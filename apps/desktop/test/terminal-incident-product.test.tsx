@@ -800,3 +800,193 @@ it('keeps a slow original input request on its starting Region after the same te
   expect(fixture.terminals).toHaveLength(2)
   expect(rendererPerformance.snapshot().slowEvents.find(item => item.id === row.id)?.source).toEqual(row.source)
 })
+
+it('releases retired original restart views while their exact attach replies remain pending', async () => {
+  const { setFlagsFromString } = await import('node:v8')
+  const { runInNewContext } = await import('node:vm')
+  const { setImmediate: nextJob } = await import('node:timers/promises')
+  setFlagsFromString('--expose_gc')
+  const collect: () => void = runInNewContext('gc'), frames = pausedFrames(window)
+  const generations = 14
+  const retired: Array<{ terminal: WeakRef<BrowserTerminal>; buffer: WeakRef<object>; element: WeakRef<HTMLElement> }> = []
+  const requests: Array<{ control: typeof session.control; promise: Promise<SessionAttachResult>;
+    resolve(value: SessionAttachResult): void; reject(error: unknown): void }> = []
+  const resultFor = (control: typeof session.control): SessionAttachResult => {
+    const value = replay(`ORIGINAL ${control.run.runId}`)
+    return { ...value, attachmentId: `pending-retirement-${control.run.runId}`,
+      session: { ...session, control, latestOutputBytes: value.session.latestOutputBytes },
+      replay: value.replay.map(item => ({ ...item, runId: control.run.runId })) }
+  }
+  let generation = 0, settled = 0
+  attach.mockImplementation(control => {
+    if (control.run.runId === `pending-restart-${generations}`) return Promise.resolve(resultFor(control as typeof session.control))
+    const original = deferred<SessionAttachResult>()
+    void original.promise.then(() => { settled++ }, () => { settled++ })
+    requests.push({ control: control as typeof session.control, ...original })
+    return original.promise
+  })
+  const restart = vi.spyOn(api.sessions, 'restart').mockImplementation(async (control, operationId) => {
+    const newRun = { runId: `pending-restart-${++generation}` }
+    return { agentSessionId: session.id, expectedRun: control.run, operationId, previousRun: control.run,
+      phase: 'restarted', canRetry: false, observedAt: generation, newRun,
+      session: { ...session, control: { ...session.control, run: newRun } } }
+  })
+  const neighbor = { ...session, id: 'pending-restart-neighbor', control: { ...session.control,
+    agentSessionId: 'pending-restart-neighbor', run: { runId: 'pending-neighbor-run' } } }
+  useAppStore.setState({ sessions: [session, neighbor], agentComposerDrafts: { [session.id]: 'Original pending draft' } })
+  const original = frozenState()
+  await act(async () => root.render(<RestartTerminalConsumer />))
+  // This synchronous scope escapes only WeakRefs; it never returns a terminal or a nested async frame.
+  const rememberRetired = () => {
+    const terminal = fixture.terminals.at(-1)!
+    retired.push({ terminal: new WeakRef(terminal), buffer: new WeakRef(terminal.buffer.normal), element: new WeakRef(terminal.element!) })
+  }
+  for (let index = 0; index < generations; index++) {
+    expect(requests).toHaveLength(index + 1)
+    rememberRetired()
+    await openRestart(); await confirmRestart()
+  }
+  await readyRun(`pending-restart-${generations}`)
+  expect(restart).toHaveBeenCalledTimes(generations)
+  expect(new Set(restart.mock.calls.map(call => call[1])).size).toBe(generations)
+  expect(settled).toBe(0)
+  expect(frozenState()).toEqual(original)
+  expect(useAppStore.getState().sessions.find(value => value.id === neighbor.id)).toBe(neighbor)
+  // Preserve the current live owner only; spies and fixture histories must not root retired generations.
+  fixture.terminals.splice(0, fixture.terminals.length - 1)
+  vi.clearAllMocks()
+  const collectObsolete = async () => {
+    for (let index = 0; index < 5; index++) { await nextJob(); collect(); await nextJob() }
+    // Exclude two newest retired generations from React/async job liveness; twelve older generations remain.
+    return retired.slice(0, -2).map(refs => ({ terminal: refs.terminal.deref() !== undefined,
+      buffer: refs.buffer.deref() !== undefined, element: refs.element.deref() !== undefined }))
+  }
+  let whilePending: Awaited<ReturnType<typeof collectObsolete>> = []
+  try {
+    whilePending = await collectObsolete()
+    expect(settled).toBe(0)
+    expect(rendererPerformance.snapshot().terminals).toHaveLength(1)
+    await act(async () => fixture.terminals[0]!.input('CURRENT OWNER STILL WORKS', true))
+    expect(write.mock.calls.at(-1)!.slice(0, 3)).toEqual([
+      useAppStore.getState().sessions.find(value => value.id === session.id)!.control, 'CURRENT OWNER STILL WORKS', 'user'
+    ])
+    expect.soft(whilePending).toEqual(Array.from({ length: generations - 2 }, () => ({ terminal: false, buffer: false, element: false })))
+  } finally {
+    for (const request of requests) request.resolve(resultFor(request.control))
+    await Promise.all(requests.map(request => request.promise))
+    await nextJob(); await nextJob()
+  }
+  expect(settled).toBe(generations)
+  const lateDetachments = vi.mocked(api.sessions.detach).mock.calls.map(call => call[0])
+  expect(lateDetachments.sort()).toEqual(requests.map(value => `pending-retirement-${value.control.run.runId}`).sort())
+  // Late real leases are released once; original requests were not cancelled or replaced.
+  expect(new Set(lateDetachments).size).toBe(generations)
+  vi.clearAllMocks()
+  const afterSettlement = await collectObsolete()
+  if (process.env.T081_MEMORY_SAMPLE) {
+    const { appendFileSync } = await import('node:fs')
+    appendFileSync(process.env.T081_MEMORY_SAMPLE, JSON.stringify({ kind: 'pending-attach-retirement', generations,
+      whilePending, afterSettlement, pendingAtObservation: generations, settled, lateDetachments,
+      resources: terminalResourceOwnerCounts(), readers: rendererPerformance.snapshot().terminals.length, frames: frames.size }) + '\n')
+  }
+  expect.soft(afterSettlement).toEqual(Array.from({ length: generations - 2 }, () => ({ terminal: false, buffer: false, element: false })))
+})
+
+it('releases retired original restart views while their exact retained-history replies remain pending', async () => {
+  const { setFlagsFromString } = await import('node:v8')
+  const { runInNewContext } = await import('node:vm')
+  const { setImmediate: nextJob } = await import('node:timers/promises')
+  setFlagsFromString('--expose_gc')
+  const collect: () => void = runInNewContext('gc'), frames = pausedFrames(window), generations = 14
+  const retired: Array<{ terminal: WeakRef<BrowserTerminal>; buffer: WeakRef<object>; element: WeakRef<HTMLElement> }> = []
+  const requests: Array<{ attachmentId: string; promise: Promise<{ replay: []; gap: null }>;
+    resolve(value: { replay: []; gap: null }): void; reject(error: unknown): void }> = []
+  const resultFor = (control: typeof session.control): SessionAttachResult => {
+    const value = replay(lines)
+    return { ...value, attachmentId: `pending-history-${control.run.runId}`,
+      session: { ...session, control, latestOutputBytes: value.session.latestOutputBytes },
+      replay: value.replay.map(item => ({ ...item, runId: control.run.runId })) }
+  }
+  attach.mockImplementation(async control => resultFor(control as typeof session.control))
+  let generation = 0, settled = 0
+  const history = vi.spyOn(api.sessions, 'replay').mockImplementation(attachmentId => {
+    const original = deferred<{ replay: []; gap: null }>()
+    void original.promise.then(() => { settled++ }, () => { settled++ })
+    requests.push({ attachmentId, ...original })
+    return original.promise
+  })
+  vi.spyOn(api.sessions, 'restart').mockImplementation(async (control, operationId) => {
+    const newRun = { runId: `history-restart-${++generation}` }
+    return { agentSessionId: session.id, expectedRun: control.run, operationId, previousRun: control.run,
+      phase: 'restarted', canRetry: false, observedAt: generation, newRun,
+      session: { ...session, control: { ...session.control, run: newRun } } }
+  })
+  useAppStore.setState({ sessions: [session], agentComposerDrafts: { [session.id]: 'Original pending history draft' } })
+  const original = frozenState()
+  const rememberRetired = () => {
+    const terminal = fixture.terminals.at(-1)!
+    retired.push({ terminal: new WeakRef(terminal), buffer: new WeakRef(terminal.buffer.normal), element: new WeakRef(terminal.element!) })
+  }
+  await act(async () => root.render(<RestartTerminalConsumer />))
+  for (let index = 0; index < generations; index++) {
+    const runId = index ? `history-restart-${index}` : session.control.run.runId
+    await readyRun(runId)
+    expect(fixture.terminals.at(-1)!.buffer.normal.length).toBeGreaterThan(500)
+    const dataBytes = new TextEncoder().encode('AFTER ORIGINAL GAP')
+    const startByte = new TextEncoder().encode(lines).length + 128
+    await act(async () => fixture.receive!({ type: 'core', hostId: session.hostId,
+      event: { type: 'terminal-output', agentSessionId: session.id, run: { runId }, data: '', dataBytes,
+        evidence: { source: 'terminal-output', observedAt: 1, outputByteRange: { startByte, endByte: startByte + dataBytes.length } } } }))
+    await vi.waitFor(() => expect(requests).toHaveLength(index + 1))
+    expect(history.mock.calls.at(-1)![0]).toBe(`pending-history-${runId}`)
+    rememberRetired()
+    await openRestart(); await confirmRestart()
+  }
+  await readyRun(`history-restart-${generations}`)
+  expect(settled).toBe(0)
+  expect(frozenState()).toEqual(original)
+  const detachmentsBeforeReply = vi.mocked(api.sessions.detach).mock.calls.map(call => call[0])
+  expect(detachmentsBeforeReply.sort()).toEqual(requests.map(value => value.attachmentId).sort())
+  // Deliver the fixture's paused native frames once, as a browser would. Xterm may have
+  // posted a DOM-only accessibility frame before disposal; withholding it is a test root.
+  let deliveredPausedFrames = 0
+  await act(async () => {
+    for (const [id, callback] of [...frames]) {
+      frames.delete(id)
+      callback(performance.now())
+      deliveredPausedFrames++
+    }
+  })
+  fixture.terminals.splice(0, fixture.terminals.length - 1)
+  vi.clearAllMocks()
+  const collectObsolete = async () => {
+    for (let index = 0; index < 5; index++) { await nextJob(); collect(); await nextJob() }
+    return retired.slice(0, -2).map(refs => ({ terminal: refs.terminal.deref() !== undefined,
+      buffer: refs.buffer.deref() !== undefined, element: refs.element.deref() !== undefined }))
+  }
+  let whilePending: Awaited<ReturnType<typeof collectObsolete>> = []
+  try {
+    whilePending = await collectObsolete()
+    expect(settled).toBe(0)
+    expect(rendererPerformance.snapshot().terminals).toHaveLength(1)
+    await act(async () => fixture.terminals[0]!.input('CURRENT HISTORY OWNER WORKS', true))
+    expect(write.mock.calls.at(-1)![1]).toBe('CURRENT HISTORY OWNER WORKS')
+    expect.soft(whilePending).toEqual(Array.from({ length: generations - 2 }, () => ({ terminal: false, buffer: false, element: false })))
+  } finally {
+    for (const request of requests) request.resolve({ replay: [], gap: null })
+    await Promise.all(requests.map(request => request.promise))
+    await nextJob(); await nextJob()
+  }
+  expect(settled).toBe(generations)
+  expect(api.sessions.detach).not.toHaveBeenCalled()
+  vi.clearAllMocks()
+  const afterSettlement = await collectObsolete()
+  if (process.env.T081_MEMORY_SAMPLE) {
+    const { appendFileSync } = await import('node:fs')
+    appendFileSync(process.env.T081_MEMORY_SAMPLE, JSON.stringify({ kind: 'pending-history-retirement', generations,
+      whilePending, afterSettlement, pendingAtObservation: generations, settled, detachmentsBeforeReply,
+      deliveredPausedFrames,
+      resources: terminalResourceOwnerCounts(), readers: rendererPerformance.snapshot().terminals.length, frames: frames.size }) + '\n')
+  }
+  expect.soft(afterSettlement).toEqual(Array.from({ length: generations - 2 }, () => ({ terminal: false, buffer: false, element: false })))
+})
