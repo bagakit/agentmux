@@ -109,6 +109,9 @@ the original position with an include. Do not duplicate its body or create files
 A heading selects its complete section within the same container, stopping before the next
 heading at the same or higher level; lower headings, paragraphs and lists move together.
 Use amux file share --help for the original destination/source baselines and exact resources.
+Choose the complete list/task item or whole table as an extraction range. Task checked state
+and original item/child identities are preserved. An explicit inner cell or required first
+paragraph target is rejected rather than silently widened; keep an old unknown request unknown.
 Only the original source include may declare forwardedBlockIds (Markdown forwarded= with
 comma-separated URI-encoded IDs) for all moved block addresses, including existing forwarding declarations in nested includes. Its root ID stays
 on the source include. Preserve these old addresses there; do not copy the forwarding declaration

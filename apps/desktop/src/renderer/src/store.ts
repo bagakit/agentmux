@@ -2498,6 +2498,26 @@ async function applyNoteShareResult(key: string, original: NoteShareAttempt, res
     }
   }
   if (result.undo) await applyNoteShareCollections(key, result.undo)
+  if (result.status === 'error' && result.code === 'NOTE_SHARE_RANGE_UNSUPPORTED' && !result.undo && writes.every(receipt => receipt === null) &&
+      [...original.writes.values()].every(held => held.attempt.phase === 'sending' &&
+        useAppStore.getState().documents[documentKey(held.workspaceId, held.path)]?.noteEditing?.attempt === held.attempt)) {
+    // Only the same first-send attempts and the owner's prepublication rejection
+    // release this send. A retained unknown or previously applied phase stays fenced.
+    noteShareAttempts.delete(key)
+    useAppStore.setState(state => {
+      const documents = { ...state.documents }, saving = { ...state.savingDocuments }
+      for (const [id, held] of original.writes) {
+        const current = documents[id]
+        if (current?.noteEditing?.attempt === held.attempt) documents[id] = { ...current, noteEditing: { ...current.noteEditing, attempt: undefined } }
+        saving[id] = false
+      }
+      const destination = documents[key], message = result.message ?? 'This sharing range was not published. Your source, draft and original request are kept.'
+      if (destination?.noteEditing?.share?.params.operationId === original.params.operationId) documents[key] = { ...destination, noteEditing: { ...destination.noteEditing, share: undefined,
+        shareRejection: { params: original.params, code: result.code!, message } } }
+      return { documents, savingDocuments: saving, documentIssues: { ...state.documentIssues, [key]: { kind: 'write-error', code: result.code!, message } } }
+    })
+    return
+  }
   if (result.status === 'committed' || result.status === 'partial') {
     noteShareAttempts.delete(key); clearPendingNoteShares(key, original.references)
     useAppStore.setState(state => {

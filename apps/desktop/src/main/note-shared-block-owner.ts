@@ -9,6 +9,7 @@ import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
 import { noteHistoryRevision, type NoteHistoryRecord } from '@agentmux/core/note-history'
 import { noteProvenanceResourceKey } from '@agentmux/core/note-provenance'
 import { readNoteDocument, serializeNoteDocument, type NoteDocument } from '../shared/note-document.js'
+import { noteContentSchema } from '../shared/note-content-schema.js'
 
 type Node = NoteDocument['content']
 type SourcePlan = { request: FileWriteParams; original: FileWriteParams; noteId: string; promotions: FileSharePromotion[] }
@@ -21,6 +22,14 @@ function parsed(content: string, noteId?: string): NoteDocument {
   if (read.status !== 'valid' || noteId !== undefined && read.note.noteId !== noteId) throw new AgentMuxError('The exact original Markdown structure or identity changed. Keep the source and staged draft.', 'NOTE_SHARE_SOURCE_INVALID')
   return read.note
 }
+/** A plan has not published any file. Invalid ranges are an explicit rejected target. */
+function serializeRange(note: NoteDocument): string {
+  const tree = noteContentSchema.nodeFromJSON(note.content)
+  let invalid = !tree.type.validContent(tree.content)
+  tree.descendants(node => { if (!node.type.validContent(node.content)) invalid = true })
+  if (invalid) throw new AgentMuxError('This exact block cannot be replaced by a shared include in its original container. Choose a whole table or list item; the source and draft are kept.', 'NOTE_SHARE_RANGE_UNSUPPORTED')
+  const content = serializeNoteDocument(note); parsed(content, note.noteId); return content
+}
 function nodes(node: Node, predicate: (node: Node) => boolean): Node[] { return [...(predicate(node) ? [node] : []), ...(node.content ?? []).flatMap(child => nodes(child, predicate))] }
 function findRange(note: NoteDocument, blockId: string) {
   const range = noteShareRange(note.content, blockId)
@@ -32,7 +41,7 @@ function include(promotion: FileSharePromotion, forwardedBlockIds: string[]): No
 function replaceRange(node: Node, blockId: string, replacement: Node, count: number): Node[] {
   if (node.attrs?.blockId === blockId) return [replacement]
   if (!node.content) return [node]
-  if (node.type === 'bulletList' || node.type === 'orderedList') {
+  if (node.type === 'bulletList' || node.type === 'orderedList' || node.type === 'taskList') {
     const index = node.content.findIndex(child => child.attrs?.blockId === blockId)
     if (index >= 0) return [
       ...(index ? [{ ...node, content: node.content.slice(0, index) }] : []), replacement,
@@ -142,14 +151,13 @@ export class NoteSharedBlockOwner {
       if (!nodes(destinationNote.content, node => node.type === 'noteInclude' && node.attrs?.referenceId === promotion.referenceId && node.attrs.noteId === promotion.shared.noteId && node.attrs.path === promotion.shared.expectedResource.path && (node.attrs.workspaceId === promotion.shared.expectedResource.workspaceId || node.attrs.workspaceId == null && promotion.shared.expectedResource.workspaceId === params.destination.expectedResource.workspaceId)).length) throw new AgentMuxError('This staged occurrence was removed or changed before save. No shared file was created.', 'NOTE_SHARE_OCCURRENCE_REMOVED')
       if (key(promotion.source) === key(promotion.shared)) throw new AgentMuxError('A shared file must be a distinct absent Markdown resource.', 'NOTE_SHARE_TARGET_INVALID')
       if (selected.nodes.some(node => nodes(node, node => node.type === 'noteInclude' && node.attrs?.noteId === promotion.shared.noteId).length)) throw new AgentMuxError('The proposed extraction would include itself. Keep the original source and draft.', 'NOTE_SHARE_CYCLE')
-      const extracted = selected.nodes[0]!.type === 'listItem' ? { type: selected.parent.type!, ...(selected.parent.type === 'orderedList' ? { attrs: { ...selected.parent.attrs, start: Number(selected.parent.attrs?.start ?? 1) + selected.index } } : selected.parent.attrs ? { attrs: selected.parent.attrs } : {}), content: structuredClone(selected.nodes) } : null
+      const extracted = ['listItem', 'taskItem'].includes(selected.nodes[0]!.type!) ? { type: selected.parent.type!, ...(selected.parent.type === 'orderedList' ? { attrs: { ...selected.parent.attrs, start: Number(selected.parent.attrs?.start ?? 1) + selected.index } } : selected.parent.attrs ? { attrs: selected.parent.attrs } : {}), content: structuredClone(selected.nodes) } : null
       const note: NoteDocument = { schema: original.schema, noteId: promotion.shared.noteId, kind: 'shared-block', ...(promotion.shared.title ? { title: promotion.shared.title } : {}),
         origin: { operationId: promotion.operationId, sourceNoteId: promotion.sourceNoteId, sourcePath: promotion.source.expectedResource.path, sourceRevision: promotion.source.expectedRevision, sourceBlockId: promotion.sourceBlockId, sourceOperationId: key(promotion.source) === key(params.destination) ? params.destination.operationId! : fileShareSourceOperation(params, promotion.source),
           requestFingerprint: fingerprint, destination: { noteId: destinationNote.noteId, path: params.destination.expectedResource.path, operationId: params.destination.operationId!, expectedRevision: params.destination.expectedRevision } },
         content: { type: 'doc', content: extracted ? [extracted] : structuredClone(selected.nodes) } }
       const { noteId: _noteId, title: _title, ...target } = promotion.shared
-      const content = serializeNoteDocument(note)
-      parsed(content, note.noteId)
+      const content = serializeRange(note)
       shared.set(promotion.operationId, { request: { ...target, expectedRevision: null, content }, promotion })
       const group = groups.get(key(promotion.source))
       if (group) {
@@ -168,8 +176,7 @@ export class NoteSharedBlockOwner {
         if (JSON.stringify(current) !== JSON.stringify(original)) throw new AgentMuxError('The selected original range changed in this draft. Preserve it and copy its current source again.', 'NOTE_SHARE_SOURCE_CHANGED')
         note = replace(note, promotion)
       }
-      const content = serializeNoteDocument(note)
-      parsed(content, group.noteId)
+      const content = serializeRange(note)
       if (ownDestination) destination = { ...destination, content }
       group.request = { ...group.original, content, operationId: ownDestination ? params.destination.operationId! : fileShareSourceOperation(params, group.original) }
     }
@@ -229,7 +236,12 @@ export class NoteSharedBlockOwner {
         result.status = 'committed'
         return result
       })
-    } catch (error) { return this.stop(result, error instanceof AgentMuxError ? 'error' : 'unknown', error instanceof AgentMuxError ? error.code : 'NOTE_SHARE_UNCONFIRMED', error instanceof Error ? error.message : String(error)) }
+    } catch (error) {
+      // Inspecting an old request never certifies its earlier effects from a new
+      // planning rejection. Its original per-file receipts still need observation.
+      if (inspect && error instanceof AgentMuxError && error.code === 'NOTE_SHARE_RANGE_UNSUPPORTED') return this.stop(result, 'unknown', 'NOTE_SHARE_INSPECTION', 'The original request has an unsupported range. Its earlier publication is unconfirmed; retain this same request and inspect its exact files and history.')
+      return this.stop(result, error instanceof AgentMuxError ? 'error' : 'unknown', error instanceof AgentMuxError ? error.code : 'NOTE_SHARE_UNCONFIRMED', error instanceof Error ? error.message : String(error))
+    }
   }
   private confirmed(receipt: FileWriteResult | null): boolean { return receipt?.result.status === 'written' && receipt.result.noteHistory?.status === 'committed' }
   private completed(result: FileShareResult): boolean { return this.confirmed(result.destination) && result.promotions.every(p => this.confirmed(p.shared) && this.confirmed(p.source)) }

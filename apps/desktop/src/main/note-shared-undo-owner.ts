@@ -50,9 +50,13 @@ function replace(node: Node, referenceId: string, replacement: Node[]): Node[] {
   if (!node.content) return [node]
   const content = node.content.flatMap(child => replace(child, referenceId, replacement)), merged: Node[] = []
   for (const child of content) {
-    const previous = merged.at(-1), list = child.type === 'orderedList' || child.type === 'bulletList'
+    const previous = merged.at(-1), list = child.type === 'orderedList' || child.type === 'bulletList' || child.type === 'taskList'
+    const unordered = (n: Node) => n.type === 'bulletList' || n.type === 'taskList'
     const attrs = (n: Node) => { const { start: _start, ...rest } = n.attrs ?? {}; return JSON.stringify(rest) }
-    if (list && previous && previous.type === child.type && attrs(previous) === attrs(child) && (child.type === 'bulletList' || Number(previous.attrs?.start ?? 1) + (previous.content?.length ?? 0) === Number(child.attrs?.start ?? 1))) previous.content = [...(previous.content ?? []), ...(child.content ?? [])]
+    if (list && previous && (previous.type === child.type || unordered(previous) && unordered(child)) && attrs(previous) === attrs(child) && (unordered(child) || Number(previous.attrs?.start ?? 1) + (previous.content?.length ?? 0) === Number(child.attrs?.start ?? 1))) {
+      previous.content = [...(previous.content ?? []), ...(child.content ?? [])]
+      if (unordered(previous)) previous.type = previous.content.every(item => item.type === 'taskItem') ? 'taskList' : 'bulletList'
+    }
     else merged.push(child)
   }
   return [{ ...node, content: merged }]

@@ -12,6 +12,8 @@ export type NoteFileEditing = {
   shares?: Record<string, PendingNoteShare>
   /** The whole original first-use intent survives settlement of any individual file. */
   share?: { params: import('@agentmux/core/files').FileShareParams; references: string[] } | undefined
+  /** Known rejected first-send plan; retained for inspection, never replayed automatically. */
+  shareRejection?: { params: import('@agentmux/core/files').FileShareParams; code: string; message: string }
   /** Removal and optional collection are one original intent, independently of one file receipt. */
   shareUndo?: { params: import('@agentmux/core/files').FileShareUndoParams } | undefined
   shareUndoReceipt?: { operationId: string; status?: import('@agentmux/core/files').FileShareUndoResult['status']; retained: { noteId?: string; code: string; message: string }[] } | undefined
