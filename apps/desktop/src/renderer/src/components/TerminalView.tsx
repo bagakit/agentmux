@@ -871,12 +871,20 @@ export function TerminalView({
       }
     }
     const releaseWebgl = (): void => {
-      webglContextLoss?.dispose()
+      // Fence old callbacks before independently releasing the listener and GPU owner.
+      const listener = webglContextLoss, addon = webgl
       webglContextLoss = null
-      const addon = webgl
       webgl = null
-      if (addon) observeDisposal('webgl-dispose', () => addon.dispose())
-      resourceOwners.setAddons(3)
+      let failure: { error: unknown } | undefined
+      try { listener?.dispose() }
+      catch (error) { failure = { error } }
+      try {
+        if (addon) {
+          observeDisposal('webgl-dispose', () => addon.dispose())
+          resourceOwners.setAddons(3)
+        }
+      } catch (error) { failure ??= { error } }
+      if (failure) throw failure.error
     }
     // Visibility owns only the GPU addon. The retained parser and Run attachment keep their
     // existing lifetime, including ordered output while this Region is hidden.
@@ -888,9 +896,11 @@ export function TerminalView({
       }
       if (webgl) return
       try {
-        webgl = new WebglAddon()
-        terminal.loadAddon(webgl)
-        webglContextLoss = webgl.onContextLoss(() => {
+        const addon = new WebglAddon()
+        webgl = addon
+        terminal.loadAddon(addon)
+        webglContextLoss = addon.onContextLoss(() => {
+          if (webgl !== addon) return
           incidents?.capture('terminal-context-lost', 'context-lost')
           releaseWebgl()
         })
