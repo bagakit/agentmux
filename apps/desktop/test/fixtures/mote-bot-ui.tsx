@@ -1,3 +1,4 @@
+import { settingsCatalog } from '../../src/renderer/src/components/settings/settings-modules'
 import { act } from 'react'
 import { createRequire } from 'node:module'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -73,7 +74,7 @@ export async function moteBotUi(options: NonNullable<Parameters<typeof moteConne
   vi.spyOn(api.files, 'unobserve').mockResolvedValue(undefined)
   const container = document.createElement('div'); document.body.append(container)
   let view = createClientUiRoot(container), mounted = false
-  const navigation = { open: vi.fn(), openToolkit: vi.fn(), openHost: vi.fn(), openLark: vi.fn(), openMoteLark: vi.fn(), chooseAgent: vi.fn() }
+  const navigation = { open: vi.fn(), openToolkit: vi.fn(), openHost: vi.fn(), openChannel: vi.fn(), channelPresentation: settingsCatalog.channelPresentation, openMoteLark: vi.fn(), chooseAgent: vi.fn() }
   const scopes = await Promise.all(owner.motes.map(async m => {
     const topic = (await owner.topics.read(owner.workspace, m.id))!
     return { topic: { ...topic, title: 'Display title is not the public source', summary: 'DO-NOT-PUBLISH-DISPLAY' }, workspace: owner.workspace, rootPath: topic.directoryPath } satisfies MoteWorkfaceScope
