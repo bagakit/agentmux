@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import { BotSignInPrompt } from '../BotConfirmationCode'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -170,7 +171,7 @@ export function useBotEnrollment(active: boolean) {
     try {
       const frozen = preset ?? await desktopBotCreationPreset(name)
       if (current !== epoch.current || intent !== draft.current) return
-      input = { operationId: crypto.randomUUID(), connectionId: crypto.randomUUID(), adapterId: issuer.adapterId, domain: issuer.domain, label: name, preset: frozen, initialPublication: initialBotPublication }
+      input = { operationId: mintObjectId(), connectionId: mintObjectId(), adapterId: issuer.adapterId, domain: issuer.domain, label: name, preset: frozen, initialPublication: initialBotPublication }
       occurrence = ++selectionEpoch.current
       currentInput.current = input
       startWrite(input.operationId)

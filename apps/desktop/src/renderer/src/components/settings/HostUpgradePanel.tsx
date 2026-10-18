@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { RemoteCoreUpgradeCheck, RemoteCoreUpgradeReceipt } from '@agentmux/core'
@@ -86,7 +87,7 @@ export function HostUpgradePanel({ host, committed, active }: {
         setState({ input, check, receipt: check.latestOperation, operationId: check.latestOperation.operationId }); return
       }
       if (!runUpgrade || !check.eligible || !check.expected) { setState({ input, check }); return }
-      operationId = crypto.randomUUID()
+      operationId = mintObjectId()
       setState({ input, check, operationId, busy: 'upgrading' })
       const receipt = await api.hosts.upgrade(input, check.expected, operationId)
       setState({ input, check, operationId, receipt })

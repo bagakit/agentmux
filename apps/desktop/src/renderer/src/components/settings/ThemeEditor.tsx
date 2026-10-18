@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { ThemeIconEditor } from './ThemeIconEditor'
 import { useEffect, useRef, useState } from 'react'
 import { TextInput, Textarea } from '@agentmux/client-ui/input'
@@ -46,7 +47,7 @@ export function ThemeEditor({ item, appearance, active, onSave, onClose }: {
     const submittedDraft = latest.current
     const checked = themeDocumentSchema.safeParse(submittedDraft)
     if (!checked.success) { await save.run(async () => { throw new Error(checked.error.issues.map(issue => `${issue.path.join('.')}: ${issue.message}`).join('; ')) }); return }
-    if (readonly && !copyId.current) copyId.current = `custom.${crypto.randomUUID()}`
+    if (readonly && !copyId.current) copyId.current = `custom.${mintObjectId()}`
     const submitted = { ...checked.data, id: readonly ? copyId.current! : checked.data.id }
     const customThemes = { ...appearance.customThemes, [submitted.id]: themeValue(submitted) }
     const expectedThemes = { ...appearance.customThemes }

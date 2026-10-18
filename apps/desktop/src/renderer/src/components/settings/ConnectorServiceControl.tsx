@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { parseConnectionServiceResult, type ConnectionServiceOperation, type ConnectionServiceState } from '@agentmux/core/connections'
@@ -52,7 +53,7 @@ export function ConnectorServiceControl({ active }: { active: boolean }) {
   }
   async function save() {
     if (writing.current || draft === null || !baseline || needsCurrent || baseline.source !== api.connections.call) return
-    const input = { operationId: crypto.randomUUID(), expectedRevision: baseline.state.revision, service: { enabled: draft } }
+    const input = { operationId: mintObjectId(), expectedRevision: baseline.state.revision, service: { enabled: draft } }
     const generation = selection.current, source = api.connections.call
     writing.current = true; setBusy(true); setNeedsCurrent(true); setNotice('')
     try {

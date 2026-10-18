@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { api } from '../../../lib/api'
 import { useAppStore } from '../../../store'
@@ -47,7 +48,7 @@ async function runSavedTool(id: string): Promise<string> {
   const snapshot = await api.toolkit.get(id)
   if (snapshot.kind !== 'script') throw new Error(snapshot.kind === 'package-unavailable' ? snapshot.reason : 'This tool is not a user script.')
   if (snapshot.admission) throw new Error(snapshot.admission.state === 'unknown' ? 'Execution unconfirmed. Check this tool’s status before running again.' : 'This tool already has an execution in progress.')
-  const result = await api.toolkit.run(id, { invocationId: crypto.randomUUID(), expectedRevision: snapshot.definition.revision, expectedLatestExecutionId: snapshot.latestConfirmed?.executionId ?? null })
+  const result = await api.toolkit.run(id, { invocationId: mintObjectId(), expectedRevision: snapshot.definition.revision, expectedLatestExecutionId: snapshot.latestConfirmed?.executionId ?? null })
   if (result.kind !== 'script') throw new Error('The execution result could not be confirmed.')
   return result.state === 'unknown' ? 'Execution unconfirmed. Open this tool in the status bar to check its status.' : 'Execution admitted. View its actual result in the status bar.'
 }

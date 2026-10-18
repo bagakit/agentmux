@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionRecord, ConnectionSetupAction, ConnectionSetupPublicationDraft, ConnectionSetupPublicationEffect, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupEnrollmentSource, ConnectionSetupInspect, ConnectionSetupConfigurationSelector, ConnectionSetupListing, ConnectionSetupOperation, ConnectionSetupView } from '@agentmux/core/connections'
@@ -127,7 +128,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   function start() {
     if (!record || !supported) return
     if (!draft.current || draft.current.key !== key || draft.current.source !== source) {
-      draft.current = { key, source, input: { operationId: crypto.randomUUID(), connectionId: record.config.connectionId, expectedConnectionRevision: record.revision, goal: { kind: 'agent-conversation', interaction: 'messages' } } }
+      draft.current = { key, source, input: { operationId: mintObjectId(), connectionId: record.config.connectionId, expectedConnectionRevision: record.revision, goal: { kind: 'agent-conversation', interaction: 'messages' } } }
       const submission = draft.current
       setSubmissions(previous => [...previous, submission])
     }
@@ -142,7 +143,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   function handoff(enrollment: ConnectionSetupEnrollmentSource) {
     if (!record || !currentSource() || !visibleCatalog?.value?.support?.capabilities.includes('enrollment-continuation')) return
     const original = submissions.find(item => item.key === key && item.source === source && JSON.stringify(item.input.source) === JSON.stringify(enrollment))
-    const submission = original ?? { key, source, input: { operationId: crypto.randomUUID(), connectionId: record.config.connectionId, expectedConnectionRevision: record.revision, goal: { kind: 'agent-conversation', interaction: 'messages' }, source: enrollment } as ConnectionSetupBegin }
+    const submission = original ?? { key, source, input: { operationId: mintObjectId(), connectionId: record.config.connectionId, expectedConnectionRevision: record.revision, goal: { kind: 'agent-conversation', interaction: 'messages' }, source: enrollment } as ConnectionSetupBegin }
     if (!original) setSubmissions(previous => [...previous, submission])
     requestedHandoff.current = submission
   }

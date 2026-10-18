@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useWorkbenchWindowDocument } from '../../lib/workbench-document'
 import { useEffect, useRef, useState } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
@@ -44,7 +45,7 @@ export function ThemeLibrary({ selected, appearance, active, editing, onCustomiz
       if (file.size > THEME_FILE_MAX_BYTES) throw new Error('Theme file exceeds the 2 MiB import boundary. Choose a smaller file.')
       const document = parseThemeFile(await file.text())
       if (!mounted.current || epoch !== uploadEpoch.current) return
-      setImported({ document, raw: structuredClone(appearance.customThemes?.[document.id]), selectedId: appearance.themeId, copyId: `custom.${crypto.randomUUID()}` })
+      setImported({ document, raw: structuredClone(appearance.customThemes?.[document.id]), selectedId: appearance.themeId, copyId: `custom.${mintObjectId()}` })
       setAttempted(false)
       setPreview(null); setFeedback(`Loaded ${file.name}. Review before saving or applying. Loading this file only prepares a preview.`)
     } catch (cause) { if (mounted.current && epoch === uploadEpoch.current) setFeedback(cause instanceof Error ? cause.message : String(cause)) }
