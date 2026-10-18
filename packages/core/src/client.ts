@@ -6880,11 +6880,16 @@ export class AgentMuxClient {
   }
 
   private async writeInputConversation(saved: AgentInputJournalEntry, recordedAt: number, inputOrigin: import('./agent-input-conversation.js').AgentInputJournalCut): Promise<void> {
-    const id = agentInputJournalKey(saved.intent.key), previous = this.inputConversationWrites.get(id)
-    const work = (previous?.catch(() => {}) ?? Promise.resolve()).then(() => this.writeInputConversationRecord(saved, recordedAt, inputOrigin))
-    this.inputConversationWrites.set(id, work)
-    try { await work }
-    finally { if (this.inputConversationWrites.get(id) === work) this.inputConversationWrites.delete(id) }
+    await this.serializeInputConversationWrite(agentInputJournalKey(saved.intent.key), () => this.writeInputConversationRecord(saved, recordedAt, inputOrigin))
+  }
+
+  private async serializeInputConversationWrite<T>(id: string, execute: () => Promise<T>): Promise<T> {
+    const previous = this.inputConversationWrites.get(id)
+    const work = (previous?.catch(() => {}) ?? Promise.resolve()).then(execute)
+    this.inputConversationWrites.set(id, work.then(() => {}, () => {}))
+    const tail = this.inputConversationWrites.get(id)
+    try { return await work }
+    finally { if (this.inputConversationWrites.get(id) === tail) this.inputConversationWrites.delete(id) }
   }
 
   private async writeInputConversationRecord(saved: AgentInputJournalEntry, recordedAt: number, inputOrigin: import('./agent-input-conversation.js').AgentInputJournalCut): Promise<void> {
@@ -6902,28 +6907,32 @@ export class AgentMuxClient {
       body = message.envelope.body; recordId = externalConversationRecordId(message.envelope.sender)
       author = { authorExternal: externalConversationAuthor(message.envelope.sender), ...(message.sourceChannel ? { sourceChannel: message.sourceChannel } : {}) }
     } else return
-    const receipt = await this.inspectAgentInput({ key })
-    if (!receipt) throw new AgentMuxError('The original saved input observation is unavailable.', 'AGENT_INPUT_READ_UNCONFIRMED')
-    const original = (await this.store.readCapturedHistory(key.agentSessionId, { recordId })).records[0]?.item
-    if (original && (original.content !== body ||
-      (author.authorExternal ? !original.authorExternal || !isDeepStrictEqual(externalConversationAuthor(original.authorExternal), author.authorExternal) : original.authorHuman !== true) ||
-      (original.inputRef ? !isDeepStrictEqual(original.inputRef, key) : !author.authorExternal) ||
-      original.inputOrigin && !isDeepStrictEqual(original.inputOrigin, inputOrigin))) throw new AgentMuxError(
-      'The saved input conflicts with its original public conversation record.', 'AGENT_TIMELINE_ID_CONFLICT')
-    const session = await this.historyDescriptor(key.agentSessionId), at = Math.max(Date.now(), original?.updatedAt ?? recordedAt)
-    const item: AgentTimelineItem = { ...original, id: recordId, agentSessionId: key.agentSessionId, kind: 'user_message', source: 'user', status: 'recorded',
-      createdAt: original?.createdAt ?? recordedAt, updatedAt: at, title: original?.title ?? (author.authorExternal ? 'External message' : 'User input'), content: body,
-      publicContent: 'confirmed', ...author, inputRef: key, inputOrigin,
-      inputSubmission: { status: receipt.status, observation: receipt.observation },
-      ...(source.kind === 'prompt' && source.inputContext ? { inputContext: source.inputContext, inputContextSource: source.inputContextSource,
-        ...(source.inputContextCaptureProof ? { inputContextCaptureProof: source.inputContextCaptureProof } : {}) } : {}) }
-    if (original) {
-      const { createdAt: _originalCreatedAt, updatedAt: _originalUpdatedAt, ...originalFacts } = original
-      const { createdAt: _createdAt, updatedAt: _updatedAt, ...nextFacts } = item
-      if (isDeepStrictEqual(originalFacts, nextFacts)) return
+    const write = async () => {
+      const receipt = await this.inspectAgentInput({ key })
+      if (!receipt) throw new AgentMuxError('The original saved input observation is unavailable.', 'AGENT_INPUT_READ_UNCONFIRMED')
+      const original = (await this.store.readCapturedHistory(key.agentSessionId, { recordId })).records[0]?.item
+      if (original && (original.content !== body ||
+        (author.authorExternal ? !original.authorExternal || !isDeepStrictEqual(externalConversationAuthor(original.authorExternal), author.authorExternal) : original.authorHuman !== true) ||
+        (original.inputRef ? !isDeepStrictEqual(original.inputRef, key) : !author.authorExternal) ||
+        original.inputOrigin && !isDeepStrictEqual(original.inputOrigin, inputOrigin))) throw new AgentMuxError(
+        'The saved input conflicts with its original public conversation record.', 'AGENT_TIMELINE_ID_CONFLICT')
+      const session = await this.historyDescriptor(key.agentSessionId), at = Math.max(Date.now(), original?.updatedAt ?? recordedAt)
+      const item: AgentTimelineItem = { ...original, id: recordId, agentSessionId: key.agentSessionId, kind: 'user_message', source: 'user', status: 'recorded',
+        createdAt: original?.createdAt ?? recordedAt, updatedAt: at, title: original?.title ?? (author.authorExternal ? 'External message' : 'User input'), content: body,
+        publicContent: 'confirmed', ...author, inputRef: key, inputOrigin,
+        inputSubmission: { status: receipt.status, observation: receipt.observation },
+        ...(source.kind === 'prompt' && source.inputContext ? { inputContext: source.inputContext, inputContextSource: source.inputContextSource,
+          ...(source.inputContextCaptureProof ? { inputContextCaptureProof: source.inputContextCaptureProof } : {}) } : {}) }
+      if (original) {
+        const { createdAt: _originalCreatedAt, updatedAt: _originalUpdatedAt, ...originalFacts } = original
+        const { createdAt: _createdAt, updatedAt: _updatedAt, ...nextFacts } = item
+        if (isDeepStrictEqual(originalFacts, nextFacts)) return
+      }
+      await this.persistAndPublishTimeline({ type: 'upsert', agentSessionId: key.agentSessionId, item },
+        { source: 'user', observedAt: at, run: key.expectedRun }, session.hostId)
     }
-    await this.persistAndPublishTimeline({ type: 'upsert', agentSessionId: key.agentSessionId, item },
-      { source: 'user', observedAt: at, run: key.expectedRun }, session.hostId)
+    if (author.authorExternal) await this.serializeInputConversationWrite(JSON.stringify(['external-record', key.agentSessionId]), write)
+    else await write()
   }
 
   private async publishInputReceipt(receipt: AgentInputSubmissionReceipt): Promise<void> {
@@ -9145,6 +9154,11 @@ export class AgentMuxClient {
 
   /** Append authenticated platform observation to the original history; never dispatch or wake a Run. */
   async recordExternalConversationMessage(value: AgentExternalConversationReference): Promise<AgentExternalConversationReceipt> {
+    const input = parseExternalConversationReference(value)
+    return await this.serializeInputConversationWrite(JSON.stringify(['external-record', input.agentSessionId]), () => this.recordExternalConversationMessageNow(input))
+  }
+
+  private async recordExternalConversationMessageNow(value: AgentExternalConversationReference): Promise<AgentExternalConversationReceipt> {
     const owner = this.externalConversationAuthority
     const input = parseExternalConversationReference(value)
     if (!owner) throw new AgentMuxError('The original external conversation owner is unavailable. Retain the original message; local input remains available.', 'EXTERNAL_RECORD_AUTHORITY_UNAVAILABLE')
