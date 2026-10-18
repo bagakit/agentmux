@@ -23,7 +23,7 @@ export type ConversationReaderPort = {
   nativeRecord(source: { providerId: string; nativeSessionId: string }, id: string): Promise<AgentSessionHistoryItem>
   signal?: AbortSignal
 }
-type Position = { native?: string | null; capturedBefore?: number | null; capturedCut?: { epoch: string; sequence: number }; unavailable?: ConversationSourceCoverage[] }
+type Position = { native?: string | null; capturedBefore?: number | null; capturedCut?: { epoch: string; sequence: number; inputJournal?: import('./agent-input-conversation.js').AgentInputJournalCut }; unavailable?: ConversationSourceCoverage[] }
 type Batch = { index: number; offset: number; digests: { id: string; sha256: string }[];
   after: Position; coverage: ConversationSourceCoverage[]; end?: ConversationFrontier; more: boolean }
 type Cursor = ConversationRef & { version: 1; mode: 'inspect' | 'changes'; scope: ConversationFrontier['scope']; position: Position;
@@ -135,7 +135,7 @@ async function discover(ref: ConversationRef, port: ConversationReaderPort): Pro
   try {
     const page = await port.captured({ limit: 1 }), source = { kind: 'captured' as const, epoch: page.stream.epoch }
     coverage.push({ source, origin: page.stream.origin, readExtent: { through: String(page.stream.sequence) }, earlier: page.records.length ? 'more' : page.stream.origin === 'beginning' ? 'complete' : 'unknown-before', current: 'partial', gaps: page.stream.gaps })
-    return { scope: { sources: coverage.map(c => c.source) }, coverage, position: { capturedCut: { epoch: page.stream.epoch, sequence: page.stream.sequence } } }
+    return { scope: { sources: coverage.map(c => c.source) }, coverage, position: { capturedCut: { epoch: page.stream.epoch, sequence: page.stream.sequence, ...(page.stream.inputJournal ? { inputJournal: page.stream.inputJournal } : {}) } } }
   } catch (error) {
     port.signal?.throwIfAborted(); coverage.push(unavailable({ kind: 'captured' }, error))
     return { scope: { sources: coverage.map(c => c.source) }, coverage, position: { capturedBefore: null } }
@@ -290,7 +290,7 @@ async function changesBatch(ref: ConversationRef, port: ConversationReaderPort, 
         }
         const sequence = record?.sequence ?? cut.sequence
         const nextCoverage: ConversationSourceCoverage = { source, origin: page.stream.origin, readExtent: { from: String(cut.sequence), through: String(sequence) }, earlier: page.stream.origin === 'beginning' ? 'complete' : 'unknown-before', current: sequence < current.stream.sequence ? 'partial' : 'complete-through-cut', gaps: page.stream.gaps }
-        rows.push(...sourceRows); cuts[cuts.indexOf(cut)] = { kind: 'captured', epoch: cut.epoch, sequence }
+        rows.push(...sourceRows); cuts[cuts.indexOf(cut)] = { kind: 'captured', epoch: cut.epoch, sequence, ...(current.stream.inputJournal ? { inputJournal: current.stream.inputJournal } : {}) }
         more ||= sequence < current.stream.sequence; coverage[at] = nextCoverage
       } catch (error) { port.signal?.throwIfAborted(); coverage[at] = unavailable(source, error, String(cut.sequence)) }
     } else coverage[at] = unavailable(source, new AgentMuxError('The original frontier has no resolved source identity. Later discovery requires a new explicit checkpoint.', 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE'))

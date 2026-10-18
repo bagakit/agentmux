@@ -536,7 +536,7 @@ export class DurableAgentMuxMessageQueue {
     if (!isDeepStrictEqual(original.kind === 'input-submission' ? original.key : original.intent.key, key)) throw new AgentMuxError('Another producer owns this original input identity.', 'AGENT_PROMPT_OPERATION_CONFLICT')
     if (original.kind === 'input-submission') return undefined
     const latest = JSON.parse(String(row.latest)) as Extract<AgentInputWaitJournalRecord, { kind: 'input-intent' | 'input-control' }>
-    return { sequence: original.sequence, intent: structuredClone(original.intent), control: latest.kind === 'input-intent'
+    return { sequence: original.sequence, recordedAt: original.at, intent: structuredClone(original.intent), control: latest.kind === 'input-intent'
       ? { ref: { key: structuredClone(original.intent.key), waitGeneration: 1 }, state: 'enabled', at: original.at }
       : structuredClone(latest.control) }
   }
@@ -634,6 +634,35 @@ export class DurableAgentMuxMessageQueue {
       }
       await this.appendRecord({ kind: 'input-submission', sequence: this.nextSequence, key, at })
     }, true)
+  }
+
+  /** Bounded recovery of original membership; never dispatches or creates an input. */
+  async readConversationInputCut(agentSessionId: string): Promise<import('./agent-input-conversation.js').AgentInputJournalCut> {
+    return this.withLock(async () => ({ queueId: this.queueId,
+      incarnation: String(this.db.prepare('SELECT incarnation FROM metadata').get()!.incarnation),
+      sequence: Number(this.db.prepare('SELECT COALESCE(MAX(intent_sequence),0) AS n FROM input_intents WHERE recipient_id=?').get(agentSessionId)!.n) }))
+  }
+
+  async readConversationInputPage(agentSessionId: string, after?: import('./agent-input-conversation.js').AgentInputJournalCut): Promise<{
+    cut: import('./agent-input-conversation.js').AgentInputJournalCut
+    items: Array<AgentInputJournalEntry & { recordedAt: number }>
+    more: boolean
+  }> {
+    return this.withLock(async () => {
+      const incarnation = String(this.db.prepare('SELECT incarnation FROM metadata').get()!.incarnation)
+      const through = Number(this.db.prepare('SELECT COALESCE(MAX(intent_sequence),0) AS n FROM input_intents WHERE recipient_id=?').get(agentSessionId)!.n)
+      if (after && (after.queueId !== this.queueId || after.incarnation !== incarnation || after.sequence > through)) throw new AgentMuxError(
+        'The original input projection belongs to another journal or recipient position.', 'AGENT_INPUT_READ_UNCONFIRMED')
+      const rows = this.db.prepare(`SELECT original.json AS original FROM input_intents i
+        JOIN records original ON original.sequence=i.intent_sequence
+        WHERE i.recipient_id=? AND i.intent_sequence>? AND i.intent_sequence<=?
+        ORDER BY i.intent_sequence LIMIT 101`).all(agentSessionId, after?.sequence ?? 0, through)
+      const accepted = rows.slice(0, 100).map(row => JSON.parse(String(row.original)) as Extract<AgentInputWaitJournalRecord, { kind: 'input-intent' | 'input-submission' }>)
+      const items = accepted.flatMap(original => original.kind === 'input-intent' && original.intent.source.kind === 'prompt' && original.intent.source.authorHuman === true
+        ? [{ ...this.input(original.intent.key)!, recordedAt: original.at }] : [])
+      const more = rows.length > accepted.length
+      return { cut: { queueId: this.queueId, incarnation, sequence: more ? accepted.at(-1)!.sequence : through }, items, more }
+    })
   }
 
   /** Membership/order are frozen by the cursor; control and admission remain their original owners. */

@@ -134,6 +134,7 @@ export function projectSessionUserMessages(params: {
         source,
         ...inputConversation(item.conversation),
         ...(item.source === 'user' && item.publicContent === 'confirmed' && item.inputRef ? { inputRef: item.inputRef } : {}),
+        ...(item.inputSubmission ? { inputSubmission: item.inputSubmission } : {}),
         ...(timeline.sourceHostId && positions.get(item.id)?.revision ? { sourceRecord: {
           record: { hostId: timeline.sourceHostId, agentSessionId, source: { kind: 'captured' as const, recordId: item.id } },
           revision: positions.get(item.id)!.revision

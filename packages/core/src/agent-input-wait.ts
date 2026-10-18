@@ -50,7 +50,7 @@ export type AgentInputJournalIntent = {
     | { kind: 'message'; messageId: string; originalControlOperationId: string }
 }
 export type AgentInputDispatchLink = { ref: AgentInputWaitRef; gateId: string }
-export type AgentInputJournalEntry = { sequence: number; intent: AgentInputJournalIntent; control: AgentInputWaitControl }
+export type AgentInputJournalEntry = { sequence: number; recordedAt: number; intent: AgentInputJournalIntent; control: AgentInputWaitControl }
 export type AgentInputWaitControl = {
   ref: AgentInputWaitRef
   state: 'enabled' | 'stopped-before-dispatch' | 'dispatch-authorized'

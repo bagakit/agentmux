@@ -9,6 +9,7 @@ import { parseNativeConversationCheckpoint, parseConversationRef, type NativeCon
 import type { ConversationRef, ConversationItemRef } from './conversation.js'
 import { consumeJsonReadEntry, type JsonReadAssembly, type JsonReadEntry } from './json-read-fragments.js'
 import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
+import { parseAgentInputJournalCut } from './agent-input-conversation.js'
 export { parseConversationRef } from './session-history-changes.js'
 export * from './session-history-changes.js'
 
@@ -19,7 +20,7 @@ export const CONVERSATION_MAX_WINDOW_RECORDS = 1200
 export type ConversationScope = { sources: readonly ConversationSourceRef[] }
 export type ConversationFrontier = ConversationRef & { scope: ConversationScope; cuts: readonly (
   | { kind: 'native'; checkpoint: NativeConversationCheckpoint }
-  | { kind: 'captured'; epoch: string; sequence: number }
+  | { kind: 'captured'; epoch: string; sequence: number; inputJournal?: import('./agent-input-conversation.js').AgentInputJournalCut }
 )[] }
 export type ConversationCheckpoint = ConversationRef & { sourceHostId: string; frontier: ConversationFrontier }
 export type ConversationVersionedAnchor = { record: ConversationItemRef; revision: string; frontier: ConversationCheckpoint }
@@ -159,17 +160,17 @@ export function parseConversationFrontier(value: unknown, expected?: Conversatio
   if (expected && (ref.hostId !== expected.hostId || ref.agentSessionId !== expected.agentSessionId) || !Array.isArray(p.cuts) || p.cuts.length > accepted.sources.length) return bad()
   const seen = new Set<string>()
   const cuts = p.cuts.map(value => {
-    const cut = rpcRecord(value, ['kind', 'checkpoint', 'epoch', 'sequence'], 'CONTROL_PROTOCOL_ERROR')
+    const cut = rpcRecord(value, ['kind', 'checkpoint', 'epoch', 'sequence', 'inputJournal'], 'CONTROL_PROTOCOL_ERROR')
     let result: ConversationFrontier['cuts'][number], source: ConversationSourceRef
     if (cut.kind === 'native') {
-      if (cut.epoch !== undefined || cut.sequence !== undefined) return bad()
+      if (cut.epoch !== undefined || cut.sequence !== undefined || cut.inputJournal !== undefined) return bad()
       const checkpoint = parseNativeConversationCheckpoint(cut.checkpoint)
       if (checkpoint.agentSessionId !== ref.agentSessionId) return bad()
       source = { kind: 'native', ...checkpoint.source }; result = { kind: 'native', checkpoint }
     } else {
       if (cut.kind !== 'captured' || cut.checkpoint !== undefined) return bad()
       const epoch = text(cut.epoch), sequence = integer(cut.sequence)
-      source = { kind: 'captured', epoch }; result = { kind: 'captured', epoch, sequence }
+      source = { kind: 'captured', epoch }; result = { kind: 'captured', epoch, sequence, ...(cut.inputJournal === undefined ? {} : { inputJournal: parseAgentInputJournalCut(cut.inputJournal) }) }
     }
     const key = conversationSourceKey(source)
     if (seen.has(key) || !accepted.sources.some(value => conversationSourceKey(value) === key)) return bad()

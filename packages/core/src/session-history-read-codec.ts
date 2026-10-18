@@ -2,6 +2,7 @@ import { parseExternalConversationAuthor } from './external-conversation.js'
 export { consumeJsonReadEntry, type JsonReadAssembly, type JsonReadEntry } from './json-read-fragments.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { AgentMuxError } from './errors.js'
+import { parseAgentInputJournalCut, parseAgentInputSubmissionObservation } from './agent-input-conversation.js'
 import { rpcRecord } from './rpc-data.js'
 import { decodeBase64, encodeBase64 } from './hosted-value.js'
 import { normalizeMessageChannel } from './message-origin.js'
@@ -67,7 +68,8 @@ function validateCapturedStream(page: Record<string,unknown>, input: AgentSessio
   if(page.capturedStream===undefined)return
   const bad=():never=>fail('Captured history coverage is malformed.','CONTROL_PROTOCOL_ERROR')
   if(input.source!=='captured')return bad()
-  const stream=rpcRecord(page.capturedStream,['epoch','sequence','revision','origin','gaps'],'CONTROL_PROTOCOL_ERROR')
+  const stream=rpcRecord(page.capturedStream,['epoch','sequence','revision','origin','gaps','inputJournal'],'CONTROL_PROTOCOL_ERROR')
+  if(stream.inputJournal!==undefined)parseAgentInputJournalCut(stream.inputJournal)
   if(!text(stream.epoch)||!Number.isSafeInteger(stream.sequence)||(stream.sequence as number)<0||!Number.isSafeInteger(stream.revision)||(stream.revision as number)<0||
     !['beginning','retained-prefix','unknown'].includes(String(stream.origin))||!Array.isArray(stream.gaps))return bad()
   for(const value of stream.gaps){const gap=rpcRecord(value,['code','message'],'CONTROL_PROTOCOL_ERROR');if(!text(gap.code)||typeof gap.message!=='string'||!gap.message)return bad()}
@@ -188,7 +190,7 @@ export function parseUserMessageHistoryPage(value: unknown, input: AgentSessionH
   if (input.source === 'captured' && page.nativeSource !== undefined || nativeSource &&
     (typeof nativeSource.providerId !== 'string' || !nativeSource.providerId || typeof nativeSource.nativeSessionId !== 'string' || !nativeSource.nativeSessionId)) return bad()
   for (const value of page.userMessages) {
-    const message = rpcRecord(value, ['id', 'rawId', 'agentSessionId', 'turnId', 'source', 'sourceRecord', 'inputRef', 'conversation', 'author', 'publicContent', 'content', 'contentParts', 'questionAnswers', 'questionDiagnostic', 'recordedAt', 'deliveryStatus'], 'CONTROL_PROTOCOL_ERROR')
+    const message = rpcRecord(value, ['id', 'rawId', 'agentSessionId', 'turnId', 'source', 'sourceRecord', 'inputRef', 'inputSubmission', 'conversation', 'author', 'publicContent', 'content', 'contentParts', 'questionAnswers', 'questionDiagnostic', 'recordedAt', 'deliveryStatus'], 'CONTROL_PROTOCOL_ERROR')
     if (typeof message.id !== 'string' || !message.id || typeof message.rawId !== 'string' || !message.rawId || message.agentSessionId !== input.agentSessionId || typeof message.content !== 'string' ||
       !Array.isArray(message.contentParts) || message.recordedAt !== undefined && (!Number.isSafeInteger(message.recordedAt) || (message.recordedAt as number) < 0) ||
       message.deliveryStatus !== undefined && !['complete', 'failed', 'unverified'].includes(String(message.deliveryStatus))) return bad()
@@ -216,6 +218,10 @@ export function parseUserMessageHistoryPage(value: unknown, input: AgentSessionH
       } catch { return bad() }
     }
     const author = rpcRecord(message.author, undefined, 'CONTROL_PROTOCOL_ERROR')
+    if (message.inputSubmission !== undefined) {
+      if (input.source !== 'captured' || message.publicContent !== 'confirmed' || !message.inputRef || author.kind !== 'human') return bad()
+      parseAgentInputSubmissionObservation(message.inputSubmission)
+    }
     try { if (author.kind === 'external') ('grantId' in author ? parseAgentExternalMessageAuthor(author) : parseExternalConversationAuthor(author)); else rpcRecord(author, ['kind', 'agentSessionId'], 'CONTROL_PROTOCOL_ERROR') } catch { return bad() }
     if (input.source === 'native') {
       if (message.publicContent === 'confirmed') return bad()
