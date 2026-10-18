@@ -1,6 +1,27 @@
 import { parseConnectionParams, parseRoomBindingTarget, type ConnectionParamsMap, type RoomBindingTarget } from '@agentmux/core/connections'
 
 type Effect = 'connection.room.create' | 'connection.room.link.create' | 'connection.bind' | 'connection.binding.relink' | 'connection.binding.pause' | 'connection.binding.resume' | 'connection.binding.detach' | 'connection.grant'
+/** Unsaved form values only. Consent and member capabilities are always chosen in the current form. */
+export type ConnectorRoomDraft = {
+  connectionId: string; bindingId: string | null; bindingRevision: number | null
+  mode: 'create' | 'existing' | 'details'; name: string; group: string; members: string; memberType: string
+  scope: 'mentions-and-replies' | 'all-messages'; publication: 'future-native-user-facing' | 'future-shared-conversation'
+  actorId: string; actorType: string
+}
+export const connectorRoomDraftKey = (target: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>) => JSON.stringify([target.executionHostId, target.agentSessionId])
+export function restoredConnectorRoomDrafts(value: unknown): Record<string, ConnectorRoomDraft> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, ConnectorRoomDraft] => {
+    try {
+      const target = JSON.parse(entry[0]), draft = entry[1] as ConnectorRoomDraft
+      return Array.isArray(target) && target.length === 2 && target.every(id => typeof id === 'string' && !!id) &&
+        !!draft && typeof draft === 'object' && ['connectionId', 'name', 'group', 'members', 'memberType', 'actorId', 'actorType'].every(key => typeof Reflect.get(draft, key) === 'string') &&
+        (draft.bindingId === null || typeof draft.bindingId === 'string') && (draft.bindingRevision === null || Number.isSafeInteger(draft.bindingRevision) && draft.bindingRevision > 0) &&
+        ['create', 'existing', 'details'].includes(draft.mode) && ['mentions-and-replies', 'all-messages'].includes(draft.scope) && ['future-native-user-facing', 'future-shared-conversation'].includes(draft.publication)
+    } catch { return false }
+  }).map(([key, draft]) => [key, { connectionId: draft.connectionId, bindingId: draft.bindingId, bindingRevision: draft.bindingRevision,
+    mode: draft.mode, name: draft.name, group: draft.group, members: draft.members, memberType: draft.memberType, scope: draft.scope, publication: draft.publication, actorId: draft.actorId, actorType: draft.actorType }]))
+}
 /** Submitted UI correlation only. Original effects and receipts remain with their Core/Host owners. */
 export type ConnectorRoomIntent = { [M in Effect]: {
   target: RoomBindingTarget; method: M; input: ConnectionParamsMap[M]; phase: 'not-dispatched' | 'may-have-dispatched'

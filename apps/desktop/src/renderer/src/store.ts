@@ -21,7 +21,7 @@ import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
 import type { NoteFileAttempt, NoteFileInput, NoteWrittenReceipt, NoteHistorySelection } from '../../shared/note-file-editing'
 import { afterNoteComposition, hasNoteComposition, mergeLiveNote, setNoteComposition } from './lib/note-live-merge'
 import { confirmNoteHistoryTarget, confirmDeletedNoteHistoryTarget, noteHistoryReadParams, noteResourceReadParams, type NoteHistoryRead, type NoteHistoryInspection, type NoteHistoryTarget } from './lib/note-history-target'
-import { restoredConnectorRoomIntents, type ConnectorRoomIntent } from './lib/connector-room-intent'
+import { restoredConnectorRoomDrafts, restoredConnectorRoomIntents, type ConnectorRoomDraft, type ConnectorRoomIntent } from './lib/connector-room-intent'
 import { restoredConnectorServiceIntents, type ConnectorServiceIntent } from './lib/connector-service-intent'
 import { mailboxNotificationIntentKey, mailboxNotificationSubject, restoredMailboxNotificationIntents, type MailboxNotificationIntent, type MailboxNotificationIntents, type MailboxNotificationFeedbackBySubject, type MailboxNotificationHistoryBySubject } from './lib/mailbox-notification-intent'
 import type { ConnectorServiceObservation } from './lib/connector-service-observation'
@@ -910,6 +910,7 @@ export type AppState = {
   hostChecks: Record<string, HostCheckState>
   browserAnnotationsByBrowserId: Record<string, BrowserAnnotation[]>
   connectorRoomIntents: Record<string, ConnectorRoomIntent>
+  connectorRoomDrafts: Record<string, ConnectorRoomDraft>
   continuityControlIntents: ContinuityControlIntents
   conversationLandmarkIntents: ConversationLandmarkIntents
   connectorServiceIntents: Record<string, ConnectorServiceIntent>
@@ -3585,6 +3586,7 @@ type PersistedAppState = {
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
   connectorRoomIntents?: Record<string, ConnectorRoomIntent>
+  connectorRoomDrafts?: Record<string, ConnectorRoomDraft>
   continuityControlIntents?: ContinuityControlIntents
   conversationLandmarkIntents?: ConversationLandmarkIntents
   connectorServiceIntents?: Record<string, ConnectorServiceIntent>
@@ -3850,6 +3852,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     goalAgentCreationDrafts: state.goalAgentCreationDrafts,
     retainedSpatialFocus: state.retainedSpatialFocus,
     connectorRoomIntents: state.connectorRoomIntents,
+    connectorRoomDrafts: state.connectorRoomDrafts,
     continuityControlIntents: state.continuityControlIntents,
     conversationLandmarkIntents: state.conversationLandmarkIntents,
     connectorServiceIntents: state.connectorServiceIntents,
@@ -4829,6 +4832,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   goalFiniteStartIntents: {},
   goalAgentCreationDrafts: {},
   connectorRoomIntents: {},
+  connectorRoomDrafts: {},
   continuityControlIntents: {},
   conversationLandmarkIntents: {},
   connectorServiceIntents: {},
@@ -12332,7 +12336,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
     state.botTaskSelections = restoredBotTaskSelections(state.botTaskSelections)
-    return { ...state, workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), goalFiniteStartIntents: restoredGoalFiniteStartIntents(state.goalFiniteStartIntents), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
+    return { ...state, workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorRoomDrafts: restoredConnectorRoomDrafts(state.connectorRoomDrafts), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), goalFiniteStartIntents: restoredGoalFiniteStartIntents(state.goalFiniteStartIntents), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState
