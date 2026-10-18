@@ -1,3 +1,4 @@
+import { processNativeRecordIds } from './helpers/conversation-process-members'
 import { fixtureEpoch as _followupFixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -208,7 +209,7 @@ it('one upward demand prepares at most three complete pages of folded process re
   await act(async () => feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -40 })))
   await wait(() => { expect(f.calls).toHaveLength(6); expect(inspectConversationConsumers({ ...f.reference, records: [] }).consumers[0]?.loading).toBe(false) })
   expect(requests.slice(before).filter(input => !input.view).every(input => input.preserveCurrent === true)).toBe(true)
-  const loaded = () => [...f.host.querySelectorAll('[data-native-record-ids]')].flatMap(node => JSON.parse(node.getAttribute('data-native-record-ids')!))
+  const loaded = () => [...f.host.querySelectorAll('[data-conversation-process-members]')].flatMap(node => processNativeRecordIds(node))
   expect(loaded()).toHaveLength(600)
   await f.activity(); await pause(); await act(async () => window.dispatchEvent(new Event('resize'))); await pause()
   expect(f.calls).toHaveLength(6)
@@ -315,11 +316,12 @@ it('actual Activity keeps ruler visibility local and measures only observed rows
   const feed = f.host.querySelector<HTMLElement>('.activity-feed')!
   const rows = [...f.host.querySelectorAll<HTMLElement>('[data-native-record-id]')]
   const visible = rows.slice(-3)
-  const observer = observers.findLast(candidate => candidate.nodes.has(visible[0]!))!
+  const observer = [...observers].reverse().find(candidate => candidate.nodes.has(visible[0]!))!
   expect(observer).toBeTruthy()
   expect(view).toHaveBeenCalled()
   const before = view.mock.calls.length
-  await act(async () => observer.callback(visible.map(target => ({ target, isIntersecting: true } as IntersectionObserverEntry)), {} as IntersectionObserver))
+  await act(async () => observer.callback(visible.map(target => ({ target, isIntersecting: true, intersectionRatio: 1,
+    boundingClientRect: target.getBoundingClientRect(), intersectionRect: target.getBoundingClientRect(), rootBounds: null, time: 0 })), {} as IntersectionObserver))
   expect(view.mock.calls.length, 'Ruler visibility must not render the conversation again').toBe(before)
   const measured = new Set<string>()
   const rect = (top: number, height: number) => ({ top, bottom: top + height, left: 0, right: 500, width: 500, height, x: 0, y: top, toJSON() {} })
