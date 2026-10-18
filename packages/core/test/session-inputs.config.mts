@@ -10,7 +10,7 @@ const mutations: Record<string, { file: string; from: string; to: string }> = {
   'author-object-order': { file: 'session-inputs.ts', from: 'conversationValuesEqual(author, known)', to: 'JSON.stringify(author) === JSON.stringify(known)' },
   'drop-journal-author': { file: 'session-inputs.ts', from: 'value.authors.push(sessionInputMailboxAuthor(item))', to: 'value.authors.push({ kind: "unknown" })' },
   'reject-foreign-relation-body': { file: 'session-history-read-codec.ts', from: 'if (!sameOriginal(parseConversationProvenance(original), original)) return bad()', to: "if (original.sameEvent && (original.sameEvent as { hostId: string }).hostId !== page.sourceHostId || !sameOriginal(parseConversationProvenance(original), original)) return bad()" },
-  'ignore-input-kind': { file: 'conversation-timeline.ts', from: '[hostId, key.kind, key.agentSessionId, key.expectedRun.runId, agentPromptInputId(key)]', to: '[hostId, key.agentSessionId, key.expectedRun.runId, agentPromptInputId(key)]' }
+  'ignore-input-kind': { file: 'conversation-stream.ts', from: '[hostId, key.kind, key.agentSessionId, key.expectedRun.runId, agentPromptInputId(key)]', to: '[hostId, key.agentSessionId, key.expectedRun.runId, agentPromptInputId(key)]' }
 }
 if (mutation && !mutations[mutation]) throw Error('Unknown Inputs source mutation: ' + mutation)
 export default defineConfig({ plugins: mutation ? [{ name: 'inputs-source-mutation', enforce: 'pre', transform(code, id) {

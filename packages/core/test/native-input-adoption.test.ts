@@ -5,7 +5,7 @@ import { paginatedFixture, user, source, turn, jsonl } from './helpers/codex-pag
 import { createNativeInputCorrelation } from '../src/native-input-correlation.js'
 import { confirmNativeInputAdoption } from '../src/native-input-adoption.js'
 import { consumeConversationWindowPage, parseConversationUnit, type ConversationWindowAssembly } from '../src/conversation-changes.js'
-import { projectConversationTimeline, conversationRevision, conversationNativeInputWitness } from '../src/conversation-timeline.js'
+import { projectConversationTimeline, conversationRevision, conversationNativeInputWitness } from '../src/conversation-stream.js'
 import type { AgentPromptSubmissionRecord, AgentTimelineItem } from '../src/types.js'
 import { DatabaseSync } from 'node:sqlite'
 import { PublicationStore, type PublicationOperation } from '../../connectors/src/publication-store.js'

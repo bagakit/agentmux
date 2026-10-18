@@ -5,7 +5,7 @@ import { defineConfig } from 'vitest/config'
 import original from '../../../vitest.config.ts'
 const root = resolve(import.meta.dirname, '../../..')
 const changes: Record<string, [string, string, string]> = {
-  'invert-tail-clock': ['conversation-timeline.ts', 'at > bt', 'at < bt'],
+  'invert-tail-clock': ['conversation-stream.ts', 'at > bt', 'at < bt'],
   'accept-future-captured-cut': ['conversation-reader.ts', ' || cut.sequence > current.stream.sequence', ''],
   'advance-before-complete-unit': ['conversation-reader.ts', 'frontier: complete ? snapshot.checkpoint : state.checkpoint!', 'frontier: snapshot.checkpoint'],
   'drop-accepted-window-contributions': ['conversation-reader.ts', 'const accepted = loaded.rows, records = new Map(view.rows.map(record => [record.id, record]))', 'view.rows = []; const accepted = loaded.rows, records = new Map(view.rows.map(record => [record.id, record]))'],
@@ -17,7 +17,7 @@ const changes: Record<string, [string, string, string]> = {
   'trust-unrelated-relation': ['conversation-changes.ts', 'if (!local && !byId.has(conversationRecordId(to)) || local &&', 'if (local &&'],
   'trust-coalesce-claim': ['conversation-changes.ts', '!same(e.coalesces, expectedCoalesces.length ? expectedCoalesces : undefined)', 'false'],
   'trust-event-anchor': ['conversation-changes.ts', "if (records.some(record => record.id !== id && anchors.get(record.id) !== id))", 'if (false)'],
-  'omit-local-answer-relations': ['conversation-timeline.ts', 'relations.push(...conversationRecordRelations(record))', "if (!record.original.item.questionAnswers) relations.push(...conversationRecordRelations(record))"],
+  'omit-local-answer-relations': ['conversation-stream.ts', 'relations.push(...conversationRecordRelations(record))', "if (!record.original.item.questionAnswers) relations.push(...conversationRecordRelations(record))"],
   'trust-local-relation-set': ['conversation-changes.ts', "if (!same(relations.filter(relation => relation.kind === 'answers' || relation.kind === 'observes'), records.flatMap(record => conversationRecordRelations(record))))", 'if (false)'],
   'import-foreign-host-answer': ['conversation-questions.ts', 'context?.sourceHostId === page.sourceHostId && context.agentSessionId', 'context?.agentSessionId'],
   'trust-invocation-claim': ['conversation-changes.ts', "if (!same(relations.filter(relation => relation.kind === 'invocation-member'), records.flatMap(record => conversationInvocationMembers(record))))", 'if (false)'],

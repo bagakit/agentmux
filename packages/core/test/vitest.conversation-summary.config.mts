@@ -6,9 +6,9 @@ import original from '../../../vitest.config.ts'
 
 const root = resolve(import.meta.dirname, '../../..')
 const changes: Record<string, [string, string, string]> = {
-  'restore-summary-hashes': ['conversation-timeline.ts', 'return projectConversationGraph(input, event => event)', 'return projectConversationTimeline(input)'],
-  'drop-graph-association': ['conversation-timeline.ts', 'const target = provenance?.sameEvent ?? adopted.targets.get(record.id)', 'const target = undefined'],
-  'change-full-version-policy': ['conversation-timeline.ts', 'conversationRevision({ policy: 1, versions: group.map(record => [record.id, record.revision]), event })', 'conversationRevision({ policy: 2, versions: group.map(record => [record.id, record.revision]), event })']
+  'restore-summary-hashes': ['conversation-stream.ts', 'return projectConversationGraph(input, event => event)', 'return projectConversationStream(input)'],
+  'drop-graph-association': ['conversation-stream.ts', 'const target = provenance?.sameEvent ?? adopted.targets.get(record.id)', 'const target = undefined'],
+  'change-full-version-policy': ['conversation-stream.ts', 'conversationRevision({ policy: 1, versions: group.map(record => [record.id, record.revision]), event })', 'conversationRevision({ policy: 2, versions: group.map(record => [record.id, record.revision]), event })']
 }
 
 export default defineConfig({ ...original, root,

@@ -16,7 +16,7 @@ const mutants: Record<string, [string, string, string]> = {
     "const original = item"
   ],
   "first-native-wins": [
-    "packages/core/src/conversation-timeline.ts",
+    "packages/core/src/conversation-stream.ts",
     "candidates?.length === 1 && candidates[0]!.key && !unconfirmed && !ambiguous.has(key)",
     "!!candidates?.length && !unconfirmed"
   ],
@@ -31,7 +31,7 @@ const mutants: Record<string, [string, string, string]> = {
     "false"
   ],
   "changed-original-witness": [
-    "packages/core/src/conversation-timeline.ts",
+    "packages/core/src/conversation-stream.ts",
     "return !next || next.semanticItemId !== fact.semanticItemId || inputWitnessGroup(next) !== inputWitnessGroup(fact) ||\n      !!fact.key && conversationInputWitnessKey(next) !== conversationInputWitnessKey(fact)",
     "return false"
   ],
@@ -46,7 +46,7 @@ const mutants: Record<string, [string, string, string]> = {
     "native.threadId, native.expectedTurnId, input?.kind, input?.operation, input?.protocolId, input?.sourceId,\n      input?.actorId, input?.threadId, input?.expectedTurnId]"
   ],
   "discard-unconfirmed-candidate": [
-    "packages/core/src/conversation-timeline.ts",
+    "packages/core/src/conversation-stream.ts",
     "(!adopted || conversationInputKey(record))",
     "!!adopted && !!conversationInputKey(record)"
   ],

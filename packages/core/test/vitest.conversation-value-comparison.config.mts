@@ -7,7 +7,7 @@ import original from '../../../vitest.config.ts'
 const root = resolve(import.meta.dirname, '../../..')
 const changes: Record<string, [string, string, string]> = {
   'double-hash': ['conversation-changes.ts', 'return conversationValuesEqual(a, b)', 'return conversationRevision(a) === conversationRevision(b)'],
-  'trust-equality': ['conversation-timeline.ts', 'return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b))', 'return true']
+  'trust-equality': ['conversation-stream.ts', 'return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b))', 'return true']
 }
 export default defineConfig({ ...original, root, cacheDir: resolve(root, '.cache/conversation-value-comparison', process.env.AGENTMUX_COMPARISON_MUTATION ?? 'candidate'),
   plugins: [{ name: 'conversation-comparison-loaded-source', enforce: 'pre', transform(code, id) {

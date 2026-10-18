@@ -6,7 +6,7 @@ import { jsonl, nativeHistoryFixture } from './fixtures/native-history-session.j
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { consumeConversationWindowPage, parseConversationUnit, type ConversationWindowAssembly } from '../src/conversation-changes.js'
-import * as timeline from '../src/conversation-timeline.js'
+import * as timeline from '../src/conversation-stream.js'
 import type { AgentTimelineItem } from '../src/types.js'
 
 const ref = { hostId: 'local', agentSessionId: 'private-agent' }
