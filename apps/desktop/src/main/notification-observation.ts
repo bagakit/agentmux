@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { AgentMuxError } from '@agentmux/core'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, parseClientNotificationsObservation,
   type AgentMuxControlInspectNotificationsRequest, type AgentMuxControlResult } from '@agentmux/core/control'
@@ -36,7 +36,7 @@ export function clientNotificationsPort(hostId: string,
     const maxBytes = bounds.maxBytes - Buffer.byteLength(JSON.stringify(target)) - 768
     if (maxBytes < 1) return missing('DIAGNOSTIC_EVIDENCE_QUERY_BUDGET')
     try {
-      const result = await execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: randomUUID(),
+      const result = await execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(),
         operation: 'inspect.notifications', target, includeRaw: bounds.includeRaw, maxBytes }, bounds.signal)
       if (result.operation !== 'inspect.notifications') throw new AgentMuxError('Unexpected notification observation operation.', 'CONTROL_PROTOCOL_ERROR')
       const observation = parseClientNotificationsObservation(result.observation, target, bounds.includeRaw)
