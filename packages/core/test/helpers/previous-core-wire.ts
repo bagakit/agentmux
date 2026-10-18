@@ -26,7 +26,7 @@ export async function previousWireCore(options: { resumeWithoutGuidance?: boolea
         builder.onLoad({ filter: /[/\\]agent-message-render\.ts$/ }, async ({ path }) => {
           const source = await readFile(path, 'utf8')
           const start = source.indexOf('export function renderAgentMuxMessageEnvelope(')
-          const end = source.indexOf('\nexport type AgentMuxMessagePrefix', start)
+          const end = source.indexOf('\ntype AgentMuxMessageReading', start)
           if (start < 0 || end < start) throw Error('Previous wire fixture lost its formatter boundary')
           return { loader: 'ts', contents: source.slice(0, start) + `
 export function renderAgentMuxMessageEnvelope(envelope: Pick<AgentMuxMessageEnvelope, 'messageId' | 'sender' | 'senderSessionId' | 'body'>): string {
