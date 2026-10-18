@@ -84,7 +84,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
   }
   function applyMode(mode: 'script' | 'tui') {
     setActionId(null); setDisplayOpen(false); setConfirmTui(false)
-    onEdit({ mode, ...(mode === 'tui' ? { actions: [], display: null } : {}),
+    onEdit({ mode, ...(mode === 'tui' ? { actions: [], ...(tool.display ? { display: null } : {}) } : {}),
       ...(!entry.expected && tool.script === "console.log('Hello from your toolkit')\n" && mode === 'tui' ? { script: 'exec /bin/sh\n' } : {}) })
   }
   async function run() {
