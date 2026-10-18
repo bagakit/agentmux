@@ -1,5 +1,6 @@
 import { copyBrowserExtension } from './prepare-browser-extension-identity.mjs'
 import { writeEmbeddedCoreCli } from './embedded-core-cli.mjs'
+import { privatePackageSmokeEnvironment, preservePackageSmokeFailure } from './package-smoke-context.mjs'
 import { updateRoute } from '../src/shared/update-policy.ts'
 import { hashRuntimeArtifact } from './update-identity.mjs'
 import { spawn } from 'node:child_process'
@@ -630,15 +631,12 @@ async function verifyLaunchServices(appPath, verificationRoot) {
   let verificationStage = 'launch-request'
   const verificationDeadline = Date.now() + 60_000
   try {
-    const guiEnvironment = { ...process.env }
-    delete guiEnvironment.ELECTRON_RUN_AS_NODE
+    const guiEnvironment = privatePackageSmokeEnvironment(process.env, { userData, runtimeRoot, readyFile })
+    for (const name of ['HOME', 'TMPDIR', 'CODEX_HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_STATE_HOME', 'XDG_CACHE_HOME']) {
+      await mkdir(guiEnvironment[name], { recursive: true, mode: 0o700 })
+    }
     await run('open', ['-n', '--stdout', stdoutPath, '--stderr', stderrPath,
-      '--env', `AGENTMUX_DESKTOP_USER_DATA=${userData}`,
-      '--env', 'AGENTMUX_DISABLE_CRASH_REPORTER=1',
-      '--env', `AGENTMUX_RUNTIME_DIRECTORY=${runtimeRoot}`,
-      '--env', `AGENTMUX_STATE_DIRECTORY=${join(runtimeRoot, 'state')}`,
-      '--env', `AGENTMUX_DESKTOP_READY_FILE=${readyFile}`,
-      '--env', 'AGENTMUX_DESKTOP_EXIT_AFTER_READY=1', canonicalAppPath
+      ...Object.entries(guiEnvironment).flatMap(([name, value]) => ['--env', `${name}=${value}`]), canonicalAppPath
     ], { capture: false, timeoutMs: Math.max(1, verificationDeadline - Date.now()), env: guiEnvironment })
     verificationStage = 'ready-receipt'
     let sawProcess = false
@@ -667,8 +665,7 @@ async function verifyLaunchServices(appPath, verificationRoot) {
     assert(Date.now() <= verificationDeadline && remainingApplicationPids.length === 0,
       `Packaged Desktop did not exit normally: ${remainingApplicationPids.join(', ')}`)
   } catch (error) {
-    const stderr = await readFile(stderrPath, 'utf8').catch(() => '')
-    verificationError = new Error(`Packaged Desktop ${verificationStage} failed: ${error.message}; stderr=${stderr.trim()}`,
+    verificationError = new Error(`Packaged Desktop ${verificationStage} failed: ${error.message}`,
       { cause: error })
   }
   const cleanupErrors = [
@@ -1123,6 +1120,7 @@ async function main() {
   await run('pnpm', ['--filter', '@agentmux/client-ui...', 'build'], { cwd: repositoryRoot })
   await run('pnpm', ['build'], { cwd: desktopRoot })
   const temporaryRoot = await mkdtemp(join(tmpdir(), 'agentmux-macos-package-'))
+  let retainedDiagnostics = false
   try {
     const candidateRoot = join(temporaryRoot, 'candidate')
     const stagedApp = join(candidateRoot, `${PRODUCT_NAME}.app`)
@@ -1186,8 +1184,19 @@ async function main() {
       `dmg_size_bytes=${dmgInfo?.size ?? 'not-requested'}`,
       'notarized=false'
     ].join('\n') + '\n')
+  } catch (error) {
+    try {
+      const receipt = await preservePackageSmokeFailure(temporaryRoot, join(repositoryRoot, '.local', 'state', 'package-failures'), error)
+      process.stderr.write(`package_failure_diagnostics=${receipt.directory}\n`)
+    } catch (diagnosticError) {
+      retainedDiagnostics = true
+      const preservedError = new AggregateError([error, diagnosticError], `Package diagnostics could not be preserved; original staging retained: ${temporaryRoot}`, { cause: error })
+      if (error.transaction) preservedError.transaction = error.transaction
+      throw preservedError
+    }
+    throw error
   } finally {
-    await rm(temporaryRoot, { recursive: true, force: true })
+    if (!retainedDiagnostics) await rm(temporaryRoot, { recursive: true, force: true })
   }
 }
 
