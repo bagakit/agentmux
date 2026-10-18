@@ -43,7 +43,7 @@ async function render(visible: boolean, options: { regionId?: string; semantic?:
     sourceKey="original-source" sessionId={control.agentSessionId} name="Original Agent" executorLabel="Executor"
     executionHost={{ configured: true, id: 'local', cwd: '', label: 'Local', kind: 'local' }} header={retainedHeader}
     historyOpen onCloseHistory={options.close ?? onCloseHistory} selectRegion={options.select ?? selectRegion}
-    activity={{ sessionId: control.agentSessionId, items: [], capability: 'complete-events', activitySemantic: options.semantic ?? 'active',
+    activity={{ sessionId: control.agentSessionId, capability: 'complete-events', activitySemantic: options.semantic ?? 'active',
       conversationReading: { reference: control, identity: control.run.runId, enabled: visible } }}
     eligible readOnly={false} resourceOrigin={resourceOrigin} renderFrame={renderFrame} />))
   return slots.get(hostId)!
