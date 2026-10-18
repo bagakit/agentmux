@@ -116,7 +116,7 @@ it('actual Activity releases a protected frame from its owner document while ret
 })
 
 
-it('the shared presentation removes its held subscription on disable, document replacement and unmount', async () => {
+it('the shared presentation keeps one active DOM subscription and removes it on disable, document replacement and unmount', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const f = await nativeHistoryFixture('claude', jsonl([
     { type: 'user', uuid: 'original-context', sessionId: 'native-main', message: { role: 'user', content: 'Original context' } }
@@ -162,7 +162,7 @@ it('the shared presentation removes its held subscription on disable, document r
   }
   await render()
   await wait(() => { expect(host.textContent).toContain(original.content); expect(view.inspect().inFlight).toBe(false) })
-  expect(firstListeners.size + secondListeners.size).toBe(0)
+  expect(firstListeners.size + secondListeners.size).toBe(1)
   const nextBody = await publish(2)
   expect(firstListeners.size).toBe(1); expect(secondListeners.size).toBe(0)
   await render(first, false)
@@ -179,7 +179,7 @@ it('the shared presentation removes its held subscription on disable, document r
   expect(view.held).toBe(true); expect(host.textContent).toContain(original.content)
   await act(async () => changed(second))
   await wait(() => expect(host.textContent).toContain(nextBody))
-  expect(view.held).toBe(false); expect(firstListeners.size + secondListeners.size).toBe(0)
+  expect(view.held).toBe(false); expect(firstListeners.size + secondListeners.size).toBe(1)
   await publish(3)
   expect(secondListeners.size).toBe(1)
   await unmount()

@@ -6,12 +6,16 @@ import { relative, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_PRESENTATION_MUTATION
 const file = 'packages/client-ui/src/lib/use-conversation-record-layout.ts'
+const owner = mutation === 'ignore-precommit-selection' ? 'packages/client-ui/src/lib/use-conversation-reading-selection.ts'
+  : mutation === 'ignore-commit-anchor' ? 'packages/client-ui/src/components/ConversationReadingCommit.tsx' : file
 const edits: Record<string, [string, string]> = {
   'ignore-parent-change': ['prior.parent === next.parent', 'true'],
   'ignore-role-revision': ['prior.version === next.version', 'true'],
   'split-frame': ['return { ...accepted.frame, sequence:', 'return { ...accepted.frame, coverage: (frame as any).coverage, sequence:'],
   'rehash-originals': ['record.event?.revision ?? conversationRevision(record.original.item)', 'conversationRevision(record.original.item)'],
-  'ignore-anchor': ["if (anchor && !incoming.has(anchor.key)) return 'anchor'", "if (false) return 'anchor'"]
+  'ignore-anchor': ["if (anchor && !incoming.has(anchor.key)) return 'anchor'", "if (false) return 'anchor'"],
+  'ignore-precommit-selection': ['const getSnapshot = useCallback(() => readSnapshot(), [readSnapshot, candidate])', 'const getSnapshot = useCallback(() => emptySelection, [candidate])'],
+  'ignore-commit-anchor': ['this.props.work.capture(true)', 'void this.props.work']
 }
 if (mutation && !edits[mutation]) throw new Error('Unknown presentation mutation')
 export default defineConfig({ ...base, cacheDir: '.cache/conversation-presentation-' + (mutation ?? 'base'), plugins: [...base.plugins ?? [], {
@@ -19,7 +23,7 @@ export default defineConfig({ ...base, cacheDir: '.cache/conversation-presentati
     const path = relative(root, id.split('?')[0]!)
     if (!/^(packages|apps|test)\//u.test(path) || path.includes('/node_modules/')) return
     let code = source
-    if (mutation && path === file) {
+    if (mutation && path === owner) {
       const [from, to] = edits[mutation]!
       if (source.split(from).length !== 2) throw new Error('Missing unique presentation mutation: ' + mutation)
       code = source.replace(from, to)
