@@ -38,7 +38,7 @@ test('the native fixture appends its delayed lifecycle boundary after externally
     await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
     const cli = fileURLToPath(new URL('../bin/amux', import.meta.url))
     const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(AGENTMUX_|CTXMUX_)/u.test(name) && name !== 'NO_COLOR'))
-    child = spawn(process.execPath, [fileURLToPath(new URL('./fixtures/fake-codex-cli.mjs', import.meta.url))], {
+    child = spawn(process.execPath, [fileURLToPath(new URL('../test/fixtures/fake-codex-cli.mjs', import.meta.url))], {
       cwd: directory, env: { ...env, TERM: 'xterm-256color', COLORTERM: 'truecolor', AGENTMUX_ENV: '1',
         AGENTMUX_CLI: cli, PATH: dirname(cli) + ':' + (env.PATH ?? ''), AGENTMUX_PROVIDER_ID: 'codex',
         AGENTMUX_AGENT_SESSION_ID: sessionId, AGENTMUX_HOOK_URL: `http://127.0.0.1:${server.address().port}`,
