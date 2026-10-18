@@ -43,13 +43,19 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave, onOpenRecover
     <div className="settings-pane-stack general-settings">
       <section className="settings-group" data-settings-field="copy-paths">
         <header><span>Project path display and copying</span><small>Saved: {saved ? 'Absolute' : 'Abbreviated'}</small></header>
-        <label className="browser-automation-toggle">
+        <div className="general-settings__path-choice"><label className="browser-automation-toggle">
           <input type="checkbox" checked={draft.value.copyPathsAsAbsolute} onChange={(event) => draft.setField('copyPathsAsAbsolute', event.target.checked)} />
           <span>
-            <strong>Show and copy the full absolute path instead of <code>~</code></strong>
-            <small>By default, project paths abbreviate your own home directory as <code>~/proj/app</code>. This preference also applies to tooltips and Copy Path actions. Remote paths and paths belonging to another user stay complete.</small>
+            <strong>Show and copy full project paths</strong>
+            <small>Include your complete home folder instead of <code>~</code>.</small>
           </span>
         </label>
+        <figure className="general-settings__path-preview" aria-label="Project path draft preview" data-path-format={draft.value.copyPathsAsAbsolute ? 'absolute' : 'abbreviated'}>
+          <figcaption>{draft.value.copyPathsAsAbsolute ? 'Full path' : 'Abbreviated path'}<small>Example</small></figcaption>
+          <code><span>{draft.value.copyPathsAsAbsolute ? 'your home folder' : '~'}</span><b aria-hidden="true"> / </b>project</code>
+          <small>Shown in paths, tooltips and Copy Path.</small>
+        </figure></div>
+        <p className="general-settings__scope">Remote paths and paths belonging to another user stay complete.</p>
       </section>
       <section className="settings-group general-settings__data">
         <header><span>Data & recovery</span><small>Stored on this machine</small></header>
