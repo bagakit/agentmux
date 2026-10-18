@@ -100,7 +100,7 @@ it('previews real activity vocabulary, steady ownership and immediate handoff wi
   const before = await f.bytes()
   for (const [phase, cue, owns] of [
     ['observing', 'Observing', true], ['script', 'Script', true], ['navigating', 'Navigating', true],
-    ['waiting', 'Waiting', true], ['completed', 'Done', false], ['human', 'Your turn', false]
+    ['waiting', 'Waiting', true], ['completed', 'Done', true], ['human', 'Your turn', false]
   ] as const) {
     await act(async () => {
       const select = dom.container.querySelector<HTMLSelectElement>('[aria-label="Simulation state"]')!

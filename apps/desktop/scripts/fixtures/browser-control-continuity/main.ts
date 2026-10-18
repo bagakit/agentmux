@@ -14,7 +14,7 @@ const privateRoot = process.env.AGENTMUX_CONTINUITY_PRIVATE!, output = process.e
 assert.ok(privateRoot && output, 'The native scene requires its own explicit private namespace')
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const receipt: any = { schema: 'agentmux.browser-control-continuity.native.v1', passed: false, pid: process.pid,
-  versions: process.versions, cases: [], checkpoints: [], preferenceChanges: [], nativeEvents: [], compositorFrames: [], cleanup: [],
+  versions: process.versions, cases: [], checkpoints: [], preferenceChanges: [], nativeEvents: [], inputDelivery: [], compositorFrames: [], cleanup: [],
   boundary: 'Actual BVM/runScript/child worker/CDP and exact native input shield. Original layer PNGs verify the stable normal rim, not webpage halo blending, a composed OS window, passive mirrors, physical input or installation. No user Browser, Agent, Runtime or clipboard.' }
 let window: BrowserWindow | undefined, manager: BrowserViewManager | undefined, unsubscribe: (() => void) | undefined
 let heldResponse: ServerResponse | undefined, requestedNavigation!: () => void
@@ -48,12 +48,22 @@ function paintedEdges(image: Electron.NativeImage) {
     center: rgba(Math.floor(width / 2), Math.floor(height / 2)) }
 }
 const green = (pixel: number[]) => pixel[3]! > 24 && pixel[1]! > pixel[0]! + 24 && pixel[1]! > pixel[2]! + 12
+async function shieldFrame(shield: WebContents, painted: boolean) {
+  let image!: Electron.NativeImage
+  for (let attempt = 0; attempt < 15; attempt++) {
+    image = await shield.capturePage(undefined, { stayHidden: true, stayAwake: false })
+    const samples = paintedEdges(image), edges = Object.entries(samples).filter(([edge]) => edge !== 'center')
+    if (edges.every(([, values]) => painted ? values.some(green) : values.every(pixel => pixel[3]! < 12))) break
+    await delay(25)
+  }
+  return image
+}
 async function persist(stage: string) { receipt.stage = stage; await writeFile(join(output, 'native.json'), JSON.stringify(receipt, null, 2) + '\n') }
-async function rimCheckpoint(name: string, source: WebContentsView, shield: WebContentsView, operationId: string,
+async function rimCheckpoint(name: string, source: WebContentsView, shield: WebContentsView, operationId: string | null,
   original: { sourceId: number; shieldId: number; shieldToken: string; shieldTimeOrigin?: number }) {
   const control = manager!.target('original')!.control
   assert.equal(control?.owner, 'agent', 'The original operation retains native input ownership: ' + name)
-  assert.equal(control.activeOperationId, operationId, 'The rim describes only the actual original operation: ' + name)
+  assert.equal(control.activeOperationId, operationId, 'Execution identity is independent of retained Browser control: ' + name)
   assert.equal(control.inputIsolation, 'isolated', 'Rim display does not replace actual native input isolation: ' + name)
   assert.equal(manager!.nativeOwner('original')!.view, source)
   assert.equal(manager!.nativeOwner('original')!.inputShield, shield, 'Navigation preserves the same original native shield')
@@ -65,7 +75,7 @@ async function rimCheckpoint(name: string, source: WebContentsView, shield: WebC
   const facts = await shield.webContents.executeJavaScript(boundaryExpression)
   original.shieldTimeOrigin ??= facts.timeOrigin
   assert.equal(facts.timeOrigin, original.shieldTimeOrigin)
-  const image = await shield.webContents.capturePage(undefined, { stayHidden: true, stayAwake: false })
+  const image = await shieldFrame(shield.webContents, true)
   assert.equal(image.isEmpty(), false, 'Original native shield produces compositor pixels')
   const file = name + '-shield.png', bytes = image.toPNG(), samples = paintedEdges(image)
   await writeFile(join(output, file), bytes)
@@ -81,6 +91,16 @@ async function rimCheckpoint(name: string, source: WebContentsView, shield: WebC
     assert.ok((values as number[][]).some(green), 'Actual native shield paints all four stable rim edges: ' + name + ' ' + edge)
   }
   assert.ok(samples.center[3]! < 12, 'The native boundary keeps the original page center transparent')
+  if (!source.webContents.isLoading()) {
+    const glow = await source.webContents.executeJavaScript(`(()=>{const e=document.querySelector('[data-agentmux-browser-control-feedback]'),s=e&&getComputedStyle(e);return e?{connected:e.isConnected,operationId:e.getAttribute('data-operation-id'),navigationId:e.getAttribute('data-navigation-id'),display:s.display,opacity:s.opacity,blend:s.mixBlendMode}:null})()`)
+    assert.ok(glow?.connected, 'The actual native page retains its inner glow host: ' + name)
+    const pageImage = await source.webContents.capturePage(undefined, { stayHidden: true, stayAwake: false })
+    const pageFile = name + '-page.png', pageBytes = pageImage.toPNG()
+    await writeFile(join(output, pageFile), pageBytes)
+    Object.assign(row, { glow, page: { file: pageFile, sha256: sha(pageBytes), pixels: pageImage.getSize(),
+      boundary: 'Unmodified complete original page WebContents frame, including its actual page-blended inner glow; excludes the sibling shield, outer Renderer and OS window.' } })
+    await persist('page-' + name)
+  } else Object.assign(row, { page: { status: 'not-captured', reason: 'Held native navigation defers source JavaScript and capture; the independent original shield pixels above remain available.' } })
   if (name === 'navigation-in-flight') assert.ok(Object.entries(samples).filter(([edge]) => edge !== 'center').every(([, values]) => (values as number[][]).some(green)),
     'The same original operation keeps its rim during native navigation')
   return row
@@ -88,10 +108,35 @@ async function rimCheckpoint(name: string, source: WebContentsView, shield: WebC
 async function released(shield: WebContentsView, shieldContents: WebContents, source: WebContentsView, operationId: string, phase: string) {
   await until('original input shield destroyed after ' + phase, () => shieldContents.isDestroyed())
   assert.equal(window!.contentView.children.includes(shield), false)
-  assert.equal(manager!.nativeOwner('original')!.inputShield, undefined, 'Ending the operation releases the original rim/input surface')
+  assert.equal(manager!.nativeOwner('original')!.inputShield, undefined, 'Explicit takeover releases the original rim/input surface')
   assert.equal(source.webContents.isDestroyed(), false, 'Releasing the rim preserves the original healthy webpage')
   assert.equal(manager!.target('original')!.control?.owner, 'human')
   receipt.cases.push({ name: phase, operationId, shieldDestroyed: true, originalPageAlive: true, passed: true })
+}
+async function ordinaryNativeInput(name: string, source: WebContentsView, shield: WebContentsView) {
+  const control = manager!.target('original')!.control
+  const expected = name === 'waiting' ? ['mousedown', 'wheel', 'keydown'] : ['mousedown']
+  await source.webContents.executeJavaScript(`window.fixtureNativeInput=[];for(const type of ['mousedown','wheel','keydown'])addEventListener(type,e=>window.fixtureNativeInput.push({type:e.type,trusted:e.isTrusted}),{once:true})`)
+  await shield.webContents.executeJavaScript(`window.fixtureNativeInput=[];for(const type of ['mousedown','wheel','keydown'])addEventListener(type,e=>window.fixtureNativeInput.push({type:e.type,trusted:e.isTrusted}),{once:true})`)
+  // Select the target WebContents without activating the private native window.
+  shield.webContents.focus()
+  await shield.webContents.executeJavaScript('document.hasFocus()')
+  shield.webContents.sendInputEvent({ type: 'mouseDown', x: 100, y: 100, button: 'left', clickCount: 1 })
+  shield.webContents.sendInputEvent({ type: 'mouseUp', x: 100, y: 100, button: 'left', clickCount: 1 })
+  if (name === 'waiting') {
+    shield.webContents.sendInputEvent({ type: 'mouseWheel', x: 100, y: 100, deltaX: 0, deltaY: 20 })
+    shield.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'A' })
+    shield.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'A' })
+  }
+  const delivered = await until('exact shield receives native ' + expected.join('/') + ' ' + name, async () => {
+    const events = await shield.webContents.executeJavaScript('window.fixtureNativeInput')
+    return expected.every(type => events.some((event: any) => event.type === type)) ? events : false
+  })
+  assert.deepEqual(await source.webContents.executeJavaScript('window.fixtureNativeInput'), [], 'Ordinary input delivered to the shield does not reach the source page')
+  assert.deepEqual(manager!.target('original')!.control, control, 'Ordinary native input does not take over or stop the current operation: ' + name)
+  assert.equal(manager!.nativeOwner('original')!.inputShield, shield)
+  receipt.inputDelivery.push({ name, expected, sourceId: source.webContents.id, shieldId: shield.webContents.id, delivered, control,
+    boundary: 'Real Electron sendInputEvent into the exact native shield, with DOM delivery receipts and no source delivery. Native sibling order and bounds are checked separately. This does not certify OS coordinate routing or physical hardware input.' })
 }
 app.on('window-all-closed', () => {})
 app.whenReady().then(async () => {
@@ -137,6 +182,7 @@ app.whenReady().then(async () => {
   })
   receipt.cases.push({ name: 'original-program-started', passed: true, operationId, original, sourceBounds: bounds })
   await rimCheckpoint('waiting', source, shield, operationId, original)
+  await ordinaryNativeInput('waiting', source, shield)
   manager.setBounds('original', null)
   assert.equal(source.getVisible(), false); assert.equal(shield.getVisible(), false)
   const saved = await configOwner.update(current => ({ ...current, browser: { ...current.browser,
@@ -153,7 +199,7 @@ app.whenReady().then(async () => {
   const restoredAppearance = await shieldContents.executeJavaScript(boundaryExpression)
   assert.equal(restoredAppearance.timeOrigin, original.shieldTimeOrigin)
   assert.equal(restoredAppearance.boundary?.opacity, '0', 'Returning to the Browser cannot revive its earlier enabled rim')
-  const disabledImage = await shieldContents.capturePage(undefined, { stayHidden: true, stayAwake: false })
+  const disabledImage = await shieldFrame(shieldContents, false)
   assert.equal(disabledImage.isEmpty(), false)
   const disabledSamples = paintedEdges(disabledImage), disabledBytes = disabledImage.toPNG()
   for (const [edge, values] of Object.entries(disabledSamples)) if (edge !== 'center') {
@@ -186,25 +232,65 @@ app.whenReady().then(async () => {
   await contents.executeJavaScript('document.body.insertAdjacentHTML("beforeend","<button>Finish original operation</button>")')
   const report = await running
   assert.equal(report.outcome.kind, 'completed'); assert.equal(report.result, '1', 'The real original program dispatches its resolved click once')
-  await released(shield, shieldContents, source, operationId, 'completion-releases-rim')
-  await delay(100)
-  assert.equal(manager.nativeOwner('original')!.inputShield, undefined, 'Late display work cannot revive the ended original rim')
-  const takeoverId = 'native-continuity-takeover'
-  const takeover = manager.runScript('original', 'await waitForElement("Never dispatched private target",16000)', operator, undefined, takeoverId)
-  programs.push(takeover); void takeover.catch(() => {})
-  await until('second actual operation waiting', () => manager!.inputContext('original', 'local')?.activity?.phase === 'waiting')
-  const secondShield = manager.nativeOwner('original')!.inputShield!
-  assert.ok(secondShield && secondShield !== shield, 'A new operation gets a new exact input surface')
-  const secondShieldContents = secondShield.webContents
-  await rimCheckpoint('takeover-waiting', source, secondShield, takeoverId, { sourceId, shieldId: secondShield.webContents.id, shieldToken: secondShield.webContents.mainFrame.frameToken })
-  await manager.stopOperationById(takeoverId)
-  assert.equal((await takeover).outcome.kind, 'stopped')
-  await released(secondShield, secondShieldContents, source, takeoverId, 'explicit-takeover-releases-rim')
+  await rimCheckpoint('completed-idle', source, shield, null, original)
+  await ordinaryNativeInput('completed-idle', source, shield)
+  receipt.cases.push({ name: 'completion-retains-control-and-original-shield', operationId, passed: true })
+  const failureId = 'native-continuity-failure'
+  const failed = await manager.runScript('original', 'throw new Error("Declared private program failure")', operator, undefined, failureId)
+  assert.equal(failed.outcome.kind, 'script-failed')
+  await rimCheckpoint('failed-idle', source, shield, null, original)
+  receipt.cases.push({ name: 'failure-retains-control-and-original-shield', operationId: failureId, passed: true })
+  const stopId = 'native-continuity-stop'
+  const stoppedProgram = manager.runScript('original', 'await waitForElement("Never dispatched private target",16000);await js("document.body.dataset.late=\\"yes\\"")', operator, undefined, stopId)
+  programs.push(stoppedProgram); void stoppedProgram.catch(() => {})
+  await until('next actual operation waiting', () => manager!.inputContext('original', 'local')?.activity?.phase === 'waiting')
+  await rimCheckpoint('next-run-waiting', source, shield, stopId, original)
+  await manager.stopOperationById(stopId)
+  assert.equal((await stoppedProgram).outcome.kind, 'stopped')
+  await rimCheckpoint('stopped-idle', source, shield, null, original)
+  await ordinaryNativeInput('stopped-idle', source, shield)
+  receipt.cases.push({ name: 'next-run-reuses-shield-and-stop-retains-control', operationId: stopId, passed: true })
+  const idleTaken = manager.takeControl('original')
+  assert.equal(idleTaken.control?.owner, 'human')
+  await released(shield, shieldContents, source, stopId, 'explicit-idle-takeover-releases-rim')
+  const returned = manager.returnControl('original')
+  assert.equal(returned.control?.owner, 'agent'); assert.equal(returned.control.activeOperationId, null)
+  const newShield = await until('return prepares a new isolation surface without a program', () => {
+    const owner = manager!.nativeOwner('original')!, control = manager!.target('original')!.control
+    return owner.inputShield && control?.inputIsolation === 'isolated' ? owner.inputShield : false
+  })
+  assert.notEqual(newShield, shield)
+  const newOriginal = { sourceId, shieldId: newShield.webContents.id, shieldToken: newShield.webContents.mainFrame.frameToken }
+  const newShieldContents = newShield.webContents
+  await rimCheckpoint('returned-idle', source, newShield, null, newOriginal)
+  assert.equal(await contents.executeJavaScript('document.body.dataset.clicks'), '1')
+  assert.equal(await contents.executeJavaScript('document.body.dataset.late??null'), null, 'Return does not replay the stopped program')
+  receipt.cases.push({ name: 'return-reisolates-without-replay', passed: true })
+  const activeId = 'native-continuity-active-takeover'
+  const active = manager.runScript('original', 'await waitForElement("Never dispatched after return",16000);await js("document.body.dataset.late=\\"yes\\"")', operator, undefined, activeId)
+  programs.push(active); void active.catch(() => {})
+  await until('returned active operation waiting', () => manager!.inputContext('original', 'local')?.activity?.phase === 'waiting')
+  await rimCheckpoint('active-takeover-waiting', source, newShield, activeId, newOriginal)
+  assert.equal(manager.takeControl('original').control?.owner, 'human')
+  assert.equal((await active).outcome.kind, 'stopped')
+  await released(newShield, newShieldContents, source, activeId, 'explicit-active-takeover-releases-rim')
   manager.returnControl('original')
+  const finalShield = await until('second return creates its new isolated surface', () => {
+    const owner = manager!.nativeOwner('original')!, control = manager!.target('original')!.control
+    return owner.inputShield && control?.inputIsolation === 'isolated' ? owner.inputShield : false
+  })
+  assert.notEqual(finalShield, newShield)
+  assert.equal(await contents.executeJavaScript('document.body.dataset.late??null'), null)
+  receipt.cases.push({ name: 'second-return-reisolates-without-replay', passed: true })
+  const fresh = await manager.runScript('original', 'return await js("document.body.dataset.clicks=String(Number(document.body.dataset.clicks)+1)")', operator, undefined, 'native-continuity-fresh')
+  assert.equal(fresh.outcome.kind, 'completed'); assert.equal(fresh.result, '2', 'Only the new explicit program adds a new effect')
+  await rimCheckpoint('final-idle', source, finalShield, null, { sourceId, shieldId: finalShield.webContents.id, shieldToken: finalShield.webContents.mainFrame.frameToken })
   assert.equal(contents.id, sourceId); assert.equal(contents.session, sourceSession)
   assert.equal(await contents.executeJavaScript('document.querySelector("h1").textContent'), 'Replaced document contents')
-  assert.equal(receipt.checkpoints.length, 5)
-  assert.equal(receipt.cases.length, 4)
+  receipt.cases.push({ name: 'fresh-program-uses-returned-original-page', passed: true })
+  assert.equal(receipt.checkpoints.length, 11)
+  assert.equal(receipt.cases.length, 10)
+  assert.equal(receipt.inputDelivery.length, 3)
   receipt.passed = true
 }).catch(error => { receipt.failure = { name: error.name, message: error.message, stack: error.stack } }).finally(async () => {
   for (const contents of subscriptions) { try { if (!contents.isDestroyed()) contents.endFrameSubscription() } catch (error) { receipt.cleanup.push(String(error)) } }

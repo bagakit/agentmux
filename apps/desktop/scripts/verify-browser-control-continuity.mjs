@@ -22,7 +22,7 @@ const receiptPath = take('--receipt') ? resolve(take('--receipt')) : join(out, '
 try { await stat(receiptPath); throw new Error('Keep the original receipt; use a fresh explicit output') } catch (error) { if (error.code !== 'ENOENT') throw error }
 await mkdir(dirname(receiptPath), { recursive: true }); await mkdir(projection)
 const fixture = 'apps/desktop/scripts/fixtures/browser-control-continuity/main.ts'
-const owners = ['apps/desktop/src/main/browser-native-input-shield.ts', 'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/shared/browser-agent-control.ts']
+const owners = ['apps/desktop/src/main/browser-native-input-shield.ts', 'apps/desktop/src/main/browser-view-manager.ts', 'apps/desktop/src/shared/browser-agent-control.ts', 'apps/desktop/src/main/browser-operation-feedback.ts', 'apps/desktop/src/main/browser-control-feedback.ts']
 const git = args => execFileSync('git', args, { cwd: root, maxBuffer: 128 * 1024 * 1024 })
 const candidate = git(['rev-parse', 'HEAD']).toString().trim()
 const receipt = { schema: 'agentmux.browser-control-continuity.proof.v1', candidate, passed: false, baselinePassed: false,
@@ -159,7 +159,7 @@ try {
       row.owningAssertion = 'AssertionRED'
     } else {
       assert.equal(row.process.exitCode, 0, JSON.stringify(actual.failure)); assert.equal(actual.passed, true)
-      assert.equal(actual.cases.length, 4); assert.equal(actual.checkpoints.length, 5)
+      assert.equal(actual.cases.length, 10); assert.equal(actual.checkpoints.length, 11); assert.equal(actual.inputDelivery.length, 3)
       assert.equal(actual.preferenceChanges.length, 1, 'The original hidden Browser consumes the actual saved appearance')
       assert.ok(actual.cases.every(value => value.passed)); receipt.baselinePassed = true
     }

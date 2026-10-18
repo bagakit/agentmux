@@ -11,7 +11,7 @@ import { useAppStore } from '../../../src/renderer/src/store'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import '../../../src/renderer/src/styles/index.css'
 
-type Phase = 'waiting' | 'navigation' | 'script' | 'observe' | 'completed' | 'human'
+type Phase = 'waiting' | 'navigation' | 'script' | 'observe' | 'completed' | 'failed' | 'stopped' | 'human'
 const browserId = 'continuity-page', regionId = 'continuity-region', tabId = 'continuity-tab', workspaceId = 'continuity-workspace'
 const operationId = 'continuity-operation', captureId = 'continuity-capture'
 const root = createRoot(document.getElementById('root')!), errors: string[] = [], calls: unknown[] = []
@@ -23,8 +23,9 @@ let acquisitions = 0, sourceFrames = 0, frameTimer: ReturnType<typeof setInterva
 let base: BrowserSnapshot, appearance: any, stopTheme: (() => void) | undefined
 let stopEvents: (() => void) | undefined
 const phaseMarkers: Record<Phase, [number, number, number]> = { waiting: [30, 70, 130], navigation: [210, 90, 30], script: [150, 45, 160],
-  observe: [30, 155, 170], completed: [40, 145, 55], human: [155, 100, 45] }
+  observe: [30, 155, 170], completed: [40, 145, 55], failed: [185, 50, 50], stopped: [135, 125, 25], human: [155, 100, 45] }
 let sourcePhase: Phase = 'waiting'
+let currentBrowser: BrowserSnapshot
 function paint(phase: Phase) {
   sourcePhase = phase
   context.fillStyle = '#f2f0e9'; context.fillRect(0, 0, 960, 540)
@@ -49,6 +50,8 @@ api.browser.armPresentationCapture = async leaseId => { calls.push({ method: 'ar
 api.browser.ackPresentationCapture = async (id, ack) => { calls.push({ method: 'ack', captureId: id, ack }) }
 api.browser.activatePresentation = async (leaseId, intent) => { calls.push({ method: 'select', leaseId, intent }); return { outcome: 'selected' } }
 api.browser.onPresentationEvent = listener => { listeners.add(listener); return () => { listeners.delete(listener) } }
+api.browser.takeControl = async id => { calls.push({ method: 'takeControl', browserId: id }); return phase('human') }
+api.browser.returnControl = async id => { calls.push({ method: 'returnControl', browserId: id }); return phase('stopped') }
 const reference = { displayWorkspaceId: workspaceId, groupId: 'continuity-group', tabId, regionId }
 const presentations: WorkbenchBrowserPresentation[] = (['space', 'survey'] as const).map(surface => ({
   occurrence: { presentationId: surface + '-continuity', location: reference }, stageHostId: surface + '-continuity-slot',
@@ -78,7 +81,7 @@ function facts() {
   const sampleContext = sample.getContext('2d', { willReadFrequently: true })!
   return { errors: errors.slice(), acquisitions, sourceFrames, sourcePhase, sourceMarker: phaseMarkers[sourcePhase], viewport: { width: innerWidth, height: innerHeight },
     trackIds: stream.getTracks().map(track => track.id), trackStates: stream.getTracks().map(track => track.readyState),
-    calls: calls.slice(), stages: [...document.querySelectorAll<HTMLElement>('[data-browser-presentation-id]')].map(stage => {
+    calls: calls.slice(), currentBrowser, stages: [...document.querySelectorAll<HTMLElement>('[data-browser-presentation-id]')].map(stage => {
       const video = stage.querySelector('video'), boundary = stage.querySelector<SVGSVGElement>('[data-browser-control-boundary]'), rect = boundary?.querySelector('rect')
       const matrix = rect?.getScreenCTM(), box = stage.getBoundingClientRect(), chrome = stage.closest('.browser-surface')?.querySelector('.browser-operation-status')
       let marker: number[] | null = null
@@ -93,6 +96,22 @@ function facts() {
           text: chrome?.textContent, label: chrome?.querySelector('button')?.getAttribute('aria-label') } }
     }) }
 }
+function phase(phase: Phase): BrowserSnapshot {
+    const method = phase === 'navigation' ? 'gotoUrl' : phase === 'script' ? 'js' : 'snapshot'
+    const human = phase === 'human'
+    const terminal = ['completed', 'failed', 'stopped'].includes(phase)
+    const operation: BrowserOperation = { id: operationId, browserId, operator: { id: 'fixture-operator', name: 'Research Agent' },
+      startedAt: 1, phase: phase === 'waiting' ? 'waiting' : terminal ? phase as 'completed' | 'failed' | 'stopped' : phase === 'human' ? 'human' : 'running',
+      summary: 'Read and compare the original page', url: base.url, steps: [{ sequence: 1, method, label: method, startedAt: 1,
+        status: terminal ? phase === 'completed' ? 'completed' : phase === 'failed' ? 'failed' : 'stopped' : 'running' }] }
+    const browser: BrowserSnapshot = { ...base, driving: !human && !terminal, loading: phase === 'navigation',
+      activity: { operation, control: human ? 'human' : 'agent' },
+      control: { owner: human ? 'human' : 'agent', activeOperationId: human || terminal ? null : operationId, revision: 2, inputIsolation: human ? 'inactive' : 'isolated' } }
+    useAppStore.getState().applyBrowserEvent({ type: 'updated', browser })
+    currentBrowser = browser
+    paint(phase)
+    return browser
+}
 Object.assign(window, { continuityRenderer: {
   async setup() {
     const config = await api.config.get(); appearance = config.appearance
@@ -101,6 +120,7 @@ Object.assign(window, { continuityRenderer: {
     const surface = { ...base, kind: 'browser' as const, browserId, regionId, workspaceId }
     const tab = createWorkbenchTab(tabId, surface)
     useAppStore.setState({ config, tabs: { [tabId]: tab }, layouts: { [workspaceId]: createWorkspaceLayout('continuity-group', [tabId]) },
+      executeControl: async request => { calls.push({ method: 'executeControl', request }); return {} as any },
       mainSurface: 'workbench', loading: false, toolsOpen: false, reportError: error => { errors.push(String(error)) } })
     stopEvents = api.browser.onEvent(event => useAppStore.getState().applyBrowserEvent(event))
     stopTheme = mountThemeRuntime(window, { ...appearance, appAppearance: 'light' })
@@ -112,19 +132,7 @@ Object.assign(window, { continuityRenderer: {
       stream.getVideoTracks().forEach(track => (track as CanvasCaptureMediaStreamTrack).requestFrame())
     }, 80)
   },
-  phase(phase: Phase) {
-    const method = phase === 'navigation' ? 'gotoUrl' : phase === 'script' ? 'js' : 'snapshot'
-    const human = phase === 'human' || phase === 'completed'
-    const operation: BrowserOperation = { id: operationId, browserId, operator: { id: 'fixture-operator', name: 'Research Agent' },
-      startedAt: 1, phase: phase === 'waiting' ? 'waiting' : phase === 'completed' ? 'completed' : phase === 'human' ? 'human' : 'running',
-      summary: 'Read and compare the original page', url: base.url, steps: [{ sequence: 1, method, label: method, startedAt: 1,
-        status: phase === 'completed' ? 'completed' : 'running' }] }
-    const browser: BrowserSnapshot = { ...base, driving: !human, loading: phase === 'navigation',
-      activity: { operation, control: human ? 'human' : 'agent' },
-      control: { owner: human ? 'human' : 'agent', activeOperationId: human ? null : operationId, revision: 2, inputIsolation: human ? 'inactive' : 'isolated' } }
-    useAppStore.getState().applyBrowserEvent({ type: 'updated', browser })
-    paint(phase)
-  },
+  phase,
   coverage(presentationId: string | null) {
     const event: BrowserPresentationEvent = { type: 'native-coverage-changed', browserId,
       coverage: presentationId ? { leaseId: presentationId + '-lease', captureId } : null }
