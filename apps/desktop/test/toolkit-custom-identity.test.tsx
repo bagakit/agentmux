@@ -68,7 +68,7 @@ describe('actual Toolkit custom identity', () => {
     const summary = dom.container.querySelector<HTMLElement>('.toolkit-icon-picker summary')!
     expect(summary.textContent).toContain('Icon')
     expect(summary.getAttribute('aria-label')).toBe('Choose tool icon')
-    expect(dom.container.querySelectorAll('.toolkit-icon-picker input[type="radio"]')).toHaveLength(9)
+    expect(dom.container.querySelectorAll('.toolkit-icon-picker input[type="radio"]')).toHaveLength(18)
     await dom.click('.toolkit-icon-picker summary')
     await dom.click('.toolkit-icon-picker input[value="zap"]')
     expect(dom.container.querySelector<HTMLInputElement>('.toolkit-icon-picker input[value="zap"]')!.checked).toBe(true)

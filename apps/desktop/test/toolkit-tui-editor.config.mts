@@ -4,9 +4,10 @@ import { appendFileSync } from 'node:fs'
 import { relative } from 'node:path'
 import base from '../scripts/fixtures/settings-overview/vitest.config.mts'
 const editor = 'apps/desktop/src/renderer/src/components/settings/ToolkitToolEditor.tsx'
+const picker = 'apps/desktop/src/renderer/src/components/toolkit/ToolkitIconPicker.tsx'
 const edits = {
-  'icon-edit': { file: editor, before: 'onChange={() => onEdit({ icon })}', after: 'onChange={() => undefined}' },
-  'icon-label': { file: editor, before: '<span>Icon</span>', after: '<span></span>' },
+  'icon-edit': { file: picker, before: 'onChange={() => onChange(option.value)}', after: 'onChange={() => undefined}' },
+  'icon-label': { file: picker, before: '<span>Icon</span>', after: '<span></span>' },
   'display-presence': { file: editor, before: '...(tool.display ? { display: null } : {})', after: 'display: null' },
   'variable-colors': { file: 'apps/desktop/src/renderer/src/lib/monaco-theme.ts', before: "{ token: 'variable', foreground: c.info.slice(1) }, { token: 'variable.predefined', foreground: c.info.slice(1) },", after: '' }
 } as const
