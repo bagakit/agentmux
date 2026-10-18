@@ -33,8 +33,8 @@ it('the original mounted Mote creation continues into explicit first bot version
       const data = path === '/developers/v1/robot/' + APP ? { enable: true }
         : path === '/developers/v1/event/' + APP ? { eventMode: 4, appEventDetails: [{ items: [{ id: 'im.message.receive_v1' }] }] }
         : path === '/developers/v1/callback/' + APP ? { callbackMode: 4, callbacks: ['card.action.trigger'] }
-        : path === '/developers/v1/scope/all/' + APP ? { scopes: ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only'].map((name, index) => ({ name, id: index + 1, scopeType: [2] })) }
-        : path === '/developers/v1/scope/applied/' + APP ? { scopes: Array.from({ length: 7 }, (_, index) => ({ id: index + 1, scopeIdentityType: 2 })) }
+        : path === '/developers/v1/scope/all/' + APP ? { scopes: ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only', 'application:application:self_manage'].map((name, index) => ({ name, id: index + 1, scopeType: [2] })) }
+        : path === '/developers/v1/scope/applied/' + APP ? { scopes: Array.from({ length: 8 }, (_, index) => ({ id: index + 1, scopeIdentityType: 2 })) }
         : path === '/developers/v1/event/all/' + APP ? { events: [{ items: [{ id: 'im.message.receive_v1', supportIdentityTypes: [2] }] }] }
         : path === '/developers/v1/app_version/list/' + APP ? { versions: [] }
         : path === '/developers/v1/app_version/detail/' + APP + '/' + VERSION ? { appVersion: '1.0.0', versionStatus: submitted ? 1 : 4 }
