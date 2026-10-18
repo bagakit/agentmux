@@ -334,6 +334,7 @@
 .composer-mailbox__notification-feedback details[open] { flex-basis: 100%; order: 1; text-align: start; }
 .composer-mailbox__notification-feedback summary { cursor: pointer; }
 .composer-mailbox__notification-feedback p { margin: var(--sp-1) 0; }
+.composer-mailbox__notification-feedback > .composer-mailbox__notification-reason { flex-basis: 100%; text-align: start; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .composer-mailbox__notification-feedback .composer-tool { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 24px; min-height: 24px; padding: var(--sp-1); background: transparent; }
 .composer-mailbox__notification-history { margin-top: var(--sp-2); }
 .composer-mailbox__notification-history section { padding: var(--sp-2) 0; border-top: 1px solid var(--border); }

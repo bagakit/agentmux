@@ -1622,9 +1622,9 @@ export async function registerIpc(args: {
     assertManualPromptSenderTrusted(event.sender, contents)
     return await args.runtime.notifySessionMessage(session, messageId, operationId)
   })
-  handleWithEvent('sessions:inspectMessageNotification', async (event, session: import('../shared/contracts.js').SessionHistoryReference, messageId: string, key: import('@agentmux/core').AgentPromptInputKey) => {
+  handleWithEvent('sessions:inspectMessageNotification', async (event, session: import('../shared/contracts.js').SessionHistoryReference, messageId: string, operationId: string) => {
     assertManualPromptSenderTrusted(event.sender, contents)
-    return await args.runtime.inspectSessionMessageNotification(session, messageId, key)
+    return await args.runtime.inspectSessionMessageNotification(session, messageId, operationId)
   })
   handleWithEvent('sessions:messageEvents', async (event, session: import('../shared/contracts.js').SessionHistoryReference, options?: import('../shared/contracts.js').SessionMessageEventsOptions) => {
     requireTrustedSender('sessions:messageEvents', event)
