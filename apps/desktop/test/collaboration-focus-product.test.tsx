@@ -27,7 +27,7 @@ function Fixture() {
   const presentation = executionFocusPresentation(state.agentFocus.execution, state.tabs, spatialCatalog(state, []), () => {})
   return <><GlobalFocusSurface visible={state.mainSurface === 'agents' && state.focusView === 'list'} presentation={presentation} onSelectContext={open} />
     <AgentCollaborationMap request={state.collaborationMapTarget} active={state.mainSurface === 'agents' && state.focusView === 'map'}
-      onOpen={(context, reference) => { open(context.id, reference); useAppStore.getState().setMainSurface('workbench') }} /></>
+      onViewInFocus={(subject, presentationSessionId) => useAppStore.getState().revealFocusAgent(subject, presentationSessionId)} onOpen={(context, reference) => { open(context.id, reference); useAppStore.getState().setMainSurface('workbench') }} /></>
 }
 const open = vi.fn()
 const graph = () => document.querySelector<HTMLElement>('.collaboration-map')!

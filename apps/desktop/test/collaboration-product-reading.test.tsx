@@ -43,7 +43,7 @@ function message(messageId: string, sender = 'agent-a', recipient = 'agent-b', b
 const graph = () => document.querySelector<HTMLElement>('.collaboration-map')!
 const bodyNode = () => graph().querySelector<HTMLElement>('.composer-mailbox__detail .log-turn__body')
 async function render(request: CollaborationMapTarget | null = original) {
-  await dom.render(<AgentCollaborationMap request={request} onOpen={() => { throw Error('Reading must not navigate') }} />)
+  await dom.render(<AgentCollaborationMap request={request} onViewInFocus={() => { throw Error("Reading cannot navigate") }} onOpen={() => { throw Error('Reading must not navigate') }} />)
   if (request) await settleCollaborationCanvas(() => {
     expect(graph()?.querySelector('.collaboration-agent'), graph()?.textContent).not.toBeNull()
     expect(graph()?.textContent).not.toContain('Reading…')

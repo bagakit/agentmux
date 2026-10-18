@@ -63,7 +63,7 @@ it('keeps hidden foreign and ambiguous map owners unconfirmed and reports origin
 
 it('validates the same strict Focus view discriminant for client inspection and rejects missing or foreign facts', () => {
   map()
-  const observed = { selection, ...read(), focus: { executionSessionId: 'original-session', pmoSessionId: null } }
+  const observed = { selection, ...read(), focus: { executionSessionId: 'original-session', pmoSessionId: null, agent: null } }
   expect(desktopObservationSchema.parse(observed).selection.focusView).toBe('map')
   expect(desktopObservationSchema.parse({ ...observed, selection: { ...selection, surface: 'space', mainSurface: 'workbench', focusView: null } }).selection.focusView).toBeNull()
   const invalid = [ { ...selection, focusView: null }, { ...selection, focusView: undefined }, { ...selection, focusView: 'unknown' }, { ...selection, surface: 'space', mainSurface: 'workbench', focusView: 'map' } ]

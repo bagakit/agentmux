@@ -90,7 +90,7 @@ async function fixture() {
         presentation: { provenance: 'observed', state: 'main-visible', tabId: 'tab-a', regionId: 'agent', blockers: [] },
         input: { provenance: 'observed', scope: 'main', ownerKind: 'terminal', tabId: 'tab-a', regionId: 'agent', sessionId: 'agent-session', connected: true, visible: true, inert: false },
         floating: { provenance: 'observed', state: 'closed', topicId: null, tabId: null, regionId: null, sessionId: null, presentation: 'hidden' },
-        overlays: { provenance: 'observed', settings: false, quickSwitcher: false }, focus: { executionSessionId: 'agent-session', pmoSessionId: null } },
+        overlays: { provenance: 'observed', settings: false, quickSwitcher: false }, focus: { executionSessionId: 'agent-session', pmoSessionId: null, agent: null } },
       tabs: [
         { id: 'tab-a', workspaceId: 'workspace', topicId: 'topic', name: 'Original', titleRegionId: 'agent',
           layout: { root: { type: 'split', direction: 'horizontal', ratio: 0.4, first: { type: 'leaf', regionId: 'agent' }, second: { type: 'leaf', regionId: 'terminal' } }, activeRegionId: 'agent' },
