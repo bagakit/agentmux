@@ -187,17 +187,23 @@ app.whenReady().then(async () => {
           const r=node.getBoundingClientRect(), x=r.x+r.width/2, y=r.y+r.height/2;
           const animations=(panel??node).getAnimations({subtree:true}).filter(a=>Number.isFinite(a.effect?.getComputedTiming().endTime)&&(a.pending||a.playState==='running'||a.playState==='paused'));
           const surface=panel?{open:panel.matches(':popover-open'),state:panel.dataset.state,inert:panel.inert,opacity:Number(getComputedStyle(panel).opacity),rect:panel.getBoundingClientRect().toJSON(),maxWidth:panel.style.maxWidth,maxHeight:panel.style.maxHeight}:null;
+          const actionable=node.isConnected&&node.checkVisibility()&&!node.matches(':disabled')&&!node.closest('[inert]')&&r.width>0&&r.height>0&&!animations.length;
           return {target:describe(node),rect:r.toJSON(),x,y,hit:node.contains(document.elementFromPoint(x,y)),
-            ready:node.isConnected&&node.checkVisibility()&&!node.matches(':disabled')&&!node.closest('[inert]')&&r.width>0&&r.height>0&&x>=0&&y>=0&&x<innerWidth&&y<innerHeight&&!animations.length&&(!surface||surface.open&&surface.state==='open'&&!surface.inert&&surface.opacity>=.999),
+            canReveal:actionable&&!panel&&node.matches('button'),
+            ready:actionable&&x>=0&&y>=0&&x<innerWidth&&y<innerHeight&&(!surface||surface.open&&surface.state==='open'&&!surface.inert&&surface.opacity>=.999),
             surface,animations:animations.map(a=>({state:a.playState,pending:a.pending,time:a.currentTime,end:a.effect.getComputedTiming().endTime})),
             tabs:panel?[...panel.querySelectorAll('[role="tab"]')].map(n=>({id:n.id,selected:n.getAttribute('aria-selected'),control:n.getAttribute('aria-controls')})):[]};
         };
         const observe=event=>{const value={type:event.type,trusted:event.isTrusted,target:describe(event.target),contains:node.contains(event.target),pathIncludesTarget:event.composedPath().includes(node),button:event.button,buttons:event.buttons,x:event.clientX,y:event.clientY};events.push(value);readingProof.mark('native-click-input',value)};
         for(const type of ['mousedown','mouseup','click'])document.addEventListener(type,observe,{capture:true,passive:true});
-        window.readingClick={facts,finish(){for(const type of ['mousedown','mouseup','click'])document.removeEventListener(type,observe,true);delete window.readingClick;return {events,after:facts()}}};
+        window.readingClick={facts,reveal(){readingProof.mark('native-click-reveal',{target:describe(node),rect:node.getBoundingClientRect().toJSON()});node.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'})},finish(){for(const type of ['mousedown','mouseup','click'])document.removeEventListener(type,observe,true);delete window.readingClick;return {events,after:facts()}}};
       })()`)
       const point = () => until(async () => {
         const before = await read('readingClick.facts()')
+        if (before.canReveal && (!before.ready || !before.hit)) {
+          await read('readingClick.reveal()')
+          return null
+        }
         if (!before.ready) return null
         await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
         const after = await read('readingClick.facts()')
