@@ -26,6 +26,7 @@ it('live cancellation releases the exact token, removes notifications and dispos
   const receive = vi.fn(), unsubscribe = vi.fn(); let abort!: () => void
   const handle = await acquire(receive, callback => { abort = callback; return unsubscribe })
   const token = bridge.invoke.mock.calls[0]![1] as string
+  expect(token).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
   const deliver = bridge.listeners.get(SESSION_HISTORY_OBSERVATION_CHANNEL)!
   deliver(null, { ...event, token }); expect(receive).toHaveBeenCalledTimes(1)
   abort(); handle.dispose(); deliver(null, { ...event, token })
