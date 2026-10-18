@@ -43,6 +43,10 @@ function choice<T extends string>(value: unknown, values: readonly T[]): T {
 export function normalizeSessionHistoryContentEligibility(value: unknown): AgentSessionHistoryContentPart['contentEligibility'] {
   return value === undefined ? undefined : choice<NonNullable<AgentSessionHistoryContentPart['contentEligibility']>>(value, ['public', 'private', 'unconfirmed'])
 }
+export function normalizeSessionHistoryContentRole(value: unknown): AgentSessionHistoryContentPart['contentRole'] {
+  return value === undefined ? undefined : choice<NonNullable<AgentSessionHistoryContentPart['contentRole']>>(value, ['tool', 'reasoning'])
+}
+
 
 function nativeReference(value: unknown): AgentSessionHistorySource {
   const reference = object(value)
@@ -229,7 +233,8 @@ export function normalizeSessionHistoryPage(
     const contentParts: AgentSessionHistoryContentPart[] = item.contentParts.map((value: unknown) => {
       const part = object(value)
       const contentEligibility = normalizeSessionHistoryContentEligibility(part.contentEligibility)
-      const eligibility = contentEligibility === undefined ? {} : { contentEligibility }
+      const contentRole = normalizeSessionHistoryContentRole(part.contentRole)
+      const eligibility = { ...(contentEligibility === undefined ? {} : { contentEligibility }), ...(contentRole === undefined ? {} : { contentRole }) }
       if (part.kind === 'text' && typeof part.text === 'string') {
         const readingRange = part.readingRange === undefined ? undefined : object(part.readingRange)
         if (readingRange && (!Number.isSafeInteger(readingRange.start) || !Number.isSafeInteger(readingRange.end) ||

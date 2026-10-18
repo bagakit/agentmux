@@ -793,7 +793,11 @@ export type AgentSessionHistoryContentPart = (
   | { kind: 'reasoning'; text: string; signature?: string; redacted?: boolean }
   | { kind: 'tool-call'; name: string; input: string; callId?: string }
   | { kind: 'tool-result'; output: string; name?: string; callId?: string; failed?: boolean }
-) & { contentEligibility?: AgentSessionHistoryContentEligibility }
+) & {
+  contentEligibility?: AgentSessionHistoryContentEligibility
+  /** Original tool/reasoning purpose when projection has a text or resource shape. Not sharing authority. */
+  contentRole?: 'tool' | 'reasoning'
+}
 
 export type AgentSessionHistorySource = { providerId: AgentProviderId; nativeSessionId: string }
 

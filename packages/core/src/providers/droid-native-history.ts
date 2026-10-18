@@ -126,7 +126,7 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
       if (block.signatureProvider !== undefined) meta.signatureProvider = block.signatureProvider
       if (block.durationMs !== undefined) meta.durationMs = block.durationMs
       if (Object.keys(meta).length > 0) {
-        parts.push({ kind: 'text', text: nativeJsonStringify(meta) })
+        parts.push({ kind: 'text', text: nativeJsonStringify(meta), contentRole: 'reasoning' })
       }
       continue
     }
@@ -152,7 +152,7 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
       if (block.script_execution !== undefined) meta.script_execution = block.script_execution
       if (block.scriptExecution !== undefined) meta.scriptExecution = block.scriptExecution
       if (Object.keys(meta).length > 0) {
-        parts.push({ kind: 'text', text: nativeJsonStringify(meta) })
+        parts.push({ kind: 'text', text: nativeJsonStringify(meta), contentRole: 'tool' })
       }
       continue
     }
@@ -261,7 +261,7 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
           ...(name !== undefined ? { name } : {})
         })
       }
-      for (const part of parts.slice(firstToolPart)) part.contentEligibility = 'public'
+      for (const part of parts.slice(firstToolPart)) { part.contentEligibility = 'public'; part.contentRole = 'tool' }
       continue
     }
 
@@ -290,10 +290,12 @@ function parseContentBlocks(content: unknown): ParsedBlocks {
           resourceType: 'image',
           reference: nativeTextConcat(`data:${mediaType};base64,`, src.data)
         })
+        hasSpeech = true
         continue
       }
       if (src?.type === 'url' && isNativeText(src.url)) {
         parts.push({ kind: 'resource', resourceType: 'image', reference: src.url })
+        hasSpeech = true
         continue
       }
     }
