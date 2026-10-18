@@ -40,7 +40,7 @@ it('retains the applied disconnect when its original notice is unknown and inspe
     reference: { hostId: 'local', agentSessionId: 'agent', source: { kind: 'binding-operation', operationId: 'detach', event: 'disconnected' } }, target: { connectionId: 'connection', application: binding.application, externalConversationId: 'group' }, state: 'unknown', receipt: { state: 'unknown', reason: 'effect-unconfirmed' } } } as never)
   await render(<ConnectorBindingNotices operation={{ operationId: 'detach', action: 'detach', state: 'applied', binding: detached, notices: [{ event: 'disconnected', deliveryOperationId: 'end-notice' }] }} />)
   await ready('Delivery is not confirmed. The connection change is saved.')
-  expect(host?.textContent).toContain('Your Agent keeps running')
+  expect(host?.textContent).toContain('Disconnection notice')
   const check = [...host!.querySelectorAll('button')].find(button => button.textContent === 'Check notice')!
   await act(async () => check.click())
   await vi.waitFor(() => expect(call).toHaveBeenCalledTimes(2))
