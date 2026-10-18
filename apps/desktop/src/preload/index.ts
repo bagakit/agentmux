@@ -1,4 +1,5 @@
 import { unwrapSessionInputOperationResult } from '../shared/session-input-result.js'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { createPreloadConversationRead } from './conversation-read'
 import { WORKBENCH_WINDOW_REQUEST, WORKBENCH_WINDOW_RESPONSE, WORKBENCH_WINDOW_CHANGED } from '../shared/workbench-windows'
 import { createPreloadNotebookObservation } from './notebook-observation'
@@ -119,7 +120,7 @@ const api: AgentMuxPreloadApi = {
   },
   search: {
     query: async (input, context) => {
-      const token = crypto.randomUUID()
+      const token = mintObjectId()
       const pending = ipcRenderer.invoke('search:query', token, input)
       const release = context?.onAbort?.(() => { void ipcRenderer.invoke('search:cancel', token).catch(() => {}) })
       try { return await pending } finally { release?.() }
@@ -179,13 +180,13 @@ const api: AgentMuxPreloadApi = {
   },
   hosts: {
     network: async (host, context) => {
-      const token = crypto.randomUUID()
+      const token = mintObjectId()
       const pending = ipcRenderer.invoke('hosts:network', token, host)
       const release = context?.onAbort?.(() => { void ipcRenderer.invoke('hosts:cancelInspect', token).catch(() => {}) })
       try { return await pending } finally { release?.() }
     },
     inspect: async (host, context) => {
-      const token = crypto.randomUUID()
+      const token = mintObjectId()
       const pending = ipcRenderer.invoke('hosts:inspect', token, host)
       const release = context?.onAbort?.(() => { void ipcRenderer.invoke('hosts:cancelInspect', token).catch(() => {}) })
       try { return await pending } finally { release?.() }
@@ -545,14 +546,14 @@ const api: AgentMuxPreloadApi = {
     historyPage: (session: import('../shared/contracts.js').SessionHistoryReference, options?: AgentSessionHistoryPageOptions) =>
       ipcRenderer.invoke('sessions:historyPage', session, options),
     readHistory: async (reference, options, context) => {
-      const token = crypto.randomUUID()
+      const token = mintObjectId()
       const pending = ipcRenderer.invoke('sessions:readHistory', token, reference, options)
       const release = context?.onAbort?.(() => { void ipcRenderer.invoke('sessions:cancelHistoryRead', token).catch(() => {}) })
       try { return await pending } finally { release?.() }
     },
     historyResource: (session, input) => ipcRenderer.invoke('sessions:historyResource', session, input),
     observeHistory: async (session, listener, options) => {
-      const token = crypto.randomUUID()
+      const token = mintObjectId()
       let disposed = false
       let releaseAbort: (() => void) | undefined
       const receive = (_event: unknown, payload: SessionHistoryObservationEvent): void => {
@@ -644,7 +645,7 @@ const api: AgentMuxPreloadApi = {
     update: async (toolId, changes, expected) => ipcRenderer.invoke('toolkit:update', toolId, changes, expected),
     remove: async (toolId, expected) => ipcRenderer.invoke('toolkit:remove', toolId, expected),
     observe(toolId, onSnapshot, onEnd, options) {
-      const id = globalThis.crypto.randomUUID()
+      const id = mintObjectId()
       let closed = false
       const snapshot = (_event: Electron.IpcRendererEvent, value: any) => {
         if (!closed && value.id === id) onSnapshot(value.snapshot)
