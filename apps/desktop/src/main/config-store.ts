@@ -47,10 +47,14 @@ import { BROWSER_AGENT_CONTROL_LIMITS as EFFECT_LIMITS, BROWSER_AGENT_GLOW_BLEND
 export const toolkitToolSchema = z.unknown().transform((value, context) => {
   try {
     const definition = parseToolkitToolConfiguration(value)
-    if (!definition.workspacePath.startsWith('/') || ('kind' in definition
-      ? !definition.packagePath.startsWith('/')
-      : !TOOLKIT_ICON_IDS.includes(definition.icon as typeof TOOLKIT_ICON_IDS[number]))) {
-      context.addIssue({ code: 'custom', message: 'Tool needs an available icon and an absolute local working directory.' })
+    const issue = !definition.workspacePath.startsWith('/')
+      ? { path: ['workspacePath'], message: 'Working directory must be an absolute local path.' }
+      : 'kind' in definition ? !definition.packagePath.startsWith('/')
+        ? { path: ['packagePath'], message: 'Package directory must be an absolute local path.' } : null
+        : !TOOLKIT_ICON_IDS.includes(definition.icon as typeof TOOLKIT_ICON_IDS[number])
+          ? { path: ['icon'], message: 'Choose an available tool icon.' } : null
+    if (issue) {
+      context.addIssue({ code: 'custom', ...issue })
       return z.NEVER
     }
     return definition

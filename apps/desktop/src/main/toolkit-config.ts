@@ -2,7 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { AgentMuxError } from '@agentmux/core'
 import { ZodError } from 'zod'
 import { app } from 'electron'
-import { parseToolkitConfigurationFields, type ToolkitRequest, type ToolkitResult,
+import { DEFAULT_TOOLKIT_WORKSPACE_PATH, resolveToolkitWorkspacePath, parseToolkitConfigurationFields, type ToolkitRequest, type ToolkitResult,
   type ToolkitToolConfiguration, type ToolkitConfigurationFields } from '@agentmux/core/control'
 import type { AppConfig } from '../shared/contracts.js'
 import { MOBILE_CONNECTION_TOOL_ID } from '../shared/toolkit-preferences.js'
@@ -19,6 +19,12 @@ export function findToolkitTool(config: AppConfig, id: string): ToolkitToolConfi
 }
 function fail(code: string, message: string): never { throw new AgentMuxError(message, code) }
 
+function absoluteFields<T extends { workspacePath?: string }>(fields: T): T {
+  if (fields.workspacePath === undefined) return fields
+  return { ...fields, workspacePath: resolveToolkitWorkspacePath(fields.workspacePath,
+    fields.workspacePath.startsWith('/') ? '' : app.getPath('home')) }
+}
+
 /** Every ConfigOwner writer shares deletion admission checks and server-issued revisions. */
 export async function prepareToolkitConfig(current: AppConfig, next: AppConfig,
   guardDelete: (id: string) => Promise<void>): Promise<AppConfig> {
@@ -26,9 +32,10 @@ export async function prepareToolkitConfig(current: AppConfig, next: AppConfig,
   const tools = toolkitTools(next)
   for (const id of before.keys()) if (!tools.some(tool => tool.id === id)) await guardDelete(id)
   const prepared = tools.map(tool => {
+    const resolved = absoluteFields(tool)
     const old = before.get(tool.id)
-    const same = old && configValuesEqual(toolkitFields(old), toolkitFields(tool))
-    return toolkitToolSchema.parse({ ...tool, revision: same ? old.revision : mintObjectId() })
+    const same = old && configValuesEqual(toolkitFields(old), toolkitFields(resolved))
+    return toolkitToolSchema.parse({ ...resolved, revision: same ? old.revision : mintObjectId() })
   })
   if (configValuesEqual(tools, prepared)) return next
   return { ...next, toolkit: { ...next.toolkit, tools: prepared } }
@@ -43,21 +50,21 @@ export async function executeToolkitConfig(request: Extract<ToolkitRequest,
     let next: ToolkitToolConfiguration | undefined
     if (request.operation === 'toolkit.add') {
       if (old) fail('SETTING_RESOURCE_EXISTS', `Tool “${request.toolId}” already exists.`)
-      const value = 'kind' in request.value ? { ...request.value, workspacePath: request.value.workspacePath ?? app.getPath('home') } : request.value
-      const fields = parseToolkitConfigurationFields(value, false, 'INVALID_SETTING_VALUE') as ToolkitConfigurationFields
+      const value = 'kind' in request.value ? { ...request.value, workspacePath: request.value.workspacePath ?? DEFAULT_TOOLKIT_WORKSPACE_PATH } : request.value
+      const fields = absoluteFields(parseToolkitConfigurationFields(value, false, 'INVALID_SETTING_VALUE') as ToolkitConfigurationFields)
       next = { id: request.toolId, revision: mintObjectId(), ...fields }
       changed = true
     } else {
       if (!old) fail('SETTING_RESOURCE_NOT_FOUND', `Tool “${request.toolId}” does not exist.`)
       const fields = toolkitFields(old)
       if (request.operation === 'toolkit.remove') {
-        if (request.expected !== undefined && !configValuesEqual(fields, toolkitFields(request.expected))) {
+        if (request.expected !== undefined && !configValuesEqual(fields, toolkitFields(absoluteFields(request.expected)))) {
           throw new ConfigConflict(`toolkit.tools.${request.toolId}`)
         }
         changed = true
       } else {
-        const changes = parseToolkitConfigurationFields(request.changes, true, 'INVALID_SETTING_VALUE')
-        const expected = request.expected === undefined ? undefined : parseToolkitConfigurationFields(request.expected, true, 'INVALID_SETTING_VALUE')
+        const changes = absoluteFields(parseToolkitConfigurationFields(request.changes, true, 'INVALID_SETTING_VALUE'))
+        const expected = request.expected === undefined ? undefined : absoluteFields(parseToolkitConfigurationFields(request.expected, true, 'INVALID_SETTING_VALUE'))
         for (const key of Object.keys(changes)) {
           if (expected && !Object.hasOwn(expected, key)) fail('INVALID_SETTING_VALUE', 'Expected must cover every changed field.')
           if (expected && !configValuesEqual(Reflect.get(fields, key), Reflect.get(changes, key)) && !configValuesEqual(Reflect.get(fields, key), Reflect.get(expected, key))) {
@@ -79,7 +86,7 @@ export async function executeToolkitConfig(request: Extract<ToolkitRequest,
   }).catch((cause: unknown) => {
     if (cause instanceof ConfigConflict) throw new AgentMuxError(cause.message, cause.code)
     if (cause instanceof ZodError) {
-      fail('INVALID_SETTING_VALUE', `Invalid Toolkit value: ${cause.issues.map(issue => `${issue.path.join('.') || 'value'}: ${issue.code}`).join('; ')}.`)
+      fail('INVALID_SETTING_VALUE', `Invalid Toolkit value: ${cause.issues.map(issue => `${issue.path.join('.') || 'value'}: ${issue.message}`).join('; ')}.`)
     }
     throw cause
   })

@@ -18,7 +18,7 @@ export async function parseToolkitCommand(args: readonly string[]): Promise<Tool
       const key = separator < 0 ? argument : argument.slice(0, separator)
       if (!['--path', '--cwd'].includes(key) || flags.has(key)) invalid('Use one --path and an optional --cwd for Toolkit install.')
       const value = separator < 0 ? args[++index] : argument.slice(separator + 1)
-      if (!value || !isAbsolute(value)) invalid(`${key} requires an absolute Host path.`)
+      if (!value || key === '--path' && !isAbsolute(value)) invalid(`${key} requires ${key === '--path' ? 'an absolute Host path' : 'a working directory'}.`)
       flags.set(key, value!)
     }
     if (!flags.has('--path')) invalid('Toolkit install requires --path <absolute directory>.')
