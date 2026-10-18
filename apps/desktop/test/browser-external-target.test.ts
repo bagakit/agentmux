@@ -100,6 +100,8 @@ async function fixture() {
     expect(binding.id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
     expect(binding.connection?.id).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
     expect(binding.tabId).toBe(tabId)
+    expect(binding.grantId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
+    expect(binding.instanceId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
     return binding
   }
   async function attach(tabId = 1) {
@@ -443,11 +445,11 @@ describe('person-shared external Browser transport', () => {
     expect(restarted.list()).toHaveLength(1)
     expect(restarted.require(binding.id).status).toBe('disconnected')
     const legacyPath = f.path + '.uuid', legacyId = '11111111-1111-4111-8111-111111111111'
-    const document = JSON.parse(stored); document.targets[0].id = legacyId
+    const document = JSON.parse(stored); document.targets[0].id = legacyId; document.targets[0].grantId = legacyId; document.targets[0].instanceId = legacyId
     await writeFile(legacyPath, JSON.stringify(document))
     const legacy = new ExternalBrowserBridge(legacyPath); cleanups.push(() => legacy.dispose())
     await legacy.ready(); expect(legacy.list().map(item => item.id)).toEqual([legacyId])
-    expect(legacy.require(legacyId).status).toBe('disconnected')
+    expect(legacy.require(legacyId)).toMatchObject({ status: 'disconnected', id: legacyId, grantId: legacyId, instanceId: legacyId })
     expect(JSON.parse(await readFile(legacyPath, 'utf8')).targets[0].id).toBe(legacyId)
 
     await expect(attachExternalBrowserTarget(restarted, restarted.require(binding.id), owner)).rejects.toThrow(/reconnect/i)
