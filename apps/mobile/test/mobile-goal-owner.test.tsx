@@ -35,7 +35,7 @@ beforeEach(async () => {
   vi.spyOn(api.demands, 'decision').mockImplementation((id, input) => owner.addDecision(id, input))
   vi.spyOn(api.demands, 'activity').mockImplementation((id, input) => owner.addActivity(id, input))
   vi.spyOn(api.demands, 'confirmAlignment').mockImplementation((id, revision) => owner.confirmAlignment(id, revision))
-  vi.spyOn(api.demands, 'acceptGrounding').mockImplementation((id, revision, submission, gaps) => owner.acceptGrounding(id, revision, submission, gaps))
+  vi.spyOn(api.demands, 'acceptGrounding').mockImplementation((id, revision, submission, gaps, finish) => owner.acceptGrounding(id, revision, submission, gaps, finish))
   vi.spyOn(api.continuousProgress, 'goals').mockResolvedValue([])
   vi.spyOn(api.scratch, 'ensureTopic').mockResolvedValue(topic as never)
   vi.spyOn(api.scratch, 'readTopic').mockResolvedValue(topic as never)
@@ -53,7 +53,7 @@ async function mount(initialContext?: import('../src/recovery/presentation-route
   const render = async (visible = true) => { await act(async () => root.render(<MobileGoalsSurface client={client} visible={visible} connected={true} openSession={openSession} {...(initialContext ? { initialContext } : {})} />)) }
   await render()
   const buttons = (text: string) => [...element.querySelectorAll('button')].filter(button => button.textContent === text && !button.closest('[hidden]'))
-  const click = async (text: string) => { const button = buttons(text)[0]; expect(button, text).toBeDefined(); await act(async () => { button.click() }) }
+  const click = async (text: string) => { const button = buttons(text)[0]; expect(button, text).toBeDefined(); await act(async () => { button!.click() }) }
   const wait = async (text: string) => { await vi.waitFor(async () => { await act(async () => {}); expect(element.textContent).toContain(text) }) }
   return { element, forwardRpc, render, click, wait, buttons, openSession, root, client }
 }
@@ -289,7 +289,7 @@ it('cold remount restores unknown creation from durable device bytes and reads i
   expect(new DeviceWorkfaceStore(() => localStorage).snapshot().record.goalIntents).toMatchObject([{ goalId: input.goalId, operationId: input.operationId, kind: 'create', phase: 'unknown' }])
   await unmount(first)
   const restored = await mount(); await restored.wait('重启或重入后的原创建回执未知')
-  expect(restored.element.textContent).toContain(input.goalId); expect(restored.buttons('新建目标')[0].disabled).toBe(true)
+  expect(restored.element.textContent).toContain(input.goalId); expect(restored.buttons('新建目标')[0]!.disabled).toBe(true)
   expect(restored.forwardRpc.mock.calls.some(([method]) => method === 'goal.create')).toBe(false)
   expect(localStorage.getItem(DEVICE_WORKFACE_KEY)).toBe(bytes)
   await restored.click('读取同一目标核对'); await restored.wait('此讨论尚未启动 Agent')
@@ -388,9 +388,9 @@ it('one click uses the strict public service to save one pending ID and enter it
   const saved = (await openDemandStore({ root: directory }).get(input.goalId))!
   expect(saved).toMatchObject({ id: input.goalId, projectId: null, description: '', sessionIds: [] }); expect(saved.alignment).toBeUndefined(); expect(saved.grounding).toBeUndefined()
   expect(view.forwardRpc).toHaveBeenCalledWith('goal.discuss', { goalId: input.goalId, mode: 'open', operationId: expect.any(String) })
-  const tabId = useAppStore.getState().demandPmoTabIds[input.goalId]
+  const tabId = useAppStore.getState().demandPmoTabIds[input.goalId]!
   expect(view.forwardRpc).toHaveBeenCalledWith('space.inspect', { target: { tabId }, presentation: true })
-  expect(useAppStore.getState().tabs[tabId].topicId).toBe(PMO_TEAMS_TOPIC_ID)
+  expect(useAppStore.getState().tabs[tabId]!.topicId).toBe(PMO_TEAMS_TOPIC_ID)
   expect(Object.keys(useAppStore.getState().tabs)).toEqual([tabId]); expect(await owner.list()).toHaveLength(1)
   expect(view.forwardRpc.mock.calls.some(([method]) => method === 'goal.start')).toBe(false)
   await view.click('返回原目标'); expect(view.element.querySelector('article h2')?.textContent).toBe('Untitled goal')
@@ -437,7 +437,7 @@ it('human confirmation unknown keeps normal acknowledgement unavailable until ex
   vi.mocked(api.demands.confirmAlignment).mockImplementationOnce(async (id, revision) => { await owner.confirmAlignment(id, revision); throw new Error('Human ACK lost') })
   await view.click('确认当前目标'); await view.wait('Human ACK lost')
   expect(view.buttons('确认当前目标')).toHaveLength(0)
-  expect(view.buttons('打开目标原讨论')[0].disabled).toBe(false)
+  expect(view.buttons('打开目标原讨论')[0]!.disabled).toBe(false)
   await view.render(false); await view.render(true); expect(view.buttons('确认当前目标')).toHaveLength(0)
   await view.click('读取当前提案与报告'); await view.wait('已读取原目标当前内容')
   expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.confirm')).toHaveLength(1)
@@ -474,13 +474,13 @@ it('mobile discussion actions retain the original grill and grounding modes on t
   const view = await existingGoal()
   await view.click('讨论目标变更'); await view.wait('此讨论尚未启动 Agent')
   expect(view.forwardRpc).toHaveBeenCalledWith('goal.discuss', { goalId: 'original-goal', mode: 'grill', operationId: expect.any(String) })
-  const tabId = useAppStore.getState().demandPmoTabIds['original-goal']
+  const tabId = useAppStore.getState().demandPmoTabIds['original-goal']!
   await view.click('返回原目标'); await view.click('确认当前目标'); await view.wait('已确认读过的当前目标提案')
   await view.click('请求核对结果'); await view.wait('此讨论尚未启动 Agent')
   expect(view.forwardRpc).toHaveBeenCalledWith('goal.discuss', { goalId: 'original-goal', mode: 'grounding', operationId: expect.any(String) })
   expect(useAppStore.getState().demandPmoTabIds['original-goal']).toBe(tabId)
   expect((await owner.get('original-goal'))!.grounding).toBeUndefined()
-  expect(useAppStore.getState().tabs[tabId].topicId).toBe(PMO_TEAMS_TOPIC_ID)
+  expect(useAppStore.getState().tabs[tabId]!.topicId).toBe(PMO_TEAMS_TOPIC_ID)
 })
 
 
@@ -490,7 +490,7 @@ it('current human stage action follows evidence before secondary discussion and 
   const evidence = article.querySelector('[aria-label="结果与证据"]')!, properties = [...article.querySelectorAll('summary')].find(node => node.textContent === '工作状态与属性')!
   expect(evidence.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   expect(section.compareDocumentPosition(properties) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-  const confirm = view.buttons('确认当前目标')[0], discuss = view.buttons('打开目标原讨论')[0]
+  const confirm = view.buttons('确认当前目标')[0]!, discuss = view.buttons('打开目标原讨论')[0]!
   expect(confirm.compareDocumentPosition(discuss) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
 })
 
@@ -508,4 +508,21 @@ it('late original creation recovery read cannot replace another Goal selected wh
   expect([...view.element.querySelectorAll('article h2')].filter(node => !node.closest('[hidden]')).map(node => node.textContent)).toEqual(['Selected later Goal B'])
   expect(view.buttons('返回原目标')).toHaveLength(0); expect(view.openSession).not.toHaveBeenCalled()
   expect((await owner.list()).map(goal => goal.id).sort()).toEqual([input.goalId, 'goal-b'].sort())
+})
+
+
+it.each([false, true])('mobile exact acceptance keeps the goal open or explicitly finishes it (finish=%s)', async finish => {
+  await owner.create({ id: 'original-goal', title: 'Actual goal', status: 'in_review' })
+  await owner.update('original-goal', { alignment: proposal }); await owner.confirmAlignment('original-goal', 1)
+  await owner.update('original-goal', { grounding: { alignmentRevision: 1, summary: 'Verified original result', checks: [{ criterionId: 'c', outcome: 'met', evidence: ['proof.log'], note: '' }] } })
+  const before = (await owner.get('original-goal'))!
+  const view = await mount(); await view.wait('Actual goal'); await view.click('Actual goal未分配项目 · 待检查')
+  await view.click(finish ? '接受并结束目标' : '接受当前结果')
+  await vi.waitFor(async () => expect((await owner.get('original-goal'))!.grounding!.acceptedAt).not.toBeNull())
+  const saved = (await owner.get('original-goal'))!
+  expect(saved.status).toBe(finish ? 'done' : 'in_review')
+  expect(saved.grounding!.submissionId).toBe(before.grounding!.submissionId)
+  expect(view.forwardRpc.mock.calls.filter(([method]) => method === 'goal.accept')).toHaveLength(1)
+  await view.wait(finish ? '当前结果已接受，目标已结束。' : '当前结果已接受，目标仍开放。')
+  expect(useAppStore.getState().sessions).toEqual([])
 })

@@ -2,7 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import { AgentMuxError, observeAgent, type AgentMuxClientEvent, type AgentMuxAgentRuntimeStatus } from '@agentmux/core'
+import { AgentMuxError, observeAgent, type AgentMuxClientEvent, type AgentMuxAgentRuntimeStatus, type AgentPromptSubmissionRecord } from '@agentmux/core'
 import { demandExecutionReferences, openDemandStore } from '@agentmux/demand'
 import type { GoalDelegationAuthority, GoalDelegationResult } from '@agentmux/core/goal-delegation'
 import { GoalPatrolOwner } from '../src/main/goal-patrol-owner'
@@ -17,7 +17,7 @@ async function fixture() {
   await demands.prepareDispatch('goal', { operationId: 'start', agentSessionId: 'worker', hostId: 'worker-host', runId: 'worker-run', prompt: 'Original task', execution: 'finite' })
   await demands.recordDispatchPhase('goal', 'start', { stage: 'confirmed', receipt: { kind: 'core-prompt', itemId: 'prompt:start', createdAt: Date.now() } })
   const state = { mode: 'idle', runId: 'manager-run', lost: false, unavailable: false }
-  const notes = new Map<string, { operationId: string; intentId: string; agentMuxNote: string }>(), receipts = new Map<string, unknown>(), submitted: string[] = []
+  const notes = new Map<string, { operationId: string; intentId: string; agentMuxNote: string }>(), receipts = new Map<string, AgentPromptSubmissionRecord>(), submitted: string[] = []
   const semantic = (id = 'manager') => ({ state: state.mode === 'busy' ? 'working' as const : 'done' as const, source: 'native-hook' as const, observedAt: Date.now(), stateEnteredAt: Date.now() - 90_000, currentActivityRevision: 3 })
   const session = (id = 'manager') => ({ kind: 'agent' as const, agentSessionId: id, providerId: 'codex', executorId: 'fixture', hostId: id === 'manager' ? 'manager-host' : 'worker-host', workspacePath: root,
     run: { runId: id === 'manager' ? state.runId : 'worker-run' }, retiredRuns: [], createdAt: Date.now() - 100_000, updatedAt: Date.now(), semanticStatus: semantic(id) })
@@ -38,8 +38,9 @@ async function fixture() {
       expect(original.attemptedAt).toBeGreaterThan(0); expect(original.operationId).toBe(operationId); expect(automation!.isCurrent()).toBe(true)
       expect(control.hostId).toBe('manager-host'); expect(prompt).toBe(''); expect(authorHuman).toBeUndefined(); expect(note).toBe(original.agentMuxNote)
       submitted.push(operationId); if (state.lost) throw new AgentMuxError('Original Native input receipt lost.', 'AGENT_PROMPT_INPUT_UNCONFIRMED', 'unknown')
-      receipts.set(operationId, { agentSessionId: 'manager', run: { runId: state.runId }, admission: { submissionId: operationId, acknowledged: true,
-        inputKey: { kind: 'prompt', agentSessionId: 'manager', expectedRun: { runId: state.runId }, submissionId: operationId }, intent: { message: { systemContext: note } } } })
+      receipts.set(operationId, { agentSessionId: 'manager', run: { runId: state.runId }, admission: { operationId, submissionId: operationId, acknowledged: true, startByte: 0, endByte: Buffer.byteLength(original.agentMuxNote),
+        inputKey: { kind: 'prompt', agentSessionId: 'manager', expectedRun: { runId: state.runId }, submissionId: operationId },
+        intent: { run: { runId: state.runId }, ownerInstanceId: 'fixture', prompt: '', plan: { kind: 'single-phase', data: original.agentMuxNote }, message: { systemContext: original.agentMuxNote } } } })
     })
   } satisfies ConstructorParameters<typeof GoalPatrolOwner>[1]
   const read = vi.fn(async (): Promise<GoalDelegationResult> => { const goal = (await demands.get('goal'))!

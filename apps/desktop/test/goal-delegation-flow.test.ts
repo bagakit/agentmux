@@ -38,7 +38,7 @@ async function record(scenario: string, proof: unknown) {
     proofBoundary: 'Actual compiled CLI, Unix RPC, Main and persisted Core/Demand owners; Native input and Run observations are explicit isolated fixtures. Does not prove live independent Agent or Renderer recovery.', proof }, null, 2) + '\n')
 }
 
-async function fixture(files?: ConstructorParameters<typeof AgentMuxControlServer>[0]['files']) {
+async function fixture(files?: NonNullable<ConstructorParameters<typeof AgentMuxControlServer>[0]>['files']) {
   const root = await fs.mkdtemp(join(tmpdir(), 'goal-delegation-flow-'))
   cleanup.push(() => fs.rm(root, { recursive: true, force: true }))
   const receiptDirectory = process.env.AGENTMUX_GOAL_DELEGATION_FLOW_RECEIPT_DIR

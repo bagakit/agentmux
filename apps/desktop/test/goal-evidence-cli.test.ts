@@ -7,7 +7,6 @@ import { goalEvidenceSource } from './helpers/goal-evidence-source'
 import { runCompiledObjectCli, objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import type { AppConfig } from '../src/shared/contracts'
 const initial = useAppStore.getState(), cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { useAppStore.setState(initial); vi.restoreAllMocks(); vi.unstubAllEnvs(); for (const dispose of cleanup.splice(0).reverse()) await dispose() })
 
@@ -18,9 +17,9 @@ it('takes an actual CLI Files receipt into goal update and restores the same typ
   await owner.create({ id: 'original-goal', title: 'Original', status: 'in_progress', sessionIds: [] })
   await owner.proposeAlignment('original-goal', { summary: 'Original agreement', criteria: [{ id: 'c', text: 'Actual outcome' }], openQuestions: [] })
   await owner.proposeGrounding('original-goal', { alignmentRevision: 1, summary: 'Original report', checks: [{ criterionId: 'c', outcome: 'met', evidence: ['Original citation'], note: '' }] })
-  useAppStore.setState({ ...initial, config: { ...initial.config, workspaces: source.workspaces, hosts: [], executors: {}, appearance: {} } as AppConfig, sessions: [], demands: {} })
+  useAppStore.setState({ ...initial, config: { ...await api.config.get(), workspaces: source.workspaces }, sessions: [], demands: {} })
   vi.spyOn(api.demands, 'list').mockImplementation(() => owner.list())
-  vi.spyOn(api.demands, 'update').mockImplementation((id, patch, operationId, expectedUpdatedAt) => owner.update(id, patch, { operationId, expectedUpdatedAt }))
+  vi.spyOn(api.demands, 'update').mockImplementation((id, patch, operationId, expectedUpdatedAt) => owner.update(id, patch, { ...(operationId === undefined ? {} : { operationId }), ...(expectedUpdatedAt === undefined ? {} : { expectedUpdatedAt }) }))
   vi.spyOn(api.continuousProgress, 'goals').mockResolvedValue([])
   const server = new AgentMuxControlServer({ socketPath: join(source.root, 'control.sock'), coreClients: () => [], files: source.owner,
     execute: request => useAppStore.getState().executeControl(request) })
