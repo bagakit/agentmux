@@ -47,10 +47,10 @@ it('joins visible overview points to the original directed route without moving 
   const route: CollaborationPath = { id: 'message', points, path: 'M 250 20 C 310 20 420 240 500 240',
     sourceHandle: 'out', targetHandle: 'in', labelX: 375, labelY: 140, bounds: { x: 250, y: 20, width: 250, height: 220 } }
   const original = structuredClone(route)
-  const path = collaborationOverviewPath(route, source, target, .25)
+  const path = collaborationOverviewPath(route, source, target, .25, 14, 6)
   const numbers = path.match(/-?\d+(?:\.\d+)?/g)!.map(Number)
   expect(numbers.slice(6, 14)).toEqual(points.flatMap(point => [point.x, point.y]))
-  expect(Math.hypot(numbers[0]!-125, numbers[1]!-47)).toBeCloseTo(24)
+  expect(Math.hypot(numbers[0]!-125, numbers[1]!-47)).toBeCloseTo(56)
   expect(Math.hypot(numbers.at(-2)!-625, numbers.at(-1)!-247)).toBeCloseTo(24)
   expect(route).toEqual(original)
   expect(collaborationOverviewScale(member('closed', 0, 0, 14, 14), .05)).toBe(1)
