@@ -100,7 +100,7 @@
 .mote-behavior-summary .mote-details__section-actions h3 { margin: 0; color: var(--text); font-size: var(--fs-title); line-height: 1.5; font-weight: 600; letter-spacing: -.02em; }
 .mote-behavior-summary > p { margin: 7px 0; line-height: 1.6; color: var(--text-2); }
 .mote-behavior-summary__saved { display: grid; gap: 12px; padding-top: 4px; }
-.mote-behavior-summary__choices { display: grid; margin: 0; padding: 0; border: 1px solid var(--line-soft); border-radius: var(--radius-md); background: var(--surface-1); overflow: hidden; }
+.mote-behavior-summary__choices { display: grid; margin: 0; padding: 0; border: 1px solid var(--line-soft); border-radius: var(--radius-lg); background: var(--surface-1); overflow: hidden; }
 .mote-behavior-summary__choices > div { min-width: 0; padding: 12px 14px; }
 .mote-behavior-summary__choices > div + div { border-top: 1px solid var(--line-soft); }
 .mote-behavior-summary__choices dt { margin-bottom: 5px; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
@@ -134,7 +134,7 @@
   .mote-details:not([data-section="profile"]) .mote-details__navigation-bar { position: absolute; inset: 8px 4px auto auto; min-height: 36px; padding: 0 12px; border-bottom: 0; }
 }
 @container mote-details (min-width: 720px) {
-  .mote-details[data-section="profile"] > .mote-details__profile { position: absolute; inset: 16px auto auto 16px; width: 240px; max-height: calc(100% - 32px); box-sizing: border-box; padding: 0 18px 18px; overflow: auto; border: 1px solid var(--line-soft); border-radius: var(--radius-md); gap: 14px; }
+  .mote-details[data-section="profile"] > .mote-details__profile { position: absolute; inset: 16px auto auto 16px; width: 240px; max-height: calc(100% - 32px); box-sizing: border-box; padding: 0 18px 18px; overflow: auto; border: 1px solid var(--line-soft); border-radius: var(--radius-lg); gap: 14px; }
   .mote-details[data-section="profile"] > .mote-details__main { margin-inline-start: 272px; }
   .mote-details[data-section="profile"] .mote-details__cover { display: block; height: 64px; margin-inline: -18px; background: linear-gradient(150deg, color-mix(in srgb, var(--green) 16%, var(--surface-3)), var(--surface-2)); border-bottom: 1px solid var(--line-soft); }
   .mote-details[data-section="profile"] .mote-details__identity { position: relative; flex-direction: column; align-items: center; gap: 12px; margin-top: -46px; text-align: center; }
@@ -292,12 +292,15 @@
 .mote-profile-trigger[aria-pressed="true"] { background: var(--surface-3); color: var(--text); box-shadow: inset 0 0 0 1px var(--line); }
 
 .mote-profile { container: mote-profile / inline-size; }
-@container mote-profile (min-width: 640px) {
-  .mote-profile__columns { grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr); gap: 28px; }
-  .mote-profile__about { padding-inline-start: 24px; border-inline-start: 1px solid var(--line-soft); }
+@container mote-profile (min-width: 480px) {
   .mote-behavior-summary__choices { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mote-behavior-summary__choices > div:nth-child(2) { border-top: 0; }
   .mote-behavior-summary__choices > div:nth-child(even) { border-inline-start: 1px solid var(--line-soft); }
+}
+@container mote-profile (min-width: 640px) {
+  .mote-profile__columns { grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr); gap: 28px; }
+  .mote-profile__about { padding-inline-start: 24px; border-inline-start: 1px solid var(--line-soft); }
+
 }
 .mote-upcoming { border-top: 1px solid var(--line-soft); padding-block: 10px; }
 .mote-upcoming .mote-details__navigation small { margin-inline-start: 8px; color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
