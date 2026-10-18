@@ -8,6 +8,24 @@ import { historyPage, visualInputPage, journalWire } from './data'
 
 const base = (window as any).identityMenu
 const calls: Array<{ action: string; reference?: unknown; query?: unknown }> = []
+const notificationKeys = new Map<string, { messageId: string; key: { kind: 'prompt'; agentSessionId: string; expectedRun: { runId: string }; submissionId: string } }>()
+api.sessions.notifyMessage = async (reference, messageId, operationId) => {
+  calls.push({ action: 'notify-reference', reference, query: { messageId, operationId } })
+  const { message } = await api.sessions.readMessage(reference, messageId)
+  if (!message?.envelope.recipientSessionId || !message.envelope.recipientRunId) throw new Error('The private scene needs its original notification recipient')
+  const key = { kind: 'prompt' as const, agentSessionId: message.envelope.recipientSessionId, expectedRun: { runId: message.envelope.recipientRunId }, submissionId: operationId }
+  notificationKeys.set(operationId, { messageId, key })
+  return { hostId: reference.hostId, notification: { notificationId: operationId, key, messageIds: [messageId], wire: 'Private original Core reference notification',
+    condition: { expectedRun: key.expectedRun, afterSubmissionId: null }, mode: 'steer', state: 'unconfirmed', reason: 'The original input receipt is not yet confirmed. Refresh this same operation.' }, input: null }
+}
+api.sessions.inspectMessageNotification = async (reference, messageId, key) => {
+  calls.push({ action: 'inspect-notification', reference, query: { messageId, key } })
+  if (key.kind !== 'prompt' || notificationKeys.get(key.submissionId)?.messageId !== messageId) throw new Error('The scene only observes its exact original notification')
+  return { record: { agentSessionId: key.agentSessionId, run: key.expectedRun,
+    admission: { inputKey: key, submissionId: key.submissionId, acknowledged: true, intent: { run: key.expectedRun, execution: 'immediate',
+      admissionIntent: { kind: 'manual-actor', expectedRun: key.expectedRun }, prompt: 'Private original Core reference notification',
+      message: { systemContext: 'Private original Core reference notification', a2aNotificationId: key.submissionId } } } } as never }
+}
 const observers = new Set<(event: AgentSessionHistoryObservation) => void>()
 const readDispatches = api.sessions.dispatches
 let emptyViews = false
@@ -54,6 +72,7 @@ Object.assign(window, { messageWorkspace: {
         text: '待发：确认消息边界后，再逐项完成设计核对。', status: 'queued', promptCondition: null,
         enqueuedAt: fixtureEpoch(0, 0, 5000), awaitingExplicitSend: true }] } }))
     calls.length = 0
+    notificationKeys.clear()
     return { generation, ...a2a, journalWire, draft: '保留这份尚未发送的草稿。' }
   },
   facts() { return { ...base.facts(), calls: [...calls], historyObservers: observers.size, progress: base.progressFacts() } },

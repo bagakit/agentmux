@@ -218,6 +218,34 @@ async function interactionStates(width, theme, original, before, geometry) {
   await originalSurfacePreserved(original, before)
   result.scenes.push({ width, theme, geometry, resting, hover, focus, originalSurfacePreserved: true })
 }
+async function manualNotification(width, theme, original, before) {
+  await choose('Agent messages'); await choose('Received')
+  await waitFor(`${visiblePanel}.querySelectorAll('button[data-record-key^="a2a:"]').length===25`)
+  const selected = `${visiblePanel}.querySelector('.composer-mailbox__record:has([aria-label="Notify now"])')`
+  const mid = await evaluate(`${selected}.querySelector('[data-record-key]').dataset.recordKey.slice(4)`)
+  const target = `${selected}.querySelector('[aria-label="Notify now"]')`
+  await evaluate(`${selected}.scrollIntoView({block:'nearest'})`)
+  await frame(width, theme, 'notify-list')
+  await click(target)
+  await waitFor(`${visiblePanel}.querySelector('[data-notification-operation]')`)
+  const operationId = await evaluate(`${visiblePanel}.querySelector('[data-notification-operation]').dataset.notificationOperation`)
+  const calls = await evaluate('messageWorkspace.facts().calls')
+  assert.deepEqual(calls.filter(call=>call.action==='notify-reference').map(call=>[call.reference,call.query]),
+    [[{hostId:original.hostId,agentSessionId:original.agentSessionId},{messageId:mid,operationId}]])
+  assert.equal(await evaluate(`${selected}.textContent.includes('This notification: unconfirmed')`), true)
+  await frame(width, theme, 'notify-unconfirmed')
+  await click(`${selected}.querySelector('[data-record-key]')`)
+  await waitFor(`${visiblePanel}.querySelector('.log-turn__body')`)
+  assert.equal(await evaluate(`${visiblePanel}.querySelector('[data-notification-operation]').dataset.notificationOperation`), operationId)
+  await click(buttons('Refresh receipt'))
+  await waitFor(`${visiblePanel}.querySelector('[data-notification-operation] summary').textContent==='This notification: submitted'`)
+  assert.equal((await evaluate('messageWorkspace.facts().calls')).filter(call=>call.action==='notify-reference').length, 1)
+  assert.equal((await evaluate('messageWorkspace.facts().calls')).filter(call=>call.action==='inspect-notification').length, 1)
+  await frame(width, theme, 'notify-detail')
+  await key('Escape', 'Escape', 27)
+  await originalSurfacePreserved(original, before)
+  result.scenes.push({width,theme,mid,operationId,explicitNotification:true,observationOnlyRefresh:true,originalSurfacePreserved:true})
+}
 async function scenario(width, theme, short = false) {
   result.stage = { width, theme, short, action: 'seed' }
   await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride', { width: width * 2 + 1, height: short ? 540 : 800, deviceScaleFactor: 1, mobile: false })
@@ -228,6 +256,7 @@ async function scenario(width, theme, short = false) {
   const before = await evaluate('({terminal:messageWorkspace.terminal(),facts:messageWorkspace.facts()})')
   await click(`${surface}.querySelector('.composer__mailbox')`)
   await waitFor(`${panel}.matches(':popover-open')`)
+  if (mode === 'manual-notify') { await manualNotification(width, theme, original, before); return }
   await choose('Inputs')
   await waitFor(`${visiblePanel}.querySelectorAll('button[data-record-key]').length===5`)
   const geometry = await layout({ search: true })
@@ -362,7 +391,8 @@ app.whenReady().then(async () => {
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await waitFor('Boolean(window.messageWorkspace)')
-    if (mode === 'empty-mutation') await scenario(320, 'dark')
+    if (mode === 'manual-notify') { for (const [width, theme] of [[380,'dark'],[320,'dark'],[640,'light']]) await scenario(width, theme) }
+    else if (mode === 'empty-mutation') await scenario(320, 'dark')
     else if (mode === 'empty-states') for (const theme of ['dark', 'light']) for (const width of [320, 380, 440]) await scenario(width, theme)
     else if (mode === 'density') await scenario(320, 'dark', true)
     else if (mode === 'interaction-states') await scenario(380, 'dark')
