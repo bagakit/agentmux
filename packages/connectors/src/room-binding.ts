@@ -28,6 +28,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     this.safe(() => this.database.exec(`
       CREATE TABLE IF NOT EXISTS room_binding_revision (binding_id TEXT NOT NULL, revision INTEGER NOT NULL, snapshot_json TEXT NOT NULL, PRIMARY KEY(binding_id, revision));
       CREATE TABLE IF NOT EXISTS room_binding_head (binding_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, connection_id TEXT NOT NULL, domain TEXT NOT NULL, app_id TEXT NOT NULL, room_id TEXT NOT NULL, host_id TEXT NOT NULL, session_id TEXT NOT NULL, UNIQUE(domain, app_id, room_id), UNIQUE(connection_id, host_id, session_id));
+      CREATE INDEX IF NOT EXISTS room_binding_session ON room_binding_head(host_id,session_id,binding_id);
       CREATE TABLE IF NOT EXISTS room_binding_operation (operation_id TEXT PRIMARY KEY, intent_json TEXT NOT NULL, result_json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS room_grant_revision (grant_id TEXT NOT NULL, revision INTEGER NOT NULL, snapshot_json TEXT NOT NULL, PRIMARY KEY(grant_id, revision));
       CREATE TABLE IF NOT EXISTS room_grant_head (grant_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, binding_id TEXT NOT NULL, connection_id TEXT NOT NULL, room_id TEXT NOT NULL, actor_json TEXT NOT NULL, UNIQUE(connection_id, room_id, actor_json));

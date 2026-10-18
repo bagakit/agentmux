@@ -1,0 +1,139 @@
+import type { ConnectionDelivery } from './connection-delivery-contract.js'
+import type { ConnectionIngressRecord } from './ingress-contract.js'
+import type { RoomBinding } from './room-binding-contract.js'
+import type { ConnectionPort } from './connections-contract.js'
+import { connectionDiagnosisIntakeCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosisInput, type ConnectionDiagnosis, type ConnectionGroupDiagnosis, type ConnectionDiagnosisTarget, type ConnectionDiagnosisWindow, type ConnectionDiagnosisReading, type GroupDiagnosis } from './connection-diagnosis-contract.js'
+
+export const groupWindowLimit = connectionDiagnosisWindowLimit
+export function groupTarget(binding: RoomBinding) {
+  return { bindingId: binding.bindingId, bindingRevision: binding.revision, connectionId: binding.connectionId,
+    domain: binding.application.domain, appId: binding.application.appId, externalConversationId: binding.externalConversationId,
+    executionHostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
+}
+type GroupTarget = ConnectionDiagnosisTarget
+type GroupWindow = ConnectionDiagnosisWindow
+type Reading<T> = ConnectionDiagnosisReading<T>
+async function reading<T>(work: () => Promise<T>): Promise<Reading<T>> {
+  try { return { value: await work(), issue: null } } catch { return { value: null, issue: 'read-unavailable' } }
+}
+const applicationMatches = (application: { domain: string; appId: string }, target: GroupTarget) => application.domain === target.domain && application.appId === target.appId
+export function deliveryMatches(delivery: ConnectionDelivery, target: GroupTarget) {
+  return delivery.bindingId === target.bindingId && delivery.bindingRevision === target.bindingRevision && delivery.target.connectionId === target.connectionId &&
+    delivery.target.externalConversationId === target.externalConversationId && applicationMatches(delivery.target.application, target)
+}
+export function deliveryFacts(delivery: ConnectionDelivery) {
+  return { operationId: delivery.operationId, state: delivery.state, receipt: delivery.receipt?.state ?? null,
+    platformMessageId: delivery.receipt?.state === 'confirmed' ? delivery.receipt.mapping.messageId : null,
+    reason: delivery.receipt && delivery.receipt.state !== 'confirmed' ? delivery.receipt.reason : delivery.reason ?? null,
+    resourceUpload: delivery.resourceUpload?.state ?? null }
+}
+const ingressMatches = (ingress: ConnectionIngressRecord, target: GroupTarget) => ingress.externalConversationId === target.externalConversationId && applicationMatches(ingress.application, target)
+// Original owner codes only. Arbitrary error text, body and exception properties are never diagnosis inputs.
+const intakeCodes = connectionDiagnosisIntakeCodes
+const intakeCode = (value?: string) => intakeCodes.find(code => code === value) ?? null
+
+/** One explicit bounded local window. None of these original read ports dispatches an effect. */
+async function readGroup(owner: ConnectionPort, target: GroupTarget, window: GroupWindow = {}): Promise<ConnectionGroupDiagnosis> {
+  const [connection, binding, outgoing, incoming] = await Promise.all([
+    reading(() => owner.inspect({ connectionId: target.connectionId })),
+    reading(() => owner.bindings!.inspect({ bindingId: target.bindingId, revision: target.bindingRevision })),
+    reading(() => owner.delivery!.list({ connectionId: target.connectionId, bindingId: target.bindingId, bindingRevision: target.bindingRevision, limit: groupWindowLimit, ...(window.after ? { after: window.after } : {}), ...(window.afterContent ? { afterContent: window.afterContent } : {}) })),
+    reading(() => owner.ingress!.listAudience!({ application: { domain: target.domain, appId: target.appId }, externalConversationId: target.externalConversationId, limit: groupWindowLimit, ...(window.beforeIngressId ? { beforeIngressId: window.beforeIngressId } : {}) }))
+  ])
+  const c = connection.value?.connection, b = binding.value?.binding
+  const sameConnection = !!c && c.config.connectionId === target.connectionId && applicationMatches(c.config.application, target)
+  const sameBinding = !!b && b.bindingId === target.bindingId && b.revision === target.bindingRevision && b.connectionId === target.connectionId &&
+    b.externalConversationId === target.externalConversationId && applicationMatches(b.application, target) && b.executionHostId === target.executionHostId && b.agentSessionId === target.agentSessionId
+  const rows = incoming.value?.ingresses.filter(ingress => ingressMatches(ingress, target)) ?? []
+  const intake = await Promise.all(rows.map(async original => {
+    const inspected = await reading(() => owner.ingress!.inspect({ ingressId: original.ingressId }))
+    const observed = inspected.value?.ingress
+    const valid = observed?.ingressId === original.ingressId && ingressMatches(observed, target)
+    const ingress = valid ? observed : original, author = ingress.input?.author
+    const current = !!author && author.bindingId === target.bindingId && author.bindingRevision === target.bindingRevision && author.connectionId === target.connectionId && ingress.input?.hostId === target.executionHostId && ingress.input?.agentSessionId === target.agentSessionId
+    const receipt = valid && current ? inspected.value?.inputReceipt : null
+    const interaction = valid && current ? inspected.value?.interactionReceipt : null
+    const waiting = receipt?.control.waiting
+    return { ingressId: ingress.ingressId, sourceConnectionId: ingress.connectionId, targetConnectionId: author?.connectionId ?? null, waiting: waiting ? { phase: waiting.phase, reason: waiting.reason, wake: waiting.wake } : null, kind: ingress.kind === 'action' ? 'action' as const : 'message' as const, state: ingress.state,
+      code: intakeCode(ingress.code), codeRecorded: ingress.code !== undefined, bindingId: author?.bindingId ?? null, bindingRevision: author?.bindingRevision ?? null,
+      scope: author ? current ? 'current-binding' as const : 'other-binding' as const : 'group-event' as const,
+      inputOperationId: ingress.input?.operationId ?? null, coreStatus: receipt?.status ?? interaction?.delivery ?? null,
+      coreObservation: inspected.issue || !valid ? 'unavailable' as const : inspected.value!.observation,
+      nativeAdoption: interaction?.nativeAdoption ?? null }
+  }))
+  const scopedOutgoing = outgoing.value && outgoing.value.deliveries.every(delivery => deliveryMatches(delivery, target))
+  return { target: { ...target }, window: { ...(window.after ? { after: window.after } : {}), ...(window.afterContent ? { afterContent: window.afterContent } : {}), ...(window.beforeIngressId ? { beforeIngressId: window.beforeIngressId } : {}) }, limit: groupWindowLimit,
+    connection: { value: sameConnection ? { revision: c.revision, enabled: c.config.enabled,
+      authentication: { state: c.observation.authentication.state, ...(c.observation.authentication.reason ? { reason: c.observation.authentication.reason } : {}) },
+      transport: { state: c.observation.transport.state, ...(c.observation.transport.reason ? { reason: c.observation.transport.reason } : {}) },
+      intake: { state: c.observation.intake.state, ...(c.observation.intake.reason ? { reason: c.observation.intake.reason } : {}) },
+      delivery: { state: c.observation.delivery.state, ...(c.observation.delivery.reason ? { reason: c.observation.delivery.reason } : {}) } } : null,
+      issue: connection.issue ?? (sameConnection ? null : 'target-unconfirmed' as const) },
+    binding: { value: sameBinding ? { state: b.state, currentRevision: binding.value?.current?.revision ?? null,
+      scope: { input: b.scope.input, publication: b.scope.publication },
+      activeAnswerGrants: binding.value!.grants.filter(grant => grant.bindingId === target.bindingId && grant.bindingRevision === target.bindingRevision && grant.state === 'active' && grant.capabilities.includes('answer')).length,
+      activePermissionGrants: binding.value!.grants.filter(grant => grant.bindingId === target.bindingId && grant.bindingRevision === target.bindingRevision && grant.state === 'active' && grant.capabilities.includes('permission')).length,
+      activeInputGrants: binding.value!.grants.filter(grant => grant.bindingId === target.bindingId && grant.bindingRevision === target.bindingRevision && grant.state === 'active' && grant.capabilities.includes('input')).length } : null,
+      issue: binding.issue ?? (sameBinding ? null : 'target-unconfirmed' as const) },
+    outgoing: { value: scopedOutgoing ? { after: window.after ?? null, afterContent: window.afterContent ?? null, next: outgoing.value!.next,
+      deliveries: outgoing.value!.deliveries.map(deliveryFacts), observation: outgoing.value!.observation ? { state: outgoing.value!.observation.state, ...(outgoing.value!.observation.reason ? { reason: outgoing.value!.observation.reason } : {}) } : null,
+      coverage: outgoing.value!.coverage ? { state: outgoing.value!.coverage.state, nextContent: outgoing.value!.coverage.nextContent,
+        gaps: outgoing.value!.coverage.gaps.slice(0, groupWindowLimit).map(gap => ({ gapId: gap.gapId, reason: gap.reason })), originCount: outgoing.value!.coverage.origins.length, omittedGapCount: Math.max(0, outgoing.value!.coverage.gaps.length - groupWindowLimit) } : null } : null,
+      issue: outgoing.issue ?? (scopedOutgoing ? null : 'target-unconfirmed' as const) },
+    incoming: { value: incoming.value && incoming.value.ingresses.every(row => ingressMatches(row, target)) ? { beforeIngressId: window.beforeIngressId ?? null, next: incoming.value.nextBeforeIngressId, rows: intake } : null, issue: incoming.issue ?? (incoming.value?.ingresses.every(row => ingressMatches(row, target)) ? null : 'target-unconfirmed' as const) }
+  }
+}
+
+/** Read original local owners directly; only this projection, never their private DTOs, crosses the diagnostic edge. */
+export async function readConnectionDiagnosis(owner: ConnectionPort, input: ConnectionDiagnosisInput): Promise<ConnectionDiagnosis> {
+  const service = await reading(async () => { const value = await owner.service!.get(); return { enabled: value.enabled, revision: value.revision } })
+  const selection = await reading(async () => input.bindingId
+    ? { bindings: [(await owner.bindings!.inspect({ bindingId: input.bindingId, ...(input.bindingRevision ? { revision: input.bindingRevision } : {}) })).binding].filter((value): value is RoomBinding => value !== null) }
+    : await owner.bindings!.list({ executionHostId: input.executionHostId, agentSessionId: input.agentSessionId }))
+  const bindings = selection.value?.bindings
+  if (!bindings || input.bindingId && bindings.length !== 1 || bindings.some(binding => binding.executionHostId !== input.executionHostId || binding.agentSessionId !== input.agentSessionId || input.bindingId && binding.bindingId !== input.bindingId || input.bindingRevision && binding.revision !== input.bindingRevision)) {
+    return { target: { ...input }, service, groups: { value: null, issue: selection.issue ?? 'target-unconfirmed' } }
+  }
+  const sorted = bindings.slice().sort((a, b) => a.bindingId.localeCompare(b.bindingId))
+  const before = input.afterBindingId ? sorted.findIndex(binding => binding.bindingId === input.afterBindingId) : -1
+  if (input.afterBindingId && before < 0) return { target: { ...input }, service, groups: { value: null, issue: 'target-unconfirmed' } }
+  const selected = sorted.slice(before + 1, before + 1 + groupWindowLimit)
+  const items = await Promise.all(selected.map(binding => readGroup(owner, groupTarget(binding), input)))
+  return { target: { ...input }, service, groups: { value: { items, nextBindingId: sorted.length > before + 1 + selected.length ? selected.at(-1)!.bindingId : null }, issue: null } }
+}
+/** Keep explicitly labelled earlier observations after a local read failure, never under another target or page. */
+export function retainGroupDiagnosis(previous: GroupDiagnosis | null, next: GroupDiagnosis): GroupDiagnosis {
+  if (!previous || JSON.stringify(previous.target) !== JSON.stringify(next.target) || JSON.stringify(previous.window) !== JSON.stringify(next.window)) return next
+  const retain = <T,>(before: Reading<T>, after: Reading<T>): Reading<T> => after.issue && before.value ? { value: before.value, issue: after.issue, retained: true } : after
+  return { ...next, service: retain(previous.service, next.service), connection: retain(previous.connection, next.connection), binding: retain(previous.binding, next.binding), outgoing: retain(previous.outgoing, next.outgoing), incoming: retain(previous.incoming, next.incoming) }
+}
+/** Only the projected facts above enter the text; no original DTO is serialized. */
+export function formatGroupDiagnosis(report: GroupDiagnosis) {
+  const { target: t, service, connection, binding, outgoing, incoming } = report, lines = [
+    'Group diagnosis — bounded local observations, not an atomic history',
+    `Binding: ${t.bindingId} · revision ${t.bindingRevision}`, `Connection: ${t.connectionId} · ${t.domain} · ${t.appId}`,
+    `Group: ${t.externalConversationId}`, `Agent: ${t.executionHostId} · ${t.agentSessionId}`, `Window limit: ${report.limit}`
+  ]
+  const section = (name: string, value: { issue: string | null; retained?: true }) => { if (value.issue) lines.push(`${name}: ${value.issue}${value.retained ? ' (earlier observed facts retained)' : ''}`) }
+  section('Service read', service); section('Connection read', connection); section('Binding read', binding); section('Delivery read', outgoing); section('Ingress read', incoming)
+  if (service.value) lines.push(`Automatic service: ${service.value.enabled ? 'on' : 'off'} · revision ${service.value.revision}`)
+  if (connection.value) { lines.push(`Connection revision: ${connection.value.revision} · enabled ${connection.value.enabled}`); for (const stage of ['authentication', 'transport', 'intake', 'delivery'] as const) lines.push(`Application ${stage}: ${connection.value[stage].state} · ${connection.value[stage].reason ?? 'no recorded reason'}`) }
+  if (binding.value) lines.push(`Binding state: ${binding.value.state} · current revision ${binding.value.currentRevision ?? 'unconfirmed'} · scope ${binding.value.scope.input} / ${binding.value.scope.publication} · active grants input ${binding.value.activeInputGrants} / answer ${binding.value.activeAnswerGrants} / permission ${binding.value.activePermissionGrants}`)
+  const out = outgoing.value
+  if (out) {
+    lines.push(`Source observation: ${out.observation?.state ?? 'unrecorded'} · ${out.observation?.reason ?? 'no recorded reason'} (not platform readiness)`, `Delivery window after: ${out.after ?? 'start'} · content after: ${out.afterContent ?? 'start'}`, `Delivery has next: ${out.next !== null} · content has next: ${out.coverage?.nextContent !== null && out.coverage?.nextContent !== undefined}`)
+    if (!out.deliveries.length) lines.push('No delivery in this reading window; this is not an empty-history or platform-availability claim.')
+    for (const d of out.deliveries) lines.push(`Outgoing ${d.operationId}: queue ${d.state} · platform receipt ${d.receipt ?? 'unrecorded'} · message ${d.platformMessageId ?? 'unrecorded'} · reason ${d.reason ?? 'unrecorded'} · resource upload ${d.resourceUpload ?? 'unrecorded'}`)
+    lines.push(`Content coverage: ${out.coverage?.state ?? 'unrecorded'} · observed origins ${out.coverage?.originCount ?? 'unrecorded'}`)
+    if (out.coverage?.omittedGapCount) lines.push(`Additional gaps in this owner page: ${out.coverage.omittedGapCount}`)
+    for (const gap of out.coverage?.gaps ?? []) lines.push(`Content gap ${gap.gapId}: ${gap.reason}`)
+  }
+  const input = incoming.value
+  if (input) {
+    lines.push(`Incoming group window before: ${input.beforeIngressId ?? 'latest'} · records ${input.rows.length} · has next ${input.next !== null}`, 'Incoming platform acknowledgement: not recorded by this read API.')
+    if (!input.rows.length) lines.push('No intake in this exact group window; this is not a complete-history or platform-receipt claim.')
+    for (const i of input.rows) lines.push(`Incoming ${i.ingressId}: ${i.kind} · receiver ${i.sourceConnectionId} · target connection ${i.targetConnectionId ?? 'unclaimed'} · intake ${i.state} · code ${i.code ?? (i.codeRecorded ? 'recorded code withheld' : 'unrecorded')} · scope ${i.scope} · original binding ${i.bindingId ?? 'unclaimed'} / ${i.bindingRevision ?? 'unclaimed'} · Core operation ${i.inputOperationId ?? 'not-started'} · Core input ${i.coreStatus ?? (i.inputOperationId ? 'unconfirmed' : 'not-started')} · waiting ${i.waiting ? i.waiting.phase + ' / ' + i.waiting.reason + ' / ' + i.waiting.wake : 'unrecorded'} · read ${i.coreObservation} · native adoption ${i.nativeAdoption ?? 'not-recorded'}`)
+  }
+  lines.push('Core terminal-confirmed/bytes-accepted means ordered input bytes, not Native acceptance. Observing or copying never retries a message or input.')
+  return lines.join('\n')
+}
