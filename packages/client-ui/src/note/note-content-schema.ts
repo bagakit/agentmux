@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { Extension, Mark, Node, getSchema } from '@tiptap/core'
 import UniqueID from '@tiptap/extension-unique-id'
 import StarterKit from '@tiptap/starter-kit'
@@ -78,7 +79,7 @@ export const noteContentSchema: ReturnType<typeof getSchema> = getSchema(noteCon
 export function noteIdentityExtensions() {
   return [
     UniqueID.extend({ name: 'noteBlockUniqueId', onCreate() {} }).configure({ attributeName: 'blockId', types: [...NOTE_BLOCK_TYPES], generateID: () => null, filterTransaction: transaction => !transaction.getMeta('preventUpdate') && !transaction.getMeta('noteSelectionRestore') }),
-    UniqueID.extend({ name: 'noteReferenceUniqueId', onCreate() {} }).configure({ attributeName: 'referenceId', types: [NoteBlockReferenceNode.name, NoteIncludeNode.name, NoteInlineLinkNode.name], generateID: () => crypto.randomUUID(), filterTransaction: transaction => !transaction.getMeta('preventUpdate') && !transaction.getMeta('noteSelectionRestore') })
+    UniqueID.extend({ name: 'noteReferenceUniqueId', onCreate() {} }).configure({ attributeName: 'referenceId', types: [NoteBlockReferenceNode.name, NoteIncludeNode.name, NoteInlineLinkNode.name], generateID: () => mintObjectId(), filterTransaction: transaction => !transaction.getMeta('preventUpdate') && !transaction.getMeta('noteSelectionRestore') })
   ]
 }
 export { closeHistory } from '@tiptap/pm/history'

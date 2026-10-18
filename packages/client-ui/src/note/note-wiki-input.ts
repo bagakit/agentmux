@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { Extension, type Editor } from '@tiptap/core'
 import { closeHistory } from '@tiptap/pm/history'
 import { Plugin } from '@tiptap/pm/state'
@@ -38,7 +39,7 @@ export function noteWikiInputExtension(created?: (link: NoteInlineLinkAttributes
         const tokens = [...blocks].flatMap(([pos, node]) => noteWikiTextTokens(node.toJSON().content ?? [], true).map(token => ({ ...token, from: pos + 1 + token.from, to: pos + 1 + token.to })))
         const tr = state.tr.setMeta('noteWikiInput', true), pending: { link: NoteInlineLinkAttributes; previousReferenceId?: string }[] = []
         const edits: { from: number; apply(): void }[] = tokens.map(token => ({ from: token.from, apply() {
-          const link = { referenceId: crypto.randomUUID(), text: token.text, target: null }
+          const link = { referenceId: mintObjectId(), text: token.text, target: null }
           tr.replaceWith(token.from, token.to, state.schema.nodeFromJSON({ ...noteInlineLinkContent(link), marks: state.doc.resolve(token.from).marks().map(mark => mark.toJSON()) }))
           pending.push({ link })
         } }))
@@ -52,7 +53,7 @@ export function noteWikiInputExtension(created?: (link: NoteInlineLinkAttributes
             else {
               // A changed query is a new lookup generation, including A -> B -> A. A late
               // response for the old occurrence cannot reattach its former exact target.
-              const link = { referenceId: crypto.randomUUID(), text, target: null }
+              const link = { referenceId: mintObjectId(), text, target: null }
               tr.setNodeMarkup(pos, undefined, link); pending.push({ link, previousReferenceId: node.attrs.referenceId })
             }
           } })
