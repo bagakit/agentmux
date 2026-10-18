@@ -272,7 +272,8 @@ it.runIf(process.platform === 'darwin').each([false, true])('actual launch smoke
   }) as typeof spawn
   const run = new Function('spawn', `return (${body('run')})`)(launchSpawn)
   const waitForPath = new Function('pathExists', `return (${body('waitForPath')})`)(async (path: string) => stat(path).then(() => true, () => false))
-  const dependencies = { realpath, join, mkdir, readFile, writeFile, rm, sep, process, PRODUCT_NAME: 'AgentMux', manifest: { version },
+  const { privatePackageSmokeEnvironment } = await import('../scripts/package-smoke-context.mjs')
+  const dependencies = { privatePackageSmokeEnvironment, realpath, join, mkdir, readFile, writeFile, rm, sep, process, PRODUCT_NAME: 'AgentMux', manifest: { version },
     createPrivateRuntimeScope: create, processIdsForApplication: async () => [],
     scopedProcesses: async () => ({ nodeModes: [], ownershipObservation: { identities: new Map() } }), run, waitForPath,
     waitForProcessExit: async () => [], cleanupProcessScope: async () => [],
