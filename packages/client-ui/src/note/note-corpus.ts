@@ -6,7 +6,7 @@ import { noteContentSchema } from './note-content-schema.js'
 import { noteSemanticText } from './note-wikilinks.js'
 
 const locationKey = (resource: { workspaceId: string; path: string }) => JSON.stringify([resource.workspaceId, resource.path])
-const textBlockTypes = new Set(['paragraph', 'heading', 'codeBlock'])
+const textBlockTypes = new Set(['paragraph', 'heading', 'codeBlock', 'noteRawBlock'])
 
 /** One original parser/index, reused by corpus outline, backlinks, graph and literal fulltext. */
 export function deriveNoteCorpus(originals: readonly { resource: NoteResource; document: NoteFileDocument }[], complete: boolean, query?: string, limit = 30) {
@@ -82,7 +82,7 @@ export function deriveNoteCorpus(originals: readonly { resource: NoteResource; d
     // External Markdown edits can introduce text without an anchor. Search the original parsed
     // textblocks rather than the stable-ID map; missing identity never makes read text disappear.
     noteContentSchema.nodeFromJSON(source.note.content).descendants(node => {
-      if (!node.isTextblock) return
+      if (!node.isTextblock && node.type.name !== 'noteRawBlock') return
       const text = noteSemanticText(node), from = text.indexOf(query)
       if (from < 0) return
       total++

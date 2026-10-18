@@ -5,6 +5,8 @@ import remarkStringify, { type Options as StringifyOptions } from 'remark-string
 import remarkGfm from 'remark-gfm'
 import remarkDirective from 'remark-directive'
 import remarkMath from 'remark-math'
+import { parseFragment } from 'parse5'
+import { noteRawFence } from './note-raw-block.js'
 import { decodeHTML, escapeAttribute } from 'entities'
 import { readNoteMarkdownHeader, NOTE_MARKDOWN_SCHEMA, isNoteWorkspaceRelativePath } from '@agentmux/core/note-format'
 import { parseNoteLinkTarget, scanNoteWikiLinks } from '@agentmux/core/note-links'
@@ -17,6 +19,8 @@ import type { NoteDocument } from './note-document.js'
 type Md = { type: string; children?: Md[]; value?: string; alt?: string | null; align?: (string | null)[]; depth?: number; ordered?: boolean; start?: number | null; checked?: boolean | null; lang?: string | null; meta?: string | null; url?: string; title?: string | null; name?: string; attributes?: Record<string, string>; position?: { start: { offset?: number }; end: { offset?: number } } }
 type Mark = NonNullable<JSONContent['marks']>[number]
 const parser = unified().use(remarkParse).use(remarkGfm).use(remarkDirective).use(remarkMath)
+class UnsupportedMarkdown extends Error {}
+const unsupported = (message: string): never => { throw new UnsupportedMarkdown(message) }
 const fail = (message: string): never => { throw new Error(message + ' The original Markdown source is preserved.') }
 // HTML comment IDs cannot contain --; URI component encoding alone leaves hyphens literal.
 const encode = (id: string) => encodeURIComponent(id).replace(/-/gu, '%2D')
@@ -103,31 +107,31 @@ function inline(nodes: readonly Md[], body: string, literalWiki = true): JSONCon
         result.push({ ...noteInlineLinkContent({ referenceId: binding.referenceId, text: token.text, target: binding.text === token.text ? binding.target : null }), ...marks ? { marks } : {} }); continue
       }
       const close = /^<\/(strong|b|em|i|s|del|u|code|a)>$/u.exec(node.value ?? '')
-      if (close) { if (stack.pop()?.tag !== close[1]) return fail('Inline formatting tags are not balanced.'); continue }
+      if (close) { if (stack.pop()?.tag !== close[1]) return unsupported('Inline formatting tags are not balanced.'); continue }
       const open = /^<(strong|b|em|i|s|del|u|code|a)((?:\s+[a-z-]+="[^"]*")*)>$/u.exec(node.value ?? '')
       if (open) {
         const tag = open[1]!
-        if (tag !== 'a' && open[2]) return fail('Inline formatting has unsupported attributes.')
+        if (tag !== 'a' && open[2]) return unsupported('Inline formatting has unsupported attributes.')
         let mark: Mark = { type: tags[tag]! }
         if (tag === 'a') {
           const attrs: Record<string, string | null> = {}, source = open[2] ?? ''
           const pairs = [...source.matchAll(/\s+([a-z-]+)="([^"]*)"/gu)]
-          if (pairs.map(pair => pair[0]).join('') !== source) return fail('A link attribute cannot be read without loss.')
+          if (pairs.map(pair => pair[0]).join('') !== source) return unsupported('A link attribute cannot be read without loss.')
           for (const pair of pairs) {
             const key = pair[1]!, value = decodeHTML(pair[2]!)
             if (key === 'data-amux-null') { for (const name of value.split(' ')) { if (!['href','title','target','rel','class'].includes(name)) return fail('A null link attribute is unsupported.'); attrs[name] = null } }
             else if (['href','title','target','rel','class'].includes(key)) attrs[key] = value
-            else return fail('An inline link contains unsupported attributes.')
+            else return unsupported('An inline link contains unsupported attributes.')
           }
           mark = { type: 'link', attrs }
         }
         stack.push({ tag, mark }); continue
       }
-      return fail('An unsupported inline HTML region cannot be edited without loss: ' + node.value)
+      return unsupported('An unsupported inline HTML region cannot be edited without loss: ' + node.value)
     }
-    return fail('Unsupported inline Markdown: ' + node.type + '.')
+    return unsupported('Unsupported inline Markdown: ' + node.type + '.')
   }
-  if (stack.length) return fail('Inline formatting tags are not balanced.')
+  if (stack.length) return unsupported('Inline formatting tags are not balanced.')
   return result
 }
 
@@ -162,62 +166,138 @@ function tableContent(node: Md, body: string): JSONContent {
   return { type: 'table', attrs: { blockId: null }, content: rows }
 }
 
-function blocks(nodes: readonly Md[], body: string, item = false): JSONContent[] {
+/** Import one complete local region; reserved machine annotations must retain their exact owner. */
+function rawRegion(nodes: readonly Md[], body: string): JSONContent {
+  const reserved = (node: Md): boolean => {
+    if (['code', 'math', 'inlineCode', 'inlineMath'].includes(node.type)) return false
+    return node.type === 'html' && /<!--amux-/u.test(node.value ?? '') || node.type.endsWith('Directive') && /^note-/u.test(node.name ?? '') || (node.children ?? []).some(reserved)
+  }
+  if (nodes.some(reserved)) return fail('An unsupported region contains Note annotations whose exact owners cannot be preserved locally.')
+  let source = body.slice(nodes[0]!.position!.start.offset, nodes.at(-1)!.position!.end.offset), blockId: string | null = null
+  const first = nodes[0]!, last = first.children?.at(-1)
+  const suffix = nodes.length === 1 && ['paragraph', 'heading'].includes(first.type) && last?.type === 'text' ? /(?:^| )\^([^\s]+)$/u.exec(source.trimEnd()) : null
+  if (suffix && last!.value?.trimEnd().endsWith('^' + suffix[1])) { blockId = decode(suffix[1]!); source = source.slice(0, suffix.index) + source.slice(source.trimEnd().length) }
+  const nestedIdentity = (node: Md): boolean => {
+    if (node.type === 'code' || node.type === 'math' || node.type === 'html') return false
+    if (['paragraph', 'heading', 'tableCell'].includes(node.type) && /(?:^| )\^[^\s]+$/u.test(body.slice(node.position?.start.offset, node.type === 'tableCell' ? node.children?.at(-1)?.position?.end.offset ?? node.position?.end.offset : node.position?.end.offset).trimEnd())) return true
+    return (node.children ?? []).some(nestedIdentity)
+  }
+  if ((nodes.length > 1 || !['paragraph', 'heading'].includes(first.type)) && nodes.some(nestedIdentity)) return fail('An unsupported region contains block identities whose exact owners are ambiguous.')
+  const containsHtml = (node: Md): boolean => node.type === 'html' || (node.children ?? []).some(containsHtml)
+  return { type: 'noteRawBlock', attrs: { source, format: nodes.some(node => ['html', 'paragraph', 'heading'].includes(node.type) && containsHtml(node)) ? 'html' : 'markdown', blockId } }
+}
+
+/** parse5 supplies HTML5 source locations; no preview DOM is serialized back into the Note. */
+function htmlRegionEnd(node: Md, body: string): number {
+  const start = node.position!.start.offset!, end = node.position!.end.offset!
+  const opening = /^[ \t]*<[a-z]/iu.exec(node.value ?? '')
+  if (!opening) return end
+  const fragment = parseFragment(body.slice(start), { sourceCodeLocationInfo: true })
+  const elements = fragment.childNodes.filter(child => 'tagName' in child && child.sourceCodeLocation).sort((a, b) => a.sourceCodeLocation!.startOffset - b.sourceCodeLocation!.startOffset)
+  if (elements[0]?.sourceCodeLocation?.startOffset !== opening[0].length - 2) return fail('The original HTML region has an ambiguous boundary.')
+  let boundary = end - start
+  for (const element of elements) {
+    const location = element.sourceCodeLocation!
+    if (location.startOffset >= boundary) break
+    if ('tagName' in element && !('endTag' in location && location.endTag) && !['area','base','br','col','embed','hr','img','input','link','meta','param','source','track','wbr'].includes(element.tagName) && !(element.namespaceURI !== 'http://www.w3.org/1999/xhtml' && /\/>$/u.test(body.slice(start + location.startOffset, start + location.endOffset)))) return fail('The original HTML region has no unambiguous closing boundary.')
+    boundary = Math.max(boundary, location.endOffset)
+  }
+  return start + boundary
+}
+
+/** Read fence bytes from the original source, because mdast code.value normalizes EOLs. */
+function rawFenceContent(node: Md, body: string): JSONContent {
+  if (node.meta !== 'html' && node.meta !== 'markdown') return fail('A note-raw fence needs exactly one supported source format.')
+  const raw = body.slice(node.position!.start.offset, node.position!.end.offset)
+  const opening = /^(`{3,}|~{3,})note-raw (html|markdown)[\t ]*(\r\n|\n|\r)/u.exec(raw)
+  if (!opening) return fail('The original note-raw fence opening is invalid.')
+  const ending = /(\r\n|\n|\r)([^\r\n]*?)(`{3,}|~{3,})[\t ]*$/u.exec(raw)
+  if (!ending || ending[3]![0] !== opening[1]![0] || ending[3]!.length < opening[1]!.length) return fail('The original note-raw fence is not closed.')
+  // remark's container handlers add this prefix to nonempty continuation lines.
+  const prefix = ending[2]!
+  if (!/^[\t >]*$/u.test(prefix)) return fail('The original note-raw fence container is ambiguous.')
+  let source = raw.slice(opening[0].length, ending.index + ending[1]!.length)
+  // Exactly the final LF is structural, even when the source itself ends with CR.
+  if (source.endsWith('\n')) source = source.slice(0, -1)
+  else if (source.endsWith('\r')) source = source.slice(0, -1)
+  if (prefix) source = source.split(/(\r\n|\n|\r)/u).map((line, index) => {
+    if (index % 2) return line
+    if (line.startsWith(prefix)) return line.slice(prefix.length)
+    if (!line || line === prefix.trimEnd()) return ''
+    return fail('The original note-raw source indentation is ambiguous.')
+  }).join('')
+  return { type: 'noteRawBlock', attrs: { source, format: node.meta, blockId: null } }
+}
+
+function blocks(nodes: readonly Md[], body: string, item = false, recover = true): JSONContent[] {
   const result: JSONContent[] = []
   let listType: string | null = null, listStart: number | undefined, headingLevel: number | null | undefined, codeLanguage: string | undefined
-  for (const node of nodes) {
-    const itemId = itemMarker(node)
-    if (itemId) { if (!item || result.length) return fail('A list item identity has no exact original owner.'); continue }
-    const empty = marker(node, 'empty')
-    if (empty) { result.push({ type: 'paragraph', attrs: { blockId: empty[1] ? decode(empty[1]) : null } }); continue }
-    const list = marker(node, 'list-type')
-    if (list) { if (listType !== null) return fail('A list type annotation is duplicated.'); listType = decodeValue(list[1] ?? ''); continue }
-    const language = marker(node, 'code-language'), level = marker(node, 'heading-level'), start = marker(node, 'list-start')
-    if (language) { if (codeLanguage !== undefined) return fail('A code language annotation is duplicated.'); codeLanguage = decodeValue(language[1] ?? ''); continue }
-    if (level) { if (headingLevel !== undefined || level[1] !== 'null' && !Number.isFinite(Number(level[1]))) return fail('A heading level annotation is invalid.'); headingLevel = level[1] === 'null' ? null : Number(level[1]); continue }
-    if (start) { if (listStart !== undefined || !Number.isFinite(Number(start[1]))) return fail('A list start annotation is invalid.'); listStart = Number(start[1]); continue }
-    if (codeLanguage !== undefined && node.type !== 'code' || headingLevel !== undefined && node.type !== 'heading' || listStart !== undefined && node.type !== 'list') return fail('A field annotation has no exact original block owner.')
-    if (node.type === 'paragraph' && node.children?.length === 1 && node.children[0]?.type === 'text' && /^\^[^\s]+$/u.test(node.children[0].value ?? '')) {
-      const previous = result.at(-1)
-      const raw = body.slice(node.position?.start.offset, node.position?.end.offset)
-      if (!raw.startsWith('^') || !previous || !['paragraph','heading','codeBlock','noteMathBlock','table','blockquote','horizontalRule'].includes(previous.type ?? '') || previous.attrs?.blockId) return fail('A standalone block identity is orphaned or duplicated.')
-      previous.attrs = { ...previous.attrs, blockId: decode(node.children[0].value!.slice(1)) }; continue
+  for (let at = 0; at < nodes.length; at++) {
+    const node = nodes[at]!
+    try {
+      const itemId = itemMarker(node)
+      if (itemId) { if (!item || result.length) return fail('A list item identity has no exact original owner.'); continue }
+      const empty = marker(node, 'empty')
+      if (empty) { result.push({ type: 'paragraph', attrs: { blockId: empty[1] ? decode(empty[1]) : null } }); continue }
+      const list = marker(node, 'list-type')
+      if (list) { if (listType !== null) return fail('A list type annotation is duplicated.'); listType = decodeValue(list[1] ?? ''); continue }
+      const language = marker(node, 'code-language'), level = marker(node, 'heading-level'), start = marker(node, 'list-start')
+      if (language) { if (codeLanguage !== undefined) return fail('A code language annotation is duplicated.'); codeLanguage = decodeValue(language[1] ?? ''); continue }
+      if (level) { if (headingLevel !== undefined || level[1] !== 'null' && !Number.isFinite(Number(level[1]))) return fail('A heading level annotation is invalid.'); headingLevel = level[1] === 'null' ? null : Number(level[1]); continue }
+      if (start) { if (listStart !== undefined || !Number.isFinite(Number(start[1]))) return fail('A list start annotation is invalid.'); listStart = Number(start[1]); continue }
+      if (codeLanguage !== undefined && node.type !== 'code' || headingLevel !== undefined && node.type !== 'heading' || listStart !== undefined && node.type !== 'list') return fail('A field annotation has no exact original block owner.')
+      if (node.type === 'paragraph' && node.children?.length === 1 && node.children[0]?.type === 'text' && /^\^[^\s]+$/u.test(node.children[0].value ?? '')) {
+        const previous = result.at(-1)
+        const raw = body.slice(node.position?.start.offset, node.position?.end.offset)
+        if (!raw.startsWith('^') || !previous || !['paragraph','heading','codeBlock','noteMathBlock','noteRawBlock','table','blockquote','horizontalRule'].includes(previous.type ?? '') || previous.attrs?.blockId) return fail('A standalone block identity is orphaned or duplicated.')
+        previous.attrs = { ...previous.attrs, blockId: decode(node.children[0].value!.slice(1)) }; continue
+      }
+      if (listType !== null && node.type !== 'list') return fail('A list type annotation has no exact list owner.')
+      if (node.type === 'list') {
+        const children = (node.children ?? []).map(child => {
+          if (child.type !== 'listItem') return fail('The original list item is invalid.')
+          const first = child.children?.[0], own = first ? itemMarker(first) : null
+          return { type: child.checked == null ? 'listItem' : 'taskItem', attrs: { blockId: own?.[1] ? decode(own[1]) : null, ...(child.checked == null ? {} : { checked: child.checked }) }, content: blocks(child.children ?? [], body, true, false) }
+        })
+        result.push({ type: node.ordered ? 'orderedList' : children.every(child => child.type === 'taskItem') ? 'taskList' : 'bulletList', ...node.ordered ? { attrs: { start: listStart ?? node.start ?? 1, type: listType } } : {}, content: children }); listType = null; listStart = undefined; continue
+      }
+      if (node.type === 'leafDirective' && ['note-ref','note-embed'].includes(node.name ?? '')) {
+        const attrs = node.attributes ?? {}, exact = target(attrs.target ?? '')
+        if (Object.keys(attrs).some(key => !['id','ref','target'].includes(key)) || exact.blockId === undefined || !attrs.ref || node.children?.length) return fail('A structural Note reference identity or target is invalid.')
+        result.push({ type: 'blockReference', attrs: { blockId: attrs.id ? decode(attrs.id) : null, referenceId: decode(attrs.ref), target: exact, mode: node.name === 'note-ref' ? 'reference' : 'embed' } }); continue
+      }
+      if (node.type === 'leafDirective' && node.name === 'note-include') {
+        const attrs = node.attributes ?? {}, exact = target(attrs.target ?? '')
+        if (Object.keys(attrs).some(key => !['id','ref','target','path','workspace','forwarded'].includes(key)) || exact.blockId !== undefined || !attrs.ref || !isNoteWorkspaceRelativePath(attrs.path) || attrs.workspace !== undefined && (!attrs.workspace || /[\0\r\n]/u.test(attrs.workspace)) || node.children?.length) return fail('A shared Markdown include identity or locator is invalid.')
+        result.push({ type: 'noteInclude', attrs: { blockId: attrs.id ? decode(attrs.id) : null, referenceId: decode(attrs.ref), noteId: exact.noteId, path: attrs.path, ...(attrs.workspace === undefined ? {} : { workspaceId: attrs.workspace }), ...(attrs.forwarded === undefined ? {} : { forwardedBlockIds: attrs.forwarded.split(',').map(decode) }) } }); continue
+      }
+      if (['paragraph','heading'].includes(node.type)) {
+        const paragraph = paragraphContent(node, body)
+        result.push({ ...paragraph, type: node.type, attrs: { ...paragraph.attrs, ...node.type === 'heading' ? { level: headingLevel === undefined ? node.depth : headingLevel } : {} } }); headingLevel = undefined; continue
+      }
+      if (node.type === 'table') { result.push(tableContent(node, body)); continue }
+      if (node.type === 'blockquote') { result.push({ type: 'blockquote', attrs: { blockId: null }, content: blocks(node.children ?? [], body, false, false) }); continue }
+      if (node.type === 'code') {
+        if (node.lang === 'note-raw') { if (codeLanguage !== undefined) return fail('A code language annotation cannot own a source block.'); result.push(rawFenceContent(node, body)); continue }
+        if (node.meta) return unsupported('Code fence metadata is unsupported; preserve it in Source.')
+        result.push({ type: 'codeBlock', attrs: { blockId: null, language: codeLanguage === undefined ? node.lang ?? null : codeLanguage }, ...node.value ? { content: [{ type: 'text', text: node.value }] } : {} }); codeLanguage = undefined; continue
+      }
+      if (node.type === 'thematicBreak') { result.push({ type: 'horizontalRule', attrs: { blockId: null } }); continue }
+      if (node.type === 'math') {
+        if (node.meta) return unsupported('Math fence metadata is unsupported; preserve it in Source.')
+        result.push({ type: 'noteMathBlock', attrs: { blockId: null, latex: node.value ?? '' } }); continue
+      }
+      return unsupported('Unsupported block Markdown: ' + node.type + '.')
+    } catch (error) {
+      if (!(error instanceof UnsupportedMarkdown) || !recover) throw error
+      if (listType !== null || listStart !== undefined || headingLevel !== undefined || codeLanguage !== undefined) return fail('A field annotation cannot be reassigned to an unsupported source region.')
+      const first = at
+      if (node.type === 'html') {
+        const end = htmlRegionEnd(node, body)
+        while (at + 1 < nodes.length && nodes[at + 1]!.position!.start.offset! < end) at++
+      }
+      result.push(rawRegion(nodes.slice(first, at + 1), body))
     }
-    if (listType !== null && node.type !== 'list') return fail('A list type annotation has no exact list owner.')
-    if (node.type === 'list') {
-      const children = (node.children ?? []).map(child => {
-        if (child.type !== 'listItem') return fail('The original list item is invalid.')
-        const first = child.children?.[0], own = first ? itemMarker(first) : null
-        return { type: child.checked == null ? 'listItem' : 'taskItem', attrs: { blockId: own?.[1] ? decode(own[1]) : null, ...(child.checked == null ? {} : { checked: child.checked }) }, content: blocks(child.children ?? [], body, true) }
-      })
-      result.push({ type: node.ordered ? 'orderedList' : children.every(child => child.type === 'taskItem') ? 'taskList' : 'bulletList', ...node.ordered ? { attrs: { start: listStart ?? node.start ?? 1, type: listType } } : {}, content: children }); listType = null; listStart = undefined; continue
-    }
-    if (node.type === 'leafDirective' && ['note-ref','note-embed'].includes(node.name ?? '')) {
-      const attrs = node.attributes ?? {}, exact = target(attrs.target ?? '')
-      if (Object.keys(attrs).some(key => !['id','ref','target'].includes(key)) || exact.blockId === undefined || !attrs.ref || node.children?.length) return fail('A structural Note reference identity or target is invalid.')
-      result.push({ type: 'blockReference', attrs: { blockId: attrs.id ? decode(attrs.id) : null, referenceId: decode(attrs.ref), target: exact, mode: node.name === 'note-ref' ? 'reference' : 'embed' } }); continue
-    }
-    if (node.type === 'leafDirective' && node.name === 'note-include') {
-      const attrs = node.attributes ?? {}, exact = target(attrs.target ?? '')
-      if (Object.keys(attrs).some(key => !['id','ref','target','path','workspace','forwarded'].includes(key)) || exact.blockId !== undefined || !attrs.ref || !isNoteWorkspaceRelativePath(attrs.path) || attrs.workspace !== undefined && (!attrs.workspace || /[\0\r\n]/u.test(attrs.workspace)) || node.children?.length) return fail('A shared Markdown include identity or locator is invalid.')
-      result.push({ type: 'noteInclude', attrs: { blockId: attrs.id ? decode(attrs.id) : null, referenceId: decode(attrs.ref), noteId: exact.noteId, path: attrs.path, ...(attrs.workspace === undefined ? {} : { workspaceId: attrs.workspace }), ...(attrs.forwarded === undefined ? {} : { forwardedBlockIds: attrs.forwarded.split(',').map(decode) }) } }); continue
-    }
-    if (['paragraph','heading'].includes(node.type)) {
-      const paragraph = paragraphContent(node, body)
-      result.push({ ...paragraph, type: node.type, attrs: { ...paragraph.attrs, ...node.type === 'heading' ? { level: headingLevel === undefined ? node.depth : headingLevel } : {} } }); headingLevel = undefined; continue
-    }
-    if (node.type === 'table') { result.push(tableContent(node, body)); continue }
-    if (node.type === 'blockquote') { result.push({ type: 'blockquote', attrs: { blockId: null }, content: blocks(node.children ?? [], body) }); continue }
-    if (node.type === 'code') {
-      if (node.meta) return fail('Code fence metadata is unsupported; preserve it in Source.')
-      result.push({ type: 'codeBlock', attrs: { blockId: null, language: codeLanguage === undefined ? node.lang ?? null : codeLanguage }, ...node.value ? { content: [{ type: 'text', text: node.value }] } : {} }); codeLanguage = undefined; continue
-    }
-    if (node.type === 'thematicBreak') { result.push({ type: 'horizontalRule', attrs: { blockId: null } }); continue }
-    if (node.type === 'math') {
-      if (node.meta) return fail('Math fence metadata is unsupported; preserve it in Source.')
-      result.push({ type: 'noteMathBlock', attrs: { blockId: null, latex: node.value ?? '' } }); continue
-    }
-    return fail('Unsupported block Markdown: ' + node.type + '.')
   }
   if (listType !== null || listStart !== undefined || headingLevel !== undefined || codeLanguage !== undefined) return fail('A field annotation is orphaned.')
   return result
@@ -296,9 +376,10 @@ function blockMarkdown(nodes: readonly JSONContent[]): Md[] {
       block = { type: node.type, ...node.type === 'heading' ? { depth: Number.isInteger(attrs.level) && attrs.level >= 1 && attrs.level <= 6 ? attrs.level : 1 } : {}, children: inlineMarkdown(node.content ?? []) }
     } else if (node.type === 'codeBlock') {
       if (attrs.language != null && typeof attrs.language !== 'string') return fail('The original code language cannot be represented without loss.')
-      if (attrs.language === '' || /\s/u.test(attrs.language ?? '')) prelude.push(comment('code-language',encode(attrs.language)))
+      if (attrs.language === '' || attrs.language === 'note-raw' || /\s/u.test(attrs.language ?? '')) prelude.push(comment('code-language',encode(attrs.language)))
       block = { type: 'code', lang: prelude.length ? null : attrs.language ?? null, value: node.content?.map(child => child.text ?? '').join('') ?? '' }
-    } else if (node.type === 'noteMathBlock') block = { type: 'math', value: attrs.latex }
+    } else if (node.type === 'noteRawBlock') block = { type: 'noteSource', value: noteRawFence(attrs.source, attrs.format) }
+    else if (node.type === 'noteMathBlock') block = { type: 'math', value: attrs.latex }
     else if (node.type === 'horizontalRule') block = { type: 'thematicBreak' }
     else if (node.type === 'blockquote') block = { type: 'blockquote', children: blockMarkdown(node.content ?? []) }
     else if (node.type === 'orderedList' || node.type === 'bulletList' || node.type === 'taskList') {
@@ -325,6 +406,7 @@ export function serializeNoteDocument(note: NoteDocument): string {
   const normalized = noteContentSchema.nodeFromJSON(note.content).toJSON()
   const tree: Md = { type:'root', children: blockMarkdown(normalized.content ?? []) }
   const compiler = unified().use(remarkStringify, { bullet:'-', fences:true, emphasis:'*', strong:'*', rule:'-', handlers: {
+    noteSource: (node: Md) => node.value!,
     noteAnchor: (node: Md) => node.value!, noteRaw: (node: Md, _parent: unknown, state: { safe(value: string, info: unknown): string }, info: object) => '[[' + state.safe(node.value!.slice(2,-2), { ...info, before: '[[', after: ']]' }) + ']]',
     text: (node: Md, _parent: unknown, state: { safe(value: string, info: unknown): string }, info: {before:string;after:string}) => {
       const value = node.value ?? '', lines = value.split(/[\r\n]/u)
