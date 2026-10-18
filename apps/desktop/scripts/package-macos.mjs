@@ -1,3 +1,4 @@
+import { copyBrowserExtension } from './prepare-browser-extension-identity.mjs'
 import { writeEmbeddedCoreCli } from './embedded-core-cli.mjs'
 import { updateRoute } from '../src/shared/update-policy.ts'
 import { hashRuntimeArtifact } from './update-identity.mjs'
@@ -207,7 +208,7 @@ export async function copyRuntimeApplication(appPath, source) {
   await mkdir(join(appResources, 'node_modules', '@agentmux'), { recursive: true })
   await copyDirectoryContents(join(desktopRoot, 'out'), join(appResources, 'out'))
   await copyDirectoryContents(join(desktopRoot, 'resources'), join(appResources, 'resources'))
-  await copyDirectoryContents(join(desktopRoot, 'browser-extension'), join(appResources, 'browser-extension'))
+  await copyBrowserExtension(join(appResources, 'browser-extension'))
   await cp(join(repositoryRoot, 'THIRD_PARTY_NOTICES.md'), join(appResources, 'THIRD_PARTY_NOTICES.md'))
   await writeFile(join(appResources, 'package.json'), `${JSON.stringify({
     name: 'agentmux-desktop',

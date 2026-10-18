@@ -51,6 +51,9 @@ importers:
       '@agentmux/git':
         specifier: workspace:*
         version: link:../../packages/git
+      '@agentmux/identity':
+        specifier: workspace:*
+        version: link:../../packages/identity
       '@agentmux/layout':
         specifier: workspace:*
         version: link:../../packages/layout
