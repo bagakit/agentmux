@@ -202,6 +202,41 @@ describe('finite collaboration Worker engine', () => {
     expect(folded.filter(box => box.areaId === 'area-2')).toEqual([expect.objectContaining({ id: 'area-2', kind: 'area', folded: true })])
   })
 
+  it('uses original same-area relations to form a closer neighborhood in the real force solve', async () => {
+    const nodes = Array.from({ length: 12 }, (_, index) => ({ id: `member-${index}`, areaId: 'work', width: index < 4 ? 250 : 160, height: index < 4 ? 94 : 44 }))
+    const connections = nodes.slice(1).map((node, index) => edge(`local-${index}`, nodes[index]!.id, node.id))
+    const input: CollaborationLayoutInput = { areas: [{ id: 'work', name: 'Original work', folded: false, members: nodes.map(node => node.id) }], nodes, connections }
+    const unrelated = await arrangeCollaboration({ ...input, connections: [] }), related = await arrangeCollaboration(input)
+    const positions = (boxes: CollaborationLayoutBox[]) => {
+      const origin = boxes.find(box => box.id === nodes[0]!.id)!
+      return boxes.filter(box => box.kind === 'agent').map(box => [box.x - origin.x, box.y - origin.y])
+    }
+    const distances = (boxes: CollaborationLayoutBox[]) => {
+      const byId = new Map(boxes.map(box => [box.id, box]))
+      return connections.map(connection => {
+        const from = byId.get(connection.source)!, to = byId.get(connection.target)!
+        return Math.hypot(from.x + from.width / 2 - to.x - to.width / 2, from.y + from.height / 2 - to.y - to.height / 2)
+      })
+    }
+    const before = distances(unrelated), after = distances(related), mean = (values: number[]) => values.reduce((sum, value) => sum + value, 0) / values.length
+    // Root-only internal edges produced exactly the unrelated geometry. This real chain must influence its owning area's solve.
+    expect(positions(related)).not.toEqual(positions(unrelated))
+    expect(mean(after)).toBeLessThan(mean(before) * .9)
+    expect(measurements).toHaveLength(2)
+    expect(measurements.every(measurement => measurement.engine === 'fdp' && measurement.nodes.length === nodes.length)).toBe(true)
+    expect(measurements[1]!.edges).toHaveLength(connections.length)
+    const area = related.find(box => box.kind === 'area')!, members = related.filter(box => box.kind === 'agent')
+    const heading = { ...area.heading, x: area.x + area.heading.x, y: area.y + area.heading.y }
+    expect(members.map(box => box.id).sort()).toEqual(nodes.map(node => node.id).sort())
+    for (const [index, member] of members.entries()) {
+      expect(contains(area, member)).toBe(true); expect(intersects(heading, member)).toBe(false)
+      expect([member.width, member.height]).toEqual([nodes[index]!.width, nodes[index]!.height])
+      for (const other of members.slice(index + 1)) expect(intersects(member, other), `${member.id}/${other.id}`).toBe(false)
+    }
+    console.info(JSON.stringify({ candidate: 'original-local-relations', members: members.length, connections: connections.length,
+      before: { mean: mean(before), max: Math.max(...before) }, after: { mean: mean(after), max: Math.max(...after) } }))
+  })
+
   it('jointly lays out exact cross-area endpoints in one real force solve', async () => {
     const nodes = ['a', 'b'].flatMap(areaId => Array.from({ length: 4 }, (_, index) => ({ id: areaId + index, areaId, width: 160, height: 44 })))
     const local = ['a', 'b'].flatMap(prefix => [0, 1, 2].map(index => edge(prefix + index, prefix + index, prefix + (index + 1))))
