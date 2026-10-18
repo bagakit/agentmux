@@ -72,6 +72,7 @@ function operation(v: unknown, code: Code): MoteChatOperation {
 }
 export function parseMoteChatParams<M extends MoteChatMethod>(method: M, value: unknown): MoteChatParamsMap[M] {
   const code: Code = 'INVALID_CONTROL_REQUEST'
+  if (!isMoteChatMethod(method)) fail(code)
   if (method === 'space.mote.chat.configure') {
     const p = fields(value, ['operationId', 'target', 'expectedRevision', 'expectedConnectionRevision', 'values'], ['operationId', 'target', 'expectedRevision', 'expectedConnectionRevision', 'values'], code)
     const values = parseMoteChatValues(p.values, code), connectionRevision = revision(p.expectedConnectionRevision, code)
@@ -95,6 +96,7 @@ export function parseMoteChatParams<M extends MoteChatMethod>(method: M, value: 
 }
 export function parseMoteChatResult<M extends MoteChatMethod>(method: M, value: unknown, input?: MoteChatParamsMap[M]): MoteChatResultMap[M] {
   const code: Code = 'CONTROL_PROTOCOL_ERROR'
+  if (!isMoteChatMethod(method)) fail(code)
   if (method === 'space.mote.chat.configure' || method === 'space.mote.chat.allocate') {
     const o = operation(value, code), i = input as MoteChatParamsMap['space.mote.chat.configure'] | MoteChatParamsMap['space.mote.chat.allocate'] | undefined
     if (o.action !== (method === 'space.mote.chat.configure' ? 'configure' : 'allocate') || i && (o.operationId !== i.operationId || !sameMotePreferencesTarget(o.configuration.target, i.target))) fail(code)
@@ -109,8 +111,14 @@ export function parseMoteChatResult<M extends MoteChatMethod>(method: M, value: 
     return { configuration, operation: o } as MoteChatResultMap[M]
   }
   const history = method === 'space.mote.chat.history', name = history ? 'generations' : 'people', p = fields(value, [name, 'next'], [name, 'next'], code)
-  if (!Array.isArray(p[name]) || !(p.next === null || typeof p.next === 'string' && p.next.trim())) fail(code)
-  const rows = (p[name] as unknown[]).map(v => history ? parseMoteChatGeneration(v, code) : parseMoteChatPerson(v, code))
+  const values = p[name]
+  if (!Array.isArray(values) || Object.getPrototypeOf(values) !== Array.prototype || Reflect.ownKeys(values).length !== values.length + 1 || !(p.next === null || typeof p.next === 'string' && p.next.trim())) fail(code)
+  const rows = Array.from({ length: (values as unknown[]).length }, (_, index) => {
+    const entry = Object.getOwnPropertyDescriptor(values, String(index))
+    if (!entry?.enumerable || !('value' in entry)) fail(code)
+    return history ? parseMoteChatGeneration(entry!.value, code) : parseMoteChatPerson(entry!.value, code)
+  })
+  if (new Set(rows.map(row => history ? (row as MoteChatGeneration).generationId : JSON.stringify(row.actor))).size !== rows.length) fail(code)
   const i = input as MoteChatParamsMap['space.mote.chat.history'] | undefined
   if (i && rows.length > (i.limit ?? 20)) fail(code)
   if (history && i && rows.some(row => !sameMotePreferencesTarget((row as MoteChatGeneration).target, i.target) || i.actor && JSON.stringify(row.actor) !== JSON.stringify(i.actor))) fail(code)
