@@ -734,6 +734,81 @@ SDK callbacks, Core history, Mailbox, Settings and compiled public CLI receipts.
 These controlled ports prove the product call chain and exact bytes; they do not
 certify live credentials, platform permissions or delivery to a real group.
 
+## Discord native channel
+
+Desktop Settings → Conversation Channels → Discord configures the built-in
+`discord` adapter. Its immutable application is
+`{ "domain": "discord.com", "appId": "APPLICATION_SNOWFLAKE" }`.
+The Bot token is stored through the original secure Settings credential port;
+public configuration retains only its `credentialRef`. Explicit connection checks
+reread the native application and bot identity rather than certifying an earlier
+cached check. No additional send RPC or CLI is introduced: configuration, service,
+room discovery, Bindings, grants, delivery inspection and metadata management use
+the original `amux connection` surface.
+
+The official Gateway and REST SDKs own heartbeat, rate limits and reconnect.
+Gateway intents cover guilds, guild/direct messages and Message Content; the
+application must enable the corresponding native capability. Guild Members is
+not requested for display profiles. Native channel permissions still govern
+View Channel, Send Messages, Read Message History, Attach Files and sending in
+threads. A visible channel or profile never establishes those permissions or an
+AgentMux member grant.
+
+Native channel IDs, including thread and direct-channel IDs, are exact external
+conversation identities. The room catalog pages native guild text/announcement
+channels; threads and direct channels remain exactly readable with `room.get`.
+Guild members are not presented as channel members: without an exact native
+membership result, `room.members` reports its observation gap. Explicit invitation
+creation uses the original room-operation receipt owner and does not infer that a
+person joined or received a grant.
+
+Only the registered SDK receiver can mint ingress transport proof. Native authors,
+mentions, parent references and application identity are separate from message
+text. Own-bot messages and webhook/bot echoes do not become Agent input. The
+existing durable ingress retains original events before advancing the saved
+Gateway resume cursor; a custody failure closes only that SDK receiver and the
+original receiver owner reopens it. Actor and channel observations reuse the
+application-scoped Channel cache. Message/interaction authors, exact REST reads
+and native channel/thread updates provide display metadata; cache refresh or clear
+cannot alter recorded authors, Bindings or grants.
+
+Messages use native Components V2 with automatic mentions disabled. Permission
+buttons refer to the original permission action; question buttons open native
+modals through the original read-only question-form owner. Native selections and
+text submit typed answers to the existing durable action owner and original Core
+responder. Each original question accepts one option or free text; an answer array
+does not establish multiple-selection support. Answer and permission grants remain separate. Platform form capacities
+retain an explicit limitation and exact local Agent entry when a native form
+cannot represent the original request. Callback acknowledgements confirm durable
+custody, not approval or native answer adoption. An unconfirmed callback keeps its
+intake observation visible and does not close a healthy Gateway or remove local input.
+
+The [SDK display-component contract](https://discordjs.guide/legacy/popular-topics/display-components)
+bounds combined display text to 4000 characters and nested components to 40.
+A longer public question or shared permission body uses a text attachment in the
+same original multipart effect. Its short card names that complete original text,
+retains the original action and exact Agent entry, and does not claim a shortened
+body is complete. Only frozen public question text, recorded answers or shared
+permission context and labels are derived into UTF-8 bytes. Transport state,
+private credentials, action references and unavailable reasons do not enter that
+attachment. Core's existing Hook projection supplies at most 8 KiB of serialized
+tool context; this adapter does not reread raw private Hook payloads to bypass it.
+
+Images and files use one native multipart message effect. The original Outbox
+retains the bytes; a frozen request contains only generic resource descriptors
+and native JSON. The current source read uses Core's fixed 16 MiB recorded-binary
+budget; this is not a claim about a Discord account's native upload allowance.
+Its effect context verifies the same operation's identity,
+length and hash before the SDK reads bytes. Metadata cache cleanup cannot remove
+pending or unknown effect data. No temporary message or fabricated upload key is
+used. REST application retries are disabled. A stable bounded nonce and
+`enforce_nonce` provide only the platform's short deduplication window, never
+permanent delivery proof. A native response or authenticated own-message nonce
+witness can confirm the original mapping. Unknown effects remain inspect-only;
+text edits can inspect the exact retained message and authored native fields,
+while attachment edits without a byte witness and unconfirmed deletions remain
+unknown instead of being inferred from names or absence.
+
 ## Saved-application management confirmation
 
 `ConnectionHost.setup` owns finite management-authentication intents in the original
