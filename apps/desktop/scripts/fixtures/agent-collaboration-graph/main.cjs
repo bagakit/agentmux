@@ -54,6 +54,17 @@ app.whenReady().then(async () => {
       await until('native Worker world boxes', () => read(`window.graphCapture.workerSamples().some(sample=>sample.boxes?.agents>=8)`))
       await until('real visible nodes', () => read(`document.querySelectorAll('.collaboration-map:not([hidden]) [data-collaboration-agent]').length>0`))
       await until('original sources and layout settled', () => read(`!document.querySelector('.collaboration-map__reading')&&!document.querySelector('.collaboration-canvas__progress')`))
+      if (!result.firstArrangement) {
+        const first = (await read('window.graphCapture.workerSamples()')).find(sample => sample.request?.type === 'arrange' && sample.geometry && sample.input)
+        assert.ok(first, 'Original initial arrangement must have actual Worker input and geometry')
+        assert.ok(first.input.edges.length > 0, 'The first original arrangement consumes known relationships from this scene')
+        const boxes = new Map(first.geometry.map(box => [box.id, box]))
+        result.firstArrangement = { nodes: first.input.nodes, knownRelations: first.input.connections, related: first.input.edges.map(edge => {
+          const source = boxes.get(edge.source), target = boxes.get(edge.target)
+          assert.ok(source && target, 'First known relation retains both exact original endpoints')
+          return { ...edge, sameArea: source.areaId === target.areaId, distance: Math.hypot(source.x + source.width / 2 - target.x - target.width / 2, source.y + source.height / 2 - target.y - target.height / 2) }
+        }) }
+      }
     }
     const closeReader = async () => { if (await read(`Boolean(document.querySelector('[aria-label="Close Agent reading"]'))`)) await click('[aria-label="Close Agent reading"]'); await until('Reader closed', () => read(`!document.querySelector('.agent-information-reader')`)) }
     const markByText = async (selector, text, attribute) => {
@@ -272,10 +283,15 @@ app.whenReady().then(async () => {
       const event = await read('window.graphCapture.live(true)'); await until('actual finite source pulse', () => read(`document.querySelectorAll('.collaboration-edge__pulse').length>0`))
       const early = await motionFrame('map-message-early-live', event, 240), middle = await motionFrame('map-message-middle-live', event, 1300), late = await motionFrame('map-message-late-live', event, 2350)
       for (const sample of [early, middle, late]) { assert.ok(sample.markers.some(marker=>marker.label==='Message sent')); assert.ok(sample.markers.some(marker=>marker.label==='Message received')); assert.ok(sample.paths.some(path=>path.kind==='communication'&&Number(path.opacity)>0),'Actual message ink is visible during its finite phase') }
-      const initial = early.paths.find(path=>path.kind==='communication'), final = late.paths.find(path=>path.id===initial.id)
-      assert.ok(final&&parseFloat(final.dashoffset)<parseFloat(initial.dashoffset),'Original path dash moves from sender to recipient rather than repeatedly blinking')
+      const packet = early.packets.find(packet => packet.kind === 'communication' && packet.onscreen && packet.display !== 'none' && Number(packet.opacity) > 0)
+      assert.ok(packet, 'A visible directional packet accompanies the original live event')
+      const moved = middle.packets.find(candidate => candidate.id === packet.id)
+      assert.ok(moved && Math.hypot(moved.x - packet.x, moved.y - packet.y) > 8, 'The same original packet actually moves on screen between timed native frames')
+      assert.ok(packet.width >= 6 && packet.width <= 12 && packet.height >= 6 && packet.height <= 12, 'Message packet stays legible at actual screen scale')
+      const finalPacket = late.packets.find(candidate => candidate.id === packet.id)
+      assert.ok(finalPacket && parseFloat(finalPacket.distance) > parseFloat(moved.distance) && parseFloat(moved.distance) > parseFloat(packet.distance), 'The same packet advances along the original directed path instead of blinking or reversing phase')
       await pause(Math.max(0,event.at+await read('window.graphCapture.activityMS')+80-await read('performance.now()')))
-      assert.equal((await activity()).paths.length,0); assert.equal((await activity()).markers.length,0); assert.equal(await matrix(), camera); assert.equal((await read('window.graphCapture.workerSamples()')).length, workers); await intact()
+      assert.equal((await activity()).paths.length,0); assert.equal((await activity()).packets.length,0); assert.equal((await activity()).markers.length,0); assert.equal(await matrix(), camera); assert.equal((await read('window.graphCapture.workerSamples()')).length, workers); await intact()
     })
     await check('metadata-reconcile-retains-unrelated-geometry-and-reader', async () => {
       await locate('fixture-core'); await mapReady(); await move('.collaboration-map [data-session-id="fixture-core"]'); await until('original Reader before metadata update', () => read(`Boolean(document.querySelector('.agent-information-reader'))`)); await move('.agent-information-reader__reading'); await click('[aria-label="Pin Agent bookmark"]'); await move('[aria-label="Find Agent in map"]'); await pause(240)
@@ -355,7 +371,7 @@ app.whenReady().then(async () => {
       await locate('fixture-core'); await closeReader(); await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
       try {
         const event = await read('window.graphCapture.live(true)'), observed = await motionFrame('map-reduced-motion-message-live',event,300)
-        assert.equal(observed.reducedMotion,true); assert.ok(observed.markers.length>=2&&observed.markers.every(marker=>marker.animationName==='none'&&marker.display!=='none'&&Number(marker.opacity)>0),'Reduced motion keeps visible static endpoint feedback'); assert.ok(observed.paths.every(path=>path.display==='none'),'Reduced motion suppresses moving path ink')
+        assert.equal(observed.reducedMotion,true); assert.ok(observed.markers.length>=2&&observed.markers.every(marker=>marker.animationName==='none'&&marker.display!=='none'&&Number(marker.opacity)>0),'Reduced motion keeps visible static endpoint feedback'); assert.ok(observed.paths.every(path=>path.display==='none'),'Reduced motion suppresses moving path ink'); assert.ok(observed.packets.every(packet=>packet.display==='none'),'Reduced motion suppresses moving packets while original static endpoint feedback remains')
         await pause(Math.max(0,event.at+await read('window.graphCapture.activityMS')+80-await read('performance.now()'))); assert.equal((await activity()).markers.length,0); result.reducedMotion={event,observed}
       } finally { await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]}) }
       await intact()
@@ -428,6 +444,17 @@ app.whenReady().then(async () => {
       }
       await click('button[aria-label="Space: show terminal and file workbench"]'); await until('original workface after isolated Map locate', () => read(`window.graphCapture.facts().mainSurface==='workbench'`)); const returned=await facts(); assert.equal(returned.focusView,'map'); assert.equal(returned.selectionPreserved,true); assert.equal(returned.selectedSession,'fixture-core'); assert.equal(returned.storedDraft,'Original unsent reply · retain this exact draft.'); await frame('workbench-after-scale')
     })
+    await check('retained-resource-association-keeps-original-project-and-no-workface-authority', async () => {
+      await click('button.surface-navigation__focus'); await mapReady(); await locate('fixture-retired-0'); await closeReader()
+      await until('original retained project association is disclosed', () => read(`document.querySelector('[aria-label="Area affiliation"]')?.textContent.includes('Workspace association')`))
+      const affiliation = await read(`({basis:document.querySelector('[aria-label="Area affiliation"]').textContent,actions:document.querySelector('.collaboration-inspector__actions')?.textContent,world:window.graphCapture.world()})`)
+      const subject = JSON.stringify(['local','fixture-retired-0']), box = affiliation.world.geometry.find(box=>box.kind==='agent'&&JSON.parse(box.id)[1]===subject)
+      assert.ok(box, 'Retained original subject has real map geometry'); assert.equal(box.areaId,result.distribution.projectAreaNodeId)
+      assert.ok(affiliation.world.geometry.some(area=>area.kind==='area'&&area.id===box.areaId),'The retained occurrence belongs to its actual original project area node')
+      assert.ok(affiliation.basis.includes('Agent protocol')&&!affiliation.basis.includes('Display binding'))
+      assert.ok(!affiliation.actions?.includes('Open workface'), 'Resource association cannot invent a live original workface')
+      result.retainedAffiliation={subject,box,basis:affiliation.basis}; await frame('map-retained-project-association'); await locate('fixture-core'); await intact()
+    })
     await check('exact-related-reference-enriches-without-moving-established-world', async () => {
       await click('button.surface-navigation__focus'); await mapReady(); await locate('fixture-core'); await mapReady(); await closeReader(); const before = await read('window.graphCapture.world()'), bodyReads = (await facts()).reads.filter(read=>read.kind==='body').length
       await read('window.graphCapture.live(false,"fixture-core","fixture-relationship-only")')
@@ -438,8 +465,8 @@ app.whenReady().then(async () => {
       const retainedPoint = () => read(`(()=>{const world=window.graphCapture.world(),box=world.geometry.find(box=>box.kind==='agent'&&JSON.parse(JSON.parse(box.id)[1])[1]==='fixture-relationship-only');if(!box)return null;const node=[...document.querySelectorAll('.collaboration-map .react-flow__node')].find(node=>node.dataset.id===box.id),mark=node?.querySelector('.collaboration-agent__mark[data-tier="closed"]');if(!mark)return null;const r=mark.getBoundingClientRect(),origin=document.querySelector('.collaboration-map .react-flow__renderer').getBoundingClientRect(),matrix=new DOMMatrixReadOnly(getComputedStyle(document.querySelector('.collaboration-map .react-flow__viewport')).transform),zoom=matrix.a;return{box,painted:{x:(r.x-origin.x-matrix.e)/zoom,y:(r.y-origin.y-matrix.f)/zoom,width:r.width/zoom,height:r.height/zoom},world}})()`)
       await until('retired original point geometry and real DOM converge',async()=>{const point=await retainedPoint();return point&&point.box.width===24&&point.box.height===24&&['x','y','width','height'].every(key=>Math.abs(point.painted[key]-point.box[key])<.1)})
       const settledPoint = await retainedPoint()
-      const metadata = await read(`({identity:document.querySelector('.collaboration-inspector .collaboration-identity')?.textContent,metadata:document.querySelector('.collaboration-inspector dl.collaboration-identity')?.textContent,actions:document.querySelector('.collaboration-inspector__actions')?.textContent,details:document.querySelector('.collaboration-inspector')?.textContent})`)
-      assert.ok(metadata.identity.includes('fixture-relationship-only')); assert.ok(metadata.metadata.includes('claude')); assert.ok(metadata.details.includes('Area membership is unconfirmed')); assert.ok(!metadata.actions.includes('Open workface'),'Retained metadata does not invent an active control target'); assert.equal((await facts()).reads.filter(read=>read.kind==='body').length,bodyReads)
+      const metadata = await read(`({identity:document.querySelector('.collaboration-inspector .collaboration-identity')?.textContent,metadata:document.querySelector('.collaboration-inspector dl.collaboration-identity')?.textContent,actions:document.querySelector('.collaboration-inspector__actions')?.textContent,affiliation:document.querySelector('[aria-label="Area affiliation"]')?.textContent,details:document.querySelector('.collaboration-inspector')?.textContent})`)
+      assert.ok(metadata.identity.includes('fixture-relationship-only')); assert.ok(metadata.metadata.includes('claude')); assert.ok(metadata.affiliation?.includes('Workspace association')&&metadata.affiliation.includes('Agent protocol'),'Exact retained workspace evidence is disclosed as an association'); assert.equal(settledPoint.box.areaId,result.distribution.projectAreaNodeId,'Confirmed original project evidence reaches actual Map geometry'); assert.ok(settledPoint.world.geometry.some(area=>area.kind==='area'&&area.id===settledPoint.box.areaId),'The enriched occurrence belongs to its actual original project area node'); assert.ok(!metadata.actions.includes('Open workface'),'Retained metadata does not invent an active control target'); assert.equal((await facts()).reads.filter(read=>read.kind==='body').length,bodyReads)
       const identityReads = (await facts()).reads.filter(read=>read.kind==='identity'&&read.participant==='fixture-relationship-only'); assert.ok(identityReads.length>0&&identityReads.every(read=>read.options.hostId==='local'),'Original exact-owner bridge is consumed by the real Map'); result.relatedIdentity={before,discovered,metadata,identityReads,settledPoint}; await frame('map-related-original-identity'); await intact()
     })
     phase = 'native-visibility-capability'; await checkpoint()
