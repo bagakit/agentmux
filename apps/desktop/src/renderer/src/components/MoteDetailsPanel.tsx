@@ -116,11 +116,16 @@ export function MoteDetailsPanel({ scope, reference, onOpenPath, onCreateNote, a
         </div>
   </>
   return <section className="mote-details" data-mote-details={scope.topic.id} data-section={section}>
-    <header className="mote-details__profile" aria-label="Mote identity">{identity}
+    <header className="mote-details__profile" aria-label="Mote identity">
+      <div className="mote-details__cover" aria-hidden="true" />{identity}
       {scope.topic.summary ? <div className="mote-details__introduction" data-expanded={introductionOpen || scope.topic.summary.length <= 160}>
         <p>{scope.topic.summary}</p>
         {scope.topic.summary.length > 160 ? <button type="button" aria-expanded={introductionOpen} onClick={() => setIntroductionOpen(value => !value)}>{introductionOpen ? 'Less' : 'Read more'}</button> : null}
       </div> : null}
+      <div className="mote-details__profile-facts">
+        <dl><div><dt>Workspace</dt><dd>{scope.workspace.name}</dd></div></dl>
+        <button type="button" className="mote-details__edit-profile" onClick={() => void onOpenPath(scope.rootPath + '/topic.md')}><ThemeActionEditIcon size={12} />Edit profile</button>
+      </div>
       {presentation ? <button type="button" className="mote-details__continue" onClick={() => presentation.expanded ? presentation.collapse() : presentation.expand()}>
         <span>{presentation.expanded ? sessionId ? 'Continue discussion' : 'Open workface' : 'Open companion home'}</span><ThemeNavigationForwardIcon size={15} />
       </button> : null}
@@ -227,10 +232,8 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
   return <div ref={content} className="mote-details__content" role="tabpanel" aria-label={section === 'profile' ? 'Mote profile' : 'Mote ideas'}
     onScroll={event => { if (active) readingPositions.current[section] = event.currentTarget.scrollTop }}>
     <div className="mote-profile" hidden={section !== 'profile'}>
-      <section className="mote-profile__start" aria-label="Work together">
-        <h3>What shall we work on?</h3>
-        {profileActive ? <MoteFirstCooperation scope={scope} reference={reference} /> : null}
-      </section>
+      <MoteBehaviorSummary scope={scope} active={profileActive} onEdit={() => { behaviorInvoker.current = document.activeElement as HTMLElement; setBehaviorOpen(true) }} onOpenPath={onOpenPath} />
+      <MoteMemory scope={scope} active={profileActive} onOpenPath={onOpenPath} />
       <div className="mote-profile__columns">
       <div className="mote-profile__work">
       <MoteCurrentWork scope={scope} reference={reference} active={profileActive} />
@@ -244,9 +247,11 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
         {!tree.rootCache?.loading && !recent.length && !tree.rootError && notes.length > 0 ? <p className="mote-details__hint">Recent updates are not confirmed. All notes remain in Ideas.</p> : null}
       </div>
       </div>
-      <aside className="mote-profile__about" aria-label="About this Mote">
-      <MoteBehaviorSummary scope={scope} active={profileActive} onEdit={() => { behaviorInvoker.current = document.activeElement as HTMLElement; setBehaviorOpen(true) }} onOpenPath={onOpenPath} />
-      <MoteMemory scope={scope} active={profileActive} onOpenPath={onOpenPath} />
+      <aside className="mote-profile__about" aria-label="Cooperation settings">
+      <section className="mote-profile__start" aria-label="Work together">
+        <h3>Start a new discussion</h3>
+        {profileActive ? <MoteFirstCooperation scope={scope} reference={reference} /> : null}
+      </section>
       <MotePrivateChat scope={scope} active={profileActive} reference={reference} onOpenPath={onOpenPath} />
       <details className="mote-profile__preferences" onToggle={event => setPreferencesOpen(event.currentTarget.open)}>
         <summary>Connection &amp; preferences<ThemeNavigationDownIcon size={14} /></summary>
@@ -343,17 +348,20 @@ function MoteBehaviorSummary({ scope, onEdit, onOpenPath, active }: {
     return () => { live = false }
   }, [active, soulOpen, revision, soulIssue])
   const confirmed = !loading && !issue && !documentIssue && !(saved?.legacySoul && soulIssue) ? saved : null
-  const choices = confirmed ? MOTE_BEHAVIOR_AXES.flatMap(axis => { const choice = axis.choices.find(choice => choice.value === confirmed.preferences[axis.id]); return choice ? [{ id: axis.id, title: choice.title }] : [] }) : []
-  const hasPreferences = !!confirmed && (choices.length > 0 || !!confirmed.preferences.custom)
+  const choices = confirmed ? MOTE_BEHAVIOR_AXES.map(axis => ({ axis, choice: axis.choices.find(choice => choice.value === confirmed.preferences[axis.id]) })) : []
+  const hasPreferences = !!confirmed && (choices.some(({ choice }) => !!choice) || !!confirmed.preferences.custom)
   const summary = hasPreferences ? moteBehaviorIntroduction(confirmed!.preferences, 'summary') : null
   return <div className="mote-details__self mote-behavior-summary">
-    <div className="mote-details__section-actions"><span>How we work together</span><MoteBehaviorAction label="Edit behavior settings" onClick={onEdit}><ThemeActionEditIcon size={14} /></MoteBehaviorAction></div>
-    {confirmed && hasPreferences ? <div className="mote-behavior-summary__saved" title={summary!}>
+    <div className="mote-details__section-actions"><h3>Personality &amp; working style</h3><MoteBehaviorAction label="Edit behavior settings" onClick={onEdit}><ThemeActionEditIcon size={14} /></MoteBehaviorAction></div>
+    {confirmed ? <div className="mote-behavior-summary__saved" title={summary!}>
       {confirmed.code ? <span className="mote-behavior-summary__tag">MBTI style · {confirmed.code}</span> : null}
-      <div className="mote-behavior-summary__choices">{choices.map(choice => <span key={choice.id}>{choice.title}</span>)}</div>
+      <dl className="mote-behavior-summary__choices">{choices.map(({ axis, choice }) => <div key={axis.id} data-behavior-axis={axis.id}>
+        <dt>{axis.label}</dt><dd><strong>{choice?.title ?? 'Not selected'}</strong>{choice ? <p>{choice.rule}</p> : null}</dd>
+      </div>)}</dl>
       {confirmed.preferences.custom ? <p className="mote-behavior-summary__custom">{confirmed.preferences.custom}</p> : null}
       {confirmed.legacySoul ? <p className="mote-details__hint">Saved in your original SOUL. Save settings once to move them into BEHAVIOR.md.</p> : null}
-    </div> : confirmed ? <button type="button" className="mote-details__invitation" onClick={onEdit}>Choose how we work together.<ThemeNavigationForwardIcon size={12} /></button> : <p className="mote-details__hint">{loading ? 'Reading saved behavior…' : !admitted.current ? 'Saved behavior not read yet.' : 'Saved behavior is unconfirmed.'}</p>}
+      {!hasPreferences ? <button type="button" className="mote-details__invitation" onClick={onEdit}>Choose how we work together.<ThemeNavigationForwardIcon size={12} /></button> : null}
+    </div> : <p className="mote-details__hint">{loading ? 'Reading saved behavior…' : !admitted.current ? 'Saved behavior not read yet.' : 'Saved behavior is unconfirmed.'}</p>}
     {issue ? <div role="status" className="mote-details__issue">{issue}<button type="button" className="small-button" onClick={() => setAttempt(value => value + 1)}>Retry settings</button></div> : null}
     <details className="mote-details__soul" onToggle={event => setSoulOpen(event.currentTarget.open)}><summary><ThemeFileTextIcon size={12} />Original files<ThemeNavigationDownIcon size={12} /></summary>
       {soulOpen && scope.topic.summary ? <div className="mote-details__original-context"><span className="mote-details__hint">topic.md · saved context</span><p>{scope.topic.summary}</p><button type="button" className="small-button" onClick={() => void onOpenPath(scope.rootPath + '/topic.md')}>Open original context</button></div> : null}
