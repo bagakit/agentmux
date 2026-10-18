@@ -270,6 +270,7 @@ app.whenReady().then(async () => {
       const field = pane+' [data-settings-field="copy-paths"] input'
       const original = await read(`${node(field)}.checked`)
       await choose(field)
+      assert.equal(await read(`${node('[aria-label="Project path draft preview"]')}.dataset.pathFormat`),original?'abbreviated':'absolute','The path example follows the unsaved original preference')
       for (const [label,target] of [['Open Execution','continuity'],['Open Hosts','hosts']]) {
         await click(button(pane,label)); await until(`!!${node(`[data-settings-pane="${target}"]:not([hidden])`)}`)
         await nav(id); assert.equal(await read(`${node(field)}.checked`),!original)
@@ -365,6 +366,17 @@ app.whenReady().then(async () => {
       assert.equal(await read(`${node(pane+' [aria-label="Start page draft preview"] h3')}.textContent`),'Review draft')
       assert.equal(await read(`${node(pane)}.querySelector('.settings-survey__history')===null`),true)
       await capture('survey-text-draft',id,'dark','text and history preview')
+      const image = 'data:image/png;base64,'+fs.readFileSync(path.resolve(__dirname,'../../../resources/icon-512.png')).toString('base64')
+      await fill(pane+' [aria-label="Start page icon"]',image)
+      assert.equal(await read(`${node(pane)}.querySelector('.settings-survey__icon')===null`),true,'An image draft is not loaded before Preview images')
+      await click(button(pane,'Preview images'))
+      await until(`${node('.settings-survey__icon')}?.naturalWidth>0`)
+      await capture('survey-image-draft',id,'dark','explicit inline image preview without saving')
+      await fill(pane+' [aria-label="Start page background image"]',image)
+      assert.equal(await read(`${node(pane)}.querySelectorAll('.settings-survey__icon,.settings-survey__background').length`),0,'Edited image addresses invalidate the old preview')
+      await click(button(pane,'Preview images'))
+      await until(`${node('.settings-survey__background')}?.naturalWidth>0&&${node('.settings-survey__icon')}?.naturalWidth>0`)
+      await capture('survey-background-draft',id,'dark','explicit draft icon and background')
     } else if (id==='mote') {
       await click(node(pane+' [aria-label="32px avatar"]'))
       assert.equal(await read(`${node(pane+' [aria-label="Avatar size"]')}.value`),'32')
@@ -471,6 +483,10 @@ app.whenReady().then(async () => {
         await read('document.querySelector("[data-settings-overview]").scrollTop=0')
         await capture(`home-${label}-${mode}`,'overview',mode)
         const first = await hit(node('[data-settings-shortcut]'),false)
+        if (width<=500) {
+          const tops = await read(`Array.from(document.querySelectorAll('[data-settings-shortcut] strong')).map(n=>n.getBoundingClientRect().top)`)
+          assert.ok(Math.max(...tops)-Math.min(...tops)<=1,'Compact shortcut titles share one baseline')
+        }
         const footer = await read('document.querySelector(".window-status-bar").getBoundingClientRect().toJSON()')
         assert.ok(first.y>0&&first.y<footer.top,'A priority entry is immediately reachable')
         assert.ok((await hit(node('[aria-label="Close settings"]'))).hit,'Close remains reachable')
@@ -558,6 +574,18 @@ app.whenReady().then(async () => {
       for (const color of ['dark','light']) {
         await theme(color)
         await captureSegments(`page-${id}-compact-${color}`,id,color)
+        if (id==='appearance') {
+          const palette = await read(`Array.from(document.querySelectorAll('.terminal-theme-choice')).map(n=>n.getBoundingClientRect().toJSON())`)
+          assert.ok(palette.length>1&&Math.abs(palette[0].top-palette[1].top)<=1&&palette[1].left>palette[0].right,'Compact terminal palettes remain comparable in two columns')
+          const sample = await read(`(() => { const s=getComputedStyle(document.querySelector('.terminal-theme-preview__composer')); return {foreground:s.color,background:s.backgroundColor} })()`)
+          const luminance = value => {
+            const channels = value.match(/[\d.]+/g).slice(0,3).map(Number).map(n=>{const c=n/255;return c<=.04045?c/12.92:((c+.055)/1.055)**2.4})
+            return channels[0]*.2126+channels[1]*.7152+channels[2]*.0722
+          }
+          const l=[luminance(sample.foreground),luminance(sample.background)].sort((a,b)=>a-b)
+          assert.ok((l[1]+.05)/(l[0]+.05)>=4.5,'Workspace terminal sample text keeps readable contrast in either brightness')
+          result.interactions.push({kind:'terminal-palette-contrast',theme:color,...sample,contrast:(l[1]+.05)/(l[0]+.05)})
+        }
         if (id==='agents') {
           const row = '[data-settings-pane="agents"] .settings-agent-templates [data-resource-row="codex"]'
           if (await read(`${node(row)}?.checkVisibility()`)) await click(node(row))
