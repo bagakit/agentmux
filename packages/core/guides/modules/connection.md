@@ -163,6 +163,20 @@ Configure or bind only within the user's authorized target. Inspect current valu
 changing them; use the current help's exact input and operation identities. A grant is an
 explicit authority decision, not an effect of reading this guide or an adapter message.
 Read connection ingress and delivery records for their original source and acknowledgement.
+
+Use connection metadata get --input FILE|- for one exact cached actor or group, and
+connection metadata ls --connection ID --kind actor|conversation for a bounded local page.
+Both are local reads, including when the original Connection is disabled. Actor subjects are
+{kind:actor,actor:{application:{domain,appId},idType,userId}}; group subjects are
+{kind:conversation,externalConversationId}. They are display observations, never author or grant
+proof. Read state, freshness and latest reason independently; unavailable may retain a confirmed
+stale name/avatar. No cache result authorizes input, answers, permissions or sharing.
+Use connection metadata refresh --input FILE|- for an explicit native lookup with connectionId,
+expectedConnectionRevision and subject. Clear uses those same fields plus expectedCacheRevision
+from get/list (null means no stored value). It clears only that metadata entry; messages, grants,
+Session identity and resources retained for unknown native effects survive. No raw storage keys,
+credentials or message bodies are exposed. Native query failure does not stop authenticated intake
+or healthy Agents; retry the exact refresh when observation is available again.
 Pause/relink affects the exact binding; it does not complete external work or stop Agents.
 After an unknown delivery, inspect the original delivery identity. Retry only as the explicit
 supported delivery operation with its frozen facts; never generate a second logical message

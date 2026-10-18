@@ -1081,3 +1081,35 @@ their different meanings. These profile views do not submit a publication or
 treat a current profile/default value as an acknowledgement of an earlier unknown write.
 Browser clients consume `@agentmux/core/mote-connections`, the pure existing
 parent contract and codec leaf, without loading the Node Runtime.
+
+
+## Channel display metadata
+
+The original ConnectionHost owns one durable Channel storage mechanism, isolated by adapter,
+native domain and application ID. Adapters own display metadata keys, native schemas and freshness;
+this is separate from the application's bot profile and from immutable message attribution.
+
+Use the public `connection metadata get --input FILE|-` and bounded `ls --connection ID --kind
+actor|conversation [--limit N] [--cursor CURSOR]` to read this local owner. Get accepts `connectionId`
+and `subject`: `{kind:"actor",actor:{application:{domain,appId},idType,userId}}` or
+`{kind:"conversation",externalConversationId}`. Reads never request native data and remain available
+when the same Connection is disabled or its unrelated configuration changes. A deleted Connection
+is not recreated to read its former cache. Entries preserve exact subject, state, prior confirmed
+name/avatar, freshness, latest failure reason and cacheRevision; they are never input or grant proof.
+
+`refresh --input FILE|-` additionally requires current `expectedConnectionRevision` and performs an
+explicit exact native lookup. `clear` requires the same scope and `expectedCacheRevision` from
+get/list (or null for absent cache). Clear only addresses that adapter's derived metadata key, not
+messages, grants, Sessions, unknown native operations or bytes retained for those effects. No public
+operation exposes arbitrary storage keys or values. Managed Agents retain the original enrollment
+Connection boundary; metadata does not expand application administration authority.
+
+The default Feishu adapter observes exact human contact and chat SDK resources after durable intake
+ACK. Original `im.chat.updated_v1` events refresh only their exact group through the same owner;
+the receiver does not change platform subscriptions or permissions. A native read failure retains
+confirmed metadata as stale and can recover on subsequent relevant intake or explicit refresh.
+`DesktopConnectionServices.onChannelMetadataChanged` carries the exact changed subject for local
+clients to reread the same owner; it does not rewrite a previously frozen input profile or an author.
+Missing cache, credentials or display observations cannot block native ACK, authenticated input,
+publication or another healthy Agent. Controlled SDK consumer tests do not qualify a live app's
+subscription, data visibility or permissions.
