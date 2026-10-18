@@ -654,7 +654,12 @@ export class CustomToolkitOwner {
           execution.port = await this.args.openRunPort()
           this.observeTui(execution)
           await this.checkTui(execution)
-        } catch (error) { this.unknown(execution, error) }
+        } catch (error) {
+          this.unknown(execution, error)
+          // A failed acquisition owns no observation. Keep the original admission
+          // available for the next reader to reconnect to that same Run.
+          if (!execution.port && tool.live === execution) tool.live = null
+        }
       })().finally(() => { execution.starting = null })
       await execution.starting
       return
