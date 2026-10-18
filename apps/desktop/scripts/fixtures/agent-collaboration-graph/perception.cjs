@@ -134,8 +134,19 @@ module.exports = async function perception({ win, result, read, click, key, fram
     await until('original grouped relation inspector', () => read(`document.querySelectorAll('[aria-label="Grouped connections"] .collaboration-relation').length>0`))
     await frame('perception-folded-pointer-inspector'); await assertHud('folded-inspector')
     await click('[aria-label="Close map details"]')
-    await read(`document.querySelector('.collaboration-region-labels .collaboration-area__internal').focus()`); await key('Enter')
-    await until('native Enter opens original grouped relationships', () => read(`document.querySelectorAll('[aria-label="Grouped connections"] .collaboration-relation').length>0`))
+    result.foldedKeyboard = { nativeWindowFocused: win.isFocused(), webContentsFocused: win.webContents.isFocused() }
+    await read(`(()=>{const button=document.querySelector('.collaboration-region-labels .collaboration-area__internal'),events=[];const observe=event=>queueMicrotask(()=>events.push({type:event.type,key:event.key,code:event.code,keyCode:event.keyCode,charCode:event.charCode,trusted:event.isTrusted,prevented:event.defaultPrevented,targetIsButton:event.target===button,activeIsButton:document.activeElement===button}));for(const type of ['keydown','keypress','keyup','click'])button.addEventListener(type,observe);button.focus();window.graphCaptureKeyboard={button,events,observe};return true})()`)
+    try {
+      result.foldedKeyboard.before = await read(`({documentFocused:document.hasFocus(),activeIsButton:document.activeElement===window.graphCaptureKeyboard.button,label:window.graphCaptureKeyboard.button.getAttribute('aria-label')})`)
+      assert.equal(result.foldedKeyboard.before.activeIsButton, true, 'The original internal connection control owns native keyboard focus')
+      await key('Enter'); await settle()
+      result.foldedKeyboard.events = await read('window.graphCaptureKeyboard.events')
+      assert.ok(result.foldedKeyboard.events.some(event => event.type === 'keydown' && event.keyCode === 13 && event.trusted && event.targetIsButton), 'Chromium receives the real Enter virtual key on the original control')
+      assert.ok(result.foldedKeyboard.events.some(event => event.type === 'click' && event.trusted && event.targetIsButton), 'Chromium default button activation produces the real click')
+      await until('native Enter opens original grouped relationships', () => read(`document.querySelectorAll('[aria-label="Grouped connections"] .collaboration-relation').length>0`))
+    } finally {
+      await read(`(()=>{const {button,observe}=window.graphCaptureKeyboard;for(const type of ['keydown','keypress','keyup','click'])button.removeEventListener(type,observe);delete window.graphCaptureKeyboard})()`)
+    }
     await frame('perception-folded-keyboard-inspector')
     await click(`[aria-label="Expand ${title}"]`); await mapReady()
     await click('[aria-label="Close map details"]'); await settle()
