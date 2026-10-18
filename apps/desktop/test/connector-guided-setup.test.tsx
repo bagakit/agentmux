@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
 import { act } from 'react'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -34,7 +35,7 @@ beforeEach(async () => {
   registerConnectorIpc({ handleWithEvent: (channel, handler) => handlers.set(channel, handler), assertTrusted: (channel, caller) => { expect(channel).toBe('connections:call'); expect(caller).toBe(sender) }, socketPath: server.path, secrets: services.secrets })
   vi.spyOn(api.connections, 'call').mockImplementation(async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
     if (failObservation && method === 'connection.setup.inspect') { failObservation = false; throw Error('Application observation interrupted') }
-    const result = await handlers.get('connections:call')!(sender, method, input)
+    const result = unwrapSessionInputOperationResult(await handlers.get('connections:call')!(sender, method, input))
     calls.push({ method, input: structuredClone(input), result: structuredClone(result) })
     return result as ConnectionResultMap[M]
   })

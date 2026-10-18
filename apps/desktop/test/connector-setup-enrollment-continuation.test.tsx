@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
 import { act, useState } from 'react'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
@@ -63,7 +64,7 @@ beforeEach(async () => {
   const handlers = new Map<string, (...args: any[]) => Promise<unknown>>(), sender = { ownedRenderer: true }
   registerConnectorIpc({ handleWithEvent: (channel, handler) => handlers.set(channel, handler), assertTrusted: (channel, event) => { expect(channel).toBe('connections:call'); expect(event).toBe(sender) }, socketPath: server.path, secrets: services.secrets })
   forward = async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
-    const result = await handlers.get('connections:call')!(sender, method, input)
+    const result = unwrapSessionInputOperationResult(await handlers.get('connections:call')!(sender, method, input))
     calls.push({ method, input: structuredClone(input), result: structuredClone(result) })
     await afterCall?.(method, result)
     return result as ConnectionResultMap[M]

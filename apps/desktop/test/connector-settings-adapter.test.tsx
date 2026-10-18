@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
 import { act } from 'react'
 import { join, resolve } from 'node:path'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -27,7 +28,7 @@ beforeEach(async () => {
   await server.start(); cleanup.push(() => server.stop())
   const handlers = new Map<string, (...args: any[]) => Promise<any>>()
   registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: () => {}, socketPath: server.path, secrets: services.secrets })
-  vi.spyOn(api.connections, 'call').mockImplementation(async (method, params) => handlers.get('connections:call')!({}, method, params))
+  vi.spyOn(api.connections, 'call').mockImplementation(async (method, params) => unwrapSessionInputOperationResult(await handlers.get('connections:call')!({}, method, params)))
   vi.spyOn(api.connections, 'storeCredential').mockImplementation(async input => handlers.get('connections:storeCredential')!({}, input))
   vi.spyOn(api.connections, 'inspectCredential').mockImplementation(async operationId => handlers.get('connections:inspectCredential')!({}, operationId))
 })

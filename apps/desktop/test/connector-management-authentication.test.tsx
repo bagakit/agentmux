@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
 import { act, useState } from 'react'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -45,7 +46,7 @@ beforeEach(async () => {
     const call: Call = { method, input: structuredClone(input) }; calls.push(call)
     await beforeCall?.(call)
     try {
-      const result = await handlers.get('connections:call')!({}, method, input)
+      const result = unwrapSessionInputOperationResult(await handlers.get('connections:call')!({}, method, input))
       call.result = structuredClone(result)
       await afterCall?.(call)
       call.delivered = true
