@@ -34,7 +34,7 @@ const platform = (domain: string) => domain === 'open.feishu.cn' ? 'Feishu' : do
 
 export function ExternalConnectionsSettings({ active, onClose, navigationRequest, channel = 'lark' }: { active: boolean; onClose?: (() => void) | undefined; navigationRequest?: SettingsNavigationRequest | undefined; channel?: 'lark' | 'discord' }) {
   const discord = channel === 'discord'
-  const navigation = useContext(SettingsNavigation), origin = navigationRequest?.section === 'lark' ? navigationRequest.larkOrigin : undefined
+  const navigation = useContext(SettingsNavigation), origin = navigationRequest?.channelOrigin
   const originalAgent = useAppStore(state => {
     if (!active || !origin) return undefined
     const session = sessionPresentationById(state.sessions).get(origin.sessionId)
@@ -206,8 +206,9 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     continueMoteSetup(record, setup.source)
   }, [active, navigationRequest, records])
   useEffect(() => {
-    if (!active || appliedRoute.current === navigationRequest || !origin?.connectionId || pending.current) return
-    const record = records.find(record => record.config.connectionId === origin.connectionId)
+    if (!active || appliedRoute.current === navigationRequest || !origin || pending.current) return
+    const record = records.find(record => record.config.connectionId === origin.connection.connectionId && record.config.adapterId === origin.connection.adapterId &&
+      record.config.application.domain === origin.connection.application.domain && record.config.application.appId === origin.connection.application.appId)
     if (!record) return
     appliedRoute.current = navigationRequest; edit(record); setView('saved')
   }, [active, navigationRequest, records])

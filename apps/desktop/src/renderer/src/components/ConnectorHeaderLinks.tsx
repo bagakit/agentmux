@@ -1,18 +1,14 @@
-import { useRef } from 'react'
+import { useContext, useRef } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { RoomBinding } from '@agentmux/core/connections'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { useConnectorRoomName } from '../lib/use-connector-room-name'
+import { SettingsNavigation } from './SettingsNavigation'
 
-// Offline platform artwork from https://www.feishu.cn/favicon.ico; shared Feishu/Lark mark.
-const feishuArtwork = new URL('../assets/connector-icons/feishu.ico', import.meta.url).href
 const ConnectionIcon = semanticIconComponent('object.connection'), DownIcon = semanticIconComponent('navigation.down'), LoadingIcon = semanticIconComponent('status.loading')
-function platform(binding: RoomBinding) {
-  return binding.application.domain === 'open.feishu.cn' ? 'Feishu' : binding.application.domain === 'open.larksuite.com' ? 'Lark' : binding.application.domain
-}
 function PlatformIcon({ binding }: { binding: RoomBinding }) {
-  return ['open.feishu.cn', 'open.larksuite.com'].includes(binding.application.domain)
-    ? <img src={feishuArtwork} width={14} height={14} alt="" /> : <ConnectionIcon size={14} />
+  const Icon = useContext(SettingsNavigation)?.channelPresentation(binding.application)?.icon ?? ConnectionIcon
+  return <Icon size={14} />
 }
 type RoomName = ReturnType<typeof useConnectorRoomName>
 type Selection = { kind: 'binding'; binding: RoomBinding } | { kind: 'connect' | 'settings' }
@@ -20,8 +16,10 @@ type Selection = { kind: 'binding'; binding: RoomBinding } | { kind: 'connect' |
 /** One connection entry projects the original Session's relations and supported setup actions. */
 export function ConnectorHeaderLinks({ bindings, issue, checking, retainedSetup, syncEnabled, nameVersion, visible, onOpen, onConnect, onMenuOpen, onSettings }: {
   bindings: RoomBinding[]; issue: string; checking: boolean; retainedSetup: boolean; syncEnabled: boolean | null; nameVersion: number; visible: boolean
-  onOpen(binding: RoomBinding, trigger: HTMLElement): void; onConnect(trigger: HTMLElement): void; onMenuOpen(open: boolean): void; onSettings?(): void
+  onOpen(binding: RoomBinding, trigger: HTMLElement): void; onConnect(trigger: HTMLElement): void; onMenuOpen(open: boolean): void; onSettings?(trigger: HTMLElement): void
 }) {
+  const navigation = useContext(SettingsNavigation)
+  const platform = (binding: RoomBinding) => navigation?.channelPresentation(binding.application)?.title ?? binding.application.domain
   const trigger = useRef<HTMLButtonElement>(null), selected = useRef<Selection | null>(null), handingOff = useRef(false)
   const unconfirmed = !!issue
   const only = bindings.length === 1 ? bindings[0]! : null, name = useConnectorRoomName(only, nameVersion, visible)
@@ -32,14 +30,14 @@ export function ConnectorHeaderLinks({ bindings, issue, checking, retainedSetup,
   const status = only ? state(only) : unconfirmed ? 'Status unknown' : ''
   const description = (binding: RoomBinding) => `${platform(binding)} · ${unconfirmed ? 'Saved link unconfirmed' : binding.state === 'paused' ? 'Sharing paused' : 'Group linked'} · Automatic sync ${syncEnabled === null ? 'unknown' : syncEnabled ? 'On' : 'Off'} · ${binding.externalConversationId} · ${binding.application.domain} · ${binding.application.appId} · ${binding.connectionId}`
   const title = only ? `${name.label}. ${description(only)}${name.issue ? '. ' + name.issue : ''}. Open Connections for group details and automatic sync settings.` :
-    `${summary}. ${unconfirmed ? 'Saved group status is unconfirmed. ' : ''}${checking ? 'Checking this Agent’s saved groups. ' : ''}Connect a Lark group or open automatic sync settings.`
+    `${summary}. ${unconfirmed ? 'Saved group status is unconfirmed. ' : ''}${checking ? 'Checking this Agent’s saved groups. ' : ''}Connect an external conversation or open automatic sync settings.`
   return <DropdownMenu.Root onOpenChange={open => {
     onMenuOpen(open)
     if (!open && selected.current && trigger.current) {
       const selection = selected.current; selected.current = null; handingOff.current = true
       if (selection.kind === 'binding') onOpen(selection.binding, trigger.current)
       else if (selection.kind === 'connect') onConnect(trigger.current)
-      else onSettings?.()
+      else onSettings?.(trigger.current)
     }
   }}>
     <DropdownMenu.Trigger ref={trigger} className="agent-region-header__connector" data-sharing-state={unconfirmed ? 'unknown' : only?.state ?? 'unbound'}
@@ -58,7 +56,7 @@ export function ConnectorHeaderLinks({ bindings, issue, checking, retainedSetup,
       }) : <p className="connector-header-menu__empty">{checking ? 'Checking saved connections…' : unconfirmed ? 'Saved connections could not be checked.' : 'No external conversations connected.'}</p>}
       {issue ? <p className="connector-header-menu__empty" role="status">{issue} Reopen Connections to check again. Saved groups and local input are kept.</p> : null}
       <DropdownMenu.Separator className="tab-context-menu__separator" />
-      <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => { selected.current = { kind: 'connect' } }}>{retainedSetup ? 'Continue Lark group setup' : 'Connect Lark group'}</DropdownMenu.Item>
+      <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => { selected.current = { kind: 'connect' } }}>{retainedSetup ? 'Continue group setup' : 'Connect a conversation'}</DropdownMenu.Item>
       {onSettings ? <DropdownMenu.Item className="tab-context-menu__item" onSelect={() => { selected.current = { kind: 'settings' } }}>Automatic sync settings</DropdownMenu.Item> : null}
     </DropdownMenu.Content></DropdownMenu.Portal>
   </DropdownMenu.Root>
@@ -69,9 +67,10 @@ function NamedConnectorHeaderItem(props: ItemProps) {
   return <ConnectorHeaderItem {...props} name={useConnectorRoomName(props.binding, 0, props.visible)} />
 }
 function ConnectorHeaderItem({ binding, state, distinguish, description, onSelect, name }: ItemProps & { name: RoomName }) {
+  const platform = useContext(SettingsNavigation)?.channelPresentation(binding.application)?.title ?? binding.application.domain
   return <DropdownMenu.Item className="tab-context-menu__item connector-header-menu__item" onSelect={onSelect}
     title={description} aria-label={`${name.label}; ${description}${name.issue ? '; ' + name.issue : ''}`}>
-    <PlatformIcon binding={binding} /><span><strong>{name.label}</strong><small>{platform(binding)} · {state}{name.loading ? ' · Reading name…' : name.issue ? ' · ' + name.issue : ''}</small>
+    <PlatformIcon binding={binding} /><span><strong>{name.label}</strong><small>{platform} · {state}{name.loading ? ' · Reading name…' : name.issue ? ' · ' + name.issue : ''}</small>
       {distinguish ? <small>{binding.application.appId} · …{binding.externalConversationId.slice(-12)}</small> : null}</span>
   </DropdownMenu.Item>
 }
