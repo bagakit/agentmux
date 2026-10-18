@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
 import { act, useState } from 'react'
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
@@ -84,7 +85,7 @@ beforeEach(async () => {
   registerConnectorIpc({ handleWithEvent: (channel, handler) => handlers.set(channel, handler), assertTrusted: trusted, socketPath: server.path, secrets: services.secrets })
   vi.spyOn(api.connections, 'call').mockImplementation(async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
     calls.push({ method, input: structuredClone(input) })
-    const result = await handlers.get('connections:call')!(sender, method, input)
+    const result = unwrapSessionInputOperationResult(await handlers.get('connections:call')!(sender, method, input))
     if (method === 'connection.enrollment.begin') {
       lastBegin = result as ConnectionEnrollmentView
       if (deliverBegin) await new Promise<void>(resolve => deliverBegin!(resolve))
