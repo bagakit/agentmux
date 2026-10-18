@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { AgentMuxClientNotificationRecord, AgentMuxClientNotificationSubject,
   AgentMuxClientNotificationsObservation, AgentMuxControlInspectNotificationsRequest } from '@agentmux/core/control'
 import type { NotificationEntry } from '../components/NotificationGroup'
@@ -20,7 +21,7 @@ export type NotificationProjection = {
 
 // A borrowed reader of the committed notification owner, not another notification
 // store. Disposing that owner removes its reader; an absent owner is never empty.
-const instanceId = crypto.randomUUID()
+const instanceId = mintObjectId()
 const readers = new Set<() => NotificationProjection>()
 export function registerNotificationReader(read: () => NotificationProjection): () => void {
   readers.add(read)
