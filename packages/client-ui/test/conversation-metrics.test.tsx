@@ -148,14 +148,14 @@ it('preserves interrupted and failed observations, original Copy, and the common
   expect(host.textContent).not.toContain('本轮已结束')
 })
 
-it('connects the actual Desktop Activity consumer without new reads or execution calls', async () => {
+it('connects the Desktop presenter to accepted metric facts without new reads or execution calls', async () => {
   const { api } = await import('../../../apps/desktop/src/renderer/src/lib/api.js')
   const reads = vi.spyOn(api.sessions, 'historyPage')
   const writes = vi.spyOn(api.sessions, 'write')
   try {
     const page = metricsPage()
     await act(async () => root.render(<ClientUiProvider platform={platform}>
-      <ActivityView capability="complete-events" items={[]} userMessages={[]} sessionId={page.agentSessionId} nativeHistoryPage={page} />
+      <ActivityView capability="complete-events" items={[]} sessionId={page.agentSessionId} nativeHistoryPage={page} />
     </ClientUiProvider>))
     const head = summaryHead()
     expect(record('answer').textContent).toContain('系统版本 26.5.1')

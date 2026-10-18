@@ -39,11 +39,15 @@ export function StaticActivityView(props: ComponentProps<typeof AcceptedActivity
   const noop = () => {}
   const window: ReturnType<typeof useSessionConversationWindow> = {
     acceptHeld: noop, presentationIntent: 0, page, projection: { ...accepted, historyPage: page ?? undefined, captured }, snapshot: null, capturedSnapshot: captured,
-    captured: captured.items, capturedLoading: false, capturedHasMore: false, capturedError: null,
+    captured: captured.items, capturedLoading: false, capturedHasMore: false,
     historical: false, hasEarlierNavigation: false, previousSource: false, coverageLoading: false,
-    loading: false, error: null, readActivity: { sourceRead: null, loading: false }, held: false, loadingEarlier: false, historyBoundary: null,
+    loading: false, error: null, automaticReadError: null, readActivity: { sourceRead: null, loading: false }, held: false, loadingEarlier: false, historyBoundary: null,
     currentOutside: false, newerOutside: false, hasNewer: false, hasMore: Boolean(page?.nextCursor),
-    readCapturedEarlier: noop, readEarlier: noop, readNewer: noop, retry: noop, showLatestAutomatically: noop,
+    readCapturedEarlier: noop, readEarlier: noop, readNewer: noop, prepareEarlier: () => false, retryLabel: 'Retry', retry: noop, showLatestAutomatically: noop,
+    inspect: () => ({ snapshot: null, loading: false, operation: null, sourceRead: null, error: null, errorOperation: null,
+      sourceError: null, observationError: null, held: false, historical: false, newerAvailable: false, pending: null,
+      dirty: null, inFlight: false, watch: { binding: false, bound: false, closed: null, windowId: null, invalidations: 0, unavailable: 0 } }),
+    noteDiagnostic: noop,
     showCurrent: noop, showCurrentSource: noop, showPreviousSource: noop
   }
   const { items: _items, timelineSnapshot: _timeline, ...presenter } = props

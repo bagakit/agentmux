@@ -22,7 +22,7 @@ export async function conversationPagePortFixture(reference: { hostId: string; a
   const nativeRead = vi.spyOn(client, 'sessionHistoryPage').mockImplementation(async(...args)=>({...await read(...args),changesCursor:checkpoint.cursor}))
   vi.spyOn(client, 'sessionHistoryCheckpoint').mockResolvedValue(checkpoint)
   vi.spyOn(client, 'readSessionHistoryChanges').mockResolvedValue({...reference,source,items:[],checkpoint,more:false})
-  vi.spyOn(client, 'observeSessionHistory').mockResolvedValue({ agentSessionId: reference.agentSessionId, source, dispose() {} })
+  vi.spyOn(client, 'observeSessionHistory').mockResolvedValue({ source, dispose() {} })
   const kernel = (client as unknown as { kernel: Record<string, () => unknown> }).kernel
   const controls = ['start', 'input', 'resize', 'stop', 'attach', 'status'].map(name => vi.spyOn(kernel, name).mockImplementation(() => { throw new Error('A page reading fixture cannot control Runtime') }))
   await desktopConversationReadBridge({ root, client }, closes, () => [{ hostId: reference.hostId, client }])
