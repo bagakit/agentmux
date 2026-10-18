@@ -49,26 +49,55 @@ it.runIf(process.platform === 'darwin').each(['rpc-rejection', 'transport-close'
       // An opening receipt can precede process exit; only the original Run owns that terminal fact.
       if (attempt.status === 'returned') expect(attempt.kind).toBe('resumed')
       else expect(typeof attempt.code).toBe('string')
-      const current = await until(() => client.refreshAgentSession(original.agentSessionId),
-        value => Boolean(value.continuityOperations?.['private-native-diagnostic-resume']?.errorCode), 'private failed native operation diagnostic', 30_000)
-      const operation = current.continuityOperations?.['private-native-diagnostic-resume']
+      const observed = await until(async () => {
+        const session = await client.refreshAgentSession(original.agentSessionId)
+        const operation = session.continuityOperations?.['private-native-diagnostic-resume']
+        if (!operation?.newRun || session.run.runId !== operation.newRun.runId) return { session, operation, replay: undefined }
+        try { return { session, operation, replay: await client.readRunReplay(operation.newRun, 0, 'raw') } }
+        catch (error) {
+          // A concurrent early failure can retire this exact attempt between the two reads.
+          if ((error as { code?: string }).code !== 'STALE_AGENT_SESSION_BINDING') throw error
+          return { session, operation, replay: undefined }
+        }
+      }, value => Boolean(value.operation?.newRun && (
+        value.session.run.runId === original.run.runId && value.operation.errorCode ||
+        value.session.run.runId === value.operation.newRun.runId && value.replay?.run.state === 'exited'
+      )), 'private original native failure evidence', 30_000)
+      const current = observed.session, operation = observed.operation
       expect(operation?.previousRun).toEqual(original.run)
+      expect(operation?.nativeTarget).toEqual(saved.nativeHandle)
       const failedRun = operation?.newRun
       if (!failedRun) throw new Error('The original failed native attempt lost its Run receipt')
       expect(failedRun.runId).not.toBe(original.run.runId)
       scope.trackRun(failedRun.runId)
       expect(current.agentSessionId).toBe(original.agentSessionId)
       expect(current.nativeHandle).toEqual(saved.nativeHandle)
-      expect(current.run).toEqual(original.run)
       const agentRecords = await records(witness), agentDiagnostic = agentRecords.find(value => value.kind === 'diagnostic')!.diagnostic as string
       const agentCredentials = knownCredentials(agentDiagnostic)
       const cause = failure === 'rpc-rejection' ? '[code=-32602]: Exact original native configuration rejected; actor=[redacted]' : 'Original native actor transport closed.'
-      expect(operation?.error).toContain(cause)
-      for (const credential of agentCredentials) expect(operation?.error).not.toContain(credential)
-      const agentReplay = await client.readRunReplay(failedRun, 0, 'raw')
-        .then(value => ({ state: 'readable', runId: value.run.runId }), error => ({ state: 'unavailable', code: error.code }))
-      if (agentReplay.state === 'unavailable') expect('code' in agentReplay && agentReplay.code).toBe('STALE_AGENT_SESSION_BINDING')
-      else expect('runId' in agentReplay && agentReplay.runId).toBe(failedRun.runId)
+      let agentConsumer: string, agentReplay: Record<string, unknown>
+      const agentRunCauseVisible = current.run.runId === failedRun.runId
+      if (agentRunCauseVisible) {
+        const replay = observed.replay!
+        expect(current.run).toEqual(failedRun)
+        expect(replay.run).toMatchObject({ runId: failedRun.runId, state: 'exited', exitCode: 1, acceptedInputBytes: 0 })
+        expect(replay.gap).toBeNull()
+        const text = Buffer.concat(replay.replay.map(value => Buffer.from(value.dataBytes))).toString('utf8')
+        expect(text).toContain(masked(agentDiagnostic, agentCredentials).replaceAll('\n', '\r\n'))
+        expect(text).toContain(cause)
+        for (const credential of agentCredentials) expect(text).not.toContain(credential)
+        agentConsumer = 'Hosted Core readRunReplay on the exact canonical failed Agent Run'
+        agentReplay = { state: 'readable', runId: replay.run.runId, processState: replay.run.state, exitCode: replay.run.exitCode }
+      } else {
+        expect(current.run).toEqual(original.run)
+        expect(typeof operation?.errorCode).toBe('string')
+        expect(operation?.error).toContain(cause)
+        for (const credential of agentCredentials) expect(operation?.error).not.toContain(credential)
+        agentReplay = await client.readRunReplay(failedRun, 0, 'raw')
+          .then(value => ({ state: 'readable', runId: value.run.runId }), error => ({ state: 'unavailable', code: error.code }))
+        expect(agentReplay).toEqual({ state: 'unavailable', code: 'STALE_AGENT_SESSION_BINDING' })
+        agentConsumer = 'Hosted Core refreshAgentSession original retired continuity operation error/newRun'
+      }
       expect(agentRecords.filter(value => value.kind === 'backend')).toHaveLength(2)
       expect(agentRecords.filter(value => value.kind === 'frontend')).toHaveLength(1)
       expect(agentRecords.filter(value => value.kind === 'rpc' && value.method === 'thread/resume')).toHaveLength(1)
@@ -103,8 +132,8 @@ it.runIf(process.platform === 'darwin').each(['rpc-rejection', 'transport-close'
       proof = { schema: 'agentmux.native-diagnostics-runtime-proof.v1', failure, agentSessionId: original.agentSessionId,
         originalRun: original.run, resumedRun: failedRun, launchAttempt: attempt, publicOutputBytes: output.length,
         outputConsumer: 'Hosted Core readRunReplay on the exact private Terminal managed entry Run', terminalRun: { runId: terminal.runId },
-        agentConsumer: 'Hosted Core refreshAgentSession original continuity operation error/newRun', agentReplay,
-        agentOperationCauseVisible: true, agentBackendCount: 2, agentFrontendCount: 1,
+        agentConsumer, agentReplay, agentCanonicalRun: current.run,
+        agentOperationCauseVisible: !agentRunCauseVisible, agentRunCauseVisible, agentBackendCount: 2, agentFrontendCount: 1,
         completeServerDiagnostic: true, originalNativeCause: true, knownCredentialsMasked: true, acceptedInputBytes: ended.run.acceptedInputBytes,
         backendCount: 1, frontendCount: 0, sameNativeHandle: true }
       console.log(JSON.stringify(proof))
