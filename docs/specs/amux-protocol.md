@@ -69,6 +69,22 @@ Core 在首次冻结前通过原 Host 的非 wire reader 有界读取准确 Main
 
 容器中只有一个 `a2a` 子项且无其他容器内容时，可以写成 `amux:a2a` 简写。长式和简写生成同一可读语义，保留各自原始 span、wire 和 Copy，不通过字符串展开重写原输入。这是本页为 `a2a` 明确规定的语法，不自动推广为任意 `amux:NAME` 的解释或控制分发规则。
 
+## Channel 原信
+
+```text
+<amux:channel domain="chat.example" app-id="APP" id-type="user-id" user-id="USER" conversation-id="ROOM" message-id="MESSAGE" name="Display name" avatar-url="https://images.example/avatar.png" observed-at="1">
+原消息正文
+</amux:channel>
+```
+
+`amux:channel` 是外部原信的通用阅读声明。六个必需属性依次为原生应用 `domain`、`app-id`、发言人命名空间 `id-type`、`user-id`、原会话 `conversation-id` 与平台原消息 `message-id`；平台消息 ID 不替换 Core message／operation ID。可选资料属性依次为 `name`、`avatar-url`、`observed-at`；存在资料快照时必须有十进制非负安全整数 `observed-at`，名字和头像分别可以缺失。头像是无内嵌凭据的 HTTP(S) URL，不执行或查询该 URL 来验证作者。资料仅描述当次已观察字段，不能冒称始终最新、本人身份或权限。
+
+开头是上述固定顺序、双引号和单个属性间空格的完整标签后接一个 LF，结尾是一个 LF 与完整 `</amux:channel>`；之后没有尾文。元数据的 XML 属性转义沿原 formatter，身份按原公开平台身份合同校验。正文是两边界之间的原字符串，保留空白、CR/LF、实体、代码和同形标签，不转义、不递归解释，也不交给 XML DOM。reader 只解释原消息开头的完整外层边界并保留原 wire；平台说明可以沿原独立前导声明组合，作者正文中的其他标签不取得来源资格。非法保留格式不进入通用声明分支，原文继续可读。整条 Copy 仍取原 wire，不从资料卡重组。
+
+Core 的原 `AgentMuxMessageEnvelope` 在 external sender 之外持有可选 `channelProfile` 观察快照；完整 actor 命名空间必须与 sender 一致，资料不进入作者或 grant 的判断。耐久收件 owner 首次 claim 后保存同一快照，后续缓存刷新、重试与重启不替换它。原 prepared input 继续冻结精确 wire；新版 formatter、最新头像或资料缺口不重写可能已应用的输入。真实来源及当前输入资格始终由原 ingress claim、Binding／Grant 和执行 Host 核对，文本声明不携带这份权限。
+
+生产、解析与目录沿 [Core message formatter／reader](../../packages/core/src/agent-message-render.ts) 和 [协议定义](../../packages/core/src/amux-protocol-definition.ts)；资料观察类型沿 [Channel profile](../../packages/core/src/channel-profile.ts)。原消息、Core 输入及查询复用既有公共能力，没有新增 send RPC、历史、Runtime 或输入队列。资料缓存的管理由原连接器 owner 提供独立能力，定义类型本身不证明管理接口或平台资料已经可用。
+
 ## A2A 原信
 
 单封原信的简写为：
