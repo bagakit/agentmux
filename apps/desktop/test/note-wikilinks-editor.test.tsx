@@ -50,6 +50,7 @@ it('converts actual typed and plain pasted wiki syntax while preserving original
   await act(async () => editor().view.dom.dispatchEvent(new ClipboardEvent('paste', { clipboardData: transfer, bubbles: true, cancelable: true })))
   await vi.waitFor(() => expect(links()).toHaveLength(2))
   expect(new Set(links().map(link => link.referenceId)).size).toBe(2)
+  for (const link of links()) expect(link.referenceId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
   const read = readNoteDocument(latest); expect(read.status).toBe('valid')
   if (read.status === 'valid') { expect(read.note.noteId).toBe('source'); expect(read.note.content.content![0]!.attrs!.blockId).toBe('source-block') }
   expect(editor().getText()).toContain('Before [[Shared knowledge]] after [[Shared knowledge #^finding]]')
@@ -249,7 +250,7 @@ it('opens a bound ID from the actual Canvas snapshot despite an unavailable glob
   const opened = vi.fn()
   function View() { const nav = useNoteLinkNavigation(opened, state); return <><button onClick={() => { void nav.openLink({ text: 'Old label now belonging elsewhere', target: { noteId: 'target', blockId: 'decision' } }) }}>Open</button>{nav.dialog}</> }
   await mount(<View />); await act(async () => host.querySelector<HTMLButtonElement>('button')!.click())
-  await vi.waitFor(() => expect(opened).toHaveBeenCalledWith(state.pages.target, 'decision'))
+  await vi.waitFor(() => expect(opened).toHaveBeenCalledWith(state.pages.target, 'decision', expect.any(AbortSignal)))
   expect(api.notebooks.resolve).not.toHaveBeenCalled()
 })
 
@@ -274,6 +275,6 @@ it('promotes only an explicitly clicked original raw range and stores the chosen
   expect(links()).toHaveLength(1); const occurrence = links()[0].referenceId
   await act(async () => (host.querySelector('.note-link-lookup .note-link-option') as HTMLButtonElement).click())
   await vi.waitFor(() => expect(links()[0]?.target).toEqual({ noteId: 'target' }))
-  expect(links()[0].referenceId).toBe(occurrence); expect(open).toHaveBeenCalledWith(page, undefined)
+  expect(links()[0].referenceId).toBe(occurrence); expect(open).toHaveBeenCalledWith(page, undefined, expect.any(AbortSignal))
   expect(readNoteDocument(latest).status).toBe('valid'); expect(editor().getText()).toBe('Existing [[Shared knowledge]]')
 })
