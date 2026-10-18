@@ -16,7 +16,7 @@ import { composerDOM } from './helpers/composer-dom-fixture'
 const dom = composerDOM()
 const notificationSave = () => dom.container.querySelector<HTMLButtonElement>('.settings-pane-actions button')!
 async function changeMode(mode: NotificationModeId) {
-  const input = dom.container.querySelector<HTMLInputElement>('[aria-label="Notification dwell"]')!
+  const input = dom.container.querySelector<HTMLInputElement>('[aria-label="Desktop banner duration"]')!
   const index = NOTIFICATION_TIERS.findIndex((tier) => tier.id === mode)
   expect(index).toBeGreaterThan(-1)
   await act(async () => {
@@ -25,7 +25,7 @@ async function changeMode(mode: NotificationModeId) {
     input.dispatchEvent(new Event('change', { bubbles: true }))
   })
 }
-const modeValue = () => Number(dom.container.querySelector<HTMLInputElement>('[aria-label="Notification dwell"]')?.value)
+const modeValue = () => Number(dom.container.querySelector<HTMLInputElement>('[aria-label="Desktop banner duration"]')?.value)
 function toolbarInput(item: typeof BROWSER_TOOLBAR_ITEM_ORDER[number]) {
   const label = [...dom.container.querySelectorAll<HTMLLabelElement>('.browser-tools-preferences label')]
     .find((node) => node.textContent?.trim() === BROWSER_TOOLBAR_ITEM_LABELS[item])
