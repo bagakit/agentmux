@@ -661,7 +661,7 @@ export class DurableAgentMuxMessageQueue {
         WHERE i.recipient_id=? AND i.intent_sequence>? AND i.intent_sequence<=?
         ORDER BY i.intent_sequence LIMIT 101`).all(agentSessionId, after?.sequence ?? 0, through)
       const accepted = rows.slice(0, 100).map(row => JSON.parse(String(row.original)) as Extract<AgentInputWaitJournalRecord, { kind: 'input-intent' | 'input-submission' }>)
-      const items = accepted.flatMap(original => original.kind === 'input-intent' && original.intent.source.kind === 'prompt' && original.intent.source.authorHuman === true
+      const items = accepted.flatMap(original => original.kind === 'input-intent' && (original.intent.source.kind === 'message' || original.intent.source.kind === 'prompt' && original.intent.source.authorHuman === true)
         ? [{ ...this.input(original.intent.key)!, recordedAt: original.at }] : [])
       const more = rows.length > accepted.length
       return { cut: { queueId: this.queueId, incarnation, sequence: more ? accepted.at(-1)!.sequence : through }, items, more }
