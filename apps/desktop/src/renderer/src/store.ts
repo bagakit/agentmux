@@ -20,6 +20,7 @@ import { afterNoteComposition, hasNoteComposition, mergeLiveNote, setNoteComposi
 import { confirmNoteHistoryTarget, confirmDeletedNoteHistoryTarget, noteHistoryReadParams, noteResourceReadParams, type NoteHistoryRead, type NoteHistoryInspection, type NoteHistoryTarget } from './lib/note-history-target'
 import { restoredConnectorRoomIntents, type ConnectorRoomIntent } from './lib/connector-room-intent'
 import { restoredConnectorServiceIntents, type ConnectorServiceIntent } from './lib/connector-service-intent'
+import { mailboxNotificationIntentKey, mailboxNotificationSubject, restoredMailboxNotificationIntents, type MailboxNotificationIntent, type MailboxNotificationIntents, type MailboxNotificationFeedbackBySubject, type MailboxNotificationHistoryBySubject } from './lib/mailbox-notification-intent'
 import type { ConnectorServiceObservation } from './lib/connector-service-observation'
 import { restoredMoteConnectionSaveIntents, type MoteConnectionSaveIntent } from './lib/mote-connection-save-intent'
 import { defaultNoteCanvasLayout, mergeNoteCanvasLayout, noteCanvasScopeKey, restoreNoteCanvasLayouts, type NoteCanvasLayout, type NoteCanvasScope } from './lib/note-canvas-state'
@@ -906,6 +907,9 @@ export type AppState = {
   continuityControlIntents: ContinuityControlIntents
   conversationLandmarkIntents: ConversationLandmarkIntents
   connectorServiceIntents: Record<string, ConnectorServiceIntent>
+  mailboxNotificationIntents: MailboxNotificationIntents
+  mailboxNotificationFeedback: MailboxNotificationFeedbackBySubject
+  mailboxNotificationHistory: MailboxNotificationHistoryBySubject
   /** Current policy is an endpoint-scoped observation, never a durable preference or receipt. */
   connectorServiceObservation: ConnectorServiceObservation | null
   moteBotRequests: Record<string, MoteBotRequest>
@@ -3551,6 +3555,7 @@ type PersistedAppState = {
   continuityControlIntents?: ContinuityControlIntents
   conversationLandmarkIntents?: ConversationLandmarkIntents
   connectorServiceIntents?: Record<string, ConnectorServiceIntent>
+  mailboxNotificationIntents?: MailboxNotificationIntents
   moteBotRequests?: Record<string, MoteBotRequest>
   botTaskSelections?: BotTaskSelections
   moteConnectionSaveIntents?: Record<string, MoteConnectionSaveIntent>
@@ -3813,6 +3818,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     continuityControlIntents: state.continuityControlIntents,
     conversationLandmarkIntents: state.conversationLandmarkIntents,
     connectorServiceIntents: state.connectorServiceIntents,
+    mailboxNotificationIntents: state.mailboxNotificationIntents,
     moteBotRequests: state.moteBotRequests,
     botTaskSelections: state.botTaskSelections,
     moteConnectionSaveIntents: state.moteConnectionSaveIntents,
@@ -4190,6 +4196,17 @@ export async function retainConnectorServiceIntent(intent: ConnectorServiceInten
   const previous = useAppStore.getState().connectorServiceIntents[intent.input.operationId]
   if (previous && JSON.stringify(previous.input) !== JSON.stringify(parsed.input)) throw new Error('The original Connector service input cannot be replaced. Inspect that request separately.')
   useAppStore.setState(state => ({ connectorServiceIntents: { ...state.connectorServiceIntents, [parsed.input.operationId]: parsed } }))
+  return await saveWorkbenchSelection(false)
+}
+/** Keep the original notification identity before dispatch; Core alone owns the receipt. */
+export async function retainMailboxNotificationIntent(intent: MailboxNotificationIntent): Promise<AgentMuxSpatialSave> {
+  const subject = mailboxNotificationSubject(intent), key = mailboxNotificationIntentKey(intent)
+  const parsed = restoredMailboxNotificationIntents({ [subject]: { [key]: intent } })[subject]?.[key]
+  if (!parsed) throw new Error('The original notification target and operation are required.')
+  const previous = useAppStore.getState().mailboxNotificationIntents[subject]?.[key]
+  if (previous && JSON.stringify(previous) !== JSON.stringify(parsed)) throw new Error('Keep the original notification target and operation unchanged.')
+  useAppStore.setState(state => ({ mailboxNotificationIntents: { ...state.mailboxNotificationIntents,
+    [subject]: { ...state.mailboxNotificationIntents[subject], [key]: parsed } } }))
   return await saveWorkbenchSelection(false)
 }
 /** Save the exact client request before a Mote effect; receipts remain with the original public owner. */
@@ -4732,6 +4749,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   continuityControlIntents: {},
   conversationLandmarkIntents: {},
   connectorServiceIntents: {},
+  mailboxNotificationIntents: {},
+  mailboxNotificationFeedback: {},
+  mailboxNotificationHistory: {},
   connectorServiceObservation: null,
   moteBotRequests: {},
   botTaskSelections: {},
@@ -12179,7 +12199,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
     state.botTaskSelections = restoredBotTaskSelections(state.botTaskSelections)
-    return { ...state, workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
+    return { ...state, workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState

@@ -325,12 +325,23 @@
 .composer-mailbox__record-actions > .composer-tool:hover { background: var(--surface-3); }
 .composer-mailbox__action-feedback { order: 1; flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; color: var(--text-3); font-size: var(--fs-meta); text-align: end; }
 .composer-mailbox__notify { gap: var(--sp-1); white-space: nowrap; }
+.composer-mailbox__notification-controls, .composer-mailbox__notification-actions { display: contents; }
+.composer-mailbox__notification-actions > .composer-tool { display: inline-flex; align-items: center; gap: var(--sp-1); min-height: var(--sp-7); padding: var(--sp-1) var(--sp-2); }
+.composer-mailbox__record .composer-mailbox__notification-target { display: none; }
+.composer-mailbox__notification-target { max-width: 12em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); }
 .composer-mailbox__notification-feedback { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-1); }
 .composer-mailbox__notification-feedback details { min-width: 0; }
 .composer-mailbox__notification-feedback details[open] { flex-basis: 100%; order: 1; text-align: start; }
 .composer-mailbox__notification-feedback summary { cursor: pointer; }
 .composer-mailbox__notification-feedback p { margin: var(--sp-1) 0; }
-.composer-mailbox__notification-feedback > .composer-tool { display: inline-flex; min-width: 24px; min-height: 24px; padding: var(--sp-1); background: transparent; }
+.composer-mailbox__notification-feedback .composer-tool { display: inline-flex; align-items: center; gap: var(--sp-1); min-width: 24px; min-height: 24px; padding: var(--sp-1); background: transparent; }
+.composer-mailbox__notification-history { margin-top: var(--sp-2); }
+.composer-mailbox__notification-history section { padding: var(--sp-2) 0; border-top: 1px solid var(--border); }
+.composer-mailbox__notification-journal { max-width: 100%; color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.composer-mailbox__notification-journal summary { cursor: pointer; text-align: end; }
+.composer-mailbox__notification-journal p { margin: var(--sp-1) 0; }
+.composer-mailbox__notification-journal section { padding-block: var(--sp-2); border-top: 1px solid var(--border); }
+.composer-mailbox__notification-journal .composer-tool { padding: var(--sp-1); }
 .composer-mailbox__navigation-feedback, .composer-mailbox__pending-location { color: var(--text-3); font-size: var(--fs-meta); }
 .composer-mailbox__pending-location { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); }
 .composer-mailbox__row { width: 100%; display: grid; gap: var(--sp-1); padding: var(--sp-3); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); text-align: left; font-size: var(--fs-body); cursor: pointer; }
@@ -503,9 +514,9 @@
 .composer-mailbox .input-history__sources, .composer-mailbox .input-history__local { padding: var(--sp-2) var(--sp-3); }
 .composer-mailbox .input-history__local > summary { padding-block: var(--sp-1); }
 
-/* A transient result must wrap below the actions, never squeeze the recorded author. */
-.composer-mailbox__detail .log-turn__head:has(.composer-mailbox__action-feedback) > .log-turn__actions { grid-column: 1 / -1; grid-row: 2; display: flex; flex-wrap: wrap; justify-content: flex-end; min-width: 0; width: 100%; margin-inline-start: 0; }
-.composer-mailbox__detail .log-turn__head:has(.composer-mailbox__action-feedback) .conversation-input-details__body { grid-row: 3; }
+/* Notification controls and transient results wrap below the recorded author. */
+.composer-mailbox__detail .log-turn__head:has(.composer-mailbox__action-feedback, .composer-mailbox__notification-controls) > .log-turn__actions { grid-column: 1 / -1; grid-row: 2; display: flex; flex-wrap: wrap; justify-content: flex-end; min-width: 0; width: 100%; margin-inline-start: 0; }
+.composer-mailbox__detail .log-turn__head:has(.composer-mailbox__action-feedback, .composer-mailbox__notification-controls) .conversation-input-details__body { grid-row: 3; }
 
 .composer-mailbox__subject { margin-inline-start: auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-2); font-size: var(--fs-meta); }
 .composer-mailbox__reading-tools { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: 0 var(--sp-3) var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
