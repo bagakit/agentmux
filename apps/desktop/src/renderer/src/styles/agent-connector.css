@@ -1,19 +1,10 @@
-.agent-connector-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(470px, calc(100vw - 24px)); display: flex; flex-direction: column; max-height: calc(100dvh - 24px); overflow: hidden; }
+.agent-connector-dialog { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(540px, calc(100vw - 24px)); display: flex; flex-direction: column; max-height: calc(100dvh - 24px); overflow: hidden; }
 .agent-connector-dialog__header { flex: none; display: flex; align-items: flex-start; justify-content: space-between; gap: var(--sp-4); padding: var(--sp-5) var(--sp-6); border-bottom: 1px solid var(--line-soft); }
 .agent-connector-dialog__header > div { min-width: 0; }
 .agent-connector-dialog__header h2 { margin: 0; color: var(--text); font-size: var(--fs-title); font-weight: 600; line-height: 1.4; letter-spacing: -.015em; }
 .agent-connector-identity { display: flex; align-items: center; gap: var(--sp-2); margin: var(--sp-2) 0 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
 .agent-connector-identity > svg, .agent-connector-dialog__header > button { flex: none; }
-.agent-connector-description { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
 .agent-connector-dialog__body { display: flex; flex-direction: column; gap: var(--sp-5); min-height: 0; padding: var(--sp-5) var(--sp-6); overflow: auto; overflow-wrap: anywhere; }
-.agent-connector-pairing { display: grid; grid-template-columns: minmax(0, 96px) 18px minmax(0, 1fr); gap: var(--sp-5); align-items: center; padding: var(--sp-6) var(--sp-5); border-radius: var(--radius-sm); background: var(--surface-1); }
-.agent-connector-pairing__agent { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); min-width: 0; text-align: center; }
-.agent-connector-pairing__agent > strong { color: var(--text); font-size: var(--fs-title); font-weight: 600; line-height: 1.35; overflow-wrap: anywhere; }
-.agent-connector-pairing__agent > span:last-child { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.4; }
-.agent-connector-pairing__link { color: var(--text-3); }
-.agent-connector-pairing__group { display: grid; gap: var(--sp-3); min-width: 0; }
-.agent-connector-pairing__group > span { display: flex; align-items: center; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
-.agent-connector-pairing__group > input { width: 100%; min-width: 0; box-sizing: border-box; font-size: var(--fs-title); font-weight: 500; }
 .agent-connector-room-choice { display: grid; gap: var(--sp-3); min-width: 0; }
 .agent-connector-room-choice > .selection-field { width: 100%; min-width: 0; }
 .agent-connector-room-choice > .selection-field .selection-field__choice { min-width: 0; white-space: normal; }
@@ -31,12 +22,6 @@
 .agent-connector-source > strong { min-width: 0; margin-right: auto; font-weight: 500; color: var(--text-2); overflow-wrap: anywhere; }
 .agent-connector-source__change { flex: none; width: auto; min-height: 28px; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); background: transparent; font-size: var(--fs-meta); }
 .selection-field__menu.agent-connector-application-menu { width: min(360px, var(--radix-dropdown-menu-content-available-width)); }
-@media (max-width: 420px) {
-  .agent-connector-pairing { grid-template-columns: minmax(0, 1fr); justify-items: stretch; gap: var(--sp-4); }
-  .agent-connector-pairing__agent { display: grid; grid-template-columns: 32px minmax(0, 1fr); column-gap: var(--sp-4); text-align: left; justify-items: start; }
-  .agent-connector-pairing__agent > :first-child { grid-row: span 2; align-self: center; }
-  .agent-connector-pairing__link { justify-self: center; transform: rotate(90deg); }
-}
 .agent-connector-fields { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; margin: 0; padding: 0; border: 0; }
 .agent-connector-fields > button, .agent-connector-receipt > button { align-self: flex-start; }
 .agent-connector-fields h3, .agent-connector-fields legend { margin: 0; padding: 0; font-size: var(--fs-meta); font-weight: 600; color: var(--text); }
@@ -68,7 +53,6 @@
 .agent-connector-status strong { color: var(--text); font-size: var(--fs-body); font-weight: 500; }
 .agent-connector-status span { color: var(--text-3); font-size: var(--fs-meta); }
 .agent-connector-status > p { flex-basis: 100%; }
-.agent-connector-pairing__group > strong, .agent-connector-room-choice > .selection-field { font-size: var(--fs-title); }
 .connector-sharing__metadata { color: var(--text-3); }
 .connector-sharing__notice { max-width: 100%; padding-inline: 0; }
 .connector-sharing__error { margin: var(--sp-3) 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; user-select: text; }
@@ -79,3 +63,34 @@
 .agent-connector-menu__label { padding: var(--sp-3) var(--sp-4) var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); font-weight: 500; }
 
 .agent-connector-access-member { display: grid; justify-items: start; gap: var(--sp-2); min-width: 0; }
+
+.agent-connector-progress { display: grid; grid-template-columns: .85fr .85fr 1.2fr; gap: var(--sp-3); margin: 0; padding: 0 0 var(--sp-5); list-style: none; border-bottom: 1px solid var(--line-soft); }
+.agent-connector-progress li { display: flex; align-items: flex-start; gap: var(--sp-2); min-width: 0; color: var(--text-3); }
+.agent-connector-progress li > span:last-child { display: grid; gap: var(--sp-1); min-width: 0; }
+.agent-connector-progress strong { font-size: var(--fs-meta); font-weight: 500; line-height: 1.4; }
+.agent-connector-progress small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
+.agent-connector-progress__number { display: grid; place-items: center; flex: none; width: 23px; height: 23px; border: 1px solid var(--line); border-radius: 50%; font-size: var(--fs-meta); }
+.agent-connector-progress li[aria-current] { color: var(--text); }
+.agent-connector-progress li[aria-current] .agent-connector-progress__number { color: var(--green); border-color: var(--green); }
+.agent-connector-progress li[data-complete] .agent-connector-progress__number { color: var(--green); border-color: transparent; background: color-mix(in srgb, var(--green) 12%, transparent); }
+.agent-connector-task-heading { display: grid; gap: var(--sp-2); }
+.agent-connector-task-heading h3 { margin: 0; font-size: var(--fs-title); font-weight: 550; color: var(--text); line-height: 1.4; }
+.agent-connector-modes { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+.agent-connector-modes button { display: grid; gap: var(--sp-2); padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); color: var(--text-2); background: transparent; text-align: left; font: 500 var(--fs-body)/1.4 var(--font-sans); cursor: pointer; }
+.agent-connector-modes button span { font-size: var(--fs-micro); color: var(--text-3); font-weight: 400; }
+.agent-connector-modes button[aria-pressed=true] { border-color: color-mix(in srgb, var(--green) 55%, var(--line)); background: color-mix(in srgb, var(--green) 6%, var(--surface-1)); color: var(--text); }
+.agent-connector-modes button:hover:not(:disabled) { background: var(--surface-1); }
+.agent-connector-modes button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.agent-connector-group-selection { display: grid; gap: var(--sp-3); min-width: 0; }
+.agent-connector-group-selection__label { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.agent-connector-group-selection > input { width: 100%; min-width: 0; box-sizing: border-box; }
+.agent-connector-task { padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); }
+.agent-connector-task > h3 { font-size: var(--fs-body); }
+.agent-connector-dialog__footer .primary-button { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding-inline: var(--sp-5); }
+.agent-connector-dialog__body > .agent-connector-status { padding: var(--sp-4); border-left: 2px solid var(--green); background: var(--surface-1); }
+@media (max-width: 420px) {
+  .agent-connector-dialog__header, .agent-connector-dialog__body, .agent-connector-dialog__footer { padding-inline: var(--sp-4); }
+  .agent-connector-progress { gap: var(--sp-2); }
+  .agent-connector-progress li { flex-direction: column; }
+  .agent-connector-modes button { padding: var(--sp-3); }
+}
