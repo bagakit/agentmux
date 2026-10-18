@@ -29,6 +29,7 @@ import { conversationReplyPreview } from '../lib/conversation-reply-preview.js'
 import { ConversationToolPayload } from './ConversationToolPayload.js'
 import { ConversationSpeechCard, SubagentReportCard, SystemRecordCard } from './ConversationMessageCard.js'
 import { ConversationMessageDisclosure } from './ConversationMessageDisclosure.js'
+import { ChannelProfileAvatar } from './ChannelProfileAvatar.js'
 import type { ConversationTraceDisclosure } from '../lib/conversation-trace-disclosure.js'
 
 import { ConversationSubmissionMetadata } from './ConversationSubmissionMetadata.js'
@@ -212,7 +213,9 @@ export function ConversationMessage({
   const speaker = recordedSpeaker ? recordedIdentity ? recordedSpeaker : speakerForDisplay(recordedSpeaker) : undefined
   const isPeerAgent = speaker?.role === 'agent' && speaker.id.length > 0 &&
     conversationSessionId !== undefined && conversationSessionId.length > 0 && speaker.id !== conversationSessionId
-  const inputOrigin = inputSource ? describeConversationInputSource(inputSource) : undefined
+  const inputOrigin = speaker?.role === 'external' && speaker.external
+    ? { caption: `External channel · ${speaker.external.actor.application.domain}`, title: `Original external conversation: ${speaker.external.externalConversationId}` }
+    : inputSource ? describeConversationInputSource(inputSource) : undefined
   const isSystemContext = speaker?.role === 'system'
   const rawSystemSummary = isSystemContext ? parts.find(part => part.kind === 'text')?.text.slice(0, 240).replace(/\s+/gu, ' ').trim() : undefined
   const isIncoming = speaker?.role === 'human' || speaker?.role === 'external' || isPeerAgent
@@ -234,7 +237,8 @@ export function ConversationMessage({
   const isDeclaredSender = prefix !== null && prefix.sourceLabel.length > 0 && recordedSpeaker?.role === 'unknown'
   const agentReference = conversationAgentReference(recordedSpeaker, prefix)
   const recordedUnknown = recordedIdentity && recordedSpeaker?.role === 'unknown'
-  const described = agentReference && !recordedUnknown ? describeSpeaker?.(agentReference.speaker) : undefined
+  const described = speaker?.role === 'external' ? describeSpeaker?.(speaker)
+    : agentReference && !recordedUnknown ? describeSpeaker?.(agentReference.speaker) : undefined
   const referenceName = described?.name && described.name !== agentReference?.speaker.id ? described.name : undefined
   const senderName = referenceName ?? (agentReference?.declared ? prefix?.packet?.name : name && name !== agentReference?.speaker.id ? name : undefined) ?? 'Agent'
   const avatarSpeaker = recordedUnknown ? recordedSpeaker : agentReference?.speaker ?? (isDeclaredSender ? recordedSpeaker : speaker)
@@ -243,7 +247,7 @@ export function ConversationMessage({
     : providerId
   const displayName = recordedSpeaker?.role === 'unknown'
     ? recordedIdentity ? conversationEvent?.role === 'observation' ? '作者未记录' : 'Author unknown' : 'You'
-    : speaker?.role === 'external' ? externalSpeakerLabel(speaker)
+    : speaker?.role === 'external' ? described?.name ?? externalSpeakerLabel(speaker)
     : described?.name ?? name ?? (speaker?.role === 'human' ? 'You' : isPeerAgent ? speaker.id : isSystemContext ? 'AgentMux' : speaker ? 'Assistant' : 'Activity')
   const canAnnotate = onSelectAnnotation !== undefined && messageId.length > 0
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -309,7 +313,7 @@ export function ConversationMessage({
   const expandedTraces = controlledTraces ?? traceDisclosure?.expandedTraces
   const onToggleTrace = controlledToggle ?? traceDisclosure?.onToggleTrace
 
-  const showOrigin = Boolean(inputOrigin && !isSystemContext && !(sources?.submissions?.length && inputSource?.kind === 'native') && (showInputSource || inputSource?.kind === 'captured' && inputSource.device))
+  const showOrigin = Boolean(inputOrigin && !isSystemContext && !(sources?.submissions?.length && inputSource?.kind === 'native') && (speaker?.role === 'external' || showInputSource || inputSource?.kind === 'captured' && inputSource.device))
   const hasMetadata = Boolean(described?.project || isDeclaredSender || showOrigin || located ||
     prefix && prefix.sourceLabel.length > 0 && !isDeclaredSender || prefix?.packet && (!isDeclaredSender || !agentReference))
 
@@ -336,7 +340,8 @@ export function ConversationMessage({
 
   const metadataInDetails = detailsOnlyMetadata || continuation || Boolean(nativeCollaboration && !sources?.submissions?.length && !located)
   const card = {
-    avatar: parentAvatarSpeaker ? parentAvatar?.avatar ?? platform.renderMessageAvatar({ speaker: parentAvatarSpeaker, name: parentAvatar?.name ?? 'Agent', providerId: parentAvatar?.providerId ?? providerId, project: parentAvatar?.project }) : avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12),
+    avatar: described?.channelProfile?.profile?.avatarUrl ? <ChannelProfileAvatar url={described.channelProfile.profile.avatarUrl}>{platform.renderMessageAvatar({ speaker: avatarSpeaker!, name: displayName })}</ChannelProfileAvatar>
+      : parentAvatarSpeaker ? parentAvatar?.avatar ?? platform.renderMessageAvatar({ speaker: parentAvatarSpeaker, name: parentAvatar?.name ?? 'Agent', providerId: parentAvatar?.providerId ?? providerId, project: parentAvatar?.project }) : avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12),
     badges: <>
       {isPeerAgent && !detailsOnlyMetadata ? <span className="log-turn__sender-kind">Agent</span> : null}
       {recordTitle && !isSystemContext && !nativeCollaboration ? <span className="log-turn__sender-kind">{recordTitle}</span> : null}

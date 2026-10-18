@@ -36,6 +36,8 @@ export function ConversationInputDetails({ messageId, source, publicContent, exe
     setOpened({ identity, ...(details && details.sessionId === senderId ? { details } : {}) })
   }
   const details = open ? opened.details : undefined
+  const channelRead = open && speaker?.external ? describeSpeaker?.(speaker) : undefined
+  const channel = channelRead?.channelProfile
   return <div className="conversation-input-details">
     <button type="button" className="conversation-input-details__toggle" title="Message details" aria-label="Message details"
       aria-expanded={open} aria-controls={contentId} onClick={toggle}><SemanticIcon name="status.info" size={14} aria-hidden="true" /></button>
@@ -54,6 +56,8 @@ export function ConversationInputDetails({ messageId, source, publicContent, exe
           <dt>Sharing</dt><dd>Requires the original audience and sharing authorization</dd></>}
       </dl> : null}
       {speaker?.external ? <dl className="conversation-input-details__facts">
+        {channel ? <><dt>Current profile</dt><dd>{channel.profile?.name ?? 'Name not observed'} · {channelRead?.channelProfileReadIssue ? 'Saved · current read unconfirmed' : channel.freshness === 'current' ? 'Current' : channel.freshness === 'stale' ? 'Saved · refresh unconfirmed' : 'Not observed'}</dd></> : null}
+        {channelRead?.channelProfileReadIssue ? <><dt>Profile observation</dt><dd>{channelRead.channelProfileReadIssue}</dd></> : null}
         <dt>External application</dt><dd>{speaker.external.actor.application.domain} · {speaker.external.actor.application.appId}</dd>
         <dt>External actor</dt><dd>{speaker.external.actor.idType} · {speaker.external.actor.userId}</dd>
         <dt>External conversation</dt><dd>{speaker.external.externalConversationId}</dd>
