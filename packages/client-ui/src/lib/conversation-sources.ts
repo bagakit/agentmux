@@ -9,7 +9,7 @@ const capturedSources = {
   'terminal-output': { label: '终端输出观察', description: '从终端输出采集的观察内容。' },
   'run-process': { label: '进程观察', description: '原运行进程的观察记录。' },
   acp: { label: 'ACP', description: '通过 ACP 协议取得的记录。' },
-  user: { label: 'AgentMux 提交记录', description: 'AgentMux 保留的原输入提交事实；不单独证明原生采用。' },
+  user: { label: 'AgentMux 记录', description: 'AgentMux 保留的原内容记录；输入阶段与原生采用以对应原回执为准。' },
   agentmux: { label: 'AgentMux', description: 'AgentMux 自身记录的系统事实。' }
 } satisfies Record<AgentMuxEvidenceSource, { label: string; description: string }>
 
