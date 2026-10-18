@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { consumeConversationWindowPage, projectConversationWindow, conversationSourceKey, CONVERSATION_MAX_READ_BYTES, type ConversationWindowAssembly,
   type ConversationWindowSnapshot, type ConversationTimelineReadInput, type ConversationChangesInput,
@@ -66,7 +67,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
     try {
       if (reporting) recorder = createReadingDiagnosticRecorder({ ...ref, runId: reporting.runId ?? null, sourceHostId: null,
         owner: 'renderer', ownerInstanceId: reporting.ownerInstanceId, producerBuildId: reporting.producerBuildId,
-        consumerId: crypto.randomUUID(), consumerKind: reporting.consumerKind }, { publish: record => reporting.publish(record) })
+        consumerId: mintObjectId(), consumerKind: reporting.consumerKind }, { publish: record => reporting.publish(record) })
     } catch { /* Diagnostic setup cannot prevent the original reader from starting. */ }
     const note = (event: ConversationDiagnosticEvent) => recorder?.record(event)
     const flush = (trigger: 'progress' | 'held' | 'failure' | 'recovered' | 'release') => recorder?.flush(trigger)

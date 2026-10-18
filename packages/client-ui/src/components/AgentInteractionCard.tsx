@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { SemanticIcon } from '../theme/icons.js'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { agentInteractionRequestTarget } from '@agentmux/core/agent-interaction-state'
@@ -55,7 +56,7 @@ export function AgentInteractionCard({
       : response.outcome === 'answered' ? response.answers[0]?.optionId ?? null : null)
     setFailure(null)
     try {
-      operation.current ??= { operationId: crypto.randomUUID(), expectedRequest: structuredClone(request) }
+      operation.current ??= { operationId: mintObjectId(), expectedRequest: structuredClone(request) }
       const original = operation.current
       const result = await onRespond(response, original)
       if (operation.current !== original) return
