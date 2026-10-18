@@ -15,7 +15,7 @@ const object = (value: unknown, fields: string[]) => rpcRecord(value, fields, 'I
 function text(value: unknown): string { if (typeof value !== 'string' || !value.trim() || value.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(value)) fail(); return value as string }
 function integer(value: unknown, minimum: number): number { if (!Number.isSafeInteger(value) || Number(value) < minimum) fail(); return value as number }
 function reason(value: unknown, queue = false): ConnectionDeliveryReason {
-  if (!CONNECTION_DELIVERY_RECEIPT_REASONS.includes(value as ConnectionDeliveryReceiptReason) && !(queue && ['original-speech-withdrawn', 'private-content', 'public-content-unconfirmed', 'version-unavailable'].includes(String(value)))) fail()
+  if (!CONNECTION_DELIVERY_RECEIPT_REASONS.includes(value as ConnectionDeliveryReceiptReason) && !(queue && ['original-speech-withdrawn', 'outside-conversation-scope', 'private-content', 'public-content-unconfirmed', 'version-unavailable'].includes(String(value)))) fail()
   return value as ConnectionDeliveryReason
 }
 function mapping(value: unknown): ConnectionDeliveryMapping {

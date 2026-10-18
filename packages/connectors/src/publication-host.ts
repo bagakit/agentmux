@@ -5,7 +5,7 @@ import type { ConnectionHost } from './connection-host.js'
 import { parsePreparedPublication } from './publication-wire.js'
 import type { PublicationAdapter } from './publication-adapter.js'
 import { publicationImage, publicationFile, type ResourceUploadReceipt, type ResolvedPublicationPart } from './publication-resource.js'
-import { publicationPartKey } from './publication-content.js'
+import { isConversationPublicationPart, publicationPartKey } from './publication-content.js'
 import { PublicationStore, publicDelivery, type PublicationReceipt, type PublicationOperation } from './publication-store.js'
 
 /** Borrow original exact Core reads and the shared Provider observation. No transcript paths or second watcher. */
@@ -164,7 +164,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const record = unit.records.find(record => record.id === slot.recordId)!
       if (record.original.kind !== 'native' || record.reference!.source.kind !== 'native' || slot.selector.kind !== 'native-part') continue
       const item = record.original.item, part = item.contentParts[slot.selector.partIndex]!
-      if (part.contentEligibility !== 'public' || part.kind !== 'resource') continue
+      if (!isConversationPublicationPart(record, slot.selector, unit.event.author) || part.contentEligibility !== 'public' || part.kind !== 'resource') continue
       const deferred = part.resourceType === 'text' && part.content?.kind === 'resource'
       if (binding.scope.publication === 'future-shared-conversation' &&
         ((part.resourceType === 'image' || deferred) && adapter.images || (part.resourceType === 'file' || deferred) && adapter.files)) {
@@ -266,8 +266,8 @@ export class PublicationHost implements ConnectionDeliveryPort {
         return { state: 'unknown', reason: 'effect-unconfirmed' }
       }
       const frozen = JSON.stringify([original.projectionId, original.sourceRevision])
-      const relevant = qualified.has(frozen) ? [] : this.store.pendingNativeRecords(original)
-      if (!qualified.has(frozen) && ['speech', 'image', 'file'].includes(original.payload.kind) && original.effect === 'upsert' && (relevant.length || (original.sourceRecords ?? [original.reference]).some(record => record.source.kind === 'native'))) {
+      const relevant = qualified.has(frozen) ? [] : this.store.pendingRecords(original)
+      if (!qualified.has(frozen) && ['speech', 'image', 'file'].includes(original.payload.kind) && original.effect === 'upsert') {
         const reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
         try {
           for (const record of relevant) {
@@ -282,7 +282,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
               const consumed = consumeConversationWindowPage(page, pending)
               if (consumed.kind === 'complete') {
                 const unit = consumed.snapshot.units.find(unit => unit.records.some(value => conversationRecordId(value.reference!) === key))
-                if (!unit) throw Error('The exact pending native record is unavailable')
+                if (!unit) throw Error('The exact pending conversation record is unavailable')
                 accepted.set(key, { unit, frontier: page.window.checkpoint, resolved: await this.resolve(reference, [unit], signal, binding, adapter) }); complete = true; break
               }
               pending = consumed.pending

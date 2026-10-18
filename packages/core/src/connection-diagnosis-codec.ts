@@ -38,7 +38,7 @@ function scope(value: unknown) {
   const p = object(value, ['input', 'publication'])
   return { input: member(p.input, ['mentions-and-replies', 'all-messages'] as const), publication: member(p.publication, ['future-native-user-facing', 'future-shared-conversation'] as const) }
 }
-const deliveryReasons = ['effect-unconfirmed', 'platform-rejected', 'adapter-unavailable', 'platform-unavailable', 'rate-limited', 'thread-unavailable', 'unsupported-format', 'original-speech-withdrawn', 'private-content', 'public-content-unconfirmed', 'version-unavailable'] as const
+const deliveryReasons = ['effect-unconfirmed', 'platform-rejected', 'adapter-unavailable', 'platform-unavailable', 'rate-limited', 'thread-unavailable', 'unsupported-format', 'original-speech-withdrawn', 'outside-conversation-scope', 'private-content', 'public-content-unconfirmed', 'version-unavailable'] as const
 function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGroupDiagnosis {
   const p = object(value, ['target', 'window', 'limit', 'connection', 'binding', 'outgoing', 'incoming']), t = object(p.target, ['bindingId', 'bindingRevision', 'connectionId', 'domain', 'appId', 'externalConversationId', 'executionHostId', 'agentSessionId'])
   const target = { bindingId: id(t.bindingId), bindingRevision: count(t.bindingRevision, 1), connectionId: id(t.connectionId), domain: text(t.domain), appId: text(t.appId), externalConversationId: text(t.externalConversationId), executionHostId: id(t.executionHostId), agentSessionId: id(t.agentSessionId) }

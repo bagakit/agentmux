@@ -1,11 +1,10 @@
-import type { AgentSessionHistoryContentPart } from '@agentmux/core'
-import { conversationRecordAuthor, conversationRecordId, type ConversationCheckpoint, type ConversationContentRef, type ConversationUnit } from '@agentmux/core/conversation'
+import { conversationRecordAuthor, conversationRecordId, type ConversationSourceRecord, type ConversationCheckpoint, type ConversationContentRef, type ConversationUnit } from '@agentmux/core/conversation'
 import type { PublicationImage, PublicationFile, ResolvedPublicationPart } from './publication-resource.js'
 import type { ConnectionDeliveryGap, ConnectionDeliveryRelay, ConnectionOriginRepresentation, RoomBinding } from '@agentmux/core/connections'
 
 export type PublicationContentPlan = {
   text: string
-  pieces: Array<{ part: ConversationContentRef; text: string; image?: PublicationImage; file?: PublicationFile; contentEligibility?: 'public'; relay?: ConnectionDeliveryRelay['sources'][number] }>
+  pieces: Array<{ part: ConversationContentRef; text: string; image?: PublicationImage; file?: PublicationFile; contentEligibility?: 'public'; purpose?: 'conversation'; relay?: ConnectionDeliveryRelay['sources'][number] }>
   relay?: ConnectionDeliveryRelay
   phase?: 'progress' | 'final'
   gaps: ConnectionDeliveryGap[]
@@ -24,6 +23,26 @@ export const publicationPartKey = (part: Pick<ConversationContentRef, 'record' |
   return JSON.stringify([conversationRecordId(part.record), selector])
 }
 
+/** Original semantic purpose is independent of public eligibility and of resolved resource bytes. */
+export function isConversationPublicationPart(record: ConversationSourceRecord, selector: ConversationContentRef['selector'], author: ConversationUnit['event']['author']): boolean {
+  const { original } = record
+  if (original.kind === 'captured') {
+    const item = original.item
+    return selector.kind === 'captured-field' && selector.field === 'content' &&
+      (item.kind === 'user_message' || item.kind === 'assistant_message') &&
+      !item.a2aNotificationId && !(item.kind === 'user_message' && item.authorAgentSessionId)
+  }
+  const item = original.item
+  if (selector.kind !== 'native-part' || !['user-message', 'assistant-message'].includes(item.kind) ||
+    item.collaboration || item.conversation?.adoptedInput?.purpose === 'a2a-notification' || item.kind === 'user-message' && author.kind === 'agent') return false
+  const part = item.contentParts[selector.partIndex]
+  if (!part || part.contentRole === 'tool' || part.contentRole === 'reasoning') return false
+  // Typed question/answer projections can share their ordinary content without sending the raw tool envelope.
+  if (part.kind === 'tool-call') return item.questionRequest !== undefined
+  if (part.kind === 'tool-result') return !!item.questionAnswers?.length
+  return part.kind === 'text' || part.kind === 'resource' && (!part.content || part.content.kind === 'text' || part.content.kind === 'resource')
+}
+
 /** Platform representation only. Identity, role, author, order and relations are accepted Core facts. */
 export function publicationContent(unit: ConversationUnit, binding: RoomBinding, frontier: ConversationCheckpoint, options: PublicationContentOptions): PublicationContentPlan {
   const records = new Map(unit.records.map(record => [record.id, record])), gaps: ConnectionDeliveryGap[] = [], origins: ConnectionOriginRepresentation[] = [], excluded: ConversationContentRef[] = []
@@ -36,6 +55,7 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
     const original = record.original, key = publicationPartKey(part)
     if (options.selected && publicationPartKey(options.selected) !== key) continue
     if (narrow && (original.kind !== 'native' || !['message', 'interaction'].includes(unit.event.role) || unit.event.author.kind !== 'agent')) { excluded.push(part); continue }
+    if (!isConversationPublicationPart(record, slot.selector, unit.event.author)) { excluded.push(part); continue }
     const gap = (reason: ConnectionDeliveryGap['reason']) => gaps.push({ gapId: key, event, part,
       anchor: { record: part.record, revision: part.recordRevision, frontier }, reason })
     if (original.kind === 'captured') {
@@ -43,6 +63,9 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
       if (!start || start.kind !== 'captured' || record.order.kind !== 'captured-stream' || record.order.epoch !== start.epoch || record.order.firstSequence <= start.sequence) { gap('start-cut-unconfirmed'); continue }
     }
     if (original.kind === 'native') {
+      if (original.item.kind === 'user-message' && original.item.conversation?.adoptedInput && unit.event.author.kind === 'unknown') {
+        gap('public-content-unconfirmed'); continue
+      }
       const eligibility = slot.selector.kind === 'native-part' ? original.item.contentParts[slot.selector.partIndex]?.contentEligibility : undefined
       if (eligibility === 'private') { excluded.push(part); continue }
       if (eligibility !== 'public') { gap('public-content-unconfirmed'); continue }
@@ -67,13 +90,12 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
       if (narrow && body.kind !== 'text' && !(body.kind === 'resource' && body.content?.kind === 'text')) { excluded.push(part); continue }
       phase ??= original.item.messagePhase
       if ((body.kind === 'image-unavailable' || body.kind === 'file-unavailable')) { gap('resource-unavailable'); continue }
-      if (body.kind === 'image') { pieces.push({ part, text: '', image: body.image, contentEligibility: 'public' }); continue }
-      if (body.kind === 'file') { pieces.push({ part, text: '', file: body.file, contentEligibility: 'public' }); continue }
+      if (body.kind === 'image') { pieces.push({ part, text: '', image: body.image, contentEligibility: 'public', purpose: 'conversation' }); continue }
+      if (body.kind === 'file') { pieces.push({ part, text: '', file: body.file, contentEligibility: 'public', purpose: 'conversation' }); continue }
       switch (body.kind) {
         case 'text': value = body.text; break
-        case 'reasoning': value = body.redacted ? '[Reasoning redacted by original source]' : body.text; break
-        case 'tool-call': value = `${body.name}\n${body.input}`; break
-        case 'tool-result': value = `${body.name ?? 'Tool result'}${body.failed === undefined ? '' : body.failed ? ' · failed' : ' · recorded result'}\n${body.output}`; break
+        case 'tool-call': case 'tool-result': break // Only the typed question/answer below is shared.
+        case 'reasoning': excluded.push(part); continue
         case 'resource': gap(body.content && body.content.kind !== 'resource' ? 'resource-unavailable' : 'transport-unsupported'); continue
       }
       // Question projection describes these same original parts. Its prompt is
@@ -91,7 +113,6 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
       }
     } else if (original.kind === 'captured' && slot.selector.kind === 'captured-field') {
       value = original.item[slot.selector.field]
-      if (slot.selector.field !== 'content') value = `${slot.selector.field === 'toolInput' ? 'Tool input' : 'Tool output'}\n${value ?? ''}`
     }
     if (value !== undefined) {
       const author = original.kind === 'captured' && original.item.kind === 'user_message' && slot.selector.kind === 'captured-field' && slot.selector.field === 'content'
@@ -101,7 +122,7 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
         : narrow || unit.event.role === 'message' && unit.event.author.kind === 'agent' && slot.placement === 'body' ? ''
         : `[${unit.event.role} · ${source} · ${unit.event.author.kind}${original.kind === 'captured' ? ` · ${original.item.status}` : ''}${unit.event.role === 'message' ? ' · via amux' : ' · read-only'}]\n`
       const text = value ? label + value : ''
-      pieces.push({ part, text, ...(original.kind === 'native' ? { contentEligibility: 'public' as const } : {}), ...(author && author.kind !== 'system' ? { relay: { part, author } } : {}) })
+      pieces.push({ part, text, purpose: 'conversation', ...(original.kind === 'native' ? { contentEligibility: 'public' as const } : {}), ...(author && author.kind !== 'system' ? { relay: { part, author } } : {}) })
       if (text) sections.push(text)
     }
   }

@@ -39,7 +39,7 @@ export type ConnectionDeliveryReference = ConversationItemRef | { hostId: string
 
 export type ConnectionDeliveryState = 'pending' | 'dispatching' | 'unknown' | 'confirmed' | 'not-applied' | 'cancelled' | 'superseded'
 export type ConnectionDeliveryReceiptReason = 'effect-unconfirmed' | 'platform-rejected' | 'adapter-unavailable' | 'platform-unavailable' | 'rate-limited' | 'thread-unavailable' | 'unsupported-format'
-export type ConnectionDeliveryReason = ConnectionDeliveryReceiptReason | 'original-speech-withdrawn' | 'private-content' | 'public-content-unconfirmed' | 'version-unavailable'
+export type ConnectionDeliveryReason = ConnectionDeliveryReceiptReason | 'original-speech-withdrawn' | 'outside-conversation-scope' | 'private-content' | 'public-content-unconfirmed' | 'version-unavailable'
 export type ConnectionDeliveryMapping = { messageId: string; threadId?: string }
 /** Original platform outcome remains separate from the operation's current queue fate. */
 export type ConnectionDeliveryReceipt =
