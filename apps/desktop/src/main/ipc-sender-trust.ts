@@ -67,6 +67,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'schedule:resume': 'Agent arrangement',
   'schedule:cancel': 'Agent arrangement',
   'topics:call': 'Topic content',
+  'moteChat:call': 'Mote private chat',
   'motePreferences:read': 'Mote preferences',
   'motePreferences:save': 'Mote preference save',
   'moteAvatars:list': 'avatar sources',

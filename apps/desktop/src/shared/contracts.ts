@@ -1768,6 +1768,9 @@ export type AgentMuxDesktopApi = {
     openSystem(workspaceId: string, path: string): Promise<void>
     reveal(workspaceId: string, path: string): Promise<void>
   }
+  moteChat: {
+    call<M extends import('@agentmux/core/mote-chat').MoteChatMethod>(method: M, params: import('@agentmux/core/mote-chat').MoteChatParamsMap[M]): Promise<import('@agentmux/core/mote-chat').MoteChatResultMap[M]>
+  }
   moteConnections: {
     call<M extends import('@agentmux/core').MoteConnectionMethod>(method: M, params: import('@agentmux/core').MoteConnectionParamsMap[M]): Promise<import('@agentmux/core').MoteConnectionResultMap[M]>
   }

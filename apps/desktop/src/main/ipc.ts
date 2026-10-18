@@ -1,3 +1,5 @@
+import { createMoteChatAgents } from './mote-chat-agents.js'
+import { registerMoteChatIpc } from './mote-chat-ipc.js'
 import { ClientIncidentIpcOwner } from './client-incident-ipc.js'
 import { ClientIncidentRuntimeOwner } from './client-incident-runtime.js'
 import type { ClientIncidentArchive } from './client-incident-archive.js'
@@ -2333,9 +2335,14 @@ export async function registerIpc(args: {
   })
   const detach = args.runtime.attach(contents)
   const rpcHttp = agentMuxRpcHttpOptions()
+  const moteChatAgents = createMoteChatAgents({ config: () => config,
+    catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
+    topics: args.scratchTopics, clients: () => args.runtime.rpcClients(),
+    checkpoint: reference => createPublicationConversationPort(() => args.runtime.rpcClients()).checkpoint(reference, new AbortController().signal)
+  })
   const connectorServices = await createDesktopConnections({ directory: process.env.AGENTMUX_DESKTOP_USER_DATA === undefined
     ? join(homedir(), '.agentmux', 'connectors')
-    : join(app.getPath('userData'), 'connectors'), encryption: safeStorage,
+    : join(app.getPath('userData'), 'connectors'), encryption: safeStorage, moteChat: { agents: moteChatAgents, assertTarget: moteChatAgents.assertTarget, assertReady: moteChatAgents.assertReady },
     publication: createPublicationConversationPort(() => args.runtime.rpcClients()),
     ingress: { core: createHostedIngressCorePort(() => args.runtime.rpcClients()) },
     bindings: { spatial: spatialState, checkpoint: async (reference: import("@agentmux/core/conversation").ConversationRef) => {
@@ -2350,6 +2357,7 @@ export async function registerIpc(args: {
       workspace: id => config.workspaces.find(item => item.id === id),
       topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory) }) })
   registerConnectorIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), secrets: connectorServices.secrets })
+  registerMoteChatIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
   registerMoteConnectionIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
   registerMotePreferencesIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
   const control = new AgentMuxControlServer({
@@ -2357,6 +2365,7 @@ export async function registerIpc(args: {
     windows: args.workbenchWindows,
     connections: connectorServices.connections,
     moteConnections,
+    ...(connectorServices.moteChat ? { moteChat: connectorServices.moteChat } : {}),
     deliveryAttempts,
     ...(args.clientIncidents ? { clientIncidents: args.clientIncidents } : {}),
     moteContext: moteContextEvidencePort(deliveryAttempts.hostId, request => executeControl(request)),
