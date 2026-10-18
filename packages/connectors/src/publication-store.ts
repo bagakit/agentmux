@@ -1,3 +1,4 @@
+import { externalConversationAuthor, externalConversationRecordId } from '@agentmux/core'
 import { createHash } from 'node:crypto'
 import type { PublicationImage, PublicationFile, ResourceUploadReceipt, ResolvedPublicationPart } from './publication-resource.js'
 import { publicationContent, publicationPartKey, type PublicationContentPlan } from './publication-content.js'
