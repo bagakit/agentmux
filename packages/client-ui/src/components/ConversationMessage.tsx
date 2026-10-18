@@ -158,6 +158,18 @@ function partHasRenderableContent(part: AgentSessionHistoryContentPart): boolean
   return part.text.length > 0
 }
 
+function ConversationCollaborationOriginal({ parts, identity, hasResources }: {
+  parts: readonly AgentSessionHistoryContentPart[]
+  identity: object
+  hasResources: boolean
+}) {
+  return <details className="log-turn__collaboration-original">
+    <summary>{hasResources ? '原始记录与资源引用' : '原始记录'}</summary>
+    {hasResources ? <p>此处保留已加载记录与资源引用。使用消息的复制按钮可按需读取并复制完整原文。</p> : null}
+    <ConversationToolPayload text={parts.map(partText).join('\n\n')} identity={identity} sourceIdentity={identity} copyLabel={hasResources ? "Copy recorded parts and references" : "Copy original record"} />
+  </details>
+}
+
 /** A readable message, shared by Activity, native history and Gallery. The host owns identity
  * resolution, timeline ordering, file destinations and continuation; this component owns display. */
 export function ConversationMessage({
@@ -192,12 +204,8 @@ export function ConversationMessage({
   const parentAvatarSpeaker: ConversationSpeaker | undefined = nativeCollaboration && conversationSessionId
     ? { role: 'agent', id: conversationSessionId } : undefined
   const parentAvatar = parentAvatarSpeaker ? describeSpeaker?.(parentAvatarSpeaker) : undefined
-  const collaborationHasResources = nativeCollaboration && parts.some(part => part.kind === 'resource')
-  const collaborationOriginal = nativeCollaboration ? <details className="log-turn__collaboration-original">
-    <summary>{collaborationHasResources ? '原始记录与资源引用' : '原始记录'}</summary>
-    {collaborationHasResources ? <p>此处保留已加载记录与资源引用。使用消息的复制按钮可按需读取并复制完整原文。</p> : null}
-    <ConversationToolPayload text={parts.map(partText).join('\n\n')} identity={readingIdentity} sourceIdentity={readingIdentity} copyLabel={collaborationHasResources ? "Copy recorded parts and references" : "Copy original record"} />
-  </details> : null
+  const collaborationHasResources = nativeCollaboration ? parts.some(part => part.kind === 'resource') : false
+  const collaborationOriginal = nativeCollaboration ? <ConversationCollaborationOriginal parts={parts} identity={readingIdentity} hasResources={collaborationHasResources} /> : null
   const hasQuestionAnswers = Boolean(questionAnswers?.length)
   const firstTextIndex = parts.findIndex(part => part.kind === 'text')
   const contextPartIndex = parts.findIndex(part => part.kind === 'text' || part.kind === 'resource' && part.resourceType === 'text')
