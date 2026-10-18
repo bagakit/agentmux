@@ -65,6 +65,8 @@ export async function runMobile({BrowserWindow,setup,evidence,phase,scene,preloa
     await until('!!document.querySelector(".mobile-conversation [contenteditable=true]")&&!!document.querySelector("[data-native-record-id]")','original Surface records and Composer')
     await until('mobileReading.facts().session?.agentSessionId==='+JSON.stringify(mobile.agentSessionId),'original SID')
     const initial=await sample('initial')
+    const latestNativeId=await read(`[...document.querySelectorAll('.mobile-conversation__reading [data-native-record-id]')].at(-1)?.dataset.nativeRecordId`)
+    assert.equal(typeof latestNativeId,'string','The original current window exposes its latest native record')
     assert.equal(initial.facts.owner.runtimeId,mobile.runtimeId)
     if(phase==='restore')assert.equal(initial.editor,draft,'The second real process restores the original device draft without refilling')
     else {
@@ -101,22 +103,46 @@ export async function runMobile({BrowserWindow,setup,evidence,phase,scene,preloa
       await sample('earlier-'+demand)
     }
     await capture('earlier')
-    await read(`(()=>{const f=document.querySelector('.mobile-conversation__reading');const b=[...f.querySelectorAll('.log-turn__body')].find(n=>n.textContent.trim().length>14);if(!b)throw Error('No original readable body');b.scrollIntoView({block:'center'});const walker=document.createTreeWalker(b,NodeFilter.SHOW_TEXT);let t;while(t=walker.nextNode())if(t.textContent.trim().length>14)break;if(!t)throw Error('No original text');const range=document.createRange();range.setStart(t,0);range.setEnd(t,12);getSelection().removeAllRanges();getSelection().addRange(range);window.originalMobileSelection={node:t,body:b,text:getSelection().toString(),top:b.getBoundingClientRect().top}})()`)
+    const beforeCurrent=await read('({started:performance.now(),receiptCount:mobileReading.facts().conversationReads.length})')
+    await tap('.mobile-reading-latest')
+    const currentProgress=`(()=>{
+      const before=${JSON.stringify(beforeCurrent)},receipts=mobileReading.facts().conversationReads.slice(before.receiptCount);
+      const own=r=>r.hostId==='local'&&r.agentSessionId===${JSON.stringify(mobile.agentSessionId)};
+      const request=receipts.find(r=>own(r)&&r.method==='readAgentConversation'&&r.requestCursor===null&&r.started>=before.started);
+      if(!request)return null;
+      const frame=receipts.filter(r=>own(r)&&r.windowId===request.windowId&&r.revision===request.revision),complete=frame.find(r=>r.complete);
+      const presented=[...document.querySelectorAll('.mobile-conversation__reading [data-native-record-id]')].some(n=>n.dataset.nativeRecordId===${JSON.stringify(latestNativeId)});
+      return complete&&presented&&frame.some(r=>r.nativeIds.includes(${JSON.stringify(latestNativeId)}))?{windowId:request.windowId,revision:request.revision,requestCursor:request.requestCursor,complete:complete.complete,nativeCut:complete.nativeCut,originalId:${JSON.stringify(latestNativeId)}}:null;
+    })()`
+    await until(`!!${currentProgress}`,'the actual Current action completes its original latest read and presents the original current native record')
+    const current=await read(currentProgress)
+    result.operations.push({type:'current-readable',receipt:current})
+    await sample('current-before-selection')
+    await read(`(()=>{const f=document.querySelector('.mobile-conversation__reading');const b=[...f.querySelectorAll('.log-turn__body:not(.conversation-progressive-body__placeholder)')].find(n=>n.closest('[data-native-record-id]')&&n.textContent.trim().length>14);if(!b)throw Error('No original readable body');b.scrollIntoView({block:'center'});const walker=document.createTreeWalker(b,NodeFilter.SHOW_TEXT);let t;while(t=walker.nextNode())if(t.textContent.trim().length>14)break;if(!t)throw Error('No original text');const range=document.createRange();range.setStart(t,0);range.setEnd(t,12);getSelection().removeAllRanges();getSelection().addRange(range);window.originalMobileSelection={node:t,body:b,text:getSelection().toString()}})()`)
     await pause(100)
-    const selected=await read('({text:originalMobileSelection.text,top:originalMobileSelection.top})')
+    const selected=await read(`(()=>{const b=originalMobileSelection.body.getBoundingClientRect(),f=document.querySelector('.mobile-conversation__reading').getBoundingClientRect();return {text:originalMobileSelection.text,top:b.top,visible:b.bottom>f.top&&b.top<f.bottom}})()`)
+    assert.equal(selected.visible,true,'The live selection belongs to a visible original body')
     assert.equal(typeof appendDuringSelection,'function','The original source append is required')
     const before=await read('({started:performance.now(),nativeCut:mobileReading.facts().conversationReads.at(-1)?.nativeCut})')
     const {recordId}=await appendDuringSelection()
     assert.equal(typeof recordId,'string','The append returns its original source record identity')
-    await until(`mobileReading.facts().conversationReads.some(receipt=>receipt.finished>${before.started}&&receipt.agentSessionId===${JSON.stringify(mobile.agentSessionId)}&&receipt.nativeCut!==${JSON.stringify(before.nativeCut)}&&receipt.nativeIds.includes(${JSON.stringify(recordId)}))`,'the original Surface reader receives the appended source record and changed native cut')
-    const appendReceipt=await read(`mobileReading.facts().conversationReads.findLast(receipt=>receipt.nativeIds.includes(${JSON.stringify(recordId)}))`)
+    const appendProgress=`(()=>{
+      const receipts=mobileReading.facts().conversationReads,own=r=>r.hostId==='local'&&r.agentSessionId===${JSON.stringify(mobile.agentSessionId)};
+      const receipt=receipts.findLast(r=>own(r)&&r.finished>${before.started}&&r.windowId===${JSON.stringify(current.windowId)}&&r.nativeCut!==${JSON.stringify(before.nativeCut)}&&r.nativeIds.includes(${JSON.stringify(recordId)}));
+      const complete=receipt&&receipts.find(r=>own(r)&&r.windowId===receipt.windowId&&r.revision===receipt.revision&&r.complete);
+      return complete?{receipt,complete}:null;
+    })()`
+    await until(`!!${appendProgress}`,'the live original Surface reader completes the appended source frame with its exact record identity and changed native cut')
+    const {receipt:appendReceipt,complete:appendComplete}=await read(appendProgress)
     await sample('selection');await capture('selection')
     assert.equal(await read('getSelection().toString()'),selected.text)
     assert.equal(await read('originalMobileSelection.node.isConnected'),true)
     assert.equal(await read('originalMobileSelection.body.isConnected'),true)
     assert.ok(Math.abs(await read('originalMobileSelection.body.getBoundingClientRect().top')-selected.top)<=2,'The original selected Mobile anchor remains in place')
-    result.operations.push({type:'selection-retained',appendReceipt,originalNode:true,originalText:true,originalAnchor:true})
+    result.operations.push({type:'selection-retained',appendReceipt,appendComplete,appendedRecordId:recordId,priorNativeCut:before.nativeCut,originalNode:true,originalText:true,originalAnchor:true})
     await read('getSelection().removeAllRanges()')
+    await until(`[...document.querySelectorAll('.mobile-conversation__reading [data-native-record-id]')].some(n=>n.dataset.nativeRecordId===${JSON.stringify(recordId)})`,'the original appended native record is presented after the selection releases')
+    result.operations.push({type:'append-presented',recordId,windowId:appendReceipt.windowId,revision:appendReceipt.revision})
     const copy=await read(`(()=>{const b=originalMobileSelection.body.closest('[data-message-id]')?.querySelector('[aria-label="Copy message"]');if(!b)return false;b.dataset.mobileProofCopy='true';return true})()`)
     assert.equal(copy,true,'An actual original message exposes whole-body Copy')
     await tap('[data-mobile-proof-copy=true]')
@@ -124,7 +150,8 @@ export async function runMobile({BrowserWindow,setup,evidence,phase,scene,preloa
     const copied=await read('mobileReading.facts().copies.at(-1)');assert.ok(copied.includes(selected.text));result.operations.push({type:'copy',characters:copied.length,selectedOriginalIncluded:true,privateClipboardSink:true})
     const group=await read(`(()=>{const n=document.querySelector('.conversation-record-process .wf-head');if(!n)return false;n.dataset.mobileProofProcess='true';return true})()`)
     if(group){await tap('[data-mobile-proof-process=true]');await sample('expanded-process');await capture('expanded-process')}
-    await button('回到最新');await pause(100)
+    await tap('.mobile-reading-latest')
+    await until(`(()=>{const feed=document.querySelector('.mobile-conversation__reading');return feed.scrollHeight-feed.clientHeight-feed.scrollTop<=2})()`,'the actual Current action returns the accepted live window to its tail')
     await sample('returned-current');await capture('returned-current')
     await read('mobileReading.disconnect()')
     await until('mobileReading.facts().connection.state==="disconnected"')
@@ -141,7 +168,7 @@ export async function runMobile({BrowserWindow,setup,evidence,phase,scene,preloa
     assert.equal(final.facts.session.run.runId,initial.facts.session.run.runId,'Reconnection preserves the original Run')
     assert.equal(final.facts.reads.filter(e=>e.method==='runtime.invoke'&&['submitAgentPrompt','submitAgentInput','respondAgentInteraction','replySessionQuestion'].includes(e.params.invocation?.method)).length,0,'Reading and reconnecting never invent an input')
     result.passed=true
-  } catch(error){result.failure={name:error.name,message:error.message,stack:error.stack};result.failureText=await read('document.body.innerText').catch(()=>null);await capture('failure').catch(()=>{})}
+  } catch(error){result.failure={name:error.name,message:error.message,stack:error.stack};result.failureFacts=await read('mobileReading.facts()').catch(()=>null);result.failureText=await read('document.body.innerText').catch(()=>null);await capture('failure').catch(()=>{})}
   finally{await read('mobileReading.disconnect()').catch(()=>{});await dispose();ipcMain.removeHandler(channel);await win.webContents.session.flushStorageData();await writeFile(join(evidence,`${scene}-${phase}-mobile.json`),JSON.stringify(result,null,2));win.destroy()}
   assert.equal(result.passed,true,result.failure?.message)
   return result
