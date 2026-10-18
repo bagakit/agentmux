@@ -21,11 +21,11 @@ async function saveExecutors(executors: Record<string, AgentExecutorConfig>, exp
 export const agentsSettingsModule = {
   id: 'agents',
   group: 'agents',
-  title: 'Agents',
+  title: 'Agent CLIs',
   overviewShortcut: 2,
-  description: 'Reusable executors for your next agent session.',
+  description: 'Providers, CLI availability and launch configurations.',
   icon: ThemeObjectAgentIcon,
-  keywords: `${AGENT_PROVIDER_KEYWORDS} executor command args env installed provider`,
+  keywords: `${AGENT_PROVIDER_KEYWORDS} agent agents cli clis executor launch startup command args env installed provider`,
   savedSummary(config) {
     const count = Object.keys(config.executors).length
     return `${count} ${count === 1 ? 'executor' : 'executors'}`

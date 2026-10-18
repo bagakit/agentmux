@@ -64,15 +64,3 @@
   .settings-overview__entry, .settings-overview__shortcut, .settings-overview__entry > svg:last-child { transition: none; }
   .settings-overview__entry:is(:hover, :focus-visible) > svg:last-child { transform: none; }
 }
-
-.settings-overview__group[data-standalone] { grid-template-columns: minmax(0, 1fr); }
-.settings-overview__group[data-standalone] .settings-overview__entries { grid-template-columns: minmax(0, 1fr); }
-.settings-overview__group[data-standalone] .settings-overview__entry { grid-template-columns: 18px minmax(0, 1fr) auto 14px; }
-.settings-overview__group[data-standalone] .settings-overview__entry-label small { display: block; margin-top: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; }
-.settings-overview__group[data-standalone] .settings-overview__summary { grid-column: 3; grid-row: 1; }
-.settings-overview__group[data-standalone] .settings-overview__entry > svg:last-child { grid-column: 4; }
-@container settings-home (max-width: 380px) {
-  .settings-overview__group[data-standalone] .settings-overview__entry { grid-template-columns: 18px minmax(0, 1fr) 14px; }
-  .settings-overview__group[data-standalone] .settings-overview__summary { grid-column: 2; grid-row: 2; }
-  .settings-overview__group[data-standalone] .settings-overview__entry > svg:last-child { grid-column: 3; }
-}
