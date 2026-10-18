@@ -1,8 +1,10 @@
 import type { BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
-import { browserAgentEffectsCss } from '../shared/browser-agent-control.js'
+import { browserAgentEffectsCss, DEFAULT_BROWSER_AGENT_CONTROL } from '../shared/browser-agent-control.js'
+import type { WebContents } from 'electron'
+import { BROWSER_OPERATION_FEEDBACK_WORLD_ID } from './browser-operation-feedback.js'
 
 type ControlFeedback = {
-  revision: number; operationId: string; navigationId: string
+  revision: number; browserId: string; ownerId: string; navigationId: string
   active: boolean; deadline: number; css: string; blend: BrowserAgentControlPreferences['glowBlend']
 }
 
@@ -12,10 +14,10 @@ function applyControlFeedback(payload: ControlFeedback): boolean {
   const globals = globalThis as typeof globalThis & { [key: string]: any }
   const previous = globals[key]
   if (previous && previous.revision >= payload.revision) return false
-  if (!payload.active && previous && previous.operationId !== payload.operationId) return false
+  if (!payload.active && previous && previous.ownerId !== payload.ownerId) return false
   if (payload.active && Date.now() > payload.deadline) return false
   previous?.dispose()
-  const state: any = { revision: payload.revision, operationId: payload.operationId,
+  const state: any = { revision: payload.revision, browserId: payload.browserId, ownerId: payload.ownerId,
     navigationId: payload.navigationId, host: null, shadow: null, dispose: () => {} }
   globals[key] = state
   let observer: MutationObserver | undefined
@@ -30,7 +32,8 @@ function applyControlFeedback(payload: ControlFeedback): boolean {
   if (!root) return false
   const host = document.createElement('div')
   host.setAttribute('data-agentmux-browser-control-feedback', '')
-  host.setAttribute('data-operation-id', payload.operationId)
+  host.setAttribute('data-browser-id', payload.browserId)
+  host.setAttribute('data-owner-id', payload.ownerId)
   host.setAttribute('data-navigation-id', payload.navigationId)
   host.setAttribute('aria-hidden', 'true')
   // Blend the glow host against the actual page. Containment or a separate isolated
@@ -70,4 +73,59 @@ export function buildBrowserControlFeedbackScript(input: Omit<ControlFeedback, '
   preferences: BrowserAgentControlPreferences): string {
   const payload: ControlFeedback = { ...input, css: browserAgentEffectsCss(preferences), blend: preferences.glowBlend }
   return `(${applyControlFeedback.toString()})(${JSON.stringify(payload)})`
+}
+
+/** Decoration follows one exact native page incarnation, independently of its operations. */
+export class BrowserControlFeedback {
+  private signature = ''
+  private mayExist = false
+  private request = 0
+  private warned = false
+  constructor(private readonly input: {
+    contents: Pick<WebContents, 'executeJavaScriptInIsolatedWorld' | 'isDestroyed'>
+    browserId: string; ownerId: string; navigationId(): string
+    nextRevision(): number; isCurrent(): boolean; warn(): void
+    preferences?(): BrowserAgentControlPreferences
+  }) {}
+
+  private async publish(active: boolean, navigationId: string): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      const value = await Promise.race([
+        this.input.contents.executeJavaScriptInIsolatedWorld(BROWSER_OPERATION_FEEDBACK_WORLD_ID, [{ code:
+          buildBrowserControlFeedbackScript({ revision: this.input.nextRevision(), browserId: this.input.browserId,
+            ownerId: this.input.ownerId, navigationId, active, deadline: active ? Date.now() + 120 : 0 },
+          this.input.preferences?.() ?? DEFAULT_BROWSER_AGENT_CONTROL) }]),
+        new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('Control display deadline')), 120) })
+      ])
+      return !active || value !== false
+    } catch { return false } finally { clearTimeout(timer) }
+  }
+  private warn(): void {
+    if (!this.warned) { this.warned = true; try { this.input.warn() } catch { /* Decoration cannot disable the page. */ } }
+  }
+  async synchronize(force = false): Promise<void> {
+    if (this.input.contents.isDestroyed()) return
+    const active = this.input.isCurrent(), navigationId = this.input.navigationId()
+    const signature = JSON.stringify([active, navigationId, this.input.preferences?.() ?? DEFAULT_BROWSER_AGENT_CONTROL])
+    if (!force && this.signature === signature) return
+    this.signature = signature
+    if (active) this.mayExist = true
+    else if (!this.mayExist) return
+    const request = ++this.request
+    const ok = await this.publish(active, navigationId)
+    if (request !== this.request) return
+    if (!ok) { this.signature = ''; this.warn() }
+    if (ok && !active) this.mayExist = false
+  }
+  async hide(): Promise<void> {
+    if (!this.mayExist) return
+    const request = ++this.request
+    this.signature = ''
+    if (this.input.contents.isDestroyed()) return
+    const ok = await this.publish(false, this.input.navigationId())
+    if (request !== this.request) return
+    if (ok) this.mayExist = false
+    else this.warn()
+  }
 }

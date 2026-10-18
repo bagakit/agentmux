@@ -4,7 +4,6 @@ import type { BrowserPageNode } from '../shared/contracts.js'
 import type { BrowserCdpSender } from './browser-page-snapshot.js'
 import { BROWSER_OPERATION_FEEDBACK_WORLD_NAME } from '../../browser-extension/protocol.js'
 import { browserAgentEffectsCss, DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
-import { buildBrowserControlFeedbackScript } from './browser-control-feedback.js'
 export { BROWSER_OPERATION_FEEDBACK_WORLD_NAME }
 
 export const BROWSER_OPERATION_FEEDBACK_WORLD_ID = 1209
@@ -338,45 +337,10 @@ export class BrowserOperationFeedback {
   private warned = false
   private token = ''
   private navigationId = ''
-  private controlSignature = ''
-  private controlMayExist = false
-  private controlRequest = 0
   private avatarPng: string | undefined
   private clickedAction = -1
   constructor(private readonly input: FeedbackInput) {}
-  private async controlScript(code: string, active: boolean): Promise<boolean> {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    try {
-      const value = await Promise.race([
-        this.input.contents.executeJavaScriptInIsolatedWorld(BROWSER_OPERATION_FEEDBACK_WORLD_ID, [{ code }]),
-        new Promise<never>((_resolve, reject) => { timer = setTimeout(() => reject(new Error('Control display deadline')), DISPLAY_BUDGET_MS) })
-      ])
-      if (active && value === false) throw new Error('Control feedback was unavailable')
-      return true
-    } catch { return false } finally { clearTimeout(timer) }
-  }
-  private warnControl(): void {
-    if (!this.warned) { this.warned = true; try { this.input.warn() } catch { /* Decoration cannot disable the page. */ } }
-  }
-  /** Retained only for this exact operation; waiting is still an input ownership fact. */
-  async synchronizeControl(force = false): Promise<void> {
-    if (this.input.contents.isDestroyed()) return
-    const active = this.input.isCurrent(), navigationId = this.input.navigationId()
-    const preferences = this.input.preferences?.() ?? DEFAULT_BROWSER_AGENT_CONTROL
-    const signature = JSON.stringify([active, navigationId, preferences])
-    if (!force && this.controlSignature === signature) return
-    this.controlSignature = signature
-    if (active) this.controlMayExist = true
-    else if (!this.controlMayExist) return
-    const request = ++this.controlRequest
-    const ok = await this.controlScript(buildBrowserControlFeedbackScript({ revision: this.input.nextRevision(), operationId: this.input.operationId,
-      navigationId, active, deadline: Date.now() + DISPLAY_BUDGET_MS }, preferences), active)
-    if (request !== this.controlRequest) return
-    if (!ok) { this.controlSignature = ''; this.warnControl() }
-    if (ok && !active) this.controlMayExist = false
-  }
   async refreshPreferences(): Promise<void> {
-    await this.synchronizeControl()
     if (!this.current() || this.mode === 'clear') return
     await this.patch('preferences')
   }
@@ -392,18 +356,7 @@ export class BrowserOperationFeedback {
     await this.bounded(Promise.all([this.page(payload), ...(this.target ? [this.document(this.target, { ...payload, kind: 'target' })] : [])]), this.generation)
   }
   async hide(reason: FeedbackPayload['clearReason'] = 'invalidate'): Promise<void> {
-    await Promise.all([this.clear(reason), this.hideControl()])
-  }
-  private async hideControl(): Promise<void> {
-    if (!this.controlMayExist) return
-    const request = ++this.controlRequest
-    this.controlSignature = ''
-    if (this.input.contents.isDestroyed()) return
-    const ok = await this.controlScript(buildBrowserControlFeedbackScript({ revision: this.input.nextRevision(), operationId: this.input.operationId,
-      navigationId: this.input.navigationId(), active: false, deadline: 0 }, this.input.preferences?.() ?? DEFAULT_BROWSER_AGENT_CONTROL), false)
-    if (request !== this.controlRequest) return
-    if (ok) this.controlMayExist = false
-    else this.warnControl()
+    await this.clear(reason)
   }
   private current(): boolean { return this.input.isCurrent() && this.input.navigationId() === this.navigationId }
   private payload(phase: FeedbackPayload['phase'], kind: FeedbackPayload['kind'], deadline: number): FeedbackPayload {
@@ -498,12 +451,9 @@ export class BrowserOperationFeedback {
     this.clickedAction = action
     await this.bounded(this.document(this.target, this.payload('click', 'target', Date.now() + DISPLAY_BUDGET_MS)), action)
   }
-  async end(completed: boolean, retainControl = false): Promise<void> {
+  async end(completed: boolean): Promise<void> {
     if (completed) await this.completeAction()
     else await this.clear()
-    if (retainControl) {
-      if (this.controlMayExist) await this.synchronizeControl()
-    } else await this.hideControl()
   }
   /** Readonly calls revalidate the original cue, without stealing an in-flight action's generation. */
   async observe(): Promise<void> {
