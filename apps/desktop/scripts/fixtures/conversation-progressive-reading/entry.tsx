@@ -60,23 +60,34 @@ let olderCursor: string | undefined, nativeCut: string | undefined
 let released: { cursor: string; returned?: { id: string; revision: number } } | undefined
 let held: { cursor: string; received: boolean; release?: () => void } | undefined
 const reads: unknown[] = [], reader = createConversationReadApi(boundary.conversation)
+const pendingCalls = new Set<{ method: string; input: unknown; started: number }>()
 Object.assign(api.conversation, reader)
 for (const method of ['readAgentConversation', 'readConversationChanges'] as const) {
   api.conversation[method] = (async (input: any, options: any) => {
     const started = performance.now()
+    const pending = { method, input, started }; pendingCalls.add(pending)
     mark('read-start', { method, input })
-    const result = await (reader[method] as any)(input, options)
-    if (held && held.cursor === input.cursor) {
-      const hold = held; hold.received = true; mark('held-earlier-response')
-      await new Promise<void>(resolve => { hold.release = resolve })
-    }
-    const native = result.window?.checkpoint?.frontier?.cuts?.find((cut: any) => cut.kind === 'native')
-    if (native) nativeCut = native.checkpoint.cursor
-    if (result.window?.navigation?.older) olderCursor = result.window.navigation.older
-    mark('read-end', { method, input, window: result.window })
-    if (released && released.cursor === input.cursor) released.returned = { id: result.window.id, revision: result.window.revision }
-    reads.push({ method, started, ended: performance.now(), input, window: result.window, records: result.items?.length })
-    return result
+    try {
+      const result = await (reader[method] as any)(input, options)
+      if (held && held.cursor === input.cursor) {
+        const hold = held; hold.received = true; mark('held-earlier-response')
+        await new Promise<void>(resolve => { hold.release = resolve })
+      }
+      const native = result.window?.checkpoint?.frontier?.cuts?.find((cut: any) => cut.kind === 'native')
+      if (native) nativeCut = native.checkpoint.cursor
+      if (result.window?.navigation?.older) olderCursor = result.window.navigation.older
+      mark('read-end', { method, input, window: result.window })
+      if (released && released.cursor === input.cursor) released.returned = { id: result.window.id, revision: result.window.revision }
+      reads.push({ method, started, ended: performance.now(), input, window: result.window, records: result.items?.length })
+      return result
+    } finally { pendingCalls.delete(pending) }
+  }) as any
+}
+for (const method of ['observeConversation', 'releaseConversationView'] as const) {
+  api.conversation[method] = (async (...args: unknown[]) => {
+    const pending = { method, input: args[0], started: performance.now() }; pendingCalls.add(pending)
+    try { return await Reflect.apply(reader[method], reader, args) }
+    finally { pendingCalls.delete(pending) }
   }) as any
 }
 let ids = setup.ids
@@ -142,6 +153,7 @@ const feed = () => document.querySelector<HTMLElement>('[data-workbench-region-i
 const rows = () => Array.from(feed()?.querySelectorAll<HTMLElement>('[data-conversation-layout-key], [data-message-source-key]') ?? [])
 ;(window as any).readingProof = {
   ids, reads, metrics, errors, events, mark,
+  inFlightCalls() { return [...pendingCalls] },
   consumer() { return inspectConversationConsumers({ hostId: 'local', agentSessionId: ids.sessionId, expectedRunId: ids.runId }).consumers.find(item => item.location.regionId === 'reading-region') },
   nativeCut() { return nativeCut },
   appendDisposition(priorCut: string, recordId: string, allowHeld = true) {

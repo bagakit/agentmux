@@ -48,21 +48,27 @@ export async function exerciseIsolation({ runtime, core, store, config, privateR
     before = observed
     return { recordId: row.payload.id, observed }
   }
-  const settled = enabled => until(() => read(`(()=>{const c=readingProof.consumer();return c&&c.gates.enabled===${enabled}&&!c.inFlight&&!c.loading&&${enabled ? 'true' : '!c.watch.bound&&!c.watch.binding'}?c:null})()`), 'Original consumer settles in its actual visibility state')
+  const settled = enabled => until(() => read(`(()=>{const c=readingProof.consumer();return c&&c.gates.enabled===${enabled}&&!c.inFlight&&!c.loading&&!readingProof.inFlightCalls().length&&${enabled ? 'true' : '!c.watch.bound&&!c.watch.binding'}?c:null})()`), 'Original consumer and the explicit visibility action settle')
   const counts = () => read('({reads:readingProof.events.filter(e=>e.type==="read-start").length,heavyMounts:readingProof.metrics.heavyMounts.length})')
   const frameSample = () => read('new Promise(resolve=>{let n=0;function next(){if(++n===12)resolve(true);else requestAnimationFrame(next)}requestAnimationFrame(next)})')
+  const identity = consumer => ({ consumerId: consumer.consumerId, readingIdentity: consumer.readingIdentity,
+    accepted: consumer.accepted && { id: consumer.accepted.id, revision: consumer.accepted.revision, checkpoint: consumer.accepted.checkpoint }, watch: consumer.watch })
+  const settleAction = async enabled => { await settled(enabled); await frameSample(); return settled(enabled) }
   const sample = async name => {
+    const beforeConsumer = identity(await settled(name === 'visible'))
     const start = await counts(), source = await appendUnrelated(name)
     await frameSample()
+    const afterConsumer = identity(await settled(name === 'visible'))
     const end = await counts(), delta = { reads: end.reads - start.reads, heavyMounts: end.heavyMounts - start.heavyMounts }
     assert.deepEqual(delta, { reads: 0, heavyMounts: 0 }, 'Unrelated output adds no original reading or heavy presentation work')
-    return { before: start, after: end, delta, source }
+    assert.deepEqual(afterConsumer, beforeConsumer, 'Unrelated output cannot replace or invalidate the original reading consumer')
+    return { before: start, after: end, delta, source, consumer: { before: beforeConsumer, after: afterConsumer } }
   }
-  await settled(true); await frameSample()
+  await settleAction(true)
   const visible = await sample('visible')
   const anchor = await read(`(()=>{const feed=document.querySelector('.activity-feed'),bounds=feed.getBoundingClientRect();const leaf=[...feed.querySelectorAll('[data-native-record-id]')].find(n=>{const r=n.getBoundingClientRect();return r.height>0&&r.bottom>bounds.top&&r.top<bounds.bottom});if(!leaf)throw new Error('No visible original native leaf');window.isolationOriginal=leaf;return {id:leaf.dataset.nativeRecordId,top:leaf.getBoundingClientRect().top}})()`)
   await click('document.querySelector("[aria-label=\\"Show Terminal\\"]")')
-  const hiddenConsumer = await settled(false)
+  const hiddenConsumer = await settleAction(false)
   const hidden = await sample('hidden')
   await click('document.querySelector("[aria-label=\\"Show Activity\\"]")')
   await settled(true); await frameSample()
