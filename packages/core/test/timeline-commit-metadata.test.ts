@@ -6,7 +6,7 @@ import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore } from '
 import { AgentMuxClient } from '../src/client.js';
 import { AgentMuxClientEventPublisher } from '../src/client-event-publisher.js';
 import { applyAgentTimelineEvent } from '../src/session-timeline.js';
-import { conversationRevision } from '../src/conversation-timeline.js';
+import { conversationRevision } from '../src/conversation-stream.js';
 import type { AgentMuxClientEvent, AgentTimelineItem, AgentTimelineMutation, AgentTimelineSnapshot } from '../src/types.js';
 import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js';
 import { AgentMuxControlServer } from '../src/public-rpc-server.js';

@@ -7,7 +7,7 @@ const root = resolve(import.meta.dirname, '../../..')
 export default defineConfig({ ...original, cacheDir: '.cache/conversation-reading-cost', resolve: { alias: { '@agentmux/core/conversation': resolve(root, 'packages/core/src/conversation.ts') } }, plugins: [...original.plugins ?? [], {
   name: 'actual-conversation-work-counters', enforce: 'pre', transform(source, id) {
     const path = relative(root, id.split('?')[0]!)
-    if (!['packages/core/src/conversation-reader.ts','packages/core/src/conversation-timeline.ts'].includes(path)) return
+    if (!['packages/core/src/conversation-reader.ts','packages/core/src/conversation-stream.ts'].includes(path)) return
     let code = source
     const counter = (field: string) => `const probe = Reflect.get(globalThis, '__amuxConversationCost'); if (probe) probe.${field}++;`
     if (path.endsWith('conversation-reader.ts')) {
@@ -15,7 +15,7 @@ export default defineConfig({ ...original, cacheDir: '.cache/conversation-readin
       if ((source.match(new RegExp(target.source,'g')) ?? []).length !== 1) throw Error('Missing unique actual navigation owner')
       code = source.replace(target, head => head + '\n  ' + counter('navigationCalls'))
     }
-    if (path.endsWith('conversation-timeline.ts')) {
+    if (path.endsWith('conversation-stream.ts')) {
       const target = 'export function conversationRevision(value: unknown): string {'
       if (source.split(target).length !== 2) throw Error('Missing unique actual revision owner')
       code = source.replace(target, target + '\n  ' + counter('revisionCalls'))
@@ -30,7 +30,7 @@ export default defineConfig({ ...original, cacheDir: '.cache/conversation-readin
     let changed = false
     for (const edit of selected) if (path === edit[0]) { if (code.split(edit[1]).length !== 2) throw Error('Missing unique work counter mutation'); code = code.replace(edit[1],edit[2]); changed = true }
     const sha = (value:string) => createHash('sha256').update(value).digest('hex')
-    if (process.env.AGENTMUX_READING_COST_LOADED) appendFileSync(process.env.AGENTMUX_READING_COST_LOADED, JSON.stringify({ path, originalSHA256: sha(source), sha256: sha(code), counters: path.endsWith('conversation-reader.ts') || path.endsWith('conversation-timeline.ts'), mutation: changed ? mutation : null }) + '\n')
+    if (process.env.AGENTMUX_READING_COST_LOADED) appendFileSync(process.env.AGENTMUX_READING_COST_LOADED, JSON.stringify({ path, originalSHA256: sha(source), sha256: sha(code), counters: path.endsWith('conversation-reader.ts') || path.endsWith('conversation-stream.ts'), mutation: changed ? mutation : null }) + '\n')
     return code === source ? undefined : code
   }
 }], test: { ...original.test, include: ['packages/core/test/conversation-reading-cost.test.ts'], passWithNoTests: false, fileParallelism: false, testTimeout: 60000 } })
