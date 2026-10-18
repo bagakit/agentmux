@@ -18,6 +18,7 @@ import { api } from '../src/renderer/src/lib/api.js'
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices.js'
+import { currentNotificationRows, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
 
 const roots: string[] = []
 afterEach(async () => { vi.restoreAllMocks(); vi.useRealTimers(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
@@ -70,9 +71,9 @@ it('does not substitute configured files for an unconfirmed, nonpersistent, or m
 })
 it('keeps the original nonempty workbench observable when local storage qualification rejects', async () => {
   const tab = createWorkbenchTab('tab', { kind: 'agent', regionId: 'region', workspaceId: 'workspace', sessionId: 'session', phase: 'attached' })
-  const selection = { surface: 'space', mainSurface: 'workbench', space: null, goalId: null } as const
+  const selection = { surface: 'space', mainSurface: 'workbench', focusView: null, space: null, goalId: null } as const
   const workbench = desktopWorkbenchObservationSchema.parse({ loading: false, startupProgress: { step: 'layout' }, startupAgentAvailability: null, activeWorkspaceId: 'workspace', mainSurface: 'workbench',
-    desktop: { selection, ...readDesktopPresentation(selection, { [tab.id]: tab }), focus: { executionSessionId: 'session', pmoSessionId: null } },
+    desktop: { selection, ...readDesktopPresentation(selection, { [tab.id]: tab }), focus: { executionSessionId: 'session', pmoSessionId: null, agent: null } },
     focus: { executionSessionId: 'session', pmoSessionId: null }, layouts: {}, tabs: [{ id: 'tab', workspaceId: 'workspace', titleRegionId: 'region', layout: tab.layout,
       regions: [{ kind: 'agent', regionId: 'region', workspaceId: 'workspace', sessionId: 'session', phase: 'attached', processState: 'running', control: null }] }] })
   const renderer = { kind: 'bundled', id: 'a'.repeat(64), identity: { shell: 'private-shell', ctxmux: 'private-native' } } as const
@@ -143,7 +144,11 @@ it('keeps the real save service notice through workspace changes, another error 
   try {
     useAppStore.getState().reportWorkbenchSaveFailure(new Error('database missing'))
     await act(async () => root.render(createElement(GlobalSystemNotices)))
-    expect(element.querySelectorAll('.service-window__step')).not.toHaveLength(0)
+    await toggleNotificationCenter(element, 'open')
+    const notice = currentNotificationRows(element).find(row => row.textContent?.includes('Saving the workbench is unconfirmed'))!
+    expect(notice).toBeDefined()
+    await toggleNotificationDetails(notice)
+    expect(notice.querySelector('.service-window')?.getAttribute('role')).toBe('status')
     expect(element.textContent).toContain('Saving the workbench is unconfirmed')
     const first = useAppStore.getState().workbenchSaveWarning
     await act(async () => {
@@ -153,7 +158,10 @@ it('keeps the real save service notice through workspace changes, another error 
     })
     expect(useAppStore.getState().workbenchSaveWarning).toBe(first)
     expect(element.textContent).toContain('Saving the workbench is unconfirmed')
+    await toggleNotificationCenter(element, 'closed')
     expect(element.querySelector('.global-system-notices__details')?.getAttribute('data-state')).toBe('closed')
+    expect(useAppStore.getState().workbenchSaveWarning).toBe(first)
+    await toggleNotificationCenter(element, 'open')
     const retry = [...element.querySelectorAll('button')].find(button => button.textContent === 'Retry saving')
     expect(retry).toBeDefined()
     await act(async () => retry!.click())

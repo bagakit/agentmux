@@ -30,7 +30,7 @@ const observation: DesktopClientObservation = {
       input: { provenance: 'observed', scope: 'none', ownerKind: null, tabId: null, regionId: null, sessionId: null,
         connected: false, visible: false, inert: false },
       floating: { provenance: 'observed', state: 'closed', topicId: null, tabId: null, regionId: null, sessionId: null, presentation: 'hidden' },
-      overlays: { provenance: 'observed', settings: false, quickSwitcher: false }, focus: { executionSessionId: null, pmoSessionId: null }
+      overlays: { provenance: 'observed', settings: false, quickSwitcher: false }, focus: { executionSessionId: null, pmoSessionId: null, agent: null }
     },
     tabs: [{ id: 'tab', workspaceId: 'workspace', titleRegionId: 'file', layout: { root: { type: 'leaf', regionId: 'file' }, activeRegionId: 'file' },
       regions: [{ kind: 'file', regionId: 'file', workspaceId: 'workspace', path: _hygiene_fixturePath("private-file") }] }],

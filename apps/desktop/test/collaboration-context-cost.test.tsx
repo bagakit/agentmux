@@ -37,7 +37,7 @@ beforeEach(() => {
 
 it('keeps the full map world while bounding production contexts and reads to the visible and selected Agents', async () => {
   const heavy = vi.spyOn(contextOwner, 'agentContextForSession')
-  await dom.render(<AgentCollaborationMap request={{ kind: 'focus', subject, name: 'Scoped task' }} onOpen={() => { throw Error('Observation cannot navigate') }} />)
+  await dom.render(<AgentCollaborationMap request={{ kind: 'focus', subject, name: 'Scoped task' }} onViewInFocus={() => { throw Error("Reading cannot navigate") }} onOpen={() => { throw Error('Observation cannot navigate') }} />)
   const graph = () => document.querySelector<HTMLElement>('.collaboration-map')!
   await settleCollaborationCanvas(() => {
     expect(graph()?.querySelector('[aria-label="Map sources"]')?.getAttribute('title')).toContain('1 connections')
