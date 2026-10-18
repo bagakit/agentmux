@@ -238,7 +238,18 @@ app.whenReady().then(async () => {
       const selection=getSelection();selection.removeAllRanges();selection.addRange(range);
       window.readingSelectedNode=text;window.readingSelectedBody=body;window.readingSelectedTop=body.getBoundingClientRect().top;
       return {text:selection.toString(),top:window.readingSelectedTop,source:body.closest('[data-message-source-key]')?.dataset.messageSourceKey}; })()`)
-  const sample = async (name: string) => result.samples.push({ name, ...await read('({ui:readingProof.inspect(),reads:readingProof.reads.length,metrics:structuredClone(readingProof.metrics)})') })
+  const taskMetrics = async () => {
+    const { metrics } = await win.webContents.debugger.sendCommand('Performance.getMetrics')
+    const names = ['Timestamp', 'TaskDuration', 'ScriptDuration', 'LayoutDuration', 'RecalcStyleDuration', 'DevToolsCommandDuration']
+    const values = Object.fromEntries(metrics.filter((item: { name: string }) => names.includes(item.name))
+      .map((item: { name: string; value: number }) => [item.name, item.value]))
+    assert.ok(Number.isFinite(values.TaskDuration) && Number.isFinite(values.Timestamp), 'Original Renderer task timing is available')
+    return { timeDomain: 'timeTicks', values, unavailable: names.filter(name => !Object.hasOwn(values, name)),
+      boundary: 'Cumulative Renderer task occupancy in wall-clock seconds, including fixture reads and DevTools commands. Subcategories overlap; no overhead is subtracted.' }
+  }
+  const sample = async (name: string) => result.samples.push({ name,
+    ...await read('({at:performance.now(),ui:readingProof.inspect(),reads:readingProof.reads.length,metrics:structuredClone(readingProof.metrics)})'),
+    taskMetrics: await taskMetrics() })
   const runMobileOnce = async () => {
     if (scene === 'surfaces' || !mobileExercise || !result.mobileSetup || result.mobileAttempted) return
     result.mobileAttempted = true
@@ -289,6 +300,8 @@ app.whenReady().then(async () => {
     win.webContents.on('console-message', (_event, level, message) => { if (level >= 2) process.stderr.write(`Renderer: ${message}\n`) })
     await win.loadFile(html)
     win.webContents.debugger.attach('1.3')
+    await win.webContents.debugger.sendCommand('Performance.enable', { timeDomain: 'timeTicks' })
+    result.taskMetricsStart = await taskMetrics()
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
     await until(() => read('window.readingProof?.inspect().rows.length > 0 && readingProof.reads.length > 0'),
       'original App records after durable input preparation', phase === 'seed' ? 140000 : 20000)
@@ -380,6 +393,7 @@ app.whenReady().then(async () => {
     }
     }
     result.readingMetrics = await read('structuredClone(readingProof.metrics)')
+    result.taskMetrics = await taskMetrics()
     if (scene !== 'surfaces' && proofMode === 'acceptance') result.isolation = await exerciseIsolation({ runtime, core, store, config, privateRoot,
       phase, read, click, until, appendRow, scene, original: result.ids })
     win.setContentSize(820, 760)
