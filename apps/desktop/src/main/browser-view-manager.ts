@@ -63,7 +63,6 @@ import { BrowserRefLedgerStore } from './browser-ref-ledger-store.js'
 import {
   appLinkOutcome,
   appLinkRefusedMessage,
-  browserWindowOpenOutcome,
   classifyBrowserTarget,
   type AppLinkSchemeChoice
 } from './browser-app-link.js'
@@ -3517,21 +3516,23 @@ export class BrowserViewManager {
     contents.on('will-redirect', guardNavigation)
     // Application schemes keep their original handoff. For native website windows,
     // Electron finishes the original request using its complete child-creation options.
-    contents.setWindowOpenHandler(({ url }) => {
-      const outcome = browserWindowOpenOutcome(url, (target, scheme) => {
-        if (!this.owns(entry, view)) return
-        void this.handOffAppLink(entry, target, scheme)
-      })
-      if (outcome.action === 'deny') return outcome
+    {
       const storage = entry.storage
-      return { action: 'allow', createWindow: options => this.popupWindows.create(options, {
+      this.popupWindows.install(contents, {
         mode: storage.mode,
         onCreated: child => {
           if (this.owns(entry, view)) this.markResourceRisk(entry, view, 'document-used')
           if (storage.mode === 'private') this.trackPrivatePopup(entry.id, storage, child)
         }
-      }) }
-    })
+      }, (target, scheme) => {
+        if (!this.owns(entry, view)) return
+        void this.handOffAppLink(entry, target, scheme)
+      }, warning => {
+        if (!this.owns(entry, view)) return
+        entry.activity = { ...entry.activity, warning }
+        this.emit(entry)
+      })
+    }
     contents.on('devtools-opened', () => this.emitRetentionChange(entry))
     contents.on('devtools-closed', () => this.emitRetentionChange(entry))
     contents.on('media-started-playing', () => this.markResourceRisk(entry, view, 'media'))
