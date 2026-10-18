@@ -1,5 +1,6 @@
 .performance-popover:has(.toolkit-tui:not(.toolkit-tui--compact)) { width: min(760px, var(--toolkit-available-width, calc(100vw - 24px))); height: min(500px, var(--toolkit-available-height, calc(100vh - 48px))); min-width: min(360px, var(--toolkit-available-width, calc(100vw - 24px))); min-height: min(260px, var(--toolkit-available-height, calc(100vh - 48px))); max-width: var(--toolkit-available-width, calc(100vw - 24px)); max-height: var(--toolkit-available-height, calc(100vh - 48px)); resize: none; }
 .toolkit-tui { display: flex; flex-direction: column; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.toolkit-tui:not(.toolkit-tui--compact) { container-type: inline-size; }
 .toolkit-tui__status { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-3); padding: var(--sp-2) var(--sp-6) var(--sp-4); color: var(--text-2); font-size: var(--fs-meta); }
 .toolkit-tui__notices { padding: 0 var(--sp-6) var(--sp-3); max-height: 100px; overflow: auto; color: var(--amber-text); font-size: var(--fs-meta); }
 .toolkit-tui__notices p { margin: var(--sp-2) 0; overflow-wrap: anywhere; }
@@ -30,4 +31,4 @@
 .toolkit-popover-resize { position: absolute; top: 0; left: 0; z-index: 1; display: grid; place-items: start; width: 22px; height: 22px; padding: var(--sp-1); border: 0; background: transparent; color: var(--text-3); cursor: nwse-resize; touch-action: none; }
 .toolkit-popover-resize > svg { transform: rotate(180deg); }
 .toolkit-popover-resize:hover, .toolkit-popover-resize:focus-visible { color: var(--text); }
-@media (max-width: 800px) { .toolkit-tui__hint { display: none; } }
+@container (max-width: 600px) { .toolkit-tui__hint { display: none; } }
