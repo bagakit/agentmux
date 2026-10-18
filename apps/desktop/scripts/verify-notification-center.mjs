@@ -122,6 +122,10 @@ try {
     receipt.green = await test('candidate-green')
     assert.equal(receipt.green.code, 0, 'Candidate interactions must be green before mutation'); assert.equal(receipt.green.passed, receipt.green.total)
     const mutations = [
+      { name: 'popover-detached-from-bell', file: src + 'components/GlobalSystemNotices.tsx',
+        from: 'computePosition(trigger, details,',
+        to: "computePosition({ contextElement: trigger, getBoundingClientRect: () => document.querySelector('.agent-input-stack')!.getBoundingClientRect() }, details,",
+        expected: 'positions the original popover from its invoking bell' },
       { name: 'opening-marks-unseen-read', file: src + 'components/GlobalSystemNotices.tsx',
         from: "onToggle={(event) => { if (event.target === event.currentTarget) setOpen(event.newState === 'open') }}",
         to: "onToggle={(event) => { if (event.target === event.currentTarget) { setOpen(event.newState === 'open'); if (event.newState === 'open') { for (const inbox of inboxes) inbox.acknowledge(inbox.notices); eventInbox.acknowledge(events.map(event => event.id)) } } }}",
