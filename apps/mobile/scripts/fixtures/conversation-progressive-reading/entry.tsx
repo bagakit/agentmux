@@ -77,6 +77,7 @@ async function connect() {
     Reflect.set(client, method, async (...args: Parameters<typeof original>) => {
       const started = performance.now(), page = await Reflect.apply(original, client, args) as Awaited<ReturnType<typeof original>>
       conversationReads.push({ method, started, finished: performance.now(), hostId: page.hostId, agentSessionId: page.agentSessionId,
+        requestCursor: args[0].cursor ?? null, olderCursor: page.window.navigation.older ?? null,
         windowId: page.window.id, revision: page.window.revision, complete: page.window.complete,
         nativeCut: page.window.checkpoint.frontier.cuts.find(cut => cut.kind === 'native')?.checkpoint.cursor,
         nativeIds: page.items.flatMap(entry => entry.kind === 'item' ? entry.item.records.flatMap(record =>
