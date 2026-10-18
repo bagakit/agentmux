@@ -19,11 +19,11 @@ export const notificationsSettingsModule = {
   id: 'notifications',
   group: 'preferences',
   title: 'Notifications',
-  description: 'Choose when and how agents get your attention.',
+  description: 'Desktop banner duration and sound. In-app issues and Focus requests stay available.',
   icon: ThemeObjectNotificationsIcon,
   keywords: 'notification alert attention dwell duration banner needs you done error until dismiss sound audio silent mute chime',
   searchTargets: [
-    { id: 'notification-dwell', title: 'How long it stays', keywords: 'notification dwell banner attention duration dismiss' },
+    { id: 'notification-dwell', title: 'Desktop banner duration', keywords: 'notification dwell banner attention duration dismiss' },
     { id: 'notification-sound', title: 'Sound', keywords: 'system notification audio silent mute' },
   ],
   savedSummary(config) {

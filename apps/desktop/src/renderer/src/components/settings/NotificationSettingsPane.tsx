@@ -59,21 +59,22 @@ export function NotificationSettingsPane({ notifications, onSave }: {
 
   return (
     <div className="settings-pane-stack settings-notifications">
-      <figure className="notification-preview" aria-label="Notification preview" data-notification-mode={mode}>
-        <figcaption><span>Example notification</span><span>{modeDraft.dirty || soundDraft.dirty ? 'Unsaved preview' : 'Saved settings'}</span></figcaption>
+      <p className="settings-hint">Desktop banners appear outside AgentMux when a background Agent finishes, needs your input or fails. These settings control their duration and sound. Current issues in the notification center and requests in Focus stay available when banners are off. Agent message alerts follow your A2A preference.</p>
+      <figure className="notification-preview" aria-label="Desktop banner preview" data-notification-mode={mode}>
+        <figcaption><span>Example desktop banner</span><span>{modeDraft.dirty || soundDraft.dirty ? 'Unsaved preview' : 'Saved settings'}</span></figcaption>
         <div className="notification-preview__sample">
-        <div className="notification-preview__chrome"><b>AgentMux</b><span>{mode === 'off' ? 'Notifications off' : active.label}</span></div>
+        <div className="notification-preview__chrome"><b>AgentMux</b><span>{mode === 'off' ? 'Desktop banners off' : active.label}</span></div>
         <div className="notification-preview__title">
           <span className="status status--waiting" aria-hidden="true"><span className="status__dot" /></span>
-          Review Codex — Needs you
+          Review Agent — Needs you
         </div>
-        <p className="notification-preview__body">Review Codex: Ready for your call on the migration plan.</p>
+        <p className="notification-preview__body">Review Agent: Ready for your call on the migration plan.</p>
         <div className="notification-preview__dwell" data-persist={persist ? 'true' : undefined} style={{ '--dwell-fill': dwellFill } as CSSProperties}><i /></div>
         </div>
-        <p className="notification-preview__context">{mode === 'off' ? 'No banners are shown. The example stays here to help you choose a duration.' : 'When an agent finishes, needs you or runs into trouble while you are elsewhere.'}</p>
+        <p className="notification-preview__context">{mode === 'off' ? 'Agent status banners are off. Current issues and Focus requests remain available in AgentMux.' : 'When an agent finishes, needs you or runs into trouble while you are elsewhere.'}</p>
       </figure>
       <section className="settings-group" data-settings-field="notification-dwell">
-        <header><span>How long it stays</span><small>{active.label}</small></header>
+        <header><span>Desktop banner duration</span><small>{active.label}</small></header>
         <div className="notification-dwell" style={{ '--notification-stops': NOTIFICATION_TIERS.length } as CSSProperties}>
           <input
             className="notification-dwell__slider"
@@ -82,7 +83,7 @@ export function NotificationSettingsPane({ notifications, onSave }: {
             max={NOTIFICATION_TIERS.length - 1}
             step={1}
             value={index < 0 ? 0 : index}
-            aria-label="Notification dwell"
+            aria-label="Desktop banner duration"
             aria-valuetext={active.label}
             list={stopsId}
             onChange={(event) => setMode(NOTIFICATION_TIERS[Number(event.target.value)]!.id)}
@@ -113,7 +114,7 @@ export function NotificationSettingsPane({ notifications, onSave }: {
           />
           <span>
             <strong>Play the system notification sound</strong>
-            <small>Uses your system notification sound. Silent by default.{soundApplies ? '' : ' Unavailable while notifications are off.'}</small>
+            <small>Uses your system notification sound. Silent by default.{soundApplies ? '' : ' Unavailable while desktop banners are off.'}</small>
           </span>
         </label>
       </section>

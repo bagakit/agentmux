@@ -125,6 +125,7 @@ export { executorDetectionKey } from './lib/executor-detection'
 import { executorsForHost, hostExecutorInventoryMatches } from './lib/executors'
 import { lifecycleFeedbackOwnerKey, type AgentLifecycleFailure, type AgentLifecycleFeedbackOwner } from './lib/agent-lifecycle-feedback'
 import { compactNotificationIdentity, ownedNotificationIdentity, normalizeNotificationReadReceipts } from './lib/notification-read-identity'
+import { notificationDeliveryNotice } from './lib/notification-delivery-notice'
 import { persist } from 'zustand/middleware'
 import { restoredSurveyCollection, restoredSurveyZoneSelection, persistedSurveyZoneSelection, surveyCollectionAfterClose, surveySelectionAfterClose, surveySelectionAfterPromote, type SurveyZoneSelection, type PersistedSurveyZoneSelection } from './lib/survey-workface'
 import { shallow } from 'zustand/shallow'
@@ -469,12 +470,22 @@ export type HostExecutorInventoryState = {
   observedAt?: number
 }
 
+/** Original client object identity; labels and current focus never identify an event's target. */
+export type NotificationEventObject = {
+  kind: 'application' | 'host' | 'workspace' | 'document' | 'browser' | 'tab-group' | 'tab' | 'region' | 'zone'
+  id: string
+  hostId?: string
+  workspaceId?: string
+}
+
 /** Attributes supplied by the original error producer, never a second Agent status record. */
 export type ErrorNoticeContext = {
   kind: ServiceNoticeKind
   /** Explicit presentation from the diagnostic producer; the complete error remains authoritative. */
   summary?: string
   subject?: SessionControl
+  /** Same key means the same original occurrence. New operations/recurrences supply a new key. */
+  event?: { source: string; key: string; object?: NotificationEventObject }
   /** An exact absent-main diagnostic may settle from this Session's later confirmed binding. */
   cause?: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED'
   lifecycle?: AgentLifecycleFailure
@@ -489,7 +500,15 @@ export type ErrorNoticeContext = {
 }
 
 /** Window-local notifications: source-owned current failures and ordinary event history. */
-export type NotificationEvent = { id: string; message: string; context: ErrorNoticeContext | null }
+export type NotificationEvent = {
+  id: string
+  message: string
+  context: ErrorNoticeContext | null
+  /** Client receipt times, not the underlying failure's occurrence time. */
+  firstObservedAt?: number
+  lastObservedAt?: number
+  occurrences?: number
+}
 
 export function notificationSourceOwner(context: ErrorNoticeContext | null | undefined): string | undefined {
   const failure = context?.lifecycle
@@ -503,6 +522,11 @@ export function notificationEventIdentity(message: string, context: ErrorNoticeC
   const owner = notificationSourceOwner(context)
   if (owner) return ownedNotificationIdentity(owner, context?.kind ?? 'indeterminate', errorIdentity(message))
   const subject = context?.subject
+  const event = context?.event
+  if (event) return compactNotificationIdentity(JSON.stringify(['event', event.source, event.key,
+    event.object?.kind, event.object?.id, event.object?.hostId, event.object?.workspaceId,
+    subject?.hostId, subject?.kind, subject?.kind === 'agent' ? subject.agentSessionId : undefined,
+    subject?.run.runId, context.kind]))
   return compactNotificationIdentity(JSON.stringify([context?.kind ?? 'indeterminate', context?.cause,
     subject?.hostId, subject?.kind, subject?.kind === 'agent' ? subject.agentSessionId : undefined,
     subject?.run.runId, context?.lifecycle, context?.startupSessionSnapshot?.sessionIds,
@@ -4961,16 +4985,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const pendingBrowserEvents: BrowserEvent[] = []
     let booting = true
     let observing = true
-    let a2aUnsupportedReported = false, a2aDowngradeReported = false
     const a2aNotifications = createA2AMessageNotifier(async input => {
       const delivery = await api.ui.notifyAgentAttention(input)
-      if (delivery.status === 'unsupported' && !a2aUnsupportedReported) {
-        a2aUnsupportedReported = true
-        get().reportError(new Error(`Agent message notifications are unavailable: ${delivery.reason}`))
-      } else if (delivery.status === 'shown' && delivery.presentation === 'downgraded' && !a2aDowngradeReported) {
-        a2aDowngradeReported = true
-        get().reportError(new Error('This platform cannot keep an Agent message notification open until dismissed; it was shown as a normal banner.'))
-      }
+      const notice = notificationDeliveryNotice(delivery)
+      if (notice) get().reportError(notice.message, notice.context)
     })
     const visibleA2ARecipients = createVisibleSessionIdsSelector()
     const availabilityEpoch = ++startupAvailabilityEpoch
@@ -6790,7 +6808,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       ? activateLayoutTab(layout, targetTabGroupId, tabId)
       : addTabPlacement(layout, targetTabGroupId, tabId)
     if (!nextLayout) {
-      get().reportError(new Error('The Tab Group is no longer available'))
+      get().reportError(new Error('The Tab Group is no longer available'), { kind: 'indeterminate', subject: session.control,
+        event: { source: 'spatial', key: crypto.randomUUID(), object: { kind: 'tab-group', id: targetTabGroupId, workspaceId: workspace.id } } })
       return false
     }
     const next = { ...get(), tabs: { ...get().tabs, [tab.id]: tab }, layouts: { ...get().layouts, [workspace.id]: nextLayout } }
@@ -6842,12 +6861,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const displayId = displayWorkspaceId ?? workspaceId
     const layout = state.layouts[displayId]
     if (!layout) {
-      get().reportError(new Error('The Workspace layout is still restoring'))
+      get().reportError(new Error('The Workspace layout is still restoring'), { kind: 'indeterminate',
+        event: { source: 'spatial', key: crypto.randomUUID(), object: { kind: 'workspace', id: displayId } } })
       return
     }
     const targetTabGroupId = tabGroupId ?? layout.activeGroupId
     if (!groupIds(layout.root).includes(targetTabGroupId) || !findGroup(layout, targetTabGroupId)) {
-      get().reportError(new Error('The exact display Tab Group is no longer available'))
+      get().reportError(new Error('The exact display Tab Group is no longer available'), { kind: 'indeterminate',
+        event: { source: 'spatial', key: crypto.randomUUID(), object: { kind: 'tab-group', id: targetTabGroupId, workspaceId: displayId } } })
       return
     }
     let space: WorkbenchTab['space']
@@ -6857,7 +6878,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const catalog = spatialCatalog(state, topics)
       const zone = catalog.zones.find(zone => zone.zoneId === zoneId)
       if (!zone || zone.workspaceId !== workspaceId || zone.kind === 'unknown') {
-        get().reportError(new Error('The exact Zone resource context is unavailable. Its original reference is retained.'))
+        get().reportError(new Error('The exact Zone resource context is unavailable. Its original reference is retained.'), { kind: 'indeterminate',
+          event: { source: 'spatial', key: crypto.randomUUID(), object: { kind: 'zone', id: zoneId, workspaceId } } })
         return
       }
       try {
@@ -6882,7 +6904,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // Placement failure is visible without leaving an orphan View or throwing from a UI handler.
     const nextLayout = addTabPlacement(layout, targetTabGroupId, tab.id)
     if (!nextLayout) {
-      get().reportError(new Error('The Tab Group is no longer available'))
+      get().reportError(new Error('The Tab Group is no longer available'), { kind: 'indeterminate',
+        event: { source: 'spatial', key: crypto.randomUUID(), object: { kind: 'tab-group', id: targetTabGroupId, workspaceId: displayId } } })
       return
     }
     let selectedObject = state.workbenchSpaceSelection
@@ -7053,7 +7076,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const projected = workbenchObjectLayout(current, workspaceId).layout
     const visibleGroup = projected?.groups.find(group => group.id === targetPaneId)
     const storedGroup = layout.groups.find(group => group.id === targetPaneId)
-    if (!visibleGroup || !storedGroup) { current.reportError(new Error('The selected object Group is unconfirmed. Original Tabs are kept.'), { kind: 'indeterminate' }); return }
+    if (!visibleGroup || !storedGroup) { current.reportError(new Error('The selected object Group is unconfirmed. Original Tabs are kept.'), { kind: 'indeterminate',
+      event: { source: 'spatial', key: crypto.randomUUID(), object: { kind: 'tab-group', id: targetPaneId, workspaceId } } }); return }
     const anchor = visibleGroup.tabOrder[visibleTargetIndex]
     const storedIndex = anchor ? storedGroup.tabOrder.indexOf(anchor) : storedGroup.tabOrder.length
     set((state) => ({
@@ -7476,7 +7500,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const layout = state.layouts[workspaceId] ?? createWorkspaceLayout(newTabGroupId())
     const groupId = tabGroupForTab(layout, tabId) ?? layout.activeGroupId
     const nextLayout = existing ? activateLayoutTab(layout, groupId, tabId) : addTabPlacement(layout, groupId, tabId)
-    if (!nextLayout) { get().reportError(new Error('The Tab Group is no longer available')); return }
+    if (!nextLayout) { get().reportError(new Error('The Tab Group is no longer available'), { kind: 'indeterminate',
+      event: { source: 'spatial', key: crypto.randomUUID(), object: { kind: 'tab-group', id: groupId, workspaceId } } }); return }
     const tab = existing
       ? focusWorkbenchTabRegion(existing.tab, existing.surface.regionId)
       : createWorkbenchTab(tabId, { kind: 'git-diff', regionId: newRegionId(), workspaceId, comparison })
@@ -12037,10 +12062,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   },
   reportError(error, context) {
     const message = presentError(error)
+    // Without an original producer or exact subject, identical prose is not proof of one failure.
+    // Mint once at intake and keep that receipt on both the latest error and its history record.
+    if (!context?.event && !context?.subject && !context?.lifecycle && !context?.startupSessionSnapshot && !context?.startupProviderCatalog) {
+      context = { kind: 'indeterminate', ...context, event: { source: 'operation', key: crypto.randomUUID() } }
+    }
+    const observedAt = Date.now()
+    const observedRecord = (id: string, prior?: NotificationEvent): NotificationEvent => {
+      const firstObservedAt = prior?.id === id ? prior.firstObservedAt : observedAt
+      return { id, message, context: context ?? null,
+        ...(firstObservedAt === undefined ? {} : { firstObservedAt }), lastObservedAt: observedAt,
+        occurrences: prior?.id === id ? (prior.occurrences ?? 1) + 1 : 1 }
+    }
     const owner = notificationSourceOwner(context)
     if (owner) {
       const current = get(), prior = projectNotifications(current.notificationEvents).owners.get(owner)
-      const record: NotificationEvent = { id: notificationEventIdentity(message, context), message, context: context! }
+      const record = observedRecord(notificationEventIdentity(message, context), prior)
       // The failed operation owns this current record. Unrelated errors cannot replace it,
       // and a later record cannot be settled by an older operation's successful receipt.
       set({ notificationEvents: [...(prior ? current.notificationEvents.filter(item => item !== prior) : current.notificationEvents), record] })
@@ -12051,10 +12088,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     const current = get(), id = notificationEventIdentity(message, context)
     if (current.errorDismissed && current.lastError !== null &&
       notificationEventIdentity(current.lastError, current.errorNoticeContext) === id) return
-    const event: NotificationEvent = { id, message, context: context ?? null }
     // Startup retains its original producer reference; other failures have an independent record.
     const retainEvent = !context?.startupSessionSnapshot && !context?.startupProviderCatalog
-    const existing = current.notificationEvents.find(item => item.id === event.id)
+    const existing = current.notificationEvents.find(item => item.id === id)
+    // Clearing activity is an explicit reading decision for this exact producer occurrence.
+    // Another channel observing it later must not recreate it after an unrelated latest error.
+    if (context?.event && !existing && current.noticeReadReceipts['global:events']?.[id] === 'read') return
+    const event = observedRecord(id, existing)
     const notificationEvents = !retainEvent ? current.notificationEvents
       : existing ? current.notificationEvents.map(item => item === existing ? event : item)
       : [...current.notificationEvents, event]
