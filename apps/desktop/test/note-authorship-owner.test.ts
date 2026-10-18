@@ -9,6 +9,7 @@ import { dirname, join, resolve } from 'node:path'
 import { spawn, execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { NoteFileWriter } from '../src/main/note-file-writer'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { FileReadOwner } from '../src/main/file-read-owner'
@@ -164,7 +165,7 @@ it('real executable CLI creates/edits the original Note through its authenticate
       const {fileUploadRevision}=await import(process.argv[3]);
       const content=readFileSync(process.argv[1],'utf8'),mapping=JSON.parse(process.argv[5]),resource={hostId:mapping.hostId,workspaceId:mapping.workspaceId,workspacePath:mapping.workspacePath,path:mapping.path};
       const metadata=await new AgentMuxNotebookStore(process.argv[4]).readProvenance({noteId:'cli-note',resource,revision:fileUploadRevision(new TextEncoder().encode(content)),blockIds:['cli-block']});
-      process.stdout.write(JSON.stringify({content,metadata}));`, join(workspace.path,path),new URL('../../../packages/core/dist/notebook-store.js',import.meta.url).href,new URL('../../../packages/core/dist/public-rpc-files.js',import.meta.url).href,join(workspace.path,'notebooks.sqlite'),JSON.stringify(observed.resource)])
+      process.stdout.write(JSON.stringify({content,metadata}));`, join(workspace.path,path),pathToFileURL(resolve('packages/core/dist/notebook-store.js')).href,pathToFileURL(resolve('packages/core/dist/public-rpc-files.js')).href,join(workspace.path,'notebooks.sqlite'),JSON.stringify(observed.resource)])
     const childSnapshot=JSON.parse(childRead.stdout),restored = parsed(childSnapshot.content,childSnapshot.metadata)
     expect(restored).toMatchObject({ noteId: 'cli-note', content: { content: [{ attrs: { blockId: 'cli-block' }, content: [{ text: 'CLI corrected body' }] }] } })
     expect(provenance(restored)).toMatchObject({ created: { actor }, lastEdited: { actor } })
