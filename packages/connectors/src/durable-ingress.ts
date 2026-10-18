@@ -1,6 +1,7 @@
 import { parseExternalConversationReference, type AgentExternalConversationAuthority, type AgentExternalConversationReference } from '@agentmux/core'
 import { isDeepStrictEqual } from 'node:util'
-import { PermissionActions } from './permission-actions.js'
+import { ConversationActions, externalActionIntentDigest } from './conversation-actions.js'
+import { parseConnectionQuestionAnswerSubmissions } from '@agentmux/core/connections'
 import { mintObjectId, AgentMuxError, parseAgentExternalMessageAuthor, agentInteractionIntentDigest, type AgentInputCallContext, type AgentMuxClient, type AgentMuxMessageEnvelope } from '@agentmux/core'
 import { CONNECTION_INGRESS_AUTHORITY_CODES, parseConnectionActor, parseConnectionIngressRecord, parseIngressParams, parseIngressResult, type ConnectionConfig, type ConnectionIngressAuthority, type ConnectionIngressAuthorityCode, type ConnectionIngressInspection, type ConnectionIngressListInput, type ConnectionIngressMessage, type ConnectionIngressAction, type ConnectionIngressReadPort, type ConnectionIngressRecord, type RoomBinding, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
@@ -20,8 +21,13 @@ export type VerifiedIngressMessage = {
   unsupportedContent?: true
 }
 export type VerifiedIngressAction = Pick<import('@agentmux/core/connections').ConnectionIngressAction,
-  'kind' | 'eventId' | 'actor' | 'externalConversationId' | 'sourceMessageId' | 'actionRef'>
+  'kind' | 'eventId' | 'actor' | 'externalConversationId' | 'sourceMessageId' | 'actionRef' | 'answers'>
 export type VerifiedIngressEvent = VerifiedIngressMessage | VerifiedIngressAction
+export type ConnectionQuestionFormInput = {
+  connectionId: string; application: ConnectionConfig['application']; actor: NonNullable<ConnectionIngressAction['actor']>
+  externalConversationId: string; sourceMessageId: string; actionRef: string
+}
+export type ConnectionQuestionForm = { questions: import('@agentmux/core').AgentSessionHistoryQuestion[]; status: 'pending' }
 export interface IngressAuthenticator {
   readonly adapterId: string
   /** Own signature/token verification and issuer checks. Never expose this port over RPC. */
@@ -29,7 +35,7 @@ export interface IngressAuthenticator {
   /** Read the exact parent after persistence/ACK, outside original Core input admission. */
   qualifyReply?(config: ConnectionConfig, event: Readonly<VerifiedIngressEvent>, raw: string, credential: string, signal: AbortSignal): Promise<'reply' | 'message' | 'unknown'>
 }
-export type DurableIngressCore = Pick<AgentMuxClient, 'recordExternalConversationMessage' | 'readAgentSession' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting'> & Partial<Pick<AgentMuxClient, 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation'>>
+export type DurableIngressCore = Pick<AgentMuxClient, 'recordExternalConversationMessage' | 'readAgentSession' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting'> & Partial<Pick<AgentMuxClient, 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation' | 'replySessionQuestion' | 'inspectAgentPromptSubmission'>> & { providers?: { get(id: string): { catalog: import('@agentmux/core').AgentCatalogEntry } } }
 export type DurableIngressOptions = {
   connections: ConnectionHost
   bindings: RoomBindingReadPort
@@ -49,7 +55,8 @@ function verified(value: VerifiedIngressEvent): VerifiedIngressEvent {
     ...(value.actor === undefined ? {} : { actor: parseConnectionActor(value.actor) }),
     ...(value.externalConversationId === undefined ? {} : { externalConversationId: text(value.externalConversationId) }),
     ...(value.sourceMessageId === undefined ? {} : { sourceMessageId: text(value.sourceMessageId) }),
-    ...(value.actionRef === undefined ? {} : { actionRef: text(value.actionRef) }) }
+    ...(value.actionRef === undefined ? {} : { actionRef: text(value.actionRef) }),
+    ...(value.answers === undefined ? {} : { answers: parseConnectionQuestionAnswerSubmissions(value.answers) }) }
   if (value.kind !== undefined || typeof value.body !== 'string' || !['mention', 'reply', 'message'].includes(value.selection)) fail('INVALID_CONNECTION_INGRESS')
   if (value.conversationKind !== undefined && !['direct', 'group'].includes(value.conversationKind)) fail('INVALID_CONNECTION_INGRESS')
   if (value.unsupportedContent !== undefined && value.unsupportedContent !== true) fail('INVALID_CONNECTION_INGRESS')
@@ -59,12 +66,14 @@ function verified(value: VerifiedIngressEvent): VerifiedIngressEvent {
 
 /** Durable transport admission only. The original Core queue owns all Agent input and delivery facts. */
 export class DurableIngressHost implements ConnectionIngressReadPort {
-  readonly permissions: PermissionActions
+  readonly permissions: ConversationActions
+  /** Host-private read for a native modal; submitting still enters the original durable action owner. */
+  questionForm(input: ConnectionQuestionFormInput): ConnectionQuestionForm | null { return this.permissions.questionForm(input) }
   private readonly database
   private readonly authenticators: Map<string, IngressAuthenticator>
   private readonly pending = new Map<string, Promise<ConnectionIngressInspection>>()
   constructor(private readonly options: DurableIngressOptions) {
-    this.permissions = new PermissionActions(options)
+    this.permissions = new ConversationActions(options)
     this.database = options.connections.database
     this.authenticators = new Map(options.authenticators.map(port => [port.adapterId, port]))
     if (this.authenticators.size !== options.authenticators.length) fail('INGRESS_AUTHENTICATOR_CONFLICT')
@@ -342,7 +351,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     return await this.inspect({ ingressId })
   }
   private async dispatchAction(original: ConnectionIngressAction): Promise<ConnectionIngressInspection> {
-    let claimed: ReturnType<PermissionActions['claim']> | undefined
+    let claimed: ReturnType<ConversationActions['claim']> | undefined
     let client: DurableIngressCore | undefined
     this.transaction(() => {
       const record = this.read(original.ingressId)
@@ -352,7 +361,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
         const target = this.permissions.authorize(record)
         client = this.options.core(target.binding.executionHostId)
         // No Core call has started; retain received until this exact consumer is available.
-        if (!client?.respondAgentInteraction) return
+        if (target.kind === 'question' ? !client?.replySessionQuestion : !client?.respondAgentInteraction) return
         claimed = this.permissions.claim(record); this.write(claimed.record)
       }
       catch (error) {
@@ -364,13 +373,14 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     })
     if (claimed?.own) {
       const input = claimed.input, record = claimed.record
-      if (client?.respondAgentInteraction) {
-        try { await client.respondAgentInteraction(input, { externalAction: { identity: record.input!.author,
-          assertCurrent: async intent => {
+      const assertCurrent = async (intent: import('./conversation-actions.js').ExternalActionInput) => {
             const authority = await this.authority({ operationId: input.operationId })
-            if (authority.authority !== 'current' || agentInteractionIntentDigest(intent) !== record.input!.intentDigest || !isDeepStrictEqual(intent.externalAction, record.input!.author)) fail('INGRESS_AUTHORITY_REVISED')
-          } } }) } catch { /* A Core response may be saved or written. Only inspect this exact operation. */ }
+            if (authority.authority !== 'current' || externalActionIntentDigest(intent) !== record.input!.intentDigest || !isDeepStrictEqual(intent.externalAction, record.input!.author)) fail('INGRESS_AUTHORITY_REVISED')
       }
+      try {
+        if ('expectedRequest' in input) await client?.respondAgentInteraction?.(input, { externalAction: { identity: record.input!.author, assertCurrent } })
+        else await client?.replySessionQuestion?.(input, { externalQuestion: { identity: record.input!.author, assertCurrent } })
+      } catch { /* A Core response may be saved or written. Only inspect this exact operation. */ }
     }
     return await this.inspect({ ingressId: original.ingressId })
   }
@@ -380,12 +390,23 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     if (ingress.kind === 'action') {
       try {
         const client = this.options.core(ingress.input.hostId)
+        if (ingress.input.responseKind === 'question') {
+          if (!client?.inspectAgentPromptSubmission) return { ingress, inputReceipt: null, observation: 'unavailable' }
+          const key = { kind: 'prompt' as const, agentSessionId: ingress.input.agentSessionId, expectedRun: ingress.input.expectedRun, submissionId: ingress.input.operationId }
+          const original = await client.inspectAgentPromptSubmission(key)
+          if (original && !isDeepStrictEqual(original.admission?.intent?.message?.questionReply?.externalAction, ingress.input.author)) throw Error('Foreign original question receipt.')
+          const question = original?.admission?.intent?.message?.questionReply, admission = original?.admission
+          const questionReceipt = question && admission ? { agentSessionId: ingress.input.agentSessionId, expectedRun: ingress.input.expectedRun, operationId: ingress.input.operationId,
+            source: question.source, recordId: question.recordId, questionIds: question.questionIds,
+            outcome: admission.transport === 'native' ? admission.native.outcome === 'admitted' ? 'submitted' as const : admission.native.outcome === 'not-applied' ? 'not-applied' as const : 'unknown' as const : 'saved' as const } : null
+          return parseIngressResult('connection.ingress.inspect', { ingress, inputReceipt: null, questionReceipt, observation: 'observed' }, input)
+        }
         if (!client?.inspectAgentInteractionOperation) return { ingress, inputReceipt: null, interactionReceipt: null, observation: 'unavailable' }
         const receipt = await client.inspectAgentInteractionOperation({ agentSessionId: ingress.input.agentSessionId, operationId: ingress.input.operationId })
         if (receipt && (agentInteractionIntentDigest({ ...receipt, expectedRun: receipt.run }) !== ingress.input.intentDigest || !isDeepStrictEqual(receipt.externalAction, ingress.input.author))) throw new Error('Foreign original interaction receipt.')
         const interactionReceipt = receipt ? { operationId: receipt.operationId, agentSessionId: receipt.agentSessionId, run: receipt.run, delivery: receipt.delivery, nativeAdoption: receipt.nativeAdoption } : null
         return parseIngressResult('connection.ingress.inspect', { ingress, inputReceipt: null, interactionReceipt, observation: 'observed' }, input)
-      } catch { return { ingress, inputReceipt: null, interactionReceipt: null, observation: 'unavailable' } }
+      } catch { return { ingress, inputReceipt: null, ...(ingress.input.responseKind === 'question' ? { questionReceipt: null } : { interactionReceipt: null }), observation: 'unavailable' } }
     }
 
     try {

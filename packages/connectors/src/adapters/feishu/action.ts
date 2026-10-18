@@ -17,8 +17,22 @@ export function readFeishuAction(raw: string, application: ConnectionApplication
   const event = object(payload.event), operator = object(event?.operator), context = object(event?.context)
   const userId = identity(operator?.open_id), externalConversationId = identity(context?.open_chat_id), sourceMessageId = identity(context?.open_message_id)
   const actionRef = identity(object(object(event?.action)?.value)?.actionRef)
+  const action = object(event?.action), value = object(action?.value), fields = value?.questionFields, form = object(action?.form_value)
+  const answers = Array.isArray(fields) && form ? fields.map(value => {
+    const field = object(value), questionId = identity(field?.questionId)
+    if (!questionId) return null
+    const entered = typeof field?.textField === 'string' ? form[field.textField] : undefined
+    if (typeof entered === 'string' && entered.trim()) return { questionId, text: entered }
+    const selected = typeof field?.optionField === 'string' ? form[field.optionField] : undefined
+    // This form uses the native single-select control; an array is not its submitted value.
+    const selections = typeof selected === 'string' ? [selected] : []
+    const options = Array.isArray(field?.optionIds) ? field.optionIds : []
+    const optionIds = selections.map(index => typeof index === 'string' && /^(0|[1-9][0-9]*)$/u.test(index) ? identity(options[Number(index)]) : undefined)
+    return optionIds.length && optionIds.every((id): id is string => !!id) ? { questionId, optionIds } : null
+  }) : undefined
   return { kind: 'action', eventId: feishuIdentity(header.event_id),
     ...(userId === undefined ? {} : { actor: { application: { ...application }, idType: 'open_id', userId } }),
     ...(externalConversationId === undefined ? {} : { externalConversationId }),
-    ...(sourceMessageId === undefined ? {} : { sourceMessageId }), ...(actionRef === undefined ? {} : { actionRef }) }
+    ...(sourceMessageId === undefined ? {} : { sourceMessageId }), ...(actionRef === undefined ? {} : { actionRef }),
+    ...(answers?.length && answers.every((answer): answer is NonNullable<typeof answer> => !!answer) ? { answers } : {}) }
 }

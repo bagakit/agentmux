@@ -104,7 +104,7 @@ export function publicationContent(unit: ConversationUnit, binding: RoomBinding,
         questions.add(record.id)
         const suffix = original.item.questionRequest.questions.map(q => [value?.includes(q.prompt) ? '' : q.prompt,
           ...q.options.map(option => `- ${option.label}`), q.acceptsText ? 'Free text is accepted by the original request.' : '',
-          'Recorded question · read-only; use the original amux interaction.'].filter(Boolean).join('\n')).join('\n\n')
+          'Original recorded question.'].filter(Boolean).join('\n')).join('\n\n')
         value = [value, suffix].filter(Boolean).join('\n\n')
       }
       if (!questions.has(record.id + ':answers') && original.item.questionAnswers?.length) {
