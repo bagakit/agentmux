@@ -17,7 +17,7 @@ export function surfaceCaptured(agentSessionId) {
 }
 
 /** Exercises real App controls over controlled Core records and a paused local intent. */
-export async function exerciseSurfaces({ read, click, shot, until, copies }) {
+export async function exerciseSurfaces({ read, click, shot, until, copies, resize }) {
   const control = async selector => {
     await read(`document.querySelector(${JSON.stringify(selector)})?.scrollIntoView({block:'center'})`)
     await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
@@ -68,8 +68,35 @@ export async function exerciseSurfaces({ read, click, shot, until, copies }) {
   await control('.composer__mailbox')
   await until(() => read(`!!document.querySelector('.composer-mailbox:popover-open')`), 'Original mailbox')
   await control('.composer-mailbox [role="tab"][id$="-user-tab"]')
-  await until(() => read(`!!document.querySelector('.composer-mailbox [data-input-history-id]')`), 'Original input history')
+  const original = await until(() => read(`readingProof.originalInput('surface-human')`), 'Original typed native input history')
+  const rowSelector = `.composer-mailbox [aria-label="Recorded input history"] .composer-mailbox__row[data-record-key=${JSON.stringify(original.key)}]`
+  await until(() => read(`!!document.querySelector(${JSON.stringify(rowSelector)})?.getClientRects().length`), 'Original native input row')
+  await read(`document.querySelector(${JSON.stringify(rowSelector)}).scrollIntoView({block:'center'})`)
+  await read('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
+  const row = await read(`(()=>{const node=document.querySelector(${JSON.stringify(rowSelector)}),r=node.getBoundingClientRect(),p=node.closest('.composer-mailbox').getBoundingClientRect();return {key:node.dataset.recordKey,text:node.querySelector('.composer-mailbox__preview').textContent,visible:r.width>0&&r.height>0&&r.top>=p.top&&r.bottom<=p.bottom}})()`)
+  assert.deepEqual(row, { key: original.key, text: original.message.content, visible: true })
+  await click(`document.querySelector(${JSON.stringify(rowSelector)})`)
+  const detailSelector = `.composer-mailbox__detail[data-record-key=${JSON.stringify(original.key)}] .log-turn`
+  const compact = () => read(`(()=>{const card=document.querySelector(${JSON.stringify(detailSelector)});if(!card)return null;const r=card.getBoundingClientRect();return {messageId:card.dataset.messageId,sourceKey:card.dataset.messageSourceKey,compact:card.dataset.compact,recordedIdentity:card.dataset.recordedIdentity,body:card.querySelector('.log-turn__body')?.textContent,left:r.left,right:r.right,width:r.width,viewport:innerWidth}})()`)
+  const verifyCompact = snapshot => {
+    assert.deepEqual({ messageId: snapshot.messageId, sourceKey: snapshot.sourceKey, compact: snapshot.compact,
+      recordedIdentity: snapshot.recordedIdentity, body: snapshot.body },
+    { messageId: original.key, sourceKey: original.sourceKey, compact: 'true', recordedIdentity: 'true', body: original.message.content })
+    assert.ok(snapshot.width > 0 && snapshot.left >= -1 && snapshot.right <= snapshot.viewport + 1, 'The original compact card stays inside its viewport')
+  }
+  const wide = await until(compact, 'Original compact native input card')
+  verifyCompact(wide)
+  await copy(detailSelector + ' [aria-label="Copy message"]', original.message.content)
   await shot('compact-mailbox')
+  let narrow
+  try {
+    await resize(332)
+    narrow = await compact()
+    await read(`readingProof.mark('compact-mailbox-narrow',${JSON.stringify(narrow)})`)
+    await shot('compact-mailbox-narrow')
+    verifyCompact(narrow)
+    assert.equal(narrow.viewport, 332)
+  } finally { await resize(1280) }
   await control('[aria-label="Close mailbox"]')
   await control('[aria-label="Show Terminal"]')
   await until(() => read(`!!document.querySelector('.terminal-view__xterm .xterm')`), 'Original terminal')
@@ -81,5 +108,5 @@ export async function exerciseSurfaces({ read, click, shot, until, copies }) {
   if (geometry.input?.bottom > geometry.input?.top) assert.equal(overlap(geometry.pending, geometry.input), false)
   await shot('pending-terminal')
   await control('[aria-label="Show Activity"]')
-  return { geometry, boundary: 'Provider-format native file, controlled Core captured input, original fake CLI PermissionRequest hook, and explicitly paused local intent. No dispatch or permission reply.' }
+  return { geometry, inputHistory: { original, row, wide, narrow }, boundary: 'Provider-format native file, controlled Core captured input, original fake CLI PermissionRequest hook, and explicitly paused local intent. No dispatch or permission reply.' }
 }

@@ -231,7 +231,8 @@ app.whenReady().then(async () => {
       assert.equal(calls.filter(call => call.operation === 'seed').length, 0, 'Restart never reseeds the original workface')
     }
     await sample('first-readable'); await shot('current')
-    if (scene === 'surfaces') result.surfaces = await exerciseSurfaces({ read, click, shot, until, copies })
+    if (scene === 'surfaces') result.surfaces = await exerciseSurfaces({ read, click, shot, until, copies,
+      resize: async (width: number) => { win.setContentSize(width, win.getContentSize()[1]); await ready(`innerWidth === ${width}`) } })
     else {
     for (let n = 0; n < 8; n++) {
       const point = await read('(() => { const r=document.querySelector(".activity-feed").getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2} })()')
@@ -333,7 +334,10 @@ app.whenReady().then(async () => {
       await shot('failure').catch(() => {})
     }
   } finally {
-    if (win && !win.isDestroyed()) result.events = await read('readingProof.events').catch(() => [])
+    if (win && !win.isDestroyed()) {
+      result.events = await read('readingProof.events').catch(() => [])
+      result.inputHistoryReads = await read('readingProof.inputHistoryReads').catch(() => [])
+    }
     await fs.writeFile(path.join(evidence, `${scene}-${phase}.json`), JSON.stringify({ ...result, passed: false, stage: 'cleanup' }, null, 2))
     result.calls = calls; result.copies = copies; result.mobileAuthenticatedRequests = authenticated.length
     // Credentials belong only to this private process; the result retains identity, not access.

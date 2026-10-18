@@ -13,10 +13,14 @@ import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spati
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { draft, surfacePending, sceneRows, appendRow } from './scene.mjs'
 import { acceptedEarlierWindow } from './earlier-frame.mjs'
+import { mailboxMessageKey } from '../../../src/renderer/src/lib/session-mailbox-messages'
+import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import '../../../src/renderer/src/styles/index.css'
 
 const boundary = (window as any).readingBoundary, request = boundary.request
 const errors: string[] = []
+const inputHistoryReads: { reference: Parameters<typeof api.sessions.readHistory>[0];
+  input: Parameters<typeof api.sessions.readHistory>[1]; page: Awaited<ReturnType<typeof api.sessions.readHistory>> }[] = []
 window.addEventListener('error', event => errors.push(event.error?.stack ?? event.message))
 window.addEventListener('unhandledrejection', event => errors.push(event.reason?.stack ?? String(event.reason)))
 const setup = await request('setup'), workspace = setup.config.workspaces[0]
@@ -34,7 +38,11 @@ api.sessions.onEvent = createRendererSessionEvents(listener => boundary.onEvent(
 for (const name of ['attach', 'detach', 'replay', 'resize', 'resolve', 'refresh', 'recover', 'historyPage', 'timeline', 'historySource', 'historySources', 'historyResource', 'inputMailbox'] as const) {
   (api.sessions as any)[name] = (...args: unknown[]) => request(name, ...args)
 }
-api.sessions.readHistory = (reference, input) => request('readHistory', reference, input)
+api.sessions.readHistory = async (reference, input) => {
+  const page = await request('readHistory', reference, input)
+  inputHistoryReads.push({ reference, input, page })
+  return page
+}
 // These proof scenes contain no send intent. Any accidental control crosses a failing boundary.
 api.sessions.write = (...args) => request('terminal-protocol', ...args)
 for (const name of ['paste', 'stop', 'submitPrompt', 'respondInteraction'] as const) {
@@ -158,6 +166,22 @@ const readingConsumer = () => inspectConversationConsumers({ hostId: 'local', ag
   ids, reads, metrics, errors, events, mark,
   inFlightCalls() { return [...pendingCalls] },
   consumer: readingConsumer,
+  inputHistoryReads,
+  originalInput(recordId: string) {
+    const original = inputHistoryReads.findLast(({ reference, input, page }) => reference.hostId === 'local' &&
+      reference.agentSessionId === ids.sessionId && input.source === 'native' && input.kind === 'user-message' &&
+      page.hostId === 'local' && page.sourceHostId === 'local' && page.agentSessionId === ids.sessionId && page.source === 'native' &&
+      page.nativeSource?.providerId === 'codex' && page.nativeSource.nativeSessionId === ids.nativeSessionId &&
+      page.userMessages?.some(message => message.agentSessionId === ids.sessionId && message.rawId === recordId &&
+        message.source.kind === 'native' && message.source.providerId === page.nativeSource!.providerId &&
+        message.source.nativeSessionId === page.nativeSource!.nativeSessionId && message.source.recordId === recordId))
+    const message = original?.page.userMessages?.find(message => message.agentSessionId === ids.sessionId && message.rawId === recordId &&
+      message.source.kind === 'native' && message.source.providerId === original.page.nativeSource!.providerId &&
+      message.source.nativeSessionId === original.page.nativeSource!.nativeSessionId && message.source.recordId === recordId)
+    return original && message ? { reference: original.reference, input: original.input, sourceHostId: original.page.sourceHostId,
+      nativeSource: original.page.nativeSource, revision: original.page.revision, message,
+      key: mailboxMessageKey({ message }), sourceKey: conversationMessageSourceKey(ids.sessionId, message.source) } : null
+  },
   nativeCut() { return nativeCut },
   appendDisposition(priorCut: string, recordId: string, allowHeld = true) {
     const consumer = inspectConversationConsumers({ hostId: 'local', agentSessionId: ids.sessionId, expectedRunId: ids.runId,
