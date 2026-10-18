@@ -42,7 +42,7 @@
   background: var(--surface-0);
   border-radius: 50%;
 }
-.log-turn[data-status='failed'] .log-turn__node { color: var(--red); }
+.log-turn[data-status='failed'] > .log-turn__node { color: var(--red); }
 .log-turn__head {
   grid-column: 2;
   grid-row: 1;
@@ -56,8 +56,8 @@
 .log-turn__title { grid-column: 1; grid-row: 1; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); min-width: 0; }
 .log-turn__head > .log-turn__time { grid-column: 2; grid-row: 1; align-self: start; line-height: 20px; }
 .log-turn__head > .log-turn__actions { grid-column: 3; grid-row: 1; }
-.log-turn__head .conversation-input-details__toggle { grid-column: 4; grid-row: 1; }
-.log-turn__head .conversation-input-details__body { grid-column: 1 / -1; grid-row: 2; }
+.log-turn__head > .conversation-input-details > .conversation-input-details__toggle { grid-column: 4; grid-row: 1; }
+.log-turn__head > .conversation-input-details > .conversation-input-details__body { grid-column: 1 / -1; grid-row: 2; }
 .log-turn__meta { grid-column: 2; grid-row: 2; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); min-width: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
 .log-turn__meta > * { max-width: 100%; }
 .conversation-input-details__body > .log-turn__meta { grid-column: 1 / -1; grid-row: auto; }
@@ -73,7 +73,7 @@
 .log-turn__action:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 1px; }
 .log-turn__who { flex: 1 1 140px; min-width: min(140px, 100%); overflow-wrap: anywhere; color: var(--text); font-size: var(--fs-body); font-weight: 620; }
 .log-turn__sender-kind { flex-shrink: 0; padding: 0 var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-3); color: var(--text-2); font-size: var(--fs-micro); line-height: 1.6; }
-.log-turn__head .log-row__chip { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.log-turn__head > .log-turn__title > .log-row__chip { display: inline-flex; align-items: center; gap: var(--sp-1); }
 .log-turn__time {
   color: var(--text-3);
   font: var(--fs-meta)/1 var(--font-mono);
@@ -118,9 +118,9 @@
 .log-turn__trace-empty { color: var(--text-3); font-style: italic; margin: 0; white-space: pre-wrap; font-family: inherit; font-size: inherit; }
 .log-turn__trace > pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .log-turn[data-trace-only='true'] { margin: var(--sp-1) 0; padding-top: var(--sp-1); padding-bottom: var(--sp-1); }
-.log-turn[data-trace-only='true'] .log-turn__node { display: none; }
-.log-turn[data-trace-only='true'] .log-turn__head { min-height: 0; }
-.log-turn[data-trace-only='true'] .log-turn__who { font-weight: 500; font-size: var(--fs-micro); color: var(--text-3); }
+.log-turn[data-trace-only='true'] > .log-turn__node { display: none; }
+.log-turn[data-trace-only='true'] > .log-turn__head { min-height: 0; }
+.log-turn[data-trace-only='true'] > .log-turn__head > .log-turn__title > .log-turn__sender > .log-turn__who { font-weight: 500; font-size: var(--fs-micro); color: var(--text-3); }
 .conversation-selection-actions, .log-turn__annotation { border: 1px solid var(--line-soft); border-radius: 12px; background: color-mix(in srgb, var(--surface-1) 94%, transparent); box-shadow: var(--elev-1), var(--hl); backdrop-filter: blur(16px); pointer-events: auto; color: var(--text); font-size: var(--fs-meta); }
 .conversation-selection-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; padding: 4px; }
 .conversation-selection-actions button { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 4px 9px; border: 0; border-radius: 8px; background: transparent; color: var(--text-2); font: inherit; cursor: pointer; white-space: nowrap; }
@@ -195,28 +195,35 @@
 .log-turn__continue:hover { color: var(--green); }
 .log-turn__continue:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; border-radius: var(--radius-sm); }
 
+/* Variants style their own slots; an embedded original remains a separate message. */
 /* Explicit compact records share the conversation body, without the ordinary bubble lane. */
 .log-turn[data-compact='true'] { grid-template-columns: 32px minmax(0, 1fr); margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; column-gap: var(--sp-3); }
-.log-turn[data-compact='true'] .log-turn__node { grid-column: 1; width: 32px; height: 32px; background: transparent; }
-.log-turn[data-compact='true'] .log-turn__head, .log-turn[data-compact='true'] .log-turn__body { grid-column: 2; }
-.log-turn[data-compact='true'] .log-turn__who { flex: 1 1 100px; min-width: 0; font-size: var(--fs-body); }
-.log-turn[data-compact='true'] .log-turn__sender-kind { flex-shrink: 1; max-width: 100%; overflow-wrap: anywhere; }
-.log-turn[data-compact='true'] .log-turn__body { font-size: var(--fs-body); }
-.log-turn[data-compact='true'] .md-paragraph { color: var(--text); }
-.log-turn[data-compact='true'] .log-turn__actions { opacity: 1; }
-.log-turn[data-compact='true'] .log-turn__head .conversation-input-details { position: static; }
-.log-turn[data-compact='true'] .conversation-input-details__body { margin-block: var(--sp-2); }
+.log-turn[data-compact='true'] > .log-turn__node { grid-column: 1; width: 32px; height: 32px; background: transparent; }
+.log-turn[data-compact='true'] > .log-turn__head > .log-turn__title > .log-turn__sender > .log-turn__who { flex: 1 1 100px; min-width: 0; font-size: var(--fs-body); }
+.log-turn[data-compact='true'] > .log-turn__head > .log-turn__title > .log-turn__sender-kind { flex-shrink: 1; max-width: 100%; overflow-wrap: anywhere; }
+.log-turn[data-compact='true'] > .conversation-progressive-body > .log-turn__body > .log-turn__text > .md .md-paragraph,
+.log-turn[data-compact='true'] > .conversation-progressive-body > .message-disclosure > .message-disclosure__body > .log-turn__body > .log-turn__text > .md .md-paragraph,
+.log-turn[data-compact='true'] > .log-turn__system-body > .conversation-progressive-body > .log-turn__body > .log-turn__text > .md .md-paragraph,
+.log-turn[data-compact='true'] > .log-turn__collaboration-content > .conversation-progressive-body > .log-turn__body > .log-turn__text > .md .md-paragraph { color: var(--text); }
+.log-turn[data-compact='true'] > .log-turn__head > .log-turn__actions { opacity: 1; }
+.log-turn[data-compact='true'] > .log-turn__head > .conversation-input-details { position: static; }
+.log-turn[data-compact='true'] > .log-turn__head > .conversation-input-details > .conversation-input-details__body { margin-block: var(--sp-2); }
 /* The short reveal state takes precedence over each speaker's ordinary bubble fill. */
 .log-turn[data-message-located] { background: var(--surface-2) !important; outline: 1px solid var(--focus-line); outline-offset: 3px; }
 .log-turn__location { color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; }
 
 /* Public progress keeps the shared reading body, with a quiet conversational face. */
 .log-turn[data-message-phase='progress'] { grid-template-columns: 32px minmax(0, 1fr); column-gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); margin: var(--sp-1) 0; border: 0; border-radius: 0; background: transparent; }
-.log-turn[data-message-phase='progress'] .log-turn__node { width: 32px; height: 32px; background: transparent; }
-.log-turn[data-message-phase='progress'] :is(.log-turn__head, .log-turn__body, .log-turn__continue) { grid-column: 2; }
-.log-turn[data-message-phase='progress'] .log-turn__body { width: fit-content; max-width: 100%; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); }
-.log-turn[data-message-phase='progress'] .md-paragraph { color: inherit; }
-.log-turn[data-message-phase='progress'] .log-turn__who { color: var(--text-2); font-weight: 500; }
+.log-turn[data-message-phase='progress'] > .log-turn__node { width: 32px; height: 32px; background: transparent; }
+.log-turn[data-message-phase='progress'] > .conversation-progressive-body > .log-turn__body,
+.log-turn[data-message-phase='progress'] > .conversation-progressive-body > .message-disclosure > .message-disclosure__body > .log-turn__body,
+.log-turn[data-message-phase='progress'] > .log-turn__system-body > .conversation-progressive-body > .log-turn__body,
+.log-turn[data-message-phase='progress'] > .log-turn__collaboration-content > .conversation-progressive-body > .log-turn__body { width: fit-content; max-width: 100%; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); }
+.log-turn[data-message-phase='progress'] > .conversation-progressive-body > .log-turn__body > .log-turn__text > .md .md-paragraph,
+.log-turn[data-message-phase='progress'] > .conversation-progressive-body > .message-disclosure > .message-disclosure__body > .log-turn__body > .log-turn__text > .md .md-paragraph,
+.log-turn[data-message-phase='progress'] > .log-turn__system-body > .conversation-progressive-body > .log-turn__body > .log-turn__text > .md .md-paragraph,
+.log-turn[data-message-phase='progress'] > .log-turn__collaboration-content > .conversation-progressive-body > .log-turn__body > .log-turn__text > .md .md-paragraph { color: inherit; }
+.log-turn[data-message-phase='progress'] > .log-turn__head > .log-turn__title > .log-turn__sender > .log-turn__who { color: var(--text-2); font-weight: 500; }
 .log-turn[data-message-continuation='true'] { padding-block: var(--sp-1); }
 .log-turn[data-message-continuation='true'] > .log-turn__node { visibility: hidden; height: 20px; }
 
@@ -231,24 +238,25 @@
   box-shadow: inset 0 0 0 1px var(--line-soft);
   column-gap: var(--sp-3);
 }
-.log-turn[data-message-bubble='true'] .log-turn__head { column-gap: var(--sp-3); }
+.log-turn[data-message-bubble='true'] > .log-turn__head { column-gap: var(--sp-3); }
 /* Keep the original 24px controls while their quiet header occupies one 20px identity line. */
-.log-turn[data-message-bubble='true'] :is(.log-turn__actions, .conversation-input-details__toggle) { margin-block: calc(-1 * var(--sp-1)); }
-.log-turn[data-message-bubble='true'] .log-turn__who {
+.log-turn[data-message-bubble='true'] > .log-turn__head > .log-turn__actions,
+.log-turn[data-message-bubble='true'] > .log-turn__head > .conversation-input-details > .conversation-input-details__toggle { margin-block: calc(-1 * var(--sp-1)); }
+.log-turn[data-message-bubble='true'] > .log-turn__head > .log-turn__title > .log-turn__sender > .log-turn__who {
   flex: 0 1 auto;
   min-width: 0;
   color: var(--text-2);
   font-size: var(--fs-meta);
   font-weight: 560;
 }
-.log-turn[data-message-bubble='true'] .log-turn__time { font-size: var(--fs-micro); }
+.log-turn[data-message-bubble='true'] > .log-turn__head > .log-turn__time { font-size: var(--fs-micro); }
 /* The identity spans the text rows instead of making an empty, avatar-height header. */
-.log-turn[data-message-bubble='true'] .log-turn__node { grid-row: 1 / span 3; align-self: start; }
-.log-turn[data-message-bubble='true'][data-speaker-role='human'] .log-turn__node { margin-top: var(--sp-1); }
+.log-turn[data-message-bubble='true'] > .log-turn__node { grid-row: 1 / span 3; align-self: start; }
+.log-turn[data-message-bubble='true'][data-speaker-role='human'] > .log-turn__node { margin-top: var(--sp-1); }
 .log-turn[data-message-bubble='true'][data-speaker-role='agent'] {
   grid-template-columns: 32px minmax(0, 1fr);
 }
-.log-turn[data-message-bubble='true'][data-speaker-role='agent'] .log-turn__node {
+.log-turn[data-message-bubble='true'][data-speaker-role='agent'] > .log-turn__node {
   width: 32px;
   height: 32px;
   background: transparent;
@@ -272,24 +280,25 @@
   background: color-mix(in srgb, var(--blue) 5%, var(--surface-1));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--blue) 10%, transparent);
 }
-.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__head,
-.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__meta,
-.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__body,
-.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__continue {
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) > .log-turn__head,
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) > .log-turn__meta,
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) > .log-turn__body,
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) > .log-turn__continue,
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) > .conversation-progressive-body > .log-turn__body {
   grid-column: 1;
 }
-.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__node {
+.log-turn:not([data-compact='true']):is([data-speaker-role='human'], [data-speaker-relation='other-agent']) > .log-turn__node {
   grid-column: 2;
   grid-row: 1;
   background: transparent;
 }
-.log-turn[data-message-bubble='true']:is([data-speaker-role='human'], [data-speaker-relation='other-agent']) .log-turn__node { grid-row: 1 / span 3; }
+.log-turn[data-message-bubble='true']:is([data-speaker-role='human'], [data-speaker-relation='other-agent']) > .log-turn__node { grid-row: 1 / span 3; }
 .log-turn__context { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-3); font-size: var(--fs-micro); }
 .log-turn__source-caption { color: var(--text-3); font-weight: 400; }
 .log-turn__declared-source { color: var(--text-3); font-size: var(--fs-micro); overflow-wrap: anywhere; }
 .log-turn[data-trace-only='true'] { grid-template-columns: minmax(0, 1fr); margin-block: var(--sp-1); }
-.log-turn[data-trace-only='true'] .log-turn__head,
-.log-turn[data-trace-only='true'] .log-turn__body { grid-column: 1; }
+.log-turn[data-trace-only='true'] > .log-turn__head,
+.log-turn[data-trace-only='true'] > .conversation-progressive-body > .log-turn__body { grid-column: 1; }
 .log-turn .wf-card--observation { margin-block: var(--sp-2); border-radius: var(--radius-sm); }
 .log-turn .wf-card--observation > .wf-head { padding-inline: var(--sp-3); gap: var(--sp-3); }
 .log-turn .wf-observation__body { margin-inline: var(--sp-3); }
@@ -306,10 +315,10 @@
   border-radius: var(--radius-sm);
   background: transparent;
 }
-.log-turn[data-speaker-role='system'] .log-turn__node { background: transparent; opacity: .7; }
-.log-turn[data-speaker-role='system'] .log-turn__time { font-size: var(--fs-micro); }
-.log-turn[data-speaker-role='system'] .log-turn__actions { margin-left: 0; }
-.log-turn[data-speaker-role='system'] .log-turn__body { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-inline-start: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); }
+.log-turn[data-speaker-role='system'] > .log-turn__node { background: transparent; opacity: .7; }
+.log-turn[data-speaker-role='system'] > .log-turn__head > .log-turn__time { font-size: var(--fs-micro); }
+.log-turn[data-speaker-role='system'] > .log-turn__head > .log-turn__actions { margin-left: 0; }
+.log-turn[data-speaker-role='system'] > .log-turn__system-body > .conversation-progressive-body > .log-turn__body { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); border-inline-start: 1px solid var(--line-soft); color: var(--text-2); font-size: var(--fs-meta); }
 .log-turn__system-toggle {
   display: inline-flex;
   align-items: center;
@@ -335,7 +344,7 @@
 .log-turn__system-toggle:focus-visible { outline: 1px solid var(--blue); outline-offset: 2px; border-radius: var(--radius-sm); }
 @media (max-width: 620px) {
   .log-turn[data-speaker-role='system'] { margin-inline: var(--sp-1); }
-  .log-turn[data-speaker-role='system'] .log-turn__head { gap: var(--sp-1); }
+  .log-turn[data-speaker-role='system'] > .log-turn__head { gap: var(--sp-1); }
   .log-turn__system-title { max-width: 55%; }
 }
 @media (prefers-reduced-motion: reduce) { .log-turn__system-toggle > svg { transition: none; } }
