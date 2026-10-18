@@ -11,7 +11,7 @@ import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
 import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import { createWorkspaceLayout } from '@agentmux/layout'
-import { draft, surfacePending } from './scene.mjs'
+import { draft, surfacePending, sceneRows, appendRow } from './scene.mjs'
 import '../../../src/renderer/src/styles/index.css'
 
 const boundary = (window as any).readingBoundary, request = boundary.request
@@ -95,16 +95,54 @@ if (setup.phase === 'seed') {
     ...(setup.scene === 'surfaces' ? { agentSteerQueues: { [ids.sessionId]: [{ operationId: 'surface-paused-intent', runId: ids.runId, text: surfacePending, status: 'queued', awaitingExplicitSend: true, promptCondition: null, origin: 'manual' }] } } : {})
   } }))
 }
-const metrics = { frames: [] as number[], longTasks: [] as number[], added: 0, removed: 0 }
+const heavyIds = new Set([...sceneRows(setup.scene), appendRow(setup.scene, `desktop-${setup.phase}`), appendRow(setup.scene, `mobile-${setup.phase}`)]
+  .filter(row => row.payload?.content?.some((part: any) => part.text?.length > 2000)).map(row => row.payload.id))
+const mountedBodies = new WeakSet<Element>(), mountsBySource = new Map<string, number>()
+const metrics = { frames: [] as number[], longTasks: [] as number[], added: 0, removed: 0,
+  heavyMounts: [] as { at: number; source: string; ordinal: number }[], firstReadable: null as unknown }
+function observeBodies(root: Element) {
+  const bodies = [...(root.matches('.conversation-progressive-body') ? [root] : []), ...root.querySelectorAll('.conversation-progressive-body')]
+  for (const body of bodies) {
+    if (body.getAttribute('data-conversation-body-presented') !== 'true' || mountedBodies.has(body)) continue
+    const source = body.closest<HTMLElement>('[data-message-source-key]')?.dataset.messageSourceKey
+    if (!source) continue
+    const id = JSON.parse(source).at(-1)
+    if (!heavyIds.has(id)) continue
+    mountedBodies.add(body)
+    const ordinal = (mountsBySource.get(source) ?? 0) + 1; mountsBySource.set(source, ordinal)
+    metrics.heavyMounts.push({ at: performance.now(), source, ordinal })
+  }
+}
 let previousFrame: number | undefined
-const frame = (now: number) => { if (previousFrame !== undefined) metrics.frames.push(now - previousFrame); previousFrame = now; requestAnimationFrame(frame) }
+const frame = (now: number) => {
+  if (previousFrame !== undefined) metrics.frames.push(now - previousFrame)
+  previousFrame = now
+  if (!metrics.firstReadable) {
+    const viewport = document.querySelector('.activity-feed'), bounds = viewport?.getBoundingClientRect()
+    const readable = [...viewport?.querySelectorAll('.log-turn__body:not(.conversation-progressive-body__placeholder)') ?? []]
+      .some(body => { const r = body.getBoundingClientRect(); return bounds && r.height > 0 && r.bottom > bounds.top && r.top < bounds.bottom })
+    if (readable) metrics.firstReadable = { at: now, reads: reads.length, heavyMounts: metrics.heavyMounts.length,
+      heavyShells: new Set([...viewport?.querySelectorAll<HTMLElement>('[data-message-source-key]') ?? []].map(node => node.dataset.messageSourceKey!)
+        .filter(source => heavyIds.has(JSON.parse(source).at(-1)))).size,
+      nodes: viewport?.querySelectorAll('*').length }
+  }
+  requestAnimationFrame(frame)
+}
 requestAnimationFrame(frame)
 new PerformanceObserver(list => { metrics.longTasks.push(...list.getEntries().map(entry => entry.duration)) }).observe({ type: 'longtask', buffered: true })
-new MutationObserver(changes => { for (const change of changes) { metrics.added += change.addedNodes.length; metrics.removed += change.removedNodes.length } if (changes.some(change => change.target instanceof Element && change.target.closest('.activity-feed'))) mark('dom-commit') }).observe(document.getElementById('root')!, { childList: true, subtree: true })
+new MutationObserver(changes => {
+  for (const change of changes) {
+    metrics.added += change.addedNodes.length; metrics.removed += change.removedNodes.length
+    if (change.type === 'attributes' && change.target instanceof Element) observeBodies(change.target)
+    for (const node of change.addedNodes) if (node instanceof Element) observeBodies(node)
+  }
+  if (changes.some(change => change.target instanceof Element && change.target.closest('.activity-feed'))) mark('dom-commit')
+}).observe(document.getElementById('root')!, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-conversation-body-presented'] })
 const feed = () => document.querySelector<HTMLElement>('[data-workbench-region-id="reading-region"] .activity-feed')
 const rows = () => Array.from(feed()?.querySelectorAll<HTMLElement>('[data-conversation-layout-key], [data-message-source-key]') ?? [])
 ;(window as any).readingProof = {
   ids, reads, metrics, errors, events, mark,
+  consumer() { return inspectConversationConsumers({ hostId: 'local', agentSessionId: ids.sessionId, expectedRunId: ids.runId }).consumers.find(item => item.location.regionId === 'reading-region') },
   nativeCut() { return nativeCut },
   holdEarlier() { if (!olderCursor) throw new Error('No exact earlier page cursor'); held = { cursor: olderCursor, received: false } },
   heldEarlier() { return held?.received === true },
