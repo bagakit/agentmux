@@ -3,6 +3,7 @@ import { isDeepStrictEqual } from 'node:util'
 import { matchesProviderNativeSessionTarget } from './agent-native-locator.js'
 import { AgentMuxError } from './errors.js'
 import type { AgentMuxAgentContinuityInput, AgentMuxAgentContinuityResult, AgentMuxContinuityOperation, AgentMuxContinuitySupervision } from './agent-session-continuity.js'
+import { agentContinuityRetryBaseDelay } from './agent-session-continuity.js'
 import type { AgentMuxLifecycleReservation } from './agent-session-store.js'
 import type { AgentMuxRunRef, AgentMuxStoredAgentSession } from './types.js'
 import type { CtxmuxAdapterRun } from './ctxmux-run-adapter.js'
@@ -277,7 +278,7 @@ export class AgentSessionContinuitySupervisor {
       if (failedFrontend) {
         if (supervision.attemptCount >= supervision.attemptLimit) return await settle('paused', 'frontend-retry-budget-exhausted', process)
         if (supervision.phase !== 'retry-wait' || supervision.nextAttemptAt === undefined) {
-          const base = Math.min(root.policy.retryMaxDelayMs, root.policy.retryInitialDelayMs * 2 ** Math.min(supervision.attemptCount - 1, 52))
+          const base = agentContinuityRetryBaseDelay(root.policy, supervision.attemptCount)
           const nextAttemptAt = Math.min(Number.MAX_SAFE_INTEGER, Date.now() + base)
           await this.save(session, root, { ...supervision, phase: 'retry-wait', reason: 'frontend-nonzero-exit', process, nextAttemptAt, observedAt: Date.now() })
           this.at(id, rootId, nextAttemptAt, () => this.wake(id)); return
@@ -325,7 +326,7 @@ export class AgentSessionContinuitySupervisor {
     if (!root.policy.resumeAfterExit) return await settle('paused', 'resume-disabled', process)
     if (supervision.attemptCount >= supervision.attemptLimit) return await settle('paused', 'retry-budget-exhausted', process)
     if (supervision.phase !== 'retry-wait' || supervision.nextAttemptAt === undefined) {
-      const base = Math.min(root.policy.retryMaxDelayMs, root.policy.retryInitialDelayMs * 2 ** Math.min(supervision.attemptCount - 1, 52))
+      const base = agentContinuityRetryBaseDelay(root.policy, supervision.attemptCount)
       // Deterministic staggering is at most a quarter of the base delay and at most one second.
       const bound = Math.min(1000, Math.floor(base / 4)), digest = createHash('sha256').update(JSON.stringify([id, rootId, supervision.attemptCount + 1])).digest()
       const stagger = bound ? digest.readUInt32BE(0) % (bound + 1) : 0

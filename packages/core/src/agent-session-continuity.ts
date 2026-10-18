@@ -49,6 +49,11 @@ export const DEFAULT_AGENT_CONTINUITY_POLICY: Readonly<AgentMuxContinuityPolicy>
   continuationPrompt: DEFAULT_AGENT_CONTINUITY_CONTINUATION, activeInterruptionFallback: false
 })
 
+/** One-based additional retry; scheduling offsets remain owned by the supervisor. */
+export function agentContinuityRetryBaseDelay(policy: Pick<AgentMuxContinuityPolicy, 'retryInitialDelayMs' | 'retryMaxDelayMs'>, retry: number): number {
+  return Math.min(policy.retryMaxDelayMs, policy.retryInitialDelayMs * 2 ** Math.min(retry - 1, 52))
+}
+
 export function normalizeAgentContinuityPolicy(authored?: Partial<AgentMuxContinuityPolicy>): AgentMuxContinuityPolicy {
   const policy = { ...DEFAULT_AGENT_CONTINUITY_POLICY, ...authored }
   if (!['automatic', 'manual'].includes(policy.activeRecovery) ||
