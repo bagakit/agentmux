@@ -457,7 +457,7 @@ export function ActivityView({
 
   const returnToLatest = (): void => {
     readAhead.cancel()
-    if (readingWindow.historical || readingWindow.newerOutside || readingWindow.held) {
+    if (readingWindow.historical || readingWindow.newerOutside || readingWindow.held || readingWindow.error) {
       readingWindow.showCurrent()
     } else jumpToLatest()
   }
@@ -764,16 +764,17 @@ export function ActivityView({
 
   // A recent source update can lead the committed window for one render. It is
   // independent of the reader's position and must not flash a scroll affordance.
-  const needsReturnToLatest = showJump && (!atLoadedTail || readingWindow.currentOutside) || readingWindow.historical
-  const latestControl = needsReturnToLatest || readingWindow.held ? (
+  const needsReturnToLatest = showJump && (!atLoadedTail || readingWindow.currentOutside) || readingWindow.historical || readingWindow.held || Boolean(readingWindow.error)
+  const currentActionLabel = readingWindow.error ? '读取当前记录' : '滚动到最新'
+  const latestControl = needsReturnToLatest ? (
     <div className="activity-feed__latest-layer" data-conversation-current-entry>
 
-      {needsReturnToLatest ? <button type="button" className="activity-feed__jump" data-message-tool-control="jump-to-latest"
-        aria-label="滚动到最新" disabled={!readingEnabled}
-        title={readingWindow.held ? '原阅读位置和选区已保留，取消选择或移开当前阅读位置后可滚动到最新' : '滚动到最新'}
+      <button type="button" className="activity-feed__jump" data-message-tool-control="jump-to-latest"
+        aria-label={currentActionLabel} disabled={!readingEnabled}
+        title={readingWindow.held ? '原阅读位置和选区已保留，取消选择或移开当前阅读位置后可滚动到最新' : currentActionLabel}
         onMouseDown={event => event.preventDefault()} onClick={returnToLatest}>
-        <ThemeActionCurrentIcon size={12} aria-hidden="true" />滚动到最新
-      </button> : null}
+        <ThemeActionCurrentIcon size={12} aria-hidden="true" />{currentActionLabel}
+      </button>
     </div>
   ) : null
 
