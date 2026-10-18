@@ -30,6 +30,8 @@ export type ToolkitDisplayProgram = { script: string; args: string[] }
 export type ToolkitAction = { id: string; label: string; script: string; args: string[] }
 export type ToolkitToolFields = {
   name: string; icon: string; enabled: boolean; statusBar: 'icon' | 'label'
+  /** Omitted means a finite JavaScript ESM result; TUI scripts are shell commands. */
+  mode?: 'script' | 'tui'
   workspacePath: string; script: string; args: string[]; actions?: ToolkitAction[]; display?: ToolkitDisplayProgram | null
 }
 export type ToolkitToolInput = ToolkitToolFields & { id: string }
@@ -95,7 +97,7 @@ export type ToolkitSnapshot = ToolkitMetricsSnapshot | ToolkitScriptSnapshot | T
 export type ToolkitDescriptor =
   | { kind: 'metrics'; toolId: 'performance'; name: string; readonly: true }
   | { kind: 'script'; toolId: string; name: string; readonly: boolean; revision: string
-      icon: string; enabled: boolean; statusBar: 'icon' | 'label'; display?: boolean }
+      icon: string; enabled: boolean; statusBar: 'icon' | 'label'; display?: boolean; mode?: 'script' | 'tui' }
   | { kind: 'package'; toolId: string; readonly: false; configRevision: string; path: string
       enabled: boolean; statusBar: 'icon' | 'label'; name: string | null; icon: string | null
       availability: 'available' | 'unavailable'; reason: string | null; display?: boolean }
@@ -166,8 +168,9 @@ function nullable(v: unknown, check: (v: unknown) => void) { if (v !== null) che
 function runRef(v: unknown) {
   if (v !== null) { const r = record(v, ['hostId', 'runId']); identity(r.hostId); identity(r.runId) }
 }
-const TOOL_FIELDS = ['name', 'icon', 'enabled', 'statusBar', 'workspacePath', 'script', 'args', 'actions', 'display'] as const
+const TOOL_FIELDS = ['name', 'icon', 'enabled', 'statusBar', 'workspacePath', 'script', 'args', 'actions', 'display', 'mode'] as const
 function field(key: typeof TOOL_FIELDS[number], value: unknown, code: string) {
+  if (key === 'mode') { if (value !== 'script' && value !== 'tui') invalid(code); return }
   if (key === 'display') {
     if (value === null) return
     const display = record(value, ['script', 'args'], [], code)
@@ -206,9 +209,10 @@ function field(key: typeof TOOL_FIELDS[number], value: unknown, code: string) {
 }
 /** Pure data validation; the host owns paths, icon choices, persistence and revision issuance. */
 export function parseToolkitToolFields(value: unknown, partial = false, code = 'CONTROL_PROTOCOL_ERROR'): ToolkitToolFields | Partial<ToolkitToolFields> {
-  const r = record(value, partial ? [] : TOOL_FIELDS.filter(key => key !== 'actions' && key !== 'display'), partial ? TOOL_FIELDS : ['actions', 'display'], code)
+  const r = record(value, partial ? [] : TOOL_FIELDS.filter(key => key !== 'actions' && key !== 'display' && key !== 'mode'), partial ? TOOL_FIELDS : ['actions', 'display', 'mode'], code)
   if (Buffer.byteLength(JSON.stringify(r)) > TOOLKIT_TOOL_FIELDS_MAX_BYTES) invalid(code)
   for (const key of Object.keys(r)) field(key as typeof TOOL_FIELDS[number], r[key], code)
+  if (r.mode === 'tui' && ((r.actions as ToolkitAction[] | undefined)?.length || r.display != null)) invalid(code)
   return r as ToolkitToolFields | Partial<ToolkitToolFields>
 }
 const PACKAGE_FIELDS = ['kind', 'packagePath', 'enabled', 'statusBar', 'workspacePath', 'args'] as const
@@ -281,13 +285,16 @@ function packageSource(value: unknown, actions: ToolkitAction[] | undefined, dis
   return r as ToolkitPackageSource
 }
 export function parseToolkitToolDefinition(value: unknown, code = 'CONTROL_PROTOCOL_ERROR'): ToolkitToolDefinition {
-  const r = record(value, [...TOOL_FIELDS.filter(key => key !== 'actions' && key !== 'display'), 'id', 'revision'], ['actions', 'display', 'package'], code)
+  const r = record(value, [...TOOL_FIELDS.filter(key => key !== 'actions' && key !== 'display' && key !== 'mode'), 'id', 'revision'], ['actions', 'display', 'mode', 'package'], code)
   if (Buffer.byteLength(JSON.stringify(r)) > TOOLKIT_DEFINITION_MAX_BYTES) invalid(code)
   const { id, revision, package: source, ...fields } = r
   identity(id, code); identity(revision, code)
   if (id === 'performance') invalid(code)
   const definition = { ...parseToolkitToolFields(fields, false, code), id, revision } as ToolkitToolDefinition
-  if (Object.hasOwn(r, 'package')) definition.package = packageSource(source, definition.actions, definition.display, code)
+  if (Object.hasOwn(r, 'package')) {
+    if (definition.mode === 'tui') invalid(code)
+    definition.package = packageSource(source, definition.actions, definition.display, code)
+  }
   return definition
 }
 /** Durable records carry references or inline source, never resolved package source copies. */
@@ -322,6 +329,7 @@ function execution(value: unknown, confirmed: boolean): ToolkitAdmission | Toolk
   const target = record(r.target, ['workspacePath']); text(target.workspacePath); encodedText(target.workspacePath, 4096)
   if (target.workspacePath !== definition.workspacePath) invalid()
   runRef(r.run); time(r.startedAt); nullable(r.reason, text); nullable(r.reason, value => encodedText(value, 4096)); text(r.text, TOOLKIT_TEXT_MAX_BYTES); encodedText(r.text, TOOLKIT_TEXT_MAX_JSON_BYTES)
+  if (definition.mode === 'tui' && (r.text !== '' || Object.hasOwn(r, 'document'))) invalid()
   if (Object.hasOwn(r, 'document') && r.document !== null) parseToolkitResultDocument(r.document)
   if (r.document !== undefined && r.run === null) invalid()
   if (confirmed) {
@@ -409,7 +417,7 @@ export function parseToolkitResult(operation: ToolkitOperation, value: unknown):
       const source = settingsResourceRecord(value, 'CONTROL_PROTOCOL_ERROR')
       const tool = source.kind === 'package'
         ? record(source, ['kind', 'toolId', 'name', 'readonly', 'icon', 'enabled', 'statusBar', 'configRevision', 'path', 'availability', 'reason'], ['display'])
-        : record(source, ['kind', 'toolId', 'name', 'readonly'], ['revision', 'icon', 'enabled', 'statusBar', 'display'])
+        : record(source, ['kind', 'toolId', 'name', 'readonly'], ['revision', 'icon', 'enabled', 'statusBar', 'display', 'mode'])
       identity(tool.toolId)
       if (Object.hasOwn(tool, 'display') && typeof tool.display !== 'boolean') invalid()
       if (tool.kind === 'package') nullable(tool.name, value => field('name', value, 'CONTROL_PROTOCOL_ERROR'))
@@ -419,8 +427,10 @@ export function parseToolkitResult(operation: ToolkitOperation, value: unknown):
         if (tool.toolId !== 'performance' || tool.readonly !== true || Object.keys(tool).length !== 4) invalid()
         builtin++
       } else if (tool.kind === 'script') {
-        if (tool.toolId === 'performance' || typeof tool.readonly !== 'boolean' || Object.keys(tool).length !== 8 + (Object.hasOwn(tool, 'display') ? 1 : 0)) invalid()
+        if (tool.toolId === 'performance' || typeof tool.readonly !== 'boolean' || Object.keys(tool).length !== 8 + (Object.hasOwn(tool, 'display') ? 1 : 0) + (Object.hasOwn(tool, 'mode') ? 1 : 0)) invalid()
         identity(tool.revision); field('icon', tool.icon, 'CONTROL_PROTOCOL_ERROR'); field('enabled', tool.enabled, 'CONTROL_PROTOCOL_ERROR'); field('statusBar', tool.statusBar, 'CONTROL_PROTOCOL_ERROR')
+        if (Object.hasOwn(tool, 'mode')) field('mode', tool.mode, 'CONTROL_PROTOCOL_ERROR')
+        if (tool.mode === 'tui' && tool.display === true) invalid()
       } else if (tool.kind === 'package') {
         if (tool.toolId === 'performance' || tool.readonly !== false || !['available', 'unavailable'].includes(tool.availability as string)) invalid()
         identity(tool.configRevision); field('workspacePath', tool.path, 'CONTROL_PROTOCOL_ERROR')

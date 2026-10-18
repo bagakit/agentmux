@@ -11,8 +11,8 @@ import { toolkitToolSchema } from './config-store.js'
 import type { ConfigOwner } from './config-owner.js'
 
 export function toolkitTools(config: AppConfig): ToolkitToolConfiguration[] { return config.toolkit?.tools ?? [] }
-export function toolkitFields({ id: _id, revision: _revision, ...fields }: ToolkitToolConfiguration): ToolkitConfigurationFields {
-  return 'kind' in fields ? fields : { ...fields, actions: fields.actions ?? [] }
+export function toolkitFields({ id: _id, revision: _revision, ...fields }: ToolkitConfigurationFields & { id?: string; revision?: string }): ToolkitConfigurationFields {
+  return 'kind' in fields ? fields : { ...fields, mode: fields.mode ?? 'script', actions: fields.actions ?? [] }
 }
 export function findToolkitTool(config: AppConfig, id: string): ToolkitToolConfiguration {
   return toolkitTools(config).find(tool => tool.id === id) ?? fail('SETTING_RESOURCE_NOT_FOUND', `Tool “${id}” does not exist.`)
@@ -51,7 +51,7 @@ export async function executeToolkitConfig(request: Extract<ToolkitRequest,
       if (!old) fail('SETTING_RESOURCE_NOT_FOUND', `Tool “${request.toolId}” does not exist.`)
       const fields = toolkitFields(old)
       if (request.operation === 'toolkit.remove') {
-        if (request.expected !== undefined && !configValuesEqual(fields, ('kind' in request.expected ? request.expected : { ...request.expected, actions: request.expected.actions ?? [] }))) {
+        if (request.expected !== undefined && !configValuesEqual(fields, toolkitFields(request.expected))) {
           throw new ConfigConflict(`toolkit.tools.${request.toolId}`)
         }
         changed = true
