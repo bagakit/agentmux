@@ -4,7 +4,7 @@ import { parseConnectionDeliveryParams, parseRoomBindingAuthority, type Connecti
 import type { ConnectionHost } from './connection-host.js'
 import { parsePreparedPublication } from './publication-wire.js'
 import type { PublicationAdapter } from './publication-adapter.js'
-import { publicationImage, publicationFile, type ResourceUploadReceipt, type ResolvedPublicationPart } from './publication-resource.js'
+import { publicationEffectContext, publicationImage, publicationFile, type ResourceUploadReceipt, type ResolvedPublicationPart } from './publication-resource.js'
 import { isConversationPublicationPart, publicationPartKey } from './publication-content.js'
 import { PublicationStore, publicDelivery, type PublicationReceipt, type PublicationOperation } from './publication-store.js'
 
@@ -337,19 +337,19 @@ export class PublicationHost implements ConnectionDeliveryPort {
         if (qualification !== 'qualified') return { state: 'unavailable', reason: 'source-unconfirmed' }
         qualified.add(frozen)
       }
-      if ((original.payload.kind === 'image' || original.payload.kind === 'file') && original.effect === 'upsert' && !original.prepared) {
+      if (!adapter.directResources && (original.payload.kind === 'image' || original.payload.kind === 'file') && original.effect === 'upsert' && !original.prepared) {
         const last = original.uploads?.at(-1)
         if (last?.state === 'dispatching') { this.store.settleResourceUpload(original.operationId, original.uploads!.length, { state: 'unknown' }); continue }
         if (last?.state !== 'confirmed') {
-          if (original.payload.kind === 'image' ? !adapter.images || !adapter.images.accepts(original.payload.image) : !adapter.files || !adapter.files.accepts(original.payload.file)) return { state: 'unavailable', reason: 'adapter-unavailable' }
+          if (original.payload.kind === 'image' ? !adapter.images?.upload || !adapter.images.accepts(original.payload.image) : !adapter.files?.upload || !adapter.files.accepts(original.payload.file)) return { state: 'unavailable', reason: 'adapter-unavailable' }
           const upload = this.store.claimResourceUpload(original.operationId, () => authorized())
           if (!upload || (upload.payload.kind !== 'image' && upload.payload.kind !== 'file')) return
           if (signal.aborted || !authorized()) { this.store.settleResourceUpload(upload.operationId, upload.uploads!.length, { state: 'unknown' }); return }
           const uploadSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)])
           let effect: Promise<ResourceUploadReceipt>
           try { effect = Promise.resolve(upload.payload.kind === 'image'
-            ? adapter.images!.upload(upload.payload.image, upload.target, credential, uploadSignal)
-            : adapter.files!.upload(upload.payload.file, upload.target, credential, uploadSignal)) }
+            ? adapter.images!.upload!(upload.payload.image, upload.target, credential, uploadSignal)
+            : adapter.files!.upload!(upload.payload.file, upload.target, credential, uploadSignal)) }
           catch { effect = Promise.reject(new Error('Unconfirmed original resource upload.')) }
           const settle = (receipt: ResourceUploadReceipt) => { if (!this.closed) this.store.settleResourceUpload(upload.operationId, upload.uploads!.length, receipt) }
           effect.then(receipt => {
@@ -368,7 +368,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (signal.aborted || !authorized() || claimed.payload.kind === 'permission' && !this.options.permissions?.authorized(claimed)) { this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); return }
       const timeout = AbortSignal.timeout(30_000), dispatchSignal = AbortSignal.any([signal, timeout])
       let effect: Promise<PublicationReceipt>
-      try { effect = Promise.resolve(adapter.dispatch(claimed.prepared!, claimed.target, credential, dispatchSignal, claimed.mapping)) }
+      try { effect = Promise.resolve(adapter.dispatch(claimed.prepared!, claimed.target, credential, dispatchSignal, claimed.mapping, publicationEffectContext(claimed))) }
       catch { effect = Promise.reject(new Error('Unconfirmed original platform effect.')) }
       const settle = (receipt: PublicationReceipt) => { if (!this.closed) this.store.settle(claimed.operationId, claimed.attempt!, receipt) }
       // A late authoritative receipt can settle this same identity after timeout, never launch another effect.

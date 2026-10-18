@@ -51,7 +51,7 @@ const parseReceipt = parseConnectionDeliveryReceipt
 export function publicDelivery(operation: PublicationOperation): ConnectionDelivery {
   const { payload: _payload, publicationScope: _scope, prepared: _prepared, attempt: _attempt, sourceRecords: _records, uploads: _uploads, ...delivery } = operation
   const last = operation.uploads?.at(-1)
-  return parseConnectionDelivery({ ...delivery, ...((operation.payload.kind === 'image' || operation.payload.kind === 'file') && operation.effect === 'upsert' ? { resourceUpload: { kind: operation.payload.kind, part: operation.payload.part, attempt: operation.uploads?.length ?? 0, state: last?.state ?? 'pending' } } : {}) })
+  return parseConnectionDelivery({ ...delivery, ...((operation.payload.kind === 'image' || operation.payload.kind === 'file') && operation.effect === 'upsert' && !operation.prepared?.request.multipart ? { resourceUpload: { kind: operation.payload.kind, part: operation.payload.part, attempt: operation.uploads?.length ?? 0, state: last?.state ?? 'pending' } } : {}) })
 }
 export type PublicationPageOptions = {
   fragmentBytes?: number
@@ -656,7 +656,7 @@ export class PublicationStore {
       const predecessor = first.predecessorOperationId ? this.inspect(first.predecessorOperationId) : null
       if (predecessor && (predecessor.state !== 'confirmed' || !predecessor.mapping)) return null
       const original = { ...first, ...(predecessor?.mapping && predecessor.effect !== 'withdraw' ? { mapping: predecessor.mapping } : {}) }
-      if ((original.payload.kind === 'image' || original.payload.kind === 'file') && original.effect === 'upsert' && original.uploads?.at(-1)?.state !== 'confirmed') return null
+      if (!adapter.directResources && (original.payload.kind === 'image' || original.payload.kind === 'file') && original.effect === 'upsert' && original.uploads?.at(-1)?.state !== 'confirmed') return null
       let candidate: unknown = original.prepared
       if (!candidate) {
         try { candidate = adapter.prepare(JSON.parse(encode(original))) }

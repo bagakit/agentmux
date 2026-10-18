@@ -95,6 +95,7 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
     ingress: { adapterId: DISCORD_PUBLICATION.adapterId, verify: async (...input) => (await discord()).verify(...input), qualifyReply: async (...input) => (await discord()).qualifyReply(...input) },
     transport: { start: async input => (await discord()).transport.start(input) },
     publication: { ...DISCORD_PUBLICATION, supportedRenderVersions: [DISCORD_PUBLICATION.renderVersion], prepare: prepareDiscordPublication,
+      images: { maxBytes: 16 * 1024 * 1024, accepts: () => true }, files: { maxBytes: 16 * 1024 * 1024, accepts: () => true },
       dispatch: async (...input) => (await discord()).publication.dispatch(...input), inspect: async (...input) => (await discord()).publication.inspect(...input) },
     channelProfiles: {
       readActor: input => readDiscordActor(input),
