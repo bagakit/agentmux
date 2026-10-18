@@ -3,20 +3,29 @@ import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { originalTopicAddress, topicSpatialAddress } from '../../../shared/space-addresses'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { collaborationSubjectKey, type CollaborationArea } from './agent-collaboration'
-import { createWorkspaceAgentListSelector, type WorkspaceAgentExecutionResolver, type WorkspaceAgentScopeState } from './workspace-agent-scope'
+import { createWorkspaceAgentListSelector, type WorkspaceAgentExecutionResolver, type WorkspaceAgentScopeState, type WorkspaceAgentList, type WorkspaceAgentSources } from './workspace-agent-scope'
 import { projectRailNavigation, workspaceProjectId } from './workspace-projects'
 import { scratchTopicsForConfig, scratchTopicKind } from './scratch-topic-snapshots'
 
 export type CollaborationAreaRequest = { workspaceId: string; choice: AgentMuxDesktopSpaceSelection | null }
 export type CollaborationAreas = { areas: readonly CollaborationArea[]; current: readonly string[]; issue: string | null; title: string }
 
+function areaMembers(lists: readonly WorkspaceAgentList[]) {
+  const affiliations = new Map<string, WorkspaceAgentList['members'][number]>()
+  for (const list of lists) for (const member of list.members) {
+    const id = collaborationSubjectKey(member.subject), old = affiliations.get(id)
+    if (!old || old.basis === 'workspace' || member.basis === 'spatial') affiliations.set(id, member)
+  }
+  return { members: [...affiliations.keys()], affiliations }
+}
+
 /** Only combines original list owners. Geometry and message activity are not membership. */
 export function createCollaborationAreasSelector(resolve: WorkspaceAgentExecutionResolver) {
   const selectors = new Map<string, ReturnType<typeof createWorkspaceAgentListSelector>>()
   let inputs: readonly unknown[] = [], previous: CollaborationAreas
-  return (state: WorkspaceAgentScopeState, request?: CollaborationAreaRequest): CollaborationAreas => {
+  return (state: WorkspaceAgentScopeState, request?: CollaborationAreaRequest, sources?: WorkspaceAgentSources): CollaborationAreas => {
     const next = [state.config, state.sessions, state.tabs, state.layouts, state.spaceZoneBindings, state.scratchTopicSnapshots,
-      state.topicCategories, state.projectGroups, state.spatialRequests, request]
+      state.topicCategories, state.projectGroups, state.spatialRequests, request, sources]
     if (previous && next.every((input, at) => input === inputs[at])) return previous
     inputs = next
     const used = new Set<string>(), areas: CollaborationArea[] = []
@@ -24,13 +33,12 @@ export function createCollaborationAreasSelector(resolve: WorkspaceAgentExecutio
       used.add(key)
       let select = selectors.get(key)
       if (!select) { select = createWorkspaceAgentListSelector(resolve); selectors.set(key, select) }
-      return select({ ...state, workbenchSpaceSelection: choice }, workspace)
+      return select({ ...state, workbenchSpaceSelection: choice }, workspace, state.sessions, sources)
     }
-    const member = (session: ReturnType<typeof list>['sessions'][number]) => collaborationSubjectKey(session.control)
     const { scratch, projects } = projectRailNavigation(state.config?.workspaces ?? [])
     for (const project of projects) {
       const lists = project.workspaces.map(workspace => list('workspace:' + workspace.id, workspace, null))
-      areas.push({ id: project.id, name: project.name, kind: 'project', members: [...new Set(lists.flatMap(value => value.sessions.map(member)))],
+      areas.push({ id: project.id, name: project.name, kind: 'project', ...areaMembers(lists),
         issue: [...new Set(lists.flatMap(value => value.issue ? [value.issue] : []))].join(' ') || null })
     }
     let selected: ReturnType<typeof list> | undefined, current: string[] = [], issue: string | null = null
@@ -54,14 +62,14 @@ export function createCollaborationAreasSelector(resolve: WorkspaceAgentExecutio
         const value = list('topic:' + id, scratch, choice)
         const kind = source && state.spaceZoneBindings[source.zoneId]?.contentKind || scratchTopicKind(id, topics)
         const area: CollaborationArea = { id: value.key, name: value.title, kind: kind === 'unknown' ? 'unplaced' : kind,
-          members: value.sessions.map(member), issue: value.issue }
+          ...areaMembers([value]), issue: value.issue }
         areas.push(area)
         if (selected?.key === value.key) current.push(area.id)
         else if (request?.choice && !request.choice.topicId && !request.choice.zoneId && display?.spaceId === request.choice.spaceId) current.push(area.id)
       }
       const placed = new Set(areas.flatMap(area => area.members))
       const total = list('scratch-total', scratch, null)
-      const remaining = total.sessions.map(member).filter(id => !placed.has(id))
+      const remaining = total.members.map(member => collaborationSubjectKey(member.subject)).filter(id => !placed.has(id))
       if (remaining.length) areas.push({ id: total.key, name: scratch.name, kind: 'unplaced', members: remaining, issue: total.issue })
       if (request?.workspaceId === scratch.id && !request.choice?.topicId && !request.choice?.zoneId && !request.choice?.spaceId) current = areas.filter(area => area.kind !== 'project').map(area => area.id)
       else if (request && selected && !current.length && !category) {
@@ -71,7 +79,7 @@ export function createCollaborationAreasSelector(resolve: WorkspaceAgentExecutio
         if (root) current = areas.filter(area => area.kind !== 'project').map(area => area.id)
         else {
           const object = Boolean(choice?.topicId)
-          const area: CollaborationArea = { id: 'unconfirmed:' + JSON.stringify(request), name: selected.title, kind: 'unplaced', members: object ? selected.sessions.map(member) : [],
+          const area: CollaborationArea = { id: 'unconfirmed:' + JSON.stringify(request), name: selected.title, kind: 'unplaced', members: object ? selected.members.map(member => collaborationSubjectKey(member.subject)) : [],
             issue: selected.issue ?? 'The original area is unconfirmed. Its exact reference is retained; refresh the original spatial facts.' }
           areas.push(area); current = [area.id]
         }
@@ -80,7 +88,15 @@ export function createCollaborationAreasSelector(resolve: WorkspaceAgentExecutio
     if (request && !workspace) issue = 'The original Workspace is unavailable. Its exact reference is retained; refresh the original spatial facts.'
     for (const key of selectors.keys()) if (!used.has(key)) selectors.delete(key)
     if (request && workspace && !scratch && !current.length && !category) issue ??= 'The original area is unconfirmed. Its exact reference is retained; refresh the original spatial facts.'
-    previous = { areas, current, issue, title: category?.title ?? selected?.title ?? workspace?.name ?? 'Space' }
+    // An execution directory may explain an otherwise unplaced Session. It must
+    // never create an extra location beside an original binding or collaborator.
+    const placed = new Set(areas.filter(area => area.kind !== 'unplaced').flatMap(area => [...area.affiliations ?? []].flatMap(([id, member]) => member.basis !== 'workspace' ? [id] : [])))
+    const resolved = areas.map(area => {
+      const members = area.members.filter(id => !placed.has(id) || area.kind !== 'unplaced' && area.affiliations?.get(id)?.basis !== 'workspace')
+      const retained = new Set(members)
+      return members.length === area.members.length ? area : { ...area, members, ...(area.affiliations ? { affiliations: new Map([...area.affiliations].filter(([id]) => retained.has(id))) } : {}) }
+    })
+    previous = { areas: resolved, current, issue, title: category?.title ?? selected?.title ?? workspace?.name ?? 'Space' }
     return previous
   }
 }
