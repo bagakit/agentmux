@@ -21,6 +21,8 @@ export type ConnectionProfileObservation = {
   state: 'observed' | 'unknown' | 'unavailable'
   profile: { name?: string; description?: string; avatarUrl?: string } | null
   metadata: { description?: string } | null
+  /** Exact application creator from this observation. Absent means unrecorded; null means no qualified creator was returned. */
+  creator?: { idType: string; userId: string } | null
   botId: string | null; onlineVersionId: string | null; reviewingVersionId: string | null
   version: { versionId: string; status: 'unknown' | 'approved' | 'rejected' | 'reviewing' | 'unsubmitted' } | null
   managementUrl?: string

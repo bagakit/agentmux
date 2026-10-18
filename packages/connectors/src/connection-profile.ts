@@ -188,6 +188,7 @@ export class ConnectionProfileHost implements ConnectionProfilePort {
       state: 'unknown',
       profile: null,
       metadata: null,
+      creator: null,
       botId: null,
       onlineVersionId: null,
       reviewingVersionId: null,

@@ -36,13 +36,16 @@ export function parseDesiredConnectionProfile(v: unknown): DesiredConnectionProf
   if (!Object.keys(out).length) fail(); return out
 }
 export function parseConnectionProfileObservation(v: unknown): ConnectionProfileObservation {
-  const p = object(v, ['connectionId','connectionRevision','application','language','state','profile','metadata','botId','onlineVersionId','reviewingVersionId','version','managementUrl','reason'])
+  const p = object(v, ['connectionId','connectionRevision','application','language','state','profile','metadata','creator','botId','onlineVersionId','reviewingVersionId','version','managementUrl','reason'])
   const f = p.profile === null ? null : object(p.profile, ['name','description','avatarUrl']), m = p.metadata === null ? null : object(p.metadata, ['description']), ver = p.version === null ? null : object(p.version, ['versionId','status'])
+  const creator = p.creator === undefined || p.creator === null ? p.creator : object(p.creator, ['idType', 'userId'])
   const result: ConnectionProfileObservation = { connectionId: id(p.connectionId), connectionRevision: integer(p.connectionRevision), application: application(p.application), language: p.language === null ? null : text(p.language), state: choice(p.state,['observed','unknown','unavailable']),
     profile: f === null ? null : { ...(f.name === undefined ? {} : { name: text(f.name) }), ...(f.description === undefined ? {} : { description: description(f.description) }), ...(f.avatarUrl === undefined ? {} : { avatarUrl: url(f.avatarUrl) }) },
     metadata: m === null ? null : { ...(m.description === undefined ? {} : { description: description(m.description) }) },
+    ...(creator === undefined ? {} : { creator: creator === null ? null : { idType: id(creator.idType), userId: text(creator.userId) } }),
     botId: p.botId === null ? null : text(p.botId), onlineVersionId: p.onlineVersionId === null ? null : text(p.onlineVersionId), reviewingVersionId: p.reviewingVersionId === null ? null : text(p.reviewingVersionId),
     version: ver === null ? null : { versionId: text(ver.versionId), status: choice(ver.status,['unknown','approved','rejected','reviewing','unsubmitted']) }, ...(p.managementUrl === undefined ? {} : { managementUrl: url(p.managementUrl) }), ...reason(p.reason) }
+  if (result.creator && result.state !== 'observed') fail()
   if (result.version && result.version.versionId !== result.onlineVersionId || result.profile?.description !== undefined && !result.version) fail()
   return result
 }
