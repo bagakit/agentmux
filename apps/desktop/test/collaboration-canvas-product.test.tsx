@@ -554,18 +554,19 @@ it('overview keeps exact Agent endpoints without relayout and enters a named reg
     expect(scene.areas[0]!.members).toContain(relation.source); expect(scene.areas[1]!.members).toContain(relation.target)
     expect(relation.kind).toBe('supervision')
   }
-  // The node's screen-sized heading stays within its original area; miniature labels cannot overlap shelves.
+  // Camera labels retain the original area's identity and exact location action.
   const heading = dom.container.querySelector<HTMLButtonElement>('[aria-label="Locate Original area 0 · 6 Agents"]')!
   expect(heading).not.toBeNull()
   expect(heading.textContent).toContain('Original area 0')
-  expect(heading.textContent).toContain('6 Agents')
+  expect(heading.textContent).toContain('6')
+  expect(heading.title).toContain('Project')
   const area = heading.closest<HTMLElement>('.collaboration-area__overview-label')!
   const areaBox = renderedBox(JSON.stringify(['area', 'area-0']))
   expect(areaBox.kind).toBe('area')
-  expect(Number.parseFloat(area.style.getPropertyValue('--collaboration-label-width'))).toBeCloseTo(Math.min(240, (areaBox.width - (areaBox as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>).heading.x) * .25))
-  expect(area.closest('.react-flow__edgelabel-renderer')).not.toBeNull()
+  expect(Number.parseFloat(area.style.width)).toBeGreaterThanOrEqual(104)
+  expect(area.closest('.collaboration-region-labels')).not.toBeNull()
   const originalHeading = (areaBox as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>).heading
-  expect(Number.parseFloat(area.style.top) + Number.parseFloat(area.style.getPropertyValue('--collaboration-label-height')) / .25).toBeCloseTo(areaBox.y + originalHeading.y + originalHeading.height)
+  expect(Number.parseFloat(area.style.top) + Number.parseFloat(area.style.height)).toBeCloseTo((areaBox.y + originalHeading.y + originalHeading.height - top) * .25 + 20)
   await dom.render(graph(scene, null, scene.relations, [], scene.agents, { ready: true }))
   // Locate is an explicit control intent, so it is allowed to replace this already-set camera.
   await viewport(-left * .25 + 20, -top * .25 + 20, 1600, 1200, .25)
@@ -685,11 +686,66 @@ it('shows immediate source and recipient activity while the original new path is
   await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-edge__pulse')).not.toBeNull())
   const flow = dom.container.querySelector<SVGPathElement>('.collaboration-edge__pulse')!
   expect(Number.parseFloat(flow.style.animationDelay)).toBeLessThan(0)
+  const packet = dom.container.querySelector<SVGCircleElement>('.collaboration-edge__packet')!
+  expect(packet).not.toBeNull()
+  expect(packet.getAttribute('data-kind')).toBe('communication')
+  expect(packet.style.offsetPath).toBe(`path("${flow.getAttribute('d')}")`)
+  expect(packet.style.animationDelay).toBe(flow.style.animationDelay)
+  expect(packet.style.animationDuration).toBe(flow.style.animationDuration)
+  expect(Number(packet.getAttribute('r'))).toBe(4)
   await focusNode(target)
   expect(nodeElement(target)!.querySelector('[aria-label="Message received"]')).not.toBeNull()
   const edge = dom.container.querySelector<SVGGElement>('.collaboration-connections .react-flow__edge')!
   await act(async () => edge.dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
   expect(dom.container.querySelector('.collaboration-edge__label')!.textContent).toContain('Messages: Agent 0 → Agent 1')
+  const operations = requests.length, camera = captured.store!.getState().transform
+  await viewport(camera[0] * .25, camera[1] * .25, 20000, 20000, .25)
+  const overviewPacket = dom.container.querySelector<SVGCircleElement>('.collaboration-edge__packet')!
+  const overviewPath = dom.container.querySelector<SVGPathElement>('.collaboration-edge__pulse')!
+  expect(Number(overviewPacket.getAttribute('r')) * .25).toBe(4)
+  expect(overviewPacket.style.offsetPath).toBe(`path("${overviewPath.getAttribute('d')}")`)
+  expect(overviewPacket.style.animationDelay).toBe(overviewPath.style.animationDelay)
+  expect(requests).toHaveLength(operations)
+})
+
+it('keeps named region labels separated at distant scale without changing world geometry', async () => {
+  const scene = scenario(24); await loaded(scene)
+  const before = captured.nodes, operations = requests.length
+  const extent = [...boxes.values()], left = Math.min(...extent.map(box => box.x)), top = Math.min(...extent.map(box => box.y))
+  await viewport(-left * .06 + 20, -top * .06 + 60, 560, 360, .06)
+  const labels = [...dom.container.querySelectorAll<HTMLElement>('.collaboration-area__overview-label')]
+  expect(labels).toHaveLength(scene.areas.length)
+  for (const label of labels) {
+    const button = label.querySelector<HTMLButtonElement>('button')!
+    expect(button.textContent).toContain('Original area')
+    expect(button.textContent).toContain('6')
+    expect(button.title).toContain('Project')
+    expect(button.querySelector('svg')).not.toBeNull()
+    expect(Number.parseFloat(label.style.width)).toBeGreaterThanOrEqual(104)
+  }
+  for (let index = 0; index < labels.length; index++) for (const other of labels.slice(index + 1)) {
+    const label = labels[index]!, x = Number.parseFloat(label.style.left), y = Number.parseFloat(label.style.top)
+    const ox = Number.parseFloat(other.style.left), oy = Number.parseFloat(other.style.top)
+    expect(x + Number.parseFloat(label.style.width) <= ox || ox + Number.parseFloat(other.style.width) <= x || y + Number.parseFloat(label.style.height) <= oy || oy + Number.parseFloat(other.style.height) <= y).toBe(true)
+  }
+  expect(captured.nodes).toBe(before); expect(requests).toHaveLength(operations)
+})
+
+it('retains exact region context when reading a member with its original heading offscreen', async () => {
+  const scene = scenario(24); await loaded(scene)
+  const area = renderedBox(JSON.stringify(['area', 'area-0'])) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
+  const members = scene.areas[0]!.members.map(id => renderedBox(collaborationAgentNode('area-0', id)))
+  const distant = [...members].sort((a, b) => Math.hypot(b.x - area.x - area.heading.x, b.y - area.y - area.heading.y) - Math.hypot(a.x - area.x - area.heading.x, a.y - area.y - area.heading.y))[0]!
+  const before = captured.nodes, operations = requests.length
+  await viewport(-distant.x + 20, -distant.y + 20, 300, 180)
+  const label = dom.container.querySelector<HTMLElement>(`[data-area-id='${area.id}'][data-context=true]`)!
+  expect(label).not.toBeNull()
+  expect(label.textContent).toContain('Original area 0')
+  expect(label.textContent).toContain('6')
+  expect(label.querySelector('button')!.getAttribute('title')).toContain('Project')
+  expect(Number.parseFloat(label.style.left)).toBeGreaterThanOrEqual(0)
+  expect(Number.parseFloat(label.style.top) + Number.parseFloat(label.style.height)).toBeLessThanOrEqual(180)
+  expect(captured.nodes).toBe(before); expect(requests).toHaveLength(operations)
 })
 
 
