@@ -1692,6 +1692,7 @@ export type AgentMuxDesktopApi = {
     upgradeInspect(host: HostConfig, operationId: string): Promise<import('@agentmux/core').RemoteCoreUpgradeReceipt | null>
   }
   connections: {
+    onMetadataChanged(listener: (change: import('@agentmux/core/connections').ChannelMetadataChange) => void): () => void
     call<M extends import('@agentmux/core/connections').ConnectionMethod>(method: M, params: import('@agentmux/core/connections').ConnectionParamsMap[M]): Promise<import('@agentmux/core/connections').ConnectionResultMap[M]>
     storeCredential(input: { operationId: string; secret: string }): Promise<{ credentialRef: string }>
     inspectCredential(operationId: string): Promise<{ credentialRef: string } | null>

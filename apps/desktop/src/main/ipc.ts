@@ -2370,7 +2370,8 @@ export async function registerIpc(args: {
       catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
       workspace: id => config.workspaces.find(item => item.id === id),
       topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory) }) })
-  registerConnectorIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), secrets: connectorServices.secrets })
+  const disposeChannelMetadata = registerConnectorIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), secrets: connectorServices.secrets,
+    metadata: { subscribe: connectorServices.onChannelMetadataChanged, publish: change => { if (!contents.isDestroyed()) contents.send('connections:metadataChanged', change) } } })
   registerMoteChatIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
   registerMoteConnectionIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
   registerMotePreferencesIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
@@ -2472,6 +2473,7 @@ export async function registerIpc(args: {
       { owner: 'control-bridge', dispose: () => controlBridge.dispose() },
       { owner: 'control-server', dispose: () => control.stop() },
       { owner: 'mote-connections', dispose: () => moteConnections.close() },
+      { owner: 'channel-metadata', dispose: disposeChannelMetadata },
       { owner: 'connections', dispose: () => connectorServices.close() },
       { owner: 'runtime-attachment', dispose: () => detach() },
       { owner: 'history-observations', dispose: () => historyObservations.dispose() },

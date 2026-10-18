@@ -202,6 +202,11 @@ const api: AgentMuxPreloadApi = {
     call: (method, params) => ipcRenderer.invoke('applications:call', method, params)
   },
   connections: {
+    onMetadataChanged: listener => {
+      const receive = (_event: unknown, change: import('@agentmux/core/connections').ChannelMetadataChange) => listener(change)
+      ipcRenderer.on('connections:metadataChanged', receive)
+      return () => ipcRenderer.removeListener('connections:metadataChanged', receive)
+    },
     call: async (method, params) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('connections:call', method, params)),
     storeCredential: input => ipcRenderer.invoke('connections:storeCredential', input),
     inspectCredential: operationId => ipcRenderer.invoke('connections:inspectCredential', operationId)
