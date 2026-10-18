@@ -72,7 +72,7 @@ it('keeps page links separate from exact shared occurrences and opens an uncatal
   expect(dom.container.querySelectorAll('.note-links-shared-use')).toHaveLength(2)
   expect(dom.container.textContent).toContain('2 uses here')
   expect(api.notebooks.content).toHaveBeenCalledTimes(1)
-  await clickText('Go to use 2')
+  await dom.click('[data-use-position="reader-use-1"] > .note-links-target')
   expect(f.onOpen).toHaveBeenLastCalledWith((await f.metadata.read()).pages.reader, 'reader-use-1', expect.any(AbortSignal))
   await clickText('Shared decision')
   expect(f.onOpenFile).toHaveBeenCalledExactlyOnceWith({ ...f.resource('shared'), noteId: 'shared' }, undefined, expect.any(AbortSignal))
@@ -129,11 +129,11 @@ it('retains navigation failure in the footer and aborts an unfinished original o
 it('cancels a registered use-location open and keeps its rejected result visible in the same footer', async () => {
   const f = await fixture(); await f.mount(); await openShared()
   f.onOpen.mockRejectedValueOnce(new Error('Original use position unavailable'))
-  await clickText('Go to use 2')
+  await dom.click('[data-use-position="reader-use-1"] > .note-links-target')
   expect(dom.container.textContent).toContain('Original use position unavailable')
   let pending: AbortSignal | undefined
   f.onOpen.mockImplementationOnce((_page, _block, signal) => new Promise((_resolve, reject) => { pending = signal; signal!.addEventListener('abort', () => reject(signal!.reason), { once: true }) }))
-  await clickText('Go to use 2'); expect(pending?.aborted).toBe(false)
+  await dom.click('[data-use-position="reader-use-1"] > .note-links-target'); expect(pending?.aborted).toBe(false)
   await f.mount('reader', false); expect(pending?.aborted).toBe(true)
 })
 

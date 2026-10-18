@@ -213,7 +213,12 @@ it.each(['close', 'inactive', 'unmount', 'identity'] as const)('cancels a pendin
   else if (reason === 'unmount') await dom.render(null)
   else { f.shared = { ...f.shared, path: 'moved-shared.note.md' }; await mount(f) }
   expect(signal?.aborted).toBe(true)
-  if (reason === 'close') await open()
+  if (reason === 'close') {
+    await open()
+    // The old dialog's delayed close-autofocus must not dismiss a newer opening.
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
+    expect(panel()).not.toBeNull()
+  }
   await act(async () => reject(Error('Stale original navigation failure')))
   expect(document.body.textContent).not.toContain('Stale original navigation failure')
   if (reason === 'close') expect(panel()).not.toBeNull()
