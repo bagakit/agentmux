@@ -14,6 +14,15 @@ it('keeps absent manual setup provenance legal without manufacturing a managed r
   expect(parseConnectionResult('connection.ls', { connections: [record] }).connections[0]).not.toHaveProperty('initialSetup')
 })
 
+it('retains finite registered adapter capabilities independently of authentication and absent support remains unknown', () => {
+  const capabilities = { roomDiscovery: true, roomCreation: false, roomLink: true }
+  expect(parseConnectionResult('connection.ls', { connections: [{ ...record, capabilities }] }).connections[0]).toEqual({ ...record, capabilities })
+  expect(parseConnectionResult('connection.ls', { connections: [record] }).connections[0]).not.toHaveProperty('capabilities')
+  for (const capabilities of [null, {}, { roomDiscovery: true, roomCreation: false }, { roomDiscovery: true, roomCreation: false, roomLink: 'ready' }, { roomDiscovery: true, roomCreation: false, roomLink: true, authorized: true }]) {
+    expect(() => parseConnectionResult('connection.ls', { connections: [{ ...record, capabilities }] })).toThrow()
+  }
+})
+
 it.each([null, {}, { state: 'ready' }, { state: 'complete', operationId: 'private-original' }, { state: 'complete', actor: 'private-actor' }])('rejects malformed or private initial setup record material %#', initialSetup => {
   expect(() => parseConnectionResult('connection.ls', { connections: [{ ...record, initialSetup }] })).toThrow()
 })
