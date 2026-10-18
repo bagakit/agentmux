@@ -8,7 +8,12 @@ module.exports = async function captureWorkingDirectory({ win, read, until, wait
   const value = selector => read(`document.querySelector(${JSON.stringify(selector)}).value`)
   const fill = async (selector, text) => {
     await click(selector)
-    for (const type of ['keyDown', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode: 'A', modifiers: ['meta'] })
+    await until(`document.activeElement === document.querySelector(${JSON.stringify(selector)})`)
+    win.webContents.selectAll()
+    await until(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});return n.selectionStart===0 && n.selectionEnd===n.value.length})()`)
+    raw.actions.push({ type: 'native-select-all', selector })
+    for (const type of ['keyDown', 'keyUp']) win.webContents.sendInputEvent({ type, keyCode: 'Backspace' })
+    await until(`document.querySelector(${JSON.stringify(selector)}).value === ''`)
     await win.webContents.insertText(text)
     raw.actions.push({ type: 'native-insert-text', selector, text })
     await until(`document.querySelector(${JSON.stringify(selector)}).value === ${JSON.stringify(text)}`)
