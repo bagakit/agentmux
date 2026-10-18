@@ -16,7 +16,7 @@ import { AgentCollaborationMap } from '../src/renderer/src/components/AgentColla
 import type { CollaborationMapTarget } from '../src/renderer/src/lib/collaboration-map-navigation'
 import { useCollaborationReading } from '../src/renderer/src/lib/use-collaboration-reading'
 import * as collaborationReading from '../src/renderer/src/lib/use-collaboration-reading'
-import { collaborationAgentPresentation } from '../src/renderer/src/lib/collaboration-map-presentation'
+import { COLLABORATION_ACTIVITY_MS, collaborationAgentPresentation } from '../src/renderer/src/lib/collaboration-map-presentation'
 
 const dom = composerDOM({ agentInformation: true }), workspace = composerConfig.workspaces[0]!
 const sessions = ['agent-a', 'agent-b', 'agent-c', 'agent-d'].map(id => ({ ...composerSession(id),
@@ -72,7 +72,7 @@ function changed(sequence: number, sender = 'agent-a', recipient = 'agent-b'): R
 beforeEach(() => {
   installCollaborationCanvasGeometry()
   installCollaborationLayoutLoopback()
-  vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
+  vi.spyOn(api.sessions, 'historySources').mockResolvedValue({ sources: [], warnings: [] })
   verificationReads = 0; listeners = new Set(); records = [event(7, 'message-a'), event(8, 'message-c', 'agent-c', 'agent-d')]
   useAppStore.setState({ config: composerConfig, sessions, tabs: {}, layouts: {}, scratchTopicSnapshots: {}, timelines: {},
     agentNames: { 'agent-a': 'Task A', 'agent-b': 'Task B', 'agent-c': 'Task C', 'agent-d': 'Task D' },
@@ -220,14 +220,15 @@ it('does not begin a supervised request body read after its qualification return
 it('expires each real live pulse independently while later traffic continues on another relation', async () => {
   vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] }); vi.setSystemTime(fixtureEpoch(1))
   let reading!: ReturnType<typeof useCollaborationReading>
-  function PulseProbe() { reading = useCollaborationReading([subject('agent-a'), subject('agent-c')], true); return null }
+  const pulseScope = { current: new Set(['agent-a', 'agent-c'].map(id => JSON.stringify(['local', id]))) }
+  function PulseProbe() { reading = useCollaborationReading([subject('agent-a'), subject('agent-c')], true, pulseScope); return null }
   try {
     await dom.render(<PulseProbe />)
     records.push(event(9, 'live-9')); await emit(changed(9)); expect(reading.pulses.map(pulse => pulse.sender)).toEqual(['agent-a'])
     await act(async () => { vi.advanceTimersByTime(1000) })
     records.push(event(10, 'live-10', 'agent-c', 'agent-d')); await emit(changed(10, 'agent-c', 'agent-d'))
     expect(reading.pulses.map(pulse => pulse.sender)).toEqual(['agent-a', 'agent-c'])
-    await act(async () => { vi.advanceTimersByTime(801) })
+    await act(async () => { vi.advanceTimersByTime(COLLABORATION_ACTIVITY_MS - 1000 + 1) })
     expect(reading.pulses.map(pulse => pulse.sender)).toEqual(['agent-c'])
     await act(async () => { vi.advanceTimersByTime(1000) })
     expect(reading.pulses).toEqual([])
@@ -238,7 +239,7 @@ it('expires each real live pulse independently while later traffic continues on 
 it('consumes retained incremental facts in the real Map without redecoding status or rebuilding unchanged cards', async () => {
   useAppStore.setState({ sessions: [...sessions, { ...sessions[0]!, id: 'alias-a' }] })
   const originalHook = collaborationReading.useCollaborationReading
-  vi.spyOn(collaborationReading, 'useCollaborationReading').mockImplementation((_subjects, enabled) => originalHook([subject('agent-a')], enabled))
+  vi.spyOn(collaborationReading, 'useCollaborationReading').mockImplementation((_subjects, enabled, scope) => originalHook([subject('agent-a')], enabled, scope))
   let decoded = 0
   const row = event(7, 'message-a'), refs = row.messages
   Object.defineProperty(row, 'messages', { get() { decoded++; return refs } })
@@ -330,7 +331,7 @@ it('keeps a confirmed exited Agent a closed map point while preserving its origi
 
 it('opens the shared reader for a retired map point without inventing a live Session or control', async () => {
   const retired = { hostId: 'local', agentSessionId: 'retained-task', state: 'retired' as const }
-  vi.mocked(api.sessions.historySources).mockResolvedValue([retired])
+  vi.mocked(api.sessions.historySources).mockResolvedValue({ sources: [retired], warnings: [] })
   await render({ kind: 'focus', subject: subject(retired.agentSessionId), name: 'Retained task' })
   let point: HTMLButtonElement | null = null
   await settleCollaborationCanvas(() => {
@@ -347,7 +348,7 @@ it('opens the shared reader for a retired map point without inventing a live Ses
 
 it('keeps an active catalogue identity missing from the current snapshot readable as unknown on its exact Host', async () => {
   const source = { hostId: 'other-host', agentSessionId: 'unobserved-task', state: 'active' as const }
-  vi.mocked(api.sessions.historySources).mockResolvedValue([source])
+  vi.mocked(api.sessions.historySources).mockResolvedValue({ sources: [source], warnings: [] })
   await render({ kind: 'focus', subject: { hostId: source.hostId, agentSessionId: source.agentSessionId }, name: 'Unobserved task' })
   let point: HTMLButtonElement | null = null
   await settleCollaborationCanvas(() => {
@@ -365,7 +366,7 @@ it('keeps an active catalogue identity missing from the current snapshot readabl
 it('keeps the exact map identity through live removal unknown observation and source-confirmed retirement', async () => {
   const current = { hostId: 'local', agentSessionId: 'agent-a', state: 'active' as const }, closed = { ...current, state: 'retired' as const }
   const retirement = deferred<(typeof closed)[]>()
-  vi.mocked(api.sessions.historySources).mockResolvedValueOnce([current]).mockReturnValueOnce(retirement.promise)
+  vi.mocked(api.sessions.historySources).mockResolvedValueOnce({ sources: [current], warnings: [] }).mockReturnValueOnce(retirement.promise.then(sources => ({ sources, warnings: [] })))
   await render()
   expect(graph().querySelector('.focus-context[data-session-id="agent-a"]')).not.toBeNull()
   await act(async () => {
@@ -392,8 +393,8 @@ it('keeps the exact map identity through live removal unknown observation and so
 
 it('surfaces original catalogue failure with no selection and recovers through its owner while keeping the world usable', async () => {
   const retained = [{ hostId: 'local', agentSessionId: 'retained-task', state: 'retired' as const }]
-  vi.mocked(api.sessions.historySources).mockResolvedValueOnce(retained)
-    .mockRejectedValueOnce(Error('Original catalogue temporarily unavailable')).mockResolvedValueOnce(retained)
+  vi.mocked(api.sessions.historySources).mockResolvedValueOnce({ sources: retained, warnings: [] })
+    .mockRejectedValueOnce(Error('Original catalogue temporarily unavailable')).mockResolvedValueOnce({ sources: retained, warnings: [] })
   await render()
   const card = graph().querySelector('.focus-context[data-session-id="agent-a"]')
   expect(card).not.toBeNull()
@@ -417,5 +418,22 @@ it('surfaces original catalogue failure with no selection and recovers through i
   expect(sourceButton.textContent).toBe('Sources')
   expect(graph().querySelector('.focus-context[data-session-id="agent-a"]')).toBe(card)
   expect(useAppStore.getState().agentComposerDrafts['agent-a']).toBe('Original A draft')
+  expect(api.sessions.readMessage).not.toHaveBeenCalled(); expect(api.sessions.dispatch).not.toHaveBeenCalled()
+})
+
+
+it('shows live activity between original referenced Agents outside the catalogue without extending history demand', async () => {
+  useAppStore.setState({ sessions: [sessions[0]!] })
+  records = [event(7, 'reference-b', 'agent-a', 'external-b'), event(8, 'reference-c', 'agent-a', 'external-c')]
+  vi.spyOn(api.sessions, 'historySource').mockImplementation(async reference => ({ reference, source: null, issue: null }))
+  await render()
+  const referenced = (id: string) => [...graph().querySelectorAll<HTMLElement>('[data-collaboration-agent]')].find(node => node.dataset.collaborationAgent === JSON.stringify(['local', id]))
+  await settleCollaborationCanvas(() => { expect(referenced('external-b')).toBeDefined(); expect(referenced('external-c')).toBeDefined() })
+  const reads = vi.mocked(api.sessions.messageEvents).mock.calls.length
+  await emit(changed(9, 'external-b', 'external-c'))
+  expect(referenced('external-b')?.querySelector('[aria-label="Message sent"]')).not.toBeNull()
+  expect(referenced('external-c')?.querySelector('[aria-label="Message received"]')).not.toBeNull()
+  expect(api.sessions.messageEvents).toHaveBeenCalledTimes(reads)
+  expect(vi.mocked(api.sessions.messageEvents).mock.calls.every(([reference]) => reference.agentSessionId === 'agent-a')).toBe(true)
   expect(api.sessions.readMessage).not.toHaveBeenCalled(); expect(api.sessions.dispatch).not.toHaveBeenCalled()
 })

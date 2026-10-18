@@ -1,11 +1,12 @@
 // @vitest-environment happy-dom
-import { act, useMemo } from 'react'
+import { act, useMemo, useRef } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentMuxMessageEvent, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxSpawnRecord } from '@agentmux/core'
 import type { RuntimeEvent, SessionHistoryReference } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
 import { useCollaborationReading } from '../src/renderer/src/lib/use-collaboration-reading'
+import { COLLABORATION_ACTIVITY_MS } from '../src/renderer/src/lib/collaboration-map-presentation'
 import { collaborationSubjectKey, createCollaborationProjector, projectCollaboration, visibleCollaboration, type CollaborationReading } from '../src/renderer/src/lib/agent-collaboration'
 
 type EventOptions = Omit<AgentMuxRpcParams<'message.events'>, 'hostId' | 'participantSessionId'>
@@ -31,12 +32,14 @@ function page(subject: SessionHistoryReference, options: EventOptions = {}, even
     beforeSequence: options.beforeSequence ?? null, throughSequence: through, incarnation, messageId: options.messageId ?? null,
     broadcastOperationId: options.broadcastOperationId ?? null, events, nextBeforeSequence: cursors.older ?? null, nextAfterSequence: cursors.newer ?? null }
 }
-function Probe({ subjects, enabled }: { subjects: readonly SessionHistoryReference[]; enabled: boolean }) {
-  reading = useCollaborationReading(subjects, enabled)
+function Probe({ subjects, enabled, activitySubjects }: { subjects: readonly SessionHistoryReference[]; enabled: boolean; activitySubjects?: readonly SessionHistoryReference[] }) {
+  const scope = useRef<ReadonlySet<string>>(new Set())
+  scope.current = new Set((activitySubjects ?? subjects).map(collaborationSubjectKey))
+  reading = useCollaborationReading(subjects, enabled, scope)
   return <output>{JSON.stringify(reading.sources.map(source => ({ subject: source.subject, events: source.events, issues: source.issues })))}</output>
 }
-async function render(subjects: readonly SessionHistoryReference[] = [reader], enabled = true) {
-  await act(async () => root!.render(<Probe subjects={subjects} enabled={enabled} />))
+async function render(subjects: readonly SessionHistoryReference[] = [reader], enabled = true, activitySubjects?: readonly SessionHistoryReference[]) {
+  await act(async () => root!.render(<Probe subjects={subjects} enabled={enabled} activitySubjects={activitySubjects} />))
 }
 async function emit(event: RuntimeEvent['event'], hostId = reader.hostId) {
   await act(async () => { for (const listener of [...listeners]) listener({ type: 'core', hostId, event }) })
@@ -303,7 +306,7 @@ it('retains the exact facts through status-only loading failure observation and 
   await emit(change(101)); expect(reading.pulses).toHaveLength(1)
   await act(async () => pending.reject(Error('Original page unavailable')))
   expect(reading.sources[0]!.issues.events).toBe('Original page unavailable'); expect(reading.facts).toBe(facts)
-  await act(async () => { await vi.advanceTimersByTimeAsync(1801) })
+  await act(async () => { await vi.advanceTimersByTimeAsync(COLLABORATION_ACTIVITY_MS + 1) })
   expect(reading.pulses).toEqual([]); expect(reading.facts).toBe(facts)
 })
 
@@ -348,7 +351,7 @@ it('decodes only a new original page after ten thousand real accumulated rows an
   })
   let projection!: ReturnType<ReturnType<typeof createCollaborationProjector>>
   function ProjectionProbe() {
-    reading = useCollaborationReading([reader], true)
+    reading = useCollaborationReading([reader], true, { current: new Set([collaborationSubjectKey(reader)]) })
     const project = useMemo(createCollaborationProjector, [])
     projection = useMemo(() => project(reading.facts), [project, reading.facts])
     return <output>{reading.sources[0]?.events.length}</output>
@@ -412,7 +415,34 @@ it('keeps a live pulse phase and original observer watermark while active viewpo
   await render([b]); expect(reading.pulses).toEqual([pulse])
   await render([reader, b]); await emit(change(101))
   expect(reading.pulses).toEqual([pulse]); expect(reading.pulses[0]).toBe(pulse)
-  await act(async () => { await vi.advanceTimersByTimeAsync(901) })
+  await act(async () => { await vi.advanceTimersByTimeAsync(COLLABORATION_ACTIVITY_MS - 900 + 1) })
   expect(reading.pulses).toEqual([])
   await emit(change(101)); expect(reading.pulses).toEqual([])
+})
+
+
+it('observes live overview traffic independently of detail demand without fetching history or replaying it on return', async () => {
+  vi.useFakeTimers()
+  await render([], true, [reader, peer])
+  expect(api.sessions.messageEvents).not.toHaveBeenCalled(); expect(api.sessions.spawns).not.toHaveBeenCalled()
+  await emit(change(200, false)); expect(reading.pulses).toEqual([])
+  await emit(change(201)); expect(reading.pulses).toHaveLength(1)
+  const first = reading.pulses[0]!
+  await act(async () => vi.advanceTimersByTimeAsync(700))
+  await render([reader], true, [reader, peer])
+  expect(reading.pulses[0]).toBe(first)
+  await render([], true, [reader, peer])
+  const reads = vi.mocked(api.sessions.messageEvents).mock.calls.length
+  await emit(change(202, true, 'unrelated-a', 'unrelated-b'))
+  await emit(change(203), 'another-owner')
+  expect(reading.pulses).toEqual([first]); expect(api.sessions.messageEvents).toHaveBeenCalledTimes(reads)
+  await emit(change(204))
+  const second = reading.pulses[1]!
+  await act(async () => vi.advanceTimersByTimeAsync(COLLABORATION_ACTIVITY_MS - 700 + 1))
+  expect(reading.pulses).toEqual([second])
+  await render([], false, [reader, peer]); expect(reading.pulses).toEqual([])
+  await emit(change(205))
+  await render([], true, [reader, peer]); await emit(change(204))
+  expect(reading.pulses).toEqual([])
+  expect(api.sessions.readMessage).not.toHaveBeenCalled(); expect(api.sessions.dispatch).not.toHaveBeenCalled()
 })
