@@ -74,6 +74,32 @@ describe('login shell exported environment', () => {
     expect(runner).toHaveBeenCalledTimes(2)
   })
 
+  it.each(['/bin/zsh', '/bin/bash'])('keeps a late %s interactive export when the login fallback finishes first', async (shell) => {
+    vi.useFakeTimers()
+    const env: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin', SHELL: shell }
+    let fallbackReady = false
+    try {
+      const pending = hydrateProcessEnvironmentFromLoginShell({
+        platform: 'darwin', env, timeoutMs: 100,
+        runner: (_shell, args) => new Promise<string>((resolve) => {
+          const interactive = args[0] === '-ilc'
+          setTimeout(() => {
+            if (!interactive) fallbackReady = true
+            resolve(framed(args, interactive
+              ? { AGENTMUX_TEST_EXPORT: 'interactive', PATH: '/usr/bin:/bin' }
+              : { PATH: '/usr/bin:/bin' }))
+          }, interactive ? 75 : 10)
+        })
+      })
+      await vi.advanceTimersByTimeAsync(80)
+      expect(fallbackReady, 'the login fallback must actually finish before the interactive shell').toBe(true)
+      expect(await pending).toEqual({ ok: true, shell, mode: 'interactive-login' })
+      expect(env.AGENTMUX_TEST_EXPORT).toBe('interactive')
+    } finally { vi.useRealTimers() }
+    const child = await exec(process.execPath, ['-e', 'process.stdout.write(process.env.AGENTMUX_TEST_EXPORT ?? "missing")'], { env })
+    expect(child.stdout).toBe('interactive')
+  })
+
   /**
    * 只有 `-lc` 那条臂才补回继承来的 PATH，`-ilc` **不补**。
    *
@@ -164,23 +190,8 @@ describe('login shell exported environment', () => {
     expect(elapsedMs, `两条臂各等了一个完整预算（${elapsedMs}ms），预算没有共享`).toBeLessThan(120)
   })
 
-  /**
-   * 第二条臂的份额必须**从固定的截止时刻**算，而不是每轮重开一个预算。
-   *
-   * 上面那条用墙钟守总量，但墙钟的门只能开得比真值宽（要留执行抖动的余量），于是它漏掉一整类变异：把
-   * `deadlineAtMs` 挪进循环里每轮重算。实测（#882 审计独立复现）——60ms 预算、两条臂都挂死时三个世界的
-   * 墙钟分别是：诚实 60ms、每轮重算 90ms（第一条臂 30 + 第二条臂整份 60）、每臂一份 120ms。`< 120` 放过
-   * 了中间那个，而它对用户的后果是实打实的：窗口要等 1.5 倍预算才出来。
-   *
-   * 本条不量墙钟，改判**交给第二条臂的那个 timeoutMs**，因为那个数把三个世界分得干净且不依赖计时精度：
-   * 截止时刻固定在 `start+60`，第一条臂已经花掉自己那 30ms，所以诚实世界里剩下的份额**在算术上**不可能
-   * 超过 30；每轮重算会给出 60，每臂一份也给 60。地板取 30（预算的一半）而不是精确值——诚实侧只会更小
-   * 本条用可控时钟推进两条臂；真实 timer 可以略早触发，不能用它证明精确的剩余额度。
-   *
-   * 注意这与「早退的臂让出整份余额」那条（下面一条）不冲突：那条说的是第一条臂**没花掉**份额时余额要整份
-   * 让出去，本条说的是第一条臂**花掉了**份额后不许无中生有。两条一起才把除数和被除数都钉住。
-   */
-  it('derives the second arm share from the fixed deadline, not a fresh budget each iteration', async () => {
+  /** The interactive arm gets the full budget; a fallback started halfway gets only the remainder. */
+  it('bounds both arms by the same fixed deadline', async () => {
     vi.useFakeTimers()
     try {
       const handed: Array<{ arm: string; timeoutMs: number }> = []
@@ -195,16 +206,14 @@ describe('login shell exported environment', () => {
       })
       await vi.advanceTimersByTimeAsync(60)
       expect(await pending).toEqual({ ok: false, reason: 'probe-failed' })
-      expect(handed).toEqual([{ arm: '-ilc', timeoutMs: 30 }, { arm: '-lc', timeoutMs: 30 }])
+      expect(handed).toEqual([{ arm: '-ilc', timeoutMs: 60 }, { arm: '-lc', timeoutMs: 30 }])
     } finally { vi.useRealTimers() }
   })
 
   /**
    * 卡住的 `-ilc` 不能把 `-lc` 饿死。
    *
-   * 这条是「共享预算」那条的对偶，两条缺一不可：让第一条臂独吞整个预算能让上面那条全绿，但那正好
-   * 毁掉本条——而 `-lc` **不 source `.zshrc`**，恰恰是 `.zshrc` 卡住时唯一还能成功的那条路。只守总量
-   * 会把「窗口不卡」换成「环境一定加载失败」，用户从看不到窗口变成看到一个没有 PATH 的窗口。
+   * 这条守住并行的降级臂：交互 shell 挂住时，`-lc` 不读取 `.zshrc`，仍须在同一总预算内完成。
    */
   it('still reaches the non-interactive arm when the interactive one hangs', async () => {
     const env: NodeJS.ProcessEnv = { PATH: '/bin', SHELL: '/bin/zsh' }
@@ -220,18 +229,8 @@ describe('login shell exported environment', () => {
     expect(env).toMatchObject({ PATH: [_hygiene_fixturePath("opt/bin"), "/bin"].join(":"), EXPORTED: 'profile' })
   })
 
-  /**
-   * 早退的臂要把没花完的份额**整份**让给下一条，而不是再对半分一次。
-   *
-   * 除数 `arms.length - index` 是「剩下还有几条臂」，不是常数 2。实测（审计独立复现）：把它换成常量
-   * `arms.length`，上面每一条都还是绿的——因为现有用例要么两条臂都挂（各分一半，总量不变），要么第二条
-   * 臂瞬间返回且预算充裕（分多分少都够用）。两个世界只在「第一条臂**很快失败**、第二条臂需要那份余额」
-   * 这一处分岔，本条就是走这一处。
-   *
-   * 判据是**交给第二条臂的那个 timeoutMs**，不是返回值：两种除法下返回值完全一样（都是 -lc 成功），
-   * 只有实参能把它们分开。地板取「远大于半额」而不是精确值——精确值会被这几行的执行耗时打成 flake。
-   */
-  it('hands the whole unspent remainder to the next arm, not another half share', async () => {
+  /** Immediate interactive failure lets the fallback use the remaining budget without waiting. */
+  it('hands the unspent remainder to the fallback after early failure', async () => {
     const handed: Array<{ arm: string; timeoutMs: number }> = []
     const result = await hydrateProcessEnvironmentFromLoginShell({
       platform: 'darwin',
@@ -247,10 +246,10 @@ describe('login shell exported environment', () => {
     expect(result).toEqual({ ok: true, shell: '/bin/zsh', mode: 'login' })
     // 自检：两条臂都跑了，否则下面那条断言在读一个不存在的元素。
     expect(handed.map((call) => call.arm)).toEqual(['-ilc', '-lc'])
-    // 第一条臂几乎没花时间，所以第二条臂应当拿到接近 400 的整份；恒 /2 的话它只会拿到约 200。
+    // The first arm failed immediately, leaving nearly the whole budget for the fallback.
     expect(
       handed[1]!.timeoutMs,
-      `第二条臂只拿到 ${handed[1]!.timeoutMs}ms：早退臂的余额没有整份让出去，除数被当成了常数`
+      `The early failure left ${handed[1]!.timeoutMs}ms for the fallback`
     ).toBeGreaterThan(300)
   })
 
@@ -267,7 +266,7 @@ describe('login shell exported environment', () => {
     const result = await hydrateProcessEnvironmentFromLoginShell({
       platform: 'darwin',
       env: { PATH: '/bin', SHELL: '/bin/zsh' },
-      // 1ms：两条臂平分后第一份就是 0，是这条边界唯一稳定的触发方式。
+      // With almost no time left, neither arm may start with an unbounded zero timeout.
       timeoutMs: 1,
       runner: (_shell, args, _env, timeoutMs) => {
         handed.push({ arm: args[0]!, timeoutMs })
