@@ -9,7 +9,7 @@ const changes: Record<string, [string, string, string]> = {
   'final-native-opportunity-not-rechecked': ['prompt-submission.ts', 'await prepared.assertCurrent()\n          await assertNativeIdle()', 'await prepared.assertCurrent()'],
   'unknown-activity-denies-idle': ['client.ts', "session.semanticStatus?.state === 'working' || session.currentActivity?.state === 'active'", "session.semanticStatus?.state === 'working' || session.currentActivity && session.currentActivity.state !== 'idle'"],
   'final-input-fence-omitted': ['prompt-submission.ts', 'if (control?.idleOnly && currentRun.acceptedInputBytes !== control.idleOnly.inputByte)', 'if (false)'],
-  'failed-claim-becomes-opportunity': ['agent-message-notifications.ts', 'const opportunity = JSON.stringify([condition.expectedRun, idle, position])', 'const opportunity = JSON.stringify([condition.expectedRun, idle, condition.afterSubmissionId, position])']
+  'failed-claim-becomes-opportunity': ['agent-message-notifications.ts', 'const opportunity = JSON.stringify([condition.expectedRun, idle, sourceRuns, position])', 'const opportunity = JSON.stringify([condition.expectedRun, idle, sourceRuns, condition.afterSubmissionId, position])']
 }
 export default defineConfig({ root, plugins: [{ name: 'a2a-initial-idle-source', enforce: 'pre', resolveId(id) {
   const match = id.match(/^@agentmux\/([^/]+)(.*)$/u)
