@@ -82,7 +82,7 @@ vi.mock('../src/renderer/src/components/SurfaceToolDock', () => ({ SurfaceToolDo
 import { App } from '../src/renderer/src/App'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
+import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails, selectNotificationView, markShownNotificationsRead } from './helpers/notification-center'
 import { SESSION_EVENT_CHANNEL } from '../src/shared/contracts'
 import { registerIpc } from '../src/main/ipc'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
@@ -136,7 +136,10 @@ async function emit(event: RuntimeEvent) {
   await act(async () => { for (const listener of listeners!) listener({}, event) })
   await settle()
 }
-function notice(element: HTMLElement) { return notificationEventRows(element)[0] ?? null }
+function notice(element: HTMLElement) {
+  const id = useAppStore.getState().notificationEvents.at(-1)?.id
+  return notificationEventRows(element).find(row => row.dataset.eventId === id) ?? null
+}
 function crashed(session: SessionSnapshot): SessionSnapshot {
   return { ...session, processState: 'exited', status: { state: 'error', source: 'run-process', observedAt: Date.now() + 100, exitReason: 'crashed', exitCode: 139, detail: 'signal SIGSEGV' } }
 }
@@ -182,8 +185,10 @@ it('delivers the actual current crash through preload/Store/App as assertive wit
   const focus = document.activeElement
   await emit(processEvent())
   await toggleNotificationCenter(element, 'open')
+  await selectNotificationView(element, 'history')
   expect(notice(element)?.getAttribute('role')).toBe('alert')
   expect(notice(element)?.getAttribute('aria-live')).toBe('assertive')
+  await toggleNotificationDetails(notice(element)!)
   expect(notice(element)?.textContent).toContain('Agent "waiting" crashed (signal SIGSEGV, exit code 139)')
   expect(useAppStore.getState().errorNoticeContext).toEqual({ kind: 'agent-broken', subject: before.sessions.find(session => session.id === 'waiting')!.control })
   expect(document.activeElement).toBe(focus)
@@ -213,23 +218,26 @@ it('keeps healthy workflow errors polite and clears the previous crash classific
   expect(useAppStore.getState().sessions.find(s => s.id === healthy.id)?.status.state).toBe('working')
   expect(useAppStore.getState().sessions.find(s => s.id === healthy.id)?.processState).toBe('running')
   await toggleNotificationCenter(element, 'open')
+  await selectNotificationView(element, 'history')
   expect(notice(element)?.textContent).toContain('Private replay gap')
   expect(notice(element)?.getAttribute('aria-live')).toBe('polite')
   await emit(processEvent())
   await toggleNotificationCenter(element, 'open')
+  await selectNotificationView(element, 'history')
   expect(notice(element)?.getAttribute('aria-live')).toBe('assertive')
   await emit({ type: 'core', hostId: 'local', event: { type: 'agent-error', code: 'AGENT_STORE_IO', message: 'Private storage observation failed',
     evidence: { source: 'run-process', observedAt: Date.now() + 200 } } })
   expect(notice(element)?.getAttribute('role')).toBe('status')
   expect(notice(element)?.getAttribute('aria-live')).toBe('polite')
   expect(notice(element)?.textContent).toContain('Private storage observation failed')
-  expect(useAppStore.getState().errorNoticeContext).toEqual({ kind: 'indeterminate', summary: 'Host "local": AGENT_STORE_IO: Private storage observation failed' })
+  expect(useAppStore.getState().errorNoticeContext).toMatchObject({ kind: 'indeterminate', summary: 'Host "local": AGENT_STORE_IO: Private storage observation failed', event: { source: 'operation', key: expect.any(String) } })
 })
 
 it.each([false, true])('resets retained crash metadata when startup completes or fails (failure=%s)', async fails => {
   const element = await mountApp()
   await emit(processEvent())
   await toggleNotificationCenter(element, 'open')
+  await selectNotificationView(element, 'history')
   expect(notice(element)?.getAttribute('aria-live')).toBe('assertive')
   snapshot.mockResolvedValue(canonical(useAppStore.getState().sessions))
   const configuration = fixture.handlers.get('config:get')!
@@ -240,6 +248,7 @@ it.each([false, true])('resets retained crash metadata when startup completes or
   expect(useAppStore.getState().errorNoticeContext).toBeNull()
   if (fails) {
     await toggleNotificationCenter(element, 'open')
+    await selectNotificationView(element, 'current')
     await toggleNotificationDetails(currentNotificationRows(element)[0]!)
     expect(currentNotificationRows(element)[0]?.getAttribute('aria-live')).toBe('polite')
     expect(currentNotificationRows(element)[0]?.textContent).toContain('Private startup config read failed')
@@ -270,6 +279,7 @@ it('announces a buffered crash after a real membership snapshot through the same
   expect(notice(element)).toBeNull()
   await act(async () => { release(baseline) }); await settle()
   await toggleNotificationCenter(element, 'open')
+  await selectNotificationView(element, 'history')
   expect(notice(element)?.getAttribute('role')).toBe('alert')
   expect(notice(element)?.getAttribute('aria-live')).toBe('assertive')
   expect(useAppStore.getState().sessions.map(s => s.id).sort()).toEqual(['healthy', 'terminal', 'waiting'])
@@ -287,7 +297,9 @@ it('seeds historical startup crashes quietly but announces a crashed new steady-
   await emit(processEvent('new-member'))
   expect(useAppStore.getState().sessions.map(s => s.id).sort()).toEqual(['healthy', 'new-member', 'terminal', 'waiting'])
   await toggleNotificationCenter(element, 'open')
+  await selectNotificationView(element, 'history')
   expect(notice(element)?.getAttribute('aria-live')).toBe('assertive')
+  await toggleNotificationDetails(notice(element)!)
   expect(notice(element)?.textContent).toContain('Agent "new-member" crashed')
 })
 
@@ -297,6 +309,8 @@ it('keeps an acknowledged exact crash read and treats another current Run as a n
   const firstMessage = useAppStore.getState().error
   const firstId = useAppStore.getState().notificationEvents[0]!.id
   await toggleNotificationCenter(element, 'open')
+  await selectNotificationView(element, 'history')
+  await markShownNotificationsRead(element)
   await toggleNotificationCenter(element, 'closed')
   const receipts = useAppStore.getState().noticeReadReceipts
   await emit(processEvent())
@@ -305,6 +319,7 @@ it('keeps an acknowledged exact crash read and treats another current Run as a n
   expect(useAppStore.getState().noticeReadReceipts).toEqual(receipts)
   expect(receipts['global:events']?.[firstId]).toBe('read')
   await toggleNotificationCenter(element, 'open')
+  await selectNotificationView(element, 'history')
   expect(notice(element)?.getAttribute('aria-live')).toBe('assertive')
   await toggleNotificationCenter(element, 'closed')
   const previous = useAppStore.getState().sessions.find(session => session.id === 'waiting')!
@@ -319,6 +334,7 @@ it('keeps an acknowledged exact crash read and treats another current Run as a n
   expect(useAppStore.getState().notificationEvents).toHaveLength(2)
   expect(notificationEventRows(element)).toHaveLength(0)
   await toggleNotificationCenter(element, 'open')
+  await selectNotificationView(element, 'history')
   expect(notice(element)?.getAttribute('aria-live')).toBe('assertive')
   expect(notice(element)?.dataset.eventId).not.toBe(firstId)
   expect(useAppStore.getState().errorNoticeContext?.subject?.run.runId).toBe('new-current-run')

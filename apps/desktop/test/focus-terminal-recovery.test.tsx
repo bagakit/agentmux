@@ -1,4 +1,4 @@
-import { notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
+import { notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails, selectNotificationView } from './helpers/notification-center'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
@@ -135,6 +135,7 @@ it('shows the cleanup failure beside the recovered Terminal without losing healt
     expect(container.querySelector('[data-test-terminal-paint="new"]')).not.toBeNull();
     expect(notificationEventRows(container)).toHaveLength(0);
     await toggleNotificationCenter(container, 'open');
+    await selectNotificationView(container, 'history');
     await toggleNotificationDetails(notificationEventRows(container)[0]!);
     const notices = container.querySelectorAll('.notification-item[data-event-id]');
     expect(notices).toHaveLength(1);
@@ -146,6 +147,7 @@ it('shows the cleanup failure beside the recovered Terminal without losing healt
     expect(notificationEventRows(container)).toHaveLength(0);
     expect(useAppStore.getState().notificationEvents).toHaveLength(1);
     await toggleNotificationCenter(container, 'open');
+    await selectNotificationView(container, 'history');
     await toggleNotificationDetails(notificationEventRows(container)[0]!);
     expect(container.querySelector('.notification-item[data-event-id]')!.textContent).toContain('cleanup failed');
     expect(container.querySelector('[data-test-terminal-paint="new"]')).not.toBeNull();
