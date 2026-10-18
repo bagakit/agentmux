@@ -13,6 +13,7 @@ let owner: ReturnType<typeof createMotionOwner> | undefined
 /** One event-driven native rig owner for the currently visible identities. No React frame clock. */
 function createMotionOwner() {
   const identities = new Map<Element, Identity>(), rigs = new Set<Identity>(), spontaneous = new Set<Identity>()
+  const pressed = new Map<Identity, number>()
   const reduced = window.matchMedia('(prefers-reduced-motion: reduce)')
   let pointing = false, frame: number | null = null, point: { x: number; y: number } | null = null
   let timer: ReturnType<typeof setTimeout> | undefined, deadline = 0
@@ -50,13 +51,30 @@ function createMotionOwner() {
     identity.near = false; identity.node.dataset.moteGaze = 'far'
     for (const name of ['--mote-gaze-x', '--mote-gaze-y', '--mote-head-turn', '--mote-brow-lift', '--mote-mouth-shift']) identity.node.style.removeProperty(name)
   }
-  const clear = () => { point = null; if (frame !== null) cancelAnimationFrame(frame); frame = null; for (const identity of rigs) reset(identity) }
+  const releasePress = (identity: Identity) => { pressed.delete(identity); delete identity.node.dataset.motePress }
+  const clear = () => { point = null; if (frame !== null) cancelAnimationFrame(frame); frame = null; for (const identity of rigs) reset(identity); for (const identity of pressed.keys()) releasePress(identity) }
+  // Touch browsers need not expose :active before release. Observe the original
+  // control's input without capturing the pointer or changing its click/scroll behavior.
+  const press = (event: PointerEvent) => {
+    if (event.pointerType !== 'touch' || !(event.target instanceof Element)) return
+    const host = event.target.closest('button, a[href], [role="button"]')
+    if (host?.matches(':disabled, [aria-disabled="true"]')) return
+    const direct = event.target.closest('.mote-identity-motion')
+    const nodes = direct ? [direct] : host?.querySelectorAll('.mote-identity-motion') ?? []
+    for (const node of nodes) {
+      const identity = identities.get(node)
+      if (identity && rigs.has(identity) && node.querySelector('.mote-companion')) {
+        pressed.set(identity, event.pointerId); identity.node.dataset.motePress = 'on'
+      }
+    }
+  }
+  const release = (event: PointerEvent) => { for (const [identity, pointerId] of pressed) if (pointerId === event.pointerId) releasePress(identity) }
   const paint = () => {
     frame = null
     if (!point) return
     // The set contains only native-visible avatar rigs. Hidden instances are never laid out on pointer input.
     const measured = Array.from(rigs, identity => ({ identity,
-      rect: identity.node.querySelector('.mote-face, .mote-image-follow')?.getBoundingClientRect() }))
+      rect: identity.node.querySelector('.mote-face, .mote-image-follow, .mote-companion')?.getBoundingClientRect() }))
     // Read every active rig before any style/dataset write can invalidate the next rig's layout.
     for (const { identity, rect } of measured) {
       if (!rect || rect.width <= 0 || rect.height <= 0) { reset(identity); continue }
@@ -83,8 +101,13 @@ function createMotionOwner() {
     const next = rigs.size > 0
     if (next === pointing) return
     pointing = next
-    if (next) { document.addEventListener('pointermove', pointer, { passive: true }); document.addEventListener('pointerleave', clear); window.addEventListener('blur', clear) }
-    else { document.removeEventListener('pointermove', pointer); document.removeEventListener('pointerleave', clear); window.removeEventListener('blur', clear); clear() }
+    if (next) {
+      document.addEventListener('pointermove', pointer, { passive: true }); document.addEventListener('pointerleave', clear); window.addEventListener('blur', clear)
+      document.addEventListener('pointerdown', press, { passive: true, capture: true }); document.addEventListener('pointerup', release, true); document.addEventListener('pointercancel', release, true)
+    } else {
+      document.removeEventListener('pointermove', pointer); document.removeEventListener('pointerleave', clear); window.removeEventListener('blur', clear)
+      document.removeEventListener('pointerdown', press, true); document.removeEventListener('pointerup', release, true); document.removeEventListener('pointercancel', release, true); clear()
+    }
   }
   const sync = (identity: Identity) => {
     const enabled = identity.visible && identity.inView && !document.hidden && !reduced.matches
@@ -94,8 +117,8 @@ function createMotionOwner() {
     if (animated) {
       if (!spontaneous.has(identity)) { identity.nextAt = Date.now() + 1800 + Math.random() * 2700; spontaneous.add(identity) }
     } else { spontaneous.delete(identity); clearGesture(identity) }
-    if (enabled && identity.node.querySelector('.mote-face, .mote-image-follow')) rigs.add(identity)
-    else { reset(identity); rigs.delete(identity) }
+    if (enabled && identity.node.querySelector('.mote-face, .mote-image-follow, .mote-companion')) rigs.add(identity)
+    else { reset(identity); releasePress(identity); rigs.delete(identity) }
   }
   const syncAll = () => { for (const identity of identities.values()) sync(identity); syncPointer(); schedule() }
   const observer = new IntersectionObserver(entries => {
@@ -122,7 +145,7 @@ function createMotionOwner() {
           sync(identity); syncPointer(); schedule()
         },
         dispose() {
-          reset(identity); clearGesture(identity); spontaneous.delete(identity); rigs.delete(identity); identities.delete(node); observer.unobserve(node); syncPointer(); schedule()
+          reset(identity); releasePress(identity); clearGesture(identity); spontaneous.delete(identity); rigs.delete(identity); identities.delete(node); observer.unobserve(node); syncPointer(); schedule()
           if (identities.size === 0) {
             observer.disconnect(); reduced.removeEventListener('change', syncAll); document.removeEventListener('visibilitychange', syncAll); owner = undefined
           }

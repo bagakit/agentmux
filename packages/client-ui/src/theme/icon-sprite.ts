@@ -1,4 +1,4 @@
-import { SEMANTIC_ICON_IDS, type SemanticIconId, type IconShape } from './icon-catalog.js'
+import { ICON_GLYPHS, SEMANTIC_ICON_IDS, type SemanticIconId, type IconShape } from './icon-catalog.js'
 import { iconShapes } from './icon-assets.js'
 import { themeColorSchema, type ThemeValue } from './schema.js'
 import { SEMANTIC_ICON_PEN, type SemanticIconPresentation } from './icon-presentation.js'
@@ -83,6 +83,10 @@ export function updateIconSprite(document: Document, theme: Pick<ThemeValue, 'ic
     sprites.set(document, sprite)
   }
   const root = document.documentElement.style
+  // Retained avatar nodes follow the same resolved asset, without per-avatar subscriptions.
+  const companion = iconShapes('object.mote', theme.icons) === ICON_GLYPHS['mote-companion']
+  root.setProperty('--mote-companion-rest-display', companion ? 'none' : 'inline')
+  root.setProperty('--mote-companion-rig-display', companion ? 'inline' : 'none')
   root.setProperty('--icon-stroke-width', String(theme.iconStyle.strokeWidth))
   root.setProperty('--icon-linecap', theme.iconStyle.linecap)
   root.setProperty('--icon-linejoin', theme.iconStyle.linejoin)

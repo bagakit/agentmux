@@ -88,19 +88,20 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
     const timer = setTimeout(() => wake(value => value + 1), Math.max(1, deadline - performance.now()))
     return () => clearTimeout(timer)
   }, [working, workCurrent, deadline, connected, visible, clock])
+  const face = selected?.parts && isMoteFace(selected.parts) ? selected.parts : null
+  const motionSource = face ? 'face' : selected?.image ? 'image' : selected?.glyph ? 'glyph' : 'automatic'
   const ref = useRef<HTMLSpanElement>(null)
   useLayoutEffect(() => {
     if (!identity.mote || !ref.current) return
     const motion = observeMoteMotion(ref.current, expression, visible)
     return () => motion.dispose()
-  }, [expression, spaceId, visible])
+  }, [expression, spaceId, visible, motionSource])
   const Glyph = selected?.glyph && Object.hasOwn(SPACE_ICON_CATALOG, selected.glyph) ? SPACE_ICON_CATALOG[selected.glyph as keyof typeof SPACE_ICON_CATALOG].Icon : null
-  const face = selected?.parts && isMoteFace(selected.parts) ? selected.parts : null
   return <span ref={ref} className={identity.mote ? 'mobile-object-avatar mote-identity-motion' : 'mobile-object-avatar mobile-project-avatar'}
     data-mote-expression={expression} data-mote-motion="off" style={{ width: size, height: size, '--mote-ambient-delay': `-${Array.from(spaceId ?? '').reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 0) % 14000}ms` } as import('react').CSSProperties} title={issue || selected?.issue || identity.name}>
     {identity.mote ? <span className="space-object-icon">{face ? <MoteFace face={face} expression={expression} />
       : selected?.image ? image && image.spaceId === spaceId && image.revision === selected.image.revision ? <img className="space-object-icon__avatar" src={image.dataUrl} alt="" /> : <MoteMark size={size - 8} />
-      : selected?.glyph ? Glyph ? <Glyph size={size - 8} /> : <MoteMark size={size - 8} /> : <MoteMark size={size - 8} data-mote-icon-source="automatic" />}</span>
+      : selected?.glyph ? Glyph ? <Glyph size={size - 8} /> : <MoteMark size={size - 8} /> : <MoteMark size={size - 8} interactive={visible} data-mote-icon-source="automatic" />}</span>
       : <span>{Array.from(identity.project || identity.name).slice(0, 1).join('').toLocaleUpperCase()}</span>}
     {(issue || selected?.issue) && <span className="mobile-avatar-issue" aria-label={issue || selected?.issue}><ThemeStatusWarningIcon size={10} /></span>}
   </span>
