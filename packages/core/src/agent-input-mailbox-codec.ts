@@ -51,7 +51,7 @@ export function parseAgentInputMailboxItem(value: unknown, agentSessionId: strin
         if (source.kind !== 'message' || key.kind !== 'message' || source.messageId !== key.messageId ||
           source.prompt !== undefined || source.agentMuxNote !== undefined || source.authorHuman !== undefined || source.sourceChannel !== undefined || source.sourceDevice !== undefined || source.inputContext !== undefined || source.inputContextSource !== undefined || source.inputContextCaptureProof !== undefined || source.promptWire !== undefined) fail()
         string(source.originalControlOperationId)
-        const message = object(entry.message, ['schema', 'messageId', 'operationId', 'createdAt', 'sender', 'recipient', 'threadId', 'correlationId', 'replyTo', 'workspaceId', 'senderSessionId', 'senderRunId', 'recipientSessionId', 'recipientRunId', 'body'])
+        const message = object(entry.message, ['schema', 'messageId', 'operationId', 'createdAt', 'sender', 'recipient', 'threadId', 'correlationId', 'replyTo', 'workspaceId', 'senderSessionId', 'senderRunId', 'recipientSessionId', 'recipientRunId', 'body', 'channelProfile'])
         const envelope = validateAgentMuxMessageEnvelope(message as unknown as Parameters<typeof validateAgentMuxMessageEnvelope>[0])
         if (key.kind !== 'message' || envelope.messageId !== key.messageId || envelope.operationId !== source.originalControlOperationId ||
           envelope.recipientSessionId !== key.agentSessionId || envelope.recipientRunId !== key.expectedRun.runId || receipt && receipt.originalControlOperationId !== envelope.operationId) fail()
