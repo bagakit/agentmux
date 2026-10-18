@@ -69,7 +69,8 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   [currentError, errorDismissed, errorContext])
   const clearReadEvents = useAppStore(state => state.clearReadNotificationEvents)
   // Window records have no complete startup snapshot. Only reading facts persist across restarts.
-  const eventInbox = useReadReceipts('global:events', Object.fromEntries(events.map(event => [event.id, 'read'])), !loading, false)
+  const eventReceiptFacts = useMemo(() => Object.fromEntries(events.map(event => [event.id, 'read'])), [events])
+  const eventInbox = useReadReceipts('global:events', eventReceiptFacts, !loading, false)
   const currentErrorInbox = useServiceNotices('global:workflow', currentWorkflowErrorId && currentError &&
     !events.some(event => event.id === currentWorkflowErrorId) ? [{ id: 'current', cause: currentWorkflowErrorId, notice: {
       kind: 'indeterminate', notice: { step: errorContext?.summary ?? 'Operation needs attention',
@@ -216,9 +217,9 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   }, [open, agentChecksInbox, environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox, currentErrorInbox, eventInbox])
   const recentEvents = open ? [...projection.history].reverse() : []
   const sessionsByIdentity = new Map((open ? sessions : []).map(session => [JSON.stringify([session.hostId, session.id]), session]))
-  const unreadEventIds = new Set(eventInbox.unread)
+  const unreadEventIds = useMemo(() => new Set(eventInbox.unread), [eventInbox.unread])
   const readEvents = open ? projection.history.filter(event => !unreadEventIds.has(event.id)).length : 0
-  const latestUnreadEvent = [...events].reverse().find(event => unreadEventIds.has(event.id))
+  const latestUnreadEvent = useMemo(() => [...events].reverse().find(event => unreadEventIds.has(event.id)), [events, unreadEventIds])
   const announcement = useMemo(() => latestUnreadEvent
     ? notificationPreview(latestUnreadEvent.context?.summary ?? latestUnreadEvent.message, 'announcement') : '',
   [latestUnreadEvent?.context?.summary, latestUnreadEvent?.message])

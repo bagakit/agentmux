@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useAppStore } from '../store'
 import type { RenderableServiceNotice } from './service-window-notice'
 import { compactNotificationIdentity } from './notification-read-identity'
@@ -33,7 +33,7 @@ export function serviceNoticeFingerprint(item: ServiceNoticeItem): string {
 /** Only acknowledgement is persisted. Only a complete, available owner projection may prune receipts. */
 export function useReadReceipts(scope: string, current: Readonly<Record<string, string>>, available = true, complete = true) {
   const receipts = useAppStore((state) => state.noticeReadReceipts[scope] ?? EMPTY_RECEIPTS)
-  const signature = JSON.stringify(current)
+  const signature = useMemo(() => JSON.stringify(current), [current])
   useEffect(() => {
     if (!available || !complete) return
     useAppStore.setState((state) => {
@@ -54,7 +54,8 @@ export function useReadReceipts(scope: string, current: Readonly<Record<string, 
       [scope]: { ...state.noticeReadReceipts[scope], ...Object.fromEntries(ids.map((id) => [id, current[id]!])) }
     } }))
   }
-  return { unread: Object.keys(current).filter((id) => receipts[id] !== current[id]), acknowledge }
+  const unread = useMemo(() => Object.keys(current).filter((id) => receipts[id] !== current[id]), [current, receipts])
+  return { unread, acknowledge }
 }
 
 
