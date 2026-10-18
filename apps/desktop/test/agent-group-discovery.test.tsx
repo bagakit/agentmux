@@ -251,13 +251,15 @@ it('a known refused link can be explicitly regenerated after repair using the cu
 it('a confirmed link is explicitly replaced without a clock inference and its new unknown head remains inspect-only after remount', async () => {
   await f.mount(); await f.journey('existing'); await chooseGroup('oc_other'); await f.button('Create join link'); await ready('Join link ready'); await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role=dialog]')?.getAttribute('aria-busy')).toBe('false') })
   const original = Object.values(useAppStore.getState().connectorRoomIntents).find(value => value.method === 'connection.room.link.create')!
-  expect(document.querySelector<HTMLDetailsElement>('[aria-label="Joining this group"]')?.open).toBe(true)
+  expect(document.querySelector('[aria-label="Joining this group"]')).not.toBeNull()
+  expect(document.querySelector('[aria-label="Joining this group"]')!.closest('details:not([open])')).toBeNull()
   const originalNative = native
   native = async request => { if (request.url?.endsWith('/link')) throw new Error('Controlled replacement outcome unknown'); return await originalNative(request) }
   await f.button('Generate a new join link')
   await vi.waitFor(async () => { await act(async () => {}); expect(f.calls.filter(call => call.method === 'connection.room.link.create')).toHaveLength(2); expect((f.calls.filter(call => call.method === 'connection.room.link.create')[1]!.result as { state?: string })?.state).toBe('unknown'); expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-busy')).toBe('false') })
   const latest = f.calls.filter(call => call.method === 'connection.room.link.create')[1]!.input as { operationId: string }
-  expect(document.querySelector<HTMLDetailsElement>('[aria-label="Joining this group"]')?.open, 'changing the original operation keeps the user’s open reading section').toBe(true)
+  expect(document.querySelector('[aria-label="Joining this group"]')).not.toBeNull()
+  expect(document.querySelector('[aria-label="Joining this group"]')!.closest('details:not([open])'), 'changing the original operation keeps joining actions visible').toBeNull()
   expect(latest.operationId).not.toBe(original.input.operationId)
   expect(useAppStore.getState().connectorRoomIntents[latest.operationId]).toMatchObject({ replacesOperationId: original.input.operationId })
   const persisted = localStorage.getItem('agentmux-workbench-v1')!
