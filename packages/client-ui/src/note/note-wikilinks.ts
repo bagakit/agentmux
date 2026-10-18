@@ -4,6 +4,7 @@ import { parseNoteWikiQuery, scanNoteWikiLinks, type NoteInlineLinkAttributes, t
 import type { NoteGraphTarget } from '@agentmux/core/notebook-observation'
 import type { NoteDocument } from './note-document.js'
 import { NOTE_BLOCK_TYPES } from './note-content-schema.js'
+import { noteMathRanges } from './note-math.js'
 
 export type PendingNoteWikiLink = { referenceId: string; text: string; query: NoteWikiQuery }
 export type IndexedNoteReference = { blockId: string; target: NoteGraphTarget; mode: 'reference' | 'embed' | 'link'; occurrence:
@@ -22,7 +23,8 @@ export function noteInlineQuery(text: string): string | null {
 }
 /** Shared indexes include the same text that a person can select and edit. */
 export function noteSemanticText(node: ProseMirrorNode): string {
-  return node.textBetween(0, node.content.size, '', leaf => leaf.type.name === 'noteLink' ? `[[${String(leaf.attrs.text)}]]` : leaf.type.name === 'hardBreak' ? '\n' : '')
+  if (node.type.name === 'noteMathInline' || node.type.name === 'noteMathBlock') return node.attrs.latex
+  return node.textBetween(0, node.content.size, '', leaf => leaf.type.name === 'noteLink' ? `[[${String(leaf.attrs.text)}]]` : leaf.type.name === 'noteMathInline' ? String(leaf.attrs.latex) : leaf.type.name === 'hardBreak' ? '\n' : '')
 }
 const eligible = (node: JSONContent) => node.type === 'text' && !node.marks?.some(mark => mark.type === 'code' || mark.type === 'link' || mark.type === 'noteWikiLiteral')
 /** One text-run adapter for the writer and saved-file index; marks never create another lexer. */
@@ -37,12 +39,17 @@ function runs(children: readonly JSONContent[], accept: (run: readonly JSONConte
   }
 }
 /** Inline PM offsets for incremental editor transactions, sharing the writer's eligibility. */
-export function noteWikiTextTokens(content: readonly JSONContent[]): readonly NoteWikiToken[] {
+export function noteWikiTextTokens(content: readonly JSONContent[], pendingMath = false): readonly NoteWikiToken[] {
   const offsets: number[] = []
   let offset = 0
   for (const node of content) { offsets.push(offset); offset += node.type === 'text' ? node.text?.length ?? 0 : node.type === 'noteLink' ? 2 + (node.content ?? []).reduce((size, child) => size + (child.text?.length ?? 0), 0) : 1 }
   const tokens: NoteWikiToken[] = []
-  runs(content, (_run, start, found) => tokens.push(...found.map(token => ({ ...token, from: offsets[start]! + token.from, to: offsets[start]! + token.to }))))
+  runs(content, (run, start, found) => {
+    // Saved Markdown has already separated math from literal escaped dollars.
+    // Only live input needs prospective delimiter protection before conversion.
+    const ranges = pendingMath ? noteMathRanges(run.map(node => node.text ?? '').join(''), true) : []
+    tokens.push(...found.filter(token => !ranges.some(range => token.from < range.to && token.to > range.from)).map(token => ({ ...token, from: offsets[start]! + token.from, to: offsets[start]! + token.to })))
+  })
   return tokens
 }
 export function prepareNoteWikiLinks(note: NoteDocument, allocateReferenceId: () => string): { note: NoteDocument; pending: readonly PendingNoteWikiLink[] } {

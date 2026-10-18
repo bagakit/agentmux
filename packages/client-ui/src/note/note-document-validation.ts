@@ -52,6 +52,7 @@ export function validateNoteDocument(value: unknown, allowUnanchored = false): n
         if (!Array.isArray(node.content) || node.content.some(child => !record(child) || child.type !== 'text' || child.marks !== undefined && (!Array.isArray(child.marks) || child.marks.length)) || node.content.map(child => (child as { text?: string }).text ?? '').join('') !== `[[${attrs.text}]]`) throw new Error('The editable Note link text and its query do not agree. The original input is preserved.')
         references.add(attrs.referenceId)
       }
+      if ((node.type === 'noteMathInline' || node.type === 'noteMathBlock') && (!record(node.attrs) || typeof node.attrs.latex !== 'string')) throw new Error('The original math expression must be text.')
       if (node.content !== undefined) {
         if (!Array.isArray(node.content)) throw new Error('The Note block tree is invalid.')
         node.content.forEach(visit)
