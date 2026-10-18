@@ -1,5 +1,6 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { WebContents } from 'electron'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { copyFile, lstat, mkdir, open, rename, unlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
@@ -357,7 +358,7 @@ export class RendererHeapSnapshotOwner {
       await this.releaseExportedPending(capture.captureId)
       return { status: 'saved', path }
     }
-    const temporary = join(dirname(path), `.amux-heap-${randomUUID()}.tmp`)
+    const temporary = join(dirname(path), `.amux-heap-${mintObjectId()}.tmp`)
     try {
       await copyFile(artifact.path, temporary)
       const actual = await this.fingerprint(temporary, undefined, true)

@@ -46,7 +46,7 @@ function text(value: unknown, max: number, code: string): asserts value is strin
   if (typeof value !== 'string' || !value.length || value.length > max || /[\0\r\n]/u.test(value)) invalid(code)
 }
 function captureId(value: unknown, code: string): asserts value is string {
-  if (typeof value !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value)) invalid(code)
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/u.test(value)) invalid(code)
 }
 function host(value: unknown, code: string): RendererHeapSnapshotHost {
   const h = fields(value, ['kind', 'hostId', 'hostname', 'mainPid'], code)

@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useCallback, useRef, useState } from 'react'
 import { parseRendererHeapSnapshotResult, parseRendererHeapSnapshotInspection,
   type RendererHeapSnapshotCapture, type RendererHeapSnapshotResult, type RendererV8ProfileTarget } from '@agentmux/core/control'
@@ -14,7 +15,7 @@ export function usePerformanceHeapSnapshot() {
   const collect = useCallback(async (target: RendererV8ProfileTarget) => {
     if (inFlight.current) return
     inFlight.current = true; setBusy(true); setError(null)
-    const input = { target: { ...target }, captureId: crypto.randomUUID() }
+    const input = { target: { ...target }, captureId: mintObjectId() }
     setCaptureId(input.captureId)
     try {
       const result = parseRendererHeapSnapshotResult(await api.performance.captureHeapSnapshot(input), input)
