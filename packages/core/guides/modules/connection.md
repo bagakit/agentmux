@@ -170,3 +170,22 @@ because a response was lost. Unavailable adapters retain configured bindings and
 Enrollment begin creates an original application intent; advance may perform a platform request.
 Enrollment ls/inspect are local reads for restart recovery. Unknown one-time credential delivery
 is inspect-only, never a reason to begin or poll again. Credentials never belong on public wire.
+
+Group conversation sharing uses an exact Binding and future source cut. The publication scope
+future-native-user-facing retains public Agent replies only. future-shared-conversation shares
+ordinary public human/Agent messages, progress, questions/answers and their supported resources.
+It excludes tool input/output, reasoning, generated context and internal Agent collaboration,
+even when a source marks those parts public. Sharing a conversation is not authority to drive
+the Agent: member input grants and the Binding trigger scope govern execution separately.
+
+Use connection binding pause, resume or detach with operationId, bindingId and expectedRevision.
+Pause keeps the relationship and member decisions. Resume retains the exact application, group,
+Session and sharing rules, captures a fresh source cut and never backfills the paused interval.
+A relink carries member decisions only when the audience and sharing rules remain unchanged.
+Detach ends current routing, retains original revisions and receipts, and never stops the Agent
+or deletes the platform group. Its original operation stays inspectable after the live list changes.
+Applied lifecycle operations reference independent notice deliveryOperationIds. Inspect or list those
+original deliveries to distinguish the saved relationship from the group card's platform result.
+The explicit notice may be sent while automatic synchronization is off and states that limitation;
+it does not enable ordinary synchronization. A failed card never rolls back detach. Unknown effects
+remain inspect-only; only confirmed non-application supports retry with the same delivery identity.
