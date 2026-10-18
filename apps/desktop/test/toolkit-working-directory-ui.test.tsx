@@ -50,6 +50,7 @@ describe('Toolkit working directory in the real Settings consumers', () => {
     const m = model(); await dom.render(m.pane())
     await click(kind === 'inline' ? 'New custom tool' : 'Install package')
     expect(directory().value).toBe('~/.agentmux')
+    if (kind === 'inline') expect(dom.container.querySelector('.toolkit-library__item[aria-pressed="true"] code')?.textContent).toBe('~/.agentmux')
     expect(dom.container.querySelector('.toolkit-directory__preview code')?.textContent).toBe(`${home}/.agentmux`)
     if (kind === 'inline') await fill(dom.container.querySelector<HTMLInputElement>('.toolkit-editor__name input')!, 'New tool')
     else await fill(dom.container.querySelector<HTMLInputElement>('input[aria-label="Package directory"]')!, fixturePath('extension'))
