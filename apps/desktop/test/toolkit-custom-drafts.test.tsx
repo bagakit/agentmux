@@ -20,6 +20,23 @@ function Consumer({ tools }: { tools: ToolkitToolDefinition[] }) {
   return <div>{Object.entries(drafts.entries).map(([id,entry]) => <output key={id} data-tool={id}>{entry.value.name} · {toolkitDraftDirty(entry) ? 'Unsaved' : 'Saved'} · {entry.state}</output>)}</div>
 }
 describe('single-resource Toolkit authored drafts in an actual mounted consumer', () => {
+  it('serializes an explicit mode in both directions and retains an outside name edit', async () => {
+    const original = tool('a')
+    await dom.render(<Consumer tools={[original]} />)
+    await act(async () => { drafts.edit('a', { mode: 'tui' }) })
+    await dom.render(<Consumer tools={[{ ...original, name: 'CLI name', revision: 'outside-name' }]} />)
+    const tui = { ...original, name: 'CLI name', mode: 'tui' as const, revision: 'tui-mode' }
+    const update = vi.fn(async (): Promise<ToolkitToolDefinition> => tui)
+    await act(async () => { await drafts.save('a', { add: vi.fn(), update }) })
+    expect(update).toHaveBeenCalledWith('a', { mode: 'tui' }, { mode: 'script' })
+    expect(drafts.entries.a!.value.name).toBe('CLI name')
+    expect(toolkitDraftDirty(drafts.entries.a!)).toBe(false)
+    await act(async () => { drafts.edit('a', { mode: 'script' }) })
+    update.mockImplementation(async () => ({ ...tui, mode: 'script', revision: 'script-mode' }))
+    await act(async () => { await drafts.save('a', { add: vi.fn(), update }) })
+    expect(update).toHaveBeenLastCalledWith('a', { mode: 'script' }, { mode: 'tui' })
+    expect(drafts.entries.a!.value.mode).toBe('script')
+  })
   it('retains a legitimate own-key ID through the source effect, edit, captured save and local removal', async () => {
     const saved=tool('__proto__')
     await dom.render(<Consumer tools={[saved]} />)
