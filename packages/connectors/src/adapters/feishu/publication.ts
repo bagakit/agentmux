@@ -3,11 +3,12 @@ import { createHash } from 'node:crypto'
 import type { ConnectionApplication } from '@agentmux/core/connections'
 import type { PublicationImage, PublicationFile } from '../../publication-resource.js'
 import type { PublicationAdapter } from '../../publication-adapter.js'
-import type { PublicationMapping, PublicationOperation, PublicationReceipt, PublicationTarget } from '../../publication-store.js'
+import type { PublicationMapping, PublicationOperation, PublicationReceipt, PublicationTarget, PublicationPayload, PublicationTextFragment } from '../../publication-store.js'
 import { parsePreparedPublication, publicationSpeechText, type PreparedPublication } from '../../publication-wire.js'
 import type { FeishuAdapter } from './index.js'
-import { feishuFailure, feishuIdentity } from './message.js'
+import { feishuFailure, feishuIdentity, FEISHU_MESSAGE_BODY_BYTES } from './message.js'
 import { feishuQuestionCard } from './question-card.js'
+import { feishuReplyCard, fragmentFeishuReply } from './reply-card.js'
 
 const path = '/open-apis/im/v1/messages'
 const object = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
@@ -43,14 +44,18 @@ function requestCard(prepared: PreparedPublication): Record<string, unknown> | n
   } catch { return null }
 }
 /** Feed preview only. Visible card text supplies the excerpt; no action values or private references. */
-function cardSummary(card: Record<string, unknown>, operation: Readonly<PublicationOperation>): string {
+function cardSummary(card: Record<string, unknown>, operation: Pick<PublicationOperation, 'payload' | 'presentationTime'>): string {
   const at = operation.presentationTime, date = at === undefined || !Number.isFinite(at) || Math.abs(at) > 8.64e15 ? null : new Date(at)
   const time = date ? `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` : undefined
   const title = object(object(card.header)?.title)?.content
-  const purpose = operation.payload.kind === 'permission' ? 'Permission' : typeof title === 'string' ? title : 'Agent progress'
+  const purpose = operation.payload.kind === 'permission' ? 'Permission' : typeof title === 'string' ? title : operation.payload.kind === 'speech' && operation.payload.phase === 'final' ? 'Agent reply' : 'Agent progress'
   const text = (elements: unknown): string[] => !Array.isArray(elements) ? [] : elements.flatMap(element => {
     const node = object(element), content = object(node?.text)?.content
-    return node?.tag === 'div' && typeof content === 'string' ? [content]
+    return node?.tag === 'markdown' && typeof node.content === 'string' ? [node.content]
+      : node?.tag === 'table' && Array.isArray(node.columns) && Array.isArray(node.rows) ? [
+        ...node.columns.map(column => String(object(column)?.display_name ?? '')),
+        ...node.rows.flatMap(row => Object.values(object(row) ?? {}).map(String))]
+      : node?.tag === 'div' && typeof content === 'string' ? [content]
       : node?.tag === 'form' ? text(node.elements) : node?.tag === 'img' && typeof object(node.alt)?.content === 'string' ? [String(object(node.alt)!.content)] : []
   })
   const body = (operation.payload.kind === 'question' ? [operation.payload.text, ...operation.payload.questions.map(question => question.prompt)].filter(Boolean)
@@ -134,8 +139,8 @@ function consistent(data: Record<string, unknown>, target: PublicationTarget, ma
 /** Stateless platform effects. The original Host owns source selection, durable work, ordering and retries. */
 export class FeishuPublicationAdapter implements PublicationAdapter {
   readonly adapterId = 'feishu'
-  readonly renderVersion = 'feishu-conversation-v3'
-  readonly supportedRenderVersions = ['feishu-post-group-v1', 'feishu-group-v2', this.renderVersion]
+  readonly renderVersion = 'feishu-conversation-v4'
+  readonly supportedRenderVersions = ['feishu-post-group-v1', 'feishu-group-v2', 'feishu-conversation-v3', this.renderVersion]
   readonly fragmentBytes = 4_096
   readonly addressing = 'group'
   readonly permissionActions = true as const
@@ -174,7 +179,21 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
   fragmentBytesFor(target: PublicationTarget): number {
     // One ASCII control byte can occupy seven bytes after both JSON encodings.
     // Reserve the fixed post/uuid envelope and the exact encoded audience.
-    return Math.max(4, Math.min(this.fragmentBytes, Math.floor((30 * 1024 - 1024 - Buffer.byteLength(JSON.stringify(target.externalConversationId))) / 8)))
+    return Math.max(4, Math.min(this.fragmentBytes, Math.floor((FEISHU_MESSAGE_BODY_BYTES - 1024 - Buffer.byteLength(JSON.stringify(target.externalConversationId))) / 8)))
+  }
+
+  fragmentText(payload: Extract<PublicationPayload, { kind: 'speech' }>, target: PublicationTarget): readonly PublicationTextFragment[] | undefined {
+    if (payload.phase !== 'final' || payload.relay) return undefined
+    // A first recorded time adds a fixed HH:mm prefix. Measure it too, and
+    // reserve the largest possible continuation label for this source text.
+    const count = Math.max(2, payload.text.length)
+    const fits = (part: PublicationTextFragment, fragment: { ordinal: number; count: number }) => {
+      const displayed = { ...payload, text: (part.presentationContext?.before ?? '') + part.text + (part.presentationContext?.after ?? '') }, card = feishuReplyCard(publicationSpeechText(displayed), fragment)
+      card.config = { ...object(card.config), summary: { content: cardSummary(card, { payload: displayed, presentationTime: 0 }) } }
+      return Buffer.byteLength(JSON.stringify({ receive_id: target.externalConversationId, msg_type: 'interactive', uuid: 'x'.repeat(43), content: JSON.stringify(card) })) <= FEISHU_MESSAGE_BODY_BYTES
+    }
+    if (fits({ text: payload.text }, { ordinal: 0, count: 1 })) return [{ text: payload.text }]
+    return fragmentFeishuReply(payload.text, part => fits(part, { ordinal: count - 1, count }))
   }
 
   prepare(operation: Readonly<PublicationOperation>): PreparedPublication {
@@ -233,12 +252,14 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     } else if (operation.payload.kind === 'speech') {
       if (!publicationSpeechText(operation.payload)) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
       const text = publicationSpeechText(operation.payload)
-      if (operation.payload.phase === 'progress') {
+      if (operation.payload.phase === 'final') {
+        card = feishuReplyCard(publicationSpeechText({ ...operation.payload, text: (operation.payload.presentationContext?.before ?? '') + operation.payload.text + (operation.payload.presentationContext?.after ?? '') }), operation.fragment)
+      } else if (operation.payload.phase === 'progress') {
         card = { schema: '2.0', config: { update_multi: true },
           body: { padding: '8px 12px 8px 12px', vertical_spacing: '4px',
             elements: [{ tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: text } }] } }
       } else {
-        const title = operation.payload.phase === 'final' ? 'Agent reply' : 'Conversation message'
+        const title = 'Conversation message'
         card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: title }, template: 'blue' },
           elements: [{ tag: 'div', text: { tag: 'plain_text', content: text } }] }
       }
@@ -251,7 +272,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     if (card) {
       card.config = { ...object(card.config), summary: { content: cardSummary(card, operation) } }
       const body = JSON.stringify({ ...(mapping ? {} : { receive_id: operation.target.externalConversationId, msg_type: 'interactive', uuid: key(operation.operationId) }), content: JSON.stringify(card) })
-      if (Buffer.byteLength(body) > 30 * 1024) feishuFailure('FEISHU_PUBLICATION_REQUEST_TOO_LARGE')
+      if (Buffer.byteLength(body) > FEISHU_MESSAGE_BODY_BYTES) feishuFailure('FEISHU_PUBLICATION_REQUEST_TOO_LARGE')
       return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: {
         method: mapping ? 'PATCH' : 'POST', path: mapping ? `${path}/${encodeURIComponent(mapping.messageId)}` : path,
         ...(mapping ? {} : { query: { receive_id_type: 'chat_id' } }), contentType: 'application/json', body } }
@@ -262,7 +283,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       if (uploaded?.state !== 'confirmed' || !('fileKey' in uploaded)) feishuFailure('FEISHU_FILE_UPLOAD_UNCONFIRMED')
       const body = JSON.stringify({ receive_id: operation.target.externalConversationId, msg_type: 'file',
         content: JSON.stringify({ file_key: feishuIdentity(uploaded.fileKey) }), uuid: key(operation.operationId) })
-      if (Buffer.byteLength(body) > 30 * 1024) feishuFailure('FEISHU_PUBLICATION_REQUEST_TOO_LARGE')
+      if (Buffer.byteLength(body) > FEISHU_MESSAGE_BODY_BYTES) feishuFailure('FEISHU_PUBLICATION_REQUEST_TOO_LARGE')
       return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: {
         method: 'POST', path, query: { receive_id_type: 'chat_id' }, contentType: 'application/json', body } }
     }
@@ -271,12 +292,12 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
   private valid(prepared: PreparedPublication, target: PublicationTarget, mapping?: Readonly<PublicationMapping>): boolean {
     try {
       parsePreparedPublication(prepared, this)
-      if (prepared.request.body !== undefined && Buffer.byteLength(prepared.request.body) > 30 * 1024) return false
+      if (prepared.request.body !== undefined && Buffer.byteLength(prepared.request.body) > FEISHU_MESSAGE_BODY_BYTES) return false
       if (mapping) return prepared.request.path === `${path}/${encodeURIComponent(feishuIdentity(mapping.messageId))}` &&
-        prepared.request.query === undefined && (prepared.request.method === 'DELETE' && prepared.request.body === undefined || prepared.request.method === 'PUT' && prepared.request.contentType === 'application/json' && (requestText(prepared) !== null || requestImage(prepared) !== null) || prepared.request.method === 'PATCH' && ['feishu-group-v2', this.renderVersion].includes(prepared.renderVersion) && prepared.request.contentType === 'application/json' && requestCard(prepared) !== null)
+        prepared.request.query === undefined && (prepared.request.method === 'DELETE' && prepared.request.body === undefined || prepared.request.method === 'PUT' && prepared.request.contentType === 'application/json' && (requestText(prepared) !== null || requestImage(prepared) !== null) || prepared.request.method === 'PATCH' && ['feishu-group-v2', 'feishu-conversation-v3', this.renderVersion].includes(prepared.renderVersion) && prepared.request.contentType === 'application/json' && requestCard(prepared) !== null)
       const body = object(JSON.parse(prepared.request.body!))
       return prepared.request.method === 'POST' && prepared.request.path === path && prepared.request.contentType === 'application/json' && prepared.request.query?.receive_id_type === 'chat_id' &&
-        body?.receive_id === target.externalConversationId && body.uuid === key(prepared.requestKey) && (body.msg_type === 'file' && requestFile(prepared) !== null || body.msg_type === 'post' && (requestText(prepared) !== null || requestImage(prepared) !== null) || body.msg_type === 'interactive' && ['feishu-group-v2', this.renderVersion].includes(prepared.renderVersion) && requestCard(prepared) !== null)
+        body?.receive_id === target.externalConversationId && body.uuid === key(prepared.requestKey) && (body.msg_type === 'file' && requestFile(prepared) !== null || body.msg_type === 'post' && (requestText(prepared) !== null || requestImage(prepared) !== null) || body.msg_type === 'interactive' && ['feishu-group-v2', 'feishu-conversation-v3', this.renderVersion].includes(prepared.renderVersion) && requestCard(prepared) !== null)
     } catch { return false }
   }
   async dispatch(prepared: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal, mapping?: Readonly<PublicationMapping>): Promise<PublicationReceipt> {

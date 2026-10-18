@@ -1,3 +1,6 @@
+/** Native message request body limit, measured after JSON encoding. */
+export const FEISHU_MESSAGE_BODY_BYTES = 30 * 1024
+
 import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError } from '@agentmux/core'
 import type { ConnectionApplication } from '@agentmux/core/connections'
