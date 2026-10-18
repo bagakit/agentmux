@@ -509,8 +509,9 @@
 /* Message tasks stay separate from the retained automation manager. */
 .composer-mailbox__folders--secondary { display: flex; gap: var(--sp-1); background: transparent; padding: 0; }
 .composer-mailbox__folders--secondary > button { flex: 1 1 auto; min-height: var(--sp-7); font-size: var(--fs-meta); }
-.composer-mailbox__automation { display: flex; flex: 0 0 auto; align-items: center; gap: var(--sp-2); min-width: 0; min-height: 28px; padding: var(--sp-2) var(--sp-3); border: 0; border-top: 1px solid var(--line-soft); color: var(--text-2); background: transparent; font: inherit; text-align: left; cursor: pointer; }
-.composer-mailbox__automation:hover { background: var(--surface-3); }
+.composer-mailbox__automation { display: flex; flex: 0 0 auto; align-items: center; gap: var(--sp-2); min-width: 0; min-height: 28px; padding: var(--sp-2) var(--sp-3); border: 0; border-top: 1px solid var(--line); color: var(--text-2); background: color-mix(in srgb, var(--blue) 6%, var(--surface-1)); font: inherit; text-align: left; cursor: pointer; }
+.composer-mailbox__automation > svg { flex: none; color: var(--blue); }
+.composer-mailbox__automation:hover { color: var(--text); background: color-mix(in srgb, var(--blue) 10%, var(--surface-3)); }
 .composer-mailbox__automation:focus-visible { outline: 1px solid var(--focus-line); outline-offset: -3px; }
 .composer-mailbox__automation-status { margin-inline-start: auto; color: var(--text-3); font-size: var(--fs-micro); }
 .composer-mailbox__automation-status[data-status="active"] { color: var(--green-text); }
