@@ -9,6 +9,9 @@ import { parseConnectionResult } from '@agentmux/core/connections'
 import { mountThemeRuntime, updateThemeSelection } from '@agentmux/client-ui/theme'
 import { AgentSessionComposer } from '../../../src/renderer/src/components/AgentSessionComposer'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
+import { SurfaceToolDock } from '../../../src/renderer/src/components/SurfaceToolDock'
+import { MoteSpaceFrame } from '../../../src/renderer/src/components/MoteSpaceFrame'
+import { SpaceContentPresentationContext, useSpaceContentPresentationOwner } from '../../../src/renderer/src/lib/space-content-presentation'
 import { MoteFilesTool } from '../../../src/renderer/src/components/MoteFilesTool'
 import { MoteProfilePopover } from '../../../src/renderer/src/components/MoteProfilePopover'
 import { WindowOverlayHost } from '../../../src/renderer/src/components/WindowOverlayHost'
@@ -65,7 +68,7 @@ const calendar = { kind: 'daily' as const, time: (new Date(_batchFixtureEpoch(0,
 const make = (id: string, index: number, prompt: string, due: number, rest: Partial<ContinuousProgressLoop> = {}): ContinuousProgressLoop => ({ ...targets[index]!,
   loopId: id, creationOperationId: 'original-' + id, futureIntentId: 'private-intent-' + id, revision: 2, intervalMs: 60_000, calendar, prompt, status: 'active', nextCheckAt: due, ...rest })
 function sceneRecords(): ContinuousProgressLoop[] {
-  return [make('daily-brief', 0, '早上一起看：项目进展、需要我决定的事情，以及今天最小的一步', nextNine),
+  return [make('daily-brief', 0, '早上一起看：项目进展、需要我决定的事情，以及今天最小的一步\n保留原始资料与每个待确认的问题；这段长正文需要完整的阅读宽度。 Compare the original evidence, keep unresolved choices visible, and wait for confirmation before making the next decision.', nextNine),
     make('research-timer', 1, '20 分钟后提醒我回来比较调研结论，不要替我决定或发消息给别人', now + 20 * 60_000, { calendar: undefined, afterMs: 1_200_000 }),
     make('paused-review', 1, '暂停的每周复盘：先等我确认下一个阶段', nextNine, { status: 'paused' }),
     make('overdue-design', 0, '已经到点：检查设计原型中仍未确认的选择', nine(now - day),
@@ -151,6 +154,7 @@ api.connections.call = async (method, params) => {
 }
 useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], executors: {}, workspaces: [workspace], appearance: { terminalTheme: 'graphite' } },
   tabs: Object.fromEntries(tabs.map(tab => [tab.id, tab])), layouts: { [workspace.id]: createWorkspaceLayout(groupId, tabs.map(tab => tab.id)) }, sessions,
+  workspaceTool: 'files-branches', toolsOpen: true, toolDockWidth: 320,
   activeWorkspaceId: workspace.id, mainSurface: 'workbench', agentComposerDrafts: { ...initialDrafts }, documents: {}, dirtyDocuments: {}, documentIssues: {}, demands: { [goal.id]: goal },
   scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), topics: [topic], revision: 0, reading: false, error: null } },
   spaceZoneBindings: { [zoneId]: { workspaceId: workspace.id, spaceId, topicId: topic.id, contentKind: 'mote', directoryPath: topic.directoryPath } },
@@ -158,7 +162,9 @@ useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local
   prewarmTerminal: async () => {}, detectExecutors: async () => {}, reportError: error => { calls.push({ method: 'fixture.error', params: String(error) }) },
   send: () => { throw new Error('PRIVATE_FIXTURE_NO_MODEL_OR_INPUT') }, interrupt: async () => { throw new Error('PRIVATE_FIXTURE_NO_RUN_CONTROL') } })
 
+const navigationProof = new URLSearchParams(location.search).get('scenario') === 'companion-navigation'
 function Scene() {
+  const presentation = useSpaceContentPresentationOwner()
   const [epoch, setEpoch] = useState(0), [card, setCard] = useState(false)
   const scope = useMoteWorkfaceScope(workspace.id)!
   const selected = useAppStore(state => state.workbenchSpaceSelection)
@@ -184,14 +190,14 @@ function Scene() {
       useAppStore.setState(state => ({ workspaceFileRevisions: { ...state.workspaceFileRevisions, [workspace.id]: (state.workspaceFileRevisions[workspace.id] ?? 0) + 1 } }))
     },
     presentation: (next: 'space' | 'card') => setCard(next === 'card'),
-    facts: () => ({ mode, now, workspacePath, moteDirectory: topic.directoryPath, targets, initialDrafts, drafts: useAppStore.getState().agentComposerDrafts,
+    facts: () => ({ expanded: presentation.expanded, mode, now, workspacePath, moteDirectory: topic.directoryPath, targets, initialDrafts, drafts: useAppStore.getState().agentComposerDrafts,
       selection: useAppStore.getState().workbenchSpaceSelection, tabIds: Object.keys(useAppStore.getState().tabs), sessions: useAppStore.getState().sessions.map(session => session.id), records, calls, opened })
   } })
-  return <DesktopClientUiProvider><WindowOverlayHost /><main className="calendar-fixture" data-presentation={card ? 'card' : 'space'}>
-    <header className="calendar-fixture__top"><span className="calendar-fixture__brand">Mote</span><span className="calendar-fixture__space-name">项目与日常合作</span><span className="calendar-fixture__private">Private visual fixture</span></header>
-    <div className="calendar-fixture__body">
-      <aside className="calendar-fixture__details" hidden={card}><MoteFilesTool key={epoch} workspace={workspace} visible={!card} isScratch scope={scope} reference={reference} onOpenPath={async file => { opened.push(file) }} /></aside>
-      <section className="calendar-fixture__discussion" data-workbench-region-id={currentRegion?.regionId}>
+  const content = <div className={navigationProof ? "workbench-shell" : "calendar-fixture__body"}>
+      <aside className={navigationProof ? "surface-tool-dock" : "calendar-fixture__details"} data-surface-tool-dock={navigationProof || undefined} data-content-expanded={navigationProof ? String(presentation.expanded) : undefined} hidden={card}>
+        {navigationProof ? <SurfaceToolDock workspace={workspace} visible /> : <MoteFilesTool key={epoch} workspace={workspace} visible={!card} isScratch scope={scope} reference={reference} onOpenPath={async file => { opened.push(file) }} />}
+      </aside>
+      <section className={navigationProof ? "workspace-main-surface calendar-fixture__discussion" : "calendar-fixture__discussion"} inert={navigationProof && presentation.expanded} aria-hidden={navigationProof && presentation.expanded || undefined} data-workbench-region-id={currentRegion?.regionId}>
         <header className="calendar-fixture__tabs">{tabs.map((tab, index) => <button type="button" key={tab.id} data-fixture-session={index} aria-pressed={sessionId === sessions[index]!.id} onClick={() => select(index)}>{tab.name}</button>)}
           <MoteProfilePopover workspaceId={workspace.id} topicId={topic.id} reference={reference} active onReferenceSelect={() => {}}>{trigger => trigger}</MoteProfilePopover>
         </header>
@@ -199,6 +205,9 @@ function Scene() {
         <div className="calendar-fixture__composer"><AgentSessionComposer key={sessionId} sessionId={sessionId} /></div>
       </section>
     </div>
+  return <DesktopClientUiProvider><WindowOverlayHost /><main className="calendar-fixture" data-presentation={card ? 'card' : 'space'} data-navigation-proof={navigationProof || undefined}>
+    <header className="calendar-fixture__top"><span className="calendar-fixture__brand">Mote</span><span className="calendar-fixture__space-name">项目与日常合作</span><span className="calendar-fixture__private">Private visual fixture</span></header>
+    {navigationProof ? <SpaceContentPresentationContext.Provider value={presentation}><MoteSpaceFrame workspaceId={workspace.id} active>{content}</MoteSpaceFrame></SpaceContentPresentationContext.Provider> : content}
   </main></DesktopClientUiProvider>
 }
 createRoot(document.getElementById('root')!).render(<Scene />)
