@@ -36,8 +36,9 @@ function matchesTarget(session: SessionSnapshot | undefined, target: ContinuousP
     session.control.agentSessionId === target.agentSessionId
 }
 
-export function MoteCalendar({ scope, reference, active }: {
+export function MoteCalendar({ scope, reference, active, openRequest }: {
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; active: boolean
+  openRequest?: { scheduleId: string } | undefined
 }) {
   const contentPresentation = useSpaceContentPresentation()
   const queries = moteScheduleQueries(scope)
@@ -139,6 +140,29 @@ export function MoteCalendar({ scope, reference, active }: {
   const row = (record: ContinuousProgressLoop, occurrence?: (typeof occurrences)[number]) => <ScheduleArrangementRow
     key={record.loopId + ':' + (occurrence?.at ?? '')} schedule={record} occurrence={occurrence} timezone={timezone} now={now}
     onReceipt={source.accept} discussion={byId.get(record.loopId)?.discussion || 'Original discussion unconfirmed'} onOpenDiscussion={openDiscussion} />
+  const requested = useRef<typeof openRequest>(undefined)
+  const pendingReveal = useRef<string | undefined>(undefined)
+  useLayoutEffect(() => {
+    if (!active || !openRequest || requested.current === openRequest) return
+    requested.current = openRequest
+    pendingReveal.current = openRequest.scheduleId
+    setMode('upcoming'); setShowEnded(true)
+    // Any later input owns attention, even if the original read is still pending.
+    const cancel = () => { pendingReveal.current = undefined }
+    document.addEventListener('pointerdown', cancel, true)
+    document.addEventListener('keydown', cancel, true)
+    document.addEventListener('input', cancel, true)
+    return () => { cancel(); document.removeEventListener('pointerdown', cancel, true); document.removeEventListener('keydown', cancel, true); document.removeEventListener('input', cancel, true) }
+  }, [active, openRequest])
+  useLayoutEffect(() => {
+    const id = pendingReveal.current
+    // A retained snapshot may predate the home row. Keep the original request
+    // until this reader confirms it; read failures retain the same retry path.
+    if (!active || mode !== 'upcoming' || !showEnded || !id || !byId.has(id)) return
+    pendingReveal.current = undefined
+    setNavigationIssue(undefined)
+    focusArrangement(surface.current, id)
+  }, [active, mode, showEnded, source.observed, byId, openRequest])
   const ordered = [...records].sort((a, b) => a.nextCheckAt - b.nextCheckAt || a.loopId.localeCompare(b.loopId))
   const today = DateTime.fromMillis(now, { zone: timezone }).toISODate()!
   const dayItems = days.get(selected) ?? []

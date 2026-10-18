@@ -146,6 +146,7 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
         {open ? <GoalContinuationControl demand={goal} active={active} onRefresh={() => void refresh()} /> : null}
       </div>
     })}
+    {!loading && !context.issue && !issue && !goals.length ? <p className="mote-current-work__empty">No linked work yet. Start with a question, or choose a goal.</p> : null}
     {!showAll && goals.length && !currentGoals.length ? <p className="mote-details__hint">No current work. Original results are kept below.</p> : null}
     {showAll || goals.length > visibleGoals.length ? <button type="button" className="mote-current-work__navigation mote-current-work__all" aria-expanded={showAll}
       onClick={() => { associationIntent.current = {}; setShowAll(value => !value) }}>{showAll ? 'Current summary' : 'All work'}<span>{showAll ? currentGoals.length : goals.length}<ThemeNavigationDownIcon size={12} /></span></button> : null}
