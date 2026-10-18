@@ -15,8 +15,9 @@ export function inputMailboxPresentation(item: AgentInputMailboxItem): Pick<Conv
   const speaker = author.kind === 'system' ? { role: 'system' as const, id: AGENTMUX_SYSTEM_SPEAKER_ID } : speakerOfUserMessage({ author })
   if (item.kind === 'controlled') {
     const original = item.intent.source, sender = item.message?.sender
+    const originalWire = original.kind === 'message' ? item.receipt?.admission?.admission?.intent?.prompt : undefined
     return { text: original.kind === 'prompt' ? original.prompt : item.message?.body ?? null, contentBoundary: 'body', speaker,
-      ...(original.kind === 'prompt' ? { inputContext: original.inputContext, inputContextSource: original.inputContextSource, ...(original.promptWire === undefined ? {} : { copyText: original.promptWire }) } : {}),
+      ...(original.kind === 'prompt' ? { inputContext: original.inputContext, inputContextSource: original.inputContextSource, ...(original.promptWire === undefined ? {} : { copyText: original.promptWire }) } : originalWire === undefined ? {} : { copyText: originalWire }),
       source: sender?.kind === 'external' ? sender.actor.application.domain : original.kind === 'prompt' ? original.sourceChannel ?? '原提交' : item.sourceChannel ?? '原消息',
       state: item.receipt ? presentMessageDeliveryFailure({ error: null, inputReceipt: item.receipt }).title : '原输入观察未确认' }
   }
