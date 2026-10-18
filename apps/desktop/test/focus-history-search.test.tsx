@@ -38,7 +38,7 @@ beforeEach(async () => {
  const agent = { ...moteAgent(reference.agentSessionId, null), workspacePath: workspace.path }
  const tab = createWorkbenchTab('OriginalTab', { kind: 'agent', phase: 'attached', workspaceId: workspace.id, regionId: 'OriginalRegion', sessionId: agent.id })
  useAppStore.setState({ loading: false, config: { ...moteConfig, workspaces: [workspace] }, sessions: [agent], tabs: { [tab.id]: tab }, layouts: { [workspace.id]: createWorkspaceLayout('OriginalGroup', [tab.id]) }, timelines: {}, scratchTopicSnapshots: {}, agentNames: {}, mainSurface: 'agents', agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, agentComposerDrafts: { OriginalSession: 'Original unsent draft' } })
- vi.spyOn(api.sessions, 'historySources').mockResolvedValue([source])
+ vi.spyOn(api.sessions, 'historySources').mockResolvedValue({ sources: [source], warnings: [] })
  history = vi.fn((input, context) => readAgentSessionHistory(owner, input, context))
  reader = createAgentMuxSearchReader({
   metadata: async () => { throw Error('This deliberate text query cannot read metadata') },

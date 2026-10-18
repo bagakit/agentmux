@@ -25,7 +25,7 @@ beforeEach(() => {
 })
 
 it.each([513, 1025])('retains every valid source from an original catalogue of %i', async count => {
-  const original = sources(count), read = vi.spyOn(api.sessions, 'historySources').mockResolvedValue(original)
+  const original = sources(count), read = vi.spyOn(api.sessions, 'historySources').mockResolvedValue({ sources: original, warnings: [] })
   await dom.render(<Catalogue />)
   expect(observed.error).toBeNull()
   expect(observed.available).toBe(true)
@@ -36,8 +36,8 @@ it.each([513, 1025])('retains every valid source from an original catalogue of %
 
 it('keeps the complete known catalogue after a failed refresh and retries the original owner', async () => {
   const original = sources(513), refreshed = sources(1025)
-  const read = vi.spyOn(api.sessions, 'historySources').mockResolvedValueOnce(original)
-    .mockRejectedValueOnce(new Error('Original source observation unavailable')).mockResolvedValueOnce(refreshed)
+  const read = vi.spyOn(api.sessions, 'historySources').mockResolvedValueOnce({ sources: original, warnings: [] })
+    .mockRejectedValueOnce(new Error('Original source observation unavailable')).mockResolvedValueOnce({ sources: refreshed, warnings: [] })
   await dom.render(<Catalogue />)
   await act(async () => observed.refresh())
   expect(observed.sources).toBe(original)
@@ -52,7 +52,7 @@ it('keeps the complete known catalogue after a failed refresh and retries the or
 
 it('does not start catalogue observation for an inactive consumer or apply its late result', async () => {
   let resolve!: (value: AgentSessionHistoryDescriptor[]) => void
-  const read = vi.spyOn(api.sessions, 'historySources').mockImplementation(() => new Promise(done => { resolve = done }))
+  const read = vi.spyOn(api.sessions, 'historySources').mockImplementation(() => new Promise(done => { resolve = sources => done({ sources, warnings: [] }) }))
   await dom.render(<Catalogue enabled={false} />)
   expect(read).not.toHaveBeenCalled()
   await dom.render(<Catalogue />)
@@ -64,7 +64,7 @@ it('does not start catalogue observation for an inactive consumer or apply its l
 })
 
 it('finds a retained conversation beyond the old threshold in the real Focus consumer without reading bodies or controlling Runs', async () => {
-  vi.spyOn(api.sessions, 'historySources').mockResolvedValue(sources(513))
+  vi.spyOn(api.sessions, 'historySources').mockResolvedValue({ sources: sources(513), warnings: [] })
   const history = vi.spyOn(api.sessions, 'historyPage'), search = vi.spyOn(api.search, 'query')
   const controls = (['launchAgent', 'recover', 'resume', 'stop', 'write', 'interrupt'] as const)
     .map(name => vi.spyOn(api.sessions, name))

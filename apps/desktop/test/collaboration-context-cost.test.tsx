@@ -18,7 +18,7 @@ const unrelated = Array.from({ length: 240 }, (_, index) => activeSession('unrel
 beforeEach(() => {
   installCollaborationCanvasGeometry()
   installCollaborationLayoutLoopback()
-  vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
+  vi.spyOn(api.sessions, 'historySources').mockResolvedValue({ sources: [], warnings: [] })
   useAppStore.setState({ config: composerConfig, sessions: [task, ...unrelated, peer], tabs: {}, layouts: {}, timelines: {},
     scratchTopicSnapshots: {}, spaceZoneBindings: {}, spatialRequests: {}, topicCategories: [], projectGroups: [],
     agentNames: { [task.id]: 'Scoped task', [peer.id]: 'Recorded peer' }, agentComposerDrafts: { [task.id]: 'Original unsent task' } })
