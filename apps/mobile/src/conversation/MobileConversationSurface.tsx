@@ -84,6 +84,10 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   }, [reading.session, agentSessionId, client, local])
 
   const session = reading.session
+  const questionCapability = (() => {
+    try { return { route: session?.providerId ? client?.catalog?.().find(provider => provider.id === session.providerId)?.capabilities.asyncQuestionReply : undefined } }
+    catch (error) { return { route: undefined, issue: errorMessage(error) } }
+  })()
   // A reader is scoped to its exact Host connection and persistent Agent, not to a replaceable Run.
   const historyConnection = useRef({ client, generation: 0 })
   if (historyConnection.current.client !== client) historyConnection.current = { client, generation: historyConnection.current.generation + 1 }
@@ -225,6 +229,10 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     <section className="mobile-conversation" aria-label="会话" data-agent-surface-mode="activity" data-agent-session-id={agentSessionId ?? ''}>
       {!available || connection.issue ? <p className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前发送暂不可用。' : ''}</p> : null}
       {reading.notice ? <details className="mobile-conversation__notice"><summary>对话读取暂未确认 · 原 Agent 与输入保留</summary><p>{reading.notice}</p><button onClick={() => { void reading.refresh() }}>刷新原记录</button></details> : null}
+      {questionCapability.issue ? <aside className="mobile-conversation__notice" role="status">
+        异步问题能力观察未确认；原会话与草稿保留，普通输入仍按原 Core 条件处理。{questionCapability.issue}
+        <button type="button" onClick={() => redraw(value => value + 1)}>重新核对问题能力</button>
+      </aside> : null}
       {local.notice ? <aside className="mobile-conversation__notice" role="status">{local.notice}
         {local.canSave ? <button type="button" onClick={() => { void local.save().then(() => { if (mounted.current) redraw(value => value + 1) }); redraw(value => value + 1) }}>重试保存</button> : null}
         <button type="button" disabled={!draft} onClick={() => {
@@ -272,7 +280,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
             onQuestionReply={input => submitMobileQuestionReply(local, agentSessionId, pageClient ?? null, input,
               () => { if (mounted.current) redraw(value => value + 1) })}
             questionDraftNotice={local.notice ?? undefined}
-            questionReplyRoute={session?.providerId ? client?.catalog?.().find(provider => provider.id === session.providerId)?.capabilities.asyncQuestionReply : undefined}
+            questionReplyRoute={questionCapability.route}
             questionReplyTarget={pageClient === client && !session?.nativeSourceObservation && session?.nativeHandle?.kind === 'provider' ? {
               source: { providerId: session.nativeHandle.providerId, nativeSessionId: session.nativeHandle.sessionId }, run: session.run
             } : undefined}
