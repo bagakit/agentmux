@@ -175,7 +175,9 @@ it('explicit latest supersedes an in-flight older read and rejects its late fram
     expect(accepted.window.id).not.toBe(prior.window.id); expect(accepted.units).toHaveLength(100)
     release(); await act(async () => { await older })
     expect(returned).toBe(true); expect(view!.snapshot).toBe(accepted)
-    expect(view!.loading).toBe(false); expect(view!.error).toBeNull(); expect(view!.observationError).toBeNull()
+    await act(async () => { await view!.settle() })
+    await flush(() => expect(view!.inspect()).toMatchObject({ loading: false, inFlight: false, dirty: false, error: null, observationError: null }))
+    expect(view!.snapshot!.window.id).toBe(accepted.window.id)
     await appendFile(f.path, jsonl([{ type: 'assistant', uuid: 'after-superseded-read', sessionId: 'native-main',
       message: { role: 'assistant', content: 'The latest watch survived the superseded original frame' } }]))
     await flush(() => expect(view!.snapshot!.units.some(unit => unit.records.some(record => record.original.item.id === 'after-superseded-read'))).toBe(true))
@@ -321,8 +323,10 @@ it('a replaced same-SID source epoch cannot revive a parked view by equal revisi
   await act(async () => root.render(<Consumer control={control} active={false} />))
   owner = other.client
   await act(async () => root.render(<Consumer control={control} />))
-  await flush(() => expect(current.error?.message).toMatch(/expired/))
+  await flush(() => expect(current.error).toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' }))
   expect(current.conversation.snapshot!.window.id).toBe(original.window.id)
+  expect(current.conversation.snapshot!.scope).toEqual(original.scope)
+  expect(current.conversation.snapshot!.sourceHostId).toBe(original.sourceHostId)
   expect(host.textContent).toContain('Old exact source body'); expect(host.textContent).not.toContain('New exact source body')
   await act(async () => { await current.refresh() })
   await flush(() => expect(host.textContent).toContain('New exact source body'))
