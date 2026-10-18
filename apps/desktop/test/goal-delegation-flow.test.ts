@@ -10,6 +10,7 @@ import { AgentMuxClient, AgentMuxControlServer, AgentMuxError, AgentMuxFileAgent
 import { openDemandStore } from '@agentmux/demand'
 import type { DemandDelegationIntent, DemandDelegationReportInput } from '@agentmux/demand/delegations'
 import { GoalDelegationOwner, type GoalDelegationCorePort } from '../src/main/goal-delegation-owner'
+import { goalEvidenceSource } from './helpers/goal-evidence-source'
 
 const execute = promisify(execFile), cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => {
@@ -37,7 +38,7 @@ async function record(scenario: string, proof: unknown) {
     proofBoundary: 'Actual compiled CLI, Unix RPC, Main and persisted Core/Demand owners; Native input and Run observations are explicit isolated fixtures. Does not prove live independent Agent or Renderer recovery.', proof }, null, 2) + '\n')
 }
 
-async function fixture() {
+async function fixture(files?: ConstructorParameters<typeof AgentMuxControlServer>[0]['files']) {
   const root = await fs.mkdtemp(join(tmpdir(), 'goal-delegation-flow-'))
   cleanup.push(() => fs.rm(root, { recursive: true, force: true }))
   const receiptDirectory = process.env.AGENTMUX_GOAL_DELEGATION_FLOW_RECEIPT_DIR
@@ -96,7 +97,7 @@ async function fixture() {
     }
   }
   const owner = new GoalDelegationOwner(demands, { agentCreation: async (_hostId, id) => (await sessions.readMetadata(id))! }, undefined, port)
-  const server = new AgentMuxControlServer({ socketPath: join(root, 'rpc.sock'), coreClients: () => [{ hostId: 'local', client }], goalDelegations: owner })
+  const server = new AgentMuxControlServer({ socketPath: join(root, 'rpc.sock'), coreClients: () => [{ hostId: 'local', client }], goalDelegations: owner, ...(files ? { files } : {}) })
   await server.start(); cleanup.push(() => server.stop())
   let sequence = 0
   const cliReceipts: unknown[] = []
@@ -121,6 +122,27 @@ async function fixture() {
 }
 
 describe('actual Goal delegation CLI, Main and original Core collaboration', () => {
+  it('takes the original file read receipt through public worker report and owner collection unchanged', async () => {
+    const source = await goalEvidenceSource(); cleanup.push(source.dispose)
+    const f = await fixture(source.owner), originalTask = task()
+    await f.goal('owner', 'delegate', { goalId: 'goal', intent: originalTask })
+    const target = source.target
+    const receipt = (await f.cli('worker-a', ['file', 'read', '--zone', target.zoneId, '--path', target.path, '--host', target.expectedResource.hostId,
+      '--workspace', target.expectedResource.workspaceId, '--workspace-path', target.expectedResource.workspacePath])).result
+    expect(receipt.result.document.content).toBe('ORIGINAL worktree evidence')
+    const evidence = { kind: 'file' as const, resource: receipt.resource, revision: receipt.result.document.revision }
+    const report = result(originalTask); report.grounding.checks[0]!.evidence = [evidence, 'Original citation']
+    await f.goal('worker-a', 'report', { goalId: 'goal', operationId: originalTask.operationId, report })
+    const reported = (await f.read()).result
+    expect(reported.delegations[0].report.grounding.checks[0].evidence).toEqual([evidence, 'Original citation'])
+    await f.goal('owner', 'collect', { goalId: 'goal', operationId: originalTask.operationId, collection: { operationId: 'collect-file', replyMessageId: report.replyMessageId } })
+    const collected = (await f.read()).result
+    expect(collected.grounding.checks[0].evidence).toEqual([evidence, 'Original citation'])
+    expect(collected.grounding.acceptedAt).toBeNull()
+    expect((await openDemandStore({ root: join(f.root, 'goals') }).get('goal'))!.grounding!.checks[0]!.evidence).toEqual([evidence, 'Original citation'])
+    await record('typed-original-file-report-and-collection', await f.proof())
+  }, 30_000)
+
   it('returns two worker reports through original questions, dispatches and explicit collection without completing the Goal', async () => {
     const f = await fixture(), a = task(), b = task('worker-b', ['AC-02'])
     const prepared = (await f.goal('owner', 'prepare', { goalId: 'goal', intent: a })).result.delegations[0]
