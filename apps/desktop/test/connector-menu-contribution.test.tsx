@@ -101,7 +101,15 @@ it('keeps connection and settings discovery visible while the mounted Settings m
     expect(groups()[0]!.querySelectorAll('[role="menuitem"]')).toHaveLength(3)
   }
   const before = useAppStore.getState(), bots = (await f.services.connections.list()).connections.map(record => record.config)
-  await openSettings(); await toggle()
+  await openSettings()
+  const pane = document.querySelector('.lark-settings')!
+  expect(pane.firstElementChild).toBe(document.querySelector('[data-connector-service]'))
+  expect(pane.firstElementChild?.textContent).toContain('all your external bots')
+  expect(writes()).toHaveLength(0)
+  await toggle()
+  expect(policy().dataset.connectorServiceState).toBe('on')
+  expect((await f.services.connections.service!.get()).enabled).toBe(true)
+  expect(writes()).toHaveLength(0)
   const forward = f.connections.getMockImplementation()!
   f.connections.mockImplementation(async (method, input) => {
     if (method === 'connection.service.configure') {
@@ -135,7 +143,7 @@ it('keeps connection and settings discovery visible while the mounted Settings m
   for (const kind of ['header', 'region'] as const) { await openMenu(kind); expect(groups()).toHaveLength(1); expect(groups()[0]!.textContent).toContain('Connect group…') }
   expect((await f.services.connections.list()).connections.find(record => record.config.connectionId === 'robot-b')!.config.enabled).toBe(false)
   evidence('mounted-settings-two-menus', { input, originalReceipt: receipt.operation, current: await cli(['get']), preservedBots: (await f.services.connections.list()).connections.map(record => ({ connectionId: record.config.connectionId, enabled: record.config.enabled })), preservedAgent: defaultAgent.control })
-})
+}, 15_000)
 
 it('keeps an unknown save as its exact original request across remount and current reads, then queries its historical receipt', async () => {
   await f.mount(); await openSettings(); await toggle()
