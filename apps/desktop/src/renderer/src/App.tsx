@@ -66,7 +66,7 @@ import type { WorkbenchViewTarget, WorkbenchViewTargets } from './lib/workbench-
 import { ordinaryWorkbenchViewTargets, workbenchResourceTabs, workbenchDisplayReferenceMatches } from './lib/workbench-resource-display'
 import { useWorkbenchObjectLayout } from './hooks/useWorkbenchObjectLayout'
 import { workbenchNavigationTabs } from './lib/workbench-navigation-catalog'
-import { mainRegionReference } from './lib/desktop-focus-navigation'
+import { mainRegionReference, workbenchZoneProjection } from './lib/desktop-focus-navigation'
 import { layoutForLogicalRegionFocus } from './lib/region-focus'
 import { sessionPresentationById } from './lib/session-presentation'
 import { isSessionSurface } from './lib/workbench-surface-kinds'
@@ -345,7 +345,44 @@ function DesktopApp() {
   if (currentOrdinaryLayout && activeWorkspaceId) retainedOrdinaryLayout.current = { workspaceId: activeWorkspaceId, layout: currentOrdinaryLayout }
   const ordinaryLayout = currentOrdinaryLayout ?? (retainedOrdinaryLayout.current?.workspaceId === activeWorkspaceId ? retainedOrdinaryLayout.current.layout : undefined)
   const ordinaryObject = useWorkbenchObjectLayout(activeWorkspaceId ?? '', ordinaryLayout)
+  const ordinaryScope = JSON.stringify([activeWorkspaceId, workbenchSpaceSelection?.spaceId, workbenchSpaceSelection?.zoneId])
+  const [ordinaryMembers, setOrdinaryMembers] = useState<{ scope: string; selection: Pick<WorkbenchProjectionSelection, 'tabId' | 'regionId'>[] }>({ scope: '', selection: [] })
+  const currentOrdinaryMembers = useRef(ordinaryMembers)
+  useLayoutEffect(() => { currentOrdinaryMembers.current = ordinaryMembers }, [ordinaryMembers])
+  const selectOrdinaryMember = useCallback<WorkbenchProjection['onSelect']>(reference => {
+    const state = useAppStore.getState(), choice = state.workbenchSpaceSelection
+    if (state.mainSurface !== 'workbench' || choice !== workbenchSpaceSelection || currentOrdinaryMembers.current !== ordinaryMembers ||
+      JSON.stringify([state.activeWorkspaceId, choice?.spaceId, choice?.zoneId]) !== ordinaryScope) return
+    const projection = workbenchZoneProjection(state, choice, [], () => {})
+    const tab = state.tabs[reference.tabId]
+    const zoneId = projection?.entity.kind === 'zone' ? projection.entity.zoneId : undefined
+    if (!zoneId || reference.displayWorkspaceId !== projection?.displayWorkspaceId || !tab?.regions[reference.regionId] ||
+      !projection.catalog.tabs.some(member => member.tabId === reference.tabId && member.zoneId === zoneId) ||
+      !projection.composition?.groups.some(group => group.id === reference.groupId && group.tabOrder.includes(reference.tabId))) return
+    if (workbenchDisplayReferenceMatches(state.layouts[reference.displayWorkspaceId], reference)) {
+      if (!state.selectMainRegion(reference, choice)) return
+    } else if (choice?.tabId) {
+      useAppStore.setState({ workbenchSpaceSelection: { ...choice, tabId: null, groupId: null, regionId: null }, retainedSpatialFocus: null })
+    }
+    setOrdinaryMembers(previous => previous.scope === ordinaryScope && previous.selection.length === 1 &&
+      previous.selection[0]?.tabId === reference.tabId && previous.selection[0]?.regionId === reference.regionId ? previous
+      : { scope: ordinaryScope, selection: [{ tabId: reference.tabId, regionId: reference.regionId }] })
+  }, [ordinaryScope, workbenchSpaceSelection, ordinaryMembers])
+  const ordinaryProjection = useMemo(() => activeWorkspaceId && workbenchSpaceSelection?.workspaceId === activeWorkspaceId
+    ? workbenchZoneProjection(useAppStore.getState(), workbenchSpaceSelection,
+      ordinaryMembers.scope === ordinaryScope ? ordinaryMembers.selection : [], selectOrdinaryMember) : null,
+  [activeWorkspaceId, workbenchSpaceSelection, ordinaryScope, ordinaryMembers, selectOrdinaryMember, ordinaryObject.choice, config, tabs, layouts, surveyBindings, surveyTopics])
   const ordinaryTargets = useStableWorkbenchViewTargets(useMemo(() => {
+    if (ordinaryProjection) {
+      const projected = projectWorkbenchProjection(ordinaryLayout, tabs, ordinaryProjection, null, 'owner')
+      const selected = mainRegionReference(workbenchSpaceSelection)
+      const targets = ordinaryWorkbenchViewTargets(projected.layout ?? undefined, tabs, ordinaryProjection.displayWorkspaceId, undefined, selected)
+      return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => {
+        const reference = projected.selection.find(reference => reference.groupId === target.reference?.groupId && reference.tabId === id) ?? target.reference!
+        return { ...target, reference, visible: target.visible !== false && mainSurface === 'workbench' && !settingsOpen, projection: ordinaryProjection,
+          retainedRegionId: reference.regionId, onSelectRegion: (regionId: string) => selectOrdinaryMember({ ...reference, regionId }) }
+      })]))
+    }
     const layout = ordinaryObject.layout
     if (!layout || !activeWorkspaceId) return {}
     const reference = mainRegionReference(workbenchSpaceSelection)
@@ -353,7 +390,7 @@ function DesktopApp() {
     const displayed = layoutForLogicalRegionFocus(layout, tabs, held)
     const targets = ordinaryWorkbenchViewTargets(displayed, tabs, activeWorkspaceId, undefined, held)
     return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => ({ ...target, visible: target.visible !== false && mainSurface === 'workbench' && !settingsOpen }))]))
-  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, settingsOpen, retainedSpatialFocus, workbenchSpaceSelection]))
+  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, settingsOpen, retainedSpatialFocus, workbenchSpaceSelection, ordinaryProjection, ordinaryLayout, selectOrdinaryMember]))
   const viewTargets = useMemo<WorkbenchViewTargets>(() => {
     const targets: Record<string, readonly WorkbenchViewTarget[]> = { ...ordinaryTargets }
     const append = (tabId: string, target: WorkbenchViewTarget) => { targets[tabId] = [...targets[tabId] ?? [], target] }
@@ -680,6 +717,7 @@ function DesktopApp() {
                         <MoteWorkface workspaceId={candidate.id} visible={visible}
                           topicId={workbenchSpaceSelection?.workspaceId === candidate.id ? workbenchSpaceSelection.topicId ?? undefined : undefined}>
                         <WorkspaceWorkbench
+                          projection={visible ? ordinaryProjection ?? undefined : undefined}
                           workspaceId={candidate.id}
                           {...(candidate.id === SCRATCH_WORKSPACE_ID && workbenchSpaceSelection?.workspaceId === candidate.id && workbenchSpaceSelection.topicId
                             ? { topicId: workbenchSpaceSelection.topicId, topicIsolation: 'bound-only' as const } : {})}

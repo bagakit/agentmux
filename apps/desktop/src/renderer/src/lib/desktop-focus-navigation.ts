@@ -5,7 +5,8 @@ import type { WorkbenchTab } from './workbench-tabs'
 import { selectSpatialCatalog, spatialCatalog, type SpatialWorkbench } from './space-agent-control'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
-import { projectWorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
+import { projectWorkbenchProjection, resolveWorkbenchZone, sameWorkbenchProjectionSelection, workbenchProjectionLocationsMatchOwner,
+  type WorkbenchProjection, type WorkbenchProjectionSelection } from './workbench-projection'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { workbenchNavigationCatalog } from './workbench-navigation-catalog'
 
@@ -99,6 +100,27 @@ export function workbenchObjectLayout(state: NavigationState, workspaceId: strin
   }
   return choice ? { ...projectWorkbenchSpaceSelection(layout, state.tabs, catalog, choice), choice }
     : { layout: layout ?? null, choice: null, confirmed: Boolean(layout), issues: [] }
+}
+
+/** Read missing display occurrences through the original Zone composition, without placing Tabs. */
+export function workbenchZoneProjection(state: NavigationState, choice: AgentMuxDesktopSpaceSelection | null,
+  preferences: readonly Pick<WorkbenchProjectionSelection, 'tabId' | 'regionId'>[], onSelect: WorkbenchProjection['onSelect']): WorkbenchProjection | null {
+  if (!choice?.zoneId || !choice.tabId && (choice.groupId || choice.regionId)) return null
+  const catalog = workbenchSelectionCatalog(state), zone = catalog.zones.find(zone => zone.zoneId === choice.zoneId)
+  if (zone?.workspaceId !== choice.workspaceId || choice.spaceId !== null && !catalog.bindings.some(binding =>
+    binding.spaceId === choice.spaceId && binding.zoneId === choice.zoneId)) return null
+  const reference = mainRegionReference(choice)
+  if (choice.tabId) {
+    const locations = reference ? catalog.locations.filter(location => sameWorkbenchProjectionSelection(reference, location) &&
+      location.spaceId === choice.spaceId && location.zoneId === choice.zoneId) : []
+    if (!reference || !state.tabs[reference.tabId]?.regions[reference.regionId] ||
+      !workbenchProjectionLocationsMatchOwner(catalog, reference.tabId, locations)) return null
+  }
+  const projection = resolveWorkbenchZone(choice.zoneId, catalog, state.layouts, state.tabs, 'workbench-tab',
+    reference ? [...preferences, reference] : preferences, onSelect)
+  // The ordinary owner already presents complete physical layouts. Only the
+  // direct member composition needs a separate presentation selection.
+  return projection?.composition && projection.composition !== state.layouts[zone.workspaceId] ? projection : null
 }
 
 /** Project original Zone membership, including legal foreign bindings, without changing entities. */
