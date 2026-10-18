@@ -1,9 +1,11 @@
 import { TextInput } from '@agentmux/client-ui/input'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ConnectionRecord, ConnectionSetupPublicationDraft, ConnectionSetupView } from '@agentmux/core/connections'
 import type { ConnectionManagementModel } from './useConnectionManagementSetup'
 
 type Configuration = Extract<NonNullable<ConnectionSetupView['applicationConfiguration']>, { effect: 'create-application-version' | 'submit-application-version' }>
 const issueLabel = { 'entry-conflict': 'An application entry conflicts with another configuration.', 'application-avatar-required': 'The platform needs an application avatar.', 'response-unconfirmed': 'The platform response does not confirm the next publication step.' }
+const LinkIcon = semanticIconComponent('action.open-external')
 
 /** The form expresses intent; current sources and write eligibility belong to the Host. */
 export function ConnectionManagementPublication({ record, model, current, configuration, onConsole, onBack }: {
@@ -47,6 +49,6 @@ export function ConnectionManagementPublication({ record, model, current, config
     {!current ? reviewDetails : null}
     {configuration.effects.length ? <details className="connector-optional"><summary>Original publication requests</summary>{configuration.effects.map(receipt => <button className="connector-enrollment__previous" key={receipt.stepId} onClick={() => select(receipt.stepId)}><strong>{receipt.effect === 'create-application-version' ? 'Create version' : 'Submit version'}</strong><span>{receipt.request === 'confirmed' ? receipt.secureStorage === 'stored' ? 'Original result saved' : 'Original result needs saving' : 'Result not confirmed'}</span></button>)}{configuration.next ? <button className="small-button" onClick={() => model.inspectOriginal({ applicationInspection: {}, applicationConfiguration: { effect: configuration.effect, cursor: configuration.next! } })}>More requests</button> : null}</details> : null}
     <div className="connector-publication__actions"><button className="small-button" data-publication-back disabled={busy} onClick={() => model.inspectOriginal({ applicationInspection: {}, applicationConfiguration: { effect: 'enable-messaging' } })}>Back to bot setup</button>
-    <button className="small-button" data-management-console onClick={() => void onConsole()}>Open developer console</button></div>
+    <button className="small-button" data-management-console onClick={() => void onConsole()}><LinkIcon size={14} />Open developer console</button></div>
   </div>
 }
