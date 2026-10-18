@@ -2,8 +2,15 @@ const RETRY_DELAYS_MS = [500, 1000, 2000] as const
 
 /** These are connection facts, never display text or an unknown business result. */
 export function recoverableInitialTerminalObservation(error: unknown): boolean {
-  const code = (error as { code?: unknown } | null)?.code
-  return code === 'CONTROL_UNAVAILABLE' || code === 'CONTROL_CONNECTION_FAILED' || code === 'CTXMUX_DISCONNECTED'
+  try {
+    const descriptor = error !== null && (typeof error === 'object' || typeof error === 'function')
+      ? Object.getOwnPropertyDescriptor(error, 'code') : undefined
+    const code = descriptor && Object.hasOwn(descriptor, 'value') ? descriptor.value : undefined
+    return code === 'CONTROL_UNAVAILABLE' || code === 'CONTROL_CONNECTION_FAILED' || code === 'CTXMUX_DISCONNECTED'
+  } catch {
+    // Missing connection evidence must leave the original failure and manual recovery usable.
+    return false
+  }
 }
 
 /** One finite wake window for a visible consumer that has not received its first lease. */
