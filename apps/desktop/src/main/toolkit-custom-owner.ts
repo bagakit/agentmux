@@ -57,7 +57,7 @@ export class CustomToolkitOwner {
   }
   private displayTool(tool: Tool): Tool { return tool.display ??= this.newTool(tool.id, tool) }
   private state(tool: Tool, definition: ToolkitToolDefinition) {
-    return tool.error || tool.loadError || tool.parent && tool.sourceError ? 'unknown' as const : tool.admission?.state ?? (!definition.enabled ? 'disabled' as const : tool.latest?.state ?? 'idle' as const)
+    return tool.error || tool.parent && tool.sourceError ? 'unknown' as const : tool.admission?.state ?? (!definition.enabled ? 'disabled' as const : tool.latest?.state ?? 'idle' as const)
   }
   private displaySnapshot(tool: Tool, definition: ToolkitToolDefinition): ToolkitDisplaySnapshot {
     return { state: this.state(tool, definition), reason: tool.error ?? tool.sourceError ?? tool.admission?.reason ?? tool.latest?.reason ?? null,
