@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
+import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError } from '@agentmux/core'
 import { parseConversationCheckpointPage, type ConversationCheckpointPage } from '@agentmux/core/conversation'
@@ -185,7 +186,7 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
       if (row && observed?.generation.generationId === row.generation.generationId && activity !== null) row.generation.lastActivityAt = Math.max(row.generation.lastActivityAt, activity)
       const elapsed = row ? now - row.generation.lastActivityAt : 0
       if (!row || row.generation.phase === 'ready' && elapsed > current.values.conversationIdleMs) {
-        const id = randomUUID()
+        const id = mintObjectId()
         row = this.store.insertGeneration({ sequence: 0, laneKey: key, connectionId: current.values.connection!.connectionId, configurationRevision: current.revision,
           authorizedBy: this.configurationAuthority(current), prepared: null, dispatched: false, binding: null, grant: null,
           generation: { generationId: id, target: current.target, application: incoming.application, externalConversationId: incoming.externalConversationId,
