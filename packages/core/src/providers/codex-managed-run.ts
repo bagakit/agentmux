@@ -1,6 +1,7 @@
+import { mintObjectId } from '../object-id.js'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { stripVTControlCharacters } from 'node:util'
 import { CODEX_NATIVE_TOKEN_ENV, CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV, openCodexFrontendControl } from './codex-managed-frontend.js'
 import type { AgentTerminalFrontendObservation } from '../agent-terminal-frontend.js'
@@ -41,7 +42,7 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
   if (!server.stderr) preparationDiagnostics.end()
   let serverError: Error | undefined
   server.once('error', error => { serverError = error })
-  let frontend: AgentTerminalFrontendObservation = { frontendId: randomUUID(), state: 'starting', backendState: 'running', source: 'managed-process', observedAt: Date.now() }
+  let frontend: AgentTerminalFrontendObservation = { frontendId: mintObjectId(), state: 'starting', backendState: 'running', source: 'managed-process', observedAt: Date.now() }
   let control: Awaited<ReturnType<typeof openCodexFrontendControl>> | undefined
   const publish = (value: AgentTerminalFrontendObservation): void => { frontend = value; control?.publish(frontend) }
   let stopping = false
@@ -51,7 +52,7 @@ export async function runCodexManaged(plan: CodexManagedRunPlan): Promise<number
     publish({ ...frontend, backendState: 'stopping', observedAt: Date.now() })
     tui?.kill('SIGTERM'); server.kill('SIGTERM')
   }
-  const spawnTui = async (endpoint: string, args: string[], frontendId: string = randomUUID()): Promise<AgentTerminalFrontendObservation> => {
+  const spawnTui = async (endpoint: string, args: string[], frontendId: string = mintObjectId()): Promise<AgentTerminalFrontendObservation> => {
     publish({ frontendId, state: 'starting', backendState: 'running', source: 'managed-process', observedAt: Date.now() })
     const child = spawn(plan.command, ['--remote', endpoint, '--remote-auth-token-env', CODEX_NATIVE_TOKEN_ENV, ...args],
       { cwd: process.cwd(), env: process.env, detached: false, stdio: ['inherit', 'inherit', 'pipe'] })

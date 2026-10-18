@@ -1,3 +1,4 @@
+import { identityRuntimeSource } from '@agentmux/identity/runtime-source'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
@@ -15,7 +16,7 @@ type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
 /**
  * OpenCode 投递的事件名。
  *
- * 证据是**上游自己的源码**（`home//proj/github/opencode`，本机可读），不是任何第三方项目的
+ * 证据是**上游自己的源码**，不是任何第三方项目的
  * 转述：事件联合体在 `packages/sdk/js/src/gen/types.gen.ts:704-736`（28 个成员），每个成员的形状是
  * `{ type, properties }`。下面的名字逐字取自那份生成类型，一个都不是推导出来的。
  *
@@ -165,6 +166,7 @@ function adaptOpenCodePayload(payload: Record<string, unknown>): Record<string, 
 function openCodePluginSource(endpoint: string, token: string): string {
   return `// AgentMux managed plugin. Generated — edits are overwritten on reinstall.
 ${hookDeliverySource()}
+const { mintObjectId } = ${identityRuntimeSource}
 export async function server() {
   const endpoint = ${JSON.stringify(endpoint)}
   const token = ${JSON.stringify(token)}
@@ -173,7 +175,7 @@ export async function server() {
     event: async ({ event }) => {
       if (!events.has(event.type)) return
       void sendHookReceipt(endpoint, token, JSON.stringify({
-        receiptId: crypto.randomUUID(), eventName: event.type, payload: event.properties ?? {}
+        receiptId: mintObjectId(), eventName: event.type, payload: event.properties ?? {}
       })).catch((error) => {
         console.error('[AgentMux Hook] delivery unconfirmed; Agent remains available:', error)
       })

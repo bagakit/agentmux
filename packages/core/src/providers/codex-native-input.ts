@@ -1,6 +1,7 @@
+import { mintObjectId } from '../object-id.js'
 import { CODEX_NATIVE_TOKEN_ENV, CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV } from './codex-managed-frontend.js'
 import { JSONRPCErrorException } from 'json-rpc-2.0'
-import { randomBytes, randomUUID } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { nativeInputSourceId } from '../native-input-correlation.js'
 import { fileURLToPath } from 'node:url'
@@ -92,7 +93,7 @@ export const prepareCodexManagedLaunch: NonNullable<AgentProvider['prepareManage
   // The version is the native CLI's stable version command, not a terminal screen or readiness guess.
   const version = await runProcess(plan.command, ['--version'], { env: plan.env, timeoutMs: 2_000, maxOutputBytes: 4096 }).catch(() => null)
   if (!version || version.exitCode !== 0 || version.stderr || version.stdout.trim() !== 'codex-cli 0.163.0') return { plan }
-  const nativeActor = { protocolId: PROTOCOL_ID, actorId: randomUUID(), lifecycleOperationId, token: randomBytes(32).toString('hex'), frontendControl: true as const, launch: { command: plan.command, args } }
+  const nativeActor = { protocolId: PROTOCOL_ID, actorId: mintObjectId(), lifecycleOperationId, token: randomBytes(32).toString('hex'), frontendControl: true as const, launch: { command: plan.command, args } }
   return { nativeActor, plan: { command: process.execPath,
     args: [fileURLToPath(new URL('./codex-managed-run.js', import.meta.url)), JSON.stringify({ command: plan.command, args, serverConfig, frontendArgs, ...(prepared ? { resume: prepared.resume } : {}) })],
     env: { ...plan.env, ELECTRON_RUN_AS_NODE: '1', [CODEX_NATIVE_TOKEN_ENV]: nativeActor.token, [CODEX_ACTOR_ID_ENV]: nativeActor.actorId, [CODEX_ACTOR_LIFECYCLE_ENV]: lifecycleOperationId } } }

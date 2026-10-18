@@ -1,3 +1,4 @@
+import { identityRuntimeSource } from '@agentmux/identity/runtime-source'
 /** These programs are transported as single quoted argv by ExecutionHost. They
  * have no shell interpolation, provider branches, or access to Agent credentials. */
 export const INSPECT_CORE_OWNER = String.raw`
@@ -118,6 +119,7 @@ print(json.dumps({'node':exe,'cli':argv[1],'cwd':cwd,'processId':pid,'startTicks
 /** The exact serving producer validates its own public DTOs before projecting
  * maintenance facts. The current normal client never parses an old Hosted DTO. */
 export const READ_CORE_MAINTENANCE = String.raw`
+const { mintObjectId } = ${identityRuntimeSource};
 const fs=require('node:fs'),path=require('node:path'),url=require('node:url'),crypto=require('node:crypto'),cp=require('node:child_process'),os=require('node:os');
 const p=JSON.parse(fs.readFileSync(0,'utf8')),launch=p.launch,root=path.dirname(path.dirname(launch.cli));
 const hash=b=>crypto.createHash('sha256').update(b).digest('hex');
@@ -172,7 +174,7 @@ void(async()=>{
    if(response.accepted!==true||JSON.stringify(stopped)!==JSON.stringify(owner))throw Error('The original Core shutdown acknowledgement is unknown');
    source();nativeScope();console.log(JSON.stringify({accepted:true,owner:stopped}));return;
   }
-  const bootstrap=await call('runtime.bootstrap',{consumerId:'core-upgrade-inspect-'+crypto.randomUUID(),fence});
+  const bootstrap=await call('runtime.bootstrap',{consumerId:'core-upgrade-inspect-'+mintObjectId(),fence});
   if(bootstrap.owner.runtimeId!==owner.runtimeId||bootstrap.owner.ownerInstanceId!==owner.ownerInstanceId||bootstrap.hostProcessId!==owner.processId||bootstrap.storePath!==launch.storePath)throw Error('Original bootstrap belongs to another owner or Store');
   const sessions=[],runs=[],missing=new Set();
   for(const session of bootstrap.sessions){

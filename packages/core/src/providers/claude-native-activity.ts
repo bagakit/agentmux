@@ -1,3 +1,4 @@
+import { identityRuntimeSource } from '@agentmux/identity/runtime-source'
 import { join } from 'node:path'
 import type { AgentManagedHookMutation } from '../managed-hook-installer.js'
 import { resolveCoreBinPath } from '../runtime-paths.js'
@@ -60,7 +61,8 @@ export function claudeNativeActivityDirectory(workspacePath: string): string {
  */
 export function claudeNativeActivitySource(): string {
   return `// AgentMux managed native activity observer. Generated; no input or completion decisions.
-const sourceId = crypto.randomUUID()
+const { mintObjectId } = ${identityRuntimeSource}
+const sourceId = mintObjectId()
 let sequence = 0
 let initialSessionId
 let actorCaptured = false

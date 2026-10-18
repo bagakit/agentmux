@@ -1,3 +1,4 @@
+import { identityRuntimeSource } from '@agentmux/identity/runtime-source'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { AgentMuxError } from '../errors.js'
@@ -178,6 +179,7 @@ function piExtensionSource(): string {
   return `// AgentMux managed extension. Generated — edits are overwritten on reinstall.
 import { existsSync } from 'node:fs'
 ${hookDeliverySource()}
+const { mintObjectId } = ${identityRuntimeSource}
 export default function (pi) {
   // session_file 只有在 transcript **真的落盘之后**才上报。
   //
@@ -211,7 +213,7 @@ export default function (pi) {
     for (const key in session) payload[key] = session[key]
     if (extra) for (const key in extra) payload[key] = extra[key]
     // 不 await：Pi 会 await 每个 handler，投递挂在事件回路上会让用户的会话等我们的网络。
-    void sendHookReceipt(url, token, JSON.stringify({ receiptId: crypto.randomUUID(), eventName: eventName, payload: payload })).catch((error) => {
+    void sendHookReceipt(url, token, JSON.stringify({ receiptId: mintObjectId(), eventName: eventName, payload: payload })).catch((error) => {
       console.error('[AgentMux Hook] delivery unconfirmed; Agent remains available:', error)
     })
   }

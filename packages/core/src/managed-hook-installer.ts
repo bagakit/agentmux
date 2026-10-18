@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { mintObjectId } from './object-id.js'
+import { createHash } from 'node:crypto'
 import {
   chmod,
   lstat,
@@ -200,7 +201,7 @@ function safeTarget(path: string): string {
 
 async function writeAtomically(path: string, content: Uint8Array | string, mode: number): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-  const temporaryPath = `${path}.agentmux-${process.pid}-${randomUUID()}.tmp`
+  const temporaryPath = `${path}.agentmux-${process.pid}-${mintObjectId()}.tmp`
   try {
     await writeFile(temporaryPath, content, { mode })
     await chmod(temporaryPath, mode)
@@ -293,7 +294,7 @@ export class AgentManagedHookInstaller {
       })
     }
     const preview: AgentManagedHookPreview = {
-      id: randomUUID(),
+      id: mintObjectId(),
       providerId: plan.providerId,
       changes: mutations.map((mutation) => ({
         path: mutation.path,
