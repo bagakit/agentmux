@@ -1,3 +1,5 @@
+import { createWorkspaceLayout } from '@agentmux/layout'
+import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath, fixtureTime as _hygiene_fixtureTime } from "../../lib/fixture-values.mjs"
 import { createClientUiRoot as createRoot } from '../../../test/helpers/client-ui-render'
@@ -5,7 +7,7 @@ import { flushSync } from 'react-dom'
 import { App } from '../../../src/renderer/src/App'
 import { projectLinksPreview } from './project-links'
 import { mainMotePreview } from './main-mote'
-import { useAppStore } from '../../../src/renderer/src/store'
+import { useAppStore, retainGoalFiniteStartIntent, prepareRendererUpdate } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
 import type { DemandRecord } from '../../../src/renderer/src/lib/global-demand-board'
@@ -18,6 +20,12 @@ import type { ComposerShortcut, GoalsCommonActionRef } from '../../../src/shared
 import '../../../src/renderer/src/styles/index.css'
 await useAppStore.getState().initialize()
 const initial = useAppStore.getState()
+function workflowRestartFacts() {
+  const state = useAppStore.getState()
+  return { intents: state.goalFiniteStartIntents, discussions: state.demandPmoTabIds, tabs: state.tabs, layouts: state.layouts,
+    drafts: state.agentComposerDrafts, selected: state.selectedDemandId, surface: state.mainSurface }
+}
+const restoredWorkflow = workflowRestartFacts()
 const previewConfig = { ...initial.config!, workspaces: [...initial.config!.workspaces.map(workspace => ({ ...workspace, path: workspace.path.startsWith('/') ? workspace.path : (_hygiene_fixturePath("preview/") + (workspace.path) + "") })), { id: SCRATCH_WORKSPACE_ID, name: 'Topics', path: _hygiene_fixturePath("preview/scratch"), hostId: 'local', kind: 'folder' as const }] }
 const projectWorkspace = previewConfig.workspaces[0]!
 const project = projectWorkspaces([projectWorkspace])[0]!
@@ -138,6 +146,26 @@ function seed(mode = 'many') {
 seed()
 root = createRoot(document.getElementById('root')!); root.render(<App key="many" />)
 Object.assign(window, { goalsVisual: { seed,
+  workflowRestartFacts,
+  restoredWorkflow: () => restoredWorkflow,
+  saveWorkflowRestart: async () => {
+    const state = useAppStore.getState(), goal = state.demands[goals[0]!.id]!
+    useAppStore.setState({ agentComposerDrafts: { ...state.agentComposerDrafts, 'workflow-region': 'Keep this original discussion draft.' },
+      demandPmoTabIds: { ...state.demandPmoTabIds, 'goal:unobserved': 'original-unobserved-discussion' } })
+    await retainGoalFiniteStartIntent({ goalId: goal.id, operationId: 'workflow-original-request', sessionId: sessions[0]!.control.agentSessionId,
+      expectedUpdatedAt: goal.updatedAt, phase: 'may-have-dispatched' })
+    await prepareRendererUpdate('quit')
+    return workflowRestartFacts()
+  },
+  seedWorkflow: (mode: string) => {
+    seed(mode === 'finite' || mode === 'multiple' ? 'confirmed' : mode === 'done' ? 'done-confirmed' : mode === 'finished' ? 'accepted' : mode)
+    const original = useAppStore.getState().demands[goals[0]!.id]!, executor = sessions[0]!, discussion = sessions[1]!
+    const tab = { ...createWorkbenchTab('workflow-discussion', { regionId: 'workflow-region', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: discussion.id }, 'Goal discussion'), topicId: PMO_TEAMS_TOPIC_ID }
+    const next = { ...original, assigneeSessionIds: mode === 'multiple' ? sessions.map(session => session.control.agentSessionId) : [executor.control.agentSessionId], supervisorSessionId: executor.control.agentSessionId,
+      ...(mode === 'finished' ? { status: 'done' as const } : {}),
+      ...(original.grounding ? { grounding: { ...original.grounding, checks: original.grounding.checks.map((check, index) => ({ ...check, evidence: index ? check.evidence : [{ kind: 'file' as const, resource: { hostId: projectWorkspace.hostId, workspaceId: projectWorkspace.id, workspacePath: projectWorkspace.path, zoneId: 'workflow-zone', zonePath: projectWorkspace.path, path: 'artifacts/recovery/layout-check.log' }, revision: 'sha256:' + 'a'.repeat(64), location: { line: 18 } }] })) } } : {}) }
+    flushSync(() => { useAppStore.setState(state => ({ demands: { ...state.demands, [next.id]: next }, goalFiniteStartIntents: {}, agentNames: { ...state.agentNames, [executor.id]: 'Atlas · Execution lead', [discussion.id]: 'Mira · Goal discussion' }, demandPmoTabIds: { [next.id]: tab.id }, tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('workflow-group', [tab.id]) } })); root?.render(<App key={`workflow-${mode}`} />) })
+  },
   seedDirect, directFacts, restoreDirectService: () => { directFailure = null },
   proposeDirectGoal: async () => { const id = useAppStore.getState().selectedDemandId; if (!id) throw new Error('No actual Goal selected'); await useAppStore.getState().updateDemand(id, { title: '让我从一个小项目开始了解 Agent', alignment: { summary: '先找到一个我愿意尝试的小项目，再判断下一步。', criteria: [{ id: 'first-try', text: '完成一次小尝试，并能说清楚想继续探索什么。' }], openQuestions: [] } }) },
   seedMaturity: () => {
