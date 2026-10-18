@@ -345,7 +345,19 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
         if (nearest && stage.current) {
           const width = Math.max(node.position.x + (node.measured?.width ?? 320), nearest.position.x + (nearest.measured?.width ?? 320)) - Math.min(node.position.x, nearest.position.x)
           const height = Math.max(node.position.y + (node.measured?.height ?? 480), nearest.position.y + (nearest.measured?.height ?? 480)) - Math.min(node.position.y, nearest.position.y)
-          if (width + 48 <= stage.current.clientWidth && height + 48 <= stage.current.clientHeight) { left = Math.min(left, nearest.position.x); top = Math.min(top, nearest.position.y) }
+          left = Math.min(left, nearest.position.x); top = Math.min(top, nearest.position.y)
+          if (width + 48 > stage.current.clientWidth || height + 48 > stage.current.clientHeight) {
+            // Keep this local pair readable. A narrow canvas may show part of its
+            // neighbor, rather than hiding that original and never reading it.
+            const zoom = Math.max(.85, Math.min(1, (stage.current.clientWidth - 48) / width, (stage.current.clientHeight - 48) / height))
+            const x = Math.max(24 - node.position.x * zoom, Math.min((stage.current.clientWidth - width * zoom) / 2 - left * zoom, stage.current.clientWidth - 24 - (node.position.x + (node.measured?.width ?? 320)) * zoom))
+            const y = Math.max(24 - node.position.y * zoom, Math.min((stage.current.clientHeight - height * zoom) / 2 - top * zoom, stage.current.clientHeight - 24 - (node.position.y + (node.measured?.height ?? 480)) * zoom))
+            if (nearest.position.x * zoom + x < stage.current.clientWidth && (nearest.position.x + (nearest.measured?.width ?? 320)) * zoom + x > 0 && nearest.position.y * zoom + y < stage.current.clientHeight && (nearest.position.y + (nearest.measured?.height ?? 480)) * zoom + y > 0) {
+              void flow.setViewport({ x, y, zoom }); return
+            }
+            // Distant manual positions must not force an unreadable whole-graph fit.
+            left = node.position.x; top = node.position.y
+          }
         }
         void flow.setViewport({ x: 24 - left, y: 24 - top, zoom: 1 })
       })
