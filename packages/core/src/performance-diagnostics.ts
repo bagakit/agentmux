@@ -1,3 +1,5 @@
+import { isObjectId } from './object-id.js'
+
 /** Read-only, process-local costs. No input data, replay authority or capability gates. */
 export type PerformanceTiming = { count: number; totalMs: number; maxMs: number }
 export type InputObservationReference = { observerId: string; source: 'user' | 'protocol' | 'paste'; sequence: number }
@@ -32,7 +34,7 @@ export function readInputObservation(value: unknown): InputObservationReference 
     const values = Object.getOwnPropertyDescriptors(value)
     const observerId = values.observerId?.value, source = values.source?.value, sequence = values.sequence?.value
     if (!values.observerId?.enumerable || !values.source?.enumerable || !values.sequence?.enumerable ||
-      typeof observerId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(observerId) ||
+      typeof observerId !== 'string' || !(isObjectId(observerId) || /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu.test(observerId)) ||
       !['user', 'protocol', 'paste'].includes(source) || !Number.isSafeInteger(sequence) || sequence < 1) return null
     return { observerId, source, sequence }
   } catch { return null }
