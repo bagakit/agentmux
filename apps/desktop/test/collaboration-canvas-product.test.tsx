@@ -12,6 +12,7 @@ import { collaborationAgentNode } from '../src/renderer/src/lib/collaboration-pr
 import * as engine from '../src/renderer/src/lib/collaboration-layout-engine'
 import type { CollaborationPulse } from '../src/renderer/src/lib/use-collaboration-reading'
 import { agentInformationPreview } from '../src/renderer/src/lib/agent-information-preview'
+import { useAppStore } from '../src/renderer/src/store'
 const captured = vi.hoisted(() => ({ nodes: [] as Node[], store: null as ReturnType<typeof useStoreApi> | null, cardRenders: [] as string[], moveStart: undefined as ReactFlowProps['onMoveStart'] }))
 vi.mock('../src/renderer/src/components/FocusContextCardBody', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/renderer/src/components/FocusContextCardBody')>()
@@ -137,6 +138,31 @@ it('overview remount never replays a retained relationship highlight as a new re
   await act(async () => mark.dispatchEvent(new PointerEvent('pointerover', { bubbles: true })))
   expect(schedule).toHaveBeenCalledTimes(1)
   expect(requests).toHaveLength(1)
+})
+
+it('keeps the original point and actual focus through first metadata without replaying keyboard-only reading', async () => {
+  const scene = scenario(24); await loaded(scene)
+  const id = subject('canvas-0'), node = collaborationAgentNode('area-0', id), box = renderedBox(node)
+  const unknown = new Map(scene.agents); unknown.set(id, { ...unknown.get(id)!, context: undefined })
+  await dom.render(graph(scene, null, scene.relations, [], unknown))
+  await viewport(-box.x * .25 + 20, -box.y * .25 + 20, 520, 300, .25)
+  const point = nodeElement(node)!.querySelector<HTMLButtonElement>('.collaboration-agent__dot')!
+  await act(async () => point.focus())
+  expect(agentInformationPreview.getAll()).toHaveLength(0)
+  await dom.render(graph(scene))
+  expect(nodeElement(node)!.querySelector('.collaboration-agent__dot')).toBe(point)
+  expect(document.activeElement).toBe(point)
+  expect(agentInformationPreview.getAll().map(request => request.context.id)).toEqual(['canvas-0'])
+  await act(async () => {
+    const config = useAppStore.getState().config!
+    useAppStore.setState({ config: { ...config, focus: { ...config.focus, previewTrigger: 'keyboard' } } })
+  })
+  await dom.render(graph(scene, null, scene.relations, [], unknown))
+  await dom.render(graph(scene))
+  expect(document.activeElement).toBe(point)
+  expect(agentInformationPreview.getAll()).toHaveLength(0)
+  await act(async () => point.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
+  expect(agentInformationPreview.getAll().map(request => request.context.id)).toEqual(['canvas-0'])
 })
 
 it('the actual Graph and original xyflow mount only visible production cards from a large Worker world', async () => {
