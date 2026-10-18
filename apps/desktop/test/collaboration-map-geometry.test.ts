@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { collaborationEnvelope, collaborationOverviewPath, collaborationOverviewScale } from '../src/renderer/src/lib/collaboration-map-geometry'
-import type { CollaborationLayoutBox, CollaborationPath } from '../src/renderer/src/lib/collaboration-layout-engine'
+import { routeCollaborationLayout, type CollaborationLayoutBox, type CollaborationPath } from '../src/renderer/src/lib/collaboration-layout-engine'
 
 const member = (id: string, x: number, y: number, width = 250, height = 94): CollaborationLayoutBox =>
   ({ kind: 'agent', id, areaId: 'area', x, y, width, height, folded: false })
@@ -54,4 +54,47 @@ it('joins visible overview points to the original directed route without moving 
   expect(Math.hypot(numbers.at(-2)!-625, numbers.at(-1)!-247)).toBeCloseTo(24)
   expect(route).toEqual(original)
   expect(collaborationOverviewScale(member('closed', 0, 0, 14, 14), .05)).toBe(1)
+})
+
+
+it('clips original short creation ports at overview circles without reversing their terminal tangents', async () => {
+  const source = member('from', 0, 0, 248, 94), target = member('to', 0, 500, 248, 94)
+  for (const obstructed of [false, true]) {
+    const obstacle = member('obstacle', 20, 220, 248, 94)
+    const [route] = await routeCollaborationLayout([source, target, ...(obstructed ? [obstacle] : [])], [{ id: 'created', kind: 'creation', source: 'from', target: 'to' }])
+    expect(route).toBeDefined()
+    expect(route!.sourceHandle).toBe('creation-out-bottom'); expect(route!.targetHandle).toBe('creation-in-top')
+    const original = structuredClone(route!), zoom = .2, radius = 14 / zoom
+    if (obstructed) expect(route!.points.length).toBeGreaterThan(7)
+    const path = collaborationOverviewPath(route!, source, target, zoom, 14, 14)
+    const numbers = path.match(/-?\d+(?:\.\d+)?(?:e[-+]?\d+)?/g)!.map(Number)
+    const points = numbers.flatMap((value, index) => index % 2 ? [] : [{ x: value, y: numbers[index + 1]! }])
+    expect(points.length).toBeGreaterThanOrEqual(4); expect((points.length - 1) % 3).toBe(0)
+    const center = (box: CollaborationLayoutBox) => ({ x: box.x + box.width / 2, y: box.y + box.height / 2 })
+    const from = center(source), to = center(target), start = points[0]!, end = points.at(-1)!
+    expect(Math.hypot(start.x - from.x, start.y - from.y)).toBeCloseTo(radius, 5)
+    expect(Math.hypot(end.x - to.x, end.y - to.y)).toBeCloseTo(radius, 5)
+    expect((points[1]!.x - start.x) * (start.x - from.x) + (points[1]!.y - start.y) * (start.y - from.y)).toBeGreaterThan(0)
+    expect((end.x - points.at(-2)!.x) * (end.x - to.x) + (end.y - points.at(-2)!.y) * (end.y - to.y)).toBeLessThan(0)
+    for (let index = 0; index < points.length - 1; index += 3) for (let sample = 0; sample <= 20; sample++) {
+      const t = sample / 20, u = 1 - t, [a, b, c, d] = points.slice(index, index + 4)
+      const x = u ** 3 * a!.x + 3 * u ** 2 * t * b!.x + 3 * u * t ** 2 * c!.x + t ** 3 * d!.x
+      const y = u ** 3 * a!.y + 3 * u ** 2 * t * b!.y + 3 * u * t ** 2 * c!.y + t ** 3 * d!.y
+      expect(Math.hypot(x - from.x, y - from.y)).toBeGreaterThanOrEqual(radius - 1e-5)
+      expect(Math.hypot(x - to.x, y - to.y)).toBeGreaterThanOrEqual(radius - 1e-5)
+    }
+    if (obstructed) {
+      const middle = original.points.slice(6, -6)
+      expect(middle.length).toBeGreaterThan(0)
+      expect(middle.every(point => points.some(value => value.x === point.x && value.y === point.y))).toBe(true)
+    }
+    expect(route).toEqual(original)
+  }
+  // Disjoint original cards may have overlapping screen-size avatars at a
+  // distant zoom. Their completely covered route has no visible ink to add.
+  const adjacent = { ...target, y: 122 }
+  const [covered] = await routeCollaborationLayout([source, adjacent], [{ id: 'covered', kind: 'creation', source: 'from', target: 'to' }])
+  const retained = structuredClone(covered!)
+  expect(collaborationOverviewPath(covered!, source, adjacent, .05, 14, 14)).toBe('')
+  expect(covered).toEqual(retained)
 })

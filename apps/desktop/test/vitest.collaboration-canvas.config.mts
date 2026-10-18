@@ -11,6 +11,7 @@ const labels = 'components/CollaborationRegionLabels.tsx'
 const metadata = 'rebuilds only one exact offscreen Agent node for metadata without another layout job or unrelated card render'
 const motion = 'the formal motion control changes only original event presentation and resumes its elapsed phase'
 export const collaborationCanvasMutations = [
+  { file: 'lib/collaboration-map-geometry.ts', name: 'short-port-clip', before: 'if (length >= visibleRadius)', after: 'if (true)', assertion: 'clips original short creation ports at overview circles without reversing their terminal tangents' },
   { file: graph, name: 'fold-screen-anchor', before: "foldAnchor.current = anchor && box?.kind === 'area' ?", after: "foldAnchor.current = false && box?.kind === 'area' ?", assertion: 'keeps a clamped region label and its Expand action visible after the original world heading folds offscreen' },
   { file: labels, name: 'current-locate-occlusion', before: 'if (contextControl?.current) surfaces.push(contextControl.current)', after: 'if (false) surfaces.push(contextControl!.current!)', assertion: 'measures a newly visible original Locate control as a region-label obstacle without changing world geometry' },
   { file: 'styles/collaboration.css', name: 'effective-motion-cascade', before: 'animation-duration: var(--collaboration-activity-duration) !important;', after: 'animation-duration: var(--collaboration-activity-duration);', assertion: 'honors explicit map motion through the actual reduced-motion cascade without restoring unrelated animations' },
