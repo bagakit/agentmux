@@ -42,6 +42,22 @@ function requestCard(prepared: PreparedPublication): Record<string, unknown> | n
     return card
   } catch { return null }
 }
+/** Feed preview only. Visible card text supplies the excerpt; no action values or private references. */
+function cardSummary(card: Record<string, unknown>, operation: Readonly<PublicationOperation>): string {
+  const at = operation.presentationTime, date = at === undefined || !Number.isFinite(at) || Math.abs(at) > 8.64e15 ? null : new Date(at)
+  const time = date ? `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}` : undefined
+  const title = object(object(card.header)?.title)?.content
+  const purpose = operation.payload.kind === 'permission' ? 'Permission' : typeof title === 'string' ? title : 'Agent progress'
+  const text = (elements: unknown): string[] => !Array.isArray(elements) ? [] : elements.flatMap(element => {
+    const node = object(element), content = object(node?.text)?.content
+    return node?.tag === 'div' && typeof content === 'string' ? [content]
+      : node?.tag === 'form' ? text(node.elements) : node?.tag === 'img' && typeof object(node.alt)?.content === 'string' ? [String(object(node.alt)!.content)] : []
+  })
+  const body = (operation.payload.kind === 'question' ? [operation.payload.text, ...operation.payload.questions.map(question => question.prompt)].filter(Boolean)
+    : [...(operation.payload.kind === 'permission' && typeof title === 'string' ? [title] : []),
+      ...text(card.elements ?? object(card.body)?.elements)]).join(' ').replace(/\s+/gu, ' ').trim()
+  return Array.from([time, purpose, body].filter(Boolean).join(' · ')).slice(0, 60).join('')
+}
 function sameCard(value: unknown, prepared: PreparedPublication): boolean {
   if (typeof value !== 'string') return false
   try { return isDeepStrictEqual(JSON.parse(value), requestCard(prepared)) } catch { return false }
@@ -218,7 +234,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       if (!publicationSpeechText(operation.payload)) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
       const text = publicationSpeechText(operation.payload)
       if (operation.payload.phase === 'progress') {
-        card = { schema: '2.0', config: { update_multi: true, summary: { content: 'Agent · ' + Array.from(text.replace(/\s+/gu, ' ')).slice(0, 52).join('') } },
+        card = { schema: '2.0', config: { update_multi: true },
           body: { padding: '8px 12px 8px 12px', vertical_spacing: '4px',
             elements: [{ tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: text } }] } }
       } else {
@@ -233,6 +249,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
         elements: [{ tag: 'img', img_key: feishuIdentity(uploaded.imageKey), alt: { tag: 'plain_text', content: 'Original conversation image' } }] }
     }
     if (card) {
+      card.config = { ...object(card.config), summary: { content: cardSummary(card, operation) } }
       const body = JSON.stringify({ ...(mapping ? {} : { receive_id: operation.target.externalConversationId, msg_type: 'interactive', uuid: key(operation.operationId) }), content: JSON.stringify(card) })
       if (Buffer.byteLength(body) > 30 * 1024) feishuFailure('FEISHU_PUBLICATION_REQUEST_TOO_LARGE')
       return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: {
