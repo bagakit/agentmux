@@ -12,11 +12,17 @@ export const AGENTMUX_NOTE_EDITING_PATH = `## Edit an authorized Note
    file write; for concurrent Note edits, retain the exact base body and original operation ID
    as described by that leaf help. Preserve stable IDs and later unsaved drafts. No page
    needs to be open or Space activated. First-use sharing uses file share --help.
-4. Confirm the body write, canonical saved content/revision, attribution and history separately;
+4. Confirm the body write, canonical content/revision, attribution and history separately;
    sharing also has separate source, shared-file and destination outcomes. After unknown,
    keep the original request, operation/event IDs and drafts. Inspect that same file/history,
    file share inspect or notebook inspect --operation-id as appropriate; never automatically
    resend a write or infer its earlier receipt from matching current content.
+
+Saved Note frontmatter uses schema: agentmux.note.md.v1 and a stable note-id. Each saved
+blockId is carried by its original Markdown anchor; preserve these identities when editing.
+Follow your own Note with notebook apply --revision CATALOG_REVISION --operation-id OP_ID
+--change-json '{"kind":"follow","noteId":"NOTE_ID"}'; use unfollow to cancel yourself.
+The authenticated caller is the follower; this is saved interest, not online presence.
 
 Diagram source stays in fenced code blocks with language mermaid, drawio, dot/gv or
 plantuml/puml; drawio content is its original XML. Inline math uses $expression$ and display
