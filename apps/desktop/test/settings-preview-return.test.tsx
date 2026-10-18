@@ -49,7 +49,9 @@ it('Focus previews the chosen group and returns to the same edited control and r
       expect(document.activeElement, 'The explicit preview action reaches the original preview').toBe(preview)
       expect(pane.querySelector('.focus-settings-preview')).toBe(preview)
       expect(preview.querySelector('[data-scene]')!.getAttribute('data-scene')).toBe(scene)
-      expect(preview.querySelector('[data-settings-preview-return]')!.textContent).toBe(`Back to ${label}`)
+      const returnAction = preview.querySelector('[data-settings-preview-return]')!
+      expect(returnAction.textContent).toBe(label)
+      expect(returnAction.getAttribute('aria-label')).toBe(`Back to ${label}`)
       const canvas = preview.querySelector<HTMLElement>('.focus-settings-preview__canvas')!
       canvas.scrollTop = 29
       pane.scrollTop = 887
@@ -87,7 +89,9 @@ it('Agent takeover keeps the original simulation and draft while all three group
       await jump(pane, group!)
       expect(document.activeElement, 'The explicit preview action reaches the original simulation').toBe(preview)
       expect(pane.querySelector('.browser-agent-preview')).toBe(preview)
-      expect(preview.querySelector('[data-settings-preview-return]')!.textContent).toBe(`Back to ${label}`)
+      const returnAction = preview.querySelector('[data-settings-preview-return]')!
+      expect(returnAction.textContent).toBe(label)
+      expect(returnAction.getAttribute('aria-label')).toBe(`Back to ${label}`)
       expect(preview.querySelector<HTMLSelectElement>('[aria-label="Simulation state"]')!.value).toBe('waiting')
       expect(preview.querySelector<HTMLSelectElement>('[aria-label="Simulation page"]')!.value).toBe('dark')
       expect(preview.querySelector('.browser-operation-status__cue')!.textContent).toBe('Waiting')
@@ -110,6 +114,7 @@ it('an untouched group returns to its actual preview opener and preserves an ope
   const pane = page('focus'), opener = pane.querySelector<HTMLButtonElement>('[data-settings-preview-open="agent-reading"]')!
   pane.scrollTop = 215
   await jump(pane, 'agent-reading')
+  expect(pane.querySelector('[data-settings-preview-return]')!.getAttribute('aria-label')).toBe('Back to Agent reading')
   await dom.click('.focus-settings-preview__try')
   const reading = pane.querySelector('[aria-label="Example Agent reading"]')!
   expect(reading).not.toBeNull()
@@ -120,4 +125,14 @@ it('an untouched group returns to its actual preview opener and preserves an ope
   expect(pane.querySelector('[aria-label="Example Agent reading"]')).toBe(reading)
   await jump(pane, 'agent-reading')
   expect(pane.querySelector('[aria-label="Example Agent reading"]')).toBe(reading)
+  const canvas = pane.querySelector<HTMLElement>('.focus-settings-preview__canvas')!
+  canvas.scrollTop = 96
+  await back(pane)
+  expect(document.activeElement).toBe(opener)
+  expect(pane.scrollTop).toBe(215)
+  expect(canvas.scrollTop).toBe(96)
+  await jump(pane, 'agent-reading')
+  expect(pane.querySelector('.focus-settings-preview__canvas')).toBe(canvas)
+  expect(pane.querySelector('[aria-label="Example Agent reading"]')).toBe(reading)
+  expect(canvas.scrollTop).toBe(96)
 })

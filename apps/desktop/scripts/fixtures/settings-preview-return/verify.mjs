@@ -10,15 +10,18 @@ mkdirSync(evidence, { recursive: true })
 const files = ['FocusSettingsPane.tsx', 'FocusSettingsPreview.tsx', 'BrowserAgentControlSettingsPane.tsx', 'BrowserAgentControlPreview.tsx', 'use-settings-preview-return.tsx', 'settings-preview-return.css']
 const sha = value => createHash('sha256').update(value).digest('hex')
 const sourceInputs = files.map(file => { const path = 'apps/desktop/src/renderer/src/components/settings/' + file; return { file: path, sha256: sha(readFileSync(resolve(root, path))) } })
+const focusStyle = 'apps/desktop/src/renderer/src/styles/settings-focus.css'
+sourceInputs.push({ file: focusStyle, sha256: sha(readFileSync(resolve(root, focusStyle))) })
 const expectedFailures = {
   focus: ['Focus previews the chosen group and returns to the same edited control and reading position without saving or remounting', 'an untouched group returns to its actual preview opener and preserves an open Focus reading example'],
   takeover: ['Agent takeover keeps the original simulation and draft while all three groups return to their own controls'],
   return: ['Focus previews the chosen group and returns to the same edited control and reading position without saving or remounting', 'Agent takeover keeps the original simulation and draft while all three groups return to their own controls', 'an untouched group returns to its actual preview opener and preserves an open Focus reading example']
 }
+expectedFailures.destination = expectedFailures.return
 const excluded = 'actual CLI reads and persists the same preferences through public RPC and rejects invalid values before writing'
 let inventory
 const runs = []
-for (const mode of ['baseline', 'focus', 'takeover', 'return', 'restored']) {
+for (const mode of ['baseline', 'focus', 'takeover', 'return', 'destination', 'restored']) {
   const directory = resolve(evidence, mode), raw = resolve(directory, 'result.json')
   mkdirSync(directory, { recursive: true })
   const env = { ...process.env, AGENTMUX_SETTINGS_PREVIEW_EVIDENCE: directory }
