@@ -10,6 +10,14 @@ import type {
 } from './types.js'
 import { recordedConversationAuthor } from './conversation-author.js'
 
+function inputConversation(conversation: AgentSessionUserMessage['conversation']): Pick<AgentSessionUserMessage, 'conversation'> {
+  if (!conversation) return {}
+  const { sameEvent, nativeInput, adoptedInput } = conversation
+  return sameEvent || nativeInput || adoptedInput ? { conversation: {
+    ...(sameEvent ? { sameEvent } : {}), ...(nativeInput ? { nativeInput } : {}), ...(adoptedInput ? { adoptedInput } : {})
+  } } : {}
+}
+
 function encodeSegment(s: string): string {
   return s.replace(/%/g, '%25').replace(/:/g, '%3A')
 }
@@ -81,6 +89,7 @@ export function projectSessionUserMessages(params: {
         agentSessionId,
         ...(item.turnId !== undefined ? { turnId: item.turnId } : {}),
         source,
+        ...inputConversation(item.conversation),
         author,
         publicContent: 'unknown',
         content,
@@ -94,6 +103,7 @@ export function projectSessionUserMessages(params: {
 
   // 2. Process captured timeline items (if timeline supplied)
   if (timeline && timeline.items) {
+    const positions = new Map(timeline.stream?.positions.map(position => [position.id, position]) ?? [])
     for (const item of timeline.items) {
       if (item.kind !== 'user_message') continue
       if (item.agentSessionId !== agentSessionId) continue
@@ -122,6 +132,12 @@ export function projectSessionUserMessages(params: {
         rawId,
         agentSessionId,
         source,
+        ...inputConversation(item.conversation),
+        ...(item.source === 'user' && item.publicContent === 'confirmed' && item.inputRef ? { inputRef: item.inputRef } : {}),
+        ...(timeline.sourceHostId && positions.get(item.id)?.revision ? { sourceRecord: {
+          record: { hostId: timeline.sourceHostId, agentSessionId, source: { kind: 'captured' as const, recordId: item.id } },
+          revision: positions.get(item.id)!.revision
+        } } : {}),
         author,
         publicContent: item.publicContent === 'confirmed' ? 'confirmed' : 'unknown',
         content: item.content ?? '',

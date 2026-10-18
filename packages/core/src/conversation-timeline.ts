@@ -53,6 +53,11 @@ export type ConversationSourceRecord = {
   order: ConversationSourceOrder
   original: { kind: 'native'; item: AgentSessionHistoryItem } | { kind: 'captured'; item: AgentTimelineItem }
 }
+/** Minimal original relation facts; readers need not copy full original bodies to reuse association. */
+export type ConversationInputRecord = Pick<ConversationSourceRecord, 'id' | 'reference' | 'revision'> & {
+  original: { kind: 'native'; item: Pick<AgentSessionHistoryItem, 'kind' | 'turnId' | 'conversation'> }
+    | { kind: 'captured'; item: Pick<AgentTimelineItem, 'kind' | 'source' | 'inputRef' | 'a2aNotificationId' | 'conversation'> }
+}
 /** Bounded original-reading witnesses, not a claim of whole-Session uniqueness. No bodies or write authority. */
 export type ConversationInputWitness = { record: ConversationItemRef; recordRevision: string; semanticItemId: string; turnId: string; clientCorrelation: string; key?: AgentPromptInputKey }
 export type ConversationInputAdoptionContext = { unconfirmed?: true; witnesses: readonly ConversationInputWitness[] }
@@ -226,7 +231,7 @@ export function conversationInvocationMembers(record: ConversationSourceRecord):
 }
 
 /** A canonical reading target is an exact same-source fact, never an event/version claim. */
-export function conversationSameEventTarget(record: ConversationSourceRecord, nativeSource?: AgentSessionHistorySource, adoptedTarget?: ConversationItemRef): ConversationItemRef | undefined {
+export function conversationSameEventTarget(record: ConversationInputRecord, nativeSource?: AgentSessionHistorySource, adoptedTarget?: ConversationItemRef): ConversationItemRef | undefined {
   const target = record.original.item.conversation?.sameEvent ?? adoptedTarget, reference = record.reference
   return target && reference && target.hostId === reference.hostId && target.agentSessionId === reference.agentSessionId && target.source.kind === 'native' &&
     (!nativeSource || sameSource(target.source, nativeSource)) ? target : undefined
@@ -240,22 +245,22 @@ export function conversationEventCoalesces(records: readonly ConversationSourceR
   })
 }
 
-export function conversationInputKey(record: ConversationSourceRecord): string | undefined {
+export function conversationInputKey(record: ConversationInputRecord): string | undefined {
   const key = record.original.kind === 'native' ? record.original.item.conversation?.adoptedInput?.key
     : record.original.item.kind === 'user_message' && record.original.item.source === 'user' ||
       record.original.item.kind === 'system_message' && record.original.item.source === 'agentmux' && record.original.item.a2aNotificationId !== undefined
       ? record.original.item.inputRef : undefined
   return key && record.reference && key.agentSessionId === record.reference.agentSessionId
-    ? inputIdentity(record.reference.hostId, key) : undefined
+    ? conversationInputIdentity(record.reference.hostId, key) : undefined
 }
-const inputIdentity = (hostId: string, key: AgentPromptInputKey): string => JSON.stringify([hostId, key.kind, key.agentSessionId, key.expectedRun.runId, agentPromptInputId(key)])
-export const conversationInputWitnessKey = (fact: ConversationInputWitness): string | undefined => fact.key ? inputIdentity(fact.record.hostId, fact.key) : undefined
+export const conversationInputIdentity = (hostId: string, key: AgentPromptInputKey): string => JSON.stringify([hostId, key.kind, key.agentSessionId, key.expectedRun.runId, agentPromptInputId(key)])
+export const conversationInputWitnessKey = (fact: ConversationInputWitness): string | undefined => fact.key ? conversationInputIdentity(fact.record.hostId, fact.key) : undefined
 const inputWitnessGroup = (fact: ConversationInputWitness): string => {
   const source = fact.record.source
   return JSON.stringify([fact.record.hostId, fact.record.agentSessionId, source.kind === 'native' ? source.providerId : null,
     source.kind === 'native' ? source.nativeSessionId : null, fact.turnId, fact.clientCorrelation])
 }
-export function conversationNativeInputWitness(record: ConversationSourceRecord): ConversationInputWitness | undefined {
+export function conversationNativeInputWitness(record: ConversationInputRecord): ConversationInputWitness | undefined {
   if (record.original.kind !== 'native' || record.original.item.kind !== 'user-message' || record.reference?.source.kind !== 'native') return undefined
   const fact = record.original.item.conversation?.nativeInput, adopted = record.original.item.conversation?.adoptedInput
   // A branded canonical candidate supplies no input key or adoption authority.
@@ -266,7 +271,7 @@ export function conversationNativeInputWitness(record: ConversationSourceRecord)
       clientCorrelation: fact.clientCorrelation, ...(adopted ? { key: adopted.key } : {}) } : undefined
 }
 /** One edge owner for accepted inventory plus retained, bounded original reading witnesses. */
-export function conversationInputAdoptionEdges(records: readonly ConversationSourceRecord[], context?: ConversationInputAdoptionContext): {
+export function conversationInputAdoptionEdges(records: readonly ConversationInputRecord[], context?: ConversationInputAdoptionContext): {
   targets: ReadonlyMap<string, ConversationItemRef>; byKey: ReadonlyMap<string, readonly ConversationInputWitness[]>; ambiguous: ReadonlySet<string>; unconfirmed: boolean; witnesses: readonly ConversationInputWitness[]
 } {
   const byKey = new Map<string, ConversationInputWitness[]>(), groups = new Map<string, ConversationInputWitness[]>(), ambiguous = new Set<string>(), targets = new Map<string, ConversationItemRef>()
@@ -302,7 +307,7 @@ export function conversationInputAdoptionEdges(records: readonly ConversationSou
   return { targets, byKey, ambiguous, unconfirmed, witnesses: [...groups.values()].flat() }
 }
 /** Resolve only original accepted edges. A cycle retains each original record identity. */
-export function conversationRecordAnchors(records: readonly ConversationSourceRecord[], targets: ReadonlyMap<string, string>): { anchors: ReadonlyMap<string, string>; cyclicRecordIds: readonly string[] } {
+export function conversationRecordAnchors(records: readonly Pick<ConversationSourceRecord, 'id'>[], targets: ReadonlyMap<string, string>): { anchors: ReadonlyMap<string, string>; cyclicRecordIds: readonly string[] } {
   const anchors = new Map<string, string>(), cyclic = new Set<string>()
   for (const record of records) {
     if (anchors.has(record.id)) continue

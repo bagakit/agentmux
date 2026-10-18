@@ -1133,6 +1133,10 @@ export type AgentSessionUserMessage = {
   source: AgentSessionUserMessageSource
   /** Exact original record/version reading fact; absence is unknown and conveys no author, adoption or input authority. */
   sourceRecord?: import('./conversation-changes.js').ConversationWindowBoundary
+  /** Original captured user input identity; never inferred from the body or submission label. */
+  inputRef?: import('./agent-prompt-condition.js').AgentPromptInputKey
+  /** Minimal original reading relationships, independent of the projected body and its ID. */
+  conversation?: Pick<import('./conversation-timeline.js').ConversationRecordProvenance, 'sameEvent' | 'nativeInput' | 'adoptedInput'>
   author: AgentSessionUserMessageAuthor
   /** Original user-content boundary only; absence is unknown. Not sharing authority, safety or identity. */
   publicContent?: 'confirmed' | 'unknown'
