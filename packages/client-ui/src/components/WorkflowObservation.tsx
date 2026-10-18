@@ -1,6 +1,7 @@
 import { useId, useLayoutEffect, useState, type ReactNode } from 'react'
+import type { AgentTimelineItemStatus } from '@agentmux/core'
 import { SemanticIcon } from '../theme/icons.js'
-export type WorkflowObservationStatus = 'streaming' | 'complete' | 'failed' | 'running' | 'interrupted'
+export type WorkflowObservationStatus = AgentTimelineItemStatus | 'running' | 'interrupted'
 export type WorkflowRecordedTime = { from: string; to: string; offset: string }
 type ObservationProps = {
   observation: {
@@ -71,7 +72,7 @@ export function RecordedStepsCard({ observation, compact = false, keepContentVis
         {status === 'interrupted' ? <span className="wf-chip"><WorkflowStatusGlyph status="killed" recorded />Interrupted</span> : null}
         {status === 'failed' ? <span className="wf-chip log-row__chip--failed"><WorkflowStatusGlyph status="failed" />Failed</span> : null}
         {observation.streaming ? <span className="wf-chip"><SemanticIcon name="status.streaming" size={12} className="wf-ico" />Streaming</span> : null}
-        {status === 'complete' ? <span className="wf-observation__recorded">Recorded</span> : null}
+        {status === 'complete' || status === 'recorded' ? <span className="wf-observation__recorded">Recorded</span> : null}
         {status === undefined && !observation.metrics && !compact ? <span className="wf-observation__recorded">Status not recorded</span> : null}
       </span>
     </button>
@@ -100,6 +101,7 @@ export function RecordedToolRow({ observation, className, icon, expanded, onTogg
       {status === 'running' ? <span className="log-row__chip" title="Last recorded operation status"><WorkflowStatusGlyph status="running" recorded />Recorded running</span> : null}
       {status === 'interrupted' ? <span className="log-row__chip" title="Last recorded operation status"><WorkflowStatusGlyph status="killed" recorded />Interrupted</span> : null}
       {status === 'failed' ? <span className="log-row__chip log-row__chip--failed"><WorkflowStatusGlyph status="failed" />Failed</span> : null}
+      {status === 'recorded' ? <span className="wf-observation__recorded">Recorded</span> : null}
       {status === undefined ? <span className="wf-observation__recorded">Status not recorded</span> : null}
       <span className="log-row__source" data-persistent={observation.persistentSource ? '' : undefined}>{observation.source}</span>
       {onToggle ? <SemanticIcon name="navigation.disclosure" size={12} className="log-row__chevron" data-open={expanded ? '' : undefined} /> : null}
