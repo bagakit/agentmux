@@ -173,9 +173,13 @@ it.each([0, 1, 9, 10, 12, 99, 100, 123])('shows %i Inbox unread separately from 
 })
 // happy-dom has no native popover toggle. Dispatch the browser's state event, not React internals.
 async function toggle(state: 'open' | 'closed') {
-  const event = new Event('toggle')
-  Object.defineProperty(event, 'newState', { value: state })
-  await act(async () => mailbox().dispatchEvent(event))
+  await act(async () => {
+    for (const type of ['beforetoggle', 'toggle']) {
+      const event = new Event(type)
+      Object.defineProperty(event, 'newState', { value: state })
+      mailbox().dispatchEvent(event)
+    }
+  })
 }
 async function readRecord(key: string) {
   const row = [...mailbox().querySelectorAll<HTMLButtonElement>('button[data-record-key]')].find(row => row.dataset.recordKey === key)
@@ -202,6 +206,9 @@ function popoverMethods(deferToggle = false) {
     content.dispatchEvent(event)
   }
   function state(newState: 'open' | 'closed') {
+    const before = new Event('beforetoggle')
+    Object.defineProperty(before, 'newState', { value: newState })
+    content.dispatchEvent(before)
     nativeOpen = newState === 'open'
     if (deferToggle) pending = newState
     else deliver(newState)
@@ -249,6 +256,20 @@ it('reopens the native-closed hover preview before its close toggle reaches Reac
   expect(methods.show).toHaveBeenCalledTimes(2)
   await act(async () => methods.deliverToggle())
   expect(mailbox().dataset.state).toBe('open')
+  expect(dom.draft()).toBe('Keep my draft')
+})
+
+it('retains an explicit Inputs choice when its opening toggle arrives after the choice', async () => {
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  const methods = popoverMethods(true)
+  expect(unread()).toBe('true')
+  await pointer(trigger(), 'pointerover')
+  await pointer(mailbox().querySelector('[id$="-user-tab"]')!, 'pointerdown')
+  await folder('user')
+  expect(mailbox().querySelector('[role="tab"][aria-selected="true"]')?.id).toMatch(/-user-tab$/)
+  await act(async () => methods.deliverToggle())
+  expect(mailbox().querySelector('[role="tab"][aria-selected="true"]')?.id).toMatch(/-user-tab$/)
+  expect(unread()).toBe('true')
   expect(dom.draft()).toBe('Keep my draft')
 })
 
