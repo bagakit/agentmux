@@ -12,3 +12,10 @@ unavailable facts remain visible; inspect the original request and input before 
 Never blindly resend unknown or partial input, and retain the healthy Agent's input and work surface.
 An execution authorization does not confirm Goal alignment or accept results for the person.
 Idle, exit, delivery, acknowledgement, worker_done and Tracker archival do not complete a Goal.
+
+A person can accept the exact current report without closing the Goal, or explicitly
+accept and finish it with goal accept --finish. Finishing uses the same atomic
+alignment/submission check, keeps reported gaps and original execution history, and
+ends this Goal’s scheduled follow-up without stopping its original Agents. Agent
+credentials cannot supply either human choice. A Done Goal without current human
+acceptance still needs review; business status alone never supplies acceptance.
