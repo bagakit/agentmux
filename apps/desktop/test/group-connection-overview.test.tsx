@@ -41,6 +41,8 @@ it('a created group shows current platform metadata and direct joining and membe
   await wait(() => expect(dialog().querySelector('.agent-connector-group')?.textContent).toBe(nativeName))
   expect(f.platformCalls.filter(call => call.method?.toUpperCase() === 'POST')).toHaveLength(before)
   expect(f.calls.some(call => call.method === 'connection.bind' || call.method === 'connection.room.link.create' || call.method === 'connection.grant')).toBe(false)
+  expect(dialog().querySelector('[aria-label="Group connection status"]')).toBeNull()
+  expect(dialog().textContent).not.toContain('Group linked')
   await f.original.unchanged()
 }, 25_000)
 
@@ -57,19 +59,37 @@ it('an unavailable current name is explicit beside the original requested name a
   await f.original.unchanged()
 }, 25_000)
 
-it('saved sharing with automatic sync off keeps join, member and sharing actions visible without changing their authority', async () => {
+it('saved sharing enables automatic sync in place through the original owner while keeping member and group authority separate', async () => {
   const service = await api.connections.call('connection.service.get', {})
   await api.connections.call('connection.service.configure', { operationId: 'overview-service-off', expectedRevision: service.revision, service: { enabled: false } })
   await create()
   const consent = dialog().querySelector<HTMLInputElement>('[aria-label="Sharing options"] input[type="checkbox"]')!
   await act(async () => consent.click()); await f.button('Connect group')
-  await wait(() => expect(dialog().textContent).toContain('Connection saved · automatic sync is off'))
-  expect(dialog().textContent).toContain('Sharing saved locally')
+  await wait(() => expect(dialog().querySelector('[data-connector-service-state]')?.textContent).toBe('Off'))
+  await wait(() => expect(dialog().textContent).toContain('Sharing saved locally'))
   unfolded(dialog().querySelector('[aria-label="Joining this group"] button'))
   unfolded(dialog().querySelector('[aria-label="Sharing options"]'))
   unfolded(dialog().querySelector('[aria-label="Member access"]'))
   await wait(() => expect(dialog().textContent).toContain('No members approved to use this Agent'))
+  expect(dialog().textContent).toContain('select your account above, enable Send requests and save member access')
   expect(f.calls.some(call => call.method === 'connection.grant' || call.method === 'connection.room.link.create')).toBe(false)
+  const originalDialog = dialog(), originalBinding = (await api.connections.call('connection.binding.ls', { executionHostId: 'local', agentSessionId: 'original-agent' })).bindings[0]!
+  expect(f.calls.filter(call => call.method === 'connection.service.configure')).toHaveLength(1)
+  const before = f.calls.length
+  await act(async () => dialog().querySelector<HTMLInputElement>('[aria-label="Enable external chat sync"]')!.click())
+  await f.button('Save changes')
+  await wait(() => expect(dialog().querySelector('[data-connector-service-state]')?.textContent).toBe('On'))
+  const save = f.calls.slice(before).find(call => call.method === 'connection.service.configure')!
+  expect(save.input).toEqual({ operationId: expect.any(String), expectedRevision: service.revision + 1, service: { enabled: true } })
+  expect(save.result).toMatchObject({ operationId: (save.input as { operationId: string }).operationId, status: 'configured', service: { enabled: true, revision: service.revision + 2 } })
+  expect((await api.connections.call('connection.service.inspect', { operationId: (save.input as { operationId: string }).operationId })).operation).toEqual(save.result)
+  expect(f.calls.slice(before).filter(call => ['connection.service.configure', 'connection.configure', 'connection.bind', 'connection.binding.relink', 'connection.grant', 'connection.room.create', 'connection.room.link.create'].includes(call.method)).map(call => call.method)).toEqual(['connection.service.configure'])
+  expect((await api.connections.call('connection.binding.ls', { executionHostId: 'local', agentSessionId: 'original-agent' })).bindings).toEqual([originalBinding])
+  expect(dialog()).toBe(originalDialog)
+  expect(f.settings).not.toHaveBeenCalled()
+  expect(dialog().textContent).toContain('No members approved to use this Agent')
+  expect(dialog().textContent).toContain('Controls automatic messages for all your external bots')
+  expect(dialog().textContent).not.toContain('messages delivered')
   await f.original.unchanged()
 }, 25_000)
 
