@@ -256,9 +256,9 @@ export function ConversationMessage({
   const messageWriter = useMemo(() => onCopy ? (text: string) => onCopy(text) : platformCopy, [onCopy, platformCopy])
   const copyIdentity = useMemo(() => ({}), [readingIdentity, content, copyText, readHistoryResource, nativeResourceRecord?.recordId,
     nativeResourceRecord?.source.providerId, nativeResourceRecord?.source.nativeSessionId, nativeResourceRecord?.turnId])
-  const messageCopy = useContentCopyAction(copyIdentity, messageWriter, active)
+  const messageCopy = useContentCopyAction(copyIdentity, messageWriter, active, 1600)
   const idCopyIdentity = useMemo(() => ({}), [readingIdentity, agentReference?.speaker.id])
-  const idCopy = useContentCopyAction(idCopyIdentity, platformCopy, active)
+  const idCopy = useContentCopyAction(idCopyIdentity, platformCopy, active, 1600)
   const copyState = messageCopy.state, idCopyState = idCopy.state
   const copyReadError = messageCopy.error instanceof Error ? messageCopy.error.message : undefined
 

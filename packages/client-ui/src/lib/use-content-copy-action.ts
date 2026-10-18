@@ -8,7 +8,7 @@ type CopyState = 'idle' | 'copying' | 'copied' | 'failed'
 type CopyAction = { owner: object; pending: boolean; writing: boolean; failed: boolean; controller: AbortController }
 
 /** One action owns its feedback; cancellation can prevent preparation, never undo a write. */
-export function useContentCopyAction(identity: unknown, write: ClientUiPlatform['copyText'] | undefined, active = true) {
+export function useContentCopyAction(identity: unknown, write: ClientUiPlatform['copyText'] | undefined, active = true, resetAfterMs?: number) {
   const onIntent = useContext(ContentCopyIntentContext)
   const owner = useMemo(() => ({}), [identity, write, active])
   const latestOwner = useRef(owner); latestOwner.current = owner
@@ -20,6 +20,11 @@ export function useContentCopyAction(identity: unknown, write: ClientUiPlatform[
     return () => { mounted.current = false; actionRef.current?.controller.abort(); actionRef.current = null }
   }, [])
   useEffect(() => () => { if (actionRef.current?.owner === owner) actionRef.current.controller.abort() }, [owner])
+  useEffect(() => {
+    if (!resetAfterMs || copy?.owner !== owner || copy.state !== 'copied') return
+    const timer = setTimeout(() => setCopy(current => current === copy ? null : current), resetAfterMs)
+    return () => clearTimeout(timer)
+  }, [copy, owner, resetAfterMs])
   const cancelPreparation = useCallback(() => {
     const action = actionRef.current
     if (!action || !action.pending || action.writing) return
