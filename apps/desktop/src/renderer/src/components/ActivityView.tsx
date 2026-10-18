@@ -606,13 +606,19 @@ export function ActivityView({
 
   useEffect(() => {
     if (!readingEnabled || !revealRequest || !feedEl) return
+    const reading = readingWindow.inspect()
+    if (conversationReading && (reading.loading || reading.inFlight || reading.watch.binding || !reading.snapshot && !reading.error)) return
     setLocatedMessageKey(revealRequest.sourceKey)
     const frame = requestAnimationFrame(() => {
       if (!revealRequest.isCurrent() || !feedEl.isConnected) { revealRequest.complete(false); return }
-      revealRequest.complete(locateLoadedRecord(revealRequest.sourceKey, revealRequest.isCurrent))
+      const current = readingWindow.inspect()
+      if (conversationReading && (current.loading || current.inFlight || current.watch.binding)) return
+      const located = locateLoadedRecord(revealRequest.sourceKey, revealRequest.isCurrent)
+      revealRequest.complete(located, located ? undefined : readingWindow.error ?? undefined)
     })
     return () => cancelAnimationFrame(frame)
-  }, [revealRequest, feedEl, unifiedItems, nativeHistoryPage, readingEnabled])
+  }, [revealRequest, feedEl, unifiedItems, nativeHistoryPage, readingEnabled,
+    Boolean(conversationReading), readingWindow.snapshot, readingWindow.loading, readingWindow.error])
 
   // Segment elements keyed by segment key, so a resolved event index can find its host row and the
   // observer can watch each one.

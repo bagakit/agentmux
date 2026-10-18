@@ -26,5 +26,5 @@ export type ConversationRevealRequest = {
   generation: number
   sourceKey: string
   isCurrent(): boolean
-  complete(located: boolean): void
+  complete(located: boolean, error?: string): void
 }

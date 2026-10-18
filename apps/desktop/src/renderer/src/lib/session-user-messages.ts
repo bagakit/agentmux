@@ -35,15 +35,20 @@ export function useSessionUserMessages(control?: AgentSessionControlInput, optio
   const sourceMessages = useMemo(() => view.reading?.originalRecords.flatMap(record => record.input ? [record.input] : []) ?? [], [view.reading])
   const sourceChanged = [view.error, view.observationError].some(error => ['AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'native-source-changed'].includes((error as (Error & { code?: string }) | null)?.code ?? ''))
   const readForReveal = useCallback(async (source: AgentConversationRecordSource) => {
-    const settled = await view.settle()
-    let accepted = settled ? projectConversationWindow(settled) : view.reading
+    let settled = await view.settle()
+    let accepted = settled?.snapshot ? projectConversationWindow(settled.snapshot) : null
     const loaded = accepted?.originalRecords.some(item => item.rawId === source.recordId && item.source.kind === source.kind &&
       (source.kind !== 'native' || item.source.kind === 'native' && item.source.providerId === source.providerId && item.source.nativeSessionId === source.nativeSessionId))
-    if (!loaded && settled?.window.navigation.older && !view.loading) {
-      const next = await view.earlier(); if (next) accepted = projectConversationWindow(next)
+    if (!loaded && !settled?.error && settled?.snapshot?.window.navigation.older) {
+      const pending = view.earlier()
+      settled = await view.settle()
+      await pending
+      accepted = settled?.snapshot ? projectConversationWindow(settled.snapshot) : null
     }
-    return { page: accepted?.historyPage ?? null, records: accepted?.originalRecords ?? [], error: view.error, windowFrozen: view.historical, sourceChanged }
-  }, [view.reading, view.error, view.historical, view.loading, sourceChanged, view.earlier, view.settle])
+    return { page: accepted?.historyPage ?? null, records: accepted?.originalRecords ?? [], error: settled?.error ?? null, cancelled: !settled,
+      windowFrozen: settled?.historical ?? false,
+      sourceChanged: ['AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'native-source-changed'].includes((settled?.error as (Error & { code?: string }) | null)?.code ?? '') }
+  }, [view.earlier, view.settle])
   const windowFull = (view.error as (Error & { code?: string }) | null)?.code === 'AGENT_CONVERSATION_WINDOW_FULL'
   return { messages, sourceMessages, conversation: view, nativeHistoryPage: page, nativeContextItems: page?.items ?? [], nextCursor: view.snapshot?.window.navigation.older ?? null,
     hasMore: view.hasMore, loading: view.loading || initialLoading, error: windowFull ? view.sourceError : view.error, observationError: view.observationError, windowFrozen: view.historical,
