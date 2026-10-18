@@ -4,6 +4,7 @@ import { createClientUiRoot as createRoot } from '../../../test/helpers/client-u
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { App } from '../../../src/renderer/src/App'
 import { api } from '../../../src/renderer/src/lib/api'
+import { createToolkitConfigurationApi } from '../../../src/renderer/src/lib/toolkit-configuration-api'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
 import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workbench-persistence'
@@ -31,7 +32,7 @@ api.config.get = () => bridge.get()
 api.config.save = (next, expected) => bridge.save(next, expected)
 api.config.onChange = listener => bridge.onChange(listener)
 api.ui.requestStorageFlush = () => bridge.flush()
-api.toolkit = w.agentmux.toolkit
+api.toolkit = createToolkitConfigurationApi(w.agentmux.toolkit)
 if (setup.phase === 'diagnostic') api.performance = w.agentmux.performance
 const writes: unknown[] = [], attachments: unknown[] = [], events: unknown[] = []
 const attach = api.sessions.attach

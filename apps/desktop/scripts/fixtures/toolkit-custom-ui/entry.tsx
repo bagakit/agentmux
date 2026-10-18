@@ -5,6 +5,7 @@ import '../../../src/renderer/src/monaco'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { App } from '../../../src/renderer/src/App'
 import { api } from '../../../src/renderer/src/lib/api'
+import { createToolkitConfigurationApi } from '../../../src/renderer/src/lib/toolkit-configuration-api'
 import { createRendererSessionEvents } from '../../../src/renderer/src/lib/session-events'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { createWorkbenchTab } from '../../../src/renderer/src/lib/workbench-tabs'
@@ -20,10 +21,10 @@ api.config.get = () => bridge.get()
 api.config.save = (next, expected) => bridge.save(next, expected)
 api.config.onChange = listener => bridge.onChange(listener)
 api.ui.requestStorageFlush = () => bridge.flush()
-api.toolkit = w.agentmux.toolkit
+api.toolkit = createToolkitConfigurationApi(w.agentmux.toolkit)
 const attachments: unknown[] = [], writes: unknown[] = [], events: unknown[] = [], toolkitCalls: unknown[] = []
 if (setup.qualification) {
-  const original=w.agentmux.toolkit, observed:any={...original}
+  const original=api.toolkit, observed:any={...original}
   for(const method of ['add','update','remove','get','run','stop','action']) observed[method]=async(...input:unknown[])=>{
     const fact:{method:string;input:unknown[];at:number;returnedAt?:number;result?:unknown;error?:string}={method,input,at:Date.now()};toolkitCalls.push(fact)
     try{fact.result=await original[method](...input);fact.returnedAt=Date.now();return fact.result}catch(error){fact.returnedAt=Date.now();fact.error=String(error);throw error}

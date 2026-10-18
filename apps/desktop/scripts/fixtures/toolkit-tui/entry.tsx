@@ -4,6 +4,7 @@ import { unwrapSessionInputWriteResult } from '../../../src/shared/session-input
 import { App } from '../../../src/renderer/src/App'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { api } from '../../../src/renderer/src/lib/api'
+import { createToolkitConfigurationApi } from '../../../src/renderer/src/lib/toolkit-configuration-api'
 import { createRendererSessionEvents } from '../../../src/renderer/src/lib/session-events'
 import { useAppStore } from '../../../src/renderer/src/store'
 import { useLauncherState } from '../../../src/renderer/src/lib/launcher-state'
@@ -14,7 +15,7 @@ const setup = await bridge.seed(await api.config.get())
 api.config.get = () => bridge.get()
 api.config.save = (next, expected) => bridge.save(next, expected)
 api.config.onChange = listener => bridge.onChange(listener)
-api.toolkit = w.agentmux.toolkit
+api.toolkit = createToolkitConfigurationApi(w.agentmux.toolkit)
 const transport = w.agentmux.sessions
 api.sessions = { ...transport, onEvent: createRendererSessionEvents(transport.onEvent),
   attach: (...args) => transport.attach(...args).then(unwrapSessionObservationResult),
