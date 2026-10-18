@@ -96,6 +96,8 @@ Renderer 桥使用 Core [`conversation-changes`](../../packages/core/src/convers
 
 [`ConversationMessage`](../../packages/client-ui/src/components/ConversationMessage.tsx) 统一正文、Question、reasoning、tool、resource、来源详情与批注；[`ConversationMessageCard`](../../packages/client-ui/src/components/ConversationMessageCard.tsx) 中的普通发言、协作回报和系统记录薄外壳分别持有头部与披露，`compact` 仍是密度维度。captured 输入、回复与系统记录由 [`CapturedConversationMessage`](../../packages/client-ui/src/components/CapturedConversationMessage.tsx) 适配。
 
+共享的[消息样式](../../packages/client-ui/src/styles/conversation-message.css)与[协作样式](../../packages/client-ui/src/styles/conversation-collaboration.css)通过 `client-ui` 样式入口供各宿主消费，变体选择器定位到本卡片所属的槽。[`ConversationA2AReferences`](../../packages/client-ui/src/components/ConversationA2AReferences.tsx) 在正文中嵌套同一消息组件的 compact 原卡；该原卡沿自己的网格、头像、正文和动作样式呈现。样式与宿主的责任合同见[共同过程、正文与卡片外壳](../design/conversation-client-architecture.md#共同过程正文与卡片外壳)。
+
 整条、SID 与局部 Copy 共用 [`useContentCopyAction`](../../packages/client-ui/src/lib/use-content-copy-action.ts) 的动作原语，各自持有原操作、反馈与到期状态；整条 Copy 继续沿资源 reader 异步取得 deferred 原文。同一消息中的后续 Copy 取消旧整条 Copy 尚未完成的准备，已经发往平台的写入仍等待自己的回执；切换来源、卸载和迟到完成各按原动作身份处理。
 
 Desktop 与 Mobile 共用 [`CapturedProcessRecord`](../../packages/client-ui/src/components/CapturedProcessRecord.tsx)、[`WorkflowObservation`](../../packages/client-ui/src/components/WorkflowObservation.tsx) 和 [`ConversationToolPayload`](../../packages/client-ui/src/components/ConversationToolPayload.tsx)，保留参数摘要、来源、完整原文 Copy、编辑差异、定位展开和 `aria-controls`。首次披露后保留详情节点，关闭只隐藏；宿主 wrapper 只提供自己的标尺／定位引用。captured 图标按记录 kind，原生步骤图标按调用／结果 part；工具名称不决定图标种类。
