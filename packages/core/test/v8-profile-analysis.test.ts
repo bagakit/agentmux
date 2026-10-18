@@ -6,7 +6,7 @@ import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve, relative } from 'node:path'
 import { createHash } from 'node:crypto'
-import { analyseV8Profile } from '../src/v8-profile-analysis.js'
+import { analyseV8Profile, parseV8ProfileBytes, summariseV8Profile } from '../src/v8-profile-analysis.js'
 import { analyseLocalV8Profile } from '../src/v8-profile-analysis-cli.js'
 import type { RendererV8Profile } from '../src/renderer-v8-profile.js'
 
@@ -100,6 +100,9 @@ it('runs the actual CLI with invalid endpoint and incomplete managed credentials
     { env: { ...process.env, AGENTMUX_AGENT_SESSION_ID: 'incomplete', AGENTMUX_AGENT_CAPABILITY: '' } })
   expect(stderr).toBe('')
   const output = JSON.parse(stdout)
+  expect(output.result).toEqual(summariseV8Profile(analyseV8Profile(parseV8ProfileBytes(Buffer.from(bytes))), {
+    sha256: createHash('sha256').update(bytes).digest('hex'), bytes: Buffer.byteLength(bytes), captureIdentity: 'unavailable-in-bare-profile'
+  }))
   expect(output).toMatchObject({ ok: true, operation: 'system.metrics.profile.analyze', result: { status: 'analysed',
     source: { sha256: createHash('sha256').update(bytes).digest('hex'), bytes: Buffer.byteLength(bytes), captureIdentity: 'unavailable-in-bare-profile' },
     timing: { weightedMs: 5, profileDurationMs: 10, lastSampleTailMs: 5 }, weights: { idle: { selfMs: 1 } } } })
