@@ -57,6 +57,8 @@ Hook 声明由原 [`AgentManagedHookInstaller`](../../packages/core/src/managed-
 | 统一事件页、精确锚点、耐久变化 | [`conversation-reader`](../../packages/core/src/conversation-reader.ts) → 原 native/captured 端口 → `projectConversationTimeline` |
 | Terminal Replay | 原 Run output／Attachment → terminal viewport；PTY 字节不自动成为对话或作者事实 |
 
+Inputs 的有界搜索／分页由原 `agent.history` 与 `agent.input.ls` 提供；[`projectSessionInputs`](../../packages/core/src/session-inputs.ts) 在 Core 内复用同一 same-event／adoption 判定，将准确 input key、已查询的原记录及当前 accepted input 关系投影为阅读组。当前实体只贡献关联证明，不把未命中查询的正文塞回结果。原记录版本改变或 native 采用出现歧义时撤销相应归并，保留原正文与未知回执；原 Host 未确认时不拿路由 Host 替代。Desktop Composer／Mailbox 和 Mobile Mailbox 消费这一个纯投影，发送回执占主行时，其来源正文在同一详情逐份展开；没有回执的组使用原生记录优先的原记录作为主行。所有 Copy、填草稿、资源读取和定位仍指向准确原记录，列表不创建新发送或第二份事实 Store。
+
 `readAgentConversation`、`conversationCheckpoint`、`readConversationChanges` 与 `observeConversation` 持有统一公共读取合同。原 Reader 的临时 view 保留已接受原记录、版本、页邻接与切点；`consumeConversationWindowPage` 仅校验和重组完整替换窗口，客户端不做跨批语义合并。准确 watch 保持相关 view，绑定观察的 `dispose` 只解除 pin，原 frame 在既有有界暂存区停放；显式 `releaseConversationView` 或 Client dispose 才释放该临时资源；deferred part 仍沿原资源接口读取。窗口 cursor、耐久 source frontier 与通知分别由[协议](../specs/conversation-protocol.md)定义，通知只唤醒权威读取。`sessionHistoryCheckpoint`／`readSessionHistoryChanges` 保留为原生 primitive，原 `agent.history` 继续提供原来源读取。Claude／Codex 保存历史页由同一 [`NativeJsonlHistoryReader`](../../packages/core/src/native-jsonl-history-reader.ts) 给出准确页快照的 `changesCursor` 和原页位置 `replayCursor`，避免另一次 checkpoint 和页读取之间的同 ID 版本竞态。原 Store 事务仍返回准确 stream 与 changed position，经既有事件进入原 raw applier／Renderer；该路径的处理不由新 view 合同替代。
 
 调用关联以每个准确 part 对原 scoped invocation 的 `invocation-member` 归属表达，单成员也保留；`conversationInvocationId` 由 Core 唯一定义。归属及其所在事件版本不依赖同批是否读到另一成员，公共 Reader 不反查全史。相同调用身份不合并父发言，也不表示未读的对端内容已经可读。
@@ -92,7 +94,9 @@ Renderer 桥使用 Core [`conversation-changes`](../../packages/core/src/convers
 
 [`ConversationView`](../../packages/client-ui/src/components/ConversationView.tsx) 接收共同 records／originals，但其内部仍将统一序列拆为原生代表项和带 `beforeRecordId` 的 captured insertions，再交 [`ConversationRecordSequence`](../../packages/client-ui/src/components/ConversationRecordSequence.tsx) 分组和放置。这层沿 Core 已给顺序取位置，不重新按正文或时间关联来源；定位和展开仍有 native／insertion 两套表示。Desktop `buildActivityEntries` 还派生 captured 段落，供宿主 renderer、标尺与定位消费；其旧 `user-message` 分支已无生成路径，传入的 `items`／`timelineSnapshot` 也不是当前正文来源。
 
-[`ConversationMessage`](../../packages/client-ui/src/components/ConversationMessage.tsx) 统一正文、完整 Copy、Question、reasoning、tool 与 resource，同时内含普通发言、协作回报和系统记录的壳逻辑；`compact` 是可与这些类型组合的密度维度。captured 输入、回复与系统记录由 [`CapturedConversationMessage`](../../packages/client-ui/src/components/CapturedConversationMessage.tsx) 适配。整条 Copy 可通过原资源 reader 异步取得 deferred 原文，不能等同于同步复制显示文本。
+[`ConversationMessage`](../../packages/client-ui/src/components/ConversationMessage.tsx) 统一正文、Question、reasoning、tool、resource、来源详情与批注；[`ConversationMessageCard`](../../packages/client-ui/src/components/ConversationMessageCard.tsx) 中的普通发言、协作回报和系统记录薄外壳分别持有头部与披露，`compact` 仍是密度维度。captured 输入、回复与系统记录由 [`CapturedConversationMessage`](../../packages/client-ui/src/components/CapturedConversationMessage.tsx) 适配。
+
+整条、SID 与局部 Copy 共用 [`useContentCopyAction`](../../packages/client-ui/src/lib/use-content-copy-action.ts) 的动作原语，各自持有原操作、反馈与到期状态；整条 Copy 继续沿资源 reader 异步取得 deferred 原文。同一消息中的后续 Copy 取消旧整条 Copy 尚未完成的准备，已经发往平台的写入仍等待自己的回执；切换来源、卸载和迟到完成各按原动作身份处理。
 
 过程目前共享 [`WorkflowObservation`](../../packages/client-ui/src/components/WorkflowObservation.tsx) 和 [`ConversationToolPayload`](../../packages/client-ui/src/components/ConversationToolPayload.tsx) 底座，完整记录面尚未统一：Mobile 使用 [`CapturedProcessRecord`](../../packages/client-ui/src/components/CapturedProcessRecord.tsx)，Desktop 经 `renderCapturedRecord` 注入 `ActivityView` 的 Row／Glyph／DiffBlock。摘要、diff、披露节点生命周期与 ARIA 因此不同；Desktop 的过程内定位由 Sequence 的受控 group／step 展开传至 Row。当前 [`activity-diff`](../../apps/desktop/src/renderer/src/lib/activity-diff.ts) 同时含通用 unified diff 解析与特定工具参数解释，二者不是同一个通用能力。
 
@@ -100,9 +104,11 @@ Renderer 桥使用 Core [`conversation-changes`](../../packages/core/src/convers
 
 当前保护分布在窗口 `beforeCommit`、Desktop 段落布局、共同 [`useConversationRecordLayout`](../../packages/client-ui/src/lib/use-conversation-record-layout.ts) 和 Sequence 过程父节点四处。窗口层检查 raw 页／captured 版本；共同布局还检查 canonical 代表项、角色与版本，Sequence 保护跨源输入拆分过程父节点的 Range。多个层次可各自保留旧布局、订阅 `selectionchange` 并提示，不能把它们视为完全等价的四次检查。直接传入 accepted records 的共同组件消费者也不必经过窗口 hook；目标收敛范围见[呈现事务](../design/conversation-client-architecture.md#一个阅读位置的呈现事务)。
 
-读取侧已有原 Core 窗口预算和相邻页游标；Desktop 首窗／时间范围补读按有界批次执行，接近阅读边缘约两视口时沿真实方向继续。当前主动边缘请求每次调用一页，完成后依靠新的阅读事件继续，不按剩余可读高度自动补足一批。工具过程占用原记录额度，折叠后未必形成相等的可读空间。
+读取侧已有原 Core 窗口预算和相邻页游标。Desktop 首窗／时间范围补读与 [`useConversationReadAhead`](../../apps/desktop/src/renderer/src/lib/use-conversation-read-ahead.ts) 的方向性需求分别计数：一次 wheel／scroll 的有效边缘需求最多补三页，一次只读一页；提交后仍处于约两视口的原边缘才继续剩余额度。布局反馈不产生新批次，反向阅读、隐藏、Current、换来源、错误或保护取消剩余需求。较早自动读取复用原 `preserveCurrent`，原窗口预算不足停止自动补充，显式 Earlier 仍沿原导航可用。
 
-渲染侧的 Sequence 仍遍历整个已载序列，过程详情部分在首次展开后保留节点；没有按视口挂载／回收的完整虚拟列表。滚动锚点从 DOM 前部扫描，可见记录状态变化又可能使带新回调和插入项的 `ConversationView` 重渲染。这些是源码成本路径，未测量前不认证现场卡顿根因；渐进挂载、节点保留及验收边界见[目标设计](../design/conversation-client-architecture.md#数据准备与渐进呈现)。
+[`ConversationReadingRuler`](../../apps/desktop/src/renderer/src/components/ConversationReadingRuler.tsx) 独立持有可见区状态，IntersectionObserver 更新只重绘标尺；原已观察节点同时作为 [`conversationReadingAnchor`](../../packages/client-ui/src/lib/conversation-reading-anchor.ts) 的候选，wheel／scroll 优先测量可见节点，不逐条测量历史前缀。观察尚未建立或候选失效时仍可从当前实际 DOM 取得锚点。
+
+Sequence 仍遍历整个已载序列，过程详情部分在首次展开后保留节点；这尚不是按视口挂载／回收的完整虚拟列表。上述边界解释当前源码的工作范围，不代表已经测定用户现场卡顿根因或全部阅读环境的性能；重正文渐进挂载、节点保留及验收边界见[目标设计](../design/conversation-client-architecture.md#数据准备与渐进呈现)。
 
 来源标签集中在 [`conversation-sources`](../../packages/client-ui/src/lib/conversation-sources.ts)，只索引已接受 Core records 和精确关系；同一事件可有多个来源，invocation 来源按 Core 归属与唯一调用身份只标对应 selector。Focus、搜索与 Mobile 复用该映射；来源标签不产生关联、作者、采用或完成事实。
 
