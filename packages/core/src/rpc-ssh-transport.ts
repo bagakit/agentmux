@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from './object-id.js'
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import type { JSONRPCRequest } from 'json-rpc-2.0'
 import { AgentMuxError } from './errors.js'
@@ -42,7 +42,7 @@ export class AgentMuxRpcSshTransport {
   private closed = false
   constructor(args: string[], private readonly onClose: () => void, socketPath?: string) {
     this.child = spawn('ssh', args, { stdio: ['pipe', 'pipe', 'pipe'] })
-    const lines = new AgentMuxRpcLines(), probeId = randomUUID()
+    const lines = new AgentMuxRpcLines(), probeId = mintObjectId()
     let established = false, resolveReady!: () => void, rejectReady!: (error: Error) => void
     this.ready = new Promise<void>((resolve, reject) => { resolveReady = resolve; rejectReady = reject })
     // An unused client can be disposed while its transport is still establishing.

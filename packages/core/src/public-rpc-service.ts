@@ -1,6 +1,7 @@
 import { isMoteChatMethod, parseMoteChatParams, parseMoteChatResult } from './mote-chat-codec.js'
 import type { MoteChatPort, MoteChatMethod, MoteChatParamsMap } from './mote-chat-contract.js'
 import { isConnectionDeletionMethod, parseConnectionDeletionParams } from './connection-deletion-codec.js'
+import { mintObjectId } from './object-id.js'
 import { readConnectionDiagnosis } from './connection-diagnosis.js'
 import { parseFileImportParams, parseFileImportResult } from './public-rpc-file-import.js'
 import { runAgentMessageBroadcast, normalizeBroadcastInput } from './agent-message-broadcast.js'
@@ -64,7 +65,7 @@ import { isAppWindowMethod, parseAppWindowPage, parseAppWindowParams, type Agent
 import { isScheduleMethod, parseScheduleRpcParams, validateScheduleRpcResult, type AgentMuxRpcSchedulesOwner, type ScheduleMethod } from './public-rpc-schedules.js'
 import { AgentMuxSpatialStateStore, spatialCatalog, resolveSpatialRegion } from './spatial-state.js'
 import { displayLabel, type AgentMuxNameContext } from './display-label.js'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { isAbsolute } from 'node:path'
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
 import type { AgentMuxClient } from './client.js'
@@ -545,7 +546,7 @@ export class AgentMuxRpcService {
   }
   private request(operation: AgentMuxControlRequest['operation'], body: Record<string, unknown> = {}) {
     return parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-      requestId: randomUUID(), operation, ...body })
+      requestId: mintObjectId(), operation, ...body })
   }
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
