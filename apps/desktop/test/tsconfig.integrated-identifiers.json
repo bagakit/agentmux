@@ -1,0 +1,12 @@
+{
+  "extends": "../tsconfig.test.json",
+  "include": [
+    "integrated-notification-identifiers.test.ts",
+    "integrated-heap-identifiers.test.ts",
+    "performance-heap-snapshot.test.tsx",
+    "mote-private-chat-profile.test.tsx",
+    "connection-identity-library.test.tsx",
+    "../../../packages/connectors/test/mote-chat-owner.test.ts",
+    "../src/renderer/src/global.d.ts"
+  ]
+}

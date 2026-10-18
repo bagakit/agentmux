@@ -81,9 +81,13 @@ it('uses the actual Performance hook, preload, registered Main owners and native
   expect(contents.takeHeapSnapshot).toHaveBeenCalledOnce()
   const captureInput = bridge.invoke.mock.calls.find(call => call[0] === 'metrics:captureHeapSnapshot')![1]
   expect(captureInput.target).toEqual(target)
+  expect(captureInput.captureId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/u)
+  // Observe the real export integrity check without replacing its file I/O.
+  const fingerprints = vi.spyOn(owner as unknown as { fingerprint(path: string): Promise<unknown> }, 'fingerprint')
   await click('Save snapshot…')
   await vi.waitFor(() => expect(container.textContent).toContain('Saved to'))
   expect(await readFile(join(directory, 'export.heapsnapshot'), 'utf8')).toBe(material)
+  expect(fingerprints.mock.calls.map(([path]) => path)).toContainEqual(expect.stringMatching(/\/\.amux-heap-[1-9A-HJ-NP-Za-km-z]{12}\.tmp$/u))
   await click('Reveal file'); await vi.waitFor(() => expect(bridge.reveal).toHaveBeenCalledOnce())
   expect(bridge.reveal).toHaveBeenCalledWith(join(directory, captureInput.captureId + '.heapsnapshot'))
   await click('Open DevTools'); await vi.waitFor(() => expect(contents.openDevTools).toHaveBeenCalledExactlyOnceWith({ mode: 'detach' }))
@@ -111,6 +115,9 @@ it('shows native failure and lets explicit inspection read the original attempt 
   expect(container.textContent).toContain('Snapshot failed')
   await click('Inspect original')
   await vi.waitFor(() => expect(bridge.invoke.mock.calls.filter(call => call[0] === 'metrics:inspectHeapSnapshot')).toHaveLength(1))
+  expect(bridge.invoke.mock.calls.find(call => call[0] === 'metrics:inspectHeapSnapshot')![1]).toEqual({
+    captureId: bridge.invoke.mock.calls.find(call => call[0] === 'metrics:captureHeapSnapshot')![1].captureId
+  })
   expect(contents.takeHeapSnapshot).toHaveBeenCalledOnce()
   expect(bridge.save).not.toHaveBeenCalled(); expect(bridge.reveal).not.toHaveBeenCalled()
 })

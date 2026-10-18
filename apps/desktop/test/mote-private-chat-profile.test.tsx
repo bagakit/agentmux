@@ -73,6 +73,8 @@ it('retains an unknown original save across Profile remount and inspects its exa
   f.chatRequests.mockImplementation(async (method, input) => { const result = await forward(method, input); if (method === 'space.mote.chat.configure') throw Error('Controlled lost chat settings acknowledgement'); return result })
   await button('Save chat settings'); await ready(() => expect(chat().textContent).toContain('Chat settings were not confirmed.'))
   const input = structuredClone(f.chatRequests.mock.calls.find(([method]) => method === 'space.mote.chat.configure')![1])
+  if (!('operationId' in input) || typeof input.operationId !== 'string') throw Error('The actual configuration input must retain its operation ID')
+  expect(input.operationId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/u)
   expect(useAppStore.getState().moteChatIntents[input.operationId]?.input).toEqual(input)
   await f.render(0, true); await useAppStore.persist.rehydrate(); await f.renderMotePanel(1)
   await ready(() => expect(chat()?.getAttribute('data-mote-private-chat')).toBe(f.scopes[1]!.topic.id))
@@ -83,7 +85,7 @@ it('retains an unknown original save across Profile remount and inspects its exa
   await button('Check original request')
   await ready(() => expect(useAppStore.getState().moteChatIntents[input.operationId]).toBeUndefined())
   expect(f.chatRequests.mock.calls.filter(([method]) => method === 'space.mote.chat.configure')).toHaveLength(1)
-  expect(f.chatRequests.mock.calls.some(([method, value]) => method === 'space.mote.chat.inspect' && value.operationId === input.operationId)).toBe(true)
+  expect(f.chatRequests.mock.calls.some(([method, value]) => method === 'space.mote.chat.inspect' && 'operationId' in value && value.operationId === input.operationId)).toBe(true)
 })
 
 it('keeps a newer interval draft when a visible refresh returns an older original policy', async () => {
@@ -137,6 +139,9 @@ it('shows creator unlimited access and each guest used, total and remaining allo
   await fill('Total allowance for original-guest', '5')
   await act(async () => row().querySelector<HTMLFormElement>('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
   await ready(() => expect(row().querySelectorAll('dd')[1]!.textContent, chat().textContent ?? '').toBe('5'))
+  const allocation = f.chatRequests.mock.calls.find(([method]) => method === 'space.mote.chat.allocate')![1]
+  if (!('operationId' in allocation)) throw Error('The actual allocation must retain its operation ID')
+  expect(allocation.operationId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/u)
   expect(row().querySelectorAll('dd')[0]!.textContent).toBe('1'); expect(row().querySelectorAll('dd')[2]!.textContent).toBe('4')
   expect((await f.client.call('space.mote.chat.audience', { target: f.target() })).people.find(person => person.actor.userId === guest.userId)).toMatchObject({ used: 1, total: 5, remaining: 4 })
 })
