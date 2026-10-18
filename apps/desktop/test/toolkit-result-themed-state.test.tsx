@@ -1,3 +1,4 @@
+import { openToolkitMenu, clickToolkitMenu } from './helpers/toolkit-menu'
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react';
@@ -35,7 +36,7 @@ it('actual result states and reading consume nonempty 5px semantic glyphs withou
         }
         current = { ...base, sequence: 20, state: 'succeeded', latestConfirmed: { executionId: 'original-result', invocationId: 'original-invocation', definition, expectedLatestExecutionId: null, target: { workspacePath: definition.workspacePath }, run: { hostId: 'local', runId: 'original-run' }, startedAt: _reshape_fixtureEpoch(0, 0, 1), endedAt: _reshape_fixtureEpoch(0, 0, 2), state: 'succeeded', exitCode: 0, reason: null, text: 'Original output' } };
         await act(async () => publish(current));
-        const runButton = dom.container.querySelector<HTMLButtonElement>('.toolkit-result__actions button')!;
+        const runButton = dom.container.querySelector<HTMLButtonElement>('.performance-actions button')!;
         expect(runButton.disabled).toBe(false);
         const custom = structuredClone(GRAPHITE_THEME);
         custom.id = 'custom.toolkit-states';
@@ -50,7 +51,8 @@ it('actual result states and reading consume nonempty 5px semantic glyphs withou
         role('status.toolkit-unknown');
         expect(marker().getAttribute('data-state')).toBe('unknown');
         expect(marker().textContent).toBe('Result unconfirmed');
-        expect(runButton.disabled).toBe(true);
+        await openToolkitMenu(dom.container);
+        expect([...dom.container.querySelectorAll<HTMLButtonElement>('[role=menuitem]')].find(node => node.textContent?.trim() === 'Run saved tool')!.disabled).toBe(true);
         expect(dom.container.querySelector('[data-toolkit-output]')?.textContent).toBe('Original output');
         expect(document.getElementById(semanticIconHref('status.toolkit-unknown').slice(1))?.querySelector('path')?.getAttribute('d')).toBe('M12 3L21 20H3Z');
         const button = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(n => n.textContent?.trim() === 'Configure')!;
@@ -93,7 +95,8 @@ it('actual display lane selects its own machine state independently of ordinary 
     expect(marker.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('status.toolkit-failed'));
     expect(marker.textContent).toBe('Failed');
     expect(dom.container.querySelector('[data-toolkit-output]')?.textContent).toBe(result.text);
-    const find = (label: string) => [...dom.container.querySelectorAll<HTMLButtonElement>('.toolkit-result__actions button')].find(button => button.textContent?.trim() === label)!;
+    const find = (label: string) => [...dom.container.querySelectorAll<HTMLButtonElement>(dom.container.querySelector('[role=menu]') ? '[role=menuitem]' : '.performance-actions > button')].find(button => button.textContent?.trim() === label)!;
+    await openToolkitMenu(dom.container);
     const originalRun = find('Run saved tool');
     expect(originalRun.disabled).toBe(false);
     await act(async () => find('Refresh display').click());
@@ -107,7 +110,7 @@ it('actual display lane selects its own machine state independently of ordinary 
     await act(async () => { expect(previewTheme(custom).applied).toBe(true) });
     expect(document.getElementById(semanticIconHref('status.toolkit-unknown').slice(1))?.querySelector('path')?.getAttribute('d')).toBe('M12 3L21 20H3Z');
     expect(dom.container.querySelector('[data-toolkit-output]')?.textContent).toBe(result.text);
-    await act(async () => originalRun.click());
+    await clickToolkitMenu('Run saved tool', dom.container);
     expect(run).toHaveBeenCalledExactlyOnceWith(definition.id, { invocationId: expect.any(String), expectedRevision: definition.revision, expectedLatestExecutionId: null });
     const { display: previousDisplay, ...withoutDisplay } = current;
     current = { ...withoutDisplay, sequence: 22 };
@@ -120,7 +123,8 @@ it('actual display lane selects its own machine state independently of ordinary 
     expect(marker.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('status.toolkit-succeeded'));
     expect(marker.textContent).toBe('Display checked');
     expect(dom.container.querySelector('[data-toolkit-previous-request]')?.textContent).toContain('Previous request is unconfirmed');
-    expect(originalRun.disabled).toBe(true);
+    await openToolkitMenu(dom.container);
+    expect(find('Run saved tool').disabled).toBe(true);
 
   } finally { await dom.render(null); cleanup(); vi.restoreAllMocks() }
 })

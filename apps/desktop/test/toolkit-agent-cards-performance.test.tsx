@@ -67,7 +67,7 @@ it('partial, unavailable, stale and paused readings preserve coverage and source
   await runs()
   sample = structuredClone(sample); sample.observedAt! += 30000; sample.observation!.observedAt += 30000
   sample.observation!.process.state = 'stale'; sample.observation!.process.reason = 'Original process source unavailable'
-  await render(true); expect(node('.performance-observation').textContent).toContain('30s old'); expect(node('[data-run-total-values]').textContent).toContain('90.0%'); expect(container.textContent).toContain('Previous reading')
+  await render(true); expect(node('.performance-reading-time').textContent).toContain('30s old'); expect(node('[data-run-total-values]').textContent).toContain('90.0%'); expect(container.textContent).toContain('Previous reading')
   sample = structuredClone(sample); sample.observation!.runTotals = {coverage:{trackedRuns:8,observedRoots:7,missingRoots:1},cpuPercent:null,rssKib:null,processCount:null}; await render()
   expect(node('[data-run-total-values]').textContent).not.toContain('0.0%'); expect(container.textContent).toContain('1 tracked roots missing')
   sample = structuredClone(sample); sample.observation!.process = {data:null,state:'unavailable',reason:'No process reading',observedAt:null,lastSuccessAt:null}; sample.observation!.runTotals=null; await render()

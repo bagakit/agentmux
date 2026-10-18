@@ -1,3 +1,4 @@
+import { openToolkitMenu } from './helpers/toolkit-menu'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
@@ -19,7 +20,7 @@ function snapshot(state: 'running' | 'succeeded' | 'unknown' = 'running'): Toolk
 }
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} }) })
 function view(active = true) { return <SettingsNavigation.Provider value={{ open: vi.fn(), openToolkit: vi.fn() }}><UserToolkitResult definition={definition} active={active} close={vi.fn()} /></SettingsNavigation.Provider> }
-function refresh() { const button = [...dom.container.querySelectorAll<HTMLButtonElement>('.toolkit-result__actions button')].find(button => /display/.test(button.textContent ?? '')); expect(button, 'real display action').toBeDefined(); return button! }
+function refresh() { const button = [...dom.container.querySelectorAll<HTMLButtonElement>('.performance-actions button')].find(button => /display/.test(button.textContent ?? '')); expect(button, 'real display action').toBeDefined(); return button! }
 it('stops the retained running decoration after the real observation onError while keeping output, Run and actions', async () => {
   let ended!: (reason: string) => void
   const release = vi.fn()
@@ -37,7 +38,8 @@ it('stops the retained running decoration after the real observation onError whi
   expect(dom.container.querySelector('[data-toolkit-output]')).toBe(output)
   expect(output.textContent).toBe('Original confirmed output')
   expect(button.disabled).toBe(beforeDisabled) // The original displayRunning gate is unchanged.
-  expect([...dom.container.querySelectorAll<HTMLButtonElement>('.toolkit-result__actions button')].find(action => action.textContent?.trim() === 'Run saved tool')?.disabled).toBe(true) // Existing read-error admission rule.
+  await openToolkitMenu(dom.container)
+  expect([...dom.container.querySelectorAll<HTMLButtonElement>('.performance-actions button')].find(action => action.textContent?.trim() === 'Run saved tool')?.disabled).toBe(true) // Existing read-error admission rule.
   expect(release).toHaveBeenCalled(); expect(run).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
 })
 it('keeps actual local evaluation waiting visible even with a retained observation error, then settles without running or stopping the tool', async () => {

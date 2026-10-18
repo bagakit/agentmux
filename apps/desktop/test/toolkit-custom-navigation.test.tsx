@@ -1,3 +1,4 @@
+import { openToolkitMenu } from './helpers/toolkit-menu'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -36,7 +37,8 @@ function node<T extends HTMLElement = HTMLElement>(selector: string): T {
 }
 async function configure(id: string) {
   await act(async () => { node<HTMLButtonElement>(`[data-toolkit-id="${id}"]`).click() })
-  const configure = Array.from(document.querySelectorAll<HTMLButtonElement>('.toolkit-result__actions button')).find(button => button.textContent?.trim() === 'Configure')
+  await openToolkitMenu()
+  const configure = Array.from(document.querySelectorAll<HTMLButtonElement>('[role=menuitem]')).find(button => button.textContent?.trim() === 'Configure')
   expect(configure?.isConnected).toBe(true)
   await act(async () => { configure!.click() })
 }

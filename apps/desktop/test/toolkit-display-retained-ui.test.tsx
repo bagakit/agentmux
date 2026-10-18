@@ -1,3 +1,4 @@
+import { openToolkitMenu, clickToolkitMenu } from './helpers/toolkit-menu'
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -35,7 +36,7 @@ async function mount(initial: ToolkitSnapshot) {
 }
 it('retains the confirmed display and its original time throughout a new evaluation and failure', async () => {
   const f = await mount(snapshot())
-  const time = () => dom.container.querySelector<HTMLTimeElement>('.performance-observation time')?.dateTime
+  const time = () => dom.container.querySelector<HTMLTimeElement>('time.performance-reading-time')?.dateTime
   expect(time()).toBe(new Date(success.endedAt).toISOString())
   for (const state of ['pending', 'running', 'unknown'] as const) {
     await f.update({ ...snapshot(), sequence: 2, display: { state, reason: null, admission: { ...admission, state, text: state === 'running' ? 'Partial new output' : '' }, latestConfirmed: success, sequence: 2 } })
@@ -56,7 +57,7 @@ it.each(['package-unavailable', 'declaration-removed', 'disabled'] as const)('co
     configuration: { kind: 'package', id: definition.id, revision: 'saved-package', packagePath: fixturePath('missing-package'), args: [], enabled: true, statusBar: 'icon', workspacePath: definition.workspacePath },
     reason: 'Package directory unavailable', retained } : retained
   const f = await mount(initial)
-  const button = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('.toolkit-result__actions button')).find(x => x.textContent?.includes('Continue display request'))!
+  const button = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('.performance-actions button')).find(x => x.textContent?.includes('Continue display request'))!
   expect(button).toBeDefined(); expect(button.disabled).toBe(false)
   expect(dom.container.textContent).toContain('If its Run is no longer retained')
   await act(async () => button.click())
@@ -67,6 +68,6 @@ it('keeps a new display evaluation disabled while the declared package source is
   const retained = snapshot()
   await mount({ schema: 'agentmux.toolkit.v1', kind: 'package-unavailable', toolId: definition.id,
     configuration: { kind: 'package', id: definition.id, revision: 'saved-package', packagePath: fixturePath('missing-package'), args: [], enabled: true, statusBar: 'icon', workspacePath: definition.workspacePath }, reason: 'Package directory unavailable', retained })
-  const button = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('.toolkit-result__actions button')).find(x => x.textContent?.includes('Refresh display'))!
+  const button = Array.from(dom.container.querySelectorAll<HTMLButtonElement>('.performance-actions button')).find(x => x.textContent?.includes('Refresh display'))!
   expect(button.disabled).toBe(true)
 })
