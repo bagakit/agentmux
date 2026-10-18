@@ -9,7 +9,7 @@ import { fileUploadRevision } from '@agentmux/core/files'
 import { hydrateNoteProvenance } from './note-metadata.js'
 export type NoteFileDocument = { path: string; content: string; revision: string; noteProvenance?: NoteProvenanceSnapshot }
 export type NoteLocation = { workspaceId: string; path: string }
-export type NoteBlock = { blockId: string; content: JSONContent; text: string; list?: { type: string; attrs: Record<string, unknown>; index: number; item?: boolean } }
+export type NoteBlock = { blockId: string; content: JSONContent; text: string; list?: { type: string; attrs: Record<string, unknown>; index: number; item?: boolean; itemType?: string; itemAttrs?: Record<string, unknown> } }
 export type NoteSource = { location: NoteLocation; note: NoteDocument; revision: string; blocks: ReadonlyMap<string, NoteBlock>; blockForwardings: readonly NoteBlockForwarding[] }
 export type NoteBacklink = { source: NoteSource; blockId: string; occurrence: NoteGraphOccurrence; mode: 'reference' | 'embed' | 'link'; target: NoteGraphTarget }
 export type NoteKnowledge = {
@@ -61,10 +61,10 @@ export function noteKnowledge(documents: readonly { location: NoteLocation; docu
         if (typeof blockId !== 'string') return
         const position = tree.resolve(_position)
         let list: NoteBlock['list']
-        if (node.type.name === 'listItem' && parent) list = { type: parent.type.name, attrs: { ...parent.attrs }, index, item: true }
-        else if (parent?.type.name === 'listItem' && position.depth >= 2) {
+        if (['listItem', 'taskItem'].includes(node.type.name) && parent) list = { type: parent.type.name, attrs: { ...parent.attrs }, index, item: true }
+        else if (parent && ['listItem', 'taskItem'].includes(parent.type.name) && position.depth >= 2) {
           const originalList = position.node(position.depth - 1)
-          list = { type: originalList.type.name, attrs: { ...originalList.attrs }, index: position.index(position.depth - 1) }
+          list = { type: originalList.type.name, attrs: { ...originalList.attrs }, index: position.index(position.depth - 1), itemType: parent.type.name, itemAttrs: { ...parent.attrs } }
         }
         if (node.type.name === 'noteInclude' && Array.isArray(node.attrs.forwardedBlockIds)) blockForwardings.push(...node.attrs.forwardedBlockIds.map((id: string) => ({ blockId: id, includeBlockId: blockId, noteId: String(node.attrs.noteId) })))
         blocks.set(blockId, { blockId, content: node.toJSON(), text: noteSemanticText(node), ...list ? { list } : {} })
@@ -129,7 +129,7 @@ export function projectNoteBlocks(source: NoteSource, ids: readonly string[], pr
   }
   for (const block of source.blocks.values()) {
     if (!requested.has(block.blockId) || covered.has(block.blockId)) continue
-    content.push(block.list ? { type: block.list.type, attrs: { ...block.list.attrs, ...(block.list.type === 'orderedList' ? { start: Number(block.list.attrs.start ?? 1) + block.list.index } : {}) }, content: [block.list.item ? block.content : { type: 'listItem', content: [block.content] }] } : block.content)
+    content.push(block.list ? { type: block.list.type, attrs: { ...block.list.attrs, ...(block.list.type === 'orderedList' ? { start: Number(block.list.attrs.start ?? 1) + block.list.index } : {}) }, content: [block.list.item ? block.content : { type: block.list.itemType ?? 'listItem', attrs: block.list.itemAttrs, content: [block.content] }] } : block.content)
     rootBlockIds.push(block.blockId)
     cover(block.content)
   }
