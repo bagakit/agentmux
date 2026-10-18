@@ -1,10 +1,12 @@
 import { Extension, Mark, Node, getSchema } from '@tiptap/core'
 import UniqueID from '@tiptap/extension-unique-id'
 import StarterKit from '@tiptap/starter-kit'
+import { NoteImageNode, NoteTaskItemNode, NoteTaskListNode, NoteBulletListNode, NoteOrderedListNode, NoteTableNode, NoteTableRowNode, NoteTableCellNode, NoteTableHeaderNode, NoteTableEnter } from './note-rich-blocks.js'
+export { NoteImageNode, NoteTaskItemNode, NoteTaskListNode, NoteTableNode, NoteTableCellNode, NoteTableHeaderNode } from './note-rich-blocks.js'
 import { NoteMathInlineNode, NoteMathBlockNode } from './note-math.js'
 export { NoteMathInlineNode, NoteMathBlockNode } from './note-math.js'
 
-export const NOTE_BLOCK_TYPES = ['paragraph', 'heading', 'codeBlock', 'noteMathBlock', 'listItem', 'blockquote', 'horizontalRule', 'blockReference', 'noteInclude'] as const
+export const NOTE_BLOCK_TYPES = ['paragraph', 'heading', 'codeBlock', 'noteMathBlock', 'table', 'taskItem', 'listItem', 'blockquote', 'horizontalRule', 'blockReference', 'noteInclude'] as const
 
 const BlockIdentity = Extension.create({
   name: 'noteBlockIdentity',
@@ -65,7 +67,7 @@ const NoteWikiLiteral = Mark.create({ name: 'noteWikiLiteral', inclusive: false,
 
 /** The parser and rich editor share the installed TipTap node/mark schema. */
 export function noteContentExtensions() {
-  return [StarterKit.configure({ trailingNode: false }), BlockIdentity, NoteBlockReferenceNode, NoteIncludeNode, NoteInlineLinkNode, NoteWikiLiteral, NoteMathInlineNode, NoteMathBlockNode]
+  return [StarterKit.configure({ trailingNode: false, bulletList: false, orderedList: false }), BlockIdentity, NoteBlockReferenceNode, NoteIncludeNode, NoteInlineLinkNode, NoteWikiLiteral, NoteImageNode, NoteBulletListNode, NoteOrderedListNode, NoteTaskListNode, NoteTaskItemNode, NoteTableNode, NoteTableRowNode, NoteTableCellNode, NoteTableHeaderNode, NoteTableEnter, NoteMathInlineNode, NoteMathBlockNode]
 }
 export const noteContentSchema: ReturnType<typeof getSchema> = getSchema(noteContentExtensions())
 

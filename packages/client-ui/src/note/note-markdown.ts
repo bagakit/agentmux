@@ -14,7 +14,7 @@ import { noteInlineLinkContent, noteWikiQueryForLabel } from './note-wikilinks.j
 import { validateNoteDocument } from './note-document-validation.js'
 import type { NoteDocument } from './note-document.js'
 
-type Md = { type: string; children?: Md[]; value?: string; depth?: number; ordered?: boolean; start?: number | null; checked?: boolean | null; lang?: string | null; meta?: string | null; url?: string; title?: string | null; name?: string; attributes?: Record<string, string>; position?: { start: { offset?: number }; end: { offset?: number } } }
+type Md = { type: string; children?: Md[]; value?: string; alt?: string | null; align?: (string | null)[]; depth?: number; ordered?: boolean; start?: number | null; checked?: boolean | null; lang?: string | null; meta?: string | null; url?: string; title?: string | null; name?: string; attributes?: Record<string, string>; position?: { start: { offset?: number }; end: { offset?: number } } }
 type Mark = NonNullable<JSONContent['marks']>[number]
 const parser = unified().use(remarkParse).use(remarkGfm).use(remarkDirective).use(remarkMath)
 const fail = (message: string): never => { throw new Error(message + ' The original Markdown source is preserved.') }
@@ -30,6 +30,7 @@ const target = (url: string) => {
 }
 const comment = (kind: string, value?: string): Md => ({ type: 'html', value: `<!--amux-${kind}${value === undefined ? '' : ':' + value}-->` })
 const marker = (node: Md, kind: string) => node.type === 'html' ? new RegExp('^<!--amux-' + kind + '(?::([^\\r\\n]*))?-->$','u').exec(node.value ?? '') : null
+const itemMarker = (node: Md) => marker(node, 'item') ?? (node.type === 'paragraph' && node.children?.length === 1 ? marker(node.children[0]!, 'item') : null)
 function occurrence(value: string) {
   const parts = value.split(';'), referenceId = decode(parts[0] ?? '')
   if (parts.length === 1) return { referenceId, text: null, target: null }
@@ -67,6 +68,7 @@ function inline(nodes: readonly Md[], body: string, literalWiki = true): JSONCon
       }
       if (from < value.length) emit({ type:'text',text:value.slice(from) }); continue
     }
+    if (node.type === 'image') { emit({ type: 'image', attrs: { src: node.url ?? '', alt: node.alt ?? '', title: node.title ?? null } }); continue }
     if (node.type === 'break') { emit({ type: 'hardBreak' }); continue }
     if (node.type === 'inlineCode') { emit({ type: 'text', text: node.value ?? '' }, [{ type: 'code' }]); continue }
     if (node.type === 'inlineMath') { emit({ type: 'noteMathInline', attrs: { latex: node.value ?? '' } }); continue }
@@ -87,6 +89,7 @@ function inline(nodes: readonly Md[], body: string, literalWiki = true): JSONCon
       continue
     }
     if (node.type === 'html') {
+      if (/^<br\s*\/?>(?:\n)?$/iu.test(node.value ?? '')) { emit({ type: 'hardBreak' }); continue }
       const ref = marker(node, 'ref')
       if (ref) {
         const last = result.at(-1), tokens = last?.type === 'text' ? scanNoteWikiLinks(last.text ?? '') : []
@@ -128,11 +131,42 @@ function inline(nodes: readonly Md[], body: string, literalWiki = true): JSONCon
   return result
 }
 
+/** The same original trailing anchor syntax is used inside GFM cells. */
+function paragraphContent(node: Md, body: string): JSONContent {
+  const content = inline(node.children ?? [], body)
+  let blockId: string | null = null
+  const last = content.at(-1), raw = body.slice(node.position?.start.offset, node.type === 'tableCell' ? node.children?.at(-1)?.position?.end.offset ?? node.position?.end.offset : node.position?.end.offset).trimEnd()
+  const suffix = /(?:^| )\^([^\s]+)$/u.exec(raw)
+  if (suffix && last?.type === 'text' && !last.marks?.length && last.text?.endsWith('^' + suffix[1])) {
+    blockId = decode(suffix[1]!); last.text = last.text.slice(0, -(suffix[1]!.length + 1)); if (last.text.endsWith(' ')) last.text = last.text.slice(0, -1); if (!last.text) content.pop()
+  }
+  return { type: 'paragraph', attrs: { blockId }, ...content.length ? { content } : {} }
+}
+const cellAlignments = ['left', 'center', 'right']
+function tableContent(node: Md, body: string): JSONContent {
+  const columns = node.align?.length ?? node.children?.[0]?.children?.length ?? 0
+  const rows = (node.children ?? []).map((row, rowIndex) => {
+    if (row.type !== 'tableRow' || (row.children?.length ?? 0) > columns) return fail('The original table row cannot be represented without loss.')
+    return { type: 'tableRow', content: Array.from({ length: columns }, (_, column) => {
+      const cell = row.children?.[column] ?? { type: 'tableCell', children: [] }
+      let kind = rowIndex === 0 ? 'tableHeader' : 'tableCell', align = node.align?.[column] ?? null
+      const field = marker(cell.children?.[0] ?? { type: '' }, 'cell')
+      if (field) {
+        const match = /^(cell|header);align=(null|left|center|right)$/u.exec(field[1] ?? '')
+        if (!match) return fail('A table cell annotation is invalid.')
+        kind = match[1] === 'header' ? 'tableHeader' : 'tableCell'; align = match[2] === 'null' ? null : match[2]!
+      }
+      return { type: kind, attrs: { align }, content: [paragraphContent(field ? { ...cell, children: cell.children!.slice(1) } : cell, body)] }
+    }) }
+  })
+  return { type: 'table', attrs: { blockId: null }, content: rows }
+}
+
 function blocks(nodes: readonly Md[], body: string, item = false): JSONContent[] {
   const result: JSONContent[] = []
   let listType: string | null = null, listStart: number | undefined, headingLevel: number | null | undefined, codeLanguage: string | undefined
   for (const node of nodes) {
-    const itemId = marker(node, 'item')
+    const itemId = itemMarker(node)
     if (itemId) { if (!item || result.length) return fail('A list item identity has no exact original owner.'); continue }
     const empty = marker(node, 'empty')
     if (empty) { result.push({ type: 'paragraph', attrs: { blockId: empty[1] ? decode(empty[1]) : null } }); continue }
@@ -146,17 +180,17 @@ function blocks(nodes: readonly Md[], body: string, item = false): JSONContent[]
     if (node.type === 'paragraph' && node.children?.length === 1 && node.children[0]?.type === 'text' && /^\^[^\s]+$/u.test(node.children[0].value ?? '')) {
       const previous = result.at(-1)
       const raw = body.slice(node.position?.start.offset, node.position?.end.offset)
-      if (!raw.startsWith('^') || !previous || !['paragraph','heading','codeBlock','noteMathBlock','blockquote','horizontalRule'].includes(previous.type ?? '') || previous.attrs?.blockId) return fail('A standalone block identity is orphaned or duplicated.')
+      if (!raw.startsWith('^') || !previous || !['paragraph','heading','codeBlock','noteMathBlock','table','blockquote','horizontalRule'].includes(previous.type ?? '') || previous.attrs?.blockId) return fail('A standalone block identity is orphaned or duplicated.')
       previous.attrs = { ...previous.attrs, blockId: decode(node.children[0].value!.slice(1)) }; continue
     }
     if (listType !== null && node.type !== 'list') return fail('A list type annotation has no exact list owner.')
     if (node.type === 'list') {
       const children = (node.children ?? []).map(child => {
-        if (child.type !== 'listItem' || child.checked != null) return fail('Task list content is not supported by this Note schema.')
-        const first = child.children?.[0], own = first ? marker(first, 'item') : null
-        return { type: 'listItem', attrs: { blockId: own?.[1] ? decode(own[1]) : null }, content: blocks(child.children ?? [], body, true) }
+        if (child.type !== 'listItem') return fail('The original list item is invalid.')
+        const first = child.children?.[0], own = first ? itemMarker(first) : null
+        return { type: child.checked == null ? 'listItem' : 'taskItem', attrs: { blockId: own?.[1] ? decode(own[1]) : null, ...(child.checked == null ? {} : { checked: child.checked }) }, content: blocks(child.children ?? [], body, true) }
       })
-      result.push({ type: node.ordered ? 'orderedList' : 'bulletList', ...node.ordered ? { attrs: { start: listStart ?? node.start ?? 1, type: listType } } : {}, content: children }); listType = null; listStart = undefined; continue
+      result.push({ type: node.ordered ? 'orderedList' : children.every(child => child.type === 'taskItem') ? 'taskList' : 'bulletList', ...node.ordered ? { attrs: { start: listStart ?? node.start ?? 1, type: listType } } : {}, content: children }); listType = null; listStart = undefined; continue
     }
     if (node.type === 'leafDirective' && ['note-ref','note-embed'].includes(node.name ?? '')) {
       const attrs = node.attributes ?? {}, exact = target(attrs.target ?? '')
@@ -169,15 +203,10 @@ function blocks(nodes: readonly Md[], body: string, item = false): JSONContent[]
       result.push({ type: 'noteInclude', attrs: { blockId: attrs.id ? decode(attrs.id) : null, referenceId: decode(attrs.ref), noteId: exact.noteId, path: attrs.path, ...(attrs.workspace === undefined ? {} : { workspaceId: attrs.workspace }), ...(attrs.forwarded === undefined ? {} : { forwardedBlockIds: attrs.forwarded.split(',').map(decode) }) } }); continue
     }
     if (['paragraph','heading'].includes(node.type)) {
-      const content = inline(node.children ?? [], body)
-      let blockId: string | null = null
-      const last = content.at(-1), raw = body.slice(node.position?.start.offset, node.position?.end.offset)
-      const suffix = /(?:^| )\^([^\s]+)$/u.exec(raw)
-      if (suffix && last?.type === 'text' && !last.marks?.length && last.text?.endsWith('^' + suffix[1])) {
-        blockId = decode(suffix[1]!); last.text = last.text.slice(0, -(suffix[1]!.length + 1)); if (last.text.endsWith(' ')) last.text = last.text.slice(0, -1); if (!last.text) content.pop()
-      }
-      result.push({ type: node.type, attrs: { blockId, ...node.type === 'heading' ? { level: headingLevel === undefined ? node.depth : headingLevel } : {} }, ...content.length ? { content } : {} }); headingLevel = undefined; continue
+      const paragraph = paragraphContent(node, body)
+      result.push({ ...paragraph, type: node.type, attrs: { ...paragraph.attrs, ...node.type === 'heading' ? { level: headingLevel === undefined ? node.depth : headingLevel } : {} } }); headingLevel = undefined; continue
     }
+    if (node.type === 'table') { result.push(tableContent(node, body)); continue }
     if (node.type === 'blockquote') { result.push({ type: 'blockquote', attrs: { blockId: null }, content: blocks(node.children ?? [], body) }); continue }
     if (node.type === 'code') {
       if (node.meta) return fail('Code fence metadata is unsupported; preserve it in Source.')
@@ -201,10 +230,11 @@ export function parseNoteMarkdown(raw: string): NoteDocument {
   return { schema: NOTE_SCHEMA, noteId: header.noteId, ...(header.title === undefined ? {} : { title: header.title }), ...(header.kind ? { kind: header.kind } : {}), ...(header.origin ? { origin: header.origin } : {}), content: { type: 'doc', content: blocks(tree.children ?? [], header.body) } }
 }
 
-function inlineMarkdown(nodes: readonly JSONContent[]): Md[] {
+function inlineMarkdown(nodes: readonly JSONContent[], tableCell = false): Md[] {
   return nodes.flatMap(node => {
     let value: Md[]
-    if (node.type === 'hardBreak') value = [{ type: 'break' }]
+    if (node.type === 'hardBreak') value = [tableCell ? { type: 'html', value: '<br>' } : { type: 'break' }]
+    else if (node.type === 'image') value = [{ type: 'image', url: node.attrs!.src, alt: node.attrs!.alt ?? '', title: node.attrs!.title ?? null }]
     // An empty inline expression needs whitespace between its delimiters: $$
     // is a block opener. Both sources represent an empty mathematical value.
     else if (node.type === 'noteMathInline') value = [{ type: 'inlineMath', value: node.attrs!.latex || ' ' }]
@@ -243,6 +273,19 @@ function inlineMarkdown(nodes: readonly JSONContent[]): Md[] {
     return value
   })
 }
+function tableMarkdown(node: JSONContent): Md {
+  const rows = node.content ?? [], align = (rows[0]?.content ?? []).map(cell => cell.attrs?.align ?? null)
+  const children = rows.map((row, rowIndex) => ({ type: 'tableRow', children: (row.content ?? []).map((cell, column) => {
+    const attrs = cell.attrs ?? {}, paragraph = cell.content?.[0]
+    if (!paragraph || cell.content!.length !== 1 || paragraph.type !== 'paragraph' || attrs.colspan !== 1 || attrs.rowspan !== 1 || attrs.colwidth != null) return fail('This table cell needs its original source because its structure is not a GFM cell.')
+    const content = inlineMarkdown(paragraph.content ?? [], true), originalAlign = attrs.align ?? null
+    if (originalAlign !== null && !cellAlignments.includes(originalAlign)) return fail('The original table alignment is invalid.')
+    if (cell.type !== (rowIndex === 0 ? 'tableHeader' : 'tableCell') || originalAlign !== align[column]) content.unshift(comment('cell', `${cell.type === 'tableHeader' ? 'header' : 'cell'};align=${originalAlign ?? 'null'}`))
+    if (typeof paragraph.attrs?.blockId === 'string') content.push({ type: 'noteAnchor', value: (content.length ? ' ' : '') + '^' + encode(paragraph.attrs.blockId) })
+    return { type: 'tableCell', children: content }
+  }) }))
+  return { type: 'table', align, children }
+}
 function blockMarkdown(nodes: readonly JSONContent[]): Md[] {
   return nodes.flatMap(node => {
     const attrs = node.attrs ?? {}, own = typeof attrs.blockId === 'string' ? attrs.blockId : null
@@ -258,12 +301,19 @@ function blockMarkdown(nodes: readonly JSONContent[]): Md[] {
     } else if (node.type === 'noteMathBlock') block = { type: 'math', value: attrs.latex }
     else if (node.type === 'horizontalRule') block = { type: 'thematicBreak' }
     else if (node.type === 'blockquote') block = { type: 'blockquote', children: blockMarkdown(node.content ?? []) }
-    else if (node.type === 'orderedList' || node.type === 'bulletList') {
+    else if (node.type === 'orderedList' || node.type === 'bulletList' || node.type === 'taskList') {
       if (node.type === 'orderedList' && (typeof attrs.start !== 'number' || !Number.isFinite(attrs.start) || attrs.type != null && typeof attrs.type !== 'string')) return fail('The original list attributes cannot be represented without loss.')
       if (node.type === 'orderedList' && (!Number.isInteger(attrs.start) || attrs.start < 0 || attrs.start > 999999999)) prelude.push(comment('list-start',String(attrs.start)))
-      const children = (node.content ?? []).map(child => ({ type: 'listItem', children: [...typeof child.attrs?.blockId === 'string' ? [comment('item',encode(child.attrs.blockId))] : [], ...blockMarkdown(child.content ?? [])] }))
+      const children = (node.content ?? []).map(child => {
+        const id = typeof child.attrs?.blockId === 'string' ? encode(child.attrs.blockId) : undefined
+        // GFM writes the checkbox only when the first child is a paragraph. Keep the
+        // existing item identity inside that paragraph, separate from its body blocks.
+        const marker: Md[] = child.type === 'taskItem' ? [{ type: 'paragraph', children: [comment('item', id)] }] : id ? [comment('item', id)] : []
+        return { type: 'listItem', ...(child.type === 'taskItem' ? { checked: child.attrs!.checked } : {}), children: [...marker, ...blockMarkdown(child.content ?? [])] }
+      })
       return [...prelude, ...attrs.type != null ? [comment('list-type',encode(attrs.type))] : [], { type: 'list', ordered: node.type === 'orderedList', start: prelude.length ? 1 : attrs.start ?? 1, children }]
-    } else if (node.type === 'blockReference') return [{ type: 'leafDirective', name: attrs.mode === 'embed' ? 'note-embed' : 'note-ref', attributes: { ...own ? { id: encode(own) } : {}, ref: encode(attrs.referenceId), target: href(attrs.target) }, children: [] }]
+    } else if (node.type === 'table') block = tableMarkdown(node)
+    else if (node.type === 'blockReference') return [{ type: 'leafDirective', name: attrs.mode === 'embed' ? 'note-embed' : 'note-ref', attributes: { ...own ? { id: encode(own) } : {}, ref: encode(attrs.referenceId), target: href(attrs.target) }, children: [] }]
     else if (node.type === 'noteInclude') return [{ type: 'leafDirective', name: 'note-include', attributes: { ...own ? { id: encode(own) } : {}, ref: encode(attrs.referenceId), target: href({ noteId: attrs.noteId }), path: attrs.path, ...(typeof attrs.workspaceId === 'string' ? { workspace: attrs.workspaceId } : {}), ...(Array.isArray(attrs.forwardedBlockIds) && attrs.forwardedBlockIds.length ? { forwarded: attrs.forwardedBlockIds.map(encode).join(',') } : {}) }, children: [] }]
     else return fail('Unsupported Note block: ' + node.type + '.')
     return [...prelude, block, ...own ? [{ type: 'noteAnchor', value: '^' + encode(own) }] : []]
