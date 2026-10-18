@@ -55,7 +55,7 @@ export function MoteQuickMode({ scope, reference, onOpenPath, active }: {
   </section>
 }
 
-function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, returnFocus }: {
+export function MoteQuickModeDialog({ scope, reference, onOpenPath, onClose, returnFocus }: {
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined
   onOpenPath(path: string): Promise<unknown>; onClose(): void; returnFocus(): HTMLElement | null
 }) {

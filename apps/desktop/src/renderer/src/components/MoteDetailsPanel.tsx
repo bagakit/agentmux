@@ -1,5 +1,6 @@
 import { MoteQuickMode } from './MoteQuickMode'
 import { MoteConnectionIdentity } from './MoteConnectionIdentity'
+import { MotePrivateChat } from './MotePrivateChat'
 import { MOTE_QUICK_MODE_PATH } from '../../../shared/mote-quick-mode'
 import { TOPIC_AGENT_INSTRUCTIONS_PATH, MOTE_MEMORY_PATH } from '../../../shared/topic-agent-instructions'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -246,6 +247,7 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
       <aside className="mote-profile__about" aria-label="About this Mote">
       <MoteBehaviorSummary scope={scope} active={profileActive} onEdit={() => { behaviorInvoker.current = document.activeElement as HTMLElement; setBehaviorOpen(true) }} onOpenPath={onOpenPath} />
       <MoteMemory scope={scope} active={profileActive} onOpenPath={onOpenPath} />
+      <MotePrivateChat scope={scope} active={profileActive} reference={reference} onOpenPath={onOpenPath} />
       <details className="mote-profile__preferences" onToggle={event => setPreferencesOpen(event.currentTarget.open)}>
         <summary>Connection &amp; preferences<ThemeNavigationDownIcon size={14} /></summary>
         <MoteQuickMode scope={scope} reference={reference} onOpenPath={onOpenPath} active={profileActive && preferencesOpen} />
