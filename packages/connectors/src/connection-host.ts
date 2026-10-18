@@ -134,7 +134,9 @@ export class ConnectionHost implements ConnectionPort {
       try { initialSetup = this.enrollmentOwner().initialSetupObservation(config) }
       catch { /* Association is unconfirmed; do not manufacture a managed requirement for a manual bot. */ }
     }
-    return parseConnectionRecord({ config, revision, observation, ...(initialSetup ? { initialSetup } : {}) })
+    const adapter = this.adapters.get(config.adapterId)
+    const capabilities = adapter ? { roomDiscovery: !!adapter.roomDiscovery, roomCreation: !!adapter.rooms, roomLink: !!adapter.roomDiscovery?.createLink } : undefined
+    return parseConnectionRecord({ config, revision, observation, ...(initialSetup ? { initialSetup } : {}), ...(capabilities ? { capabilities } : {}) })
   }
   /** Synchronous exact configuration read for owners joining this same database transaction. */
   readConfiguration(connectionId: string): ConnectionRecord | null { return this.safe(() => this.read(connectionId, false)) }

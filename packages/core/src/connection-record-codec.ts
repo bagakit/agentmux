@@ -27,9 +27,12 @@ export function parseConnectionObservation(value: unknown): ConnectionObservatio
   return { authentication: stage(p.authentication), transport: stage(p.transport), intake: stage(p.intake), delivery: stage(p.delivery) }
 }
 export function parseConnectionRecord(value: unknown): ConnectionRecord {
-  const p = object(value, ['config', 'revision', 'observation', 'initialSetup'])
+  const p = object(value, ['config', 'revision', 'observation', 'initialSetup', 'capabilities'])
   const initial = p.initialSetup === undefined ? undefined : object(p.initialSetup, ['state'])
   if (initial && !['incomplete', 'complete', 'unconfirmed'].includes(initial.state as string)) fail()
+  const support = p.capabilities === undefined ? undefined : object(p.capabilities, ['roomDiscovery', 'roomCreation', 'roomLink'])
+  if (support && [support.roomDiscovery, support.roomCreation, support.roomLink].some(value => typeof value !== 'boolean')) fail()
   return { config: parseConnectionConfig(p.config), revision: revision(p.revision), observation: parseConnectionObservation(p.observation),
+    ...(support ? { capabilities: { roomDiscovery: support.roomDiscovery as boolean, roomCreation: support.roomCreation as boolean, roomLink: support.roomLink as boolean } } : {}),
     ...(initial ? { initialSetup: { state: initial.state as NonNullable<ConnectionRecord['initialSetup']>['state'] } } : {}) }
 }
