@@ -4,14 +4,14 @@ import type { ConversationItemRef, ConversationSourceRecord } from '@agentmux/co
 import { sessionHistoryTextForReading } from '@agentmux/core/session-user-messages'
 import { readSessionHistoryTextResource } from '@agentmux/core/session-history-content'
 import { SemanticIcon } from '../theme/icons.js'
-import { memo, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
 import { formatClock, formatOffset } from '../lib/conversation-time.js'
 import { useContentCopyAction, ContentCopyIntentContext } from '../lib/use-content-copy-action.js'
 import { useClientUiPlatform, useMarkdownCopyText } from '../platform.js'
 import { externalSpeakerLabel, conversationAgentReference, speakerForDisplay, type ConversationSpeaker, type DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { describeConversationInputSource } from '../lib/conversation-input-source.js'
 import { ConversationInputDetails } from './ConversationInputDetails.js'
-import { AgentMarkdown, type LinkClickModifiers, type OpenWorkspaceFile } from './AgentMarkdown.js'
+import type { LinkClickModifiers, OpenWorkspaceFile } from './AgentMarkdown.js'
 import type { ReadPastedImage } from './ConversationImage.js'
 import { ConversationResourceImage, type ConversationHistoryResourceReader, type ConversationNativeResourceRecord } from './ConversationResourceImage.js'
 import { ConversationResourceText } from './ConversationResourceText.js'
@@ -26,14 +26,13 @@ import { ConversationFiles } from './ConversationFiles.js'
 import { ConversationQuestionReply } from './ConversationQuestionReply.js'
 import { conversationReplyPreview } from '../lib/conversation-reply-preview.js'
 import { ConversationToolPayload } from './ConversationToolPayload.js'
+import { ConversationSpeechCard, SubagentReportCard, SystemRecordCard } from './ConversationMessageCard.js'
 import { ConversationMessageDisclosure } from './ConversationMessageDisclosure.js'
 import type { ConversationTraceDisclosure } from '../lib/conversation-trace-disclosure.js'
 
 import { ConversationSubmissionMetadata } from './ConversationSubmissionMetadata.js'
 import { ConversationSourceLabels } from './ConversationSourceLabels.js'
 import type { ConversationSources } from '../lib/conversation-sources.js'
-
-const MemoizedAgentMarkdown = memo(AgentMarkdown)
 
 export type ConversationContentBoundary = 'wire' | 'body'
 
@@ -193,11 +192,6 @@ export function ConversationMessage({
   const discloseBody = (body: ReactNode) => discloseHuman
     ? <ConversationMessageDisclosure key={JSON.stringify([messageId, recordSourceKey, humanText])} preview={humanText.slice(0, 160).trimEnd()} reveal={located}>{body}</ConversationMessageDisclosure>
     : body
-  const [collaborationOpen, setCollaborationOpen] = useState(located)
-  const [collaborationPresented, setCollaborationPresented] = useState(located)
-  const collaborationContentId = useId()
-  useEffect(() => { setCollaborationOpen(located); setCollaborationPresented(located) }, [readingIdentity])
-  useEffect(() => { if (located) { setCollaborationOpen(true); setCollaborationPresented(true) } }, [located])
   const collaborationPreview = useMemo(() => nativeCollaboration ? conversationReplyPreview(parts.flatMap(part => part.kind === 'text'
     ? [sessionHistoryTextForReading(part)] : []).join('\n\n')).slice(0, 180) : '', [content, Boolean(nativeCollaboration)])
   const parentAvatarSpeaker: ConversationSpeaker | undefined = nativeCollaboration && conversationSessionId
@@ -235,8 +229,6 @@ export function ConversationMessage({
     : prefix?.protocol ? `${prefix.protocol.id ? AMUX_PROTOCOL_DEFINITIONS[prefix.protocol.id].title : 'Protocol declaration'} · ${prefix.protocol.tag}`
     : prefix?.declaredMessageId !== undefined ? AMUX_PROTOCOL_DEFINITIONS.a2a.title : rawSystemSummary
   const isDeclaredSender = prefix !== null && prefix.sourceLabel.length > 0 && recordedSpeaker?.role === 'unknown'
-  const [systemContextOpen, setSystemContextOpen] = useState(false)
-  const systemContentId = useId()
   const agentReference = conversationAgentReference(recordedSpeaker, prefix)
   const recordedUnknown = recordedIdentity && recordedSpeaker?.role === 'unknown'
   const described = agentReference && !recordedUnknown ? describeSpeaker?.(agentReference.speaker) : undefined
@@ -295,8 +287,6 @@ export function ConversationMessage({
     })
   }
 
-  useEffect(() => { setSystemContextOpen(false) }, [messageId])
-
   const partKeys = useMemo(() => {
     const occurrences = new Map<string, number>()
     return parts.map(part => {
@@ -341,6 +331,39 @@ export function ConversationMessage({
         {prefix?.packet && (!isDeclaredSender || !agentReference) ? <span className="log-turn__packet-declaration" title={`Declared profile: ${prefix.packet.profile} · Declared time: ${prefix.packet.time}; recorded authorship and time are unchanged`}>From {prefix.packet.name}</span> : null}
       </div> : null
 
+  const metadataInDetails = detailsOnlyMetadata || continuation || Boolean(nativeCollaboration && !sources?.submissions?.length && !located)
+  const card = {
+    avatar: parentAvatarSpeaker ? parentAvatar?.avatar ?? platform.renderMessageAvatar({ speaker: parentAvatarSpeaker, name: parentAvatar?.name ?? 'Agent', providerId: parentAvatar?.providerId ?? providerId, project: parentAvatar?.project }) : avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12),
+    badges: <>
+      {isPeerAgent && !detailsOnlyMetadata ? <span className="log-turn__sender-kind">Agent</span> : null}
+      {recordTitle && !isSystemContext && !nativeCollaboration ? <span className="log-turn__sender-kind">{recordTitle}</span> : null}
+      {hasQuestionAnswers ? <span className="log-turn__sender-kind">问题答复</span> : null}
+      {status === 'streaming' ? <span className="log-row__chip" role="status"><SemanticIcon name="status.streaming" size={12} />Streaming</span> : null}
+      {status === 'failed' ? <span className="log-row__chip log-row__chip--failed" role="status">{platform.renderIcon('failed', 12)}Failed</span> : null}
+      {status === 'unverified' ? <span className="log-row__chip log-row__chip--unverified" role="status">{platform.renderIcon('neutral', 12)}Unverified</span> : null}
+    </>,
+    time: createdAt === undefined ? null : <span className="log-turn__time" title={origin === undefined
+      ? renderClock(createdAt) : `${renderClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>
+      {renderClock(createdAt)}
+    </span>,
+    actions: hasCopyContent || messageActions ? <span className="log-turn__actions" data-copy-state={copyState}>
+      {messageActions}
+      {copyState === 'failed' ? <span className="log-turn__copy-error" role="alert">{copyReadError ?? 'Copy failed'}</span> : null}
+      {hasCopyContent ? <button type="button" className="log-turn__action" onClick={() => { void copyMessage() }} title="Copy message" aria-label={copyState === 'copied' ? 'Message copied' : 'Copy message'}>
+        <SemanticIcon name="action.copy" size={13} />{copyState === 'copied' ? <span>Copied</span> : null}{copyState === 'failed' ? <span>Retry</span> : null}
+      </button> : null}
+    </span> : null,
+    details: isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity || detailsOnlyMetadata || nativeCollaboration
+      ? <ConversationInputDetails messageId={messageId} source={inputSource} publicContent={publicContent} executionHostId={executionHostId} speaker={recordedSpeaker}
+        declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>
+        {detailsOnlyMetadata ? senderIdentity : null}{metadataInDetails ? metadata : null}{messageDetails}{collaborationOriginal}
+      </ConversationInputDetails> : null,
+    metadata: <>{!metadataInDetails ? metadata : null}
+      {sources && detailsOnlyMetadata && !nativeCollaboration ? <div className="log-turn__meta"><ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /></div> : null}
+    </>,
+    renderBody
+  }
+
   return (
     <ContentCopyIntentContext.Provider value={messageCopy.cancelPreparation}><div
       className="log-turn"
@@ -367,78 +390,20 @@ export function ConversationMessage({
       data-trace-only={isTraceOnly ? 'true' : undefined}
       data-message-bubble={messagePhase !== 'progress' && !compact && !isTraceOnly && (speaker?.role === 'agent' || speaker?.role === 'human' || speaker?.role === 'external') ? 'true' : undefined}
     >
-      <span className="log-turn__node" aria-hidden="true">
-        {parentAvatarSpeaker ? parentAvatar?.avatar ?? platform.renderMessageAvatar({ speaker: parentAvatarSpeaker, name: parentAvatar?.name ?? 'Agent', providerId: parentAvatar?.providerId ?? providerId, project: parentAvatar?.project }) : avatarSpeaker ? described?.avatar ?? platform.renderMessageAvatar({ speaker: avatarSpeaker, name: recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.sourceLabel : displayName, project: described?.project, providerId: displayProvider }) : platform.renderIcon('neutral', 12)}
-      </span>
-      <div className="log-turn__head">
-        <div className="log-turn__title">
-          {nativeCollaboration ? <button type="button" className="log-turn__collaboration-toggle"
-            aria-label={`${collaborationOpen ? '收起' : '展开'} Subagent ${nativeCollaboration.sender ?? '路径未记录'}`}
-            aria-expanded={collaborationOpen} aria-controls={collaborationContentId}
-            onClick={() => { setCollaborationOpen(open => !open); setCollaborationPresented(true) }}>
-            <SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />
-            <span className="log-turn__collaboration-label">Subagent</span>
-            <code className="log-turn__collaboration-path" title={nativeCollaboration.sender}>{nativeCollaboration.sender ?? '路径未记录'}</code>
-            {nativeCollaboration.recipient ? <span className="log-turn__collaboration-recipient" title={`接收者 ${nativeCollaboration.recipient}`}>→ {nativeCollaboration.recipient}</span> : null}
-          </button> : isSystemContext ? <button type="button" className="log-turn__system-toggle"
-            aria-label={systemContextOpen ? '收起系统记录' : '展开系统记录'}
-            aria-expanded={systemContextOpen} aria-controls={hasContent ? systemContentId : undefined}
-            disabled={!hasContent} onClick={() => setSystemContextOpen(open => !open)}>
-            {hasContent ? <SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" /> : null}
-            <span className="log-turn__system-title">{recordTitle || '系统记录'}</span>
-            {systemSummary ? <span className="log-turn__system-summary">{systemSummary}</span> : null}
-          </button> : <span className="log-turn__sender">
-            <span className="log-turn__who">{recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.packet?.name ?? prefix.sourceLabel : displayName}</span>
-            {!detailsOnlyMetadata ? senderIdentity : null}
-          </span>}
-          {isPeerAgent && !detailsOnlyMetadata ? <span className="log-turn__sender-kind">Agent</span> : null}
-          {recordTitle && !isSystemContext && !nativeCollaboration ? <span className="log-turn__sender-kind">{recordTitle}</span> : null}
-          {hasQuestionAnswers ? <span className="log-turn__sender-kind">问题答复</span> : null}
-          {status === 'streaming' ? (
-            <span className="log-row__chip" role="status"><SemanticIcon name="status.streaming" size={12} />Streaming</span>
-          ) : null}
-          {status === 'failed' ? (
-            <span className="log-row__chip log-row__chip--failed" role="status">{platform.renderIcon('failed', 12)}Failed</span>
-          ) : null}
-          {status === 'unverified' ? (
-            <span className="log-row__chip log-row__chip--unverified" role="status">{platform.renderIcon('neutral', 12)}Unverified</span>
-          ) : null}
-        </div>
-        {createdAt === undefined ? null : <span className="log-turn__time" title={origin === undefined
-          ? renderClock(createdAt) : `${renderClock(createdAt)} · ${formatOffset(createdAt, origin)} from start`}>
-          {renderClock(createdAt)}
-        </span>}
-        {hasCopyContent || messageActions ? <span className="log-turn__actions" data-copy-state={copyState}>
-          {messageActions}
-          {copyState === 'failed' ? (
-            <span className="log-turn__copy-error" role="alert">{copyReadError ?? 'Copy failed'}</span>
-          ) : null}
-          {hasCopyContent ? <button type="button" className="log-turn__action" onClick={() => { void copyMessage() }} title="Copy message" aria-label={copyState === 'copied' ? 'Message copied' : 'Copy message'}>
-            <SemanticIcon name="action.copy" size={13} />{copyState === 'copied' ? <span>Copied</span> : null}{copyState === 'failed' ? <span>Retry</span> : null}
-          </button> : null}
-        </span> : null}
-        {isIncoming || speaker?.role === 'agent' || isSystemContext || messageDetails || recordedIdentity || detailsOnlyMetadata || nativeCollaboration ? <ConversationInputDetails messageId={messageId} source={inputSource} publicContent={publicContent} executionHostId={executionHostId} speaker={recordedSpeaker}
-          declaredAgentSessionId={prefix?.declaredAgentSessionId} sourceDeclaration={isDeclaredSender ? prefix.sourceLabel : undefined} describeSpeaker={describeSpeaker} recordedIdentity={recordedIdentity}>{detailsOnlyMetadata ? <>{senderIdentity}{metadata}</> : continuation ? metadata : null}{nativeCollaboration && !sources?.submissions?.length && !located ? metadata : null}{messageDetails}{collaborationOriginal}</ConversationInputDetails> : null}
-      </div>
-      {(!nativeCollaboration || sources?.submissions?.length || located) && !detailsOnlyMetadata && !continuation ? metadata : null}
-      {sources && detailsOnlyMetadata && !nativeCollaboration ? <div className="log-turn__meta"><ConversationSourceLabels sources={sources.main} observation={sources.collectedReply} /></div> : null}
-      {nativeCollaboration && !collaborationOpen ? <button type="button" className="log-turn__collaboration-preview"
-        aria-label="展开协作消息正文" onClick={() => { setCollaborationOpen(true); setCollaborationPresented(true) }}>
-        {collaborationPreview || (collaborationHasResources ? '包含按需读取的内容 · 展开查看' : '暂无可读正文 · 原始内容已保留')}
-      </button> : null}
-      {nativeCollaboration ? <div id={collaborationContentId} className="log-turn__collaboration-content" hidden={!collaborationOpen} inert={!collaborationOpen}>
-        {collaborationPresented || collaborationOpen ? <>
-          {!collaborationPreview && parts.every(part => part.kind === 'text') ? <p className="log-turn__collaboration-empty">原生记录未提供可读正文，可在消息详情中查看原始内容。</p> : null}
-          {renderBody()}
-        </> : null}
-      </div> : renderBody()}
+      {nativeCollaboration ? <SubagentReportCard {...card} identity={readingIdentity} collaboration={nativeCollaboration} located={located}
+        preview={collaborationPreview} hasResources={collaborationHasResources} emptyText={!collaborationPreview && parts.every(part => part.kind === 'text')} />
+        : isSystemContext ? <SystemRecordCard {...card} identity={readingIdentity} title={recordTitle || '系统记录'} summary={systemSummary} hasContent={hasContent} />
+        : <ConversationSpeechCard {...card} sender={<>
+          <span className="log-turn__who">{recordedUnknown ? displayName : agentReference ? senderName : isDeclaredSender ? prefix.packet?.name ?? prefix.sourceLabel : displayName}</span>
+          {!detailsOnlyMetadata ? senderIdentity : null}
+        </>} />}
       {questionDiagnostic ? <p className="agent-interaction__error" role="status" data-question-reply-diagnostic={questionDiagnostic.code}>{questionDiagnostic.message}</p> : null}
       {onContinue ? <button type="button" className="log-turn__continue" onClick={onContinue}>Continue from here</button> : null}
     </div></ContentCopyIntentContext.Provider>
   )
-  function renderBody(): ReactNode {
-    return hasContent && (!isSystemContext || systemContextOpen) ? discloseBody(
-        <div ref={bodyRef} id={isSystemContext ? systemContentId : undefined} className="log-turn__body"
+  function renderBody(contentId?: string): ReactNode {
+    return hasContent ? discloseBody(
+        <div ref={bodyRef} id={contentId} className="log-turn__body"
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
           {hasQuestionAnswers && firstTextIndex < 0 ? <ConversationQuestionReply visible={active} answers={questionAnswers!}
             inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
