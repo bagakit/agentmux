@@ -150,3 +150,46 @@ it('protects a visible process record even when its offscreen parent group remai
   await draw(frame(page(item('offscreen', 'activity'))))
   expect(visible.isConnected, 'A retained process shell cannot substitute for the current reading record').toBe(true)
 })
+
+it('keeps the selected original below a stable leading process header when earlier records arrive', async () => {
+  host.setAttribute('data-workbench-reading-scroll', '')
+  Object.defineProperties(host, { clientHeight: { configurable: true, value: 400 }, scrollHeight: { configurable: true, value: 6000 } })
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this === host) return new DOMRect(0, 0, 600, 400)
+    if (this.matches('.wf-head')) return new DOMRect(0, 30 - host.scrollTop, 600, 32)
+    if (this.dataset.nativeRecordId === 'selected') return new DOMRect(0, 150 + (host.querySelector('[data-native-record-id="earlier"]') ? 1040 : 0) - host.scrollTop, 600, 80)
+    return new DOMRect()
+  })
+  const header = item('leading', 'activity'), selected = item('selected')
+  await draw(frame(page(header, selected)))
+  const row = host.querySelector<HTMLElement>('[data-native-record-id="selected"]')!
+  const text = row.querySelector('p')!.firstChild!, range = select(text)
+  await draw(frame(page(header, item('earlier'), selected)))
+  expect(host.querySelector('[data-native-record-id="earlier"]')).not.toBeNull()
+  expect(row.getBoundingClientRect().top, 'The unchanged leading group is not the selected reading position').toBe(150)
+  expect(host.scrollTop).toBe(1040)
+  expect(host.querySelector('[data-native-record-id="selected"]')).toBe(row)
+  expect(getSelection()!.getRangeAt(0)).toBe(range); expect(range.startContainer).toBe(text)
+})
+
+it('anchors the visible selected leaf when a cross-record Range starts offscreen before a stable group', async () => {
+  host.setAttribute('data-workbench-reading-scroll', '')
+  Object.defineProperties(host, { clientHeight: { configurable: true, value: 400 }, scrollHeight: { configurable: true, value: 6000 } })
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this === host) return new DOMRect(0, 0, 600, 400)
+    if (this.matches('.wf-head')) return new DOMRect(0, 30 - host.scrollTop, 600, 32)
+    if (this.dataset.nativeRecordId === 'start') return new DOMRect(0, -200 - host.scrollTop, 600, 80)
+    if (this.dataset.nativeRecordId === 'selected') return new DOMRect(0, 150 + (host.querySelector('[data-native-record-id="earlier"]') ? 1040 : 0) - host.scrollTop, 600, 80)
+    return new DOMRect()
+  })
+  const start = item('start'), header = item('leading', 'activity'), selected = item('selected')
+  await draw(frame(page(start, header, selected)))
+  const row = host.querySelector<HTMLElement>('[data-native-record-id="selected"]')!
+  const first = host.querySelector('[data-native-record-id="start"] p')!.firstChild!, last = row.querySelector('p')!.firstChild!
+  const range = document.createRange(); range.setStart(first, 1); range.setEnd(last, 3); getSelection()!.addRange(range)
+  await draw(frame(page(start, header, item('earlier'), selected)))
+  expect(host.querySelector('[data-native-record-id="earlier"]')).not.toBeNull()
+  expect(row.getBoundingClientRect().top, 'The offscreen Range start cannot return ownership to the stable group').toBe(150)
+  expect(host.scrollTop).toBe(1040); expect(getSelection()!.getRangeAt(0)).toBe(range)
+  expect(range.startContainer).toBe(first); expect(range.endContainer).toBe(last)
+})
