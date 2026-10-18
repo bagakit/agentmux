@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act, createElement } from 'react'
 import type { FileReadParams, FileReadResult } from '@agentmux/core'
-import { parseMoteBehaviorDocument, serializeMoteBehaviorDocument, DEFAULT_MOTE_BEHAVIOR, MOTE_BEHAVIOR_LINK } from '../src/renderer/src/lib/mote-behavior'
+import { parseMoteBehaviorDocument, serializeMoteBehaviorDocument, DEFAULT_MOTE_BEHAVIOR, MOTE_BEHAVIOR_LINK, MOTE_BEHAVIOR_AXES, type MoteBehaviorDraft } from '../src/renderer/src/lib/mote-behavior'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
 import { api } from '../src/renderer/src/lib/api'
@@ -40,6 +40,17 @@ async function studio() { await moteClick(action('Edit behavior settings')) }
 async function trial() { await studio(); await moteClick(action('Try a cooperation question')) }
 async function choices() { for (const value of ['I', 'N', 'F', 'J']) await moteClick(dialog().querySelector<HTMLInputElement>('input[value="' + value + '"]')!) }
 const scope = () => ({ workspace: scratchWorkspace, topic: moteTopics.find(topic => topic.id === PMO_TEAMS_TOPIC_ID)!, rootPath })
+function savedAxes(preferences: MoteBehaviorDraft) {
+  const list = details().querySelector('.mote-behavior-summary__choices')!
+  expect(list.tagName).toBe('DL')
+  expect(list.children).toHaveLength(4)
+  for (const [index, axis] of MOTE_BEHAVIOR_AXES.entries()) {
+    const row = list.children[index]!, selected = axis.choices.find(choice => choice.value === preferences[axis.id])
+    expect(row.querySelector('dt')?.textContent).toBe(axis.label)
+    expect(row.querySelector('dd strong')?.textContent).toBe(selected?.title ?? 'Not selected')
+    expect(row.querySelector('dd p')?.textContent ?? null).toBe(selected?.rule ?? null)
+  }
+}
 
 describe('original Mote cooperation Editor and explicit new Launcher', () => {
   it('prepares a real editable new Launcher in the same Zone and Group without clearing old inputs or operating a Run', async () => {
@@ -370,9 +381,40 @@ it('keeps ordinary user notes in both Profile and Ideas while excluding the beha
 it('shows a saved partial preference without inventing its missing axes or MBTI code', async () => {
   disk = '---\nversion: 1\npreferences:\n  engagement: I\n---\nKeep these partial notes.'
   await app.mount(); await settleMoteApp()
-  expect(details().querySelector('.mote-behavior-summary__choices')!.children).toHaveLength(1)
+  savedAxes({ engagement: 'I', custom: 'Keep these partial notes.' })
   expect(details().textContent).toContain('Keep these partial notes.')
   expect(details().querySelector('.mote-behavior-summary__tag')).toBeNull()
+})
+
+it('presents every saved personality axis with its own title and working rule before current work', async () => {
+  const preferences = { engagement: 'E', information: 'S', decisions: 'T', approach: 'P', custom: 'Keep my original additional preference.' } as const
+  disk = serializeMoteBehaviorDocument(DEFAULT_MOTE_BEHAVIOR, preferences)
+  await app.mount(); await settleMoteApp()
+  savedAxes(preferences)
+  const personality = details().querySelector('.mote-behavior-summary')!, work = details().querySelector('[aria-label="This Mote’s work"]')!
+  expect(personality.textContent).toContain('Personality & working style')
+  expect(personality.textContent).toContain('MBTI style · ESTP')
+  expect(personality.textContent).toContain(preferences.custom)
+  expect(personality.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(api.files.write).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
+})
+
+it('distinguishes confirmed unselected axes from an unconfirmed original behavior read', async () => {
+  await app.mount(); await settleMoteApp()
+  savedAxes({ custom: '' })
+  const before = useAppStore.getState()
+  vi.mocked(api.files.readPublic).mockImplementation(async params => params.path === 'BEHAVIOR.md'
+    ? { resource: publicRead(params).resource, result: { status: 'unknown', code: 'ORIGINAL_BEHAVIOR_UNCONFIRMED', message: 'Original behavior could not be confirmed.' } }
+    : publicRead(params))
+  await act(async () => useAppStore.setState(state => ({ workspaceFileRevisions: { ...state.workspaceFileRevisions, [SCRATCH_WORKSPACE_ID]: (state.workspaceFileRevisions[SCRATCH_WORKSPACE_ID] ?? 0) + 1 } })))
+  await settleMoteApp()
+  expect(details().querySelector('.mote-behavior-summary__choices')).toBeNull()
+  expect(details().textContent).toContain('Saved behavior is unconfirmed')
+  expect(details().textContent).not.toContain('Not selected')
+  expect(details().querySelector('[aria-label="Edit behavior settings"]')).not.toBeNull()
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(api.files.write).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
 })
 
 it('prefills all four saved choices from the original file when opening settings', async () => {

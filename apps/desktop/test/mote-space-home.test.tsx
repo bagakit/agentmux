@@ -94,6 +94,31 @@ it('returns to each original home and Ideas reading position with its unsent inp
   expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
 })
 
+it('keeps the original private-chat draft and manual question through Ideas and Calendar navigation', async () => {
+  const chatRead = vi.spyOn(api.moteChat, 'call').mockResolvedValue({ configuration: null, operation: null })
+  await app.mount(); await settleMoteApp()
+  const chat = node('[data-mote-private-chat]'), interval = node<HTMLInputElement>('[aria-label="Conversation update interval in minutes"]')
+  expect(chat.closest('.mote-profile__preferences')).toBeNull()
+  const target = chatRead.mock.calls.find(([method]) => method === 'space.mote.chat.inspect')![1]
+  const before = useAppStore.getState()
+  await type('[aria-label="A question for this Mote"]', 'Keep this new-discussion question unsent.')
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(interval, '47')
+    interval.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await moteClick(button('Ideas')); await moteClick(button('Calendar')); await moteClick(button('Profile'))
+  expect(node('[data-mote-private-chat]')).toBe(chat)
+  expect(node<HTMLInputElement>('[aria-label="Conversation update interval in minutes"]')).toBe(interval)
+  expect(interval.value).toBe('47')
+  expect(node<HTMLTextAreaElement>('[aria-label="A question for this Mote"]').value).toBe('Keep this new-discussion question unsent.')
+  expect(chatRead.mock.calls.length).toBeGreaterThan(0)
+  for (const [method, input] of chatRead.mock.calls) { expect(method).toBe('space.mote.chat.inspect'); expect(input).toEqual(target) }
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(useAppStore.getState().moteChatIntents).toEqual(before.moteChatIntents)
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+})
+
 const homeExpanded = () => app.container.querySelector('[data-surface-tool-dock][data-content-expanded="true"]')
 const originalComposer = () => node<HTMLElement>('.workspace-workbench-slot[data-workspace-id="' + SCRATCH_WORKSPACE_ID + '"] .workbench-tab-slot[data-workbench-tab-id="' + defaultTab.id + '"] [aria-label="Message Agent"]')
 async function openHome() {
