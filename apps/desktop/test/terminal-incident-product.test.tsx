@@ -25,9 +25,12 @@ import { useSessionRestart } from '../src/renderer/src/components/SessionRestart
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
 import { readTerminalViewObservation, registerTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
 import { TERMINAL_REVEAL_DEADLINE_MS } from '../src/renderer/src/lib/terminal-reveal'
+import { rendererPerformance } from '../src/renderer/src/lib/renderer-performance'
+import { terminalResourceOwnerCounts } from '../src/renderer/src/lib/terminal-resource-owners'
 
 // Browser xterm open/parser/buffers/selection and owner-size adoption are real; layout, addons and Run boundary are not.
-const fixture = vi.hoisted(() => ({ terminals: [] as BrowserTerminal[], receive: null as ((event: RuntimeEvent) => void) | null, refresh: null as (() => Promise<void>) | null, diagnosticRegionFailure: false, contextLoss: null as (() => void) | null, renderListeners: [] as Array<() => void> }))
+const fixture = vi.hoisted(() => ({ terminals: [] as BrowserTerminal[], receive: null as ((event: RuntimeEvent) => void) | null, refresh: null as (() => Promise<void>) | null, diagnosticRegionFailure: false, contextLoss: null as (() => void) | null, renderListeners: [] as Array<() => void>,
+  gpuReleaseFault: null as { listener: boolean; addon: boolean; first: unknown; second: unknown } | null }))
 vi.mock('../src/renderer/src/lib/client-incident-recorder', async () => {
   const actual = await vi.importActual<typeof import('../src/renderer/src/lib/client-incident-recorder')>('../src/renderer/src/lib/client-incident-recorder')
   return { ...actual, createClientIncidentRecorder(input: Parameters<typeof actual.createClientIncidentRecorder>[0]) {
@@ -57,9 +60,16 @@ vi.mock('@xterm/xterm', async () => {
 vi.mock('@xterm/addon-fit', () => ({ FitAddon: class { activate() {} dispose() {} fit() {} proposeDimensions() { return { cols: 80, rows: 24 } } } }))
 vi.mock('@xterm/addon-search', () => ({ SearchAddon: class { activate() {} dispose() {} onDidChangeResults() { return { dispose() {} } } } }))
 vi.mock('@xterm/addon-web-links', () => ({ WebLinksAddon: class { activate() {} dispose() {} } }))
-vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class { activate() {} dispose() {} onContextLoss(listener: () => void) {
+vi.mock('@xterm/addon-webgl', () => ({ WebglAddon: class { activate() {} dispose() {
+  const fault = fixture.gpuReleaseFault
+  if (fault?.addon) { fault.addon = false; throw fault.second }
+} onContextLoss(listener: () => void) {
   fixture.contextLoss = listener
-  return { dispose() { fixture.contextLoss = null } }
+  return { dispose() {
+    fixture.contextLoss = null
+    const fault = fixture.gpuReleaseFault
+    if (fault?.listener) { fault.listener = false; throw fault.first }
+  } }
 } } }))
 vi.mock('../src/renderer/src/lib/terminal-viewport-sync', async () => {
   const { TerminalViewportSynchronizer } = await vi.importActual<typeof import('../src/renderer/src/lib/terminal-viewport-sync')>('../src/renderer/src/lib/terminal-viewport-sync')
@@ -135,7 +145,7 @@ beforeEach(() => {
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('xterm-char-measure-element') ? 256 : 640 })
   vi.spyOn(HTMLElement.prototype, 'offsetHeight', 'get').mockReturnValue(16)
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, top: 0, left: 0, width: 640, height: 384, right: 640, bottom: 384, toJSON() {} })
-  fixture.terminals.length = 0; fixture.receive = null; fixture.diagnosticRegionFailure = false; fixture.contextLoss = null; fixture.renderListeners = []; releases = []
+  fixture.terminals.length = 0; fixture.receive = null; fixture.diagnosticRegionFailure = false; fixture.contextLoss = null; fixture.renderListeners = []; fixture.gpuReleaseFault = null; releases = []
   attach = vi.spyOn(api.sessions, 'attach').mockResolvedValue(replay(lines))
   vi.spyOn(api.sessions, 'detach').mockResolvedValue(undefined)
   vi.spyOn(api.sessions, 'onEvent').mockImplementation(receive => { fixture.receive = receive; return () => { fixture.receive = null } })
@@ -520,6 +530,195 @@ it('retires suspended terminal frames and obsolete buffers through repeated orig
   // The latest generation can remain in the test/React unmount job; only the five replaced Runs are the reachability oracle.
   expect(obsoleteAlive).toEqual([false, false, false, false, false])
   expect(counts).toEqual(Array(6).fill(counts[0]))
+  expect(frames.size).toBe(0)
+})
+
+it('converges original restart resources with queued output and independent cleanup failures', async () => {
+  const { setFlagsFromString } = await import('node:v8')
+  const { runInNewContext } = await import('node:vm')
+  const { setImmediate: nextJob } = await import('node:timers/promises')
+  setFlagsFromString('--expose_gc')
+  const collect: () => void = runInNewContext('gc')
+  const frames = pausedFrames(window), generations = 36
+  const retired: Array<{ terminal: WeakRef<BrowserTerminal>; buffer: WeakRef<object>;
+    element: WeakRef<HTMLElement>; addon: WeakRef<object> }> = []
+  const samples: Array<{ generation: number; frames: number; queuedBytes: number;
+    owners: ReturnType<typeof terminalResourceOwnerCounts>; readers: number; renderListeners: number }> = []
+  const faults: Array<{ generation: number; kind: string }> = []
+  const neighbor = { ...session, id: 'restart-neighbor', control: { ...session.control,
+    agentSessionId: 'restart-neighbor', run: { runId: 'restart-neighbor-run' } } }
+  useAppStore.setState({ sessions: [session, neighbor], agentComposerDrafts: { [session.id]: 'Unsent original draft' } })
+  const original = useAppStore.getState()
+  let generation = 0
+  const restart = vi.spyOn(api.sessions, 'restart').mockImplementation(async (control, operationId) => {
+    const newRun = { runId: `memory-replacement-${++generation}` }
+    return { agentSessionId: session.id, expectedRun: control.run, operationId, previousRun: control.run,
+      phase: 'restarted', canRetry: false, observedAt: generation, newRun,
+      session: { ...session, control: { ...session.control, run: newRun } } }
+  })
+  attach.mockImplementation(async control => {
+    const result = replay(`ORIGINAL OUTPUT ${control.run.runId}`)
+    return { ...result, attachmentId: `memory-lease-${control.run.runId}`,
+      replay: result.replay.map(item => ({ ...item, runId: control.run.runId })),
+      session: { ...session, control: control as typeof session.control, latestOutputBytes: result.session.latestOutputBytes } }
+  })
+  const encoder = new TextEncoder(), liveBytes = encoder.encode('\x1b[31mLIVE中\x1b[0m')
+  const event = (runId: string, startByte: number, dataBytes: Uint8Array): RuntimeEvent => ({
+    type: 'core', hostId: session.hostId, event: { type: 'terminal-output', agentSessionId: session.id,
+      run: { runId }, data: '', dataBytes, evidence: { source: 'terminal-output', observedAt: 1,
+        outputByteRange: { startByte, endByte: startByte + dataBytes.length } } }
+  })
+  await act(async () => root.render(<RestartTerminalConsumer />))
+  for (let index = 0; index < generations; index++) {
+    let queuedBytes = 0
+    if (index) {
+      await openRestart()
+      const oldRunId = useAppStore.getState().sessions.find(value => value.id === session.id)!.control.run.runId
+      const pending = encoder.encode(`QUEUED OLD ${index}`)
+      const start = encoder.encode(`ORIGINAL OUTPUT ${oldRunId}`).length + liveBytes.length
+      // The old parser has accepted queued work when the original restart receipt replaces it.
+      await act(async () => {
+        fixture.receive!(event(oldRunId, start, pending))
+        queuedBytes = rendererPerformance.snapshot().terminals.find(value => value.runId === oldRunId)!.queuedBytes
+        expect(queuedBytes).toBe(pending.length)
+        document.querySelector<HTMLButtonElement>('[role="dialog"] [data-confirm-label]')!.click()
+      })
+    }
+    const runId = index ? `memory-replacement-${index}` : session.control.run.runId
+    await readyRun(runId)
+    const terminal = fixture.terminals.at(-1)!, start = encoder.encode(`ORIGINAL OUTPUT ${runId}`).length
+    // Original Runtime chunks split ANSI and UTF8. The existing composer/parser owns continuation.
+    await act(async () => {
+      for (const [from, to] of [[0, 3], [3, 10], [10, liveBytes.length]] as const) {
+        fixture.receive!(event(runId, start + from, liveBytes.subarray(from, to)))
+      }
+    })
+    await vi.waitFor(() => expect(terminal.buffer.active.getLine(0)?.translateToString(true)).toBe(`ORIGINAL OUTPUT ${runId}LIVE中`))
+    const addon = (terminal as unknown as { _addonManager: { _addons: Array<{ instance: object }> } })._addonManager._addons.at(-1)!.instance
+    retired.push({ terminal: new WeakRef(terminal), buffer: new WeakRef(terminal.buffer.normal),
+      element: new WeakRef(terminal.element!), addon: new WeakRef(addon) })
+    const owners = terminalResourceOwnerCounts(), readers = rendererPerformance.snapshot().terminals.length
+    samples.push({ generation: index, frames: frames.size, queuedBytes, owners, readers, renderListeners: fixture.renderListeners.length })
+    expect(owners).toEqual({ terminalViews: 1, terminalAddons: 4, terminalListeners: 11 })
+    expect(readers).toBe(1)
+    expect(fixture.renderListeners).toHaveLength(2)
+    if (index % 4 !== 0) {
+      const first = index % 4 === 3 ? undefined : new Error('Original listener release failure')
+      const second = new Error('Original GPU addon release failure')
+      fixture.gpuReleaseFault = { listener: index % 4 !== 2, addon: index % 4 !== 1, first, second }
+      let threw = false, caught: unknown
+      try { fixture.contextLoss!() } catch (error) { threw = true; caught = error }
+      expect(threw).toBe(true)
+      expect(caught).toBe(index % 4 === 2 ? second : first)
+      fixture.gpuReleaseFault = null
+      faults.push({ generation: index, kind: index % 4 === 1 ? 'listener' : index % 4 === 2 ? 'addon' : 'undefined-first-both' })
+    }
+    await act(async () => terminal.input(`CURRENT INPUT ${index}`, true))
+    const current = useAppStore.getState()
+    expect(write.mock.calls.at(-1)!.slice(0, 3)).toEqual([
+      current.sessions.find(value => value.id === session.id)!.control, `CURRENT INPUT ${index}`, 'user'
+    ])
+    expect(current.sessions.find(value => value.id === neighbor.id)).toBe(neighbor)
+    for (const key of ['tabs', 'layouts', 'agentComposerDrafts', 'activeWorkspaceId'] as const) expect(current[key]).toBe(original[key])
+  }
+  expect(restart).toHaveBeenCalledTimes(generations - 1)
+  expect(new Set(restart.mock.calls.map(call => call[1])).size).toBe(generations - 1)
+  expect(restart.mock.calls.every(call => call[2] === false)).toBe(true)
+  const detachments = vi.mocked(api.sessions.detach).mock.calls.map(call => call[0])
+  expect(detachments).toEqual([`memory-lease-${session.control.run.runId}`,
+    ...Array.from({ length: generations - 2 }, (_, index) => `memory-lease-memory-replacement-${index + 1}`)])
+  // Check old generations while the original current view is still mounted. Fixture arrays and
+  // spy receiver/argument histories are test-owned strong roots, not product retention.
+  const activeTerminal = fixture.terminals.at(-1)!
+  fixture.terminals.length = 0; fixture.terminals.push(activeTerminal)
+  vi.clearAllMocks()
+  const collectObsolete = async () => {
+    for (let index = 0; index < 4; index++) { await nextJob(); collect(); await nextJob() }
+    return retired.slice(0, -1).map(refs => ({ terminal: refs.terminal.deref() !== undefined,
+      buffer: refs.buffer.deref() !== undefined, element: refs.element.deref() !== undefined,
+      addon: refs.addon.deref() !== undefined }))
+  }
+  const activeObsolete = await collectObsolete()
+  const active = { owners: terminalResourceOwnerCounts(), readers: rendererPerformance.snapshot().terminals.length, frames: frames.size }
+  await act(async () => root.render(null))
+  expect(api.sessions.detach).toHaveBeenCalledExactlyOnceWith(`memory-lease-memory-replacement-${generations - 1}`)
+  fixture.terminals.length = 0
+  vi.clearAllMocks()
+  const afterObsolete = await collectObsolete()
+  const after = { owners: terminalResourceOwnerCounts(), readers: rendererPerformance.snapshot().terminals.length,
+    renderListeners: fixture.renderListeners.length, frames: frames.size }
+  if (process.env.AGENTMUX_TERMINAL_RESTART_SAMPLE) {
+    const { appendFileSync } = await import('node:fs')
+    appendFileSync(process.env.AGENTMUX_TERMINAL_RESTART_SAMPLE, JSON.stringify({ kind: 'restart-cycle', samples, faults, detachments, activeObsolete, active, afterObsolete, after }) + '\n')
+  }
+  const collected = Array.from({ length: generations - 1 }, () => ({ terminal: false, buffer: false, element: false, addon: false }))
+  expect.soft(activeObsolete).toEqual(collected)
+  expect.soft(afterObsolete).toEqual(collected)
+  expect(samples.map(sample => sample.frames)).toEqual(Array(generations).fill(samples[0]!.frames))
+  expect(active).toEqual({ owners: { terminalViews: 1, terminalAddons: 4, terminalListeners: 11 }, readers: 1, frames: samples[0]!.frames })
+  expect(after).toEqual({ owners: { terminalViews: 0, terminalAddons: 0, terminalListeners: 0 }, readers: 0, renderListeners: 0, frames: 0 })
+  // These are controlled object-reachability facts. The latest React generation and physical
+  // GPU/native/allocator memory are outside this oracle; no RSS or all-App leak claim follows.
+})
+
+it.each(['resolve', 'reject'] as const)('releases a retired input observer while the original pending input reply will %s', async outcome => {
+  const { setFlagsFromString } = await import('node:v8')
+  const { runInNewContext } = await import('node:vm')
+  const { setImmediate: nextJob } = await import('node:timers/promises')
+  setFlagsFromString('--expose_gc')
+  const collect: () => void = runInNewContext('gc'), pending = deferred<void>(), frames = pausedFrames(window)
+  let settled = false
+  void pending.promise.then(() => { settled = true }, () => { settled = true })
+  write.mockReturnValue(pending.promise)
+  attach.mockResolvedValue(replay('ORIGINAL INPUT OWNER'))
+  await render(); await readyRun(session.control.run.runId)
+  const refs = { terminal: new WeakRef(fixture.terminals[0]!), buffer: new WeakRef(fixture.terminals[0]!.buffer.normal),
+    element: new WeakRef(fixture.terminals[0]!.element!) }
+  const pendingBefore = rendererPerformance.snapshot().inputRequests.user.pending
+  await act(async () => fixture.terminals[0]!.input('ORIGINAL PENDING INPUT', true))
+  expect(write.mock.calls.at(-1)!.slice(0, 3)).toEqual([session.control, 'ORIGINAL PENDING INPUT', 'user'])
+  expect(settled).toBe(false)
+  // Additional real generations exclude the current React/async job from this old-object oracle.
+  for (let generation = 0; generation < 3; generation++) {
+    const next = { ...session, control: { ...session.control, run: { runId: `pending-input-replacement-${generation}` } } }
+    const result = replay('REPLACEMENT OUTPUT')
+    attach.mockResolvedValue({ ...result, attachmentId: `pending-input-lease-${generation}`,
+      session: { ...next, latestOutputBytes: result.session.latestOutputBytes },
+      replay: result.replay.map(item => ({ ...item, runId: next.control.run.runId })) })
+    await render(next); await readyRun(next.control.run.runId)
+  }
+  await act(async () => root.render(null))
+  expect(api.sessions.detach).toHaveBeenCalledTimes(4)
+  expect(fixture.receive).toBeNull(); expect(fixture.refresh).toBeNull(); expect(fixture.contextLoss).toBeNull()
+  fixture.terminals.length = 0
+  vi.clearAllMocks()
+  const collectRetired = async () => {
+    for (let index = 0; index < 4; index++) { await nextJob(); collect(); await nextJob() }
+    return { terminal: refs.terminal.deref() !== undefined, buffer: refs.buffer.deref() !== undefined,
+      element: refs.element.deref() !== undefined }
+  }
+  let whilePending: Awaited<ReturnType<typeof collectRetired>>
+  try {
+    whilePending = await collectRetired()
+    expect(settled).toBe(false)
+    expect(rendererPerformance.snapshot().inputRequests.user.pending).toBe(pendingBefore + 1)
+  } finally {
+    // Retirement never settles or cancels the original request. Both late outcomes remain observed.
+    if (outcome === 'resolve') pending.resolve()
+    else pending.reject(new Error('Original input reply failed after its view retired'))
+    await pending.promise.catch(() => {})
+  }
+  const afterSettlement = await collectRetired()
+  if (process.env.AGENTMUX_TERMINAL_RESTART_SAMPLE) {
+    const { appendFileSync } = await import('node:fs')
+    appendFileSync(process.env.AGENTMUX_TERMINAL_RESTART_SAMPLE, JSON.stringify({ kind: 'pending-input', outcome,
+      whilePending, afterSettlement, frames: frames.size, owners: terminalResourceOwnerCounts(),
+      readers: rendererPerformance.snapshot().terminals.length }) + '\n')
+  }
+  expect.soft(whilePending).toEqual({ terminal: false, buffer: false, element: false })
+  expect(afterSettlement).toEqual({ terminal: false, buffer: false, element: false })
+  expect(settled).toBe(true)
+  expect(rendererPerformance.snapshot().inputRequests.user.pending).toBe(pendingBefore)
   expect(frames.size).toBe(0)
 })
 
