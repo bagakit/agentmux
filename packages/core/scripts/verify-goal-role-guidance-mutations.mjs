@@ -21,7 +21,7 @@ const cases = [
     from: 'if (original) return original.admission?.intent?.message?.systemContext', to: 'if (original) return note',
     oracle: 'a frozen original application segment survives guidance changes verbatim' },
   { name: 'fresh-pmo-launch-loses-manager-role', file: 'apps/desktop/src/renderer/src/store.ts',
-    from: "goalRoleGuidance({ role: 'manager', goalId: demandId, source: { kind: fresh ? 'goal-pmo-launch' : 'goal-discussion', ...(intent.creationOperationId ? { operationId: intent.creationOperationId } : {}) } })", to: "''",
+    from: "goalRoleGuidance({ role: 'manager', goalId: demandId, source: { kind: 'goal-pmo-launch', ...(intent.creationOperationId ? { operationId: intent.creationOperationId } : {}) } })", to: "''",
     oracle: 'actual Renderer PMO fresh producer reaches registered IPC and real Core with manager responsibility' },
   { name: 'native-continuation-loses-executor-role', file: 'apps/desktop/src/main/continuous-progress-loop-manager.ts',
     from: "goalRoleGuidance({ role: 'executor', goalId: claim.loop.taskSource.goalId, agentSessionId: claim.loop.agentSessionId, runId: observation.session.run.runId, source: { kind: 'goal-native-continuation', operationId: claim.tickId } })", to: "''",

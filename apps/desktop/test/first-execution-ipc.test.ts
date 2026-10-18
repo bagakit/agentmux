@@ -151,7 +151,7 @@ it('PMO fresh Store launch keeps explicit note in pending intent and records the
     const entries = Object.entries(useAppStore.getState().pendingAgentLaunches)
     expect(entries).toHaveLength(1)
     const [sessionId, intent] = entries[0]!, note = intent.request!.agentMuxNote!
-    expect(intent.request!.prompt).toBe('Clarify goal'); expect(note).toContain(MOTE_COORDINATION_ROLE)
+    expect(intent.request!.prompt).toBe('Clarify goal'); expect(note).not.toContain(MOTE_COORDINATION_ROLE)
     expect(note).toContain('Project: Original Project'); expect(note).toContain(originalGoal.description)
     useAppStore.setState({ demands: { [originalGoal.id]: { ...originalGoal, description: 'Later changed Goal' } }, activeWorkspaceId: SCRATCH_WORKSPACE_ID })
     release(); const tabId = await pending
@@ -270,7 +270,7 @@ it('PMO retained launcher carries the original producer note after editing raw u
     const tabId = await useAppStore.getState().openDemandPmo(originalGoal.id), tab = useAppStore.getState().tabs[tabId]!, regionId = tab.layout.activeRegionId
     const note = useAppStore.getState().agentComposerNotes[regionId]!
     expect(useAppStore.getState().agentComposerDrafts[regionId]).toBe('')
-    expect(note).toContain(MOTE_COORDINATION_ROLE); expect(note).toContain(originalGoal.description)
+    expect(note).not.toContain(MOTE_COORDINATION_ROLE); expect(note).toContain(originalGoal.description)
     expect(f.start.mock.calls).toEqual([])
     const prompt = '  User edited <amux from="amux">literal body</amux>\r\nKeep the ending.  \n'
     useAppStore.getState().setAgentComposerDraft(regionId, prompt)

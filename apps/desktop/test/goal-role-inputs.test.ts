@@ -14,9 +14,11 @@ import { RuntimeController } from '../src/main/runtime-controller'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store'
 import { deliverContinuousProgress } from '../src/main/continuous-progress-delivery'
+import { ScratchTopics } from '../src/main/scratch-topics'
+import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
 import { goalPmoOperation } from '../src/shared/goal-pmo-origin'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
+import { MOTE_COORDINATION_ROLE, SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID } from '../src/shared/scratch-topics'
 import { sessionAgentLaunchResult } from '../src/shared/session-agent-launch-result'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
@@ -48,9 +50,9 @@ function registeredHandler(channel: string) {
 const trusted = (actual: object, expected: object) => { if (actual !== expected) throw new Error('Untrusted sender') }
 function promptHandler(runtime: RuntimeController, dispatch: GoalDispatchInputOwner, sender: object, goals?: ReturnType<typeof openDemandStore>) {
   const expression = registeredHandler('sessions:submitPrompt')
-  const names = ['sessionInputWriteResult', 'assertManualPromptSenderTrusted', 'pauseUserProgress', 'args', 'pmoGoal', 'goalPmoOperation', 'goalRoleInputNote', 'AgentMuxError', 'assertGoalDispatchReference', 'goalDispatchInputs', 'confirmedPmoSource']
+  const names = ['sessionInputWriteResult', 'assertManualPromptSenderTrusted', 'pauseUserProgress', 'args', 'contents', 'pmoGoal', 'goalPmoOperation', 'goalRoleInputNote', 'AgentMuxError', 'assertGoalDispatchReference', 'goalDispatchInputs', 'confirmedPmoSource']
   const outside = () => { throw new Error('PMO creation provenance is outside this finite Start fixture') }
-  return new Function(...names, `return ${expression}`)(sessionInputWriteResult, trusted, vi.fn(), { runtime, window: { webContents: sender } },
+  return new Function(...names, `return ${expression}`)(sessionInputWriteResult, trusted, vi.fn(), { runtime, window: { webContents: sender } }, sender,
     goals ? async (intent: { goalId: string }) => { const goal = await goals.get(intent.goalId); expect(goal).not.toBeNull(); return goal } : outside,
     goalPmoOperation, goalRoleInputNote, AgentMuxError, assertGoalDispatchReference, dispatch,
     // Participation persistence is tested by its business owner; this input proof observes Core records.
@@ -100,14 +102,15 @@ it.each(['fresh', 'reuse'] as const)('actual Renderer PMO %s producer reaches re
   const native = await injectedContextCore(root, mode === 'reuse' ? { kind: 'agent', agentSessionId: 'manager', providerId: 'traex', executorId: 'fixture', hostId: 'local', workspacePath: root,
     run: { runId: 'original-manager-run' }, retiredRuns: [], hookBindingId: 'binding', hookToken: 'token', createdAt: Date.now() - 1000, updatedAt: Date.now() } : undefined)
   cleanup.push(native.dispose)
-  const runtime = new RuntimeController(native.store, localRuntimeConnector, { prepareAgent: async () => ({ absolutePath: root, prompt: 'Original Topic context' }), discardPreparedIdentity: async () => {} } as never)
+  const topics = new ScratchTopics(), prepare = vi.spyOn(topics, 'prepareAgent')
+  const runtime = new RuntimeController(native.store, localRuntimeConnector, topics)
   runtime.commit({ hosts: [{ id: 'local', client: native.core, executionHost: new LocalExecutionHost(), config: { id: 'local', kind: 'local', label: 'Fixture' } }], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   const goals = openDemandStore({ root: join(root, 'goals') }); await goals.create({ id: 'goal', title: 'Original Goal', description: 'Original human task' }); const goal = (await goals.get('goal'))!
   const config: AppConfig = { ...structuredClone(DEFAULT_CONFIG), executors: { fixture: { providerId: 'traex', label: 'Fixture', command: process.execPath, args: [], env: {}, injectAgentMuxGuide: false } },
     workspaces: [{ id: SCRATCH_WORKSPACE_ID, name: 'Topics', hostId: 'local', path: root, kind: 'scratch' }] }
   const sender = { isDestroyed: () => false }, submit = promptHandler(runtime, new GoalDispatchInputOwner(goals, runtime), sender, goals)
-  const launch = new Function('sessionAgentLaunchResult', 'assertManualPromptSenderTrusted', 'pmoGoal', 'goalPmoOperation', 'args', 'config', 'confirmedPmoSource', 'AgentMuxError', `return ${registeredHandler('sessions:launchAgent')}`)(
-    sessionAgentLaunchResult, trusted, async (intent: { goalId: string }) => { expect(intent.goalId).toBe(goal.id) }, goalPmoOperation, { runtime, window: { webContents: sender } }, config, async () => {}, AgentMuxError)
+  const launch = new Function('sessionAgentLaunchResult', 'assertManualPromptSenderTrusted', 'pmoGoal', 'goalPmoOperation', 'args', 'contents', 'config', 'confirmedPmoSource', 'AgentMuxError', `return ${registeredHandler('sessions:launchAgent')}`)(
+    sessionAgentLaunchResult, trusted, async (intent: { goalId: string }) => { expect(intent.goalId).toBe(goal.id) }, goalPmoOperation, { runtime, window: { webContents: sender } }, sender, config, async () => {}, AgentMuxError)
   bridge.invoke.mockImplementation(async (channel, ...args) => {
     if (channel === 'sessions:launchAgent') return launch({ sender }, ...structuredClone(args))
     if (channel === 'sessions:submitPrompt') return submit({ sender }, ...structuredClone(args))
@@ -120,7 +123,10 @@ it.each(['fresh', 'reuse'] as const)('actual Renderer PMO %s producer reaches re
   vi.spyOn(api.sessions, 'onEvent').mockReturnValue(() => {})
   vi.spyOn(api.continuousProgress, 'pauseForInput').mockResolvedValue(undefined)
   vi.spyOn(api.demands, 'list').mockImplementation(() => goals.list())
-  vi.spyOn(api.scratch, 'ensureTopic').mockResolvedValue({ id: PMO_TEAMS_TOPIC_ID } as never)
+  vi.spyOn(api.scratch, 'ensureTopic').mockImplementation(async (workspaceId, topicId) => {
+    expect(workspaceId).toBe(SCRATCH_WORKSPACE_ID)
+    return await topics.ensure(config.workspaces[0]!, topicId)
+  })
   useLauncherState.setState({ executors: { [SCRATCH_WORKSPACE_ID]: 'fixture' } })
   const recipient = mode === 'reuse' ? await runtime.refresh({ kind: 'agent', hostId: 'local', agentSessionId: 'manager', run: { runId: 'original-manager-run' } }, config) : undefined
   const tab = recipient ? { ...createWorkbenchTab('pmo-tab', { regionId: 'pmo-region', kind: 'agent', phase: 'attached', workspaceId: SCRATCH_WORKSPACE_ID, sessionId: recipient.id }), topicId: PMO_TEAMS_TOPIC_ID } : undefined
@@ -134,11 +140,25 @@ it.each(['fresh', 'reuse'] as const)('actual Renderer PMO %s producer reaches re
     await useAppStore.getState().flushAgentSteerQueue(managerId, useAppStore.getState().agentSteerQueues[managerId]?.[0]?.operationId)
   }
   const items = (await native.store.loadTimeline(managerId)).items, note = items.find(item => item.kind === 'system_message')!.content
+  expect(note.split(MOTE_COORDINATION_ROLE)).toHaveLength(2)
+  const responsibilities = goalRoleGuidance({ role: 'manager' }).split('\n\n').slice(1).join('\n\n')
+  expect(responsibilities.length).toBeGreaterThan(0)
+  expect(note.split(responsibilities)).toHaveLength(2)
   expect(note).toContain('Goal role: manager'); expect(note).toContain('"goalId":"goal"'); expect(note).toContain('amux goal --skill')
   expect(note).toContain('perform the inspection'); expect(note).toContain('next responsible party')
   expect(items.find(item => item.kind === 'user_message')!.content).toBe('Clarify goal')
-  if (mode === 'reuse') { expect(note).toContain('"agentSessionId":"manager"'); expect(note).toContain('"runId":"original-manager-run"'); expect(native.start).not.toHaveBeenCalled() }
-  else expect(native.start).toHaveBeenCalledOnce()
+  if (mode === 'reuse') {
+    const operationId = vi.mocked(api.sessions.submitPrompt).mock.calls[0]![2]
+    expect(note).toContain(goalRoleGuidance({ role: 'manager', goalId: 'goal', agentSessionId: 'manager', runId: 'original-manager-run',
+      source: { kind: 'goal-discussion', operationId } }))
+    expect(prepare).not.toHaveBeenCalled(); expect(native.start).not.toHaveBeenCalled()
+  } else {
+    expect(prepare).toHaveBeenCalledOnce()
+    const prepared = await prepare.mock.results[0]!.value
+    expect(prepared.snapshot.kind).toBe('mote'); expect(prepared.prompt).toContain(MOTE_COORDINATION_ROLE)
+    expect(note).toContain(goalRoleGuidance({ role: 'manager', goalId: 'goal', source: { kind: 'goal-pmo-launch' } }))
+    expect(native.start).toHaveBeenCalledOnce()
+  }
   expect(native.stop).not.toHaveBeenCalled()
 })
 
