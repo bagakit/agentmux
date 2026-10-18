@@ -1,10 +1,11 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { randomBytes, randomUUID } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
+import { mintObjectId } from '@agentmux/identity'
 import { WebSocket, WebSocketServer, type RawData } from 'ws'
 
 export interface LocalRelayConnectionInfo { readonly address?: string; readonly userAgent?: string }
 
-/** Local adapter for Paseo's V2 control/data protocol. Encryption remains end to end. */
+/** Local adapter for the V2 control/data protocol. Encryption remains end to end. */
 export async function startLocalRelay(options: {
   serverId: string
   port: number
@@ -68,7 +69,7 @@ export async function startLocalRelay(options: {
         return
       }
       if (!control || control.readyState !== WebSocket.OPEN) { ws.close(4001, 'Host reconnecting'); return }
-      const key = randomUUID()
+      const key = mintObjectId()
       const address = request.socket.remoteAddress?.replace(/^::ffff:/u, '')
       const userAgent = request.headers['user-agent']
       const pair = { client: ws, data: undefined as WebSocket | undefined, pending: [] as { data: RawData; binary: boolean }[], bytes: 0,

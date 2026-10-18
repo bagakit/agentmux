@@ -657,6 +657,9 @@ importers:
 
   packages/relay:
     dependencies:
+      '@agentmux/identity':
+        specifier: workspace:*
+        version: link:../identity
       base64-js:
         specifier: ^1.5.1
         version: 1.5.1

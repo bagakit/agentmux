@@ -38,6 +38,7 @@
     "build": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@agentmux/identity": "workspace:*",
     "base64-js": "^1.5.1",
     "tweetnacl": "^1.0.3",
     "ws": "^8.18.0"
