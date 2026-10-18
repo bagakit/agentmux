@@ -48,7 +48,7 @@ async function save(target: SurveyRecallCapture, notebookId: string, draft: stri
   if (!workspace) throw new Error('The Notes folder is unavailable. Your browser and capture draft are kept; reconnect it and retry.')
   const groupId = state.prepareWorkbenchLayout(workspace.id).activeGroupId
   if (!receipt) {
-    receipt = { intentId: crypto.randomUUID(), createdAt: Date.now(), noteId: mintObjectId(), blockIds: [mintObjectId()],
+    receipt = { intentId: mintObjectId(), createdAt: Date.now(), noteId: mintObjectId(), blockIds: [mintObjectId()],
       draft, path: '', status: 'pending', revealed: false, notebook: { notebookId, source: target.source },
       target: { workspaceId: workspace.id, hostId: workspace.hostId, workspacePath: workspace.path, directoryPath: workspace.path,
         relativeDirectory: '', zoneId: null, sourceSpaceId: null, displayWorkspaceId: workspace.id, groupId } }

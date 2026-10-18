@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useMemo, useState } from 'react'
 import { useVisibleWork } from '@agentmux/client-ui/use-visible-work'
 
@@ -9,7 +10,7 @@ export function DotFilePreview({ content, path, visible = true }: { content: str
   const [result, setResult] = useState<{ owner: object; content: string; attempt: number; url?: string; error?: string } | null>(null)
   useEffect(() => {
     if (!inView) return
-    const id = crypto.randomUUID()
+    const id = mintObjectId()
     let worker: Worker
     try { worker = new Worker(new URL('../../lib/file-formats/dot-worker.ts', import.meta.url), { type: 'module' }) }
     catch { setResult({ owner, content, attempt, error: 'The DOT worker could not start. Retry preview or return to Source.' }); return }

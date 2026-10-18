@@ -503,7 +503,7 @@ const mockApi: AgentMuxDesktopApi = {
       const demand: Demand = { id: input.id ?? mintObjectId(), title: input.title, description: input.description ?? '', status: input.status ?? 'backlog', priority: input.priority ?? 'normal', projectId: input.projectId ?? null, projectName: input.projectName ?? null, executorId: null, tags: [...(input.tags ?? [])], plannedStartAt: input.plannedStartAt ?? null, targetAt: input.targetAt ?? null, parentDemandId: input.parentDemandId ?? null, phaseIndex: input.phaseIndex ?? null, sessionIds: [...new Set([...(input.sessionIds ?? []), ...(input.assigneeSessionIds ?? [])])], assigneeSessionIds: [...(input.assigneeSessionIds ?? [])], supervisorSessionId: input.supervisorSessionId ?? null, participations: [], activities: [], decisions: [], createdAt: now, updatedAt: now }
       if (demand.supervisorSessionId && !demand.assigneeSessionIds.includes(demand.supervisorSessionId)) throw new Error('Supervisor must be an assignee.')
       mockDemands.set(demand.id, demand)
-      return { schema: 'agentmux.demand-receipt.v1', operation: 'create', operationId: `mock-${crypto.randomUUID()}`, revision: mockDemands.size, demand: structuredClone(demand) }
+      return { schema: 'agentmux.demand-receipt.v1', operation: 'create', operationId: `mock-${mintObjectId()}`, revision: mockDemands.size, demand: structuredClone(demand) }
     },
     update: async (id, patch) => {
       const now = Date.now()
@@ -511,9 +511,9 @@ const mockApi: AgentMuxDesktopApi = {
       const demand: Demand = { id, title: patch.title ?? previous?.title ?? 'Demand', description: patch.description ?? previous?.description ?? '', status: patch.status ?? previous?.status ?? 'backlog', priority: patch.priority ?? previous?.priority ?? 'normal', projectId: patch.projectId === undefined ? previous?.projectId ?? null : patch.projectId, projectName: patch.projectName === undefined ? previous?.projectName ?? null : patch.projectName, executorId: previous?.executorId ?? null, tags: patch.tags === undefined ? [...(previous?.tags ?? [])] : [...patch.tags], plannedStartAt: patch.plannedStartAt === undefined ? previous?.plannedStartAt ?? null : patch.plannedStartAt, targetAt: patch.targetAt === undefined ? previous?.targetAt ?? null : patch.targetAt, parentDemandId: patch.parentDemandId === undefined ? previous?.parentDemandId ?? null : patch.parentDemandId, phaseIndex: patch.phaseIndex === undefined ? previous?.phaseIndex ?? null : patch.phaseIndex, sessionIds: [...new Set([...(patch.sessionIds ?? previous?.sessionIds ?? []), ...(patch.assigneeSessionIds ?? previous?.assigneeSessionIds ?? [])])], assigneeSessionIds: [...(patch.assigneeSessionIds ?? previous?.assigneeSessionIds ?? [])], supervisorSessionId: Object.hasOwn(patch, 'supervisorSessionId') ? patch.supervisorSessionId ?? null : previous?.supervisorSessionId ?? null, participations: [...(previous?.participations ?? [])], dispatches: [...(previous?.dispatches ?? [])], ...(previous?.creationOrigin ? { creationOrigin: { ...previous.creationOrigin, ...(Object.hasOwn(patch, 'supervisorSessionId') ? { supervisorDefaultPending: false } : {}) } } : {}), activities: [...(previous?.activities ?? [])], decisions: [...(previous?.decisions ?? [])], createdAt: previous?.createdAt ?? now, updatedAt: now }
       if (demand.supervisorSessionId && !demand.assigneeSessionIds.includes(demand.supervisorSessionId)) throw new Error('Supervisor must be an assignee.')
       mockDemands.set(id, demand)
-      return { schema: 'agentmux.demand-receipt.v1', operation: 'update', operationId: `mock-${crypto.randomUUID()}`, revision: mockDemands.size, demand: structuredClone(demand) }
+      return { schema: 'agentmux.demand-receipt.v1', operation: 'update', operationId: `mock-${mintObjectId()}`, revision: mockDemands.size, demand: structuredClone(demand) }
     },
-    delete: async (id) => { const demand = mockDemands.get(id) ?? { id, title: 'Demand', description: '', status: 'backlog' as const, priority: 'normal' as const, projectId: null, projectName: null, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, sessionIds: [], assigneeSessionIds: [], supervisorSessionId: null, participations: [], activities: [], decisions: [], createdAt: Date.now(), updatedAt: Date.now() }; mockDemands.delete(id); return { schema: 'agentmux.demand-receipt.v1', operation: 'remove', operationId: `mock-${crypto.randomUUID()}`, revision: mockDemands.size, demand: structuredClone(demand) } },
+    delete: async (id) => { const demand = mockDemands.get(id) ?? { id, title: 'Demand', description: '', status: 'backlog' as const, priority: 'normal' as const, projectId: null, projectName: null, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, sessionIds: [], assigneeSessionIds: [], supervisorSessionId: null, participations: [], activities: [], decisions: [], createdAt: Date.now(), updatedAt: Date.now() }; mockDemands.delete(id); return { schema: 'agentmux.demand-receipt.v1', operation: 'remove', operationId: `mock-${mintObjectId()}`, revision: mockDemands.size, demand: structuredClone(demand) } },
     linkSession: async (id, sessionId) => mockApi.demands.update(id, { description: `${id}:${sessionId}` }),
     unlinkSession: async (id) => mockApi.demands.update(id, {}),
     activity: async () => { throw new Error('Activity append requires the original Desktop Demand owner.') },
@@ -1003,7 +1003,7 @@ const mockApi: AgentMuxDesktopApi = {
       const executor = mockConfig.executors[input.executorId]
       if (!executor) throw new Error(`Unknown Agent Executor: ${input.executorId}`)
       const agentSessionId = input.agentSessionId ?? mintObjectId()
-      const runId = crypto.randomUUID()
+      const runId = mintObjectId()
       const session: SessionSnapshot = {
         id: agentSessionId,
         kind: 'agent',
@@ -1038,7 +1038,7 @@ const mockApi: AgentMuxDesktopApi = {
       } }
     },
     launchTerminal: async (input) => {
-      const runId = crypto.randomUUID()
+      const runId = mintObjectId()
       const session: SessionSnapshot = {
         id: runId,
         kind: 'terminal',
@@ -1091,7 +1091,7 @@ const mockApi: AgentMuxDesktopApi = {
       const sessionId = control.kind === 'agent' ? control.agentSessionId : control.runId
       const session = mockSnapshot.sessions.find((item) => item.id === sessionId)
       if (!session) throw new Error(`Session not found: ${sessionId}`)
-      const attachmentId = crypto.randomUUID()
+      const attachmentId = mintObjectId()
       mockAttachmentControls.set(attachmentId, control)
       return {
         attachmentId,
@@ -1206,7 +1206,7 @@ const mockApi: AgentMuxDesktopApi = {
     resume: async (control, prompt) => {
       const session = mockSnapshot.sessions.find((item) => item.id === control.agentSessionId)
       if (!session || session.kind !== 'agent') throw new Error(`Session not found: ${control.agentSessionId}`)
-      const runId = crypto.randomUUID()
+      const runId = mintObjectId()
       session.processState = 'running'
       session.status = { state: 'running', source: 'run-process', observedAt: Date.now() }
       session.updatedAt = Date.now()
@@ -1238,7 +1238,7 @@ const mockApi: AgentMuxDesktopApi = {
       if (control.kind === 'agent') {
         // Agents resume under the same agentSessionId with a fresh runId.
         if (!previous) throw new Error(`Session not found: ${sessionId}`)
-        const runId = crypto.randomUUID()
+        const runId = mintObjectId()
         previous.processState = 'running'
         previous.status = { state: 'running', source: 'run-process', observedAt: Date.now() }
         previous.updatedAt = Date.now()
@@ -1247,7 +1247,7 @@ const mockApi: AgentMuxDesktopApi = {
         return { kind: 'resumed' as const, session: structuredClone(previous) }
       }
       // Terminals relaunch as a brand-new Run in the same cwd.
-      const runId = crypto.randomUUID()
+      const runId = mintObjectId()
       const session: SessionSnapshot = {
         id: runId,
         kind: 'terminal',
@@ -1330,7 +1330,7 @@ const mockApi: AgentMuxDesktopApi = {
       const browser: BrowserSnapshot = {
         id,
         mode,
-        navigationId: crypto.randomUUID(),
+        navigationId: mintObjectId(),
         profileId: mode === 'private' ? null : rememberedProfileId ?? mockDefaultBrowserProfile.id,
         url: resolveBrowserAddress(url),
         title: 'New Tab',
@@ -1353,7 +1353,7 @@ const mockApi: AgentMuxDesktopApi = {
       if (!current) throw new Error(`Unknown browser: ${id}`)
       const url = resolveBrowserAddress(rawUrl)
       const browser = { ...current, url, title: url === 'about:blank' ? 'New Tab' : new URL(url).hostname, error: null }
-      browser.navigationId = crypto.randomUUID()
+      browser.navigationId = mintObjectId()
       mockBrowsers.set(id, browser)
       browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))
       return structuredClone(browser)
@@ -1361,7 +1361,7 @@ const mockApi: AgentMuxDesktopApi = {
     back: async (id) => structuredClone(requireMockBrowser(id)),
     forward: async (id) => structuredClone(requireMockBrowser(id)),
     reload: async (id) => {
-      const browser = { ...requireMockBrowser(id), navigationId: crypto.randomUUID() }
+      const browser = { ...requireMockBrowser(id), navigationId: mintObjectId() }
       mockBrowsers.set(id, browser)
       return structuredClone(browser)
     },
@@ -1372,7 +1372,7 @@ const mockApi: AgentMuxDesktopApi = {
       const browser = {
         ...requireMockBrowser(id),
         profileId,
-        navigationId: crypto.randomUUID()
+        navigationId: mintObjectId()
       }
       mockBrowsers.set(id, browser)
       browserListeners.forEach((listener) => listener({ type: 'updated', browser: structuredClone(browser) }))
@@ -1500,7 +1500,7 @@ const mockApi: AgentMuxDesktopApi = {
         const browser: BrowserSnapshot = {
           id,
           mode: input.mode ?? 'normal',
-          navigationId: crypto.randomUUID(),
+          navigationId: mintObjectId(),
           profileId: input.profileId,
           url: 'about:blank',
           title: 'New Tab',
@@ -1518,7 +1518,7 @@ const mockApi: AgentMuxDesktopApi = {
       }
       const browser = {
         ...current,
-        navigationId: crypto.randomUUID(),
+        navigationId: mintObjectId(),
         profileId: input.profileId,
         url: current.url,
         viewport: cloneBrowserViewport(input.viewport)

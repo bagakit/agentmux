@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useLayoutEffect, useMemo, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import type { WorkspaceRecord } from '../../../shared/contracts'
@@ -77,7 +78,7 @@ export const WorkspaceZonesPanel = memo(function WorkspaceZonesPanel({ workspace
 
   async function selectZone(zoneId: string): Promise<void> {
     try {
-      const result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: crypto.randomUUID(),
+      const result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: mintObjectId(),
         operation: 'focus', target: { kind: 'space', spaceId: context.spaceId, zoneId }, inputPolicy: 'preserve' })
       if (result.operation !== 'focus' || result.navigation.state === 'rejected' || result.navigation.state === 'unconfirmed') {
         const detail = result.operation === 'focus' ? result.issues.map(issue => `${issue.message} ${issue.recovery}`).join('\n') : ''

@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import * as Menu from '@radix-ui/react-dropdown-menu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -95,7 +96,7 @@ export function ConversationAnnotationDelivery({ sessionId, origin, annotation, 
     }
     if (!executor || !choices.some(item => item.id === executor)) { onError('请先选择这个项目执行设备上的 Agent 配置。'); return }
     let creation: NewRequest
-    try { creation = annotationCreationRequest(sessionId, origin, executor, annotation, `annotation:${crypto.randomUUID()}`) }
+    try { creation = annotationCreationRequest(sessionId, origin, executor, annotation, `annotation:${mintObjectId()}`) }
     catch (error) { onError(error instanceof Error ? error.message : String(error)); return }
     flight.current = true; setBusy(true); setRequest(creation); onPendingChange?.(true)
     try {
@@ -113,7 +114,7 @@ export function ConversationAnnotationDelivery({ sessionId, origin, annotation, 
     if (!activeRef.current || !request || flight.current || accepted.current) return
     flight.current = true; setBusy(true)
     try {
-      const result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: `inspect:${crypto.randomUUID()}`,
+      const result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: `inspect:${mintObjectId()}`,
         operation: 'space.inspect', target: { requestId: request.requestId } })
       if (!mounted.current) return
       if (result.operation === 'space.inspect' && result.request?.requestId === request.requestId && result.request.report) acceptCreation(result.request.report)

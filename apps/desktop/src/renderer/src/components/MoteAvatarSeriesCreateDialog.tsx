@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useEffect, useRef, useState } from 'react'
 import type { MoteAvatarSeriesCreateResult } from '@agentmux/core/mote-avatar-series'
@@ -10,7 +11,7 @@ const AddIcon = semanticIconComponent('action.add-item')
 const FolderIcon = semanticIconComponent('action.open-folder')
 const CopyIcon = semanticIconComponent('action.copy')
 const CloseIcon = semanticIconComponent('action.close')
-const freshFolder = () => 'my-series-' + crypto.randomUUID().slice(0, 8)
+const freshFolder = () => 'my-series-' + mintObjectId()
 
 export function MoteAvatarSeriesCreateDialog({ disabled, rootPath, onUse }: {
   disabled: boolean; rootPath?: string | undefined;

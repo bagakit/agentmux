@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useSyncExternalStore } from 'react'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxSpaceMutationReport } from '@agentmux/core/control'
 import { useAppStore } from '../store'
@@ -19,7 +20,7 @@ const subscribe = (listener: () => void) => { listeners.add(listener); return ()
 function publish(value: Request) { current = value; for (const listener of listeners) listener() }
 export async function requestGlobalGoalPatrol(fresh = false): Promise<void> {
   if (flight) return flight
-  const operationId = !fresh && current ? current.operationId : crypto.randomUUID()
+  const operationId = !fresh && current ? current.operationId : mintObjectId()
   let preferenceIssue: string | undefined
   try { localStorage.setItem(key, operationId) }
   catch { preferenceIssue = '本机入口引用保存未确认；本次操作仍沿原空间回执保留。' }

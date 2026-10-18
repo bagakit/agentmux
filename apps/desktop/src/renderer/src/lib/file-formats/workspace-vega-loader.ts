@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { Loader } from 'vega'
 import { api } from '../api'
@@ -43,7 +44,7 @@ export function createWorkspaceVegaLoader(workspaceId: string, sourcePath: strin
   }
   const read = async (kind: 'data' | 'image', uri: string) => {
     check()
-    const path = chartResourcePath(sourcePath, uri), id = crypto.randomUUID()
+    const path = chartResourcePath(sourcePath, uri), id = mintObjectId()
     pending.add(id)
     try {
       const result = await api.files.readPreviewResource({ id, workspaceId, path, kind })

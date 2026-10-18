@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 // Portions adapted from Orca, MIT Copyright (c) 2026 Lovecast Inc.; see THIRD_PARTY_NOTICES.md.
 import { TextInput } from '@agentmux/client-ui/input'
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
@@ -237,7 +238,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
   }
   function beginText(shape?: TextShape, at: ScreenshotPoint = { x: 0, y: 0 }) {
     resetGesture()
-    const draft: TextDraft = shape ? { shape, existing: true, edited: false } : { shape: { id: crypto.randomUUID(), kind: 'text', color,
+    const draft: TextDraft = shape ? { shape, existing: true, edited: false } : { shape: { id: mintObjectId(), kind: 'text', color,
       at, text: '', fontSize: fontSize / viewRef.current.scale }, existing: false, edited: false }
     textDraftRef.current = draft; setPendingText(draft)
   }
@@ -266,7 +267,7 @@ export function ImageAnnotationEditor({ image, busy, copied, active = true, init
       eraseRef.current = new Set(); lastErasePoint.current = at; const shape = hit(at); if (shape) eraseRef.current.add(shape.id)
     } else if (tool === 'crop') cropRef.current = { from: at, to: at }
     else {
-      const id = crypto.randomUUID(), fit = viewRef.current.scale, stroke = width / fit
+      const id = mintObjectId(), fit = viewRef.current.scale, stroke = width / fit
       currentGestureRef.current = tool === 'pen' || tool === 'highlight'
         ? { id, kind: tool, color, width: stroke, points: [at] }
         : tool === 'pixelate' ? { id, kind: 'pixelate', color, blockSize: blockSize / fit, from: at, to: at }

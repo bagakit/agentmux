@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useRef, useState } from 'react'
 import { formatSessionAddress } from '@agentmux/core/sharing'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core/control'
@@ -58,7 +59,7 @@ export function GoalDelegationWork({ demand, active = true, compact = false }: {
   async function review() {
     try {
       const result = await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-        requestId: crypto.randomUUID(), operation: 'focus', target: { kind: 'goal', goalId: demand.id }, inputPolicy: 'preserve' })
+        requestId: mintObjectId(), operation: 'focus', target: { kind: 'goal', goalId: demand.id }, inputPolicy: 'preserve' })
       if (result.operation === 'focus' && result.navigation.state === 'rejected') setIssue(result.issues.map(item => item.message).join(' '))
     } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
   }

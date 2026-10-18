@@ -288,7 +288,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
       }
       if ('native' in row.candidate) {
         const operation = nativeOperations.current[key] ??= structuredClone({ request: {
-          agentSessionId: mintObjectId(), createOperationId: crypto.randomUUID(), hostId: row.candidate.hostId,
+          agentSessionId: mintObjectId(), createOperationId: mintObjectId(), hostId: row.candidate.hostId,
           executorId: row.candidate.executorId, workspacePath: row.candidate.workspacePath,
           nativeResumeSource: row.candidate.native.source }, source: row.candidate.native, capabilities: row.candidate.capabilities, attempted: false })
         const retry = operation.attempted
@@ -305,7 +305,7 @@ export function LauncherResumePicker({ workspace, disabled = false }: { workspac
       // Core can report that this stable Session already owns a newer Run. Re-read that exact
       // identity instead of retrying the obsolete Run or starting a replacement Agent.
       if (current?.status.continuityConflict === 'session-run-changed') await before.refreshSession(id)
-      const recovered = await recoverSession(id, crypto.randomUUID(), { stillCurrent: stillSelected })
+      const recovered = await recoverSession(id, mintObjectId(), { stillCurrent: stillSelected })
       if (recovered) {
         if (stillSelected()) changeOpen(false)
         else setFeedback({ id, name: row.name, outcome: 'restored', text: 'This saved Session was restored in its original project. Its current Run remains available.' })

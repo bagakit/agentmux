@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useContext, useEffect, useId, useRef, useState, type ComponentProps } from 'react'
@@ -241,14 +242,14 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
   function createRoom() {
     if (!connection || !availableForNewGroup(connection) || roomIntent || binding || awaitingCreator || !name.trim() || members && !memberType.trim()) return
     void work(() => execute({ method: 'connection.room.create', target: { ...target, regionAnchor: { ...target.regionAnchor } }, phase: 'not-dispatched', input: {
-      ...target, operationId: crypto.randomUUID(), connectionId, expectedConnectionRevision: connection.revision, name,
+      ...target, operationId: mintObjectId(), connectionId, expectedConnectionRevision: connection.revision, name,
       members: [...new Map([...(creatorInvitation.member ? [creatorInvitation.member] : []), ...members.split('\n').filter(value => value !== '').map(userId => ({ idType: memberType, userId }))].map(member => [JSON.stringify([member.idType, member.userId]), member])).values()]
     } }))
   }
   function createJoinLink(replacesOperationId?: string) {
     if (!connection || !audience) return
     if (replacesOperationId ? linkIntent?.input.operationId !== replacesOperationId || !linkOperation || linkOperation.state !== 'confirmed' && linkOperation.state !== 'refused' : audienceLinks.length > 0) return
-    void work(() => execute({ method: 'connection.room.link.create', target, phase: 'not-dispatched', ...(replacesOperationId ? { replacesOperationId } : {}), input: { operationId: crypto.randomUUID(), connectionId,
+    void work(() => execute({ method: 'connection.room.link.create', target, phase: 'not-dispatched', ...(replacesOperationId ? { replacesOperationId } : {}), input: { operationId: mintObjectId(), connectionId,
       expectedConnectionRevision: connection.revision, externalConversationId: audience } }))
   }
   function bind() {
@@ -256,12 +257,12 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
     if (!connection || !confirmed || native?.kind !== 'provider' || !audience.trim()) return
     const previous = relevant.find(intent => intent.method === 'connection.bind' || intent.method === 'connection.binding.relink')
     if (previous) { void work(async () => { await inspect(previous) }); return }
-    const input = { ...target, operationId: crypto.randomUUID(), bindingId: binding?.bindingId ?? crypto.randomUUID(), connectionId,
+    const input = { ...target, operationId: mintObjectId(), bindingId: binding?.bindingId ?? mintObjectId(), connectionId,
       expectedConnectionRevision: connection.revision, externalConversationId: audience,
       scope: { input: scope, publication }, expectedSource: { providerId: native.providerId, nativeSessionId: native.sessionId } }
     void work(() => execute(binding ? { method: 'connection.binding.relink', input: { ...input, expectedRevision: binding.revision }, target, phase: 'not-dispatched' } : { method: 'connection.bind', input, target, phase: 'not-dispatched' }))
   }
-  function pause() { const previous = relevant.find(intent => intent.method === 'connection.binding.pause'); if (previous) { void work(async () => { await inspect(previous) }); return } if (binding) void work(() => execute({ method: 'connection.binding.pause', target, phase: 'not-dispatched', input: { operationId: crypto.randomUUID(), bindingId: binding.bindingId, expectedRevision: binding.revision } })) }
+  function pause() { const previous = relevant.find(intent => intent.method === 'connection.binding.pause'); if (previous) { void work(async () => { await inspect(previous) }); return } if (binding) void work(() => execute({ method: 'connection.binding.pause', target, phase: 'not-dispatched', input: { operationId: mintObjectId(), bindingId: binding.bindingId, expectedRevision: binding.revision } })) }
   function currentGrantIntent(intent: ConnectorRoomIntent): boolean {
     return intent.method === 'connection.grant' && !!binding && intent.input.bindingId === binding.bindingId &&
       intent.input.expectedBindingRevision === binding.revision && intent.input.actor.application.domain === binding.application.domain && intent.input.actor.application.appId === binding.application.appId
@@ -273,8 +274,8 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
     if (previous) { void memberWork(key, async () => { await inspect(previous) }); return }
     if (!actorInput && !actorAnswer && !actorPermission) return
     void memberWork(key, () => execute({ method: 'connection.grant', target, phase: 'not-dispatched', input: {
-      operationId: crypto.randomUUID(), bindingId: binding.bindingId, expectedBindingRevision: binding.revision,
-      grantId: actorGrant?.grantId ?? crypto.randomUUID(), expectedRevision: actorGrant?.revision ?? null,
+      operationId: mintObjectId(), bindingId: binding.bindingId, expectedBindingRevision: binding.revision,
+      grantId: actorGrant?.grantId ?? mintObjectId(), expectedRevision: actorGrant?.revision ?? null,
       actor: { application: binding.application, idType: actorType, userId: actorId },
       capabilities: [...(actorInput ? ['input' as const] : []), ...(actorAnswer ? ['answer' as const] : []), ...(actorPermission ? ['permission' as const] : [])], state: 'active'
     } }))
@@ -286,7 +287,7 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
     const previous = relevant.find(intent => intent.method === 'connection.grant' && currentGrantIntent(intent) && intent.input.grantId === grant.grantId && intent.input.actor.idType === grant.actor.idType && intent.input.actor.userId === grant.actor.userId)
     if (previous) { void memberWork(key, async () => { await inspect(previous) }); return }
     void memberWork(key, () => execute({ method: 'connection.grant', target, phase: 'not-dispatched', input: {
-      operationId: crypto.randomUUID(), bindingId: binding.bindingId, expectedBindingRevision: binding.revision, grantId: grant.grantId, expectedRevision: grant.revision,
+      operationId: mintObjectId(), bindingId: binding.bindingId, expectedBindingRevision: binding.revision, grantId: grant.grantId, expectedRevision: grant.revision,
       actor: grant.actor, capabilities, state: capabilities.length ? 'active' : 'revoked'
     } }))
   }

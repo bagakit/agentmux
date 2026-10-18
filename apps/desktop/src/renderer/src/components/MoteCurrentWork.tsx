@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -86,7 +87,7 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
     const token = {}; flight.current = token; setLoading(true)
     try {
       await useAppStore.getState().executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
-        requestId: crypto.randomUUID(), operation: 'demand.list' })
+        requestId: mintObjectId(), operation: 'demand.list' })
       if (lifetime.current === owner) setIssue(null)
     } catch (error) { if (lifetime.current === owner) setIssue(presentError(error)) }
     finally { if (flight.current === token) { flight.current = null; if (lifetime.current === owner) setLoading(false) } }
@@ -103,7 +104,7 @@ export function MoteCurrentWork({ scope, reference, active = true }: {
     const events = ['pointerdown', 'keydown', 'input'] as const
     for (const event of events) document.addEventListener(event, cancel, true)
     try {
-      const result = await state.executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: crypto.randomUUID(),
+      const result = await state.executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(),
         operation: 'focus', target: id ? { kind: 'goal', goalId: id } : { kind: 'surface', surface: 'goals' }, inputPolicy: 'preserve' }, controller.signal)
       if (result.operation === 'focus' && result.navigation.state === 'rejected') setIssue(result.issues.map(item => item.message).join(' '))
     } catch (error) { if (!controller.signal.aborted) state.reportError(error) }

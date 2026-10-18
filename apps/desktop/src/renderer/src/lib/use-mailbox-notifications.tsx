@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useMemo } from 'react'
 import type { AgentMuxMessageMetadata, AgentMuxMessageNotification, AgentPromptInputKey } from '@agentmux/core'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -91,7 +92,7 @@ export function useMailboxNotifications(reference: SessionHistoryReference, mess
     if (Object.values(state.mailboxNotificationIntents[subject] ?? EMPTY_INTENTS).some(intent => mailboxNotificationScope(intent) === scope(messageId) &&
       state.mailboxNotificationFeedback[subject]?.[mailboxNotificationIntentKey(intent)]?.sending)) return
     const intent: MailboxNotificationIntent = { hostId: reference.hostId, participantSessionId: reference.agentSessionId, messageId,
-      recipientSessionId: message.envelope.recipientSessionId!, operationId: crypto.randomUUID(), createdAt: Date.now(),
+      recipientSessionId: message.envelope.recipientSessionId!, operationId: mintObjectId(), createdAt: Date.now(),
       ...(message.envelope.recipientRunId ? { recipientRunId: message.envelope.recipientRunId } : {}) }
     patchFeedback(intent, { state: 'pending', sending: true })
     try {
@@ -108,7 +109,7 @@ export function useMailboxNotifications(reference: SessionHistoryReference, mess
   async function readEvents(target: Pick<MailboxNotificationIntent, 'hostId' | 'participantSessionId' | 'messageId' | 'recipientSessionId'>,
     continuation?: MailboxNotificationFeedback['older']) {
     const owner = mailboxNotificationSubject(target), id = mailboxNotificationScope(target)
-    const prior = useAppStore.getState().mailboxNotificationHistory[owner]?.[id], request = crypto.randomUUID()
+    const prior = useAppStore.getState().mailboxNotificationHistory[owner]?.[id], request = mintObjectId()
     useAppStore.setState(state => ({ mailboxNotificationHistory: { ...state.mailboxNotificationHistory,
       [owner]: { ...state.mailboxNotificationHistory[owner],
         [id]: { events: [], ...state.mailboxNotificationHistory[owner]?.[id], loading: request, error: undefined } } } }))
@@ -152,7 +153,7 @@ export function useMailboxNotifications(reference: SessionHistoryReference, mess
   async function inspect(intent: MailboxNotificationIntent, refresh: () => void | Promise<void>, continuation?: MailboxNotificationFeedback['older']) {
     const previous = feedback(intent)
     if (previous?.checking) return
-    const request = crypto.randomUUID(), original = { hostId: intent.hostId, agentSessionId: intent.participantSessionId }
+    const request = mintObjectId(), original = { hostId: intent.hostId, agentSessionId: intent.participantSessionId }
     patchFeedback(intent, { checking: request })
     let eventIssue: string | undefined
     try {

@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useContext, useEffect, useId, useRef, useState } from 'react'
@@ -114,7 +115,7 @@ export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved
     const baseline = moteConnectionBaseline(snapshot.saved), chosen = snapshot.connections.find(item => choiceKey(item.config) === value)
     if (!baseline) { setIssue('Read this Mote’s current choice before saving. Your selection is kept.'); return }
     if (value && (!chosen?.config.enabled || connectionNeedsInitialSetup(chosen))) { setIssue('Choose an enabled bot or continue its unfinished original setup in settings.'); return }
-    const input: MoteConnectionPreferencesSaveParams = { kind: 'connection', target, operationId: crypto.randomUUID(), baseline,
+    const input: MoteConnectionPreferencesSaveParams = { kind: 'connection', target, operationId: mintObjectId(), baseline,
       values: { connection: chosen ? { connectionId: chosen.config.connectionId, application: structuredClone(chosen.config.application) } : null } }
     const token = alive.current, epoch = ++readEpoch.current
     let dispatched = false

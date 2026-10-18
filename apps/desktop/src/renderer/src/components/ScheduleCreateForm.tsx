@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import { ComposerTextarea, TextInput } from '@agentmux/client-ui/input'
 import { parseAgentScheduleCalendar, parseAgentScheduleAfterMs } from '@agentmux/core/schedule'
@@ -93,7 +94,7 @@ export function ScheduleCreateForm({ draftKey, target, onReceipt, initialMessage
       setSavedArrangement(undefined)
       update({ target: exact })
       void operation.perform({ action: 'create', params: { target: exact, ...timing,
-        prompt: form.context ? form.prompt + '\n\n' + form.context : form.prompt, operationId: 'schedule-' + crypto.randomUUID() } })
+        prompt: form.context ? form.prompt + '\n\n' + form.context : form.prompt, operationId: 'schedule-' + mintObjectId() } })
     } catch (error) { setNotice(error instanceof Error ? error.message : String(error)) }
   }
   return <><details ref={element} className="continuous-progress-control__details schedule-create" open={form.open} onToggle={event => {

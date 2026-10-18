@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -515,7 +516,7 @@ export function BranchesPanel({ workspace, inventoryWorkspace = workspace, activ
         const saved = config?.workspaces.find(value => value.id === zone.workspaceId && value.hostId === zone.hostId && value.path === zone.directoryPath)
         const label = saved?.name ?? zone.directoryPath?.split(/[\\/]/).filter(Boolean).at(-1) ?? 'Saved workface'
         return <button key={zone.zoneId} type="button" title={zone.zoneId} onClick={() => {
-          void useAppStore.getState().executeControl({ schemaVersion: 5, requestId: crypto.randomUUID(), operation: 'focus',
+          void useAppStore.getState().executeControl({ schemaVersion: 5, requestId: mintObjectId(), operation: 'focus',
             target: { kind: 'space', spaceId: zoneContext!.spaceId, zoneId: zone.zoneId }, inputPolicy: 'preserve' })
             .then(result => { if (result.operation !== 'focus' || result.navigation.state === 'rejected' || result.navigation.state === 'unconfirmed') setActionError('The saved workface navigation is unconfirmed. Your original workface is kept; retry this directory.') })
             .catch(error => setActionError(message(error)))

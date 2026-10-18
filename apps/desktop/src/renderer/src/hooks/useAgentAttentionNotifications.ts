@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect } from 'react'
 import {
   resolveNotificationModeId,
@@ -54,7 +55,7 @@ export function useAgentAttentionNotifications(): void {
         if (!disposed) { badgeCount = count; badgeFailureKey = undefined }
       } catch (error) {
         if (!disposed) {
-          badgeFailureKey ??= crypto.randomUUID()
+          badgeFailureKey ??= mintObjectId()
           reportError(new Error(
             'Updating the Dock badge did not complete. Agent attention remains visible in this window; the next Agent status update will retry.',
             { cause: error }

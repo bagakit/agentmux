@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { ContinuousProgressLoop } from '@agentmux/core/continuous-progress-scheduler'
 import type { ScheduleOccurrence } from '@agentmux/core/schedule-calendar'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -36,7 +37,7 @@ export function ScheduleArrangementRow({ schedule, occurrence, timezone, now, on
   const remaining = Math.ceil((schedule.nextCheckAt - now) / 1000)
   const relative = remaining <= 0 ? 'Due' : remaining < 60 ? remaining + 's left' : remaining < 3600 ? Math.ceil(remaining / 60) + 'm left' : Math.ceil(remaining / 3600) + 'h left'
   const mutate = (action: 'pause' | 'resume' | 'cancel') => void operation.perform({ action,
-    params: { scheduleId: schedule.loopId, expectedRevision: schedule.revision!, operationId: crypto.randomUUID() } })
+    params: { scheduleId: schedule.loopId, expectedRevision: schedule.revision!, operationId: mintObjectId() } })
   async function inspectSaved() {
     try {
       const result = await api.schedule.inspect({ scheduleId: schedule.loopId })

@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import { parseFileReadResult } from '@agentmux/core/files'
 import { parseMoteAvatarWriteResult } from '@agentmux/core/mote-avatar-write'
@@ -287,7 +288,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
         action: 'create',
         phase: 'not-dispatched',
         input: {
-          operationId: crypto.randomUUID(),
+          operationId: mintObjectId(),
           source: {
             ...profile.source,
             expectedAvatarRevision: includeAvatar ? profile.source.expectedAvatarRevision : null
@@ -312,7 +313,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
         action: 'sync',
         phase: 'not-dispatched',
         input: {
-          operationId: crypto.randomUUID(),
+          operationId: mintObjectId(),
           source: {
             ...profile.source,
             expectedAvatarRevision: includeAvatar ? profile.source.expectedAvatarRevision : null

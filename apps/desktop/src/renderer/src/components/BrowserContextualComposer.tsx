@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { observeBrowserReader } from '../lib/browser-reader-position'
 import { ComposerTextarea } from '@agentmux/client-ui/input'
@@ -136,7 +137,7 @@ export function useBrowserContextualComposer(browserId: string, operation: Brows
     // Once freeze starts, only this exact original intent can retry an unknown result.
     const note = original.comment ? 'The user selected this historical Browser step as reference data, separately from the observed page: ' +
       JSON.stringify(original.comment).replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e').replace(/&/gu, '\\u0026') : undefined
-    const intent = pending.current ?? { operationId: crypto.randomUUID(), text, context: includeContext && original.scene !== undefined, ...(note ? { note } : {}) }
+    const intent = pending.current ?? { operationId: mintObjectId(), text, context: includeContext && original.scene !== undefined, ...(note ? { note } : {}) }
     if (intent.text !== text || intent.context !== (includeContext && original.scene !== undefined) || intent.note !== note) {
       setFailure('The original send is unconfirmed. Keep its words and context to retry it, or inspect Pending before composing another opinion.'); return
     }

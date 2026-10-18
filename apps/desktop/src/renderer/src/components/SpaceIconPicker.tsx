@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useLayoutEffect, useRef, useState } from 'react'
@@ -224,7 +225,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
     if (!target || busy || preparing || seriesPreparing || (seriesAttempt && seriesAttempt.state !== 'saved' && (editingSeries || seriesAttempt.state !== 'unsent')) || editingSeries && seriesStorageIssue || (!editingFace && preview && !previewReady)) return
     if (editingSeries) {
       if (!target.avatarTarget || !avatarBaseline || !seriesDraft || avatarReading) return
-      const request = freezeSeriesSave({ target: target.avatarTarget, operationId: crypto.randomUUID(), beforeRevision: avatarBaseline.revision,
+      const request = freezeSeriesSave({ target: target.avatarTarget, operationId: mintObjectId(), beforeRevision: avatarBaseline.revision,
         source: seriesDraft.source, definition: seriesDraft.definition, parameters: seriesDraft.parameters, pngDataUrl: seriesDraft.pngDataUrl })
       await submitSeriesSave(request, target)
       return
