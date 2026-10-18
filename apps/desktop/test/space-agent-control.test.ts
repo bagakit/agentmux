@@ -326,6 +326,38 @@ describe('public Desktop spatial Control owner', () => {
     expect(created).toHaveBeenCalledTimes(1)
   })
 
+  it.each(['retained', 'removed'] as const)('reports retired creation through public readback with %s target placement and no replay', async placement => {
+    const created = vi.spyOn(api.sessions, 'launchAgent').mockImplementation(async input => launch(agent(input.agentSessionId!, input.workspacePath), input.createOperationId!))
+    const refresh = vi.spyOn(api.sessions, 'refresh'), stop = vi.spyOn(api.sessions, 'stop')
+    const input = request({ operation: 'agent.open', content: { kind: 'new-agent', executorId: 'fixture', prompt: 'once' },
+      destination: { zoneId: workspaceZoneId(directoryIdentity('local', _hygiene_fixturePath("other")), 'other') }, focus: false })
+    const opened = await useAppStore.getState().executeControl(input)
+    if (opened.operation !== 'agent.open') throw new Error('Wrong operation')
+    const original = agentCreationFixture(agent(opened.agent!.agentSessionId, _hygiene_fixturePath("other")))
+    const retirement = { source: 'user' as const, observedAt: 42 }
+    vi.spyOn(api.sessions, 'creation').mockResolvedValue({ kind: 'retired-agent', agentSessionId: original.agentSessionId,
+      hostId: 'local', run: original.run, ...retirement, history: { providerId: original.providerId, executorId: original.executorId,
+        workspacePath: original.workspacePath, createdAt: original.createdAt, creation: { createOperationId: input.requestId, initialPrompt: 'confirmed' } } })
+    if (placement === 'removed') useAppStore.setState({ sessions: [], tabs: {}, layouts: {} })
+    const before = { tabs: useAppStore.getState().tabs, layouts: useAppStore.getState().layouts, sessions: useAppStore.getState().sessions }
+    const query = request({ operation: 'space.inspect', target: { requestId: input.requestId } })
+    const inspected = await useAppStore.getState().executeControl(query)
+    if (inspected.operation !== 'space.inspect') throw new Error('Wrong operation')
+    expect(inspected.request!.report).toMatchObject({ outcome: 'retired', agent: {
+      agentSessionId: original.agentSessionId, runId: original.run.runId, createOperationId: input.requestId, retirement }, issues: [] })
+    const receipt = parseAgentMuxControlReceipt({ schemaVersion: 5, requestId: query.requestId, ok: true, operation: inspected.operation,
+      result: Object.fromEntries(Object.entries(inspected).filter(([key]) => key !== 'operation')) }, query)
+    expect(receipt).toMatchObject({ result: { request: { report: { outcome: 'retired', agent: { retirement } } } } })
+    const publicResult = parseRpcControlResult('space.inspect', rpcControlResult('space.inspect', inspected), { target: { operationId: input.requestId } })
+    expect(publicResult).toMatchObject({ request: { operationId: input.requestId, report: { outcome: 'retired', agent: { retirement } } } })
+    expect(await useAppStore.getState().executeControl(input)).toMatchObject({ outcome: 'retired' })
+    expect(useAppStore.getState()).toMatchObject(before)
+    expect(created).toHaveBeenCalledTimes(1); expect(refresh).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
+    vi.mocked(api.sessions.creation).mockRejectedValue(new Error('Exact retirement read unavailable'))
+    expect(await useAppStore.getState().executeControl(query)).toMatchObject({ request: { report: { outcome: 'unknown', issues: expect.arrayContaining([expect.objectContaining({ code: 'AGENT_CREATION_UNKNOWN' })]) } } })
+    expect(created).toHaveBeenCalledTimes(1)
+  })
+
   it('retains the first launch error across persistence reload and public readback without replaying', async () => {
     const original = Object.assign(new Error('Runtime durable database is full'), { code: 'CTXMUX_DURABILITY_FAILED' })
     const created = vi.spyOn(api.sessions, 'launchAgent').mockRejectedValue(original)

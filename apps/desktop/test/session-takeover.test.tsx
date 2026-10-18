@@ -196,6 +196,22 @@ it.each(['disk', 'identity'])('settles an unobserved new Agent from exact Core c
   expect(launch).toHaveBeenCalledTimes(1)
 })
 
+it('keeps a later retirement observed while naming instead of returning an earlier opened result', async () => {
+  const launch = launchBoundary(), report = await takeOverSession(source, 'fixture', () => true), id = report.agent!.agentSessionId
+  const execute = useAppStore.getState().executeControl
+  const confirmed = await execute({ schemaVersion: 5, requestId: 'before-retirement', operation: 'space.inspect', target: { requestId: report.requestId } })
+  vi.spyOn(useAppStore.getState(), 'executeControl').mockImplementation((request, signal) => request.operation === 'space.inspect' ? Promise.resolve(confirmed) : execute(request, signal))
+  useAppStore.setState(state => ({ sessions: state.sessions.filter(s => s.id !== id), agentNames: {}, nameLabels: {} }))
+  const original = creations.get(id)!
+  vi.mocked(api.sessions.creation).mockResolvedValue({ kind: 'retired-agent', agentSessionId: id, hostId: 'local', run: original.run,
+    source: 'user', observedAt: 42, history: { providerId: original.providerId, executorId: original.executorId,
+      workspacePath: original.workspacePath, createdAt: original.createdAt, creation: original.creation } })
+  const rename = vi.spyOn(useAppStore.getState(), 'renameAgent')
+  expect(await inspectTakeover(source)).toMatchObject({ requestId: report.requestId, outcome: 'retired', agent: {
+    agentSessionId: id, runId: original.run.runId, retirement: { source: 'user', observedAt: 42 } } })
+  expect(rename).not.toHaveBeenCalled(); expect(launch).toHaveBeenCalledTimes(1)
+})
+
 it('a moved display uses the exact original execution Zone instead of the display Host', async () => {
   config = { ...config, hosts: [...config.hosts, { id: 'remote', kind: 'ssh', label: 'Build', hostname: 'private.invalid' }],
     workspaces: [...config.workspaces, { id: 'execution', hostId: 'remote', path: _hygiene_fixturePath("srv/repo"), name: 'Remote', kind: 'folder' }] }
@@ -343,7 +359,7 @@ it('an incomplete two-Host catalogue cannot establish a unique takeover source w
     workspacePath: _hygiene_fixturePath("repo"), run: { runId: 'retained-original-run' }, retiredRuns: [], createdAt: 1, updatedAt: 1,
     hookBindingId: 'private-fixture', hookToken: 'private-fixture-token', nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'original-native' } })
   const failure = new Error('The other exact Host retained metadata is unavailable.')
-  vi.spyOn(failedStore, 'load').mockRejectedValue(failure)
+  vi.spyOn(failedStore, 'loadMetadata').mockRejectedValue(failure)
   const healthy = new AgentMuxClient({ store: goodStore }), failed = new AgentMuxClient({ store: failedStore })
   const controller = new RuntimeController(goodStore, async () => { throw new Error('No Runtime connection belongs to this metadata fixture') })
   controller.commit({ hosts: [

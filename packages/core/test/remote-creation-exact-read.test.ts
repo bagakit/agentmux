@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient, hostAgentCreationIntent, type AgentMuxHostAgentCreateInput } from '../src/client.js'
 import { AgentMuxCreationAuthority, agentCreationIntentDigest } from '../src/agent-creation-authority.js'
 import { AgentMuxHostExecutorOwner } from '../src/executor-owner.js'
-import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, agentLifecycleOperationIdentity } from '../src/agent-session-store.js'
+import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, agentLifecycleOperationIdentity, type AgentMuxAgentSessionStore } from '../src/agent-session-store.js'
+import { readCurrentSessionDatabase } from '../src/agent-session-database.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import { hostedTestClient } from './helpers/hosted-runtime-port.js'
 
@@ -43,7 +44,106 @@ async function fixture(kind: 'memory' | 'file') {
   return { root, client, inner, store, start, stop, send, metadata, forbidCatalogue }
 }
 
+async function retire(store: AgentMuxAgentSessionStore, original: AgentMuxStoredAgentSession) {
+  const reservation = { kind: 'stop' as const, reservationId: `retire-${original.agentSessionId}`, ownerId: 'retirement-owner', ownerPid: process.pid,
+    agentSessionId: original.agentSessionId, expectedRun: original.run, operationId: `stop-${original.agentSessionId}`, expiresAt: Date.now() + 60_000,
+    stopOperation: { daemonInstance: 'private-unconnected', operationKey: `stop-${original.agentSessionId}`, runId: original.run.runId } }
+  await store.reserveLifecycle(reservation)
+  await store.commitLifecycle(reservation, null)
+  return (await store.readRetiredAgentSession(original.agentSessionId))!
+}
+
 describe.each(['memory', 'file'] as const)('exact creation reads through the %s Store', kind => {
+  it.runIf(kind === 'file')('uses the retired operation index without scanning unrelated retired records', async () => {
+    const f = await fixture(kind), original = session()
+    await f.store.compareAndSwap(null, original)
+    const retired = await retire(f.store, original)
+    const database = (await readCurrentSessionDatabase(join(f.root, 'sessions.json')))!
+    try {
+      const plan = database.prepare("EXPLAIN QUERY PLAN SELECT json FROM retired_sessions WHERE json_extract(json,'$.history.creation.createOperationId')=?")
+        .all(input.createOperationId!)
+      expect(plan).toHaveLength(1)
+      expect(plan[0]!.detail).toContain('SEARCH retired_sessions USING INDEX retired_creation_operation')
+    } finally { database.close() }
+    expect(await f.client.resolveAgentCreationSessionId(input.createOperationId!)).toBe(original.agentSessionId)
+    expect(await f.store.readRetiredAgentSession(original.agentSessionId)).toEqual(retired)
+  })
+
+  it('Hosted reads confirmed creation after retirement ahead of a stale registry without Runtime or replay', async () => {
+    const f = await fixture(kind), original = session()
+    original.creation = { ...original.creation!, initialPrompt: 'confirmed', agentMuxContext: 'confirmed' }
+    await f.store.compareAndSwap(null, original)
+    await f.inner.registry.load('local')
+    const retired = await retire(f.store, original)
+    f.inner.registry.rememberStartedCreation({ ...original, creation: { ...original.creation, persistence: 'unconfirmed' } })
+    const native = vi.spyOn(f.inner.kernel, 'connect').mockRejectedValue(new Error('Private Native is unavailable'))
+    const list = vi.spyOn(f.inner.kernel, 'list').mockRejectedValue(new Error('Retirement needs no Runtime inventory'))
+    vi.spyOn(f.inner.kernel, 'isConnected').mockReturnValue(false)
+    const h = await hostedTestClient(f.client)
+    const catalogue = f.forbidCatalogue()
+    native.mockClear(); list.mockClear()
+    try {
+      expect(await h.sdk.inspectAgentCreation(original.agentSessionId)).toEqual({ kind: 'retired-agent', ...retired })
+      expect(await h.sdk.resolveAgentCreationSessionId(input.createOperationId!)).toBe(original.agentSessionId)
+      expect(await h.sdk.inspectAgentCreation(original.agentSessionId)).not.toHaveProperty('creation')
+      expect(native).not.toHaveBeenCalled(); expect(list).not.toHaveBeenCalled(); expect(catalogue).not.toHaveBeenCalled()
+      expect(f.start).not.toHaveBeenCalled(); expect(f.send).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+    } finally { await h.dispose() }
+  })
+
+  it('refuses to replay a retired creation through Host or direct create, including a substituted Session identity', async () => {
+    const f = await fixture(kind), original = session()
+    await f.store.compareAndSwap(null, original)
+    const retired = await retire(f.store, original)
+    f.inner.registry.rememberStartedCreation({ ...original, creation: { ...original.creation!, persistence: 'unconfirmed' } })
+    f.inner.connected = true; vi.spyOn(f.inner.kernel, 'isConnected').mockReturnValue(true)
+    const h = await hostedTestClient(f.client)
+    const direct = { agentSessionId: original.agentSessionId, createOperationId: input.createOperationId,
+      providerId: original.providerId, executorId: original.executorId, workspacePath: original.workspacePath }
+    try {
+      await expect(h.sdk.createHostAgentWithDelivery(input)).rejects.toMatchObject({ code: 'AGENT_CREATION_RETIRED', controlFailure: { disposition: 'not_applied' } })
+      await expect(h.sdk.createAgent(direct)).rejects.toMatchObject({ code: 'AGENT_CREATION_RETIRED', controlFailure: { disposition: 'not_applied' } })
+      await expect(h.sdk.createAgent({ ...direct, agentSessionId: undefined })).rejects.toMatchObject({ code: 'AGENT_CREATION_RETIRED' })
+      await expect(h.sdk.createAgent({ ...direct, agentSessionId: 'substitute-session' })).rejects.toMatchObject({ code: 'AGENT_CREATION_OPERATION_CONFLICT' })
+      await expect(h.sdk.createHostAgentWithDelivery({ ...input, agentSessionId: 'substitute-session' })).rejects.toMatchObject({ code: 'AGENT_CREATION_OPERATION_CONFLICT' })
+      await expect(h.sdk.createAgent({ ...direct, createOperationId: 'another-operation' })).rejects.toMatchObject({ code: 'AGENT_CREATION_OPERATION_CONFLICT' })
+      expect(await f.store.readRetiredAgentSession(original.agentSessionId)).toEqual(retired)
+      expect(await f.store.readMetadata(original.agentSessionId)).toBeNull()
+      expect(await f.store.loadCreationCorrelation(original.agentSessionId)).toBeNull()
+      expect(f.start).not.toHaveBeenCalled(); expect(f.send).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+    } finally { await h.dispose() }
+  })
+
+  it('rejects conflicting active or retired identities for the same original operation', async () => {
+    const f = await fixture(kind), original = session()
+    await f.store.compareAndSwap(null, original)
+    await retire(f.store, original)
+    const other = { ...original, agentSessionId: 'other-session', run: { runId: 'other-run' } }
+    await f.store.compareAndSwap(null, other)
+    await expect(f.client.resolveAgentCreationSessionId(input.createOperationId!)).rejects.toMatchObject({ code: 'AGENT_CREATION_OPERATION_CONFLICT' })
+    await retire(f.store, other)
+    await expect(f.client.resolveAgentCreationSessionId(input.createOperationId!)).rejects.toMatchObject({ code: 'AGENT_CREATION_OPERATION_CONFLICT' })
+    expect(f.start).not.toHaveBeenCalled(); expect(f.send).not.toHaveBeenCalled()
+  })
+
+  it('keeps retired creation unknown when its original creation fact is missing', async () => {
+    const f = await fixture(kind), original = session()
+    const { creation: _creation, ...withoutCreation } = original
+    await f.store.compareAndSwap(null, withoutCreation)
+    await retire(f.store, withoutCreation)
+    f.inner.registry.rememberStartedCreation({ ...original, creation: { ...original.creation!, persistence: 'unconfirmed' } })
+    await expect(f.client.inspectAgentCreation(original.agentSessionId)).rejects.toMatchObject({ code: 'AGENT_CREATION_UNKNOWN' })
+    expect(f.start).not.toHaveBeenCalled(); expect(f.send).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+  })
+
+  it('preserves an exact retirement read failure instead of using an unconfirmed cached creation', async () => {
+    const f = await fixture(kind), original = session()
+    f.inner.registry.rememberStartedCreation({ ...original, creation: { ...original.creation!, persistence: 'unconfirmed' } })
+    vi.spyOn(f.store, 'readRetiredAgentSession').mockRejectedValue(new Error('Original retirement observation unavailable'))
+    await expect(f.client.inspectAgentCreation(original.agentSessionId)).rejects.toThrow('Original retirement observation unavailable')
+    expect(f.start).not.toHaveBeenCalled(); expect(f.send).not.toHaveBeenCalled(); expect(f.stop).not.toHaveBeenCalled()
+  })
+
   it('Hosted reads the original receipt and UNKNOWN without connecting an unavailable Native', async () => {
     const f = await fixture(kind), original = session()
     await f.store.compareAndSwap(null, original)
