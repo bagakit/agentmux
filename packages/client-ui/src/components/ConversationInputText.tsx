@@ -6,6 +6,7 @@ import { AgentMarkdown } from './AgentMarkdown.js'
 import { ConversationBrowserContext } from './ConversationBrowserContext.js'
 import { ConversationAmuxProtocol, ConversationProtocolCard } from './ConversationAmuxProtocol.js'
 import { ConversationA2AReferences } from './ConversationA2AReferences.js'
+import { ConversationChannelQuote } from './ConversationChannelQuote.js'
 import type { ConversationRef } from '@agentmux/core/conversation'
 import type { DescribeSpeaker } from '../lib/conversation-speaker.js'
 import { useA2AMessageReader } from '../platform.js'
@@ -58,6 +59,7 @@ export function ConversationInputText({ text, prefix, inputContext, inputContext
   const a2a = prefix?.kind === 'references' || prefix?.declaredMessageId !== undefined
   const browserImages = { visible: markdown.visible ?? true, readOnly: markdown.readOnly ?? false, readOnlyImages: markdown.readOnlyImages ?? false }
   return <>
+    {prefix?.declaredChannelQuote ? <ConversationChannelQuote quote={prefix.declaredChannelQuote.quote} raw={prefix.declaredChannelQuote.raw} /> : null}
     {inputContext && matching < 0 ? <ConversationBrowserContext {...browserImages} context={inputContext} source={inputContextSource} /> : null}
     {prefix?.declaredContexts?.map((context, index) => context.inputContext
       ? <ConversationBrowserContext {...browserImages} key={index} context={context.inputContext} source={index === matching ? inputContextSource ?? 'caller-declared' : 'caller-declared'} raw={context.raw} />
