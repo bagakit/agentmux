@@ -663,7 +663,10 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
       }
       return { hostId: id(f, '--host', true), messageIds: [id(f, '--message-id', true)], ...operation(f) }
     },
-    'Trusted user/device input only; managed Agents cannot self-authorize steer. This is a separate original input action over an existing MID, not a resend or a body read. Keep its operation ID and input key for unknown outcomes. A JSON --input may select up to 100 original MIDs belonging to the same exact recipient Run.'),
+    'Trusted user/device input only; managed Agents cannot self-authorize steer. This is a separate original input action over existing MIDs in the same durable recipient Session, not a resend or a body read. A new action freezes the current recipient Run once; retained operations keep their original input key across later recovery. Use message notify inspect for read-only recovery after an unknown response. A JSON --input may select up to 100 original MIDs from different historical Runs of that same recipient Session.'),
+  command('message.notify.inspect', '--host ID --operation-id ID', 'Read the original notification and its own input receipt without sending.',
+    { '--host': 'data', '--operation-id': 'data' }, f => ({ hostId: id(f, '--host', true), operationId: id(f, '--operation-id', true) }),
+    'Trusted user/device read only; managed Agents cannot inspect arbitrary notification operations. Keeps the original frozen Run, input key and references. Never prepares, submits, reads message bodies or acknowledges input. null means no original notification was found by this read; it does not prove that an unknown remote operation was never applied. Keep the same operation ID; do not automatically notify again.'),
   command('message.read', '(--message-id ID|--operation-id ID) [--host ID]', 'Read one original message before input or dispatch exists.',
     { '--message-id': 'data', '--operation-id': 'data', '--host': 'data' }, f => {
       const selected = one(f, ['--message-id', '--operation-id'], 'Original message read')

@@ -67,6 +67,29 @@ export const messageNotificationJournalSchema = `
   CREATE INDEX IF NOT EXISTS a2a_notification_messages ON a2a_message_notifications(notification_id);
 `
 
+/** Derived unresolved reference links over original notices/results, including pre-existing journals. */
+export function initializeMessageNotificationReferenceIndex(db: DatabaseSync): void {
+  if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='a2a_unresolved_notification_references'").get()) return
+  db.exec(`CREATE TABLE a2a_unresolved_notification_references (
+    message_id TEXT NOT NULL, notification_id TEXT NOT NULL, original_sequence INTEGER NOT NULL,
+    PRIMARY KEY(message_id, notification_id)) WITHOUT ROWID;
+    CREATE INDEX a2a_unresolved_notification_by_notice ON a2a_unresolved_notification_references(notification_id);
+    INSERT INTO a2a_unresolved_notification_references
+      SELECT refs.value, n.notification_id, n.original_sequence FROM a2a_notifications n
+      JOIN records original ON original.sequence=n.original_sequence
+      LEFT JOIN records result ON result.sequence=n.result_sequence,
+      json_each(original.json, '$.notification.messageIds') refs
+      WHERE n.result_sequence IS NULL OR json_extract(result.json, '$.state')='unconfirmed';
+    CREATE TRIGGER a2a_unresolved_notification_insert AFTER INSERT ON records
+      WHEN json_extract(NEW.json, '$.kind')='a2a-notification'
+      BEGIN INSERT OR IGNORE INTO a2a_unresolved_notification_references
+        SELECT value, json_extract(NEW.json, '$.notification.notificationId'), NEW.sequence
+        FROM json_each(NEW.json, '$.notification.messageIds'); END;
+    CREATE TRIGGER a2a_unresolved_notification_result AFTER INSERT ON records
+      WHEN json_extract(NEW.json, '$.kind')='a2a-notification-result' AND json_extract(NEW.json, '$.state') IN ('submitted','not-applied')
+      BEGIN DELETE FROM a2a_unresolved_notification_references WHERE notification_id=json_extract(NEW.json, '$.notificationId'); END;`)
+}
+
 /** Future sequence positions only: no history backfill, copied message or consumption state. */
 export const messageObservationJournalSchema = `
   CREATE TABLE IF NOT EXISTS message_observation_records (sequence INTEGER PRIMARY KEY);
@@ -319,6 +342,8 @@ export async function openMessageJournal(
     db.exec(inputControlJournalSchema)
     db.exec(messageBroadcastJournalSchema)
     db.exec(messageRouteJournalSchema)
+    db.exec(messageNotificationJournalSchema)
+    initializeMessageNotificationReferenceIndex(db)
     db.prepare('INSERT INTO metadata VALUES (?, ?)').run(incarnation, sourceHash)
     if (archive) for await (const record of legacyRecords(archive)) importRecord(db, record)
     db.exec('COMMIT')

@@ -21,7 +21,7 @@ const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory', 'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource',
   'clientPerformanceDiagnostics', 'respondAgentInteraction', 'inspectAgentInteractionOperation', 'replySessionQuestion',
   'listHostExecutors', 'configureHostExecutor', 'listAgentSpawns',
-  'readDeliveryAttempt', 'readReadingDiagnostic', 'findReadingDiagnostics', 'inspectAgentPromptSubmission', 'inspectAgentInput', 'readAgentInputMailbox', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'attestAgentCreation',
+  'readDeliveryAttempt', 'readReadingDiagnostic', 'findReadingDiagnostics', 'inspectAgentPromptSubmission', 'inspectMessageNotification', 'inspectAgentInput', 'readAgentInputMailbox', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'attestAgentCreation',
   'readAgentSession', 'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'releaseConversationView', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'checkDeliveries', 'ackDeliveryBatch',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff', 'readMessage', 'listMessages', 'listMessageEvents', 'inspectMessageBroadcast', 'broadcastMessages', 'readDispatch', 'listDispatches'
@@ -255,8 +255,8 @@ export class AgentMuxHostedRuntimeService {
     const continuityControl = invocation.method === 'controlAgentContinuity'
     if (invocation.method === 'ensureAgentContinuity' && invocation.args.length !== 1) throw new AgentMuxError('Capture producer context is supplied only by the original Host, never by recovery wire arguments.', 'INVALID_CONTROL_REQUEST')
     if (continuityControl && invocation.args.length !== 1) throw new AgentMuxError('Recovery control accepts one exact packet; authority is supplied by the original Host.', 'INVALID_CONTROL_REQUEST')
-    if (invocation.method === 'notifyMessages' && (context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError(
-      'Immediate Inbox notification requires an explicit trusted user/device action.', 'CONTROL_PERMISSION_DENIED')
+    if ((invocation.method === 'notifyMessages' || invocation.method === 'inspectMessageNotification') && (context.caller || !context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError(
+      'Notification operations require a trusted user/device.', 'CONTROL_PERMISSION_DENIED')
     let messageIntake = false
     if (invocation.method === 'submitAgentMessage' && invocation.args[0]?.envelope?.sender?.kind === 'agent-session' &&
         (invocation.args[0].execution ?? 'default') === 'default' && invocation.args[0].admissionIntent === undefined) {

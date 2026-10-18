@@ -34,7 +34,7 @@ import { validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-p
 import { parseAgentInputMailboxRead, type AgentInputMailboxRead } from './agent-input-mailbox.js'
 import { renderAgentMuxMessageReferences } from './agent-message-render.js'
 import { MAX_A2A_NOTIFICATION_BYTES, validateMessageNotification, type AgentMuxMessageNotification, type AgentMuxMessageNotificationStatus } from './agent-message-notification.js'
-import { messageNotificationJournalSchema } from './agent-message-journal.js'
+import { messageNotificationJournalSchema, initializeMessageNotificationReferenceIndex } from './agent-message-journal.js'
 
 export type { AgentMuxMessageIdentity, AgentMuxMessageRecipient, AgentMuxMessageEnvelope } from './agent-message-envelope.js'
 export type AgentMuxMessageDeliveryState = {
@@ -272,6 +272,7 @@ export class DurableAgentMuxMessageQueue {
         this.db.exec(messageBroadcastJournalSchema)
         this.db.exec(messageRouteJournalSchema)
         this.db.exec(messageNotificationJournalSchema)
+        initializeMessageNotificationReferenceIndex(this.db)
       }
       transaction.signal?.throwIfAborted()
       stage = 'operation'
@@ -370,22 +371,25 @@ export class DurableAgentMuxMessageQueue {
   }
 
   private applyNotificationRecord(record: Extract<JournalRecord, { kind: 'a2a-notification' | 'a2a-notification-result' }>): void {
+    initializeMessageNotificationReferenceIndex(this.db)
     if (record.kind === 'a2a-notification') {
       const notice = validateMessageNotification(record.notification)
       if (notice.state !== 'pending' || notice.reason !== undefined) throw new AgentMuxError('A new notification must retain an unsubmitted intent.', 'INVALID_A2A_NOTIFICATION')
       const references = notice.messageIds.map(messageId => {
         const original = this.messageReference(messageId)
         if (!original || original.delivery_mode !== 'reference' || original.recipient_id !== notice.key.agentSessionId ||
-            original.run_id !== notice.key.expectedRun.runId || typeof original.sender_id !== 'string' ||
+            typeof original.sender_id !== 'string' ||
             notice.mode === 'idle' && (original.notification_id !== null || original.submitted !== 0)) throw new AgentMuxError(
-          'The original Inbox reference is already assigned or belongs to another Run.', 'A2A_NOTIFICATION_CONFLICT')
+          'The original Inbox reference is already assigned or belongs to another recipient.', 'A2A_NOTIFICATION_CONFLICT')
         return { senderSessionId: String(original.sender_id), messageId }
       })
       if (notice.wire !== renderAgentMuxMessageReferences(references)) throw new AgentMuxError('Notification wire must contain exactly its original references.', 'INVALID_A2A_NOTIFICATION')
       this.db.prepare('INSERT INTO a2a_notifications (notification_id, recipient_id, run_id, original_sequence, active) VALUES (?, ?, ?, ?, ?)')
         .run(notice.notificationId, notice.key.agentSessionId, notice.key.expectedRun.runId, record.sequence, notice.mode === 'idle' ? 1 : 0)
-      const assign = this.db.prepare('UPDATE a2a_message_notifications SET notification_id=? WHERE message_id=?')
-      if (notice.mode === 'idle') for (const id of notice.messageIds) assign.run(notice.notificationId, id)
+      const link = this.db.prepare('INSERT OR IGNORE INTO a2a_unresolved_notification_references VALUES (?, ?, ?)')
+      for (const id of notice.messageIds) link.run(id, notice.notificationId, record.sequence)
+      const assign = this.db.prepare('UPDATE a2a_message_notifications SET notification_id=? WHERE message_id=? AND notification_id IS NULL AND submitted=0')
+      for (const id of notice.messageIds) assign.run(notice.notificationId, id)
       return
     }
     const current = this.notification(nonEmpty(record.notificationId, 'Notification ID'))
@@ -401,7 +405,15 @@ export class DurableAgentMuxMessageQueue {
         for (const id of current.messageIds) submitted.run(record.notificationId, id)
       }
     }
-    else if (record.state === 'not-applied') this.db.prepare('UPDATE a2a_message_notifications SET notification_id=NULL WHERE notification_id=?').run(record.notificationId)
+    else if (record.state === 'not-applied') {
+      // A second explicit action may still own unknown input over these same references.
+      // Follow only this exact MID's unfinished original references, never terminal history.
+      const retain = this.db.prepare(`UPDATE a2a_message_notifications SET notification_id=(
+        SELECT refs.notification_id FROM a2a_unresolved_notification_references refs
+        WHERE refs.message_id=a2a_message_notifications.message_id AND refs.notification_id<>?
+        ORDER BY refs.original_sequence LIMIT 1) WHERE notification_id=? AND submitted=0`)
+      retain.run(record.notificationId, record.notificationId)
+    }
   }
 
   /** Only unfinished participants, not historical messages or unrelated Sessions. */
@@ -416,10 +428,19 @@ export class DurableAgentMuxMessageQueue {
   }
 
   /** New original references distinguish work at the same idle boundary from outcome observations. */
-  async pendingNotificationPosition(agentSessionId: string, runId: string): Promise<number> {
+  async pendingNotificationPosition(agentSessionId: string, sourceRuns: readonly string[]): Promise<number> {
     return this.withLock(async () => Number(this.db.prepare(`SELECT COALESCE(MAX(message_sequence),0) AS position
-      FROM a2a_message_notifications WHERE recipient_id=? AND run_id=? AND submitted=0 AND notification_id IS NULL`)
-      .get(agentSessionId, runId)!.position))
+      FROM a2a_message_notifications WHERE recipient_id=? AND run_id IN (SELECT value FROM json_each(?)) AND submitted=0 AND notification_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM a2a_unresolved_notification_references refs WHERE refs.message_id=a2a_message_notifications.message_id)`)
+      .get(agentSessionId, JSON.stringify(sourceRuns))!.position))
+  }
+
+  /** A missing recovery relationship is an observation gap, scoped to untouched references only. */
+  async excludedNotificationPosition(agentSessionId: string, sourceRuns: readonly string[]): Promise<number> {
+    return this.withLock(async () => Number(this.db.prepare(`SELECT COALESCE(MAX(message_sequence),0) AS position
+      FROM a2a_message_notifications WHERE recipient_id=? AND run_id NOT IN (SELECT value FROM json_each(?)) AND submitted=0 AND notification_id IS NULL
+      AND NOT EXISTS (SELECT 1 FROM a2a_unresolved_notification_references refs WHERE refs.message_id=a2a_message_notifications.message_id)`)
+      .get(agentSessionId, JSON.stringify(sourceRuns))!.position))
   }
 
   /** Explicit user notification also resolves IDs without loading opaque original bodies. */
@@ -437,7 +458,7 @@ export class DurableAgentMuxMessageQueue {
 
   /** Freeze the bounded original reference set atomically, before entering the Input owner. */
   async prepareNotification(input: { notificationId: string; agentSessionId: string; condition: AgentPromptCondition;
-    idle?: AgentMuxMessageNotification['idle']; messageIds?: readonly string[];
+    idle?: AgentMuxMessageNotification['idle']; messageIds?: readonly string[]; sourceRuns?: readonly string[];
     originalInputAbsent?: () => Promise<boolean> }): Promise<AgentMuxMessageNotification | null> {
     return this.withLock(async () => {
       const condition = validateAgentPromptCondition(input.condition)
@@ -448,10 +469,13 @@ export class DurableAgentMuxMessageQueue {
         return existing
       }
       const positions = input.messageIds ? input.messageIds.map(id => ({ message_id: id })) : this.db.prepare(`SELECT message_id FROM a2a_message_notifications
-        WHERE recipient_id=? AND run_id=? AND submitted=0 AND notification_id IS NULL ORDER BY message_sequence LIMIT 100`)
-        .all(input.agentSessionId, condition.expectedRun.runId)
+        WHERE recipient_id=? AND run_id IN (SELECT value FROM json_each(?)) AND submitted=0 AND notification_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM a2a_unresolved_notification_references refs WHERE refs.message_id=a2a_message_notifications.message_id)
+        ORDER BY message_sequence LIMIT 100`)
+        .all(input.agentSessionId, JSON.stringify(input.sourceRuns ?? [condition.expectedRun.runId]))
       if (!positions.length) {
-        const active = this.db.prepare('SELECT notification_id FROM a2a_notifications WHERE recipient_id=? AND run_id=? AND active=1 ORDER BY original_sequence LIMIT 1')
+        const active = this.db.prepare(`SELECT n.notification_id FROM a2a_notifications n JOIN records original ON original.sequence=n.original_sequence
+          WHERE n.recipient_id=? AND n.run_id=? AND n.active=1 AND json_extract(original.json, '$.notification.mode')='idle' ORDER BY n.original_sequence LIMIT 1`)
           .get(input.agentSessionId, condition.expectedRun.runId)
         return active ? this.notification(String(active.notification_id))! : null
       }
