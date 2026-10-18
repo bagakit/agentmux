@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -51,6 +52,8 @@ it('rejects a different sender, embedded frame, unknown generation and stale pro
   navigate()
   expect(owner.report(event, opened.token, report())).toEqual({ accepted: false })
   const current = owner.open(event)!
+  expect(current.token).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/)
+  expect(archive.appInstanceId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
   expect(current.token).not.toBe(opened.token)
   expect(owner.report(event, current.token, report()).accepted).toBe(true)
   unavailable()

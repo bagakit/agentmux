@@ -85,6 +85,11 @@ async function fixture(store?: Store) {
 async function opened(f: Awaited<ReturnType<typeof fixture>>, operationId = 'open') {
   const page = await f.owner.call('app.window.open', { operationId, target }, context)
   expect(page.recordedOperation?.state).toBe('confirmed')
+  expect(page.recordedOperation?.windowId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
+  expect(page.recordedOperation?.documentGeneration).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
+  const ticket = f.tickets.at(-1)!
+  expect(new URL(ticket.url).searchParams.get('ticket')).toMatch(/^[1-9A-HJ-NP-Za-km-z]{32,44}$/)
+  expect(ticket.frameName).toMatch(/^workbench-window-[1-9A-HJ-NP-Za-km-z]{32,44}$/)
   return { windowId: page.recordedOperation!.windowId!, documentGeneration: page.recordedOperation!.documentGeneration! }
 }
 function snapshot(f: Awaited<ReturnType<typeof fixture>>): WorkbenchWindowSnapshot {
