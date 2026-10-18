@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { analyseLocalV8Profile } from './v8-profile-analysis-cli.js'
 import { mintObjectId } from './object-id.js'
 import { writeRendererDiagnosticFile } from './renderer-scene-cli.js'
 import { writeRendererV8Profile } from './renderer-v8-profile-cli.js'
@@ -159,6 +160,10 @@ async function main(): Promise<number> {
   const { method } = invocation.command
   if (method === 'mote.playbook.pmo') {
     write({ ok: true, operation: method, result: agentMuxPmoPlaybook() }); return 0
+  }
+  if (method === 'system.metrics.profile.analyze') {
+    const result = await analyseLocalV8Profile(String(invocation.params.input))
+    write({ ok: result.status === 'analysed', operation: method, result }); return result.status === 'analysed' ? 0 : 2
   }
   const endpoint = agentMuxRpcEndpoint(invocation.endpoint)
   if (method === 'system.endpoint' && !invocation.params.inspect) {
