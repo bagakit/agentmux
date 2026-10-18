@@ -23,6 +23,7 @@ export async function assertAgentConnectionAccess(owner: ConnectionPort, method:
     return
   }
   if (['connection.setup.begin', 'connection.setup.ls', 'connection.test', 'connection.profile.get', 'connection.profile.ls',
+    'connection.metadata.get', 'connection.metadata.ls', 'connection.metadata.refresh', 'connection.metadata.clear',
     'connection.room.ls', 'connection.room.search', 'connection.room.get', 'connection.room.members', 'connection.room.link.create'].includes(method)) {
     await connection(p.connectionId); return
   }

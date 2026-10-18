@@ -1,3 +1,4 @@
+import { isChannelMetadataMethod, parseChannelMetadataParams } from './channel-metadata-codec.js'
 import { parseExternalConversationReference, parseExternalConversationReceipt } from './external-conversation.js'
 import { isMoteChatMethod, parseMoteChatParams, parseMoteChatResult } from './mote-chat-codec.js'
 import type { MoteChatPort, MoteChatMethod, MoteChatParamsMap } from './mote-chat-contract.js'
@@ -657,6 +658,17 @@ export class AgentMuxRpcService {
           : method === 'connection.setup.advance' ? await setup.advance(parseConnectionSetupParams(method, params), callContext)
           : method === 'connection.setup.ls' ? await setup.list(parseConnectionSetupParams(method, params), administration)
           : await setup.inspect(parseConnectionSetupParams(method, params), callContext)
+        return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
+      }
+      if (isChannelMetadataMethod(method)) {
+        const metadata = owner.metadata
+        if (!metadata) throw new AgentMuxError('Channel metadata management is unavailable on this Host. Existing input remains available.', 'CONTROL_UNAVAILABLE')
+        const callContext = { ...administration, ...(context.signal ? { signal: context.signal } : {}) }
+        const result = method === 'connection.metadata.get' ? await metadata.get(parseChannelMetadataParams(method, params), callContext)
+          : method === 'connection.metadata.ls' ? await metadata.list(parseChannelMetadataParams(method, params), callContext)
+          : method === 'connection.metadata.refresh' ? await metadata.refresh(parseChannelMetadataParams(method, params), callContext)
+          : await metadata.clear(parseChannelMetadataParams(method, params), callContext)
+        await administration.assertCurrent()
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
       if (isConnectionProfileMethod(method)) {
