@@ -47,9 +47,9 @@ Message Tool 在 Settings 中有专门分组，依次提供五个独立入口：
 
 A2A 设置持有面向用户的后台来信提醒偏好：跟随全局遵从 Notifications 的关闭、停留时长和声音；静默不弹用户提醒；提示在全局关闭时仍用 Standard 时长，其余沿全局时长，声音始终沿全局。三种偏好都不对前台可见收件 Agent 重复弹窗，初始化、观察补读和重连不补弹旧信，同 MID 的后续回执不算新来信。它不改变接收 Agent 的入箱、确认空闲时引用通知与按原 MID 主动取信合同，不代表已读、任务接受或授权。消息与原投递事实仍在准确 Agent 的 Inbox／Outbox，不在 Settings 另建收发箱。全局通知呈现仍归 Notifications。
 
-Automation 集中恢复后的自动续行、持续推进的新任务默认周期／Prompt、日历安排默认时区和 quiet follow-up 默认策略（静默时段、沉默时长、最小间隔、每日预算）。恢复续行复用原 continuity 字段及固定续行正文；恢复方式、时机、失败重试和同操作复查仍归 Execution，两页各自只保存所编辑字段，不能用陈旧整份 policy 覆盖另一页。新建任务默认值只在新表单／新目标初始化时消费，不重写已编辑草稿或既有任务；保存不创建、启用、暂停、停止任务，也不发送输入。准确 Agent 的任务创建、周期／Prompt、日历、来源绑定和生命周期动作仍归 Progress。A2A 引用通知继续归 A2A，不收入 Automation；Browser 等其他领域的自动化也不归本页。
+Automation 集中恢复后的自动续行、持续推进的新任务默认周期／Prompt、日历安排默认时区和 quiet follow-up 默认策略（静默时段、沉默时长、最小间隔、每日预算）。恢复续行复用原 continuity 字段及固定续行正文；恢复方式、时机、失败重试和同操作复查仍归 Session recovery，两页各自只保存所编辑字段，不能用陈旧整份 policy 覆盖另一页。新建任务默认值只在新表单／新目标初始化时消费，不重写已编辑草稿或既有任务；保存不创建、启用、暂停、停止任务，也不发送输入。准确 Agent 的任务创建、周期／Prompt、日历、来源绑定和生命周期动作仍归 Progress。A2A 引用通知继续归 A2A，不收入 Automation；Browser 等其他领域的自动化也不归本页。
 
-Automation 将当前草稿中的静默时段、首次等待、后续间隔与每日预算合成可读示例，说明条件如何共同约束跟进；示例不承诺实际发送时刻或已启用任务。Execution 区分重新尝试恢复与观察同一原操作，按原 Core 策略展示有界重试节奏及上限；输入无效时就地说明，不能把旧值、样例或预览当成当前已保存策略或执行事实。
+Automation 将当前草稿中的静默时段、首次等待、后续间隔与每日预算合成可读示例，说明条件如何共同约束跟进；示例不承诺实际发送时刻或已启用任务。Session recovery 区分重新尝试恢复与观察同一原操作，按原 Core 策略展示有界重试节奏及上限；输入无效时就地说明，不能把旧值、样例或预览当成当前已保存策略或执行事实。
 
 Prompts 保持独立可复用资源库；amux Protocols 保持独立只读公共协议参考。两者用途不同，不能合并为一个页面或按输入来源复制。新偏好复用同一 ConfigOwner 和公共 Settings get/set，发现、校验、持久化与真实新建任务／提醒消费者必须闭合，不提供仅改变显示的设置。
 
@@ -249,7 +249,7 @@ Overview 是 Settings 的普通入口，保留 AgentMux 品牌，并提供清楚
 
 侧栏分组默认全部展开，用户可明确收起或再次展开，各原分区在初次进入时直接可见。手动展开选择在同一设置工作面内保留；搜索临时展示命中组，不因筛选覆盖手动选择，原精确导航使目标组可见。收起组不关闭已访问编辑器或清空草稿，也不改变当前分区事实；当前入口不在可见区域时，选中材质不能停在其他入口上。窄窗分类继续沿原完整目录提供全部入口，展开不形成新的配置层或持久业务身份。
 
-设置命名保持具体产品与对象含义，不用泛化词替代已有具体名称。Agents 直接作为入口呈现，不再包在 Resources 分类之下；本机与 SSH 主机管理使用 Hosts，与其真实 Host 身份一致。Prompts、Survey、Mote Club 与 amux Protocols 保持原名称、用途和归属。导航命名与分类变化不修改原路由 ID、配置键、对象身份或保存 owner。
+设置命名保持具体产品与对象含义，不用泛化词替代已有具体名称。Agent 配置与会话恢复的分组及具体入口见[分区、资源与配置生效](#分区资源与配置生效)；本机与 SSH 主机管理使用 Hosts，与其真实 Host 身份一致。Prompts、Survey、Mote Club 与 amux Protocols 保持原名称、用途和归属。导航命名与分类变化不修改原路由 ID、配置键、对象身份或保存 owner。
 
 Survey 的图标与背景提供本地选图、替换和清除，URL 为可选入口；文件读取和预览失败保留原草稿与已保存设置，选图与预览不隐式保存。Mobile 直接提供扫码连接与复制链接，均消费同一原连接链接，不要求先复制才能发现二维码；读取未知保留原设备与恢复动作。Focus 与 Agent takeover 在窄窗和短屏允许就近查看当前草稿效果并返回原编辑控件，保留输入、草稿和阅读位置；预览不获取实际接管权、发消息或启动工作。
 
@@ -276,9 +276,9 @@ Settings 为 Browser 提供独立的 **Browser use** 组，收拢原基础设置
 
 ### 会话连续性设置
 
-Preferences 中的 Execution 模块编辑全局恢复偏好，侧栏、Overview、搜索和窄窗分类使用同一模块目录。恢复时机、等待、自动恢复活动时间窗、确证退出后原生 resume、同一操作的复查次数与间隔沿同一配置 owner 编辑；默认值与合法政策由 Core 的 [continuity policy](../../../packages/core/src/agent-session-continuity.ts) 持有，恢复资格与执行语义仍归[Session 恢复](session-recovery.md)，设置页不另判 Run 或 Provider 状态。
+Agents 中的 Session recovery 模块编辑全局恢复偏好，侧栏、Overview、搜索和窄窗分类使用同一模块目录。恢复时机、等待、自动恢复活动时间窗、确证退出后原生 resume、同一操作的复查次数与间隔沿同一配置 owner 编辑；默认值与合法政策由 Core 的 [continuity policy](../../../packages/core/src/agent-session-continuity.ts) 持有，恢复资格与执行语义仍归[Session 恢复](session-recovery.md)，设置页不另判 Run 或 Provider 状态。
 
-Automation 提供“Provider 不支持中断识别时，使用退出前 active 状态”的独立开关，默认关闭，与恢复后续行同组。页面明确 Provider 已支持但本次 unknown 不使用该兜底，并展示准确中断的原生恢复成功后只发送一次固定 `<amux:continue />`；正常结束回合、健康接回和 unknown 不主动发送。该标记可能开启一个普通 User 回合，投递不代表模型已经完成任务。技术恢复信息留在操作回执与服务窗，不提供新的恢复提醒或自定义续行正文编辑；历史已冻结正文和未知输入受据保留。Execution 保留自动原生恢复的活动时间窗，覆盖退出前活动与已确认闲置，不能只将旧 working 作为不限时恢复资格。
+Automation 提供“Provider 不支持中断识别时，使用退出前 active 状态”的独立开关，默认关闭，与恢复后续行同组。页面明确 Provider 已支持但本次 unknown 不使用该兜底，并展示准确中断的原生恢复成功后只发送一次固定 `<amux:continue />`；正常结束回合、健康接回和 unknown 不主动发送。该标记可能开启一个普通 User 回合，投递不代表模型已经完成任务。技术恢复信息留在操作回执与服务窗，不提供新的恢复提醒或自定义续行正文编辑；历史已冻结正文和未知输入受据保留。Session recovery 保留自动原生恢复的活动时间窗，覆盖退出前活动与已确认闲置，不能只将旧 working 作为不限时恢复资格。
 
 保存只影响下一次准入的新恢复意图，不启动 Agent、不发消息、不修改原草稿或在途已冻结政策和正文。GUI 与 `settings inspect continuity`／已声明 `continuity.*` scalar 的 `settings set` 复用唯一 ConfigOwner，保留首次多字段并发 authored 合并、保存期间后续输入、原字段期望值与冲突；有效默认不回填未编辑字段。具体键和查询入口见[设置目录](../../settings-catalog.md)，不增加任意路径 setter 或第二配置 owner。
 
@@ -310,7 +310,7 @@ Prompt 的当前对象、未提交修改与只读使用示意应在同一编辑�
 
 远程管理的产品范围、拓扑、Host 连接配置与测试、来源核验和维护入口由 [Remote 管理 PRD](remote-management.md) 持有；本节只持有通用设置导航、草稿与保存，以及 Agent 配置和设备模块的相邻规则。
 
-- 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、General），Browser 基础设置与 Agent 操作呈现归独立的 [Browser use](#browser-use-与-agent-操作呈现) 组，Message Tool 独立归组，其五个入口沿[本组职责](#message-tool-设置分组)，Agents 提供原启动配置，Hosts 工作台与 Mobile 设备管理归 Remote，Conversation Channels 提供 InApp、Lark 与 Discord 子项，分别面向 App 内对话模式及对应外部对话应用；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，项目管理沿 Hosts 的原项目入口进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
+- 设置结构优化必须落到真实页面。日常 Preferences 在前（Appearance、Notifications、General），Browser 基础设置与 Agent 操作呈现归独立的 [Browser use](#browser-use-与-agent-操作呈现) 组，Message Tool 独立归组，其五个入口沿[本组职责](#message-tool-设置分组)，Agents 位于 Preferences 之后，分组内依次提供 Agent CLIs（安装与原启动配置）和 Session recovery（原会话恢复、复查与重试）；两页沿原分区身份和保存 owner，不再把 Agent 配置呈现为无标题的孤立入口。Hosts 工作台与 Mobile 设备管理归 Remote，Conversation Channels 提供 InApp、Lark 与 Discord 子项，分别面向 App 内对话模式及对应外部对话应用；原能力全部保留，Copied paths 在 General 内与本地数据／诊断分层，原单字段草稿、expected 和保存范围不扩大。统一底栏入口进入 Overview，项目管理沿 Hosts 的原项目入口进入；不新增第二齿轮，显式分区与 Executor ID 仍指向原精确对象；不保留独立 Copy Paths 页面或另造兼容路由。搜索仍能定位路径、`~`／absolute、字号、通知、日志、恢复、Provider 与设备接入。诊断或只读说明不进入偏好保存，不自动触发资源检测或更改健康 Run。
 
 - 用户要求「继续，直到设置界面质量彻底满意」。设置作为辅助界面，第一眼必须是当前对象和动作；Workspace 与 Executor 可按名字、路径或身份检索，大量资源不靠逐条扫读。Executor 常用身份与外观优先，高级启动配置按需进入；已有 Provider 与 Executor ID 保持不可修改，新 Executor 创建后直接进入编辑。改变分组或检查结果不能丢失展开、输入或焦点。
 - 设置保存仍经既有公开 API，启动配置的说明应明确针对后续启动，不能冒充已改变健康 Run。高级权限动作保持显式选择，不自动批准；所有分区保留原功能、草稿、错误反馈和 status bar。

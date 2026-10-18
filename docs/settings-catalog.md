@@ -28,9 +28,24 @@ GUI 偏好与 CLI 写入都经过唯一 [Main ConfigOwner](../apps/desktop/src/m
 | My Profile | 本人称呼、头像、协作背景；是否分享给新 Agent。头像为界面资料，分享开关不代表访问隔离。 | inspect / set：`profile.displayName`、`profile.avatar`、`profile.about`、`profile.shareWithAgents` | [UI](../apps/desktop/src/renderer/src/components/settings/modules/profile.tsx)、[字段](../apps/desktop/src/shared/user-profile.ts)、[Main](../apps/desktop/src/main/settings/modules/profile.ts) |
 | Appearance | App 主题身份与明暗、终端主题与字号、Source/Diff 编辑字号及继承选项；Notes 正文另设。 | inspect / set：`appearance.themeId`、`appearance.appAppearance`、`appearance.terminalTheme`、`appearance.terminalFontSize`、`appearance.editorFontSize` | [UI](../apps/desktop/src/renderer/src/components/settings/modules/appearance.tsx)、[Main](../apps/desktop/src/main/settings/modules/appearance.ts) |
 | Notifications | 通知模式和声音。 | inspect / set：`notifications.mode`、`notifications.sound` | [UI](../apps/desktop/src/renderer/src/components/settings/modules/notifications.tsx)、[模式解析](../apps/desktop/src/shared/notification-presentation.ts)、[Main](../apps/desktop/src/main/settings/modules/notifications.ts) |
-| Execution | 原会话恢复时机、等待、自动恢复时间窗、确证退出后 resume、同操作复查与失败重试。恢复后的续行独立归 Automation；两页仍使用原 continuity 政策，各自保存所编辑字段。 | `settings inspect continuity`；本页 inspect / set：`continuity.activeRecovery`、`continuity.activeRecoveryDelayMs`、`continuity.confirmedIdleWindowMs`、`continuity.resumeAfterExit`、`continuity.recheckIntervalMs`、`continuity.recheckMaxAttempts`、`continuity.retryInitialDelayMs`、`continuity.retryMaxDelayMs`、`continuity.retryMaxAttempts`。时长键使用毫秒，GUI 使用秒并支持毫秒精度。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/continuity.tsx)、[Core 政策与默认](../packages/core/src/agent-session-continuity.ts)、[Main](../apps/desktop/src/main/settings/modules/continuity.ts)、[行为](design/behavior/settings-and-observation.md#会话连续性设置) |
 | General | 路径显示和复制使用绝对路径还是家目录缩写；本机数据与恢复说明为只读，崩溃日志按钮为诊断动作。Agent 可用性检查在后台继续，不作为工作面加载门禁。 | inspect / set：`copyPathsAsAbsolute`；`system crash-log inspect / reveal`。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/general.tsx)、[Main](../apps/desktop/src/main/settings/modules/general.ts) |
 | Keyboard shortcuts | 查看快捷键、平台键位、命令和作用范围；当前只读。 | 没有自定义键位 setter。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/keyboard-shortcuts.tsx)、[快捷键注册表](../apps/desktop/src/renderer/src/lib/shortcut-registry.ts) |
+
+### Appearance 的主题资源与观察
+
+以下是 Appearance 复用的公开资源与观察能力，不是独立导航分区。
+
+| 页面 | 可修改内容与只读事实 | CLI 范围 | 保存与事实 owner |
+| --- | --- | --- | --- |
+| Themes（Appearance） | 内置只读目录与完整自定义主题；坏记录保留并具名诊断，内置编辑另存副本。 | `settings themes ls / inspect / create / update / delete`；选择沿 `settings set appearance.themeId <ID>`。create/update 接受同 ID 完整主题文件或原 value；inspect 的 document 可由 `settings themes inspect <ID> --output FILE` 原子新建文件（不覆盖现有文件）。update 的 expected 为完整原值或同 ID 原文档；delete 的 expected 可为坏记录的原始 JSON，活动主题删除原子回默认。 | [共享 schema](../packages/client-ui/src/theme/schema.ts)、[目录](../packages/client-ui/src/theme/catalog.ts)、[资源 owner](../apps/desktop/src/main/settings-themes-control.ts)、[配置写入边界](../apps/desktop/src/main/theme-config.ts) |
+| Appearance observation | 已提交的当前主题、明暗选择、显式终端配色与具名诊断的即时只读投影；手机使用本地系统明暗。 | `settings appearance watch` / `settings.appearance.watch` 沿现公开 stream 返回 initial 与有序 snapshot。取消只释放读者；断线保留最后已确认主题，重连重新取 initial。 | [通用 stream 合同](../packages/core/src/public-rpc-settings-observation.ts)、[原 Main owner 投影](../apps/desktop/src/main/theme-observation.ts)、[Mobile 消费](../apps/mobile/src/appearance/useHostAppearance.ts) |
+
+## Agents
+
+| 页面 | 可修改内容与只读事实 | CLI 范围 | 保存与事实 owner |
+| --- | --- | --- | --- |
+| Agent CLIs | Executor 名称、命令、参数、环境变量、AgentMux guide、头像颜色和徽标；创建时选择 Provider，已有 Executor 的 Provider 与身份不随编辑改变。Provider 能力目录和每个 Host 的命令可用性是观测事实。 | `settings executors ls / inspect / create / update / delete / refresh`；完整字段由资源 schema 校验，`args` 与 `env` 整体替换。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/agents.tsx)、[Core Executor 类型](../packages/core/src/types.ts)、[Desktop 头像字段](../apps/desktop/src/shared/contracts.ts)、[资源 owner](../apps/desktop/src/main/settings-resources-control.ts)、[可用性刷新](../apps/desktop/src/main/settings-executor-refresh-control.ts) |
+| Session recovery | 原会话恢复时机、等待、自动恢复时间窗、确证退出后 resume、同操作复查与失败重试。恢复后的续行独立归 Automation；两页仍使用原 continuity 政策，各自保存所编辑字段。 | `settings inspect continuity`；本页 inspect / set：`continuity.activeRecovery`、`continuity.activeRecoveryDelayMs`、`continuity.confirmedIdleWindowMs`、`continuity.resumeAfterExit`、`continuity.recheckIntervalMs`、`continuity.recheckMaxAttempts`、`continuity.retryInitialDelayMs`、`continuity.retryMaxDelayMs`、`continuity.retryMaxAttempts`。时长键使用毫秒，GUI 使用秒并支持毫秒精度。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/continuity.tsx)、[Core 政策与默认](../packages/core/src/agent-session-continuity.ts)、[Main](../apps/desktop/src/main/settings/modules/continuity.ts)、[行为](design/behavior/settings-and-observation.md#会话连续性设置) |
 
 ## Browser use
 
@@ -73,14 +88,6 @@ Goals 的常用操作引用、顺序与显隐在原 Goals 面管理，正文复�
 | 自定义本地扩展包 | 安装本地包目录，配置启用、显示样式、固定执行目录与参数；名称、图标、脚本和动作由可编辑的包文件提供。 | `toolkit install <id> --path <directory>`，以及原 Toolkit 查询、更新和执行命令；不是一次性复制脚本。 | [包编辑器](../apps/desktop/src/renderer/src/components/settings/ToolkitPackageEditor.tsx)、[包读取](../apps/desktop/src/main/toolkit-package.ts)、[本地扩展包合同](design/behavior/settings-and-observation.md#toolkit-本地扩展包) |
 
 Toolkit Library 的唯一[设置模块](../apps/desktop/src/renderer/src/components/settings/modules/toolkit.tsx)组合表中的工具入口。Auth 用量工具属于可编辑的本地用户包，业务逻辑在包文件中；AgentMux 提供通用加载、配置、执行与结果能力，不把特定账户业务实现为固定设置。官方工具与自定义工具的边界见[Toolkit 行为合同](design/behavior/settings-and-observation.md#toolkit-与官方-performance-工具)。
-
-## Resources
-
-| 页面 | 可修改内容与只读事实 | CLI 范围 | 保存与事实 owner |
-| --- | --- | --- | --- |
-| Agents | Executor 名称、命令、参数、环境变量、AgentMux guide、头像颜色和徽标；创建时选择 Provider，已有 Executor 的 Provider 与身份不随编辑改变。Provider 能力目录和每个 Host 的命令可用性是观测事实。 | `settings executors ls / inspect / create / update / delete / refresh`；完整字段由资源 schema 校验，`args` 与 `env` 整体替换。 | [UI](../apps/desktop/src/renderer/src/components/settings/modules/agents.tsx)、[Core Executor 类型](../packages/core/src/types.ts)、[Desktop 头像字段](../apps/desktop/src/shared/contracts.ts)、[资源 owner](../apps/desktop/src/main/settings-resources-control.ts)、[可用性刷新](../apps/desktop/src/main/settings-executor-refresh-control.ts) |
-| Themes（Appearance） | 内置只读目录与完整自定义主题；坏记录保留并具名诊断，内置编辑另存副本。 | `settings themes ls / inspect / create / update / delete`；选择沿 `settings set appearance.themeId <ID>`。create/update 接受同 ID 完整主题文件或原 value；inspect 的 document 可由 `settings themes inspect <ID> --output FILE` 原子新建文件（不覆盖现有文件）。update 的 expected 为完整原值或同 ID 原文档；delete 的 expected 可为坏记录的原始 JSON，活动主题删除原子回默认。 | [共享 schema](../packages/client-ui/src/theme/schema.ts)、[目录](../packages/client-ui/src/theme/catalog.ts)、[资源 owner](../apps/desktop/src/main/settings-themes-control.ts)、[配置写入边界](../apps/desktop/src/main/theme-config.ts) |
-| Appearance observation | 已提交的当前主题、明暗选择、显式终端配色与具名诊断的即时只读投影；手机使用本地系统明暗。 | `settings appearance watch` / `settings.appearance.watch` 沿现公开 stream 返回 initial 与有序 snapshot。取消只释放读者；断线保留最后已确认主题，重连重新取 initial。 | [通用 stream 合同](../packages/core/src/public-rpc-settings-observation.ts)、[原 Main owner 投影](../apps/desktop/src/main/theme-observation.ts)、[Mobile 消费](../apps/mobile/src/appearance/useHostAppearance.ts) |
 
 ## Message Tool
 
