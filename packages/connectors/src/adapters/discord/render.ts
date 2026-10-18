@@ -2,27 +2,44 @@ import type { PublicationOperation } from '../../publication-store.js'
 import { publicationSpeechText, type PreparedPublication } from '../../publication-wire.js'
 import { discordId, discordFailure } from './protocol.js'
 import { publicationResourceDescriptor } from '../../publication-resource.js'
+import { discordQuestionComponents } from './actions.js'
 import { createHash } from 'node:crypto'
-export const DISCORD_PUBLICATION = { adapterId: 'discord', renderVersion: 'discord-components-v1', fragmentBytes: 1900, directResources: true } as const
+export const DISCORD_PUBLICATION = { adapterId: 'discord', renderVersion: 'discord-components-v1', fragmentBytes: 1900, directResources: true, permissionActions: true, questionActions: true } as const
 export const discordNonce = (operationId: string): string => createHash('sha256').update(operationId).digest('base64url').slice(0, 25)
 export function prepareDiscordPublication(operation: Readonly<PublicationOperation>): PreparedPublication {
-    const channel = discordId(operation.target.externalConversationId), mapping = operation.mapping
-    const path = `/channels/${channel}/messages${mapping ? '/' + discordId(mapping.messageId) : ''}`
-    if (operation.effect === 'withdraw') {
-      if (!mapping) return discordFailure('DISCORD_ORIGINAL_MESSAGE_UNCONFIRMED')
-      return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId, request: { method: 'DELETE', path } }
-    }
-    const p = operation.payload
-    if (p.kind === 'image' || p.kind === 'file') {
-      const file = publicationResourceDescriptor(operation)
-      const components = p.kind === 'image' ? [{ type: 12, items: [{ media: { url: 'attachment://' + file.name } }] }] : [{ type: 13, file: { url: 'attachment://' + file.name } }]
-      const payloadJson = JSON.stringify({ flags: 32768, components, attachments: [{ id: 0, filename: file.name }], allowed_mentions: { parse: [] }, ...(!mapping ? { nonce: discordNonce(operation.operationId), enforce_nonce: true } : {}) })
-      return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId, request: { method: mapping ? 'PATCH' : 'POST', path, multipart: { payloadJson, files: [file] } } }
-    }
-    const text = p.kind === 'speech' ? publicationSpeechText(p) : p.kind === 'binding-lifecycle'
-      ? `${p.event === 'disconnected' ? 'Conversation sharing ended' : 'Conversation sharing ' + p.event}\nAgent ${p.agentSessionId}\n${p.scope.publication === 'future-shared-conversation' ? 'New conversation messages' : 'Agent replies'} · ${p.scope.input}\n${p.synchronization === true ? 'Synchronization enabled' : p.synchronization === false ? 'Synchronization disabled' : 'Synchronization state unconfirmed'}${p.event === 'disconnected' ? '\nThe Agent remains available.' : ''}`
-      : discordFailure('DISCORD_REPRESENTATION_UNSUPPORTED')
-    const components = [{ type: 17, components: [{ type: 10, content: (p.kind === 'speech' && p.phase === 'progress' ? '**Progress**\n' : '') + text }] }]
-    const body = JSON.stringify({ flags: 32768, components, allowed_mentions: { parse: [] }, ...(!mapping ? { nonce: discordNonce(operation.operationId), enforce_nonce: true } : {}) })
-    return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId, request: { method: mapping ? 'PATCH' : 'POST', path, body, contentType: 'application/json' } }
+  const channel = discordId(operation.target.externalConversationId), mapping = operation.mapping
+  const path = `/channels/${channel}/messages${mapping ? '/' + discordId(mapping.messageId) : ''}`
+  if (operation.effect === 'withdraw') {
+    if (!mapping) return discordFailure('DISCORD_ORIGINAL_MESSAGE_UNCONFIRMED')
+    return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId, request: { method: 'DELETE', path } }
   }
+  const p = operation.payload
+  if (p.kind === 'image' || p.kind === 'file') {
+    const file = publicationResourceDescriptor(operation)
+    const components = p.kind === 'image' ? [{ type: 12, items: [{ media: { url: 'attachment://' + file.name } }] }] : [{ type: 13, file: { url: 'attachment://' + file.name } }]
+    const payloadJson = JSON.stringify({ flags: 32768, components, attachments: [{ id: 0, filename: file.name }], allowed_mentions: { parse: [] }, ...(!mapping ? { nonce: discordNonce(operation.operationId), enforce_nonce: true } : {}) })
+    return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId, request: { method: mapping ? 'PATCH' : 'POST', path, multipart: { payloadJson, files: [file] } } }
+  }
+  let text = p.kind === 'question' ? p.text : p.kind === 'permission' ? [p.title, p.context, ...p.options.map((option, index) => `${index + 1}. ${option.label}`)].filter(Boolean).join('\n\n') : p.kind === 'speech' ? publicationSpeechText(p) : p.kind === 'binding-lifecycle'
+    ? `${p.event === 'disconnected' ? 'Conversation sharing ended' : 'Conversation sharing ' + p.event}\nAgent ${p.agentSessionId}\n${p.scope.publication === 'future-shared-conversation' ? 'New conversation messages' : 'Agent replies'} · ${p.scope.input}\n${p.synchronization === true ? 'Synchronization enabled' : p.synchronization === false ? 'Synchronization disabled' : 'Synchronization state unconfirmed'}${p.event === 'disconnected' ? '\nThe Agent remains available.' : ''}`
+    : discordFailure('DISCORD_REPRESENTATION_UNSUPPORTED')
+  const localAgent = 'amux://agent/' + encodeURIComponent(operation.reference.agentSessionId)
+  const buttons: Array<{ type: number; components: Array<{ type: number; style: number; label: string; custom_id: string }> }> = []
+  if (p.kind === 'permission') {
+    text += '\n\n' + (p.status === 'pending' ? 'Awaiting an authorized decision' : p.status === 'response-sent' ? 'Response sent to the original Agent' : 'Original response ' + p.status)
+    if (p.status === 'pending' && p.options.length <= 25) for (let index = 0; index < p.options.length; index += 5) buttons.push({ type: 1, components: p.options.slice(index, index + 5).map((option, offset) => ({ type: 2, style: 2, label: option.label.length <= 80 ? option.label : `Option ${index + offset + 1}`, custom_id: 'p:' + option.actionRef })) })
+    else if (p.status === 'pending') text += '\nThis request exceeds Discord component capacity. Respond in AgentMux.'
+    if (p.status !== 'pending' || p.options.length > 25) text += '\n' + localAgent
+  }
+  if (p.kind === 'question') {
+    const actionable = p.status === 'pending' && p.actionRef && discordQuestionComponents(p.questions)
+    if (p.answers?.length) text += '\n\n' + p.answers.map(answer => `${p.questions.find(question => question.id === answer.questionId)?.prompt ?? 'Original answer'}\n${answer.answer}`).join('\n\n')
+    if (p.unavailableReason) text += '\n\n' + p.unavailableReason
+    text += '\n\n' + (p.status === 'response-sent' ? 'Answer submitted to the original Agent' : actionable ? 'Answer the original questions' : 'Open the original conversation in AgentMux to continue. ' + (p.status === 'pending' ? 'This question exceeds Discord modal capacity.' : p.status))
+    if (!actionable) text += '\n' + localAgent
+    if (actionable) buttons.push({ type: 1, components: [{ type: 2, style: 1, label: 'Answer questions', custom_id: 'q:' + p.actionRef }] })
+  }
+  const components = [{ type: 17, components: [{ type: 10, content: ('phase' in p && p.phase === 'progress' ? '**Progress**\n' : '') + text }, ...buttons] }]
+  const body = JSON.stringify({ flags: 32768, components, allowed_mentions: { parse: [] }, ...(!mapping ? { nonce: discordNonce(operation.operationId), enforce_nonce: true } : {}) })
+  return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId, request: { method: mapping ? 'PATCH' : 'POST', path, body, contentType: 'application/json' } }
+}

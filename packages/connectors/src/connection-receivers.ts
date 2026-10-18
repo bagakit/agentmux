@@ -15,6 +15,7 @@ export interface ConnectionIngressTransport {
     signal: AbortSignal
     storage(): ChannelStoragePort
     metadataChanged?(subject: ChannelMetadataSubject): void
+    questionForm?(input: import('./durable-ingress.js').ConnectionQuestionFormInput): import('./durable-ingress.js').ConnectionQuestionForm | null
     receive(input: ConnectionTransportEvent, acknowledge: () => void | Promise<void>): ReturnType<DurableIngressHost['receive']>
   }): Promise<ConnectionIngressReceiver>
 }
@@ -99,6 +100,7 @@ export class ConnectionReceivers {
       const receiver = await transport.start({ config: structuredClone(lane.record.config), credential,
         signal: lane.abort.signal,
         storage: () => this.connections.channelStorage(lane.record.config),
+        questionForm: input => this.current(lane) ? this.ingress.questionForm(input) : null,
         metadataChanged: subject => {
           setImmediate(() => {
             try {

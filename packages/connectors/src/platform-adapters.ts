@@ -4,6 +4,7 @@ import { FeishuPublicationAdapter } from './adapters/feishu/publication.js'
 import { FEISHU_ENROLLMENT_PROTOCOL } from './adapters/feishu/enrollment-protocol.js'
 import { DISCORD_PUBLICATION, prepareDiscordPublication } from './adapters/discord/render.js'
 import { readDiscordActor } from './adapters/discord/profile.js'
+import { createDiscordMetadataCache } from './adapters/discord/metadata.js'
 import { createFeishuChannelProfiles } from './adapters/feishu/channel-profile.js'
 
 /** Built-in leaves stay unloaded until an explicit adapter operation or receiver consumes them. */
@@ -89,6 +90,7 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
     discordLoading = undefined
     throw new AgentMuxError('The connection adapter is unavailable. Existing Agents are retained.', 'CONNECTION_ADAPTER_UNAVAILABLE')
   })
+  const discordProfiles = createDiscordMetadataCache({ readActor: readDiscordActor })
   const discordAdapter: ConnectionAdapter = {
     adapterId: DISCORD_PUBLICATION.adapterId,
     test: async (...input) => (await discord()).test(...input),
@@ -97,9 +99,15 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
     publication: { ...DISCORD_PUBLICATION, supportedRenderVersions: [DISCORD_PUBLICATION.renderVersion], prepare: prepareDiscordPublication,
       images: { maxBytes: 16 * 1024 * 1024, accepts: () => true }, files: { maxBytes: 16 * 1024 * 1024, accepts: () => true },
       dispatch: async (...input) => (await discord()).publication.dispatch(...input), inspect: async (...input) => (await discord()).publication.inspect(...input) },
+    roomDiscovery: {
+      list: async (...input) => (await discord()).roomDiscovery.list(...input), search: async (...input) => (await discord()).roomDiscovery.search(...input),
+      get: async (...input) => (await discord()).roomDiscovery.get(...input), members: async (...input) => (await discord()).roomDiscovery.members(...input), createLink: async (...input) => (await discord()).roomDiscovery.createLink(...input)
+    },
     channelProfiles: {
       readActor: input => readDiscordActor(input),
-      refreshActor: async (...input) => (await discord()).channelProfiles.refreshActor(...input)
+      refreshActor: async (...input) => (await discord()).channelProfiles.refreshActor(...input),
+      getMetadata: input => discordProfiles.getMetadata!(input), listMetadata: input => discordProfiles.listMetadata!(input), clearMetadata: input => discordProfiles.clearMetadata!(input),
+      refreshConversation: async (...input) => (await discord()).channelProfiles.refreshConversation!(...input)
     }
   }
   return [adapter, discordAdapter]

@@ -15,9 +15,9 @@ export class DiscordClients {
     const rest = new REST({ version: '10', retries: 0, ...this.http }).setToken(credential)
     this.clients.set(key, { credential, rest }); return rest
   }
-  async identity(config: ConnectionConfig, credential: string, signal?: AbortSignal): Promise<{ botId: string; name?: string; avatar?: string | null }> {
+  async identity(config: ConnectionConfig, credential: string, signal?: AbortSignal, refresh = false): Promise<{ botId: string; name?: string; avatar?: string | null }> {
     const rest = this.rest(config, credential), existing = this.identities.get(rest)
-    if (existing) return await existing
+    if (existing && !refresh) return await existing
     const reading = (async () => {
       const app = await rest.get('/oauth2/applications/@me', { signal }) as { id?: string; bot?: { id?: string; username?: string; avatar?: string | null } }
       if (app.id !== config.application.appId || !app.bot) return discordFailure('DISCORD_APPLICATION_MISMATCH')

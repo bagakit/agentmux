@@ -8,6 +8,11 @@ import { discordId, discordFailure } from './protocol.js'
 import type { DiscordClients } from './client.js'
 
 import { prepareDiscordPublication, discordNonce } from './render.js'
+function nativeFieldsMatch(expected: unknown, actual: unknown): boolean {
+  if (Array.isArray(expected)) return Array.isArray(actual) && expected.length === actual.length && expected.every((value, index) => nativeFieldsMatch(value, actual[index]))
+  if (expected && typeof expected === 'object') return !!actual && typeof actual === 'object' && Object.entries(expected).every(([key, value]) => nativeFieldsMatch(value, (actual as Record<string, unknown>)[key]))
+  return expected === actual
+}
 const unknown = (): PublicationReceipt => ({ state: 'unknown', reason: 'effect-unconfirmed' })
 function failed(error: unknown): PublicationReceipt {
   const status = error instanceof DiscordAPIError || error instanceof HTTPError ? error.status : undefined
@@ -23,6 +28,8 @@ export class DiscordPublicationAdapter implements PublicationAdapter {
   readonly renderVersion = 'discord-components-v1'
   readonly supportedRenderVersions = [this.renderVersion]
   readonly fragmentBytes = 1900
+  readonly permissionActions = true as const
+  readonly questionActions = true as const
   readonly directResources = true as const
   readonly images = { maxBytes: 16 * 1024 * 1024, accepts: () => true }
   readonly files = { maxBytes: 16 * 1024 * 1024, accepts: () => true }
@@ -36,9 +43,11 @@ export class DiscordPublicationAdapter implements PublicationAdapter {
       if (!context) return discordFailure('DISCORD_RESOURCE_UNCONFIRMED')
       return { name: file.name, contentType: file.contentType, data: Buffer.from(context.readResource(file)) }
     }) } catch { return { state: 'not-applied', reason: 'unsupported-format' } }
+    let identity: { botId: string }
+    try { identity = await this.clients.identity({ ...target, adapterId: this.adapterId, label: '', enabled: true, credentialRef: '' }, credential, signal) }
+    catch { return { state: 'not-applied', reason: 'adapter-unavailable' } }
     try {
       const rest = this.clients.rest({ ...target, adapterId: this.adapterId, label: '', enabled: true, credentialRef: '' }, credential)
-      const identity = await this.clients.identity({ ...target, adapterId: this.adapterId, label: '', enabled: true, credentialRef: '' }, credential, signal)
       const message = await rest.request({ method: prepared.request.method as RequestMethod, fullRoute: prepared.request.path as `/${string}`, signal,
         ...(prepared.request.multipart ? { body: JSON.parse(prepared.request.multipart.payloadJson), files: files! } : prepared.request.body === undefined ? {} : { body: JSON.parse(prepared.request.body) }) }) as APIMessage | undefined
       if (prepared.request.method === 'DELETE') return mapping ? { state: 'confirmed', mapping: { ...mapping } } : unknown()
@@ -58,12 +67,13 @@ export class DiscordPublicationAdapter implements PublicationAdapter {
       return null
     }
     // A GET confirms the exact retained message; content equality never establishes a new identity.
-    if (!mapping || prepared.request.method === 'DELETE') return null
+    if (!mapping || prepared.request.method === 'DELETE' || prepared.request.multipart) return null
     try {
       const rest = this.clients.rest({ ...target, adapterId: this.adapterId, label: '', enabled: true, credentialRef: '' }, credential)
+      const identity = await this.clients.identity({ ...target, adapterId: this.adapterId, label: '', enabled: true, credentialRef: '' }, credential, signal)
       const message = await rest.get(`/channels/${discordId(target.externalConversationId)}/messages/${discordId(mapping.messageId)}`, { signal }) as APIMessage
-      const expected = prepared.request.multipart ? JSON.parse(prepared.request.multipart.payloadJson) : prepared.request.body ? JSON.parse(prepared.request.body) : undefined
-      return message.id === mapping.messageId && message.channel_id === target.externalConversationId && JSON.stringify(message.components) === JSON.stringify(expected?.components) ? { state: 'confirmed', mapping: { ...mapping } } : null
+      const expected = prepared.request.body ? JSON.parse(prepared.request.body) : undefined
+      return message.id === mapping.messageId && message.channel_id === target.externalConversationId && message.author?.id === identity.botId && nativeFieldsMatch(expected?.components, message.components) ? { state: 'confirmed', mapping: { ...mapping } } : null
     } catch { return null }
   }
 }
