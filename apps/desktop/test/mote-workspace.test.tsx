@@ -6,6 +6,7 @@ import { createMoteApp, moteClick, settleMoteApp, type MoteAppFixture } from './
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
+import { documentKey } from '../src/renderer/src/lib/workbench-tabs'
 import { defaultAgent, scratchWorkspace } from './fixtures/mote-workface'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 
@@ -48,6 +49,27 @@ async function input(selector: string, value: string) {
 }
 async function ideas() { await moteClick(button('Ideas')) }
 async function openFirst() { await ideas(); const list = rows(); expect(list).toHaveLength(2); await moteClick(list[0]!) }
+function delayNextSourceRead() {
+  let requested!: FileReadParams, resolve!: (result: FileReadResult) => void
+  vi.mocked(api.files.readPublic).mockImplementationOnce(params => {
+    requested = params
+    return new Promise(done => { resolve = done })
+  })
+  return async () => {
+    expect(requested.path).toBe('SOUL.md')
+    await act(async () => resolve(readResult(requested)))
+    await settleMoteApp()
+  }
+}
+function expectOriginalWork(before: ReturnType<typeof useAppStore.getState>) {
+  const current = useAppStore.getState()
+  expect(current.tabs).toBe(before.tabs)
+  expect(current.workbenchSpaceSelection).toEqual(before.workbenchSpaceSelection)
+  expect(current.sessions).toBe(before.sessions)
+  expect(current.agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(current.agentComposerNotes).toBe(before.agentComposerNotes)
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+}
 
 beforeEach(() => {
   app = createMoteApp()
@@ -170,4 +192,120 @@ it('opens the selected original file through the existing Editor while preservin
   expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
   expect(write).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+})
+
+it.each([
+  { kind: 'question', section: 'Profile', label: 'A question for this Mote', action: 'Prepare this question in a new discussion', returnBeforeRead: false },
+  { kind: 'question', section: 'Profile', label: 'A question for this Mote', action: 'Prepare this question in a new discussion', returnBeforeRead: true },
+  { kind: 'idea request', section: 'Ideas', label: 'Idea direction', action: 'Prepare idea request', returnBeforeRead: false },
+  { kind: 'idea request', section: 'Ideas', label: 'Idea direction', action: 'Prepare idea request', returnBeforeRead: true }
+])('retains the original $kind after local Calendar navigation while its source is pending (return first: $returnBeforeRead)', async ({ section, label, action, returnBeforeRead }) => {
+  await app.mount()
+  if (section === 'Ideas') {
+    await ideas()
+    await moteClick(node('.mote-details__idea-request summary'))
+  }
+  const selector = '[aria-label="' + label + '"]', authored = 'Keep this exact unsent request.'
+  await input(selector, authored)
+  const before = useAppStore.getState(), finishRead = delayNextSourceRead()
+  await moteClick(button(action))
+  await moteClick(button('Calendar'))
+  if (returnBeforeRead) await moteClick(button(section))
+  await finishRead()
+  expectOriginalWork(before)
+  expect(button(returnBeforeRead ? section : 'Calendar').getAttribute('aria-selected')).toBe('true')
+  if (!returnBeforeRead) await moteClick(button(section))
+  expect(node<HTMLTextAreaElement>(selector).value).toBe(authored)
+  expect(button(action).disabled).toBe(false)
+
+  await moteClick(button(action))
+  const current = useAppStore.getState()
+  const created = Object.values(current.tabs).filter(tab => !before.tabs[tab.id])
+  expect(created).toHaveLength(1)
+  expect(current.agentComposerDrafts[created[0]!.layout.activeRegionId]).toBe(authored)
+  expect(current.agentComposerNotes[created[0]!.layout.activeRegionId]).toContain(revision)
+  expect(current.sessions).toBe(before.sessions)
+  for (const [id, draft] of Object.entries(before.agentComposerDrafts)) expect(current.agentComposerDrafts[id]).toBe(draft)
+  for (const [id, note] of Object.entries(before.agentComposerNotes)) expect(current.agentComposerNotes[id]).toBe(note)
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+})
+
+it.each([false, true])('does not prepare an idea arrangement after local Calendar navigation and retains a fresh confirmed preparation (return first: %s)', async returnBeforeRead => {
+  const create = vi.spyOn(api.schedule, 'create')
+  vi.spyOn(api.schedule, 'list').mockResolvedValue({ schedules: [], executionScope: 'connected-host' })
+  vi.spyOn(api.schedule, 'onChanged').mockImplementation(() => () => {})
+  await app.mount(); await ideas()
+  await moteClick(node('.mote-details__idea-request summary'))
+  const authored = 'Arrange only this exact direction.'
+  await input('[aria-label="Idea direction"]', authored)
+  const before = useAppStore.getState(), finishRead = delayNextSourceRead()
+  await moteClick(button('Arrange sourced ideas'))
+  await moteClick(button('Calendar'))
+  if (returnBeforeRead) await ideas()
+  await finishRead()
+  expectOriginalWork(before)
+  expect(Object.values(useLauncherState.getState().drafts).some(draft => draft.moteIdea?.arrangement)).toBe(false)
+  expect(panel().querySelector('.mote-idea-controls__arrangement')).toBeNull()
+  expect(create).not.toHaveBeenCalled()
+  if (!returnBeforeRead) await ideas()
+  expect(node<HTMLTextAreaElement>('[aria-label="Idea direction"]').value).toBe(authored)
+  expect(button('Arrange sourced ideas').disabled).toBe(false)
+
+  await moteClick(button('Arrange sourced ideas'))
+  const prepared = Object.values(useLauncherState.getState().drafts).find(draft => draft.moteIdea?.arrangement)!.moteIdea!.arrangement!
+  expect(prepared.message).toBe(authored)
+  expect(prepared.frozenContext).toContain(revision)
+  expect(node<HTMLTextAreaElement>('.mote-idea-controls__arrangement textarea').value).toBe(authored)
+  await moteClick(button('Calendar')); await ideas()
+  expect(Object.values(useLauncherState.getState().drafts).find(draft => draft.moteIdea?.arrangement)!.moteIdea!.arrangement).toBe(prepared)
+  expect(node<HTMLTextAreaElement>('.mote-idea-controls__arrangement textarea').value).toBe(authored)
+  expectOriginalWork(before)
+  expect(create).not.toHaveBeenCalled()
+})
+
+it('keeps feedback and cancels its cold SOUL open after real Calendar navigation, then stages only a fresh review', async () => {
+  const path = rootPath + '/SOUL.md', original = '# Original SOUL\nKeep this saved paragraph.'
+  let finish!: (value: Awaited<ReturnType<typeof api.files.read>>) => void
+  const read = vi.spyOn(api.files, 'read').mockResolvedValue({ status: 'read', document: { path, content: original, revision } })
+  const write = vi.spyOn(api.files, 'write')
+  await app.mount(); await openFirst()
+  await moteClick(node('.mote-details__idea-feedback summary'))
+  const comment = 'Keep this specific unsent feedback.'
+  await input('[aria-label="Idea feedback comment"]', comment)
+  read.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
+  const before = useAppStore.getState()
+  await moteClick(button('Review feedback in SOUL'))
+  expect(read).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, path)
+  await moteClick(button('Calendar')); await ideas()
+  await act(async () => finish({ status: 'read', document: { path, content: original, revision } }))
+  await settleMoteApp()
+  const cancelled = useAppStore.getState()
+  // The shared File read may retain its original data and background placement;
+  // this cancelled review must not reveal that File or stage its local feedback.
+  for (const [id, tab] of Object.entries(before.tabs)) expect(cancelled.tabs[id]).toBe(tab)
+  for (const tab of Object.values(cancelled.tabs).filter(tab => !before.tabs[tab.id])) {
+    expect(Object.values(tab.regions)).toEqual([expect.objectContaining({ kind: 'file', workspaceId: SCRATCH_WORKSPACE_ID, path })])
+  }
+  expect(cancelled.workbenchSpaceSelection).toEqual(before.workbenchSpaceSelection)
+  expect(cancelled.layouts[SCRATCH_WORKSPACE_ID]!.groups.map(group => group.activeTabId)).toEqual(before.layouts[SCRATCH_WORKSPACE_ID]!.groups.map(group => group.activeTabId))
+  expect(cancelled.mainSurface).toBe(before.mainSurface)
+  expect(cancelled.sessions).toBe(before.sessions)
+  expect(cancelled.agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(cancelled.agentComposerNotes).toBe(before.agentComposerNotes)
+  const key = documentKey(SCRATCH_WORKSPACE_ID, path)
+  expect(useAppStore.getState().dirtyDocuments[key]).not.toBe(true)
+  expect(useAppStore.getState().documents[key]?.content ?? original).toBe(original)
+  expect(node<HTMLTextAreaElement>('[aria-label="Idea feedback comment"]').value).toBe(comment)
+  expect(write).not.toHaveBeenCalled()
+
+  if (!node<HTMLDetailsElement>('.mote-details__idea-feedback').open) await moteClick(node('.mote-details__idea-feedback summary'))
+  await moteClick(button('Review feedback in SOUL'))
+  const current = useAppStore.getState()
+  expect(current.documents[key]!.content).toContain(original)
+  expect(current.documents[key]!.content).toContain(comment)
+  expect(current.documents[key]!.content).toContain(rootPath + '/' + noteNames[0])
+  expect(current.dirtyDocuments[key]).toBe(true)
+  expect(current.sessions).toBe(before.sessions)
+  expect(current.agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(write).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
 })
