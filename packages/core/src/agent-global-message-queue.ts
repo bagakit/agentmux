@@ -22,6 +22,7 @@ import { defaultAgentMuxMessageQueuePath } from './runtime-paths.js'
 import type { AgentMuxRunRef, AgentPromptExecution, AgentMessageChannel, AgentOperationDevice } from './types.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { composeAgentPrompt } from './agent-outbound-message.js'
+import { renderAgentMuxMessageEnvelope, channelQuoteWireMatchesEnvelope } from './agent-message-render.js'
 import { browserInputContextFields } from './browser-input-context.js'
 import { normalizeOperationDevice } from './operation-device.js'
 import { configureMessageJournal, inputControlJournalSchema, messageRouteJournalSchema, messageObservationJournalSchema, messageObservationQuery, dispatchDiscoveryJournalSchema, dispatchReplyJournalSchema, initializeMessageEventIndex, messageBroadcastJournalSchema, openMessageJournal, openMessageJournalSnapshot, syncMessageJournal } from './agent-message-journal.js'
@@ -574,6 +575,8 @@ export class DurableAgentMuxMessageQueue {
             message.envelope.operationId !== intent.source.originalControlOperationId ||
             message.envelope.recipientSessionId !== key.agentSessionId || message.envelope.recipientRunId !== key.expectedRun.runId ||
             !isDeepStrictEqual(message.admissionIntent, admissionIntent)) throw new AgentMuxError('Original message intent is invalid.', 'INVALID_AGENT_INPUT_CONTROL')
+        if (message.envelope.channelQuote && (typeof intent.source.promptWire !== 'string' || !channelQuoteWireMatchesEnvelope(intent.source.promptWire, message.envelope)) ||
+            !message.envelope.channelQuote && intent.source.promptWire !== undefined) throw new AgentMuxError('Frozen original channel quote wire is invalid.', 'INVALID_AGENT_INPUT_CONTROL')
       } else throw new AgentMuxError('Original input producer is invalid.', 'INVALID_AGENT_INPUT_CONTROL')
       this.db.prepare('INSERT INTO input_intents VALUES (?, ?, ?, ?)').run(agentInputJournalKey(key), key.agentSessionId, record.sequence, record.sequence)
       return
@@ -992,7 +995,8 @@ export class DurableAgentMuxMessageQueue {
         this.input(key) // Also verifies producer ownership for a read-only original submission.
         if (!this.db.prepare('SELECT 1 FROM input_intents WHERE input_id=?').get(agentInputJournalKey(key))) await this.appendRecord({ kind: 'input-intent', sequence: this.nextSequence, at: envelope.createdAt,
           intent: { key, admissionIntent: frozenIntent, execution: 'immediate', environment: structuredClone(newMessage.inputEnvironment),
-            source: { kind: 'message', messageId, originalControlOperationId: envelope.operationId } } })
+            source: { kind: 'message', messageId, originalControlOperationId: envelope.operationId,
+              ...(envelope.channelQuote ? { promptWire: renderAgentMuxMessageEnvelope(envelope) } : {}) } } })
       }
       return this.receipt(this.message(messageId)!)
     }, true)

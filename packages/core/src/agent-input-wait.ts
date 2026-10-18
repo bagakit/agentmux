@@ -47,7 +47,9 @@ export type AgentInputJournalIntent = {
         inputContextCaptureProof?: import('./agent-input-context-capture.js').AgentInputContextCaptureProof;
         /** Wire frozen at first intake, before waiting or Provider preparation. */
         promptWire?: string }
-    | { kind: 'message'; messageId: string; originalControlOperationId: string }
+    | { kind: 'message'; messageId: string; originalControlOperationId: string;
+        /** Original quote wire, frozen at the first journal save before waiting. */
+        promptWire?: string }
 }
 export type AgentInputDispatchLink = { ref: AgentInputWaitRef; gateId: string }
 export type AgentInputJournalEntry = { sequence: number; recordedAt: number; intent: AgentInputJournalIntent; control: AgentInputWaitControl }

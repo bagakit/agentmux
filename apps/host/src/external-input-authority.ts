@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from 'node:util'
 import { AgentMuxError, connectAgentMuxRpc, parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor, agentInteractionIntentDigest, agentQuestionReplyIntentDigest, type AgentExternalInputAuthorityPort } from '@agentmux/core'
 
 /** Original local Desktop business owner, separate from the semantic Host and its input journal. */
@@ -19,6 +20,7 @@ export function createDesktopExternalInputAuthority(options: { desktopSocketPath
       const original = result.ingress, input = original?.input
       if (!original || original.kind === 'action' || !input || !('messageId' in input) || input.hostId !== options.executionHostId || input.agentSessionId !== intent.agentSessionId ||
         input.expectedRun.runId !== intent.expectedRun.runId || input.operationId !== intent.operationId || input.messageId !== intent.messageId || original.body !== intent.body ||
+        !isDeepStrictEqual(input.channelQuote, intent.channelQuote) || !isDeepStrictEqual(input.admissionIntent, intent.admissionIntent) ||
         JSON.stringify(parseAgentExternalMessageAuthor(input.author)) !== JSON.stringify(parseAgentExternalMessageAuthor(author))) throw unavailable()
       if (result.authority !== 'current') {
         if (result.code === 'INGRESS_SERVICE_DISABLED' || result.code === 'INGRESS_SERVICE_UNCONFIRMED') throw new AgentMuxError('The original Connector service cannot authorize this external input. Retain its original waiting reference; restore service policy and explicitly rejoin. Local Agent input remains available.', result.code)

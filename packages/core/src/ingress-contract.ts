@@ -34,6 +34,9 @@ export type ConnectionIngressMessage = {
     operationId: string; messageId: string; author: AgentExternalMessageAuthor
     /** First-claim display snapshot; cache refresh never changes this original input. */
     channelProfile?: import('./channel-profile.js').ChannelActorProfileObservation
+    channelQuote?: import('./channel-quote.js').ChannelTranscriptQuote
+    /** Original recipient observation for position correlation; never an input grant. */
+    contextSource?: import('./types.js').AgentSessionHistorySource
     /** Original first claim only; missing historical intent is unknown and never reconstructed. */
     admissionIntent?: Exclude<import('./agent-prompt-condition.js').AgentPromptAdmissionIntent, { kind: 'exact-condition' }>
   }

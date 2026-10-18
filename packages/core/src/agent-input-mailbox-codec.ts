@@ -13,6 +13,7 @@ import { parseAgentInputMailboxRead, type AgentInputMailboxPage, type AgentInput
 import { parseAgentInputSubmissionReceipt } from './agent-input-receipt-codec.js'
 import { parsePromptSubmissionRecord } from './prompt-submission-record.js'
 import { validateAgentMuxMessageEnvelope } from './agent-message-envelope.js'
+import { channelQuoteWireMatchesEnvelope } from './agent-message-render.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
 const fail = (): never => { throw new AgentMuxError('The input mailbox page does not match its original scope and facts.', 'CONTROL_PROTOCOL_ERROR') }
@@ -49,10 +50,11 @@ export function parseAgentInputMailboxItem(value: unknown, agentSessionId: strin
         if (source.sourceDevice !== undefined) normalizeOperationDevice(source.sourceDevice)
       } else {
         if (source.kind !== 'message' || key.kind !== 'message' || source.messageId !== key.messageId ||
-          source.prompt !== undefined || source.agentMuxNote !== undefined || source.authorHuman !== undefined || source.sourceChannel !== undefined || source.sourceDevice !== undefined || source.inputContext !== undefined || source.inputContextSource !== undefined || source.inputContextCaptureProof !== undefined || source.promptWire !== undefined) fail()
+          source.prompt !== undefined || source.agentMuxNote !== undefined || source.authorHuman !== undefined || source.sourceChannel !== undefined || source.sourceDevice !== undefined || source.inputContext !== undefined || source.inputContextSource !== undefined || source.inputContextCaptureProof !== undefined) fail()
         string(source.originalControlOperationId)
-        const message = object(entry.message, ['schema', 'messageId', 'operationId', 'createdAt', 'sender', 'recipient', 'threadId', 'correlationId', 'replyTo', 'workspaceId', 'senderSessionId', 'senderRunId', 'recipientSessionId', 'recipientRunId', 'body', 'channelProfile'])
+        const message = object(entry.message, ['schema', 'messageId', 'operationId', 'createdAt', 'sender', 'recipient', 'threadId', 'correlationId', 'replyTo', 'workspaceId', 'senderSessionId', 'senderRunId', 'recipientSessionId', 'recipientRunId', 'body', 'channelProfile', 'channelQuote'])
         const envelope = validateAgentMuxMessageEnvelope(message as unknown as Parameters<typeof validateAgentMuxMessageEnvelope>[0])
+        if (envelope.channelQuote ? typeof source.promptWire !== 'string' || !channelQuoteWireMatchesEnvelope(source.promptWire, envelope) : source.promptWire !== undefined) fail()
         if (key.kind !== 'message' || envelope.messageId !== key.messageId || envelope.operationId !== source.originalControlOperationId ||
           envelope.recipientSessionId !== key.agentSessionId || envelope.recipientRunId !== key.expectedRun.runId || receipt && receipt.originalControlOperationId !== envelope.operationId) fail()
       }

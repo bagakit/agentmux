@@ -7021,7 +7021,7 @@ export class AgentMuxClient {
     }
     if (envelope.sender.kind === 'external') authority = await this.externalMessageAuthority(envelope, context, intent.admissionIntent)
     return { input: { agentSessionId: intent.key.agentSessionId, expectedRun: intent.key.expectedRun, operationId: agentPromptInputId(intent.key),
-      prompt: renderAgentMuxMessageEnvelope(envelope), admissionIntent: (() => { const { expectedRun: _run, ...target } = intent.admissionIntent; return target })(), execution: 'immediate',
+      prompt: envelope.channelQuote ? source.promptWire! : renderAgentMuxMessageEnvelope(envelope), admissionIntent: (() => { const { expectedRun: _run, ...target } = intent.admissionIntent; return target })(), execution: 'immediate',
       ...(original.sourceChannel ? { sourceChannel: original.sourceChannel } : {}), ...(original.sourceDevice ? { sourceDevice: original.sourceDevice } : {}) },
       ...(envelope.sender.kind === 'agent-session' ? { authorAgentSessionId: envelope.sender.agentSessionId } : {}), ...(authority ? { authority } : {}) }
   }
@@ -7031,7 +7031,7 @@ export class AgentMuxClient {
     const host = context?.externalAuthor, sender = envelope.sender
     if (sender.kind !== 'external' || !envelope.recipientSessionId || !envelope.recipientRunId || !host || typeof host.assertCurrent !== 'function' || !isDeepStrictEqual(parseAgentExternalMessageAuthor(host.identity), sender)) throw new AgentMuxError('External input requires its exact current Host author owner.', 'EXTERNAL_AUTHOR_REQUIRED')
     const identity = structuredClone(sender), check = host.assertCurrent.bind(host)
-    const intent = { agentSessionId: envelope.recipientSessionId!, expectedRun: { runId: envelope.recipientRunId! }, operationId: envelope.operationId, messageId: envelope.messageId, body: envelope.body, ...(admissionIntent === undefined ? {} : { admissionIntent: structuredClone(admissionIntent) }) }
+    const intent = { agentSessionId: envelope.recipientSessionId!, expectedRun: { runId: envelope.recipientRunId! }, operationId: envelope.operationId, messageId: envelope.messageId, body: envelope.body, ...(envelope.channelQuote === undefined ? {} : { channelQuote: structuredClone(envelope.channelQuote) }), ...(admissionIntent === undefined ? {} : { admissionIntent: structuredClone(admissionIntent) }) }
     const assertCurrent = async () => { await check(structuredClone(intent)) }
     await assertCurrent()
     return { externalAuthor: identity, assertCurrent }
