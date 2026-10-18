@@ -41,6 +41,7 @@ export type DurableIngressOptions = {
 }
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const intakeRows = 'SELECT sequence,connection_id,ingress_id,record_json FROM connection_ingress_message UNION ALL SELECT intake_sequence AS sequence,connection_id,ingress_id,record_json FROM connection_ingress_event WHERE record_json IS NOT NULL'
+const unfinishedIntake = "(json_extract(record_json,'$.state')='received' OR (COALESCE(json_extract(record_json,'$.code'),'')!='INGRESS_CONTENT_UNSUPPORTED' AND json_extract(record_json,'$.group.target.agentSessionId') IS NOT NULL AND json_extract(record_json,'$.group.recorded') IS NULL AND COALESCE(json_extract(record_json,'$.group.recording.state'),'')!='refused'))"
 function fail(code: string): never { throw new AgentMuxError('This external intake cannot use the original target or authority. Existing Agents and inputs are retained.', code) }
 function verified(value: VerifiedIngressEvent): VerifiedIngressEvent {
   const text = (v: unknown): string => { if (typeof v !== 'string' || !v.trim() || v.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(v)) fail('INVALID_CONNECTION_INGRESS'); return v as string }
@@ -80,6 +81,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
         if (!columns.includes(name)) this.database.exec(`ALTER TABLE connection_ingress_event ADD COLUMN ${name} ${type}`)
       }
       this.database.exec(`CREATE UNIQUE INDEX IF NOT EXISTS connection_ingress_action_sequence ON connection_ingress_event(intake_sequence) WHERE record_json IS NOT NULL; CREATE UNIQUE INDEX IF NOT EXISTS connection_ingress_action_identity ON connection_ingress_event(ingress_id) WHERE record_json IS NOT NULL; CREATE INDEX IF NOT EXISTS connection_ingress_action_connection ON connection_ingress_event(connection_id,intake_sequence) WHERE record_json IS NOT NULL; CREATE INDEX IF NOT EXISTS connection_ingress_message_connection ON connection_ingress_message(connection_id,sequence); CREATE INDEX IF NOT EXISTS connection_ingress_message_audience ON connection_ingress_message(domain,app_id,json_extract(record_json,'$.externalConversationId'),sequence); CREATE INDEX IF NOT EXISTS connection_ingress_event_audience ON connection_ingress_event(domain,app_id,json_extract(record_json,'$.externalConversationId'),intake_sequence) WHERE record_json IS NOT NULL;`)
+      this.database.exec(`CREATE INDEX IF NOT EXISTS connection_ingress_unfinished_message ON connection_ingress_message(connection_id,sequence) WHERE ${unfinishedIntake}; CREATE INDEX IF NOT EXISTS connection_ingress_unfinished_action ON connection_ingress_event(connection_id,intake_sequence) WHERE record_json IS NOT NULL AND ${unfinishedIntake};`)
     })
   }
   private safe<T>(read: () => T): T {
@@ -447,7 +449,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail('INVALID_CONNECTION_INGRESS')
       const after = afterIngressId ? this.database.prepare(`SELECT sequence FROM (${intakeRows}) WHERE connection_id=? AND ingress_id=?`).get(connectionId, afterIngressId) : undefined
       if (afterIngressId && !after) fail('INGRESS_CURSOR_MISMATCH')
-      const rows = this.database.prepare(`SELECT ingress_id FROM (${intakeRows}) WHERE connection_id=? AND (json_extract(record_json,'$.state')='received' OR (COALESCE(json_extract(record_json,'$.code'),'')!='INGRESS_CONTENT_UNSUPPORTED' AND json_extract(record_json,'$.group.target.agentSessionId') IS NOT NULL AND json_extract(record_json,'$.group.recorded') IS NULL AND COALESCE(json_extract(record_json,'$.group.recording.state'),'')!='refused')) AND sequence>? ORDER BY sequence LIMIT ?`)
+      const rows = this.database.prepare(`SELECT ingress_id FROM (${intakeRows}) WHERE connection_id=? AND ${unfinishedIntake} AND sequence>? ORDER BY sequence LIMIT ?`)
         .all(connectionId, Number(after?.sequence ?? 0), limit + 1)
       const ingressIds = rows.slice(0, limit).map(row => String(row.ingress_id))
       return { ingressIds, nextAfterIngressId: rows.length > ingressIds.length ? ingressIds.at(-1)! : null }
