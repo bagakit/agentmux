@@ -2,6 +2,8 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
+import { AgentMuxRpcService } from '../../core/src/public-rpc-service.js'
+import { AgentMuxError } from '../../core/src/index.js'
 import { AgentMuxControlServer } from '../../core/src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../../core/src/public-rpc-client.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
@@ -62,4 +64,22 @@ describe('local identity deletion through original public consumers', () => {
       .rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
     expect((await f.owner.list()).connections.map(r => r.config.connectionId)).toEqual([f.second.connectionId])
   })
+  it('checks the original operator again after a delayed owner acquisition and before deletion', async () => {
+    const f = await fixture()
+    let revoked = false
+    const connections = Object.create(f.owner) as typeof f.owner
+    connections.delete = async (input, context) => {
+      await Promise.resolve()
+      revoked = true
+      return await f.owner.delete(input, context)
+    }
+    const service = new AgentMuxRpcService({ connections })
+    await expect(service.call('connection.delete', { operationId: 'remove-after-revocation', connectionId: f.first.connectionId, expectedRevision: 1 }, {
+      principal: { kind: 'user', id: 'original-operator' },
+      assertCurrent: () => { if (revoked) throw new AgentMuxError('Original operator revoked.', 'CONTROL_PERMISSION_DENIED') }
+    })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+    expect((await f.owner.list()).connections.map(row => row.config.connectionId)).toEqual([f.first.connectionId, f.second.connectionId])
+    expect(await f.owner.inspectDeletion({ operationId: 'remove-after-revocation' })).toEqual({ operation: null })
+  })
+
 })
