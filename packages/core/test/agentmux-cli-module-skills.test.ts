@@ -137,6 +137,13 @@ describe('local progressive AgentMux module skills', () => {
       'keep the original request, operation/event IDs and drafts', 'never automatically resend a write']) expect(path).toContain(step)
     expect(path).toContain('A shared include points to one independent Markdown file')
     expect(path).toContain('partial results do not prove missing links')
+    for (const discovery of [entry.stdout, note.stdout]) {
+      const guidance = discovery.replace(/\s+/gu, ' ')
+      for (const contract of ['mermaid, drawio, dot/gv', 'plantuml/puml', 'original XML',
+        '$expression$', '$$ delimiter lines', 'Escape literal dollars or use inline/fenced code',
+        'formula source and anchors', 'render failures do not invalidate saved source',
+        'Previews are client projections', 'file write']) expect(guidance).toContain(contract)
+    }
     expect(entry.stdout).not.toContain('::note-include')
     expect(note.stdout.indexOf('## Edit an authorized Note')).toBeGreaterThan(-1)
     expect(note.stdout.indexOf('## Edit an authorized Note')).toBeLessThan(note.stdout.indexOf('A minimal Note body is:'))
