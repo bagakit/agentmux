@@ -5,3 +5,17 @@
 .a2a-settings__global { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-4); margin-top: var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
 .a2a-settings__global button { flex: none; }
 @media (max-width: 560px) { .a2a-settings__global { align-items: flex-start; flex-direction: column; gap: var(--sp-2); } }
+.a2a-settings__choice-preview { display: grid; grid-template-columns: minmax(230px, .9fr) minmax(250px, 1.1fr); gap: var(--sp-5); align-items: start; }
+[data-a2a-settings] .settings-reading-width { margin: 0; }
+.a2a-settings__preview { min-width: 0; margin: 0; padding: var(--sp-4); background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-md); }
+.a2a-settings__preview figcaption { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--sp-2); margin-bottom: var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); }
+.a2a-settings__message { display: flex; align-items: flex-start; gap: var(--sp-3); }
+.a2a-settings__message > svg { flex: none; color: var(--text-2); margin-top: 2px; }
+.a2a-settings__message strong { color: var(--text); font-size: var(--fs-body); font-weight: 600; }
+.a2a-settings__message p { margin: var(--sp-1) 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
+.a2a-settings__message small { color: var(--text-3); font-size: var(--fs-micro); }
+.a2a-settings__outcome { display: grid; grid-template-columns: 1fr auto; gap: var(--sp-1) var(--sp-3); margin-top: var(--sp-4); padding-top: var(--sp-3); border-top: 1px solid var(--line); font-size: var(--fs-meta); color: var(--text-2); }
+.a2a-settings__outcome strong { color: var(--text); font-weight: 600; }
+.a2a-settings__outcome p { grid-column: 1 / -1; margin: 0; color: var(--text-3); line-height: 1.5; }
+.a2a-settings__preview-note { margin: var(--sp-3) 0 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+@media (max-width: 900px) { .a2a-settings__choice-preview { grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); } }
