@@ -1,29 +1,31 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, type ComponentProps } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import type {
   AgentSessionHistoryContentPart,
   AgentSessionHistoryPage,
-  AgentTimelineItem,
-  AgentSessionUserMessage
+  AgentTimelineItem
 } from '@agentmux/core'
 import type { AgentSessionControl } from '../src/shared/contracts'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
-import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
+import { activityReadingProps } from './helpers/activity-reading-props'
+import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
+import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
-import { ConversationReasoningTrace } from '@agentmux/client-ui/components/ConversationReasoningTrace'
 import { api } from '../src/renderer/src/lib/api'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 vi.stubGlobal('ResizeObserver', class {
   observe() {}
+  unobserve() {}
   disconnect() {}
 })
 vi.stubGlobal('IntersectionObserver', class {
   observe() {}
+  unobserve() {}
   disconnect() {}
 })
 
@@ -36,7 +38,7 @@ const control: AgentSessionControl = {
 
 let host: HTMLDivElement
 let root: Root
-let historyPageSpy: MockInstance<typeof api.sessions.historyPage>
+const fixtures: Awaited<ReturnType<typeof conversationPagePortFixture>>[] = []
 let clipboardSpy: MockInstance<typeof api.ui.writeClipboardText>
 let openFile: ReturnType<typeof vi.fn>
 let openHttp: ReturnType<typeof vi.fn>
@@ -49,12 +51,7 @@ beforeEach(() => {
   openFile = vi.fn()
   openHttp = vi.fn()
   clipboardSpy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
-  historyPageSpy = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue({
-    agentSessionId: control.agentSessionId,
-    source: { providerId: 'codex', nativeSessionId: 'native-reading-ui' },
-    items: [],
-    nextCursor: null
-  })
+
 })
 
 afterEach(async () => {
@@ -62,106 +59,59 @@ afterEach(async () => {
   host.remove()
   window.getSelection()?.removeAllRanges()
   clipboardSpy.mockRestore()
-  historyPageSpy.mockRestore()
+  try {
+    for (const f of fixtures) expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
+  } finally {
+    for (const f of fixtures.splice(0).reverse()) await f.close()
+    vi.restoreAllMocks()
+  }
 })
 
+async function readActivity(page: AgentSessionHistoryPage, items: AgentTimelineItem[] = [], props: Partial<ComponentProps<typeof ActivityView>> = {}) {
+  const f = await conversationPagePortFixture(control, page.source, async () => page); fixtures.push(f)
+  const stream = await f.publishCaptured(items)
+  await act(async () => root.render(<ActivityView {...activityReadingProps({ control, workspaceRoot: _hygiene_fixturePath('workspace'), openWorkspaceFile: openFile, openHttpLink: openHttp })} {...props} />))
+  await vi.waitFor(async () => {
+    await act(async () => { await Promise.resolve() })
+    expect(f.acceptedCaptured(stream)).toBe(true)
+    const consumer = inspectConversationConsumers(control).consumers[0]
+    expect(consumer?.accepted).not.toBeNull(); expect(consumer?.loading).toBe(false); expect(consumer?.inFlight).toBe(false)
+  })
+  return f
+}
+async function revealBody() {
+  for (const button of host.querySelectorAll<HTMLButtonElement>('[data-captured-reply-observation] [aria-expanded="false"]')) await act(async () => button.click())
+  for (const details of host.querySelectorAll<HTMLDetailsElement>('.conversation-submission-record .message-disclosure:not([open])')) await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+  for (const button of [...host.querySelectorAll<HTMLButtonElement>('button')].filter(button => button.textContent === '显示正文')) await act(async () => button.click())
+}
+
 describe('Conversation and History shared reading UI presentation', () => {
-  it('renders Agent open reading on left and both known and unattributed user inputs right-docked in ActivityView', async () => {
-    const userMsgHuman: AgentSessionUserMessage = {
-      id: 'msg-human',
-      rawId: 'raw-human-1',
-      agentSessionId: control.agentSessionId,
-      source: { kind: 'captured', submissionId: 'sub-1' },
-      author: { kind: 'human' },
-      content: '人类提问：请检查代码。',
-      contentParts: [{ kind: 'text', text: '人类提问：请检查代码。' }],
-      recordedAt: 1000
-    }
-
-    const userMsgUnknown: AgentSessionUserMessage = {
-      id: 'msg-unknown',
-      rawId: 'raw-unknown-1',
-      agentSessionId: control.agentSessionId,
-      source: { kind: 'captured', submissionId: 'sub-2' },
-      author: { kind: 'unknown' },
-      content: '未核实作者输入。',
-      contentParts: [{ kind: 'text', text: '未核实作者输入。' }],
-      recordedAt: 1500
-    }
-
-    const assistantItem: AgentTimelineItem = {
-      id: 'msg-agent',
-      agentSessionId: control.agentSessionId,
-      kind: 'assistant_message',
-      status: 'complete',
-      source: 'native-hook',
-      createdAt: 2000,
-      updatedAt: 2000,
-      title: 'Agent',
-      content: '回答已生成。\n- 列表项一\n- 列表项二\n\n```ts\nconst x = 1\n```'
-    }
-
-    const machineItem: AgentTimelineItem = {
-      id: 'msg-machine',
-      agentSessionId: control.agentSessionId,
-      kind: 'lifecycle',
-      status: 'complete',
-      source: 'native-hook',
-      createdAt: 2500,
-      updatedAt: 2500,
-      title: 'Lifecycle event',
-      content: 'System ready.'
-    }
-
-    await act(async () => {
-      root.render(
-        <ActivityView
-          sessionId={control.agentSessionId}
-          capability="complete-events"
-          displayState="done"
-          items={[assistantItem, machineItem]}
-          userMessages={[userMsgHuman, userMsgUnknown]}
-          workspaceRoot={_hygiene_fixturePath("workspace")}
-          describeSpeaker={(speaker) => ({
-            name: speaker.role === 'human' ? 'You' : speaker.role === 'unknown' ? 'Input' : 'Agent'
-          })}
-          openWorkspaceFile={openFile}
-          openHttpLink={openHttp}
-        />
-      )
-    })
-
-    const turns = host.querySelectorAll<HTMLElement>('.log-turn')
-    expect(turns.length).toBeGreaterThan(0)
-
-    // 1. Agent turn: left-aligned open reading lane
-    const agentTurn = Array.from(turns).find((t) => t.dataset.speakerRole === 'agent')
-    expect(agentTurn).toBeDefined()
-    expect(agentTurn!.textContent).toContain('Agent')
-    expect(agentTurn!.textContent).toContain('回答已生成。')
-    expect(agentTurn!.querySelector('.md')).not.toBeNull()
-    expect(agentTurn!.querySelector('.md-list')).not.toBeNull()
-    expect(agentTurn!.querySelector('.md-block-code')).not.toBeNull()
-
-    // 2. Human turn: right-docked with human role
-    const humanTurn = Array.from(turns).find((t) => t.dataset.speakerRole === 'human')
-    expect(humanTurn).toBeDefined()
-    expect(humanTurn!.textContent).toContain('You')
-    expect(humanTurn!.textContent).toContain('人类提问：请检查代码。')
-
-    // 3. Recorded author remains unknown; the user-requested display default is You.
-    const unknownTurn = Array.from(turns).find((t) => t.dataset.messageId === 'msg-unknown')
-    expect(unknownTurn).toBeDefined()
-    expect(unknownTurn!.dataset.speakerRole).toBe('human')
-    expect(unknownTurn!.textContent).not.toContain('作者未记录')
-    expect(unknownTurn!.textContent).toContain('You')
-    expect(unknownTurn!.textContent).toContain('未核实作者输入。')
-
-    // 4. Undefined speaker machine activity: does NOT shift right
-    const machineTurn = Array.from(turns).find((t) => !t.dataset.speakerRole)
-    if (machineTurn) {
-      expect(machineTurn.dataset.speakerRole).toBeUndefined()
-    }
+  it('renders confirmed Agent replies left and both confirmed and unattributed user inputs right through the public Activity window', async () => {
+    const item = (id: string, kind: AgentTimelineItem['kind'], content: string, createdAt: number): AgentTimelineItem => ({ id, agentSessionId: control.agentSessionId,
+      kind, source: 'native-hook', status: 'complete', title: id, content, createdAt, updatedAt: createdAt })
+    const human = { ...item('sub-1', 'user_message', '人类提问：请检查代码。', 1000), source: 'user' as const, authorHuman: true }
+    const unknown = { ...item('sub-2', 'user_message', '未核实作者输入。', 1500), source: 'user' as const }
+    const agent = { ...item('msg-agent', 'assistant_message', '回答已生成。\n- 列表项一\n- 列表项二\n\n```ts\nconst x = 1\n```', 2000), authorAgentSessionId: control.agentSessionId }
+    const machine = item('msg-machine', 'lifecycle', 'System ready.', 2500)
+    await readActivity({ agentSessionId: control.agentSessionId, source: { providerId: 'codex', nativeSessionId: 'native-reading-ui' }, items: [], nextCursor: null }, [human, unknown, agent, machine],
+      { describeSpeaker: speaker => ({ name: speaker.role === 'human' ? 'You' : speaker.role === 'unknown' ? 'Input' : 'Agent' }) })
+    await revealBody()
+    const reply = host.querySelector<HTMLElement>('[data-message-id="msg-agent"]')!
+    expect(reply).not.toBeNull(); expect(reply.dataset.speakerRole).toBe('agent')
+    expect(reply.textContent).toContain('回答已生成。'); expect(reply.querySelector('.md-list')).not.toBeNull(); expect(reply.querySelector('.md-block-code')).not.toBeNull()
+    const input = host.querySelector<HTMLElement>('[data-submission-id="sub-1"]')!
+    expect(input).not.toBeNull(); expect(input.querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBe('human')
+    expect(input.textContent).toContain(human.content)
+    const unattributed = host.querySelector<HTMLElement>('[data-submission-id="sub-2"]')!
+    expect(unattributed).not.toBeNull(); expect(unattributed.querySelector('.log-turn')?.getAttribute('data-speaker-role')).toBe('human')
+    expect(unattributed.textContent).toContain(unknown.content)
+    expect(Reflect.get(unknown, 'authorHuman')).toBeUndefined()
+    const group = host.querySelector<HTMLButtonElement>('.wf-head')!; expect(group).not.toBeNull()
+    await act(async () => group.click())
+    const step = host.querySelector<HTMLElement>('[data-observation-step-id="msg-machine"]')!
+    expect(step).not.toBeNull(); expect(step.closest('.log-turn')).toBeNull()
+    await act(async () => step.click())
+    expect(host.querySelector('.wf-native-process__body')?.textContent).toContain(machine.content)
   })
 
   it('renders trace-only turn compactly with identity preserved and no heavy header wall', async () => {
@@ -188,10 +138,10 @@ describe('Conversation and History shared reading UI presentation', () => {
     expect(turn.dataset.traceOnly).toBe('true')
     expect(turn.querySelector('.log-turn__who')?.textContent).toBe('Tool Agent')
     expect(turn.querySelectorAll('.conversation-tool-trace')).toHaveLength(2)
-    expect(turn.querySelector('.log-turn__resource')).not.toBeNull()
+    expect(turn.querySelector('.conversation-resource-file')).not.toBeNull()
   })
 
-  it('shares ConversationMessage in SessionHistoryView with unified Markdown baseline', async () => {
+  it('uses the shared Markdown baseline in the actual Activity history entry', async () => {
     const historyParts: AgentSessionHistoryContentPart[] = [
       { kind: 'text', text: '## 历史回顾\n\n- 记录一\n- 记录二\n\n```bash\npnpm install\n```' }
     ]
@@ -209,24 +159,10 @@ describe('Conversation and History shared reading UI presentation', () => {
       nextCursor: null
     }
 
-    historyPageSpy.mockResolvedValue(page)
+    await readActivity(page)
+    await revealBody()
 
-    await act(async () => {
-      root.render(
-        <SessionHistoryView
-          control={control}
-          label="Codex"
-          visible
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("workspace")}
-          openWorkspaceFile={openFile}
-          openHttpLink={openHttp}
-        />
-      )
-    })
-
-    const turn = host.querySelector<HTMLElement>('.session-history__item .log-turn')
+    const turn = host.querySelector<HTMLElement>('.conversation-native-thread .log-turn')
     expect(turn).not.toBeNull()
     expect(turn!.textContent).toContain('历史回顾')
     expect(turn!.querySelector('.md-heading')).not.toBeNull()
@@ -340,7 +276,7 @@ describe('Conversation and History shared reading UI presentation', () => {
     expect(copied).not.toContain('保密正文')
   })
 
-  it('mounts actual ActivityView and SessionHistoryView with typed mixed parts and asserts exact DOM for all 4 parts categories', async () => {
+  it('reads all typed mixed part categories through the one public Activity entry with exact Copy order', async () => {
     const mixedParts: AgentSessionHistoryContentPart[] = [
       { kind: 'text', text: '**Mixed text body**' },
       { kind: 'reasoning', text: '**Mixed reasoning body**' },
@@ -362,25 +298,11 @@ describe('Conversation and History shared reading UI presentation', () => {
       nextCursor: null
     }
 
-    historyPageSpy.mockResolvedValue(page)
-
-    await act(async () => {
-      root.render(
-        <SessionHistoryView
-          control={control}
-          label="Codex"
-          visible
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("workspace")}
-          openWorkspaceFile={openFile}
-          openHttpLink={openHttp}
-        />
-      )
-    })
+    await readActivity(page)
+    await revealBody()
 
     // 1. Assert text category in mounted DOM (fails AssertionRED if remove-text-parts mutant runs)
-    const textEls = host.querySelectorAll('.log-turn__body > .log-turn__text > .md')
+    const textEls = host.querySelectorAll('.log-turn__body .log-turn__text .md')
     expect(textEls.length).toBeGreaterThan(0)
     expect(host.textContent).toContain('Mixed text body')
 
@@ -406,12 +328,16 @@ describe('Conversation and History shared reading UI presentation', () => {
     expect(host.textContent).toContain('search_files')
 
     // 4. Assert resource category in mounted DOM (fails AssertionRED if remove-resource-parts mutant runs)
-    const resourceEls = host.querySelectorAll('.log-turn__resource')
+    const resourceEls = host.querySelectorAll('.conversation-resource-file')
     expect(resourceEls.length).toBeGreaterThan(0)
     expect(host.textContent).toContain('Index file')
-    expect(host.textContent).toContain('src/index.ts')
+    const reference = host.querySelector<HTMLDetailsElement>('.conversation-resource-file__reference')!
+    expect(reference).not.toBeNull()
+    await act(async () => { reference.open = true; reference.dispatchEvent(new Event('toggle')) })
+    await act(async () => reference.querySelector<HTMLButtonElement>('[aria-label="Copy file reference"]')!.click())
+    expect(clipboardSpy).toHaveBeenLastCalledWith('src/index.ts')
     const body = host.querySelector('.log-turn__body')!
-    expect([...body.children].map((element) =>
+    expect([...body.querySelectorAll('.log-turn__text, [data-trace-kind], .conversation-resource-file')].map((element) =>
       element.getAttribute('data-trace-kind') ?? (element.classList.contains('log-turn__text') ? 'text' : 'resource')
     )).toEqual(['text', 'reasoning', 'tool-call', 'tool-result', 'resource'])
     const copy = host.querySelector<HTMLButtonElement>('button[aria-label="Copy message"]')!
@@ -420,29 +346,6 @@ describe('Conversation and History shared reading UI presentation', () => {
       '**Mixed text body**\n**Mixed reasoning body**\nsearch_files\n{"pattern":"*.ts"}\nsearch_files\nsrc/index.ts\nIndex file\nsrc/index.ts'
     )
 
-    // The same typed native parts must also reach the actual Activity entry.
-    await act(async () => {
-      root.render(
-        <ActivityView
-          sessionId={control.agentSessionId}
-          capability="complete-events"
-          displayState="done"
-          items={[]}
-          userMessages={[{
-            id: 'activity-mixed', rawId: 'activity-mixed-raw',
-            agentSessionId: control.agentSessionId,
-            source: { kind: 'captured', submissionId: 'mixed-submission' },
-            author: { kind: 'agent', agentSessionId: 'sender-agent' },
-            content: 'Mixed text body', contentParts: mixedParts
-          }]}
-          workspaceRoot={_hygiene_fixturePath("workspace")}
-        />
-      )
-    })
-    expect(host.querySelectorAll('.log-turn__body > .log-turn__text > .md')).toHaveLength(1)
-    expect(host.textContent).toContain('Mixed text body')
-    expect(host.querySelectorAll('[data-trace-kind="reasoning"]')).toHaveLength(1)
-    expect(host.querySelectorAll('.conversation-tool-trace')).toHaveLength(2)
-    expect(host.querySelectorAll('.log-turn__resource')).toHaveLength(1)
+
   })
 })
