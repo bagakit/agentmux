@@ -204,7 +204,7 @@ function MoteContent({ scope, reference, section, onShowIdeas, onShowCalendar, o
     <div className="mote-profile" hidden={section !== 'profile'}>
       <section className="mote-profile__start" aria-label="Work together">
         <h3>What shall we work on?</h3>
-        <MoteFirstCooperation scope={scope} reference={reference} />
+        {profileActive ? <MoteFirstCooperation scope={scope} reference={reference} /> : null}
       </section>
       <div className="mote-profile__columns">
       <div className="mote-profile__work">
