@@ -20,7 +20,7 @@ const node = <T extends HTMLElement>(selector: string): T => {
   expect(found, selector).not.toBeNull(); return found!
 }
 const button = (label: string) => {
-  const found = [...app.container.querySelectorAll<HTMLButtonElement>('[data-mote-details] button')]
+  const found = [...app.container.querySelectorAll<HTMLButtonElement>('.mote-space-frame__header button, [data-mote-details] button')]
     .find(item => item.getAttribute('aria-label') === label || item.textContent?.trim() === label)
   expect(found, label).toBeDefined(); return found!
 }
@@ -52,7 +52,7 @@ beforeEach(() => {
 afterEach(async () => { await app.dispose() })
 
 it('makes original memory a first-class home entry while keeping its exact source lazy and editable', async () => {
-  await app.mount()
+  await app.mount(); await moteClick(button('Profile'))
   const memory = node<HTMLDetailsElement>('[data-mote-memory]')
   expect(memory.closest('.mote-profile__preferences')).toBeNull()
   expect(memory.open).toBe(false)
@@ -71,7 +71,7 @@ it('makes original memory a first-class home entry while keeping its exact sourc
 })
 
 it('returns to each original home and Ideas reading position with its unsent inputs intact', async () => {
-  await app.mount()
+  await app.mount(); await moteClick(button('Profile'))
   const profile = node<HTMLElement>('[aria-label="Mote profile"]')
   await type('[aria-label="A question for this Mote"]', 'Keep our question beside the original work.')
   await act(async () => { profile.scrollTop = 144; profile.dispatchEvent(new Event('scroll')) })
@@ -96,7 +96,7 @@ it('returns to each original home and Ideas reading position with its unsent inp
 
 it('keeps the original private-chat draft and manual question through Ideas and Calendar navigation', async () => {
   const chatRead = vi.spyOn(api.moteChat, 'call').mockResolvedValue({ configuration: null, operation: null })
-  await app.mount(); await settleMoteApp()
+  await app.mount(); await moteClick(button('Profile')); await settleMoteApp()
   const chat = node('[data-mote-private-chat]'), interval = node<HTMLInputElement>('[aria-label="Conversation update interval in minutes"]')
   expect(chat.closest('.mote-profile__preferences')).toBeNull()
   const target = chatRead.mock.calls.find(([method]) => method === 'space.mote.chat.inspect')![1]
@@ -117,6 +117,29 @@ it('keeps the original private-chat draft and manual question through Ideas and 
   expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(useAppStore.getState().moteChatIntents).toEqual(before.moteChatIntents)
   expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+})
+
+it('reads a changed original idea once when returning from Profile and retains it on ordinary mode switches', async () => {
+  await app.mount(); await moteClick(button('Ideas'))
+  await moteClick(node('.mote-details__ideas .mote-details__note'))
+  const ideaReads = () => vi.mocked(api.files.readPublic).mock.calls.filter(([params]) => params.path === 'experiment.md').length
+  const before = ideaReads()
+  expect(node('.mote-details__preview').textContent).toContain('Keep the source and its decisions.')
+  await moteClick(button('Profile'))
+  vi.mocked(api.files.readPublic).mockImplementation(async params => {
+    const result = material(params)
+    if (params.path === 'experiment.md' && result.result.status === 'read') result.result.document.content = 'The original source has a new decision.'
+    return result
+  })
+  await act(async () => useAppStore.setState(state => ({ workspaceFileRevisions: {
+    ...state.workspaceFileRevisions, [SCRATCH_WORKSPACE_ID]: (state.workspaceFileRevisions[SCRATCH_WORKSPACE_ID] ?? 0) + 1
+  } })))
+  expect(ideaReads()).toBe(before)
+  await moteClick(button('Ideas'))
+  expect(ideaReads()).toBe(before + 1)
+  expect(node('.mote-details__preview').textContent).toContain('The original source has a new decision.')
+  await moteClick(button('Profile')); await moteClick(button('Ideas'))
+  expect(ideaReads()).toBe(before + 1)
 })
 
 const homeExpanded = () => app.container.querySelector('[data-surface-tool-dock][data-content-expanded="true"]')
@@ -142,7 +165,7 @@ it('opens the companion home from the actual directory and returns to the same o
   expect(covered.operation).toBe('inspect.client')
   if (covered.operation !== 'inspect.client') throw new Error('Wrong original observation')
   expect(desktopWorkbenchObservationSchema.parse(covered.observation).desktop.presentation).toMatchObject({ state: 'covered', blockers: [] })
-  await moteClick(button('Continue discussion'))
+  await moteClick(button('Discussion'))
   expect(homeExpanded()).toBeNull()
   const revealed = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: 'companion-revealed-observation', operation: 'inspect.client' })
   expect(revealed.operation).toBe('inspect.client')
@@ -200,7 +223,7 @@ it('reveals retained unplaced original members without inventing a selected Agen
   const before = useAppStore.getState()
   await app.mount(); await openHome()
   expect(app.container.querySelector('[data-mote-details] [aria-label="Continue discussion"]')).toBeNull()
-  await moteClick(button('Open workface'))
+  await moteClick(button('Discussion'))
   expect(homeExpanded()).toBeNull()
   const main = node<HTMLElement>('.workspace-workbench-slot[data-workspace-id="' + SCRATCH_WORKSPACE_ID + '"]')
   expect(main.querySelector('button[data-workbench-tab-id="' + defaultTab.id + '"]')).not.toBeNull()
@@ -232,7 +255,7 @@ it('shows a bounded reading of original arrangements and opens the selected row 
   vi.mocked(api.schedule.list).mockImplementation(async params => ({ schedules: params.scope ? saved : saved.filter(record => record.agentSessionId === params.target?.agentSessionId), executionScope: 'connected-host' }))
   const listeners = new Set<(value: ContinuousProgressLoop) => void>()
   vi.mocked(api.schedule.onChanged).mockImplementation(listener => { listeners.add(listener); return () => { listeners.delete(listener) } })
-  await app.mount()
+  await app.mount(); await moteClick(button('Profile'))
   expect(vi.mocked(api.schedule.list).mock.calls.filter(([params]) => params.scope).map(([params]) => params)).toEqual([{ scope: { hostId: defaultAgent.hostId, workspacePath: defaultAgent.workspacePath } }])
   const upcoming = node('[aria-label="Next arrangements"]')
   expect([...upcoming.querySelectorAll('[data-upcoming-id]')].map(row => row.getAttribute('data-upcoming-id'))).toEqual(['first', 'next', 'third'])
@@ -260,7 +283,7 @@ it('shows a bounded reading of original arrangements and opens the selected row 
 it('keeps confirmed upcoming rows and independent work available when the original read fails, then recovers on the same scope', async () => {
   confirmOriginalHome()
   vi.mocked(api.schedule.list).mockResolvedValue({ schedules: [arrangement('retained', 10000)], executionScope: 'connected-host' })
-  await app.mount()
+  await app.mount(); await moteClick(button('Profile'))
   const original = node('[data-upcoming-id="retained"]')
   await moteClick(button('Ideas'))
   vi.mocked(api.schedule.list).mockRejectedValueOnce(new Error('Original arrangement observation unavailable.'))
@@ -296,7 +319,7 @@ it('keeps the original on-open recovery eligible while its companion home covers
     await moteClick(node<HTMLButtonElement>('[data-space-nav="topic:' + customMoteId + '"]'))
     expect(homeExpanded()).not.toBeNull()
     expect(recover).toHaveBeenCalledExactlyOnceWith(customAgent.control, customAgent.workspacePath, expect.any(String), { trigger: 'mote-open', timingOverride: 'on-open' })
-    await moteClick(button('Continue discussion'))
+    await moteClick(button('Discussion'))
     expect(homeExpanded()).toBeNull()
     expect(recover).toHaveBeenCalledTimes(1)
     expect(useAppStore.getState().tabs).toBe(before.tabs)
@@ -357,5 +380,66 @@ it.each([false, true])('reveals a newly saved home arrangement after the existin
   expect(document.activeElement).toBe(cancelReveal ? input : row.querySelector('summary'))
   if (cancelReveal) expect(input.value).toBe('Keep this later arrangement thought.')
   expect(useAppStore.getState().agentComposerDrafts[defaultAgent.id]).toBe('Default unsent')
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+})
+
+
+it('keeps one shared navigation and question lifecycle across Profile and Discussion without replacing the original workface', async () => {
+  useAppStore.setState({ projectRailOpen: true })
+  await app.mount(); await openHome()
+  const navigation = node('[aria-label="Mote pages"]')
+  const question = node<HTMLTextAreaElement>('[aria-label="A question for this Mote"]')
+  const composer = originalComposer()
+  await type('[aria-label="A question for this Mote"]', 'A new question, kept separately from the current discussion.')
+  const before = useAppStore.getState()
+  const reads = vi.mocked(api.files.readPublic).mock.calls.length
+  for (const mode of ['Discussion', 'Profile', 'Ideas', 'Calendar', 'Profile', 'Discussion']) {
+    await moteClick(button(mode))
+    expect(node('[aria-label="Mote pages"]')).toBe(navigation)
+    expect(node<HTMLTextAreaElement>('[aria-label="A question for this Mote"]')).toBe(question)
+    expect(button(mode).getAttribute('aria-selected')).toBe('true')
+    expect(originalComposer()).toBe(composer)
+  }
+  expect(question.value).toBe('A new question, kept separately from the current discussion.')
+  expect(vi.mocked(api.files.readPublic).mock.calls).toHaveLength(reads)
+  expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+})
+
+it('retains the original pending question across local page switches and prepares it only once', async () => {
+  useAppStore.setState({ projectRailOpen: true })
+  await app.mount(); await openHome()
+  await type('[aria-label="A question for this Mote"]', 'Hold this one original preparation.')
+  const replies: (() => void)[] = []
+  vi.mocked(api.files.readPublic).mockImplementation(params => new Promise(resolve => replies.push(() => resolve(material(params)))))
+  const before = useAppStore.getState()
+  await moteClick(button('Prepare this question in a new discussion'))
+  expect(replies).toHaveLength(2)
+  await moteClick(button('Discussion')); await moteClick(button('Profile'))
+  expect(button('Reading original materials').disabled).toBe(true)
+  expect(replies).toHaveLength(2)
+  vi.mocked(api.files.readPublic).mockImplementation(async params => material(params))
+  await act(async () => replies.forEach(reply => reply())); await settleMoteApp()
+  const created = Object.values(useAppStore.getState().tabs).filter(tab => !before.tabs[tab.id])
+  expect(created).toHaveLength(1)
+  expect(useAppStore.getState().agentComposerDrafts[created[0]!.layout.activeRegionId]).toBe('Hold this one original preparation.')
+  expect(useAppStore.getState().tabs[defaultTab.id]).toBe(before.tabs[defaultTab.id])
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+})
+
+it('lists recent original discussions and opens the exact selected Tab without creating another conversation', async () => {
+  useAppStore.setState({ projectRailOpen: true })
+  await app.mount(); await openHome()
+  const recent = node('[aria-label="Recent discussions"]')
+  expect(recent.querySelector('[data-mote-discussion="' + defaultTab.id + '"]')).not.toBeNull()
+  const chosen = recent.querySelector<HTMLButtonElement>('[data-mote-discussion="' + neighborTab.id + '"]')!
+  expect(chosen).not.toBeNull()
+  const before = useAppStore.getState()
+  await moteClick(chosen)
+  expect(button('Discussion').getAttribute('aria-selected')).toBe('true')
+  expect(useAppStore.getState().workbenchSpaceSelection).toMatchObject({ tabId: neighborTab.id, groupId: 'mote-group', regionId: neighborTab.layout.activeRegionId })
+  expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
   expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
 })
