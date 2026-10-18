@@ -7,6 +7,8 @@ import { WorkspaceZonesPanel } from './WorkspaceZonesPanel'
 import { WorkspaceChangesSummary } from './WorkspaceGitTool'
 import { WorkspaceFilesFrame, type WorkspaceFileActions } from './WorkspaceFilesFrame'
 
+const FOLDER_PRESENTATION = { ...contentSlotPresentation(false), fileTreeDefaultSize: 45 }
+
 export function ProjectFilesTool({ workspace, visible, onOpenPath, onOpenTerminal, actions }: WorkspaceFileActions & { actions: ReactNode }) {
   const context = useWorkspaceZoneContext(workspace)
   const openGit = (view: 'changes' | 'branches') => {
@@ -19,7 +21,7 @@ export function ProjectFilesTool({ workspace, visible, onOpenPath, onOpenTermina
     {zones}
   </div>
   const files = context.files
-  return <WorkspaceFilesFrame workspace={files.workspace} visible={visible} presentation={contentSlotPresentation(false)}
+  return <WorkspaceFilesFrame workspace={files.workspace} visible={visible} presentation={FOLDER_PRESENTATION}
     title={files.workspace.name} subtitle={files.workspace.branch} contextPath={files.directoryPath} actions={actions}
     explorer={{ rootPath: files.rootPath, rootLabel: files.workspace.name,
       onOpenPath: onOpenPath ?? (path => openWorkspaceZoneFile(workspace, path)),

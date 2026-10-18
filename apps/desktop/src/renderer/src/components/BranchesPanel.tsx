@@ -79,7 +79,7 @@ function WorktreeAgentPresence({ hostId, path }: { hostId: string; path: string 
                   }))} />
 }
 
-export function BranchesPanel({ workspace, active = true, zoneContext }: { workspace: WorkspaceRecord; active?: boolean; zoneContext?: Pick<WorkspaceZoneContext, 'spaceId' | 'zones'> }) {
+export function BranchesPanel({ workspace, inventoryWorkspace = workspace, active = true, zoneContext }: { workspace: WorkspaceRecord; inventoryWorkspace?: WorkspaceRecord | null; active?: boolean; zoneContext?: Pick<WorkspaceZoneContext, 'spaceId' | 'zones'> }) {
   const activeRef = useRef(active)
   activeRef.current = active
   const displayPath = usePathDisplay()
@@ -153,7 +153,7 @@ export function BranchesPanel({ workspace, active = true, zoneContext }: { works
   const pendingCloseouts = config?.workspaces.filter(item => item.closeout?.targetWorkspaceId === workspace.id) ?? []
   const closedWorkspaceIds = useMemo(() => new Set(config?.workspaces.filter(item => item.closeout).map(item => item.id)), [config?.workspaces])
   const { snapshot, loading, error: loadError, refresh } = useWorkspaceBranches(workspace.id, active)
-  const inventory = useZoneWorktrees(zoneContext?.spaceId ?? pinScope, workspace, active)
+  const inventory = useZoneWorktrees(zoneContext?.spaceId ?? pinScope, inventoryWorkspace, active)
   const native = inventory.snapshot?.kind === 'ready' ? inventory.snapshot : null
   const notHere = native && !inventory.stale && zoneContext ? unrepresentedWorktrees(native, zoneContext.zones, inventory.directories) : null
   // ahead/behind 是 **HEAD** 相对它自己 upstream 的事实，不是逐分支的——所以下面只把它画在

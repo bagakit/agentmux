@@ -33,6 +33,7 @@ import { LiquidSelectionSurface } from './LiquidSelectionSurface'
 import { WorkspaceFilesTool } from './WorkspaceFilesTool'
 import { WorkspaceGitTool } from './WorkspaceGitTool'
 import { useWorkspaceZoneContext } from '../lib/workspace-zone-context'
+import { folderInventoryWorkspace } from '../lib/zone-worktree-observation'
 import { useMoteWorkfaceScope } from '../lib/mote-workface'
 import { SidebarToggleChrome, WindowSidebarLayoutContext } from './TopRowChrome'
 import { SemanticIcon } from './semantic-icons'
@@ -216,10 +217,12 @@ const WorkspaceAgentListView = memo(function WorkspaceAgentListView({ workspace,
 
 function WorkspaceGitSlot({ workspace, visible }: { workspace: WorkspaceRecord; visible: boolean }) {
   const context = useWorkspaceZoneContext(workspace)
+  const workspaces = useAppStore(state => state.config?.workspaces)
+  const inventoryWorkspace = useMemo(() => folderInventoryWorkspace(context.spaceId, workspaces), [context.spaceId, workspaces])
   const view = useAppStore(state => state.workspaceGitView)
   const [retained, setRetained] = useState<WorkspaceRecord[]>([])
   // Branches manages the Folder repository inventory. Changes/History keep the selected exact resource.
-  const resource = view === 'branches' ? workspace : context.resource
+  const resource = view === 'branches' ? inventoryWorkspace ?? context.resource ?? workspace : context.resource
   useEffect(() => {
     if (visible && resource) setRetained(previous => previous.some(value => gitWorkspaceKey(value) === gitWorkspaceKey(resource)) ? previous : [...previous, resource])
   }, [resource, visible])
@@ -228,7 +231,7 @@ function WorkspaceGitSlot({ workspace, visible }: { workspace: WorkspaceRecord; 
     {resources.map(value => {
       const active = Boolean(resource && gitWorkspaceKey(value) === gitWorkspaceKey(resource))
       return <div className="workspace-tool-slot" hidden={!active} key={gitWorkspaceKey(value)}>
-        <WorkspaceGitTool workspace={value} visible={visible && active} />
+        <WorkspaceGitTool workspace={value} inventoryWorkspace={inventoryWorkspace} visible={visible && active} />
       </div>
     })}
     {!resource ? <div className="surface-inline-error" role="status">{context.issue}</div> : null}

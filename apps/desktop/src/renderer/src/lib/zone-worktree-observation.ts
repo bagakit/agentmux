@@ -1,7 +1,17 @@
 import type { AgentMuxZoneFact } from '@agentmux/core/control'
 import type { GitDirectoryObservation, GitWorktreeEntry, GitWorktreesResult } from '@agentmux/git/types'
+import { isFolderWorkspace, type WorkspaceRecord } from '../../../shared/contracts'
+import { directoryIdentity } from '../../../shared/space-addresses'
+import { workspaceProjectId } from './workspace-projects'
 
 type Ready = Extract<GitWorktreesResult, { kind: 'ready' }>
+
+/** The saved Space's Folder owns inventory reads; selected workfaces keep their own resource. */
+export function folderInventoryWorkspace(spaceId: string, workspaces: readonly WorkspaceRecord[] | undefined): WorkspaceRecord | null {
+  const matches = workspaces?.filter(value => !value.closeout && isFolderWorkspace(value) &&
+    directoryIdentity(value.hostId, value.path) === spaceId && workspaceProjectId(value) === spaceId) ?? []
+  return matches.length === 1 ? matches[0]! : null
+}
 export function worktreeAtPath(entry: GitWorktreeEntry, path: string): boolean {
   return entry.path === path || entry.aliases.includes(path)
 }
