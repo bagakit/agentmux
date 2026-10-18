@@ -23,6 +23,7 @@ import { restoredConnectorServiceIntents, type ConnectorServiceIntent } from './
 import { mailboxNotificationIntentKey, mailboxNotificationSubject, restoredMailboxNotificationIntents, type MailboxNotificationIntent, type MailboxNotificationIntents, type MailboxNotificationFeedbackBySubject, type MailboxNotificationHistoryBySubject } from './lib/mailbox-notification-intent'
 import type { ConnectorServiceObservation } from './lib/connector-service-observation'
 import { restoredMoteConnectionSaveIntents, type MoteConnectionSaveIntent } from './lib/mote-connection-save-intent'
+import { restoredMoteChatIntents, type MoteChatIntent } from './lib/mote-chat-intent'
 import { defaultNoteCanvasLayout, mergeNoteCanvasLayout, noteCanvasScopeKey, restoreNoteCanvasLayouts, type NoteCanvasLayout, type NoteCanvasScope } from './lib/note-canvas-state'
 import { projectInputReceipt as retainInputReceipt } from '@agentmux/client-ui/input-receipt-projection'
 import { restoredQuestionReplies, type DesktopQuestionReplies, type DesktopQuestionReplyAttempt, type DesktopQuestionDrafts } from './lib/conversation-question-intent'
@@ -916,6 +917,7 @@ export type AppState = {
   moteBotRequests: Record<string, MoteBotRequest>
   botTaskSelections: BotTaskSelections
   moteConnectionSaveIntents: Record<string, MoteConnectionSaveIntent>
+  moteChatIntents: Record<string, MoteChatIntent>
   agentComposerDrafts: Record<string, string>
   browserOpinionDrafts: Record<string, BrowserOpinionDraft>
   agentComposerHistory: Record<string, readonly string[]>
@@ -3585,6 +3587,7 @@ type PersistedAppState = {
   moteBotRequests?: Record<string, MoteBotRequest>
   botTaskSelections?: BotTaskSelections
   moteConnectionSaveIntents?: Record<string, MoteConnectionSaveIntent>
+  moteChatIntents?: Record<string, MoteChatIntent>
   agentComposerDrafts?: Record<string, string>
   browserOpinionDrafts?: Record<string, BrowserOpinionDraft>
   agentComposerHistory?: Record<string, readonly string[]>
@@ -3848,6 +3851,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     moteBotRequests: state.moteBotRequests,
     botTaskSelections: state.botTaskSelections,
     moteConnectionSaveIntents: state.moteConnectionSaveIntents,
+    moteChatIntents: state.moteChatIntents,
     agentComposerDrafts: state.agentComposerDrafts,
     browserOpinionDrafts: state.browserOpinionDrafts,
     agentComposerHistory: state.agentComposerHistory,
@@ -4280,6 +4284,20 @@ export async function retainMoteConnectionSaveIntent(intent: MoteConnectionSaveI
 }
 export async function clearMoteConnectionSaveIntent(operationId: string): Promise<void> {
   useAppStore.setState(state => { const moteConnectionSaveIntents = { ...state.moteConnectionSaveIntents }; delete moteConnectionSaveIntents[operationId]; return { moteConnectionSaveIntents } })
+  await saveWorkbenchSelection(false)
+}
+/** Retain the exact private-chat write before dispatch, without mirroring its owner result. */
+export async function retainMoteChatIntent(intent: MoteChatIntent): Promise<AgentMuxSpatialSave> {
+  const parsed = restoredMoteChatIntents({ [intent.input.operationId]: intent })[intent.input.operationId]
+  if (!parsed) throw new Error('The exact original Mote chat input is required.')
+  const previous = useAppStore.getState().moteChatIntents[parsed.input.operationId]
+  if (previous && (previous.method !== parsed.method || JSON.stringify(previous.input) !== JSON.stringify(parsed.input)))
+    throw new Error('The original Mote chat request cannot be replaced.')
+  useAppStore.setState(state => ({ moteChatIntents: { ...state.moteChatIntents, [parsed.input.operationId]: parsed } }))
+  return await saveWorkbenchSelection(false)
+}
+export async function clearMoteChatIntent(operationId: string): Promise<void> {
+  useAppStore.setState(state => { const moteChatIntents = { ...state.moteChatIntents }; delete moteChatIntents[operationId]; return { moteChatIntents } })
   await saveWorkbenchSelection(false)
 }
 /** Retain the chosen Goal and original operation before dispatch; this never creates or sends. */
@@ -4795,6 +4813,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   moteBotRequests: {},
   botTaskSelections: {},
   moteConnectionSaveIntents: {},
+  moteChatIntents: {},
   retainedSpatialFocus: null,
   config: null,
   providerCatalog: [],
@@ -12270,7 +12289,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
     state.botTaskSelections = restoredBotTaskSelections(state.botTaskSelections)
-    return { ...state, workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
+    return { ...state, workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState
