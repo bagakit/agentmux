@@ -46,6 +46,6 @@ export function useSettingsPreviewReturn(initialLabel: string) {
     }
   }
 
-  const returnAction = <button type="button" className="small-button settings-preview-return" data-settings-preview-return onClick={restore} title={`Back to ${returnLabel}`}><BackIcon size={14} /><span>Back to {returnLabel}</span></button>
+  const returnAction = <button type="button" className="small-button settings-preview-return" data-settings-preview-return onClick={restore} aria-label={`Back to ${returnLabel}`} title={`Back to ${returnLabel}`}><BackIcon size={14} aria-hidden="true" /><span>{returnLabel}</span></button>
   return { rootRef, previewRef, remember, open, returnAction }
 }
