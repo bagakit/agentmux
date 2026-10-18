@@ -1,3 +1,4 @@
+import { openToolkitMenu, clickToolkitMenu } from './helpers/toolkit-menu'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act, useState } from 'react'
@@ -172,14 +173,13 @@ describe('actual Toolkit custom identity', () => {
     await dom.render(<m.View active={false} />); expect(dom.container.querySelectorAll('[data-identity-script]')).toHaveLength(0)
     expect(m.writer.add).not.toHaveBeenCalled(); expect(m.run).not.toHaveBeenCalled()
   })
-  it('shows Custom on the actual generic result and Configure retains its exact saved tool', async () => {
+  it('shows the saved name in the compact result header and Configure retains its exact saved tool', async () => {
     const saved = { ...definition('custom-summary'), name: 'Workspace summary' }, close = vi.fn(), openToolkit = vi.fn(), released = vi.fn()
     const controlled: ToolkitScriptSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'script', toolId: saved.id, definition: saved, state: 'idle', reason: null, admission: null, latestConfirmed: null, consumerCount: 1, sequence: 1 }
     vi.spyOn(api.toolkit, 'observe').mockImplementation((id, read) => { expect(id).toBe(saved.id); read(controlled); return { dispose: released } })
     const run = vi.spyOn(api.toolkit, 'run'), action = vi.spyOn(api.toolkit, 'action')
     await dom.render(<SettingsNavigation.Provider value={{ open: vi.fn(), openToolkit }}><UserToolkitResult definition={saved} active close={close} /></SettingsNavigation.Provider>)
-    expect(dom.container.querySelector('.toolkit-result__identity small')?.textContent).toBe('Custom tool')
-    expect(dom.container.querySelector('h2')?.textContent).toBe('Workspace summary'); await button('Configure')
+    expect(dom.container.querySelector('h2')?.textContent).toBe('Workspace summary'); await clickToolkitMenu('Configure', dom.container)
     expect(openToolkit).toHaveBeenCalledWith(saved.id); expect(run).not.toHaveBeenCalled(); expect(action).not.toHaveBeenCalled()
   })
 })

@@ -1,3 +1,4 @@
+import { openToolkitMenu, clickToolkitMenu } from './helpers/toolkit-menu'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -71,7 +72,7 @@ function draft() { return node<HTMLTextAreaElement>('[data-prompt-editor] textar
 it('renders the public amux metrics command through the actual App script source reader', async () => {
   await mountApp()
   await click('.performance-trigger')
-  await click('.performance-actions > button:first-child')
+  await clickToolkitMenu('View script')
   expect(api.toolkit.script).toHaveBeenCalledTimes(1)
   const source = node<HTMLTextAreaElement>('[aria-label="Official Performance script source"]')
   expect(source.readOnly).toBe(true)
@@ -100,12 +101,12 @@ it('通过 actual App Settings 左侧入口与右侧 Toolkit，并让 script、P
   expect(node('.performance-status').textContent).toBe('Paused here')
   await click('[data-performance-observation-toggle]')
   expect(vi.mocked(api.toolkit.observe).mock.calls).toHaveLength(2)
-  await click('.performance-actions > button:first-child')
+  await clickToolkitMenu('View script')
   expect(vi.mocked(api.toolkit.script).mock.calls, '只读 script actual API caller 非空').toHaveLength(1)
   const source = node<HTMLTextAreaElement>('[aria-label="Official Performance script source"]')
   expect(source.readOnly).toBe(true); expect(source.value).toBe('exec amux metrics watch\n')
   await click('[aria-label="Back to Performance"]')
-  await click('.performance-actions > button:last-child')
+  await clickToolkitMenu('Configure')
   expect(node('.settings-page').dataset.settingsPage).toBe('toolkit')
   expect(document.querySelector('.performance-popover')).toBeNull()
   expect(api.toolkit.run).not.toHaveBeenCalled(); expect(api.toolkit.stop).not.toHaveBeenCalled()
@@ -146,7 +147,7 @@ it('source 自身年龄不被新 envelope 时间刷新，展开行在真实新�
   const render = async () => act(async () => root.render(<PerformanceOverview snapshot={observation} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} />))
   observation.observedAt! += 30000; observation.observation!.observedAt += 30000; observation.observation!.app.state = 'stale'; observation.observation!.app.reason = 'Application readings could not be refreshed.'
   await render()
-  expect.soft(node('.performance-observation').textContent, 'Source age uses its last successful reading').toContain('30s old')
+  expect.soft(node('.performance-reading-time').textContent, 'Source age uses its last successful reading').toContain('30s old')
   expect(node('.performance-body').textContent).toContain('Previous reading')
   await click('[data-settings-target="runs"]')
   const row = node<HTMLDetailsElement>('[data-run-id="preparation-run-1"]')
@@ -226,21 +227,28 @@ it('selected Run 来源时间独立于 gap marker；cached available 不追加�
 
 it('128 Session/8 Host 中 unrelated Store 更新不扫描身份；真实新 Session 数组只 join 一次并有相关身份正控', async () => {
   await mountApp()
+  expect(cost.app, 'The actual App render counter is installed').toBeGreaterThan(0)
   const updateBackground = async () => {
     for (let i = 0; i < 6; i++) await act(async () => useAppStore.setState(state => ({
       hostChecks: { ...state.hostChecks, [`irrelevant-${i}`]: { ok: true, checkedAt: i } },
       agentComposerDrafts: { ...state.agentComposerDrafts, [`unrelated-${i + 60}`]: `Unrelated draft ${i}` }, errorDismissed: i % 2 === 0
     })))
+    const updated = useAppStore.getState()
+    for (let i = 0; i < 6; i++) {
+      expect(updated.hostChecks[`irrelevant-${i}`]).toEqual({ ok: true, checkedAt: i })
+      expect(updated.agentComposerDrafts[`unrelated-${i + 60}`]).toBe(`Unrelated draft ${i}`)
+    }
+    expect(updated.errorDismissed).toBe(false)
   }
   const closed = baselineCost(); await updateBackground(); const closedDelta = delta(closed)
   expect(closedDelta.panel).toBe(0); expect(closedDelta.visits).toBe(0); expect(vi.mocked(api.toolkit.observe).mock.calls).toHaveLength(0)
-  expect(closedDelta.app, '原 App 实际消费六次 background 更新').toBeGreaterThanOrEqual(6)
+  expect(closedDelta.app, 'Unrelated writes do not render the App selector consumer').toBe(0)
   await click('.performance-trigger'); await click('[data-settings-target="runs"]')
   expect(node('[data-run-id="preparation-run-1"]').textContent).toContain('Observed Agent 1')
   expect(cost.visits, '非空 actual Session join 正控').toBeGreaterThanOrEqual(128)
   const open = baselineCost(); await updateBackground(); const openDelta = delta(open)
   expect(openDelta.panel, 'Stable unrelated facts do not render Performance').toBe(0)
-  expect(openDelta.app).toBeGreaterThanOrEqual(6)
+  expect(openDelta.app).toBe(0)
   expect(openDelta.visits, 'Stable sessions reference prevents an unrelated N scan').toBe(0)
   const array = baselineCost()
   await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions] })))

@@ -93,7 +93,7 @@ it('stale and paused sources retain values without live heat; new envelope does 
   await render(samples.fresh); await openRenderer()
   expect(node('[data-performance-role="renderer"] > summary .performance-heat-cell').getAttribute('style')).toContain('--heat-intensity')
   await render(samples.stale)
-  expect(node('.performance-observation').textContent).toContain('30s old')
+  expect(node('.performance-reading-time').textContent).toContain('30s old')
   expect(node('[data-performance-role="renderer"] > summary').textContent).toContain('126.0%')
   expect(node('[data-performance-role="renderer"] > summary .performance-heat-cell').getAttribute('style') ?? '').not.toContain('--heat-intensity')
   await render(samples.fresh, true)

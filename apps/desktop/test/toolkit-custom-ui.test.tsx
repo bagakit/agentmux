@@ -1,3 +1,4 @@
+import { openToolkitMenu, clickToolkitMenu } from './helpers/toolkit-menu'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
@@ -175,7 +176,7 @@ describe('Toolkit visible reader and shared selection',()=> {
     const run=vi.spyOn(api.toolkit,'run').mockImplementation(async()=>current),stop=vi.spyOn(api.toolkit,'stop').mockImplementation(async()=>current)
     const openToolkit=vi.fn(),close=vi.fn()
     await dom.render(<SettingsNavigation.Provider value={{open:vi.fn(),openToolkit}}><UserToolkitResult definition={saved} active close={close}/></SettingsNavigation.Provider>)
-    const runButton=dom.container.querySelector<HTMLButtonElement>('.toolkit-result__actions button')!
+    const runButton=dom.container.querySelector<HTMLButtonElement>('.performance-actions button')!
     expect(runButton.disabled).toBe(false)
     await act(async()=>runButton.click())
     expect(run).toHaveBeenCalledTimes(1)
@@ -184,12 +185,14 @@ describe('Toolkit visible reader and shared selection',()=> {
     const running={executionId:'admitted-a',invocationId:'invocation-a',definition:saved,expectedLatestExecutionId:'previous-a',target:{workspacePath:saved.workspacePath},run:{hostId:'local',runId:'running-a'},startedAt:_reshape_fixtureEpoch(0, 0, 3),state:'unknown' as const,reason:'Reply unconfirmed',text:'Current text'}
     current={...current,sequence:2,state:'unknown',admission:running,reason:running.reason}
     await act(async()=>publish(current))
-    expect(runButton.disabled).toBe(true)
-    const stopButton=Array.from(dom.container.querySelectorAll<HTMLButtonElement>('.toolkit-result__actions button')).find(button=>button.textContent?.trim()==='Stop')!
+    await openToolkitMenu(dom.container)
+    expect([...dom.container.querySelectorAll<HTMLButtonElement>('[role=menuitem]')].find(button => button.textContent?.trim() === 'Run saved tool')!.disabled).toBe(true)
+    const stopButton=Array.from(dom.container.querySelectorAll<HTMLButtonElement>('[role=menuitem]')).find(button=>button.textContent?.trim()==='Stop')!
     expect(stopButton.disabled).toBe(false)
     await act(async()=>stopButton.click())
     expect(stop).toHaveBeenCalledTimes(1);expect(stop).toHaveBeenCalledWith('__proto__','admitted-a')
-    const configure=Array.from(dom.container.querySelectorAll<HTMLButtonElement>('.toolkit-result__actions button')).find(button=>button.textContent?.trim()==='Configure')!
+    await openToolkitMenu(dom.container)
+    const configure=Array.from(dom.container.querySelectorAll<HTMLButtonElement>('.performance-actions button')).find(button=>button.textContent?.trim()==='Configure')!
     await act(async()=>configure.click())
     expect(close).toHaveBeenCalledOnce();expect(openToolkit).toHaveBeenCalledWith('__proto__')
     expect(get).toHaveBeenCalledTimes(2)
@@ -292,7 +295,8 @@ describe('Toolkit visible reader and shared selection',()=> {
     vi.spyOn(api.toolkit,'observe').mockImplementation((_id,read)=>{read(current);return{dispose:vi.fn()}})
     await dom.render(<SettingsNavigation.Provider value={{open:vi.fn(),openToolkit:vi.fn()}}><UserToolkitResult definition={saved} active close={vi.fn()}/></SettingsNavigation.Provider>)
     expect(dom.container.querySelector('.toolkit-result__origin')?.textContent).toBe('Action · Refresh identity')
-    const script=Array.from(dom.container.querySelectorAll<HTMLButtonElement>('.toolkit-result__actions button')).find(node=>node.textContent?.trim()==='Script')!
+    await openToolkitMenu(dom.container)
+    const script=Array.from(dom.container.querySelectorAll<HTMLButtonElement>('.performance-actions button')).find(node=>node.textContent?.trim()==='Script')!
     await act(async()=>script.click())
     expect(dom.container.querySelector<HTMLTextAreaElement>('[aria-label="Read-only toolkit script"]')!.value).toBe(action.script)
     expect(dom.container.textContent).toContain(JSON.stringify(action.args))
