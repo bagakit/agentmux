@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
+import { createHash } from 'node:crypto'
 import { mkdir, open, link, readFile, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AgentMuxError, observeRead } from '@agentmux/core'
@@ -45,7 +46,7 @@ export class BrowserInputContextCaptureFiles {
   }
   async put(kind: FileKind, id: string, value: unknown): Promise<void> {
     await mkdir(this.directory, { recursive: true, mode: 0o700 })
-    const path = this.path(kind, id), temporary = `${path}.${randomUUID()}.partial`
+    const path = this.path(kind, id), temporary = `${path}.${mintObjectId()}.partial`
     try {
       const file = await open(temporary, 'wx', 0o600)
       try { await file.writeFile(JSON.stringify(value)); await file.sync() } finally { await file.close() }
@@ -90,7 +91,7 @@ export class BrowserInputContextCaptures implements AgentInputContextCaptureRead
         before.browser.browserId !== browserId || after.browser.browserId !== browserId) throw unavailable()
     const source = observation(before, capture.navigationId)
     const end = observation(after, after.browser.navigationId)
-    const scene: BrowserInputScene = { reference: { hostId: this.options.hostId, captureId: randomUUID() },
+    const scene: BrowserInputScene = { reference: { hostId: this.options.hostId, captureId: mintObjectId() },
       inputContext: parseBrowserInputContext(before), diskDurability: 'unconfirmed',
       frame: { capturedAt: before.capturedAt, source,
         observationEnd: { ...end, observedAt: after.capturedAt },
@@ -206,7 +207,7 @@ export class BrowserInputContextCaptures implements AgentInputContextCaptureRead
   async capture(browserId: string): Promise<BrowserInputScene> {
     const inputContext = this.options.source(identity(browserId))
     if (!inputContext || inputContext.browser.hostId !== this.options.hostId || inputContext.browser.browserId !== browserId) throw unavailable()
-    const scene: BrowserInputScene = { reference: { hostId: this.options.hostId, captureId: randomUUID() },
+    const scene: BrowserInputScene = { reference: { hostId: this.options.hostId, captureId: mintObjectId() },
       inputContext: parseBrowserInputContext(inputContext), diskDurability: 'unconfirmed' }
     this.scenes.set(scene.reference.captureId, scene)
     try { await this.options.files.put('scene', scene.reference.captureId, this.sceneDocument(scene)); scene.diskDurability = 'confirmed' }

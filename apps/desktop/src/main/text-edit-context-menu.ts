@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintCapabilityToken } from '@agentmux/core/object-id'
 import { Menu, webContents, type BrowserWindow, type ContextMenuParams, type WebContents, type WebFrameMain } from 'electron'
 
 type EditAction = 'copy' | 'cut' | 'paste' | 'selectAll'
@@ -52,7 +52,7 @@ export function installTextEditContextMenu(contents: WebContents, host: BrowserW
     if (actions.length === 0) return
     const ancestors: Array<{ frame: WebFrameMain; token: string }> = []
     for (let current: WebFrameMain | null = frame; current; current = current.parent) ancestors.push({ frame: current, token: current.frameToken })
-    const key = `__agentmuxTextEdit_${randomUUID().replaceAll('-', '')}`
+    const key = `__agentmuxTextEdit_${mintCapabilityToken()}`
     let ended = false, chosen = false, menu: Menu | undefined
     const cleanup: Array<() => void> = []
     const current = () => focused(window) && contents.focusedFrame === frame && ancestors.every((original, index) =>

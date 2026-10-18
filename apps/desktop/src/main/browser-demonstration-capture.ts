@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintCapabilityToken } from '@agentmux/core/object-id'
 import type { WebContents } from 'electron'
 import type { BrowserDemonstrationDraft } from '../shared/browser-demonstration.js'
 import type { BrowserReplayTarget } from '../shared/browser-operation.js'
@@ -88,7 +88,7 @@ export class BrowserDemonstrationCapture {
     // An Agent can take over while storage is slow. Never attach after that synchronous release.
     if (generation !== this.generation) return draft
     this.identity = identity
-    this.token = randomUUID()
+    this.token = mintCapabilityToken()
     this.active = true
     this.warning = undefined
     contents.on('input-event', this.onInput)
@@ -161,7 +161,7 @@ export class BrowserDemonstrationCapture {
     const previous = this.identity
     const identity = this.options.getIdentity()
     this.identity = identity
-    this.token = randomUUID()
+    this.token = mintCapabilityToken()
     this.contextId = undefined
     this.generation += 1
     if (previous && previous.navigationId !== identity.navigationId) {

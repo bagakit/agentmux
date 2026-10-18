@@ -1,5 +1,5 @@
 import { mintObjectId, isObjectId } from '@agentmux/core/object-id'
-import { randomBytes, randomUUID } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { createServer, type Server } from 'node:http'
 import { readFile } from 'node:fs/promises'
 import { WebSocketServer, WebSocket } from 'ws'
@@ -9,10 +9,12 @@ import type { AgentMuxBrowserTarget, AgentMuxBrowserTargetsResult, AgentMuxExter
 import { EXTERNAL_BROWSER_PROTOCOL, MAX_BRIDGE_BYTES, EXTERNAL_CDP_METHODS, isShareUrl, isTabScopedCommand } from '../../browser-extension/protocol.js'
 
 const id = z.string().min(1).max(200)
-const grantSchema = z.object({ tabId: z.number().int().nonnegative(), grantId: z.string().uuid(),
+// Existing shares retain their original UUID; only new local identities use the shared allocator.
+const storedIdentity = z.string().refine(value => isObjectId(value) || z.uuid().safeParse(value).success)
+const grantSchema = z.object({ tabId: z.number().int().nonnegative(), grantId: storedIdentity,
   navigationId: id, url: z.string().max(8192).refine(isShareUrl), title: z.string().max(512) }).strict()
-const savedSchema = grantSchema.extend({ id: z.string().refine(value => isObjectId(value) || z.uuid().safeParse(value).success), workspaceId: id,
-  extensionId: z.string().regex(/^[a-p]{32}$/), instanceId: z.string().uuid(),
+const savedSchema = grantSchema.extend({ id: storedIdentity, workspaceId: id,
+  extensionId: z.string().regex(/^[a-p]{32}$/), instanceId: storedIdentity,
   status: z.enum(['ready', 'disconnected', 'revoked', 'closed', 'unavailable']), warning: z.string().max(2000).optional(),
   ledgerNavigationId: id.optional() })
 const documentSchema = z.object({ version: z.literal(1), targets: z.array(savedSchema).max(64) }).strict()
@@ -126,7 +128,7 @@ export class ExternalBrowserBridge {
       try { message = JSON.parse(bytes.toString()) as Record<string, unknown>; if (!message || typeof message !== 'object') throw new Error() } catch { socket.close(1008); return }
       if (!connection) {
         const hello = z.object({ type: z.literal('hello'), protocol: z.literal(EXTERNAL_BROWSER_PROTOCOL),
-          token: z.string().regex(/^[a-f0-9]{64}$/), instanceId: z.string().uuid(), grants: z.array(grantSchema).max(64) }).strict().safeParse(message)
+          token: z.string().regex(/^[a-f0-9]{64}$/), instanceId: storedIdentity, grants: z.array(grantSchema).max(64) }).strict().safeParse(message)
         if (!hello.success) { socket.close(1008); return }
         const pairing = this.pairings.get(hello.data.token)
         if (!pairing || (!pairing.extensionId && pairing.expiresAt < Date.now()) ||
@@ -237,7 +239,7 @@ export class ExternalBrowserBridge {
       return Promise.reject(new ExternalBrowserRequestFailure('This request is outside the original shared-tab capability.', false))
     }
     if (connection.pending.size >= 64) return Promise.reject(new ExternalBrowserRequestFailure('The shared-tab connection has too many pending requests.', false))
-    const requestId = randomUUID()
+    const requestId = mintObjectId()
     let packet: string
     try {
       packet = JSON.stringify({ type: 'request', connectionId: connection.id, requestId, tabId: row.tabId, grantId: row.grantId,
