@@ -20,6 +20,11 @@ export function mintObjectId(): string {
   }
 }
 
+/** Bearer credentials need their own entropy budget; ordinary object IDs are not authorization. */
+export function mintCapabilityToken(): string {
+  return base58.encode(globalThis.crypto.getRandomValues(new Uint8Array(32)))
+}
+
 /** Stable business-domain identity. Resolve already persisted bindings before deriving a new identity. */
 export function deriveObjectId(domain: string, key: string): string {
   // A fixed nonempty domain without ':' keeps domain/nonce/key framing unambiguous.
