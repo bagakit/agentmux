@@ -130,7 +130,7 @@ describe('original room binding and grants', () => {
     expect(() => parseRoomBindingParams('connection.grant', { ...input, capabilities: ['publish'] })).toThrow()
     await f.bindings.pause({ operationId: 'pause', bindingId: f.input.bindingId, expectedRevision: 1 }, context)
     expect(f.bindings.readGrant(input.grantId, 1)?.bindingRevision).toBe(1)
-    expect((await f.bindings.inspect({ bindingId: f.input.bindingId })).grants).toEqual([])
+    expect((await f.bindings.inspect({ bindingId: f.input.bindingId })).grants).toEqual([expect.objectContaining({ grantId: input.grantId, revision: 2, bindingRevision: 2, capabilities: ['input'] })])
     expect((await f.bindings.inspect({ operationId: input.operationId })).operation).toEqual(granted)
   })
   it('releases only stale grant routing after explicit relink while retaining original grant identity and receipt', async () => {
@@ -153,12 +153,41 @@ describe('original room binding and grants', () => {
     expect((await f.bindings.inspect({ operationId: f.input.operationId })).binding?.revision).toBe(1)
     await f.unchanged()
   })
-  it('renews grants explicitly after a Binding revision and permits only one competing valid actor grant', async () => {
+  it('carries unchanged member decisions through an exact same-scope relink', async () => {
+    const f = await fixture(); await f.bindings.bind(f.input, context)
+    const actor = { application: config.application, idType: 'open_id', userId: 'retained-member' }
+    const input = { operationId: 'grant-retained', bindingId: f.input.bindingId, expectedBindingRevision: 1, grantId: 'retained-grant', expectedRevision: null, actor, capabilities: ['input'] as ['input'], state: 'active' as const }
+    const original = await f.bindings.grant(input, context)
+    const linked = await f.bindings.relink({ ...f.input, operationId: 'same-scope', expectedRevision: 1 }, context)
+    expect(linked).toMatchObject({ state: 'applied', binding: { revision: 2 } })
+    expect(f.bindings.findGrant({ connectionId: config.connectionId, externalConversationId: f.input.externalConversationId, actor })).toMatchObject({ grantId: input.grantId, revision: 2, bindingRevision: 2, state: 'active', capabilities: ['input'] })
+    expect(f.bindings.readGrant(input.grantId, 1)).toEqual(original.state === 'applied' ? original.grant : null)
+    expect(f.bindings.readOperation(input.operationId)).toEqual(original)
+    await f.unchanged()
+  })
+  it.each([true, false])('continues grants across a Connection alias only for the same native application (%s)', async sameApplication => {
+    const f = await fixture(); await f.bindings.bind(f.input, context)
+    const actor = { application: config.application, idType: 'open_id', userId: 'original-member' }
+    const input = { operationId: 'original-member', bindingId: f.input.bindingId, expectedBindingRevision: 1, grantId: 'original-member', expectedRevision: null, actor, capabilities: ['input', 'answer'] as ['input', 'answer'], state: 'active' as const }
+    const original = await f.bindings.grant(input, context)
+    const alias = { ...config, connectionId: 'alternate-connection', application: sameApplication ? config.application : { ...config.application, appId: 'different-application' } }
+    await f.connections.configure({ operationId: 'configure-alias', expectedRevision: null, connection: alias })
+    const linked = await f.bindings.relink({ ...f.input, connectionId: alias.connectionId, operationId: 'relink-alias', expectedRevision: 1 }, context)
+    expect(linked).toMatchObject({ state: 'applied', binding: { revision: 2, connectionId: alias.connectionId } })
+    const current = f.bindings.findGrant({ connectionId: alias.connectionId, externalConversationId: f.input.externalConversationId, actor })
+    if (sameApplication) expect(current).toMatchObject({ grantId: input.grantId, revision: 2, bindingRevision: 2, connectionId: alias.connectionId, state: 'active', capabilities: input.capabilities })
+    else expect(current).toBeNull()
+    expect(f.bindings.findGrant({ connectionId: config.connectionId, externalConversationId: f.input.externalConversationId, actor })).toBeNull()
+    expect(f.bindings.readGrant(input.grantId, 1)).toEqual(original.state === 'applied' ? original.grant : null)
+    expect(f.bindings.readOperation(input.operationId)).toEqual(original)
+    await f.unchanged()
+  })
+  it('requires explicit authorization after scope changes', async () => {
     const f = await fixture(); await f.bindings.bind(f.input, context)
     const actor = { application: config.application, idType: 'open_id', userId: 'actor' }
     const input = { operationId: 'original-grant', bindingId: f.input.bindingId, expectedBindingRevision: 1, grantId: 'original-grant', expectedRevision: null, actor, capabilities: ['input'] as ['input'], state: 'active' as const }
     const first = await f.bindings.grant(input, context)
-    await f.bindings.relink({ ...f.input, operationId: 'new-revision', expectedRevision: 1 }, context)
+    await f.bindings.relink({ ...f.input, operationId: 'new-revision', expectedRevision: 1, scope: { ...f.input.scope, input: 'all-messages' } }, context)
     const scope = { connectionId: config.connectionId, externalConversationId: f.input.externalConversationId, actor }
     expect(f.bindings.findGrant(scope)).toBeNull()
     const attempts = await Promise.all(['grant-a', 'grant-b'].map(grantId => f.bindings.grant({ ...input, operationId: grantId, grantId, expectedBindingRevision: 2 }, context)))
