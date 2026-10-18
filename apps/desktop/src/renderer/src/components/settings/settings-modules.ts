@@ -1,3 +1,4 @@
+import { discordSettingsModule } from './modules/discord'
 import { larkSettingsModule } from './modules/lark'
 import { createSettingsCatalog } from './settings-catalog'
 import { appearanceSettingsModule } from './modules/appearance'
@@ -51,7 +52,8 @@ export const settingsModules = [
   hostsSettingsModule,
   mobileSettingsModule,
   inappConversationSettingsModule,
-  larkSettingsModule
+  larkSettingsModule,
+  discordSettingsModule
 ] as const
 
 export type SettingsSectionId = typeof settingsModules[number]['id']
