@@ -50,8 +50,7 @@ describe('login shell exported environment', () => {
         ("export PATH='" + _hygiene_fixturePath("opt/test") + " tools:/usr/bin:/bin'")
       ].join('\n'))
       const env: NodeJS.ProcessEnv = { HOME: directory, ZDOTDIR: directory, SHELL: shell, PATH: '/usr/bin:/bin' }
-      // This test checks exported values, so allow a slow test host more than the product startup budget.
-      const result = await hydrateProcessEnvironmentFromLoginShell({ platform: 'darwin', env, timeoutMs: 20_000 })
+      const result = await hydrateProcessEnvironmentFromLoginShell({ platform: 'darwin', env })
       expect(result).toEqual({ ok: true, shell, mode: 'interactive-login' })
       expect(loginShellEnvironmentWarning(result)).toBeUndefined()
       const child = await exec(process.execPath, ['-e', 'process.stdout.write(JSON.stringify([process.env.AGENTMUX_TEST_PROFILE, process.env.AGENTMUX_TEST_RC, process.env.AGENTMUX_TEST_EMPTY, process.env.AGENTMUX_TEST_LOCAL, process.env.PATH]))'], { env })
@@ -59,7 +58,7 @@ describe('login shell exported environment', () => {
       expect(env.SHLVL).toBeUndefined()
       expect(env._).toBeUndefined()
     } finally { await rm(directory, { recursive: true, force: true }) }
-  }, 30_000)
+  }, 45_000)
 
   it('reports partial success after interactive failure and preserves inherited PATH entries', async () => {
     const env: NodeJS.ProcessEnv = { PATH: ["/bin", _hygiene_fixturePath("client/bin")].join(":"), SHELL: '/bin/zsh', KEEP: 'inherited' }
@@ -191,23 +190,22 @@ describe('login shell exported environment', () => {
     expect(elapsedMs, `两条臂各等了一个完整预算（${elapsedMs}ms），预算没有共享`).toBeLessThan(120)
   })
 
-  /** The interactive arm gets the full budget; a fallback started halfway gets only the remainder. */
-  it('bounds both arms by the same fixed deadline', async () => {
+  /** Both modes start together, each bounded by the same default deadline. */
+  it('starts both modes together under the full default deadline', async () => {
     vi.useFakeTimers()
     try {
       const handed: Array<{ arm: string; timeoutMs: number }> = []
       const pending = hydrateProcessEnvironmentFromLoginShell({
         platform: 'darwin',
         env: { PATH: '/bin' },
-        timeoutMs: 60,
         runner: (_shell, args, _env, timeoutMs) => {
           handed.push({ arm: args[0]!, timeoutMs })
           return new Promise<string>(() => {})
         }
       })
-      await vi.advanceTimersByTimeAsync(60)
+      expect(handed).toEqual([{ arm: '-ilc', timeoutMs: 30_000 }, { arm: '-lc', timeoutMs: 30_000 }])
+      await vi.advanceTimersByTimeAsync(30_000)
       expect(await pending).toEqual({ ok: false, reason: 'probe-failed' })
-      expect(handed).toEqual([{ arm: '-ilc', timeoutMs: 60 }, { arm: '-lc', timeoutMs: 30 }])
     } finally { vi.useRealTimers() }
   })
 
@@ -230,8 +228,8 @@ describe('login shell exported environment', () => {
     expect(env).toMatchObject({ PATH: [_hygiene_fixturePath("opt/bin"), "/bin"].join(":"), EXPORTED: 'profile' })
   })
 
-  /** Immediate interactive failure lets the fallback use the remaining budget without waiting. */
-  it('hands the unspent remainder to the fallback after early failure', async () => {
+  /** Even an immediate failure does not delay the already running fallback. */
+  it('has the fallback running before an early interactive failure', async () => {
     const handed: Array<{ arm: string; timeoutMs: number }> = []
     const result = await hydrateProcessEnvironmentFromLoginShell({
       platform: 'darwin',
@@ -247,11 +245,7 @@ describe('login shell exported environment', () => {
     expect(result).toEqual({ ok: true, shell: '/bin/zsh', mode: 'login' })
     // 自检：两条臂都跑了，否则下面那条断言在读一个不存在的元素。
     expect(handed.map((call) => call.arm)).toEqual(['-ilc', '-lc'])
-    // The first arm failed immediately, leaving nearly the whole budget for the fallback.
-    expect(
-      handed[1]!.timeoutMs,
-      `The early failure left ${handed[1]!.timeoutMs}ms for the fallback`
-    ).toBeGreaterThan(300)
+    expect(handed.map((call) => call.timeoutMs)).toEqual([400, 400])
   })
 
   /**
@@ -296,7 +290,7 @@ describe('login shell exported environment', () => {
     try {
       const pidFile = join(directory, 'probe.pid')
       // trap 掉 TERM 再无限等待：这正是「.zshrc 卡在 read 上」那个真实形状的可控复现。只有交互式那条
-      // 臂会 source 到它，非交互的 `-lc` 不读 .zshrc，于是照常返回——这也是本条期望 ok:true 的原因。
+      // 臂会 source 到它，非交互的 `-lc` 不读 .zshrc，可以独立完成。
       await writeFile(join(directory, '.zshrc'), [
         `printf '%s' "$$" > '${pidFile}'`,
         "trap '' TERM",
