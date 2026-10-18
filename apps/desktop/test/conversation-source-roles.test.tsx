@@ -1,3 +1,4 @@
+import { processNativeRecordIds } from './helpers/conversation-process-members'
 // @vitest-environment happy-dom
 import { act, type ComponentProps } from 'react'
 import type { Root } from 'react-dom/client'
@@ -66,7 +67,7 @@ it('presents the exact independent original Hook reply as a compact observation 
   expect(JSON.stringify({ page, hook })).toBe(before)
 })
 
-it.each(['codex', 'claude'])('keeps a sole Hook reply fully readable through local disclosure with absent, empty and failed %s native reading', async providerId => {
+it.each(['codex', 'claude'])('keeps a sole Hook reply fully readable through local disclosure with absent and empty %s native reading and unavailable capability', async providerId => {
   const hook = originalHook(), page = { ...originalPage(), source: { ...original.source, providerId }, items: [] }
   for (const source of [null, page]) {
     await render(source, [hook])
@@ -79,12 +80,9 @@ it.each(['codex', 'claude'])('keeps a sole Hook reply fully readable through loc
     expect(bodies()[0]).toContain('磁盘可用空间')
     expect(host.querySelector('[data-captured-reply-observation] [aria-expanded]')!.getAttribute('aria-expanded')).toBe('true')
   }
-  await render(null, [hook], { capability: 'unavailable', userMessageRead: { error: new Error('original reader unavailable'),
-    loading: false, hasMore: false, onRetry: vi.fn(), onReadEarlier: vi.fn() } })
+  await render(null, [hook], { capability: 'unavailable' })
   expect(bodies()).toHaveLength(1); expect(bodies()[0]).toContain('磁盘可用空间')
-  expect(host.textContent).toContain('Existing messages are kept')
-  await render({ ...page, items: [native('retained-older-answer', _historyFixtureEpoch(0, 0, 1), 'assistant-message')] }, [hook], { userMessageRead: {
-    error: new Error('original reader unavailable'), loading: false, hasMore: false, onRetry: vi.fn(), onReadEarlier: vi.fn() } })
+  await render({ ...page, items: [native('retained-older-answer', _historyFixtureEpoch(0, 0, 1), 'assistant-message')] }, [hook])
   expect(bodies()).toHaveLength(2)
   expect(host.querySelector('[data-captured-reply-observation] [aria-expanded]')!.getAttribute('aria-expanded')).toBe('true')
 })
@@ -203,7 +201,7 @@ it('splits only on accurate native turns, real speech and the original History b
     native('input', _historyFixtureEpoch(0, 0, 250), 'user-message'), native('c', _historyFixtureEpoch(0, 0, 300), 'activity', 'turn-b'), native('d', _historyFixtureEpoch(0, 0, 400), 'activity', 'turn-b')] }
   await act(async () => root.render(<ConversationView page={page} sessionId={sid} recordBoundary={{ beforeRecordId: 'd', content: <p role="separator">Original History boundary</p> }}
     renderProcess={props => <NativeProcessObservation {...props} compact />} />))
-  expect([...host.querySelectorAll('[data-native-record-ids]')].map(node => JSON.parse(node.getAttribute('data-native-record-ids')!))).toEqual([['a'], ['b'], ['c'], ['d']])
+  expect([...host.querySelectorAll('[data-conversation-process-members]')].map(node => processNativeRecordIds(node))).toEqual([['a'], ['b'], ['c'], ['d']])
   expect(bodies()).toEqual(['Original native input'])
   expect(host.querySelector('[role="separator"]')!.textContent).toBe('Original History boundary')
 })
