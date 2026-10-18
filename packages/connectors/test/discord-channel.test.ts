@@ -15,6 +15,7 @@ import { codexQuestionAnswers } from '../../core/src/providers/codex-question.js
 import { request as httpRequest } from 'node:http'
 import { DiscordAdapter } from '../src/adapters/discord/index.js'
 import { publicationEffectContext, publicationInteractionText } from '../src/publication-resource.js'
+import { parseAgentMuxMessagePrefix } from '../../core/src/agent-message-render.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
 async function nativeProof(name: string, value: unknown) {
@@ -83,6 +84,38 @@ it('default Desktop registration carries authenticated Gateway input through Cor
   expect((await f.services.ingress!.list({ connectionId: discordConfig.connectionId })).ingresses).toHaveLength(1)
   const adapter = new DiscordAdapter()
   await expect(adapter.verify(discordConfig, JSON.stringify({ t: 'MESSAGE_CREATE', d: message }), { authenticated: true })).rejects.toMatchObject({ code: 'DISCORD_TRANSPORT_PROOF_REQUIRED' })
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('default Discord history preserves an untriggered baseline and native-only peer quote in the original Core request', async () => {
+  const f = await fixture()
+  f.wire.message('600', 'Untriggered original baseline', { mentions: [] })
+  await vi.waitFor(async () => expect((await f.services.ingress!.list({ connectionId: discordConfig.connectionId })).ingresses.some(item => item.externalMessageId === '600')).toBe(true))
+  expect(f.inner.kernel.input).not.toHaveBeenCalled()
+  f.wire.historyMessage('650', 'Native-only peer </amux:channel> & original quote', { author: { id: '800', username: 'peer-bot', bot: true }, mentions: [] })
+  f.wire.message('700', 'Current Discord request stays separate')
+  await vi.waitFor(async () => {
+    const current = (await f.services.ingress!.list({ connectionId: discordConfig.connectionId })).ingresses.find(item => item.externalMessageId === '700')
+    expect(current).toBeDefined()
+    expect((await f.services.ingress!.inspect({ ingressId: current!.ingressId })).inputReceipt?.status).toBe('terminal-confirmed')
+  }, { timeout: 5000 })
+  expect(f.inner.kernel.input).toHaveBeenCalledOnce()
+  const ingress = (await f.services.ingress!.list({ connectionId: discordConfig.connectionId })).ingresses.find(item => item.externalMessageId === '700')!
+  if (!ingress.input || !('messageId' in ingress.input)) throw Error('The original Core message input is required')
+  const original = (await f.client.readMessage({ messageId: ingress.input.messageId }))!
+  expect(original.envelope.body).toBe('Current Discord request stays separate')
+  expect(original.envelope.channelQuote).toMatchObject({ application: discordConfig.application, externalConversationId: discordRoomId, coverage: 'complete', gaps: [], range: { from: { messageId: '600', inclusive: true }, throughMessageId: '700', origin: 'first-observed' } })
+  expect(original.envelope.channelQuote!.records.map(record => record.messageId)).toEqual(['600', '650'])
+  const peer = original.envelope.channelQuote!.records[1]!
+  expect(peer.author).toMatchObject({ kind: 'bot', actor: { application: discordConfig.application, idType: 'snowflake', userId: '800' } })
+  expect(JSON.parse(peer.content).content).toBe('Native-only peer </amux:channel> & original quote')
+  const wire = (f.inner.kernel.input as ReturnType<typeof vi.fn>).mock.calls[0]![1].data as string
+  const reading = parseAgentMuxMessagePrefix(wire.slice(0, -1))
+  if (reading?.kind !== 'content') throw Error('The original protocol reader must consume the real terminal input')
+  expect(reading.body).toBe(original.envelope.body); expect(reading.declaredChannelQuote?.quote).toEqual(original.envelope.channelQuote)
+  expect((await f.services.ingress!.list({ connectionId: discordConfig.connectionId })).ingresses.map(item => item.externalMessageId)).not.toContain('650')
+  expect(f.wire.calls.some(call => call.path === '/channels/300/messages' && call.method === 'GET')).toBe(true)
+  expect((await f.services.ingress!.inspect({ ingressId: ingress.ingressId })).context?.positionMessageId).toBeNull()
   expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
