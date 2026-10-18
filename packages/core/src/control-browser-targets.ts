@@ -16,8 +16,9 @@ export function parseBrowserControl(value: unknown): AgentMuxBrowserControl {
     !['agent', 'human', 'unknown'].includes(String(row.owner)) ||
     !['inactive', 'preparing', 'isolated', 'unconfirmed', 'unsupported'].includes(String(row.inputIsolation)) ||
     !Number.isSafeInteger(row.revision) || Number(row.revision) < 0) throw new AgentMuxError('Browser control fact is invalid.', 'CONTROL_PROTOCOL_ERROR')
-  const activeOperationId = row.activeOperationId === null ? null : text(row.activeOperationId, 200)
-  if (['preparing', 'isolated'].includes(String(row.inputIsolation)) && (row.owner !== 'agent' || activeOperationId === null)) throw new AgentMuxError('Browser isolation requires its original active operation.', 'CONTROL_PROTOCOL_ERROR')
+  const activeOperationId = row.activeOperationId
+  if (activeOperationId !== null && (typeof activeOperationId !== 'string' || !activeOperationId.trim())) throw new AgentMuxError('Browser control operation identity is invalid.', 'CONTROL_PROTOCOL_ERROR')
+  if (['preparing', 'isolated'].includes(String(row.inputIsolation)) && row.owner !== 'agent') throw new AgentMuxError('Browser isolation requires its current Agent owner.', 'CONTROL_PROTOCOL_ERROR')
   return { owner: row.owner as AgentMuxBrowserControl['owner'], activeOperationId, revision: Number(row.revision), inputIsolation: row.inputIsolation as AgentMuxBrowserControl['inputIsolation'] }
 }
 /** Discovery facts carry no pairing secret, profile or credential store. */

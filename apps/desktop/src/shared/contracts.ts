@@ -2093,6 +2093,7 @@ export type AgentMuxDesktopApi = {
     stopOperationById(operationId: string): Promise<BrowserOperation | null>
     replayPlan(operationId: string): Promise<BrowserReplayPlan | null>
     runReplay(id: string, plan: BrowserReplayPlan, operator?: BrowserOperator): Promise<BrowserScriptRunReport>
+    takeControl(id: string): Promise<BrowserSnapshot>
     returnControl(id: string): Promise<BrowserSnapshot>
     selectElement(id: string): Promise<BrowserElementSelection | null>
     /**

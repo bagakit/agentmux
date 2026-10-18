@@ -18,7 +18,8 @@ function applyControlFeedback(payload: ControlFeedback): boolean {
   const state: any = { revision: payload.revision, operationId: payload.operationId,
     navigationId: payload.navigationId, host: null, shadow: null, dispose: () => {} }
   globals[key] = state
-  const hide = () => { state.host?.remove(); state.host = null; state.shadow = null }
+  let observer: MutationObserver | undefined
+  const hide = () => { observer?.disconnect(); state.host?.remove(); state.host = null; state.shadow = null }
   state.hide = hide
   state.dispose = () => {
     hide()
@@ -48,6 +49,19 @@ function applyControlFeedback(payload: ControlFeedback): boolean {
   const glow = document.createElement('div'); glow.className = 'amux-browser-agent-glow'
   effects.appendChild(glow); shadow.appendChild(effects); root.appendChild(host)
   state.host = host; state.shadow = shadow
+  // Website root-content replacement does not change the native input owner.
+  // Observe only direct root/document changes and restore this exact decoration;
+  // no page-subtree scan, target lookup or animation restarts are needed.
+  observer = new MutationObserver(() => {
+    const currentRoot = document.documentElement
+    if (globals[key] !== state || state.host !== host || host.isConnected || !currentRoot) return
+    observer!.disconnect()
+    currentRoot.appendChild(host)
+    observer!.observe(currentRoot, { childList: true })
+    observer!.observe(document, { childList: true })
+  })
+  observer.observe(root, { childList: true })
+  observer.observe(document, { childList: true })
   window.addEventListener('pagehide', hide)
   return true
 }

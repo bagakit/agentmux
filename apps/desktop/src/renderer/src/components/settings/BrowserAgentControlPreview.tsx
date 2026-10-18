@@ -52,7 +52,7 @@ export function BrowserAgentControlPreview({ preferences, active, dirty }: { pre
   }, [active, visible, phase, step, preferences.clickRipple, preferences.pointerTween, preferences.pointerDurationMs, preferences.clickDurationMs])
   const point = targets[step % targets.length]!
   const position = { left: point.x * size.width, top: (preferences.showDiscussion ? Math.min(point.y, .3) : point.y) * size.height }
-  const operating = active && visible && phase !== 'human' && phase !== 'completed'
+  const operating = active && visible && phase !== 'human'
   const operation: BrowserOperation = {
     id: 'simulation-operation', browserId: 'simulation-browser', operator: { id: 'simulation-agent', name: 'Sample Agent', providerId: 'codex' },
     startedAt: 0, url: 'https://example.test/workspace', summary: 'Local appearance simulation',
@@ -76,8 +76,8 @@ export function BrowserAgentControlPreview({ preferences, active, dirty }: { pre
     <div className="browser-agent-preview__stage" data-background={background} ref={stage}>
       <div className="browser-agent-preview__browserbar"><span className="browser-agent-preview__address">example.test / workspace</span>
         <BrowserOperationStatus browserId={operation.browserId} activity={{ operation, control: operating ? 'agent' : 'human' }}
-          control={{ owner: operating ? 'agent' : 'human', activeOperationId: operating ? operation.id : null, revision: 0, inputIsolation: operating ? 'isolated' : 'inactive' }}
-          onTakeControl={() => setPhase('human')} onReturnControl={() => setPhase('running')} />
+          control={{ owner: operating ? 'agent' : 'human', activeOperationId: operating && phase !== 'completed' ? operation.id : null, revision: 0, inputIsolation: operating ? 'isolated' : 'inactive' }}
+          onTakeControl={() => setPhase('human')} onReturnControl={() => setPhase('completed')} />
       </div>
       <div className="browser-agent-preview__page">
         <span className="browser-agent-preview__eyebrow">SAMPLE WORKSPACE</span><h3>A clear view of the work.</h3>
@@ -101,7 +101,7 @@ export function BrowserAgentControlPreview({ preferences, active, dirty }: { pre
       {operating ? <div className="browser-agent-preview__boundary"><BrowserControlBoundary preferences={preferences} /></div> : null}
     </div>
     <p className="browser-agent-preview__caption" role="status">{phase === 'human' ? 'Your turn · page input is available; agent effects are cleared.'
-      : phase === 'completed' ? 'Completed · input is returned immediately; the last action stays in Activity.'
+      : phase === 'completed' ? 'Completed · Agent retains control. Take control explicitly to interact with the page.'
         : phase === 'waiting' ? 'Waiting · the steady edge stays visible; no pointer or clicks are simulated.'
           : phase === 'navigating' ? 'Navigating · the steady edge survives a change of page.'
             : phase === 'observing' ? 'Observing · the agent reads the page without pointing at a target.'
