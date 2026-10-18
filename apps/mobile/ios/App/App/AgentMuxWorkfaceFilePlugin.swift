@@ -18,12 +18,14 @@ public final class AgentMuxWorkfaceFilePlugin: CAPPlugin, CAPBridgedPlugin, UIDo
             }
             do {
                 guard call.getString("filename") == "agentmux-workface.json",
+                      let stagingId = call.getString("stagingId"), stagingId.utf8.count == 12,
+                      stagingId.range(of: "^[1-9A-HJ-NP-Za-km-z]{12}$", options: .regularExpression) != nil,
                       let text = call.getString("bytes"), let bytes = text.data(using: .utf8), bytes.count <= 2 * 1024 * 1024,
                       let value = try JSONSerialization.jsonObject(with: bytes) as? [String: Any],
                       Set(value.keys) == Set(["schema", "workface"]), value["schema"] as? String == "agentmux.mobile-workface.v1",
                       value["workface"] is [String: Any], let view = self.bridge?.viewController,
                       view.presentedViewController == nil else { throw PrivateFileFailure.unsaved }
-                let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agentmux-workface-" + UUID().uuidString, isDirectory: true)
+                let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agentmux-workface-" + stagingId, isDirectory: true)
                 try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
                     attributes: [.posixPermissions: 0o700])
                 self.directory = directory
