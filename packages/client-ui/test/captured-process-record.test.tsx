@@ -7,6 +7,8 @@ import { createRoot } from 'react-dom/client'
 import { CapturedProcessRecord } from '../src/components/CapturedProcessRecord'
 import { ConversationView } from '../src/components/ConversationView'
 import { NativeProcessObservation } from '../src/components/NativeProcessObservation'
+import { ConversationToolTrace } from '../src/components/ConversationToolTrace'
+import * as summaries from '../src/lib/activity-step-summary'
 import { projectConversationReading } from '../src/lib/conversation-records'
 import { recordedToolEdit } from '../../core/test/fixtures/recorded-tool-edits'
 import { ClientUiProvider, type ClientUiPlatform } from '../src/platform'
@@ -19,6 +21,38 @@ function surface() {
   closes.push(async () => { await act(async () => root.unmount()); host.remove() })
   return { host, render: async (node: ReactNode) => act(async () => root.render(<ClientUiProvider platform={platform}>{node}</ClientUiProvider>)) }
 }
+it.each(['captured', 'native', 'trace'] as const)('reuses the %s step title through local disclosure changes and refreshes changed input', async kind => {
+  const { host, render } = surface()
+  const title = vi.spyOn(summaries, 'stepTitle')
+  const show = async (file: string) => {
+    const input = JSON.stringify({ file_path: file, new_string: 'Original content. '.repeat(1000), old_string: '' })
+    if (kind === 'trace') return render(<ConversationToolTrace part={{ kind: 'tool-call', name: 'Edit', input }} />)
+    if (kind === 'captured') {
+      const item = { ...recordedToolEdit('original-session'), toolInput: input }
+      const projection = projectConversationReading({ agentSessionId: item.agentSessionId, timeline: { agentSessionId: item.agentSessionId, revision: 1, items: [item] } })
+      return render(<CapturedProcessRecord record={projection.records[0]!} />)
+    }
+    const page = { agentSessionId: 'original-session', source: { providerId: 'recorded-provider', nativeSessionId: 'original-native' }, nextCursor: null,
+      items: [{ id: 'call', kind: 'activity' as const, contentParts: [{ kind: 'tool-call' as const, name: 'Edit', input }] }] }
+    const projection = projectConversationReading({ agentSessionId: page.agentSessionId, historyPage: page })
+    return render(<ConversationView page={page} sessionId={page.agentSessionId} records={projection.records} originalRecords={projection.originalRecords}
+      renderProcess={props => <NativeProcessObservation {...props} />} />)
+  }
+  try {
+    await show('src/original.ts')
+    const row = host.querySelector<HTMLButtonElement>(kind === 'trace' ? '.conversation-tool-trace__row' : '.wf-native-process button[data-expandable]')!
+    await act(async () => row.click())
+    const afterFirstDisclosure = title.mock.calls.length
+    expect(afterFirstDisclosure).toBeGreaterThan(0)
+    await act(async () => row.click())
+    await act(async () => row.click())
+    expect(title).toHaveBeenCalledTimes(afterFirstDisclosure)
+    await show('src/changed.ts')
+    expect(title.mock.calls.length).toBeGreaterThan(afterFirstDisclosure)
+    expect(host.textContent).toContain('src/changed.ts')
+  } finally { title.mockRestore() }
+})
+
 it('classifies captured tool structure independently of its name and preserves unknown original parameters', async () => {
   const { host, render } = surface()
   for (const toolName of ['Bash', 'Read', 'Edit', 'custom']) {
