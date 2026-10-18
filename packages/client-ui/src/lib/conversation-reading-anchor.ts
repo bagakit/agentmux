@@ -4,13 +4,27 @@ import { conversationMessageSourceKey } from './conversation-message-location.js
 
 export type ConversationWindowProjection = { current: AgentSessionHistoryPage | null; recordBoundary?: { beforeRecordId: string } }
 type ReadingAnchor = { kind: 'record' | 'group' | 'segment'; id: string; offset: number }
-export function conversationReadingAnchor(viewport: HTMLElement, observedScope?: HTMLElement | null, nativeOnly = false): ReadingAnchor | null {
+export function conversationReadingAnchor(viewport: HTMLElement, observedScope?: HTMLElement | null, nativeOnly = false, visibleShells?: Iterable<Element>): ReadingAnchor | null {
   const bounds = viewport.getBoundingClientRect()
   if (bounds.height <= 0) return null
+  const selector = nativeOnly ? '[data-native-record-id], [data-native-record-ids]' : '[data-segment-key], [data-native-record-id], [data-native-record-ids]'
+  if (visibleShells) {
+    // The host already observes these shells for its visible reading band. Reuse
+    // those candidates rather than measuring every earlier record on scroll.
+    const rows = [...new Set([...visibleShells].map(node => node.closest<HTMLElement>(selector)))]
+      .filter((node): node is HTMLElement => Boolean(node && node.isConnected && viewport.contains(node)))
+      .sort((a, b) => a === b ? 0 : a.compareDocumentPosition(b) & 4 ? -1 : 1)
+    const anchor = anchorFromRows(rows, bounds)
+    if (anchor) return anchor
+  }
   // Read the actual mixed DOM order. Source priority would choose a later native
-  // row over an earlier captured message once the sources share one sequence.
-  for (const row of (observedScope ?? viewport).querySelectorAll<HTMLElement>(nativeOnly
-    ? '[data-native-record-id], [data-native-record-ids]' : '[data-segment-key], [data-native-record-id], [data-native-record-ids]')) {
+  // row over an earlier captured message. A cold observation still has a complete
+  // reading path; once visibility is known the scroll path stays local.
+  return anchorFromRows((observedScope ?? viewport).querySelectorAll<HTMLElement>(selector), bounds)
+}
+
+function anchorFromRows(rows: Iterable<HTMLElement>, bounds: DOMRect): ReadingAnchor | null {
+  for (const row of rows) {
     const rect = row.getBoundingClientRect()
     if (rect.height <= 0 || rect.bottom <= bounds.top || rect.top >= bounds.bottom) continue
     if (row.dataset.segmentKey) return { kind: 'segment', id: row.dataset.segmentKey, offset: rect.top - bounds.top }
