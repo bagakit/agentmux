@@ -1,4 +1,14 @@
 export const mutations = [
+  { name: 'notify-original-mid-replaced', file: 'apps/desktop/src/renderer/src/lib/use-mailbox-notifications.tsx',
+    before: 'api.sessions.notifyMessage(reference, messageId, operationId)', after: "api.sessions.notifyMessage(reference, 'replacement-mid', operationId)" },
+  { name: 'notify-action-id-reused', file: 'apps/desktop/src/renderer/src/lib/use-mailbox-notifications.tsx',
+    before: 'const operationId = crypto.randomUUID()', after: "const operationId = 'reused-notification-action'" },
+  { name: 'notify-refresh-replays', file: 'apps/desktop/src/renderer/src/lib/use-mailbox-notifications.tsx',
+    before: 'const { record } = await api.sessions.inspectMessageNotification(reference, messageId, key)',
+    after: 'const { input: record } = await api.sessions.notifyMessage(reference, messageId, attempt.operationId)' },
+  { name: 'notify-unrelated-producer-ack', file: 'apps/desktop/src/renderer/src/lib/use-mailbox-notifications.tsx',
+    before: "content?.a2aNotificationId !== attempt.operationId", after: 'false' },
+
   { name: 'automation-object-replaced', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',
     before: "const ThemeObjectAutomationIcon = semanticIconComponent('object.automation')", after: "const ThemeObjectAutomationIcon = semanticIconComponent('action.repeat')" },
   { name: 'journal-query-disconnected', file: 'apps/desktop/src/renderer/src/components/SessionMailbox.tsx',

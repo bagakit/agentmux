@@ -17,6 +17,7 @@ export function journalMessage({ id, body = `Original ${id}`, sender = 'reviewer
 export function journalMetadata(record: DurableAgentMuxMessage): AgentMuxMessageMetadata {
   const { body, ...envelope } = record.envelope
   return { sequence: record.sequence, envelope, delivery: record.delivery,
+    ...(record.deliveryMode ? { deliveryMode: record.deliveryMode } : {}), ...(record.notification ? { notification: record.notification } : {}),
     bodyPreview: body.slice(0, 240), bodyBytes: new TextEncoder().encode(body).byteLength }
 }
 

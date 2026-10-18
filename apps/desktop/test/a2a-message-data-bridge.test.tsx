@@ -139,6 +139,32 @@ it('the visible bounded hook reaches the original SDK through production Rendere
     expect(bridge.invoke.mock.calls.some(([channel]) => channel === 'sessions:messages')).toBe(true)
     expect(await queue.readJournal()).toEqual([...original, expect.objectContaining({ kind: 'message', envelope: expect.objectContaining({ messageId: 'new-undelivered', body }) })])
     expect(connect).not.toHaveBeenCalled(); for (const control of controls) expect(control).not.toHaveBeenCalled()
+    // Explicit UI notification crosses the registered trusted bridge into the actual Core journal.
+    const notificationOriginal = { messageId: 'manual-reference', operationId: 'manual-source-operation', createdAt: 3,
+      sender: { kind: 'agent-session' as const, agentSessionId: 'sender' }, recipient: { kind: 'agent-session' as const, agentSessionId: 'child-a' },
+      senderSessionId: 'sender', senderRunId: 'original-sender-run', recipientSessionId: 'child-a', recipientRunId: 'original-child-a',
+      threadId: 'original-thread', correlationId: 'original-correlation', replyTo: null, workspaceId: null, body }
+    await queue.append(notificationOriginal, { deliveryMode: 'reference' })
+    const recipient = { hostId: 'original-host', agentSessionId: 'child-a' }, operationId = 'explicit-notify-operation'
+    const notify = vi.spyOn(client, 'notifyMessages')
+    await expect(bridge.handlers.get('sessions:notifyMessage')!({ sender: {} }, recipient, 'manual-reference', operationId)).rejects.toThrow('Untrusted')
+    await expect(api.sessions.notifyMessage({ ...recipient, agentSessionId: 'stranger' }, 'manual-reference', operationId)).rejects.toMatchObject({ code: 'MESSAGE_PARTICIPANT_MISMATCH' })
+    expect(notify).not.toHaveBeenCalled()
+    const notificationAction = api.sessions.notifyMessage(recipient, 'manual-reference', operationId)
+    await expect(notificationAction).resolves.toMatchObject({ hostId: 'original-host' })
+    const notified = await notificationAction
+    expect(notify).toHaveBeenCalledExactlyOnceWith({ operationId, messageIds: ['manual-reference'] })
+    expect(notified).toMatchObject({ hostId: 'original-host', notification: { notificationId: operationId,
+      messageIds: ['manual-reference'], mode: 'steer', key: { kind: 'prompt', agentSessionId: 'child-a', expectedRun: { runId: 'original-child-a' }, submissionId: operationId } } })
+    expect(notified.notification.state).not.toBe('submitted')
+    expect((await queue.readByMessageId('manual-reference'))?.envelope).toMatchObject(notificationOriginal)
+    const beforeInspect = await queue.readJournal(), originalKey = notified.notification.key
+    const observed = await api.sessions.inspectMessageNotification(recipient, 'manual-reference', originalKey)
+    expect(observed).toEqual({ record: await client.inspectAgentPromptSubmission(originalKey) })
+    await expect(api.sessions.inspectMessageNotification(recipient, 'manual-reference', { ...originalKey, expectedRun: { runId: 'replacement-run' } })).rejects.toMatchObject({ code: 'MESSAGE_RECIPIENT_MISMATCH' })
+    await expect(bridge.handlers.get('sessions:inspectMessageNotification')!({ sender: {} }, recipient, 'manual-reference', originalKey)).rejects.toThrow('Untrusted')
+    expect(notify).toHaveBeenCalledTimes(1); expect(await queue.readJournal()).toEqual(beforeInspect)
+
   } finally {
     await act(async () => unmount?.()); container?.remove(); await dispose?.(); await client.dispose(); await applicationAccess.dispose()
     await rm(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 20 }); vi.unstubAllEnvs(); vi.restoreAllMocks(); bridge.listeners.clear()
