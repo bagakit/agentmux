@@ -124,7 +124,7 @@ Sequence 仍遍历整个已载序列，过程详情部分在首次展开后保�
 
 Hosted Client 已通过选定连接绑定 semantic Host，读取中的 `hostId: 'local'` 是该接收方的 route-local namespace。[Core `readAgentSessionHistory`](../../packages/core/src/client.ts) 先按 Session descriptor 取得原执行 Host，再将响应路由映回 `local`；Desktop 的 [`RuntimeController.readSessionHistory`](../../apps/desktop/src/main/runtime-controller.ts) 对远端也先选择 client、发送 `local`、最后映回外侧 Host。MobileMailbox 传给 `useAgentInputMailbox` 的 Host 用于本地读窗作用域／key，并不是该 mailbox RPC 的 Host 参数。它们不能仅按同名字符串比较或相互替换；原 source Host、执行 Host 与连接路由分别核对。当前单一已选 semantic Host 的接线不等于 Mobile 已支持浏览该 Host 登记的全部其他 Host。
 
-Mobile Surface 目前还内联手动输入、CAS 意图保存、重连核对及同步交互答复；设备意图归 [`local-drafts`](../../apps/mobile/src/conversation/local-drafts.ts)，准入／权限与操作回执归 Core。原生异步问题的宿主适配已由 [`question-replies`](../../apps/mobile/src/conversation/question-replies.ts) 独立承接。技术设计中的控制器拆分不改变这些业务 owner。
+Mobile Surface 组合两个独立控制器：[`useMobilePromptController`](../../apps/mobile/src/conversation/use-mobile-prompt-controller.ts) 保留原 CAS、冻结正文、原 operation／waiting generation 与重连核对；[`useMobileInteractionController`](../../apps/mobile/src/conversation/use-mobile-interaction-controller.ts) 核对原请求和同步答复回执。设备意图仍归 [`local-drafts`](../../apps/mobile/src/conversation/local-drafts.ts)，准入／权限与操作回执仍归 Core。原生异步问题的宿主适配由 [`question-replies`](../../apps/mobile/src/conversation/question-replies.ts) 承接；能力目录观察失败在 Surface 提供原核对动作，不阻断普通输入或清除草稿。控制器没有新增发送协议或原操作副本。
 
 共享样式归 [`client-ui/styles`](../../packages/client-ui/src/styles/index.css)，两端按宿主入口导入。Mobile 的触控尺寸、外层容器和本端覆盖归 [`conversation.css`](../../apps/mobile/src/conversation/conversation.css)；共同组件的存在不代签两端视觉、性能或交互验收。
 
@@ -156,7 +156,7 @@ PTY 字节回执及 `inputRef` 本身不构成原生采用。原 Provider saved-
 
 Desktop Inputs 还组合本地队列、Core mailbox 和来源输入历史；各有独立覆盖与游标，不能相互代签。已有 [`session-mailbox-messages`](../../apps/desktop/src/renderer/src/lib/session-mailbox-messages.ts) 提供来源 selector，但 `SessionMailbox` 仍在组件中派生 `deliveredIds`／准确 journal keys，并通过 InputMailboxRecords、InputHistoryList、MessageHistory 的 render-props 拼装含 ReactNode 的行。这里的呈现组合与原 Core 输入关联是不同职责，目标边界见[三类输入的派生投影](../design/conversation-client-architecture.md#三类输入的派生投影)。
 
-[`ComposerPendingDelivery`](../../apps/desktop/src/renderer/src/components/ComposerPendingDelivery.tsx) 的避让已复用 Floating UI、按 Region 注册的 [`TerminalInputGeometry`](../../apps/desktop/src/renderer/src/lib/terminal-view-observation.ts)、有界终端读取与 RAF 合并；它仍借祖先和 xterm／interaction 私有 DOM 发现几何对象。这些查询只服务呈现，不授予发送或权限资格。目标是补全原宿主几何边界，不能把当前实现误述为完全没有观察 port，也不能仅凭 observer 数量认证性能问题。
+[`SessionPane`](../../apps/desktop/src/renderer/src/components/SessionPane.tsx) 通过 [`usePendingDeliveryLayout`](../../apps/desktop/src/renderer/src/lib/pending-delivery-layout.ts) 提供当前工作面边界及原 interaction wrapper／card 的显式 ref；只有显示终端的原 Region 提供准确 Session／Run 的 [`TerminalInputGeometry`](../../apps/desktop/src/renderer/src/lib/terminal-view-observation.ts)。辅助阅读面使用自己的边界，不借主终端几何。端口沿 Composer／Mailbox 传给 [`ComposerPendingDelivery`](../../apps/desktop/src/renderer/src/components/ComposerPendingDelivery.tsx)，浮层测量自己的 composer 并复用 Floating UI 与 RAF 合并；不从祖先或兄弟节点发现终端／请求。原终端 owner 保留有界输入行与 textarea 观察，可见性及身份变化解除相应订阅。这些引用仅服务呈现，不授予发送或权限资格，也不进入父工作面的高频 React state。
 
 具体行为由[范围与唯一归属](../design/behavior/conversation-mode.md#范围与唯一归属)指向的原专题持有。普通输入和健康能力不以历史探测或 UI 阅读是否成功为门槛。
 
