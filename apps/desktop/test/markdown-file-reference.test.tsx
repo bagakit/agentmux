@@ -1,3 +1,4 @@
+// @vitest-environment happy-dom
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { createElement } from 'react'
 import { renderClientUiMarkup as renderToStaticMarkup } from './helpers/client-ui-render'

@@ -82,6 +82,8 @@ import { WorkbenchPresentationContext, type WorkbenchPresentation } from '../src
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs.js'
 import * as sessionLinkOpening from '../src/renderer/src/lib/session-link-opening.js'
 import type { RuntimeEvent, SessionSnapshot } from '../src/shared/contracts.js'
+import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics.js'
+import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots.js'
 
 const initial = useAppStore.getState()
 const origin = { workspaceId: 'private-workspace', tabGroupId: 'private-group', tabId: 'private-tab', regionId: 'private-region' }
@@ -213,15 +215,59 @@ async function focusTerminal(destination: 'region' | 'tab' = 'region') {
   })
 }
 
+describe('mounted Topic and Mote Terminal file references', () => {
+  it.each(['topic', 'mote'] as const)('opens %s physical and relative paths through its confirmed logical resource without changing the Run', async kind => {
+    const topicId = 'view:terminal-files', logicalDirectory = scratchTopicDirectoryName(topicId)
+    const workspace = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', name: 'Topics', kind: 'folder' as const,
+      path: _hygiene_fixturePath('terminal-home/scratch') }
+    const physical = _hygiene_fixturePath(`terminal-home/${kind === 'mote' ? 'motes' : 'topics'}/${logicalDirectory}`)
+    const originalSession = { ...session, workspacePath: physical }, source = { ...origin, workspaceId: workspace.id }
+    const tab = { ...createWorkbenchTab(source.tabId, { regionId: source.regionId, workspaceId: workspace.id,
+      kind: 'terminal', phase: 'attached', sessionId: originalSession.id }), topicId }
+    await act(async () => {
+      useAppStore.setState(state => ({ config: { ...state.config!, workspaces: [workspace] }, sessions: [originalSession],
+        mainSurface: 'workbench', tabs: { [tab.id]: tab }, layouts: { [workspace.id]: createWorkspaceLayout(source.tabGroupId, [tab.id]) },
+        agentComposerDrafts: { [session.id]: 'ORIGINAL UNSENT INPUT' },
+        scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), revision: 1, error: null, reading: false,
+          topics: [{ id: topicId, kind, title: 'Original resource', summary: '', directoryPath: logicalDirectory,
+            physicalDirectoryPath: physical, identityDirectoryPath: physical, confirmedDirectoryPaths: [physical],
+            topicPath: `${logicalDirectory}/topic.md`, collaborators: [],
+            ...(kind === 'mote' ? { readError: 'Optional SOUL detail could not be read.' } : {}) }] } } }))
+      root.render(<TerminalView session={originalSession} themeId="graphite" interactiveResize={false} linkOrigin={source} autoFocus={false} />)
+    })
+    terminal = renderer.Terminal.instances.at(-1)!
+    const mounted = [...renderer.Terminal.instances], attachments = vi.mocked(api.sessions.attach).mock.calls.length
+    const path = 'outcome/knowledge/README.md', logicalPath = `${logicalDirectory}/${path}`
+    for (const text of [`${physical}/${path}:12:3`, `知识库总入口 (${path}:12:3)`]) {
+      const link = await fileLink(text)
+      await act(async () => link.activate(pointer(), link.text))
+    }
+    expect(openFile.mock.calls.map(call => [call[0], call[2], call[3]])).toEqual(Array.from({ length: 2 }, () =>
+      [logicalPath, { line: 12, column: 3 }, workspace.id]))
+    expect(useAppStore.getState().sessions).toEqual([originalSession])
+    expect(useAppStore.getState().tabs[tab.id]!.regions[source.regionId]).toBe(tab.regions[source.regionId])
+    expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('ORIGINAL UNSENT INPUT')
+    await act(async () => { terminal.userInput(); terminal.data('still usable') })
+    expect(vi.mocked(api.sessions.write).mock.calls.at(-1)?.slice(0, 3)).toEqual([originalSession.control, 'still usable', 'user'])
+    expect(renderer.Terminal.instances).toEqual(mounted)
+    expect(api.sessions.attach).toHaveBeenCalledTimes(attachments)
+    expect(api.files.openSystem).not.toHaveBeenCalled()
+  })
+})
+
 describe('mounted Focus Terminal destinations', () => {
-  it('plain HTTP from both real provider callbacks immediately uses the current Region or Tab preference', async () => {
+  it('plain HTTP from both real provider callbacks waits for the explicit destination in Focus', async () => {
     await focusTerminal()
     for (const destination of ['region', 'tab'] as const) {
       await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, focus: { recentActivityHours: state.config?.focus?.recentActivityHours ?? 48, linkDestination: destination } } })))
       for (const activate of [web.activate, terminal.options.linkHandler!.activate]) {
         await act(async () => activate(pointer(), 'https://example.test/focus', range))
-        expect(host.querySelector('[role="dialog"]')).toBeNull()
-        expect(openHttp).toHaveBeenLastCalledWith(focusOrigin, 'https://example.test/focus', destination === 'region' ? 'right' : 'tab')
+        expect(host.querySelector('[role="dialog"]')).not.toBeNull()
+        const target = destination === 'region' ? 'right' : 'tab'
+        const before = openHttp.mock.calls.length
+        await act(async () => host.querySelector<HTMLButtonElement>(`button[data-destination="${target}"]`)!.click())
+        expect(openHttp).toHaveBeenCalledTimes(before + 1)
+        expect(openHttp).toHaveBeenLastCalledWith(focusOrigin, 'https://example.test/focus', target, expect.objectContaining({ active: true }))
       }
     }
     expect(openHttp).toHaveBeenCalledTimes(4)
@@ -237,7 +283,7 @@ describe('mounted Focus Terminal destinations', () => {
     expect(openHttp).not.toHaveBeenCalled()
     expect(host.querySelector('[role="dialog"]')?.getAttribute('aria-label')).toBe('Choose where to open the link')
     await act(async () => host.querySelector<HTMLButtonElement>('button[data-destination="left"]')!.click())
-    expect(openHttp).toHaveBeenCalledExactlyOnceWith(focusOrigin, 'https://example.test/explicit', 'left')
+    expect(openHttp).toHaveBeenCalledExactlyOnceWith(focusOrigin, 'https://example.test/explicit', 'left', expect.objectContaining({ active: true }))
     await act(async () => terminal.options.linkHandler!.activate(alt(), 'https://example.test/stale', range))
     const oldChoice = host.querySelector<HTMLButtonElement>('button[data-destination="tab"]')!
     expect(oldChoice).not.toBeNull(); terminal.selection = 'Original terminal selection'
@@ -246,34 +292,36 @@ describe('mounted Focus Terminal destinations', () => {
         reference: focusReference(otherFocusOrigin) } } }))
       root.render(<TerminalView session={session} themeId="graphite" interactiveResize={false} linkOrigin={otherFocusOrigin} autoFocus={false} />)
     })
-    expect(host.querySelector('[role="dialog"]')).toBeNull()
+    expect(host.querySelector('[role="dialog"]')).not.toBeNull()
     await act(async () => oldChoice.click())
-    expect(openHttp).toHaveBeenCalledTimes(1)
+    expect(openHttp).toHaveBeenCalledTimes(2)
+    expect(openHttp).toHaveBeenLastCalledWith(focusOrigin, 'https://example.test/stale', 'tab', expect.objectContaining({ active: true }))
+    expect(host.querySelector('[role="dialog"]')).toBeNull()
     expect(useAppStore.getState().agentFocus.execution.reference).toEqual(focusReference(otherFocusOrigin))
     expect(useAppStore.getState().agentFocus.execution.sessionId).toBe(session.id)
     expect(terminal.getSelection()).toBe('Original terminal selection')
     expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
     expect(terminal.data).toBe(callback); expect(terminal.provider).toBe(provider)
     await act(async () => { terminal.userInput(); terminal.data('Input remains usable') })
-    expect(api.sessions.write).toHaveBeenCalledExactlyOnceWith(session.control, 'Input remains usable', 'user')
+    expect(vi.mocked(api.sessions.write).mock.calls.map(call => call.slice(0, 3))).toEqual([[session.control, 'Input remains usable', 'user']])
     expect(renderer.Terminal.instances).toEqual([terminal]); expect(terminalResourceOwnerCounts()).toEqual(owners)
     expect(api.sessions.attach).toHaveBeenCalledOnce(); expect(api.sessions.detach).not.toHaveBeenCalled()
   })
 
-  it('Focus preserves Cmd HTTP/file system exits and drag or selected-text protection with the original input owner', async () => {
+  it('Focus preserves Cmd HTTP and system artifact exits and drag or selected-text protection with the original input owner', async () => {
     await focusTerminal()
     for (const activate of [web.activate, terminal.options.linkHandler!.activate]) {
       await act(async () => activate(new MouseEvent('mouseup', { button: 0, metaKey: true }), 'https://example.test/system', range))
-      expect(openHttp).toHaveBeenLastCalledWith(focusOrigin, 'https://example.test/system', 'system')
+      expect(openHttp).toHaveBeenLastCalledWith(focusOrigin, 'https://example.test/system', 'system', expect.objectContaining({ active: true }))
       await act(async () => { pointer(); activate(new MouseEvent('mouseup', { button: 0, clientX: 150, clientY: 80 }), 'https://example.test/drag', range) })
       terminal.selection = 'Keep selected text'
       await act(async () => activate(pointer(), 'https://example.test/selection', range))
       expect(terminal.getSelection()).toBe('Keep selected text'); terminal.selection = ''
     }
     expect(openHttp).toHaveBeenCalledTimes(2)
-    const file = await fileLink()
+    const file = await fileLink('release/Example.dmg')
     await act(async () => file.activate(new MouseEvent('mouseup', { button: 0, metaKey: true }), file.text))
-    expect(api.files.openSystem).toHaveBeenCalledExactlyOnceWith(origin.workspaceId, 'src/example.ts')
+    expect(api.files.openSystem).toHaveBeenCalledExactlyOnceWith(origin.workspaceId, 'release/Example.dmg')
     expect(openFile).not.toHaveBeenCalled(); expect(host.querySelector('[role="dialog"]')).toBeNull()
     expect(renderer.Terminal.instances).toEqual([terminal]); expect(api.sessions.detach).not.toHaveBeenCalled()
   })
@@ -556,7 +604,7 @@ describe('mounted passive link readout', () => {
     expect(renderer.Terminal.instances).toEqual([terminal])
     expect([terminal.cols, terminal.rows]).toEqual([80, 24])
     await act(async () => { terminal.userInput(); terminal.data('still usable') })
-    expect(api.sessions.write).toHaveBeenCalledWith(session.control, 'still usable', 'user')
+    expect(vi.mocked(api.sessions.write).mock.calls.at(-1)?.slice(0, 3)).toEqual([session.control, 'still usable', 'user'])
   })
   it('OSC 8 and file callbacks share the delayed passive readout and leave cleanup', async () => {
     const file = await fileLink()
@@ -622,7 +670,7 @@ describe('mounted passive link readout', () => {
       await vi.advanceTimersByTimeAsync(50)
     })
     expect(oldTerminal.write).toHaveBeenCalledOnce(); expect(completeOldWrite).toBeTypeOf('function')
-    await act(async () => { root.render(<TerminalView session={session} themeId="catppuccin-mocha" interactiveResize={false} linkOrigin={origin} autoFocus={false} />) })
+    await act(async () => { root.render(<TerminalView key="replacement-owner" session={session} themeId="graphite" interactiveResize={false} linkOrigin={origin} autoFocus={false} />) })
     expect(oldTerminal.dispose).toHaveBeenCalledOnce(); expect(renderer.Terminal.instances).toHaveLength(2)
     terminal = renderer.Terminal.instances[1]!; web = renderer.WebLinksAddon.instances[1]!
     await installCells('new owner')
