@@ -6,7 +6,7 @@ import { WorkbenchLayoutMenuRows } from './WorkbenchLayoutMenuRows'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { StableWorkbenchView } from './StableWorkbenchView'
-import { createRef, useCallback, useEffect, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react'
+import { createRef, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react'
 import { flushSync } from 'react-dom'
 import {
   type BrowserScreenshotCapture,
@@ -73,7 +73,7 @@ import { FullPageLoadingSurface } from './FullPageLoadingSurface'
 import { BrowserToolsPanel } from './BrowserToolsPanel'
 import type { SurveyBrowserPreparation } from '../lib/survey-browser-creation'
 import { BrowserWorkfaceBoundary, type BrowserWorkfaceAddressDraft } from './BrowserWorkfaceBoundary'
-import { createBrowserAgent } from '../lib/browser-agent-creation'
+import { createBrowserAgent, type BrowserAgentCreationResult } from '../lib/browser-agent-creation'
 
 const ThemeActionAddAnnotationIcon = semanticIconComponent('action.add-annotation')
 const ThemeStatusSavedIcon = semanticIconComponent('status.saved')
@@ -314,15 +314,26 @@ function BrowserPaneContent({
   const inSurvey = controlPanelOpen !== undefined
   const [busy, setBusy] = useState(false)
   const [creatingAgent, setCreatingAgent] = useState(false)
-  const [agentCreationNotice, setAgentCreationNotice] = useState<string | null>(null)
+  const [agentCreationNotice, setAgentCreationNotice] = useState<Exclude<BrowserAgentCreationResult, { kind: 'confirmed' }> | null>(null)
   const browserAgentIntent = useAppStore(state => tab.agentCreationRequestId ? state.spatialRequests[tab.agentCreationRequestId]?.browserAgent : undefined)
+  const initialInputQueue = useAppStore(state => agentCreationNotice?.kind === 'input-unconfirmed' ? state.agentSteerQueues[agentCreationNotice.agentSessionId] : undefined)
+  const initialInputConfirmed = useMemo(() => {
+    if (agentCreationNotice?.kind !== 'input-unconfirmed') return false
+    const receipt = initialInputQueue?.find(entry => entry.operationId === agentCreationNotice.messageOperationId)?.inputReceipt
+    return receipt?.key.kind === 'prompt' && receipt.key.agentSessionId === agentCreationNotice.agentSessionId &&
+      receipt.key.submissionId === agentCreationNotice.messageOperationId && receipt.key.expectedRun.runId === agentCreationNotice.runId &&
+      (receipt.status === 'admitted' || receipt.status === 'terminal-confirmed')
+  }, [agentCreationNotice, initialInputQueue])
+  useEffect(() => {
+    if (initialInputConfirmed) setAgentCreationNotice(current => current === agentCreationNotice ? null : current)
+  }, [agentCreationNotice, initialInputConfirmed])
   async function startBrowserAgent(target: { reference?: WorkbenchProjectionSelection | undefined } = primaryPresentation): Promise<void> {
     const reference = target.reference && { ...target.reference, regionId: tab.regionId }
-    if (!reference) { setAgentCreationNotice('The original Browser presentation is unconfirmed. The page is kept; select this Browser occurrence and try again.'); return }
+    if (!reference) { setAgentCreationNotice({ kind: 'setup-unconfirmed', message: 'The original Browser presentation is unconfirmed. The page is kept; select this Browser occurrence and try again.' }); return }
     setCreatingAgent(true)
     setAgentCreationNotice(null)
-    try { setAgentCreationNotice(await createBrowserAgent(tab.browserId, reference) || null) }
-    catch (error) { setAgentCreationNotice(presentError(error)) }
+    try { const result = await createBrowserAgent(tab.browserId, reference); setAgentCreationNotice(result.kind === 'confirmed' ? null : result) }
+    catch (error) { setAgentCreationNotice({ kind: 'setup-unconfirmed', message: presentError(error) }) }
     finally { setCreatingAgent(false) }
   }
   const [menuOpen, setMenuOpen] = useState(false)
@@ -1360,7 +1371,7 @@ function BrowserPaneContent({
       {(agentCreationNotice || browserAgentIntent && !browserAgentIntent.inputStarted && !creatingAgent) ? <ServiceWindowNotice notice={{
         kind: 'indeterminate', notice: {
           step: 'Browser Agent setup needs attention',
-          mode: agentCreationNotice ?? 'The original Agent creation request is retained. Its first task has not been confirmed.',
+          mode: agentCreationNotice?.message ?? 'The original Agent creation request is retained. Its first task has not been confirmed.',
           restore: 'Check the same request to continue. The existing Agent and original page are kept.'
         }
       }} actions={<button type="button" className="small-button" disabled={creatingAgent}
