@@ -2,14 +2,14 @@ import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { createHash, randomUUID } from 'node:crypto'
 import { stripVTControlCharacters } from 'node:util'
-import { CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV, openCodexFrontendControl } from './codex-managed-frontend.js'
+import { CODEX_NATIVE_TOKEN_ENV, CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV, openCodexFrontendControl } from './codex-managed-frontend.js'
 import type { AgentTerminalFrontendObservation } from '../agent-terminal-frontend.js'
 import { resolve } from 'node:path'
 import { nativeProcessTcpListeners } from '../agent-native-process.js'
 import { connectCodexNativeActor } from './codex-native-rpc.js'
 import { codexDiagnosticStream, formatCodexManagedDiagnostic } from './codex-managed-diagnostics.js'
 
-export const CODEX_NATIVE_TOKEN_ENV = 'AGENTMUX_CODEX_ACTOR_TOKEN'
+export { CODEX_NATIVE_TOKEN_ENV } from './codex-managed-frontend.js'
 export type CodexManagedResume = { threadId: string; sandbox?: 'read-only' | 'workspace-write' | 'danger-full-access'; approvalPolicy?: 'on-request' | 'never'; model?: string; cwd?: string }
 export type CodexManagedRunPlan = { command: string; args: string[]; serverConfig: string[]; frontendArgs: string[]; resume?: CodexManagedResume }
 class ManagedNativeLaunchError extends Error {}

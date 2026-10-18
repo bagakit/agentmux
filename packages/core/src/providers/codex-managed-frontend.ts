@@ -6,6 +6,7 @@ import type { AgentProvider } from '../agent-provider.js'
 import { AgentMuxError } from '../errors.js'
 import { parseTerminalFrontendObservation, type AgentTerminalFrontendObservation } from '../agent-terminal-frontend.js'
 
+export const CODEX_NATIVE_TOKEN_ENV = 'AGENTMUX_CODEX_ACTOR_TOKEN'
 export const CODEX_ACTOR_ID_ENV = 'AGENTMUX_CODEX_ACTOR_ID'
 export const CODEX_ACTOR_LIFECYCLE_ENV = 'AGENTMUX_CODEX_ACTOR_LIFECYCLE'
 export const codexFrontendSocketPath = (token: string): string => '/tmp/amxf-' + createHash('sha256').update(token).digest('hex').slice(0, 32) + '.sock'
