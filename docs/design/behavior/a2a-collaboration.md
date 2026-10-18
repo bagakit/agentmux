@@ -159,7 +159,7 @@ Executor 包装与已有原生通道由[Provider 输入环境边界](agent-capab
 
 每次通知有独立的原 prompt input key、冻结 wire、目标 Run 与被引用 MID 集合，沿原 journal 与 Input owner 保存，不是第二封 A2A 原信。通知 key 与普通输入的 producer 排他，普通输入的同名 ACK 不能签收通知。通知状态区分待准入、输入 owner 已接纳及未确认；已接纳不等于模型采用。未知结果只观察原 claim，重开 Client 或新消息不得重放旧输入；旧 unknown 不阻塞另一封新原信的独立通知或健康手动输入。只有原 owner 确认整个输入未应用时，才能结束该原通知并在后续真实机会创建新通知。
 
-明确的用户通知沿公共 `message.notify` 操作选择已有 Inbox MID，并使用独立 operation ID；本次原授权是可信用户／设备的显式动作。受管 Agent 不得用 `immediate`、原生目标、回复关系或正文声明自授 steer；普通用户原输入继续沿原手动合同。读取原文、浏览 Inbox 或重复查询 unknown 都不隐式产生这项动作。更广的预授权关系、等待回复快通路和逐条显式消费仍未定，不据此扩大当前资格或建立周期提醒。
+明确的用户通知沿公共 `message.notify` 操作选择已有 Inbox MID，并使用独立 operation ID；本次原授权是可信用户／设备的显式动作。[Message Tools 邮箱](conversation-input.md#message-tools-邮箱)提供已有原信的人工通知入口，消费同一操作与原回执。受管 Agent 不得用 `immediate`、原生目标、回复关系或正文声明自授 steer；普通用户原输入继续沿原手动合同。读取原文、浏览 Inbox 或重复查询 unknown 都不隐式产生这项动作。更广的预授权关系、等待回复快通路和逐条显式消费仍未定，不据此扩大当前资格或建立周期提醒。
 
 Agent 需要处理引用时沿发现入口读取 skill，再按原 MID 取得 journal 正文。取信只读，不产生输入、通知签收、模型采用或任务接单；用户浏览不替 Agent 消费。原批次 generation ack 不能因只读一封推进整批，也不因原信仍未消费反复通知。不能据显示文案猜空闲、输入资格或 steer 成功；不支持／未知时保原消息、准确回执、健康能力与手动恢复路径，不静默换正文、目标或重发。
 

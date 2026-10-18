@@ -18,3 +18,14 @@ The pointer checks read the actual computed styles and hit targets: a resting pe
 The bounded `--empty-mutation` mode first changes only the imported owner stylesheet's empty-state padding in private PostCSS compilation. The actual Notices view must fail `EMPTY_STATE_HEIGHT` at the inflated height; compilation or unrelated failures cannot count. It then restores the unchanged source and captures Notices without a hint and Collaboration with its original necessary hint at 320, 380 and 440 Region widths in both themes. The original collaboration API returns an exact-participant empty page, and the private Session has no capability diagnostic. Assertions cover the 26px plain row, unchanged 12px title, complete natural hint wrapping, Automation return, Escape and original editor, draft, queue and terminal preservation. `--empty-states` runs only this restored six-scene capture when a separate visual check is needed.
 
 The script prints a private receipt directory. `compilation.json` records the actual imported source and style hashes; `render.json` records runtime identity, nonempty operations and screenshot hashes. `review.md` links the complete images for an independent visual review. Capture and geometry success do not certify aesthetic quality. These controlled Renderer scenes do not certify a live Host, native CLI delivery, installed application or durable Session recovery, and never operate user Sessions.
+
+The explicit notification slice is exercised with:
+
+```sh
+node apps/desktop/scripts/verify-a2a-manual-notify.mjs
+node apps/desktop/scripts/verify-message-tool-workspace.mjs --manual-notify
+```
+
+The first command runs the unchanged mounted Renderer and registered preload/IPC/Main → actual Core journal path, then kills four original Renderer mutations and four Main/IPC mutations. Each nonempty suite and actual imported source mutation is recorded. It covers exact Host/MID/recipient Run, trusted sender, distinct explicit operation IDs, same-operation read-only inspection, and rejection of an unrelated producer's ACK. The Core bridge deliberately has an unavailable Runtime and certifies retained unknown/failed observation, not a live CLI delivery.
+
+`--manual-notify` uses the existing private production Renderer at dark 380/320 and light 640 Region widths. It clicks Notify now on one retained reference message, captures its unconfirmed receipt, opens the same MID, clicks Refresh receipt and captures the submitted receipt. Fixture notification/inspection ports assert the original IDs; one explicit notification and one read-only inspection are recorded. Original editor, draft, queued messages and terminal remain intact. These controlled ports do not send to user Agents, and a submitted notification never certifies original-body reading or task acceptance. The nine full screenshots and compilation identity are listed in the generated review.md for independent review.
