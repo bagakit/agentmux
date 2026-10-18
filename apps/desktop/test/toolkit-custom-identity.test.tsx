@@ -20,8 +20,8 @@ import { composerDOM } from './helpers/composer-dom-fixture'
 
 vi.mock('electron', () => ({ app: { getPath: () => _hygiene_fixturePath("tmp"), getAppPath: () => process.cwd() } }))
 // Functional editor shape only; finite compositor capture loads the real Monaco component.
-vi.mock('../src/renderer/src/components/settings/ToolkitScriptEditor', () => ({ default: ({ id, actionId, value, onChange }: { id: string; actionId: string | null; value: string; onChange(value: string): void }) =>
-  <textarea data-identity-script={id} data-identity-action={actionId ?? ''} aria-label="Functional script field" value={value} onChange={event => onChange(event.target.value)} /> }))
+vi.mock('../src/renderer/src/components/settings/ToolkitScriptEditor', () => ({ default: ({ id, actionId, mode, value, onChange }: { id: string; actionId: string | null; mode?: string; value: string; onChange(value: string): void }) =>
+  <textarea data-identity-script={id} data-identity-action={actionId ?? ''} data-mode={mode ?? 'script'} aria-label="Functional script field" value={value} onChange={event => onChange(event.target.value)} /> }))
 const dom = composerDOM(), paths: string[] = []
 beforeEach(() => { vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} unobserve() {} }) })
 afterEach(async () => { for (const path of paths.splice(0)) await rm(path, { recursive: true }) })
@@ -61,10 +61,52 @@ async function fill(selector: string, value: string) {
   await act(async () => { Object.getOwnPropertyDescriptor(node instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(node, value); node!.dispatchEvent(new Event('input', { bubbles: true })) })
 }
 describe('actual Toolkit custom identity', () => {
+  it('makes TUI icon editing discoverable and saves the same authored draft after a rejected publication', async () => {
+    const script = "# Authored shell\necho '$HOME'\n"
+    const m = await setup([{ ...definition('terminal-tool'), mode: 'tui', script }]); await dom.render(<m.View />)
+    const summary = dom.container.querySelector<HTMLElement>('.toolkit-icon-picker summary')!
+    expect(summary.textContent).toContain('Icon')
+    expect(summary.getAttribute('aria-label')).toBe('Choose tool icon')
+    expect(dom.container.querySelectorAll('.toolkit-icon-picker input[type="radio"]')).toHaveLength(9)
+    await dom.click('.toolkit-icon-picker summary')
+    await dom.click('.toolkit-icon-picker input[value="zap"]')
+    expect(dom.container.querySelector<HTMLInputElement>('.toolkit-icon-picker input[value="zap"]')!.checked).toBe(true)
+    expect(m.writer.update).not.toHaveBeenCalled(); expect(m.run).not.toHaveBeenCalled()
+    await act(async () => dom.container.querySelector('.toolkit-icon-picker input[value="zap"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    expect(dom.container.querySelector<HTMLDetailsElement>('.toolkit-icon-picker')!.open).toBe(false)
+    expect(document.activeElement).toBe(summary)
+    for (const mode of ['script', 'tui']) {
+      await dom.click(`.toolkit-editor__mode input[value="${mode}"]`)
+      const editor = dom.container.querySelector<HTMLTextAreaElement>('[data-identity-script]')!
+      expect(editor.value).toBe(script); expect(editor.dataset.mode).toBe(mode)
+    }
+    m.writer.update.mockRejectedValueOnce(new Error('Configuration publication refused'))
+    await button('Save tool')
+    expect(dom.container.textContent).toContain('Configuration publication refused')
+    expect(dom.container.querySelector<HTMLInputElement>('.toolkit-icon-picker input[value="zap"]')!.checked).toBe(true)
+    expect(findToolkitTool(m.owner.current, 'terminal-tool')!.icon).toBe('terminal')
+    await button('Save tool')
+    await act(async () => { await expect(m.writer.update.mock.results[1]!.value).resolves.toBeDefined() })
+    const saved = findToolkitTool(m.owner.current, 'terminal-tool')!
+    expect(saved).toMatchObject({ icon: 'zap', mode: 'tui', script })
+    expect(JSON.parse(await readFile(m.path, 'utf8')).toolkit.tools).toEqual([saved])
+    expect(m.run).not.toHaveBeenCalled()
+  })
+  it('explicitly removes an existing display program when a confirmed draft becomes TUI', async () => {
+    const script = "echo 'Kept command'\n"
+    const m = await setup([{ ...definition('display-tool'), mode: 'script', script, display: { script: 'console.log(1)', args: [] } }]); await dom.render(<m.View />)
+    await dom.click('.toolkit-editor__mode input[value="tui"]')
+    expect(m.writer.update).not.toHaveBeenCalled()
+    await button('Switch to TUI', document)
+    expect(dom.container.querySelector<HTMLTextAreaElement>('[data-identity-script]')!.value).toBe(script)
+    await button('Save tool'); await act(async () => { await expect(m.writer.update.mock.results[0]!.value).resolves.toBeDefined() })
+    expect(findToolkitTool(m.owner.current, 'display-tool')).toMatchObject({ mode: 'tui', display: null, script })
+    expect(m.run).not.toHaveBeenCalled()
+  })
   it('chooses Custom first with a creation empty state or the first real saved tool', async () => {
     const m = await setup(); await dom.render(<m.View />)
     expect(Array.from(dom.container.querySelectorAll('.toolkit-library__group')).map(item => item.textContent)).toEqual(['Custom', 'Built-in'])
-    expect(dom.container.querySelector('.toolkit-workbench__empty h3')?.textContent).toBe('Make a tool your own.')
+    expect(dom.container.querySelector('.toolkit-workbench__empty h3')?.textContent).toBe('Create a custom tool')
     expect(dom.container.querySelector('.toolkit-library__items [data-tool-template]')).toBeNull()
     expect(dom.container.querySelector('[data-tool-id="performance"]')?.getAttribute('aria-pressed')).toBe('false')
     expect(m.writer.add).not.toHaveBeenCalled(); expect(m.run).not.toHaveBeenCalled()
@@ -77,7 +119,7 @@ describe('actual Toolkit custom identity', () => {
     const name = dom.container.querySelector<HTMLInputElement>('.toolkit-editor__name input')!
     expect(name.value).toBe(''); expect(document.activeElement).toBe(name)
     expect(dom.container.querySelector<HTMLTextAreaElement>('[data-identity-script]')?.value).not.toBe(accountUsageScript)
-    await button('Cancel new tool'); expect(dom.container.querySelector('.toolkit-workbench__empty h3')?.textContent).toBe('Make a tool your own.')
+    await button('Cancel new tool'); expect(dom.container.querySelector('.toolkit-workbench__empty h3')?.textContent).toBe('Create a custom tool')
     expect(dom.container.querySelector('[data-tool-id="performance"]')?.getAttribute('aria-pressed')).toBe('false')
     expect(m.writer.add).not.toHaveBeenCalled(); expect(m.run).not.toHaveBeenCalled()
   })
@@ -95,9 +137,9 @@ describe('actual Toolkit custom identity', () => {
     await fill('.toolkit-argument input', 'report.md'); await button('Main script'); await button('Save tool')
     expect(m.writer.update).toHaveBeenCalledOnce(); await expect(m.writer.update.mock.results[0]!.value).resolves.toBeDefined(); const id = 'auth'
     const saved = findToolkitTool(m.owner.current, id)
-    expect(saved).toEqual({ id, revision: expect.any(String), name: 'Workspace summary', icon: 'zap', enabled: true, statusBar: 'icon', workspacePath: _hygiene_fixturePath("workspace-notes"), script: "console.log('Workspace summary')\n", args: ['--project', 'current'], actions: [{ id: expect.any(String), label: 'Open report', script: "console.log('Report ready')\n", args: ['report.md'] }] })
+    expect(saved).toEqual({ id, revision: expect.any(String), mode: 'script', name: 'Workspace summary', icon: 'zap', enabled: true, statusBar: 'icon', workspacePath: _hygiene_fixturePath("workspace-notes"), script: "console.log('Workspace summary')\n", args: ['--project', 'current'], actions: [{ id: expect.any(String), label: 'Open report', script: "console.log('Report ready')\n", args: ['report.md'] }] })
     expect(JSON.parse(await readFile(m.path, 'utf8')).toolkit.tools).toEqual([saved])
-    expect(Object.keys(saved).sort()).toEqual(['actions', 'args', 'enabled', 'icon', 'id', 'name', 'revision', 'script', 'statusBar', 'workspacePath'].sort())
+    expect(Object.keys(saved).sort()).toEqual(['actions', 'args', 'enabled', 'icon', 'id', 'mode', 'name', 'revision', 'script', 'statusBar', 'workspacePath'].sort())
     expect(m.run).not.toHaveBeenCalled()
   })
   it('preserves dirty fields across local and Built-in, then honors the exact changed deep link', async () => {
@@ -118,7 +160,7 @@ describe('actual Toolkit custom identity', () => {
     await button('Delete tool'); await button('Delete tool', document.querySelector('.confirmation-dialog')!)
     await act(async () => { await m.remove.mock.results[1]!.value })
     expect(m.owner.current.toolkit?.tools).toEqual([])
-    expect(dom.container.querySelector('.toolkit-workbench__empty h3')?.textContent).toBe('Make a tool your own.')
+    expect(dom.container.querySelector('.toolkit-workbench__empty h3')?.textContent).toBe('Create a custom tool')
     expect(dom.container.querySelector('[data-tool-id="performance"]')?.getAttribute('aria-pressed')).toBe('false')
   })
   it('128 definitions mount only the selected functional editor and leave zero when inactive', async () => {
