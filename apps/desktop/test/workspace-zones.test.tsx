@@ -38,7 +38,7 @@ describe('Workspace Zones original Store projection and navigation', () => {
 
   beforeEach(() => {
     vi.spyOn(api.git, 'worktrees').mockResolvedValue({ kind: 'ready', hostId: display.hostId, workspacePath: display.path,
-      repoPath: display.path, checkedAt: 1, warnings: [], worktrees: [
+      repoPath: display.path, checkedAt: 1, warnings: [], directories: [display.path, first.path, second.path].map(path => ({ path, kind: 'directory' as const, canonicalPath: path })), worktrees: [
         { path: display.path, branch: 'main', kind: 'main', detached: false, aliases: [] },
         { path: first.path, branch: 'same', kind: 'linked', detached: false, aliases: [] },
         { path: second.path, branch: 'same', kind: 'linked', detached: false, aliases: [] }
@@ -110,7 +110,7 @@ describe('Workspace Zones original Store projection and navigation', () => {
     await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={vi.fn()} />)
     expect([rootZone, firstZone, secondZone, remoteZone, duplicateZone, unknownZone, nested.zoneId, folderZone]
       .map(zoneId => row(zoneId).querySelector('.workspace-zone-entry__kind')?.textContent))
-      .toEqual(['Folder', 'Worktree', 'Worktree', 'Folder', 'Worktree', 'Unknown', 'Home', 'Folder'])
+      .toEqual(['Main worktree', 'Worktree', 'Worktree', 'Folder', 'Worktree', 'Unknown', 'Home', 'Folder'])
     expect([rootZone, firstZone, secondZone, remoteZone, duplicateZone, unknownZone, nested.zoneId, folderZone].map(rowName))
       .toEqual(['Project', 'Same', 'Same', 'Remote directory', 'Same', 'missing-resource', 'topic', 'nested-folder'])
     expect(row(nested.zoneId).getAttribute('aria-pressed')).toBe('true')
@@ -276,7 +276,7 @@ describe('Workspace Zones original Store projection and navigation', () => {
     expect(row(nestedZone).disabled).toBe(false)
     const notice = dom.container.querySelector<HTMLDetailsElement>('.workspace-zones-notice')!
     expect(notice.open).toBe(false)
-    expect(notice.querySelector('summary')?.textContent).toBe('Files available. Choose a repository Zone for Git.')
+    expect(notice.querySelector('summary')?.textContent).toBe('Files available. Use a repository working directory for Git.')
     expect(notice.querySelector('p')?.textContent).toBe(context.issue)
     expect(dom.container.querySelector('[role="status"]')).toBeNull()
     expect(row(nestedZone).getAttribute('aria-pressed')).toBe('true')
@@ -384,7 +384,7 @@ describe('Workspace Zones original Store projection and navigation', () => {
     expect(row(unknownZone).disabled).toBe(false)
     expect(row(unknownZone).getAttribute('aria-pressed')).toBe('true')
     expect(dom.container.querySelector('[role="status"]')?.textContent).toContain('unavailable')
-    expect(dom.container.querySelector('.workspace-zones-notice')).toBeNull()
+    expect(dom.container.querySelector('.workspace-zones-notice summary')?.textContent).toBe('Selected directory is unconfirmed.')
     const before = useAppStore.getState()
     await clickZone(unknownZone)
     expect(useAppStore.getState().tabs).toBe(before.tabs)
@@ -395,7 +395,7 @@ describe('Workspace Zones original Store projection and navigation', () => {
     const create = vi.fn(), execute = vi.spyOn(useAppStore.getState(), 'executeControl')
     await dom.render(<WorkspaceZonesPanel workspace={display} onManageWorktrees={create} footer={<span>Original scope footer</span>} />)
     const manage = dom.container.querySelector<HTMLButtonElement>('button[aria-label="Manage worktrees"]')!
-    expect(manage.textContent).toBe('Worktrees')
+    expect(manage.textContent).toBe('All worktrees 3')
     expect(dom.container.querySelector('[aria-label="Create worktree"]')).toBeNull()
     expect(dom.container.querySelector('.workspace-zones-panel')?.textContent).toContain('Original scope footer')
     await dom.click('button[aria-label="Manage worktrees"]')

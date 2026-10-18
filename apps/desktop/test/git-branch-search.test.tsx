@@ -17,7 +17,7 @@ const fixture = vi.hoisted(() => ({
   refresh: vi.fn(),
   state: {
     localHome: _hygiene_fixturePath("home/private"),
-    config: { hosts: [{ id: 'local', kind: 'local' }], executors: {}, projects: [], copyPathsAsAbsolute: false },
+    config: { hosts: [{ id: 'local', kind: 'local' }], executors: {}, workspaces: [], copyPathsAsAbsolute: false },
     sessions: [],
     pinnedItems: {} as Record<string, string[]>,
     togglePinnedItem: vi.fn(),
@@ -29,6 +29,11 @@ const fixture = vi.hoisted(() => ({
 vi.mock('../src/renderer/src/hooks/useWorkspaceBranches', () => ({
   useWorkspaceBranches: () => ({ snapshot: fixture.snapshot, loading: fixture.loading, error: fixture.error, refresh: fixture.refresh })
 }))
+vi.mock('../src/renderer/src/hooks/useZoneWorktrees', () => ({ useZoneWorktrees: () => ({
+  snapshot: fixture.snapshot?.kind === 'git-repository' ? { kind: 'ready', hostId: fixture.snapshot.hostId, repoPath: fixture.snapshot.repoPath, workspacePath: fixture.snapshot.repoPath, checkedAt: 1, warnings: [], directories: [],
+    worktrees: fixture.snapshot.branches.filter(value => value.worktreePath).map(value => ({ path: value.worktreePath!, branch: value.name, kind: value.isCurrent ? 'main' : 'linked', detached: false, aliases: [] })) } : null,
+  directories: [], directoryObservation: null, directoryStale: false, stale: false, issue: null, loading: false, refresh: vi.fn()
+}) }))
 vi.mock('../src/renderer/src/hooks/useGitAheadBehind', () => ({ useGitAheadBehind: () => ({ facts: null }) }))
 vi.mock('../src/renderer/src/store', () => ({
   useAppStore: Object.assign((select: (state: typeof fixture.state) => unknown) => select(fixture.state), { getState: () => fixture.state })
