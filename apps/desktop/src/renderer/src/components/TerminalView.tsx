@@ -88,6 +88,7 @@ import {
 } from '@agentmux/client-ui/terminal/live-output'
 import { terminalStartupPhase } from '../lib/terminal-startup'
 import { isVanishedAgentRunError } from '../lib/terminal-attach-recovery'
+import { TerminalInitialObservationRecovery, recoverableInitialTerminalObservation } from '../lib/terminal-initial-observation-recovery'
 import {
   TERMINAL_REVEAL_DEADLINE_MS,
   terminalAcceptsInput,
@@ -242,6 +243,7 @@ export function TerminalView({
   }, [switchTarget, session.id, session.control.run.runId])
   const inputGeometryRef = useRef<TerminalInputGeometry | null>(null)
   const refreshObservationRef = useRef<(() => Promise<void>) | null>(null)
+  const initialObservationVisibilityRef = useRef<((visible: boolean) => void) | null>(null)
   const onObservationRefreshRef = useRef(onObservationRefresh)
   onObservationRefreshRef.current = onObservationRefresh
   const webglVisibilityRef = useRef<((visible: boolean) => void) | null>(null)
@@ -559,6 +561,7 @@ export function TerminalView({
     if (!visible && terminal) rememberViewport(terminal)
     webglVisibilityRef.current?.(visible)
     viewportRef.current?.setVisible(visible)
+    initialObservationVisibilityRef.current?.(visible)
     if (!visible || !terminal) return
     // Restore after the synchronizer's first visibility frame as well: fit/resize can otherwise
     // move xterm's DOM viewport before the user sees the reactivated Region.
@@ -903,6 +906,8 @@ export function TerminalView({
     let disposed = false
     let observedOutput = false
     let attachmentId: string | null = null
+    let initialRecovery: TerminalInitialObservationRecovery | undefined
+    let initialFailureOccurrence: string | null = null
     let revealed = false
     let attachDeadlineOccurrence: string | null = null
     let readyForLiveOutput = false
@@ -1527,6 +1532,7 @@ export function TerminalView({
     const accept = (event: RuntimeEvent): void => {
       const output = outputForSession(event, session)
       const core = event.event
+      if (event.hostId === session.control.hostId && core.type === 'connection-state' && core.state === 'restored') initialRecovery?.ownerRestored()
       if (event.hostId === session.hostId && core.type === 'attachment-state' &&
         core.run.runId === session.control.run.runId) {
         incidents?.capture(core.state === 'restored' ? 'terminal-recovered' : 'terminal-attach-failed',
@@ -1742,15 +1748,16 @@ export function TerminalView({
       reveal(decision.overdue)
     }, TERMINAL_REVEAL_DEADLINE_MS)
 
-    const attach = async (refresh = false): Promise<void> => {
+    const attach = async (refresh = false, automatic = false): Promise<void> => {
       incidents?.begin(refresh ? 'refresh-requested' : 'attach-requested')
       // Freeze the old state before refreshSession or any output connection replacement runs.
-      const refreshOccurrence = refresh ? incidents?.capture('terminal-refresh', 'refresh-requested') : undefined
+      const refreshOccurrence = refresh ? incidents?.capture('terminal-refresh', 'refresh-requested', undefined,
+        automatic ? initialFailureOccurrence : null) : undefined
       const preserve = refresh && readyForLiveOutput
       let applyingReplay = false
       let readingMarker: ReturnType<Terminal['registerMarker']> | undefined
       try {
-        if (refresh) {
+        if (refresh && !automatic) {
           const metadata = await refreshSession(session.id)
           if (disposed) return
           if (!metadata || metadata.control.hostId !== session.control.hostId || metadata.control.run.runId !== session.control.run.runId) {
@@ -1774,6 +1781,11 @@ export function TerminalView({
           return
         }
         attachmentId = result.attachmentId
+        initialRecovery?.acquired()
+        if (result.session.id !== session.id || result.session.kind !== session.kind || result.session.hostId !== session.hostId ||
+          result.session.control.hostId !== session.control.hostId || result.session.control.run.runId !== session.control.run.runId) {
+          throw new Error('The attachment observation did not confirm this original Session and Run. The original Region is kept.')
+        }
         latestObservedOutputBytes = result.session.latestOutputBytes
         incidents?.mark('attach-received')
         if (result.terminal.type === 'not-requested') throw new Error('The Runtime did not provide the requested terminal representation.')
@@ -1847,6 +1859,7 @@ export function TerminalView({
           }
         })
         if (!disposed && refresh) incidents?.capture('terminal-refresh', 'refresh-completed', undefined, refreshOccurrence ?? null)
+        if (!disposed && automatic) incidents?.capture('terminal-recovered', 'observation-restored', undefined, initialFailureOccurrence)
         if (!disposed && !refresh && attachDeadlineOccurrence) {
           incidents?.capture('terminal-recovered', 'observation-restored', undefined, attachDeadlineOccurrence)
         }
@@ -1854,9 +1867,13 @@ export function TerminalView({
         if (!disposed) {
           const detail = (error instanceof Error ? error.message : String(error))
             .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
-          incidents?.capture(applyingReplay ? 'terminal-replay-failed' : 'terminal-attach-failed',
+          const failureOccurrence = incidents?.capture(applyingReplay ? 'terminal-replay-failed' : 'terminal-attach-failed',
             refresh ? 'refresh-failed' : applyingReplay ? 'replay-failed' : 'attach-failed', error,
-            refreshOccurrence ?? attachDeadlineOccurrence)
+            refreshOccurrence ?? initialFailureOccurrence ?? attachDeadlineOccurrence)
+          if (attachmentId === null && !applyingReplay) {
+            initialRecovery?.failure(error)
+            if (recoverableInitialTerminalObservation(error)) initialFailureOccurrence = failureOccurrence ?? initialFailureOccurrence
+          }
           const vanishedAgentRun = session.kind === 'agent' && isVanishedAgentRunError(error)
           if (!refresh && vanishedAgentRun && recoverVanishedRunRef.current !== session.control.run.runId) {
             // The durable Agent Session is still the owner. Ask the store to perform the
@@ -1880,34 +1897,48 @@ export function TerminalView({
       }
     }
     let operation: Promise<void> | null = null
-    const refreshObservation = (): Promise<void> => {
+    const refreshObservation = (automatic = false): Promise<void> => {
       if (operation) return operation
+      initialRecovery?.pause()
       setRefreshingObservation(true)
       const waiting = setTimeout(() => {
         if (!disposed) setAttachmentFailure({ step: 'Refreshing this Region’s observation',
           message: 'The observation reply is still pending. Current Run availability and input delivery are unconfirmed.' })
       }, TERMINAL_REVEAL_DEADLINE_MS)
-      const current = attach(true).finally(() => {
+      const current = attach(true, automatic).finally(() => {
         clearTimeout(waiting)
         if (operation === current) operation = null
         if (!disposed) setRefreshingObservation(false)
+        initialRecovery?.settled()
       })
       operation = current
       return current
     }
-    const initial = attach().finally(() => { if (operation === initial) operation = null })
+    initialRecovery = new TerminalInitialObservationRecovery(visibleRef.current,
+      () => !disposed && attachmentId === null && operation === null,
+      () => refreshObservation(true))
+    const observeInitialVisibility = (shown: boolean) => initialRecovery?.setVisible(shown)
+    initialObservationVisibilityRef.current = observeInitialVisibility
+    const initial = attach().finally(() => {
+      if (operation === initial) operation = null
+      initialRecovery?.settled()
+    })
     operation = initial
     refreshObservationRef.current = refreshObservation
     onObservationRefreshRef.current?.(refreshObservation)
 
     viewport.observeViewport()
-    root.ownerDocument.defaultView!.requestAnimationFrame(() => {
+    const focusWindow = root.ownerDocument.defaultView!
+    const focusFrame = focusWindow.requestAnimationFrame(() => {
       if (!disposed && autoFocusRef.current && visibleRef.current && terminal.element?.isConnected &&
         !terminal.element.closest('[inert]')) terminal.focus()
     })
     return () => {
+      focusWindow.cancelAnimationFrame(focusFrame)
       incidents?.mark('observation-unavailable')
       disposed = true
+      initialRecovery.dispose()
+      if (initialObservationVisibilityRef.current === observeInitialVisibility) initialObservationVisibilityRef.current = null
       incidentRender.dispose()
       interaction.dispose()
       if (refreshObservationRef.current === refreshObservation) {
