@@ -115,6 +115,10 @@
 .mote-details:not([data-section="profile"]) .mote-details__identity { flex: 1; }
 .mote-details:not([data-section="profile"]) .mote-details__avatar { width: 32px; height: 32px; }
 .mote-details:not([data-section="profile"]) .mote-details__identity strong { font-size: var(--fs-title); }
+@container mote-details (min-width: 640px) {
+  .mote-details:not([data-section="profile"]) > .mote-details__profile { padding-inline-end: 286px; }
+  .mote-details:not([data-section="profile"]) .mote-details__navigation-bar { position: absolute; inset: 8px 4px auto auto; min-height: 36px; padding: 0 12px; border-bottom: 0; }
+}
 @container mote-details (min-width: 720px) {
   .mote-details[data-section="profile"] > .mote-details__profile { position: absolute; inset: 0 auto 0 0; width: 208px; max-height: none; box-sizing: border-box; padding: 28px 20px; overflow: auto; border-bottom: 0; border-right: 1px solid var(--line-soft); gap: 20px; }
   .mote-details[data-section="profile"] > .mote-details__main { margin-inline-start: 208px; }
