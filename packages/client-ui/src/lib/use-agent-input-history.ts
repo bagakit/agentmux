@@ -6,7 +6,7 @@ export type InputHistoryRead = (input: Omit<AgentSessionHistoryReadInput, 'hostI
   signal: AbortSignal) => Promise<AgentSessionHistoryReadPage>
 export type InputHistorySource = 'captured' | 'native'
 type SourcePage = { source: InputHistorySource; messages: readonly AgentSessionUserMessage[]; cursor: string | null;
-  complete: boolean; examined: number; loading: boolean; error: string | null; retry?: { cursor?: string; retain?: boolean } }
+  sourceHostId?: string; complete: boolean; examined: number; loading: boolean; error: string | null; retry?: { cursor?: string; retain?: boolean } }
 const sources: readonly InputHistorySource[] = ['captured', 'native']
 const EMPTY_MESSAGES: readonly AgentSessionUserMessage[] = Object.freeze([])
 const empty = (source: InputHistorySource): SourcePage => ({ source, messages: [], cursor: null, complete: false, examined: 0, loading: false, error: null })
@@ -44,7 +44,7 @@ export function useAgentInputHistory({ scope, enabled, read, initialMessages = E
           // Paging resumes from the new snapshot; retained records do not claim scan coverage.
           const messages = [...new Map([...(cursor || retain ? old.messages : []), ...page.userMessages!]
             .map(message => [message.id, message])).values()]
-          return { source, messages, cursor: page.nextCursor, complete: page.scan!.complete,
+          return { source, messages, ...(page.sourceHostId ? { sourceHostId: page.sourceHostId } : {}), cursor: page.nextCursor, complete: page.scan!.complete,
             examined: (cursor ? old.examined : 0) + page.scan!.examined, loading: false, error: null }
         }) }
       })
@@ -102,7 +102,10 @@ export function useAgentInputHistory({ scope, enabled, read, initialMessages = E
       const indices = new Map(messages.map((message, index) => [message.id, index]))
       for (const message of initialMessages) {
         const index = indices.get(message.id)
-        if (index !== undefined) messages[index] = message
+        // An unversioned seed cannot replace an accepted query's original proof.
+        if (index !== undefined) {
+          if (message.sourceRecord || !messages[index]!.sourceRecord) messages[index] = message
+        }
         else { indices.set(message.id, messages.length); messages.push(message) }
       }
     }
@@ -115,7 +118,9 @@ export function useAgentInputHistory({ scope, enabled, read, initialMessages = E
     if (!page || page.loading || (!page.error && !page.cursor)) return
     void load(source, valid ? state.query : '', page.error ? page.retry?.cursor : page.cursor ?? undefined, page.error ? page.retry?.retain : false)
   }
-  return { scope, draftQuery, setDraftQuery, query: valid ? state.query : '', search, refresh, messages, pages, loadMore,
+  const sourceHosts = new Set(pages.flatMap(page => page.sourceHostId ? [page.sourceHostId] : []))
+  const sourceHostId = sourceHosts.size === 1 ? [...sourceHosts][0] : undefined
+  return { scope, draftQuery, setDraftQuery, query: valid ? state.query : '', search, refresh, messages, pages, loadMore, sourceHostId,
     loading: pages.some(page => page.loading) || enabled && pages.some(page => !page.complete && page.cursor === null && page.examined === 0 && page.error === null),
     complete: pages.every(page => page.complete && !page.error),
     examined: pages.reduce((total, page) => total + page.examined, 0) }
