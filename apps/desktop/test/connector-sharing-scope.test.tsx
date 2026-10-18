@@ -25,13 +25,13 @@ async function select(label: string, value: string) {
   expect(option, value).not.toBeNull(); await act(async () => option.click())
 }
 async function consent() { await act(async () => document.querySelector<HTMLInputElement>('.agent-connector-check input')!.click()) }
-async function openExisting() { await f.mount(); await f.menu('Bind existing group chat'); await f.fill('Existing group ID', 'oc_shared') }
+async function openExisting() { await f.mount(); await f.journey('existing'); await f.fill('Existing group ID', 'oc_shared') }
 
 it('existing reply-only consent is not expanded by opening details and a broader scope requires explicit new confirmation at the same original audience', async () => {
   await openExisting(); expect(document.querySelector('[aria-label="Group sharing content"]')?.getAttribute('data-value')).toBe('future-native-user-facing')
   await consent(); await f.button('Connect group'); await ready('Group saved')
   const original = (await f.services.connections.bindings!.list({})).bindings[0]!
-  await f.button('Close'); await f.menu('Shared group details'); await ready('Group saved')
+  await f.button('Close'); await f.journey('details'); await ready('Group saved')
   expect((await f.cli(['binding', 'inspect', '--binding', original.bindingId])).binding.scope.publication).toBe('future-native-user-facing')
   const change = [...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Change connected group')!
   await act(async () => change.querySelector('summary')!.click())
@@ -59,7 +59,7 @@ it('the original default PublicationHost content gap remains readable beside its
   const effect = f.services.publication!.store.list(binding)[0]!
   await appendFile(f.original.transcript, row('unqualified-input', 'user'))
   await vi.waitFor(() => expect(f.services.publication!.observation(binding.bindingId, 1)).toEqual({ state: 'unavailable', reason: 'content-unconfirmed' }), { timeout: 6000 })
-  await f.button('Close'); await f.menu('Shared group details'); await ready('Some content has not synced'); await ready('Delivery confirmed in this window')
+  await f.button('Close'); await f.journey('details'); await ready('Some content has not synced'); await ready('Delivery confirmed in this window')
   const service = document.querySelector('.agent-connector-service')!
   expect(service.closest('details'), 'content gap is readable before opening receipt details').toBeNull()
   expect(service.textContent).toContain('keep working in the original conversation')

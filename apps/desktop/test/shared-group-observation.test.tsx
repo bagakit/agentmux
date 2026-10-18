@@ -24,7 +24,7 @@ const panel = () => document.querySelector('[aria-label="Group delivery"]')!
 function summaryText() { const node = panel().cloneNode(true) as HTMLElement; node.querySelectorAll('details').forEach(detail => detail.remove()); return node.textContent! }
 async function ready(text: string) { await vi.waitFor(async () => { await act(async () => {}); expect(panel()?.textContent).toContain(text) }, { timeout: 6000 }) }
 async function bind(shared = false) {
-  await f.mount(); await f.menu('Bind existing group chat'); await f.fill('Existing group ID', 'oc_observed_group')
+  await f.mount(); await f.journey('existing'); await f.fill('Existing group ID', 'oc_observed_group')
   if (shared) {
     const select = document.querySelector<HTMLElement>('[aria-label="Group sharing content"]')!
     await act(async () => { select.focus(); select.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
@@ -34,10 +34,10 @@ async function bind(shared = false) {
   await f.button('Connect group')
   await vi.waitFor(() => expect(f.services.publication!.observation((f.services.bindings!.listActive())[0]!.bindingId, 1).state).toBe('ready'), { timeout: 6000 })
   const binding = f.services.bindings!.listActive()[0]!
-  await f.button('Close'); await f.menu('Shared group details'); await ready('No new delivery receipt recorded')
+  await f.button('Close'); await f.journey('details'); await ready('No new delivery receipt recorded')
   return binding
 }
-async function reopen() { await f.button('Close'); await f.menu('Shared group details') }
+async function reopen() { await f.button('Close'); await f.journey('details') }
 const row = (id: string, type: 'assistant' | 'user') => JSON.stringify({ sessionId: 'original-native', uuid: id, type, message: { role: type, content: [{ type: 'text', text: 'PRIVATE outgoing ' + id }] } }) + '\n'
 async function incoming(id: string, room = 'oc_observed_group') {
   await vi.waitFor(() => expect(f.ingressTransport!.sockets).toHaveLength(1))
@@ -68,7 +68,7 @@ it('shows the original no-grant incoming refusal rather than an empty binding-fi
   const original = await incoming('refused-original')
   await vi.waitFor(async () => expect((await f.forward('connection.ingress.inspect', { ingressId: original.ingressId })).ingress).toMatchObject({ state: 'refused', code: 'INGRESS_ACTOR_NOT_AUTHORIZED' }))
   expect((await f.forward('connection.ingress.ls', { connectionId: binding.connectionId, bindingId: binding.bindingId })).ingresses).toEqual([])
-  await f.button('Close'); await f.menu('Shared group details')
+  await f.button('Close'); await f.journey('details')
   await ready('INGRESS_ACTOR_NOT_AUTHORIZED')
   expect(panel().textContent).toContain('Core input: not started')
   expect(summaryText()).toContain('Approve this member to send requests.')

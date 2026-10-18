@@ -26,7 +26,7 @@ afterEach(async () => { await remote?.close() })
 const activity = () => document.querySelector('[aria-label="Group delivery"]')!
 async function ready(text: string) { await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')?.textContent).toContain(text) }, { timeout: 6000 }) }
 async function createAndBind() {
-  await f.mount(); await f.menu('Create group chat'); await f.button('Create group'); await ready('Group created')
+  await f.mount(); await f.journey('create'); await f.button('Create group'); await ready('Group created')
   await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-busy')).toBe('false'))
   await act(async () => document.querySelector<HTMLInputElement>('.agent-connector-check input')!.click())
   await f.button('Connect group'); await ready('Group saved')
@@ -75,7 +75,7 @@ it('joins original menu creation, explicit member authority, original Core input
     expect(page.deliveries[0]).toMatchObject({ state: 'confirmed', bindingId: binding.bindingId, bindingRevision: 1, target: { externalConversationId: 'oc_first_use' }, reference: { source: { kind: 'native', recordId: 'first-use-new-reply' } }, receipt: { state: 'confirmed', mapping: { messageId: 'platform-message-1' } } })
   }, { timeout: 6000 })
   expect(remote.records.get('platform-message-1')).toMatchObject({ body: { content: expect.stringContaining('Newly eligible original answer') } })
-  await f.button('Close'); await f.menu('Shared group details'); await f.button('Check group activity')
+  await f.button('Close'); await f.journey('details'); await f.button('Check group activity')
   await ready('Delivery confirmed in this window')
   expect(activity().textContent).not.toContain('Service: ready')
   await f.button('Copy group diagnosis'); await vi.waitFor(() => expect(copy).toHaveBeenCalledOnce())

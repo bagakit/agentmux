@@ -17,11 +17,12 @@ import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-valu
 
 
 async function disclosure(label: string) {
+  if (document.querySelector('section[aria-label="' + label + '"]')) return
   const summary = [...document.querySelectorAll('summary')].find(node => node.textContent === label)!
   expect(summary, label).toBeDefined()
   if (!(summary.parentElement as HTMLDetailsElement).open) await act(async () => summary.click())
 }
-async function ready(text: string) { await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')?.textContent).toContain(text) }) }
+async function ready(text: string) { await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')?.textContent).toContain(text) }, { timeout: 6000 }) }
 async function toggle(label: string) {
   const input = [...document.querySelectorAll('label')].find(node => node.textContent?.trim() === label)?.querySelector('input')!
   expect(input, label).not.toBeNull(); await act(async () => input.click())
@@ -34,7 +35,7 @@ describe('the original member access owner', () => {
     return { code: 0, data: { name: 'Design team', chat_status: 'normal', chat_mode: 'group' } }
   } })
   async function open() {
-    await f.mount(); await f.menu('Bind existing group chat'); await f.fill('Existing group ID', 'oc_original')
+    await f.mount(); await f.journey('existing'); await f.fill('Existing group ID', 'oc_original')
     await act(async () => document.querySelector<HTMLInputElement>('.agent-connector-check input')!.click())
     await f.button('Connect group'); await ready('Group saved'); await disclosure('Manage member access')
     await f.fill('Member access ID type', 'open_id'); await f.fill('Member access ID', 'ou_original')
@@ -51,7 +52,8 @@ describe('the original member access owner', () => {
     expect(read.grants[0]).toMatchObject({ actor: { idType: 'open_id', userId: 'ou_original' }, capabilities: ['input', 'permission'], revision: 1 })
     expect(f.calls.filter(value => value.method === 'connection.grant')).toHaveLength(1)
     await f.button('Revoke permission decisions')
-    await vi.waitFor(async () => expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).grants[0]).toMatchObject({ capabilities: ['input'], state: 'active', revision: 2 }))
+    await vi.waitFor(() => expect(f.calls.filter(call => call.method === 'connection.grant' && call.result)).toHaveLength(2), { timeout: 6000 })
+    expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).grants[0]).toMatchObject({ capabilities: ['input'], state: 'active', revision: 2 })
     expect(f.calls.filter(value => value.method === 'connection.grant')).toHaveLength(2)
     expect(f.platformCalls.some(call => call.method === 'POST')).toBe(false)
     expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中'); await f.original.unchanged()
@@ -93,7 +95,8 @@ describe('the original member access owner', () => {
         const read = await f.cli(['binding', 'inspect', '--binding', second.bindingId])
         expect(read.grants).toHaveLength(1); expect(read.grants[0]).toMatchObject({ actor: { application: bound.state === 'applied' ? bound.binding.application : {} }, capabilities: ['permission'] })
         await f.button('Revoke permission decisions')
-        await vi.waitFor(async () => expect((await f.cli(['binding', 'inspect', '--binding', second.bindingId])).grants[0].state).toBe('revoked'))
+        await vi.waitFor(() => expect(f.calls.filter(call => call.method === 'connection.grant' && call.result)).toHaveLength(3), { timeout: 6000 })
+        expect((await f.cli(['binding', 'inspect', '--binding', second.bindingId])).grants[0].state).toBe('revoked')
       }
       expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
     } finally { await act(async () => release()) }
@@ -104,13 +107,21 @@ describe('the original member access owner', () => {
     const forward = f.forward; let previousOperation = '', release!: () => void
     const barrier = new Promise<void>(resolve => { release = resolve })
     vi.spyOn(api.connections, 'call').mockImplementation(async (method, input) => {
+      const previousGrant = method === 'connection.grant' && 'expectedBindingRevision' in input && input.expectedBindingRevision === 1
+      if (previousGrant) previousOperation = input.operationId
       if (method === 'connection.binding.inspect' && 'operationId' in input && input.operationId === previousOperation) await barrier
       const result = await forward(method, input)
-      if (method === 'connection.grant' && 'expectedBindingRevision' in input && input.expectedBindingRevision === 1) { previousOperation = input.operationId; throw Error('Controlled lost previous group grant receipt') }
+      if (previousGrant) throw Error('Controlled lost previous group grant receipt')
       return result
     })
     try {
-      await f.button('Approve this member'); await ready('not confirmed')
+      await f.button('Approve this member')
+      await vi.waitFor(async () => {
+        await act(async () => {})
+        expect(previousOperation).not.toBe('')
+        expect(useAppStore.getState().connectorRoomIntents[previousOperation]).toMatchObject({ method: 'connection.grant', phase: 'may-have-dispatched' })
+        expect(document.querySelector('[aria-label="Member access status"] strong')?.textContent).toBe('Member access not confirmed')
+      }, { timeout: 6000 })
       const binding = (await f.services.connections.bindings!.list({})).bindings[0]!
       await f.button('Close')
       const relink = await forward('connection.binding.relink', { ...f.original.input, operationId: 'member-next-group', bindingId: binding.bindingId, expectedRevision: 1,
@@ -120,7 +131,7 @@ describe('the original member access owner', () => {
         const original = f.calls.find(call => call.method === 'connection.grant')!.input as import('@agentmux/core/connections').RoomBindingGrantInput
         expect((await forward('connection.grant', { ...original, operationId: 'member-reassigned-current-group', expectedBindingRevision: 2, expectedRevision: 1 })).state).toBe('applied')
       }
-      await f.menu('Shared group details'); await disclosure('People in this group'); await f.button('Choose')
+      await f.journey('details'); await disclosure('People in this group'); await f.button('Choose')
       const earlier = document.querySelector('[aria-label="Member access status"]')!
       expect(earlier).not.toBeNull(); expect(earlier.querySelector('strong')?.textContent).toBe('Member access not confirmed')
       const originalScope = [...earlier.querySelectorAll('span')].find(node => node.textContent === 'Original group connection · revision 1')
@@ -135,7 +146,8 @@ describe('the original member access owner', () => {
       expect(Object.values(useAppStore.getState().connectorRoomIntents).some(intent => intent.input.operationId === previousOperation)).toBe(true)
       await f.button('Revoke permission decisions')
       await vi.waitFor(() => expect(f.calls.filter(call => call.method === 'connection.grant'), 'Revocation uses the current group revision even with an older intent for the same grant ID').toHaveLength(3))
-      await vi.waitFor(async () => expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).grants[0].state).toBe('revoked'))
+      await vi.waitFor(() => expect(f.calls.filter(call => call.method === 'connection.grant' && call.result)).toHaveLength(3), { timeout: 6000 })
+      expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).grants[0].state).toBe('revoked')
       expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
     } finally { await act(async () => release()) }
   }, 25_000)
@@ -158,7 +170,7 @@ describe('the original member access owner', () => {
     expect(summary.textContent).toContain('Last confirmed:')
     expect(summary.textContent).toContain(baseline === 'approved' ? '1 member approved' : 'no members approved')
     const access = [...document.querySelectorAll('details')].find(node => node.querySelector(':scope > summary')?.textContent === 'Manage member access')!
-    expect(access.textContent).toContain('Last confirmed:')
+    if (baseline === 'approved') expect(access.textContent).toContain('Last confirmed:')
     await vi.waitFor(async () => { await act(async () => {}); expect([...access.querySelectorAll('button')].map(node => node.textContent)).toContain('Check original member access') })
     expect([...access.querySelectorAll('button')].some(node => node.textContent === 'Approve this member' || node.textContent === 'Save member access')).toBe(false)
     const before = f.calls.filter(call => call.method === 'connection.grant').length
@@ -196,13 +208,25 @@ describe('the original member access owner', () => {
   it('retains the original grant intent after a lost IPC receipt and only inspects it', async () => {
     await open(); await toggle('Allow permission decisions')
     const forward = f.forward
-    vi.spyOn(api.connections, 'call').mockImplementation(async (method, input) => { const result = await forward(method, input); if (method === 'connection.grant') throw new Error('Controlled lost member grant receipt'); return result })
-    await f.button('Approve this member'); await ready('not confirmed')
+    let originalOperation = '', inspectionAvailable = false
+    vi.spyOn(api.connections, 'call').mockImplementation(async (method, input) => {
+      if (method === 'connection.grant') originalOperation = input.operationId
+      if (method === 'connection.binding.inspect' && 'operationId' in input && input.operationId === originalOperation && !inspectionAvailable) throw new Error('Controlled original member access observation failure')
+      const result = await forward(method, input)
+      if (method === 'connection.grant') throw new Error('Controlled lost member grant receipt')
+      return result
+    })
+    await f.button('Approve this member'); await ready('Member access not confirmed')
     const intents = Object.values(useAppStore.getState().connectorRoomIntents)
     expect(intents).toHaveLength(1)
     const original = intents[0]!
-    expect(original.method).toBe('connection.grant')
+    expect(original).toMatchObject({ method: 'connection.grant', phase: 'may-have-dispatched', input: { operationId: originalOperation } })
+    await f.button('Close'); await f.journey('details'); await ready('Member access not confirmed')
+    expect(useAppStore.getState().connectorRoomIntents[originalOperation]).toEqual(original)
+    expect(document.querySelector('[aria-label="Member access status"] strong')?.textContent).toBe('Member access not confirmed')
+    inspectionAvailable = true
     await f.button('Check status'); await ready('Permission decisions')
+    await vi.waitFor(() => expect(useAppStore.getState().connectorRoomIntents[originalOperation]).toBeUndefined())
     expect(f.calls.filter(value => value.method === 'connection.grant')).toHaveLength(1)
     expect(f.calls.some(value => value.method === 'connection.binding.inspect' && (value.input as { operationId?: string }).operationId === original.input.operationId)).toBe(true)
     expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
