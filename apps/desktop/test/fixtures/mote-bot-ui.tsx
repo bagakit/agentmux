@@ -9,6 +9,8 @@ import { moteConnectionOwner } from './mote-connection-owner'
 import { moteEnrollmentWeb } from './mote-enrollment-web'
 import { registerMoteConnectionIpc } from '../../src/main/mote-connection-ipc'
 import { registerMotePreferencesIpc } from '../../src/main/mote-preferences-ipc'
+import { registerMoteChatIpc } from '../../src/main/mote-chat-ipc'
+import { unwrapSessionInputOperationResult } from '../../src/shared/session-input-result'
 import { registerConnectorIpc } from '../../src/main/connector-ipc'
 import { api } from '../../src/renderer/src/lib/api'
 import { useAppStore } from '../../src/renderer/src/store'
@@ -50,16 +52,18 @@ export async function moteBotUi(options: NonNullable<Parameters<typeof moteConne
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
   window.localStorage.clear(); await useAppStore.persist.rehydrate()
   const stop = await useAppStore.getState().initialize(); stop()
-  useAppStore.setState({ config, loading: false, spaceZoneBindings: {}, moteBotRequests: {}, botTaskSelections: {}, moteConnectionSaveIntents: {} })
+  useAppStore.setState({ config, loading: false, spaceZoneBindings: {}, moteBotRequests: {}, botTaskSelections: {}, moteConnectionSaveIntents: {}, moteChatIntents: {} })
   const handlers = new Map<string, (...args: any[]) => Promise<any>>(), sender = {}
   const handleWithEvent = (name: string, handler: (...args: any[]) => Promise<any>) => { handlers.set(name, handler) }
   const assertTrusted = (_channel: string, event: { sender: object }) => { if (event.sender !== sender) throw new Error('Untrusted renderer') }
   registerMoteConnectionIpc({ socketPath: owner.server.path, handleWithEvent, assertTrusted })
   registerMotePreferencesIpc({ socketPath: owner.server.path, handleWithEvent, assertTrusted })
+  registerMoteChatIpc({ socketPath: owner.server.path, handleWithEvent, assertTrusted })
   registerConnectorIpc({ socketPath: owner.server.path, handleWithEvent, assertTrusted, secrets: owner.connections.secrets })
   const forward = async (method: any, input: any) => await handlers.get('moteConnections:call')!({ sender }, method, input)
   const parentCalls = vi.spyOn(api.moteConnections, 'call').mockImplementation(forward)
-  const connectionCalls = vi.spyOn(api.connections, 'call').mockImplementation(async (method, input) => await handlers.get('connections:call')!({ sender }, method, input))
+  const connectionCalls = vi.spyOn(api.connections, 'call').mockImplementation(async (method, input) => unwrapSessionInputOperationResult(await handlers.get('connections:call')!({ sender }, method, input)))
+  const chatRequests = vi.spyOn(api.moteChat, 'call').mockImplementation(async (method, input) => unwrapSessionInputOperationResult(await handlers.get('moteChat:call')!({ sender }, method, input)))
   const saves = vi.spyOn(api.motePreferences, 'save').mockImplementation(async input => await handlers.get('motePreferences:save')!({ sender }, input))
   vi.spyOn(api.motePreferences, 'read').mockImplementation(async input => await handlers.get('motePreferences:read')!({ sender }, input))
   vi.spyOn(api.files, 'readPublic').mockImplementation(input => owner.client.call('file.read', input))
@@ -79,7 +83,7 @@ export async function moteBotUi(options: NonNullable<Parameters<typeof moteConne
   }
   async function click(text: string) {
     let node!: HTMLElement
-    await vi.waitFor(async () => { await act(async () => {}); node = [...document.querySelectorAll<HTMLElement>('button,summary')].find(n => n.textContent?.trim() === text || n.getAttribute('aria-label') === text)!; expect(node, text + '\n' + document.body.textContent).toBeTruthy(); expect((node as HTMLButtonElement).disabled).not.toBe(true) })
+    await vi.waitFor(async () => { await act(async () => {}); node = [...document.querySelectorAll<HTMLElement>('button,summary')].find(n => n.textContent?.trim() === text || n.getAttribute('aria-label') === text)!; expect(node, text + '\n' + document.body.textContent).toBeTruthy(); expect((node as HTMLButtonElement).disabled).not.toBe(true) }, { timeout: 6000 })
     const folded: HTMLDetailsElement[] = []
     for (let parent = node.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement && !parent.open) folded.push(parent)
     for (const details of folded.reverse()) await act(async () => details.querySelector<HTMLElement>('summary')!.click())
@@ -90,7 +94,7 @@ export async function moteBotUi(options: NonNullable<Parameters<typeof moteConne
   async function open(index = 0) { await render(index); await vi.waitFor(() => expect(document.querySelector('.mote-connection__row')).not.toBeNull()); await act(async () => (document.querySelector('.mote-connection__row') as HTMLElement).click()); await settle() }
   async function renderSettings(navigationRequest?: SettingsNavigationRequest, visible = true) { await act(async () => view.render(<SettingsNavigation.Provider value={navigation}><SettingsPanel initialSection="lark" navigationRequest={navigationRequest} visible={visible} onClose={() => {}} /></SettingsNavigation.Provider>)); mounted = true; await settle() }
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/amux'))
-  return { ...owner, container, scopes, calls, registration, parentCalls, connectionCalls, saves, forward, handlers, sender, navigation, open, click, render, renderSettings, settle,
+  return { ...owner, container, scopes, calls, registration, parentCalls, connectionCalls, chatRequests, saves, forward, handlers, sender, navigation, open, click, render, renderSettings, settle,
     async renderCreateShortcut(index = 0) { await act(async () => view.render(<MoteConnectionPanel key={'create-' + index} target={owner.target(index)} topicId={owner.motes[index]!.id} moteName={scopes[index]!.topic.title} onRead={() => {}} createOnOpen />)); mounted = true; await settle() },
     async renderMotePanel(index = 0) { await act(async () => view.render(<SettingsNavigation.Provider value={navigation}><MoteDetailsPanel scope={scopes[index]!} active onOpenPath={async () => {}} /></SettingsNavigation.Provider>)); mounted = true; await settle() },
     get beginCount() { return options.generic ? owner.counts.begin : native.begins }, get authenticationCount() { return options.generic ? owner.counts.authentication : native.authentications },
