@@ -26,7 +26,7 @@ it('preserves surrounding context, exact tool semantics, bounded chunks, and com
   expect(container.querySelector('[data-trace-kind="tool-result"]')?.getAttribute('data-call-id')).toBe('exact-call')
   expect(container.textContent).toContain('Failed')
   await click('Tool result'); expect(container.querySelector('pre')?.textContent).toBe(originalBody)
-  await click('Copy complete content'); expect(copy.mock.calls.at(-1)?.[0]).toBe(originalBody)
+  await click('Copy tool output'); expect(copy.mock.calls.at(-1)?.[0]).toBe(originalBody)
   await click('Copy message'); expect(copy.mock.calls.at(-1)?.[0] === 'Before\ninspect\n' + originalBody + '\nAfter').toBe(true)
 })
 it('keeps long text as speech, leaves short text directly visible, and retries failure without losing context', async () => {
