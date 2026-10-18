@@ -9,15 +9,15 @@ type Observation = { key: string; snapshot: Snapshot | null; directories: GitWor
 const EMPTY_DIRECTORIES: GitDirectoryObservation[] = []
 
 /** One current Space read, shared by all its Zone rows. Navigation never depends on this observation. */
-export function useZoneWorktrees(spaceId: string, workspace: WorkspaceRecord, visible: boolean) {
-  const { id, hostId, path } = workspace
+export function useZoneWorktrees(spaceId: string, workspace: WorkspaceRecord | null, visible: boolean) {
+  const id = workspace?.id, hostId = workspace?.hostId, path = workspace?.path
   const key = JSON.stringify([spaceId, id, hostId, path])
   const [state, setState] = useState<Observation | null>(null)
   const generation = useRef(0)
   const current = useRef({ key, visible })
   current.current = { key, visible }
   const refresh = useCallback(async () => {
-    if (!current.current.visible || current.current.key !== key) return
+    if (!id || !hostId || !path || !current.current.visible || current.current.key !== key) return
     const request = ++generation.current
     setState(previous => ({ key, snapshot: previous?.key === key ? previous.snapshot : null, directories: previous?.key === key ? previous.directories : null, directoryStale: true, loading: true, stale: true, issue: null }))
     try {
@@ -41,5 +41,5 @@ export function useZoneWorktrees(spaceId: string, workspace: WorkspaceRecord, vi
   const observed = state?.key === key ? state : null
   return { snapshot: observed?.snapshot ?? null, directoryObservation: observed?.directories ?? null, directoryStale: observed?.directoryStale ?? true,
     directories: observed?.directories?.directories ?? EMPTY_DIRECTORIES, loading: observed?.loading ?? false,
-    stale: observed?.stale ?? true, issue: observed?.issue ?? null, refresh }
+    stale: observed?.stale ?? true, issue: workspace ? observed?.issue ?? null : 'The Folder repository for this Space is unconfirmed. Restore its original Folder record to refresh worktree inventory. Existing directory and branch actions remain available.', refresh }
 }

@@ -1,5 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { memo, useMemo, type KeyboardEvent, type ReactNode } from 'react'
+import { memo, useLayoutEffect, useMemo, useRef, type KeyboardEvent, type ReactNode } from 'react'
 import type { WorkspaceRecord } from '../../../shared/contracts'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { useWorkspaceZoneContext } from '../lib/workspace-zone-context'
@@ -8,7 +8,7 @@ import { summarizeRelatedPath } from '../lib/copy-path-display'
 import { workspaceProjectId } from '../lib/workspace-projects'
 import { SelectorListHeader, SelectorRow } from './SelectorList'
 import { useZoneWorktrees } from '../hooks/useZoneWorktrees'
-import { directoryStatus, unrepresentedWorktrees, worktreeKind } from '../lib/zone-worktree-observation'
+import { directoryStatus, folderInventoryWorkspace, unrepresentedWorktrees, worktreeKind } from '../lib/zone-worktree-observation'
 
 const FolderIcon = semanticIconComponent('object.folder')
 const WorktreeIcon = semanticIconComponent('object.repository')
@@ -29,11 +29,38 @@ export const WorkspaceZonesPanel = memo(function WorkspaceZonesPanel({ workspace
   const displayPath = usePathDisplay()
   const workspaces = useAppStore(state => state.config?.workspaces)
   const resources = useMemo(() => new Map(workspaces?.map(value => [value.id, value])), [workspaces])
-  const git = useZoneWorktrees(context.spaceId, workspace, visible)
+  const inventoryWorkspace = useMemo(() => folderInventoryWorkspace(context.spaceId, workspaces), [context.spaceId, workspaces])
+  const git = useZoneWorktrees(context.spaceId, inventoryWorkspace, visible)
   const worktrees = useMemo(() => new Map(git.snapshot?.kind === 'ready' ? git.snapshot.worktrees.flatMap(value => [value.path, ...value.aliases].map(path => [path, value] as const)) : []), [git.snapshot])
   const ready = git.snapshot?.kind === 'ready' ? git.snapshot : null
   const notHere = ready && !git.stale ? unrepresentedWorktrees(ready, context.zones, git.directories) : null
   const directories = useMemo(() => new Map(git.directories.map(value => [value.path, value])), [git.directories])
+  const list = useRef<HTMLDivElement>(null)
+  const selectedItem = useRef<HTMLDivElement>(null)
+  const manualReading = useRef(false)
+  const automaticScroll = useRef<number | null>(null)
+
+  useLayoutEffect(() => { manualReading.current = false }, [context.selectedZoneId, visible])
+  useLayoutEffect(() => {
+    const container = list.current, item = selectedItem.current
+    if (!visible || !container || !item) return
+    const button = item.querySelector('button'), summary = item.querySelector('summary')
+    const ensureVisible = () => {
+      if (manualReading.current || !button) return
+      const viewport = container.getBoundingClientRect(), top = button.getBoundingClientRect().top
+      const bottom = (summary ?? button).getBoundingClientRect().bottom
+      const delta = top < viewport.top ? top - viewport.top : bottom > viewport.bottom ? bottom - viewport.bottom : 0
+      if (delta) {
+        container.scrollTop += delta
+        automaticScroll.current = container.scrollTop
+      }
+    }
+    ensureVisible()
+    const observer = new ResizeObserver(ensureVisible)
+    observer.observe(container)
+    observer.observe(item)
+    return () => observer.disconnect()
+  }, [visible, context.selectedZoneId, context.zones, git.directoryObservation, git.directoryStale, git.snapshot, git.stale, git.issue, context.issue])
 
   function moveFocus(event: KeyboardEvent<HTMLButtonElement>): void {
     if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey || event.nativeEvent.isComposing) return
@@ -76,7 +103,10 @@ export const WorkspaceZonesPanel = memo(function WorkspaceZonesPanel({ workspace
       <summary role="status">{git.issue ? `Git update unavailable.${ready ? ' Last observation is shown.' : ''}` : 'Some directory relationships are unconfirmed.'} Refresh to retry.</summary>
       <p>{[git.issue, ...ready?.warnings ?? []].filter(Boolean).join('\n')}</p>
     </details> : null}
-    <div className="workspace-zones-list" role="group" aria-label="Zone working directories">
+    <div className="workspace-zones-list" role="group" aria-label="Zone working directories" ref={list}
+      onWheel={() => { manualReading.current = true }} onTouchStart={() => { manualReading.current = true }}
+      onKeyDownCapture={event => { if (['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End'].includes(event.key)) manualReading.current = true }}
+      onScroll={() => { if (list.current?.scrollTop !== automaticScroll.current) manualReading.current = true; automaticScroll.current = null }}>
       {context.zones.map(zone => {
         const original = resources.get(zone.workspaceId)
         const resource = original?.hostId === zone.hostId && original.path === zone.directoryPath ? original : null
@@ -99,7 +129,7 @@ export const WorkspaceZonesPanel = memo(function WorkspaceZonesPanel({ workspace
         const relationship = !observed && !nonGit && kind !== 'home' && kind !== 'unknown' && !pathIssue ? presentUnlisted ? 'Not listed as a worktree here' : 'Git relationship unconfirmed' : null
         const rowIssue = pathIssue ?? relationship ?? (zone.kind === 'unknown' ? 'Resource unconfirmed' : null)
         const KindIcon = kind === 'worktree' ? WorktreeIcon : kind === 'unknown' ? UnknownIcon : FolderIcon
-        return <div className="workspace-zone-item" key={zone.zoneId}><button type="button" className="workspace-zone-entry" data-zone-id={zone.zoneId} data-zone-kind={kind} data-zone-git-state={gitState}
+        return <div className="workspace-zone-item" key={zone.zoneId} ref={selected ? selectedItem : undefined}><button type="button" className="workspace-zone-entry" data-zone-id={zone.zoneId} data-zone-kind={kind} data-zone-git-state={gitState}
           aria-pressed={selected} title={[title, branch, detail, zone.zoneId, zone.issue, observation,
             observed || nonGit ? `Git observed: ${new Date(git.snapshot!.checkedAt).toLocaleString()}` : 'Current Git relationship is unconfirmed.',
             zone.kind === 'unknown' ? 'Restore the original Workspace or choose another Zone.' : 'Open the existing Zone workface.'].filter(Boolean).join('\n')}

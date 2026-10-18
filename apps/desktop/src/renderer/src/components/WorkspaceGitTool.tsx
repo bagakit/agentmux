@@ -20,7 +20,7 @@ const ThemeNavigationForwardIcon = semanticIconComponent('navigation.forward')
 const VIEWS = [{ value: 'changes', label: 'Changes' }, { value: 'history', label: 'History' }, { value: 'branches', label: 'Branches' }] as const
 
 export function WorkspaceGitTool(props: {
-  workspace: WorkspaceRecord; visible: boolean
+  workspace: WorkspaceRecord; visible: boolean; inventoryWorkspace?: WorkspaceRecord | null
 }) {
   const shared = useSharedGitHistory(props.workspace)
   const view = useAppStore(state => state.workspaceGitView)
@@ -28,8 +28,8 @@ export function WorkspaceGitTool(props: {
   const viewportState = useRef<GitHistoryViewportState | null>(null)
   return <SourceControl {...props} history={shared?.history ?? history} shared={shared} viewportState={shared?.viewportState ?? viewportState} />
 }
-function SourceControl({ workspace, visible, history, shared, viewportState }: {
-  workspace: WorkspaceRecord; visible: boolean
+function SourceControl({ workspace, visible, inventoryWorkspace = workspace, history, shared, viewportState }: {
+  workspace: WorkspaceRecord; visible: boolean; inventoryWorkspace?: WorkspaceRecord | null
   history: ReturnType<typeof useGitHistory>; shared: ReturnType<typeof useSharedGitHistory>
   viewportState: React.RefObject<GitHistoryViewportState | null>
 }) {
@@ -64,7 +64,7 @@ function SourceControl({ workspace, visible, history, shared, viewportState }: {
     <div className="workspace-git-path" title={displayPath(workspace.path, workspace.hostId)}>{displayPath(workspace.path, workspace.hostId)}</div>
     <SurfaceModeSwitch value={view} options={VIEWS} onChange={(next: WorkspaceGitView) => setView(next)} active={visible} ariaLabel="Git view" />
     <div className="workspace-git-panel" hidden={view !== 'branches'}>
-      <BranchesPanel workspace={workspace} zoneContext={zoneContext} active={visible && view === 'branches'} />
+      <BranchesPanel workspace={workspace} inventoryWorkspace={inventoryWorkspace} zoneContext={zoneContext} active={visible && view === 'branches'} />
     </div>
     <div className="workspace-git-panel" hidden={view !== 'changes'}>
       <ChangesPanel workspace={workspace} active={visible && view === 'changes'} />
