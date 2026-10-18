@@ -479,15 +479,15 @@ export class PublicationStore {
   next(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId?: string): PublicationOperation | null {
     return this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') AND " + (projectionId === undefined ? "json_extract(operation_json,'$.reference.source.kind')!='interaction'" : "projection_id=?") + " ORDER BY CASE WHEN state='not-applied' AND json_extract(operation_json,'$.payload.kind') IN ('image','file') THEN 1 ELSE 0 END,ordinal LIMIT 1" ).get(...scopeKey(boundary), ...(projectionId === undefined ? [] : [projectionId])) )
   }
-  /** Only the original pending projection supplies its relevant native records. No history scan. */
-  pendingNativeRecords(operation: PublicationOperation): ConversationItemRef[] {
+  /** Only the original pending projection supplies records missing accepted purpose. No history scan. */
+  pendingRecords(operation: PublicationOperation): ConversationItemRef[] {
     if (!['speech', 'image', 'file'].includes(operation.payload.kind) || operation.effect !== 'upsert') return []
     const rows = this.representationRows({ bindingId: operation.bindingId, revision: operation.bindingRevision }, operation.projectionId)
     const records = rows.flatMap(row => {
       const reference = row.value.kind === 'representation' ? row.value.part.record : row.value.record
-      return reference.source.kind === 'native' && (row.value.kind !== 'representation' || row.value.contentEligibility !== 'public') ? [reference] : []
+      return row.value.kind !== 'representation' || row.value.purpose !== 'conversation' || reference.source.kind === 'native' && row.value.contentEligibility !== 'public' ? [reference] : []
     })
-    if (!rows.length) records.push(...(operation.sourceRecords ?? [operation.reference]).filter((reference): reference is ConversationItemRef => reference.source.kind === 'native'))
+    if (!rows.length) records.push(...(operation.sourceRecords ?? [operation.reference]).filter((reference): reference is ConversationItemRef => reference.source.kind === 'native' || reference.source.kind === 'captured'))
     return [...new Map(records.map(record => [conversationRecordId(record), record])).values()]
   }
   /** New qualification must account for the exact frozen bytes, not bless another version's payload. */
@@ -498,28 +498,34 @@ export class PublicationStore {
       if (!current || current.state !== 'pending' || !same(current, operation) || !['speech', 'image', 'file'].includes(operation.payload.kind)) return 'unavailable'
       const content = operation.payload as ContentPayload
       const rows = this.representationRows(boundary, operation.projectionId, operation.sourceRecords)
-      const failures: Array<{ reason: 'private-content' | 'public-content-unconfirmed' | 'version-unavailable'; part?: ConversationContentRef; record?: ConversationItemRef; frontier?: ConversationCheckpoint }> = []
+      const failures: Array<{ reason: 'outside-conversation-scope' | 'private-content' | 'public-content-unconfirmed' | 'version-unavailable'; part?: ConversationContentRef; record?: ConversationItemRef; frontier?: ConversationCheckpoint }> = []
       if (!rows.length) failures.push({ reason: 'public-content-unconfirmed' })
       const qualified: Array<{ part: ConversationContentRef; frontier: ConversationCheckpoint }> = []
       for (const row of rows) {
         const retained = row.value
         if (retained.kind === 'legacy-representation') { failures.push({ reason: retained.record.source.kind === 'native' ? 'public-content-unconfirmed' : 'version-unavailable', record: retained.record }); continue }
-        if (retained.part.record.source.kind !== 'native') { qualified.push({ part: retained.part, frontier }); continue }
         // This original accepted decision names one exact part version and frozen representation.
         // It survives paging/restart without requiring a Provider's newer observation capability.
-        if (retained.contentEligibility === 'public') { qualified.push({ part: retained.part, frontier }); continue }
+        if (retained.purpose === 'conversation' && (retained.part.record.source.kind !== 'native' || retained.contentEligibility === 'public')) { qualified.push({ part: retained.part, frontier }); continue }
         const original = originals.get(conversationRecordId(retained.part.record))
         if (!original) { failures.push({ reason: 'version-unavailable', part: retained.part, frontier }); continue }
         const record = original.unit.records.find(record => same(record.reference, retained.part.record))
-        if (!record || record.original.kind !== 'native' || retained.part.selector.kind !== 'native-part') return 'unavailable'
-        const part = { ...retained.part, recordRevision: record.revision }, raw = record.original.item.contentParts[retained.part.selector.partIndex]
-        if (raw?.contentEligibility !== 'public') {
-          failures.push({ reason: raw?.contentEligibility === 'private' ? 'private-content' : 'public-content-unconfirmed', part, frontier: original.frontier }); continue
-        }
+        if (!record) return 'unavailable'
+        const part = { ...retained.part, recordRevision: record.revision }
+        const eligibility = record.original.kind === 'native' && part.selector.kind === 'native-part'
+          ? record.original.item.contentParts[part.selector.partIndex]?.contentEligibility
+          : record.original.kind === 'captured' ? record.original.item.contentEligibility : undefined
+        if (eligibility === 'private') { failures.push({ reason: 'private-content', part, frontier: original.frontier }); continue }
         const plan = publicationContent(original.unit, boundary as RoomBinding, original.frontier, { resolved: original.resolved, origin: () => undefined, selected: part })
+        if (plan.excluded.some(value => publicationPartKey(value) === publicationPartKey(part))) {
+          failures.push({ reason: 'outside-conversation-scope', part, frontier: original.frontier }); continue
+        }
+        if (plan.gaps.some(gap => gap.reason === 'public-content-unconfirmed')) {
+          failures.push({ reason: 'public-content-unconfirmed', part, frontier: original.frontier }); continue
+        }
         const piece = plan.pieces.find(piece => publicationPartKey(piece.part) === publicationPartKey(part))
         if (!plan.complete || !piece || piece.text !== retained.text || (!same(piece.image, retained.image) || !same(piece.file, retained.file))) { failures.push({ reason: 'version-unavailable', part, frontier: original.frontier }); continue }
-        this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...retained, part, contentEligibility: 'public' }), row.ordinal)
+        this.database.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(encode({ ...retained, part, purpose: 'conversation', ...(record.original.kind === 'native' ? { contentEligibility: 'public' } : {}) }), row.ordinal)
         qualified.push({ part, frontier: original.frontier })
       }
       // Verify the original whole payload and its exact stored fragments as well as each qualified slot.
@@ -537,7 +543,7 @@ export class PublicationStore {
       }
       // An already attempted request retains its prepared bytes and original receipt. It is never requalified into another effect.
       if (current.attempt !== undefined) return 'unavailable'
-      const reason = failures.some(f => f.reason === 'private-content') ? 'private-content' : failures[0]!.reason
+      const reason = failures.some(f => f.reason === 'outside-conversation-scope') ? 'outside-conversation-scope' : failures.some(f => f.reason === 'private-content') ? 'private-content' : failures[0]!.reason
       for (const row of this.database.prepare("SELECT operation_json,state FROM connector_publication_operation WHERE projection_id=? AND source_revision=? AND state='pending'").all(operation.projectionId, operation.sourceRevision)) {
         const pending = this.read(row)!
         if (pending.attempt === undefined) this.write({ ...pending, state: 'cancelled', reason })
@@ -548,12 +554,12 @@ export class PublicationStore {
         this.database.prepare('DELETE FROM connector_publication_decision WHERE rowid=?').run(row.ordinal)
       for (const value of qualified) failures.push({ reason: 'version-unavailable', ...value })
       for (const failure of failures) {
-        if (failure.reason === 'private-content') {
+        if (failure.reason === 'private-content' || failure.reason === 'outside-conversation-scope') {
           this.saveDecision(boundary, 'scope-private-' + digest([operation.operationId, failure.part]), 'current', { kind: 'scope', excluded: failure.part ? [failure.part] : [], reason: failure.reason })
           continue
         }
         const gap: ConnectionDeliveryGap = { gapId: 'gap-' + digest([operation.operationId, failure.part, failure.record, failure.reason]), reason: failure.reason,
-          ...(operation.event ? { event: operation.event } : {}), ...(failure.part ? { part: failure.part } : failure.record ? { record: failure.record } : operation.reference.source.kind !== 'interaction' ? { record: { hostId: operation.reference.hostId, agentSessionId: operation.reference.agentSessionId, source: operation.reference.source } } : {}),
+          ...(operation.event ? { event: operation.event } : {}), ...(failure.part ? { part: failure.part } : failure.record ? { record: failure.record } : (operation.reference.source.kind === 'native' || operation.reference.source.kind === 'captured') ? { record: { hostId: operation.reference.hostId, agentSessionId: operation.reference.agentSessionId, source: operation.reference.source } } : {}),
           ...(failure.part && failure.frontier ? { anchor: { record: failure.part.record, revision: failure.part.recordRevision, frontier: failure.frontier } } : {}),
           code: 'PUBLICATION_PENDING_CONTENT_UNCONFIRMED' }
         this.saveDecision(boundary, gap.gapId, failure.part?.recordRevision ?? operation.sourceRevision, { kind: 'gap', gap, state: 'unresolved' })
