@@ -1,3 +1,4 @@
+import { mintObjectId } from './object-id.js'
 import { parseRendererAllocationsResult } from './renderer-allocations.js'
 import { parseRendererSceneCaptureResult, parseRendererSceneInspection } from './renderer-performance-scene.js'
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
@@ -5,7 +6,6 @@ import { parseRendererMemoryResult } from './renderer-memory.js'
 import { parseRendererHeapSnapshotResult, parseRendererHeapSnapshotInspection } from './renderer-heap-snapshot.js'
 import { parseRendererAnimationsResult } from './renderer-animations.js'
 import { parseRendererTraceResult } from './renderer-trace.js'
-import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { parseGitOpenResult } from './public-rpc-git.js'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, type AgentMuxControlRequest,
@@ -73,7 +73,7 @@ export function rpcControlRequest(method: keyof typeof AGENTMUX_RPC_CONTROL_METH
   }
   const { operationId, ...originalBody } = source
   const body = method.startsWith('goal.') ? goalKeys(originalBody, true) : originalBody
-  const requestId = operationId === undefined ? randomUUID() : rpcString(operationId, 'Operation ID')
+  const requestId = operationId === undefined ? mintObjectId() : rpcString(operationId, 'Operation ID')
   if (method === 'space.inspect' && body.target && typeof body.target === 'object' &&
     Object.hasOwn(body.target, 'operationId')) {
     const target = rpcRecord(body.target, ['operationId'])
@@ -381,7 +381,7 @@ export function parseRpcControlResult(method: keyof typeof AGENTMUX_RPC_CONTROL_
   const operation = AGENTMUX_RPC_CONTROL_METHODS[method]
   // The spatial owner validates this envelope against the same durable business
   // ID. JSON-RPC's correlation ID is deliberately absent from this DTO.
-  const requestId = legacy.requestId ?? (params && rpcRecord(params).operationId) ?? randomUUID()
+  const requestId = legacy.requestId ?? (params && rpcRecord(params).operationId) ?? mintObjectId()
   const receipt = parseAgentMuxControlReceipt({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
     requestId, ok: true, operation, result: legacy })
   if (!receipt.ok) throw new AgentMuxError('RPC result is not a successful business body.', 'CONTROL_PROTOCOL_ERROR')
@@ -401,7 +401,7 @@ export function parseRpcControlResult(method: keyof typeof AGENTMUX_RPC_CONTROL_
   if (presentation !== undefined) {
     const observed = rpcRecord(presentation, ['region', 'tab', 'unavailable'], 'CONTROL_PROTOCOL_ERROR')
     for (const kind of ['region', 'tab'] as const) if (observed[kind] !== null) {
-      const receipt = parseAgentMuxControlReceipt({ schemaVersion: 5, requestId: randomUUID(), ok: true,
+      const receipt = parseAgentMuxControlReceipt({ schemaVersion: 5, requestId: mintObjectId(), ok: true,
         operation: `inspect.${kind}`, result: { [kind]: observed[kind] } })
       if (!receipt.ok) throw new AgentMuxError('Invalid space presentation.', 'CONTROL_PROTOCOL_ERROR')
       const target = params === undefined ? undefined : rpcRecord(rpcRecord(params).target)

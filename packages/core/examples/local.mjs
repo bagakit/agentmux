@@ -1,7 +1,6 @@
 import {
-  connectLocalAgentMux
+  connectLocalAgentMux, mintObjectId
 } from '@agentmux/core'
-import { randomUUID } from 'node:crypto'
 
 const client = await connectLocalAgentMux()
 const output = new Promise((resolve) => {
@@ -12,12 +11,12 @@ const output = new Promise((resolve) => {
   })
 })
 const terminal = await client.createTerminal({
-  createOperationId: crypto.randomUUID(),
+  createOperationId: mintObjectId(),
   workspacePath: process.cwd()
 })
 await client.writeTerminal(terminal, {
   ownerInstanceId: client.runtimeIdentity().instanceId,
-  operationId: randomUUID(),
+  operationId: mintObjectId(),
   expectedByte: terminal.acceptedInputBytes,
   data: "printf 'agentmux-local-ready\\n'\n"
 })

@@ -1,3 +1,4 @@
+import { mintObjectId } from './object-id.js'
 import { parseConversationWatchOpening, parseConversationObservation, type ConversationWatchOpening } from './conversation-changes.js'
 import { parseAppearanceObservation } from './public-rpc-settings-observation.js'
 import { validateDeliveryLogId } from './delivery-attempt.js'
@@ -7,7 +8,6 @@ import { loadOrCreateRelayKeyPair } from './rpc-relay-keypair.js'
 import { openAgentMuxRpcRelayRequest } from './public-rpc-relay.js'
 import { parseConnectionOfferUrl } from '@agentmux/relay/offer'
 import { type KeyPair } from '@agentmux/relay/e2ee'
-import { randomUUID } from 'node:crypto'
 import { openAgentMuxRpcHttpRequest } from './public-rpc-http.js'
 import { createConnection } from 'node:net'
 import { AgentMuxRpcSshTransport, AGENTMUX_RPC_SSH_TRANSPORT_BUDGET_MS } from './rpc-ssh-transport.js'
@@ -279,7 +279,7 @@ class RpcClient implements AgentMuxRpcClient {
     if (Object.hasOwn(body, 'caller') || Object.hasOwn(body, 'runtimeFence')) throw new AgentMuxError('RPC caller is a connection credential, not business input.', 'INVALID_CONTROL_REQUEST')
     const credentials = options.credentials ?? this.credentials, runtimeFence = options.runtimeFence ?? this.runtimeFence
     if (credentials) { rpcRecord(credentials, ['agentSessionId', 'capability']); rpcString(credentials.agentSessionId, 'Caller Session ID'); rpcString(credentials.capability, 'Caller capability') }
-    const request: JSONRPCRequest = { jsonrpc: '2.0', id: randomUUID(), method,
+    const request: JSONRPCRequest = { jsonrpc: '2.0', id: mintObjectId(), method,
       params: { ...body, ...(credentials ? { caller: credentials } : {}), ...(runtimeFence ? { runtimeFence } : {}) } }
     const controller = new AbortController()
     let opened = false, responseSeen = false, responseDelivered = false, subscriptionId: string | undefined, sequence = 0

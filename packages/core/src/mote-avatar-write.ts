@@ -57,7 +57,7 @@ export function parseMoteAvatarTarget(raw: unknown, code = 'INVALID_CONTROL_REQU
   return target as MoteAvatarTarget
 }
 export function parseMoteAvatarOperationId(value: unknown, code = 'INVALID_CONTROL_REQUEST'): asserts value is string {
-  if (typeof value !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/u.test(value)) fail('Keep the original UUID operationId when inspecting or retrying this save.', code)
+  if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/u.test(value)) fail('Keep the original path-safe operationId when inspecting or retrying this save.', code)
 }
 export function parseMoteAvatarSave(raw: unknown, code = 'INVALID_CONTROL_REQUEST'): MoteAvatarSave {
   const p = rpcRecord(raw, ['target','operationId','beforeRevision','source','definition','parameters','pngDataUrl'], code)

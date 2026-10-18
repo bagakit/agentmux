@@ -1,3 +1,4 @@
+import { mintObjectId } from './object-id.js'
 import type { ReadingDiagnosticRecord, ReadingDiagnosticReason } from './reading-diagnostic.js'
 import { CoreReadingDiagnosticSource } from './reading-diagnostic-source.js'
 import { unavailableDiagnosticEvidence } from '@agentmux/diagnostic-evidence'
@@ -32,7 +33,7 @@ import { deliveryFailure, newDeliveryLogId, type DeliveryAttempt, type DeliveryA
 import type { AgentMuxRunStorageObservation } from './run-storage-observation.js'
 
 import { isDeepStrictEqual } from 'node:util'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { delimiter, dirname, isAbsolute, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import {
@@ -3903,7 +3904,7 @@ export class AgentMuxClient {
   async createTerminal(input: AgentMuxTerminalCreateInput): Promise<AgentMuxRun> {
     this.requireConnected()
     const run = await this.kernel.start({
-      operationKey: input.createOperationId ?? randomUUID(),
+      operationKey: input.createOperationId ?? mintObjectId(),
       program: input.command ?? process.env.SHELL ?? '/bin/sh',
       args: input.args ?? [],
       cwd: input.workspacePath,
@@ -3946,7 +3947,7 @@ export class AgentMuxClient {
 
   /** Replace this client's live observation of an exact Run, keeping its process and Input untouched. */
   async refreshRunAttachment(ref: AgentMuxRunRef, afterByte = 0,
-    view: AgentMuxRunAttachmentView = 'raw', operationId: string = randomUUID()): Promise<AgentMuxRunAttachment> {
+    view: AgentMuxRunAttachmentView = 'raw', operationId: string = mintObjectId()): Promise<AgentMuxRunAttachment> {
     this.requireConnected()
     safeId(operationId, 'Attachment refresh operation id')
     if (this.registry.isRetiredRun(ref)) throw new AgentMuxError('Retired Agent Run cannot be refreshed.', 'STALE_AGENT_SESSION_BINDING')
@@ -4486,7 +4487,7 @@ export class AgentMuxClient {
     }
     if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use an authenticated initial message.', 'MESSAGE_ENVELOPE_REQUIRED')
     if (input.prompt !== undefined) assertAgentPromptSize(input.prompt)
-    const createOperationId = input.createOperationId ?? randomUUID()
+    const createOperationId = input.createOperationId ?? mintObjectId()
     const agentSessionId = safeId(input.agentSessionId ?? await this.resolveAgentCreationSessionId(createOperationId), 'Agent Session id')
     const executorId = safeId(input.executorId, 'Agent Executor id')
     let initialAuthor: AgentMuxStoredAgentSession | undefined
@@ -7984,7 +7985,7 @@ export class AgentMuxClient {
       throw new AgentMuxError('Agent Session changed before its Run was stopped.', 'STALE_AGENT_SESSION')
     }
     const retained = (await this.registry.claimStaleLifecycles(Date.now(), { agentSessionId, expectedRun }))[0]
-    const operationId = retained?.operationId ?? agentLifecycleOperationIdentity('stop', agentSessionId, randomUUID())
+    const operationId = retained?.operationId ?? agentLifecycleOperationIdentity('stop', agentSessionId, mintObjectId())
     const stopOperation = retained?.kind === 'stop' ? retained.stopOperation : await this.kernel.prepareStop(expectedRun.runId, operationId)
     const reservation = retained ?? await this.registry.reserveExisting('stop', agentSessionId, expectedRun, operationId, stopOperation)
     // Intent is recorded only after admission succeeds. Keep this prepared
@@ -9438,7 +9439,7 @@ export class AgentMuxClient {
         semanticStatus,
         ...(acceptsAgentActivityState(current.activityCommit, expectedRun, semanticStatus) ? {
           activityCommit: advanceAgentActivityCommit(current.activityCommit, {
-            id: JSON.stringify(['activity-state', status.source, expectedRun.runId, randomUUID()]),
+            id: JSON.stringify(['activity-state', status.source, expectedRun.runId, mintObjectId()]),
             source: status.source, createdAt: status.observedAt,
             activityState: { run: { ...expectedRun }, state: semanticStatus.state,
               ...(semanticStatus.stateEnteredAt === undefined ? {} : { stateEnteredAt: semanticStatus.stateEnteredAt }) }
@@ -9598,7 +9599,7 @@ export class AgentMuxClient {
             (!mousePreparation || !observation.protocolInput.preclaim?.claimStarted))
       : []
     // This is the same operation later passed to ctxmux, before any input-lane or ACK fact exists.
-    const operationId = randomUUID()
+    const operationId = mintObjectId()
     this.cancelPromptRenderObservation(requestedSession, source,
       rawInputCancellationDetail(requestedSession, data, operationId, inputKind), mousePreparation)
     return await this.serializeAgentInput(requestedSession, async (session, run, diagnostic) => {
@@ -10608,7 +10609,7 @@ export class AgentMuxClient {
         if (latest?.run.runId === session.run.runId && 'boundary' in latest && latest.boundary === boundary) return current
         return { ...current, updatedAt: Math.max(current.updatedAt, observedAt),
           activityCommit: advanceAgentActivityCommit(current.activityCommit, {
-            id: JSON.stringify(['activity-state', boundary === 'history-gap' ? 'agentmux' : 'run-process', session.run.runId, randomUUID()]),
+            id: JSON.stringify(['activity-state', boundary === 'history-gap' ? 'agentmux' : 'run-process', session.run.runId, mintObjectId()]),
             source: boundary === 'history-gap' ? 'agentmux' : 'run-process', createdAt: observedAt, activityState: { run: { ...session.run }, boundary }
           }) }
       })

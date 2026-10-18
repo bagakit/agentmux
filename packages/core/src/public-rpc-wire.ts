@@ -1,3 +1,4 @@
+import { mintObjectId } from './object-id.js'
 import { JSONRPCServer, createJSONRPCErrorResponse,
   type JSONRPCRequest, type JSONRPCResponse, type JSONRPCID } from 'json-rpc-2.0'
 import { AgentMuxError } from './errors.js'
@@ -46,7 +47,7 @@ export class AgentMuxRpcDispatcher {
           if (method === 'system.subscription.cancel') result = { disposed: await channel.cancel(String(params.subscriptionId ?? '')) }
           else if (isAgentMuxRpcStream(method, params)) {
             if (!channel.stream || !Object.hasOwn(request, 'id')) throw new AgentMuxError('A subscription requires a streaming request with an ID.', 'INVALID_CONTROL_REQUEST')
-            const subscriptionId = crypto.randomUUID()
+            const subscriptionId = mintObjectId()
             let opened = false, sequence = 0, pendingBytes = 0
             let pendingFailure: AgentMuxError | undefined, draining: Promise<void> | undefined
             const pending: Array<{ event: AgentMuxRpcStreamEvent<AgentMuxRpcStreamMethod>; bytes: number; resolve?: () => void }> = []

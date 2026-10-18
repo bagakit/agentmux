@@ -1,4 +1,5 @@
 import { parseMoteChatParams } from './mote-chat-codec.js'
+import { mintObjectId } from './object-id.js'
 import { parseFileImportParams } from './public-rpc-file-import.js'
 import { parseAgentInputContextCaptureReference } from './agent-input-context-capture.js'
 import { parseRendererAllocationsInput } from './renderer-allocations.js'
@@ -25,7 +26,6 @@ import { parseMotePreferencesReadInput, parseMotePreferencesSaveParams } from '.
 import { readControlJsonInput } from './cli-json-input.js'
 import { parseSessionHistoryResourceParams } from './session-history-resource.js'
 import { parseNativeHistoryParams, parseNativeHistoryResourceParams } from './public-rpc-native-history.js'
-import { randomUUID } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import { parseAgentNativeSessionConfirmation } from './agent-native-session-confirmation.js'
 import { parseAgentNativeResumeSource } from './agent-native-sessions.js'
@@ -106,7 +106,7 @@ function one(f: Flags, names: readonly string[], label: string): string {
 function fields(f: Flags, map: Readonly<Record<string, string>>): Record<string, unknown> {
   return Object.fromEntries(Object.entries(map).filter(([flag]) => f.values.has(flag)).map(([flag, key]) => [key, key.endsWith('Id') ? id(f, flag) : f.values.get(flag)]))
 }
-const operation = (f: Flags): { operationId: string } => ({ operationId: f.values.has('--operation-id') ? id(f, '--operation-id') : randomUUID() })
+const operation = (f: Flags): { operationId: string } => ({ operationId: f.values.has('--operation-id') ? id(f, '--operation-id') : mintObjectId() })
 const numbers = (f: Flags, map: Readonly<Record<string, string>>): Record<string, unknown> => Object.fromEntries(
   Object.entries(map).filter(([flag]) => f.values.has(flag)).map(([flag, key]) => {
     const result = Number(f.values.get(flag))
@@ -452,7 +452,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('agent.role.register', '--role ROLE [--provider ID]', 'Register the verified caller in its original role directory.', { '--role': 'data', '--provider': 'data' }, f => ({ role: id(f, '--role'), ...fields(f, { '--provider': 'providerId' }) })),
   command('agent.role.resolve', '--role ROLE [--workspace PATH]', 'Resolve a role through its original owner; unavailable is not unassigned.', { '--role': 'data', '--workspace': 'data' }, f => ({ role: id(f, '--role'), ...fields(f, { '--workspace': 'workspacePath' }) })),
   command('space.mote.avatar.read', '--input FILE|-', 'Read one exact original Mote appearance and optional original save operation.', { '--input': 'data' }, async f => parseMoteAvatarWriteParams('space.mote.avatar.read', await readControlJsonInput(value(f, '--input', true)!, 'Avatar target')) as unknown as Record<string, unknown>, 'Input carries target {workspaceId,topicId,objectKey} and optional original operationId. The target is discoverable from app snapshot.motes; unavailable source retains the saved PNG and parameters.'),
-  command('space.mote.avatar.save', '--input FILE|-', 'Save an exact series appearance through the original image/config owners.', { '--input': 'data' }, async f => parseMoteAvatarWriteParams('space.mote.avatar.save', await readControlJsonInput(value(f, '--input', true)!, 'Avatar save')) as unknown as Record<string, unknown>, 'Input carries target, original UUID operationId, beforeRevision from avatar.read, exact source/definition/parameters and pngDataUrl. Keep the same complete input when inspecting or retrying; unknown publication never authorizes replay or a replacement operation. PNG pixels are supplied by the caller, not independently rendered by this service.'),
+  command('space.mote.avatar.save', '--input FILE|-', 'Save an exact series appearance through the original image/config owners.', { '--input': 'data' }, async f => parseMoteAvatarWriteParams('space.mote.avatar.save', await readControlJsonInput(value(f, '--input', true)!, 'Avatar save')) as unknown as Record<string, unknown>, 'Input carries target, original operationId, beforeRevision from avatar.read, exact source/definition/parameters and pngDataUrl. Keep the same complete input when inspecting or retrying; unknown publication never authorizes replay or a replacement operation. PNG pixels are supplied by the caller, not independently rendered by this service.'),
   empty('space.mote.avatar.list', 'Discover image and editable avatar series from the selected Host avatar root; no avatar or Agent is changed.'),
   command('space.mote.avatar.series.create', '--series ID --title TEXT', 'Create one absent user avatar directory with an image, face preset and editing guide.', { '--series': 'data', '--title': 'data' }, f => parseMoteAvatarSeriesParams('space.mote.avatar.series.create', { seriesId: id(f, '--series', true), title: value(f, '--title', true)! }) as unknown as Record<string, unknown>, 'Creates only the exact new child of the original Host user avatar root. Existing paths are refused; partial new files are kept on failure. This does not select or save an avatar. Without the original complete reply, read avatar list and inspect the same directory; do not automatically retry creation.'),
   command('space.mote.avatar.series.reveal', '--series ID', 'Request opening one exact existing user avatar directory through its original Host OS port.', { '--series': 'data' }, f => parseMoteAvatarSeriesParams('space.mote.avatar.series.reveal', { seriesId: id(f, '--series', true) }) as unknown as Record<string, unknown>, 'Takes a directory id, not a path. Only an original regular user series may be opened. The result reports requested, not window focus or page visibility. The original files and other avatar capabilities remain available if the OS folder port is unavailable.'),

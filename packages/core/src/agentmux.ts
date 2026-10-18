@@ -1,10 +1,10 @@
 #!/usr/bin/env node
+import { mintObjectId } from './object-id.js'
 import { writeRendererDiagnosticFile } from './renderer-scene-cli.js'
 import { writeRendererV8Profile } from './renderer-v8-profile-cli.js'
 import { writeRendererTrace } from './renderer-trace-cli.js'
 import { writeCliResourceDocument } from './cli-resource-document.js'
 import process from 'node:process'
-import { randomUUID } from 'node:crypto'
 import packageManifest from '../package.json' with { type: 'json' }
 import {
   connectAgentMuxRpc, agentMuxRpcEndpoint,
@@ -207,7 +207,7 @@ async function main(): Promise<number> {
       invocation.params.items = (supplied as Record<string, unknown>).items
     }
     try {
-      rpcEncode({ jsonrpc: '2.0', id: randomUUID(), method, params: { ...invocation.params,
+      rpcEncode({ jsonrpc: '2.0', id: mintObjectId(), method, params: { ...invocation.params,
         ...(sid && capability ? { caller: { agentSessionId: sid, capability } } : {}) } })
     } catch (error) {
       throw new AgentMuxError(error instanceof Error ? error.message : 'Command input is invalid.', 'INVALID_CLI_ARGUMENT')
