@@ -52,10 +52,10 @@ it.each(['progress', 'final'] as const)('native %s speech stays distinct from Us
 })
 
 it.each([
-  ['waiting', 'Waiting for the original Agent'], ['stopped', 'Input waiting stopped'],
-  ['terminal-confirmed', 'Input bytes confirmed; Agent acceptance unconfirmed'],
-  ['admitted', 'Accepted by the original Agent; work completion unconfirmed'],
-  ['not-applied', 'Input not applied'], ['unknown', 'Input result unknown']
+  ['waiting', 'Saved · waiting for Agent'], ['stopped', 'Saved · delivery stopped'],
+  ['terminal-confirmed', 'Sent to Agent · acceptance not confirmed'],
+  ['admitted', 'Accepted by Agent'],
+  ['not-applied', 'Not delivered to Agent'], ['unknown', 'Saved · delivery to Agent unconfirmed']
 ] satisfies Array<[AgentInputSubmissionObservation['status'], string]>)('User cards show original %s input facts separately from speech and Agent completion', (status, label) => {
   const original = operation([{ kind: 'human' }]), body = original.payload.text
   original.payload.inputSubmission = { status, observation: 'closed' }
@@ -68,6 +68,6 @@ it.each([
   original.payload.inputSubmission.observation = 'rejoin-needed'
   const f2 = JSON.parse(JSON.parse(new FeishuAdapter().publication.prepare(original).request.body!).content)
   const d2 = JSON.parse(prepareDiscordPublication(original).request.body!)
-  expect(f2.elements[1].text.content).toBe(label + '\nInput observation needs reconnection')
-  expect(d2.components[0].components[1].content).toBe(label + '\nInput observation needs reconnection')
+  expect(f2.elements[1].text.content).toBe(label + '\nReconnect this input in AgentMux')
+  expect(d2.components[0].components[1].content).toBe(label + '\nReconnect this input in AgentMux')
 })
