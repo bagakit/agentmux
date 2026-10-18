@@ -15,6 +15,8 @@ import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/help
 const APP = 'cli_permission_request_original', effect = 'add-application-permissions' as const
 const NAMES = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only', 'application:application:patch', 'application:application:self_manage']
 const IDS = NAMES.map((_, index) => index % 2 ? String(100 + index) : 100 + index)
+const REQUIRED_NAMES = [...NAMES.slice(0, 7), NAMES[8]]
+const REQUIRED_IDS = [...IDS.slice(0, 7), IDS[8]]
 const clean: Array<() => void | Promise<void>> = []
 afterEach(async () => {
   const errors: unknown[] = []
@@ -94,15 +96,15 @@ it('SDK and compiled CLI review exact App rows then request only missing origina
   expect(configuration.effect).toBe(effect)
   if (configuration.effect !== effect) throw Error('Wrong permission result')
   expect(configuration.sources).toEqual({ catalog, applied })
-  expect(configuration.review!.permissions).toEqual(NAMES.slice(0, 7).map((name, index) => ({ name, group: index < 3 ? 'messages' : 'groups', state: index === 0 ? 'requested' : 'missing' })))
+  expect(configuration.review!.permissions).toEqual(REQUIRED_NAMES.map((name, index) => ({ name, group: index < 3 ? 'messages' : index < 7 ? 'groups' : 'identity', state: index === 0 ? 'requested' : 'missing' })))
   expect(f.native).toEqual(before)
   const input = action(offered, effect), accepted = await f.cli(['advance', '--input', '-'], input)
-  expect(accepted.applicationConfiguration!.selected).toMatchObject({ effect, purpose: 'agent-conversation', sourceStepIds: { catalog: catalog.stepId, applied: applied.stepId }, scopeNames: NAMES.slice(1, 7), input, request: 'confirmed', secureStorage: 'stored', requiresDataRangeConfiguration: true })
-  expect(f.native.slice(before.length)).toEqual([{ path: '/developers/v1/scope/update/' + APP, body: { clientId: APP, appScopeIDs: IDS.slice(1, 7), userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } }])
+  expect(accepted.applicationConfiguration!.selected).toMatchObject({ effect, purpose: 'agent-conversation', sourceStepIds: { catalog: catalog.stepId, applied: applied.stepId }, scopeNames: REQUIRED_NAMES.slice(1), input, request: 'confirmed', secureStorage: 'stored', requiresDataRangeConfiguration: true })
+  expect(f.native.slice(before.length)).toEqual([{ path: '/developers/v1/scope/update/' + APP, body: { clientId: APP, appScopeIDs: REQUIRED_IDS.slice(1), userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } }])
   expect(accepted.applicationConfiguration!.capability).toBe('unknown')
   expect(await f.sdk.call('connection.setup.advance', input)).toEqual(accepted)
   expect(f.native.slice(before.length)).toHaveLength(1)
-  f.applied({ scopes: IDS.slice(0, 7).map(id => ({ id, scopeIdentityType: 2 })) })
+  f.applied({ scopes: REQUIRED_IDS.map(id => ({ id, scopeIdentityType: 2 })) })
   await f.read('application-permissions')
   const current = await f.inspect()
   expect(current.applicationConfiguration!.capability).toBe('enabled')
@@ -114,11 +116,11 @@ it('SDK and compiled CLI review exact App rows then request only missing origina
 it('offers only conversation permissions and keeps retired Mote permission selection read-only', async () => {
   const f = await fixture(); await f.read('permission-catalog'); await f.read('application-permissions')
   const base = await f.inspect(), before = [...f.native], retired = await f.inspect('mote-profile-sync')
-  expect('review' in base.applicationConfiguration! && base.applicationConfiguration.review!.permissions.map(p => p.name)).toEqual(NAMES.slice(0, 7))
+  expect('review' in base.applicationConfiguration! && base.applicationConfiguration.review!.permissions.map(p => p.name)).toEqual(REQUIRED_NAMES)
   expect(retired.applicationConfiguration).toMatchObject({capability:'unknown',review:null,actions:[]})
   expect(f.native).toEqual(before)
   await f.sdk.call('connection.setup.advance',action(base,effect))
-  expect(f.native.at(-1)).toEqual({path:'/developers/v1/scope/update/'+APP,body:{clientId:APP,appScopeIDs:IDS.slice(0,7),userScopeIDs:[],scopeIds:[],operation:'add',isDeveloperPanel:true}})
+  expect(f.native.at(-1)).toEqual({path:'/developers/v1/scope/update/'+APP,body:{clientId:APP,appScopeIDs:REQUIRED_IDS,userScopeIDs:[],scopeIds:[],operation:'add',isDeveloperPanel:true}})
 },30000)
 
 it('an applied App row without a supported original id keeps the exact missing set unknown and offers no addition', async () => {
@@ -203,14 +205,14 @@ it('an explicitly User-only catalog row sharing an App id cannot close a qualifi
   f.catalog({ scopes: [...NAMES.map((name, index) => ({ name, id: IDS[index], scopeType: [2] })), { name: 'user-only-unrelated', id: IDS[0], scopeType: [1] }] })
   await f.read('permission-catalog'); await f.read('application-permissions')
   const view = await f.inspect()
-  expect(view.applicationConfiguration).toMatchObject({ capability: 'disabled', review: { permissions: NAMES.slice(0, 7).map((name, index) => ({ name, group: index < 3 ? 'messages' : 'groups', state: 'missing' })) } })
+  expect(view.applicationConfiguration).toMatchObject({ capability: 'disabled', review: { permissions: REQUIRED_NAMES.map((name, index) => ({ name, group: index < 3 ? 'messages' : index < 7 ? 'groups' : 'identity', state: 'missing' })) } })
   expect(view.applicationConfiguration!.actions.map(a => a.kind)).toEqual([effect])
 }, 30_000)
 
 it('never reopens retired SDK identity grants after fresh catalog or applied observations', async () => {
   const f = await fixture(); await f.read('permission-catalog'); await f.read('application-permissions')
   await f.sdk.call('connection.setup.advance',action(await f.inspect(),effect))
-  f.applied({scopes:IDS.slice(0,7).map(id=>({id,scopeIdentityType:2}))})
+  f.applied({scopes:REQUIRED_IDS.map(id=>({id,scopeIdentityType:2}))})
   for(const subject of ['permission-catalog','application-permissions'] as const){await f.read(subject);expect((await f.inspect('mote-profile-sync')).applicationConfiguration).toMatchObject({capability:'unknown',review:null,actions:[]})}
   expect(f.native.filter(call=>call.path.includes('/scope/update/'))).toHaveLength(1)
 },30000)
@@ -242,7 +244,7 @@ it.each(['native-inflight', 'stored-ack'] as const)('a true %s writer exit prese
   const pending = runCompiledObjectCli(['--endpoint', 'unix:' + join(f.directory, 'owner.sock'), 'connection', 'setup', 'advance', '--input', '-'], objectCliEnvironment(f.root), JSON.stringify(input))
   await reached
   const original = (await cli(['inspect', '--operation-id', f.input.operationId, '--application-configuration', effect, '--permission-purpose', 'agent-conversation'])).applicationConfiguration!.selected!
-  expect(original).toMatchObject({ effect, input, purpose: 'agent-conversation', scopeNames: NAMES.slice(0, 7) })
+  expect(original).toMatchObject({ effect, input, purpose: 'agent-conversation', scopeNames: REQUIRED_NAMES })
   writer.kill('SIGKILL'); await once(writer, 'exit'); expect((await pending).code).not.toBe(0)
   const native = await readFile(join(f.directory, 'permission-writes.ndjson'), 'utf8')
   await start('recover')
@@ -252,7 +254,7 @@ it.each(['native-inflight', 'stored-ack'] as const)('a true %s writer exit prese
   expect(resumed.applicationConfiguration!.selected).toEqual({ ...original, request: mode === 'stored-ack' ? 'confirmed' : 'unknown', secureStorage: mode === 'stored-ack' ? 'stored' : 'not-started' })
   expect((await cli(['advance', '--input', '-'], input)).applicationConfiguration!.selected).toEqual(resumed.applicationConfiguration!.selected)
   expect(await readFile(join(f.directory, 'permission-writes.ndjson'), 'utf8')).toBe(native)
-  expect(native.trim().split('\n').map(line => JSON.parse(line))).toEqual([{ path: '/developers/v1/scope/update/' + APP, body: { clientId: APP, appScopeIDs: IDS.slice(0, 7), userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } }])
+  expect(native.trim().split('\n').map(line => JSON.parse(line))).toEqual([{ path: '/developers/v1/scope/update/' + APP, body: { clientId: APP, appScopeIDs: REQUIRED_IDS, userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } }])
 }, 30_000)
 
 

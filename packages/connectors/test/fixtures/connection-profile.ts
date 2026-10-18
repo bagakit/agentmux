@@ -14,10 +14,11 @@ import {
 export type ProfileRequest = {
   url?: string
   method?: string
+  params?: Record<string, unknown>
   data?: Record<string, unknown>
   signal?: AbortSignal
 }
-export async function profileFixture() {
+export async function profileFixture(appResponse?: () => unknown) {
   const root = await mkdtemp(join(tmpdir(), 'profile-read-')),
     directory = join(root, 'connections'),
     socketPath = join(root, 'owner.sock'),
@@ -54,6 +55,7 @@ export async function profileFixture() {
             }
           }
         }
+      if (appResponse) return appResponse()
       return {
         code: 0,
         data: {
