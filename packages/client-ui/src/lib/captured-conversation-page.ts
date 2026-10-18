@@ -1,5 +1,5 @@
 import type { AgentTimelineItem, AgentTimelineSnapshot, AgentSessionHistoryReadInput, AgentSessionHistoryReadPage } from '@agentmux/core'
-import { consumeJsonReadEntry, parseAgentSessionHistoryReadPage, conversationRevision, type JsonReadAssembly } from '@agentmux/core/conversation'
+import { consumeJsonReadEntry, parseAgentSessionHistoryReadPage, type JsonReadAssembly } from '@agentmux/core/conversation'
 import { normalizeAgentTimelineItem } from '@agentmux/core/timeline'
 
 export type CapturedConversationPage = {
@@ -44,34 +44,4 @@ export function retainCapturedItems(earlier: readonly AgentTimelineItem[], curre
   const latest = new Map(current.map(item => [item.id, item]))
   const known = new Set(earlier.map(item => item.id))
   return [...earlier.map(item => latest.get(item.id) ?? item), ...current.filter(item => !known.has(item.id))]
-}
-
-/** Reading-only admission in the original window owner, not a source/input capability. */
-export function canReplaceCapturedWindow(viewport: HTMLElement | null, snapshot: AgentTimelineSnapshot, preserveAnchor: boolean, displayed?: AgentTimelineSnapshot): boolean {
-  if (!viewport) return true
-  const retained = new Map(snapshot.items.map(item => [JSON.stringify([snapshot.agentSessionId, 'captured', item.id]), item]))
-  const previous = new Map(displayed?.items.map(item => [JSON.stringify([displayed.agentSessionId, 'captured', item.id]), item]))
-  const selection = viewport.ownerDocument.defaultView?.getSelection(), range = selection && !selection.isCollapsed && selection.rangeCount ? selection.getRangeAt(0) : null
-  const bounds = viewport.getBoundingClientRect()
-  let anchorSeen = false
-  for (const node of viewport.querySelectorAll<HTMLElement>('[data-message-source-key]')) {
-    const key = node.dataset.messageSourceKey
-    if (!key) continue
-    let identity: unknown
-    try { identity = JSON.parse(key) } catch { continue }
-    if (!Array.isArray(identity) || identity[0] !== snapshot.agentSessionId) continue
-    const rect = node.getBoundingClientRect(), visible = bounds.height > 0 && rect.height > 0 && rect.bottom > bounds.top && rect.top < bounds.bottom
-    const captured = identity[1] === 'captured'
-    if (!anchorSeen && visible) {
-      anchorSeen = true
-      if (preserveAnchor && captured && !retained.has(key)) return false
-    }
-    const original = previous.get(key), next = retained.get(key)
-    if (captured && range) {
-      let intersects = true
-      try { intersects = range.intersectsNode(node) } catch { /* Keep the original version guard when geometry is unavailable. */ }
-      if (intersects && (!next || !original || conversationRevision(original) !== conversationRevision(next))) return false
-    }
-  }
-  return true
 }

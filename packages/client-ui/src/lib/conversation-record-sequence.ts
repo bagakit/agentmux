@@ -1,98 +1,66 @@
-import type { AgentSessionHistoryItem } from '@agentmux/core'
+import type { ConversationRecord } from './conversation-records.js'
 
-/** Presentation only: opaque bodies and facts stay at the source renderer. */
-export type ConversationSequenceInsertion = {
-  key: string
-  beforeRecordId?: string
-  role?: 'process' | 'message' | 'anchor'
-}
+/** View-only slots never carry another source's conversation records. */
+export type ConversationSequenceInsertion = { key: string; beforeRecordId?: string; role?: 'anchor' }
 export type ConversationSequenceEntry =
-  | { kind: 'native'; item: AgentSessionHistoryItem }
-  | { kind: 'insertion'; insertion: ConversationSequenceInsertion }
-type ConversationRecordSequenceRow =
-  | { kind: 'record'; item: AgentSessionHistoryItem }
-  | { kind: 'insertion'; insertion: ConversationSequenceInsertion }
-  | { kind: 'process'; id: string; items: readonly AgentSessionHistoryItem[]; entries: readonly ConversationSequenceEntry[] }
+  | { kind: 'record'; record: ConversationRecord }
+  | { kind: 'anchor'; insertion: ConversationSequenceInsertion }
+export type ConversationRecordSequenceRow = ConversationSequenceEntry
+  | { kind: 'process'; id: string; records: readonly ConversationRecord[]; entries: readonly ConversationSequenceEntry[] }
   | { kind: 'boundary' }
+export type ConversationSequence = { rows: readonly ConversationRecordSequenceRow[]; groups: ReadonlyMap<string, string> }
+export const conversationPresentationKey = (record: ConversationRecord): string => record.presentationKey ?? record.id
 
-/** One source-order projection for rendering and checking retained reading nodes. */
+/** One presentation projection over Core's ordered records; no source merge. */
 export function projectConversationRecordSequence(
-  items: readonly AgentSessionHistoryItem[], sourceKey: string,
+  records: readonly ConversationRecord[], sourceKey: string,
   previous: ReadonlyMap<string, string> = new Map(), beforeRecordId?: string,
-  insertions: readonly ConversationSequenceInsertion[] = [],
-  previousInsertions: ReadonlyMap<string, string> = new Map(),
-  nativeRoles?: ReadonlyMap<string, import('@agentmux/core/conversation').ConversationEvent['role']>
-): { rows: ConversationRecordSequenceRow[]; groups: Map<string, string>; insertionGroups: Map<string, string> } {
-  const groups = new Map<string, string>()
-  const insertionGroups = new Map<string, string>()
-  const usedGroups = new Set<string>()
-  const seen = new Set<string>()
+  anchors: readonly ConversationSequenceInsertion[] = []
+): ConversationSequence {
+  const groups = new Map<string, string>(), usedGroups = new Set<string>()
   const rows: ConversationRecordSequenceRow[] = []
   let process: ConversationSequenceEntry[] = []
-  let knownTurn: string | undefined
-  let priorGroup: string | undefined
-
+  let knownTurn: string | undefined, priorGroup: string | undefined
   function flush(): void {
     if (!process.length) return
-    // A retained member keeps the card mounted when its old first record is clipped.
-    const prior = process.map(groupOf).find(id => id !== undefined && !usedGroups.has(id))
-    const first = process.find(entry => entry.kind !== 'insertion' || entry.insertion.role !== 'anchor')!
-    const identity = first.kind === 'native' ? ['native', first.item.id] : ['insertion', first.insertion.key]
-    const id = prior ?? JSON.stringify([sourceKey, 'process', ...identity])
+    const members = process.flatMap(entry => entry.kind === 'record' ? [entry.record] : [])
+    const prior = members.map(record => previous.get(conversationPresentationKey(record))).find(id => id !== undefined && !usedGroups.has(id))
+    const id = prior ?? JSON.stringify([sourceKey, 'process', conversationPresentationKey(members[0]!)])
     usedGroups.add(id)
-    for (const entry of process) {
-      if (entry.kind === 'native') groups.set(entry.item.id, id)
-      else if (entry.insertion.role !== 'anchor') insertionGroups.set(entry.insertion.key, id)
-    }
-    rows.push({ kind: 'process', id, items: process.flatMap(entry => entry.kind === 'native' ? [entry.item] : []), entries: process })
-    process = []
-    knownTurn = undefined
-    priorGroup = undefined
+    for (const record of members) groups.set(conversationPresentationKey(record), id)
+    rows.push({ kind: 'process', id, records: members, entries: process })
+    process = []; knownTurn = undefined; priorGroup = undefined
   }
-
-  function groupOf(entry: ConversationSequenceEntry): string | undefined {
-    return entry.kind === 'native' ? previous.get(entry.item.id) : previousInsertions.get(entry.insertion.key)
-  }
-  function append(entry: ConversationSequenceEntry): void {
-    const itemGroup = groupOf(entry)
-    // Do not merge retained rows across two already mounted card parents.
-    if (priorGroup !== undefined && itemGroup !== undefined && priorGroup !== itemGroup) flush()
-    process.push(entry)
-    if (itemGroup !== undefined) priorGroup = itemGroup
-  }
-  const recordIds = new Set(items.map(item => item.id))
-  const insertBefore = new Map<string | undefined, ConversationSequenceInsertion[]>()
-  for (const insertion of insertions) {
-    const before = insertion.beforeRecordId && recordIds.has(insertion.beforeRecordId) ? insertion.beforeRecordId : undefined
-    const bucket = insertBefore.get(before) ?? []
-    bucket.push(insertion); insertBefore.set(before, bucket)
+  const before = new Map<string | undefined, ConversationSequenceInsertion[]>()
+  const ids = new Set(records.map(conversationPresentationKey))
+  for (const anchor of anchors) {
+    const id = anchor.beforeRecordId && ids.has(anchor.beforeRecordId) ? anchor.beforeRecordId : undefined
+    before.set(id, [...before.get(id) ?? [], anchor])
   }
   function insert(id?: string): void {
-    for (const insertion of insertBefore.get(id) ?? []) {
-      if (insertion.role === 'process') append({ kind: 'insertion', insertion })
-      else if (insertion.role === 'anchor' && process.length) process.push({ kind: 'insertion', insertion })
-      else { flush(); rows.push({ kind: 'insertion', insertion }) }
+    for (const insertion of before.get(id) ?? []) {
+      const entry = { kind: 'anchor' as const, insertion }
+      if (process.length) process.push(entry); else rows.push(entry)
     }
   }
-
-  for (const item of items) {
-    if (seen.has(item.id)) continue
-    seen.add(item.id)
-    insert(item.id)
-    if (beforeRecordId === item.id) {
-      flush()
-      rows.push({ kind: 'boundary' })
-    }
-    if (nativeRoles ? nativeRoles.get(item.id) !== 'process' : item.kind !== 'activity') {
-      flush()
-      rows.push({ kind: 'record', item })
-    } else {
-      if (knownTurn !== undefined && item.turnId !== undefined && item.turnId !== knownTurn) flush()
-      append({ kind: 'native', item })
-      if (item.turnId !== undefined) knownTurn = item.turnId
-    }
+  for (const record of records) {
+    const key = conversationPresentationKey(record)
+    insert(key)
+    if (beforeRecordId === key) { flush(); rows.push({ kind: 'boundary' }) }
+    if (record.role === 'process') {
+      const turn = record.original.kind === 'native' && record.original.item.turnId !== undefined
+        ? JSON.stringify([record.sourceHostId, record.source.kind === 'native' ? record.source.providerId : undefined,
+          record.source.kind === 'native' ? record.source.nativeSessionId : undefined, record.original.item.turnId]) : undefined
+      const prior = previous.get(key)
+      // Never combine two already mounted parents. A retained member owns its group.
+      if (knownTurn !== undefined && turn !== undefined && knownTurn !== turn
+        || priorGroup !== undefined && prior !== undefined && priorGroup !== prior) flush()
+      process.push({ kind: 'record', record })
+      if (turn !== undefined) knownTurn = turn
+      if (prior !== undefined) priorGroup = prior
+    } else if (record.role === 'observation' && process.length) process.push({ kind: 'record', record })
+    else { flush(); rows.push({ kind: 'record', record }) }
   }
-  insert()
-  flush()
-  return { rows, groups, insertionGroups }
+  insert(); flush()
+  return { rows, groups }
 }

@@ -2,7 +2,7 @@ import { ConversationSourceLabels } from '@agentmux/client-ui/components/Convers
 import type { ConversationSources } from '@agentmux/client-ui/conversation-sources'
 import { conversationItemRef } from '@agentmux/core/conversation'
 import { ConversationCoverage } from '@agentmux/client-ui/components/ConversationCoverage'
-import { canReplaceCapturedWindow } from '@agentmux/client-ui/captured-conversation-page'
+import type { ConversationPresentationController } from '@agentmux/client-ui/use-conversation-record-layout'
 import { type AgentConversationRecord, type ConversationItemRef } from '@agentmux/core/conversation'
 import { projectConversationWindow, type ConversationRecord } from '@agentmux/client-ui/conversation-records'
 import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
@@ -13,7 +13,7 @@ import { useConversationTraceDisclosure } from '@agentmux/client-ui/conversation
 import type { ConversationReplySource } from '@agentmux/core/prompt-reaction'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type ComponentProps, type KeyboardEvent, type WheelEvent } from 'react'
-import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage, AgentTimelineSnapshot } from '@agentmux/core'
+import type { AgentDisplayState, AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
 import type { AgentObservation } from '@agentmux/core/agent-status'
 import type { AgentTimelineItem } from '../../../shared/contracts'
 import {
@@ -38,7 +38,6 @@ import { showEmptyState, showWorkingIndicator } from '../lib/activity-working-st
 import { speaksAsAgent, type ConversationAxisItem, type ConversationAxisMark } from '../lib/conversation-axis'
 import { buildContinuationPrompt } from '../lib/session-continuation'
 import { isConversationTurn, speakerOf } from '../lib/conversation-speaker'
-import { speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
 import { conversationQuote } from '../lib/conversation-quote'
 import { terminalLinkPreviewAnchor } from '../lib/terminal-link-gesture'
 import { type LinkClickModifiers, type OpenWorkspaceFile } from '@agentmux/client-ui/components/AgentMarkdown'
@@ -52,7 +51,6 @@ export { Ruler } from './ConversationRuler'
 import { RULER_WINDOWS, conversationRulerRecords, type RulerRecord, type RulerWindow } from '../lib/conversation-ruler'
 import { projectAgentActivityHistory } from '@agentmux/core/timeline'
 import type { DescribeSpeaker } from './ConversationAxis'
-import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
 import type { ConversationProcessProps } from '@agentmux/client-ui/components/ConversationRecordSequence'
 import { renderConversationQuestionNotice } from './ConversationQuestionNotice'
@@ -61,7 +59,7 @@ import { SemanticIcon } from './semantic-icons'
 import { RecordedToolRow as WorkflowToolRow } from '@agentmux/client-ui/components/WorkflowObservation'
 import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
-import { conversationReadingAnchor, protectsConversationWindow, restoreConversationAnchor, useSessionConversationWindow, type ConversationReading } from '../lib/session-conversation-window'
+import { conversationReadingAnchor, restoreConversationAnchor, useSessionConversationWindow, type ConversationReading } from '../lib/session-conversation-window'
 import type { ConversationRevealRequest, RevealConversationItem } from '../lib/mailbox-message-navigation'
 import { registerConversationConsumer, conversationFrameObservation, conversationRenderedObservation, conversationInspectionError } from '../lib/conversation-consumer-observation'
 import { conversationDiagnosticFrame } from '@agentmux/client-ui/conversation-reading-diagnostics'
@@ -81,7 +79,7 @@ const ThemeLayoutCollapseAllIcon = semanticIconComponent('layout.collapse-all')
 
 /**
  * 机器上报那一路的图标：按 `kind` 画，而这是对的——`tool_call` 是一把锤子、`permission` 是一枚盾，
- * 回答的是「这是一条什么事件」。**对话回合不走这里**：那一路的形状由身份驱动（见 {@link ConversationMessage}），
+ * 回答的是「这是一条什么事件」。**对话回合不走这里**：那一路的形状由身份驱动（见共同消息组件），
  * 因为「谁说的」不是一种事件类型。两个寄存器各有各的判据，不是同一个判据的两次调用。
  */
 function Glyph({ kind, toolName, size = 12 }: { kind: AgentTimelineItem['kind']; toolName?: string; size?: number }) {
@@ -104,22 +102,17 @@ function Glyph({ kind, toolName, size = 12 }: { kind: AgentTimelineItem['kind'];
  * is the second level of folding: level one expands one step's payload, level two hides the whole
  * stretch of lifecycle noise that sits between a prompt and its answer.
  */
-type Segment = (
-  | { kind: 'item'; item: AgentTimelineItem; record?: ConversationRecord }
-  | { kind: 'user-message'; message: AgentSessionUserMessage }) & { beforeRecordId?: string }
+type Segment = { kind: 'item'; item: AgentTimelineItem; record: ConversationRecord }
 
-/** Positions only adapt the already ordered Core events to retained source renderers. */
+/** Source payloads for the existing leaf renderer and ruler; sequence order stays canonical. */
 function buildActivityEntries(projection: ReturnType<typeof projectConversationWindow> | null) {
-  const records = projection?.records ?? [], segments: Segment[] = [], unifiedItems: ConversationAxisItem[] = []
-  let beforeRecordId: string | undefined
-  for (let index = records.length - 1; index >= 0; index--) {
-    const record = records[index]!
-    if (record.original.kind === 'native') { beforeRecordId = record.rawId; continue }
-    const item = record.original.item
-    unifiedItems.push(item); segments.push({ kind: 'item', item, record, ...(beforeRecordId === undefined ? {} : { beforeRecordId }) })
-  }
-  segments.reverse(); unifiedItems.reverse()
-  return { records, originalRecords: projection?.originalRecords ?? [], coverage: projection?.timeline.coverage ?? [], unifiedItems, segments }
+  const records = projection?.records ?? []
+  const nativeTail = records.reduce((last, record, index) => record.original.kind === 'native' ? index : last, -1)
+  const afterNativeTail = nativeTail < 0 ? undefined : records[nativeTail + 1]
+  const segments: Segment[] = records.flatMap(record => record.original.kind === 'captured'
+    ? [{ kind: 'item' as const, item: record.original.item, record }] : [])
+  return { records, nativeTailBeforeRecordId: afterNativeTail?.presentationKey ?? afterNativeTail?.id, originalRecords: projection?.originalRecords ?? [], coverage: projection?.timeline.coverage ?? [],
+    unifiedItems: segments.map(entry => entry.item), segments }
 }
 
 function Row({
@@ -229,7 +222,7 @@ function placeSegments(segments: Segment[]): PlacedSegment[] {
   let index = 0
   for (const entry of segments) {
     const size = 1
-    const identity = entry.kind === 'user-message' ? entry.message.id : entry.item.id
+    const identity = entry.item.id
     const key = JSON.stringify([entry.kind, identity])
     placed.push({ entry, key, from: index, to: index + size - 1 })
     index += size
@@ -237,24 +230,7 @@ function placeSegments(segments: Segment[]): PlacedSegment[] {
   return placed
 }
 
-type SegmentLayout = { key: string; kind: Segment['kind']; id: string; ids: string[]; beforeRecordId?: string }
-function segmentLayout({ entry, key }: PlacedSegment): SegmentLayout {
-  return { key, kind: entry.kind,
-    id: entry.kind === 'item' ? entry.item.id : entry.message.id,
-    ids: [entry.kind === 'item' ? entry.item.id : entry.message.id],
-    ...(entry.beforeRecordId === undefined ? {} : { beforeRecordId: entry.beforeRecordId }) }
-}
-/** Reuse committed grouping/placement choices, resolving bodies from current source records. */
-function retainSegmentLayout(layout: readonly SegmentLayout[], current: readonly Segment[]): Segment[] {
-  const timeline = new Map(current.flatMap(entry => entry.kind === 'item' ? [[entry.item.id, entry] as const] : []))
-  const messages = new Map(current.flatMap(entry => entry.kind === 'user-message' ? [[entry.message.id, entry.message] as const] : []))
-  return layout.flatMap((entry): Segment[] => {
-    const position = entry.beforeRecordId === undefined ? {} : { beforeRecordId: entry.beforeRecordId }
-    if (entry.kind === 'item') { const item = timeline.get(entry.id); return item ? [{ ...item, ...position }] : [] }
-    const message = messages.get(entry.id)
-    return message ? [{ kind: 'user-message', message, ...position }] : []
-  })
-}
+
 
 /**
  * 「在进行」。
@@ -308,8 +284,6 @@ function UserMessageReadNotice({ read, showEarlier = true }: { read: UserMessage
 export function ActivityView({
   sessionId,
   executionHostId,
-  items: observedItems,
-  timelineSnapshot,
   userMessages,
   nativeHistoryPage: recentNativePage,
   nativeContextItems,
@@ -337,8 +311,6 @@ export function ActivityView({
 }: {
   sessionId: string
   executionHostId?: string
-  items: AgentTimelineItem[]
-  timelineSnapshot?: AgentTimelineSnapshot
   userMessages?: readonly AgentSessionUserMessage[]
   nativeHistoryPage?: AgentSessionHistoryPage | null
   nativeContextItems?: AgentSessionHistoryPage['items']
@@ -402,10 +374,11 @@ export function ActivityView({
   const earlierCommitPending = useRef(false)
   const physicalScrollRef = useRef<ScrollGeometry | null>(null)
   const [rulerWindow, setRulerWindow] = useState<RulerWindow>('24h')
-  const readingWindow = useSessionConversationWindow(conversationReading, (page, intent, currentOriginal, projection) => {
+  const presentation = useRef<ConversationPresentationController | null>(null)
+  const readingWindow = useSessionConversationWindow(conversationReading, (frame, intent, beforeRecordId) => {
     if (intent === 'earlier' || intent === 'newer') followRef.current = { ...followRef.current, following: false }
     const keepAnchor = intent === 'earlier' || intent === 'newer' || (intent !== 'current' && !followRef.current.following)
-    if (protectsConversationWindow(feedEl, page, keepAnchor, currentOriginal, projection, userMessages)) return false
+    if (presentation.current?.canPresent(frame, { ...(beforeRecordId ? { beforeRecordId } : {}), preserveAnchor: keepAnchor }) === false) return false
     anchorRef.current = keepAnchor && feedEl ? captureReadingAnchor(feedEl) : null
     if (intent === 'earlier') earlierCommitPending.current = true
     if (!keepAnchor) clearEarlierSpace()
@@ -413,12 +386,7 @@ export function ActivityView({
       followRef.current = { ...followRef.current, following: true }
     }
     return true
-  }, RULER_WINDOWS[rulerWindow], (snapshot, displayed) => {
-    if (!feedEl) return true
-    if (!canReplaceCapturedWindow(feedEl, snapshot, !followRef.current.following, displayed)) return false
-    anchorRef.current = captureReadingAnchor(feedEl)
-    return true
-  })
+  }, RULER_WINDOWS[rulerWindow])
   function readEarlierRecords(): void {
     readAhead.cancel()
     followRef.current = { ...followRef.current, following: false }
@@ -565,31 +533,11 @@ export function ActivityView({
     if (!conversationReading?.enabled || !conversationReading.opened || !conversationReading.onClose) return
     returnRef.current?.focus({ preventScroll: true })
   }, [conversationReading?.opened, conversationReading?.identity])
-  const { records: conversationRecords, originalRecords: originalConversationRecords, coverage: conversationCoverage, unifiedItems, segments } = useMemo(
+  const { records: conversationRecords, originalRecords: originalConversationRecords, coverage: conversationCoverage, nativeTailBeforeRecordId, unifiedItems, segments } = useMemo(
     () => buildActivityEntries(readingWindow.projection), [readingWindow.projection])
 
-  const proposedSegments = useMemo(() => placeSegments(segments), [segments])
-  const proposedLayout = proposedSegments.map(segmentLayout)
-  const layoutSource = JSON.stringify([sessionId, nativeHistoryPage?.source])
-  const committedLayout = useRef<{ source: string; entries: SegmentLayout[] }>({ source: layoutSource, entries: [] })
+  const placed = useMemo(() => placeSegments(segments), [segments])
   const segmentEls = useRef(new Map<string, HTMLElement>())
-  const [, selectionChanged] = useState(0)
-  const selection = feedEl?.ownerDocument.defaultView?.getSelection()
-  const incomingLayout = new Map(proposedLayout.map(entry => [entry.key, entry]))
-  const holdCapturedLayout = committedLayout.current.source === layoutSource && Boolean(selection && !selection.isCollapsed && selection.rangeCount && committedLayout.current.entries.some(entry => {
-    if (JSON.stringify(entry) === JSON.stringify(incomingLayout.get(entry.key))) return false
-    const node = segmentEls.current.get(entry.key)
-    if (!node) return false
-    try { return selection.getRangeAt(0).intersectsNode(node) } catch { return true }
-  }))
-  const placed = holdCapturedLayout ? placeSegments(retainSegmentLayout(committedLayout.current.entries, segments)) : proposedSegments
-  useLayoutEffect(() => { committedLayout.current = { source: layoutSource, entries: placed.map(segmentLayout) } })
-  useEffect(() => {
-    if (!holdCapturedLayout || !feedEl) return
-    const update = () => selectionChanged(value => value + 1)
-    feedEl.ownerDocument.addEventListener('selectionchange', update)
-    return () => feedEl.ownerDocument.removeEventListener('selectionchange', update)
-  }, [holdCapturedLayout, feedEl])
   function captureReadingAnchor(viewport: HTMLElement, target?: EventTarget | null): ReturnType<typeof conversationReadingAnchor> {
     const selection = viewport.ownerDocument.defaultView?.getSelection()
     const node = target instanceof Node ? target : selection && !selection.isCollapsed && selection.rangeCount ? selection.getRangeAt(0).startContainer : null
@@ -603,7 +551,7 @@ export function ActivityView({
     ? readPastedImage(path) : Promise.resolve(null), [readingEnabled, readPastedImage])
   const origin = useMemo(() => {
     for (const it of unifiedItems) {
-      const t = 'createdAt' in it ? it.createdAt : it.recordedAt
+      const t = it.createdAt
       if (t !== undefined) return t
     }
     return 0
@@ -801,8 +749,6 @@ export function ActivityView({
       readingWindow.showLatestAutomatically()
     }
     attempt()
-    document.addEventListener('selectionchange', attempt)
-    return () => document.removeEventListener('selectionchange', attempt)
   }, [conversationReading?.enabled, readingWindow.newerOutside, readingWindow.historical,
     readingWindow.loading, readingWindow.error, recentNativePage, showJump, feedEl])
 
@@ -1000,7 +946,7 @@ export function ActivityView({
   const needsReturnToLatest = showJump && (!atLoadedTail || readingWindow.currentOutside) || readingWindow.historical
   const latestControl = needsReturnToLatest || readingWindow.held ? (
     <div className="activity-feed__latest-layer" data-conversation-current-entry>
-      {readingWindow.held ? <span className="activity-feed__latest-held" role="status">保留阅读位置</span> : null}
+
       {needsReturnToLatest ? <button type="button" className="activity-feed__jump" data-message-tool-control="jump-to-latest"
         aria-label="滚动到最新" disabled={!readingEnabled}
         title={readingWindow.held ? '原阅读位置和选区已保留，取消选择或移开当前阅读位置后可滚动到最新' : '滚动到最新'}
@@ -1085,9 +1031,7 @@ export function ActivityView({
 
   const renderPlaced = ({ entry, key }: PlacedSegment, disclosure?: ConversationProcessProps['disclosure'], submissionDisclosure?: SubmissionDisclosure): JSX.Element => {
   // Identity is resolved once here; the shared message only renders that verdict.
-  const speaker = entry.kind === 'user-message'
-      ? speakerOfUserMessage(entry.message)
-      : entry.record?.speaker ?? speakerOf(entry.item)
+  const speaker = entry.record.speaker ?? speakerOf(entry.item)
   const described = speaker ? describeSpeaker?.(speaker) : undefined
   return (
     // One wrapper per segment carries the scroll target, the observer key, and the selection
@@ -1098,43 +1042,7 @@ export function ActivityView({
       {...(entry.kind === 'item' && entry.record?.role === 'process' ? { 'data-conversation-process-source-key': conversationMessageSourceKey(sessionId, entry.record.source), 'data-message-source-key': conversationMessageSourceKey(sessionId, entry.record.source) } : {})}
       ref={registerSegment(key)}
     >
-      {entry.kind === 'user-message' ? (
-        <ConversationMessage
-          messageId={entry.message.id}
-          conversationSessionId={sessionId}
-          {...(executionHostId ? { executionHostId } : {})}
-          {...(executionHostId ? { itemRef: { hostId: executionHostId, agentSessionId: entry.message.agentSessionId,
-            source: entry.message.source.kind === 'native' ? entry.message.source : { kind: 'captured' as const, recordId: entry.message.source.submissionId }
-          } } : {})}
-          messageActions={executionHostId ? renderRecordActions?.({ hostId: executionHostId, agentSessionId: entry.message.agentSessionId,
-            source: entry.message.source.kind === 'native' ? entry.message.source : { kind: 'captured', recordId: entry.message.source.submissionId } }, readingEnabled) : undefined}
-          inputSource={entry.message.source}
-          publicContent={entry.message.publicContent}
-          located={locatedMessageKey === conversationMessageSourceKey(sessionId, entry.message.source)}
-          {...(describeSpeaker ? { describeSpeaker } : {})}
-          content={entry.message.contentParts.length > 0 ? entry.message.contentParts : entry.message.content}
-          {...(entry.message.source.kind === 'native' ? {
-            nativeResourceRecord: { source: { providerId: entry.message.source.providerId, nativeSessionId: entry.message.source.nativeSessionId },
-              recordId: entry.message.source.recordId, ...(entry.message.turnId === undefined ? {} : { turnId: entry.message.turnId }) },
-            ...(readHistoryResource ? { readHistoryResource } : {})
-          } : {})}
-          {...(entry.message.questionAnswers ? { questionAnswers: entry.message.questionAnswers } : {})}
-          {...(entry.message.questionDiagnostic ? { questionDiagnostic: entry.message.questionDiagnostic } : {})}
-          {...(entry.message.deliveryStatus ? { status: entry.message.deliveryStatus } : {})}
-          {...(entry.message.recordedAt === undefined ? {} : { createdAt: entry.message.recordedAt })}
-          origin={origin}
-          speaker={speaker!}
-          name={described?.name ?? (speaker!.role === 'agent' ? (entry.message.author.kind === 'agent' ? entry.message.author.agentSessionId : speaker!.id) : 'Input')}
-          workspaceRoot={workspaceRoot}
-          homeDir={homeDir}
-          {...(described?.providerId ? { providerId: described.providerId } : {})}
-          {...(openWorkspaceFile ? { openWorkspaceFile } : {})}
-          {...(readPastedImage ? { readPastedImage: readEntryImage } : {})}
-          {...(openHttpLink ? { openHttpLink } : {})}
-          {...(onContinue ? { onContinue: () => onContinue(buildContinuationPrompt([entry.message], entry.message)) } : {})}
-          {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
-        />
-      ) : entry.record?.role !== 'process' && entry.record?.role !== 'interaction' && speaker ? (
+      {entry.record?.role !== 'process' && entry.record?.role !== 'interaction' && speaker ? (
         <CapturedConversationMessage
           active={readingEnabled}
           item={entry.item}
@@ -1187,9 +1095,11 @@ export function ActivityView({
         selectRulerRecord={selectRulerRecord} hasMore={conversationReading ? readingWindow.hasMore : undefined}
         pending={readPending && !earlierReadPending} activity={activity.segments} describeSpeaker={describeSpeaker}
         tools={<>{collapseTraces}{findTrigger}{renderReadingTools?.(readingEnabled, revealLoadedRecord)}</>} /> : undefined)}
-      {holdCapturedLayout ? <p className="conversation-metrics__notice" role="status">保留选区，取消选择后更新消息顺序。</p> : null}
       <div ref={logRef}>
       <ConversationView
+        presentation={{ controller: presentation, pending: readingWindow.held, onRelease: readingWindow.showLatestAutomatically,
+          watchSelection: readingWindow.newerOutside && !readingWindow.historical && followRef.current.following,
+          intent: readingWindow.presentationIntent }}
         page={nativeHistoryPage}
         readActivity={readingWindow.readActivity}
         expandSubmissions={Boolean(readingWindow.error || readingWindow.automaticReadError)}
@@ -1201,7 +1111,7 @@ export function ActivityView({
           const segment = placedByRecord.get(record.id) ?? (record.original.kind === 'captured' ? { entry: { kind: 'item' as const, item: record.original.item, record }, key: JSON.stringify(['item', record.rawId]), from: 0, to: 0 } : undefined)
           return segment ? renderPlaced(segment, disclosure, submissionDisclosure) : null
         }}
-        insertions={[{ key: 'native-reading-tail', role: 'anchor', content: <div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" /> }]}
+        insertions={[{ key: 'native-reading-tail', role: 'anchor', ...(nativeTailBeforeRecordId ? { beforeRecordId: nativeTailBeforeRecordId } : {}), content: <div ref={nativeTailRef} data-conversation-native-tail aria-hidden="true" /> }]}
         traceDisclosure={traceDisclosure}
         questionAnswerContext={questionAnswerContext}
         {...(historyBoundary && boundaryIndex > 0 ? {
@@ -1236,7 +1146,6 @@ export function ActivityView({
         {...(openHttpLink ? { openHttpLink } : {})}
         {...(onSelectAnnotation ? { onSelectAnnotation } : {})}
       />
-      {!nativeHistoryPage ? placed.filter(segment => segment.entry.kind === 'user-message').map(segment => renderPlaced(segment)) : null}
       </div>
       <div ref={readingTailRef} data-conversation-reading-tail aria-hidden="true" />
       {!readingWindow.historical && showWorkingIndicator(displayState, items) ? <WorkingIndicator active={activitySemantic === 'active'} /> : null}

@@ -884,7 +884,7 @@ export function SessionPane({
           : 'Check again reads the original Core Session and Run. The unconfirmed operation is not resent.'
         : 'Check the Host and current Executor configuration, then explicitly try again. No new message is sent.'
     } }} /> : null
-    const retainedConversation = <ActivityView sessionId={sessionId} executionHostId={reference.hostId} items={timeline} capability="complete-events"
+    const retainedConversation = <ActivityView sessionId={sessionId} executionHostId={reference.hostId} capability="complete-events"
           conversationReading={{ reference, identity: JSON.stringify([reference.hostId, reference.agentSessionId]),
             enabled: visible && !parked, opened: true, readCaptured: true }}
           renderRecordActions={renderConversationLandmarkAction}
@@ -1051,7 +1051,7 @@ export function SessionPane({
     ...(!inlineHistory && historyOpen ? { onClose: closeHistory, returnLabel: pendingAgentRestore ? 'Session' : viewMode === 'terminal' ? 'Terminal' : 'Activity' } : {})
   } : undefined
   const activityProps: ComponentProps<typeof ActivityView> = {
-    sessionId: session.id, items: timeline, ...(timelineSnapshot ? { timelineSnapshot } : {}), userMessages, nativeHistoryPage, nativeContextItems,
+    sessionId: session.id, userMessages, nativeHistoryPage, nativeContextItems,
     ...(session.kind === 'agent' ? { executionHostId: session.control.hostId, ...(conversationReading ? { conversationReading } : {}) } : {}),
     ...(restorePresentation ? { readingNotice: <div className="activity-feed__read-notice" role="status"><strong>{restorePresentation.title}</strong><span>{restorePresentation.detail}</span></div> } : {}),
     ...(!restorePresentation && detachedFrontendNotice ? { readingNotice: <div className="activity-feed__read-notice" role="status"><strong>{detachedFrontendNotice.title}</strong><span>{detachedFrontendNotice.detail}</span></div> } : {}),

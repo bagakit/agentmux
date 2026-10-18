@@ -1,5 +1,6 @@
 import { NATIVE_CONVERSATION_SOURCE } from '../lib/conversation-sources.js'
 import type { AgentSessionHistoryItem, AgentSessionHistorySource } from '@agentmux/core'
+import { conversationPresentationKey } from '../lib/conversation-record-sequence.js'
 import type { ConversationProcessProps } from './ConversationRecordSequence.js'
 import { describeActivityRecordTime } from '../lib/activity-record-time.js'
 import { stepTitle } from '../lib/activity-step-summary.js'
@@ -33,15 +34,16 @@ function recordTime(item: AgentSessionHistoryItem, origin?: number): WorkflowRec
 }
 
 /** Read-only observations over Core records. A native reference is never a Desktop Session. */
-export function NativeProcessObservation({ id, items, entries, renderRecord, metrics, disclosure, compact = false }: ConversationProcessProps & { compact?: boolean }) {
+export function NativeProcessObservation({ id, records: sourceRecords, entries, renderRecord, metrics, disclosure, compact = false }: ConversationProcessProps & { compact?: boolean }) {
   const [localExpanded, setExpanded] = useState(!compact)
   const expanded = disclosure?.expanded ?? localExpanded
   const [readOnce, setReadOnce] = useState(expanded)
   useEffect(() => { if (expanded) setReadOnce(true) }, [expanded])
-  const layout = entries ?? items.map(item => ({ kind: 'native' as const, item }))
-  const records = layout.filter(entry => entry.kind !== 'insertion' || entry.role !== 'anchor')
-  const anchored = layout.some(entry => entry.kind === 'insertion' && entry.role === 'anchor')
-  const nativeOnly = records.every(entry => entry.kind === 'native')
+  const layout = entries
+  const records = sourceRecords.filter(record => record.role !== 'observation')
+  const items = sourceRecords.flatMap(record => record.original.kind === 'native' ? [record.original.item] : [])
+  const anchored = layout.some(entry => entry.kind === 'anchor' || entry.record.role === 'observation')
+  const nativeOnly = records.every(record => record.original.kind === 'native')
   const states = items.map(recordedStatus)
   const recordedStepStatus = states.includes('failed') ? 'failed' : states.includes('running') ? 'running'
     : states.includes('interrupted') ? 'interrupted'
@@ -57,13 +59,17 @@ export function NativeProcessObservation({ id, items, entries, renderRecord, met
     ...(status ? { status } : {}), ...(recordedTime ? { recordedTime } : {}) }}
     keepContentVisible={anchored} expanded={expanded} onExpandedChange={open => { if (open) setReadOnce(true); setExpanded(open); disclosure?.onExpandedChange(open) }}>
     {metrics ? <div hidden={!expanded}><ConversationMetricsDetails observation={metrics} /></div> : null}
-    {layout.map(entry => entry.kind === 'insertion' ? entry.role === 'anchor'
-      ? <div key={JSON.stringify(['anchor', entry.key])}>{entry.content}</div>
-      : <div key={JSON.stringify(['insertion', entry.key])} hidden={!expanded} inert={!expanded}>{expanded || readOnce ? entry.content : null}</div>
-      : <div key={entry.item.id} hidden={!expanded} inert={!expanded}>{expanded || readOnce ? renderRecord(entry.item, body =>
-      <NativeProcessStep item={entry.item} {...(first?.startedAt === undefined ? {} : { origin: first.startedAt })}
-        {...(disclosure?.steps.get(entry.item.id) === undefined ? {} : { expanded: disclosure.steps.get(entry.item.id)! })}
-        {...(disclosure ? { onExpandedChange: (open: boolean) => disclosure.onStepExpandedChange(entry.item.id, open) } : {})}>{body}</NativeProcessStep>) : null}</div>)}
+    {layout.map(entry => {
+      if (entry.kind === 'anchor') return <div key={JSON.stringify(['anchor', entry.key])}>{entry.content}</div>
+      const record = entry.record, key = conversationPresentationKey(record)
+      if (record.role === 'observation') return <div key={key}>{renderRecord(record)}</div>
+      const item = record.original.kind === 'native' ? record.original.item : undefined
+      return <div key={key} hidden={!expanded} inert={!expanded}>{expanded || readOnce ? item ? renderRecord(record, body =>
+        <NativeProcessStep item={item} {...(first?.startedAt === undefined ? {} : { origin: first.startedAt })}
+          {...(disclosure?.steps.get(key) === undefined ? {} : { expanded: disclosure.steps.get(key)! })}
+          {...(disclosure ? { onExpandedChange: (open: boolean) => disclosure.onStepExpandedChange(key, open) } : {})}>{body}</NativeProcessStep>)
+        : renderRecord(record) : null}</div>
+    })}
   </WorkflowCard>{items.map(item => item.metricsDiagnostic
     ? <p key={item.id} className="conversation-metrics__notice" role="status">{item.metricsDiagnostic.message}</p> : null)}</div>
 }

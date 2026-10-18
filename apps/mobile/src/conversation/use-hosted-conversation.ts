@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useConversationView } from '@agentmux/client-ui/use-conversation-view'
 import { projectConversationWindow } from '@agentmux/client-ui/conversation-records'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
-import type { AgentMuxAgentSession, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
+import type { AgentMuxAgentSession, AgentSessionHistoryPage } from '@agentmux/core'
 import { agentEvidenceStale, msUntilSemanticStatusStale, type AgentObservation } from '@agentmux/core/agent-status'
 import { errorMessage } from './delivery'
 
@@ -15,20 +15,14 @@ const sameSource = (a: AgentSessionHistoryPage, b: AgentSessionHistoryPage) => a
 
 /** Complete accepted public Reader frames; transport loss retains the original view and resource owner. */
 export function useHostedConversation(client: AgentMuxHostedClient | null, id: string | null, active: boolean,
-  beforeCapturedCommit?: (snapshot: AgentTimelineSnapshot, displayed?: AgentTimelineSnapshot) => boolean,
-  beforeNativeCommit?: (page: AgentSessionHistoryPage, previous: AgentSessionHistoryPage | null) => boolean) {
+  beforeCommit?: (frame: ReturnType<typeof projectConversationWindow>) => boolean) {
   const [metadata, setMetadata] = useState<Metadata>(() => empty(id))
   const selected = metadata.id === id ? metadata : empty(id)
   const activityOwner = useMemo(() => ({}), [client, id, active])
-  const displayed = useRef<AgentSessionHistoryPage | null>(null)
   const view = useConversationView(client, id ? { hostId: 'local', agentSessionId: id } : undefined, active, {
-    beforeCommit: (snapshot, _operation, displayedFrame) => {
-      const next = projectConversationWindow(snapshot)
-      return beforeCapturedCommit?.(next.captured, displayedFrame ? projectConversationWindow(displayedFrame).captured : undefined) !== false && (!next.historyPage || beforeNativeCommit?.(next.historyPage, displayed.current) !== false)
-    }
+    beforeCommit: snapshot => beforeCommit?.(projectConversationWindow(snapshot)) !== false
   })
   const reading = useMemo(() => view.snapshot ? projectConversationWindow(view.snapshot) : null, [view.snapshot])
-  displayed.current = reading?.historyPage ?? null
   const pageOwner = useRef<{ snapshot: typeof view.snapshot; owner: PageOwner } | null>(null)
   // A retained frame keeps its original client until that client supplies a newly accepted frame.
   if (view.snapshot && view.snapshot !== pageOwner.current?.snapshot && client && id) {
@@ -91,16 +85,10 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
     sessionMetadata(); void readActivity()
     return () => { live = false; if (expiry) clearTimeout(expiry); document.removeEventListener('visibilitychange', foreground); unlisten() }
   }, [client, id, active, activityOwner, view.resume, answers.resume, hasQuestion])
-  useEffect(() => {
-    if (!active || !view.held) return
-    const accept = () => view.acceptHeld()
-    document.addEventListener('selectionchange', accept)
-    return () => document.removeEventListener('selectionchange', accept)
-  }, [active, view.held, view.acceptHeld])
   const refresh = useCallback(() => view.refresh(), [view.refresh])
   const activity = active && selected.activity?.owner === activityOwner &&
     selected.activity.hostId === selected.session?.hostId && selected.activity.runId === selected.session?.run.runId ? selected.activity.observation : null
-  return { ...selected, activity, page: reading?.historyPage ?? null, timeline: reading?.captured ?? null, projection: reading,
+  return { ...selected, activity, held: view.held, acceptHeld: view.acceptHeld, page: reading?.historyPage ?? null, timeline: reading?.captured ?? null, projection: reading,
     readError: view.error, readActivity: { sourceRead: view.sourceRead, loading: view.loading },
     pageOwner: view.snapshot ? pageOwner.current?.owner ?? null : null, answerContext, reading: view.loading,
     olderWindow: view.historical, capturedHasMore: view.hasMore, newerAvailable: view.newerAvailable || view.held,
