@@ -4,8 +4,11 @@
 First inspect the exact Tab/Region and read its typed Browser id with
 `amux space inspect --tab TAB` or `amux space inspect --region REGION`.
 Use `amux browser targets` to discover original available Browser targets and their host-owned
-`control` facts: owner, activeOperationId, revision and inputIsolation. A retained operation or
-Agent working status does not acquire webpage input. External targets report unsupported isolation;
+`control` facts: owner, activeOperationId, revision, inputIsolation and the optional `agent` association.
+`agent: {hostId, agentSessionId}` identifies the associated original Session; null confirms none,
+and omission means unknown. Association is separate from input ownership and a live Run. A retained operation or
+Agent working status does not acquire webpage input. Human handoff remains a trusted UI action;
+ordinary CLI input cannot grant it. External targets report unsupported isolation;
 an AgentMux visual border cannot block human input in an external browser.
 Discovery reports coverage=complete or coverage=partial. A partial result cannot confirm that an unreturned page was removed.
 Use `amux browser input inspect --host-id HOST --operation-id INPUT` to read one original captured input scene and message digest.
