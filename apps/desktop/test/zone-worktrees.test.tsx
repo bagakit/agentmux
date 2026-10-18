@@ -288,8 +288,9 @@ it('discards a delayed old target after path rebind and keeps healthy non-Git Fo
   read.mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
   await dom.click('[aria-label="Refresh Zone Git metadata"]')
   const plain = join(root, 'plain'); await mkdir(plain)
-  const rebound = { ...workspace, path: plain, repoPath: plain, kind: 'worktree' as const, branch: 'stale-registration' }
-  const nonGit = { kind: 'not-a-git-repository' as const, hostId: rebound.hostId, workspacePath: plain, checkedAt: Date.now() }
+  const rebound = { ...workspace, path: plain, repoPath: plain, kind: 'folder' as const, branch: 'stale-registration' }
+  const nonGit = { kind: 'not-a-git-repository' as const, hostId: rebound.hostId, workspacePath: plain, checkedAt: Date.now(),
+    directories: [{ kind: 'directory' as const, path: plain, canonicalPath: plain }] }
   read.mockResolvedValueOnce(nonGit)
   await act(async () => useAppStore.setState({ config: { ...config, workspaces: [rebound] } }))
   await dom.render(<WorkspaceZonesPanel workspace={rebound} onManageWorktrees={() => {}} />)
