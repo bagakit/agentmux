@@ -5,6 +5,26 @@ import { creation, membership, feishuRoomsHttp } from './fixtures/feishu-rooms.j
 afterEach(() => vi.restoreAllMocks())
 const member = (id: string, idType = 'open_id'): RoomMember => ({ idType, userId: id })
 
+it.each([
+  { label: 'threaded group', native: { chat_mode: 'group', group_message_type: 'thread', chat_status: 'normal', membership_approval: 'approval_required' }, mode: 'topic', state: 'active', approval: 'required' },
+  { label: 'ordinary group', native: { chat_mode: 'group', group_message_type: 'chat', chat_status: 'normal', membership_approval: 'no_approval_required' }, mode: 'group', state: 'active', approval: 'not-required' },
+  { label: 'native topic mode', native: { chat_mode: 'topic' }, mode: 'topic', state: 'unknown', approval: 'unknown' },
+  { label: 'direct conversation', native: { chat_mode: 'p2p', group_message_type: 'thread' }, mode: 'direct', state: 'unknown', approval: 'unknown' },
+  { label: 'thread without chat mode', native: { group_message_type: 'thread' }, mode: 'topic', state: 'unknown', approval: 'unknown' },
+  { label: 'message type without chat mode', native: { group_message_type: 'chat' }, mode: 'unknown', state: 'unknown', approval: 'unknown' },
+  { label: 'unknown optional enums', native: { chat_mode: 'future-mode', group_message_type: 'future-message-type', chat_status: 'future-status', membership_approval: 'future-approval' }, mode: 'unknown', state: 'unknown', approval: 'unknown' },
+  { label: 'unknown message type on a confirmed group', native: { chat_mode: 'group', group_message_type: 'future-message-type' }, mode: 'group', state: 'unknown', approval: 'unknown' },
+  { label: 'missing optional metadata', native: {}, mode: 'unknown', state: 'unknown', approval: 'unknown' },
+  { label: 'dissolved group', native: { chat_status: 'dissolved' }, mode: 'unknown', state: 'dissolved', approval: 'unknown' },
+  { label: 'retained dissolved group', native: { chat_status: 'dissolved_save' }, mode: 'unknown', state: 'dissolved', approval: 'unknown' }
+])('reads $label from the original native response without losing its group name', async ({ native, mode, state, approval }) => {
+  const f = feishuRoomsHttp(async () => ({ code: 0, data: { name: 'Original group name', ...native } }))
+  const result = await f.adapter.roomDiscovery.get({ config: creation.config, externalConversationId: 'oc_original' }, 'private-fixture-credential')
+  expect(result).toEqual({ observation: { state: 'ready' }, room: { externalConversationId: 'oc_original', name: 'Original group name', mode, state, membershipApproval: approval } })
+  expect(f.calls).toHaveLength(1)
+  expect(f.calls[0]).toMatchObject({ url: 'https://open.feishu.cn/open-apis/im/v1/chats/oc_original', method: 'GET', params: { user_id_type: 'open_id' } })
+})
+
 it('uses the original durable attempt as native UUID and creates only a private ordinary group', async () => {
   const f = feishuRoomsHttp(), result = await f.adapter.rooms.create(creation, 'private-fixture-credential')
   expect(result).toEqual({ kind: 'created', externalConversationId: 'original-created-room' })
