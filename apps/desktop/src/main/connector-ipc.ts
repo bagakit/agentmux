@@ -1,7 +1,7 @@
 import { sessionInputOperationResult } from '../shared/session-input-result.js'
 import type { IpcMainInvokeEvent } from 'electron'
 import { connectAgentMuxRpc, type AgentMuxRpcParams, type AgentMuxRpcResult } from '@agentmux/core'
-import { isConnectionMethod, type ConnectionMethod } from '@agentmux/core/connections'
+import { isConnectionMethod, type ConnectionMethod, type ChannelMetadataChange } from '@agentmux/core/connections'
 import type { DesktopConnectorSecrets } from './connector-secrets.js'
 
 export type ConnectorIpcChannel = 'connections:call' | 'connections:storeCredential' | 'connections:inspectCredential'
@@ -12,7 +12,11 @@ export function registerConnectorIpc(options: {
   socketPath: string
   secrets: Pick<DesktopConnectorSecrets, 'store' | 'inspect'>
   connect?: typeof connectAgentMuxRpc
-}): void {
+  metadata?: {
+    subscribe(listener: (change: ChannelMetadataChange) => void): () => void
+    publish(change: ChannelMetadataChange): void
+  }
+}): () => void {
   options.handleWithEvent('connections:call', async (event, method: ConnectionMethod, params: unknown) => {
     options.assertTrusted('connections:call', event)
     if (!isConnectionMethod(method)) throw new Error('Unsupported connection operation.')
@@ -28,4 +32,5 @@ export function registerConnectorIpc(options: {
     options.assertTrusted('connections:inspectCredential', event)
     return await options.secrets.inspect(operationId)
   })
+  return options.metadata?.subscribe(change => options.metadata!.publish(change)) ?? (() => {})
 }
