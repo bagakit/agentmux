@@ -88,6 +88,7 @@ export function objectCliSeed(method: string, input: string): string[] {
     'connection.enrollment.begin': ['--input', '-'], 'connection.enrollment.advance': ['--operation-id', 'enroll-original'], 'connection.enrollment.inspect': ['--operation-id', 'enroll-original'], 'connection.enrollment.ls': [],
     'connection.setup.begin': ['--input', '-'], 'connection.setup.advance': ['--input', '-'], 'connection.setup.inspect': ['--operation-id', 'setup-original'], 'connection.setup.ls': ['--connection', 'setup-connection'],
     'connection.service.get': [], 'connection.service.configure': ['--input', '-'], 'connection.service.inspect': ['--operation-id', 'service-original'],
+    'connection.diagnose': ['--host', 'local', '--session', 'SID'],
     'connection.ls': [], 'connection.inspect': ['--connection', 'connection-a'], 'connection.configure': ['--input', '-'], 'connection.test': ['--connection', 'connection-a'],
     'agent.interaction.respond': ['--input', '-'],
     'agent.interaction.inspect': ['--session', 'SID', '--operation-id', 'RESPONSE'],
