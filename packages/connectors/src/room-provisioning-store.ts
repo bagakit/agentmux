@@ -1,5 +1,4 @@
-import { randomUUID } from 'node:crypto'
-import { AgentMuxError } from '@agentmux/core'
+import { mintObjectId, AgentMuxError } from '@agentmux/core'
 import { parseRoomProvisioningOperation, type RoomBindingAuthority, type RoomCreateInput, type RoomCreationState, type RoomMembershipState, type RoomProvisioningOperation, type RoomProvisioningRefusal } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 
@@ -70,7 +69,7 @@ export class RoomProvisioningStore {
       if (operation[phase].state !== 'pending' || phase === 'membership' && operation.creation.state !== 'created') return { operation, claimed: false }
       const refusal = guard()
       if (refusal) return { operation: this.refuse(operation, phase, refusal), claimed: false }
-      const attemptId = randomUUID(), receipt = { state: 'dispatching' as const, attemptId }
+      const attemptId = mintObjectId(), receipt = { state: 'dispatching' as const, attemptId }
       this.database.prepare('INSERT INTO room_provisioning_attempt(attempt_id,operation_id,phase,receipt_json) VALUES(?,?,?,?)').run(attemptId, operationId, phase, JSON.stringify(receipt))
       // The confirmed transaction precedes the adapter invocation; dispatching is never replayable.
       return { operation: this.save({ ...operation, [phase]: receipt }), claimed: true }

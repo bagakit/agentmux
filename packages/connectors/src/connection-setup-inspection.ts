@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
-import { AgentMuxError } from '@agentmux/core'
+import { createHash } from 'node:crypto'
+import { mintObjectId, AgentMuxError } from '@agentmux/core'
 import { CONNECTION_SETUP_READ_ACTIONS, parseConnectionSetupReadSummary, parseConnectionSetupInspectionReceipt, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupInspect, type ConnectionSetupInspectionAction, type ConnectionSetupInspectionReceipt, type ConnectionSetupOperation, type ConnectionSetupReadSubject, type ConnectionSetupReadSummary, type ConnectionSetupView } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import type { SetupAuthenticationSource } from './connection-setup.js'
@@ -224,7 +224,7 @@ export class SetupApplicationInspection {
         if (existing) { db.exec('COMMIT'); return { child: existing, claimed: false } }
         const fresh = this.owner.read(input.operationId)!
         if (!this.eligible(fresh, subject) || fresh.operation.authentication?.stepId !== source.stepId || fresh.operation.revision !== input.expectedRevision || this.newAction(fresh, subject, input.versionId).actionId !== input.decision.actionId) throw failure('The original observation target or authentication changed.', 'CONNECTION_SETUP_ACTION_STALE')
-        const receipt: ConnectionSetupInspectionReceipt = { stepId: randomUUID(), input, request: 'dispatching', secureStorage: 'not-started', ...(subject ? { subject } : {}), ...(subject === 'publication-version' ? { versionId: input.versionId } : {}) }
+        const receipt: ConnectionSetupInspectionReceipt = { stepId: mintObjectId(), input, request: 'dispatching', secureStorage: 'not-started', ...(subject ? { subject } : {}), ...(subject === 'publication-version' ? { versionId: input.versionId } : {}) }
         const child: Child = { receipt, authenticationStepId: source.stepId, recoveryActionId: 'setup-inspection-recover:' + digest(receipt), privateRef: null }
         db.prepare('INSERT INTO connection_setup_inspection(step_id,operation_id,action_id,recovery_action_id,record_json) VALUES(?,?,?,?,?)').run(receipt.stepId, input.operationId, input.decision.actionId, child.recoveryActionId, JSON.stringify({ receipt, authenticationStepId: child.authenticationStepId, recoveryActionId: child.recoveryActionId }))
         this.owner.touch(fresh); db.exec('COMMIT'); return { child, claimed: true }

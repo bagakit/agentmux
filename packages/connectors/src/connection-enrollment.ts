@@ -1,6 +1,5 @@
 import { readConnectionRequestTrace } from './connection-request-trace.js'
-import { randomUUID } from 'node:crypto'
-import { AgentMuxError } from '@agentmux/core'
+import { mintObjectId, AgentMuxError } from '@agentmux/core'
 import {
   parseConnectionParams,
   parseConnectionResult,
@@ -86,7 +85,7 @@ const issue = (code: string) =>
 export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
   private readonly store: ConnectionEnrollmentStore
   private readonly pending = new Map<string, Promise<void>>()
-  private readonly owner = randomUUID()
+  private readonly owner = mintObjectId()
   private readonly unsettled = new Map<string, Snapshot>()
   private closed = false
   constructor(
@@ -468,7 +467,7 @@ export class ConnectionEnrollmentHost implements ConnectionEnrollmentPort {
         }
         case 'renew-authentication':
           row = this.store.update(input.operationId, (r) => {
-            r.operation.authentication = { attemptId: randomUUID(), stage: 'not-started' }
+            r.operation.authentication = { attemptId: mintObjectId(), stage: 'not-started' }
             delete r.confirmedAccountDigest
             r.privateRef = null
           })

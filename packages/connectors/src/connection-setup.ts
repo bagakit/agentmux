@@ -1,8 +1,8 @@
 import { ProfileConnectionSetup } from './connection-setup-profile.js'
 import { InitialConnectionSetup } from './connection-setup-initial.js'
 import { readConnectionRequestTrace } from './connection-request-trace.js'
-import { createHash, randomUUID } from 'node:crypto'
-import { AgentMuxError } from '@agentmux/core'
+import { createHash } from 'node:crypto'
+import { mintObjectId, AgentMuxError } from '@agentmux/core'
 import { connectionSetupGoalSummary, parseConnectionSetupAccount, parseConnectionSetupAuthentication, parseConnectionSetupChallenge, parseConnectionSetupOperation, parseConnectionSetupParams, type ConnectionEnrollmentCallContext, type ConnectionSetupAdvance, type ConnectionSetupAuthenticationAction, type ConnectionSetupBegin, type ConnectionSetupInspect, type ConnectionSetupListing, type ConnectionSetupOperation, type ConnectionSetupPort, type ConnectionSetupView } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import type { EnrollmentSecrets } from './connection-enrollment-adapter.js'
@@ -291,7 +291,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
         row = this.read(input.operationId)!
         if (row.operation.revision !== input.expectedRevision) throw failure('The original action revision changed. Read the same request before continuing.', 'CONNECTION_OPERATION_CONFLICT')
         if (!this.current(row)) throw failure('The exact saved bot changed. The original management intent is retained.', 'CONNECTION_REVISION_CONFLICT')
-        const authentication: Authentication = { attemptId: kind === 'renew' ? randomUUID() : snapshot!.attemptId, stepId: randomUUID(), stage: 'handoff', request: 'dispatching', secureStorage: 'not-started' }
+        const authentication: Authentication = { attemptId: kind === 'renew' ? mintObjectId() : snapshot!.attemptId, stepId: mintObjectId(), stage: 'handoff', request: 'dispatching', secureStorage: 'not-started' }
         db.prepare('INSERT INTO connection_setup_auth_step(step_id,operation_id,action_id,input_json,record_json) VALUES(?,?,?,?,?)').run(authentication.stepId, input.operationId, input.decision.actionId, JSON.stringify(input), JSON.stringify(authentication))
         this.touch(row); db.exec('COMMIT')
         return { step: { operationId: input.operationId, input, authentication, privateRef: null } as AuthStep, claimed: true }
@@ -482,7 +482,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     catch { return this.view(this.save(row, o => { o.reason = 'secure-storage-unavailable' }), context) }
     await this.authority(context, row)
     if (!this.current(row)) return this.view(row, context)
-    row = this.save(row, o => { o.request = { state: 'dispatching', attemptId: randomUUID() }; delete o.reason })
+    row = this.save(row, o => { o.request = { state: 'dispatching', attemptId: mintObjectId() }; delete o.reason })
     let receipt: Awaited<ReturnType<typeof adapter.begin>>
     this.nativeRequests.set(row.operation.request.attemptId!, null)
     try { receipt = await adapter.begin({ operationId: row.operation.operationId, connectionId: row.operation.connectionId, attemptId: row.operation.request.attemptId!, application: row.operation.application }, context.signal) }
@@ -512,7 +512,7 @@ export class ConnectionSetupHost implements ConnectionSetupPort {
     await this.secrets.assertAvailable()
     await this.authority(context, row)
     if (!this.current(row)) return this.view(row, context)
-    if (!row.operation.request.attemptId) row = this.save(row, o => { o.request = { kind: 'enrollment-handoff', state: 'dispatching', attemptId: randomUUID() }; delete o.reason })
+    if (!row.operation.request.attemptId) row = this.save(row, o => { o.request = { kind: 'enrollment-handoff', state: 'dispatching', attemptId: mintObjectId() }; delete o.reason })
     const source = await this.enrollmentSource(row.operation.source!, row.operation, context)
     await this.authority(context, row)
     source.assertCurrent()
