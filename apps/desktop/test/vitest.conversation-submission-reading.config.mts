@@ -8,7 +8,7 @@ const changes: Record<string, [string, string, string]> = {
   'unrelated-confirms': ['packages/client-ui/src/lib/conversation-sources.ts', "? originals.filter(source => source.original.kind", "? [...inventory.values()].filter(source => source.original.kind"],
   'retain-completed-activity': ['packages/client-ui/src/lib/use-conversation-view.ts', 'setState(value => ({ ...value, loading: false, operation: null, sourceRead: null }))', 'setState(value => ({ ...value, operation: null }))'],
   'unknown-range-fold': ['packages/client-ui/src/components/ConversationMessageDisclosure.tsx', '(controlledOpen ?? choice ?? (expanded || selected))', '(controlledOpen ?? choice ?? expanded)'],
-  'held-accepted-coverage': ['packages/client-ui/src/components/ConversationView.tsx', 'const sourceCoverage = describedRecords[0]?.coverage ?? projection.coverage', 'const sourceCoverage = projection.coverage'],
+  'held-accepted-coverage': ['packages/client-ui/src/lib/use-conversation-record-layout.ts', 'return { ...accepted.frame, sequence:', 'return { ...accepted.frame, coverage: (frame as any).coverage, sequence:'],
   'retained-latest-source': ['packages/client-ui/src/lib/use-conversation-view.ts', "kind === 'resume' ? undefined : request.nativeSource ??", "kind === 'resume' ? undefined : originalNative ?? request.nativeSource ??"],
   'lose-mobile-source-read': ['apps/mobile/src/conversation/MobileConversationSurface.tsx', 'readActivity={reading.readActivity}', 'readActivity={undefined}'],
   'lose-source-read': ['apps/desktop/src/renderer/src/components/ActivityView.tsx', 'readActivity={readingWindow.readActivity}', 'readActivity={undefined}']
@@ -29,4 +29,4 @@ export default defineConfig({ ...base, cacheDir: '.cache/conversation-submission
     }
     return code === source ? undefined : { code, map: null }
   }
-}], test: { ...base.test, include: ['apps/desktop/test/conversation-submission-reading.test.tsx'], passWithNoTests: false } })
+}], test: { ...base.test, include: ['apps/desktop/test/conversation-submission-reading.test.tsx', 'packages/client-ui/test/conversation-presentation.test.tsx'], passWithNoTests: false } })

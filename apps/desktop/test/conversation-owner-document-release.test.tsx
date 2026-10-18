@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, useRef } from 'react'
+import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import type { ConversationPresentationController } from '@agentmux/client-ui/use-conversation-record-layout'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { AgentTimelineItem } from '@agentmux/core'
@@ -114,7 +116,7 @@ it('actual Activity releases a protected frame from its owner document while ret
 })
 
 
-it('the original window Hook removes its held subscription on disable, document replacement and unmount', async () => {
+it('the shared presentation removes its held subscription on disable, document replacement and unmount', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const f = await nativeHistoryFixture('claude', jsonl([
     { type: 'user', uuid: 'original-context', sessionId: 'native-main', message: { role: 'user', content: 'Original context' } }
@@ -139,12 +141,16 @@ it('the original window Hook removes its held subscription on disable, document 
   const unmount = async () => { if (mounted) { mounted = false; await act(async () => root.unmount()) } }
   closes.push(async () => { await unmount(); host.remove() })
   function Consumer({ enabled }: { enabled: boolean }) {
+    const controller = useRef<ConversationPresentationController | null>(null)
     view = useSessionConversationWindow({ reference: { hostId: 'local', agentSessionId: f.session.agentSessionId },
-      identity: f.session.agentSessionId, enabled }, () => true, Infinity, () => allow)
-    return <output>{view.capturedSnapshot?.items.find(item => item.id === original.id)?.content}</output>
+      identity: f.session.agentSessionId, enabled }, frame => allow && controller.current?.canPresent(frame) !== false, Infinity)
+    const reading = view.projection
+    return reading ? <ConversationView sessionId={f.session.agentSessionId} executionHostId="local" active={enabled}
+      page={view.page} records={reading.records.map(record => ({ ...record, role: 'message' }))} originalRecords={reading.originalRecords} coverage={reading.timeline.coverage}
+      presentation={{ controller, pending: view.held, onRelease: view.acceptHeld }} /> : null
   }
   const render = (owner = first, enabled = true) => act(async () => root.render(
-    <WorkbenchDocumentContext.Provider value={{ document: owner, window: null }}><Consumer enabled={enabled} /></WorkbenchDocumentContext.Provider>))
+    <WorkbenchDocumentContext.Provider value={{ document: owner, window: null }}><DesktopClientUiProvider document={owner}><Consumer enabled={enabled} /></DesktopClientUiProvider></WorkbenchDocumentContext.Provider>))
   const changed = (owner: Document) => owner.dispatchEvent(new owner.defaultView!.Event('selectionchange'))
   const publish = async (version: number) => {
     allow = false
@@ -155,14 +161,14 @@ it('the original window Hook removes its held subscription on disable, document 
     return item.content
   }
   await render()
-  await wait(() => { expect(host.textContent).toBe(original.content); expect(view.inspect().inFlight).toBe(false) })
+  await wait(() => { expect(host.textContent).toContain(original.content); expect(view.inspect().inFlight).toBe(false) })
   expect(firstListeners.size + secondListeners.size).toBe(0)
   const nextBody = await publish(2)
   expect(firstListeners.size).toBe(1); expect(secondListeners.size).toBe(0)
   await render(first, false)
   expect(firstListeners.size + secondListeners.size, 'A reading-disabled held window keeps no selection subscription').toBe(0)
   allow = true; await act(async () => changed(first))
-  expect(view.held).toBe(true); expect(host.textContent).toBe(original.content)
+  expect(view.held).toBe(true); expect(host.textContent).toContain(original.content)
   allow = false; await render()
   await wait(() => { expect(view.held).toBe(true); expect(view.inspect().inFlight).toBe(false) })
   expect(firstListeners.size).toBe(1)
@@ -170,9 +176,9 @@ it('the original window Hook removes its held subscription on disable, document 
   expect(firstListeners.size, 'Changing the owning document removes the original subscription').toBe(0)
   expect(secondListeners.size).toBe(1)
   allow = true; await act(async () => changed(first))
-  expect(view.held).toBe(true); expect(host.textContent).toBe(original.content)
+  expect(view.held).toBe(true); expect(host.textContent).toContain(original.content)
   await act(async () => changed(second))
-  await wait(() => expect(host.textContent).toBe(nextBody))
+  await wait(() => expect(host.textContent).toContain(nextBody))
   expect(view.held).toBe(false); expect(firstListeners.size + secondListeners.size).toBe(0)
   await publish(3)
   expect(secondListeners.size).toBe(1)

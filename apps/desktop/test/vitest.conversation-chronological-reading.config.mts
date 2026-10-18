@@ -5,17 +5,17 @@ import { createHash } from 'node:crypto'
 import { relative } from 'node:path'
 const mutation = process.env.AGENTMUX_CHRONOLOGY_MUTATION
 const replacements: Record<string, [string, string, string]> = {
-  'stack-inputs': ['ActivityView.tsx', 'const beforeRecordId = nativePage?.items[nativeIndex]?.id', 'const beforeRecordId = undefined'],
-  'swallow-input': ['conversation-record-sequence.ts', 'insert(item.id)', 'if (!process.length) insert(item.id)'],
-  'captured-range': ['ActivityView.tsx', 'const holdCapturedLayout = committedLayout.current.source === layoutSource', 'const holdCapturedLayout = false && committedLayout.current.source === layoutSource'],
-  'native-range': ['ConversationRecordSequence.tsx', 'if (held) {', 'if (held && false) {'],
+  'stack-inputs': ['conversation-record-sequence.ts', 'for (const record of records) {', "for (const record of [...records.filter(record => record.original.kind === 'native'), ...records.filter(record => record.original.kind === 'captured')]) {"],
+  'swallow-input': ['conversation-record-sequence.ts', 'else { flush(); rows.push({ kind:', "else { if (record.original.kind === 'captured' && process.length) continue; flush(); rows.push({ kind:"],
+  'change-selected-parent': ['use-conversation-record-layout.ts', 'prior.parent === next.parent', 'true'],
   'forget-disclosure': ['ConversationRecordSequence.tsx', 'const choices = disclosure.source === sourceKey ? disclosure :', 'const choices = false ? disclosure :']
 }
 export default defineConfig({ ...base, cacheDir: '.cache/conversation-chronological-reading',
   plugins: [{ name: 'chronology-source-counterexample', enforce: 'pre', transform(source, id) {
     const file = id.split('?')[0]!
-    if (!['ActivityView.tsx', 'ConversationRecordSequence.tsx', 'conversation-record-sequence.ts'].some(name => file.endsWith('/' + name))) return
+    if (!['ConversationRecordSequence.tsx', 'conversation-record-sequence.ts', 'use-conversation-record-layout.ts'].some(name => file.endsWith('/' + name))) return
     const replacement = mutation ? replacements[mutation] : undefined
+    if (mutation && !replacement) throw Error('Unknown chronology mutation: ' + mutation)
     let code = source
     if (replacement && file.endsWith('/' + replacement[0])) {
       if (source.split(replacement[1]).length !== 2) throw Error('Non-unique chronology mutation: ' + mutation)

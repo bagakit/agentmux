@@ -17,7 +17,7 @@ import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-messages'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { SessionActivityPresentation } from '../src/renderer/src/components/SessionActivityPresentation'
-import { protectsConversationWindow, conversationReadingAnchor, restoreConversationAnchor } from '../src/renderer/src/lib/session-conversation-window'
+import { conversationReadingAnchor, restoreConversationAnchor } from '../src/renderer/src/lib/session-conversation-window'
 
 // Heavy paint/input leaves are isolated; both real callers, store, read owner and common body are mounted.
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({ visible }: { visible: boolean }) => <div data-terminal-visible={String(visible)} /> }))
@@ -1365,24 +1365,6 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(requests).toEqual([{ limit: 100 }, { limit: 100 }]); expect(container.querySelector('[role="slider"]')).toBeNull()
   expect(container.querySelector('.activity-feed__empty-reading')).toBeNull(); expect(container.textContent).not.toContain('Original first conversation read unavailable')
   expect(container.textContent).toContain('No structured activity yet. Terminal remains available.')
- })
- it('protects a connected Range crossing a middle-page record with neither endpoint inside it', async () => {
-  await render(compose()); await click('Earlier')
-  const viewport = container.querySelector<HTMLElement>('.activity-feed')!
-  const before = document.createTextNode('start'), after = document.createTextNode('end')
-  const middle = document.createElement('div'); middle.dataset.nativeRecordId = 'evicted-middle'; middle.textContent = 'middle page'
-  viewport.append(before, middle, after)
-  const range = document.createRange(); range.setStart(before, 1); range.setEnd(after, 1)
-  window.getSelection()!.addRange(range)
-  expect(protectsConversationWindow(viewport, recent!.nativeHistoryPage!, false)).toBe(true)
- })
- it('keeps the window when the standard Range intersection cannot be established', async () => {
-  await render(compose()); await click('Earlier')
-  const viewport = container.querySelector<HTMLElement>('.activity-feed')!
-  const row = document.createElement('div'); row.dataset.nativeRecordId = 'protected-unknown'; row.textContent = 'Selected record'; viewport.append(row)
-  const range = document.createRange(); range.selectNodeContents(row); window.getSelection()!.addRange(range)
-  vi.spyOn(range, 'intersectsNode').mockImplementation(() => { throw new DOMException('Intersection unavailable') })
-  expect(protectsConversationWindow(viewport, recent!.nativeHistoryPage!, false)).toBe(true)
  })
  it('keeps a selected folded Process title before explicit latest would evict the group', async () => {
   await render(compose()); await click('Earlier')

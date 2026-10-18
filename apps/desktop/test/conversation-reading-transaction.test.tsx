@@ -4,7 +4,6 @@ import { act } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { useConversationView } from '@agentmux/client-ui/use-conversation-view'
 import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
-import { canReplaceCapturedWindow } from '@agentmux/client-ui/captured-conversation-page'
 import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { AgentMuxError } from '../../../packages/core/src/errors'
@@ -77,17 +76,6 @@ it('the shared real Core consumer retains a selected same-ID native body version
   expect(x.host.textContent).not.toContain('Changed version of the same original'); expect(node.isConnected).toBe(true); expect(selection.toString()).toBe(old)
   await act(async () => { selection.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
   await wait(() => expect(x.host.textContent).toContain('Changed version of the same original'))
-})
-it('captured admission compares the displayed original version even when its source identity is retained', () => {
-  const host = document.createElement('div'); document.body.append(host); closes.push(() => host.remove())
-  const key = JSON.stringify([reference.agentSessionId, 'captured', 'captured-original'])
-  const node = document.createElement('article'); node.dataset.messageSourceKey = key; node.textContent = 'Selected captured body'; host.append(node)
-  const range = document.createRange(); range.selectNodeContents(node.firstChild!); window.getSelection()!.addRange(range)
-  const original = { id: 'captured-original', agentSessionId: reference.agentSessionId, kind: 'assistant_message' as const, source: 'agent' as const, status: 'complete' as const, title: 'Captured', content: 'Selected captured body', createdAt: _followupFixtureEpoch(0, 0, 1), updatedAt: _followupFixtureEpoch(0, 0, 1) }
-  const previous: AgentTimelineSnapshot = { agentSessionId: reference.agentSessionId, revision: 1, items: [original] }, next = { ...previous, revision: 2, items: [{ ...original, content: 'Changed captured version', updatedAt: _followupFixtureEpoch(0, 0, 2) }] }
-  expect(canReplaceCapturedWindow(host, previous, false, previous)).toBe(true)
-  expect(canReplaceCapturedWindow(host, next, false, previous), 'Same identity does not certify unchanged selected content').toBe(false)
-  window.getSelection()!.removeAllRanges(); expect(canReplaceCapturedWindow(host, next, false, previous)).toBe(true)
 })
 
 it('a held source failure remains an operation service error while displayed coverage stays with its accepted body', async () => {
