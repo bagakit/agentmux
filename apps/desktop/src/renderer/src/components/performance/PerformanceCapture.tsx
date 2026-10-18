@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { parseRendererTraceResult, parseRendererV8ProfileResult, parseRendererAnimationsResult,
-  type MetricsObservation, type RendererTraceResult, type RendererV8ProfileResult, type RendererV8ProfileTarget, type RendererAnimationsResult } from '@agentmux/core/control'
+import { analyseV8Profile, parseRendererTraceResult, parseRendererV8ProfileResult, parseRendererAnimationsResult,
+  type V8ProfileAnalysis, type MetricsObservation, type RendererTraceResult, type RendererV8ProfileResult, type RendererV8ProfileTarget, type RendererAnimationsResult } from '@agentmux/core/control'
 import { api } from '../../lib/api'
-import { analyseRendererProfile, profileFlameRows, type ProfileAnalysis } from '../../lib/renderer-profile-analysis'
+import { profileFlameRows } from '../../lib/renderer-profile-analysis'
 import { AnimationInspectionResult } from './PerformanceAnimations'
 
 type Capture = { kind: 'profile'; result: RendererV8ProfileResult } | { kind: 'trace'; result: RendererTraceResult }
 type Captured = { key: string; value: Capture }
 const ms = (value: number) => `${value.toFixed(1)} ms`
-const scriptName = (url: string) => url === '(runtime / no script)' ? url : url.split(/[\\/]/u).at(-1) || url
+const scriptName = (url: string) => url === '' ? '(no source URL)' : url.split(/[\\/]/u).at(-1) || url
 
 export function currentPerformanceCaptureTarget(observation: MetricsObservation | null | undefined): RendererV8ProfileTarget | null {
   // App process details contain bounded hotspots. The Renderer source owns this
@@ -33,16 +33,17 @@ export function downloadPerformanceTrace(trace: NonNullable<RendererTraceResult[
   downloadPerformanceBlob(new Blob([bytes], { type: 'application/gzip' }), 'renderer-trace.json.gz')
 }
 
-function ProfileView({ analysis }: { analysis: ProfileAnalysis }) {
+function ProfileView({ analysis }: { analysis: V8ProfileAnalysis }) {
   const [path, setPath] = useState<number[]>([analysis.root])
   const root = path.at(-1)!, selected = analysis.frames.get(root)!, flame = useMemo(() => profileFlameRows(analysis, root), [analysis, root])
   return <>
     <div className="performance-section-heading"><strong>Module samples</strong><span>{analysis.samples} samples · {ms(analysis.sampledMs)}</span></div>
     <p className="performance-note">Self time from V8 sample weights. Select a module to inspect its hottest call frame. Script modules are not React components; idle and native work may be outside these samples.</p>
+    <p className="performance-note" aria-label="V8 sample interpretation">Original profile {ms(analysis.profileDurationMs)} · weighted samples {ms(analysis.sampledMs)} · {analysis.lastSampleTailMs >= 0 ? `unrepresented tail ${ms(analysis.lastSampleTailMs)}` : `sample weights exceed interval by ${ms(-analysis.lastSampleTailMs)}`} · largest sample interval {ms(analysis.maxSampleGapMs)}. Script {ms(analysis.weights.script.selfMs)} · idle {ms(analysis.weights.idle.selfMs)} · GC {ms(analysis.weights.gc.selfMs)} · unattributed {ms(analysis.weights.unattributed.selfMs)}. Percentages below use weighted samples, not process CPU. Locations refer to generated scripts; original source mapping is unavailable.</p>
     <div className="performance-module-list" aria-label="Module sample heatmap">
       {analysis.modules.slice(0, 12).map(module => <button type="button" className="performance-module-row" key={module.url}
         aria-label={`Inspect hottest call frame in ${module.url}`} title={`Inspect hottest call frame in ${module.url}`}
-        onClick={() => { const frame = [...analysis.frames.values()].filter(frame => (frame.url || '(runtime / no script)') === module.url).sort((a, b) => b.selfMs - a.selfMs)[0]; if (frame) setPath(frame.id === analysis.root ? [analysis.root] : [analysis.root, frame.id]) }}
+        onClick={() => { const frame = [...analysis.frames.values()].filter(frame => frame.url === module.url).sort((a, b) => b.selfMs - a.selfMs)[0]; if (frame) setPath(frame.id === analysis.root ? [analysis.root] : [analysis.root, frame.id]) }}
         style={{ background: `color-mix(in srgb,var(--green) ${Math.round(4 + 18 * module.selfMs / analysis.sampledMs)}%,transparent)` }}>
         <span title={module.url}>{scriptName(module.url)}</span><strong>{ms(module.selfMs)} <small>{(module.selfMs / analysis.sampledMs * 100).toFixed(1)}%</small></strong>
       </button>)}
@@ -52,19 +53,19 @@ function ProfileView({ analysis }: { analysis: ProfileAnalysis }) {
     <p className="performance-note">Width is inclusive sampled time, not a timeline. Select a frame to zoom; parent and child time overlap.</p>
     <div className="performance-flame" aria-label="Sampled call stacks" style={{ height: `${(Math.max(0, ...flame.rows.map(row => row.depth)) + 1) * 25}px` }}>
       {flame.rows.map(row => { const frame = analysis.frames.get(row.id)!; return <button key={row.id} type="button"
-        title={`${frame.name}\n${frame.url || '(no script)'}:${frame.line + 1}\nSelf ${ms(frame.selfMs)} · inclusive ${ms(frame.totalMs)}`}
+        title={`${frame.name}\n${frame.url || '(no source URL)'}:${frame.line + 1}:${frame.column + 1}\nSelf ${ms(frame.selfMs)} · inclusive ${ms(frame.totalMs)}`}
         aria-label={`${frame.name}, self ${ms(frame.selfMs)}, inclusive ${ms(frame.totalMs)}`} aria-pressed={row.id === root}
         style={{ left: `${row.left}%`, width: `${row.width}%`, top: `${row.depth * 25}px` }}
         onClick={() => { if (row.id !== root) setPath(value => [...value, row.id]) }}>{frame.name}</button> })}
     </div>
     {flame.omitted ? <p className="performance-note">{flame.omitted} branches outside this view. Select a parent frame to inspect deeper, or export.</p> : null}
-    <div className="performance-frame-detail" aria-live="polite"><strong>{selected.name}</strong><span>{selected.url || '(runtime / no script)'}{selected.line >= 0 ? `:${selected.line + 1}` : ''}</span><small>Self {ms(selected.selfMs)} · inclusive {ms(selected.totalMs)}</small></div>
+    <div className="performance-frame-detail" aria-live="polite"><strong>{selected.name}</strong><span>{selected.url || '(no source URL)'}{selected.line >= 0 ? `:${selected.line + 1}` : ''}</span><small>Self {ms(selected.selfMs)} · inclusive {ms(selected.totalMs)}</small></div>
   </>
 }
 
 export function CaptureResult({ capture, sourceChanged, retained = false }: { capture: Capture; sourceChanged: boolean; retained?: boolean }) {
   const result = capture.result
-  const analysis = useMemo(() => capture.kind === 'profile' && capture.result.status === 'completed' && capture.result.profile ? analyseRendererProfile(capture.result.profile) : null, [capture.kind, capture.result])
+  const analysis = useMemo(() => capture.kind === 'profile' && capture.result.status === 'completed' && capture.result.profile ? analyseV8Profile(capture.result.profile) : null, [capture.kind, capture.result])
   const material = capture.kind === 'profile' ? capture.result.profile : capture.result.trace
   const receipt = capture.kind === 'profile' ? { ...capture.result, profile: material ? '(export original profile)' : null }
     : { ...capture.result, trace: capture.result.trace ? { ...capture.result.trace, data: '(export original native gzip)' } : null }

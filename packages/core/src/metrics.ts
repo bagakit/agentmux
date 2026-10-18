@@ -1,3 +1,4 @@
+export * from './v8-profile-analysis.js'
 export * from './renderer-allocations.js'
 export * from './renderer-heap-snapshot.js'
 import type { RendererHeapSnapshotInput, RendererHeapSnapshotResult, RendererHeapSnapshotInspectInput, RendererHeapSnapshotInspection } from './renderer-heap-snapshot.js'
