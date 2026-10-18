@@ -1,3 +1,4 @@
+import { useGoalAgentName } from '../lib/goal-discussion-recipient'
 import { useRef, useState } from 'react'
 import type { DemandRecord } from '../lib/global-demand-board'
 import { api } from '../lib/api'
@@ -22,6 +23,7 @@ export function GoalPatrolControl({ demand, compact = false }: { demand: DemandR
   const manager = demand.responsibility?.supervisor, attempt = patrol?.attempts.at(-1)
   const targetSessionId = pending ? patrol?.supervisorAgentSessionId ?? null : demand.supervisorSessionId ?? manager?.agentSessionId ?? null
   const targetHostId = attempt?.target.agentSessionId === targetSessionId ? attempt.target.hostId : manager?.agentSessionId === targetSessionId ? manager.hostId : undefined
+  const targetName = useGoalAgentName(targetSessionId, targetHostId)
   const latestReport = [...demand.patrols ?? []].reverse().find(item => item.report)
   const entryContext = { kind: 'goal-patrol' as const, goalId: demand.id, scope: demand.responsibility?.scope ?? null,
     afterReportOperationId: latestReport?.report?.operationId ?? null }
@@ -80,10 +82,10 @@ export function GoalPatrolControl({ demand, compact = false }: { demand: DemandR
         const entry = requestAgentConversationFloatingOpen(targetSessionId, targetHostId,
           pending ? observed?.reason ?? '原巡查请求已保存；正在读取原回执。' : '正在请求原 PMO 巡查；实际工作状态以原 Agent 为准。', undefined, entryContext)
         void run(pending ? () => refreshGoalDelegations(demand.id) : () => request(entry), entry)
-      }}>{busy ? '核对原巡查…' : pending ? '巡查请求已保存' : 'PMO 巡查'}</button>
+      }}>{busy ? '核对原巡查…' : pending ? '巡查请求已保存' : targetName ? `请 ${targetName} 巡查` : '请求原负责人巡查'}</button>
       {patrol ? <button type="button" className="goals-button" disabled={busy} onClick={() => void run(() => refreshGoalDelegations(demand.id))}>读取原巡查</button> : null}
       {canContinue ? <button type="button" className="goals-button" disabled={busy} onClick={() => void run(continueOriginal)}>接续原巡查</button> : null}
-      {targetSessionId ? <button type="button" className="goals-button" onClick={() => requestAgentConversationFloatingOpen(targetSessionId, targetHostId, undefined, undefined, entryContext)}>打开原 PMO</button> : null}
+      {targetSessionId ? <button type="button" className="goals-button" onClick={() => requestAgentConversationFloatingOpen(targetSessionId, targetHostId, undefined, undefined, entryContext)}>{targetName ? `打开 ${targetName} 的对话` : '打开原负责人对话'}</button> : null}
       {needsSupervisor ? <button type="button" className="goals-button" onClick={() => setSupervisorGoalId(demand.id)}>选择 Supervisor</button> : null}
     </div>
     {observed ? <p className="goal-patrol__feedback" role="status"><strong>{labels[observed.state]}</strong>{!compact || ['missing', 'unknown', 'prepared'].includes(observed.state) ? <span>{observed.reason}</span> : null}</p> : null}

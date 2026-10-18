@@ -1,3 +1,4 @@
+import { goalDiscussionTarget } from './lib/goal-discussion-recipient'
 import { observeNotifications } from './lib/notification-observation'
 import type { CollaborationMapTarget } from './lib/collaboration-map-navigation'
 import { noteShareRange, noteShareSiblingRange } from '../../shared/note-share-range'
@@ -4624,8 +4625,10 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
     }
   }
 
-  const mappedTabId = state.demandPmoTabIds[demandId]
-  const mappedTab = mappedTabId ? state.tabs[mappedTabId] : undefined
+  const discussionTarget = goalDiscussionTarget(state, demandId)
+  const mappedTabId = discussionTarget.kind === 'new' ? undefined : discussionTarget.tabId
+  const mappedTab = discussionTarget.kind === 'existing' ? discussionTarget.tab : undefined
+  if (discussionTarget.kind === 'unconfirmed') throw new Error('The original Goal discussion placement is unconfirmed. Keep its Tab and Session; restore that workface before opening this discussion.')
   const layout = state.layouts[workspace.id]
   const originalSource = intent.creationOperationId === undefined ? undefined : demand.participations?.find(source => source.id === demand.creationOrigin?.requesterParticipationId && source.kind === 'discussion')
   let originalPmoSessionId: string | undefined
@@ -4648,7 +4651,7 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
   const originalRegions = originalPmoSessionId && mappedTab ? Object.values(mappedTab.regions).filter(surface => surface.kind === 'agent' && surface.sessionId === originalPmoSessionId) : []
   if (originalPmoSessionId && originalRegions.length !== 1) throw new Error('The original PMO Region is unconfirmed or ambiguous. The Goal, original Tab and Session are kept; restore that exact workface before retrying.')
   const mappedRegion = originalPmoSessionId ? originalRegions[0] :
-    mappedTab?.layout.activeRegionId ? mappedTab.regions[mappedTab.layout.activeRegionId] : undefined
+    discussionTarget.kind === 'existing' ? discussionTarget.region : undefined
   const mappedTabIsUsable = Boolean(
     mappedTab &&
     mappedTab.workspaceId === workspace.id &&
@@ -4666,6 +4669,8 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
       canonicalRecipientId = await api.sessions.resolveCreationSessionId(pending.hostId, pending.createOperationId)
     }
     receiptSessionId = canonicalRecipientId ?? null
+    // Opening an existing discussion is navigation only, including a retained launcher.
+    if (!prompt?.trim()) { focusPmoTabSession(mappedTab.id); return done(mappedTab.id) }
     if (mappedRegion?.kind === 'agent' && prompt?.trim()) {
       // The live recipient already has its exact owner. Topic file preparation cannot gate input.
       const recipientId = mappedRegion.sessionId
@@ -7072,9 +7077,14 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         collectionChanged = committed.surveyCollectedZones !== current.surveyCollectedZones
         recordClosedWorkbenchEntities(current.tabs, committed.tabs)
         const removedTabId = removedTab?.id
-        if (!removedTabId || !Object.values(current.recentMoteAgents).some(agent => agent.tabId === removedTabId)) return committed
-        return { ...committed, recentMoteAgents: Object.fromEntries(
-          Object.entries(current.recentMoteAgents).filter(([, agent]) => agent.tabId !== removedTabId)) }
+        if (!removedTabId) return committed
+        // Only this admitted, committed close releases a Goal's dedicated discussion binding.
+        // A missing projection elsewhere remains unknown and never authorizes replacement.
+        const discussionClosed = Object.values(current.demandPmoTabIds).includes(removedTabId)
+        if (discussionClosed) collectionChanged = true
+        return { ...committed,
+          ...(discussionClosed ? { demandPmoTabIds: Object.fromEntries(Object.entries(current.demandPmoTabIds).filter(([, id]) => id !== removedTabId)) } : {}),
+          recentMoteAgents: Object.fromEntries(Object.entries(current.recentMoteAgents).filter(([, agent]) => agent.tabId !== removedTabId)) }
       })
       if (removedTab && !get().tabs[removedTab.id]) publishWorkbenchTabRemoved(removedTab, { displayWorkspaceId: workspaceId, groupId: tabGroupId, tabOrder: removedTabOrder }, error => get().reportError(error))
       if (collectionChanged) void saveWorkbenchSelection(false)
