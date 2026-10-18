@@ -5,6 +5,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { ConversationToolDiff } from '../src/components/ConversationToolDiff'
 import { createRoot } from 'react-dom/client'
 import { CapturedProcessRecord } from '../src/components/CapturedProcessRecord'
+import { RecordedStepsCard, RecordedToolRow } from '../src/components/WorkflowObservation'
+import { normalizeAgentTimelineItem } from '@agentmux/core'
 import { ConversationView } from '../src/components/ConversationView'
 import { NativeProcessObservation } from '../src/components/NativeProcessObservation'
 import { ConversationToolTrace } from '../src/components/ConversationToolTrace'
@@ -96,4 +98,35 @@ it('opens a large original edit with a bounded preview and complete original Cop
   expect(copy.mock.calls).toHaveLength(1)
   expect(copy.mock.calls[0]?.[0] === item.toolInput).toBe(true)
   copy.mockRestore()
+})
+
+
+it('preserves Core saved-input recorded status in the User route and neutral observation consumers', async () => {
+  const { host, render } = surface()
+  const item = normalizeAgentTimelineItem({ id: 'prompt:original-saved', agentSessionId: 'original-session', kind: 'user_message',
+    source: 'user', status: 'recorded', title: 'Original saved input', content: 'Original human body 中文🙂', createdAt: 1, updatedAt: 1,
+    authorHuman: true, publicContent: 'confirmed',
+    inputRef: { kind: 'prompt', agentSessionId: 'original-session', expectedRun: { runId: 'original-run' }, submissionId: 'original-saved' },
+    inputOrigin: { queueId: 'original-journal', incarnation: 'original-incarnation', sequence: 1 },
+    inputSubmission: { status: 'waiting', observation: 'rejoin-needed' } })
+  const timeline = { agentSessionId: item.agentSessionId, sourceHostId: 'local', revision: 1, items: [item] }
+  const projection = projectConversationReading({ agentSessionId: item.agentSessionId, executionHostId: 'local', timeline })
+  expect(projection.records).toHaveLength(1)
+  expect(projection.records[0]).toMatchObject({ role: 'message', original: { item: { status: 'recorded' } } })
+  await render(<ConversationView timeline={timeline} sessionId={item.agentSessionId} executionHostId="local"
+    records={projection.records} originalRecords={projection.originalRecords} expandSubmissions />)
+  expect(host.querySelector('[data-speaker-role="human"]')?.textContent).toContain(item.content)
+  expect(host.querySelector('.conversation-submission-summary')?.getAttribute('data-status')).toBe('recorded')
+  expect(host.querySelector('.conversation-submission-summary')?.textContent).toContain('已保存 · 等待 Agent')
+  expect(host.querySelector('[data-captured-process-id]')).toBeNull()
+  await render(<RecordedStepsCard observation={{ id: item.id, stepCount: 1, status: item.status }} expanded onExpandedChange={() => {}}>
+    <RecordedToolRow className="log-row" icon={null} observation={{ id: item.id, title: item.title, status: item.status, source: 'Original captured input', persistentSource: true }} />
+  </RecordedStepsCard>)
+  const card = host.querySelector('[data-observation-id]')!, row = host.querySelector('[data-observation-step-id]')!
+  expect(card.getAttribute('data-status')).toBe('recorded'); expect(row.getAttribute('data-status')).toBe('recorded')
+  expect(card.querySelector('.wf-head .wf-observation__recorded')?.textContent).toBe('Recorded')
+  expect(row.querySelector('.wf-observation__recorded')?.textContent).toBe('Recorded')
+  expect(host.textContent).not.toContain('Status not recorded')
+  expect(host.textContent).not.toContain('Streaming'); expect(host.textContent).not.toContain('Recorded running')
+  expect(host.querySelector('[data-semantic-icon="status.completed"]')).toBeNull()
 })
