@@ -1,3 +1,4 @@
+@import './note-static-markup.css';
 /* Client supplies its own theme tokens, font and shell. These rules own conversation surfaces. */
 @import './overlays.css';
 @import '../input/input.css';
@@ -19,6 +20,7 @@
 @import './note-authorship.css';
 @import './note-code-block.css';
 @import './note-rich-content.css';
+@import './note-image.css';
 @import './conversation-image.css';
 @import './conversation-input-details.css';
 @import './conversation-tool-trace.css';

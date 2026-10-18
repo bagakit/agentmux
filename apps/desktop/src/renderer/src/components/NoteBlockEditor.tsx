@@ -1,3 +1,6 @@
+import { NoteLinkActions } from '@agentmux/client-ui/components/NoteLinkActions'
+import { useNoteAttachments } from '../lib/use-note-attachments'
+import { NoteFileContext, useNoteFileResource, resolveNoteSourceResource } from '@agentmux/client-ui/components/NoteFileContext'
 import { retainNoteDraftEditor, retainNoteDraftNavigation, observeNoteDraftNavigation, notePendingSourceDecorations, observeNotePendingSource } from '../lib/note-share-staging'
 import { NoteSharedContext } from '../lib/note-shared-context'
 import { RovingToolbar, RovingToolbarButton } from './RovingToolbar'
@@ -18,6 +21,7 @@ import { useNoteWikiCompletion } from './NoteWikiCompletion'
 import { serializeNoteDocument, type NoteInclude, type NoteBlockReference, type NoteBlockTarget, type NoteDocument } from '../../../shared/note-document'
 import { noteRichContentExtensions } from '@agentmux/client-ui/components/NoteRichContent'
 import { NoteInsertMenu } from '@agentmux/client-ui/components/NoteInsertMenu'
+import { NoteTableTools } from '@agentmux/client-ui/components/NoteTableTools'
 import { NoteBlockAuthors } from '@agentmux/client-ui/components/NoteBlockAuthors'
 import { useAppStore } from '../store'
 import { noteBacklinks, resolveNoteBlock, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
@@ -78,6 +82,7 @@ export function noteEditorExtensions(folded: () => ReadonlySet<string> = () => n
 
 function NoteReferenceView({ node }: NodeViewProps) {
   const context = useContext(ReferenceContext)
+  const parentResource = useNoteFileResource()
   const reference = node.attrs as NoteBlockReference
   if (!context) return <NodeViewWrapper className="note-reference" contentEditable={false}>Reference scope is not available.</NodeViewWrapper>
   if (!reference.target) return <NodeViewWrapper className="note-reference" contentEditable={false}><p className="note-knowledge-notice" role="status">
@@ -95,7 +100,7 @@ function NoteReferenceView({ node }: NodeViewProps) {
     {cycle ? <p className="note-knowledge-notice" role="status">This reference is circular. The original reference is preserved.</p>
       : resolution.status !== 'resolved' ? <p className="note-knowledge-notice" role="status">{resolution.message}</p>
       : reference.mode === 'embed' || resolution.block.content.type === 'noteInclude' ? <ReferenceContext.Provider value={{ ...context, trail: [...context.trail, key] }}>
-        <ReadOnlyBlock content={resolution.block.content} />
+        <NoteFileContext.Provider value={resolveNoteSourceResource(parentResource, resolution.source.location)}><ReadOnlyBlock content={resolution.block.content} /></NoteFileContext.Provider>
       </ReferenceContext.Provider> : <p className="note-reference__excerpt">{resolution.block.text || 'Empty block'}</p>}
   </NodeViewWrapper>
 }
@@ -104,7 +109,7 @@ export function ReadOnlyBlock({ content }: { content: JSONContent }) {
   const ownerDocument = useWorkbenchDocument()
   const agentNames = useAppStore(state => state.agentNames)
   // A list item requires its schema container even when its subtree is the requested projection.
-  const doc = useMemo(() => content.type === 'doc' ? content : ({ type: 'doc', content: [content.type === 'listItem' ? { type: 'bulletList', content: [content] } : content] }), [content])
+  const doc = useMemo(() => content.type === 'doc' ? content : ({ type: 'doc', content: [content.type === 'listItem' ? { type: 'bulletList', content: [content] } : content.type === 'taskItem' ? { type: 'taskList', content: [content] } : content] }), [content])
   const context = useContext(ReferenceContext), openLink = useRef(context?.onOpenLink); openLink.current = context?.onOpenLink
   const editor = useEditor({ extensions: [...noteRichContentExtensions().map(extension => extension.name === NoteIncludeNode.name ? includeExtension(true) : extension.name === NoteBlockReferenceNode.name ? referenceExtension() : extension.name === NoteInlineLinkNode.name ? inlineLinkExtension() : extension), noteWikiLiteralExtension(link => openLink.current?.(link))], content: doc, editable: false,
     editorProps: { attributes: { class: 'note-embedded-content', 'aria-label': 'Original block, read only' } } }, [])
@@ -116,7 +121,7 @@ export function ReadOnlyBlock({ content }: { content: JSONContent }) {
     return () => { sync.destroy(); if (snapshot.current === sync) snapshot.current = null }
   }, [editor])
   useEffect(() => { snapshot.current?.update(doc) }, [editor, doc])
-  return <>{issue && <p role="status">{issue} <button type="button" onClick={() => snapshot.current?.retry()}>Retry incoming update</button></p>}<EditorContent editor={editor} /><NoteBlockAuthors editor={editor} agentNames={agentNames} /></>
+  return <>{issue && <p role="status">{issue} <button type="button" onClick={() => snapshot.current?.retry()}>Retry incoming update</button></p>}<NoteLinkActions editor={editor} /><EditorContent editor={editor} /><NoteBlockAuthors editor={editor} agentNames={agentNames} /></>
 }
 
 export type NoteEditorHandle = { onNavigationReady?: (listener: () => void) => () => void; editor: Editor; focusBlock: (blockId: string, focus?: boolean, reveal?: boolean) => boolean; bindLink: (link: NoteLinkOpenRequest, target: NoteLinkTarget) => boolean }
@@ -127,6 +132,9 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   onSnapshotIssue?: ((displayedRaw: string, incomingRaw: string, reason: string) => void) | undefined
   onKeepDisplayedDraft?: ((displayedRaw: string, incomingRaw: string) => void) | undefined
 }) {
+  const resource = useNoteFileResource()
+  const attachments = useNoteAttachments(resource ?? undefined)
+  const attachmentRef = useRef(attachments); attachmentRef.current = attachments
   const ownerDocument = useWorkbenchDocument()
   const agentNames = useAppStore(state => state.agentNames)
   const shared = useContext(NoteSharedContext), sharedRef = useRef(shared); sharedRef.current = shared
@@ -170,7 +178,14 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
   const pendingSource = useMemo(() => Extension.create({ name: 'notePendingSource', addDecorations() { return { shouldUpdate: ({ tr }) => tr.docChanged || Boolean(tr.getMeta('notePendingSource')), create: ({ state }) => { const source = pendingSourceKey.current; return source.fileKey ? notePendingSourceDecorations(source.fileKey, source.noteId, state.doc) : [] } } } }), [])
   const editor = useEditor({ extensions: [...extensions, pendingSource], content: note.content, editorProps: {
     attributes: { class: 'note-block-content', role: 'textbox', 'aria-label': 'Note blocks', 'aria-multiline': 'true' },
-    handlePaste(_view, event) { return editorRef.current ? sharedRef.current?.paste(editorRef.current, event) ?? false : false },
+    handlePaste(_view, event) {
+      const current = editorRef.current
+      if (!current) return false
+      if (sharedRef.current?.paste(current, event)) return true
+      const files = Array.from(event.clipboardData?.files ?? [])
+      if (!files.length) return false
+      event.preventDefault(); attachmentRef.current.importFiles(files, current); return true
+    },
     handleDOMEvents: { compositionstart(view) { if (!composing.current) { compositionBefore.current = view.state.doc.toJSON(); composing.current = true; snapshot.current?.pause(); props.current.onCompositionChange?.(true) }; return false } },
     handleKeyDown(view, event) {
       if (event.isComposing || view.composing) return false
@@ -208,6 +223,9 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     if (!composing.current && !transaction.getMeta('noteWikiCompositionEnd')) publishContent(editor, transaction.before.toJSON())
   } }, [note.noteId])
   editorRef.current = editor
+  useEffect(() => {
+    if (editor && shared?.focusedEditor === editor) shared.focusEditor(editor, attachments)
+  }, [editor, shared?.focusedEditor, shared?.focusEditor, attachments.importFiles, attachments.pending])
   useEffect(() => editor && shared?.fileKey ? retainNoteDraftEditor(shared.fileKey, editor) : undefined, [editor, shared?.fileKey])
   useEffect(() => editor && shared?.fileKey ? observeNotePendingSource(shared.fileKey, note.noteId, editor, () => { if (!editor.isDestroyed) editor.view.dispatch(editor.state.tr.setMeta('notePendingSource', true)) }) : undefined, [editor, shared?.fileKey, note.noteId])
   useLayoutEffect(() => {
@@ -333,6 +351,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
     return () => { editor.off('mount', attach).off('unmount', detach).off('destroy', detach); detach() }
   }, [editor, handleRef])
   const actionEditor = shared?.focusedEditor && !shared.focusedEditor.isDestroyed ? shared.focusedEditor : editor
+  const actionAttachments = actionEditor === editor ? attachments : shared?.focusedAttachments
   const formatting = useEditorState({ editor: actionEditor, selector: ({ editor }) => ({
     heading: editor && !editor.isDestroyed ? editor.isActive('heading', { level: 1 }) : false,
     list: editor && !editor.isDestroyed ? editor.isActive('bulletList') : false,
@@ -396,9 +415,12 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
           editor.view.dispatch(editor.state.tr.setMeta('noteFold', true)); setFoldRevision(value => value + 1)
         }}><ThemeNavigationDownIcon size={15} /></RovingToolbarButton>
       </div>
-      <NoteInsertMenu editor={actionEditor} />
+      <NoteInsertMenu editor={actionEditor} {...(actionAttachments ? { onImportFiles: actionAttachments.importFiles, importing: actionAttachments.pending } : {})} />
+      {actionEditor && <NoteTableTools editor={actionEditor} />}
     </RovingToolbar>
-    <div className="note-editor__body" onFocus={event => { if (editor && (event.target as HTMLElement).closest('.note-block-content') === editor.view.dom) { shared?.focusEditor(editor); showSelectedAction() } }} onPointerMove={event => {
+    {attachments.pending && <p className="note-knowledge-notice" role="status">Copying attachments to this Note’s folder…</p>}
+    {attachments.issue && <p className="note-knowledge-notice" role="status">{attachments.issue} <button type="button" className="note-text-button" onClick={attachments.dismiss}>Dismiss</button></p>}
+    <div className="note-editor__body" onFocus={event => { if (editor && (event.target as HTMLElement).closest('.note-block-content') === editor.view.dom) { shared?.focusEditor(editor, attachments); showSelectedAction() } }} onPointerMove={event => {
       if (!editor || editor.isDestroyed || !(event.target instanceof ownerDocument.defaultView!.Element)) return
       const element = event.target.closest('p,h1,h2,h3,h4,h5,h6,li,blockquote,pre,hr,[data-note-include]')
       if (!element || element.closest('.note-block-content') !== editor.view.dom) return
@@ -411,7 +433,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
         void shared.copyBlock(editor, position).then(() => setCopyFeedback({ position, accepted: true, message: 'Copied · paste to share' })).catch(error => { const message = error instanceof Error ? error.message : String(error); setCopyFeedback({ position, accepted: false, message }); props.current.onIssue(message) })
       }}>{copyFeedback?.accepted ? <ThemeStatusCopiedIcon size={13} /> : <ThemeObjectLinkIcon size={13} />}</button>}
       {copyFeedback && <span className="note-block-copy-feedback" role="status" data-failed={!copyFeedback.accepted || undefined} style={{ top: beside?.top ?? 0 }}>{copyFeedback.message}</span>}
-      <EditorContent editor={editor} /><NoteBlockAuthors editor={editor} agentNames={agentNames} />
+      <NoteLinkActions editor={editor} /><EditorContent editor={editor} /><NoteBlockAuthors editor={editor} agentNames={agentNames} />
     </div>
     {wiki.popup}
     {showBacklinks ? <details className="note-backlinks"><summary>Backlinks{selected && backlinks.length ? ` · ${backlinks.length}` : ''}<span>{knowledge.scope === 'complete' ? 'Confirmed scope' : 'Partial scope'}</span></summary>

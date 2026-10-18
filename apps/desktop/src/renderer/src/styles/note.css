@@ -1,3 +1,5 @@
+@import '@agentmux/client-ui/styles/note-image.css';
+@import '@agentmux/client-ui/styles/note-static-markup.css';
 @import '@agentmux/client-ui/styles/note-authorship.css';
 @import '@agentmux/client-ui/styles/note-rich-content.css';
 @import '@agentmux/client-ui/styles/note-code-block.css';

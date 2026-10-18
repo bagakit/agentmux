@@ -1,3 +1,4 @@
+import { NoteFileContext } from '@agentmux/client-ui/components/NoteFileContext'
 import type { Editor } from '@tiptap/core'
 import { noteShareSiblingRange } from '../../../shared/note-share-range'
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
@@ -6,7 +7,7 @@ import type { NoteInclude } from '../../../shared/note-document'
 import { closeHistory } from '../../../shared/note-content-schema'
 import { parseNoteFile, type NoteKnowledge, type NoteSource } from '../lib/note-knowledge'
 import type { NoteFileTarget } from '../lib/file-document-consumers'
-import { NoteSharedContext } from '../lib/note-shared-context'
+import { NoteSharedContext, type NoteEditorAttachments } from '../lib/note-shared-context'
 import { clearPendingNoteShares, copyNoteBlock, focusIncludedNoteDraft, noteBlockFingerprint, noteNodeAtPath, pendingNoteShares, readNoteShareClipboard, stageNoteShare, writeNoteShareClipboard } from '../lib/note-share-staging'
 import { documentKey } from '../lib/workbench-tabs'
 import { useAppStore } from '../store'
@@ -18,7 +19,7 @@ import { NoteSharedDetails } from './NoteSharedDetails'
 import { noteSharedRelations } from '../lib/note-shared-relations'
 import { useNoteLinkNavigation } from '../lib/use-note-link-navigation'
 
-type EditorOwner = { focusedEditor: Editor | null; focusEditor(editor: Editor): void }
+type EditorOwner = { focusedEditor: Editor | null; focusedAttachments?: NoteEditorAttachments | undefined; focusEditor(editor: Editor, attachments?: NoteEditorAttachments): void }
 type Observation = ReturnType<typeof useNoteCanvasObservation>
 type Scope = { include?: NoteInclude; target: NoteFileTarget; read?: FileReadParams | undefined; occurrence: string; active: boolean; knowledge: NoteKnowledge; onOpen(source: NoteSource, blockId: string): void; onOpenOriginal?(target: NoteFileTarget, blockId?: string, signal?: AbortSignal): Promise<void> }
 /** One graph observation for all includes on this Note; typing never rescans the workspace. */
@@ -26,10 +27,14 @@ export function NoteSharedFileEditing({ children, hasIncludes, ...scope }: Scope
   const graph = useNoteCanvasObservation(scope.active && hasIncludes, false)
   const fileRevision = useAppStore(state => state.workspaceFileRevisions[scope.target.workspaceId] ?? 0), previousRevision = useRef(fileRevision)
   useEffect(() => { if (previousRevision.current !== fileRevision) { previousRevision.current = fileRevision; graph.refresh() } }, [fileRevision, graph.refresh])
-  const [focusedEditor, focusEditor] = useState<Editor | null>(null), trail = useMemo(() => [scope.target.noteId], [scope.target.noteId])
+  const [focused, setFocused] = useState<{ editor: Editor; attachments?: NoteEditorAttachments | undefined } | null>(null)
+  const focusEditor = useCallback((editor: Editor, attachments?: NoteEditorAttachments) => setFocused(current =>
+    current?.editor === editor && current.attachments?.importFiles === attachments?.importFiles && current.attachments?.pending === attachments?.pending
+      ? current : { editor, attachments }), [])
+  const trail = useMemo(() => [scope.target.noteId], [scope.target.noteId])
   const confirmedIncludes = useMemo(() => graph.snapshot?.graph.observations.flatMap(value => value.status === 'read' && value.kind === 'shared-block' && value.fileIdentity === 'confirmed' ? [{ noteId: value.noteId, workspaceId: value.resource.workspaceId, path: value.resource.path, revision: value.revision }] : []) ?? [], [graph.snapshot])
   const knowledge = useMemo(() => ({ ...scope.knowledge, confirmedIncludes }), [scope.knowledge, confirmedIncludes])
-  return <SharedScope {...scope} knowledge={knowledge} owner={{ focusedEditor, focusEditor }} graph={graph} trail={trail}>{children}</SharedScope>
+  return <SharedScope {...scope} knowledge={knowledge} owner={{ focusedEditor: focused?.editor ?? null, focusedAttachments: focused?.attachments, focusEditor }} graph={graph} trail={trail}>{children}</SharedScope>
 }
 function SharedScope({ children, graph, trail, owner, ...scope }: Scope & { children: ReactNode; graph: Observation; trail: readonly string[]; owner: EditorOwner }) {
   const current = useRef(scope); current.current = scope
@@ -59,8 +64,8 @@ function SharedScope({ children, graph, trail, owner, ...scope }: Scope & { chil
       const destination = documentKey(current.current.target.workspaceId, current.current.target.path)
       return editor.chain().focus().command(({ tr }) => { closeHistory(tr); tr.setMeta('uiEvent', 'paste'); return true }).insertContent({ type: 'noteInclude', attrs: stageNoteShare(destination, copy) }).run()
     }
-  }), [scope.target.workspaceId, scope.target.path, scope.target.noteId, scope.occurrence, scope.active, scope.knowledge, scope.onOpen, graph.snapshot, graph.issue, graph.busy, graph.refresh, trail, owner.focusedEditor])
-  return <NoteSharedContext.Provider value={value}>{children}</NoteSharedContext.Provider>
+  }), [scope.target.workspaceId, scope.target.path, scope.target.noteId, scope.occurrence, scope.active, scope.knowledge, scope.onOpen, graph.snapshot, graph.issue, graph.busy, graph.refresh, trail, owner.focusedEditor, owner.focusedAttachments])
+  return <NoteFileContext.Provider value={scope.target}><NoteSharedContext.Provider value={value}>{children}</NoteSharedContext.Provider></NoteFileContext.Provider>
 }
 /** Chrome is presentation only; source identity stays in the original Markdown declaration. */
 function SharedFrame({ children, source = false, status, attention = false, actions, marker }: { children: ReactNode; source?: boolean; status?: string | undefined; attention?: boolean; actions?: ReactNode; marker?: ReactNode }) {

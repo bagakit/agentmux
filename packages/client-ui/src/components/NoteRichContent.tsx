@@ -1,8 +1,10 @@
+import { NoteRawBlock } from './NoteRawBlock.js'
 import { Extension } from '@tiptap/core'
 import { DOMSerializer } from '@tiptap/pm/model'
 import { Plugin } from '@tiptap/pm/state'
 import type { NodeViewConstructor } from '@tiptap/pm/view'
 import { noteContentExtensions } from '../note/note-content-schema.js'
+import { NoteImage } from './NoteImage.js'
 import { NoteCodeBlock } from './NoteCodeBlock.js'
 import { NoteMathInline, NoteMathBlock } from './NoteMath.js'
 
@@ -29,6 +31,6 @@ const provenanceContainers = Extension.create({
 
 /** Client-only node views share the canonical schema used by files and public writes. */
 export function noteRichContentExtensions() {
-  return [...noteContentExtensions().map(extension => extension.name === 'starterKit' ? extension.configure({ codeBlock: false })
-    : extension.name === 'noteMathInline' ? NoteMathInline : extension.name === 'noteMathBlock' ? NoteMathBlock : extension), NoteCodeBlock, provenanceContainers]
+  return [...noteContentExtensions().map(extension => extension.name === 'starterKit' ? extension.configure({ codeBlock: false, link: { openOnClick: false } })
+    : extension.name === 'noteRawBlock' ? NoteRawBlock : extension.name === 'image' ? NoteImage : extension.name === 'noteMathInline' ? NoteMathInline : extension.name === 'noteMathBlock' ? NoteMathBlock : extension), NoteCodeBlock, provenanceContainers]
 }

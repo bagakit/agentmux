@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api } from './api'
+import type { WorkspaceFilePreviewReadOptions } from '../../../shared/workspace-file-preview'
 import { useAppStore } from '../store'
 
 type PreviewResult = Awaited<ReturnType<typeof api.files.readPreview>>
@@ -12,7 +13,7 @@ function resourceKey(workspaceId: string): string {
 }
 
 /** Main owns file bytes. A read is admitted only by its original resource and lifecycle. */
-export function useWorkspaceFilePreview(workspaceId: string, path: string, enabled = true) {
+export function useWorkspaceFilePreview(workspaceId: string, path: string, enabled = true, expectedResource?: WorkspaceFilePreviewReadOptions['expectedResource']) {
   const selectResource = useMemo(() => {
     let config: ReturnType<typeof useAppStore.getState>['config'] | undefined, key = ''
     return (state: ReturnType<typeof useAppStore.getState>) => {
@@ -27,7 +28,7 @@ export function useWorkspaceFilePreview(workspaceId: string, path: string, enabl
   const resource = useAppStore(selectResource)
   const [attempt, setAttempt] = useState(0)
   const [epoch, setEpoch] = useState(0)
-  const owner = useMemo(() => ({ valid: true, resource }), [resource, path, enabled, attempt, epoch])
+  const owner = useMemo(() => ({ valid: true, resource }), [resource, path, enabled, attempt, epoch, expectedResource?.hostId, expectedResource?.workspacePath])
   const [loaded, setLoaded] = useState<{ owner: typeof owner; result: ReadyFilePreview } | null>(null)
   const [failed, setFailed] = useState<{ owner: typeof owner; failure: Failure } | null>(null)
   useEffect(() => {
@@ -44,7 +45,7 @@ export function useWorkspaceFilePreview(workspaceId: string, path: string, enabl
       setEpoch(value => value + 1)
     })
     const current = () => !cancelled && owner.valid && resourceKey(workspaceId) === owner.resource
-    void api.files.readPreview(workspaceId, path).then(result => {
+    void api.files.readPreview(workspaceId, path, expectedResource ? { expectedResource } : undefined).then(result => {
       if (!current()) return
       if (result.status === 'ready') setLoaded({ owner, result })
       else setFailed({ owner, failure: { status: result.status,
