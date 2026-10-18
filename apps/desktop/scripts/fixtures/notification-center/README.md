@@ -1,0 +1,9 @@
+# Notification center product proof
+
+Run `node apps/desktop/scripts/verify-notification-center.mjs --visual` from the repository root.
+
+The fixture mounts the complete production App, DesktopClientUiProvider, notification consumers, real terminals and all product styles in a private Electron process. Preview API ports provide exact Host/Session/Run observations; the fixture never reaches the user's App or Runtime. It starts with two existing work surfaces and unsent drafts, then adds 98 original current observations across 32 Session objects and two system sources. Grouping does not resolve or remove those observations.
+
+Real pointer and keyboard input opens the bottom status entry, filters categories, expands object groups and original Details, marks the explicitly selected scope read, changes Current/Activity, and dismisses the panel. Native geometry and the original Store verify that passive notifications and reading retain the workface, drafts and input focus. New events arrive while the original selection and scroll position are held. Dark/light and normal/narrow captures show the whole original App, including its surrounding workface and status bar.
+
+The receipt binds consumed source/CSS, dependency manifests, compiled outputs, actual interaction events, screenshots, and private process cleanup. `captureOnly` and `aestheticReview: not-performed` remain explicit until a separate Agent actually opens every full image and records a candidate-bound review. This proves Desktop presentation and reading, not native Agent execution, OS delivery or durable Session process recovery. Current behavior and appearance contracts are [notification behavior](../../../../../docs/design/behavior/settings-and-observation.md#全局通知与底部状态入口) and [notification presentation](../../../../../docs/design/presentation/settings-and-observation.md#全局通知与底部状态入口).
