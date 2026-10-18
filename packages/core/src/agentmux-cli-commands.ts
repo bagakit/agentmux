@@ -623,10 +623,10 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   }, true),
   goal('delete', '--goal ID --confirm delete', 'Delete one explicitly confirmed Goal.', { '--confirm': 'value' }, f => ({ confirmation: value(f, '--confirm', true) }), true),
   goal('assign', '--goal ID [--project ID] [--assignees JSON] [--supervisor SESSION|--clear-supervisor] [--expected-updated-at MS] [--start --session ID]', 'Assign accurate Agent Sessions atomically; optional start is explicit.', { '--project': 'data', '--session': 'data', '--start': 'boolean', '--expected-updated-at': 'value', ...RELATION_FLAGS }, f => ({ ...fields(f, { '--project': 'projectId', '--session': 'sessionId' }), ...relationFields(f), ...numbers(f, { '--expected-updated-at': 'expectedUpdatedAt' }), start: f.booleans.has('--start') }), true),
-  goal('start', '--goal ID [--session ID] [--continue-ms MS --alignment-revision REV] [--operation-id OP]', 'Start finite execution or an exact confirmed Goal continuation. If input is unknown, inspect this Goal and retry the same OP.', { '--session': 'data', '--continue-ms': 'value', '--alignment-revision': 'value' }, f => {
+  goal('start', '--goal ID [--session ID] [--expected-updated-at MS] [--continue-ms MS --alignment-revision REV] [--operation-id OP]', 'Start finite execution or an exact confirmed Goal continuation. Bind a new start to the read Goal version with --expected-updated-at. Unknown input requires inspection of the same OP before any explicit continuation.', { '--session': 'data', '--expected-updated-at': 'value', '--continue-ms': 'value', '--alignment-revision': 'value' }, f => {
     const continuation = numbers(f, { '--continue-ms': 'intervalMs', '--alignment-revision': 'alignmentRevision' })
     if (f.values.has('--continue-ms') !== f.values.has('--alignment-revision')) invalid('Continuation requires both --continue-ms and --alignment-revision.')
-    return { ...fields(f, { '--session': 'sessionId' }), ...(f.values.has('--continue-ms') ? { continuation } : {}) }
+    return { ...fields(f, { '--session': 'sessionId' }), ...numbers(f, { '--expected-updated-at': 'expectedUpdatedAt' }), ...(f.values.has('--continue-ms') ? { continuation } : {}) }
   }, true),
   goal('continuation-action', '--goal ID --loop ID --action pause|resume|stop|check --revision REV [--operation-id OP]', 'Control the exact original Goal loop; stopping a loop keeps the Agent Run.', { '--loop': 'data', '--action': 'value', '--revision': 'value' }, f => {
     value(f, '--revision', true)

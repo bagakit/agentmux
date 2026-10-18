@@ -1811,7 +1811,7 @@ export type AgentMuxDesktopApi = {
   demands: {
     delegation<M extends 'goal.delegations' | 'goal.collect' | 'goal.patrol' | 'goal.patrol.continue'>(method: M, input: import('@agentmux/core/goal-delegation').GoalDelegationParamsMap[M]): Promise<import('@agentmux/core/goal-delegation').GoalDelegationResult>
     onChanged(listener: (goalIds: string[]) => void): () => void
-    prepareGoalStart(goalId: string, intent: import('@agentmux/demand').DemandDispatchIntent, controlRequestId?: string): Promise<import('@agentmux/demand').DemandReceipt>
+    prepareGoalStart(goalId: string, intent: import('@agentmux/demand').DemandDispatchIntent, controlRequestId?: string, expectedUpdatedAt?: number): Promise<import('@agentmux/demand').DemandReceipt | { conflict: 'goal-version'; goalId: string; operationId: string; currentUpdatedAt: number }>
     inspectDispatch(reference: import('./goal-dispatch').GoalDispatchReference): Promise<import('@agentmux/demand').DemandDispatch | null>
     reconcileDispatch(reference: import('./goal-dispatch').GoalDispatchReference): Promise<import('@agentmux/demand').DemandReceipt>
     list(): Promise<import('@agentmux/demand').Demand[]>

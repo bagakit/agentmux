@@ -483,6 +483,7 @@ export type AgentMuxControlDemandStartRequest = RequestBase & {
   operation: 'demand.start'
   demandId: string
   sessionId?: string
+  expectedUpdatedAt?: number
   continuation?: { intervalMs: number; alignmentRevision: number }
   caller?: AgentMuxControlCaller
 }

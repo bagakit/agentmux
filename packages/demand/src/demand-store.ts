@@ -595,7 +595,7 @@ export class DemandStore {
   }
 
   /** Only the explicit business Start owner calls this; ordinary updates cannot write it. */
-  async prepareDispatch(id: string, input: DemandDispatchIntent): Promise<DemandReceipt> {
+  async prepareDispatch(id: string, input: DemandDispatchIntent, expectedUpdatedAt?: number): Promise<DemandReceipt> {
     const intent = parseDemandDispatchIntent(input)
     return this.mutate('dispatch.prepare', snapshot => {
       const demand = findDemand(snapshot, id, this.storePath)
@@ -604,6 +604,9 @@ export class DemandStore {
       if (original) {
         if (owner!.id !== id || !sameDemandDispatchIntent(original, intent)) throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original Start operation belongs to another Goal, Session, Run or input. Inspect it without resending.')
         return { unchanged: demand }
+      }
+      if (expectedUpdatedAt !== undefined && (!Number.isSafeInteger(expectedUpdatedAt) || expectedUpdatedAt < 0 || demand.updatedAt !== expectedUpdatedAt)) {
+        throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The Goal changed before this new Start was prepared. Read the current Goal and explicitly start that version. The original Agent remains available.', { kind: 'goal-start-version-conflict', goalId: id, operationId: intent.operationId, currentUpdatedAt: demand.updatedAt })
       }
       demand.dispatches = [...(demand.dispatches ?? []), { ...intent, stage: 'prepared', preparedAt: Date.now(),
         ...(intent.execution === 'finite' ? { resultBasis: { alignmentRevision: demand.alignment?.revision ?? null,

@@ -1,4 +1,5 @@
 import { goalDiscussionTarget } from './lib/goal-discussion-recipient'
+import { restoredGoalFiniteStartIntents, type GoalFiniteStartIntent } from './lib/goal-finite-start'
 import { observeNotifications } from './lib/notification-observation'
 import type { CollaborationMapTarget } from './lib/collaboration-map-navigation'
 import { noteShareRange, noteShareSiblingRange } from '../../shared/note-share-range'
@@ -832,6 +833,7 @@ export type AppState = {
   spatialRequests: Record<string, SpatialRequestBinding>
   /** UI intent only; original Core/spatial creation still owns the reserved Session. */
   goalAgentSelectionDrafts: Record<string, GoalAgentSelectionDraft>
+  goalFiniteStartIntents: Record<string, GoalFiniteStartIntent>
   goalAgentCreationDrafts: Record<string, GoalAgentCreationDraft>
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
@@ -3578,6 +3580,7 @@ type PersistedAppState = {
   spaceZoneBindings?: SpaceZoneBindings
   spatialRequests: Record<string, SpatialRequestBinding>
   goalAgentSelectionDrafts?: Record<string, GoalAgentSelectionDraft>
+  goalFiniteStartIntents?: Record<string, GoalFiniteStartIntent>
   goalAgentCreationDrafts?: Record<string, GoalAgentCreationDraft>
   /** Exact logical focus retained when a background move removes the active leaf. */
   retainedSpatialFocus: (AgentMuxSpaceAddress & { topicId?: string }) | null
@@ -3843,6 +3846,7 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     spaceZoneBindings: coreSpatialReady ? undefined : state.spaceZoneBindings,
     spatialRequests: state.spatialRequests,
     goalAgentSelectionDrafts: state.goalAgentSelectionDrafts,
+    goalFiniteStartIntents: state.goalFiniteStartIntents,
     goalAgentCreationDrafts: state.goalAgentCreationDrafts,
     retainedSpatialFocus: state.retainedSpatialFocus,
     connectorRoomIntents: state.connectorRoomIntents,
@@ -4313,6 +4317,21 @@ export async function clearGoalAgentSelectionDraft(goalId: string, role: GoalAge
   useAppStore.setState(state => { const goalAgentSelectionDrafts = { ...state.goalAgentSelectionDrafts }; delete goalAgentSelectionDrafts[key]; return { goalAgentSelectionDrafts } })
   await saveWorkbenchSelection(false)
 }
+export async function retainGoalFiniteStartIntent(intent: GoalFiniteStartIntent): Promise<AgentMuxSpatialSave> {
+  const original = useAppStore.getState().goalFiniteStartIntents[intent.goalId]
+  if (original && original.operationId !== intent.operationId) throw new Error('Inspect the original Goal Start before starting another task. The Agent remains available.')
+  useAppStore.setState(state => ({ goalFiniteStartIntents: { ...state.goalFiniteStartIntents, [intent.goalId]: intent } }))
+  return await saveWorkbenchSelection(false)
+}
+export async function clearGoalFiniteStartIntent(goalId: string, operationId: string): Promise<void> {
+  useAppStore.setState(state => {
+    if (state.goalFiniteStartIntents[goalId]?.operationId !== operationId) return state
+    const goalFiniteStartIntents = { ...state.goalFiniteStartIntents }; delete goalFiniteStartIntents[goalId]
+    return { goalFiniteStartIntents }
+  })
+  await saveWorkbenchSelection(false)
+}
+
 export async function retainGoalAgentCreationDraft(draft: GoalAgentCreationDraft): Promise<AgentMuxSpatialSave> {
   const key = goalCreationDraftKey(draft.goalId, draft.role), original = useAppStore.getState().goalAgentCreationDrafts[key]
   if (original && original.operationId !== draft.operationId) throw new Error('An original creation is retained. Inspect that operation before creating another Agent for this selection.')
@@ -4807,6 +4826,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   spaceZoneBindings: {},
   spatialRequests: {},
   goalAgentSelectionDrafts: {},
+  goalFiniteStartIntents: {},
   goalAgentCreationDrafts: {},
   connectorRoomIntents: {},
   continuityControlIntents: {},
@@ -6233,7 +6253,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       const current = demandRecord(demandId)
       await get().updateDemand(demandId, { activityLog: [...(current.activityLog ?? []), message] })
     }
-    const startDemand = async (demandId: string, sessionId?: string, continuation?: { intervalMs: number; alignmentRevision: number }, businessOperationId?: string, caller?: import('@agentmux/core').AgentMuxControlCaller) => {
+    const startDemand = async (demandId: string, sessionId?: string, continuation?: { intervalMs: number; alignmentRevision: number }, businessOperationId?: string, caller?: import('@agentmux/core').AgentMuxControlCaller, expectedUpdatedAt?: number) => {
       let savedContinuation: import('@agentmux/core').ContinuousProgressLoop | undefined
       const sourceForStart = (canonicalSessionId: string, hostId?: string) => {
         const matches = get().sessions.filter((candidate): candidate is Extract<SessionSnapshot, { kind: 'agent' }> => candidate.kind === 'agent' && candidate.control.agentSessionId === canonicalSessionId && (hostId === undefined || candidate.control.hostId === hostId))
@@ -6320,7 +6340,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         operationId: businessOperationId, agentSessionId: session.control.agentSessionId, hostId: session.control.hostId,
         runId: session.control.run.runId, execution: savedContinuation ? 'continue' : 'finite', prompt,
         ...(savedContinuation ? { loopId: savedContinuation.loopId, alignmentRevision: continuation!.alignmentRevision } : {})
-      }, options?.admittedControlRequestId)
+      }, options?.admittedControlRequestId, expectedUpdatedAt ?? current.updatedAt)
+      if ('conflict' in prepared) throw controlFailure('CONTROL_REQUEST_CONFLICT', 'The Goal changed. Read its current content before starting this task. No input was submitted.', { controlFailure: { disposition: 'not_applied', confirmedInputBytes: null } })
       set(state => ({ demands: { ...state.demands, [demandId]: demandRecordFromFilesystem(prepared.demand, state.demands[demandId]) } }))
       refreshKnownGoalResponsibilities([demandId])
       const operationId = admitAgentSteer(session.id, prompt, undefined, businessOperationId, undefined, undefined,
@@ -6348,7 +6369,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       return { operation: request.operation, demand: demandRecord(request.demandId), receipt: { demandId: request.demandId, assignedAt: Date.now(), startRequested: false } }
     }
     if (request.operation === 'demand.start') {
-      const started = await startDemand(request.demandId, request.sessionId, request.continuation, request.requestId, request.caller)
+      const started = await startDemand(request.demandId, request.sessionId, request.continuation, request.requestId, request.caller, request.expectedUpdatedAt)
       return { operation: request.operation, demand: started.demand, ...(started.continuation ? { continuation: started.continuation } : {}), receipt: { demandId: request.demandId, startedAt: started.startedAt, sessionId: started.sessionId } }
     }
     if (request.operation === 'demand.handoff') {
@@ -12303,7 +12324,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
     state.botTaskSelections = restoredBotTaskSelections(state.botTaskSelections)
-    return { ...state, workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
+    return { ...state, workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), goalFiniteStartIntents: restoredGoalFiniteStartIntents(state.goalFiniteStartIntents), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState

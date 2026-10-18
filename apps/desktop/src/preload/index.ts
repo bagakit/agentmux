@@ -357,7 +357,7 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.on('demands:changed', wrapped)
       return () => { ipcRenderer.removeListener('demands:changed', wrapped) }
     },
-    prepareGoalStart: (goalId, intent, controlRequestId) => ipcRenderer.invoke('demands:prepareGoalStart', goalId, intent, controlRequestId),
+    prepareGoalStart: (goalId, intent, controlRequestId, expectedUpdatedAt) => ipcRenderer.invoke('demands:prepareGoalStart', goalId, intent, controlRequestId, expectedUpdatedAt),
     inspectDispatch: (reference) => ipcRenderer.invoke('demands:inspectDispatch', reference),
     reconcileDispatch: (reference) => ipcRenderer.invoke('demands:reconcileDispatch', reference),
     list: () => ipcRenderer.invoke('demands:list'),

@@ -1,0 +1,10 @@
+.goal-finite-start { padding-block: var(--sp-6); border-block-end: 1px solid var(--line-soft); }
+.goal-finite-start__recipients { display: flex; flex-wrap: wrap; gap: var(--sp-4); margin-block: var(--sp-4); }
+.goal-finite-start__recipients .goal-collaboration__member { max-width: 100%; padding: var(--sp-3) var(--sp-4); border: 1px solid transparent; border-radius: var(--radius-sm); }
+.goal-finite-start__recipients .goal-collaboration__member { cursor: pointer; }
+.goal-finite-start__recipients .goal-collaboration__member[data-selected="true"] { background: var(--surface-1); border-color: var(--line-soft); }
+.goal-finite-start__recipients input[type="radio"] { flex: 0 0 auto; margin: 0; accent-color: var(--text-1); }
+.goal-finite-start__recipients .goal-collaboration__member span { min-width: 0; overflow-wrap: anywhere; }
+.goal-finite-start .goals-inline-actions { flex-wrap: wrap; }
+.goal-finite-start__another { margin-block-start: var(--sp-5); }
+.goal-finite-start__another > summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-meta); }
