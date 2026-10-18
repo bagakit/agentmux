@@ -24,16 +24,16 @@ async function nativeProof(name: string, value: unknown) {
   await mkdir(directory, { recursive: true }); await writeFile(join(directory, name + '.json'), JSON.stringify(value, null, 2))
 }
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
-async function fixture(providerId = 'claude') {
+async function fixture(providerId = 'claude', currentSource = false) {
   const wire = await discordTransport(); cleanup.push(wire.close)
   vi.spyOn(DefaultRestOptions, 'makeRequest').mockImplementation(wire.http.makeRequest)
   const f = await rpcOwnerFixture(['original-agent'], core, root => ({ providerId, executorId: providerId, nativeHandle: { kind: 'provider', providerId, sessionId: 'original-native', transcriptPath: join(root, 'native.jsonl') } })); cleanup.push(f.close)
   const transcript = join(f.root, 'native.jsonl'); await writeFile(transcript, providerId === 'codex' ? JSON.stringify({ type: 'session_meta', payload: { id: 'original-native', cwd: f.root, history_mode: 'paginated', cli_version: '0.163.0' } }) + '\n' : '')
   const provider = (f.client as unknown as { providers: { get(id: string): { planPromptInput(text: string): unknown } } }).providers.get(providerId)
   vi.spyOn(provider, 'planPromptInput').mockImplementation(text => ({ kind: 'single-phase', data: text + '\r' }))
-  if (providerId === 'codex') {
-    const native = f.client.providers.get('codex')
-    native.discoverNativeSession = async () => ({ handle: { kind: 'provider', providerId: 'codex', sessionId: 'original-native', transcriptPath: transcript }, assertCurrent: async () => {} })
+  if (providerId === 'codex' || currentSource) {
+    const native = f.client.providers.get(providerId)
+    native.discoverNativeSession = async () => ({ handle: { kind: 'provider', providerId, sessionId: 'original-native', transcriptPath: transcript }, assertCurrent: async () => {} })
     native.observeSessionStatus = async () => ({ dispose() {} })
     f.inner.kernel.status = vi.fn(async (id: string) => ({ ...f.run(id), pid: 123 }))
   }
@@ -117,6 +117,38 @@ it('default Discord history preserves an untriggered baseline and native-only pe
   expect(f.wire.calls.some(call => call.path === '/channels/300/messages' && call.method === 'GET')).toBe(true)
   expect((await f.services.ingress!.inspect({ ingressId: ingress.ingressId })).context?.positionMessageId).toBeNull()
   expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it.each([true, false])('quote selection uses original Discord REST mappings only for a confirmed current native source=%s', async currentSource => {
+  const f = await fixture('claude', currentSource)
+  f.wire.message('600', 'Original baseline', { mentions: [] })
+  await vi.waitFor(async () => expect((await f.services.ingress!.list({ connectionId: discordConfig.connectionId })).ingresses.some(item => item.externalMessageId === '600')).toBe(true))
+  await appendFile(f.transcript, JSON.stringify({ type: 'assistant', sessionId: 'original-native', uuid: 'known-discord-reply', message: { role: 'assistant', content: [{ type: 'text', text: 'Same public content' }] } }) + '\n')
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding).find(op => op.reference.source.recordId === 'known-discord-reply')?.state).toBe('confirmed'))
+  const published = f.services.publication!.store.list(f.binding).find(op => op.reference.source.recordId === 'known-discord-reply')!
+  const native = f.wire.messages.get(published.mapping!.messageId)!
+  expect(native.id).toBe(published.mapping!.messageId)
+  f.wire.historyMessage(String(native.id), 'Same public content', { ...native, type: 0, embeds: [], mentions: [] })
+  f.wire.historyMessage('8000', 'Same public content', { author: { id: '800', username: 'Original bot', bot: true }, mentions: [] })
+  f.wire.message('9000', 'Current Discord request')
+  let ingress: core.ConnectionIngressRecord | undefined
+  await vi.waitFor(async () => {
+    ingress = (await f.services.ingress!.list({ connectionId: discordConfig.connectionId })).ingresses.find(item => item.externalMessageId === '9000')
+    expect(ingress).toBeDefined()
+    expect((await f.services.ingress!.inspect({ ingressId: ingress!.ingressId })).inputReceipt?.status).toBe('terminal-confirmed')
+  })
+  if (!ingress!.input || !('messageId' in ingress!.input)) throw Error('Original Core input required')
+  expect(ingress!.input.contextSource).toEqual(currentSource ? { providerId: 'claude', nativeSessionId: 'original-native' } : undefined)
+  expect([...f.services.publication!.store.knownContextMessages({ application: discordConfig.application, externalConversationId: discordRoomId, hostId: 'local', agentSessionId: 'original-agent', source: { providerId: 'claude', nativeSessionId: 'original-native' } }, [String(native.id)])], JSON.stringify(published)).toEqual([String(native.id)])
+  const original = (await f.client.readMessage({ messageId: ingress!.input.messageId }))!
+  expect(original.envelope.channelQuote!.records.map(record => record.messageId)).toEqual(currentSource ? ['600', '8000'] : ['600', String(native.id), '8000'])
+  expect(original.envelope.channelQuote!.coverage).toBe('complete')
+  const sent = (f.inner.kernel.input as ReturnType<typeof vi.fn>).mock.calls[0]![1].data as string
+  const reading = parseAgentMuxMessagePrefix(sent.slice(0, -1))
+  if (reading?.kind !== 'content') throw Error('Actual native input protocol reader required')
+  expect(reading.declaredChannelQuote!.quote).toEqual(original.envelope.channelQuote)
+  expect(f.inner.kernel.input).toHaveBeenCalledOnce(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0K8AAAAASUVORK5CYII=', 'base64')
