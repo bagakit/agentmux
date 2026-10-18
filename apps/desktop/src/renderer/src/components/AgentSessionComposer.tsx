@@ -1,5 +1,4 @@
 import { useWorkbenchWindowDocument } from '../lib/workbench-document'
-import { ConnectorSharing } from './ConnectorSharing'
 import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-observed-app-store'
 import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
@@ -71,6 +70,7 @@ export function AgentSessionComposer({
   onRevealMessage,
   onOpenTerminal,
   mailboxOrigin,
+  inputContext,
   visible = true
 }: {
   sessionId: string
@@ -83,6 +83,7 @@ export function AgentSessionComposer({
   onOpenTerminal?(): void
   mailboxOrigin?: OpenHttpLinkOrigin | undefined
   resultReview?: ((onNavigate: () => void) => ReactNode) | undefined
+  inputContext?: ReactNode
   visible?: boolean
 }) {
   useObservedConsumerCommit('composer', visible)
@@ -286,7 +287,7 @@ export function AgentSessionComposer({
       onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) inputHistory.setFocused(false) }}>
     {fileReferencesOpen && workspace && visible ? <ComposerFileReferences key={attachmentScope} workspace={workspace}
       onClose={() => setFileReferencesOpen(false)} onSelect={path => { void attachments.referencePaths([path]) }} /> : null}
-    <AgentComposer key={sessionId} active={visible} aboveInput={<>{pending}{session?.kind === 'agent' ? <ConnectorSharing session={session} tabId={mailboxOrigin?.tabId} regionId={mailboxOrigin?.regionId} visible={visible} /> : null}</>} mailbox={mailbox}
+    <AgentComposer key={sessionId} active={visible} aboveInput={<>{pending}{inputContext}</>} mailbox={mailbox}
       readPastedImage={api.ui.readPastedImage}
       insertionRef={insertionRef}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
