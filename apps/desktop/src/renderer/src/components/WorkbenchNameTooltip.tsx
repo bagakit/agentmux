@@ -29,12 +29,20 @@ export function useWorkbenchNameTooltip(name: string, detail: string, suppressed
         if (pointerPassThrough) setOverflowing(panel.scrollHeight > panel.clientHeight + 1)
       }
     }
-    const stop = autoUpdate(anchor, panel, () => { void update() }, { animationFrame: anchor.namespaceURI === 'http://www.w3.org/2000/svg' })
+    const svgAnchor = anchor.namespaceURI === 'http://www.w3.org/2000/svg'
+    let stop: (() => void) | undefined, startFrame: number | undefined
+    const subscribe = () => { stop = autoUpdate(anchor, panel, () => { void update() }, { animationFrame: svgAnchor }) }
+    if (svgAnchor) {
+      // Canvas node observations can mount this shallower window portal during
+      // ResizeObserver delivery. Subscribe outside that depth-constrained turn.
+      void update()
+      startFrame = window.requestAnimationFrame(() => { startFrame = undefined; subscribe() })
+    } else subscribe()
     const hide = () => setAnchor(null)
     const key = (event: KeyboardEvent) => { if (event.key === 'Escape') hide() }
     window.addEventListener('blur', hide); document.addEventListener('visibilitychange', hide)
     window.addEventListener('keydown', key)
-    return () => { disposed = true; stop(); window.removeEventListener('blur', hide)
+    return () => { disposed = true; if (startFrame !== undefined) window.cancelAnimationFrame(startFrame); stop?.(); window.removeEventListener('blur', hide)
       document.removeEventListener('visibilitychange', hide); window.removeEventListener('keydown', key) }
   }, [visible, anchor, name, detail, placement, pointerPassThrough])
   const show = (event: MouseEvent<Element> | FocusEvent<Element>) => showFor(event.currentTarget)
