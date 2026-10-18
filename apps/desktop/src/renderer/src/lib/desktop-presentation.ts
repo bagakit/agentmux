@@ -8,6 +8,8 @@ import { workbenchRegionProjectionSlotId } from './workbench-projection'
 export type DesktopAppPresentationOwner = {
   loading: boolean
   overlays: { settings: boolean; quickSwitcher: boolean }
+  /** The existing Space content slot may cover its retained main workface. */
+  contentExpanded?: boolean
   floating: { state: 'closed' | 'preview' | 'pinned'; topicId: string | null; tabId: string | null; regionId?: string | null } | null
 }
 // The original App supplies its committed local facts. This is one reader, not a second router,
@@ -136,7 +138,7 @@ export function readDesktopPresentation(selection: AgentMuxDesktopSelection, tab
   if (owner) {
     if (owner.loading) presentation = { ...base, provenance: 'observed', state: 'pending' }
     else if (windowIdentity && desktopElementVisible(windowTarget)) presentation = { ...base, ...windowIdentity, provenance: 'observed', state: 'window' }
-    else if (blockers.length) presentation = { ...base, provenance: 'observed', state: 'covered' }
+    else if (blockers.length || selection.surface === 'space' && owner.contentExpanded) presentation = { ...base, provenance: 'observed', state: 'covered' }
     else {
       const main = document.querySelector<HTMLElement>(`[data-desktop-surface="${selection.surface}"]`)
       const views = selection.surface === 'focus' && main ? [...(main.matches(`[data-desktop-focus-view="${selection.focusView}"]`) ? [main] : []), ...main.querySelectorAll<HTMLElement>(`[data-desktop-focus-view="${selection.focusView}"]`)]

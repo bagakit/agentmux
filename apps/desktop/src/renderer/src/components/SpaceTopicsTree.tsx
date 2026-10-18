@@ -27,6 +27,7 @@ import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { SpaceObjectContextMenu } from './SpaceObjectContextMenu'
 import { MoteArchiveNotice, useMoteArchiveAction } from './MoteArchiveNotice'
 import { MoteRenameDialog } from './MoteRenameDialog'
+import { useSpaceContentPresentation } from '../lib/space-content-presentation'
 import '../styles/mote-directory.css'
 
 const ThemeActionArchiveIcon = semanticIconComponent('action.archive')
@@ -46,6 +47,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
   workspace: WorkspaceRecord; query?: string; visible?: boolean; icons: SpaceIconOverrides; onChangeIcon(target: SpaceIconTarget): void
 }) {
   const displayPath = usePathDisplay()
+  const contentPresentation = useSpaceContentPresentation()
   const { topics, error } = useScratchTopics(workspace.id, visible)
   const layout = useAppStore((state) => state.layouts[workspace.id])
   const tabs = useAppStore((state) => state.tabs)
@@ -131,6 +133,7 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
       const opened = await openTopic(id, workspace.id, { signal: controller.signal })
       if (!opened || controller.signal.aborted) return false
       if (edit) await openFile(`${scratchTopicDirectoryName(id)}/${MOTE_SOUL_PATH}`, undefined, undefined, workspace.id)
+      else contentPresentation?.expand()
       return true
     } catch (cause) { reportError(cause); return false }
     finally { release(); if (pendingOpen.current === controller) pendingOpen.current = null }

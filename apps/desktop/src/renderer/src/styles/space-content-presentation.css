@@ -1,0 +1,9 @@
+/* The original content slot fills its existing shell without moving the retained workface. */
+.surface-tool-dock[data-content-expanded="true"] { position: static; box-shadow: none; }
+.surface-tool-dock[data-content-expanded="true"][data-tools-collapsed="true"] { min-width: 0; }
+.surface-tool-dock[data-content-expanded="true"] > .surface-tool-panel {
+  position: absolute;
+  inset: 0;
+  height: auto;
+  z-index: 10;
+}
