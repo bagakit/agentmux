@@ -36,7 +36,21 @@ afterEach(async () => {
 })
 const system = { available: true, notices: [], unread: [], acknowledge: vi.fn() }
 async function inputs() {
-  const f = await ingressFixture(false); closes.push(f.close)
+  const f = await ingressFixture(false)
+  // Hosted disposal closes the logical request, not this source Core operation.
+  // Keep its entire queue → Store read alive until it settles before deleting its files.
+  const mailboxReads = new Set<Promise<AgentInputMailboxPage>>()
+  const readMailbox = f.client.readAgentInputMailbox.bind(f.client)
+  vi.spyOn(f.client, 'readAgentInputMailbox').mockImplementation((...args) => {
+    const reading = readMailbox(...args)
+    mailboxReads.add(reading)
+    void reading.then(() => mailboxReads.delete(reading), () => mailboxReads.delete(reading))
+    return reading
+  })
+  closes.push(async () => {
+    while (mailboxReads.size) await Promise.allSettled(mailboxReads)
+    await f.close()
+  })
   const incoming = await f.receive(), delivered = await f.ingress.dispatch(incoming.ingress.ingressId)
   expect(delivered.inputReceipt?.key.kind).toBe('message')
   const local = await f.client.submitAgentPrompt({ agentSessionId: f.input.agentSessionId, expectedRun: f.session.run,
