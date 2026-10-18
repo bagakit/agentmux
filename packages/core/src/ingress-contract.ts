@@ -39,6 +39,7 @@ export type ConnectionIngressMessage = {
   }
 }
 /** Authenticated native action intake. An opaque reference locates an original intent, never authority. */
+export type ConnectionQuestionAnswerSubmission = { questionId: string; optionIds?: string[]; text?: string }
 export type ConnectionIngressAction = {
   kind: 'action'
   ingressId: string
@@ -49,9 +50,10 @@ export type ConnectionIngressAction = {
   externalConversationId?: string
   sourceMessageId?: string
   actionRef?: string
+  answers?: ConnectionQuestionAnswerSubmission[]
   state: 'received' | 'refused' | 'claimed'
   code?: 'INGRESS_ACTION_UNSUPPORTED' | ConnectionIngressAuthorityCode
-  input?: { hostId: string; agentSessionId: string; expectedRun: { runId: string }; operationId: string; intentDigest: string; author: AgentExternalInteractionAuthor }
+  input?: { hostId: string; agentSessionId: string; expectedRun: { runId: string }; operationId: string; intentDigest: string; author: AgentExternalInteractionAuthor; responseKind?: 'question' }
   body?: never
   externalMessageId?: never
   addressing?: never
@@ -63,6 +65,9 @@ export type ConnectionIngressInspection = {
   ingress: ConnectionIngressRecord | null
   /** Original Core read only. An absent receipt never licenses a replay. */
   inputReceipt: AgentInputSubmissionReceipt | null
+  /** Safe projection of the original Core historical-question admission, not another input journal. */
+  questionReceipt?: { agentSessionId: string; expectedRun: { runId: string }; operationId: string;
+    source: import('./types.js').AgentSessionHistorySource; recordId: string; questionIds: string[]; outcome: 'saved' | 'unknown' | 'not-applied' | 'submitted' } | null
   interactionReceipt?: { operationId: string; agentSessionId: string; run: { runId: string }; delivery: 'saved' | 'unknown' | 'bytes-accepted' | 'hook-written' | 'acp-acknowledged'; nativeAdoption: 'unknown' } | null
   observation: 'not-started' | 'observed' | 'unavailable'
 }

@@ -434,6 +434,8 @@ export type AgentMuxSessionQuestionReplyInput = AgentPromptCondition & Omit<Agen
   turnId: string
   recordId: string
   answers: AgentSessionHistoryQuestionAnswer[]
+  /** Original authenticated channel action; the executing Host must restore its authority. */
+  externalAction?: import('./external-author.js').AgentExternalInteractionAuthor
   /** Configured native invocation, just as for the existing public history reader. */
   commandOverride?: string
   args?: readonly string[]
@@ -7135,10 +7137,20 @@ export class AgentMuxClient {
   }
 
   /** Route an exact historical question reply without guessing the live terminal's active editor. */
-  async replySessionQuestion(input: AgentMuxSessionQuestionReplyInput): Promise<AgentSessionQuestionReplyReceipt> {
+  async replySessionQuestion(input: AgentMuxSessionQuestionReplyInput, context?: AgentInputCallContext): Promise<AgentSessionQuestionReplyReceipt> {
     const condition = validateAgentPromptCondition(input)
     input = { ...input, ...condition, source: { ...input.source },
       answers: Array.isArray(input.answers) ? input.answers.map(answer => ({ ...answer })) : input.answers }
+    let authority: import('./prompt-submission.js').AgentPromptInputAuthority | undefined
+    if (input.externalAction !== undefined) {
+      const identity = parseAgentExternalInteractionAuthor(input.externalAction), owner = context?.externalQuestion
+      if (!owner || input.authorHuman !== undefined || !isDeepStrictEqual(identity, owner.identity)) throw new AgentMuxError(
+        'The original external question authority is unavailable. Retain its action; local answers remain available.', 'EXTERNAL_INTERACTION_AUTHORITY_UNCONFIRMED')
+      input = { ...input, externalAction: identity }
+      const frozen = structuredClone(input)
+      authority = { assertCurrent: async () => { await context?.assertCurrent?.(); await owner.assertCurrent(structuredClone(frozen)) } }
+      await authority.assertCurrent()
+    }
     safeId(input.operationId, 'Question reply operation id')
     input.signal?.throwIfAborted()
     const session = await this.registry.resolveMetadata(input.agentSessionId, 'local', () => input.signal?.throwIfAborted())
@@ -7169,7 +7181,7 @@ export class AgentMuxClient {
     await this.submitPromptInternal({ ...condition, agentSessionId: session.agentSessionId, operationId: input.operationId,
       prompt, execution: 'default', ...(input.authorHuman === undefined ? {} : { authorHuman: input.authorHuman }),
       ...(input.sourceDevice ? { sourceDevice: input.sourceDevice } : {}), sourceChannel: input.sourceChannel ?? 'question-reply',
-      ...(input.signal ? { signal: input.signal } : {}) }, undefined, assertSource, undefined, undefined, 'prompt', undefined, { source: input.source, turnId: input.turnId, recordId: input.recordId, questionIds: input.answers.map(answer => answer.questionId) })
+      ...(input.signal ? { signal: input.signal } : {}) }, undefined, assertSource, undefined, authority, 'prompt', undefined, { source: input.source, turnId: input.turnId, recordId: input.recordId, questionIds: input.answers.map(answer => answer.questionId), ...(input.externalAction ? { externalAction: input.externalAction } : {}) })
     return { agentSessionId: session.agentSessionId, source: { ...input.source }, recordId: input.recordId,
       questionIds: input.answers.map(answer => answer.questionId), operationId: input.operationId, outcome: 'submitted' }
   }
@@ -7639,7 +7651,7 @@ export class AgentMuxClient {
     input = { ...input, expectedRequest: normalizeAgentInteractionRequest(input.expectedRequest) }
     if (input.externalAction !== undefined) {
       const identity = parseAgentExternalInteractionAuthor(input.externalAction), originalContext = context
-      if (input.expectedRequest.kind !== 'permission' || !originalContext?.externalAction ||
+      if (!originalContext?.externalAction ||
           !isDeepStrictEqual(identity, originalContext.externalAction.identity)) {
         throw new AgentMuxError('The original external interaction authority is unavailable. Inspect the retained action; local responses remain available.', 'EXTERNAL_INTERACTION_AUTHORITY_UNCONFIRMED')
       }

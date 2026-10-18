@@ -272,7 +272,7 @@ const NATIVE_FIELDS = {
   'agent.context': ['hostId', 'agentSessionId', 'cursor', 'limit'],
   'agent.interaction.respond': ['agentSessionId', 'expectedRun', 'operationId', 'expectedRequest', 'response', 'externalAction'],
   'agent.interaction.inspect': ['agentSessionId', 'operationId'],
-  'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel'],
+  'agent.question.reply': ['agentSessionId', 'source', 'turnId', 'recordId', 'answers', 'operationId', 'expectedRun', 'afterSubmissionId', 'allowUncertainTurn', 'sourceChannel', 'externalAction'],
   'agent.history.resource': ['hostId', 'agentSessionId', 'source', 'turnId', 'recordId', 'partIndex', 'expectedReference', 'maxBytes', 'offsetBytes', 'representation'],
   'agent.conversation.record': ['hostId', 'agentSessionId', 'ingressId'],
   'agent.conversation.checkpoint': ['hostId', 'agentSessionId'],
@@ -1117,7 +1117,7 @@ export class AgentMuxRpcService {
       context.signal?.throwIfAborted()
       if (target.client.forwardRpc) return await target.client.forwardRpc('agent.question.reply', { ...input, agentSessionId: target.agentSessionId }, context) as AgentMuxRpcResult<M>
       const sourceDevice = this.ports.operationSource?.(context)
-      return await target.client.replySessionQuestion({ ...input, agentSessionId: target.agentSessionId, authorHuman: true, sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api'),
+      return await target.client.replySessionQuestion({ ...input, agentSessionId: target.agentSessionId, ...(input.externalAction ? {} : { authorHuman: true }), sourceChannel: normalizeMessageChannel(input.sourceChannel ?? 'api'),
         ...(sourceDevice ? { sourceDevice } : {}),
         ...(context.signal ? { signal: context.signal } : {}) }) as AgentMuxRpcResult<M>
     }

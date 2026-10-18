@@ -1315,7 +1315,7 @@ export type AgentPromptMessageContent = {
   inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource
   inputContextCaptureProof?: import('./agent-input-context-capture.js').AgentInputContextCaptureProof
   /** Original question identity frozen with this input; independent of encoded native text. */
-  questionReply?: { source: AgentSessionHistorySource; turnId: string; recordId: string; questionIds: string[] }
+  questionReply?: { source: AgentSessionHistorySource; turnId: string; recordId: string; questionIds: string[]; externalAction?: import('./external-author.js').AgentExternalInteractionAuthor }
   userContent?: string
   systemContext?: string
   authorAgentSessionId?: string

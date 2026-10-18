@@ -264,7 +264,7 @@ export class AgentMuxHostedRuntimeService {
       const retained = await this.client.readMessage({ messageId: invocation.args[0].envelope.messageId })
       messageIntake = retained === null || retained.deliveryMode === 'reference'
     }
-    const controlledInput = invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'broadcastMessages' || invocation.method === 'notifyMessages' || invocation.method === 'rejoinAgentInputWaiting' || invocation.method === 'respondAgentInteraction'
+    const controlledInput = invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'broadcastMessages' || invocation.method === 'notifyMessages' || invocation.method === 'rejoinAgentInputWaiting' || invocation.method === 'respondAgentInteraction' || invocation.method === 'replySessionQuestion'
     if (controlledInput && invocation.args.length !== 1) throw new AgentMuxError('Input call context is supplied only by the original Host, never by wire arguments.', 'INVALID_CONTROL_REQUEST')
     const attachment = invocation.method === 'reattachAgent' || invocation.method === 'attachTerminal' || invocation.method === 'refreshRunAttachment'
     // Direct attachment invocations borrow an existing exact event destination;
@@ -304,7 +304,7 @@ export class AgentMuxHostedRuntimeService {
     const first = invocation.args[0] as unknown
     // Match the public human question-reply owner. Only transport-approved
     // user/device intent supplies human authorship; a wire claim cannot name an Agent.
-    if (invocation.method === 'replySessionQuestion' && context.caller === undefined && context.principal &&
+    if (invocation.method === 'replySessionQuestion' && invocation.args[0].externalAction === undefined && context.caller === undefined && context.principal &&
         ['user', 'device'].includes(context.principal.kind)) {
       if (invocation.args.length !== 1 || !first || typeof first !== 'object' || 'authorAgentSessionId' in first || 'caller' in first) {
         throw new AgentMuxError('A human question reply cannot assert an Agent author or caller.', 'INVALID_CONTROL_REQUEST')
@@ -352,6 +352,12 @@ export class AgentMuxHostedRuntimeService {
         if (!port?.assertInteractionCurrent) throw new AgentMuxError('The original external interaction authority is unavailable. Retain its original operation; local responses remain available.', 'EXTERNAL_INTERACTION_AUTHORITY_UNCONFIRMED')
         return { identity, assertCurrent: (intent: import('./client.js').AgentMuxAgentInteractionInput) => port.assertInteractionCurrent!(structuredClone(identity), structuredClone(intent)) }
       })()
+      const question = invocation.method === 'replySessionQuestion' ? invocation.args[0].externalAction : undefined
+      const externalQuestion = question === undefined ? undefined : (() => {
+        const identity = parseAgentExternalInteractionAuthor(question), port = this.externalInputAuthority
+        if (!port?.assertQuestionCurrent) throw new AgentMuxError('The original external question authority is unavailable. Retain its original operation; local answers remain available.', 'EXTERNAL_INTERACTION_AUTHORITY_UNCONFIRMED')
+        return { identity, assertCurrent: (intent: import('./client.js').AgentMuxSessionQuestionReplyInput) => port.assertQuestionCurrent!(structuredClone(identity), structuredClone(intent)) }
+      })()
 
       const pending = operation.apply(this.client, invocation.method === 'readAgentInputMailbox' ? [invocation.args[0], ...(context.caller ? [context.caller] : [])] : continuityControl || invocation.method === 'ensureAgentContinuity' ? [...invocation.args, {
         ...(context.signal ? { requestSignal: context.signal } : {}),
@@ -362,7 +368,8 @@ export class AgentMuxHostedRuntimeService {
         ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}),
         ...(this.inputContextCaptureReader ? { captureReader: this.inputContextCaptureReader } : {}),
         ...(externalAuthor ? { externalAuthor } : {}),
-        ...(externalAction ? { externalAction } : {})
+        ...(externalAction ? { externalAction } : {}),
+        ...(externalQuestion ? { externalQuestion } : {})
       } satisfies import('./agent-input-wait.js').AgentInputCallContext] : invocation.args)
       value = invocation.method === 'sessionHistorySources' ? await observe(Promise.resolve(pending), context.signal) : await pending
     }
