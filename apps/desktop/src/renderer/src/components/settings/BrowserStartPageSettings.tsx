@@ -51,9 +51,11 @@ export function BrowserStartPageSettings({ config, onSave, onOpen, children }: {
       <div className="settings-survey__workspace"><div className="settings-survey__fields">
       <label className="browser-start-settings__field" data-settings-field="start-title"><span>Title</span><TextInput aria-label="Start page title" value={draft.value.title} maxLength={BROWSER_START_PAGE_TITLE_LIMIT} onChange={event => draft.setField('title', event.target.value)} /></label>
       <label className="browser-start-settings__field" data-settings-field="start-subtitle"><span>Subtitle</span><TextInput aria-label="Start page subtitle" value={draft.value.subtitle} maxLength={BROWSER_START_PAGE_SUBTITLE_LIMIT} onChange={event => draft.setField('subtitle', event.target.value)} /></label>
+      <div className="settings-survey__images" role="group" aria-label="Icon and background">
+      <div className="settings-survey__image-actions"><strong>Icon and background</strong>{hasImages && <button type="button" className="small-button" aria-label="Preview icon and background images" onClick={previewImages}><PreviewIcon size={14} aria-hidden="true" />Preview images</button>}</div>
       <StartPageImageField kind="icon" value={draft.value.icon} preview={iconPreview} revision={imagePreview?.revision ?? 0} onChange={value => { draft.setField('icon', value); setImageNotice('') }} />
       <StartPageImageField kind="background" value={draft.value.backgroundImage} preview={backgroundPreview} revision={imagePreview?.revision ?? 0} onChange={value => { draft.setField('backgroundImage', value); setImageNotice('') }} />
-      <div className="settings-survey__image-actions"><p className="settings-group-note">Choose a picture or use an image URL.</p>{hasImages && <button type="button" className="small-button" onClick={previewImages}><PreviewIcon size={14} aria-hidden="true" />Preview images</button>}</div>
+      </div>
       <label className="browser-automation-toggle" data-settings-field="start-history"><input type="checkbox" aria-label="Show recent input cards" checked={draft.value.showHistory} onChange={event => draft.setField('showHistory', event.target.checked)} />
         <span><strong>Show recent addresses and searches</strong><small>Cards use this Browser's saved input history. Turning them off keeps your history.</small></span></label>
       </div>
