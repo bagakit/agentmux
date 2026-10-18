@@ -112,7 +112,7 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
     return !fact && intent.phase === 'not-dispatched' ? 'not-dispatched' : 'unconfirmed'
   }
   useEffect(() => { setGroup(binding?.externalConversationId ?? ''); setScope(binding?.scope.input ?? 'mentions-and-replies'); setPublication(binding?.scope.publication ?? 'future-native-user-facing'); setConfirmed(false); setChangingGroup(false); setActorId(''); setActorType(''); setActorInput(false); setActorAnswer(false); setActorPermission(false); setAccessOpen(false) }, [connectionId, binding?.bindingId, binding?.revision])
-  useEffect(() => { if (approvedMembers === 0) setAccessOpen(true) }, [binding?.bindingId, binding?.revision, approvedMembers])
+  useEffect(() => { if (approvedMembers === 0 && initialSection !== 'joining') setAccessOpen(true) }, [binding?.bindingId, binding?.revision, approvedMembers, initialSection])
   const frozenRoom = roomIntent?.method === 'connection.room.create' ? roomIntent.input : null
   function observeBinding(bindingId: string, current: RoomBinding | null) {
     setBindings(previous => {
@@ -351,15 +351,22 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
     { label: 'Sharing', detail: bindingPending ? 'Check result' : sharingSaved ? 'Enabled' : binding?.state === 'paused' ? 'Paused' : 'Review scope', done: !!sharingSaved },
     { label: 'Member access', detail: !showingCurrentBinding ? binding ? 'Review after sharing' : 'Not set' : unconfirmedMembers ? 'Check result' : approvedMembers === null ? binding ? 'Checking' : 'Not set' : approvedMembers === 0 ? 'Approve members' : `${approvedMembers} approved`, done: accessConfirmed }
   ]
-  const taskTitle = bindingPending ? 'Check the original connection result' : !connection ? 'Choose a bot to connect' : roomIntent && !created && !binding ? 'Check this group’s creation' : changingGroup ? 'Review this group change' : !groupSelected ? creatingGroup ? 'Give your group a name' : 'Choose the group for this Agent'
+  const joining = initialSection === 'joining' && showingCurrentBinding
+  const disabledBinding = !!binding && connection?.config.enabled === false
+  const taskTitle = joining ? 'Join with your chat account' : disabledBinding ? 'This bot is disabled' : bindingPending ? 'Check the original connection result' : !connection ? 'Choose a bot to connect' : roomIntent && !created && !binding ? 'Check this group’s creation' : changingGroup ? 'Review this group change' : !groupSelected ? creatingGroup ? 'Give your group a name' : 'Choose the group for this Agent'
     : !binding ? 'Your group is selected. Review sharing next.'
     : binding.state === 'paused' ? 'Sharing is paused' : approvedMembers === 0 ? 'Choose who can use this Agent'
     : unconfirmedMembers || approvedMembers === null ? 'Check member access' : 'Your group connection is saved'
-  const taskDetail = bindingPending ? 'Check the original connection request below. Earlier confirmed sharing is kept.' : roomIntent && !created && !binding ? 'Your original creation request is kept. Check its status below to continue.' : changingGroup ? 'Your current group stays connected until you confirm this change.' : !groupSelected ? 'Use a group your bot has joined, or create a dedicated group.'
+  const taskDetail = joining ? 'Use the official group link or scan its code. Joining the group and permission to use this Agent are separate.' : disabledBinding ? 'Your group and sharing settings are kept. Open bot settings to enable this bot; saved member access remains available to review.' : bindingPending ? 'Check the original connection request below. Earlier confirmed sharing is kept.' : roomIntent && !created && !binding ? 'Your original creation request is kept. Check its status below to continue.' : changingGroup ? 'Your current group stays connected until you confirm this change.' : !groupSelected ? 'Use a group your bot has joined, or create a dedicated group.'
     : !binding ? 'Choose what to share, then connect this group. Member access comes next.'
     : binding.state === 'paused' ? 'The original group and member access are kept. Review sharing to resume.'
     : approvedMembers === 0 ? 'Sharing is enabled. Approve a member before they can send requests from the group.'
     : 'Sharing, member access and message delivery are separate. Check activity for actual receipts.'
+
+  const joiningAccess = audience && audienceLinks.length && !linkIntent ? <p role="status" className="agent-connector-note">Several original joining requests are kept. Check their receipts below before generating another.</p> : audience ? <ConnectorRoomJoinLink key={JSON.stringify([connectionId, audience])} submitted={!!linkIntent} operation={linkOperation} pending={busy} prominent={false} initialOpen={initialSection === 'joining'}
+            canContinue={linkIntent?.phase === 'not-dispatched' && !linkOperation}
+            onCreate={() => createJoinLink()} onRegenerate={() => { if (linkIntent) createJoinLink(linkIntent.input.operationId) }} onInspect={() => { if (linkIntent) void work(async () => { await inspect(linkIntent) }) }}
+            onContinue={() => { if (linkIntent?.phase === 'not-dispatched' && !linkOperation) void work(() => execute(linkIntent, true)) }} /> : null
 
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="dialog-scrim" />
@@ -367,7 +374,7 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
         onOpenAutoFocus={event => { event.preventDefault(); (content.current?.querySelector<HTMLElement>('[aria-label="Group name"]') ?? content.current?.querySelector<HTMLElement>('[aria-label="Existing group"]') ?? content.current?.querySelector<HTMLElement>('[aria-label="Close group setup"]'))?.focus({ preventScroll: true }) }}
         onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus(), active = ownerDocument.activeElement; if (node?.isConnected && (active === ownerDocument.body || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}
         onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}>
-        <header className="agent-connector-dialog__header"><div><Dialog.Title>{binding ? 'Group connection' : 'Connect a group'}</Dialog.Title>
+        <header className="agent-connector-dialog__header"><div><Dialog.Title>{joining ? 'Join this group' : binding ? 'Group connection' : 'Connect a group'}</Dialog.Title>
           <Dialog.Description className="agent-connector-identity">{original.identity ? <ResolvedAgentAvatar {...original.identity} label={original.name} size={22} /> : <AgentIcon size={20} aria-hidden="true" />}<span>{original.name}</span></Dialog.Description></div>
           <button type="button" className="icon-button" aria-label="Close group setup" onClick={onClose}><CloseIcon size={15} /></button></header>
         <div className="agent-connector-dialog__body">
@@ -393,6 +400,7 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
           {defaultNote ? <p className="agent-connector-note" role="status" data-mote-bot-source>{defaultNote}</p> : null}
           {busy ? <p className="agent-connector-note" role="status" aria-busy="true" data-connector-request-pending><LoadingIcon size={13} animation="spin" /> Working on this group request…</p> : null}
           {showingCurrentBinding && binding ? <><section className="agent-connector-status" aria-label="Group connection status"><div><strong>Group saved</strong><span>{binding.state === 'active' ? 'Sharing enabled locally' : 'Sharing paused'} · New {binding.scope.publication === 'future-shared-conversation' ? 'conversation content' : 'replies and questions'}</span></div><button className="agent-connector-text-action" disabled={busy || binding.state === 'paused'} onClick={pause}>Pause sharing</button><p className="agent-connector-note" aria-label="Group member access">{approvedMembers === null ? 'Member access not confirmed' : unconfirmedMembers ? 'Member access not confirmed. Last confirmed: ' + (approvedMembers === 0 ? 'no members approved' : approvedMembers + (approvedMembers === 1 ? ' member approved' : ' members approved')) : approvedMembers === 0 ? 'No members approved to use this Agent' : approvedMembers + (approvedMembers === 1 ? ' member approved to use this Agent' : ' members approved to use this Agent')}</p></section></> : null}
+          {joining ? joiningAccess : null}
           {bindingPending || binding && changingGroup ? <p className="agent-connector-note" role="status">{bindingPending ? 'The group change is not confirmed. Check its original status.' : 'Your current group stays connected until you confirm this change.'}</p> : null}
           {creatingGroup && !created ? <fieldset disabled={busy || !!roomIntent} className="agent-connector-fields" aria-label="New dedicated group">
             <details className="agent-connector-disclosure"><summary>Invite people (optional)</summary><div className="agent-connector-fields">
@@ -439,10 +447,7 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
               <button className="primary-button" disabled={memberFlights.has(selectedMember.current) || !actorType || !actorId || !selectedMemberIntent && !actorInput && !actorAnswer && !actorPermission} onClick={grant}>{memberFlights.has(selectedMember.current) ? 'Member access in progress…' : selectedMemberIntent ? 'Check original member access' : actorGrant ? 'Save member access' : 'Approve this member'}</button>
             </div></details> : null}
           </> : null}
-          {audience && audienceLinks.length && !linkIntent ? <p role="status" className="agent-connector-note">Several original joining requests are kept. Check their receipts below before generating another.</p> : audience ? <ConnectorRoomJoinLink key={JSON.stringify([connectionId, audience])} submitted={!!linkIntent} operation={linkOperation} pending={busy} prominent={false} initialOpen={initialSection === 'joining'}
-            canContinue={linkIntent?.phase === 'not-dispatched' && !linkOperation}
-            onCreate={() => createJoinLink()} onRegenerate={() => { if (linkIntent) createJoinLink(linkIntent.input.operationId) }} onInspect={() => { if (linkIntent) void work(async () => { await inspect(linkIntent) }) }}
-            onContinue={() => { if (linkIntent?.phase === 'not-dispatched' && !linkOperation) void work(() => execute(linkIntent, true)) }} /> : null}
+          {!joining ? joiningAccess : null}
           {audience && !binding ? <ConnectorRoomPeople facts={roomFacts} /> : null}
           {showingCurrentBinding && binding ? <ConnectorDeliveryDetails key={JSON.stringify([binding.bindingId, binding.revision])} binding={binding} /> : null}
           <details className="agent-connector-disclosure"><summary>Connection details</summary><div className="agent-connector-fields">

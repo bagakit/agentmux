@@ -9,9 +9,10 @@ import { AgentConnectorDialog, type AgentConnectorTarget } from './AgentConnecto
 import { ServiceNoticeDisclosure } from './ServiceNoticeDisclosure'
 import { SettingsNavigation } from './SettingsNavigation'
 import { useAgentConnectorMenu } from '../lib/use-agent-connector-menu'
+import { ConnectorHeaderLinks } from './ConnectorHeaderLinks'
 
 /** Reads only this original Session's audiences. No input, history, lifecycle or global watcher. */
-export function ConnectorSharing({ session, tabId, regionId, visible }: { session: Extract<SessionSnapshot, { kind: 'agent' }>; tabId?: string | undefined; regionId?: string | undefined; visible: boolean }) {
+export function ConnectorSharing({ session, tabId, regionId, visible, presentation = 'composer' }: { session: Extract<SessionSnapshot, { kind: 'agent' }>; tabId?: string | undefined; regionId?: string | undefined; visible: boolean; presentation?: 'composer' | 'header' }) {
   const connector = useAgentConnectorMenu(regionId ?? '', regionId ? session.id : null, tabId)
   const settings = useContext(SettingsNavigation)
   const target = { executionHostId: session.control.hostId, agentSessionId: session.control.agentSessionId }
@@ -36,6 +37,15 @@ export function ConnectorSharing({ session, tabId, regionId, visible }: { sessio
   const notice = current?.issue ? { kind: 'indeterminate' as const, notice: {
     step: 'Sharing status could not be read', mode: 'The current audience is unconfirmed. Last known groups are kept.',
     restore: 'Refresh reads the sharing status for this Session; it does not change sharing.' } } : null
+  function openBinding(binding: RoomBinding, trigger: HTMLElement) {
+    const store = useAppStore.getState(), executorId = session.executorId ?? undefined
+    const appearance = executorId ? store.config?.executors[executorId]?.avatar ?? store.config?.appearance.agentAvatars?.[executorId] : undefined
+    returned.current = trigger; setDialog({ name: store.agentNames[session.id] ?? session.label, session, connectionId: binding.connectionId,
+      identity: { providerId: session.providerId, executorId, ...(appearance ? { appearance: structuredClone(appearance) } : {}) },
+      target: { ...target, regionAnchor: { regionId: regionId ?? binding.regionAnchor.regionId } } })
+  }
+  const details = dialog ? <AgentConnectorDialog original={dialog} mode="details" {...(presentation === 'header' ? { initialSection: 'joining' as const } : {})} onClose={() => { setDialog(null); if (presentation === 'header') refreshRead.current?.() }} returnFocus={() => returned.current} /> : null
+  if (presentation === 'header') return <><ConnectorHeaderLinks bindings={current?.bindings ?? []} unconfirmed={!!current?.issue} onOpen={openBinding} />{details}</>
   const canConnect = current && !current.loading && !current.bindings.length && !current.issue && (regionId || settings)
   if (!current?.bindings.length && !current?.issue && !canConnect && !connector.dialogOpen && !dialog) return null
   return <div className="connector-sharing" aria-label="Group sharing before sending">
@@ -44,13 +54,7 @@ export function ConnectorSharing({ session, tabId, regionId, visible }: { sessio
       else settings?.openLark({ sessionId: session.id, hostId: target.executionHostId, agentSessionId: target.agentSessionId })
     }}>Connect group…</button> : null}
     {connector.issue ? <p className="connector-sharing__error" role="status">{connector.issue}</p> : null}
-    {current?.bindings.map(binding => <ConnectorSharingAudience key={binding.bindingId} binding={binding} unconfirmed={!!current.issue} onSelect={trigger => {
-      const store = useAppStore.getState(), executorId = session.executorId ?? undefined
-      const appearance = executorId ? store.config?.executors[executorId]?.avatar ?? store.config?.appearance.agentAvatars?.[executorId] : undefined
-      returned.current = trigger; setDialog({ name: store.agentNames[session.id] ?? session.label, session, connectionId: binding.connectionId,
-        identity: { providerId: session.providerId, executorId, ...(appearance ? { appearance: structuredClone(appearance) } : {}) },
-        target: { ...target, regionAnchor: { regionId: regionId ?? binding.regionAnchor.regionId } } })
-    }} />)}
+    {current?.bindings.map(binding => <ConnectorSharingAudience key={binding.bindingId} binding={binding} unconfirmed={!!current.issue} onSelect={trigger => openBinding(binding, trigger)} />)}
     <ServiceNoticeDisclosure scope={`connector-sharing:${identity}`} notices={notice ? [{ id: 'binding-read', cause: 'binding-read', notice }] : []}
       title="Sharing status unconfirmed" persistentTitle visible={visible} className="connector-sharing__notice"
       actions={<button type="button" className="small-button" aria-label="Refresh sharing status"
@@ -61,7 +65,7 @@ export function ConnectorSharing({ session, tabId, regionId, visible }: { sessio
       <p className="connector-sharing__error">{current?.issue}</p>
     </ServiceNoticeDisclosure>
     {connector.dialog}
-    {dialog ? <AgentConnectorDialog original={dialog} mode="details" onClose={() => setDialog(null)} returnFocus={() => returned.current} /> : null}
+    {details}
   </div>
 }
 
