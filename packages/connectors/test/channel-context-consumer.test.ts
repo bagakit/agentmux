@@ -83,3 +83,54 @@ it('partial history and lost native admission never advance the original positio
   expect(f.nativeSend).toHaveBeenCalledTimes(2); expect((await f.inspect(unknown.ingressId)).context?.positionMessageId).toBeNull()
   expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 }, 30000)
+
+it('an exact grant revision during native history prevents the next page and preserves the original request without input', async () => {
+  const f = await channelContextFixture(cleanup)
+  await f.receive('baseline', 1000, 'Original baseline', false)
+  f.addNative('old-root', 1, 'Earlier root discovery')
+  let pages = 0, started!: () => void, release!: () => void
+  const reading = new Promise<void>(resolve => { started = resolve })
+  f.transport.override(input => {
+    if (input.params?.container_id_type !== 'chat') return
+    pages++
+    if (pages === 1) return new Promise(resolve => {
+      release = () => resolve({ code: 0, data: { items: f.nativeRows.filter(row => row.message_id !== 'old-root'), has_more: true, page_token: 'remaining-root' } })
+      started()
+    })
+    return { code: 0, data: { items: [f.nativeRows.find(row => row.message_id === 'old-root')!], has_more: false } }
+  })
+  const received = await f.receive('inflight-grant', 2000, 'Original request held during history')
+  await reading
+  const pending = f.services.ingress!.dispatch(received.ingressId).catch(() => undefined)
+  expect(await f.rpc.call('connection.grant', { operationId: 'revoke-exact-member', bindingId: f.binding.bindingId, expectedBindingRevision: 1, grantId: 'context-member', expectedRevision: 1,
+    actor: { application: f.config.application, idType: 'open_id', userId: 'original-external-user' }, capabilities: ['input'], state: 'revoked' })).toMatchObject({ state: 'applied' })
+  release(); await pending
+  expect(pages).toBe(1); expect(f.nativeSend).not.toHaveBeenCalled()
+  const original = await f.inspect(received.ingressId)
+  expect(original.inputReceipt).toBeNull(); expect(original.ingress).toMatchObject({ body: 'Original request held during history' })
+  expect(original.ingress!.input).toBeUndefined(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 30000)
+
+it('closing the original receiver aborts its actual native HTTP read without claiming or submitting the saved input', async () => {
+  const f = await channelContextFixture(cleanup)
+  await f.receive('baseline', 1000, 'Original baseline', false)
+  let started!: () => void, nativeSignal: AbortSignal | undefined, pages = 0
+  const reading = new Promise<void>(resolve => { started = resolve })
+  f.transport.override(input => {
+    if (input.params?.container_id_type !== 'chat') return
+    pages++; nativeSignal = (input as { signal?: AbortSignal }).signal
+    return new Promise((_resolve, reject) => {
+      nativeSignal?.addEventListener('abort', () => reject(Error('Original native read cancelled')), { once: true }); started()
+    })
+  })
+  const received = await f.receive('inflight-close', 2000, 'Original request before receiver close')
+  await reading
+  const pending = f.services.ingress!.dispatch(received.ingressId).catch(() => undefined)
+  expect(await f.rpc.call('connection.configure', { operationId: 'close-exact-receiver', expectedRevision: 1, connection: { ...f.config, enabled: false } })).toMatchObject({ status: 'configured' })
+  await vi.waitFor(() => expect(nativeSignal?.aborted).toBe(true), { timeout: 3000 })
+  await pending
+  expect(pages).toBe(1); expect(f.nativeSend).not.toHaveBeenCalled()
+  const original = await f.inspect(received.ingressId)
+  expect(original.inputReceipt).toBeNull(); expect(original.ingress).toMatchObject({ state: 'received', body: 'Original request before receiver close' })
+  expect(original.ingress!.input).toBeUndefined(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+}, 30000)

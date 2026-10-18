@@ -15,7 +15,10 @@ export default defineConfig({ ...native, plugins: [...native.plugins!, { name: '
     'unknown-promote': { path: 'packages/connectors/src/ingress-context.ts', changes: [[nativeGuard, "if ((receipt.status !== 'admitted' && receipt.status !== 'unknown') || quote.coverage !== 'complete' || quote.gaps.length) return false"]] },
     'quote-disconnect': { path: 'packages/connectors/src/durable-ingress.ts', changes: [['...(ref.channelQuote ? { channelQuote: ref.channelQuote } : {}), recipient:', 'recipient:']] },
     'history-forward-disconnect': { path: 'packages/connectors/src/connection-host.ts', changes: [['...(ingress.readHistory ? { readHistory:', '...(false && ingress.readHistory ? { readHistory:']] },
-    'lazy-native-disconnect': { path: 'packages/connectors/src/platform-adapters.ts', changes: [['readHistory: async (...input) => (await feishu()).readHistory(...input)', 'readHistory: undefined']] }
+    'lazy-native-disconnect': { path: 'packages/connectors/src/platform-adapters.ts', changes: [['readHistory: async (...input) => (await feishu()).readHistory(...input)', 'readHistory: undefined']] },
+    'page-authority-disconnect': { path: 'packages/connectors/src/adapters/feishu/history.ts', changes: [['do {\n            input.assertCurrent?.(); signal.throwIfAborted()', 'do {\n            signal.throwIfAborted()']] },
+    'receiver-cancel-disconnect': { path: 'packages/connectors/src/connection-receivers.ts', changes: [['this.ingress.dispatch(ingressId, lane.abort.signal)', 'this.ingress.dispatch(ingressId)']] },
+    'host-authority-disconnect': { path: 'packages/connectors/src/durable-ingress.ts', changes: [['{ externalConversationId: record.externalConversationId, range, assertCurrent }, credential, signal)', '{ externalConversationId: record.externalConversationId, range }, credential, signal)']] }
   }
   let code = original
   const selected = mutant ? variants[mutant] : undefined
