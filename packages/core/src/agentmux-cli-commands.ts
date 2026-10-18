@@ -929,7 +929,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   toolkit('ls', '', 'List original saved Toolkit resources.', 0),
   toolkit('inspect', '<id> [--failure-evidence]', 'Inspect current definition, execution and result facts.'),
   toolkit('create', '<id> --input <file|->', 'Create a saved tool; an enabled TUI loads and starts its shell command.'),
-  toolkit('install', '<id> --path <absolute-directory> [--cwd <absolute-directory>]', 'Save a local package reference and preferences without running it.'),
+  toolkit('install', '<id> --path <absolute-directory> [--cwd <directory>]', 'Save a local package reference and preferences without running it. Cwd accepts an absolute path or Host home shorthand; omitted cwd defaults to ~/.agentmux.'),
   toolkit('update', '<id> --input <file|->', 'Update {changes,expected?}; source edits affect the next run, enabling a TUI loads it.'),
   toolkit('delete', '<id> [--input <file|->]', 'Delete a saved tool with original expected-field checks.'),
   toolkit('action', '<id> <action-id> --input <file|->', 'Run a saved action against its exact original result/admission baseline.', 2),

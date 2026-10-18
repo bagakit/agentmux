@@ -5,6 +5,7 @@ import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecor
 import { parseToolkitResultDocument, type ToolkitResultDocument } from './toolkit-result-document.js'
 export * from './toolkit-result-document.js'
 export * from './toolkit-performance-failure.js'
+export * from './toolkit-working-directory.js'
 import { parseToolkitPerformanceDiagnostics, type ToolkitPerformanceDiagnostics } from './toolkit-performance-failure.js'
 
 export const TOOLKIT_STATES = ['idle', 'starting', 'observing', 'paused', 'stopping', 'failed', 'unknown'] as const
