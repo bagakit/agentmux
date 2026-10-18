@@ -6,9 +6,10 @@ import path from 'node:path'
 import { runProbeProcess } from '../../probe-process.mjs'
 import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
 
-const scenario = process.argv.slice(2).length === 0 ? 'workspace' : process.argv[2] === '--scenario=companion-navigation' && process.argv.length === 3 ? 'companion-navigation' : null
-assert.ok(scenario, 'Use no argument or --scenario=companion-navigation')
-const rendererRunner = scenario === 'workspace' ? 'renderer-main.cjs' : 'renderer-navigation.cjs'
+const scenarios = { workspace: 'renderer-main.cjs', 'companion-navigation': 'renderer-navigation.cjs', 'discussion-files': 'renderer-discussion-files.cjs' }
+const scenario = process.argv.length === 2 ? 'workspace' : process.argv.length === 3 && process.argv[2].startsWith('--scenario=') ? process.argv[2].slice('--scenario='.length) : null
+assert.ok(Object.hasOwn(scenarios, scenario), 'Use no argument or --scenario=companion-navigation or --scenario=discussion-files')
+const rendererRunner = scenarios[scenario]
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..')
 const directory = path.join(root, '.local/state/mote-workspace/capture-' + randomUUID()), compiled = path.join(directory, 'compiled')
 // Clear before loading esbuild: its service is a child process too.
