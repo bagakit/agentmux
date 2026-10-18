@@ -9,9 +9,11 @@ import { tmpdir } from 'node:os'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { useAppStore } from '../src/renderer/src/store'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
+import { activityReadingProps } from './helpers/activity-reading-props'
 
-const cleanups: Array<() => Promise<void>> = []
-afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.unstubAllGlobals() })
+const cleanups: Array<() => unknown | Promise<unknown>> = []
+afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 it('the actual Desktop Activity reads original Provider records through the common Core projection', async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -27,11 +29,17 @@ it('the actual Desktop Activity reads original Provider records through the comm
     nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'native', transcriptPath: transcript } })
   const client = new AgentMuxClient({ store }); cleanups.push(() => client.dispose())
   const page = await client.sessionHistoryPage('session')
+  await desktopConversationReadBridge({ root: folder, client }, cleanups)
   const initial = useAppStore.getState(); useAppStore.setState({ sessions: [], timelines: {}, agentNames: {} });
   cleanups.push(async () => { useAppStore.setState(initial, true) })
   const container = document.createElement('div'); document.body.append(container)
   const root = createClientUiRoot(container); cleanups.push(async () => { await act(async () => root.unmount()); container.remove() })
-  await act(async () => root.render(<ActivityView sessionId="session" executionHostId="local" items={[]} capability="complete-events" nativeHistoryPage={page} />))
+  const reading = activityReadingProps({ control: { hostId: 'local', agentSessionId: 'session', run: { runId: 'original-run' } } })
+  await act(async () => root.render(<ActivityView {...reading} nativeHistoryPage={page} />))
+  await vi.waitFor(async () => {
+    await act(async () => { await Promise.resolve() })
+    expect([...container.querySelectorAll<HTMLElement>('[data-native-record-id]')].map(record => record.dataset.nativeRecordId)).toEqual(['first', 'second'])
+  })
   const records = [...container.querySelectorAll<HTMLElement>('[data-native-record-id]')]
   expect(records.map(record => record.dataset.nativeRecordId)).toEqual(['first', 'second'])
   expect(records.map(record => record.textContent)).toEqual([expect.stringContaining('Original repeated reply'), expect.stringContaining('Original repeated reply')])
@@ -40,7 +48,7 @@ it('the actual Desktop Activity reads original Provider records through the comm
   expect(textNode).toBeDefined()
   const range = document.createRange(); range.selectNodeContents(textNode)
   const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range)
-  await act(async () => root.render(<ActivityView sessionId="session" executionHostId="local" items={[]} capability="complete-events" nativeHistoryPage={{ ...page }} />))
+  await act(async () => root.render(<ActivityView {...reading} nativeHistoryPage={{ ...page }} />))
   expect(container.querySelector('[data-native-record-id="first"]')).toBe(original)
   expect(selection.toString()).toBe('Original repeated reply')
 })
