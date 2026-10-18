@@ -14,9 +14,13 @@ export type InputHistoryView = ReturnType<typeof useAgentInputHistory>
 export type InputHistoryLocalEntry = { id: string; text: string; inputOrigin?: { hostId: string; key: import('@agentmux/core/prompt-condition').AgentPromptInputKey } }
 
 /** Pure presentation: query and actions are injected from the original read/draft owners. */
-export function InputHistoryList({ history, localEntries = [], onRead, onFill, onCopy, onFillLocal, beforeRecords, renderRecords, additionalRecords = [], onRefresh, refreshing, coverage }: {
+export function InputHistoryList({ history, localEntries = [], onRead, onFill, onCopy, onFillLocal, beforeRecords, renderRecords, additionalRecords = [], onRefresh, refreshing, coverage, relatedMessages, relatedContent, onReadingChange }: {
   history: InputHistoryView; localEntries?: readonly InputHistoryLocalEntry[]
   additionalRecords?: readonly InputMailboxDisplayRow[]
+  /** Core-confirmed contributions to a primary input, preserving each original action target. */
+  relatedMessages?: ReadonlyMap<string, readonly AgentSessionUserMessage[]>
+  relatedContent?: ReadonlyMap<string, ReactNode>
+  onReadingChange?(message: AgentSessionUserMessage | null): void
   beforeRecords?: ReactNode
   onRefresh?(): void
   refreshing?: boolean
@@ -31,7 +35,7 @@ export function InputHistoryList({ history, localEntries = [], onRead, onFill, o
   const [action, setAction] = useState<{ id: string; pending: boolean; message: string } | null>(null)
   const [readingId, setReadingId] = useState<string | null>(null)
   const generation = useRef(0)
-  useEffect(() => { ++generation.current; setAction(null); setReadingId(null); return () => { ++generation.current } }, [history.scope])
+  useEffect(() => { ++generation.current; setAction(null); setReadingId(null); onReadingChange?.(null); return () => { ++generation.current } }, [history.scope])
   const perform = async (message: AgentSessionUserMessage, copy: boolean) => {
     if (action?.pending) return
     const original = generation.current
@@ -82,9 +86,13 @@ export function InputHistoryList({ history, localEntries = [], onRead, onFill, o
         <div className="input-history__meta"><span title={describeConversationInputSource(message.source).title}>{describeConversationInputSource(message.source).caption}</span>
           {message.recordedAt !== undefined && Number.isFinite(message.recordedAt) && Math.abs(message.recordedAt) <= 8.64e15 ? <time dateTime={new Date(message.recordedAt).toISOString()}>{new Date(message.recordedAt).toLocaleString()}</time> : <span>时间未记录</span>}</div>
         {onRead ? <details open={readingId === message.id} onToggle={event => {
-          if (event.currentTarget.open) setReadingId(message.id)
-          else if (readingId === message.id) setReadingId(null)
-        }}><summary>查看原文</summary>{readingId === message.id ? onRead(message) : null}</details> : null}
+          if (event.currentTarget.open) { setReadingId(message.id); onReadingChange?.(message) }
+          else if (readingId === message.id) { setReadingId(null); onReadingChange?.(null) }
+        }}><summary>查看原文</summary>{readingId === message.id ? <>{onRead(message)}
+          <InputHistoryOriginalRecords messages={(relatedMessages?.get(message.id) ?? []).filter(original => original !== message)}
+            onRead={onRead} onCopy={onCopy} {...(onFill ? { onFill } : {})} />
+          {relatedContent?.get(message.id)}
+        </> : null}</details> : null}
         <div className="input-history__actions"><button type="button" disabled={action?.pending} onClick={() => void perform(message, true)}>复制正文</button>
           {onFill ? <button type="button" disabled={action?.pending} onClick={() => void perform(message, false)}>填入草稿</button> : null}</div>
         {action?.id === message.id ? <p className="input-history__notice" role="status">{action.message}</p> : null}
@@ -99,4 +107,62 @@ export function InputHistoryList({ history, localEntries = [], onRead, onFill, o
       {local.map(entry => <div key={entry.id}><p>{entry.text.slice(0, 320)}</p>{onFillLocal ? <button type="button" disabled={action?.pending} aria-label="填入草稿" title="插入草稿，不发送" onClick={() => void fillLocal(entry)}>{renderRecords ? <FillIcon size={14} /> : '填入草稿'}</button> : null}
         {action?.id === entry.id ? <p role="status">{action.message}</p> : null}</div>)}</details> : null}
   </div>
+}
+
+/** Disclosure only. Every body/resource and action still belongs to its original record. */
+export function InputHistoryOriginalRecords({ messages, ...actions }: {
+  messages: readonly AgentSessionUserMessage[]; onRead(message: AgentSessionUserMessage): ReactNode
+  onCopy(message: AgentSessionUserMessage): Promise<boolean>
+  onFill?(message: AgentSessionUserMessage): Promise<string | void>
+}) {
+  const [reading, setReading] = useState<{ messages: ReadonlyMap<string, AgentSessionUserMessage>; order: readonly string[] }>(
+    () => ({ messages: new Map(), order: [] }))
+  const originals = new Map(messages.map(message => [message.id, message]))
+  // This is the open reading selection, not a second history window. New versions
+  // and withdrawn relations apply after the reader releases the original body.
+  for (const [id, message] of reading.messages) originals.set(id, message)
+  // Moving a retained DOM node can empty a browser Range. Keep every open row
+  // in its displayed order; opening a new row captures its current position too.
+  const retained = new Set(reading.order)
+  const order = [...reading.order.filter(id => originals.has(id)), ...[...originals.keys()].filter(id => !retained.has(id))]
+  return <>{order.map(id => {
+    const message = originals.get(id)!
+    return <OriginalHistoryContribution key={message.id} message={message}
+    open={reading.messages.has(message.id)} onOpenChange={open => setReading(current => {
+      if (current.messages.has(message.id) === open) return current
+      const next = new Map(current.messages)
+      if (open) next.set(message.id, message)
+      else next.delete(message.id)
+      return { messages: next, order: next.size ? order : [] }
+    })} {...actions} />})}</>
+}
+
+function OriginalHistoryContribution({ message, open, onOpenChange, onRead, onFill, onCopy }: {
+  message: AgentSessionUserMessage; onRead(message: AgentSessionUserMessage): ReactNode
+  open: boolean; onOpenChange(open: boolean): void
+  onCopy(message: AgentSessionUserMessage): Promise<boolean>
+  onFill?(message: AgentSessionUserMessage): Promise<string | void>
+}) {
+  const [action, setAction] = useState<{ pending: boolean; message: string } | null>(null)
+  const generation = useRef(0)
+  useEffect(() => { ++generation.current; setAction(null); return () => { ++generation.current } }, [open])
+  async function perform(copy: boolean) {
+    if (action?.pending) return
+    const current = ++generation.current
+    setAction({ pending: true, message: copy ? '读取完整正文…' : '准备正文…' })
+    try {
+      const result = copy ? await onCopy(message) : await onFill?.(message)
+      if (generation.current === current) setAction({ pending: false, message: copy
+        ? result ? '已复制正文' : '复制未完成，原记录保留' : typeof result === 'string' ? result : '已填入草稿，尚未发送' })
+    } catch (error) {
+      if (generation.current === current) setAction({ pending: false, message: error instanceof Error ? error.message : String(error) })
+    }
+  }
+  return <details className="input-history__original" open={open} onToggle={event => onOpenChange(event.currentTarget.open)}>
+    <summary>{describeConversationInputSource(message.source).caption} · 原记录</summary>
+    {open ? <>{onRead(message)}<div className="input-history__actions">
+      <button type="button" disabled={action?.pending} onClick={() => void perform(true)}>复制正文</button>
+      {onFill ? <button type="button" disabled={action?.pending} onClick={() => void perform(false)}>填入草稿</button> : null}
+    </div>{action ? <p role="status">{action.message}</p> : null}</> : null}
+  </details>
 }

@@ -8,7 +8,8 @@ import { MailboxLocationContext } from './MailboxLocationContext'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { Fragment, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from 'react'
 import type { AgentSessionUserMessage, AgentTimelineSnapshot } from '@agentmux/core'
-import { InputHistoryList } from '@agentmux/client-ui/components/InputHistoryList'
+import { conversationRecordId, projectSessionInputs } from '@agentmux/core/conversation'
+import { InputHistoryList, InputHistoryOriginalRecords } from '@agentmux/client-ui/components/InputHistoryList'
 import { describeConversationInputSource } from '@agentmux/client-ui/conversation-input-source'
 import type { useComposerInputHistory } from '../lib/use-composer-input-history'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -36,7 +37,7 @@ import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { speakerOf } from '../lib/conversation-speaker'
 import type { ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
 import type { RevealMailboxMessage } from '../lib/mailbox-message-navigation'
-import { createMailboxMessagesSelector, mailboxMessageKey as messageKey, isMailboxUserMessage as isUserMessage, type MailboxDisplayItem } from '../lib/session-mailbox-messages'
+import { createMailboxMessagesSelector, mailboxInputMessages, mailboxMessageKey as messageKey, isMailboxUserMessage as isUserMessage, type MailboxDisplayItem } from '../lib/session-mailbox-messages'
 
 const ThemeObjectNotificationsIcon = semanticIconComponent('object.notifications')
 const ThemeActionRepeatIcon = semanticIconComponent('action.repeat')
@@ -49,7 +50,12 @@ const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
 const RevealIcon = semanticIconComponent('action.open-external')
 
 
-type MailboxSelection = { scope: string; folder: Folder; key: string }
+type MailboxSelection = { scope: string; folder: Folder; key: string; original?: AgentSessionUserMessage }
+
+function sameOriginalReading(a: AgentSessionUserMessage, b: AgentSessionUserMessage): boolean {
+  return a === b || Boolean(a.sourceRecord && b.sourceRecord && a.sourceRecord.revision === b.sourceRecord.revision &&
+    conversationRecordId(a.sourceRecord.record) === conversationRecordId(b.sourceRecord.record))
+}
 
 function latestFirst(a: number | undefined, b: number | undefined) {
   if (a === undefined) return b === undefined ? 0 : 1
@@ -58,7 +64,7 @@ function latestFirst(a: number | undefined, b: number | undefined) {
 }
 
 
-function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, reading, sessionId, renderNavigation, historyResourceReader, queuedRecords = [], renderQueueRecord, additionalRecords = [] }: {
+function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, reading, sessionId, renderNavigation, historyResourceReader, queuedRecords = [], renderQueueRecord, additionalRecords = [], renderContributions, copyInParent = false }: {
   mailboxOrigin?: OpenHttpLinkOrigin | undefined
   items: readonly MailboxDisplayItem[]; selectedKey: string | null
   onOpen: (key: string, event: MouseEvent<HTMLButtonElement>) => void
@@ -69,27 +75,31 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
   additionalRecords?: readonly InputMailboxDisplayRow[]
   queuedRecords?: readonly ComposerQueuedMessage[]
   renderQueueRecord?: (entry: ComposerQueuedMessage) => ReactNode
+  renderContributions?(item: MailboxDisplayItem): ReactNode
+  copyInParent?: boolean
 }) {
   // Only the current reading page mounts. Rows read bounded prefixes, never full Markdown.
   const recent = useMemo(() => [...items].sort((a, b) => latestFirst(
     a.message.recordedAt, b.message.recordedAt)), [items])
   const identities = useMemo(() => {
     const result = new Map<string, { speaker: ConversationSpeaker; name: string; avatar: ReactNode }>()
-    for (const { message } of recent) {
-      const speaker = speakerOf(message) as ConversationSpeaker
+    for (const { message, group } of recent) {
+      const author = group?.author.kind === 'system' ? { kind: 'unknown' as const } : group?.author ?? message.author
+      const speaker = speakerOf({ ...message, author }) as ConversationSpeaker
       const key = `${speaker.role}:${speaker.id}`
       if (result.has(key)) continue
-      const described = speaker.role === 'agent' ? reading?.describeSpeaker?.(speaker, 18) : undefined
-      const name = described?.name || (message.author.kind === 'agent' ? `Agent ${message.author.agentSessionId.slice(0, 8)}`
-        : message.author.kind === 'external' ? `${message.author.actor.userId} · ${message.author.actor.application.domain}`
-        : message.author.kind === 'human' ? 'Human' : 'Author unknown')
+      const described = speaker.role !== 'unknown' ? reading?.describeSpeaker?.(speaker, 18) : undefined
+      const name = described?.name || (author.kind === 'agent' ? `Agent ${author.agentSessionId.slice(0, 8)}`
+        : author.kind === 'external' ? `${author.actor.userId} · ${author.actor.application.domain}`
+        : author.kind === 'human' ? 'Human' : 'Author unknown')
       result.set(key, { speaker, name, avatar: described?.avatar ?? <ConversationMessageAvatar speaker={speaker} name={name}
         size={18} providerId={described?.providerId} project={described?.project} /> })
     }
     return result
   }, [recent, reading?.describeSpeaker])
   const identity = (item: MailboxDisplayItem) => {
-    const speaker = speakerOf(item.message) as ConversationSpeaker
+    const author = item.group?.author.kind === 'system' ? { kind: 'unknown' as const } : item.group?.author ?? item.message.author
+    const speaker = speakerOf({ ...item.message, author }) as ConversationSpeaker
     return identities.get(`${speaker.role}:${speaker.id}`)!
   }
   const authorLabel = (item: MailboxDisplayItem) => identity(item).name
@@ -97,8 +107,8 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
   const state = (item: MailboxDisplayItem) => item.message.deliveryStatus
   const selected = selectedKey ? recent.find(item => messageKey(item) === selectedKey) : undefined
   if (selected) return <MailboxLocationContext origin={mailboxOrigin} sessionId={sessionId}>{(locationSummary, locationDetails) => <article className="composer-mailbox__detail" data-record-key={messageKey(selected)}>
-    <ConversationMessage {...reading} compact recordedIdentity detailsOnlyMetadata messageActions={renderNavigation(selected, true)} {...(sessionId ? { conversationSessionId: sessionId } : {})}
-      messageId={messageKey(selected)} {...(selected.reference ? { itemRef: selected.reference } : {})} speaker={speakerOf(selected.message) as ConversationSpeaker} name={authorLabel(selected)}
+    <ConversationMessage {...reading} compact recordedIdentity detailsOnlyMetadata copyInParent={copyInParent} messageActions={renderNavigation(selected, true)} {...(sessionId ? { conversationSessionId: sessionId } : {})}
+      messageId={messageKey(selected)} {...(selected.reference ? { itemRef: selected.reference } : {})} speaker={identity(selected).speaker} name={authorLabel(selected)}
       content={selected.message.contentParts.length > 0 ? selected.message.contentParts : selected.message.content}
       {...(selected.message.questionAnswers ? { questionAnswers: selected.message.questionAnswers } : {})}
       {...(selected.message.questionDiagnostic ? { questionDiagnostic: selected.message.questionDiagnostic } : {})}
@@ -113,6 +123,7 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
         <dt>Time</dt><dd><MailboxTime value={time(selected)} complete /></dd>
         <dt>Delivery</dt><dd>{selected.message.source.kind === 'native' ? 'Recorded · not a delivery receipt' : state(selected) === 'complete' ? 'Submission confirmed · CLI acceptance and reply are separate' : 'Delivery not confirmed'}</dd>
       </dl>{locationDetails}</>} />
+    {renderContributions?.(selected)}
     {!selected.message.content && !(isUserMessage(selected.original) && selected.message.contentParts.length) ? <MailboxEmpty title="No text recorded" /> : null}
     {state(selected) !== 'complete' && !(selected.message.source.kind === 'native')
       ? <p className="composer-mailbox__risk">Delivery not confirmed. Check the Agent’s response before sending again.</p> : null}
@@ -269,7 +280,8 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
   function selectRecord(key: string, event: MouseEvent<HTMLButtonElement>) {
     positions.current[folder] = { scroll: body.current?.scrollTop ?? 0, key }
     focusAfter.current = document.activeElement === event.currentTarget ? 'back' : null
-    setSelection({ scope, folder, key })
+    const original = folder === 'user' ? historyMessages.find(item => messageKey(item) === key)?.message : undefined
+    setSelection({ scope, folder, key, ...(original ? { original } : {}) })
   }
   function leaveRecord(event: MouseEvent<HTMLButtonElement>) {
     focusAfter.current = document.activeElement === event.currentTarget ? 'row' : null
@@ -294,6 +306,8 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
 
   const {
     messages: hookUserMessages,
+    sourceMessages: hookSourceMessages,
+    conversation: hookConversation,
     hasMore,
     loadEarlier,
     refresh,
@@ -302,7 +316,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
     windowFrozen
   } = useSessionUserMessages(effectiveControl, { enabled: open && visible && folder === 'user' })
 
-  const effectiveUserMessages = propUserMessages ?? hookUserMessages
+  const effectiveUserMessages = propUserMessages ?? hookSourceMessages
 
   const mailboxSessionId = effectiveControl?.agentSessionId ?? timeline?.agentSessionId
   const inputMailboxHost = effectiveControl?.hostId ?? ''
@@ -374,12 +388,32 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
   const wanted = selection?.scope === scope && selection.folder === folder ? selection.key : null
   const selectedNotice = wanted && folder === 'system' ? notices.find(item => `notice:${item.id}:${serviceNoticeFingerprint(item)}` === wanted) : undefined
   const selectedQueue = wanted && folder === 'user' ? [...pending,...archived].find(item => `queue:${item.id}` === wanted) : undefined
-  const selectHistoryMessages = useMemo(createMailboxMessagesSelector, [])
-  const historyMessages = useMemo(() => inputHistory ? selectHistoryMessages(mailboxSessionId, undefined,
-    inputHistory.history.messages.filter(message => message.author.kind !== 'agent'), effectiveControl?.hostId) : sent,
-    [selectHistoryMessages, inputHistory?.history.messages, sent, mailboxSessionId, effectiveControl?.hostId])
-  const selectedMessage = wanted && folder === 'user' ? historyMessages.find(item => messageKey(item) === wanted) : undefined
-  const selectedJournal = wanted && folder === 'user' ? userInputMailbox.items.find(item => inputMailboxItemKey(inputMailboxHost, item) === wanted) : undefined
+  const sourceMessages = useMemo(() => displayedMessages.map(item => item.message), [displayedMessages])
+  const historySource = inputHistory?.sourceMessages ?? sourceMessages
+  const sourceHosts = new Set([timeline?.sourceHostId, hookConversation.reading?.timeline.reference?.hostId].filter((host): host is string => Boolean(host)))
+  const sourceHostId = inputHistory ? inputHistory.sourceHostId : sourceHosts.size === 1 ? [...sourceHosts][0] : undefined
+  const inputGroups = useMemo(() => projectSessionInputs({ hostId: inputMailboxHost, agentSessionId: mailboxSessionId ?? '',
+    ...(sourceHostId ? { sourceHostId } : {}), messages: historySource, inputs: inputHistory?.inputs ?? hookUserMessages,
+    mailbox: inputMailbox.items }).filter(group => group.author.kind !== 'agent' && group.author.kind !== 'system' ||
+      // Reclassification changes the list after leaving an already opened original journal.
+      group.mailbox.some(item => inputMailboxItemKey(inputMailboxHost, item) === wanted)),
+  [inputMailboxHost, mailboxSessionId, sourceHostId, historySource, inputHistory?.inputs, hookUserMessages, inputMailbox.items, wanted])
+  const historyMessages = useMemo(() => mailboxInputMessages(inputGroups, sourceHostId), [inputGroups, sourceHostId])
+  const journalGroups = useMemo(() => new Map(inputGroups.flatMap(group => group.mailbox.map(item =>
+    [inputMailboxItemKey(inputMailboxHost, item), group] as const))), [inputGroups, inputMailboxHost])
+  const query = inputHistory?.history.query ?? ''
+  const groupedMailbox = useMemo(() => ({ ...inputMailbox, failures: inputMailbox.failures.filter(item => journalGroups.has(inputMailboxItemKey(inputMailboxHost, item))), items: inputMailbox.items.filter(item => {
+    const group = journalGroups.get(inputMailboxItemKey(inputMailboxHost, item))
+    return group && (!query || group.messages.length > 0 || inputMailboxPresentation(item).text?.includes(query) || inputMailboxItemKey(inputMailboxHost, item) === wanted)
+  }) }), [inputMailbox, journalGroups, inputMailboxHost, query, wanted])
+  // The opened original is one reading intent, independent of revisions or later author/group changes.
+  // Only that exact source version may borrow the current group's related contributions.
+  const selectedOriginal = wanted && folder === 'user' ? selection?.original : undefined
+  const selectedGroup = selectedOriginal ? inputGroups.find(group => group.messages.some(message => sameOriginalReading(message, selectedOriginal))) : undefined
+  const selectedMessage = selectedOriginal ? mailboxInputMessages([{ id: selectedGroup?.id ?? selectedOriginal.id,
+    primary: selectedOriginal, messages: [selectedOriginal, ...selectedGroup?.messages.filter(message => !sameOriginalReading(message, selectedOriginal)) ?? []],
+    mailbox: [], author: selectedGroup?.author ?? selectedOriginal.author }], sourceHostId)[0] : undefined
+  const selectedJournal = wanted && folder === 'user' ? groupedMailbox.items.find(item => inputMailboxItemKey(inputMailboxHost, item) === wanted) : undefined
   const detail = Boolean(selectedNotice || selectedMessage || selectedJournal || (folder === 'inbox' || folder === 'outbox') && wanted?.startsWith('a2a:'))
   function queueRecordProps() {
     return { sessionId: mailboxSessionId, selectedId: selectedQueue?.id ?? null, reading, pendingInteraction,
@@ -400,8 +434,22 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
       historyResourceReader={historyResourceReader} additionalRecords={additionalRecords} queuedRecords={archived.filter(entry => !query || entry.text.includes(query))}
       renderQueueRecord={entry => <ComposerOutbox {...queueRecordProps()} queued={[entry]} rowsOnly onHistory={operationId => {
         const original = messages.find(item => item.message.agentSessionId === mailboxSessionId && item.message.source.kind === 'captured' && item.message.source.submissionId === `prompt:${operationId}` && item.message.deliveryStatus === 'complete')
-        if (original) setSelection({ scope, folder: 'user', key: messageKey(original) })
+        if (original) setSelection({ scope, folder: 'user', key: messageKey(original), original: original.message })
       }} />} />
+  }
+  function renderOriginalHistory(messages: readonly AgentSessionUserMessage[]) {
+    return <InputHistoryOriginalRecords messages={messages}
+      onCopy={message => inputHistory ? inputHistory.copy(message) : onCopyQueued ? onCopyQueued(message.content) : Promise.resolve(false)}
+      {...(inputHistory && inputHistory.canFill !== false ? { onFill: inputHistory.fill } : {})}
+      onRead={message => {
+        const item = mailboxInputMessages([{ id: message.id, primary: message, messages: [message], mailbox: [], author: message.author }], sourceHostId)[0]
+        return item ? <MessageHistory copyInParent mailboxOrigin={mailboxOrigin} items={[item]} selectedKey={messageKey(item)}
+          onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={mailboxSessionId}
+          renderNavigation={original => renderReveal(original)} historyResourceReader={historyResourceReader} /> : null
+      }} />
+  }
+  function renderContributions(item: MailboxDisplayItem) {
+    return renderOriginalHistory(item.group?.messages.filter(message => message !== item.message) ?? [])
   }
 
   useLayoutEffect(() => {
@@ -584,7 +632,9 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
       <div id={`${id}-user`} role="tabpanel" aria-labelledby={`${id}-user-tab`} aria-busy={Boolean(inputHistory?.history.loading || inputMailbox.loading)} hidden={folder !== 'user'}>
         {readingMounted && folder === 'user' ? <>
           <InputMailboxRecords compact refreshInParent={Boolean(inputHistory)} coverageInParent={Boolean(inputHistory)}
-            query={inputHistory?.history.query ?? ''} selection={{ key: selectedJournal ? wanted : null, onOpen: selectRecord }} mailbox={userInputMailbox} hostId={inputMailboxHost} reading={reading} onCopy={onCopyQueued}
+            selection={{ key: selectedJournal ? wanted : null, onOpen: selectRecord }} mailbox={groupedMailbox} hostId={inputMailboxHost} reading={reading} onCopy={onCopyQueued}
+            renderRelated={item => renderOriginalHistory(journalGroups.get(inputMailboxItemKey(inputMailboxHost, item))?.messages ?? [])}
+            inputGroup={item => journalGroups.get(inputMailboxItemKey(inputMailboxHost, item))}
             renderLocal={item => {
               const original = journalLocal.get(inputMailboxItemKey(inputMailboxHost,item))
               if (!original) return null
@@ -595,9 +645,9 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
                 onCancelPreparation={onCancelQueuedPreparation} onMoveToDraft={onMoveQueuedToDraft}
                 {...(onEditQueued ? { onEdit: onEditQueued } : {})} {...(onSendQueued ? { onSend: onSendQueued } : {})} /></ol>
             }} renderRecords={(journalRecords, journalDetail) => <>
-          {journalDetail ?? (selectedMessage ? <MessageHistory mailboxOrigin={mailboxOrigin} items={historyMessages} selectedKey={wanted}
+          {journalDetail ?? (selectedMessage ? <MessageHistory mailboxOrigin={mailboxOrigin} items={[selectedMessage]} selectedKey={wanted}
             onOpen={selectRecord} onCopy={onCopyQueued} reading={reading} sessionId={mailboxSessionId} renderNavigation={renderNavigation}
-            historyResourceReader={historyResourceReader} /> : <>
+            historyResourceReader={historyResourceReader} renderContributions={renderContributions} /> : <>
             {observationError ? <SourceNotice title="Automatic native updates are unavailable" message={observationError.message} action="Refresh source" onAction={() => void refresh()} /> : null}
             {windowFrozen ? <SourceNotice title="The native source changed" message="This reading window is kept." action="Read latest records" onAction={() => void refresh()} /> : null}
             {inputHistory ? <InputHistoryList history={{ ...inputHistory.history, messages: inputHistory.history.messages.filter(message => message.author.kind !== 'agent') }}
@@ -606,12 +656,12 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
               refreshing={inputMailbox.loading || inputHistory.history.loading}
               coverage={<>{inputMailbox.loading || inputHistory.history.loading ? 'Reading inputs…' : 'Loaded inputs'} · Partial history
                 <details className="composer-mailbox__coverage-details"><summary>Sources</summary>
-                  <span>Journal: {userInputMailbox.items.length} loaded; earlier coverage unconfirmed. {inputHistory.history.complete ? 'Available history checked for this read.' : 'History is a partial reading window.'}{inputHistory.history.examined ? ` Examined ${inputHistory.history.examined} history records.` : ''}</span>
+                  <span>Journal: {journalGroups.size} loaded; earlier coverage unconfirmed. {inputHistory.history.complete ? 'Available history checked for this read.' : 'History is a partial reading window.'}{inputHistory.history.examined ? ` Examined ${inputHistory.history.examined} history records.` : ''}</span>
                 </details></>}
               beforeRecords={renderPending()}
               renderRecords={() => renderRecorded(historyMessages,journalRecords)} /> : <>
               {historyError && !historyError.message.includes('unavailable in the web preview') ? <SourceNotice title="Failed to read native conversation history" message={historyError.message} action="Retry" onAction={() => void refresh()} /> : null}
-              {renderPending()}{renderRecorded(sent,journalRecords)}
+              {renderPending()}{renderRecorded(historyMessages,journalRecords)}
               {hasMore ? <div className="composer-mailbox__boundary"><button type="button" className="composer-tool" onClick={() => void loadEarlier()}>Load earlier messages</button></div> : null}
             </>}
           </>)}

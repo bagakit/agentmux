@@ -1,25 +1,30 @@
 import { inputMailboxItemKey, inputMailboxKey, useAgentInputMailbox } from '@agentmux/client-ui/use-agent-input-mailbox'
-import { InputMailboxRecords } from '@agentmux/client-ui/components/InputMailboxRecords'
+import { InputMailboxRecords, inputMailboxPresentation } from '@agentmux/client-ui/components/InputMailboxRecords'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { conversationRecordId, projectSessionInputs, type ConversationInputEntity } from '@agentmux/core/conversation'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxAgentSession, AgentSessionUserMessage } from '@agentmux/core'
 import { ConversationMessage, speakerOfUserMessage, type ClientUiPlatform, type DescribeSpeaker } from '@agentmux/client-ui'
 import type { ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
-import { InputHistoryList, type InputHistoryLocalEntry } from '@agentmux/client-ui/components/InputHistoryList'
+import { InputHistoryList, InputHistoryOriginalRecords, type InputHistoryLocalEntry } from '@agentmux/client-ui/components/InputHistoryList'
 import { useAgentInputHistory, type InputHistoryRead } from '@agentmux/client-ui/use-agent-input-history'
 
 const ThemeObjectMailboxIcon = semanticIconComponent('object.mailbox')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
 
-
+function sameOriginalReading(a: AgentSessionUserMessage, b: AgentSessionUserMessage) {
+  return a === b || Boolean(a.sourceRecord && b.sourceRecord && a.sourceRecord.revision === b.sourceRecord.revision &&
+    conversationRecordId(a.sourceRecord.record) === conversationRecordId(b.sourceRecord.record))
+}
 
 /** A client presentation of original Core messages and state, never a second mailbox owner. */
-export function MobileMailbox({ client, session, connected, messages, platform, describeSpeaker, refresh, terminal,
+export function MobileMailbox({ client, session, connected, messages, inputs, sourceHostId, platform, describeSpeaker, refresh, terminal,
   historyScope, readHistory, onHistoryFill, onHistoryCopy, localEntries = [], onHistoryFillLocal, reading, visible = true }: {
   client?: AgentMuxHostedClient | null; session: AgentMuxAgentSession | null; connected: boolean; messages: readonly AgentSessionUserMessage[]; platform: ClientUiPlatform;
+  inputs?: readonly ConversationInputEntity[]; sourceHostId?: string
   describeSpeaker: DescribeSpeaker; refresh(): void; terminal?: () => void
   historyScope: string; readHistory: InputHistoryRead; reading?: ConversationReadingProps; visible?: boolean
   onHistoryFill(message: AgentSessionUserMessage, signal: AbortSignal): Promise<string | void>
@@ -27,13 +32,16 @@ export function MobileMailbox({ client, session, connected, messages, platform, 
   localEntries?: readonly InputHistoryLocalEntry[]
   onHistoryFillLocal?(entry: InputHistoryLocalEntry): void
 }) {
+  // Hosted reads use the connection's local route; Session.hostId identifies the execution owner.
+  const hostId = 'local'
   const [open, setOpen] = useState(false)
+  const [selection, setSelection] = useState<{ scope: string; message: AgentSessionUserMessage } | null>(null)
   const action = useRef<AbortController | null>(null)
   const readInputMailbox = useCallback(async (input: import('@agentmux/core/agent-input-mailbox').AgentInputMailboxRead) => {
     if (!client) throw new Error('原发送信箱尚未连接；原消息保留。')
     return await client.readAgentInputMailbox(input)
   }, [client])
-  const mailbox = useAgentInputMailbox({ hostId: session?.hostId ?? '', agentSessionId: session?.agentSessionId ?? '',
+  const mailbox = useAgentInputMailbox({ hostId, agentSessionId: session?.agentSessionId ?? '',
     enabled: open && visible && connected && Boolean(session && client), read: readInputMailbox })
   useEffect(() => {
     if (!client || !open || !visible || !session) return
@@ -44,6 +52,28 @@ export function MobileMailbox({ client, session, connected, messages, platform, 
     })
   }, [client, open, visible, session?.agentSessionId, mailbox.refresh])
   const history = useAgentInputHistory({ scope: historyScope, enabled: open && visible, read: readHistory, initialMessages: messages })
+  const originalHostId = sourceHostId && history.sourceHostId && sourceHostId !== history.sourceHostId
+    ? undefined : history.sourceHostId ?? sourceHostId
+  const groups = useMemo(() => projectSessionInputs({ hostId, agentSessionId: session?.agentSessionId ?? '',
+    ...(originalHostId ? { sourceHostId: originalHostId } : {}), messages: history.messages,
+    ...(inputs ? { inputs } : {}), mailbox: mailbox.items }), [session?.agentSessionId, originalHostId, history.messages, inputs, mailbox.items])
+  const selectedOriginal = selection?.scope === historyScope ? selection.message : null
+  const selectedGroup = selectedOriginal ? groups.find(group => group.messages.some(message => sameOriginalReading(message, selectedOriginal))) : undefined
+  const groupedMessages = [
+    ...(selectedOriginal && !selectedGroup ? [selectedOriginal] : []),
+    ...groups.flatMap(group => group === selectedGroup && selectedOriginal ? [selectedOriginal]
+      // An open original version stays readable until released; its newer version cannot reuse that row.
+      : !group.mailbox.length && group.primary && group.primary.id !== selectedOriginal?.id ? [group.primary] : [])]
+  const groupedHistory = { ...history, messages: groupedMessages }
+  const relatedMessages = new Map(groups.flatMap(group => {
+    const primary = group === selectedGroup ? selectedOriginal : !group.mailbox.length ? group.primary : null
+    return primary ? [[primary.id, group.messages.filter(message => !sameOriginalReading(message, primary))] as const] : []
+  }))
+  const selectedJournalKeys = new Set(selectedGroup?.mailbox.map(item => inputMailboxItemKey(hostId, item)) ?? [])
+  const mailboxGroups = new Map(groups.flatMap(group => group.mailbox.map(item => [inputMailboxItemKey(hostId, item), group] as const)))
+  // A history query may match an original contribution absent from the journal body.
+  const matchedMailbox = { ...mailbox, items: mailbox.items.filter(item => !history.query ||
+    mailboxGroups.get(inputMailboxItemKey(hostId, item))?.messages.length || inputMailboxPresentation(item).text?.includes(history.query)) }
   useEffect(() => {
     action.current?.abort()
     return () => { action.current?.abort() }
@@ -58,6 +88,18 @@ export function MobileMailbox({ client, session, connected, messages, platform, 
     const controller = new AbortController(); action.current = controller
     return run(message, controller.signal)
   }
+  const readMessage = (message: AgentSessionUserMessage) => <ConversationMessage {...reading} copyInParent
+    messageId={message.id} conversationSessionId={message.agentSessionId}
+    content={message.contentParts.length ? message.contentParts : message.content} inputSource={message.source}
+    {...(message.questionAnswers ? { questionAnswers: message.questionAnswers } : {})}
+    {...(message.questionDiagnostic ? { questionDiagnostic: message.questionDiagnostic } : {})}
+    speaker={speakerOfUserMessage(message)} describeSpeaker={describeSpeaker}
+    {...(message.source.kind === 'native' ? { nativeResourceRecord: { source: { providerId: message.source.providerId, nativeSessionId: message.source.nativeSessionId }, recordId: message.source.recordId,
+      ...(message.turnId === undefined ? {} : { turnId: message.turnId }) } } : {})}
+    {...(message.deliveryStatus ? { status: message.deliveryStatus } : {})}
+    {...(message.recordedAt === undefined ? {} : { createdAt: message.recordedAt })} />
+  const historyActions = { onRead: readMessage, onFill: (message: AgentSessionUserMessage) => originalAction(message, onHistoryFill),
+    onCopy: (message: AgentSessionUserMessage) => originalAction(message, onHistoryCopy) }
   const recordedKeys = new Set(mailbox.items.map(item => inputMailboxItemKey(session?.hostId ?? '',item)))
   const localIntents = localEntries.filter(entry => !entry.inputOrigin || !recordedKeys.has(inputMailboxKey(entry.inputOrigin.hostId,entry.inputOrigin.key)))
   const state = session?.semanticStatus?.state
@@ -70,18 +112,18 @@ export function MobileMailbox({ client, session, connected, messages, platform, 
       <Dialog.Description id="mobile-message-tools-description">{session?.providerId ?? 'Agent'} · {label}</Dialog.Description>
       <div className="mobile-message-tools__actions"><button className="mobile-text-button" onClick={() => { refresh(); history.search(); void mailbox.refresh() }}><ThemeActionRefreshIcon size={16} />刷新消息</button>{terminal && <button className="mobile-text-button" onClick={() => { changeOpen(false); terminal() }}><ThemeObjectTerminalIcon size={16} />查看 Terminal</button>}</div>
       <section className="mobile-message-tools__records" aria-label="通信记录">
-        <InputMailboxRecords refreshInParent mailbox={mailbox} hostId={session?.hostId ?? ''} reading={reading} onCopy={text => platform.copyText(text, () => {})} renderRecords={records => <>
-        <InputHistoryList history={history} additionalRecords={records} localEntries={localIntents} {...(onHistoryFillLocal ? { onFillLocal: onHistoryFillLocal } : {})} onFill={message => originalAction(message, onHistoryFill)}
-          onCopy={message => originalAction(message, onHistoryCopy)} onRead={message => <ConversationMessage {...reading}
-            messageId={message.id} conversationSessionId={message.agentSessionId}
-            content={message.contentParts.length ? message.contentParts : message.content} inputSource={message.source}
-            {...(message.questionAnswers ? { questionAnswers: message.questionAnswers } : {})}
-            {...(message.questionDiagnostic ? { questionDiagnostic: message.questionDiagnostic } : {})}
-            speaker={speakerOfUserMessage(message)} describeSpeaker={describeSpeaker}
-            {...(message.source.kind === 'native' ? { nativeResourceRecord: { source: { providerId: message.source.providerId, nativeSessionId: message.source.nativeSessionId }, recordId: message.source.recordId,
-              ...(message.turnId === undefined ? {} : { turnId: message.turnId }) } } : {})}
-            {...(message.deliveryStatus ? { status: message.deliveryStatus } : {})}
-            {...(message.recordedAt === undefined ? {} : { createdAt: message.recordedAt })} />} /></>} />
+        <InputMailboxRecords refreshInParent mailbox={matchedMailbox} hostId={hostId} reading={reading}
+          inputGroup={item => mailboxGroups.get(inputMailboxItemKey(hostId, item))}
+          onCopy={text => platform.copyText(text, () => {})} renderRelated={item => {
+            const key = inputMailboxItemKey(hostId, item)
+            const messages = mailboxGroups.get(key)?.messages.filter(message => !selectedOriginal || !selectedJournalKeys.has(key) || !sameOriginalReading(message, selectedOriginal))
+            return <InputHistoryOriginalRecords messages={messages ?? []} {...historyActions} />
+          }} renderRecords={records => <InputHistoryList history={groupedHistory} relatedMessages={relatedMessages}
+            relatedContent={new Map(selectedOriginal && selectedJournalKeys.size ? [[selectedOriginal.id,
+              <ol className="input-history__records" aria-label="本次输入的原登记与回执">{records.filter(record => selectedJournalKeys.has(record.key)).map(record => record.node)}</ol>]] : [])}
+            onReadingChange={message => setSelection(message ? { scope: historyScope, message } : null)}
+            additionalRecords={records.filter(record => !selectedJournalKeys.has(record.key))} localEntries={localIntents}
+            {...(onHistoryFillLocal ? { onFillLocal: onHistoryFillLocal } : {})} {...historyActions} />} />
       </section>
     </Dialog.Content></Dialog.Portal>
   </Dialog.Root>

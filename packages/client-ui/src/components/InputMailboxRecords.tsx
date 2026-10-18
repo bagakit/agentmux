@@ -1,5 +1,6 @@
 import { useId, useState, type MouseEvent, type ReactNode } from 'react'
 import type { AgentInputMailboxItem } from '@agentmux/core/agent-input-mailbox'
+import { sessionInputMailboxAuthor, type SessionInputGroup } from '@agentmux/core/conversation'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { ConversationMessage, type ConversationContentBoundary, type ConversationMessageProps, type ConversationReadingProps } from './ConversationMessage.js'
 import { MailboxRecordRow } from './MailboxRecordRow.js'
@@ -7,45 +8,33 @@ import { MessageDeliveryFailure } from './MessageDeliveryFailure.js'
 import { presentMessageDeliveryFailure } from '../lib/message-delivery-presentation.js'
 import { useClientUiPlatform } from '../platform.js'
 import { inputMailboxItemKey, type useAgentInputMailbox } from '../lib/use-agent-input-mailbox.js'
-import { AGENTMUX_SYSTEM_SPEAKER_ID, HUMAN_SPEAKER_ID, UNKNOWN_SPEAKER_ID, speakerOfExternalAuthor, externalSpeakerLabel, type ConversationSpeaker } from '../lib/conversation-speaker.js'
+import { AGENTMUX_SYSTEM_SPEAKER_ID, speakerOfUserMessage, externalSpeakerLabel, type ConversationSpeaker } from '../lib/conversation-speaker.js'
 
 export function inputMailboxPresentation(item: AgentInputMailboxItem): Pick<ConversationMessageProps, 'inputContext' | 'inputContextSource' | 'copyText'> & { text: string | null; contentBoundary: ConversationContentBoundary; speaker: ConversationSpeaker; source: string; state: string; a2aNotificationId?: string } {
-  const unknown = { role: 'unknown' as const, id: UNKNOWN_SPEAKER_ID }
+  const author = sessionInputMailboxAuthor(item)
+  const speaker = author.kind === 'system' ? { role: 'system' as const, id: AGENTMUX_SYSTEM_SPEAKER_ID } : speakerOfUserMessage({ author })
   if (item.kind === 'controlled') {
     const original = item.intent.source, sender = item.message?.sender
-    const speaker = original.kind === 'prompt' ? original.authorHuman === true ? { role: 'human' as const, id: HUMAN_SPEAKER_ID } : unknown
-      : sender?.kind === 'external' ? speakerOfExternalAuthor(sender)
-      : sender?.kind === 'agent-session' ? { role: 'agent' as const, id: sender.agentSessionId } : unknown
     return { text: original.kind === 'prompt' ? original.prompt : item.message?.body ?? null, contentBoundary: 'body', speaker,
       ...(original.kind === 'prompt' ? { inputContext: original.inputContext, inputContextSource: original.inputContextSource, ...(original.promptWire === undefined ? {} : { copyText: original.promptWire }) } : {}),
       source: sender?.kind === 'external' ? sender.actor.application.domain : original.kind === 'prompt' ? original.sourceChannel ?? '原提交' : item.sourceChannel ?? '原消息',
       state: item.receipt ? presentMessageDeliveryFailure({ error: null, inputReceipt: item.receipt }).title : '原输入观察未确认' }
   }
-  const { key, record } = item, admission = record?.admission, inputKey = admission?.inputKey
+  const { record } = item, admission = record?.admission
   const message = admission?.intent?.message ?? record?.launch?.message
-  // Only the original typed producer identifies a platform notice; authored wire remains an ordinary input.
-  const isNotification = key.kind === 'prompt' && inputKey?.kind === 'prompt' &&
-    inputKey.agentSessionId === key.agentSessionId && inputKey.expectedRun.runId === key.expectedRun.runId && inputKey.submissionId === key.submissionId &&
-    record?.agentSessionId === key.agentSessionId && record.run.runId === key.expectedRun.runId && admission?.intent?.run.runId === key.expectedRun.runId &&
-    message?.a2aNotificationId === key.submissionId && message.systemContext === admission.intent.prompt &&
-    message.userContent === undefined && message.authorHuman === undefined && message.authorAgentSessionId === undefined && message.authorExternal === undefined
-  const speaker = isNotification ? { role: 'system' as const, id: AGENTMUX_SYSTEM_SPEAKER_ID }
-    : message?.authorExternal ? speakerOfExternalAuthor(message.authorExternal)
-    : message?.authorAgentSessionId ? { role: 'agent' as const, id: message.authorAgentSessionId }
-    : message?.authorHuman === true ? { role: 'human' as const, id: HUMAN_SPEAKER_ID } : unknown
   // Core performPromptSubmission records the original prompt body here, but a message-key producer records its rendered wire.
   return { text: message?.userContent ?? item.record?.admission?.intent?.prompt ?? item.record?.launch?.prompt ?? null,
     contentBoundary: item.key.kind === 'prompt' && message?.userContent !== undefined ? 'body' : 'wire',
     inputContext: message?.inputContext, inputContextSource: message?.inputContextSource,
     ...(admission?.intent?.prompt !== undefined ? { copyText: admission.intent.prompt } : record?.launch?.prompt !== undefined ? { copyText: record.launch.prompt } : {}),
     speaker, source: message?.sourceChannel ?? '原提交', state: item.record ? '原提交已登记' : '原提交观察未确认',
-    ...(isNotification ? { a2aNotificationId: message.a2aNotificationId } : {}) }
+    ...(author.kind === 'system' ? { a2aNotificationId: message!.a2aNotificationId } : {}) }
 }
 
 export type InputMailboxDisplayRow = { key: string; time: number; node: ReactNode }
 
 /** A journal reader. Opening, copying and refreshing never dispatch an input or grant control. */
-export function InputMailboxRecords({ mailbox, hostId, reading, onCopy, renderLocal, renderRecords, refreshInParent = false, coverageInParent = false, compact = false, query = '', selection }: {
+export function InputMailboxRecords({ mailbox, hostId, reading, onCopy, renderLocal, renderRelated, inputGroup, renderRecords, refreshInParent = false, coverageInParent = false, compact = false, query = '', selection }: {
   mailbox: ReturnType<typeof useAgentInputMailbox>; hostId: string; reading?: ConversationReadingProps | undefined
   onCopy?: ((text: string) => Promise<boolean>) | undefined
   /** The containing surface already owns one refresh action for this reader. */
@@ -59,6 +48,10 @@ export function InputMailboxRecords({ mailbox, hostId, reading, onCopy, renderLo
   compact?: boolean
   renderRecords?(rows: readonly InputMailboxDisplayRow[], selectedDetail: ReactNode): ReactNode
   renderLocal?(item: AgentInputMailboxItem): ReactNode
+  /** Original history contributions already related by Core; no identity inference here. */
+  renderRelated?(item: AgentInputMailboxItem): ReactNode
+  /** Core owns author consensus and source membership; receipts and actions remain original. */
+  inputGroup?(item: AgentInputMailboxItem): SessionInputGroup | undefined
 }) {
   const [localSelected, setSelected] = useState<string | null>(null)
   const selected = selection ? selection.key : localSelected
@@ -72,12 +65,15 @@ export function InputMailboxRecords({ mailbox, hostId, reading, onCopy, renderLo
   })
   const records = mailbox.items.filter(item => !query || inputMailboxPresentation(item).text?.includes(query)).map(item => {
       const key = inputMailboxItemKey(hostId,item), view = inputMailboxPresentation(item), local = selected === key ? renderLocal?.(item) : null
+      const group = inputGroup?.(item)
+      if (group) view.speaker = group.author.kind === 'system' ? { role: 'system', id: AGENTMUX_SYSTEM_SPEAKER_ID } : speakerOfUserMessage({ author: group.author })
+      const previewText = view.text ?? group?.primary?.content ?? null
       const failed = failures.get(key)
       const author = view.speaker.role === 'external' ? externalSpeakerLabel(view.speaker) : view.speaker.role === 'agent' ? view.speaker.id : view.speaker.role === 'system' ? 'AgentMux' : view.speaker.role === 'human' ? 'Human' : 'Author unknown'
       const described = compact && view.speaker.role !== 'unknown' ? reading?.describeSpeaker?.(view.speaker, 18) : undefined
       const label = described?.name || author
-      const prefix = compact ? view.text?.slice(0,240) ?? '' : ''
-      const preview = compact && view.contentBoundary === 'wire' ? parseAgentMuxMessagePrefix(prefix)?.body?.trim() || prefix : prefix
+      const prefix = compact ? previewText?.slice(0,240) ?? '' : ''
+      const preview = compact && view.text !== null && view.contentBoundary === 'wire' ? parseAgentMuxMessagePrefix(prefix)?.body?.trim() || prefix : prefix
       const detailId = `${id}-${encodeURIComponent(key)}`
       const observed = new Date(item.recordedAt)
       const state = failed ? `${failed !== item ? '此前已读 · ' : ''}本次读取未确认`
@@ -99,6 +95,7 @@ export function InputMailboxRecords({ mailbox, hostId, reading, onCopy, renderLo
           {...(item.receipt ? { inputReceipt: item.receipt } : {})} copyText={onCopy ?? (text => platform.copyText(text, () => {}))} /> : null}
         {item.kind === 'submission' && item.failure ? <p role="status">{item.failure.message}</p> : null}
         {local ? <details><summary>此设备的保留操作</summary>{local}</details> : null}
+        {renderRelated?.(item)}
         {!compact || view.text === null ? originalFacts : null}
       </> : null
       if (selected === key) selectedDetail = <article className="composer-mailbox__detail" data-record-key={key}>{detail}</article>
@@ -112,7 +109,7 @@ export function InputMailboxRecords({ mailbox, hostId, reading, onCopy, renderLo
           {selection ? null : <div id={detailId} className="composer-mailbox__detail" hidden={selected !== key}>{detail}</div>}
         </> : <>
         <div className="input-history__meta"><span data-mailbox-author>{author}</span>{view.speaker.role === 'external' && view.source === view.speaker.external?.actor.application.domain ? null : <span>{view.source}</span>}<span>{failed && failed !== item ? '此前已读 · ' : ''}{view.state}</span><time>{observed.toLocaleString()}</time></div>
-        <p className="input-history__excerpt">{view.text?.slice(0,320) ?? '原正文未随本条观察返回'}</p>
+        <p className="input-history__excerpt">{previewText?.slice(0,320) ?? '原正文未随本条观察返回'}</p>
         <details open={selected === key} onToggle={event => { if (event.currentTarget.open) setSelected(key); else if (selected === key) setSelected(null) }}><summary>查看原输入</summary>
           {detail}
         </details>
