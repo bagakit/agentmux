@@ -1,5 +1,5 @@
+import { mintObjectId } from './object-id.js'
 import { execFile } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
 
 /** Total budget for the whole hydration, spent across every probe arm — not a per-arm allowance. */
 const PROFILE_SHELL_TIMEOUT_MS = 30_000
@@ -125,7 +125,7 @@ export async function hydrateProcessEnvironmentFromLoginShell(options: {
   const shell = profileShell(platform, env)
   if (!shell) return { ok: false, reason: 'unavailable-shell' }
 
-  const marker = `__AGENTMUX_ENV_${randomUUID()}__`
+  const marker = `__AGENTMUX_ENV_${mintObjectId()}__`
   const command = `printf '%s\\0' '${marker}'; /usr/bin/env -0; printf '%s\\0' '${marker}'`
   const runner = options.runner ?? runProfileShell
   const budgetMs = options.timeoutMs ?? PROFILE_SHELL_TIMEOUT_MS

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from './object-id.js'
 import { open, rename, unlink } from 'node:fs/promises'
 import { dirname } from 'node:path'
 
@@ -51,8 +51,8 @@ export async function durableWriteFile(
 ): Promise<void> {
   const { mode = 0o600, signal } = options
   signal?.throwIfAborted()
-  // UUID 后缀让并发写各自拿到独立临时文件，wx（O_EXCL）保证不会误踩已存在的临时残留。
-  const temporaryPath = `${path}.${process.pid}.${randomUUID()}.tmp`
+  // 独立 ID 后缀让并发写各自拿到独立临时文件，wx（O_EXCL）保证不会误踩已存在的临时残留。
+  const temporaryPath = `${path}.${process.pid}.${mintObjectId()}.tmp`
   let committed = false
   let failure: DurableWriteError | undefined
   const primary = (error: unknown) => failure ??= new DurableWriteError(path, committed ? 'after-replace' : 'before-replace', error)

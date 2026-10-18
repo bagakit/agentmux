@@ -1,5 +1,4 @@
 import { link, mkdir, open, unlink } from 'node:fs/promises'
-import { randomUUID } from 'node:crypto'
 import { join } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { durableWriteFile, DurableWriteError } from './durable-write.js'
@@ -58,7 +57,7 @@ export class DeliveryAttemptStore {
       const existing = await this.readJournalIdentity()
       if (existing.authority || existing.causeCode !== 'ENOENT') return
       await mkdir(this.directory, { recursive: true, mode: 0o700 })
-      const temporary = join(this.directory, `journal-${randomUUID()}.candidate`)
+      const temporary = join(this.directory, `journal-${mintObjectId()}.candidate`)
       try {
         await durableWriteFile(temporary, JSON.stringify({ schema: 'agentmux.delivery-journal.v1', journalId: mintObjectId() }) + '\n', { mode: 0o600, requireDirectorySync: true })
         try { await link(temporary, join(this.directory, 'journal-identity.json')) }
@@ -184,7 +183,7 @@ export class DeliveryAttemptStore {
         await mkdir(this.directory, { recursive: true, mode: 0o700 })
         // Publish without replacement: simultaneous reporters cannot overwrite an
         // existing immutable attempt, even across independent Host processes.
-        const temporary = join(this.directory, `${logId}.${randomUUID()}.candidate`)
+        const temporary = join(this.directory, `${logId}.${mintObjectId()}.candidate`)
         try {
           await durableWriteFile(temporary, content, { mode: 0o600, requireDirectorySync: true })
           try { await link(temporary, join(this.directory, `${logId}.json`)) }

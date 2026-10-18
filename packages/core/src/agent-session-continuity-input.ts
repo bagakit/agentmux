@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { mintObjectId } from './object-id.js'
+import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { matchesProviderNativeSessionTarget } from './agent-native-locator.js'
 import { AgentMuxError } from './errors.js'
@@ -103,7 +104,7 @@ type Dependencies = {
 /** The original Session owns both the plan and its receipt. This observer never retries Input. */
 export class AgentSessionContinuityInputs {
   private readonly controller = new AbortController()
-  private readonly owner = randomUUID()
+  private readonly owner = mintObjectId()
   private readonly saves = new Set<Promise<void>>()
   private readonly operations = new Map<string, Set<string>>()
   private readonly tails = new Map<string, { pending: Promise<void>; again: boolean }>()

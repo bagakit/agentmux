@@ -1,5 +1,5 @@
+import { mintObjectId } from './object-id.js'
 import { AgentMuxError } from './errors.js'
-import { randomUUID } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { cloneSession } from './agent-session-identity.js'
 import { resolveAgentSessionId } from './agent-session-id.js'
@@ -69,7 +69,7 @@ export class AgentMuxAgentSessionRegistry {
   private readonly activeWrites = new Set<string>()
   private readonly writeDrains = new Map<string, AgentSessionWriteDrain>()
   private readonly metadataLoadCuts = new Set<AgentSessionLoadCut>()
-  private readonly lifecycleOwnerId = randomUUID()
+  private readonly lifecycleOwnerId = mintObjectId()
   private static readonly lifecycleLeaseMs = 30_000
   private readonly unconfirmedDurability = new Set<string>()
 
@@ -263,7 +263,7 @@ export class AgentMuxAgentSessionRegistry {
       throw new AgentMuxError('Agent Session retirement changed before explicit continue.', 'STALE_AGENT_SESSION')
     }
     const reservation: Extract<AgentMuxLifecycleReservation, { kind: 'reopen' }> = {
-      reservationId: randomUUID(), ownerId: this.lifecycleOwnerId, ownerPid: process.pid,
+      reservationId: mintObjectId(), ownerId: this.lifecycleOwnerId, ownerPid: process.pid,
       agentSessionId, operationId, expiresAt: Date.now() + AgentMuxAgentSessionRegistry.lifecycleLeaseMs,
       kind: 'reopen', expectedRetirement: structuredClone(retirement), callerOperationId
     }
@@ -325,7 +325,7 @@ export class AgentMuxAgentSessionRegistry {
     const session = this.get(agentSessionId)
     if (!sameRun(session.run, expectedRun)) throw new AgentMuxError('Agent Session changed before restart admission.', 'STALE_AGENT_SESSION')
     const reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }> = {
-      reservationId: randomUUID(), ownerId: this.lifecycleOwnerId, ownerPid: process.pid, agentSessionId,
+      reservationId: mintObjectId(), ownerId: this.lifecycleOwnerId, ownerPid: process.pid, agentSessionId,
       operationId, expectedRun: { ...expectedRun }, kind: 'resume', restart: structuredClone(restart),
       expiresAt: Date.now() + AgentMuxAgentSessionRegistry.lifecycleLeaseMs }
     await this.store.reserveLifecycle(reservation)
@@ -635,7 +635,7 @@ export class AgentMuxAgentSessionRegistry {
   )): Promise<AgentMuxLifecycleReservation> {
     const now = Date.now()
     const base = {
-      reservationId: randomUUID(),
+      reservationId: mintObjectId(),
       ownerId: this.lifecycleOwnerId,
       ownerPid: process.pid,
       agentSessionId: input.agentSessionId,

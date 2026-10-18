@@ -1,4 +1,5 @@
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { mintObjectId } from './object-id.js'
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { searchAgentMuxMetadata } from './search-metadata.js'
@@ -124,7 +125,7 @@ export function createAgentMuxSearchReader<C extends AgentMuxSearchReadContext =
         streams.push(...discovery.issues.map(issue => ({ kind: 'unavailable' as const, issue })))
       }
       context.signal?.throwIfAborted()
-      view = { id: randomUUID(), scope, streams, touchedAt: Date.now(), bytes: size(streams) }; retain(view)
+      view = { id: mintObjectId(), scope, streams, touchedAt: Date.now(), bytes: size(streams) }; retain(view)
       position = { index: 0, offset: 0, completed: 0, unavailable: 0, sourceCursor: null }
     }
     if (position.index > view.streams.length || position.completed + position.unavailable !== position.index) return changed()

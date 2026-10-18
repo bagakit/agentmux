@@ -1,6 +1,6 @@
+import { mintObjectId } from './object-id.js'
 import { parseAgentInputMailboxRead } from './agent-input-mailbox.js'
 import { sanitizeHostedInputInvocation } from './performance-diagnostics.js'
-import { randomUUID } from 'node:crypto'
 import type { AgentMuxControlEndpointState } from './control-endpoint-state.js'
 import type { AgentMuxClient } from './client.js'
 import type { AgentMuxClientEvent, AgentMuxRunAttachment, AgentMuxRunRef } from './types.js'
@@ -38,7 +38,7 @@ type Reader = { enqueue(chunks: AgentMuxHostedTransferChunk[], metadata?: AgentM
 type InitialReader = Reader & { metadataIds(): readonly string[]; coverMetadata(id: string, retain: (queued: readonly AgentMuxClientEvent[]) => AgentMuxClientEvent | null): void;
   begin(initial: unknown): void; readonly opening: boolean }
 function reader(emit: Emit, initial: unknown, onFailure: () => void, opening = false): InitialReader {
-  const initialId = randomUUID()
+  const initialId = mintObjectId()
   let closed = false, started = false, pumping = false, queuedBytes = 0, initialReady = false
   const queue: Array<{ chunks: AgentMuxHostedTransferChunk[]; metadata?: AgentMuxClientEvent | undefined }> = []
   const metadataId = (event?: AgentMuxClientEvent) => event?.type === 'agent-session' ? event.session.agentSessionId
@@ -70,7 +70,7 @@ function reader(emit: Emit, initial: unknown, onFailure: () => void, opening = f
         insertion = index
       }
       if (observation) {
-        const chunks = hostedTransfer({ kind: 'event', event: observation }, randomUUID())
+        const chunks = hostedTransfer({ kind: 'event', event: observation }, mintObjectId())
         queuedBytes += size(chunks); queue.splice(insertion, 0, { chunks, metadata: observation })
       }
     },
@@ -193,7 +193,7 @@ export class AgentMuxHostedRuntimeService {
     if (!recipients.size) return
     let chunks: AgentMuxHostedTransferChunk[]
     try { chunks = hostedTransfer({ kind: 'event', event: event,
-      ...(event.type === 'connection-state' && event.state === 'restored' ? { owner: this.owner() } : {}) }, randomUUID()) }
+      ...(event.type === 'connection-state' && event.state === 'restored' ? { owner: this.owner() } : {}) }, mintObjectId()) }
     catch (error) { for (const reader of recipients) reader.fail(error); return }
     for (const reader of recipients) {
       // The initial snapshot takes the current connection cut synchronously with begin().
@@ -313,7 +313,7 @@ export class AgentMuxHostedRuntimeService {
     }
     if (source && (invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'broadcastMessages' || invocation.method === 'replySessionQuestion')) invocation.args[0] = { ...invocation.args[0], sourceDevice: source }
     if (source && invocation.method === 'saveAgentFuturePromptIntent') invocation.args[0] = { ...invocation.args[0], sourceDevice: source }
-    const operationId = first && typeof first === 'object' && 'operationId' in first ? String(first.operationId) : randomUUID()
+    const operationId = first && typeof first === 'object' && 'operationId' in first ? String(first.operationId) : mintObjectId()
     const recordActivity = async (result: 'confirmed' | 'failed' | 'unknown') => {
       if (!source || !modifying) return
       try { await context.recordDeviceOperation?.(source, invocation.method, invocation.args, result, operationId) } catch { /* Recording failure cannot disable the original input capability. */ }
@@ -445,10 +445,10 @@ export class AgentMuxHostedRuntimeService {
       consumer.stopMessages = this.client.onEvent(event => {
         if (consumer.events !== events || events.closed ||
           event.type !== 'agent-message-changed' && event.type !== 'agent-message-observation') return
-        try { events.enqueue(hostedTransfer({ kind: 'event', event }, randomUUID())) }
+        try { events.enqueue(hostedTransfer({ kind: 'event', event }, mintObjectId())) }
         catch (error) { events.fail(error) }
       }, { observeMessages: true })
-      if (this.endpointState) events.enqueue(hostedTransfer({ kind: 'event', event: this.endpointState }, randomUUID()))
+      if (this.endpointState) events.enqueue(hostedTransfer({ kind: 'event', event: this.endpointState }, mintObjectId()))
       const abort = () => { void dispose().catch(error => this.releaseUnconfirmed(error)) }
       context.signal?.addEventListener('abort', abort, { once: true })
       if (context.signal?.aborted) { await dispose(); throw new AgentMuxError('Host subscription was cancelled.', 'CONTROL_CANCELLED') }
@@ -497,11 +497,11 @@ export class AgentMuxHostedRuntimeService {
       const opening = method === 'runtime.conversation-watch'
         ? this.client.observeConversation(p.reference as import('./conversation.js').ConversationRef, observation => {
           if (stopped || this.consumers.get(id) !== original) return
-          try { consumer.enqueue(hostedTransfer({ kind: 'conversation', observation }, randomUUID())) } catch (error) { consumer.fail(error) }
+          try { consumer.enqueue(hostedTransfer({ kind: 'conversation', observation }, mintObjectId())) } catch (error) { consumer.fail(error) }
         }, watchOptions)
         : this.client.observeSessionHistory(p.agentSessionId as string, observation => {
           if (stopped || this.consumers.get(id) !== original) return
-          try { consumer.enqueue(hostedTransfer({ kind: 'history', observation }, randomUUID())) } catch (error) { consumer.fail(error) }
+          try { consumer.enqueue(hostedTransfer({ kind: 'history', observation }, mintObjectId())) } catch (error) { consumer.fail(error) }
         }, watchOptions)
       // The Provider/Core may still finish acquiring after this reader is cancelled.
       // Its exact late handle is released once without retaining Consumer.pending.

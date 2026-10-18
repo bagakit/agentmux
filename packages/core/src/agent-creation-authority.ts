@@ -1,4 +1,5 @@
-import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, randomUUID, sign, verify, type KeyObject } from 'node:crypto'
+import { mintObjectId } from './object-id.js'
+import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify, type KeyObject } from 'node:crypto'
 import { link, lstat, mkdir, open, readFile, readdir, unlink } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
 import { AgentMuxError } from './errors.js'
@@ -50,7 +51,7 @@ function publicKey(value: unknown): { key: KeyObject; encoded: string; fingerpri
 /** Publish a complete immutable identity/pin without replacing a concurrent winner. */
 async function publishFirst(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-  const temporary = `${path}.${randomUUID()}.pending`
+  const temporary = `${path}.${mintObjectId()}.pending`
   try {
     await durableWriteFile(temporary, JSON.stringify(value) + '\n', { mode: 0o600, requireDirectorySync: true })
     try { await link(temporary, path) }

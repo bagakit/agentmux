@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { mintObjectId } from './object-id.js'
+import { createHash } from 'node:crypto'
 import { chmod, mkdir, open, readFile, link, unlink } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { gzipSync, gunzipSync } from 'node:zlib'
@@ -257,7 +258,7 @@ export async function publishNotebookDatabase(path: string, value: NotebookDatab
     await durableWriteFile(path + '.sqlite-identity', value.incarnation, { mode: 0o600, requireDirectorySync: true }); return
   }
   await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-  const candidate = path + '.' + randomUUID() + '.tmp'
+  const candidate = path + '.' + mintObjectId() + '.tmp'
   const reservation = await open(candidate, 'wx', 0o600); await reservation.close()
   let db: DatabaseSync | undefined
   try {
@@ -289,7 +290,7 @@ export async function initializeNotebookDatabase(path: string, legacyPath?: stri
   const state = raw ? parseNotebookState(JSON.parse(raw.toString('utf8'))) : emptyNotebookState()
   if (raw) await durableWriteFile(legacyPath + '.original-' + createHash('sha256').update(raw).digest('hex'), raw, { mode: 0o600, requireDirectorySync: true })
   if (raw && !(await readFile(legacyPath!)).equals(raw)) throw failure('The original JSON directory changed during its explicit import.')
-  const value: NotebookDatabaseSnapshot = { incarnation: randomUUID(), state, provenance: [] }
+  const value: NotebookDatabaseSnapshot = { incarnation: mintObjectId(), state, provenance: [] }
   await publishNotebookDatabase(path, value)
   return value
 }

@@ -1,4 +1,5 @@
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { mintObjectId } from './object-id.js'
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { projectConversationTimeline, conversationRecordId, conversationRevision, conversationSourceKey, conversationInputAdoptionEdges,
@@ -45,7 +46,7 @@ export class ConversationReaderState {
   }
   create(ref: ConversationRef, checkpoint: ConversationFrontier): ReadingView {
     this.trimParked(MAX_UNOBSERVED_VIEWS - 1)
-    const view: ReadingView = { ...ref, id: randomUUID(), scope: checkpoint.scope, revision: 0, rows: [], history: [], checkpoint, snapshots: new Map(), observers: 0, readers: 0, outside: { older: null, newer: null }, inputAdoption: { witnesses: [] } }
+    const view: ReadingView = { ...ref, id: mintObjectId(), scope: checkpoint.scope, revision: 0, rows: [], history: [], checkpoint, snapshots: new Map(), observers: 0, readers: 0, outside: { older: null, newer: null }, inputAdoption: { witnesses: [] } }
     this.views.set(view.id, view); return view
   }
   get(id: string, ref: ConversationRef, scope: ConversationFrontier['scope']): ReadingView {
@@ -519,7 +520,7 @@ async function read(input: ConversationTimelineReadInput | ConversationChangesIn
       const batch: Batch = { ...loaded.batch, index: 0, offset: 0, digests: [] }
       snapshot = { rows, batch, units: projected.units.reverse(), coverage: projected.coverage, order: projected.order,
         ...(state.anchor ? { anchor: state.anchor } : {}), revision: view.revision + 1, checkpoint: loaded.batch.end ?? state.checkpoint!, committed: false, requestKey, outside, history, inputAdoption }
-      state.viewRevision = view.revision; state.snapshotId = randomUUID(); state.batch = { index: 0, offset: 0 }
+      state.viewRevision = view.revision; state.snapshotId = mintObjectId(); state.batch = { index: 0, offset: 0 }
       view.snapshots.set(state.snapshotId, snapshot)
       while (view.snapshots.size > 3) view.snapshots.delete(view.snapshots.keys().next().value!)
     }

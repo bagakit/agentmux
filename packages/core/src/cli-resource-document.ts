@@ -1,6 +1,6 @@
+import { mintObjectId } from './object-id.js'
 import { open, link, unlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import { randomUUID } from 'node:crypto'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { settingsResourceRecord } from './settings-resource-json.js'
@@ -13,7 +13,7 @@ export async function writeCliResourceDocument(path: string, result: unknown): P
   if (typeof item.id !== 'string' || document.id !== item.id) throw new AgentMuxError('Resource document belongs to another identity. No file was written.', 'CONTROL_PROTOCOL_ERROR')
   const text = JSON.stringify(document, null, 2) + '\n'
   if (new TextEncoder().encode(text).byteLength > AGENTMUX_CONTROL_MAX_MESSAGE_BYTES) throw new AgentMuxError('Resource document output exceeds its byte boundary. No file was written.', 'CONTROL_PROTOCOL_ERROR')
-  const destination = resolve(path), temporary = join(dirname(destination), `.amux-document-${randomUUID()}.tmp`)
+  const destination = resolve(path), temporary = join(dirname(destination), `.amux-document-${mintObjectId()}.tmp`)
   let created = false
   try {
     const file = await open(temporary, 'wx', 0o600)

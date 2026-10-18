@@ -1,5 +1,6 @@
+import { mintObjectId } from './object-id.js'
 import { homedir } from 'node:os'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { createRequire } from 'node:module'
 import { AsyncLocalStorage } from 'node:async_hooks'
 import { mkdir, open, readFile, realpath, lstat, unlink, readdir, link } from 'node:fs/promises'
@@ -276,7 +277,7 @@ export class AgentMuxNotesStorage {
     })
   }
   private async exportMetadata(value: NotebookDatabaseSnapshot): Promise<NonNullable<NotesStorageOperation['database']>> {
-    const bytes = Buffer.from(JSON.stringify(value) + '\n'), snapshotPath = join(this.locatorPath + '.operations', randomUUID() + '.metadata.json')
+    const bytes = Buffer.from(JSON.stringify(value) + '\n'), snapshotPath = join(this.locatorPath + '.operations', mintObjectId() + '.metadata.json')
     await mkdir(dirname(snapshotPath), { recursive: true, mode: 0o700 })
     await durableWriteFile(snapshotPath, bytes, { mode: 0o600, requireDirectorySync: true })
     return { incarnation: value.incarnation, snapshotPath, snapshotHash: digest(bytes) }
@@ -305,7 +306,7 @@ export class AgentMuxNotesStorage {
   /** Atomic create: an external file appearing at the destination is never replaced. */
   private async createFile(path: string, bytes: Uint8Array): Promise<void> {
     await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-    const temporary = path + '.' + randomUUID() + '.notes-transfer'
+    const temporary = path + '.' + mintObjectId() + '.notes-transfer'
     try {
       const handle = await open(temporary, 'wx', 0o600)
       try { await handle.writeFile(bytes); await handle.sync() } finally { await handle.close() }
@@ -409,9 +410,9 @@ export class AgentMuxNotesStorage {
         const catalog = (await readNotebookDatabase(current.catalogPath, false))?.state
         const deferred = new Set((current.conversionIssues ?? []).flatMap(issue => issue.resource ? [noteProvenanceResourceKey(issue.resource)] : []))
         if (!catalog || !Object.values(catalog.pages).some(p => p.resource.hostId === legacy.workspace.hostId && p.resource.workspaceId === legacy.workspace.id && p.resource.workspacePath === legacy.workspace.path && !p.resource.path.includes('/') && !deferred.has(noteProvenanceResourceKey(p.resource)))) return this.inspect()
-        return this.change({ operationId: 'adopt-original-note-resources:' + randomUUID(), expectedDirectory: current.directory, directory: current.directory }, { ...legacy, catalogPath: current.catalogPath })
+        return this.change({ operationId: 'adopt-original-note-resources:' + mintObjectId(), expectedDirectory: current.directory, directory: current.directory }, { ...legacy, catalogPath: current.catalogPath })
       }
-      return this.change({ operationId: 'adopt-original-notes-directory:' + randomUUID(), expectedDirectory: current.directory, directory: this.initialDirectory }, legacy)
+      return this.change({ operationId: 'adopt-original-notes-directory:' + mintObjectId(), expectedDirectory: current.directory, directory: this.initialDirectory }, legacy)
     })
   }
   async resume(): Promise<void> { await this.withLock(async () => { const location = await this.location(); if (location.pending) await this.retry(location, location.operations[location.pending]!) }) }
