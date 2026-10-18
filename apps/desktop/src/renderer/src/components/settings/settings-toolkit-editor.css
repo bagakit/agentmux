@@ -5,3 +5,9 @@
 .toolkit-editor__mode legend { margin-bottom: var(--sp-3); font-weight: 550; }
 .toolkit-editor__mode label { display: flex; align-items: center; gap: var(--sp-2); cursor: pointer; }
 .toolkit-editor__mode input { accent-color: var(--text-2); }
+
+.toolkit-editor__terminal-appearance { display: grid; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.toolkit-editor__terminal-appearance > span { font-weight: 550; }
+.toolkit-editor__terminal-appearance small { color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
+.toolkit-editor__terminal-appearance > span small { margin-left: var(--sp-3); }
+.toolkit-editor__terminal-appearance select { max-width: 100%; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; }
