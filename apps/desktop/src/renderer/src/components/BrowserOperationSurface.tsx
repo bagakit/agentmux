@@ -185,6 +185,10 @@ export function BrowserOperationStatus({
         aria-label="Take control of Browser" title="Take control of Browser" onClick={() => onTakeControl()}>
         <ThemeActionPanIcon size={14} aria-hidden="true" />
       </button> : null}
+      {canReturnControl && onReturnControl ? <button type="button" className="browser-operation-status__trigger"
+        aria-label="Return to Agent" title="Return to Agent" onClick={() => onReturnControl()}>
+        <ThemeActionReturnControlIcon size={14} aria-hidden="true" />
+      </button> : null}
     </span>
   )
 }
