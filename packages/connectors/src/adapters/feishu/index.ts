@@ -13,6 +13,7 @@ import { createFeishuProfile } from './profile.js'
 import { createFeishuEnrollment } from './enrollment.js'
 import { createFeishuRooms } from './rooms.js'
 import { createFeishuRoomDiscovery } from './room-discovery.js'
+import { createFeishuChannelProfiles } from './channel-profile.js'
 
 export type FeishuAdapterOptions = { http?: HttpInstance }
 /** Only original application identity is needed by the SDK; Host authorization stays outside the leaf. */
@@ -28,6 +29,7 @@ const safeLogger: Logger = { error: muted, warn: muted, info: muted, debug: mute
 
 export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
   readonly adapterId = 'feishu'
+  readonly channelProfiles = createFeishuChannelProfiles((config, credential, call, signal) => this.withClient(config, credential, call, signal))
   readonly profile = createFeishuProfile((config, credential, call, signal) => this.withClient(config, credential, call, signal))
   readonly setup = createFeishuSetup()
   readonly enrollment = createFeishuEnrollment()

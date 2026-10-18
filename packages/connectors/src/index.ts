@@ -1,4 +1,6 @@
 export * from './connection-host.js'
+export * from './channel-storage.js'
+export * from './channel-profile-adapter.js'
 export type * from '@agentmux/core/connections'
 export * from './room-binding.js'
 export * from './room-provisioning.js'
