@@ -7,7 +7,7 @@ import { candidateAlias, candidateModule } from '../scripts/candidate-package-re
 
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_SYSTEM_AUTHOR_MUTATION
-const owner = 'packages/core/src/conversation-timeline.ts'
+const owner = 'packages/core/src/conversation-stream.ts'
 const branch = "if (record.original.item.kind === 'system_message' && record.original.item.source === 'agentmux') return { kind: 'system' }"
 const edits: Record<string, [string, string]> = {
   'ignore-system-author': [branch, '/* Source mutation: no recorded AgentMux system fallback. */'],
