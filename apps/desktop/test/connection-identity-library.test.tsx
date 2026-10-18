@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { MOTE_CHAT_DEFAULT_VALUES } from '@agentmux/core/mote-chat'
 import type { ConnectionRecord } from '@agentmux/core/connections'
 import { moteConnectionBaseline } from '@agentmux/core/mote-preferences'
 import { api } from '../src/renderer/src/lib/api'
@@ -38,10 +39,13 @@ async function saveDefault(connectionId: string) {
 
 it('keeps exact app, setup and current paused traffic distinct for same-name identities using one Mote metadata reading', async () => {
   await saveDefault('completed-identity')
+  await f.client.call('space.mote.chat.configure', { operationId: 'save-private-chat-association', target: f.target(), expectedRevision: null, expectedConnectionRevision: 1,
+    values: { ...MOTE_CHAT_DEFAULT_VALUES, connection: { connectionId: 'completed-identity', application: { domain: 'open.feishu.cn', appId: 'app-completed-identity' } } } })
   const policy = await f.client.call('connection.service.get', {})
   await f.client.call('connection.service.configure', { operationId: 'pause-automatic-traffic', expectedRevision: policy.revision, service: { enabled: false } })
   await f.render(0, true)
   await ready(() => expect(identity('completed-identity')?.querySelector('[data-identity-motes]')?.textContent).toContain('Saved public name · new groups'))
+  await ready(() => expect(identity('completed-identity')?.querySelector('[data-identity-motes]')?.textContent).toContain('Saved public name · private chat paused'))
   for (const id of ['completed-identity', 'unfinished-identity']) {
     expect(identity(id).textContent).toContain('app-' + id)
     expect(identity(id).querySelector('[data-identity-sync]')?.textContent).toBe('Automatic chat sync is paused')
