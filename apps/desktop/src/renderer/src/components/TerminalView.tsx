@@ -997,7 +997,7 @@ export function TerminalView({
     incidents = createClientIncidentRecorder({
       hostId: session.control.hostId, agentSessionId: session.kind === 'agent' ? session.id : null,
       runId: session.control.run.runId, regionId: () => linkOriginRef.current.regionId ?? null,
-      send: report => incidentDispatcher.send(report), dropped: incidentDispatcher.dropped,
+      send: report => incidentDispatcher.send(report), reporter: incidentDispatcher.inspect,
       read: includeGeometry => {
         const buffer = terminal.buffer.active
         return {

@@ -1,4 +1,4 @@
-import { parseClientIncidentReport, type AgentMuxClientIncidentReport } from '@agentmux/core/client-incident'
+import { clientIncidentPriority, parseClientIncidentReport, type AgentMuxClientIncidentReport } from '@agentmux/core/client-incident'
 import { isObjectId } from '@agentmux/core/object-id'
 
 export type ClientIncidentTransport = {
@@ -6,7 +6,7 @@ export type ClientIncidentTransport = {
   report(token: string, report: AgentMuxClientIncidentReport): Promise<unknown>
 }
 export const CLIENT_INCIDENT_DISPATCH_LIMITS = Object.freeze({ reports: 32, bytes: 512 * 1024,
-  progressReports: 16, progressBytes: 256 * 1024 })
+  readingReports: 16, readingBytes: 256 * 1024 })
 const PROGRESS_PUBLICATION_INTERVAL_MS = 1000
 export type ClientIncidentDispatchStatus = {
   pending: number; pendingBytes: number; inFlight: boolean
@@ -17,7 +17,7 @@ export type ClientIncidentDispatcher = {
   dropped(): number
   inspect(): ClientIncidentDispatchStatus
 }
-type Pending = { report: AgentMuxClientIncidentReport; bytes: number; progressKey: string | null }
+type Pending = { report: AgentMuxClientIncidentReport; bytes: number; key: string | null; priority: ReturnType<typeof clientIncidentPriority> }
 const increment = (value: number, amount = 1) => Math.min(Number.MAX_SAFE_INTEGER, value + amount)
 const encoder = new TextEncoder()
 
@@ -43,10 +43,10 @@ function accepted(value: unknown, originalLogId?: string): boolean {
     Object.hasOwn(item, 'logId') && (!item.accepted || !isObjectId(item.logId) || originalLogId !== undefined && item.logId !== originalLogId)) throw Error('Invalid diagnostic receipt.')
   return item.accepted
 }
-function progressKey(report: AgentMuxClientIncidentReport): string | null {
-  if (report.kind !== 'conversation-reading-progress' || !report.reading || report.reading.trigger === 'release') return null
+function readingKey(report: AgentMuxClientIncidentReport): string | null {
+  if (!report.reading) return null
   const scope = report.reading.scope
-  return JSON.stringify([scope.ownerInstanceId, scope.consumerId, scope.hostId, scope.agentSessionId, scope.runId])
+  return JSON.stringify([scope.owner, scope.ownerInstanceId, scope.consumerKind, scope.consumerId, scope.hostId, scope.agentSessionId, scope.runId, scope.sourceHostId, scope.producerBuildId, report.reading.trigger])
 }
 
 /** One finite queue for the actual transport Realm. Documents are positions, not transport owners. */
@@ -78,7 +78,7 @@ export function createClientIncidentDispatcher(readTransport: () => ClientIncide
     if (sending) return
     try {
       if (!queue.length) { clearWake(); return }
-      const delay = queue.some(item => item.progressKey === null) ? 0 : delayProgress()
+      const delay = queue.some(item => item.priority !== 'progress') ? 0 : delayProgress()
       if (delay > 0) {
         // One wake for the transport Realm, only while a normal tail is queued.
         if (wake === undefined) wake = setTimeout(() => { wake = undefined; void drain() }, delay)
@@ -96,7 +96,8 @@ export function createClientIncidentDispatcher(readTransport: () => ClientIncide
       if (!token) { discard(); return }
       let progressBatch: Set<Pending> | null = null
       while (queue.length) {
-        const urgent = queue.findIndex(item => item.progressKey === null)
+        const critical = queue.findIndex(item => item.priority === 'critical')
+        const urgent = critical >= 0 ? critical : queue.findIndex(item => item.priority === 'reading')
         let next = urgent
         if (next < 0) {
           next = progressBatch === null ? -1 : queue.findIndex(item => progressBatch!.has(item))
@@ -104,7 +105,7 @@ export function createClientIncidentDispatcher(readTransport: () => ClientIncide
             if (delayProgress() > 0) break
             // Freeze this window's finite membership. Arrivals while an actual
             // report is pending belong to the next window, even on a fast bridge.
-            progressBatch = new Set(queue.filter(item => item.progressKey !== null))
+            progressBatch = new Set(queue.filter(item => item.priority === 'progress'))
             nextProgressAt = clock() + PROGRESS_PUBLICATION_INTERVAL_MS
             next = queue.findIndex(item => progressBatch!.has(item))
           }
@@ -126,28 +127,26 @@ export function createClientIncidentDispatcher(readTransport: () => ClientIncide
       try {
         // The finite parser returns detached data without invoking caller serializers.
         const report = parseClientIncidentReport(input)
-        const pending: Pending = { report, bytes: encoder.encode(JSON.stringify(report)).byteLength, progressKey: progressKey(report) }
-        // Critical observations reclaim queued healthy progress before they can
-        // be dropped. The real in-flight publication keeps its original slot.
-        if (pending.progressKey === null) {
-          while (queue.length >= CLIENT_INCIDENT_DISPATCH_LIMITS.reports || pendingBytes + pending.bytes > CLIENT_INCIDENT_DISPATCH_LIMITS.bytes) {
-            const victim = queue.findIndex(item => item.progressKey !== null)
-            if (victim < 0) break
-            pendingBytes -= queue.splice(victim, 1)[0]!.bytes
-            lose(1, 'budget')
-          }
+        const pending: Pending = { report, bytes: encoder.encode(JSON.stringify(report)).byteLength,
+          key: readingKey(report), priority: clientIncidentPriority(report) }
+        const same = pending.key === null ? [] : queue.filter(item => item.key === pending.key)
+        // Keep the first original checkpoint and latest tail for each reading trigger.
+        const previous = same.length >= 2 ? same.at(-1) : undefined
+        const reading = () => queue.filter(item => item !== previous && item.priority !== 'critical')
+        const full = () => queue.length - (previous ? 1 : 0) >= CLIENT_INCIDENT_DISPATCH_LIMITS.reports ||
+          pendingBytes - (previous?.bytes ?? 0) + pending.bytes > CLIENT_INCIDENT_DISPATCH_LIMITS.bytes ||
+          pending.priority !== 'critical' && (reading().length >= CLIENT_INCIDENT_DISPATCH_LIMITS.readingReports ||
+            reading().reduce((total, item) => total + item.bytes, 0) + pending.bytes > CLIENT_INCIDENT_DISPATCH_LIMITS.readingBytes)
+        // Reclaim lower classes only. The actual report has left this queue and keeps its IO slot.
+        while (full()) {
+          let victim = pending.priority === 'progress' ? -1 : queue.findIndex(item => item !== previous && item.priority === 'progress')
+          if (victim < 0 && pending.priority === 'critical') victim = queue.findIndex(item => item.priority === 'reading')
+          if (victim < 0) break
+          pendingBytes -= queue.splice(victim, 1)[0]!.bytes
+          lose(1, 'budget')
         }
-        const same = pending.progressKey === null ? [] : queue.flatMap((item, index) => item.progressKey === pending.progressKey ? [index] : [])
-        // Keep the first pending checkpoint. Later healthy snapshots replace only the pending tail.
-        const replace = same.length >= 2 ? same.at(-1)! : -1
-        const previous = replace < 0 ? undefined : queue[replace]
-        const progress = queue.filter(item => item.progressKey !== null)
-        const fits = queue.length + (previous ? 0 : 1) <= CLIENT_INCIDENT_DISPATCH_LIMITS.reports &&
-          pendingBytes - (previous?.bytes ?? 0) + pending.bytes <= CLIENT_INCIDENT_DISPATCH_LIMITS.bytes &&
-          (pending.progressKey === null || progress.length + (previous ? 0 : 1) <= CLIENT_INCIDENT_DISPATCH_LIMITS.progressReports &&
-            progress.reduce((total, item) => total + item.bytes, 0) - (previous?.bytes ?? 0) + pending.bytes <= CLIENT_INCIDENT_DISPATCH_LIMITS.progressBytes)
-        if (!fits) { lose(1, 'budget'); return }
-        if (previous) { queue[replace] = pending; pendingBytes += pending.bytes - previous.bytes; lose(1, 'coalesced') }
+        if (full()) { lose(1, 'budget'); return }
+        if (previous) { queue[queue.indexOf(previous)] = pending; pendingBytes += pending.bytes - previous.bytes; lose(1, 'coalesced') }
         else { queue.push(pending); pendingBytes += pending.bytes }
         // The async owner retains its actual open/report slot until the Promise truly settles.
         schedule()

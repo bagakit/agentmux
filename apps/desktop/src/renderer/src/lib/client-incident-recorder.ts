@@ -1,6 +1,6 @@
 import { parseClientIncidentMetadata, parseClientIncidentReport, safeClientIncidentCode, type AgentMuxClientIncidentKind, type AgentMuxClientReadingIncidentKind, type AgentMuxClientIncidentMetadata,
   type AgentMuxClientIncidentReport, type AgentMuxClientIncidentStage } from '@agentmux/core/client-incident'
-import { createClientIncidentDispatcher, type ClientIncidentDispatcher } from './client-incident-dispatcher'
+import { createClientIncidentDispatcher, type ClientIncidentDispatcher, type ClientIncidentDispatchStatus } from './client-incident-dispatcher'
 export { createClientIncidentDispatcher } from './client-incident-dispatcher'
 
 // One transport owner per JS Realm; detached documents share this original owner.
@@ -17,7 +17,7 @@ export function createClientIncidentRecorder(input: {
   hostId: string; agentSessionId: string | null; runId: string | null; regionId(): string | null
   read(includeGeometry: boolean): AgentMuxClientIncidentMetadata
   send(report: AgentMuxClientIncidentReport): void
-  dropped?(): number
+  reporter?(): Pick<ClientIncidentDispatchStatus, 'dropped' | 'rejected' | 'unavailable' | 'coalesced'>
   now?(): number
   monotonic?(): number
   id?(): string
@@ -65,14 +65,21 @@ export function createClientIncidentRecorder(input: {
           if (descriptor && !Object.hasOwn(descriptor, 'value')) throw Error('Diagnostic code is not a data observation')
           return safeClientIncidentCode(descriptor?.value)
         }, null)
-        const reporterDropped = input.dropped?.() ?? 0
-        if (!Number.isSafeInteger(reporterDropped) || reporterDropped < 0) throw Error('Diagnostic drop coverage is unavailable')
+        const reporter = input.reporter?.()
+        const reporterMetadata: AgentMuxClientIncidentMetadata = { reporterDropped: publicationFailures }
+        if (reporter) {
+          for (const [field, value] of [['reporterDropped', reporter.dropped], ['reporterRejected', reporter.rejected],
+            ['reporterUnavailable', reporter.unavailable], ['reporterCoalesced', reporter.coalesced]] as const) {
+            if (!Number.isSafeInteger(value) || value < 0) throw Error('Diagnostic publication coverage is unavailable')
+            reporterMetadata[field] = field === 'reporterDropped' ? Math.min(Number.MAX_SAFE_INTEGER, value + publicationFailures) : value
+          }
+        }
         const report = parseClientIncidentReport({
           occurrenceId, attemptId, relatedOccurrenceId, kind, stage, code,
           hostId: input.hostId, agentSessionId: input.agentSessionId, runId: input.runId, regionId: input.regionId(),
           observedAt: timestamp(input.now ? input.now() : Date.now()), elapsedMs: elapsed(),
           metadata: { ...snapshot(true), historyOverwritten: overwritten, recorderReadFailures: readFailures,
-            reporterDropped: Math.min(Number.MAX_SAFE_INTEGER, reporterDropped + publicationFailures) },
+            ...reporterMetadata },
           stages, references: []
         })
         input.send(report)

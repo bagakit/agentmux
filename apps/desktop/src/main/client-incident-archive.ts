@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { mintObjectId } from '@agentmux/core/object-id'
+import { clientIncidentPriority } from '@agentmux/core/client-incident'
 import { link, lstat, mkdir, open, opendir, unlink } from 'node:fs/promises'
 import { join } from 'node:path'
 import { durableWriteFile, DurableWriteError, parseClientIncidentRecord, parseClientIncidentReport,
@@ -14,7 +15,8 @@ import type { DiagnosticEvidenceRead, DiagnosticEvidenceAuthority, DiagnosticEvi
 export const CLIENT_INCIDENT_LIMITS = Object.freeze({ records: 128, bytes: 2 * 1024 * 1024,
   recordBytes: 40 * 1024, queue: 32, queueBytes: 512 * 1024, readers: 4,
   indexBytes: 512 * 1024, retentionMs: 7 * 24 * 60 * 60 * 1000,
-  readingProgressRecords: 16, readingProgressBytes: 512 * 1024 })
+  readingQueue: 16, readingQueueBytes: 256 * 1024, readingProducerQueue: 4,
+  readingRecords: 64, readingBytes: 1024 * 1024, readingProgressRecords: 16, readingProgressBytes: 512 * 1024 })
 
 type Persistence = 'confirmed' | 'observed' | 'unconfirmed'
 type Counters = AgentMuxClientIncidentPage['coverage']
@@ -30,11 +32,11 @@ const emptyCounters = (): Manifest['counters'] => ({ dropped: 0, invalid: 0, dup
   corrupt: 0, writeFailures: 0, indexFailures: 0, cleanupFailures: 0 })
 const digest = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const safeInt = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 0
-function progressKey(report: AgentMuxClientIncidentReport, producer: AgentMuxClientIncidentProducer): string | null {
-  if (report.kind !== 'conversation-reading-progress') return null
+function readingKey(report: AgentMuxClientIncidentReport, producer: AgentMuxClientIncidentProducer): string | null {
+  if (!report.reading) return null
   const scope = report.reading.scope
   return JSON.stringify([producer.appInstanceId, producer.producerInstanceId, scope.owner, scope.ownerInstanceId,
-    scope.consumerKind, scope.consumerId, scope.hostId, scope.agentSessionId, scope.runId, scope.sourceHostId, scope.producerBuildId])
+    scope.consumerKind, scope.consumerId, scope.hostId, scope.agentSessionId, scope.runId, scope.sourceHostId, scope.producerBuildId, report.reading.trigger])
 }
 
 /** Main-owned immutable records and a bounded durable index. This owner performs no business calls. */
@@ -164,30 +166,32 @@ export class ClientIncidentArchive {
     const logId = report.reading?.logId ?? mintObjectId()
     if (this.memory.has(logId) || this.queue.some(item => item.logId === logId) ||
       this.manifest?.entries.some(entry => entry.summary.recordRef.logId === logId)) { this.counters.dropped++; return { accepted: false } }
-    const progress = progressKey(report, producer)
-    let replace = -1
-    if (progress !== null) {
-      const same = this.queue.flatMap((item, index) => index >= (this.draining ? 1 : 0) &&
-        progressKey(item.report, item.producer) === progress ? [index] : [])
-      // Retain the first pending checkpoint and the latest tail. An actual writer
-      // remains immutable; each omitted original is reflected in coverage.
-      if (same.length >= 2) replace = same.at(-1)!
-    }
-    const replaced = replace < 0 ? undefined : this.queue[replace]
-    const producerFull = () => this.queue.filter(item => item.producer.producerInstanceId === producer.producerInstanceId).length - (replaced ? 1 : 0) >= 8
-    const full = () => producerFull() || this.queue.length - (replaced ? 1 : 0) >= CLIENT_INCIDENT_LIMITS.queue ||
-      this.queueBytes - (replaced?.bytes ?? 0) + bytes > CLIENT_INCIDENT_LIMITS.queueBytes
-    if (report.kind !== 'conversation-reading-progress') {
-      while (full()) {
-        const ownBudget = producerFull()
-        const victim = this.queue.findIndex((item, index) => index >= (this.draining ? 1 : 0) &&
-          item.report.kind === 'conversation-reading-progress' && (!ownBudget || item.producer.producerInstanceId === producer.producerInstanceId))
-        if (victim < 0) break
-        this.omitQueued(victim)
-      }
+    const priority = clientIncidentPriority(report), reading = readingKey(report, producer)
+    const same = reading === null ? [] : this.queue.filter((item, index) => index >= (this.draining ? 1 : 0) &&
+      readingKey(item.report, item.producer) === reading)
+    // The actual writer and the first pending checkpoint remain immutable.
+    const replaced = same.length >= 2 ? same.at(-1) : undefined
+    const queued = () => this.queue.filter(item => item !== replaced)
+    const own = () => queued().filter(item => item.producer.producerInstanceId === producer.producerInstanceId)
+    const lower = () => queued().filter(item => clientIncidentPriority(item.report) !== 'critical')
+    const ownFull = () => own().length >= 8 || priority !== 'critical' &&
+      own().filter(item => clientIncidentPriority(item.report) !== 'critical').length >= CLIENT_INCIDENT_LIMITS.readingProducerQueue
+    const full = () => ownFull() || queued().length >= CLIENT_INCIDENT_LIMITS.queue ||
+      this.queueBytes - (replaced?.bytes ?? 0) + bytes > CLIENT_INCIDENT_LIMITS.queueBytes || priority !== 'critical' &&
+      (lower().length >= CLIENT_INCIDENT_LIMITS.readingQueue ||
+        lower().reduce((total, item) => total + item.bytes, 0) + bytes > CLIENT_INCIDENT_LIMITS.readingQueueBytes)
+    while (full()) {
+      const ownBudget = ownFull()
+      const candidate = (item: Pending, index: number, desired: 'progress' | 'reading') => index >= (this.draining ? 1 : 0) &&
+        item !== replaced && clientIncidentPriority(item.report) === desired &&
+        (!ownBudget || item.producer.producerInstanceId === producer.producerInstanceId)
+      let victim = priority === 'progress' ? -1 : this.queue.findIndex((item, index) => candidate(item, index, 'progress'))
+      if (victim < 0 && priority === 'critical') victim = this.queue.findIndex((item, index) => candidate(item, index, 'reading'))
+      if (victim < 0) break
+      this.omitQueued(victim)
     }
     if (this.startup === 'unavailable' || full()) { this.counters.dropped++; return { accepted: false } }
-    if (replaced) this.omitQueued(replace)
+    if (replaced) this.omitQueued(this.queue.indexOf(replaced))
     const pending = { logId, report, producer: structuredClone(producer), receivedAt: this.now(), bytes, key, digest: fingerprint }
     this.accepted.set(key, { logId: pending.logId, digest: fingerprint })
     this.queue.push(pending); this.queueBytes += bytes
@@ -203,6 +207,10 @@ export class ClientIncidentArchive {
   private async drain(): Promise<void> {
     await this.ready
     while (this.queue.length) {
+      const critical = this.queue.findIndex(item => clientIncidentPriority(item.report) === 'critical')
+      const reading = this.queue.findIndex(item => clientIncidentPriority(item.report) === 'reading')
+      const next = critical >= 0 ? critical : reading >= 0 ? reading : 0
+      if (next > 0) this.queue.unshift(this.queue.splice(next, 1)[0]!)
       const pending = this.queue[0]!
       try {
         const original = this.manifest?.entries.find(entry => entry.key === pending.key)
@@ -254,23 +262,25 @@ export class ClientIncidentArchive {
       receivedAt: pending.receivedAt, producer: pending.producer, report: pending.report })
     const content = JSON.stringify(record) + '\n', bytes = Buffer.byteLength(content)
     const expiredBefore = this.now() - CLIENT_INCIDENT_LIMITS.retentionMs
-    const isProgress = (entry: Entry) => entry.summary.kind === 'conversation-reading-progress'
-    const progress = pending.report.kind === 'conversation-reading-progress'
-    const progressOverBudget = () => {
-      const entries = manifest.entries.filter(isProgress)
-      return progress && (entries.length >= CLIENT_INCIDENT_LIMITS.readingProgressRecords ||
-        entries.reduce((total, entry) => total + entry.bytes, 0) + bytes > CLIENT_INCIDENT_LIMITS.readingProgressBytes)
-    }
+    const priority = clientIncidentPriority(pending.report)
+    const entryPriority = (entry: Entry) => clientIncidentPriority(this.memory.get(entry.summary.recordRef.logId)?.report ?? entry.summary)
+    const reading = () => manifest.entries.filter(entry => entryPriority(entry) !== 'critical')
+    const progress = () => manifest.entries.filter(entry => entryPriority(entry) === 'progress')
+    const readingOverBudget = () => priority !== 'critical' &&
+      (reading().length >= CLIENT_INCIDENT_LIMITS.readingRecords ||
+        reading().reduce((total, entry) => total + entry.bytes, 0) + bytes > CLIENT_INCIDENT_LIMITS.readingBytes)
+    const progressOverBudget = () => priority === 'progress' &&
+      (progress().length >= CLIENT_INCIDENT_LIMITS.readingProgressRecords ||
+        progress().reduce((total, entry) => total + entry.bytes, 0) + bytes > CLIENT_INCIDENT_LIMITS.readingProgressBytes)
     while (manifest.entries.length && (manifest.entries.length >= CLIENT_INCIDENT_LIMITS.records ||
       manifest.entries.reduce((total, entry) => total + entry.bytes, 0) + bytes > CLIENT_INCIDENT_LIMITS.bytes ||
-      manifest.entries[0]!.summary.receivedAt < expiredBefore || progressOverBudget())) {
+      manifest.entries[0]!.summary.receivedAt < expiredBefore || readingOverBudget() || progressOverBudget())) {
       let victim = 0
       if (manifest.entries[0]!.summary.receivedAt >= expiredBefore) {
-        const progressIndex = manifest.entries.findIndex(isProgress)
-        // Low-priority progress cannot evict an unrelated retained failure.
-        // Critical evidence reclaims progress first, then follows normal retention.
-        if (progressIndex >= 0) victim = progressIndex
-        else if (progress) { this.counters.dropped++; return }
+        victim = manifest.entries.findIndex(entry => entryPriority(entry) === 'progress')
+        if (victim < 0 && priority !== 'progress') victim = manifest.entries.findIndex(entry => entryPriority(entry) === 'reading')
+        if (victim < 0 && priority === 'critical') victim = 0
+        if (victim < 0) { this.counters.dropped++; return }
       }
       const oldest = manifest.entries[victim]!, logId = oldest.summary.recordRef.logId
       // Keep the indexed identity until its file is actually removed. A failed removal stops only
