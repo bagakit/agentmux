@@ -1,6 +1,6 @@
 # 对话模式的机制与接线
 
-本文说明当前源码的 owner 与调用链。行为归[对话行为 SSOT](../design/behavior/conversation-mode.md)，呈现归[对话呈现 SSOT](../design/presentation/conversation-mode.md)，字段、关系、分页与覆盖合同归[公共协议](../specs/conversation-protocol.md)；本页不持有任务、构建、安装或运行验收状态。
+本文说明当前源码的 owner 与调用链。行为归[对话行为 SSOT](../design/behavior/conversation-mode.md)，呈现归[对话呈现 SSOT](../design/presentation/conversation-mode.md)，字段、关系、分页与覆盖合同归[公共协议](../specs/conversation-protocol.md)。目标职责与渐进阅读的技术边界见[对话客户端分层](../design/conversation-client-architecture.md)，不代表已替换本页的现有实现；本页不持有任务、构建、安装或运行验收状态。
 
 ## 记录、身份与唯一 owner
 
@@ -86,11 +86,23 @@ flowchart LR
 
 Renderer 桥使用 Core [`conversation-changes`](../../packages/core/src/conversation-changes.ts) 的 `parseConversationReadPageForWindow`／`parseConversationChangesPageForWindow`，严格解析后持有本次响应的不可变副本。窗口组装只复用该准确对象已经完成的 unit 校验，不重复规范化原记录和计算 revision；拷贝或 raw 页仍走原严格校验，fragment 完整后仍校验其原内容。该私有持有权不跨响应缓存或 wire，不改变普通 SDK parser 的可变 DTO，也不授予作者、输入或恢复权限。
 
-[`ActivityView`](../../apps/desktop/src/renderer/src/components/ActivityView.tsx) 使用 [`useSessionConversationWindow`](../../apps/desktop/src/renderer/src/lib/session-conversation-window.ts) 保持阅读锚点、返回位置与选区，沿同一 view 的 `navigation.older`／`navigation.newer` 补充相邻范围。时间范围读取、Current／Previous source 仍是明确阅读意图。退休 Session、History 和当前对话复用共同读取与呈现；来源失败保原内容及恢复入口。选中的原节点或 pin 需要保留时，客户端持前一个完整 accepted frame，解除保护后接受新 frame，不裁出 records 再重投影。
+[`ActivityView`](../../apps/desktop/src/renderer/src/components/ActivityView.tsx) 使用 [`useSessionConversationWindow`](../../apps/desktop/src/renderer/src/lib/session-conversation-window.ts) 保持阅读锚点、返回位置与选区，沿同一 view 的 `navigation.older`／`navigation.newer` 补充相邻范围。时间范围读取、Current／Previous source 仍是明确阅读意图。退休 Session、History 和当前对话复用共同读取与呈现；来源失败保原内容及恢复入口。窗口准入 hold 与 Focus pin 持前一个完整 accepted frame，解除保护后接受新 frame，不裁出 records 再重投影；下层布局保护目前只保 records／originals 或 placement，不能将完整帧保持概括为所有呈现层已具备的机制。
 
 [`RecentFocusTimeline`](../../apps/desktop/src/renderer/src/components/RecentFocusTimeline.tsx) 仅为已选择的 Context 挂载共同 view；已读 Context 的完整 frame 在原呈现预算内保留，未选中的观察停放且不读。淘汰以完整 frame 为单位，当前和 pin 的原内容保留；Core 暂存已过期时明确显示错误，不能把旧 frame 当可继续的 cursor。Context 目录、已记录工作区间与时间尺仍由原 Focus owner 提供，不成为对话关联来源。
 
-[`ConversationView`](../../packages/client-ui/src/components/ConversationView.tsx) 与 [`ConversationRecordSequence`](../../packages/client-ui/src/components/ConversationRecordSequence.tsx) 消费共同 records／originals；[`ConversationMessage`](../../packages/client-ui/src/components/ConversationMessage.tsx) 统一正文、完整 Copy、Question、reasoning、tool 与 resource。captured 输入保原输入身份，回复和系统记录由 [`CapturedConversationMessage`](../../packages/client-ui/src/components/CapturedConversationMessage.tsx) 薄适配。原生与 captured 过程使用共同 [`WorkflowObservation`](../../packages/client-ui/src/components/WorkflowObservation.tsx) 和 [`ConversationToolPayload`](../../packages/client-ui/src/components/ConversationToolPayload.tsx)。
+[`ConversationView`](../../packages/client-ui/src/components/ConversationView.tsx) 接收共同 records／originals，但其内部仍将统一序列拆为原生代表项和带 `beforeRecordId` 的 captured insertions，再交 [`ConversationRecordSequence`](../../packages/client-ui/src/components/ConversationRecordSequence.tsx) 分组和放置。这层沿 Core 已给顺序取位置，不重新按正文或时间关联来源；定位和展开仍有 native／insertion 两套表示。Desktop `buildActivityEntries` 还派生 captured 段落，供宿主 renderer、标尺与定位消费；其旧 `user-message` 分支已无生成路径，传入的 `items`／`timelineSnapshot` 也不是当前正文来源。
+
+[`ConversationMessage`](../../packages/client-ui/src/components/ConversationMessage.tsx) 统一正文、完整 Copy、Question、reasoning、tool 与 resource，同时内含普通发言、协作回报和系统记录的壳逻辑；`compact` 是可与这些类型组合的密度维度。captured 输入、回复与系统记录由 [`CapturedConversationMessage`](../../packages/client-ui/src/components/CapturedConversationMessage.tsx) 适配。整条 Copy 可通过原资源 reader 异步取得 deferred 原文，不能等同于同步复制显示文本。
+
+过程目前共享 [`WorkflowObservation`](../../packages/client-ui/src/components/WorkflowObservation.tsx) 和 [`ConversationToolPayload`](../../packages/client-ui/src/components/ConversationToolPayload.tsx) 底座，完整记录面尚未统一：Mobile 使用 [`CapturedProcessRecord`](../../packages/client-ui/src/components/CapturedProcessRecord.tsx)，Desktop 经 `renderCapturedRecord` 注入 `ActivityView` 的 Row／Glyph／DiffBlock。摘要、diff、披露节点生命周期与 ARIA 因此不同；Desktop 的过程内定位由 Sequence 的受控 group／step 展开传至 Row。当前 [`activity-diff`](../../apps/desktop/src/renderer/src/lib/activity-diff.ts) 同时含通用 unified diff 解析与特定工具参数解释，二者不是同一个通用能力。
+
+### 当前阅读保护与成本边界
+
+当前保护分布在窗口 `beforeCommit`、Desktop 段落布局、共同 [`useConversationRecordLayout`](../../packages/client-ui/src/lib/use-conversation-record-layout.ts) 和 Sequence 过程父节点四处。窗口层检查 raw 页／captured 版本；共同布局还检查 canonical 代表项、角色与版本，Sequence 保护跨源输入拆分过程父节点的 Range。多个层次可各自保留旧布局、订阅 `selectionchange` 并提示，不能把它们视为完全等价的四次检查。直接传入 accepted records 的共同组件消费者也不必经过窗口 hook；目标收敛范围见[呈现事务](../design/conversation-client-architecture.md#一个阅读位置的呈现事务)。
+
+读取侧已有原 Core 窗口预算和相邻页游标；Desktop 首窗／时间范围补读按有界批次执行，接近阅读边缘约两视口时沿真实方向继续。当前主动边缘请求每次调用一页，完成后依靠新的阅读事件继续，不按剩余可读高度自动补足一批。工具过程占用原记录额度，折叠后未必形成相等的可读空间。
+
+渲染侧的 Sequence 仍遍历整个已载序列，过程详情部分在首次展开后保留节点；没有按视口挂载／回收的完整虚拟列表。滚动锚点从 DOM 前部扫描，可见记录状态变化又可能使带新回调和插入项的 `ConversationView` 重渲染。这些是源码成本路径，未测量前不认证现场卡顿根因；渐进挂载、节点保留及验收边界见[目标设计](../design/conversation-client-architecture.md#数据准备与渐进呈现)。
 
 来源标签集中在 [`conversation-sources`](../../packages/client-ui/src/lib/conversation-sources.ts)，只索引已接受 Core records 和精确关系；同一事件可有多个来源，invocation 来源按 Core 归属与唯一调用身份只标对应 selector。Focus、搜索与 Mobile 复用该映射；来源标签不产生关联、作者、采用或完成事实。
 
@@ -103,6 +115,10 @@ Renderer 桥使用 Core [`conversation-changes`](../../packages/core/src/convers
 ## Mobile、样式与宿主差异
 
 [`useHostedConversation`](../../apps/mobile/src/conversation/use-hosted-conversation.ts) 将准确 Hosted Session 交给同一 `useConversationView`；[`MobileConversationSurface`](../../apps/mobile/src/conversation/MobileConversationSurface.tsx) 以完整窗口驱动 `ConversationView`。Mobile 的连接、草稿、未确认操作与活动状态保留原 owner；历史窗口中存在 Question 时才挂载同来源的当前答案读取需求。保留页的资源继续使用其原 client／Session／Host，连接或 Session 改变后不接受旧结果。
+
+Hosted Client 已通过选定连接绑定 semantic Host，读取中的 `hostId: 'local'` 是该接收方的 route-local namespace。[Core `readAgentSessionHistory`](../../packages/core/src/client.ts) 先按 Session descriptor 取得原执行 Host，再将响应路由映回 `local`；Desktop 的 [`RuntimeController.readSessionHistory`](../../apps/desktop/src/main/runtime-controller.ts) 对远端也先选择 client、发送 `local`、最后映回外侧 Host。MobileMailbox 传给 `useAgentInputMailbox` 的 Host 用于本地读窗作用域／key，并不是该 mailbox RPC 的 Host 参数。它们不能仅按同名字符串比较或相互替换；原 source Host、执行 Host 与连接路由分别核对。当前单一已选 semantic Host 的接线不等于 Mobile 已支持浏览该 Host 登记的全部其他 Host。
+
+Mobile Surface 目前还内联手动输入、CAS 意图保存、重连核对及同步交互答复；设备意图归 [`local-drafts`](../../apps/mobile/src/conversation/local-drafts.ts)，准入／权限与操作回执归 Core。原生异步问题的宿主适配已由 [`question-replies`](../../apps/mobile/src/conversation/question-replies.ts) 独立承接。技术设计中的控制器拆分不改变这些业务 owner。
 
 共享样式归 [`client-ui/styles`](../../packages/client-ui/src/styles/index.css)，两端按宿主入口导入。Mobile 的触控尺寸、外层容器和本端覆盖归 [`conversation.css`](../../apps/mobile/src/conversation/conversation.css)；共同组件的存在不代签两端视觉、性能或交互验收。
 
@@ -131,6 +147,10 @@ Renderer 桥使用 Core [`conversation-changes`](../../packages/core/src/convers
 Desktop 的 [`SessionMailbox`](../../apps/desktop/src/renderer/src/components/SessionMailbox.tsx) 与 [`AgentSessionComposer`](../../apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx)、Mobile 的 [`MobileMailbox`](../../apps/mobile/src/conversation/MobileMailbox.tsx) 通过共同 [`useAgentInputMailbox`](../../packages/client-ui/src/lib/use-agent-input-mailbox.ts) 消费这份原日志。Desktop 沿原 Host 路由和 typed IPC 调用，Mobile 使用原 Hosted 读口；完整条目通过严格分片校验后才进入当前读窗。共同 [`InputMailboxRecords`](../../packages/client-ui/src/components/InputMailboxRecords.tsx) 保留准确作者、正文、原回执与当前读取失败，原本地未发意图和可编辑控件仍归原输入 owner。信箱的来源历史与登记行按原显示时刻共同排序，只有准确原 input key 相同才连接已有本地操作，不按正文或时间认定原生采用。
 
 PTY 字节回执及 `inputRef` 本身不构成原生采用。原 Provider saved-history owner 保留 canonical user item 的准确 client correlation、语义 item ID 与来源；[`native-input-adoption`](../../packages/core/src/native-input-adoption.ts) 沿原历史页、changes 和 exact-record 读取入口核对原持久 claim，不派发输入或改写回执。共同 timeline 与严格 codec 复用同一采用边规则，临时 Reader 仅保有界原引用反证；后到歧义撤销归并，溢出明确未知。客户端和 connector 直接消费原生主消息及完整提交贡献，不解码 token 或匹配正文。原 actor 写通道不授予历史 reader 控制权，公开内容及原投递授权仍逐原 part 判断。
+
+Desktop Inputs 还组合本地队列、Core mailbox 和来源输入历史；各有独立覆盖与游标，不能相互代签。已有 [`session-mailbox-messages`](../../apps/desktop/src/renderer/src/lib/session-mailbox-messages.ts) 提供来源 selector，但 `SessionMailbox` 仍在组件中派生 `deliveredIds`／准确 journal keys，并通过 InputMailboxRecords、InputHistoryList、MessageHistory 的 render-props 拼装含 ReactNode 的行。这里的呈现组合与原 Core 输入关联是不同职责，目标边界见[三类输入的派生投影](../design/conversation-client-architecture.md#三类输入的派生投影)。
+
+[`ComposerPendingDelivery`](../../apps/desktop/src/renderer/src/components/ComposerPendingDelivery.tsx) 的避让已复用 Floating UI、按 Region 注册的 [`TerminalInputGeometry`](../../apps/desktop/src/renderer/src/lib/terminal-view-observation.ts)、有界终端读取与 RAF 合并；它仍借祖先和 xterm／interaction 私有 DOM 发现几何对象。这些查询只服务呈现，不授予发送或权限资格。目标是补全原宿主几何边界，不能把当前实现误述为完全没有观察 port，也不能仅凭 observer 数量认证性能问题。
 
 具体行为由[范围与唯一归属](../design/behavior/conversation-mode.md#范围与唯一归属)指向的原专题持有。普通输入和健康能力不以历史探测或 UI 阅读是否成功为门槛。
 
