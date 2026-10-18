@@ -1,5 +1,6 @@
 export const packageIdentifierMutations = [
   { name: 'enrollment-store-uuid', path: 'packages/connectors/src/connection-enrollment-store.ts', pattern: 'uses compiled CLI and original SDK through the Desktop owner' },
+  { name: 'enrollment-create-wire-format', path: 'packages/connectors/src/connection-enrollment-store.ts', pattern: 'retains the original native creation rejection through durable inspect', before: "kind === 'create' ? randomUUID() : mintObjectId()", after: 'mintObjectId()' },
   { name: 'enrollment-owner-uuid', path: 'packages/connectors/src/connection-enrollment.ts', pattern: 'uses compiled CLI and original SDK through the Desktop owner' },
   { name: 'setup-uuid', path: 'packages/connectors/src/connection-setup.ts', pattern: 'compiled CLI and SDK explicitly inspect the exact saved application' },
   { name: 'configuration-step-uuid', path: 'packages/connectors/src/connection-setup-configuration.ts', pattern: 'SDK and compiled CLI explicitly enable one exact original bot' },

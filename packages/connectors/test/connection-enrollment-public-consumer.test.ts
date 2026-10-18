@@ -22,6 +22,7 @@ afterEach(async () => { const errors: unknown[] = []; try { for (const close of 
 async function fixture(options?: Parameters<typeof enrollmentFixture>[0]) { const f = await enrollmentFixture(options); clean.push(f.close); return f }
 function result(o: { code: number | null; stdout: string; stderr: string }) { expect(o.code, o.stdout + o.stderr).toBe(0); return JSON.parse(o.stdout).result }
 type Fixture = Awaited<ReturnType<typeof fixture>>
+const originalCreateWireId = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u
 function decision(view: ConnectionEnrollmentView, kind: ConnectionEnrollmentActionKind) { const choices = view.actions.filter(action => action.kind === kind); expect(choices).toHaveLength(1); const action = choices[0]!; return { operationId: view.operation!.operationId, ownRevision: action.ownRevision, decision: { actionId: action.actionId, kind } } }
 async function advance(f: Pick<Fixture, 'sdk'>, view: ConnectionEnrollmentView, kind: ConnectionEnrollmentActionKind) { return f.sdk.call('connection.enrollment.advance', decision(view, kind)) }
 async function inspect(f: Pick<Fixture, 'sdk' | 'input'>) { return f.sdk.call('connection.enrollment.inspect', { operationId: f.input.operationId }) }
@@ -68,13 +69,21 @@ it('uses compiled CLI and original SDK through the Desktop owner, preserving enc
   const serialized = JSON.stringify([caps, pending, saved]); expect(serialized).not.toContain(fixtureCredential); expect(serialized).not.toContain(fixturePrivateState)
   const rows = f.services.database!.prepare('SELECT record_json FROM connection_enrollment').all(); expect(JSON.stringify(rows)).not.toContain(fixtureCredential); expect(JSON.stringify(rows)).not.toContain('"signed":')
   expectConnectionAllocations(JSON.parse(String(rows[0]!.record_json)))
-  const owners = f.services.database!.prepare('SELECT owner FROM connection_enrollment_attempt').all()
-  expect(owners.length).toBeGreaterThan(0)
-  for (const owner of owners) expect(isObjectId(owner.owner)).toBe(true)
+  const attempts = f.services.database!.prepare('SELECT owner,attempt_id,kind FROM connection_enrollment_attempt ORDER BY rowid').all()
+  expect(attempts.filter(attempt => attempt.kind === 'create')).toHaveLength(1)
+  expect(attempts.filter(attempt => attempt.kind !== 'create').length).toBeGreaterThan(0)
+  for (const attempt of attempts) {
+    expect(isObjectId(attempt.owner)).toBe(true)
+    if (attempt.kind === 'create') expect(attempt.attempt_id).toMatch(originalCreateWireId)
+    else expect(isObjectId(attempt.attempt_id), 'Ordinary enrollment claim IDs must use the shared component').toBe(true)
+  }
+  expect(f.create.mock.calls[0]![0].attemptId).toBe(attempts.find(attempt => attempt.kind === 'create')!.attempt_id)
   const bytes = await readFile(join(f.directory, 'connections.sqlite')); expect(bytes.includes(Buffer.from(fixtureCredential))).toBe(false)
   await f.closeOwner(); await f.reopen()
   const reopened = result(await f.cli(['enrollment', 'ls'])); expect(reopened.operations).toEqual([saved]); expect(f.authentication).toHaveBeenCalledTimes(1)
   expect(result(await f.cli(['enrollment', 'advance', '--input', '-'], originalCreate))).toEqual(view)
+  expect(f.services.database!.prepare('SELECT owner,attempt_id,kind FROM connection_enrollment_attempt ORDER BY rowid').all()).toEqual(attempts)
+  expect(f.create).toHaveBeenCalledTimes(1)
 }, 30_000)
 
 it('joins concurrent same intent once and rejects changed target, actor and payload-authored authority', async () => {
@@ -366,6 +375,7 @@ it('preserves finite response diagnostics without accepting unsafe or cross-stag
 
 it('retains the original native creation rejection through durable inspect, public SDK and compiled CLI without replay', async () => {
   const f = await defaultFixture(), calls: string[] = []
+  let createCid: unknown
   const clock = vi.spyOn(Date, 'now').mockReturnValue(Date.now())
   const responses = [
     Response.json({ code: 0, data: { step_info: { token: 'private-diagnostic-qr' } } }, { headers: { 'x-flow-key': 'private-diagnostic-flow' } }),
@@ -377,8 +387,10 @@ it('retains the original native creation rejection through durable inspect, publ
     Response.json({ code: 0, data: { url: 'https://images.example.invalid/private-diagnostic-avatar.png' } }),
     Response.json({ code: 17, message: 'private-diagnostic-native-message', data: { token: 'private-diagnostic-secret' } })
   ]
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
-    calls.push(new URL(url).pathname)
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const path = new URL(url).pathname
+    calls.push(path)
+    if (path === '/developers/v1/manifest/upsert_by_template') createCid = JSON.parse(String(init?.body)).cid
     const response = responses.shift()
     if (!response) throw Error('Unexpected extra native request')
     return response
@@ -398,6 +410,10 @@ it('retains the original native creation rejection through durable inspect, publ
   expect(view.actions.map(action => action.kind)).not.toContain('create')
   expect(responses).toHaveLength(0)
   expect(calls.filter(path => path.includes('upsert_by_template'))).toHaveLength(1)
+  // This checks the preserved wire shape and exact durable association, not server acceptance.
+  expect(createCid).toMatch(originalCreateWireId)
+  const originalAttempt = f.services.database!.prepare("SELECT attempt_id,kind,state FROM connection_enrollment_attempt WHERE kind='create'").get()
+  expect(originalAttempt).toEqual({ attempt_id: createCid, kind: 'create', state: 'claimed' })
   const count = calls.length
   await f.closeOwner(); await f.reopen()
   const observed = await f.sdk.call('connection.enrollment.inspect', { operationId: f.input.operationId, requestTrace: { limit: 100 } })
@@ -405,12 +421,13 @@ it('retains the original native creation rejection through durable inspect, publ
   for (const value of [observed, copied]) {
     expect(value.operation.diagnostic).toEqual(expected)
     expect(value.requestTrace.operationId).toBe(f.input.operationId)
-    expect(value.requestTrace.entries.find((row: any) => row.action === 'create')).toMatchObject({ request: 'claimed', secureStorage: null })
+    expect(value.requestTrace.entries.find((row: any) => row.action === 'create')).toMatchObject({ stepId: createCid, request: 'claimed', secureStorage: null })
     expect(JSON.stringify(value)).not.toMatch(/private-diagnostic|native-message|csrf|cookie/)
   }
   expect((await f.sdk.call('connection.enrollment.begin', f.input)).operation!.diagnostic).toEqual(expected)
   expect((await f.sdk.call('connection.enrollment.advance', originalDecision)).operation!.diagnostic).toEqual(expected)
   expect(calls).toHaveLength(count)
+  expect(f.services.database!.prepare("SELECT attempt_id,kind,state FROM connection_enrollment_attempt WHERE kind='create'").get()).toEqual(originalAttempt)
 }, 30_000)
 
 it('keeps another provider response code diagnostic through the same public inspect contract', async () => {
