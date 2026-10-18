@@ -8,7 +8,7 @@ import { readRoomTarget } from './room-target.js'
 export type RoomBindingHostOptions = {
   connections: ConnectionHost
   /** Synchronous enqueue joins this original Binding transaction; no network effects. */
-  lifecycle?: { queueBindingNotice(operationId: string, binding: RoomBinding, event: RoomBindingNoticeEvent, synchronization: boolean | null): string }
+  lifecycle?: { queueBindingNotice(operationId: string, binding: RoomBinding, event: RoomBindingNoticeEvent, synchronization: boolean | null): string; retireBindingPending(binding: RoomBinding): void }
   spatial: { read(): Promise<AgentMuxSpatialState | null> }
   /** Borrow the original Core client for the exact Host, never a new Runtime or focused occupant. */
   checkpoint(reference: ConversationRef): Promise<ConversationCheckpointPage>
@@ -244,6 +244,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
         const { inputTarget: _previousInputTarget, ...previous } = current
         const binding: RoomBinding = { ...previous, revision: current.revision + 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, ...(input.inputTarget ? { inputTarget: input.inputTarget } : {}), executionHostId: input.executionHostId, agentSessionId: input.agentSessionId, regionAnchor: input.regionAnchor, ...cut, authorizedBy: authority }
         this.writeBinding(binding)
+        this.options.lifecycle?.retireBindingPending(current)
         this.carryGrants(current, binding)
         const sameRoute = equal(current.application, binding.application) && current.externalConversationId === binding.externalConversationId && current.agentSessionId === binding.agentSessionId && current.executionHostId === binding.executionHostId
         const notices = this.notices(input.operationId, sameRoute ? [{ binding, event: current.state === 'paused' ? 'resumed' : 'updated' }] : [{ binding: current, event: 'disconnected' }, { binding, event: 'connected' }])
@@ -284,6 +285,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
         if (!current || current.state === 'detached' || current.revision !== input.expectedRevision) refuse('ROOM_BINDING_REVISION_CONFLICT')
         const binding: RoomBinding = { ...current, state: action === 'pause' ? 'paused' : 'detached', revision: current.revision + 1 }
         this.writeBinding(binding)
+        this.options.lifecycle?.retireBindingPending(current)
         if (action === 'pause') this.carryGrants(current, binding)
         const notices = this.notices(input.operationId, [{ binding, event: action === 'pause' ? 'paused' : 'disconnected' }])
         return this.finish({ operationId: input.operationId, action, state: 'applied', binding, ...(notices ? { notices } : {}) })

@@ -28,8 +28,14 @@ function requestCard(prepared: PreparedPublication): Record<string, unknown> | n
       if (value?.tag === 'div') { if (object(value.text)?.tag !== 'plain_text' || typeof object(value.text)?.content !== 'string') return null }
       else if (value?.tag === 'action' && Array.isArray(value.actions) && value.actions.length === 1) {
         const button = object(value.actions[0]), text = object(button?.text), ref = object(button?.value)
-        if (button?.tag !== 'button' || text?.tag !== 'plain_text' || typeof text.content !== 'string' || !ref || Object.keys(ref).length !== 1) return null
-        feishuIdentity(ref.actionRef)
+        if (button?.tag !== 'button' || text?.tag !== 'plain_text' || typeof text.content !== 'string') return null
+        if (typeof button.url === 'string' && button.value === undefined) {
+          const link = new URL(button.url), sessionId = decodeURIComponent(link.pathname.slice(1))
+          if (button.url !== `amux://agent/${encodeURIComponent(feishuIdentity(sessionId))}`) return null
+        } else {
+          if (button.url !== undefined || !ref || Object.keys(ref).length !== 1) return null
+          feishuIdentity(ref.actionRef)
+        }
       } else return null
     }
     return card
@@ -164,7 +170,24 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       return { adapterId: this.adapterId, renderVersion: this.renderVersion, requestKey: operation.operationId, request: { method: 'DELETE', path: `${path}/${encodeURIComponent(mapping.messageId)}` } }
     }
     let card: Record<string, unknown> | undefined
-    if (operation.payload.kind === 'permission') {
+    if (operation.payload.kind === 'binding-lifecycle') {
+      const payload = operation.payload
+      const title = { connected: 'Conversation connected', disconnected: 'Conversation disconnected', paused: 'Conversation paused', resumed: 'Conversation resumed', updated: 'Conversation sharing updated' }[payload.event]
+      const ended = payload.event === 'disconnected', paused = payload.event === 'paused'
+      const publication = payload.scope.publication === 'future-shared-conversation' ? 'New normal conversation messages are shared with this group.' : 'New public Agent replies are shared with this group.'
+      const input = payload.scope.input === 'all-messages' ? 'Authorized members can send requests directly.' : 'Authorized members can send requests by mentioning or replying to the bot.'
+      const status = ended ? 'This group no longer synchronizes with the Agent. The Agent and its conversation are kept.'
+        : paused ? 'New messages are paused in both directions. The Agent, group and member permissions are kept.'
+        : payload.synchronization === null ? 'The relationship is saved. Automatic synchronization has not been confirmed; inspect it in AgentMux Connections.'
+        : !payload.synchronization ? 'The group is linked, but automatic synchronization is off. Enable it in AgentMux Connections to start sharing.'
+        : 'This relationship is saved. Individual message receipts show whether each direction is working.'
+      card = { config: { update_multi: true }, header: { template: ended || paused ? 'grey' : 'blue', title: { tag: 'plain_text', content: title } }, elements: [
+        { tag: 'div', text: { tag: 'plain_text', content: `Agent ${payload.agentSessionId}` } },
+        { tag: 'div', text: { tag: 'plain_text', content: status } },
+        ...(!ended && !paused ? [{ tag: 'div', text: { tag: 'plain_text', content: `${publication}\n${input}\nEarlier history is not backfilled. Internal reasoning, raw tool details and system context are not shared.` } }] : []),
+        { tag: 'action', actions: [{ tag: 'button', type: 'default', text: { tag: 'plain_text', content: 'Open conversation' }, url: `amux://agent/${encodeURIComponent(payload.agentSessionId)}` }] }
+      ] }
+    } else if (operation.payload.kind === 'permission') {
       const payload = operation.payload
       const status = { pending: 'Choose one original permission option.', 'response-sent': 'Response returned. Native adoption and completion are not confirmed.', unconfirmed: 'The original response is not confirmed. Check it in amux; it will not be resent.', unavailable: 'Continue in the original amux terminal.' }[payload.status]
       card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: payload.title } }, elements: [

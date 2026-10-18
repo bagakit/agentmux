@@ -22,24 +22,26 @@ export interface PublicationPermissionsPort {
   authorized(operation: PublicationOperation): boolean
 }
 export type PublicationObservation = ConnectionDeliveryObservation
-type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; work?: Promise<void> | undefined; watch?: ConversationObservationHandle | undefined; watchViewId?: string | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
-export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort }
+type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; watch?: ConversationObservationHandle | undefined; watchViewId?: string | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
+export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore }
 
 
 /** Durable external publication. Each Binding has an independent read/effect lane, outside original Core input. */
 export class PublicationHost implements ConnectionDeliveryPort {
   readonly store: PublicationStore
   private readonly lanes = new Map<string, Lane>()
+  private readonly notices = new Map<string, Lane>()
   private closed = false
   private readonly timer: ReturnType<typeof setInterval>
   constructor(private readonly options: PublicationHostOptions) {
-    this.store = new PublicationStore(options.connections.database)
+    this.store = options.store ?? new PublicationStore(options.connections.database)
     // Recovery probes only failed/closed/unconfirmed lanes. Healthy source reads are notification-driven.
     this.timer = setInterval(() => this.refresh(true), 5_000); this.timer.unref()
     this.refresh()
   }
   refresh(recoveryOnly = false): void {
     if (this.closed) return
+    this.refreshNotices()
     let active: RoomBinding[]
     try { active = this.options.bindings.listActive() } catch { for (const lane of this.lanes.values()) lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }; return }
     const current = new Map(active.map(binding => [binding.bindingId, binding]))
@@ -66,6 +68,36 @@ export class PublicationHost implements ConnectionDeliveryPort {
     catch { return null }
   }
   private authorized(binding: RoomBinding): boolean { return !this.closed && this.authority(binding)?.authorized === true }
+  /** Explicit lifecycle authority is narrower than ordinary publication and does not enable synchronization. */
+  private noticeAuthorized(notice: PublicationOperation): boolean {
+    if (this.closed || notice.payload.kind !== 'binding-lifecycle' || notice.reference.source.kind !== 'binding-operation') return false
+    const source = notice.reference.source
+    const original = this.options.bindings.readOperation?.(source.operationId)
+    if (original?.state !== 'applied' || !original.notices?.some(item => item.deliveryOperationId === notice.operationId && item.event === source.event)) return false
+    const binding = this.options.bindings.readExact(notice.bindingId, notice.bindingRevision)
+    const connection = this.options.connections.readConfiguration(notice.target.connectionId)
+    return !!binding && connection?.config.enabled === true && binding.connectionId === notice.target.connectionId &&
+      binding.application.domain === notice.target.application.domain && binding.application.appId === notice.target.application.appId &&
+      connection.config.application.domain === binding.application.domain && connection.config.application.appId === binding.application.appId &&
+      binding.externalConversationId === notice.target.externalConversationId && binding.executionHostId === notice.reference.hostId && binding.agentSessionId === notice.reference.agentSessionId
+  }
+  private refreshNotices(): void {
+    let pending: PublicationOperation[]
+    try { pending = this.store.pendingBindingNotices() } catch { for (const lane of this.notices.values()) lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }; return }
+    const ids = new Set(pending.map(item => item.operationId))
+    for (const [id, lane] of this.notices) if (!ids.has(id)) { lane.abort.abort(); this.notices.delete(id) }
+    for (const notice of pending) {
+      let lane = this.notices.get(notice.operationId)
+      if (!lane) {
+        let binding: RoomBinding | null
+        try { binding = this.options.bindings.readExact(notice.bindingId, notice.bindingRevision) } catch { continue /* Original pending notice survives this unavailable read. */ }
+        if (!binding) continue
+        lane = { binding, notice, abort: new AbortController(), dirty: false, observation: { state: 'unknown', reason: 'not-started' } }
+        this.notices.set(notice.operationId, lane)
+      }
+      this.wake(lane)
+    }
+  }
   private wake(lane: Lane): void {
     if (this.closed || lane.abort.signal.aborted) return
     lane.dirty = true
@@ -79,6 +111,14 @@ export class PublicationHost implements ConnectionDeliveryPort {
     }).finally(() => { lane.work = undefined; if (lane.dirty && !lane.abort.signal.aborted) this.wake(lane) })
   }
   private async cycle(lane: Lane): Promise<void> {
+    if (lane.notice) {
+      const adapter = this.options.connections.publicationAdapter(lane.notice.target.connectionId)
+      if (!adapter) { lane.observation = { state: 'unavailable', reason: 'adapter-unavailable' }; return }
+      if (!this.noticeAuthorized(lane.notice)) { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' }; return }
+      const observation = await this.drain(lane, adapter, lane.notice.projectionId)
+      if (observation) lane.observation = observation
+      return
+    }
     const binding = lane.binding, signal = lane.abort.signal, reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
     if (!this.authorized(binding)) return
     const adapter = this.options.connections.publicationAdapter(binding.connectionId)
@@ -245,16 +285,17 @@ export class PublicationHost implements ConnectionDeliveryPort {
   }
   private async drain(lane: Lane, adapter: PublicationAdapter, projectionId?: string): Promise<PublicationObservation | undefined> {
     const binding = lane.binding, signal = lane.abort.signal
+    const authorized = () => lane.notice ? this.noticeAuthorized(lane.notice) : this.authorized(binding)
     const accepted = new Map<string, { unit: ConversationUnit; frontier: ConversationCheckpoint; resolved: ReadonlyMap<string, ResolvedPublicationPart> }>()
     const qualified = new Set<string>() // One frozen representation is verified once in this bounded drain.
     for (let count = 0; count < 16; count++) {
-      if (signal.aborted || !this.authorized(binding)) return
+      if (signal.aborted || !authorized()) return
       let original = this.store.next(binding, projectionId)
       if (!original) return
       let credential: string | null
       try { credential = await this.options.connections.resolveCredential(binding.connectionId) } catch { credential = null }
       if (!credential) return { state: 'unavailable', reason: 'credential-missing' }
-      if (signal.aborted || !this.authorized(binding)) return
+      if (signal.aborted || !authorized()) return
       if (original.state === 'not-applied') return { state: 'unavailable', reason: 'effect-unconfirmed' }
       if (original.state === 'dispatching' || original.state === 'unknown') {
         // Recovery is read-only even when no platform lookup can establish the effect.
@@ -301,9 +342,9 @@ export class PublicationHost implements ConnectionDeliveryPort {
         if (last?.state === 'dispatching') { this.store.settleResourceUpload(original.operationId, original.uploads!.length, { state: 'unknown' }); continue }
         if (last?.state !== 'confirmed') {
           if (original.payload.kind === 'image' ? !adapter.images || !adapter.images.accepts(original.payload.image) : !adapter.files || !adapter.files.accepts(original.payload.file)) return { state: 'unavailable', reason: 'adapter-unavailable' }
-          const upload = this.store.claimResourceUpload(original.operationId, () => this.authorized(binding))
+          const upload = this.store.claimResourceUpload(original.operationId, () => authorized())
           if (!upload || (upload.payload.kind !== 'image' && upload.payload.kind !== 'file')) return
-          if (signal.aborted || !this.authorized(binding)) { this.store.settleResourceUpload(upload.operationId, upload.uploads!.length, { state: 'unknown' }); return }
+          if (signal.aborted || !authorized()) { this.store.settleResourceUpload(upload.operationId, upload.uploads!.length, { state: 'unknown' }); return }
           const uploadSignal = AbortSignal.any([signal, AbortSignal.timeout(30_000)])
           let effect: Promise<ResourceUploadReceipt>
           try { effect = Promise.resolve(upload.payload.kind === 'image'
@@ -316,15 +357,15 @@ export class PublicationHost implements ConnectionDeliveryPort {
             this.wake(lane)
           }, () => {})
           try { await this.until(effect, uploadSignal) } catch { try { settle({ state: 'unknown' }) } catch { /* Preserve its authoritative receipt or unconfirmed storage. */ } }
-          if (signal.aborted || !this.authorized(binding)) return
+          if (signal.aborted || !authorized()) return
           original = this.store.inspect(upload.operationId)!
           if (original.uploads?.at(-1)?.state !== 'confirmed') continue
         }
       }
       if (original.payload.kind === 'permission' && !this.options.permissions?.authorized(original)) return { state: 'unavailable', reason: 'source-unconfirmed' }
-      const claimed = this.store.claimNext(binding, () => this.authorized(binding) && (original!.payload.kind !== 'permission' || this.options.permissions?.authorized(original!) === true), adapter, projectionId)
+      const claimed = this.store.claimNext(binding, () => authorized() && (original!.payload.kind !== 'permission' || this.options.permissions?.authorized(original!) === true), adapter, projectionId)
       if (!claimed) return
-      if (signal.aborted || !this.authorized(binding) || claimed.payload.kind === 'permission' && !this.options.permissions?.authorized(claimed)) { this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); return }
+      if (signal.aborted || !authorized() || claimed.payload.kind === 'permission' && !this.options.permissions?.authorized(claimed)) { this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); return }
       const timeout = AbortSignal.timeout(30_000), dispatchSignal = AbortSignal.any([signal, timeout])
       let effect: Promise<PublicationReceipt>
       try { effect = Promise.resolve(adapter.dispatch(claimed.prepared!, claimed.target, credential, dispatchSignal, claimed.mapping)) }
@@ -374,7 +415,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     if (this.closed) throw new AgentMuxError('The original publication owner closed during authorization. Its original outcome is retained.', 'PUBLICATION_OWNER_UNAVAILABLE')
     const original = this.store.inspect(input.operationId)
     if (!original) throw new AgentMuxError('The original publication operation is unknown.', 'UNKNOWN_PUBLICATION_OPERATION')
-    const delivery = publicDelivery(this.store.retry(original.operationId, () => !this.closed && this.options.bindings.publicationAuthority(original.bindingId, original.bindingRevision).authorized))
+    const delivery = publicDelivery(this.store.retry(original.operationId, () => !this.closed && (original.payload.kind === 'binding-lifecycle' ? this.noticeAuthorized(original) : this.options.bindings.publicationAuthority(original.bindingId, original.bindingRevision).authorized)))
     this.refresh(); return { delivery }
   }
   close(): void {
@@ -382,5 +423,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     this.closed = true; clearInterval(this.timer)
     for (const lane of this.lanes.values()) { lane.abort.abort(); lane.permissionStop?.(); try { lane.watch?.dispose() } catch { /* Release failure cannot change an Agent lifecycle. */ } }
     this.lanes.clear()
+    for (const lane of this.notices.values()) lane.abort.abort()
+    this.notices.clear()
   }
 }

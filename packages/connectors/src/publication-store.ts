@@ -1,4 +1,3 @@
-import { externalConversationAuthor, externalConversationRecordId } from '@agentmux/core'
 import { createHash } from 'node:crypto'
 import type { PublicationImage, PublicationFile, ResourceUploadReceipt, ResolvedPublicationPart } from './publication-resource.js'
 import { publicationContent, publicationPartKey, type PublicationContentPlan } from './publication-content.js'
@@ -16,7 +15,14 @@ export type PermissionPublicationPayload = {
 }
 export type ImagePublicationPayload = { kind: 'image'; part: ConversationContentRef; image: PublicationImage; phase?: 'progress' | 'final'; relay?: NonNullable<ConnectionDelivery['relay']> }
 export type FilePublicationPayload = { kind: 'file'; part: ConversationContentRef; file: PublicationFile; phase?: 'progress' | 'final'; relay?: NonNullable<ConnectionDelivery['relay']> }
-export type PublicationPayload = PermissionPublicationPayload | ImagePublicationPayload | FilePublicationPayload | {
+export type BindingLifecyclePayload = {
+  kind: 'binding-lifecycle'
+  event: import('@agentmux/core/connections').RoomBindingNoticeEvent
+  agentSessionId: string
+  scope: RoomBinding['scope']
+  synchronization: boolean | null
+}
+export type PublicationPayload = PermissionPublicationPayload | BindingLifecyclePayload | ImagePublicationPayload | FilePublicationPayload | {
   kind: 'speech'
   text: string
   phase?: 'progress' | 'final'
@@ -81,7 +87,7 @@ function fragments(payload: Extract<PublicationPayload, { kind: 'speech' }>, byt
 }
 
 type RepresentationPart = { text: string; part?: ConversationContentRef; image?: PublicationImage; file?: PublicationFile }
-type ContentPayload = Exclude<PublicationPayload, PermissionPublicationPayload>
+type ContentPayload = Exclude<PublicationPayload, PermissionPublicationPayload | BindingLifecyclePayload>
 type RepresentationPayload = Extract<PublicationPayload, { kind: 'speech' }> | { kind: 'sequence'; parts: ContentPayload[] }
 type MaterializedPlan = PublicationContentPlan & { resourceParts?: RepresentationPart[] }
 function representation(parts: readonly RepresentationPart[], phase?: 'progress' | 'final', relay?: ConnectionDelivery['relay'], separator = '\n\n'): RepresentationPayload {
@@ -131,6 +137,10 @@ export class PublicationStore {
         ON connector_publication_operation(binding_id, binding_revision, ordinal);
       CREATE INDEX IF NOT EXISTS connector_publication_fragments
         ON connector_publication_operation(projection_id, fragment_ordinal, ordinal);
+      CREATE INDEX IF NOT EXISTS connector_publication_binding_notice
+        ON connector_publication_operation(ordinal)
+        WHERE json_extract(operation_json,'$.payload.kind')='binding-lifecycle'
+          AND state IN ('pending','dispatching','unknown');
     `)
     if (!database.prepare('PRAGMA table_info(connector_publication_decision)').all().some(c => c.name === 'decision_json'))
       database.exec('ALTER TABLE connector_publication_decision ADD COLUMN decision_json TEXT')
@@ -158,6 +168,34 @@ export class PublicationStore {
   }
   inspect(operationId: string): PublicationOperation | null {
     return this.read(this.database.prepare('SELECT operation_json, state FROM connector_publication_operation WHERE operation_id=?').get(operationId))
+  }
+  /** A new relationship boundary skips only ordinary effects that never crossed the dispatch boundary. */
+  retireBindingPending(boundary: RoomBinding): void {
+    for (const row of this.database.prepare("SELECT operation_json,state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state='pending' AND json_extract(operation_json,'$.reference.source.kind') IN ('native','captured') AND json_extract(operation_json,'$.attempt') IS NULL").all(...scopeKey(boundary))) {
+      this.write({ ...this.read(row)!, state: 'cancelled', reason: 'binding-revised' })
+    }
+  }
+  /** Called synchronously inside the original Binding transaction, before it publishes its applied receipt. */
+  queueBindingNotice(bindingOperationId: string, boundary: RoomBinding, event: BindingLifecyclePayload['event'], synchronization: boolean | null): string {
+    const projectionId = 'binding-notice-' + digest([bindingOperationId, event, ...scopeKey(boundary)])
+    const operationId = 'publication-' + digest(projectionId)
+    const existing = this.inspect(operationId)
+    if (existing) return existing.operationId
+    const payload: BindingLifecyclePayload = { kind: 'binding-lifecycle', event, agentSessionId: boundary.agentSessionId, scope: boundary.scope, synchronization }
+    const operation: PublicationOperation = {
+      operationId, projectionId, sourceRevision: digest(payload), bindingId: boundary.bindingId, bindingRevision: boundary.revision,
+      reference: { ...ref(boundary), source: { kind: 'binding-operation', operationId: bindingOperationId, event } },
+      target: { connectionId: boundary.connectionId, application: boundary.application, externalConversationId: boundary.externalConversationId },
+      publicationScope: boundary.scope.publication, payload, effect: 'upsert', fragment: { ordinal: 0, count: 1 }, state: 'pending'
+    }
+    this.database.prepare('INSERT INTO connector_publication_operation (operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
+      .run(operationId, projectionId, operation.sourceRevision, 0, boundary.bindingId, boundary.revision, encode(operation), 'pending')
+    return operationId
+  }
+  /** Only unfinished notice effects participate in recovery; historical conversation data is not scanned. */
+  pendingBindingNotices(): PublicationOperation[] {
+    return this.database.prepare("SELECT operation_json,state FROM connector_publication_operation WHERE json_extract(operation_json,'$.payload.kind')='binding-lifecycle' AND state IN ('pending','dispatching','unknown') ORDER BY ordinal")
+      .all().map(row => this.read(row)!)
   }
   list(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, limit = 30, after?: string): PublicationOperation[] {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AgentMuxError('Publication pages require a limit from 1 to 100.', 'INVALID_PUBLICATION_REQUEST')
@@ -226,7 +264,7 @@ export class PublicationStore {
       .all(projectionId).map(row => this.read(row)!).filter(operation => operation.effect === 'upsert' && operation.state !== 'cancelled' && operation.payload.kind === 'speech')
     if (!operations.length) return
     const reference = operations[0]!.reference
-    if (reference.source.kind === 'interaction') return
+    if (reference.source.kind !== 'native' && reference.source.kind !== 'captured') return
     this.saveDecision(boundary, 'legacy-' + digest(projectionId), 'current', { kind: 'legacy-representation', projectionId, record: { ...reference, source: reference.source },
       operations: operations.map(operation => operation.operationId), text: operations.map(operation => publicationSpeechText(operation.payload as Extract<PublicationPayload, { kind: 'speech' }>)).join('') } satisfies LegacyRepresentationIntent)
   }
@@ -341,7 +379,7 @@ export class PublicationStore {
         const qualified = (projectionId: string) => {
           if (qualification.has(projectionId)) return qualification.get(projectionId)!
           const original = this.latestProjection(projectionId)
-          const accepted = !original || (original.event ? allowedEvents.has(original.event.id) : original.reference.source.kind !== 'interaction' && references.some(reference => conversationRecordId(reference) === conversationRecordId(original.reference as ConversationItemRef)))
+          const accepted = !original || (original.event ? allowedEvents.has(original.event.id) : (original.reference.source.kind === 'native' || original.reference.source.kind === 'captured') && references.some(reference => conversationRecordId(reference) === conversationRecordId(original.reference as ConversationItemRef)))
           qualification.set(projectionId, accepted); return accepted
         }
         const ambiguous = new Set<string>()
@@ -485,7 +523,7 @@ export class PublicationStore {
     return original
   }
   next(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId?: string): PublicationOperation | null {
-    return this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') AND " + (projectionId === undefined ? "json_extract(operation_json,'$.reference.source.kind')!='interaction'" : "projection_id=?") + " ORDER BY CASE WHEN state='not-applied' AND json_extract(operation_json,'$.payload.kind') IN ('image','file') THEN 1 ELSE 0 END,ordinal LIMIT 1" ).get(...scopeKey(boundary), ...(projectionId === undefined ? [] : [projectionId])) )
+    return this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') AND " + (projectionId === undefined ? "json_extract(operation_json,'$.reference.source.kind') IN ('native','captured')" : "projection_id=?") + " ORDER BY CASE WHEN state='not-applied' AND json_extract(operation_json,'$.payload.kind') IN ('image','file') THEN 1 ELSE 0 END,ordinal LIMIT 1" ).get(...scopeKey(boundary), ...(projectionId === undefined ? [] : [projectionId])) )
   }
   /** Only the original pending projection supplies records missing accepted purpose. No history scan. */
   pendingRecords(operation: PublicationOperation): ConversationItemRef[] {
@@ -609,7 +647,7 @@ export class PublicationStore {
   claimNext(boundary: PublicationBoundary, authorized: () => boolean, adapter: PublicationPreparer, projectionId?: string): PublicationOperation | null {
     return this.transaction(() => {
       if (!authorized()) return null
-      const first = this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') AND " + (projectionId === undefined ? "json_extract(operation_json,'$.reference.source.kind')!='interaction'" : "projection_id=?") + " ORDER BY CASE WHEN state='not-applied' AND json_extract(operation_json,'$.payload.kind') IN ('image','file') THEN 1 ELSE 0 END,ordinal LIMIT 1" )
+      const first = this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') AND " + (projectionId === undefined ? "json_extract(operation_json,'$.reference.source.kind') IN ('native','captured')" : "projection_id=?") + " ORDER BY CASE WHEN state='not-applied' AND json_extract(operation_json,'$.payload.kind') IN ('image','file') THEN 1 ELSE 0 END,ordinal LIMIT 1" )
         .get(...scopeKey(boundary), ...(projectionId === undefined ? [] : [projectionId])))
       if (!first || first.state !== 'pending') return null
       if ((first.publicationScope ?? 'future-native-user-facing') !== boundary.scope.publication)
