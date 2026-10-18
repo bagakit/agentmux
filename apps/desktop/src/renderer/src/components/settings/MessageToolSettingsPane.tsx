@@ -43,11 +43,11 @@ export function MessageToolSettingsPane({ initialLayout, completion, onSave, onS
 
   return <div className="settings-pane-stack" data-message-tool-settings>
     <figure className="message-tool-preview" aria-label="Input preview">
-      <figcaption><span>Message input</span><span>{draft.dirty || inputDraft.dirty ? 'Unsaved preview' : 'Saved settings'}</span></figcaption>
+      <figcaption><span>Input preview</span><span>{draft.dirty || inputDraft.dirty ? 'Unsaved preview' : 'Saved settings'}</span></figcaption>
       <div className="message-tool-preview__composer" data-layout={draft.value}>
         <span className="message-tool-preview__text">Review these changes<span aria-hidden="true" className="message-tool-preview__caret" /></span>
         <div className="message-tool-preview__tools">
-          {completionFields.map(field => <span key={field.key} title={field.label} data-preview-prefix={field.key} data-disabled={!inputDraft.value[field.key] || undefined}>
+          {completionFields.map(field => <span key={field.key} title={`${field.label}: ${inputDraft.value[field.key] || 'Off'}`} data-preview-prefix={field.key} data-disabled={!inputDraft.value[field.key] || undefined}>
             <kbd>{inputDraft.value[field.key] || 'Off'}</kbd><small>{field.label}</small>
           </span>)}
           <span className="message-tool-preview__send" aria-label="Send example">↑</span>
