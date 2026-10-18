@@ -32,7 +32,7 @@ export async function openAgentMuxRpcHttpRequest(options: AgentMuxRpcHttpClientO
         ...(options.token === undefined ? {} : { Authorization: `Bearer ${options.token}` }) }, body
     })
   } catch (error) {
-    throw signal.aborted ? new AgentMuxError('RPC reader was cancelled.', 'CONTROL_CANCELLED') : rpcTransportError(error)
+    throw signal.aborted ? new AgentMuxError('RPC reader was cancelled.', 'CONTROL_CANCELLED') : rpcTransportError(error, 'connection')
   }
   if (response.status === 401 || response.status === 403) {
     await response.body?.cancel().catch(() => {})
@@ -45,6 +45,10 @@ export async function openAgentMuxRpcHttpRequest(options: AgentMuxRpcHttpClientO
       : new AgentMuxError('HTTP RPC service is unavailable.', 'CONTROL_UNAVAILABLE')
   }
   const reader = response.body.getReader()
+  const read = async () => {
+    try { return await reader.read() }
+    catch (error) { throw rpcTransportError(error, 'connection') }
+  }
   let closed = false
   const dispose = async () => {
     if (closed) return
@@ -64,7 +68,7 @@ export async function openAgentMuxRpcHttpRequest(options: AgentMuxRpcHttpClientO
       if (type === 'application/json') {
         const chunks: Uint8Array[] = []; let size = 0
         while (!closed) {
-          const { value, done } = await reader.read()
+          const { value, done } = await read()
           if (done) break
           size += value.byteLength
           if (size > AGENTMUX_RPC_MAX_MESSAGE_BYTES) throw new AgentMuxError('HTTP RPC response exceeds its budget.', 'CONTROL_PROTOCOL_ERROR')
@@ -79,7 +83,7 @@ export async function openAgentMuxRpcHttpRequest(options: AgentMuxRpcHttpClientO
         const decoder = new TextDecoder('utf-8', { fatal: true })
         let pieces: Uint8Array[] = [], size = 0, tail = new Uint8Array()
         while (!closed) {
-          const { value, done } = await reader.read()
+          const { value, done } = await read()
           if (done) { decoder.decode(); break }
           let start = 0, offset = 0
           while (!closed) {
