@@ -92,6 +92,7 @@ export class DiscordAdapter implements ConnectionAdapter, IngressAuthenticator {
       if (owners.get(key) === receiver) { owners.delete(key); this.stores.delete(key) }
     }
     signal.addEventListener('abort', close, { once: true })
+    manager.on(WebSocketShardEvents.Closed, () => { receiver.socketFailed = true })
     manager.on(WebSocketShardEvents.Error, () => { receiver.socketFailed = true })
     manager.on(WebSocketShardEvents.SocketError, () => { receiver.socketFailed = true })
     // This only serializes native custody/ACK for a shard. DurableIngress owns all saved messages and Agent input.
