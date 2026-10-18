@@ -25,6 +25,7 @@ import { BrowserDemonstrationFileStore, BrowserDemonstrationRecorder } from '../
 import { BrowserTaskAssets, BrowserTaskAssetFileStore } from '../src/main/browser-task-assets.js'
 import type { BrowserTaskAsset, BrowserTaskContent } from '../src/shared/browser-task-assets.js'
 import type { BrowserDemonstrationDocument, BrowserDemonstrationDraft } from '../src/shared/browser-demonstration.js'
+import type { BrowserAgentAuthority } from '../src/main/browser-agent-authority.js'
 
 /**
  * `runScript` 那条路的单元判据：**生产的 onPageCall 真的走派发层**，以及会话中途没了要如实报告。
@@ -223,7 +224,7 @@ function fakeWindow(): any {
 }
 
 async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: BrowserStepEvidenceStore,
-  results?: BrowserResultArtifactStore, workspaceId: string | null = null, demonstrations?: BrowserDemonstrationRecorder, assets?: BrowserTaskAssets, downloads?: BrowserDownloads, uploads?: BrowserUploads): Promise<{
+  results?: BrowserResultArtifactStore, workspaceId: string | null = null, demonstrations?: BrowserDemonstrationRecorder, assets?: BrowserTaskAssets, downloads?: BrowserDownloads, uploads?: BrowserUploads, agents?: BrowserAgentAuthority): Promise<{
   manager: BrowserViewManager
   contents: any
   /** 到此刻为止推给渲染进程的每一个 browser 事件——判「驱动位有没有真的送出去」要读它。 */
@@ -243,8 +244,12 @@ async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: 
     rememberedSchemes: async () => ({}),
     rememberScheme: async () => {},
     openExternal: () => {}
-  }, journal, evidence, results, demonstrations, assets, downloads, uploads)
-  await manager.create('b1', 'https://example.invalid/', workspaceId)
+  }, journal, evidence, results, demonstrations, assets, downloads, uploads, undefined, undefined, {}, agents)
+  // Existing Take/Return regressions address a page with an accurately associated original Agent.
+  // A fresh unassociated page now has a different creation action, covered by its owning tests.
+  await manager.create('b1', 'https://example.invalid/', workspaceId, undefined, undefined, 'responsive', {
+    agent: { hostId: 'original-host', agentSessionId: 'original-agent' }
+  })
   const view = fakeElectron.FakeWebContentsView.instances[0]!
   // 函数而不是数组：驱动的开始与结束各推一次，都发生在 create 之后，取快照就看不到它们了。
   return {
@@ -253,6 +258,58 @@ async function managerWithBrowser(journal?: BrowserOperationJournal, evidence?: 
     sentEvents: () => window.events
   }
 }
+
+describe('Browser exact Agent program authority', () => {
+  it('establishes only the original Core actor and retains the relationship and notice through an observation gap without taking healthy capability', async () => {
+    const identity = { hostId: 'actor-host', agentSessionId: 'exact-actor' }
+    const resolve = vi.fn(() => identity), inspect = vi.fn()
+    const f = await managerWithBrowser(undefined, undefined, undefined, 'workspace-a', undefined, undefined, undefined, undefined, { resolve, inspect })
+    try {
+      const operator = { id: identity.agentSessionId, name: 'Display name is not authority' }
+      const run = (code: string) => f.manager.runScript('b1', code, operator, undefined, undefined, undefined, false, undefined, { agentSessionId: identity.agentSessionId })
+      const first = await run('return 17')
+      expect(first.result).toBe(17)
+      expect(f.manager.target('b1')?.control?.agent).toEqual(identity)
+      expect(resolve).toHaveBeenCalledWith(identity.agentSessionId)
+      f.manager.takeControl('b1')
+      expect(f.manager.returnControl('b1').control).toMatchObject({ owner: 'agent', agent: identity })
+      resolve.mockImplementationOnce(() => { throw new Error('Retained Core observation unavailable') })
+      expect((await run('return 23')).result).toBe(23)
+      expect(f.manager.target('b1')).toMatchObject({ control: { agent: identity }, warning: expect.stringContaining('identity could not be confirmed') })
+      expect(f.sentEvents().at(-1)?.browser.activity.warning).toContain('identity could not be confirmed')
+      f.manager.takeControl('b1')
+      expect(f.manager.returnControl('b1').control).toMatchObject({ owner: 'agent', agent: identity })
+      expect((await run('return 29')).result).toBe(29)
+      expect(f.manager.target('b1')?.warning).toBeUndefined()
+      expect(inspect).not.toHaveBeenCalled()
+    } finally { f.manager.dispose() }
+  })
+
+  it('keeps an accepted actor unknown when Core cannot confirm it rather than treating the new page as no-Agent', async () => {
+    const resolve = vi.fn(() => undefined), f = await managerWithBrowser(undefined, undefined, undefined, 'workspace-a', undefined, undefined, undefined, undefined, { resolve, inspect: vi.fn() })
+    try {
+      await f.manager.create('fresh-actor', 'https://example.invalid/fresh', 'workspace-a')
+      expect((await f.manager.runScript('fresh-actor', 'return 31', { id: 'actor-unobserved', name: 'A label' }, undefined, undefined, undefined, false, undefined,
+        { agentSessionId: 'actor-unobserved' })).result).toBe(31)
+      expect(f.manager.target('fresh-actor')?.control).not.toHaveProperty('agent')
+      expect(f.manager.target('fresh-actor')?.warning).toContain('identity could not be confirmed')
+      f.manager.takeControl('fresh-actor')
+      expect(() => f.manager.returnControl('fresh-actor')).toThrow('association is unconfirmed')
+    } finally { f.manager.dispose() }
+  })
+
+  it('keeps display-only human program authors separate from an authenticated Agent caller', async () => {
+    const resolve = vi.fn(() => ({ hostId: 'host', agentSessionId: 'display-label' }))
+    const f = await managerWithBrowser(undefined, undefined, undefined, 'workspace-a', undefined, undefined, undefined, undefined, { resolve, inspect: vi.fn() })
+    try {
+      await f.manager.create('human-program', 'https://example.invalid/fresh', 'workspace-a')
+      expect((await f.manager.runScript('human-program', 'return 37', { id: 'display-label', name: 'A human field check' })).result).toBe(37)
+      expect(resolve).not.toHaveBeenCalled()
+      expect(f.manager.target('human-program')).toMatchObject({ control: { agent: null } })
+      expect(f.manager.target('human-program')?.warning).toBeUndefined()
+    } finally { f.manager.dispose() }
+  })
+})
 
 /**
  * 让派发层在**第一次**被调用时顺手模拟一次显式停止，并记下每次调用的名字。

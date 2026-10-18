@@ -1,7 +1,7 @@
 const { fixtureFileUrl: _reshape_fixtureFileUrl } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixtureFileUrl: _hygiene_fixtureFileUrl, fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { BrowserRecoveryPreviewStore } from '../src/main/browser-recovery-preview.js'
@@ -205,6 +205,11 @@ import {
 import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
 import { normalizeBrowserBounds } from '../src/shared/browser-bounds.js'
 import { BROWSER_EVENT_CHANNEL, BROWSER_PRESENTATION_EVENT_CHANNEL, type BrowserEvent, type BrowserPresentationEvent } from '../src/shared/contracts.js'
+import type { BrowserAgentAuthority } from '../src/main/browser-agent-authority.js'
+import type { BrowserControlHandoff } from '../src/shared/contracts.js'
+import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
+import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
+import ts from 'typescript'
 
 const profiles: BrowserProfileResolver = {
   defaultProfileId: () => 'default',
@@ -222,15 +227,173 @@ const profiles: BrowserProfileResolver = {
 const privateLedgerRoots: string[] = []
 afterEach(() => { for (const path of privateLedgerRoots.splice(0)) rmSync(path, { recursive: true, force: true }) })
 
-function browserManager(window: ReturnType<typeof fakeWindow>['window'], recoveryPreviews?: BrowserRecoveryPreviewStore): BrowserViewManager {
+function browserManager(window: ReturnType<typeof fakeWindow>['window'], recoveryPreviews?: BrowserRecoveryPreviewStore, agents?: BrowserAgentAuthority): BrowserViewManager {
   // ref 账本指向一个临时路径：本文件判的是 view 生命周期，不判持久化。给真路径会让这些用例
   // 往用户的 userData 里写文件。
   const root = mkdtempSync(join(tmpdir(), 'agentmux-bvm-'))
   privateLedgerRoots.push(root)
   return new BrowserViewManager(window as never, profiles, new BrowserRefLedgerStore(
     join(root, 'ref-ledger.json')
-  ), appLinkHost(), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, recoveryPreviews)
+  ), appLinkHost(), undefined, undefined, undefined, undefined, undefined, undefined, undefined, undefined, recoveryPreviews, {}, agents)
 }
+
+describe('Browser exact Agent association and trusted handoff', () => {
+  const recipient = { kind: 'agent' as const, hostId: 'original-host', agentSessionId: 'created-agent', run: { runId: 'created-run' } }
+  const identity = { hostId: recipient.hostId, agentSessionId: recipient.agentSessionId }
+  const inspect = () => vi.fn(async () => ({ ...recipient } as Awaited<ReturnType<BrowserAgentAuthority['inspect']>>))
+  const input = (manager: BrowserViewManager, id: string): BrowserControlHandoff => ({ agent: recipient,
+    navigationId: manager.target(id)!.navigationId!, expectedRevision: manager.target(id)!.control!.revision })
+
+  it('publishes confirmed-none for a fresh page and refuses receiver-free Return without affecting the page', async () => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    await manager.create('unassociated', 'https://example.invalid/original', 'workspace-a')
+    expect(manager.target('unassociated')?.control).toMatchObject({ owner: 'human', agent: null })
+    expect(() => manager.returnControl('unassociated')).toThrow('no associated Agent')
+    expect(manager.target('unassociated')).toMatchObject({ status: 'ready', url: 'https://example.invalid/original', control: { owner: 'human', agent: null, revision: 0 } })
+    expect(f.children[0]!.webContents.isDestroyed()).toBe(false)
+    manager.close('unassociated')
+  })
+
+  it('confirms the exact original Core Session/Run before associating and transferring, and retains the association after Take and navigation', async () => {
+    const f = fakeWindow(), read = inspect(), manager = browserManager(f.window, undefined, { resolve: () => undefined, inspect: read })
+    await manager.create('handoff', 'https://example.invalid/original', 'workspace-a')
+    const received = await manager.returnControl('handoff', input(manager, 'handoff'))
+    expect(read).toHaveBeenCalledExactlyOnceWith(recipient)
+    expect(received.control).toMatchObject({ owner: 'agent', agent: identity, activeOperationId: null })
+    expect(manager.target('handoff')?.control?.agent).toEqual(identity)
+    expect(manager.takeControl('handoff').control).toMatchObject({ owner: 'human', agent: identity })
+    const moved = await manager.navigate('handoff', 'https://example.invalid/current')
+    expect(moved.control).toMatchObject({ owner: 'human', agent: identity })
+    expect(manager.returnControl('handoff').control).toMatchObject({ owner: 'agent', agent: identity })
+    expect(read).toHaveBeenCalledTimes(1)
+    manager.close('handoff')
+  })
+
+  for (const wrong of ['hostId', 'agentSessionId', 'run', 'retired'] as const) it(`rejects a Core ${wrong} mismatch while keeping the created Agent and original page`, async () => {
+    const f = fakeWindow(), read = inspect()
+    read.mockResolvedValue({ ...recipient, ...(wrong === 'retired' ? { kind: 'retired-agent' } : wrong === 'run' ? { run: { runId: 'newer-run' } } : { [wrong]: 'another-identity' }) } as never)
+    const manager = browserManager(f.window, undefined, { resolve: () => undefined, inspect: read })
+    await manager.create('mismatch', 'https://example.invalid/original', 'workspace-a')
+    await expect(manager.returnControl('mismatch', input(manager, 'mismatch'))).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION_BINDING' })
+    expect(manager.target('mismatch')?.control).toMatchObject({ owner: 'human', agent: null, revision: 0 })
+    expect(f.children[0]!.webContents.isDestroyed()).toBe(false)
+    manager.close('mismatch')
+  })
+
+  for (const changed of ['take', 'navigation', 'closed', 'other-browser'] as const) it(`rechecks original Browser identity and revision after the Core await: ${changed}`, async () => {
+    const f = fakeWindow()
+    let release!: (value: Awaited<ReturnType<BrowserAgentAuthority['inspect']>>) => void
+    const wait = new Promise<Awaited<ReturnType<BrowserAgentAuthority['inspect']>>>(resolve => { release = resolve })
+    const read = vi.fn(() => wait), manager = browserManager(f.window, undefined, { resolve: () => undefined, inspect: read })
+    await manager.create('race', 'https://example.invalid/original', 'workspace-a')
+    const pending = manager.returnControl('race', input(manager, 'race'))
+    const refused = expect(pending).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
+    if (changed === 'take') manager.takeControl('race')
+    if (changed === 'navigation') await manager.navigate('race', 'https://example.invalid/later')
+    if (changed === 'closed' || changed === 'other-browser') manager.close('race')
+    if (changed === 'other-browser') await manager.create('race', 'https://example.invalid/replacement', 'workspace-a')
+    release({ ...recipient } as never)
+    await refused
+    if (changed !== 'closed') expect(manager.target('race')?.control).toMatchObject({ owner: 'human', agent: null })
+    expect(read).toHaveBeenCalledTimes(1)
+    if (changed !== 'closed') manager.close('race')
+  })
+
+  it('keeps an unavailable Core observation local to this handoff, and the same exact request works after reconnecting', async () => {
+    const f = fakeWindow(), read = inspect(), manager = browserManager(f.window, undefined, { resolve: () => undefined, inspect: read })
+    await manager.create('reconnect', 'https://example.invalid/original', 'workspace-a')
+    const request = input(manager, 'reconnect')
+    read.mockRejectedValueOnce(new Error('Original Core observation is unavailable'))
+    await expect(manager.returnControl('reconnect', request)).rejects.toThrow('Core observation')
+    expect(manager.target('reconnect')?.control).toMatchObject({ owner: 'human', agent: null })
+    expect((await manager.returnControl('reconnect', request)).control).toMatchObject({ owner: 'agent', agent: identity })
+    manager.close('reconnect')
+  })
+
+  it('does not infer an association from a legacy descriptor or an operation author, while a saved association survives same-ID native reacquisition', async () => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    const descriptor = { id: 'cold', workspaceId: 'workspace-a', url: 'https://example.invalid/original', title: '', mode: 'normal' as const }
+    const cold = await manager.ensure('cold', async () => descriptor)
+    expect(cold.control).not.toHaveProperty('agent')
+    Reflect.get(manager, 'entries').get('cold').activity.operation = { id: 'historical', operator: { id: recipient.agentSessionId, name: 'Old author' }, phase: 'completed' }
+    expect(() => manager.returnControl('cold')).toThrow('association is unconfirmed')
+    manager.close('cold')
+    const restored = await manager.ensure('saved', async () => ({ ...descriptor, id: 'saved', agent: identity }))
+    expect(restored.control).toMatchObject({ owner: 'human', agent: identity, revision: 0, activeOperationId: null, inputIsolation: 'inactive' })
+    f.children.find(child => child.webContents.getURL() === descriptor.url)!.webContents.close()
+    const reopened = await manager.restore('saved', { workspaceId: 'workspace-a' })
+    expect(reopened.control).toMatchObject({ owner: 'human', agent: identity, revision: 0, activeOperationId: null, inputIsolation: 'inactive' })
+    expect(reopened.activity?.operation).toBeNull()
+    manager.close('saved')
+  })
+
+  it('refuses stale, malformed, unknown-association and replacement recipients before reading Core', async () => {
+    const f = fakeWindow(), read = inspect(), manager = browserManager(f.window, undefined, { resolve: () => undefined, inspect: read })
+    await manager.create('checked', 'https://example.invalid/original', 'workspace-a')
+    const valid = input(manager, 'checked')
+    for (const bad of [{ ...valid, expectedRevision: 99 }, { ...valid, navigationId: 'wrong' }, { ...valid, approval: true },
+      { ...valid, agent: { ...recipient, run: { runId: '' } } }]) await expect(manager.returnControl('checked', bad as never)).rejects.toThrow()
+    const entry = Reflect.get(manager, 'entries').get('checked')
+    entry.agent = undefined
+    await expect(manager.returnControl('checked', valid)).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
+    entry.agent = { ...identity, agentSessionId: 'original-other-agent' }
+    await expect(manager.returnControl('checked', valid)).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
+    expect(read).not.toHaveBeenCalled()
+    expect(manager.target('checked')?.control?.owner).toBe('human')
+    manager.close('checked')
+  })
+
+  it('consumes the actual trusted IPC handoff body before Core verification and Main transfer', async () => {
+    const source = readFileSync(new URL('../src/main/ipc.ts', import.meta.url), 'utf8')
+    const ast = ts.createSourceFile('ipc.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+    const handlers: ts.Expression[] = []
+    const visit = (node: ts.Node) => {
+      if (ts.isCallExpression(node) && node.expression.getText(ast) === 'handleWithEvent' && node.arguments[0]?.getText(ast) === "'browser:returnControl'") handlers.push(node.arguments[1]!)
+      ts.forEachChild(node, visit)
+    }
+    visit(ast); expect(handlers).toHaveLength(1)
+    const emitted = ts.transpileModule(`const handle = ${handlers[0]!.getText(ast)};`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText
+    const f = fakeWindow(), read = inspect(), manager = browserManager(f.window, undefined, { resolve: () => undefined, inspect: read })
+    await manager.create('ipc-handoff', 'https://example.invalid/original', 'workspace-a')
+    const trusted = {}, trust = vi.fn((_channel, event) => { if (event !== trusted) throw new Error('Untrusted Browser handoff sender') })
+    const handler = new Function('requireTrustedSender', 'browsers', `${emitted}; return handle;`)(trust, manager)
+    await expect(handler({}, 'ipc-handoff', input(manager, 'ipc-handoff'))).rejects.toThrow('Untrusted')
+    expect(read).not.toHaveBeenCalled()
+    const result = await handler(trusted, 'ipc-handoff', input(manager, 'ipc-handoff'))
+    expect(result.control).toMatchObject({ owner: 'agent', agent: identity })
+    expect(trust).toHaveBeenCalledWith('browser:returnControl', trusted)
+    expect(read).toHaveBeenCalledExactlyOnceWith(recipient)
+    manager.close('ipc-handoff')
+  })
+
+  it('carries exact Main association, confirmed-none and unknown through public RPC and the actual Browser targets CLI', async () => {
+    const f = fakeWindow(), manager = browserManager(f.window)
+    const directory = mkdtempSync(join(tmpdir(), 'amx-browser-agent-cli-')); privateLedgerRoots.push(directory)
+    await manager.create('none', 'https://example.invalid/none', 'workspace-a')
+    const descriptor = { workspaceId: 'workspace-a', url: 'https://example.invalid/saved', title: '', mode: 'normal' as const }
+    await manager.ensure('unknown', async () => ({ id: 'unknown', ...descriptor }))
+    await manager.ensure('associated', async () => ({ id: 'associated', ...descriptor, agent: identity }))
+    const socketPath = join(directory, 'control.sock')
+    const server = new AgentMuxControlServer({ socketPath, coreClients: () => [], async execute(request) {
+      if (request.operation !== 'browser.targets') throw new Error('Unexpected private Browser request')
+      return { operation: request.operation, targets: manager.targets(), coverage: 'partial', warning: 'An unrelated external owner is unavailable.' }
+    } })
+    await server.start()
+    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
+    try {
+      const decoded = await rpc.call('browser.targets', {})
+      expect(decoded).toMatchObject({ coverage: 'partial', warning: 'An unrelated external owner is unavailable.' })
+      expect(decoded.targets.map(target => [target.id, target.control?.agent])).toEqual([['none', null], ['unknown', undefined], ['associated', identity]])
+      expect(decoded.targets[1]!.control).not.toHaveProperty('agent')
+      const result = await runCompiledObjectCli(['--endpoint', `unix:${socketPath}`, 'browser', 'targets'], objectCliEnvironment(directory))
+      expect(result.code, result.stderr).toBe(0)
+      const actual = JSON.parse(result.stdout).result
+      expect(actual).toEqual(decoded)
+      expect(actual.targets[1].control).not.toHaveProperty('agent')
+      expect(actual.targets[2].control.agent).toEqual(identity)
+    } finally { await rpc.dispose(); await server.stop(); manager.dispose() }
+  })
+})
 
 /**
  * 一个记账的应用链接宿主。`openExternal` **必须**是假的——真的 `shell.openExternal` 会在跑测试的
@@ -561,6 +724,7 @@ describe('BrowserViewManager', () => {
     const dispose = vi.fn(() => { throw new Error('Native cleanup unavailable') })
     const shield = { contents: shieldContents, dispose, synchronize: vi.fn() }
     const entry = Reflect.get(manager, 'entries').get('native-cleanup')
+    entry.agent = { hostId: 'original-host', agentSessionId: 'original-agent' }
     entry.inputShield = shield; entry.inputIsolation = 'isolated'
     source.webContents.close()
     const processes = new Map([[10, 1], [20, 2]])

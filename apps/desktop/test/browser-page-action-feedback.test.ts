@@ -159,7 +159,10 @@ async function managerFixture(preferences?: () => BrowserAgentControlPreferences
     new BrowserRefLedgerStore(join(root, 'refs.json')), { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal() {} },
     undefined, undefined, undefined, undefined, undefined, undefined, undefined, preferences)
   managers.push(manager)
-  await manager.create('browser-one', 'https://generic.invalid/one', 'workspace')
+  // These control-decoration scenes already have an exact Agent; receiver-free Return is invalid.
+  await manager.create('browser-one', 'https://generic.invalid/one', 'workspace', undefined, undefined, 'responsive', {
+    agent: { hostId: 'original-host', agentSessionId: 'original-agent' }
+  })
   const source = children.find(view => view.webContents.getURL() === 'https://generic.invalid/one')
   await manager.create('sibling', 'https://generic.invalid/two', 'workspace')
   const sibling = children.find(view => view.webContents.getURL() === 'https://generic.invalid/two')
