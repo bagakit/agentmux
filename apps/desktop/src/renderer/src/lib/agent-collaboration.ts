@@ -2,10 +2,11 @@ import type { AgentMuxMessageEvent, AgentMuxMessageEventReference, AgentMuxSpawn
 import type { SessionHistoryReference, SessionHistorySourceReference } from '../../../shared/contracts'
 import type { FocusContext } from './focus-context'
 import type { WorkspaceAgentMember } from './workspace-agent-scope'
+import type { SpaceIconTarget } from './space-object-appearance'
 
 export type CollaborationSubject = SessionHistoryReference
 export const collaborationSubjectKey = (subject: CollaborationSubject) => JSON.stringify([subject.hostId, subject.agentSessionId])
-export type CollaborationArea = { id: string; name: string; kind: 'mote' | 'topic' | 'project' | 'unplaced'; members: readonly string[]; affiliations?: ReadonlyMap<string, WorkspaceAgentMember>; issue?: string | null }
+export type CollaborationArea = { id: string; name: string; kind: 'mote' | 'topic' | 'project' | 'unplaced'; iconTarget?: SpaceIconTarget; workspaceId?: string; hostId?: string; members: readonly string[]; affiliations?: ReadonlyMap<string, WorkspaceAgentMember>; issue?: string | null }
 export type CollaborationReading = {
   subject: CollaborationSubject
   incarnation: string | null
@@ -26,7 +27,7 @@ export type CollaborationEvidence =
 export type CollaborationRelation = {
   id: string; source: string; target: string; kind: CollaborationEvidence['kind']; evidence: CollaborationEvidence[]
 }
-export type CollaborationAgent = { id: string; subject: CollaborationSubject | null; reference?: SessionHistorySourceReference; sessionId: string; context?: FocusContext; provenance?: string; name?: string; tier?: 'active' | 'idle' | 'closed' | 'unknown'; lastActivityAt?: number | null }
+export type CollaborationAgent = { id: string; subject: CollaborationSubject | null; reference?: SessionHistorySourceReference; sessionId: string; context?: FocusContext; providerId?: string; executorId?: string; provenance?: string; name?: string; tier?: 'active' | 'idle' | 'closed' | 'unknown'; lastActivityAt?: number | null }
 
 /** Original owner + Session is identity. Display context IDs and area membership are not. */
 export function collaborationAgents(contexts: readonly FocusContext[]): Map<string, CollaborationAgent> {

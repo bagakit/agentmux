@@ -98,6 +98,7 @@ export function resolveCollaborationIdentities(recorded: { agents: ReadonlyMap<s
     aliases.set(id, canonical); sources.set(canonical, source)
     if (id !== canonical) agents.delete(id)
     agents.set(canonical, { ...agent, id: canonical, subject, tier: source.state === 'retired' ? 'closed' : 'unknown',
+      ...(source.history ? { providerId: source.history.providerId, executorId: source.history.executorId } : {}),
       provenance: `${source.state === 'retired' ? 'Retired' : 'Retained'} Session · ${source.history?.providerId ?? 'Provider unrecorded'} · ${source.hostId}` })
   }
   const relations = new Map<string, CollaborationRelation>()
