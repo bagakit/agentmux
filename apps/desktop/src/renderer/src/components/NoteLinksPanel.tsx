@@ -9,6 +9,8 @@ import { canvasSharedObservation } from '../lib/note-canvas-model'
 import { sameNoteResource } from '../lib/notebook-library'
 import type { NoteFileTarget } from '../lib/file-document-consumers'
 import { NoteSharedDetails } from './NoteSharedDetails'
+import { NoteUseContextReader, NoteUseLocations } from './NoteUseLocations'
+import { noteSharedRelations } from '../lib/note-shared-relations'
 import { noteGraphReferenceKey, noteGraphReferenceLabel, projectNoteLinks } from '../lib/note-graph-references'
 import { useNoteCanvasObservation } from '../lib/use-note-canvas-observation'
 import '../styles/note-links.css'
@@ -86,7 +88,7 @@ function IncomingSource({ references, snapshot, active, navigate }: { references
 }
 
 /** One read per shared original serves all of this page's direct occurrences. */
-function SharedOriginal({ references, graph, active, navigate, onOpenFile }: { references: NoteGraphReference[]; graph: ReturnType<typeof useNoteCanvasObservation>; active: boolean; navigate: Navigate; onOpenFile?: OpenFile | undefined }) {
+function SharedOriginal({ references, graph, active, navigate, onOpenFile, selectedBlockId }: { references: NoteGraphReference[]; graph: ReturnType<typeof useNoteCanvasObservation>; active: boolean; navigate: Navigate; onOpenFile?: OpenFile | undefined; selectedBlockId?: string | undefined }) {
   const snapshot = graph.snapshot!, reference = references[0]!, targetId = reference.target.kind === 'page' ? reference.target.noteId : ''
   const original = canvasSharedObservation(snapshot, targetId)
   const [read, setRead] = useState<{ snapshot: NotebookGraphSnapshot; value?: NoteContentObservation; issue?: string } | null>(null)
@@ -105,15 +107,18 @@ function SharedOriginal({ references, graph, active, navigate, onOpenFile }: { r
   const note = source?.note.kind === 'shared-block' && source.note.noteId === targetId ? source.note : null
   const title = note?.title || (source && [...source.blocks.values()].find(block => block.text.trim())?.text.trim().slice(0, 120)) || 'Shared content'
   const target = original ? { ...original.resource, noteId: targetId } : null
+  const locations = useMemo(() => {
+    const keys = new Set(references.map(noteGraphReferenceKey))
+    return noteSharedRelations(snapshot, targetId, note?.origin, { target: { ...reference.sourceResource, noteId: reference.source.noteId }, referenceId: '' }).uses
+      .filter(use => keys.has(noteGraphReferenceKey(use.reference))).map(use => ({ ...use, current: use.reference.source.blockId === selectedBlockId }))
+  }, [snapshot, targetId, note?.origin, references, selectedBlockId])
   return <section className="note-links-shared-original">
     <div className="note-links-source-heading">{target ? <button type="button" className="note-links-target" onClick={() => navigate(targetId, target)}>{title}</button> : <strong>Shared content</strong>}<small>{references.length} {references.length === 1 ? 'use here' : 'uses here'}</small></div>
     {!note && <p className="note-links-state" role="status">{!original ? 'The shared original is unconfirmed. Its exact references are kept; refresh the saved sources.' : !observed ? 'Reading shared content…' : confirmed ? 'The shared content could not be read as its original Note.' : content?.status === 'read' ? 'The shared original changed after this graph. Refresh links to read its details.' : observed.issue ?? (content && 'message' in content ? content.message : 'Shared content is unconfirmed.')}</p>}
-    <ol>{references.map((use, index) => <li className="note-links-shared-use" key={noteGraphReferenceKey(use)}>
-      {note && target && onOpenFile && use.occurrence.kind === 'stored' && <NoteSharedDetails note={note} target={target} host={{ ...use.sourceResource, noteId: use.source.noteId }}
-        include={{ referenceId: use.occurrence.referenceId, noteId: targetId, path: target.path, workspaceId: target.workspaceId }} graph={graph} active={active} onOpen={onOpenFile} />}
-      <button type="button" className="note-links-target" onClick={() => navigate(use.source.noteId, use.sourceResource, use.source.blockId)}>Go to use {index + 1}</button>
-      {use.resolution !== 'resolved' && <span>{use.resolution}</span>}
-    </li>)}</ol>
+    <NoteUseLocations uses={locations} active={active} itemClassName="note-links-shared-use" buttonClassName="note-links-target"
+      onOpen={({ reference: use }) => navigate(use.source.noteId, use.sourceResource, use.source.blockId)}
+      marker={({ reference: use }) => note && target && onOpenFile && use.occurrence.kind === 'stored' ? <NoteSharedDetails note={note} target={target} host={{ ...use.sourceResource, noteId: use.source.noteId }}
+        include={{ referenceId: use.occurrence.referenceId, noteId: targetId, path: target.path, workspaceId: target.workspaceId }} graph={graph} active={active} onOpen={onOpenFile} /> : null} />
   </section>
 }
 
@@ -163,7 +168,7 @@ function NoteLinksPanelSurface({ noteId, active = true, selectedBlockId, onOpen,
   }, [links])
   const complete = snapshot?.graph.completeness === 'complete', qualifier = stale || issue ? 'last confirmed ' : complete ? '' : 'at least '
   return <section className="note-links" aria-label="Saved Note links"><button type="button" className="note-links-toggle" aria-expanded={expanded} onClick={() => expand(value => !value)}><Disclosure size={12} /><LinkIcon size={14} /><strong>Linked references</strong>{busy ? <span>Reading…</span> : issue || stale ? <span>Needs refresh</span> : snapshot?.graph.completeness === 'partial' ? <span>Partial coverage</span> : snapshot?.graph.completeness === 'unknown' ? <span>Unconfirmed coverage</span> : null}</button>
-    {expanded && <div className="note-links-body">
+    {expanded && <NoteUseContextReader snapshot={snapshot} active={active && direction === 'shared'}><div className="note-links-body">
       <div className="note-links-controls"><div role="group" aria-label="Link direction"><button type="button" aria-pressed={direction === 'incoming'} onClick={() => setDirection('incoming')}>Links to this note{links ? ` (${qualifier}${links.incoming.length})` : ''}</button><button type="button" aria-pressed={direction === 'outgoing'} onClick={() => setDirection('outgoing')}>Links from this note{links ? ` (${qualifier}${links.outgoing.length})` : ''}</button><button type="button" aria-pressed={direction === 'shared'} onClick={() => setDirection('shared')}>Shared content</button></div>
         {selectedBlockId && <button type="button" aria-pressed={blockOnly} onClick={() => setBlockOnly(value => !value)}>Selected block only</button>}
         <button type="button" className="note-links-refresh" aria-label="Refresh saved links" aria-busy={busy} onClick={refresh}><Refresh size={12} />Refresh</button></div>
@@ -171,7 +176,7 @@ function NoteLinksPanelSurface({ noteId, active = true, selectedBlockId, onOpen,
       {(issue || stale) && <p className="note-links-state" role="status">{issue ? `Links could not be observed: ${issue}. The last confirmed view is kept.` : 'Saved originals changed. Refresh links to observe them; this view is kept.'}<button type="button" onClick={refresh}>Refresh links</button></p>}
       {snapshot && !complete && <p className="note-links-state" role="status">{snapshot.graph.completeness === 'partial' ? 'Partial link coverage' : 'Link coverage is unconfirmed'} · {snapshot.graph.observations.filter(item => item.status === 'read').length}/{snapshot.graph.observations.length} originals read</p>}
       {links && snapshot && (direction === 'shared' ? <>
-        {shared.length > 0 && <><h3 className="note-links-section-title">Shared content used here</h3>{shared.map(([id, references]) => <SharedOriginal key={id} references={references} graph={graph} active={active && expanded} navigate={navigate} onOpenFile={onOpenFile ? openFile : undefined} />)}</>}
+        {shared.length > 0 && <><h3 className="note-links-section-title">Shared content used here</h3>{shared.map(([id, references]) => <SharedOriginal key={id} references={references} graph={graph} active={active && expanded} navigate={navigate} onOpenFile={onOpenFile ? openFile : undefined} selectedBlockId={selectedBlockId} />)}</>}
         {incoming.length > 0 && <><h3 className="note-links-section-title">Uses of this content</h3>{incoming.map(([key, references]) => <IncomingSource key={key} references={references} snapshot={snapshot} active={active && expanded} navigate={navigate} />)}</>}
         {!shared.length && !incoming.length && <p className="note-links-state">{complete ? 'No shared content uses in this saved catalog.' : 'No confirmed shared content uses in this observation. Some sources or targets remain unconfirmed.'}</p>}
       </> : direction === 'incoming' ? incoming.length ? incoming.map(([key, references]) => <IncomingSource key={key} references={references} snapshot={snapshot} active={active && expanded} navigate={navigate} />)
@@ -181,6 +186,6 @@ function NoteLinksPanelSurface({ noteId, active = true, selectedBlockId, onOpen,
       {links && links.unboundElsewhere > 0 && <p className="note-links-state" role="status">{links.unboundElsewhere} written link {links.unboundElsewhere === 1 ? 'query elsewhere has' : 'queries elsewhere have'} no confirmed destination; incoming coverage is partial.</p>}
       {snapshot && links && <details className="note-links-details note-links-coverage"><summary>About these links</summary><p className="note-links-scope">Saved {complete ? 'catalog observed' : snapshot.graph.completeness === 'partial' ? 'partial catalog' : 'catalog unconfirmed'} · {snapshot.graph.observations.filter(item => item.status === 'read').length}/{snapshot.graph.observations.length} originals read · catalog r{snapshot.catalog.revision}<br />{links.incoming.length} incoming · {links.outgoing.length} outgoing · {links.sharedOutgoing.length} shared uses here</p></details>}
       {!snapshot && !busy && !issue && <button type="button" className="note-text-button" onClick={refresh}>Read saved links</button>}
-    </div>}
+    </div></NoteUseContextReader>}
   </section>
 }
