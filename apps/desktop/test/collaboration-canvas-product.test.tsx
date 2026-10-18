@@ -47,7 +47,7 @@ function scenario(count = 480) {
 type Scene = ReturnType<typeof scenario>
 let requests: engine.CollaborationLayoutRequest[], boxes: Map<string, engine.CollaborationLayoutBox>, paths: Map<string, engine.CollaborationPath>
 let holdResponses = false, heldResponses: { response: engine.CollaborationLayoutResponse; deliver(): void }[] = []
-function graph(scene: Scene, selection: CollaborationSelection = null, relations: readonly CollaborationRelation[] = scene.relations, pulses: readonly CollaborationPulse[] = [], agents: ReadonlyMap<string, CollaborationAgent> = scene.agents, options: Pick<ComponentProps<typeof AgentCollaborationGraph>, 'ready' | 'locate'> = {}) {
+function graph(scene: Scene, selection: CollaborationSelection = null, relations: readonly CollaborationRelation[] = scene.relations, pulses: readonly CollaborationPulse[] = [], agents: ReadonlyMap<string, CollaborationAgent> = scene.agents, options: Pick<ComponentProps<typeof AgentCollaborationGraph>, 'ready' | 'locate' | 'onPreviewAgent'> = {}) {
   return <AgentCollaborationGraph agents={agents} areas={scene.areas} relations={relations} pulses={pulses} selection={selection} onSelect={select} onOpen={open} ready={false} {...options} />
 }
 async function viewport(x: number, y: number, width = 600, height = 400, zoom = 1) {
@@ -361,11 +361,16 @@ it('anchors the clicked exact occurrence through a real size transition and tran
 
 it('keeps keyboard reading anchored then honors the last actual pointer during a later size job without another request', async () => {
   const scene = scenario(24); await loaded(scene)
+  const preview = vi.fn()
+  await dom.render(graph(scene, null, scene.relations, [], scene.agents, { onPreviewAgent: preview }))
   const earlier = collaborationAgentNode('area-0', subject('canvas-0')), reading = collaborationAgentNode('area-1', subject('canvas-1'))
   await focusNode(earlier)
   const body = nodeElement(earlier)!.querySelector<HTMLButtonElement>('.focus-context')!, firstBox = renderedBox(earlier), firstCamera = captured.store!.getState().transform
   await act(async () => { body.focus(); body.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
   expect(select).not.toHaveBeenCalled()
+  expect(preview).toHaveBeenLastCalledWith(subject('canvas-0'))
+  await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Zoom in"]')!.focus())
+  expect(preview).toHaveBeenLastCalledWith(null)
   const changed = new Map(scene.agents); changed.set(subject('canvas-4'), { ...changed.get(subject('canvas-4'))!, tier: 'idle' })
   holdResponses = true; await dom.render(graph(scene, null, scene.relations, [], changed))
   await settleCollaborationCanvas(() => expect(heldResponses.some(item => item.response.type === 'complete')).toBe(true))
@@ -442,7 +447,7 @@ it('opens a real working region at readable scale instead of fitting many empty 
   expect(requests).toHaveLength(operations)
 })
 
-it('overview groups original directional relations without relayout and enters a named region through its control', async () => {
+it('overview keeps exact Agent endpoints without relayout and enters a named region through its control', async () => {
   const scene = scenario(24); await loaded(scene)
   const extent = [...boxes.values()], left = Math.min(...extent.map(box => box.x)), top = Math.min(...extent.map(box => box.y))
   const operations = requests.length, originalNodes = captured.nodes
@@ -451,12 +456,21 @@ it('overview groups original directional relations without relayout and enters a
   expect(dom.container.querySelectorAll('.focus-context')).toHaveLength(0)
   expect(dom.container.querySelectorAll('.collaboration-agent__mark strong')).toHaveLength(0)
   const edges = [...dom.container.querySelectorAll<SVGGElement>('.collaboration-connections .react-flow__edge')]
-  expect(edges.length).toBeGreaterThan(0); expect(edges.length).toBeLessThan(scene.relations.length)
-  const edge = edges.find(value => value.getAttribute('aria-label')!.includes('Original area 0 → Original area 1'))!
-  expect(edge).toBeDefined(); expect(edge.getAttribute('aria-label')).toContain('relations')
+  expect(edges).toHaveLength(scene.relations.length)
+  expect(edges.every(edge => !edge.getAttribute('aria-label')!.includes('Original area'))).toBe(true)
+  const edge = edges.find(value => value.getAttribute('aria-label')!.includes('Agent 0 → Agent 1'))!
+  expect(edge).toBeDefined(); expect(edge.getAttribute('aria-label')).toContain('original records')
+  const connection = requests.flatMap(request => request.type === 'arrange' ? request.input.connections : []).find(connection => connection.id === edge.dataset.id)!
+  const source = renderedBox(connection.source), target = renderedBox(connection.target)
+  const ends = curvePoints(edge.querySelector('.react-flow__edge-path')!.getAttribute('d')!)
+  expect(Math.hypot(ends[0]!.x - source.x - source.width / 2, ends[0]!.y - source.y - source.height / 2)).toBeCloseTo(24)
+  expect(Math.hypot(ends.at(-1)!.x - target.x - target.width / 2, ends.at(-1)!.y - target.y - target.height / 2)).toBeCloseTo(24)
+  const envelopes = [...dom.container.querySelectorAll('.collaboration-area__envelope path')]
+  expect(envelopes).toHaveLength(scene.areas.length)
+  expect(envelopes.every(path => path.getAttribute('d')!.includes('Q'))).toBe(true)
   await act(async () => edge.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
   const selected = select.mock.lastCall![0] as NonNullable<CollaborationSelection>
-  expect(selected.kind).toBe('relation'); expect(selected.relatedIds!.length).toBeGreaterThan(1)
+  expect(selected.kind).toBe('relation'); expect(selected.relatedIds).toEqual(['cross-0'])
   for (const id of selected.relatedIds!) {
     const relation = scene.relations.find(value => value.id === id)!
     expect(scene.areas[0]!.members).toContain(relation.source); expect(scene.areas[1]!.members).toContain(relation.target)
@@ -465,8 +479,12 @@ it('overview groups original directional relations without relayout and enters a
   // The node's screen-sized heading stays within its original area; miniature labels cannot overlap shelves.
   const heading = dom.container.querySelector<HTMLButtonElement>('[aria-label="Locate Original area 0 · 6 Agents"]')!
   expect(heading).not.toBeNull()
+  expect(heading.textContent).toContain('Original area 0')
+  expect(heading.textContent).toContain('6 Agents')
   const area = heading.closest<HTMLElement>('.collaboration-area')!
-  expect(Number.parseFloat(area.style.getPropertyValue('--collaboration-label-width'))).toBeCloseTo(renderedBox(JSON.stringify(['area', 'area-0'])).width * .25)
+  const areaBox = renderedBox(JSON.stringify(['area', 'area-0']))
+  expect(areaBox.kind).toBe('area')
+  expect(Number.parseFloat(area.style.getPropertyValue('--collaboration-label-width'))).toBeCloseTo(Math.min(240, (areaBox.width - (areaBox as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>).heading.x) * .25))
   await dom.render(graph(scene, null, scene.relations, [], scene.agents, { ready: true }))
   // Locate is an explicit control intent, so it is allowed to replace this already-set camera.
   await viewport(-left * .25 + 20, -top * .25 + 20, 1600, 1200, .25)
@@ -491,17 +509,28 @@ it('selecting an Agent highlights only its original relations while preserving e
 })
 
 
-it('keeps every selected original relation emphasized when an overview group expands into detail', async () => {
+it('keeps every selected original relation emphasized when an explicitly folded group expands', async () => {
   const scene = scenario(24); await loaded(scene)
+  for (const area of scene.areas) {
+    await focusNode(JSON.stringify(['area', area.id]))
+    await act(async () => nodeElement(JSON.stringify(['area', area.id]))!.querySelector<HTMLButtonElement>('.collaboration-area__heading')!.click())
+    await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull())
+  }
   const extent = [...boxes.values()], left = Math.min(...extent.map(box => box.x)), top = Math.min(...extent.map(box => box.y))
   await viewport(-left * .25 + 20, -top * .25 + 20, 1600, 1200, .25)
   const group = [...dom.container.querySelectorAll<SVGGElement>('.collaboration-connections .react-flow__edge')]
     .find(edge => edge.getAttribute('aria-label')!.includes('Original area 0 → Original area 1'))!
   await act(async () => group.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
-  const selection = select.mock.lastCall![0] as NonNullable<CollaborationSelection>, operations = requests.length
+  const selection = select.mock.lastCall![0] as NonNullable<CollaborationSelection>
   expect(selection.relatedIds!.length).toBeGreaterThan(1)
   await dom.render(graph(scene, selection))
-  await viewport(-left + 20, -top + 20, 20000, 20000, 1)
+  for (const area of scene.areas) {
+    await focusNode(JSON.stringify(['area', area.id]))
+    await act(async () => nodeElement(JSON.stringify(['area', area.id]))!.querySelector<HTMLButtonElement>('.collaboration-area__heading')!.click())
+    await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull())
+  }
+  const operations = requests.length
+  await viewport(10000, 10000, 40000, 40000, 1)
   const edges = [...dom.container.querySelectorAll<SVGGElement>('.collaboration-connections .react-flow__edge')]
   const selected = edges.filter(edge => edge.getAttribute('aria-pressed') === 'true')
   expect(edges).toHaveLength(scene.relations.length)
