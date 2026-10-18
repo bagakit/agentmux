@@ -8,18 +8,19 @@ export function useConnectorRoomName(binding: RoomBinding | null, refresh = 0, v
   const [read, setRead] = useState<{ identity: string; name?: string; issue: string; loading: boolean } | null>(null)
   useEffect(() => {
     if (!binding || !visible) return
-    let live = true, generation = 0
+    let live = true, generation = 0, subscriptionIssue = ''
     const subject = { kind: 'conversation' as const, externalConversationId: binding.externalConversationId }
     const finish = (request: number, name: string | undefined, issue: string, preserveName = false) => {
       if (live && generation === request) setRead(previous => ({ identity,
-        ...(name ? { name } : preserveName && previous?.identity === identity && previous.name ? { name: previous.name } : {}), issue, loading: false }))
+        ...(name ? { name } : preserveName && previous?.identity === identity && previous.name ? { name: previous.name } : {}),
+        issue: [issue, subscriptionIssue].filter(Boolean).join(' · '), loading: false }))
     }
     const matches = (result: ChannelMetadataResult) => result.connectionId === binding.connectionId &&
       result.application.domain === binding.application.domain && result.application.appId === binding.application.appId &&
       result.entry.subject.kind === 'conversation' && result.entry.subject.externalConversationId === binding.externalConversationId
     const load = (nativeOnMiss: boolean) => {
       const request = ++generation
-      setRead(previous => ({ ...(previous?.identity === identity ? previous : {}), identity, issue: '', loading: true }))
+      setRead(previous => ({ ...(previous?.identity === identity ? previous : {}), identity, issue: subscriptionIssue, loading: true }))
       void (async () => {
         let result = await api.connections.call('connection.metadata.get', { connectionId: binding.connectionId, subject })
         if (!live || request !== generation) return
@@ -31,12 +32,15 @@ export function useConnectorRoomName(binding: RoomBinding | null, refresh = 0, v
         finish(request, name, result.entry.observation.freshness === 'stale' ? 'Saved name · refresh unconfirmed' : name ? '' : 'Group name unconfirmed')
       })().catch(() => finish(request, undefined, 'Group name unconfirmed', true))
     }
+    let release: (() => void) | undefined
+    try {
+      release = api.connections.onMetadataChanged(change => {
+        if (change.connectionId === binding.connectionId && change.application.domain === binding.application.domain && change.application.appId === binding.application.appId &&
+          change.subject.kind === 'conversation' && change.subject.externalConversationId === binding.externalConversationId) load(false)
+      })
+    } catch { subscriptionIssue = 'Group name updates unconfirmed' }
     load(true)
-    const release = api.connections.onMetadataChanged(change => {
-      if (change.connectionId === binding.connectionId && change.application.domain === binding.application.domain && change.application.appId === binding.application.appId &&
-        change.subject.kind === 'conversation' && change.subject.externalConversationId === binding.externalConversationId) load(false)
-    })
-    return () => { live = false; generation++; release() }
+    return () => { live = false; generation++; if (release) release() }
   }, [identity, refresh, visible])
   const current = read?.identity === identity ? read : null
   return { label: current?.name ?? binding?.externalConversationId ?? '', issue: current?.issue ?? '', loading: visible && !!binding && (!current || current.loading) }

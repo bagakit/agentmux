@@ -24,6 +24,7 @@ import {
   BROWSER_EVENT_CHANNEL,
   BROWSER_PRESENTATION_EVENT_CHANNEL,
   CONFIG_CHANGED_CHANNEL,
+  CONNECTION_METADATA_CHANGED_CHANNEL,
   CONTROL_CANCEL_CHANNEL,
   CONTROL_REQUEST_CHANNEL,
   CONTROL_RESPONSE_CHANNEL,
@@ -204,8 +205,8 @@ const api: AgentMuxPreloadApi = {
   connections: {
     onMetadataChanged: listener => {
       const receive = (_event: unknown, change: import('@agentmux/core/connections').ChannelMetadataChange) => listener(change)
-      ipcRenderer.on('connections:metadataChanged', receive)
-      return () => ipcRenderer.removeListener('connections:metadataChanged', receive)
+      ipcRenderer.on(CONNECTION_METADATA_CHANGED_CHANNEL, receive)
+      return () => ipcRenderer.removeListener(CONNECTION_METADATA_CHANGED_CHANNEL, receive)
     },
     call: async (method, params) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('connections:call', method, params)),
     storeCredential: input => ipcRenderer.invoke('connections:storeCredential', input),
