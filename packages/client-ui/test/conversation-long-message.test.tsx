@@ -24,7 +24,7 @@ it('mounts the same original reader on demand and keeps Range and links on unrel
  const p=element.querySelector('.md-input p')!, text=p.firstChild!, selection=window.getSelection()!, range=document.createRange();range.setStart(text,0);range.setEnd(text,8);selection.addRange(range)
  await render({content,status:'streaming'});expect(details().open).toBe(true);expect(element.querySelector('.md-input p')).toBe(p);expect(selection.toString()).toBe('Original');expect(selection.anchorNode).toBe(text)
  await act(async()=>element.querySelector<HTMLButtonElement>('.md-link')!.click());expect(open).toHaveBeenCalledWith('https://example.test/original',expect.any(Object))
- await toggle(false);expect(element.querySelector('.log-turn__body')).toBeNull();expect(element.querySelector('.md-link')).toBeNull()
+ await toggle(false);expect(element.querySelector('.md-input p')).toBe(p);expect(element.querySelector<HTMLElement>('.message-disclosure__body')!.hidden).toBe(true);expect(element.querySelector('.md-link')).not.toBeNull()
 })
 it('isolates original record/content including A-B-A and reveals exact located content',async()=>{
  await render();await toggle(true);await render({content:long+' changed'});expect(details().open).toBe(false)
@@ -34,6 +34,6 @@ it('isolates original record/content including A-B-A and reveals exact located c
  await render({conversationSessionId:'another-session'});expect(details().open).toBe(false)
 })
 
-it('reveals the original resource reference with the full message and removes hidden descendants when collapsed',async()=>{
- await render({content:[{kind:'text',text:long},{kind:'resource',resourceType:'image',reference:'attachment:original',label:'Original image'}]});expect(element.querySelector('.log-turn__resource')).toBeNull();await toggle(true);expect(element.querySelector('.log-turn__resource code')!.textContent).toBe('attachment:original');await toggle(false);expect(element.querySelector('.log-turn__resource')).toBeNull()
+it('reveals the original resource reference and retains hidden descendants when collapsed',async()=>{
+ await render({content:[{kind:'text',text:long},{kind:'resource',resourceType:'image',reference:'attachment:original',label:'Original image'}]});expect(element.querySelector('.log-turn__resource')).toBeNull();await toggle(true);expect(element.querySelector('.log-turn__resource code')!.textContent).toBe('attachment:original');const resource=element.querySelector('.log-turn__resource');await toggle(false);expect(element.querySelector('.log-turn__resource')).toBe(resource);expect(element.querySelector<HTMLElement>('.message-disclosure__body')!.hidden).toBe(true)
 })
