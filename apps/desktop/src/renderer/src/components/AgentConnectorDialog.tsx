@@ -17,6 +17,7 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { ResolvedAgentAvatar } from './AgentAvatar'
 import { ConnectorRoomPeople, ConnectorRoomSelection, roomName, useConnectorRoomFacts } from './ConnectorRoomSelection'
 import { ConnectorRoomJoinLink, ConnectorRoomJoinReceipt } from './ConnectorRoomJoinLink'
+import { ConnectorCreatorInvitation, useConnectorCreatorInvitation } from './ConnectorCreatorInvitation'
 import { ConnectorDeliveryDetails } from './ConnectorDeliveryDetails'
 import { parseMotePreferencesReadResult, type MoteConnectionRef } from '@agentmux/core/mote-preferences'
 import { connectionIdentityObservation, connectionNeedsInitialSetup, moteConnectionChoice, type AgentMoteConnectionSource } from '../lib/mote-connection-default'
@@ -114,6 +115,8 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
   useEffect(() => { setGroup(binding?.externalConversationId ?? ''); setScope(binding?.scope.input ?? 'mentions-and-replies'); setPublication(binding?.scope.publication ?? 'future-native-user-facing'); setConfirmed(false); setChangingGroup(false); setActorId(''); setActorType(''); setActorInput(false); setActorAnswer(false); setActorPermission(false); setAccessOpen(false) }, [connectionId, binding?.bindingId, binding?.revision])
   useEffect(() => { if (approvedMembers === 0 && initialSection !== 'joining') setAccessOpen(true) }, [binding?.bindingId, binding?.revision, approvedMembers, initialSection])
   const frozenRoom = roomIntent?.method === 'connection.room.create' ? roomIntent.input : null
+  const creatorInvitation = useConnectorCreatorInvitation(connection, creatingGroup && !roomIntent && !!connection && availableForNewGroup(connection))
+  const awaitingCreator = creatorInvitation.pending && creatorInvitation.included
   function observeBinding(bindingId: string, current: RoomBinding | null) {
     setBindings(previous => {
       const known = previous.find(item => item.bindingId === bindingId)
@@ -239,10 +242,10 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
       setIssue('The bot configuration changed before this request. No group was created. Review the current bot settings and keep this original receipt.')
   }
   function createRoom() {
-    if (!connection || !availableForNewGroup(connection) || roomIntent || binding || !name.trim() || members && !memberType.trim()) return
+    if (!connection || !availableForNewGroup(connection) || roomIntent || binding || awaitingCreator || !name.trim() || members && !memberType.trim()) return
     void work(() => execute({ method: 'connection.room.create', target: { ...target, regionAnchor: { ...target.regionAnchor } }, phase: 'not-dispatched', input: {
       ...target, operationId: crypto.randomUUID(), connectionId, expectedConnectionRevision: connection.revision, name,
-      members: members.split('\n').filter(value => value !== '').map(userId => ({ idType: memberType, userId }))
+      members: [...new Map([...(creatorInvitation.member ? [creatorInvitation.member] : []), ...members.split('\n').filter(value => value !== '').map(userId => ({ idType: memberType, userId }))].map(member => [JSON.stringify([member.idType, member.userId]), member])).values()]
     } }))
   }
   function createJoinLink(replacesOperationId?: string) {
@@ -403,9 +406,12 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
           {joining ? joiningAccess : null}
           {bindingPending || binding && changingGroup ? <p className="agent-connector-note" role="status">{bindingPending ? 'The group change is not confirmed. Check its original status.' : 'Your current group stays connected until you confirm this change.'}</p> : null}
           {creatingGroup && !created ? <fieldset disabled={busy || !!roomIntent} className="agent-connector-fields" aria-label="New dedicated group">
+            {!roomIntent ? <ConnectorCreatorInvitation invitation={creatorInvitation} onOpenSettings={settings && connection ? () => { settings.openLark({ sessionId: session.id, hostId: target.executionHostId, agentSessionId: target.agentSessionId, connectionId: connection.config.connectionId }); onClose() } : undefined} /> : null}
             <details className="agent-connector-disclosure"><summary>Invite people (optional)</summary><div className="agent-connector-fields">
-              <label className="agent-connector-field">Member ID type<TextInput aria-label="Member ID type" value={frozenRoom?.members[0]?.idType ?? memberType} onChange={event => setMemberType(event.target.value)} placeholder="Exact ID type" /></label>
-              <label className="agent-connector-field">Member IDs<Textarea aria-label="Invite member IDs" rows={3} value={frozenRoom ? frozenRoom.members.map(member => member.userId).join('\n') : members} onChange={event => setMembers(event.target.value)} placeholder="One exact ID per line" /></label>
+              {frozenRoom ? frozenRoom.members.length ? frozenRoom.members.map(member => <p className="agent-connector-note" key={JSON.stringify([member.idType, member.userId])}>{member.idType} · {member.userId}</p>) : <p className="agent-connector-note">No invitations requested.</p> : <>
+                <label className="agent-connector-field">Member ID type<TextInput aria-label="Member ID type" value={memberType} onChange={event => setMemberType(event.target.value)} placeholder="Exact ID type" /></label>
+                <label className="agent-connector-field">Member IDs<Textarea aria-label="Invite member IDs" rows={3} value={members} onChange={event => setMembers(event.target.value)} placeholder="One exact ID per line" /></label>
+              </>}
               <p className="agent-connector-note">Invitations and access to this Agent are separate. You can manage member access after connecting the group.</p>
             </div></details>
           </fieldset> : null}
@@ -459,7 +465,7 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
         </div><footer className="agent-connector-dialog__footer">
           {issue || relevant.length ? <button className="agent-connector-text-action" disabled={busy} onClick={() => void work(refresh)}>Refresh</button> : null}
           <button className="small-button" onClick={onClose}>{!binding && !relevant.length ? 'Cancel' : 'Close'}</button>
-          {canCreate ? <button className="primary-button" disabled={busy || !connection || !availableForNewGroup(connection) || !name.trim() || !!members && !memberType.trim()} onClick={createRoom}>{busy ? 'Creating…' : 'Create group'}</button> : canConnect ? <button className="primary-button" disabled={busy || !connection?.config.enabled || !confirmed || !audience.trim() || session.nativeHandle?.kind !== 'provider'} onClick={bind}>{binding ? audience === binding.externalConversationId ? binding.state === 'paused' && sameSharing ? 'Resume sharing' : sameSharing ? 'Reconnect group' : 'Save sharing' : 'Change group' : 'Connect group'}</button> : null}
+          {canCreate ? <button className="primary-button" disabled={busy || !connection || !availableForNewGroup(connection) || awaitingCreator || !name.trim() || !!members && !memberType.trim()} onClick={createRoom}>{busy ? 'Creating…' : 'Create group'}</button> : canConnect ? <button className="primary-button" disabled={busy || !connection?.config.enabled || !confirmed || !audience.trim() || session.nativeHandle?.kind !== 'provider'} onClick={bind}>{binding ? audience === binding.externalConversationId ? binding.state === 'paused' && sameSharing ? 'Resume sharing' : sameSharing ? 'Reconnect group' : 'Save sharing' : 'Change group' : 'Connect group'}</button> : null}
         </footer>
       </Dialog.Content></DocumentOverlayPortal>
   </Dialog.Root>
