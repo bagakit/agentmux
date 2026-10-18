@@ -19,6 +19,8 @@ These are required protocol invariants. The contract below defines the unified t
 
 ### Records, events and content ownership
 
+Source-shaped adapters establish original records once. Semantic normalization consumes those accepted records directly, retaining their identity, revision and order witnesses; reading windows do not reconstruct records from presentation or recompute original versions to establish identity. An event revision describes its current contributing facts and does not establish input adoption, completion or authorization.
+
 A source record retains its source-qualified identity, original item, revision and source-order witness. Native items and captured items keep their own shapes. The timeline accounts for every captured kind, including process, permission, lifecycle and system records. A browser-safe Core projection is the only owner of event role, recorded author, cross-source association and ordering policy; input projections reuse the same author interpretation.
 
 A Provider interprets the declared original history format before projecting roles. When that format defines a canonical user event and separate model-context records, only the canonical event represents that native utterance; the context records retain their original content as process or detail. The original source metadata establishes the format; copied later metadata cannot redefine it. Missing or unknown format facts cannot justify discarding the only known speech. Corrected normalization keeps original raw identities and bytes while producing an accurate new revision; an old exact anchor or resource cannot silently resolve to a different current representation.
