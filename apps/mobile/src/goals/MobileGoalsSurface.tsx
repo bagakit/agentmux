@@ -12,6 +12,7 @@ import { MobileGoalActions } from './MobileGoalActions'
 import { MobileGoalLinks } from './MobileGoalLinks'
 import { MobileGoalSessions } from './MobileGoalSessions'
 import { MobileGoalAlignment } from './MobileGoalAlignment'
+import { MobileGoalEvidence } from './MobileGoalEvidence'
 import type { MobileObjectIdentity } from '../navigation/MobileIdentity'
 import { getDeviceWorkface } from '../recovery/device-workface'
 import type { MobileGoalsContext } from '../recovery/presentation-route'
@@ -224,7 +225,7 @@ function GoalDetail({ goalId, goal, factScope, visible, decisions, client, conne
         {(!alignment || grounding.alignmentRevision !== alignment.revision) && <p role="status">此报告尚不能对应当前目标标准，请核对目标版本。</p>}
         {(currentReport ? alignment?.criteria : [])?.filter(criterion => !grounding.checks.some(check => check.criterionId === criterion.id)).map(criterion => <p key={criterion.id}>缺少结果检查：{criterion.text}</p>)}
         <ul>{grounding.checks.map(check => <li key={check.criterionId}><strong>{currentReport ? alignment?.criteria.find(criterion => criterion.id === check.criterionId)?.text ?? check.criterionId : `旧报告标准 ${check.criterionId}`}</strong><p>{({ met: '报告声称达成', gap: '仍有差距', unknown: '结果未知' })[check.outcome]}</p><p>{check.note}</p>
-          <ul>{check.evidence.map((evidence, index) => <li key={index}><code>{evidence}</code></li>)}</ul>{!check.evidence.length && <p>暂无定位证据。</p>}
+          <MobileGoalEvidence evidence={check.evidence} client={client} copyText={copyText} />{!check.evidence.length && <p>暂无定位证据。</p>}
         </li>)}</ul><p>{grounding.acceptedAt === null ? '结果尚未接受。' : `${currentReport ? '当前结果已接受' : '旧报告曾被接受，不代表当前结果接受'} · ${new Date(grounding.acceptedAt).toLocaleString()}`}</p>
       </> : <p>{goal.status === 'done' ? '工作状态已完成，结果尚未核验。' : '尚无结果报告。'}</p>}
     </section>
