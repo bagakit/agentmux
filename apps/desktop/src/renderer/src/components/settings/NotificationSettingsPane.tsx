@@ -1,6 +1,6 @@
 import './notification-settings.css'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
-import type { CSSProperties } from 'react'
+import { useId, type CSSProperties } from 'react'
 import type { AppConfig, NotificationModeId } from '../../../../shared/contracts'
 import { useSettingDraft } from './use-setting-draft'
 import {
@@ -17,6 +17,7 @@ export function NotificationSettingsPane({ notifications, onSave }: {
   notifications: AppConfig['notifications']
   onSave: (notifications: NonNullable<AppConfig['notifications']>, expected: NonNullable<AppConfig['notifications']>) => Promise<void>
 }) {
+  const stopsId = useId()
   const modeDraft = useSettingDraft<NotificationModeId>(resolveNotificationModeId({ notifications }))
   // A second, independent dimension — not a sixth stop on the dwell slider. The slider answers "how
   // long does it stay"; this answers "do I hear it". Either is a coherent choice at any setting of the
@@ -73,7 +74,7 @@ export function NotificationSettingsPane({ notifications, onSave }: {
       </figure>
       <section className="settings-group" data-settings-field="notification-dwell">
         <header><span>How long it stays</span><small>{active.label}</small></header>
-        <div className="notification-dwell">
+        <div className="notification-dwell" style={{ '--notification-stops': NOTIFICATION_TIERS.length } as CSSProperties}>
           <input
             className="notification-dwell__slider"
             type="range"
@@ -83,8 +84,10 @@ export function NotificationSettingsPane({ notifications, onSave }: {
             value={index < 0 ? 0 : index}
             aria-label="Notification dwell"
             aria-valuetext={active.label}
+            list={stopsId}
             onChange={(event) => setMode(NOTIFICATION_TIERS[Number(event.target.value)]!.id)}
           />
+          <datalist id={stopsId}>{NOTIFICATION_TIERS.map((tier, index) => <option key={tier.id} value={index} label={tier.label} />)}</datalist>
           <ol className="notification-dwell__ticks" aria-hidden="true">
             {NOTIFICATION_TIERS.map((tier) => (
               <li
