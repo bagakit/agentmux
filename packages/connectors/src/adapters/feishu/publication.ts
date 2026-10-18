@@ -202,7 +202,11 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       ] }
     } else if (operation.payload.kind === 'speech' && operation.payload.relay) {
       if (!publicationSpeechText(operation.payload)) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
-      card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: 'Shared message · via amux' } },
+      const authors = operation.payload.relay.sources.map(source => source.author.kind)
+      const kinds = new Set(authors), human = authors.length > 0 && authors.every(kind => kind === 'human')
+      const title = human ? 'User' : kinds.size > 1 ? 'Mixed authors' : kinds.has('external') ? 'External message'
+        : kinds.has('agent') ? 'Agent input' : 'Unknown author'
+      card = { config: { update_multi: true }, header: { title: { tag: 'plain_text', content: title + ' · via amux' }, template: human ? 'green' : 'grey' },
         elements: [{ tag: 'div', text: { tag: 'plain_text', content: publicationSpeechText(operation.payload) } }] }
     } else if (operation.payload.kind === 'speech') {
       if (!publicationSpeechText(operation.payload)) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
