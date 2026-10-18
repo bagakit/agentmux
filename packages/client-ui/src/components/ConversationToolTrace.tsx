@@ -33,7 +33,7 @@ export const ConversationToolTrace = memo(function ConversationToolTrace({
   const text = isCall ? part.input : part.output
   const failed = part.kind === 'tool-result' && part.failed === true
   const name = part.name ?? 'Tool result'
-  const title = stepTitle(name, isCall ? part.name : undefined, isCall ? part.input : undefined, workspaceRoot)
+  const title = useMemo(() => stepTitle(name, isCall ? part.name : undefined, isCall ? part.input : undefined, workspaceRoot), [part, workspaceRoot])
   return (
     <div className="conversation-tool-trace" data-trace-kind={part.kind}
       {...(failed ? { 'data-status': 'failed' } : {})} data-call-id={part.callId} data-trace-id={traceId}>

@@ -4,7 +4,7 @@ import { conversationPresentationKey } from '../lib/conversation-record-sequence
 import type { ConversationProcessProps } from './ConversationRecordSequence.js'
 import { describeActivityRecordTime } from '../lib/activity-record-time.js'
 import { stepTitle } from '../lib/activity-step-summary.js'
-import { useEffect, useId, useState, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useState, type ReactNode } from 'react'
 import { SemanticIcon } from '../theme/icons.js'
 import { RecordedStepsCard as WorkflowCard, RecordedToolRow as WorkflowToolRow, RecordedAgentRow as WorkflowAgentRow, type WorkflowObservationStatus, type WorkflowRecordedTime } from './WorkflowObservation.js'
 import { ConversationMetricsDetails, ConversationMetricsInline, conversationMetricsLabel } from './ConversationMetrics.js'
@@ -92,12 +92,12 @@ function NativeProcessStep({ item, origin, children, expanded: controlledExpande
   const time = recordTime(item, origin)
   const status = recordedStatus(item)
   const call = item.contentParts.find(part => part.kind === 'tool-call')
-  const title = collaboration?.kind === 'operation'
+  const title = useMemo(() => collaboration?.kind === 'operation'
     ? operationTitle(collaboration.operation)
     : collaboration?.kind === 'agent-activity'
       ? `Agent ${collaboration.event}`
       : call?.kind === 'tool-call' ? stepTitle(call.name, call.name, call.input, '')
-        : item.title ?? (item.contentParts.some(part => part.kind === 'reasoning') ? 'Reasoning' : 'Recorded activity')
+        : item.title ?? (item.contentParts.some(part => part.kind === 'reasoning') ? 'Reasoning' : 'Recorded activity'), [item])
   function toggle(): void {
     if (!expanded) setReadOnce(true)
     setExpanded(!expanded)
