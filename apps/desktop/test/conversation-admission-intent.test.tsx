@@ -41,7 +41,7 @@ async function fixture(expected: 'earlier' | 'coverage') {
   const reading = { reference, identity: 'original-reading-owner', enabled: true }
   function Consumer() {
     view = useSessionConversationWindow(reading, (page, intent) => {
-      calls.push({ intent, ids: page.items.map(item => item.id) })
+      calls.push({ intent, ids: page.historyPage?.items.map(item => item.id) ?? [] })
       return !(hold && intent === expected)
     }, expected === 'coverage' ? Infinity : 0)
     return <p>{view.page?.items.map(item => item.id).join(',')}</p>
@@ -95,15 +95,12 @@ it('Desktop performs no native admission bookkeeping when captured admission rej
   const nativeAdmissions: ConversationReadingIntent[] = []
   const reading = { reference, identity: 'original-reading-owner', enabled: true }
   function Consumer() {
-    view = useSessionConversationWindow(reading, (_page, intent) => {
+    view = useSessionConversationWindow(reading, (frame, intent) => {
+      expect(frame.captured.items.some(item => item.id === 'original-captured')).toBe(true)
+      if (rejectCaptured) { rejected++; return false }
       nativeAdmissions.push(intent)
       return true
-    }, 0, snapshot => {
-      expect(snapshot.items.some(item => item.id === 'original-captured')).toBe(true)
-      if (!rejectCaptured) return true
-      rejected++
-      return false
-    })
+    }, 0)
     return <p>{view.page?.items.map(item => item.id).join(',')}</p>
   }
   await act(async () => root.render(<Consumer />))

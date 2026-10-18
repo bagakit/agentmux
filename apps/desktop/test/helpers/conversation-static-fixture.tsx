@@ -1,4 +1,5 @@
 import { createContext, useContext, type ComponentProps } from 'react'
+import type { AgentTimelineSnapshot } from '@agentmux/core'
 import { vi } from 'vitest'
 import { projectConversationReading } from '@agentmux/client-ui/conversation-records'
 import { ActivityView as AcceptedActivityView } from '../../src/renderer/src/components/ActivityView'
@@ -26,7 +27,7 @@ export function StaticConversationView(props: Omit<ComponentProps<typeof Accepte
 }
 
 /** DOM/folding/Range/Copy fixture only. Real IPC/Hosted Reader qualification lives in conversation-reader-cutover. */
-export function StaticActivityView(props: ComponentProps<typeof AcceptedActivityView>) {
+export function StaticActivityView(props: ComponentProps<typeof AcceptedActivityView> & { items: AgentTimelineSnapshot['items']; timelineSnapshot?: AgentTimelineSnapshot }) {
   const agentSessionId = props.sessionId ?? props.timelineSnapshot?.agentSessionId ?? props.nativeHistoryPage?.agentSessionId ?? props.items[0]?.agentSessionId
   if (!agentSessionId) throw new Error('A static fixture needs its original Session scope.')
   const timeline = props.timelineSnapshot ?? { agentSessionId, revision: 0, items: props.items }
@@ -37,7 +38,7 @@ export function StaticActivityView(props: ComponentProps<typeof AcceptedActivity
   const captured = { ...timeline, agentSessionId, items: timeline.items.filter(item => item.agentSessionId === agentSessionId) }
   const noop = () => {}
   const window: ReturnType<typeof useSessionConversationWindow> = {
-    page, projection: { ...accepted, historyPage: page ?? undefined, captured }, snapshot: null, capturedSnapshot: captured,
+    acceptHeld: noop, presentationIntent: 0, page, projection: { ...accepted, historyPage: page ?? undefined, captured }, snapshot: null, capturedSnapshot: captured,
     captured: captured.items, capturedLoading: false, capturedHasMore: false, capturedError: null,
     historical: false, hasEarlierNavigation: false, previousSource: false, coverageLoading: false,
     loading: false, error: null, readActivity: { sourceRead: null, loading: false }, held: false, loadingEarlier: false, historyBoundary: null,
@@ -45,5 +46,6 @@ export function StaticActivityView(props: ComponentProps<typeof AcceptedActivity
     readCapturedEarlier: noop, readEarlier: noop, readNewer: noop, retry: noop, showLatestAutomatically: noop,
     showCurrent: noop, showCurrentSource: noop, showPreviousSource: noop
   }
-  return <StaticWindow.Provider value={window}><AcceptedActivityView {...props} /></StaticWindow.Provider>
+  const { items: _items, timelineSnapshot: _timeline, ...presenter } = props
+  return <StaticWindow.Provider value={window}><AcceptedActivityView {...presenter} /></StaticWindow.Provider>
 }

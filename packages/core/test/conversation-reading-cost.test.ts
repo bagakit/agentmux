@@ -7,8 +7,7 @@ import { nativeHistoryFixture, jsonl } from './fixtures/native-history-session.j
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { consumeConversationWindowPage, type ConversationWindowAssembly, type ConversationWindowSnapshot } from '../src/conversation.js'
-import { canReplaceCapturedWindow } from '../../client-ui/src/lib/captured-conversation-page.js'
-import type { AgentTimelineItem, AgentTimelineSnapshot } from '../src/types.js'
+import type { AgentTimelineItem } from '../src/types.js'
 const closes: Array<() => unknown | Promise<unknown>> = []
 const samples: unknown[] = []
 type Probe = { navigationCalls: number; locatorRecords: number; revisionCalls: number }
@@ -85,21 +84,4 @@ it.each([[12, 0], [12, 32], [1198, 32]] as const)('a %i-record public window wit
   expect(cost.navigationCalls, 'An immutable Snapshot needs one adjacency derivation across all wire fragments').toBe(1)
   expect(cost.locatorRecords, 'Discarded Batch locator copies are not consumed by the public frame').toBe(0)
   expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
-})
-it('captured selection admission hashes only intersected original versions while other rows remain eligible', () => {
-  const cost = probe(), sid = 'selected-cost-session', host = document.createElement('div')
-  document.body.append(host); closes.push(() => host.remove())
-  const items = Array.from({ length: 300 }, (_, i) => captured(sid, 'record-' + i))
-  for (const item of items) { const row = document.createElement('article'); row.dataset.messageSourceKey = JSON.stringify([sid, 'captured', item.id]); row.textContent = item.content; host.append(row) }
-  const selected = host.children[37]!, range = document.createRange(); range.selectNodeContents(selected.firstChild!); window.getSelection()!.addRange(range)
-  const previous: AgentTimelineSnapshot = { agentSessionId: sid, revision: 1, items }, next = { ...previous, revision: 2, items: items.map((item, i) => ({ ...item, ...(i === 299 ? { content: 'Independent changed version', updatedAt: _followupFixtureEpoch(0, 0, 2) } : {}) })) }
-  Reflect.set(globalThis, '__amuxConversationCost', cost)
-  expect(canReplaceCapturedWindow(host, next, false, previous)).toBe(true)
-  samples.push({ scenario: 'selected-captured-row', rows: items.length, selected: 1, revisionCalls: cost.revisionCalls })
-  expect(cost.revisionCalls, 'Only the selected original and its next version need hashing').toBe(2)
-  expect(window.getSelection()!.toString()).toBe(items[37]!.content)
-  const geometry = vi.spyOn(window.getSelection()!.getRangeAt(0), 'intersectsNode').mockImplementation(() => { throw new Error('Selection geometry is unavailable') })
-  expect(canReplaceCapturedWindow(host, previous, false, previous), 'Missing geometry cannot hold an unchanged original version').toBe(true)
-  expect(canReplaceCapturedWindow(host, { ...previous, items: items.map((item, i) => i === 37 ? { ...item, content: 'A replacement of the selected original' } : item) }, false, previous)).toBe(false)
-  expect(geometry).toHaveBeenCalled()
 })

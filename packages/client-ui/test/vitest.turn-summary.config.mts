@@ -1,16 +1,11 @@
 import { defineConfig } from 'vitest/config'
-import { existsSync, readFileSync, appendFileSync } from 'node:fs'
+import { appendFileSync } from 'node:fs'
+import consumers from '../../../apps/desktop/test/vitest.conversation-unified-consumers.config.mts'
 import { resolve, relative } from 'node:path'
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 
 const root = resolve(import.meta.dirname, '../../..')
-const pkg = JSON.parse(readFileSync(resolve(root, 'packages/core/package.json'), 'utf8'))
-const aliases = Object.entries(pkg.exports).flatMap(([name, value]) => {
-  const source = resolve(root, 'packages/core/src/' + (value as { import: string }).import.replace('./dist/', '').replace(/\.js$/u, '.ts'))
-  const spec = name === '.' ? '@agentmux/core' : '@agentmux/core' + name.slice(1)
-  return existsSync(source) ? [{ find: new RegExp('^' + spec.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$'), replacement: source }] : []
-})
 const mutation = process.env.AGENTMUX_TURN_SUMMARY_MUTATION
 const mutations: Record<string, [string, string, string]> = {
   'drop-metrics': ['packages/client-ui/src/lib/conversation-metrics.ts', 'const metrics = item.metrics', 'const metrics = undefined'],
@@ -19,18 +14,13 @@ const mutations: Record<string, [string, string, string]> = {
   'copy-prior-records': ['packages/client-ui/src/lib/conversation-metrics.ts', 'const recordIds = previous?.recordIds ?? []\n      recordIds.push(item.id)',
     'const recordIds = [...previous?.recordIds ?? [], item.id]'],
   'forget-read-body': ['packages/client-ui/src/components/WorkflowObservation.tsx', 'expanded || readOnce ? children : null', 'expanded ? children : null'],
-  'unstable-record-wrapper': ['packages/client-ui/src/components/ConversationRecordSequence.tsx', 'renderRecord: (item, wrapBody) => renderOne(item, wrapBody, false, !summary)', 'renderRecord: summary ? renderRecord : (item, wrapBody) => renderOne(item, wrapBody, false)'],
-  'hide-recorded-failure': ['packages/client-ui/src/components/NativeProcessObservation.tsx', "const status = recordedStepStatus ?? (metrics?.metrics.status === 'completed' ? 'complete' : metrics?.metrics.status)", "const status = metrics?.metrics.status === 'completed' ? 'complete' : metrics?.metrics.status ?? recordedStepStatus"],
+  'unstable-record-wrapper': ['packages/client-ui/src/components/ConversationRecordSequence.tsx', 'renderRecord: (record, wrapBody) => renderOne(record, wrapBody, disclosure, false, !summary)', 'renderRecord: summary ? renderRecord : (record, wrapBody) => renderOne(record, wrapBody, disclosure, false)'],
+  'hide-recorded-failure': ['packages/client-ui/src/components/NativeProcessObservation.tsx', "const status = nativeOnly ? recordedStepStatus ?? (metrics?.metrics.status === 'completed' ? 'complete' : metrics?.metrics.status) : undefined", "const status = nativeOnly ? metrics?.metrics.status === 'completed' ? 'complete' : metrics?.metrics.status ?? recordedStepStatus : undefined"],
   'guess-legacy-turn': ['apps/desktop/src/renderer/src/lib/agent-usage.ts', "'Latest report · scope unrecorded'", "'Last turn'"]
 }
 
 export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, esbuild: { jsx: 'automatic', jsxImportSource: 'react' },
-  resolve: { conditions: ['browser', 'import', 'default'], alias: [...aliases,
-    { find: /^react$/, replacement: resolve(root, 'apps/desktop/node_modules/react') },
-    { find: /^react-dom$/, replacement: resolve(root, 'apps/desktop/node_modules/react-dom') },
-    { find: /^react\/(.*)$/, replacement: resolve(root, 'apps/desktop/node_modules/react/$1') },
-    { find: /^react-dom\/(.*)$/, replacement: resolve(root, 'apps/desktop/node_modules/react-dom/$1') }
-  ] },
+  resolve: consumers.resolve, ssr: consumers.ssr,
   cacheDir: resolve(root, '.cache/turn-summary-' + (mutation ?? 'base')),
   plugins: [{ name: 'turn-summary-source-proof', enforce: 'pre', transform(code, id) {
     const file = id.split('?')[0]!

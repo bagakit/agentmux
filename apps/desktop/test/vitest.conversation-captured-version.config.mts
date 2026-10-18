@@ -8,20 +8,12 @@ import { relative, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..')
 const activity = 'apps/desktop/src/renderer/src/components/ActivityView.tsx'
 const mobile = 'apps/mobile/src/conversation/MobileConversationSurface.tsx'
-const guard = 'packages/client-ui/src/lib/captured-conversation-page.ts'
 const layout = 'packages/client-ui/src/lib/use-conversation-record-layout.ts'
-const owners = [activity, mobile, guard, layout, 'packages/client-ui/src/lib/use-conversation-view.ts',
+const owners = [activity, mobile, layout, 'packages/client-ui/src/lib/use-conversation-view.ts',
   'apps/desktop/src/renderer/src/lib/session-conversation-window.ts', 'apps/mobile/src/conversation/use-hosted-conversation.ts',
   'packages/core/src/conversation-reader.ts', 'packages/core/src/conversation-changes.ts']
 const edits: Record<string, Array<[string, string, string]>> = {
-  'desktop-missing-displayed': [[activity, 'canReplaceCapturedWindow(feedEl, snapshot, !followRef.current.following, displayed)',
-    'canReplaceCapturedWindow(feedEl, snapshot, !followRef.current.following)']],
-  'mobile-missing-displayed': [[mobile, 'canReplaceCapturedWindow(feed.current, snapshot, !follow.current.following, displayed)',
-    'canReplaceCapturedWindow(feed.current, snapshot, !follow.current.following)']],
-  'identity-only-protection': [
-    [guard, '(!next || !original || conversationRevision(original) !== conversationRevision(next))', '!next'],
-    [layout, ' && version(next) === row.revision', '']
-  ]
+  'identity-only-protection': [[layout, 'prior.version === next.version', 'true']]
 }
 export default defineConfig({ ...base, resolve: mobileBase.resolve, ssr: mobileBase.ssr,
   cacheDir: '.cache/conversation-captured-version', plugins: [...base.plugins ?? [], {

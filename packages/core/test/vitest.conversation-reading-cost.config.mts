@@ -7,7 +7,7 @@ const root = resolve(import.meta.dirname, '../../..')
 export default defineConfig({ ...original, cacheDir: '.cache/conversation-reading-cost', resolve: { alias: { '@agentmux/core/conversation': resolve(root, 'packages/core/src/conversation.ts') } }, plugins: [...original.plugins ?? [], {
   name: 'actual-conversation-work-counters', enforce: 'pre', transform(source, id) {
     const path = relative(root, id.split('?')[0]!)
-    if (!['packages/core/src/conversation-reader.ts','packages/core/src/conversation-timeline.ts','packages/client-ui/src/lib/captured-conversation-page.ts'].includes(path)) return
+    if (!['packages/core/src/conversation-reader.ts','packages/core/src/conversation-timeline.ts'].includes(path)) return
     let code = source
     const counter = (field: string) => `const probe = Reflect.get(globalThis, '__amuxConversationCost'); if (probe) probe.${field}++;`
     if (path.endsWith('conversation-reader.ts')) {
@@ -23,8 +23,7 @@ export default defineConfig({ ...original, cacheDir: '.cache/conversation-readin
     const mutation = process.env.AGENTMUX_READING_COST_MUTATION
     const edits: Record<string, [string,string,string]> = {
       'repeat-navigation': ['packages/core/src/conversation-reader.ts', 'snapshot.navigation ??= historyNavigation(snapshot.rows, snapshot.history)', 'historyNavigation(snapshot.rows, snapshot.history)'],
-      'restore-unused-locators': ['packages/core/src/conversation-reader.ts', 'const batch: Batch = { ...loaded.batch, index: 0, offset: 0, digests: [] }', "const batch: Batch = { ...loaded.batch, records: loaded.rows.map(r => ({ id: r.id, reference: r.reference!, revision: r.revision, order: r.order, source: r.original.kind })), index: 0, offset: 0, digests: [] }"],
-      'hash-unselected-rows': ['packages/client-ui/src/lib/captured-conversation-page.ts', 'if (intersects && (!next || !original || conversationRevision(original) !== conversationRevision(next)))', 'if ((!next || !original || conversationRevision(original) !== conversationRevision(next)) && intersects)']
+      'restore-unused-locators': ['packages/core/src/conversation-reader.ts', 'const batch: Batch = { ...loaded.batch, index: 0, offset: 0, digests: [] }', "const batch: Batch = { ...loaded.batch, records: loaded.rows.map(r => ({ id: r.id, reference: r.reference!, revision: r.revision, order: r.order, source: r.original.kind })), index: 0, offset: 0, digests: [] }"]
     }
     const selected = mutation === 'legacy-all' ? Object.values(edits) : mutation && edits[mutation] ? [edits[mutation]!] : []
     if (mutation && !selected.length) throw Error('Unknown work counter mutation')

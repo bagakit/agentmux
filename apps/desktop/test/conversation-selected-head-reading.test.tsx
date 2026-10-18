@@ -6,7 +6,10 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryItem, AgentSessionHistoryPage } from '@agentmux/core'
 import { StaticConversationView as ConversationView } from './helpers/conversation-static-fixture'
 import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
-import { protectsConversationWindow } from '../src/renderer/src/lib/session-conversation-window'
+import type { ConversationPresentationController } from '@agentmux/client-ui/use-conversation-record-layout'
+import { projectConversationReading } from '@agentmux/client-ui/conversation-records'
+const controller: { current: ConversationPresentationController | null } = { current: null }
+const candidate = (page: AgentSessionHistoryPage) => projectConversationReading({ agentSessionId: reference.agentSessionId, historyPage: page })
 import { ActivityView as ReaderActivityView } from '../src/renderer/src/components/ActivityView'
 import { api } from '../src/renderer/src/lib/api'
 import { createClientUiRoot } from './helpers/client-ui-render'
@@ -35,7 +38,7 @@ afterEach(async () => {
 const bounds = (top: number, height: number) => ({ x: 0, y: top, top, bottom: top + height, left: 0, right: 500, width: 500, height, toJSON() {} })
 async function render(next: AgentSessionHistoryPage, beforeRecordId?: string) {
   await act(async () => root.render(<ConversationView page={next} sessionId={reference.agentSessionId}
-    renderProcess={props => <NativeProcessObservation {...props} compact />}
+    presentation={{ controller, pending: false, onRelease: () => {} }} renderProcess={props => <NativeProcessObservation {...props} compact />}
     {...(beforeRecordId ? { recordBoundary: { beforeRecordId, content: <div role="separator">Original history boundary</div> } } : {})} />))
 }
 function selectHead(viewport: HTMLElement = host, count = false) {
@@ -60,7 +63,7 @@ it('selected process head permits user-separated earlier records and retains its
   await render(current)
   const selected = selectHead()
   const next = page([activity('older-process'), user('earlier-user'), ...current.items])
-  expect(protectsConversationWindow(host, next, true, undefined, { current })).toBe(false)
+  expect(!controller.current!.canPresent(candidate(next))).toBe(false)
   await render(next)
   expectRetained(selected)
   expect(selected.group.dataset.nativeRecordIds).toBe(JSON.stringify(current.items.map(item => item.id)))
@@ -71,7 +74,7 @@ it('selected process head protects a contiguous merge that would change its sele
   await render(current)
   const selected = selectHead(host, true)
   const next = page([activity('older-process'), ...current.items])
-  expect(protectsConversationWindow(host, next, true, undefined, { current })).toBe(true)
+  expect(!controller.current!.canPresent(candidate(next))).toBe(true)
   expectRetained(selected)
   expect(selected.head.querySelector('.log-fold__steps')?.textContent).toBe('2 条已加载记录')
   expect(selected.group.dataset.nativeRecordIds).toBe(JSON.stringify(current.items.map(item => item.id)))
@@ -82,20 +85,20 @@ it('selected process head uses the next actual record boundary to preserve a sep
   await render(current)
   const selected = selectHead(host, true), next = page([activity('older-process'), ...current.items])
   const recordBoundary = { beforeRecordId: current.items[0]!.id }
-  expect(protectsConversationWindow(host, next, true, undefined, { current, recordBoundary })).toBe(false)
+  expect(!controller.current!.canPresent(candidate(next), recordBoundary)).toBe(false)
   await render(next, recordBoundary.beforeRecordId)
   expectRetained(selected)
   expect(host.querySelectorAll('.wf-head')).toHaveLength(2)
 })
 
-it.each(['clipped', 'changed-record', 'changed-source', 'unknown-current'] as const)('selected process head still protects %s reading data', async mode => {
+it.each(['clipped', 'changed-record', 'changed-source'] as const)('selected process head still protects %s reading data', async mode => {
   const current = page([activity('current-first'), activity('current-second')])
   await render(current)
   const selected = selectHead()
   const next = mode === 'clipped' ? page(current.items.slice(1))
     : mode === 'changed-record' ? page([{ ...current.items[0]!, title: 'Changed original record' }, current.items[1]!])
     : mode === 'changed-source' ? { ...current, source: { ...source, nativeSessionId: 'other-native' } } : current
-  expect(protectsConversationWindow(host, next, true, undefined, { current: mode === 'unknown-current' ? null : current })).toBe(true)
+  expect(!controller.current!.canPresent(candidate(next))).toBe(true)
   expectRetained(selected)
 })
 

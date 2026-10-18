@@ -5,6 +5,7 @@ import { GRAPHITE_THEME, mountThemeRuntime, previewTheme, getSemanticIconCatalog
 import { semanticIconHref, type SemanticIconId } from '@agentmux/client-ui/icons'
 import { NativeProcessObservation } from '@agentmux/client-ui/components/NativeProcessObservation'
 import type { AgentSessionHistoryItem } from '@agentmux/core'
+import { projectConversationRecords } from '@agentmux/client-ui/conversation-records'
 import { WorkbenchTabMarks } from '../src/renderer/src/components/WorkbenchTabMarks'
 import { ComposerPendingDelivery } from '../src/renderer/src/components/ComposerPendingDelivery'
 import { TopicKnowledgePanel } from '../src/renderer/src/components/TopicKnowledgePanel'
@@ -135,7 +136,9 @@ it('Create Worktree is the original filesystem action and no longer claims to fo
 
 it('recorded native collaboration remains a read-only observation with original participants and record body', async () => {
   const record = { id: 'same-record', contentParts: [], collaboration: { kind: 'operation', operation: 'send-input', status: 'running', sender: { providerId: 'protocol', nativeSessionId: 'source-native' }, receivers: [{ providerId: 'protocol', nativeSessionId: 'target-native' }], agentStates: [], prompt: 'Original recorded prompt' } } as unknown as AgentSessionHistoryItem
-  await dom.render(<NativeProcessObservation id="same-group" items={[record]} renderRecord={(original, wrap) => <div key={original.id}>{wrap(<p>Original untouched native record</p>)}</div>} />)
+  const records = projectConversationRecords({ agentSessionId: 'original-session', historyPage: {
+    agentSessionId: 'original-session', source: { providerId: 'protocol', nativeSessionId: 'source-native' }, nextCursor: null, items: [record] } })
+  await dom.render(<NativeProcessObservation id="same-group" records={records} entries={records.map(record => ({ kind: 'record', record }))} renderRecord={(original, wrap) => <div key={original.id}>{wrap?.(<p>Original untouched native record</p>)}</div>} />)
   const row = dom.container.querySelector('[data-native-step-id="same-record"]')!
   drawing(row, 'object.collaboration'); expect(row.querySelector('[data-icon-animation]')).toBeNull()
   await override('object.collaboration'); await click(row.querySelector('button'))
