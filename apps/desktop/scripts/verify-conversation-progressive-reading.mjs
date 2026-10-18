@@ -7,7 +7,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
-import { candidateResolve } from './fixtures/conversation-progressive-reading/candidate-resolve.mjs'
+import { candidateResolve, candidateModule } from './candidate-package-resolve.mjs'
 import { sceneNames } from './fixtures/conversation-progressive-reading/scene.mjs'
 import { immediateFirstMount, compareReadingCosts } from './fixtures/conversation-progressive-reading/cost-comparison.mjs'
 
@@ -30,20 +30,26 @@ const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'amux-r-'))
 const hash = value => createHash('sha256').update(value).digest('hex')
 const files = async directory => (await Promise.all((await fs.readdir(directory, { withFileTypes: true })).map(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
 const inputPaths = [...await files(fixture), path.join(import.meta.dirname, 'verify-conversation-progressive-reading.mjs'),
+  path.join(import.meta.dirname, 'candidate-package-resolve.mjs'),
   path.join(import.meta.dirname, 'probe-process.mjs'), path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'pnpm-lock.yaml'),
   ...await files(path.join(root, 'apps/desktop/src')), ...await files(path.join(root, 'packages/client-ui/src')), ...await files(path.join(root, 'packages/core/src')),
   ...await files(path.join(root, 'packages/core/dist')),
   ...(await Promise.all(['identity', 'demand', 'relay', 'git', 'diagnostic-evidence', 'connectors'].flatMap(pkg => ['src', 'dist'].map(directory => files(path.join(root, 'packages', pkg, directory)))))).flat()]
+for (const entry of await fs.readdir(path.join(root, 'packages'), { withFileTypes: true })) {
+  if (!entry.isDirectory()) continue
+  const manifest = path.join(root, 'packages', entry.name, 'package.json')
+  try { await fs.access(manifest); inputPaths.push(manifest) } catch (error) { if (error.code !== 'ENOENT') throw error }
+}
 const hashes = async () => Object.fromEntries(await Promise.all(inputPaths.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
 const loaded = new Map(), emitted = [], transforms = new Map()
 const plugin = (browser, variant = 'scheduled') => ({ name: 'exact-conversation-candidate', enforce: 'pre',
   resolveId(specifier) {
     if (!browser && specifier.endsWith('/packages/core/dist/hosted-runtime-service.js')) return { id: path.join(root, 'packages/core/dist/hosted-runtime-service.js'), external: true }
-    if (specifier.startsWith('@agentmux/')) return candidateResolve(root, specifier, browser)
+    if (specifier.startsWith('@agentmux/')) return candidateResolve(root, specifier, { browser })
   },
   transform(code, id) {
     const file = id.split('?')[0]
-    if (file.includes('/packages/') && file.includes('/agentmux/') && !file.startsWith(root + path.sep)) throw new Error('First-party import resolved outside this candidate: ' + file)
+    if (path.isAbsolute(file)) candidateModule(root, file)
     if (file.startsWith(root + path.sep) && !file.includes('/node_modules/')) loaded.set(path.relative(root, file), hash(code))
     if (variant === 'immediate' && file === path.join(root, 'packages/client-ui/src/components/ConversationProgressiveBody.tsx')) {
       const transformed = immediateFirstMount(code)
@@ -105,7 +111,7 @@ try {
   receipt.compiled = Object.fromEntries(await Promise.all(emitted.map(async file => [path.relative(privateRoot, file), hash(await fs.readFile(file))])))
   // Register before loading the bundled Main so external Core dependencies obey
   // the same exact checkout instead of following shared node_modules symlinks.
-  await fs.writeFile(path.join(privateRoot, 'bootstrap.mjs'), `import {registerHooks} from 'node:module';import {pathToFileURL} from 'node:url';import {candidateResolve} from ${JSON.stringify(pathToFileURL(path.join(fixture, 'candidate-resolve.mjs')).href)};registerHooks({resolve(s,c,n){return s.startsWith('@agentmux/')?{url:pathToFileURL(candidateResolve(${JSON.stringify(root)},s)).href,shortCircuit:true}:n(s,c)}});try{await import('./main/main.mjs')}catch(error){process.stderr.write(String(error.stack)+'\\n');const {app}=await import('electron');app.exit(1)};`)
+  await fs.writeFile(path.join(privateRoot, 'bootstrap.mjs'), `import {registerHooks} from 'node:module';import {pathToFileURL} from 'node:url';import {candidateResolve} from ${JSON.stringify(pathToFileURL(path.join(import.meta.dirname, 'candidate-package-resolve.mjs')).href)};registerHooks({resolve(s,c,n){return s.startsWith('@agentmux/')?{url:pathToFileURL(candidateResolve(${JSON.stringify(root)},s)).href,shortCircuit:true}:n(s,c)}});try{await import('./main/main.mjs')}catch(error){process.stderr.write(String(error.stack)+'\\n');const {app}=await import('electron');app.exit(1)};`)
   resolver = registerHooks({ resolve(specifier, context, next) { return specifier.startsWith('@agentmux/') ? { url: pathToFileURL(candidateResolve(root, specifier)).href, shortCircuit: true } : next(specifier, context) } })
   const Core = await import(pathToFileURL(path.join(root, 'packages/core/dist/index.js')).href)
   const runs = anchorAttempts ? Array.from({ length: anchorAttempts }, (_, index) => ({ scene: 'dense', attempt: index + 1 }))
