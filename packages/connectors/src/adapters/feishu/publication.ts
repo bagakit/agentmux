@@ -188,7 +188,10 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     // reserve the largest possible continuation label for this source text.
     const count = Math.max(2, payload.text.length)
     const fits = (part: PublicationTextFragment, fragment: { ordinal: number; count: number }) => {
-      const displayed = { ...payload, text: (part.presentationContext?.before ?? '') + part.text + (part.presentationContext?.after ?? '') }, card = feishuReplyCard(publicationSpeechText(displayed), fragment)
+      // Without line breaks there cannot be a native table. Its Markdown
+      // component preserves every source byte, so this lower bound is exact.
+      if (!/[\r\n]/u.test(part.text) && Buffer.byteLength(part.text) > FEISHU_MESSAGE_BODY_BYTES) return false
+      const displayed = { ...payload, text: (part.presentationContext?.before ?? '') + part.text + (part.presentationContext?.after ?? '') }, card = feishuReplyCard(publicationSpeechText(displayed), fragment, part.presentationContext?.literal)
       card.config = { ...object(card.config), summary: { content: cardSummary(card, { payload: displayed, presentationTime: 0 }) } }
       return Buffer.byteLength(JSON.stringify({ receive_id: target.externalConversationId, msg_type: 'interactive', uuid: 'x'.repeat(43), content: JSON.stringify(card) })) <= FEISHU_MESSAGE_BODY_BYTES
     }
@@ -253,7 +256,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       if (!publicationSpeechText(operation.payload)) feishuFailure('FEISHU_PUBLICATION_CONTENT_UNSUPPORTED')
       const text = publicationSpeechText(operation.payload)
       if (operation.payload.phase === 'final') {
-        card = feishuReplyCard(publicationSpeechText({ ...operation.payload, text: (operation.payload.presentationContext?.before ?? '') + operation.payload.text + (operation.payload.presentationContext?.after ?? '') }), operation.fragment)
+        card = feishuReplyCard(publicationSpeechText({ ...operation.payload, text: (operation.payload.presentationContext?.before ?? '') + operation.payload.text + (operation.payload.presentationContext?.after ?? '') }), operation.fragment, operation.payload.presentationContext?.literal)
       } else if (operation.payload.phase === 'progress') {
         card = { schema: '2.0', config: { update_multi: true },
           body: { padding: '8px 12px 8px 12px', vertical_spacing: '4px',
