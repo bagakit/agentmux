@@ -7,7 +7,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const mutations: Record<string, [string, string, string]> = {
   'native-queue-becomes-steer': ['providers/codex-native-input.ts', "if (frozen.operation === 'queue-idle') {", 'if (false) {'],
   'native-idle-target-is-omitted': ['prompt-submission.ts', '...(control?.idleOnly ? { idleOnly: true } : {})', '...{}'],
-  'completion-fence-is-omitted': ['prompt-submission.ts', '} else if (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId && !independentIdleNotification) {', '} else if (false) {'],
+  'completion-fence-is-omitted': ['prompt-submission.ts', '} else if (!control?.idleOnly?.nativeEvidence && (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId && !independentIdleNotification)) {', '} else if (false) {'],
   'final-input-fence-is-omitted': ['prompt-submission.ts', 'if (control?.idleOnly && currentRun.acceptedInputBytes !== control.idleOnly.inputByte)', 'if (false)'],
   'notification-identity-is-omitted': ['prompt-submission.ts', 'message.questionReply, message.a2aNotificationId])', 'message.questionReply])'],
   'edited-notification-is-adopted': ['native-input-adoption.ts', "item.contentParts.length === 1 && item.contentParts[0]?.kind === 'text' && item.contentParts[0].text === intent.prompt", 'true'],

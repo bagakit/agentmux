@@ -6,7 +6,7 @@ import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { agentTurnCompletionIdentity } from '../src/agent-session-identity.js'
 import { AgentMuxFileAgentSessionStore as SourceStore } from '../src/agent-session-store.js'
 import { confirmNativeInputAdoption as sourceConfirmAdoption } from '../src/native-input-adoption.js'
-import type { AgentNativePromptInputPlan, AgentPromptMessageContent, AgentPromptSubmissionRecord, AgentSessionHistoryItem } from '../src/types.js'
+import type { AgentNativePromptInputPlan, AgentPromptExecutionEvidence, AgentPromptMessageContent, AgentPromptSubmissionRecord, AgentSessionHistoryItem } from '../src/types.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { fixtureEpoch } from './helpers/fixture-values.js'
 import { nativeInputCorrelationKey } from '../src/native-input-correlation.js'
@@ -26,14 +26,14 @@ const id = 'original-notification', wire = '<amux:a2a from="peer" msg-id="origin
 const source = { providerId: 'codex', nativeSessionId: 'original-native-thread' }
 const actor = { protocolId: 'original-protocol', actorId: 'original-actor', lifecycleOperationId: 'original-lifecycle', token: 'a'.repeat(64), launch: { command: 'codex', args: [] } }
 
-async function fixture(outcome: 'admitted' | 'unknown' = 'admitted', withActor = true) {
+async function fixture(outcome: 'admitted' | 'unknown' = 'admitted', withActor = true, nativeIdle = false) {
   const h = await rpcOwnerFixture(); closes.push(h.close)
   const inner = h.client as unknown as { promptSubmission: SourceCoordinator; messageQueue: DurableAgentMuxMessageQueue }
   const deps = Reflect.get(inner.promptSubmission, 'deps') as ConstructorParameters<typeof AgentPromptSubmissionCoordinator>[0]
   const original = (await h.store.readMetadata('recipient'))!
   await h.store.compareAndSwapMetadata(original, { ...original, ...(withActor ? { nativeActor: actor } : {}), updatedAt: fixtureEpoch(0, 1),
     nativeHandle: { kind: 'provider', providerId: source.providerId, sessionId: source.nativeSessionId },
-    semanticStatus: { state: 'done', source: 'native-hook', observedAt: fixtureEpoch(0, 1) } })
+    ...(nativeIdle ? {} : { semanticStatus: { state: 'done', source: 'native-hook', observedAt: fixtureEpoch(0, 1) } as const }) })
   await deps.registry.refresh('recipient', original.run)
   let inputByte = 0
   const run = () => ({ ...h.run(original.run.runId), acceptedInputBytes: inputByte, pid: 1234 })
@@ -58,17 +58,20 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted', withActor =
     return { plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([selected.providerId, selected.nativeSessionId]),
       actorId: actor.actorId, threadId: selected.nativeSessionId, operation: selected.idleOnly ? 'queue-idle' : 'start-or-steer' }, assertCurrent, send, dispose }
   })
-  const provider = { ...new AgentProviderRegistry().get('codex'), prepareNativeInput: prepare }
+  let evidence: AgentPromptExecutionEvidence | null = { state: 'idle', sourceId: 'original-native-source', id: 'initial-idle-evidence' }
+  const readEvidence = vi.fn(async () => evidence)
+  const provider = { ...new AgentProviderRegistry().get('codex'), prepareNativeInput: prepare, readPromptExecutionEvidence: readEvidence }
   const coordinator = new AgentPromptSubmissionCoordinator({ ...deps, providers: new AgentProviderRegistry([provider]) })
   const session = h.client.agentSession('recipient'), condition = agentPromptCondition(session), completionId = agentTurnCompletionIdentity(session)!
+  const idle = nativeIdle ? { nativeEvidence: { sourceId: evidence!.sourceId, id: evidence!.id }, inputByte: 0 } : { completionId, inputByte: 0 }
   const appendReference = (messageId: string) => inner.messageQueue.append({ messageId, operationId: 'operation-' + messageId, createdAt: fixtureEpoch(0, 1),
     sender: { kind: 'agent-session', agentSessionId: 'peer' }, recipient: { kind: 'agent-session', agentSessionId: 'recipient' },
     senderSessionId: 'peer', senderRunId: 'peer-run', recipientSessionId: 'recipient', recipientRunId: original.run.runId,
     threadId: 'original-thread', correlationId: 'correlation-' + messageId, replyTo: null, workspaceId: null, body: 'Original Inbox body stays outside notification input' }, { deliveryMode: 'reference' })
   await appendReference('original-message')
   expect((await inner.messageQueue.prepareNotification({ notificationId: id, agentSessionId: 'recipient', condition,
-    idle: { completionId, inputByte: 0 } }))?.wire).toBe(wire)
-  const control: AgentPromptInputControl = { idleOnly: { completionId, inputByte: 0 } }
+    idle }))?.wire).toBe(wire)
+  const control: AgentPromptInputControl = { idleOnly: idle }
   const submit = (changed: { message?: AgentPromptMessageContent; control?: AgentPromptInputControl } = {}) => coordinator.submitInputPlan(
     session, run(), id, wire, { kind: 'single-phase', data: wire + '\r' }, condition, completionId, undefined, false, undefined, 0,
     changed.message ?? message, 'default', undefined, undefined, undefined, key, changed.control ?? control)
@@ -94,10 +97,51 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted', withActor =
         { kind: 'manual-actor', expectedRun: current.run }, undefined, undefined, false, undefined, undefined,
         { userContent: prompt, authorHuman: true }, 'immediate')
   }
-  return { ...h, key, message, prepare, send, submit, assertCurrent, dispose, beforePrepare: (callback: () => Promise<void>) => { beforePrepare = callback },
+  return { ...h, key, message, prepare, send, submit, assertCurrent, dispose, readEvidence,
+    changeEvidence: (value: AgentPromptExecutionEvidence | null) => { evidence = value }, beforePrepare: (callback: () => Promise<void>) => { beforePrepare = callback },
     changeByte: () => { inputByte++ }, submitIndependent, submitOrdinary, queue: inner.messageQueue,
     read: () => h.store.readPromptAdmission('recipient', original.run, id) }
 }
+
+it('admits an exact Provider initial idle without inventing a completed turn', async () => {
+  const f = await fixture('admitted', false, true)
+  await expect(f.submit()).resolves.toEqual(f.message)
+  const record = await f.read()
+  expect(record?.admission?.completionId).toBeUndefined()
+  expect(record?.admission?.native).toMatchObject({ outcome: 'admitted', plan: { operation: 'queue-idle' } })
+  expect(f.client.agentSession('recipient').semanticStatus).toBeUndefined()
+  expect(f.readEvidence).toHaveBeenCalledTimes(2)
+  expect(f.send).toHaveBeenCalledTimes(1)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it.each(['source', 'identity', 'working', 'unknown'] as const)('rejects only the notice when its native idle %s changes before claim', async change => {
+  const f = await fixture('admitted', false, true)
+  f.beforePrepare(async () => f.changeEvidence(change === 'unknown' ? null : { state: change === 'working' ? 'working' : 'idle',
+    sourceId: change === 'source' ? 'changed-source' : 'original-native-source', id: change === 'identity' ? 'changed-evidence' : 'initial-idle-evidence' }))
+  await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_TURN_END_UNCONFIRMED' })
+  expect(await f.read()).toBeNull(); expect(f.send).not.toHaveBeenCalled()
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('rechecks input bytes after the final awaited native idle observation', async () => {
+  const f = await fixture('admitted', false, true), original = f.readEvidence.getMockImplementation()!
+  f.readEvidence.mockImplementationOnce(original).mockImplementationOnce(async () => { f.changeByte(); return await original() })
+  await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_NOT_APPLIED' })
+  expect((await f.read())?.admission).toMatchObject({ acknowledged: false, notApplied: true, native: { outcome: 'not-applied' } })
+  expect(f.send).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('settles an existing claim not-applied when its final native idle evidence disappears, without replaying that key', async () => {
+  const f = await fixture('admitted', false, true), original = f.readEvidence.getMockImplementation()!
+  f.readEvidence.mockImplementationOnce(original).mockResolvedValueOnce(null)
+  await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_NOT_APPLIED' })
+  const record = await f.read()
+  expect(record?.admission).toMatchObject({ acknowledged: false, notApplied: true, native: { outcome: 'not-applied' } })
+  await expect(f.submit()).rejects.toMatchObject({ code: 'AGENT_PROMPT_INPUT_NOT_APPLIED' })
+  expect(await f.read()).toEqual(record); expect(f.prepare).toHaveBeenCalledTimes(1)
+  expect(f.send).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
 
 it('persists one independent notification input before native idle-queue admission; retry is receipt-only', async () => {
   const f = await fixture()
