@@ -17,6 +17,7 @@ import { agentPromptInputId, agentPromptNotApplied, validateAgentPromptInputKey,
 import { AgentScreenEvidenceStore } from './screen-evidence.js'
 import { createNativeInputCorrelation, nativeInputSourceId } from './native-input-correlation.js'
 import { agentInteractionActiveRequest, agentInteractionResponseUnavailableReason } from './agent-interaction-state.js'
+import type { AgentMuxMessageIdleBoundary } from './agent-message-notification.js'
 import type {
   AgentMuxAgentSession,
   AgentMuxRunRef,
@@ -224,7 +225,7 @@ export type AgentPromptInputControl = {
   authorizeDispatch?: () => Promise<import('./agent-input-wait.js').AgentInputDispatchLink | null>
   onlyIfUnclaimed?: boolean
   requiredNativeSource?: { providerId: string; nativeSessionId: string }
-  idleOnly?: { completionId: string; inputByte: number }
+  idleOnly?: AgentMuxMessageIdleBoundary
 }
 
 /**
@@ -335,9 +336,11 @@ export class AgentPromptSubmissionCoordinator {
     if (control?.idleOnly && (manual || execution !== 'default' || expectedFutureIntent !== undefined ||
         originalInputKey.kind !== 'prompt' || message?.a2aNotificationId !== submissionId || message.systemContext !== prompt ||
         message.userContent !== undefined || message.authorAgentSessionId !== undefined || message.authorHuman !== undefined || message.authorExternal !== undefined ||
-        expectedCompletionId !== control.idleOnly.completionId || !expectedCompletionId || expectedInputByte !== control.idleOnly.inputByte ||
+        expectedCompletionId !== control.idleOnly.completionId ||
+        (control.idleOnly.nativeEvidence ? expectedCompletionId !== undefined || !control.idleOnly.nativeEvidence.sourceId || !control.idleOnly.nativeEvidence.id : !expectedCompletionId) ||
+        expectedInputByte !== control.idleOnly.inputByte ||
         !Number.isSafeInteger(expectedInputByte) || expectedInputByte! < 0)) throw new AgentMuxError(
-      'An idle notification must retain its original platform input, exact completion and input fence. Ordinary input remains available.', 'INVALID_AGENT_PROMPT')
+      'An idle notification must retain its original platform input, exact idle opportunity and input fence. Ordinary input remains available.', 'INVALID_AGENT_PROMPT')
     try {
       const boundary = transportQualification?.protocolInput
       beginPromptPreparationPhase(boundary, 'submission-store')
@@ -652,7 +655,7 @@ export class AgentPromptSubmissionCoordinator {
         }
       }
       assertInteraction(current)
-      if (expectedCompletionId === undefined && expectedFutureIntent === undefined) return
+      if (expectedCompletionId === undefined && expectedFutureIntent === undefined && !control?.idleOnly) return
       if (expectedInputByte === undefined) throw new AgentMuxError('Automatic prompt admission is missing its input fence.', 'INVALID_AGENT_PROMPT')
       if (run.acceptedInputBytes === null) throw new AgentMuxError('Automatic input fence is unconfirmed; the terminal remains available.', 'CTXMUX_INPUT_CURSOR_MISSING')
       if (run.acceptedInputBytes !== expectedInputByte) throw new AgentMuxError('Human input changed before automatic delivery.', 'AGENT_COMPLETION_CHANGED')
@@ -673,7 +676,7 @@ export class AgentPromptSubmissionCoordinator {
         if (current.promptCompletionAdmission?.completionId === agentTurnCompletionIdentity(current) && !confirmedFutureIdle) {
           throw new AgentMuxError('The previous admission consumed this idle boundary; a current native idle frame is unconfirmed. The future message remains due and manual input remains available.', 'AGENT_TURN_END_UNCONFIRMED')
         }
-      } else if (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId && !independentIdleNotification) {
+      } else if (!control?.idleOnly?.nativeEvidence && (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId && !independentIdleNotification)) {
         throw new AgentMuxError('The completed turn changed before automatic delivery.', 'AGENT_COMPLETION_CHANGED')
       }
     }
@@ -695,6 +698,23 @@ export class AgentPromptSubmissionCoordinator {
     const nativeOriginal = admissionIntent?.kind === 'native-conversation' ||
         (control?.requiredNativeSource || control?.idleOnly || inputKey.kind === 'message') && execution === 'default' && admissionIntent?.kind === 'exact-condition' && !rejoiningFrozenPlan
       ? await refreshSession(session.agentSessionId, session.run) : undefined
+    const assertNativeIdle = async (): Promise<void> => {
+      const expected = control?.idleOnly?.nativeEvidence
+      if (!expected) return
+      const current = await refreshSession(session.agentSessionId, session.run)
+      assertInteraction(current)
+      const context: AgentProviderPromptExecutionContext = { args: this.deps.providerArgs?.(current, run) ?? run.args,
+        workspacePath: current.workspacePath, ...(signal ? { signal } : {}),
+        ...(current.hostId === 'local' && run.pid !== null ? { processId: run.pid } : {}),
+        ...(current.nativeHandle ? { nativeHandle: current.nativeHandle } : {}),
+        ...(current.nativePromptPredecessor?.run.runId === current.run.runId &&
+          current.retiredRuns.at(-1)?.runId === current.nativePromptPredecessor.previousRun.runId
+          ? { nativePromptPredecessor: current.nativePromptPredecessor } : {}) }
+      const evidence = await provider.readPromptExecutionEvidence?.(context)
+      if (current.semanticStatus?.state === 'working' || evidence?.state !== 'idle' ||
+          evidence.sourceId !== expected.sourceId || evidence.id !== expected.id) throw new AgentMuxError(
+        'The original Provider initial idle opportunity changed or is unconfirmed. The Inbox and manual input remain available.', 'AGENT_TURN_END_UNCONFIRMED')
+    }
     const source = nativeOriginal && defaultNativeSource(nativeOriginal)
     if ((control?.requiredNativeSource || control?.idleOnly) && !source) throw new AgentMuxError(
       'The original native input source is unconfirmed. No input was sent; the Agent and terminal remain available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
@@ -716,6 +736,7 @@ export class AgentPromptSubmissionCoordinator {
             prepared.plan.operation !== (control?.idleOnly ? 'queue-idle' : target.expectedTurnId === undefined ? 'start-or-steer' : 'steer')) throw new AgentMuxError(
           'The prepared native plan does not address the original source and input operation. No input was sent.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
         await prepared.assertCurrent()
+        await assertNativeIdle()
         const frozenPlan = { ...prepared.plan, clientCorrelation: createNativeInputCorrelation(inputKey) }
         const claimed = await claimSession(session.agentSessionId, session.run, stored => {
           assertAdmission(stored)
@@ -741,15 +762,16 @@ export class AgentPromptSubmissionCoordinator {
         let dispatchAttempted = false
         try {
           await control?.authority?.assertCurrent()
+          const current = await refreshSession(session.agentSessionId, session.run)
+          if (!isDeepStrictEqual(current.promptCompletionAdmission, record.admission) || !isDeepStrictEqual(current.nativeActor, original.nativeActor) ||
+              source && !isDeepStrictEqual(defaultNativeSource(current), source)) throw new AgentMuxError('The original native input claim changed.', 'STALE_AGENT_SESSION')
+          await prepared.assertCurrent()
+          await assertNativeIdle()
           const currentRun = await this.deps.kernel.status(run.runId)
           this.deps.assertAgentRun(claimed, currentRun)
           if (currentRun.state.type !== 'running' || currentRun.pid !== run.pid) throw new AgentMuxError('The original native Run changed before input.', 'STALE_AGENT_SESSION')
           if (control?.idleOnly && currentRun.acceptedInputBytes !== control.idleOnly.inputByte) throw new AgentMuxError(
             'The original input fence changed before notification admission. Ordinary input remains available.', 'AGENT_COMPLETION_CHANGED')
-          const current = await refreshSession(session.agentSessionId, session.run)
-          if (!isDeepStrictEqual(current.promptCompletionAdmission, record.admission) || !isDeepStrictEqual(current.nativeActor, original.nativeActor) ||
-              source && !isDeepStrictEqual(defaultNativeSource(current), source)) throw new AgentMuxError('The original native input claim changed.', 'STALE_AGENT_SESSION')
-          await prepared.assertCurrent()
           dispatchAttempted = true
           result = await prepared.send(prompt, frozenPlan)
         } catch (error) { failure = error }

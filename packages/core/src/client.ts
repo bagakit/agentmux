@@ -120,7 +120,7 @@ import { observeMessageJournal } from './agent-message-observer.js'
 import { agentPromptExceedsBudget, MAX_AGENT_PROMPT_BYTES } from './agent-prompt-budget.js'
 import { agentPromptCondition, agentPromptInputId, agentPromptNotApplied, validateAgentPromptAdmissionIntent, validateAgentPromptCondition, validateAgentPromptInputKey,
   type AgentPromptAdmissionIntent, type AgentPromptInputKey, type AgentPromptCondition } from './agent-prompt-condition.js'
-import { agentTurnEndEvidence, agentNativeTurnEnd, nativeTurnEndScopeMatches, cloneSession, sameNativeHandle, sameRun } from './agent-session-identity.js'
+import { agentTurnCompletionIdentity, agentTurnEndEvidence, agentNativeTurnEnd, nativeTurnEndScopeMatches, cloneSession, sameNativeHandle, sameRun } from './agent-session-identity.js'
 import { invalidateAgentIdleEvidence, transitionAgentSemanticStatus } from './agent-semantic-state.js'
 import { observeAgent, currentAgentSemanticStatus, type AgentObservation } from './agent-status-freshness.js'
 import { runDisplayState } from './agent-run-status.js'
@@ -1215,7 +1215,16 @@ export class AgentMuxClient {
         if (!this.registry.has(id)) return null
         const current = await this.registry.refresh(id, this.registry.get(id).run)
         const run = await this.requireCurrentAgentRun(current)
-        return { session: this.projectSession(current), inputByte: run.acceptedInputBytes }
+        const session = this.projectSession(current)
+        if (agentTurnCompletionIdentity(session)) return { session, inputByte: run.acceptedInputBytes }
+        if (session.semanticStatus?.state === 'working' || session.currentActivity?.state === 'active') {
+          return { session, inputByte: run.acceptedInputBytes }
+        }
+        const provider = this.providers.get(session.providerId)
+        const evidence = await provider.readPromptExecutionEvidence?.(this.providerNativeContext(session, run))
+        if (evidence?.state === 'idle') return { session, inputByte: run.acceptedInputBytes, nativeIdle: evidence }
+        if (!evidence) throw new AgentMuxError('The Provider initial idle opportunity is unconfirmed. Inspect the original Session or read its retained Inbox.', 'AGENT_TURN_END_UNCONFIRMED')
+        return { session, inputByte: run.acceptedInputBytes }
       },
       submit: notice => this.submitMessageNotification(notice),
       inputAbsent: async key => !await this.inspectAgentPromptSubmission(key),
@@ -7221,7 +7230,8 @@ export class AgentMuxClient {
         !input.expectedFutureIntent.intentId || !Number.isSafeInteger(input.expectedFutureIntent.occurrenceAt) || input.expectedFutureIntent.occurrenceAt < 0 || input.expectedInputByte === undefined)) {
       throw new AgentMuxError('A saved future message requires its exact occurrence and input fence.', 'INVALID_AGENT_PROMPT')
     }
-    if (input.expectedInputByte !== undefined && ((input.expectedCompletionId === undefined && input.expectedFutureIntent === undefined) ||
+    if (input.expectedInputByte !== undefined && ((input.expectedCompletionId === undefined && input.expectedFutureIntent === undefined &&
+        !(platformNotification?.mode === 'idle' && platformNotification.idle?.nativeEvidence)) ||
         !Number.isSafeInteger(input.expectedInputByte) || input.expectedInputByte < 0)) {
       throw new AgentMuxError('Automatic prompt admission requires its completion and finite input fence together.', 'INVALID_AGENT_PROMPT')
     }
@@ -7280,11 +7290,12 @@ export class AgentMuxClient {
     const condition = admissionIntent.kind === 'exact-condition' ? admissionIntent.condition : admissionIntent
     const assertCurrentSubmission = (current: AgentMuxAgentSession): void => {
       assertSession?.(current)
-      if (input.expectedCompletionId === undefined && input.expectedFutureIntent === undefined) return
+      const nativeIdle = platformNotification?.mode === 'idle' && platformNotification.idle?.nativeEvidence !== undefined
+      if (input.expectedCompletionId === undefined && input.expectedFutureIntent === undefined && !nativeIdle) return
       const position = this.nativeCurrentActivities.get(current.agentSessionId)
       if (position?.runId !== current.run.runId) return
       const activity = this.projectCurrentActivity(current)
-      if (!activity || activity.state !== 'idle' || activity.nativeTurnId !== current.semanticStatus?.nativeTurnId) {
+      if (nativeIdle ? activity?.state === 'active' : !activity || activity.state !== 'idle' || activity.nativeTurnId !== current.semanticStatus?.nativeTurnId) {
         throw new AgentMuxError('Current native activity does not confirm the original automatic input boundary. The saved message and manual input remain available.',
           input.expectedCompletionId === undefined ? 'AGENT_TURN_END_UNCONFIRMED' : 'AGENT_COMPLETION_CHANGED')
       }
@@ -7443,7 +7454,7 @@ export class AgentMuxClient {
       const base = { agentSessionId: notice.key.agentSessionId, operationId: notice.notificationId,
         prompt: notice.wire, ...(context?.requestSignal ? { signal: context.requestSignal } : {}) }
       const input: AgentMuxAgentPromptInput = notice.mode === 'idle'
-        ? { ...base, ...notice.condition, execution: 'default', expectedCompletionId: notice.idle!.completionId, expectedInputByte: notice.idle!.inputByte }
+        ? { ...base, ...notice.condition, execution: 'default', ...(notice.idle!.completionId === undefined ? {} : { expectedCompletionId: notice.idle!.completionId }), expectedInputByte: notice.idle!.inputByte }
         : { ...base, expectedRun: notice.key.expectedRun, admissionIntent: { kind: 'manual-actor' }, execution: 'immediate' }
       await this.submitPromptInternal(input, undefined, undefined, undefined, this.inputCallAuthority(undefined, context), 'prompt', undefined, undefined, notice)
       const receipt = await inspect()

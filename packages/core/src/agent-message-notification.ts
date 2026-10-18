@@ -6,6 +6,12 @@ import type { AgentPromptSubmissionRecord } from './types.js'
 
 export const MAX_A2A_NOTIFICATION_BYTES = 64 * 1024
 
+/** A completed turn and a Provider's initial idle are distinct original facts. */
+export type AgentMuxMessageIdleBoundary = { inputByte: number } & (
+  | { completionId: string; nativeEvidence?: never }
+  | { completionId?: never; nativeEvidence: { sourceId: string; id: string } }
+)
+
 /** A platform input referencing original Inbox records; never another A2A message. */
 export type AgentMuxMessageNotification = {
   notificationId: string
@@ -15,7 +21,7 @@ export type AgentMuxMessageNotification = {
   condition: AgentPromptCondition
   mode: 'idle' | 'steer'
   /** An automatic producer's exact observed opportunity, not a saved user intent. */
-  idle?: { completionId: string; inputByte: number }
+  idle?: AgentMuxMessageIdleBoundary
   state: 'pending' | 'submitted' | 'unconfirmed' | 'not-applied'
   reason?: string
 }
@@ -53,8 +59,13 @@ export function validateMessageNotification(value: AgentMuxMessageNotification):
       value.reason !== undefined && typeof value.reason !== 'string') throw new AgentMuxError('The original A2A notification is invalid.', 'INVALID_A2A_NOTIFICATION')
   for (const id of value.messageIds) messageEnvelopeString(id, 'Original message ID')
   if (value.mode === 'idle') {
-    if (!value.idle || typeof value.idle.completionId !== 'string' || !value.idle.completionId ||
-        !Number.isSafeInteger(value.idle.inputByte) || value.idle.inputByte < 0) throw new AgentMuxError(
+    const idle = value.idle, native = idle?.nativeEvidence
+    const validOpportunity = native === undefined
+      ? typeof idle?.completionId === 'string' && idle.completionId.length > 0
+      : idle?.completionId === undefined && typeof native?.sourceId === 'string' && native.sourceId.length > 0 &&
+        typeof native.id === 'string' && native.id.length > 0 && Object.keys(native).every(key => key === 'sourceId' || key === 'id')
+    if (!idle || !validOpportunity || Object.keys(idle).some(key => !['completionId', 'nativeEvidence', 'inputByte'].includes(key)) ||
+        !Number.isSafeInteger(idle.inputByte) || idle.inputByte < 0) throw new AgentMuxError(
       'The automatic notification has no original idle input boundary.', 'INVALID_A2A_NOTIFICATION')
   } else if (value.idle !== undefined) throw new AgentMuxError('A manual notification cannot invent an automatic idle boundary.', 'INVALID_A2A_NOTIFICATION')
   return structuredClone({ ...value, key, condition })
