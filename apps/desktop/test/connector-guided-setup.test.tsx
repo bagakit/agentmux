@@ -18,7 +18,7 @@ import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures
 const APP = 'cli_guided_setup', VERSION = 'guided-original-version'
 let app: ReturnType<typeof createMoteApp>
 const dom = { get container() { return document.body } }
-const SCOPES = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only']
+const SCOPES = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only', 'application:application:self_manage']
 let bot: boolean, mode: number, callbackMode: number, cards: boolean, permissions: boolean, reception: boolean, submitted: boolean
 let directory: string, services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer
 let failObservation: boolean, accept: boolean, native: Array<{ path: string; body: unknown }>, calls: Array<{ method: ConnectionMethod; input: unknown; result: unknown }>
