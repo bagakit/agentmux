@@ -7434,17 +7434,16 @@ export class AgentMuxClient {
       'Select one to one hundred distinct original Inbox message IDs.', 'INVALID_A2A_NOTIFICATION')
     const originals = await this.messageQueue.readNotificationMessages(input.messageIds)
     const first = originals[0]
-    if (!first?.recipientSessionId || !first.recipientRunId || originals.some(original => !original || original.deliveryMode !== 'reference' ||
-        original.recipientSessionId !== first.recipientSessionId || original.recipientRunId !== first.recipientRunId)) throw new AgentMuxError(
-      'The selected Inbox messages must belong to the same exact recipient Run.', 'MESSAGE_RECIPIENT_MISMATCH')
+    if (!first?.recipientSessionId || originals.some(original => !original || original.deliveryMode !== 'reference' ||
+        original.recipientSessionId !== first.recipientSessionId)) throw new AgentMuxError(
+      'The selected Inbox messages must belong to the same durable recipient Session.', 'MESSAGE_RECIPIENT_MISMATCH')
     const retained = await this.messageQueue.readNotification(input.operationId)
     let notification: AgentMuxMessageNotification | null = retained
     if (retained && (retained.mode !== 'steer' || !isDeepStrictEqual(retained.messageIds, input.messageIds) ||
-        retained.key.agentSessionId !== first.recipientSessionId || retained.key.expectedRun.runId !== first.recipientRunId)) throw new AgentMuxError(
+        retained.key.agentSessionId !== first.recipientSessionId)) throw new AgentMuxError(
       'The original notification action already names another target or reference set.', 'A2A_NOTIFICATION_CONFLICT')
     if (!notification) {
       const session = await this.currentStoredAgentSession(first.recipientSessionId)
-      if (session.run.runId !== first.recipientRunId) throw new AgentMuxError('The original recipient Run changed. The Inbox and original action are retained.', 'STALE_AGENT_SESSION')
       notification = await this.messageQueue.prepareNotification({ notificationId: safeId(input.operationId, 'Notification operation ID'),
         agentSessionId: session.agentSessionId, condition: agentPromptCondition(session), messageIds: input.messageIds,
         originalInputAbsent: async () => !await this.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: session.agentSessionId,
@@ -7453,6 +7452,26 @@ export class AgentMuxClient {
     if (!notification) throw new AgentMuxError('No original Inbox references were selected.', 'MESSAGE_NOT_FOUND')
     await this.submitMessageNotification(notification, context)
     return { notification: (await this.messageQueue.readNotification(notification.notificationId))!, input: await this.inspectAgentPromptSubmission(notification.key) }
+  }
+
+  /** Read only this original notification and its producer-qualified input, without preparing or dispatching. */
+  async inspectMessageNotification(input: { operationId: string }): Promise<{
+    notification: AgentMuxMessageNotification | null; input: import('./types.js').AgentPromptSubmissionRecord | null
+  }> {
+    const notification = await this.messageQueue.readNotification(safeId(input.operationId, 'Notification operation ID'))
+    if (!notification) return { notification: null, input: null }
+    const record = await this.inspectAgentPromptSubmission(notification.key)
+    if (record && !isMessageNotificationInput(notification, record)) throw new AgentMuxError(
+      'Another original input owns this notification identity. Its outcome cannot sign the Inbox notification.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+    if (!record || notification.state === 'submitted') return { notification, input: record }
+    const submitted = record.admission?.acknowledged === true || record.terminalPromptSubmission?.submit.acknowledged === true
+    const notApplied = agentPromptNotApplied({ run: record.run,
+      ...(record.admission ? { promptCompletionAdmission: record.admission } : {}),
+      ...(record.terminalPromptSubmission ? { terminalPromptSubmission: record.terminalPromptSubmission } : {}) }) !== undefined
+    if (!submitted && !notApplied) return { notification, input: record }
+    const { reason: _reason, ...original } = notification
+    return { notification: { ...original, state: submitted ? 'submitted' : 'not-applied',
+      ...(submitted ? {} : { reason: 'The original input owner confirmed this whole notification input was not applied.' }) }, input: record }
   }
 
   private async submitMessageNotification(notice: AgentMuxMessageNotification, context?: AgentInputCallContext): Promise<void> {

@@ -261,6 +261,7 @@ type NativeParams = ApplicationAccessParameterMap & MoteConnectionParamsMap & Go
   'message.inbox.check': { limit: number }
   'message.inbox.ack': { generation: number; readerRun: import('./types.js').AgentMuxRunRef }
   'message.notify': { operationId: string; messageIds: readonly string[]; hostId: string }
+  'message.notify.inspect': { operationId: string; hostId: string }
   'message.read': import('./agent-message-query.js').AgentMuxMessageRead & { hostId?: string }
   'message.events': Omit<import('./agent-message-events.js').AgentMuxMessageEventsQuery, 'participantSessionId'> & { hostId?: string; participantSessionId?: string }
   'message.ls': Omit<import('./agent-message-query.js').AgentMuxMessageQuery, 'participantSessionId'> & { hostId?: string; participantSessionId?: string }
@@ -339,6 +340,7 @@ type NativeResult = ApplicationAccessResultMap & MoteConnectionResultMap & GoalD
   'message.inbox.check': Awaited<ReturnType<AgentMuxClient['checkDeliveries']>>
   'message.inbox.ack': Awaited<ReturnType<AgentMuxClient['ackDeliveryBatch']>>
   'message.notify': Awaited<ReturnType<AgentMuxClient['notifyMessages']>> & { hostId: string }
+  'message.notify.inspect': Awaited<ReturnType<AgentMuxClient['inspectMessageNotification']>> & { hostId: string }
   'message.read': { hostId: string; message: Awaited<ReturnType<AgentMuxClient['readMessage']>> }
   'message.ls': import('./agent-message-query.js').AgentMuxMessagePage & { hostId: string }
   'message.events': import('./agent-message-events.js').AgentMuxMessageEventsPage & { hostId: string }
@@ -398,7 +400,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'message.delivery.inspect': 'short', 'message.delivery.report': 'long',
   'agent.output': 'long', 'message.inbox.check': 'long', 'message.inbox.ack': 'long',
   'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
-  'message.notify': 'long', 'message.read': 'short', 'message.ls': 'short', 'message.events': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
+  'message.notify': 'long', 'message.notify.inspect': 'short', 'message.read': 'short', 'message.ls': 'short', 'message.events': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
   'app.search': 'long', 'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long', 'system.storage': 'short',
   'system.endpoint': 'short', 'system.subscription.cancel': 'short'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>

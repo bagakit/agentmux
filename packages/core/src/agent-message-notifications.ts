@@ -5,6 +5,7 @@ import { agentTurnCompletionIdentity } from './agent-session-identity.js'
 import type { DurableAgentMuxMessageQueue } from './agent-global-message-queue.js'
 import type { AgentMuxMessageNotification } from './agent-message-notification.js'
 import type { AgentMuxAgentSession, AgentPromptExecutionEvidence } from './types.js'
+import { messageNotificationSourceRuns } from './agent-message-notification-sources.js'
 
 type Dependencies = {
   queue: DurableAgentMuxMessageQueue
@@ -20,6 +21,7 @@ export class AgentMuxMessageNotifications {
   private readonly recipients = new Set<string>()
   private readonly drains = new Map<string, { pending: Promise<void>; requested: boolean }>()
   private readonly attempted = new Map<string, string>()
+  private readonly unconfirmedSources = new Map<string, string>()
   private observation: ReturnType<typeof observeMessageJournal> | undefined
   private disposed = false
 
@@ -37,6 +39,7 @@ export class AgentMuxMessageNotifications {
     if (this.disposed) return
     this.observe()
     this.attempted.clear()
+    this.unconfirmedSources.clear()
     try {
       for (const id of await this.deps.queue.pendingNotificationRecipients()) this.saved(id)
     } catch (error) { this.deps.unavailable(undefined, error) }
@@ -67,7 +70,7 @@ export class AgentMuxMessageNotifications {
   }
 
   private async drain(agentSessionId: string): Promise<void> {
-    if (!await this.deps.queue.hasPendingNotification(agentSessionId)) { this.recipients.delete(agentSessionId); this.attempted.delete(agentSessionId); return }
+    if (!await this.deps.queue.hasPendingNotification(agentSessionId)) { this.recipients.delete(agentSessionId); this.attempted.delete(agentSessionId); this.unconfirmedSources.delete(agentSessionId); return }
     const current = await this.deps.read(agentSessionId)
     if (!current || this.disposed) return
     const { session, inputByte, nativeIdle } = current
@@ -78,23 +81,42 @@ export class AgentMuxMessageNotifications {
     const idle = completionId ? { completionId, inputByte }
       : { nativeEvidence: { sourceId: nativeIdle!.sourceId, id: nativeIdle!.id }, inputByte }
     const condition = agentPromptCondition(session)
-    const position = await this.deps.queue.pendingNotificationPosition(agentSessionId, condition.expectedRun.runId)
+    const sourceRuns = messageNotificationSourceRuns(session)
+    const position = await this.deps.queue.pendingNotificationPosition(agentSessionId, sourceRuns)
+    // Failure to explain excluded historical references is a weak observation dependency:
+    // publish its service window, then continue this writer's independently qualified work.
+    try {
+      const excluded = await this.deps.queue.excludedNotificationPosition(agentSessionId, sourceRuns)
+      if (!excluded) this.unconfirmedSources.delete(agentSessionId)
+      else {
+        const gap = JSON.stringify([session.run.runId, sourceRuns, excluded])
+        if (this.unconfirmedSources.get(agentSessionId) !== gap) {
+          this.unconfirmedSources.set(agentSessionId, gap)
+          this.deps.unavailable(agentSessionId, new Error('A retained Inbox reference belongs to a historical Run whose semantic recovery relationship to this writer is unconfirmed. Read the original Inbox or explicitly notify its MID; no original input was replayed.'))
+        }
+      }
+    } catch (error) {
+      const gap = JSON.stringify([session.run.runId, sourceRuns, 'unavailable'])
+      if (this.unconfirmedSources.get(agentSessionId) !== gap) {
+        this.unconfirmedSources.set(agentSessionId, gap); this.deps.unavailable(agentSessionId, error)
+      }
+    }
     // Our own rejected claim changes the predecessor, not the idle opportunity.
-    const opportunity = JSON.stringify([condition.expectedRun, idle, position])
+    const opportunity = JSON.stringify([condition.expectedRun, idle, sourceRuns, position])
     if (this.attempted.get(agentSessionId) === opportunity) return
     this.attempted.set(agentSessionId, opportunity)
     const notificationId = `a2a-notice-${mintObjectId()}`
     const notice = await this.deps.queue.prepareNotification({ agentSessionId,
-      notificationId, condition, idle,
+      notificationId, condition, idle, sourceRuns,
       originalInputAbsent: () => this.deps.inputAbsent({ kind: 'prompt', agentSessionId, expectedRun: condition.expectedRun, submissionId: notificationId }) })
     if (notice) await this.deps.submit(notice)
-    if (!await this.deps.queue.hasPendingNotification(agentSessionId)) { this.recipients.delete(agentSessionId); this.attempted.delete(agentSessionId) }
+    if (!await this.deps.queue.hasPendingNotification(agentSessionId)) { this.recipients.delete(agentSessionId); this.attempted.delete(agentSessionId); this.unconfirmedSources.delete(agentSessionId) }
   }
 
   async dispose(): Promise<void> {
     this.disposed = true
     this.observation?.dispose()
     await Promise.allSettled([...this.drains.values()].map(value => value.pending))
-    this.drains.clear(); this.recipients.clear(); this.attempted.clear()
+    this.drains.clear(); this.recipients.clear(); this.attempted.clear(); this.unconfirmedSources.clear()
   }
 }

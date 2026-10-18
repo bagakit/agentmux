@@ -214,7 +214,7 @@ function notificationStatus(value: unknown, envelope: ReturnType<typeof validate
   if (status.key !== undefined) {
     const key = validateAgentPromptInputKey(status.key); string(status.notificationId)
     if (key.kind !== 'prompt' || key.submissionId !== status.notificationId || key.submissionId === envelope.messageId ||
-        key.agentSessionId !== envelope.recipientSessionId || key.expectedRun.runId !== envelope.recipientRunId) fail()
+        key.agentSessionId !== envelope.recipientSessionId) fail()
   }
   if (status.reason !== undefined) text(status.reason)
 }
@@ -734,12 +734,13 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         break
       }
       case 'message.dispatch.open': case 'message.dispatch.inspect': case 'message.dispatch.report': dispatch(p, input); break
-      case 'message.notify': {
+      case 'message.notify': case 'message.notify.inspect': {
         record(p, ['hostId', 'notification', 'input'])
         if (p.hostId !== input.hostId) fail()
+        if (method === 'message.notify.inspect' && p.notification === null) { if (p.input !== null) fail(); break }
         const raw = record(p.notification, ['notificationId', 'key', 'messageIds', 'wire', 'condition', 'mode', 'idle', 'state', 'reason'])
         const notice = validateMessageNotification(raw as unknown as import('./agent-message-notification.js').AgentMuxMessageNotification)
-        if (notice.mode !== 'steer' || notice.notificationId !== input.operationId || !isDeepStrictEqual(notice.messageIds, input.messageIds)) fail()
+        if (notice.notificationId !== input.operationId || method === 'message.notify' && (notice.mode !== 'steer' || !isDeepStrictEqual(notice.messageIds, input.messageIds))) fail()
         if (p.input !== null) {
           const receipt = parsePromptSubmissionRecord(p.input)
           if (!isMessageNotificationInput(notice, receipt)) fail()
