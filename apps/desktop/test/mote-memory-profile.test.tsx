@@ -328,4 +328,21 @@ describe('original Memory in the shared Mote Profile', () => {
     expect(memory().textContent).not.toContain('Reading saved memory…')
     expect(memoryReads()).toHaveLength(1)
   })
+
+  it('finishes the original chat settings read after StrictMode effect replay without rereading on local page switches', async () => {
+    const chatRead = vi.spyOn(api.moteChat, 'call').mockResolvedValue({ configuration: null, operation: null })
+    vi.spyOn(api.connections, 'call').mockImplementation(async method => method === 'connection.ls' ? { connections: [] } : { enabled: false, revision: 1 })
+    await act(async () => root.render(<StrictMode><MoteDetailsPanel scope={scope()} reference={reference} active onOpenPath={openPath} /></StrictMode>))
+    const chat = container.querySelector<HTMLElement>('[data-mote-private-chat]')!
+    expect(chat.querySelector('[data-mote-chat-saved]')?.getAttribute('data-mote-chat-saved')).toBe('off')
+    expect(chat.textContent).not.toContain('Reading chat settings…')
+    const reads = chatRead.mock.calls.length
+    await click('Ideas'); await click('Profile')
+    expect(container.querySelector('[data-mote-private-chat]')).toBe(chat)
+    expect(chatRead).toHaveBeenCalledTimes(reads)
+    const refresh = [...chat.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Refresh')!
+    expect(refresh.disabled).toBe(false)
+    await act(async () => refresh.click())
+    expect(chatRead).toHaveBeenCalledTimes(reads + 1)
+  })
 })
