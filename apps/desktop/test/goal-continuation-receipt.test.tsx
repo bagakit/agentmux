@@ -29,7 +29,16 @@ it('actual Goal continuation accepts its original Core receipt with platform not
   expect(await runtime.inspectContinuousProgressInitial(loop)).toBe('unconfirmed')
   read.mockResolvedValueOnce({ ...original!, run: { runId: 'another-original-run' } })
   expect(await runtime.inspectContinuousProgressInitial(loop)).toBe('unconfirmed')
-  read.mockResolvedValueOnce({ ...original!, admission: { ...original!.admission!, acknowledged: false }, terminalPromptSubmission: undefined })
+  const { inputKey, ...unattributed } = original!.admission!
+  read.mockResolvedValueOnce({ ...original!, admission: unattributed })
+  expect(await runtime.inspectContinuousProgressInitial(loop)).toBe('unconfirmed')
+  for (const changed of [{ kind: 'message', agentSessionId: loop.agentSessionId, expectedRun: initial.condition.expectedRun, messageId: initial.operationId }, { ...inputKey!, agentSessionId: 'another-agent' },
+    { ...inputKey!, expectedRun: { runId: 'another-run' } }, { ...inputKey!, submissionId: 'another-operation' }]) {
+    read.mockResolvedValueOnce({ ...original!, admission: { ...original!.admission!, inputKey: changed as NonNullable<typeof inputKey> } })
+    expect(await runtime.inspectContinuousProgressInitial(loop)).toBe('unconfirmed')
+  }
+  const { terminalPromptSubmission, ...withoutTerminal } = original!
+  read.mockResolvedValueOnce({ ...withoutTerminal, admission: { ...original!.admission!, acknowledged: false } })
   expect(await runtime.inspectContinuousProgressInitial(loop)).toBe('pending')
   expect(writes).toEqual(accepted)
 })
