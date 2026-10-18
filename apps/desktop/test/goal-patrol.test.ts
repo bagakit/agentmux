@@ -102,3 +102,14 @@ it('valid large original tasks use source references instead of copying task bod
   const note = (await f.demands.get('goal'))!.patrols![0]!.attempts[0]!.agentMuxNote
   expect(Buffer.byteLength(note)).toBeLessThan(64 * 1024); expect(note).not.toContain('x'.repeat(100)); expect(JSON.parse(note).read).toMatchObject({ method: 'goal.delegations', params: { goalId: 'goal' } })
 })
+
+it('retains typed original file evidence once in the frozen inspection and actual PMO input', async () => {
+  const f = await fixture()
+  const evidence = { kind: 'file' as const, resource: { hostId: 'worker-host', workspaceId: 'original-worktree', workspacePath: f.root, zoneId: 'original-zone', zonePath: f.root, path: 'result.log' }, revision: 'sha256:' + 'a'.repeat(64) }
+  await f.demands.proposeGrounding('goal', { alignmentRevision: 1, summary: 'Original result', checks: [{ criterionId: 'AC', outcome: 'met', evidence: [evidence, structuredClone(evidence), 'Original citation'], note: '' }] })
+  await f.owner.request('goal', 'patrol', {}, person); await f.settle()
+  const patrol = (await f.demands.get('goal'))!.patrols![0]!
+  expect(JSON.parse(patrol.context).evidence).toEqual([evidence, 'Original citation'])
+  expect(JSON.parse(patrol.attempts[0]!.agentMuxNote).context.evidence).toEqual([evidence, 'Original citation'])
+  expect(f.submitted).toHaveLength(1)
+})
