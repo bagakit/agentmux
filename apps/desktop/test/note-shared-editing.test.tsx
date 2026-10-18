@@ -111,6 +111,73 @@ it('copies without files, pastes into an actual undo transaction and creates no 
   expect((await readdir(f.root)).filter(name => name.startsWith('block-'))).toEqual([])
   expect(await readFile(join(f.root, 'source.note.md'), 'utf8')).toContain('Original knowledge')
 })
+async function richCopyFixture(kind: 'task' | 'table') {
+  const f = await fixture(), key = documentKey(f.workspace.id, 'source.note.md'), original = readNoteDocument(f.documents[key]!.content)
+  if (original.status !== 'valid') throw Error('Original must parse')
+  original.note.content.content!.unshift(kind === 'task'
+    ? { type: 'taskList', content: [{ type: 'taskItem', attrs: { blockId: 'checked-item', checked: true }, content: [{ type: 'paragraph', attrs: { blockId: 'checked-body' }, content: [{ type: 'text', text: 'Original reusable task' }] }] }] }
+    : { type: 'table', attrs: { blockId: 'whole-table' }, content: [{ type: 'tableRow', content: [{ type: 'tableHeader', content: [{ type: 'paragraph', attrs: { blockId: 'cell-body' }, content: [{ type: 'text', text: 'Original reusable table' }] }] }] }] })
+  const written = await f.writer.write(f.workspace, { path: 'source.note.md', content: serializeNoteDocument(original.note), expectedRevision: f.documents[key]!.revision })
+  if (written.status !== 'written') throw Error('Rich original must save')
+  const read = await f.writer.read(f.workspace, 'source.note.md'); if (read.status !== 'read') throw Error('Rich original must read')
+  useAppStore.setState(state => ({ documents: { ...state.documents, [key]: read.document } }))
+  await f.mount()
+  await act(async () => {
+    const editor = f.rich(0); let at = -1
+    editor.state.doc.descendants((node, position) => { if (node.attrs.blockId === (kind === 'task' ? 'checked-body' : 'cell-body')) at = position })
+    expect(at).toBeGreaterThanOrEqual(0); editor.view.focus(); editor.commands.setTextSelection(at + 1)
+  })
+  return f
+}
+it.each(['task', 'table'] as const)('copies a nearby %s body as its clearly identified legal range and saves the original shared file', async kind => {
+  const f = await richCopyFixture(kind), copied = await f.copy(), ticket = JSON.parse(copied.getData('application/x-agentmux-note-share'))
+  expect(ticket.block.blockId).toBe(kind === 'task' ? 'checked-item' : 'whole-table')
+  expect(dom.container.querySelector('.note-block-copy-feedback')?.textContent).toBe(kind === 'task' ? 'Copied task item · paste to share' : 'Copied whole table · paste to share')
+  await f.paste(copied); expect(api.files.sharePublic).not.toHaveBeenCalled()
+  await act(async () => await f.save())
+  const result = await vi.mocked(api.files.sharePublic).mock.results[0]!.value
+  expect(result.status, JSON.stringify(result)).toBe('committed')
+  const names = (await readdir(f.root)).filter(name => name.startsWith('block-')); expect(names).toHaveLength(1)
+  const shared = readNoteDocument(await readFile(join(f.root, names[0]!), 'utf8'))
+  expect(shared.status).toBe('valid'); if (shared.status !== 'valid') throw Error(shared.message)
+  expect(shared.note.content.content![0]!.type).toBe(kind === 'task' ? 'taskList' : 'table')
+  if (kind === 'task') expect(shared.note.content.content![0]!.content![0]!.attrs?.checked).toBe(true)
+})
+it('keeps a known rejected legacy inner range and complete draft without freezing later explicit saving or reclassifying an old unknown', async () => {
+  const f = await richCopyFixture('task'); await f.paste(await f.copy())
+  const key = documentKey(f.workspace.id, 'destination.note.md')
+  // A pending draft from the earlier copier may still contain its exact inner paragraph target.
+  useAppStore.setState(state => { const doc = state.documents[key]!, shares = structuredClone(doc.noteEditing!.shares!); for (const ticket of Object.values(shares)) ticket.copy.block.blockId = 'checked-body'; return { documents: { ...state.documents, [key]: { ...doc, noteEditing: { ...doc.noteEditing, shares } } } } })
+  const before = useAppStore.getState().documents[key]!.content
+  await act(async () => await f.save())
+  const request = vi.mocked(api.files.sharePublic).mock.calls[0]![0]
+  expect(useAppStore.getState().documents[key]!.noteEditing).toMatchObject({ shareRejection: { params: request, code: 'NOTE_SHARE_RANGE_UNSUPPORTED' } })
+  expect(useAppStore.getState().documents[key]!.noteEditing?.share).toBeUndefined()
+  expect(useAppStore.getState().documents[key]!.noteEditing?.attempt).toBeUndefined()
+  expect(useAppStore.getState().documents[key]!.content).toBe(before)
+  expect(useAppStore.getState().documentIssues[key]?.kind).toBe('write-error')
+  expect((await readdir(f.root)).filter(name => name.startsWith('block-'))).toHaveLength(0)
+  expect(dom.container.querySelector('.note-shared-content')?.textContent).toContain('Cancel this use')
+  await act(async () => f.rich(1).commands.undo())
+  await act(async () => f.rich(1).commands.insertContent(' Kept ordinary edit'))
+  await act(async () => await f.save())
+  expect(await readFile(join(f.root, 'destination.note.md'), 'utf8')).toContain('Kept ordinary edit')
+  expect(api.files.sharePublic).toHaveBeenCalledTimes(1)
+})
+it('does not release an earlier unknown share from a later structural rejection or replay its original request', async () => {
+  const f = await richCopyFixture('task'); await f.paste(await f.copy())
+  vi.mocked(api.files.sharePublic).mockRejectedValueOnce(Error('Original share transport unavailable'))
+  await act(async () => await f.save())
+  const key = documentKey(f.workspace.id, 'destination.note.md'), before = useAppStore.getState().documents[key]!, request = before.noteEditing!.share!.params
+  expect(before.noteEditing!.attempt?.phase).toBe('unknown')
+  vi.mocked(api.files.inspectSharePublic).mockResolvedValueOnce({ mode: 'request', result: { operationId: request.operationId, status: 'error', code: 'NOTE_SHARE_RANGE_UNSUPPORTED', message: 'A later range check cannot certify the original effects.', promotions: request.promotions.map(p => ({ operationId: p.operationId, shared: null, source: null })), destination: null } })
+  await act(async () => await useAppStore.getState().inspectNoteShare(f.workspace.id, 'destination.note.md'))
+  const current = useAppStore.getState().documents[key]!
+  expect(current.noteEditing?.share?.params).toEqual(request); expect(current.noteEditing?.attempt?.phase).toBe('unknown')
+  expect(current.noteEditing?.shareRejection).toBeUndefined(); expect(current.content).toBe(before.content)
+  expect(api.files.sharePublic).toHaveBeenCalledTimes(1)
+  expect(dom.container.querySelector('.note-shared-content')?.textContent).not.toContain('Cancel this use')
+})
 it('saves dirty previously unanchored source through the real multi-file owner and edits one shared FileDocument in two Notes', async () => {
   const f = await fixture(), key = documentKey(f.workspace.id, 'source.note.md')
   // External ordinary Markdown has no paragraph anchor; copying must not require an initial manual save.
