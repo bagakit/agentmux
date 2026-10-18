@@ -9,7 +9,7 @@ import type { AgentMuxStoredAgentSession } from '../../src/types.js'
 import type { CtxmuxAdapterRun } from '../../src/ctxmux-run-adapter.js'
 
 /** Actual Provider, FileStore, Registry and Client. Only the private process/Hook seams are controlled. */
-export async function retiredReopenFixture(providerId: 'claude' | 'pi' = 'claude', historyItems = 1) {
+export async function retiredReopenFixture(providerId: 'claude' | 'pi' | 'codex' = 'claude', historyItems = 1) {
   const root = await mkdtemp(join(tmpdir(), 'amx-retired-reopen-'))
   for (const key of Object.keys(process.env).filter(key => key.startsWith('AGENTMUX_'))) vi.stubEnv(key, undefined)
   await mkdir(join(root, 'runtime'))
@@ -18,7 +18,12 @@ export async function retiredReopenFixture(providerId: 'claude' | 'pi' = 'claude
   vi.stubEnv('AGENTMUX_AGENT_SESSION_STORE', join(root, 'sessions.json'))
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
   const path = join(root, 'native.jsonl')
-  const data = providerId === 'claude'
+  const data = providerId === 'codex'
+    ? [{ type: 'session_meta', timestamp: fixtureDay(1) + 'T' + fixtureClock(0, 0, 0) + 'Z',
+      payload: { id: 'native-main', source: 'cli', cwd: root } },
+      { type: 'event_msg', timestamp: fixtureDay(1) + 'T' + fixtureClock(0, 1, 0) + 'Z',
+        payload: { type: 'task_started', thread_id: 'native-main', turn_id: 'original-turn' } }]
+    : providerId === 'claude'
     ? [{ sessionId: 'native-main', uuid: 'input-1', type: 'user', timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 0) + "Z", message: { role: 'user', content: 'Original native conversation' } }]
     : [{ type: 'session', version: 3, id: 'native-main', cwd: root, timestamp: fixtureDay(1) + "T" + fixtureClock(0, 0, 0) + "Z" },
       { type: 'message', id: 'input-1', parentId: null, timestamp: fixtureDay(1) + "T" + fixtureClock(0, 1, 0) + "Z", message: { role: 'user', content: 'Original native conversation' } }]
