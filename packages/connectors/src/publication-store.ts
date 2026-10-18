@@ -142,6 +142,12 @@ export class PublicationStore {
       CREATE INDEX IF NOT EXISTS connector_publication_pending
         ON connector_publication_operation(binding_id, binding_revision, ordinal)
         WHERE state IN ('pending','dispatching','unknown','not-applied');
+      CREATE INDEX IF NOT EXISTS connector_publication_open_state
+        ON connector_publication_operation(binding_id, binding_revision, state, ordinal)
+        WHERE state IN ('pending','dispatching','unknown','not-applied');
+      CREATE INDEX IF NOT EXISTS connector_publication_open_projection
+        ON connector_publication_operation(binding_id, binding_revision, projection_id, ordinal)
+        WHERE state IN ('pending','dispatching','unknown','not-applied');
       CREATE INDEX IF NOT EXISTS connector_publication_audit
         ON connector_publication_operation(binding_id, binding_revision, ordinal);
       CREATE INDEX IF NOT EXISTS connector_publication_fragments
@@ -549,7 +555,37 @@ export class PublicationStore {
     return original
   }
   next(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId?: string): PublicationOperation | null {
-    return this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') AND " + (projectionId === undefined ? "json_extract(operation_json,'$.reference.source.kind') IN ('native','captured')" : "projection_id=?") + " ORDER BY CASE WHEN state='not-applied' AND json_extract(operation_json,'$.payload.kind') IN ('image','file') THEN 1 ELSE 0 END,ordinal LIMIT 1" ).get(...scopeKey(boundary), ...(projectionId === undefined ? [] : [projectionId])) )
+    return this.read(this.candidate(boundary, projectionId))
+  }
+  /** One exact eligible head per projection. Both preparation and atomic claim use this selection. */
+  private candidate(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId?: string) {
+    return this.database.prepare(`SELECT original.operation_json, original.state FROM connector_publication_operation original
+      WHERE original.binding_id=? AND original.binding_revision=?
+        AND original.state IN ('pending','dispatching','unknown','not-applied') AND original.state='pending'
+        AND ${projectionId === undefined ? "json_extract(original.operation_json,'$.reference.source.kind') IN ('native','captured')" : 'original.projection_id=?'}
+        AND NOT EXISTS (SELECT 1 FROM connector_publication_operation earlier
+          WHERE earlier.binding_id=original.binding_id AND earlier.binding_revision=original.binding_revision AND earlier.projection_id=original.projection_id
+            AND earlier.state IN ('pending','dispatching','unknown','not-applied') AND earlier.ordinal<original.ordinal
+            AND NOT (earlier.state='not-applied' AND json_extract(earlier.operation_json,'$.payload.kind') IN ('image','file')))
+        AND (json_extract(original.operation_json,'$.predecessorOperationId') IS NULL OR EXISTS (
+          SELECT 1 FROM connector_publication_operation predecessor WHERE predecessor.operation_id=json_extract(original.operation_json,'$.predecessorOperationId')
+            AND predecessor.binding_id=original.binding_id AND predecessor.binding_revision=original.binding_revision AND predecessor.projection_id=original.projection_id
+            AND predecessor.state='confirmed' AND json_type(predecessor.operation_json,'$.mapping')='object'))
+      ORDER BY original.ordinal LIMIT 1`).get(...scopeKey(boundary), ...(projectionId === undefined ? [] : [projectionId]))
+  }
+  /** Read-only recovery advances through this audience's retained open rows, never another queue or history. */
+  nextUnconfirmed(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, after?: string, projectionId?: string): PublicationOperation | null {
+    const cursor = after === undefined ? undefined : this.database.prepare('SELECT ordinal FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND operation_id=?').get(...scopeKey(boundary), after)
+    return this.read(this.database.prepare(`SELECT operation_json,state FROM connector_publication_operation
+      WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied')
+        AND state IN ('dispatching','unknown') AND ordinal>? ${projectionId === undefined ? "AND json_extract(operation_json,'$.reference.source.kind')!='binding-operation'" : 'AND projection_id=?'}
+      ORDER BY ordinal LIMIT 1`).get(...scopeKey(boundary), Number(cursor?.ordinal ?? 0), ...(projectionId === undefined ? [] : [projectionId])))
+  }
+  /** Aggregate effect facts cannot be overwritten by a newer successful independent message. */
+  unresolvedState(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId?: string): 'unknown' | 'not-applied' | null {
+    const suffix = projectionId === undefined ? '' : ' AND projection_id=?', parameters = [...scopeKey(boundary), ...(projectionId === undefined ? [] : [projectionId])]
+    if (this.database.prepare("SELECT 1 FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') AND state IN ('dispatching','unknown')" + suffix + ' LIMIT 1').get(...parameters)) return 'unknown'
+    return this.database.prepare("SELECT 1 FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') AND state='not-applied'" + suffix + ' LIMIT 1').get(...parameters) ? 'not-applied' : null
   }
   /** Only the original pending projection supplies records missing accepted purpose. No history scan. */
   pendingRecords(operation: PublicationOperation): ConversationItemRef[] {
@@ -671,13 +707,12 @@ export class PublicationStore {
       this.write(result); return result
     })
   }
-  /** Save the exact effect identity before any adapter call. Unknown work blocks this audience alone. */
-  claimNext(boundary: PublicationBoundary, authorized: () => boolean, adapter: PublicationPreparer, projectionId?: string): PublicationOperation | null {
+  /** Claim only the exact qualified candidate; an unresolved projection cannot hold independent work. */
+  claimNext(boundary: PublicationBoundary, expectedOperationId: string, authorized: () => boolean, adapter: PublicationPreparer, projectionId?: string): PublicationOperation | null {
     return this.transaction(() => {
       if (!authorized()) return null
-      const first = this.read(this.database.prepare("SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND state IN ('pending','dispatching','unknown','not-applied') AND " + (projectionId === undefined ? "json_extract(operation_json,'$.reference.source.kind') IN ('native','captured')" : "projection_id=?") + " ORDER BY CASE WHEN state='not-applied' AND json_extract(operation_json,'$.payload.kind') IN ('image','file') THEN 1 ELSE 0 END,ordinal LIMIT 1" )
-        .get(...scopeKey(boundary), ...(projectionId === undefined ? [] : [projectionId])))
-      if (!first || first.state !== 'pending') return null
+      const first = this.read(this.candidate(boundary, projectionId))
+      if (!first || first.operationId !== expectedOperationId) return null
       if ((first.publicationScope ?? 'future-native-user-facing') !== boundary.scope.publication)
         throw new AgentMuxError('The original publication retains another sharing scope. Inspect its Binding revision without replacing the operation.', 'PUBLICATION_SCOPE_CONFLICT')
       const predecessor = first.predecessorOperationId ? this.inspect(first.predecessorOperationId) : null
