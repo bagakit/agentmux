@@ -21,7 +21,7 @@ export type PreparedPublication = {
   }
 }
 /** Private bytes remain in the original Outbox operation, never in a mutable cache or URL. */
-export type PreparedPublicationResource = { resourceId: string; sha256: string; byteLength: number; name: string; contentType: string }
+export type PreparedPublicationResource = { resourceId: string; sha256: string; byteLength: number; name: string; contentType: string; source?: 'public-interaction-text' }
 export type PublicationEffectContext = { readResource(resource: Readonly<PreparedPublicationResource>): Uint8Array }
 /** Preparation is synchronous and pure; all network effects occur after the original transaction commits. */
 export interface PublicationPreparer {
@@ -50,7 +50,8 @@ export function parsePreparedPublication(value: unknown, adapter: PublicationPre
     if (!adapter.directResources || request.body !== undefined || request.contentType !== undefined || !record(multipart) ||
         Object.keys(multipart).some(key => !['payloadJson', 'files'].includes(key)) || typeof multipart.payloadJson !== 'string' || Buffer.byteLength(multipart.payloadJson) > 4 * 1024 * 1024 ||
         !Array.isArray(multipart.files) || !multipart.files.length || multipart.files.some(file => !record(file) ||
-          Object.keys(file).some(key => !['resourceId', 'sha256', 'byteLength', 'name', 'contentType'].includes(key)) || !text(file.resourceId) ||
+          Object.keys(file).some(key => !['resourceId', 'sha256', 'byteLength', 'name', 'contentType', 'source'].includes(key)) || !text(file.resourceId) ||
+          file.source !== undefined && file.source !== 'public-interaction-text' ||
           typeof file.sha256 !== 'string' || !/^[a-f0-9]{64}$/u.test(file.sha256) || !Number.isSafeInteger(file.byteLength) || Number(file.byteLength) < 1 ||
           !text(file.name, 255) || !text(file.contentType, 255))) return invalid()
   }
