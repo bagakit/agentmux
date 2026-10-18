@@ -5,7 +5,7 @@ import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { queuedMessageState, queuedInputFailure, QueuedDeliveryFailure, type ComposerQueuedMessage, type ArchiveQueuedMessage, type MoveQueuedMessageToDraft } from './ComposerOutbox'
 import { ComposerQueuedMessageEditor, type EditQueuedMessage } from './ComposerQueuedMessageEditor'
 import { WindowOverlayPortal } from './WindowOverlayHost'
-import { observeTerminalInputGeometry, readTerminalInputOverlapTop } from '../lib/terminal-view-observation'
+import type { PendingDeliveryLayout } from '../lib/pending-delivery-layout'
 
 const ThemeStatusLoadingIcon = semanticIconComponent('status.loading')
 const ThemeStatusUnknownIcon = semanticIconComponent('status.unknown')
@@ -19,10 +19,12 @@ const ThemeActionCopyIcon = semanticIconComponent('action.copy')
 
 
 /** Original queue facts, viewed by operation identity; this surface owns no delivery state. */
-export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef, surfaceRef, onSend, onCancelPreparation, onCopy, onEdit, onArchive, onMoveToDraft, sendImmediately = false, suppressed = false, returning = false, onMore, notice }: {
+export function ComposerPendingDelivery({ queued, pendingInteraction, composerRef, anchorRef, layout, surfaceRef, onSend, onCancelPreparation, onCopy, onEdit, onArchive, onMoveToDraft, sendImmediately = false, suppressed = false, returning = false, onMore, notice }: {
   queued: readonly ComposerQueuedMessage[]
   pendingInteraction: boolean
+  composerRef: RefObject<HTMLElement | null>
   anchorRef: RefObject<HTMLButtonElement | null>
+  layout?: PendingDeliveryLayout | undefined
   surfaceRef: RefObject<HTMLElement | null>
   onSend?: ((id: string) => void) | undefined
   onCancelPreparation?: ((id: string) => void) | undefined
@@ -125,70 +127,19 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
   }, [editingId, selectedId, active?.id, suppressed])
 
   useEffect(() => {
-    const anchor = anchorRef.current, floating = surfaceRef.current
-    if (suppressed || (!queued.length && !notice) || !anchor?.isConnected || !floating) return
-    const composer = anchor.closest<HTMLElement>('.composer')
-    const region = anchor.closest<HTMLElement>('[data-workbench-region-id]') ?? anchor.closest<HTMLElement>('.agent-surface') ?? composer
-    if (!composer || !region) return
-    const agentSurface = composer.closest('.agent-surface')
-    const terminalContainer = agentSurface?.querySelector<HTMLElement>('.terminal-view__xterm')
-    const interactionBody = agentSurface?.querySelector<HTMLElement>('.agent-body')
-    let disposed = false, revision = 0
-    let observedSourceHost: HTMLElement | null = null
-    let observedInteraction: HTMLElement | null = null
-    let observedHelper: HTMLElement | null = null
-    let observedTerminal: HTMLElement | null = null, observedRegionId: string | undefined
-    let stopInputGeometry = () => {}, geometryFrame = 0
+    const composer = composerRef.current, floating = surfaceRef.current
+    if (suppressed || (!queued.length && !notice) || !composer?.isConnected || !floating) return
+    const region = layout?.boundaryRef.current
+    const document = composer.ownerDocument
+    let disposed = false, revision = 0, geometryFrame = 0
     const scheduleUpdate = () => {
       if (disposed || geometryFrame) return
       geometryFrame = requestAnimationFrame(() => { geometryFrame = 0; void update() })
     }
-    const cursorObserver = new MutationObserver(scheduleUpdate)
-    const terminalObserver = new MutationObserver(scheduleUpdate)
-    if (terminalContainer) terminalObserver.observe(terminalContainer, { childList: true })
-    // Observe only this Region's body, current source host and request shell.
-    // Reading history or an unrelated Region must not schedule this placement.
-    const interactionObserver = new MutationObserver(scheduleUpdate)
-    const observeInteraction = () => {
-      interactionObserver.disconnect()
-      if (interactionBody) interactionObserver.observe(interactionBody, { childList: true, attributes: true, attributeFilter: ['hidden', 'inert', 'style', 'class'] })
-      if (observedSourceHost) interactionObserver.observe(observedSourceHost, { childList: true, attributes: true, attributeFilter: ['hidden', 'inert', 'style', 'class'] })
-      if (observedInteraction) interactionObserver.observe(observedInteraction, { attributes: true, attributeFilter: ['hidden', 'inert', 'style', 'class', 'data-request-id'] })
-    }
-    observeInteraction()
-    const resize = new ResizeObserver(() => { void update() })
     const update = async () => {
       const request = ++revision
       if (!composer.isConnected || composer.closest('[hidden], [inert]')) return
-      const sourceHost = Array.from(interactionBody?.children ?? []).find(node =>
-        node instanceof HTMLElement && node.matches('.agent-interaction-source') &&
-        (node.closest('[data-workbench-region-id]') ?? node.closest('.agent-surface')) === region) as HTMLElement | undefined
-      const interaction = Array.from(sourceHost?.children ?? []).find(node =>
-        node instanceof HTMLElement && node.matches('.agent-interaction[data-request-id]')) as HTMLElement | undefined
-      if ((sourceHost ?? null) !== observedSourceHost || (interaction ?? null) !== observedInteraction) {
-        if (observedSourceHost) resize.unobserve(observedSourceHost)
-        if (observedInteraction) resize.unobserve(observedInteraction)
-        observedSourceHost = sourceHost ?? null
-        observedInteraction = interaction ?? null
-        if (observedSourceHost) resize.observe(observedSourceHost)
-        if (observedInteraction) resize.observe(observedInteraction)
-        observeInteraction()
-      }
       const tool = composer.getBoundingClientRect()
-      const terminal = Array.from(composer.closest('.agent-surface')?.querySelectorAll<HTMLElement>('.terminal-view__xterm .xterm') ?? [])
-        .find(node => !node.closest('[hidden], [inert]') && node.getBoundingClientRect().width > 0 && node.getBoundingClientRect().height > 0)
-      const helper = terminal?.querySelector<HTMLElement>('.xterm-helper-textarea')
-      const regionId = region.dataset.workbenchRegionId
-      if (terminal !== observedTerminal || regionId !== observedRegionId) {
-        stopInputGeometry()
-        observedTerminal = terminal ?? null; observedRegionId = regionId
-        stopInputGeometry = terminal && regionId ? observeTerminalInputGeometry(regionId, terminal, scheduleUpdate) : () => {}
-      }
-      if (helper !== observedHelper) {
-        cursorObserver.disconnect()
-        observedHelper = helper ?? null
-        if (observedHelper) cursorObserver.observe(observedHelper, { attributes: true, attributeFilter: ['style'] })
-      }
       // The transparent gutter protects outlines and shadows; the painted card
       // edge, rather than its scrollport, stays attached to the original Tool.
       const cards = listRef.current!
@@ -200,41 +151,21 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
       floating.style.left = 'auto'; floating.style.right = document.documentElement.clientWidth - right + 'px'
       const reference = { contextElement: composer, getBoundingClientRect: () => new DOMRect(right, tool.top, 0, 0) }
       const padding = { top: 8, left: 8, right: 0, bottom: 0 }
+      const boundary = region ?? 'clippingAncestors'
       const locate = (gap: number) => computePosition(reference, floating, {
-        strategy: 'fixed', placement: 'top-end', middleware: [offset(gap), shift({ boundary: region, padding }),
-          size({ boundary: region, padding, apply({ availableWidth, availableHeight }) {
+        strategy: 'fixed', placement: 'top-end', middleware: [offset(gap), shift({ boundary, padding }),
+          size({ boundary, padding, apply({ availableWidth, availableHeight }) {
             if (disposed || request !== revision) return
-            floating.style.maxWidth = Math.max(0, Math.min(360, availableWidth, tool.right - region.getBoundingClientRect().left - 8)) + 'px'
+            floating.style.maxWidth = Math.max(0, Math.min(360, availableWidth, tool.right - (region?.getBoundingClientRect().left ?? 0) - 8)) + 'px'
             floating.style.maxHeight = Math.max(0, Math.min(320, availableHeight)) + 'px'
           } })]
       })
       let position = await locate(gap)
-      // A move can encounter another protected row/control above the first one.
-      // The mounted terminal reads at most cursor/last-two rows; with its helper
-      // and this request there are at most five barriers, never history scans.
+      // The original layout owners expose at most the cursor, two status rows,
+      // helper and current request. Recheck a move without scanning history.
       for (let barrier = 0; barrier < 5; barrier++) {
-        const cursor = helper?.getBoundingClientRect()
         const width = floating.offsetWidth, height = floating.offsetHeight
-        const left = right - width
-        let overlapTop = terminal && regionId
-          ? readTerminalInputOverlapTop(regionId, terminal, new DOMRect(left, position.y, width, height)) : undefined
-        if (cursor && cursor.width > 0 && cursor.height > 0 &&
-            left < cursor.right && left + width > cursor.left &&
-            position.y < cursor.bottom && position.y + height > cursor.top) {
-          overlapTop = overlapTop === undefined ? cursor.top : Math.min(overlapTop, cursor.top)
-        }
-        if (interaction?.isConnected && sourceHost?.isConnected && !interaction.closest('[hidden], [inert]')) {
-          const style = getComputedStyle(interaction), hostStyle = getComputedStyle(sourceHost)
-          // The source notice belongs to the current request too; moving above
-          // only its inner card could cover that visible declaration instead.
-          const rect = sourceHost.getBoundingClientRect()
-          if (style.display !== 'none' && style.visibility !== 'hidden' && style.visibility !== 'collapse' &&
-              hostStyle.display !== 'none' && hostStyle.visibility !== 'hidden' && hostStyle.visibility !== 'collapse' &&
-              rect.width > 0 && rect.height > 0 && left < rect.right && left + width > rect.left &&
-              position.y < rect.bottom && position.y + height > rect.top) {
-            overlapTop = overlapTop === undefined ? rect.top : Math.min(overlapTop, rect.top)
-          }
-        }
+        const overlapTop = layout?.readOverlapTop(new DOMRect(right - width, position.y, width, height))
         if (overlapTop === undefined) break
         position = await locate(Math.max(gap, tool.top - overlapTop + 2))
       }
@@ -243,13 +174,10 @@ export function ComposerPendingDelivery({ queued, pendingInteraction, anchorRef,
       floating.dataset.positioned = 'true'
       paintPointer()
     }
-    const stop = autoUpdate(composer, floating, () => { void update() })
-    resize.observe(composer); resize.observe(region); if (terminalContainer) resize.observe(terminalContainer)
-    return () => {
-      disposed = true; stop(); resize.disconnect(); cursorObserver.disconnect(); terminalObserver.disconnect(); interactionObserver.disconnect()
-      stopInputGeometry(); cancelAnimationFrame(geometryFrame)
-    }
-  }, [anchorRef, queued.length, suppressed, Boolean(notice)])
+    const stopLayout = layout?.subscribe(scheduleUpdate)
+    const stop = autoUpdate(composer, floating, scheduleUpdate)
+    return () => { disposed = true; stop(); stopLayout?.(); cancelAnimationFrame(geometryFrame) }
+  }, [composerRef, surfaceRef, layout, queued.length, suppressed, Boolean(notice)])
 
   useLayoutEffect(() => {
     const floating = surfaceRef.current

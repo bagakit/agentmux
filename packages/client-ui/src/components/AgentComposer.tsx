@@ -9,6 +9,7 @@ import type { ReadPastedImage } from './ConversationImage.js'
 import type { ComposerSemanticReference } from '../lib/composer-semantic-reference.js'
 
 export type AgentComposerProps = ComposerCompletionProps & {
+  surfaceRef?: Ref<HTMLDivElement>
   active?: boolean
   value: string
   readPastedImage?: ReadPastedImage
@@ -43,6 +44,7 @@ export type AgentComposerProps = ComposerCompletionProps & {
 }
 
 export function AgentComposer({
+  surfaceRef,
   active = true,
   value,
   readPastedImage,
@@ -99,7 +101,7 @@ export function AgentComposer({
   return (
     <>
     {aboveInput}
-    <div className="composer" data-agent-composer="true">
+    <div ref={surfaceRef} className="composer" data-agent-composer="true">
       {/* The maintained editor owns composition, selection and undo; the host owns the draft. */}
       <ComposerCompletionEditor
         active={active}

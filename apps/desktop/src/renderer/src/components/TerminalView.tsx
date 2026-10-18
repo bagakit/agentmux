@@ -965,22 +965,23 @@ export function TerminalView({
       replaying: replayingContinuation
     })
     switchReaderRef.current = readSwitch
-    const currentInputElement = (element: HTMLElement) =>
+    const currentInputElement = () =>
       !disposed && terminalRef.current === terminal && visibleRef.current &&
-      terminal.element === element && element.isConnected && !element.closest('[hidden], [inert]')
+      Boolean(terminal.element?.isConnected && !terminal.element.closest('[hidden], [inert]'))
     const inputGeometry: TerminalInputGeometry = {
-      readOverlapTop(element, popup) {
-        if (!currentInputElement(element)) return undefined
-        const screen = element.querySelector<HTMLElement>('.xterm-screen')?.getBoundingClientRect()
+      readOverlapTop(popup) {
+        if (!currentInputElement()) return undefined
+        const cursor = terminal.textarea?.getBoundingClientRect()
+        let overlapTop = cursor && cursor.width > 0 && cursor.height > 0 && popup.left < cursor.right && popup.right > cursor.left && popup.top < cursor.bottom && popup.bottom > cursor.top ? cursor.top : undefined
+        const screen = terminal.element!.querySelector<HTMLElement>('.xterm-screen')?.getBoundingClientRect()
         const buffer = terminal.buffer.active, lineIndex = buffer.baseY + buffer.cursorY
         const row = lineIndex - buffer.viewportY
-        if (!screen || screen.width <= 0 || screen.height <= 0 || terminal.rows <= 0) return undefined
+        if (!screen || screen.width <= 0 || screen.height <= 0 || terminal.rows <= 0) return overlapTop
         const rowHeight = screen.height / terminal.rows
         // Protect the actual current input and occupied bottom status rows.
         // This is text geometry, not a Provider-specific footer interpretation.
         const protectedRows = new Set([Math.max(0, terminal.rows - 2), terminal.rows - 1])
         if (row >= 0 && row < terminal.rows) protectedRows.add(row)
-        let overlapTop: number | undefined
         for (const protectedRow of protectedRows) {
           const rowRect = new DOMRect(screen.left, screen.top + protectedRow * rowHeight, screen.width, rowHeight)
           const currentLine = { viewportY: buffer.viewportY + protectedRow, getLine: (line: number) => buffer.getLine(line), getNullCell: () => buffer.getNullCell() }
@@ -990,12 +991,14 @@ export function TerminalView({
         }
         return overlapTop
       },
-      subscribe(element, onChange) {
-        if (!currentInputElement(element)) return () => {}
-        const changed = () => { if (currentInputElement(element)) onChange() }
+      subscribe(onChange) {
+        if (!currentInputElement()) return () => {}
+        const changed = () => { if (currentInputElement()) onChange() }
+        const helperObserver = new MutationObserver(changed)
+        if (terminal.textarea) helperObserver.observe(terminal.textarea, { attributes: true, attributeFilter: ['style'] })
         const events = [terminal.onRender(changed), terminal.onCursorMove(changed), terminal.onScroll(changed)]
         const releaseListeners = resourceOwners.acquireListeners(events.length)
-        return () => { for (const event of events) event.dispose(); releaseListeners() }
+        return () => { helperObserver.disconnect(); for (const event of events) event.dispose(); releaseListeners() }
       }
     }
     inputGeometryRef.current = inputGeometry
@@ -2013,8 +2016,8 @@ export function TerminalView({
       sessionId: session.id,
       runId: session.control.run.runId
     }, () => observationReaderRef.current?.(), {
-      readOverlapTop: (element, popup) => inputGeometryRef.current?.readOverlapTop(element, popup),
-      subscribe: (element, onChange) => inputGeometryRef.current?.subscribe(element, onChange) ?? (() => {})
+      readOverlapTop: popup => inputGeometryRef.current?.readOverlapTop(popup),
+      subscribe: onChange => inputGeometryRef.current?.subscribe(onChange) ?? (() => {})
     })
   }, [linkOrigin.regionId, session.id, session.control.run.runId])
 
