@@ -1,9 +1,20 @@
+import assert from 'node:assert/strict'
+import { GUIDE_DOCUMENTS } from '../dist/generated/agentmux-guides.js'
 import { join } from 'node:path'
 import { runA2aProof } from './lib/a2a-proof.mjs'
 
 // Verify the Progress producer first so its private Main/Core seam fails before
 // the broader discovery and recovery mutation proof.
 await import('../../../apps/desktop/scripts/verify-injected-context-progress.mjs')
+
+// Mutate the exact compiled document consumed by the module, after build-time includes.
+function documentMutation(id, before, after) {
+  const original = GUIDE_DOCUMENTS[id]
+  assert.equal(original.split(before).length, 2, 'Unique authored guide fragment: ' + id)
+  return { file: 'generated/agentmux-guides.js',
+    before: JSON.stringify(id) + ': ' + JSON.stringify(original),
+    after: JSON.stringify(id) + ': ' + JSON.stringify(original.replace(before, after)) }
+}
 
 const discovery = ['packages/core/test/agent-messaging-guidance.test.ts']
 const context = ['packages/core/test/agent-messaging-context.test.ts']
@@ -16,7 +27,7 @@ await runA2aProof({
   regressionTests: ['packages/core/test/agent-creation-delivery-fact.test.ts',
     'packages/core/test/agent-injected-context-resume.test.ts', ...continuity,
     'packages/core/test/durable-direct-resume.test.ts', 'packages/core/test/agent-outbound-message.test.ts', ...historical],
-  sourceInputs: ['packages/core/src/agent-messaging-guidance.ts', 'packages/core/src/client.ts', 'packages/core/src/agentmux.ts',
+  sourceInputs: ['packages/core/src/agent-messaging-guidance.ts', 'packages/core/src/guide-text.ts', 'packages/core/src/generated/agentmux-guides.ts', 'packages/core/guides/modules/message.md', 'packages/core/guides/shared/messaging/contract.md', 'packages/core/guides/shared/runtime.md', 'packages/core/guides/shared/spatial.md', 'packages/core/src/client.ts', 'packages/core/src/agentmux.ts',
     'packages/core/src/control-host.ts', 'packages/core/src/public-rpc-service.ts',
     'packages/core/src/agentmux-cli-help.ts', 'packages/core/src/agentmux-cli-module-skills.ts', 'packages/core/src/agentmux-cli-shared-guides.ts',
     'packages/core/src/agentmux-cli-commands.ts', 'packages/core/src/agentmux-cli-browser-guide.ts',
@@ -34,12 +45,12 @@ await runA2aProof({
     { symbol: 'client.call(method, invocation.params', path: 'packages/core/src/agentmux.ts' },
     { symbol: 'AGENTMUX_AGENT_MESSAGING_ENTRY', path: 'packages/core/src/agent-outbound-message.ts' },
     { symbol: 'agentMuxCliModuleCatalog()', path: 'packages/core/src/agentmux-cli-help.ts' },
-    { symbol: 'AGENTMUX_AGENT_MESSAGING_GUIDANCE', path: 'packages/core/src/agentmux-cli-module-skills.ts' },
+    { symbol: 'guide: guideText(definition.guide,', path: 'packages/core/src/agentmux-cli-module-skills.ts' },
     { symbol: 'AGENTMUX_A2A_REMINDER', path: 'packages/core/src/agent-message-render.ts' },
     { symbol: ': composeAgentLaunchPrompt(originalPrompt,', path: 'packages/core/src/client.ts' },
     { symbol: 'composeAgentResumePrompt(input.prompt, input.agentMuxNote)', path: 'packages/core/src/client.ts' },
     { symbol: 'prepareContinuityLaunchInput(receipt, catalog!', path: 'packages/core/src/client.ts' },
-    { symbol: 'composeAgentResumePrompt(input.prompt, input.agentMuxNote)', path: 'packages/core/src/agent-session-continuity-input.ts' },
+    { symbol: 'composeAgentResumePrompt(input.prompt, input.agentMuxNote, inputContext)', path: 'packages/core/src/agent-session-continuity-input.ts' },
     { symbol: 'createContinuityInputDelivery(next.continuity', path: 'packages/core/src/client.ts' },
     { symbol: 'normalizeAgentContinuityOperation(source.continuity)', path: 'packages/core/src/agent-session-store.ts' }
   ],
@@ -47,18 +58,18 @@ await runA2aProof({
     { label: 'actual-launch-guide-disconnected', file: 'client.js',
       before: 'composeAgentLaunchPrompt(originalPrompt, forkSource ? true : input.injectAgentMuxGuide,', after: 'composeAgentLaunchPrompt(originalPrompt, false,', tests: context },
     { label: 'actual-base-skill-contract-disconnected', file: 'agentmux-cli-module-skills.js',
-      before: '${directory}', after: 'No module directory.', tests: discovery },
+      before: "return guideText('index', { 'module-directory': directory }) + '\\n';", after: "return 'No module directory.';", tests: discovery },
     { label: 'actual-message-module-contract-disconnected', file: 'agentmux-cli-module-skills.js',
-      before: '${AGENTMUX_AGENT_MESSAGING_GUIDANCE}', after: 'No collaboration contract.', tests: discovery },
+      before: 'guide: guideText(definition.guide, {', after: "guide: root === 'message' ? 'No collaboration contract.' : guideText(definition.guide, {", tests: discovery },
     { label: 'actual-total-and-object-help-contract-disconnected', file: 'agentmux-cli-help.js',
       before: 'const selected = entries(path);', after: 'const selected = [];', tests: discovery },
     { label: 'actual-reminder-receiver-contract-disconnected', file: 'agent-messaging-guidance.js',
-      before: 'Assess relevance and existing responsibility; you may defer unrelated or unaccepted requests, but report results or blockers for accepted delegation and avoid acknowledgement loops.', after: '', tests: context },
+      before: "guideText('shared/messaging/reminder')", after: "'No responsibility guidance.'", tests: context },
     { label: 'actual-context-falsely-confirmed-without-content', file: 'client.js',
       before: "agentMuxContext: composed.systemContext && inputConfirmed ? 'confirmed' : 'unconfirmed'", after: "agentMuxContext: 'confirmed'", tests: context },
     { label: 'actual-resume-guide-disconnected', file: 'agent-outbound-message.js',
-      before: "return composeAgentPrompt(prompt, [AGENTMUX_AGENT_MESSAGING_ENTRY, agentMuxNote?.trim() ? agentMuxNote : undefined].filter(Boolean).join('\\n\\n'));",
-      after: 'return composeAgentPrompt(prompt, agentMuxNote);', tests: context },
+      before: "return composeAgentPrompt(prompt, [AGENTMUX_AGENT_MESSAGING_ENTRY, agentMuxNote?.trim() ? agentMuxNote : undefined].filter(Boolean).join('\\n\\n'), inputContext);",
+      after: 'return composeAgentPrompt(prompt, agentMuxNote, inputContext);', tests: context },
     { label: 'actual-frozen-resume-wire-discarded', file: 'client.js',
       before: 'const composed = frozenInput ? { text: frozenInput.prompt, systemContext: frozenInput.message.systemContext }',
       after: 'const composed = false && frozenInput ? { text: frozenInput.prompt, systemContext: frozenInput.message.systemContext }', tests: context },
@@ -80,12 +91,12 @@ await runA2aProof({
       before: 'const retained = current && this.continuitySupervisor.retainedAutomaticIntent(current, input);',
       after: 'const retained = undefined;', tests: historical },
     { label: 'actual-launch-browser-preference-removed', file: 'agent-outbound-message.js',
-      before: "browser --skill first", after: 'choose a Browser', tests: discovery },
-    { label: 'actual-skill-browser-preference-removed', file: 'agentmux-cli-shared-guides.js',
-      before: "prefer AgentMux's embedded Browser and public CLI", after: 'choose a Browser', tests: discovery },
+      before: 'guideText("shared/runtime", { \'self-context-verb\': AGENTMUX_SELF_CONTEXT_VERB, \'goal-skill-entry\': AGENTMUX_GOAL_SKILL_ENTRY })', after: 'guideText("shared/runtime", { \'self-context-verb\': AGENTMUX_SELF_CONTEXT_VERB, \'goal-skill-entry\': AGENTMUX_GOAL_SKILL_ENTRY }).replace("browser --skill first", "choose a Browser")', tests: discovery },
+    { label: 'actual-skill-browser-preference-removed',
+      ...documentMutation('modules/space', "prefer AgentMux's embedded Browser and public CLI", 'choose a Browser'), tests: discovery },
     { label: 'actual-launch-browser-nearby-region-removed', file: 'agent-outbound-message.js',
-      before: 'read space --skill', after: 'choose any available Region', tests: discovery },
-    { label: 'actual-skill-browser-nearby-region-removed', file: 'agentmux-cli-shared-guides.js',
-      before: 'prefer a directional Region in that same Tab', after: 'choose any available Region', tests: discovery }
+      before: 'guideText("shared/runtime", { \'self-context-verb\': AGENTMUX_SELF_CONTEXT_VERB, \'goal-skill-entry\': AGENTMUX_GOAL_SKILL_ENTRY })', after: 'guideText("shared/runtime", { \'self-context-verb\': AGENTMUX_SELF_CONTEXT_VERB, \'goal-skill-entry\': AGENTMUX_GOAL_SKILL_ENTRY }).replace("read space --skill", "choose any available Region")', tests: discovery },
+    { label: 'actual-skill-browser-nearby-region-removed',
+      ...documentMutation('modules/space', 'prefer a directional Region in that same Tab', 'choose any available Region'), tests: discovery }
   ]
 })
