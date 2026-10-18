@@ -7,7 +7,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { documentKey } from '../src/renderer/src/lib/workbench-tabs'
-import { defaultAgent, scratchWorkspace } from './fixtures/mote-workface'
+import { defaultAgent, customMoteId, customTab, scratchWorkspace } from './fixtures/mote-workface'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
 
 vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: () => createElement('div', { 'data-original-editor': true }) }))
@@ -82,11 +82,16 @@ beforeEach(() => {
 })
 afterEach(async () => { await app.dispose() })
 
-it('puts a real question and current work before accessible secondary preferences', async () => {
+it('introduces personality before current work and preserves the new-discussion input below it', async () => {
   await app.mount()
   const question = node('[aria-label="Start working together"]'), work = node('[aria-label="This Mote’s work"]')
-  const secondary = ['.mote-behavior-summary', '[aria-label="Quick mode"]', '[aria-label="Mote bot"]', '[data-mote-memory]'].map(selector => node(selector))
-  expect(secondary).toHaveLength(4)
+  const personality = node('.mote-behavior-summary'), memory = node('[data-mote-memory]')
+  expect(personality.compareDocumentPosition(memory) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(personality.compareDocumentPosition(work) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(work.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  expect(question.closest('[aria-label="Work together"]')?.textContent).toContain('Start a new discussion')
+  const secondary = ['[aria-label="Quick mode"]', '[aria-label="Mote bot"]'].map(selector => node(selector))
+  expect(secondary).toHaveLength(2)
   for (const section of secondary) {
     expect(question.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(work.compareDocumentPosition(section) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
@@ -98,6 +103,25 @@ it('puts a real question and current work before accessible secondary preference
   await ideas(); await moteClick(button('Profile'))
   expect(node<HTMLTextAreaElement>('[aria-label="A question for this Mote"]').value).toBe('Retain my original question.')
   expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
+})
+
+it('opens Edit profile in the exact original Mote topic file without writing or starting a discussion', async () => {
+  const path = scratchTopicDirectoryName(customMoteId) + '/topic.md'
+  const read = vi.spyOn(api.files, 'read').mockImplementation(async (_workspace, requested) => ({ status: 'read', document: { path: requested, content: '# Original employee profile', revision } }))
+  const write = vi.spyOn(api.files, 'write')
+  await app.mount()
+  await act(async () => useAppStore.getState().openScratchTopic(customMoteId, SCRATCH_WORKSPACE_ID, { tabId: customTab.id }))
+  await settleMoteApp()
+  const before = useAppStore.getState()
+  await moteClick(button('Edit profile'))
+  expect(read).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, path)
+  const current = useAppStore.getState(), selected = current.workbenchSpaceSelection!, tab = current.tabs[selected.tabId!]!
+  expect(tab.regions[selected.regionId!]).toMatchObject({ kind: 'file', workspaceId: SCRATCH_WORKSPACE_ID, path })
+  expect(current.documents[documentKey(SCRATCH_WORKSPACE_ID, path)]).toMatchObject({ content: '# Original employee profile', revision })
+  expect(current.agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(current.sessions).toBe(before.sessions)
+  expect(current.tabs[customTab.id]).toBe(before.tabs[customTab.id])
+  expect(write).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
 })
 
 it('filters discovered names without new reads or clearing the exact selected body and revision feedback', async () => {
