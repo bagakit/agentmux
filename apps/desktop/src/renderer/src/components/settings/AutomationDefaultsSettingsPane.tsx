@@ -5,6 +5,7 @@ import { resolveAutomationPreferences, validateAutomationPreferences, type Autom
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
 import { useSettingDraftRecord } from './use-setting-draft'
 import '../../styles/settings-continuity.css'
+import './settings-automation.css'
 
 export const AUTOMATION_DEFAULTS_SEARCH_TARGETS = [
   { id: 'progressIntervalMs', title: 'Default progress interval', keywords: 'periodic minutes check interval 周期 持续推进' },
@@ -52,14 +53,19 @@ export function AutomationDefaultsSettingsPane({ preferences, onSave }: {
     submitted.finish(await save.run(() => onSave(policyValue(submitted.value), policyValue(submitted.expected))))
   }
   return <div className="settings-pane-stack continuity-settings automation-defaults">
-    <div className="automation-defaults-heading"><h3>New task defaults</h3><p className="continuity-scope">Used when you create a task. Existing tasks and edited drafts keep their choices; saving creates no task and sends no message.</p></div>
+    <div className="automation-defaults-heading"><h3>New task defaults</h3><p className="continuity-scope">Starting values for new tasks. Existing tasks and edited drafts keep their choices.</p></div>
     <section className="settings-group"><header><span>Progress tasks</span><small>Saved: {saved.progressIntervalMs / 60_000} minutes</small></header>
       {number('progressIntervalMs', 'Default progress interval', 'minutes', 'Built-in default: 30 minutes. At least one minute.')}
-      <div className="automation-defaults-prompt" data-settings-field="progressPrompt"><label htmlFor={`${id}-prompt`}><strong>Default progress prompt</strong><small>Starts blank by default. Review the instruction when creating each task.</small></label>
-        <ComposerTextarea id={`${id}-prompt`} aria-label="Default progress prompt" rows={4} value={draft.value.progressPrompt} onValueChange={value => draft.setField('progressPrompt', value)} /></div>
+      <details className="continuity-disclosure automation-prompt-disclosure" data-settings-field="progressPrompt">
+        <summary><span>Default progress prompt<small>{draft.value.progressPrompt.trim() ? 'Custom instruction for new progress tasks' : 'Optional · starts blank'}</small></span></summary>
+        <div className="automation-defaults-prompt">
+          <label htmlFor={`${id}-prompt`}><small>Review this instruction when creating each task.</small></label>
+          <ComposerTextarea id={`${id}-prompt`} aria-label="Default progress prompt" rows={3} value={draft.value.progressPrompt} onValueChange={value => draft.setField('progressPrompt', value)} />
+        </div>
+      </details>
     </section>
     <section className="settings-group"><header><span>Calendar arrangements</span><small>Saved: {saved.calendarTimezone || 'System timezone'}</small></header>
-      <div className="continuity-setting-row" data-settings-field="calendarTimezone"><label htmlFor={`${id}-timezone`}><strong>Default arrangement timezone</strong><small>Leave blank to use the system timezone when a new form opens. Enter an IANA name, such as Asia/Shanghai.</small></label>
+      <div className="continuity-setting-row" data-settings-field="calendarTimezone"><label htmlFor={`${id}-timezone`}><strong>Default arrangement timezone</strong><small>Blank uses the system timezone when a new form opens. Or enter an IANA name, such as Asia/Shanghai.</small></label>
         <TextInput id={`${id}-timezone`} aria-label="Default arrangement timezone" placeholder="System timezone" value={draft.value.calendarTimezone} onChange={event => draft.setField('calendarTimezone', event.target.value)} /></div>
     </section>
     <details className="continuity-disclosure" data-automation-quiet-defaults>
@@ -73,6 +79,7 @@ export function AutomationDefaultsSettingsPane({ preferences, onSave }: {
       {number('checkInDailyBudget', 'Daily follow-up budget', 'attempts', 'Built-in default: 1 attempt per local day. Choose 1 to 3.')}
       </div>
     </details>
+    <p className="automation-save-scope">Saves progress, calendar and quiet follow-up defaults. Creates no task and sends no message.</p>
     {!!issue && <p className="settings-inline-error" role="alert">{issue}</p>}
     <SettingsSaveBar save={save} dirty={draft.dirty} disabled={!!issue} label="Save task defaults" onSave={() => void commit()} />
   </div>
