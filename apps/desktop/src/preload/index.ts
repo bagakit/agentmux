@@ -306,6 +306,7 @@ const api: AgentMuxPreloadApi = {
     openSystem: (workspaceId: string, path: string) => ipcRenderer.invoke('files:openSystem', workspaceId, path),
     reveal: (workspaceId: string, path: string) => ipcRenderer.invoke('files:reveal', workspaceId, path)
   },
+  moteChat: { call: async (method, params) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('moteChat:call', method, params)) },
   moteConnections: { call: (method, params) => ipcRenderer.invoke('moteConnections:call', method, params) },
   motePreferences: {
     read: params => ipcRenderer.invoke('motePreferences:read', params),
