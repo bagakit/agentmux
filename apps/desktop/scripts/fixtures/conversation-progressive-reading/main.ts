@@ -248,7 +248,7 @@ app.whenReady().then(async () => {
       boundary: 'Cumulative Renderer task occupancy in wall-clock seconds, including fixture reads and DevTools commands. Subcategories overlap; no overhead is subtracted.' }
   }
   const sample = async (name: string) => result.samples.push({ name,
-    ...await read('({at:performance.now(),ui:readingProof.inspect(),reads:readingProof.reads.length,metrics:structuredClone(readingProof.metrics)})'),
+    ...await read('({at:performance.now(),ui:readingProof.inspect(),reads:readingProof.reads.length,metrics:readingProof.snapshotMetrics()})'),
     taskMetrics: await taskMetrics() })
   const runMobileOnce = async () => {
     if (scene === 'surfaces' || !mobileExercise || !result.mobileSetup || result.mobileAttempted) return
@@ -392,7 +392,8 @@ app.whenReady().then(async () => {
       await sample('return-current')
     }
     }
-    result.readingMetrics = await read('structuredClone(readingProof.metrics)')
+    await read('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))')
+    result.readingMetrics = await read('readingProof.snapshotMetrics()')
     result.taskMetrics = await taskMetrics()
     if (scene !== 'surfaces' && proofMode === 'acceptance') result.isolation = await exerciseIsolation({ runtime, core, store, config, privateRoot,
       phase, read, click, until, appendRow, scene, original: result.ids })
