@@ -1,4 +1,4 @@
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
@@ -20,7 +20,7 @@ export default defineConfig({ ...original, root, cacheDir: resolve(root, '.cache
       if (code.split(selected.before).length !== 2) throw Error('Group conversation mutation anchor missing or ambiguous')
       code = code.replace(selected.before, selected.after)
     }
-    if (process.env.AGENTMUX_GROUP_LOADED) appendFileSync(process.env.AGENTMUX_GROUP_LOADED, JSON.stringify({ path, originalSHA256, sha256: createHash('sha256').update(code).digest('hex'), mutation: selected?.path === path ? mutation : null }) + '\n')
+    if (process.env.AGENTMUX_GROUP_LOADED) appendFileSync(process.env.AGENTMUX_GROUP_LOADED, JSON.stringify({ path, fileSHA256: createHash('sha256').update(readFileSync(id.split('?')[0]!)).digest('hex'), originalSHA256, sha256: createHash('sha256').update(code).digest('hex'), mutation: selected?.path === path ? mutation : null }) + '\n')
     if (selected?.path === path) return { code, map: null }
   } }],
   test: { ...original.test, fileParallelism: false, passWithNoTests: false,
