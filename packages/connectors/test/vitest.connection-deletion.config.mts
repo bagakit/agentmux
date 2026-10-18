@@ -6,14 +6,18 @@ import original from '../../../vitest.config.ts'
 
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_DELETION_MUTATION
-if (mutation && mutation !== 'delete-neighbour') throw Error('Unknown identity removal mutation')
+if (mutation && !['delete-neighbour', 'skip-revalidation'].includes(mutation)) throw Error('Unknown identity removal mutation')
 export default defineConfig({ ...original, root, cacheDir: resolve(root, '.cache/connection-deletion'),
   plugins: [{ name: 'local-identity-removal-counterexample', enforce: 'pre', transform(source, id) {
     const file = relative(root, id.split('?')[0]!)
     if (file !== 'packages/connectors/src/connection-host.ts') return
     const anchor = ".prepare('DELETE FROM connection_configuration WHERE connection_id=? AND revision=?').run(input.connectionId, input.expectedRevision)"
     let code = source
-    if (mutation) {
+    if (mutation === 'skip-revalidation') {
+      const check = 'await context?.assertCurrent?.()'
+      if (source.split(check).length !== 2) throw Error('Actual deletion authorization changed')
+      code = source.replace(check, '')
+    } else if (mutation) {
       if (source.split(anchor).length !== 2) throw Error('The actual identity-removal owner changed; update this counterexample')
       code = source.replace(anchor, anchor.replace('run(input.connectionId,', "run('second-bot',"))
     }
