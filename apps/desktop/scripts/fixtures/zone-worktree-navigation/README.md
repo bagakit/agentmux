@@ -8,7 +8,7 @@ node apps/desktop/scripts/capture-zone-worktree-navigation.mjs
 
 An optional first argument selects a new evidence directory. The default is a
 unique ignored `.tmp/zone-worktree-navigation-*` directory. `receipt.json` binds
-the nine owning production inputs before/after, actual compiled inputs, emitted
+the twelve owning production inputs before/after, actual compiled inputs, emitted
 nonempty JS/CSS/assets, loaded bundle URLs, full-frame PNG hashes and cleanup.
 Shared App/Store/Core sources are consumed directly and recorded when compiled;
 they are not substituted, pinned to a shared HEAD, or a global freshness gate.
@@ -37,7 +37,7 @@ made. Original Tabs/Regions and unsent drafts exist in the real Store fixture.
 Unknown is not converted to a plain folder or clean Git status. Every queried
 retained Git control is filtered for actual visibility.
 Zone metadata consumes the typed `git.worktrees` observation with explicit main/linked
-paths, branch/detached facts and alias arrays; it does not read saved Workspace branch
+paths, branch/detached facts, directory states and alias arrays; it does not read saved Workspace branch
 labels as current checkout. This controlled projection does not prove native Git aliases.
 
 Capture success is not visual approval. Give the complete PNG set and original
