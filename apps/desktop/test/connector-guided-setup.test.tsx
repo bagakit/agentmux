@@ -415,7 +415,7 @@ async function agentMenuItem(dialog: boolean) {
   expect(trigger).not.toBeNull()
   await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
   let item: HTMLElement | undefined
-  await ready(() => { item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.trim() === (dialog ? 'Shared group details' : 'Enable a chat application')); expect(item).toBeDefined() })
+  await ready(() => { item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.trim() === (dialog ? 'Shared group details' : 'Lark settings')); expect(item).toBeDefined() })
   return item!
 }
 
@@ -601,12 +601,17 @@ it('keeps all milestones and reads the exact original request trace without plat
   expect(traceCalls.at(-1)?.input).toMatchObject({ operationId: id, requestTrace: { limit: 25 } })
   expect((traceCalls.at(-1)?.result as any).requestTrace.entries.length).toBeGreaterThan(0)
   const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
-  const button = [...document.querySelectorAll<HTMLButtonElement>('[data-request-trace] button')].find(node => node.textContent === 'Copy diagnosis')!
+  const trace = document.querySelector('[data-request-trace]')!.closest('.connector-request-trace')!
+  const button = [...trace.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Copy diagnosis')!
+  expect(button).toBeDefined()
   await act(async () => button.click())
   await ready(() => expect(clipboard).toHaveBeenCalledOnce())
   const copied = clipboard.mock.calls[0]![0]
-  expect(JSON.parse(copied).operationId).toBe(id)
+  expect(copied).toContain('setup ' + id + ' — recorded')
+  expect(copied).toContain('Trace setup ' + id + ' — complete')
+  for (const entry of (traceCalls.at(-1)?.result as ConnectionResultMap['connection.setup.inspect']).requestTrace!.entries) expect(copied).toContain(entry.stepId)
   for (const value of ['settings-publication-private-token', 'settings-publication-private-flow', 'settings-publication-private-cookie', 'settings-publication-private-csrf', 'settings-publication-user', 'settings-publication-enterprise']) expect(copied).not.toContain(value)
-  expect(document.querySelector('[data-request-trace]')?.textContent).toContain('HTTP request details were not recorded')
+  expect(copied).toContain('HTTP request details were not recorded')
+  expect(trace.textContent).toContain('No request URLs, bodies, cookies, secrets, sign-in codes or account details are included')
   expect(native.length).toBe(before)
 }, 30_000)
