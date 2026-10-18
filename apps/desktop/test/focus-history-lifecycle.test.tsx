@@ -35,7 +35,7 @@ beforeEach(() => {
 
 it('invalidates new exact Host identities and reopened sources without rescanning ordinary Session ticks', async () => {
   const original = [source(), source('local', 'closed', 'retired')]
-  const read = vi.spyOn(api.sessions, 'historySources').mockResolvedValue(original)
+  const read = vi.spyOn(api.sessions, 'historySources').mockResolvedValue({ sources: original, warnings: [] })
   await dom.render(<Catalogue />)
   await emit(...Array.from({ length: 100 }, () => active()))
   expect(read).toHaveBeenCalledTimes(1)
@@ -52,7 +52,7 @@ it('invalidates new exact Host identities and reopened sources without rescannin
 
 it('drains a lifecycle invalidation received during the original catalogue read without overlapping reads', async () => {
   const first = deferred(), second = deferred(), original = [source()], retired = [source('local', 'same-session', 'retired')]
-  const read = vi.spyOn(api.sessions, 'historySources').mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+  const read = vi.spyOn(api.sessions, 'historySources').mockReturnValueOnce(first.promise.then(sources => ({ sources, warnings: [] }))).mockReturnValueOnce(second.promise.then(sources => ({ sources, warnings: [] })))
   await dom.render(<Catalogue />); expect(read).toHaveBeenCalledTimes(1)
   await emit(removed()); expect(read).toHaveBeenCalledTimes(1)
   await act(async () => first.resolve(original))
@@ -64,7 +64,7 @@ it('drains a lifecycle invalidation received during the original catalogue read 
 
 it('preserves a newer reopen invalidation through an older in-flight catalogue and subsequent ordinary ticks', async () => {
   const pending = deferred(), reopened = [source()]
-  const read = vi.spyOn(api.sessions, 'historySources').mockReturnValueOnce(pending.promise).mockResolvedValueOnce(reopened)
+  const read = vi.spyOn(api.sessions, 'historySources').mockReturnValueOnce(pending.promise.then(sources => ({ sources, warnings: [] }))).mockResolvedValueOnce({ sources: reopened, warnings: [] })
   await dom.render(<Catalogue />)
   await emit(removed(), active())
   expect(read).toHaveBeenCalledTimes(1)
@@ -76,7 +76,7 @@ it('preserves a newer reopen invalidation through an older in-flight catalogue a
 
 it('coalesces hidden lifecycle changes and fences a hidden late catalogue before resuming its original owner', async () => {
   const original = [source()], late = deferred(), retired = [source('local', 'same-session', 'retired')]
-  const read = vi.spyOn(api.sessions, 'historySources').mockResolvedValueOnce(original).mockReturnValueOnce(late.promise).mockResolvedValueOnce(retired)
+  const read = vi.spyOn(api.sessions, 'historySources').mockResolvedValueOnce({ sources: original, warnings: [] }).mockReturnValueOnce(late.promise.then(sources => ({ sources, warnings: [] }))).mockResolvedValueOnce({ sources: retired, warnings: [] })
   await dom.render(<Catalogue />)
   await emit(removed()); expect(read).toHaveBeenCalledTimes(2)
   await act(async () => { visible = 'hidden'; document.dispatchEvent(new Event('visibilitychange')) })
@@ -89,8 +89,8 @@ it('coalesces hidden lifecycle changes and fences a hidden late catalogue before
 
 it('retains the original catalogue and explicit retry after a lifecycle read fails', async () => {
   const original = [source()], retired = [source('local', 'same-session', 'retired')]
-  const read = vi.spyOn(api.sessions, 'historySources').mockResolvedValueOnce(original)
-    .mockRejectedValueOnce(Error('Original lifecycle source unavailable')).mockResolvedValueOnce(retired)
+  const read = vi.spyOn(api.sessions, 'historySources').mockResolvedValueOnce({ sources: original, warnings: [] })
+    .mockRejectedValueOnce(Error('Original lifecycle source unavailable')).mockResolvedValueOnce({ sources: retired, warnings: [] })
   await dom.render(<Catalogue />); await emit(removed())
   expect(catalogue.sources).toBe(original); expect(catalogue.error).toContain('Original lifecycle source unavailable')
   expect(catalogue.available).toBe(false); expect(read).toHaveBeenCalledTimes(2)
@@ -100,7 +100,7 @@ it('retains the original catalogue and explicit retry after a lifecycle read fai
 
 it('tracks lifecycle invalidation while disabled and ignores removal without an exact Session identity', async () => {
   const original = [source()], retired = [source('local', 'same-session', 'retired')]
-  const read = vi.spyOn(api.sessions, 'historySources').mockResolvedValueOnce(original).mockResolvedValueOnce(retired)
+  const read = vi.spyOn(api.sessions, 'historySources').mockResolvedValueOnce({ sources: original, warnings: [] }).mockResolvedValueOnce({ sources: retired, warnings: [] })
   await dom.render(<Catalogue />)
   const event = removed(); if (event.type !== 'core' || event.event.type !== 'run-removed') throw Error('Exact fixture required')
   delete event.event.agentSessionId

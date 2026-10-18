@@ -35,7 +35,7 @@ async function click(label: string) { const button = document.querySelector<HTML
 beforeEach(() => {
   installCollaborationCanvasGeometry()
   installCollaborationLayoutLoopback()
-  vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
+  vi.spyOn(api.sessions, 'historySources').mockResolvedValue({ sources: [], warnings: [] })
   const tab = createWorkbenchTab(ref.tabId, { regionId: ref.regionId, kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: session.id })
   const peerTab = createWorkbenchTab('graph-peer-tab', { regionId: 'graph-peer-region', kind: 'agent', phase: 'attached', workspaceId: workspace.id, sessionId: peer.id })
   executionBindings.clear(); executionBindings.set(JSON.stringify([ref.tabId, ref.regionId]), { hostId: session.control.hostId }); executionBindings.set(JSON.stringify([peerTab.id, 'graph-peer-region']), { hostId: peer.control.hostId })

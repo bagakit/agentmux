@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto'
 import shared from './vitest.collaboration-space-product.config.mts'
 export const collaborationContextMutation = {
   name: 'unscoped-context', file: 'components/AgentCollaborationMap.tsx',
-  before: 'rows = [...wanted].flatMap', after: 'rows = [...catalog.sessions.keys()].flatMap',
+  before: 'rows = [...contextDemand].flatMap', after: 'rows = [...catalog.sessions.keys()].flatMap',
   assertion: 'keeps the full map world while bounding production contexts and reads to the visible and selected Agents'
 } as const
 const selected = process.env.AGENTMUX_COLLABORATION_CONTEXT_MUTATION
