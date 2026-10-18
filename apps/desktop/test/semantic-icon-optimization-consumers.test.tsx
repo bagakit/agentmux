@@ -170,7 +170,7 @@ it('pending delivery separates queued, unknown and active preparation drawings w
   ]
   Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value() {} })
   function Harness() { const anchor = useRef<HTMLButtonElement>(null), surface = useRef<HTMLElement>(null)
-    return <><button ref={anchor}>Original anchor</button><ComposerPendingDelivery queued={entries} pendingInteraction={false} anchorRef={anchor} surfaceRef={surface} onSend={send} onMore={more} /></>
+    return <><button ref={anchor}>Original anchor</button><ComposerPendingDelivery queued={entries} pendingInteraction={false} composerRef={anchor} anchorRef={anchor} surfaceRef={surface} onSend={send} onMore={more} /></>
   }
   await dom.render(<Harness />)
   for (const [id, role, animation] of [['queued', 'status.queued', null], ['unknown', 'status.unknown', null], ['busy', 'status.loading', 'spin']] as const) {

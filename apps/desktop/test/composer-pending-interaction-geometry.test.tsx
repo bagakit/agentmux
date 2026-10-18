@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, useEffect, useRef } from 'react'
+import { usePendingDeliveryLayout } from '../src/renderer/src/lib/pending-delivery-layout'
+import { registerTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentMuxInteractionRequest } from '@agentmux/core'
@@ -17,10 +19,10 @@ vi.mock('@floating-ui/dom', () => ({
   }
 }))
 vi.mock('../src/renderer/src/store', () => ({
-  useAppStore: Object.assign((selector: (state: unknown) => unknown) => selector({ sessions: [], agentNames: {}, noticeReadReceipts: {} }), { setState() {} })
+  useAppStore: Object.assign((selector: (state: unknown) => unknown) => selector({ sessions: [], agentNames: {}, noticeReadReceipts: {}, mailboxNotificationIntents: {}, mailboxNotificationFeedback: {}, mailboxNotificationHistory: {} }), { setState() {} })
 }))
-vi.mock('../src/renderer/src/lib/session-user-messages', () => ({ useSessionUserMessages: () => ({ messages: [], hasMore: false, loadEarlier() {}, refresh() {} }) }))
-vi.mock('@agentmux/client-ui/components/InlineComposer', () => ({ InlineComposer: () => <input aria-label="Original draft" defaultValue="Original draft" /> }))
+vi.mock('../src/renderer/src/lib/session-user-messages', () => ({ useSessionUserMessages: () => ({ messages: [], sourceMessages: [], conversation: {}, hasMore: false, loadEarlier() {}, refresh() {} }) }))
+vi.mock('@agentmux/client-ui/components/ComposerCompletionEditor', () => ({ ComposerCompletionEditor: () => <input aria-label="Original draft" defaultValue="Original draft" /> }))
 vi.mock('@agentmux/client-ui/components/ComposerReferenceTool', () => ({ ComposerReferenceTool: () => null }))
 
 import { SessionMailbox } from '../src/renderer/src/components/SessionMailbox'
@@ -43,20 +45,36 @@ const body = () => container.querySelector<HTMLElement>('[data-workbench-region-
 const interaction = () => body().querySelector<HTMLElement>('.agent-interaction')!
 const top = () => parseFloat(panel().style.top)
 async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) }) }
-async function render(kind?: 'permission' | 'question', entries = queue, neighbor = false, notice = false, retainHost = false) {
-  await act(async () => root.render(<>
-    <section className="agent-surface" data-workbench-region-id="original-region">
-      <div className="agent-body" hidden={hidden} inert={inert}>
+const terminalIdentity = { regionId: 'original-region', sessionId: 'original-session', runId: 'original-run' }
+let terminalSubscriptions = 0
+function OwnedSurface({ kind, entries, neighbor, notice, retainHost, surfaceVisible = true }: {
+  kind?: 'permission' | 'question'; entries: readonly ComposerQueuedMessage[]; neighbor: boolean; notice: boolean; retainHost: boolean; surfaceVisible?: boolean
+}) {
+  const boundaryRef = useRef<HTMLElement>(null), bodyRef = useRef<HTMLDivElement>(null), interactionSourceRef = useRef<HTMLDivElement>(null), interactionRef = useRef<HTMLElement>(null)
+  const layout = usePendingDeliveryLayout({ boundaryRef, bodyRef, interactionSourceRef, interactionRef, interactionId: !neighbor && kind ? request(kind).id : undefined,
+    terminal: terminalIdentity, active: surfaceVisible })
+  useEffect(() => registerTerminalViewObservation(terminalIdentity, () => ({ runId: terminalIdentity.runId, sampledAt: 1,
+    visible: true, readOnly: false, liveReady: true, acceptsInput: true, viewGrid: { cols: 80, rows: 24 },
+    buffer: { type: 'normal', baseY: 0, viewportY: 0, length: 24 }, mouseTrackingMode: 'none' }), {
+    readOverlapTop: popup => !bodyRef.current?.closest('[hidden], [inert]') && terminalRect.width > 0 && terminalRect.height > 0 && popup.left < terminalRect.right && popup.right > terminalRect.left && popup.top < terminalRect.bottom && popup.bottom > terminalRect.top ? terminalRect.top : undefined,
+    subscribe: () => { terminalSubscriptions++; return () => { terminalSubscriptions-- } }
+  }), [])
+  return <>
+    <section ref={boundaryRef} className="agent-surface" data-workbench-region-id="original-region">
+      <div ref={bodyRef} className="agent-body" hidden={hidden} inert={inert}>
         <div className="terminal-view__xterm"><div className="xterm"><textarea className="xterm-helper-textarea" aria-label="Original terminal" /></div></div>
-        {!neighbor && (kind || retainHost) ? <div className="agent-interaction-source">{notice ? <p className="agent-interaction-source__notice">This current request belongs to the retained source.</p> : null}{kind ? <AgentInteractionCard request={request(kind)} onRespond={respond} /> : null}</div> : null}
+        {!neighbor && (kind || retainHost) ? <div ref={interactionSourceRef} className="agent-interaction-source">{notice ? <p className="agent-interaction-source__notice">This current request belongs to the retained source.</p> : null}{kind ? <AgentInteractionCard surfaceRef={interactionRef} request={request(kind)} onRespond={respond} /> : null}</div> : null}
       </div>
-      <SessionMailbox queued={entries} pendingInteraction={Boolean(kind)} onSendQueued={send} onEditQueued={edit} onCopyQueued={copy} onArchiveQueued={archive}
+      <SessionMailbox visible={surfaceVisible} pendingLayout={layout} queued={entries} pendingInteraction={Boolean(kind)} onSendQueued={send} onEditQueued={edit} onCopyQueued={copy} onArchiveQueued={archive}
         system={{ notices: [], unread: [], available: true, acknowledge() {} }}>
-        {(mailbox, pending) => <AgentComposer value="Original draft" onChange={change} disabled={false} placeholder="Original" aboveInput={pending} mailbox={mailbox} />}
+        {(mailbox, pending, composerRef) => <AgentComposer surfaceRef={composerRef} value="Original draft" onChange={change} disabled={false} placeholder="Original" aboveInput={pending} mailbox={mailbox} />}
       </SessionMailbox>
     </section>
     <section className="agent-surface" data-workbench-region-id="neighbor-region"><div className="agent-body">{kind && neighbor ? <div className="agent-interaction-source"><AgentInteractionCard request={request(kind)} onRespond={respond} /></div> : null}</div><input defaultValue="Neighbor draft" /></section>
-  </>))
+  </>
+}
+async function render(kind?: 'permission' | 'question', entries = queue, neighbor = false, notice = false, retainHost = false, surfaceVisible = true) {
+  await act(async () => root.render(<OwnedSurface kind={kind} entries={entries} neighbor={neighbor} notice={notice} retainHost={retainHost} surfaceVisible={surfaceVisible} />))
   await settle()
 }
 async function resize(target: Element) {
@@ -67,6 +85,7 @@ beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   geometry.height = 40; geometry.width = 352; geometry.calls.length = 0; geometry.updates.length = 0
   requestRect = new DOMRect(500, 500, 300, 70); sourceRect = undefined; terminalRect = new DOMRect(0, 0, 0, 0); hidden = false; inert = false
+  terminalSubscriptions = 0
   resizeObservers.clear(); for (const fn of [respond, send, edit, copy, archive, change]) fn.mockClear()
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), 0))
   vi.stubGlobal('cancelAnimationFrame', clearTimeout)
@@ -135,7 +154,7 @@ it('keeps all original identities traversable in a bounded long queue and preser
 })
 it('keeps the exact original copy and request response wiring after the geometric move', async () => {
   await render('permission'); await act(async () => { panel().querySelector<HTMLButtonElement>('[data-operation-id="original-1"] .composer-pending__copy')!.click() }); expect(copy).toHaveBeenCalledExactlyOnceWith(queue[1]!.text)
-  await act(async () => interaction().querySelector<HTMLButtonElement>('button.is-primary')!.click()); expect(respond).toHaveBeenCalledExactlyOnceWith({ requestId: 'original-permission', kind: 'permission', decision: { outcome: 'selected', optionId: 'allow' } }); expect(send).not.toHaveBeenCalled(); expect(archive).not.toHaveBeenCalled()
+  await act(async () => interaction().querySelector<HTMLButtonElement>('button.is-primary')!.click()); expect(respond).toHaveBeenCalledExactlyOnceWith({ requestId: 'original-permission', kind: 'permission', decision: { outcome: 'selected', optionId: 'allow' } }, { expectedRequest: request('permission'), operationId: expect.any(String) }); expect(send).not.toHaveBeenCalled(); expect(archive).not.toHaveBeenCalled()
 })
 it('releases only its local geometry observers after unmount', async () => {
   await render('permission'); expect([...resizeObservers].some(observer => observer.targets.has(interaction()))).toBe(true)
@@ -204,4 +223,13 @@ it('ignores historical request descendants and their mutations in the same body'
   await act(async () => { history.firstElementChild!.setAttribute('style', 'height:200px'); history.append(document.createElement('p')) }); await settle()
   expect(geometry.calls).toHaveLength(calls)
   expect(top()).toBe(558); expect(send).not.toHaveBeenCalled()
+})
+
+it('releases terminal geometry subscriptions while the original surface is hidden and restores only that owner', async () => {
+  await render('permission'); expect(terminalSubscriptions).toBe(1)
+  await render('permission', queue, false, false, false, false)
+  expect(terminalSubscriptions).toBe(0); expect(geometry.updates).toHaveLength(0)
+  await render('permission'); expect(terminalSubscriptions).toBe(1)
+  expect(top() + geometry.height).toBeLessThanOrEqual(requestRect.top - 2)
+  expect(send).not.toHaveBeenCalled(); expect(respond).not.toHaveBeenCalled()
 })
