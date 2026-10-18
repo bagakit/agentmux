@@ -13,6 +13,7 @@ import { createFeishuProfile } from './profile.js'
 import { createFeishuEnrollment } from './enrollment.js'
 import { createFeishuRooms } from './rooms.js'
 import { createFeishuRoomDiscovery } from './room-discovery.js'
+import { createFeishuHistory } from './history.js'
 import { createFeishuChannelProfiles } from './channel-profile.js'
 
 export type FeishuAdapterOptions = { http?: HttpInstance }
@@ -35,6 +36,7 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
   readonly enrollment = createFeishuEnrollment()
   readonly publication = new FeishuPublicationAdapter(this)
   readonly ingress = this
+  readonly readHistory = createFeishuHistory(this)
   readonly transport: ConnectionIngressTransport = { start: input => this.startReceiver(input) }
   readonly rooms = createFeishuRooms((config, credential, call, signal) => this.withClient(config, credential, call, signal))
   readonly roomDiscovery = createFeishuRoomDiscovery((config, credential, call, signal) => this.withClient(config, credential, call, signal))
