@@ -7,12 +7,12 @@
 .mote-private-chat__toggle { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-body); }
 .mote-private-chat__toggle > span { display: grid; gap: var(--sp-1); }
 .mote-private-chat__toggle small, .mote-private-chat__fields small { color: var(--text-3); font-size: var(--fs-meta); font-weight: 400; line-height: 1.6; }
-.mote-private-chat__toggle input { appearance: none; flex: none; width: 32px; height: 19px; margin: 0; padding: 2px; background: var(--surface-3); border: 1px solid var(--line); border-radius: 12px; cursor: pointer; transition: background 160ms ease, border-color 160ms ease; }
-.mote-private-chat__toggle input::before { content: ''; display: block; width: 13px; height: 13px; border-radius: 50%; background: var(--text-3); transition: transform 160ms ease, background 160ms ease; }
-.mote-private-chat__toggle input:checked { background: var(--green-bg); border-color: var(--green-text); }
-.mote-private-chat__toggle input:checked::before { background: var(--green-text); transform: translateX(13px); }
-.mote-private-chat__toggle input:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.mote-private-chat__toggle input:disabled { cursor: default; opacity: .6; }
+.mote-private-chat__toggle input[role="switch"] { appearance: none; flex: none; width: 32px; height: 19px; margin: 0; padding: 2px; background: var(--surface-3); border: 1px solid var(--line); border-radius: 12px; cursor: pointer; transition: background 160ms ease, border-color 160ms ease; }
+.mote-private-chat__toggle input[role="switch"]::before { content: ''; display: block; visibility: visible; mask: none; width: 13px; height: 13px; border-radius: 50%; background: var(--text-3); transition: transform 160ms ease, background 160ms ease; }
+.mote-private-chat__toggle input[role="switch"]:checked { background: var(--green-bg); border-color: var(--green-text); }
+.mote-private-chat__toggle input[role="switch"]:checked::before { background: var(--green-text); transform: translateX(13px); }
+.mote-private-chat__toggle input[role="switch"]:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.mote-private-chat__toggle input[role="switch"]:disabled { cursor: default; opacity: .6; }
 .mote-private-chat__fields { display: grid; gap: var(--sp-4); min-width: 0; }
 .mote-private-chat__executor { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
 .mote-private-chat__executor > span { min-width: 0; display: grid; gap: var(--sp-1); color: var(--text-3); font-size: var(--fs-meta); }
@@ -47,4 +47,4 @@
 .mote-chat-requests p, .mote-chat-requests summary { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
 .mote-chat-requests summary { cursor: pointer; }
 .mote-chat-requests code { color: var(--text-3); font: var(--fs-meta)/1.6 var(--font-mono); overflow-wrap: anywhere; }
-@media (prefers-reduced-motion: reduce) { .mote-private-chat__toggle input, .mote-private-chat__toggle input::before { transition: none; } }
+@media (prefers-reduced-motion: reduce) { .mote-private-chat__toggle input[role="switch"], .mote-private-chat__toggle input[role="switch"]::before { transition: none; } }
