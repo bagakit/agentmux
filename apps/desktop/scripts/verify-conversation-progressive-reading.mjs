@@ -7,7 +7,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
-import { candidateResolve, candidateModule } from './candidate-package-resolve.mjs'
+import { candidateResolve, candidateAlias, candidateModule } from './candidate-package-resolve.mjs'
 import { sceneNames } from './fixtures/conversation-progressive-reading/scene.mjs'
 import { immediateFirstMount, compareReadingCosts } from './fixtures/conversation-progressive-reading/cost-comparison.mjs'
 
@@ -41,11 +41,10 @@ for (const entry of await fs.readdir(path.join(root, 'packages'), { withFileType
   try { await fs.access(manifest); inputPaths.push(manifest) } catch (error) { if (error.code !== 'ENOENT') throw error }
 }
 const hashes = async () => Object.fromEntries(await Promise.all(inputPaths.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
-const loaded = new Map(), emitted = [], transforms = new Map()
+const loaded = new Map(), cssInputs = {}, emitted = [], transforms = new Map()
 const plugin = (browser, variant = 'scheduled') => ({ name: 'exact-conversation-candidate', enforce: 'pre',
   resolveId(specifier) {
     if (!browser && specifier.endsWith('/packages/core/dist/hosted-runtime-service.js')) return { id: path.join(root, 'packages/core/dist/hosted-runtime-service.js'), external: true }
-    if (specifier.startsWith('@agentmux/')) return candidateResolve(root, specifier, { browser })
   },
   transform(code, id) {
     const file = id.split('?')[0]
@@ -59,7 +58,7 @@ const plugin = (browser, variant = 'scheduled') => ({ name: 'exact-conversation-
   } })
 const priorEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH'].map(name => [name, process.env[name]]))
 const receipt = { schema: 'agentmux.conversation-progressive-reading.v1', passed: false, sourceBound: false, preparation, compileOnly, anchorAttempts, costPairs,
-  candidate: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim(), phases: [], loaded: {}, visualPaths: [],
+  candidate: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim(), phases: [], loaded: {}, cssInputs, visualPaths: [],
   independentVisualReview: 'not-performed', boundary: 'Private real Electron and Runtime; controlled native transcript. This runner records a bounded candidate sample. Repeated baseline comparison, Mobile, physical-device operation and independent aesthetic acceptance are separate evidence.' }
 let client, resolver, mobileBuild
 await fs.mkdir(evidence, { recursive: true })
@@ -83,10 +82,20 @@ try {
     const { assertWorkspaceDistBuiltFromCurrentSource } = await import(pathToFileURL(path.join(root, 'vitest.dist-freshness.ts')).href)
     await assertWorkspaceDistBuiltFromCurrentSource(root)
   }
-  const common = { configFile: false, root: fixture, logLevel: 'error', resolve: { alias: [
-    { find: '@agentmux/client-ui/styles.css', replacement: path.join(root, 'packages/client-ui/src/styles/index.css') },
-    { find: /^@agentmux\/client-ui\/styles\/(.*)$/u, replacement: path.join(root, 'packages/client-ui/src/styles/$1') }
-  ] } }
+  const common = { configFile: false, root: fixture, logLevel: 'error',
+    resolve: { alias: [candidateAlias(root)] },
+    css: { postcss: { plugins: [{ postcssPlugin: 'bind-actual-conversation-css', async Once(styles) {
+      const files = new Set(); styles.walk(node => { if (node.source?.input.file) files.add(node.source.input.file.split('?')[0]) })
+      for (const file of files) {
+        const actual = candidateModule(root, file)
+        if (actual.startsWith(root + path.sep) && !actual.includes('/node_modules/')) {
+          const key = path.relative(root, actual), sha256 = hash(await fs.readFile(actual))
+          assert.equal(sha256, receipt.inputs[key], 'Actual CSS is a bound candidate input: ' + key)
+          if (cssInputs[key]) assert.equal(cssInputs[key], sha256, 'Actual CSS remains fixed: ' + key)
+          cssInputs[key] = sha256
+        }
+      }
+    } }] } } }
   for (const [name, format] of [['main', 'es'], ['preload', 'cjs']]) await build({ ...common, plugins: [plugin(false)],
     ...(name === 'preload' ? { ssr: { noExternal: true } } : {}),
     build: { ssr: path.join(fixture, `${name}.ts`), target: 'node24', outDir: path.join(privateRoot, name), emptyOutDir: true,
@@ -95,7 +104,7 @@ try {
   const preloadRequires = [...preloadCode.matchAll(/\brequire\(["\x27]([^"\x27]+)["\x27]\)/gu)].map(match => match[1])
   assert.ok(preloadRequires.length > 0, 'The sandbox preload must consume its original Electron bridge')
   assert.deepEqual([...new Set(preloadRequires)], ['electron'], 'The sandbox preload must bundle workspace dependencies')
-  for (const variant of costPairs ? ['scheduled', 'immediate'] : ['scheduled']) await build({ ...common, base: './', plugins: [plugin(true, variant)], worker: { format: 'es', plugins: () => [plugin(true, variant)] }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
+  for (const variant of costPairs ? ['scheduled', 'immediate'] : ['scheduled']) await build({ ...common, base: './', resolve: { alias: [candidateAlias(root, { browser: true })] }, plugins: [plugin(true, variant)], worker: { format: 'es', plugins: () => [plugin(true, variant)] }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
     build: { target: 'esnext', minify: false, reportCompressedSize: false, outDir: path.join(privateRoot, variant === 'scheduled' ? 'renderer' : 'renderer-immediate'), emptyOutDir: true } })
   receipt.transforms = [...transforms.values()]
   if (costPairs) assert.equal(receipt.transforms.length, 1)

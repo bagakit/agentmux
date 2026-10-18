@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { mutateMessageSlotScope } from './layout-mutations.mjs'
-import { candidateResolve, candidateModule } from '../../candidate-package-resolve.mjs'
+import { candidateAlias, candidateModule } from '../../candidate-package-resolve.mjs'
 
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 export async function captureA2aOriginalReading({ root, evidence, layout = false, styleMutation = null }) {
@@ -30,11 +30,9 @@ export async function captureA2aOriginalReading({ root, evidence, layout = false
     await mkdir(evidence, { recursive: true })
     for (const file of ['package.json', 'pnpm-lock.yaml', 'apps/desktop/package.json', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/scripts/candidate-package-resolve.mjs']) await bind(resolve(root, file))
     for (const entry of await readdir(fixture, { withFileTypes: true })) if (entry.isFile()) await bind(resolve(fixture, entry.name))
-    const alias = []
+    const alias = [candidateAlias(root, { browser: true, source: true, onManifest: bindBytes })]
     for (const name of ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom/client']) alias.push({ find: new RegExp('^' + name + '$'), replacement: require.resolve(name) })
-    const candidate = { name: 'bind-actual-a2a-original-renderer', enforce: 'pre', resolveId(specifier) {
-        if (specifier.startsWith('@agentmux/')) return candidateResolve(root, specifier, { browser: true, source: true, onManifest: bindBytes })
-      }, async transform(code, id) {
+    const candidate = { name: 'bind-actual-a2a-original-renderer', enforce: 'pre', async transform(code, id) {
         const file = id.split('?')[0]
         if (resolve(file) === file) {
           const actual = candidateModule(root, file)
@@ -45,7 +43,10 @@ export async function captureA2aOriginalReading({ root, evidence, layout = false
       define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, plugins: [candidate],
       css: { postcss: { plugins: [{ postcssPlugin: 'bind-actual-a2a-original-css', async Once(styles) {
         const files = new Set(); styles.walk(node => { if (node.source?.input.file) files.add(node.source.input.file.split('?')[0]) })
-        await Promise.all([...files].filter(file => file.startsWith(root + '/') && !file.includes('/node_modules/')).map(bind))
+        for (const file of files) {
+          const actual = candidateModule(root, file)
+          if (actual.startsWith(root + '/') && !actual.includes('/node_modules/')) await bind(actual)
+        }
         const owner = resolve(root, 'packages/client-ui/src/styles/conversation-message.css')
         if (styleMutation && files.has(owner)) {
           const original = styles.toString(), changes = mutateMessageSlotScope(styles, styleMutation, owner)
