@@ -18,6 +18,7 @@ import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures
 const dom = composerDOM(), APP = 'cli_settings_permission_request'
 const NAMES = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only', 'application:application:patch', 'application:application:self_manage']
 const IDS = NAMES.map((_, index) => 100 + index)
+const REQUIRED_IDS = [...IDS.slice(0, 7), IDS[8]!] // Creator lookup needs self_manage, not the unrelated patch scope.
 let directory: string, services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer
 let applied: unknown, appliedAccept: boolean, accept: boolean, native: Array<{ path: string; body: unknown }>, calls: Array<{ method: ConnectionMethod; input: unknown; result: unknown }>
 beforeEach(async () => {
@@ -79,26 +80,26 @@ async function open() {
   expect(writes()).toEqual([])
 }
 
-it('original Settings reviews both sources with one consent then explicitly requests the default seven; acceptance and fresh applied read stay distinct', async () => {
+it('original Settings reviews both sources with one consent then explicitly requests the eight consumer permissions; acceptance and fresh applied read stay distinct', async () => {
   await open()
   expect(native.filter(call => call.path.startsWith('/developers/'))).toEqual([])
   await click('[data-permission-review]')
   await ready(() => expect(dom.container.querySelector('[data-permission-add]')).not.toBeNull())
   expect(native.filter(call => call.path.startsWith('/developers/')).map(call => call.path)).toEqual(['/developers/v1/scope/all/' + APP, '/developers/v1/scope/applied/' + APP])
-  expect(dom.container.textContent).toContain('7 missing application permissions')
+  expect(dom.container.textContent).toContain('8 missing application permissions')
   expect(dom.container.textContent).toContain('Applies to the whole')
   expect(writes()).toEqual([])
   const offered = current().applicationConfiguration!.actions.find(action => action.kind === 'add-application-permissions')!
   await click('[data-permission-add]')
   await ready(() => expect(current().applicationConfiguration!.selected?.secureStorage).toBe('stored'))
   expect(current().applicationConfiguration!.selected!.input).toEqual({ operationId: current().operation!.operationId, expectedRevision: offered.expectedRevision, decision: { actionId: offered.actionId, value: 'confirm' } })
-  expect(writes()).toEqual([{ path: '/developers/v1/scope/update/' + APP, body: { appScopeIDs: IDS.slice(0, 7), userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } }])
+  expect(writes()).toEqual([{ path: '/developers/v1/scope/update/' + APP, body: { clientId: APP, appScopeIDs: REQUIRED_IDS, userScopeIDs: [], scopeIds: [], operation: 'add', isDeveloperPanel: true } }])
   const selected = current().applicationConfiguration!.selected!
   expect(selected).toMatchObject({ effect: 'add-application-permissions', request: 'confirmed', secureStorage: 'stored' })
   expect(dom.container.querySelector('[data-permission-result="' + selected.stepId + '"] span')?.textContent).toBe('Accepted result saved')
   expect(dom.container.textContent).toContain('data-range configuration is still needed')
   expect(current().applicationConfiguration!.capability).toBe('unknown')
-  applied = { scopes: IDS.slice(0, 7).map(id => ({ id, scopeIdentityType: 2 })) }
+  applied = { scopes: REQUIRED_IDS.map(id => ({ id, scopeIdentityType: 2 })) }
   await click('[data-permission-review]')
   await ready(() => expect(dom.container.textContent).toContain('No additions needed'))
   expect(dom.container.querySelector('[data-permission-add]')).toBeNull()
@@ -107,9 +108,10 @@ it('original Settings reviews both sources with one consent then explicitly requ
   expect(dom.container.textContent).not.toContain('settings-permission-private')
 }, 30_000)
 
-it('explicit identity sync reviews nine, preserves a completed half on an unknown read, and cannot replay an unknown add through purpose changes', async () => {
-  await open(); await click('[data-permission-profile-sync]')
-  await ready(() => expect(current().applicationConfiguration).toMatchObject({ effect: 'add-application-permissions', purpose: 'mote-profile-sync' }))
+it('permission review preserves a completed half on an unknown read and cannot replay an unknown addition after returning to its original task', async () => {
+  await open()
+  expect(dom.container.querySelector('[data-permission-profile-sync]')).toBeNull()
+  await ready(() => expect(current().applicationConfiguration).toMatchObject({ effect: 'add-application-permissions', purpose: 'agent-conversation' }))
   expect(native.filter(call => call.path.startsWith('/developers/'))).toEqual([])
   appliedAccept = false; await click('[data-permission-review]')
   await ready(() => expect(current().applicationInspection?.selected?.request).toBe('unknown'))
@@ -121,13 +123,13 @@ it('explicit identity sync reviews nine, preserves a completed half on an unknow
   expect(catalog?.secureStorage).toBe('stored')
   appliedAccept = true; await click('[data-permission-review]')
   await ready(() => expect(dom.container.querySelector('[data-permission-add]')).not.toBeNull())
-  expect(dom.container.textContent).toContain('9 missing application permissions')
+  expect(dom.container.textContent).toContain('8 missing application permissions')
   expect(native.filter(call => call.path.startsWith('/developers/')).map(call => call.path)).toEqual(['/developers/v1/scope/all/' + APP, '/developers/v1/scope/applied/' + APP, '/developers/v1/scope/applied/' + APP])
   expect(current().applicationConfiguration).toMatchObject({ sources: { catalog } })
   accept = false; await click('[data-permission-add]')
   await ready(() => expect(dom.container.querySelector('[data-permission-unresolved]')).not.toBeNull())
   const original = current().applicationConfiguration!.selected!
-  await click('[data-permission-profile-sync]')
+  await click('[data-surface-mode="enable-messaging"]'); await click('[data-surface-mode="add-application-permissions"]')
   await ready(() => expect(current().applicationConfiguration).toMatchObject({ purpose: 'agent-conversation', reason: 'original-effect-unconfirmed', selected: original }))
   expect(dom.container.querySelector('[data-permission-add]')).toBeNull()
   expect(writes()).toHaveLength(1)
