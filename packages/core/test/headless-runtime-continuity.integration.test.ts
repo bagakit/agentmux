@@ -75,7 +75,8 @@ describe('Headless semantic owner ordinary process continuity', () => {
     expect(restored.run.runId).toBe(session.run.runId)
     expect(restored.run.pid).toBe(original.attachment.run.pid)
     expect(restored.run.state).toBe('running')
-    const snapshots = events.filter(value => value.type === 'terminal-snapshot')
+    const snapshots = await until(() => events.filter(value => value.type === 'terminal-snapshot'),
+      values => values.length > 0, 'original attachment receives its replay snapshot after owner restart')
     expect(snapshots).toHaveLength(1)
     expect(snapshots[0]!.run.runId).toBe(session.run.runId)
     await client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession(session.agentSessionId)), agentSessionId: session.agentSessionId,
