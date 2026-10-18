@@ -142,7 +142,8 @@ describe('local progressive AgentMux module skills', () => {
       for (const contract of ['mermaid, drawio, dot/gv', 'plantuml/puml', 'original XML',
         '$expression$', '$$ delimiter lines', 'Escape literal dollars or use inline/fenced code',
         'formula source and anchors', 'render failures do not invalidate saved source',
-        'Previews are client projections', 'file write']) expect(guidance).toContain(contract)
+        'Previews are client projections', 'file write', '![alternative text]', 'GFM tables',
+        'file import --help', 'note-raw fence', 'static previews', 'original Note file directory']) expect(guidance).toContain(contract)
     }
     expect(entry.stdout).not.toContain('::note-include')
     expect(note.stdout.indexOf('## Edit an authorized Note')).toBeGreaterThan(-1)
