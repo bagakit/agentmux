@@ -226,6 +226,11 @@ it('frames a fresh large graph at a readable zoom around the original focus and 
   useAppStore.setState({ noteCanvasLayouts: { [noteCanvasScopeKey(scope)]: { positions: { target: { x: 0, y: 0 }, 'closed-source': { x: 2000, y: 1000 } }, viewport: saved, expandedNoteIds: ['target'], previewNoteIds: [] } } })
   await dom.render(<ReactFlowProvider><ViewportProbe /><NoteCanvas scope={scope} onOpen={() => {}} /></ReactFlowProvider>)
   await vi.waitFor(() => expect(viewport()).toEqual(saved))
+  // A restored view can appear before the graph, layout reply and queued first frame.
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-title')).toHaveLength(9))
+  await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="target"] .note-canvas-reader')).not.toBeNull())
+  await act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) })
+  expect(viewport()).toEqual(saved)
 })
 
 it('reads the exact saved source of an unbound query without inventing a destination or borrowing a first paragraph', async () => {
@@ -242,7 +247,7 @@ it('reads the exact saved source of an unbound query without inventing a destina
   expect(api.notebooks.content).toHaveBeenCalledTimes(1)
 })
 
-it('keeps the direct incoming source beside its root readable on first entry without fitting or changing the original positions', async () => {
+it.each([900, 640, 520])('keeps the direct incoming source and body visible on first entry at %ipx without Fit or changing positions', async width => {
   class IncomingLayoutWorker {
     onmessage: ((event: MessageEvent) => void) | null = null
     onerror = null
@@ -250,10 +255,20 @@ it('keeps the direct incoming source beside its root readable on first entry wit
     terminate() {}
   }
   vi.stubGlobal('Worker', IncomingLayoutWorker)
-  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(900)
+  vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(width)
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600)
+  vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('react-flow__node') ? 288 : width })
   await dom.render(<ReactFlowProvider><ViewportProbe /><NoteCanvas scope={scope} onOpen={() => {}} /></ReactFlowProvider>); await ready()
-  await vi.waitFor(() => expect(JSON.parse(dom.container.querySelector('.actual-flow-viewport')!.textContent!)).toEqual({ x: 24, y: 24, zoom: 1 }))
+  await vi.waitFor(() => {
+    const viewport = JSON.parse(dom.container.querySelector('.actual-flow-viewport')!.textContent!)
+    expect(viewport.zoom).toBeGreaterThanOrEqual(.85)
+    expect(viewport.zoom).toBeLessThanOrEqual(1)
+    // Actual original Flow viewport must expose readable width of the incoming card.
+    expect(Math.min(width, 288 * viewport.zoom + viewport.x) - Math.max(0, viewport.x)).toBeGreaterThan(100)
+    expect(400 * viewport.zoom + viewport.x).toBeGreaterThanOrEqual(24)
+    expect(688 * viewport.zoom + viewport.x).toBeLessThanOrEqual(width - 24)
+    if (width === 900) expect(viewport).toEqual({ x: 24, y: 24, zoom: 1 })
+  })
   await vi.waitFor(() => expect(sourceCardContent()).toContain('Saved target'))
   expect(useAppStore.getState().noteCanvasLayouts[noteCanvasScopeKey(scope)]!.positions.target).toEqual({ x: 400, y: 0 })
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
