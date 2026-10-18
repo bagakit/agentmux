@@ -14,14 +14,19 @@ const inputStatus: Record<AgentInputSubmissionObservation['status'], string> = {
 export const conversationSubmissionPreview = (text: string, limit = 160) => text.slice(0, limit).replace(/\s+/gu, ' ').trim()
 
 /** The same original submission facts in a native card or an independent send row. */
-export function ConversationSubmissionSummary({ record, renderClock, nativeRecorded = false }: {
+export function ConversationSubmissionSummary({ record, renderClock }: {
   record: ConversationSourceRecord; renderClock(time: number): string; nativeRecorded?: boolean
 }) {
   if (record.original.kind !== 'captured') return null
   const item = record.original.item
-  return <span className="conversation-submission-summary" data-status={item.status} title={item.inputSubmission ? '原输入阶段，不表示群消息已交付或 Agent 任务已完成' : '原提交记录的时间与状态，不是原生接纳时间'}>
-    <span>{item.inputSubmission ? '消息输入' : '消息发送'}</span><span><time>{renderClock(item.createdAt)}</time></span>
-    <span>{item.inputSubmission ? inputStatus[item.inputSubmission.status] : item.status === 'complete' ? nativeRecorded ? '已进入对话' : '提交已记录' : item.status === 'failed' ? '提交失败' : '提交未确认'}</span>
+  const refused = item.externalInput?.state === 'refused'
+  const summary = item.inputSubmission ? inputStatus[item.inputSubmission.status] : item.inputRef ? '原输入状态未确认'
+    : refused ? item.externalInput?.code === 'INGRESS_ACTOR_NOT_AUTHORIZED' ? '对话已收录 · 未提交 Agent：成员未获输入权限'
+      : item.externalInput?.code === 'INGRESS_INPUT_OUTSIDE_SCOPE' ? '对话已收录 · 未提交 Agent：未符合触发范围' : '对话已收录 · 本次请求被拒绝'
+    : '对话已收录'
+  return <span className="conversation-submission-summary" data-status={item.status} title={item.inputRef ? '原输入阶段，不表示群消息已交付或 Agent 任务已完成' : '原对话收录记录，不表示已提交给 Agent'}>
+    <span>{item.inputRef ? '消息输入' : '对话记录'}</span><span><time>{renderClock(item.createdAt)}</time></span>
+    <span>{summary}</span>
   </span>
 }
 
@@ -37,6 +42,11 @@ export function ConversationSubmissionFacts({ record }: { record: ConversationSo
     <dt>原记录版本</dt><dd><code>{record.revision}</code></dd>
     {item.inputRef ? <><dt>原输入</dt><dd><code>{JSON.stringify(item.inputRef)}</code></dd></> : null}
     <dt>原记录状态</dt><dd>{item.status}</dd>
+    {item.externalInput ? <><dt>原群消息处理</dt><dd>{item.externalInput.state}{item.externalInput.code ? ' · ' + item.externalInput.code : ''}</dd>
+      <dt>原收件</dt><dd><code>{item.externalInput.ingressId}</code></dd>
+      {item.externalInput.state === 'refused' ? <><dt>核对路径</dt><dd>{item.externalInput.code === 'INGRESS_ACTOR_NOT_AUTHORIZED'
+        ? '在当前 Agent 的 Connections 打开此群的 Member access，核对准确成员权限。查看或修改权限不会重发这条旧消息。'
+        : '在当前 Agent 的 Connections 打开此群，查看原收件回执与共享范围。查看不会重新提交这条消息。'}</dd></> : null}</> : null}
     {item.inputSubmission ? <><dt>处理状态</dt><dd><code>{item.inputSubmission.status}</code> · {inputStatus[item.inputSubmission.status]}</dd>
       <dt>输入观察</dt><dd>{item.inputSubmission.observation === 'rejoin-needed' ? '需重新接入原输入观察' : item.inputSubmission.observation === 'owned' ? '原 Core 正在观察' : '原输入回执已记录'}</dd></> : null}
     <dt>时间口径</dt><dd>原提交记录时间，不是原生接纳或执行完成时间。</dd>
