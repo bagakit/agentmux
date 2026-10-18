@@ -162,6 +162,26 @@ describe('Toolkit TUI lifecycle on the existing admission owner', () => {
     await f.custom.dispose()
   })
 
+  it('retains an unknown original request instead of rebuilding its missing creation intent', async () => {
+    const f = fixture(), create = f.create.getMockImplementation()!
+    f.create.mockImplementationOnce(async (...args) => { await create(...args); throw new Error('creation reply lost') })
+    await f.custom.loadConfigured()
+    const original = (await f.snapshot()).admission!
+    const receipt = structuredClone(f.receipts.get(definition.id)) as Record<string, unknown>
+    delete receipt.createIntent
+    f.receipts.set(definition.id, receipt)
+    await f.reopen(); await f.custom.loadConfigured()
+    const continued = await f.custom.run(definition.id, { invocationId: original.invocationId, expectedRevision: original.definition.revision,
+      expectedLatestExecutionId: original.expectedLatestExecutionId }, new AbortController().signal)
+    expect(continued).toMatchObject({ state: 'unknown', admission: { executionId: original.executionId,
+      invocationId: original.invocationId, definition: original.definition, run: null, state: 'unknown' } })
+    expect(continued.reason).toContain('Original TUI creation intent is missing')
+    expect(f.create).toHaveBeenCalledOnce(); expect(f.port.stop).not.toHaveBeenCalled()
+    expect([...f.runs.values()]).toMatchObject([{ state: 'running' }])
+    expect(f.receipts.get(definition.id)).not.toHaveProperty('createIntent')
+    await f.custom.dispose()
+  })
+
   it('keeps a confirmed terminal readable until a new host loading cycle admits another execution', async () => {
     const f = fixture()
     await f.custom.loadConfigured()

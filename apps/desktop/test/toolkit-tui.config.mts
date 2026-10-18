@@ -9,6 +9,7 @@ const owner = 'apps/desktop/src/main/toolkit-custom-owner.ts'
 const changes: Record<string, [string, string, string]> = {
   'raw-ownership': ['apps/desktop/src/main/runtime-controller.ts', "if (output === 'raw') this.toolkitRuns.set", 'if (true) this.toolkitRuns.set'],
   'repeat-load': [owner, 'const added = [...enabled].filter(id => !this.enabledTuis.has(id))', 'const added = [...enabled]'],
+  'missing-intent': [owner, 'if (retained && !intent) throw new AgentMuxError', 'if (false) throw new AgentMuxError'],
   'dispose-stop': [owner, '// The durable Run outlives this host owner; closing its observer is not Stop.', 'await execution.port?.stop(ref(execution))'],
   'service-membership': ['apps/desktop/src/renderer/src/lib/run-service-projection.ts', '!retained.has(key) && !listeners.has(key)', '!retained.has(key)']
 }
