@@ -130,7 +130,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
             setAreaLocate({ source: actions.current.locate, request: { token: {}, areaIds: [area.id] } })
           }),
           onInspect: old?.onInspect ?? (() => { const current = actions.current.presentation.internal.get(area.id) ?? []; if (current[0]) actions.current.onSelect({ kind: 'relation', id: current[0].id, relatedIds: current.map(relation => relation.id) }) }),
-          onToggle: old?.onToggle ?? (() => setFolded(previous => { const next = new Set(previous); if (!next.delete(area.id)) next.add(area.id); return next })) }
+          onToggle: old?.onToggle ?? (() => { readingAnchor.current = areaId; setFolded(previous => { const next = new Set(previous); if (!next.delete(area.id)) next.add(area.id); return next }) }) }
       }
       next.push(areaNode); cache.set(areaId, areaNode)
       if (box.folded) continue
