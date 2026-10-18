@@ -113,7 +113,7 @@ export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved
     if (!target || !snapshot || flight.current || pending) return
     const baseline = moteConnectionBaseline(snapshot.saved), chosen = snapshot.connections.find(item => choiceKey(item.config) === value)
     if (!baseline) { setIssue('Read this Mote’s current choice before saving. Your selection is kept.'); return }
-    if (value && !chosen?.config.enabled) { setIssue('Choose an available bot or update this bot in settings.'); return }
+    if (value && (!chosen?.config.enabled || chosen.initialSetup?.state === 'incomplete')) { setIssue('Choose an enabled bot whose original setup is complete, or continue this bot in settings.'); return }
     const input: MoteConnectionPreferencesSaveParams = { kind: 'connection', target, operationId: crypto.randomUUID(), baseline,
       values: { connection: chosen ? { connectionId: chosen.config.connectionId, application: structuredClone(chosen.config.application) } : null } }
     const token = alive.current, epoch = ++readEpoch.current
@@ -164,7 +164,7 @@ export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved
           {snapshot ? <details className="mote-bot-existing" open={choosing} onToggle={event => setChoosing(event.currentTarget.open)}><summary>Choose a saved bot</summary><label htmlFor={fieldId}>Chat bot</label><SelectionField id={fieldId} label="Mote chat bot" value={selection} menuClassName="mote-connection-dialog__choices"
             disabled={busy} onValueChange={value => { edited.current = true; setSelection(value) }}
             options={[{ value: '', label: 'No default bot' }, ...snapshot.connections.map(item => ({ value: choiceKey(item.config), label: item.config.label,
-              disabled: !item.config.enabled, description: connectionIdentityObservation(item).label + ' · ' + item.config.application.domain + ' · ' + item.config.application.appId }))]} />
+              disabled: !item.config.enabled || item.initialSetup?.state === 'incomplete', description: connectionIdentityObservation(item).label + ' · ' + item.config.application.domain + ' · ' + item.config.application.appId }))]} />
             {observation ? <p className="mote-details__hint" data-connection-observation><strong>{observation.label}</strong><br />{observation.detail}</p> : null}
             {current ? <p className="mote-details__hint">Saved bot: {current.application.domain} · {current.application.appId}</p> : null}</details> : null}
           {loading ? <p role="status" className="mote-details__hint">Reading saved bots…</p> : null}

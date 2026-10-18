@@ -40,3 +40,11 @@
 .mote-identity-options[open] { display: grid; gap: var(--sp-3); }
 .mote-identity-management { display: grid; gap: var(--sp-2); }
 .mote-identity-management > p { margin: 0; }
+.connector-record__facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-1) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+.connector-record__facts > span { min-width: 0; overflow-wrap: anywhere; }
+.connector-record__facts .connector-record__app, .connector-record__facts [data-identity-motes] { grid-column: 1 / -1; }
+.connector-record__app code { font: inherit; font-family: var(--font-mono); color: var(--text-2); }
+[data-identity-setup="incomplete"] { color: var(--amber-text); }
+.connector-identity-facts { padding-block: var(--sp-4); border-block: 1px solid var(--line-soft); }
+.connector-identity-facts > div { flex: 1 1 180px; }
+@media (max-width: 480px) { .connector-record__facts { grid-template-columns: minmax(0, 1fr); } }

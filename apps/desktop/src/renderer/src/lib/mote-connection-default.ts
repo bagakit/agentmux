@@ -54,6 +54,12 @@ export function agentMoteConnectionSource(state: ReturnType<typeof useAppStore.g
 }
 
 /** Saved configuration and exact Host observations are different facts from setup or group delivery. */
+export function connectionInitialSetupLabel(record: ConnectionRecord): string {
+  return record.initialSetup?.state === 'complete' ? 'Setup complete'
+    : record.initialSetup?.state === 'incomplete' ? 'Setup incomplete'
+      : record.initialSetup?.state === 'unconfirmed' ? 'Setup not confirmed' : 'Setup history not recorded'
+}
+
 export function connectionIdentityObservation(record: ConnectionRecord): { label: string; detail: string } {
   if (connectionNeedsInitialSetup(record)) return { label: record.initialSetup?.state === 'incomplete' ? 'Setup incomplete' : 'Setup not confirmed',
     detail: 'Saved application. Continue its original setup in application settings before a new group chat.' }

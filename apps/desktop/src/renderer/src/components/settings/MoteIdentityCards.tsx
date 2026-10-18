@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { parseMotePreferencesReadResult, type MoteConnectionPreferencesReadResult } from '@agentmux/core/mote-preferences'
 import type { ConnectionRecord } from '@agentmux/core/connections'
@@ -12,25 +12,55 @@ import { useAppStore } from '../../store'
 import { SpaceObjectIcon } from '../SpaceObjectIcon'
 import type { MoteLarkSettingsOrigin } from '../SettingsNavigation'
 
-function MoteIdentityCard({ scope, records, recordsIssue, onOpen }: {
-  scope: MoteWorkfaceScope; records: ConnectionRecord[]; recordsIssue: string
-  onOpen(origin: MoteLarkSettingsOrigin, create: boolean): void
-}) {
+export type MoteIdentityReading = {
+  scope: MoteWorkfaceScope
+  target: ReturnType<typeof moteConnectionTarget>
+  saved: MoteConnectionPreferencesReadResult | null
+  issue: string
+}
+
+/** One metadata read per original Mote, shared by its card and the saved identity library. */
+export function useMoteIdentityReadings(active: boolean, revision: number) {
+  const workspace = useAppStore(state => state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID))
   const bindings = useAppStore(state => state.spaceZoneBindings)
-  const target = moteConnectionTarget(scope, bindings), identity = JSON.stringify(target)
-  const icon = useAppStore(state => target ? state.spaceObjectIcons[target.spaceId] ?? null : null)
-  const [saved, setSaved] = useState<MoteConnectionPreferencesReadResult | null>(null), [issue, setIssue] = useState('')
-  const lifetime = useRef(0)
-  async function read() {
+  const directory = useScratchTopics(workspace?.id ?? null, active)
+  const scopes = useMemo(() => workspace && directory.topics ? scratchMoteTopics(directory.topics).flatMap(topic => {
+    const rootPath = scratchTopicLogicalPath(workspace, topic)
+    return rootPath === null ? [] : [{ topic, workspace, rootPath }]
+  }) : [], [workspace, directory.topics])
+  const targets = scopes.map(scope => moteConnectionTarget(scope, bindings)), identity = JSON.stringify(targets)
+  const [readings, setReadings] = useState<{ identity: string; items: MoteIdentityReading[]; reading: boolean }>({ identity: '', items: [], reading: false })
+  const [attempt, setAttempt] = useState(0), lifetime = useRef(0)
+  useEffect(() => {
     const epoch = ++lifetime.current
-    if (!target) { setIssue('The original Mote home is not confirmed.'); return }
-    try {
-      const input = { kind: 'connection' as const, target }
-      const value = parseMotePreferencesReadResult(await api.motePreferences.read(input), input)
-      if (epoch === lifetime.current) { setSaved(value); setIssue(value.issue ?? '') }
-    } catch (error) { if (epoch === lifetime.current) setIssue(presentError(error)) }
-  }
-  useEffect(() => { setSaved(null); setIssue(''); void read(); return () => { lifetime.current++ } }, [identity])
+    if (!active) return
+    setReadings(current => ({ identity, items: current.identity === identity ? current.items : [], reading: true }))
+    void Promise.all(scopes.map(async (scope, index): Promise<MoteIdentityReading> => {
+      const target = targets[index]!
+      if (!target) return { scope, target, saved: null, issue: 'The original Mote home is not confirmed.' }
+      try {
+        const input = { kind: 'connection' as const, target }
+        const saved = parseMotePreferencesReadResult(await api.motePreferences.read(input), input)
+        return { scope, target, saved, issue: saved.issue ?? '' }
+      } catch (error) { return { scope, target, saved: null, issue: presentError(error) } }
+    })).then(items => { if (epoch === lifetime.current) setReadings({ identity, items, reading: false }) })
+    return () => { lifetime.current++ }
+  }, [active, identity, revision, attempt])
+  const current = readings.identity === identity ? readings : null
+  const items = scopes.map((scope, index) => current?.items[index]
+    ? { ...current.items[index]!, scope } : { scope, target: targets[index]!, saved: null, issue: '' })
+  return { items, reading: directory.reading || !current || current.reading, issue: directory.error,
+    complete: directory.topics !== null && !directory.reading && !directory.error && !!current && !current.reading && items.every(item => item.saved?.status === 'ready'),
+    refresh: () => setAttempt(value => value + 1) }
+}
+export type MoteIdentityReadings = ReturnType<typeof useMoteIdentityReadings>
+
+function MoteIdentityCard({ reading, records, recordsIssue, onOpen, onRetry }: {
+  reading: MoteIdentityReading; records: ConnectionRecord[]; recordsIssue: string
+  onOpen(origin: MoteLarkSettingsOrigin, create: boolean): void; onRetry(): void
+}) {
+  const { scope, target, saved, issue } = reading
+  const icon = useAppStore(state => target ? state.spaceObjectIcons[target.spaceId] ?? null : null)
   const ref = saved?.values?.connection
   const choice = ref && !recordsIssue ? moteConnectionChoice(ref, records) : null
   const unbound = !issue && saved?.status === 'ready' && saved.values?.connection === null
@@ -48,25 +78,18 @@ function MoteIdentityCard({ scope, records, recordsIssue, onOpen }: {
     {issue ? <p className="connector-mote-card__issue" role="status">{issue}</p> : null}
     <div className="connector-mote-card__actions">
       <button type="button" className={unbound ? 'primary-button' : 'small-button'} data-mote-card-action={unbound ? 'create' : 'manage'} onClick={() => onOpen(origin, unbound)}>{unbound ? 'Create Feishu identity' : ref ? 'Manage identity' : 'Review identity'}</button>
-      {unbound ? <button type="button" className="connector-enrollment__text-action" onClick={() => onOpen(origin, false)}>Use existing</button> : issue ? <button type="button" className="connector-enrollment__text-action" onClick={() => void read()}>Retry</button> : null}
+      {unbound ? <button type="button" className="connector-enrollment__text-action" onClick={() => onOpen(origin, false)}>Use existing</button> : issue ? <button type="button" className="connector-enrollment__text-action" onClick={onRetry}>Retry</button> : null}
     </div>
   </article>
 }
 
-/** The original directory and preferences are read only while this library is visible. */
-export function MoteIdentityCards({ records, recordsIssue, onOpen }: {
-  records: ConnectionRecord[]; recordsIssue: string; onOpen(origin: MoteLarkSettingsOrigin, create: boolean): void
+/** Cards consume the same bounded readings as the saved identity list. */
+export function MoteIdentityCards({ readings, records, recordsIssue, onOpen }: {
+  readings: MoteIdentityReadings; records: ConnectionRecord[]; recordsIssue: string; onOpen(origin: MoteLarkSettingsOrigin, create: boolean): void
 }) {
-  const workspace = useAppStore(state => state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID))
-  const { topics, reading, error } = useScratchTopics(workspace?.id ?? null)
-  const scopes = workspace && topics ? scratchMoteTopics(topics).flatMap(topic => {
-    const rootPath = scratchTopicLogicalPath(workspace, topic)
-    return rootPath === null ? [] : [{ topic, workspace, rootPath }]
-  }) : []
   return <section className="connector-mote-identities" aria-label="Mote identities">
-    <header><div><h3>Mote identities</h3><p>Choose a Mote to create or manage its identity.</p></div><span className="connector-identity-count">{scopes.length || null}</span></header>
-    {scopes.length ? <div className="connector-mote-grid">{scopes.map(scope => <MoteIdentityCard key={JSON.stringify([scope.workspace.hostId, scope.workspace.path, scope.topic.id])} scope={scope} records={records} recordsIssue={recordsIssue} onOpen={onOpen} />)}</div>
-      : <p className="settings-group-note" role="status">{reading ? 'Reading your Motes…' : error ? 'Your Motes could not be read. Saved identities remain available below.' : 'Create an identity for a Mote here, or add a general identity for any Agent.'}</p>}
-    {error && scopes.length ? <p role="status" className="settings-group-note">{error}</p> : null}
+    <header><div><h3>Mote identities</h3><p>Choose a Mote to create or manage its identity.</p></div><span className="connector-identity-count">{readings.items.length || null}</span></header>
+    {readings.items.length ? <div className="connector-mote-grid">{readings.items.map(reading => <MoteIdentityCard key={JSON.stringify([reading.scope.workspace.hostId, reading.scope.workspace.id, reading.scope.topic.id])} reading={reading} records={records} recordsIssue={recordsIssue} onOpen={onOpen} onRetry={readings.refresh} />)}</div>
+      : <p className="settings-group-note" role="status">{readings.reading ? 'Reading your Motes…' : readings.issue ? 'Your Motes could not be read. Saved identities remain available below.' : 'Create an identity for a Mote here, or add a general identity for any Agent.'}</p>}
   </section>
 }
