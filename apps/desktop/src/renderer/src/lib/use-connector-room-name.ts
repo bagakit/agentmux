@@ -3,12 +3,12 @@ import type { RoomBinding } from '@agentmux/core/connections'
 import { api } from './api'
 
 /** Visible original audiences share a bounded metadata read, never a second relationship store. */
-export function useConnectorRoomName(binding: RoomBinding | null, refresh = 0) {
+export function useConnectorRoomName(binding: RoomBinding | null, refresh = 0, visible = true) {
   const identity = binding ? JSON.stringify([binding.bindingId, binding.connectionId, binding.application, binding.externalConversationId]) : ''
   const revision = binding?.revision
   const [read, setRead] = useState<{ identity: string; name?: string; issue: string; loading: boolean } | null>(null)
   useEffect(() => {
-    if (!binding) return
+    if (!binding || !visible) return
     let live = true
     setRead(previous => ({ ...(previous?.identity === identity ? previous : {}), identity, issue: '', loading: true }))
     const finish = (name: string | undefined, issue: string) => {
@@ -27,7 +27,7 @@ export function useConnectorRoomName(binding: RoomBinding | null, refresh = 0) {
       finish(name, result.observation.state !== 'ready' ? 'Group name unconfirmed' : name ? '' : 'Group name unavailable')
     })().catch(() => finish(undefined, 'Group name unconfirmed'))
     return () => { live = false }
-  }, [identity, revision, refresh])
+  }, [identity, revision, refresh, visible])
   const current = read?.identity === identity ? read : null
-  return { label: current?.name ?? binding?.externalConversationId ?? '', issue: current?.issue ?? '', loading: !!binding && (!current || current.loading) }
+  return { label: current?.name ?? binding?.externalConversationId ?? '', issue: current?.issue ?? '', loading: visible && !!binding && (!current || current.loading) }
 }

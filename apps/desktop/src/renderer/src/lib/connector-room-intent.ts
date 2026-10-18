@@ -43,7 +43,7 @@ export function restoredConnectorRoomIntents(value: unknown): Record<string, Con
 
 /** This is a targeted UI invalidation, never a Binding fact or a permission grant. */
 const changed = new EventTarget()
-export function invalidateConnectorTarget(target: RoomBindingTarget) { changed.dispatchEvent(new CustomEvent('changed', { detail: { executionHostId: target.executionHostId, agentSessionId: target.agentSessionId } })) }
+export function invalidateConnectorTarget(target: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>) { changed.dispatchEvent(new CustomEvent('changed', { detail: { executionHostId: target.executionHostId, agentSessionId: target.agentSessionId } })) }
 export function observeConnectorTarget(target: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>, read: () => void) {
   const listener = (event: Event) => { if (sameConnectorTarget(target, (event as CustomEvent<RoomBindingTarget>).detail)) read() }
   changed.addEventListener('changed', listener)

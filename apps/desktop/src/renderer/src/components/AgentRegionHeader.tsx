@@ -1,5 +1,5 @@
 import { RegionCurrentDemand } from './RegionCurrentDemand'
-import { ConnectorSharing } from './ConnectorSharing'
+import { AgentConnections } from './AgentConnections'
 import { useAppStore } from '../store'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -97,7 +97,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     <HostBadge host={executionHost} />
     {readOnly ? <span className="agent-region-header__mode">Read-only</span> : null}
     {resultReview}
-    {!readOnly && connectorSession?.kind === 'agent' ? <ConnectorSharing session={connectorSession} regionId={regionId} visible={active} presentation="header" /> : null}
+    {!readOnly && connectorSession?.kind === 'agent' ? <AgentConnections session={connectorSession} regionId={regionId} visible={active} /> : null}
     {sessionKind === 'agent' && nativeSession ? <RegionCurrentDemand agentSessionId={nativeSession.control.agentSessionId} hostId={nativeSession.control.hostId} /> : null}
     <DropdownMenu.Root {...(menuObservation.moreOpen !== undefined ? { open: menuObservation.moreOpen } : {})} onOpenChange={menuObservation.onOpen}>
       <DropdownMenu.Trigger ref={moreTrigger} className="agent-region-header__more"
