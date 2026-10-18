@@ -1,4 +1,5 @@
 import type { Graph, Subgraph, Viz } from '@viz-js/viz'
+import { CollaborationBoundsIndex, collaborationBoundsOverlap as overlap, type CollaborationBounds } from './collaboration-spatial-index'
 
 export type CollaborationLayoutKind = 'communication' | 'creation' | 'supervision'
 export type CollaborationLayoutConnection = { id: string; source: string; target: string; kind: CollaborationLayoutKind }
@@ -8,7 +9,7 @@ export type CollaborationLayoutInput = {
   connections: readonly CollaborationLayoutConnection[]
 }
 export type CollaborationLayoutPoint = { x: number; y: number }
-export type CollaborationLayoutBounds = { x: number; y: number; width: number; height: number }
+export type CollaborationLayoutBounds = CollaborationBounds
 export type CollaborationLayoutBox = CollaborationLayoutBounds & { id: string; areaId: string; folded: boolean } & (
   | { kind: 'agent' }
   | { kind: 'area'; heading: CollaborationLayoutBounds }
@@ -45,8 +46,6 @@ function render(viz: Viz, graph: Graph, layout: string): RenderedGraph {
   catch (error) { engine = undefined; throw error }
 }
 const dimension = (value: number) => Number.isFinite(value) && value > 0
-const overlap = (a: CollaborationLayoutBounds, b: CollaborationLayoutBounds) =>
-  a.x < b.x + b.width && a.x + a.width > b.x && a.y < b.y + b.height && a.y + a.height > b.y
 function bounds(points: readonly CollaborationLayoutPoint[]): CollaborationLayoutBounds {
   let left = Infinity, top = Infinity, right = -Infinity, bottom = -Infinity
   for (const point of points) {
@@ -177,35 +176,18 @@ export async function arrangeCollaboration(input: CollaborationLayoutInput, sign
 type Obstacle = CollaborationLayoutBounds & Pick<CollaborationLayoutBox, 'id' | 'kind'>
 const layoutObstacle = (original: CollaborationLayoutBox): Obstacle => original.kind === 'area'
   ? { id: original.id, kind: original.kind, x: original.x + original.heading.x, y: original.y + original.heading.y, width: original.heading.width, height: original.heading.height } : original
-/** Coarse broad phase shared by this bounded route job, never a second map fact store. */
+/** The routing owner validates original geometry and projects area titles before indexing. */
 class Obstacles {
   readonly byId = new Map<string, Obstacle>()
-  private cells = new Map<string, Obstacle[]>()
-  extent: CollaborationLayoutBounds | null = null
-  constructor(boxes: readonly CollaborationLayoutBox[]) {
-    for (const original of boxes) this.add(original)
-  }
+  private index = new CollaborationBoundsIndex<Obstacle>([])
+  get extent() { return this.index.extent }
+  constructor(boxes: readonly CollaborationLayoutBox[]) { for (const box of boxes) this.add(box) }
   add(original: CollaborationLayoutBox) {
-      const box = layoutObstacle(original)
-      if (this.byId.has(box.id) || !dimension(box.width) || !dimension(box.height) || !Number.isFinite(box.x) || !Number.isFinite(box.y)) throw Error('Original fixed map geometry is inconsistent. Existing connections are kept.')
-      this.byId.set(box.id, box)
-      for (const key of this.keys(box)) { const values = this.cells.get(key) ?? []; values.push(box); this.cells.set(key, values) }
-      this.extent = bounds([...(this.extent ? [{ x: this.extent.x, y: this.extent.y }, { x: this.extent.x + this.extent.width, y: this.extent.y + this.extent.height }] : []),
-        { x: box.x, y: box.y }, { x: box.x + box.width, y: box.y + box.height }])
+    const box = layoutObstacle(original)
+    if (this.byId.has(box.id) || !dimension(box.width) || !dimension(box.height) || !Number.isFinite(box.x) || !Number.isFinite(box.y)) throw Error('Original fixed map geometry is inconsistent. Existing connections are kept.')
+    this.byId.set(box.id, box); this.index.add(box)
   }
-  private *keys(box: CollaborationLayoutBounds) {
-    for (let x = Math.floor(box.x / 512); x <= Math.floor((box.x + box.width) / 512); x++)
-      for (let y = Math.floor(box.y / 512); y <= Math.floor((box.y + box.height) / 512); y++) yield `${x},${y}`
-  }
-  query(box: CollaborationLayoutBounds) {
-    if (!this.extent) return []
-    const x = Math.max(box.x, this.extent.x), y = Math.max(box.y, this.extent.y)
-    const clipped = { x, y, width: Math.min(box.x + box.width, this.extent.x + this.extent.width) - x, height: Math.min(box.y + box.height, this.extent.y + this.extent.height) - y }
-    if (clipped.width < 0 || clipped.height < 0) return []
-    const result = new Set<Obstacle>()
-    for (const key of this.keys(clipped)) for (const value of this.cells.get(key) ?? []) if (overlap(box, value)) result.add(value)
-    return [...result]
-  }
+  query(box: CollaborationLayoutBounds) { return this.index.query(box) }
 }
 
 /** Preserve established positions. Only new or genuinely colliding geometry needs a nearby slot. */
