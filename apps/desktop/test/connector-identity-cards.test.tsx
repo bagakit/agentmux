@@ -29,11 +29,32 @@ async function click(selector: string) {
 async function library() { await f.render(0, true); await ready('[data-mote-card-action="create"]') }
 async function create() {
   await library(); await act(async () => card().querySelector<HTMLButtonElement>('[data-mote-card-action="create"]')!.click())
+  await f.click('Sign in & continue')
   await vi.waitFor(() => expect(f.beginCount).toBe(1), { timeout: 3500 })
   await ready('[data-mote-enrollment-action="confirm-account"]')
   expect(f.creationCount).toBe(0)
+  const forward = f.connectionCalls.getMockImplementation()!
+  const held: Array<() => void> = []
+  let holdConfirmed = true
+  f.connectionCalls.mockImplementation(async (method, input) => {
+    const value = await forward(method, input)
+    if (holdConfirmed && method === 'connection.enrollment.inspect' && value.operation?.authentication?.stage === 'confirmed')
+      await new Promise<void>(resolve => held.push(resolve))
+    return value
+  })
   await f.click('Confirm this account'); expect(f.creationCount).toBe(0)
-  await f.click('Create this bot')
+  // Force the real background observer to overlap the explicit confirmation read.
+  // The explicit result finishes first; the observer returns after its effect was cancelled.
+  await vi.waitFor(async () => { await f.settle(); expect(held.length).toBe(2) }, { timeout: 6000 })
+  holdConfirmed = false
+  await act(async () => { held[0]!(); await new Promise(resolve => setTimeout(resolve, 20)) })
+  await act(async () => { held[1]!(); await new Promise(resolve => setTimeout(resolve, 20)) })
+  f.connectionCalls.mockImplementation(forward)
+  const account = f.parentCalls.mock.calls.findLast(([method, input]) => method === 'space.mote.connection.advance' && input.enrollment?.decision.kind === 'confirm-account')
+  expect(account).toBeTruthy()
+  const observed = await f.client.call('space.mote.connection.inspect', { operationId: account![1].operationId })
+  expect(observed.operation?.enrollment?.authentication?.stage, JSON.stringify(observed.operation)).toBe('confirmed')
+  await f.click('Create, configure & publish')
   await vi.waitFor(async () => { await f.settle(); expect(document.body.textContent).toContain('Original save confirmed') }, { timeout: 8000 })
   await f.click('Back to bot profile'); await ready('[data-mote-identity-unbind]')
 }
@@ -82,7 +103,7 @@ it('a replacement keeps the old identity until the same new application is saved
   await click('[data-mote-bot-create]'); await ready('[data-mote-bot-code]')
   expect((await f.preferences.read({ kind: 'connection', target: f.target() })).values!.connection).toEqual(old)
   expect(f.creationCount).toBe(1)
-  await ready('[data-mote-enrollment-action="confirm-account"]'); await f.click('Confirm this account'); await f.click('Create this bot')
+  await ready('[data-mote-enrollment-action="confirm-account"]'); await f.click('Confirm this account'); await f.click('Create, configure & publish')
   await vi.waitFor(async () => expect((await f.preferences.read({ kind: 'connection', target: f.target() })).values!.connection?.application.appId).not.toBe(old.application.appId), { timeout: 8000 })
   expect((await f.client.call('connection.ls', {})).connections.some(item => item.config.connectionId === old.connectionId)).toBe(true)
   expect(f.saves.mock.calls.some(([input]) => input.kind === 'connection' && input.values.connection === null)).toBe(false)
