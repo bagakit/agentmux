@@ -43,6 +43,11 @@ export function prepareDiscordPublication(operation: Readonly<PublicationOperati
   if (includeAgent) text += '\n' + localAgent
   const authors = p.kind === 'speech' && p.relay ? p.relay.sources.map(source => source.author.kind) : undefined
   const kinds = new Set(authors), human = !!authors?.length && authors.every(kind => kind === 'human')
+  const input = human && p.kind === 'speech' ? p.inputSubmission : undefined
+  const inputStatus = input ? ({ waiting: 'Waiting for the original Agent', stopped: 'Input waiting stopped',
+    'terminal-confirmed': 'Input bytes confirmed; Agent acceptance unconfirmed', admitted: 'Accepted by the original Agent; work completion unconfirmed',
+    'not-applied': 'Input not applied', unknown: 'Input result unknown' }[input.status]
+    + (input.observation === 'rejoin-needed' ? '\nInput observation needs reconnection' : '')) : undefined
   const relayTitle = authors ? (human ? 'User' : kinds.size > 1 ? 'Mixed authors' : kinds.has('external') ? 'External message'
     : kinds.has('agent') ? 'Agent input' : 'Unknown author') + ' · via amux' : undefined
   const heading = relayTitle ?? (p.kind === 'speech' && p.phase === 'final' ? 'Agent reply'
@@ -55,7 +60,8 @@ export function prepareDiscordPublication(operation: Readonly<PublicationOperati
       { type: 13, file: { url: 'attachment://' + file.name } }, ...buttons] }], attachments: [{ id: 0, filename: file.name }], allowed_mentions: { parse: [] }, ...(!mapping ? { nonce: discordNonce(operation.operationId), enforce_nonce: true } : {}) })
     return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId, request: { method: mapping ? 'PATCH' : 'POST', path, multipart: { payloadJson, files: [file] } } }
   }
-  const components = [{ type: 17, ...(human ? { accent_color: 0x2e8b57 } : {}), components: [{ type: 10, content }, ...buttons] }]
+  const components = [{ type: 17, ...(human ? { accent_color: 0x2e8b57 } : {}), components: [{ type: 10, content },
+    ...(inputStatus ? [{ type: 10, content: inputStatus }] : []), ...buttons] }]
   const body = JSON.stringify({ flags: 32768, components, allowed_mentions: { parse: [] }, ...(!mapping ? { nonce: discordNonce(operation.operationId), enforce_nonce: true } : {}) })
   return { adapterId: DISCORD_PUBLICATION.adapterId, renderVersion: DISCORD_PUBLICATION.renderVersion, requestKey: operation.operationId, request: { method: mapping ? 'PATCH' : 'POST', path, body, contentType: 'application/json' } }
 }
