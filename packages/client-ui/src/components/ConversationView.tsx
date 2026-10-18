@@ -1,3 +1,5 @@
+import { ConversationBodyWorkContext } from './ConversationProgressiveBody.js'
+import type { ConversationReadingGeometry } from '../lib/conversation-body-work.js'
 import { ConversationCoverage } from './ConversationCoverage.js'
 import { CapturedProcessRecord } from './CapturedProcessRecord.js'
 import { ConversationOriginalRecords, ConversationOriginalRecordContent } from './ConversationOriginalRecords.js'
@@ -31,6 +33,7 @@ export type ConversationReadActivity = {
 
 type Props = ReadingProps & {
   presentation?: ConversationPresentationPort
+  readingGeometry?: ConversationReadingGeometry
   readActivity?: ConversationReadActivity
   questionReplyRoute?: AgentCapabilities['asyncQuestionReply']
   questionReplyTarget?: { source: AgentSessionHistorySource; run: AgentMuxRunRef } | undefined
@@ -70,7 +73,7 @@ type Props = ReadingProps & {
 
 /** Continuous source-order reading over the committed page; no reader or independent body cache. */
 export const ConversationView = memo(function ConversationView({
-  presentation, page: acceptedPage, timeline, records: acceptedRecords, originalRecords: acceptedOriginals, coverage, onLocateRecord, renderCapturedRecord, expandSubmissions = false, readActivity, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary: acceptedBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions: acceptedInsertions, questionReplyRoute, questionReplyTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, onQuestionReply, renderQuestionNotice, ...reading
+  presentation, readingGeometry, page: acceptedPage, timeline, records: acceptedRecords, originalRecords: acceptedOriginals, coverage, onLocateRecord, renderCapturedRecord, expandSubmissions = false, readActivity, questionAnswerContext, sessionId, describeSpeaker, onContinue, locatedMessageKey, renderProcess, recordBoundary: acceptedBoundary, renderMessageActions, renderRecordActions, messageIdForRecord, showSource = false, insertions: acceptedInsertions, questionReplyRoute, questionReplyTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, onQuestionReply, renderQuestionNotice, ...reading
 }: Props) {
   const frame = useMemo(() => ({ records: acceptedRecords, originalRecords: acceptedOriginals ?? acceptedRecords,
     coverage: coverage ?? acceptedRecords[0]?.coverage ?? [], page: acceptedPage, recordBoundary: acceptedBoundary, insertions: acceptedInsertions }),
@@ -78,7 +81,8 @@ export const ConversationView = memo(function ConversationView({
   const sourceKey = JSON.stringify([reading.executionHostId, sessionId, timeline?.stream?.epoch])
   const boundaryRecord = acceptedRecords.find(record => record.original.kind === 'native' && record.rawId === acceptedBoundary?.beforeRecordId)
   const layout = useConversationRecordLayout(frame, sourceKey, { ...(boundaryRecord ? { beforeRecordId: boundaryRecord.presentationKey ?? boundaryRecord.id } : {}),
-    ...(acceptedInsertions ? { anchors: acceptedInsertions } : {}), active: reading.active !== false, ...(presentation ? { presentation, intent: presentation.intent } : {}) })
+    ...(acceptedInsertions ? { anchors: acceptedInsertions } : {}), active: reading.active !== false, ...(readingGeometry ? { geometry: readingGeometry } : {}), ...(presentation ? { presentation, intent: presentation.intent } : {}) })
+  const bodyScope = useMemo(() => ({ work: layout.bodyWork, active: reading.active !== false }), [layout.bodyWork, reading.active])
   const { records: describedRecords, page, recordBoundary, insertions } = layout
   const projection = layout
   const choiceScope = JSON.stringify([reading.executionHostId, sessionId, timeline?.stream?.epoch])
@@ -239,7 +243,7 @@ export const ConversationView = memo(function ConversationView({
       </div>
 
   }
-  return <section ref={layout.root} className="conversation-native-thread" aria-label="Conversation"
+  return <ConversationBodyWorkContext.Provider value={bodyScope}><section ref={layout.root} className="conversation-native-thread" aria-label="Conversation"
     data-native-provider={page?.source.providerId} data-native-source={describedRecords.some(record => record.original.kind === 'captured') || insertions?.length || !page ? undefined : JSON.stringify([page.source.providerId, page.source.nativeSessionId])}>
     <ConversationCoverage coverage={projection.coverage} {...(onLocateRecord ? { onLocate: onLocateRecord } : {})} />
     {layout.held ? <p className="conversation-metrics__notice" role="status">{layout.reason === 'anchor' ? '保留当前阅读位置，移开后更新消息。' : layout.reason === 'focus' ? '保留当前焦点，移开后更新消息。' : '保留选区，取消选择后更新已确认的消息关系。'}</p> : null}
@@ -252,7 +256,7 @@ export const ConversationView = memo(function ConversationView({
       {...(page ? { nativeSourceKey: JSON.stringify([page.source.providerId, page.source.nativeSessionId]) } : {})}
       {...(insertions ? { insertions } : {})}
       renderRecord={renderRecord} {...(renderProcess ? { renderProcess } : {})} {...(recordBoundary ? { recordBoundary } : {})} />
-  </section>
+  </section></ConversationBodyWorkContext.Provider>
 })
 
 function recordTitle(item: AgentSessionHistoryItem): string {

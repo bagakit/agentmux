@@ -1,3 +1,4 @@
+import { ConversationProgressiveBody, needsProgressiveText } from './ConversationProgressiveBody.js'
 import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionHistoryCollaboration, AgentSessionHistoryMessagePhase, AgentSessionHistoryQuestionAnswer, AgentSessionUserMessage, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
 import { AMUX_PROTOCOL_DEFINITIONS, parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import type { ConversationItemRef, ConversationSourceRecord } from '@agentmux/core/conversation'
@@ -404,7 +405,9 @@ export function ConversationMessage({
     </div></ContentCopyIntentContext.Provider>
   )
   function renderBody(contentId?: string): ReactNode {
-    return hasContent ? discloseBody(
+    return hasContent ? <ConversationProgressiveBody heavy={parts.some(part => part.kind === 'resource' || (part.kind === 'text' || part.kind === 'reasoning') && needsProgressiveText(part.text)
+      || part.kind === 'tool-call' && part.input !== undefined && needsProgressiveText(part.input)
+      || part.kind === 'tool-result' && needsProgressiveText(part.output))} reveal={located}>{discloseBody(
         <div ref={bodyRef} id={contentId} className="log-turn__body"
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
           {hasQuestionAnswers && firstTextIndex < 0 ? <ConversationQuestionReply visible={active} answers={questionAnswers!}
@@ -462,6 +465,6 @@ export function ConversationMessage({
           })}
           {files.length > 0 && openWorkspaceFile ? <ConversationFiles files={files} openFile={openWorkspaceFile} /> : null}
         </div>
-      ) : null
+      )}</ConversationProgressiveBody> : null
   }
 }

@@ -1,4 +1,7 @@
+import { markProgrammaticReadingScroll } from './reading-scroll.js'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useClientUiOwnerDocument } from '../platform.js'
+import { ConversationBodyWork, conversationReadingNode, conversationScrollParent, type ConversationReadingGeometry } from './conversation-body-work.js'
 import { conversationRecordId, conversationRevision } from '@agentmux/core/conversation'
 import type { ConversationRecord } from './conversation-records.js'
 import { conversationPresentationKey, projectConversationRecordSequence, type ConversationSequence, type ConversationSequenceInsertion } from './conversation-record-sequence.js'
@@ -38,7 +41,7 @@ export type ConversationPresentationPort = {
 }
 type Protection = 'selection' | 'focus' | 'anchor' | null
 function readingNode(node: HTMLElement): HTMLElement | null {
-  return node.dataset.conversationProcessKey ? node.querySelector<HTMLElement>('.wf-card--observation > .wf-head') : node
+  return conversationReadingNode(node)
 }
 function protection(root: HTMLElement | null, previous: ReadonlyMap<string, Placement>, incoming: ReadonlyMap<string, Placement>, preserveAnchor: boolean): Protection {
   const document = root?.ownerDocument, selection = document?.defaultView?.getSelection()
@@ -55,11 +58,7 @@ function protection(root: HTMLElement | null, previous: ReadonlyMap<string, Plac
   if (anchor && !incoming.has(anchor.key)) return 'anchor'
   return null
 }
-function scrollParent(root: HTMLElement | null): HTMLElement | null {
-  for (let node = root?.parentElement; node; node = node.parentElement)
-    if (node.clientHeight > 0 && node.scrollHeight > node.clientHeight) return node
-  return null
-}
+const scrollParent = conversationScrollParent
 function currentAnchor(root: HTMLElement | null) {
   const viewport = scrollParent(root)
   if (!viewport || !root) return null
@@ -77,9 +76,11 @@ function currentAnchor(root: HTMLElement | null) {
 /** One complete presentation transaction; pending data is always the current props.
  * It retains accepted frame references, never another reader or copied message body. */
 export function useConversationRecordLayout<T extends ConversationPresentationFrame>(frame: T, sourceKey: string, {
-  beforeRecordId, anchors = [], active = true, intent, presentation
-}: { beforeRecordId?: string; anchors?: readonly ConversationSequenceInsertion[]; active?: boolean; intent?: unknown; presentation?: ConversationPresentationPort } = {}) {
+  beforeRecordId, anchors = [], active = true, intent, presentation, geometry
+}: { beforeRecordId?: string; anchors?: readonly ConversationSequenceInsertion[]; active?: boolean; intent?: unknown; presentation?: ConversationPresentationPort; geometry?: ConversationReadingGeometry } = {}) {
   const root = useRef<HTMLElement>(null)
+  const [bodyWork] = useState(() => new ConversationBodyWork())
+  const ownerDocument = useClientUiOwnerDocument()
   const committed = useRef<{ source: string; frame: T; sequence: ConversationSequence; placements: Map<string, Placement>; intent: unknown } | null>(null)
   const [, changed] = useState(0)
   const pendingReason = useRef<Protection>(null)
@@ -96,6 +97,9 @@ export function useConversationRecordLayout<T extends ConversationPresentationFr
   const reason = prior && active && changedFrame ? protection(root.current, prior.placements, incoming, Boolean(anchor)) : null
   const held = reason !== null
   const accepted = held && prior ? prior : { source: sourceKey, frame, sequence, placements: incoming, intent }
+  useLayoutEffect(() => { bodyWork.connect(root.current, active, geometry) })
+  useLayoutEffect(() => { bodyWork.updateShells() }, [bodyWork, accepted.sequence, active, ownerDocument])
+  useLayoutEffect(() => () => bodyWork.disconnect(), [bodyWork])
   useLayoutEffect(() => {
     committed.current = accepted
     if (presentation) presentation.controller.current = {
@@ -113,7 +117,10 @@ export function useConversationRecordLayout<T extends ConversationPresentationFr
     const node = [...root.current?.querySelectorAll<HTMLElement>('[data-conversation-layout-key]') ?? []]
       .find(node => node.dataset.conversationLayoutKey === anchor.key)
     const target = node ? readingNode(node) : null
-    if (target) anchor.viewport.scrollTop += target.getBoundingClientRect().top - anchor.viewport.getBoundingClientRect().top - anchor.offset
+    if (target) {
+      const delta = target.getBoundingClientRect().top - anchor.viewport.getBoundingClientRect().top - anchor.offset
+      if (delta) { anchor.viewport.scrollTop += delta; markProgrammaticReadingScroll(anchor.viewport) }
+    }
   })
   useEffect(() => {
     const ownerDocument = root.current?.ownerDocument
@@ -129,5 +136,5 @@ export function useConversationRecordLayout<T extends ConversationPresentationFr
     return () => { ownerDocument.removeEventListener('selectionchange', update); ownerDocument.removeEventListener('focusout', update); viewport?.removeEventListener('scroll', update) }
   }, [held, reason, document, active, presentation?.pending, presentation?.watchSelection, presentation?.onRelease])
   useLayoutEffect(() => () => { if (presentation) presentation.controller.current = null }, [presentation?.controller])
-  return { ...accepted.frame, sequence: accepted.sequence, root, held: held || Boolean(presentation?.pending), reason: reason ?? (presentation?.pending ? pendingReason.current : null) }
+  return { ...accepted.frame, sequence: accepted.sequence, root, bodyWork, held: held || Boolean(presentation?.pending), reason: reason ?? (presentation?.pending ? pendingReason.current : null) }
 }

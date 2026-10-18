@@ -382,22 +382,6 @@ export function ActivityView({
       markProgrammaticReadingScroll(feedEl)
     }
   }, [readingWindow.error, readingWindow.newerOutside, feedEl, conversationReading?.enabled])
-  useLayoutEffect(() => {
-    if (!readingEnabled || !feedEl) return
-    const content = logRef.current
-    if (!content) return
-    let active = true
-    const observer = new ResizeObserver(() => {
-      if (!active) return
-      if (conversationReading?.enabled && (readingWindow.historical || !followRef.current.following) && anchorRef.current) {
-        restoreReadingPosition(feedEl, anchorRef.current); markProgrammaticReadingScroll(feedEl)
-      }
-      syncTailPosition()
-    })
-    observer.observe(content)
-    observer.observe(feedEl)
-    return () => { active = false; observer.disconnect() }
-  }, [feedEl, conversationReading?.enabled, readingWindow.historical, readingEnabled])
   useEffect(() => {
     if (!conversationReading?.enabled || !conversationReading.opened || !conversationReading.onClose) return
     returnRef.current?.focus({ preventScroll: true })
@@ -967,6 +951,11 @@ export function ActivityView({
         tools={<>{collapseTraces}{findTrigger}{renderReadingTools?.(readingEnabled, revealLoadedRecord)}</>} /> : undefined)}
       <div ref={logRef}>
       <ConversationView
+        readingGeometry={{ viewport: () => feedEl, content: () => logRef.current,
+          following: () => !readingWindow.historical && followRef.current.following, pinToBottom,
+          captureAnchor: () => { if (feedEl) anchorRef.current = captureReadingAnchor(feedEl) },
+          restoreAnchor: () => { if (feedEl && anchorRef.current) { restoreReadingPosition(feedEl, anchorRef.current); markProgrammaticReadingScroll(feedEl) } },
+          onLayout: syncTailPosition }}
         presentation={{ controller: presentation, pending: readingWindow.held, onRelease: readingWindow.showLatestAutomatically,
           watchSelection: readingWindow.newerOutside && !readingWindow.historical && followRef.current.following,
           intent: readingWindow.presentationIntent }}

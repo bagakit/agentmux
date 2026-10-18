@@ -1,3 +1,4 @@
+import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
 import type { ConversationPresentationController } from '@agentmux/client-ui/use-conversation-record-layout'
 import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
@@ -58,9 +59,6 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     const change = onContentChange(follow.current, { itemCount: reading.page?.items.length ?? reading.timeline?.items.length ?? 0, lastItemId: tail?.id ?? null, lastItemLength: tail ? JSON.stringify(tail).length : 0 })
     follow.current = change.state
     if (change.scrollToBottom && !reading.olderWindow) node.scrollTop = node.scrollHeight
-    const resize = new ResizeObserver(() => { if (follow.current.following && !reading.olderWindow) node.scrollTop = node.scrollHeight })
-    for (const child of node.children) resize.observe(child)
-    return () => resize.disconnect()
   }, [reading.page, reading.timeline, reading.olderWindow, visible])
   const [local] = useState(createLocalDrafts)
   const drafts = useRef(local.drafts)
@@ -253,7 +251,8 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       </details>}
       <div ref={feed} className="mobile-conversation__reading" onScroll={event => {
         const node = event.currentTarget
-        follow.current = onScroll(follow.current, { scrollTop: node.scrollTop, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight })
+        const programmatic = consumeProgrammaticReadingScroll(node)
+        follow.current = programmatic === 'restore' ? { ...follow.current, lastScrollTop: node.scrollTop } : onScroll(follow.current, { scrollTop: node.scrollTop, scrollHeight: node.scrollHeight, clientHeight: node.clientHeight })
         setJump(shouldShowJumpToLatest(follow.current))
       }}>
         {(reading.page?.nextCursor || reading.capturedHasMore) && <button className="mobile-reading-action" disabled={reading.reading} onClick={() => { follow.current.following = false; void reading.older() }}>更早消息</button>}
@@ -266,7 +265,9 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         {workingObservedAt !== undefined ? <p className="mobile-active-state" role="status" data-activity-current={currentActivity}
           title={`最后观察：${new Date(workingObservedAt).toLocaleString()}`}><SemanticIcon name="status.presence-working" size={5} />{currentActivity ? '正在执行' : '最近观察：执行中'}</p> : null}
         {agentSessionId ? <>
-          <ConversationView presentation={{ controller: presentation, pending: reading.held, onRelease: reading.acceptHeld, intent: presentationIntent.current }} page={reading.page} readActivity={reading.readActivity} expandSubmissions={Boolean(reading.readError)} timeline={reading.timeline ?? undefined} questionAnswerContext={reading.answerContext} records={reading.projection?.records ?? []} originalRecords={reading.projection?.originalRecords ?? []} coverage={reading.projection?.timeline.coverage ?? []} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
+          <ConversationView readingGeometry={{ viewport: () => feed.current,
+            following: () => follow.current.following && !reading.olderWindow,
+            pinToBottom: () => { if (feed.current) { feed.current.scrollTop = feed.current.scrollHeight; markProgrammaticReadingScroll(feed.current) } } }} presentation={{ controller: presentation, pending: reading.held, onRelease: reading.acceptHeld, intent: presentationIntent.current }} page={reading.page} readActivity={reading.readActivity} expandSubmissions={Boolean(reading.readError)} timeline={reading.timeline ?? undefined} questionAnswerContext={reading.answerContext} records={reading.projection?.records ?? []} originalRecords={reading.projection?.originalRecords ?? []} coverage={reading.projection?.timeline.coverage ?? []} showInputSource={false} sessionId={agentSessionId} describeSpeaker={describeSpeaker}
             renderProcess={props => <NativeProcessObservation {...props} compact />}
             questionReplyState={target => {
               const state = mobileQuestionReplyState(local, agentSessionId, target), original = state?.original

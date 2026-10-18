@@ -440,3 +440,12 @@
 .conversation-original-record { margin: var(--sp-1) var(--sp-4); min-width: 0; max-width: calc(100% - 2 * var(--sp-4)); color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; overflow-wrap: anywhere; }
 .conversation-original-record > summary { cursor: pointer; }
 .conversation-native-thread__record:has(> .log-turn[data-message-direction='incoming']) > .conversation-original-record { width: fit-content; margin-inline-start: auto; }
+
+/* Stable body shell. Only its first heavy subtree is scheduled; read content stays mounted. */
+.conversation-progressive-body { display: contents; }
+.conversation-progressive-body__placeholder { min-height: 80px; display: flex; align-items: center; user-select: none; }
+.conversation-progressive-body__placeholder button { border: 0; border-radius: var(--radius-sm); padding: var(--sp-1) var(--sp-2); background: var(--surface-2); color: var(--text-3); font: inherit; font-size: var(--fs-meta); cursor: pointer; }
+.conversation-progressive-body__placeholder button:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
+
+.log-turn__system-body { display: contents; }
+.log-turn__system-body[hidden] { display: none; }

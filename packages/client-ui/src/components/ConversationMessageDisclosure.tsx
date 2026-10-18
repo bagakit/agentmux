@@ -41,6 +41,6 @@ export function ConversationMessageDisclosure({ preview, reveal, children, summa
       {!open && preview ? <span className="message-disclosure__preview">{preview}{summary ? '' : '…'}</span> : null}
       <span className="message-disclosure__action"><SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />{summary ? open ? '收起原文' : '展开原文' : open ? 'Collapse message' : 'Show full message'}</span>
     </summary>
-    {summary ? <div ref={body} hidden={!open} inert={!open}>{open || presented ? children : null}</div> : open ? children : null}
+    <div ref={summary ? body : undefined} className="message-disclosure__body" hidden={!open} inert={!open}>{open || presented ? children : null}</div>
   </details>
 }
