@@ -16,15 +16,13 @@ function ProtocolExamples({ entry }: { entry: AgentMuxProtocolCatalogEntry }) {
   return <ClientUiProvider platform={platform}>
     {entry.examples.map((example, index) => <section key={index} className="amux-protocols__example" aria-label={example.label}>
       <h4>{example.label}</h4>
-      <span className="amux-protocols__preview-label">Rendered message</span>
-      <div className="amux-protocols__preview" data-protocol-example={entry.id}>
+      <div className="amux-protocols__comparison">
+      <div className="amux-protocols__wire"><span className="amux-protocols__preview-label">Original wire</span><pre>{example.wire}</pre></div>
+      <div className="amux-protocols__rendered"><span className="amux-protocols__preview-label">Rendered message</span><div className="amux-protocols__preview" data-protocol-example={entry.id}>
         <ConversationMessage content={example.wire} speaker={{ role: 'human', id: 'protocol-example' }} name="Example input"
           messageId={`protocol-example:${entry.id}:${index}`} compact expandedContent />
+      </div></div>
       </div>
-      <details className="amux-protocols__wire">
-        <summary>Original wire</summary>
-        <pre>{example.wire}</pre>
-      </details>
     </section>)}
   </ClientUiProvider>
 }
@@ -35,10 +33,10 @@ function ProtocolRow({ entry, active, rowRef }: { entry: AgentMuxProtocolCatalog
     onToggle={event => setOpen(event.currentTarget.open)}>
     <summary>
       <SemanticIcon name="navigation.disclosure" size={13} aria-hidden="true" />
-      <span><strong>{entry.title}</strong><small>{entry.description}</small></span>
-      <code>{entry.form}</code>
+      <span><strong>{entry.title}</strong><code>{entry.form}</code></span>
     </summary>
     {open && active ? <div className="amux-protocols__body">
+      <p className="amux-protocols__description">{entry.description}</p>
       <ProtocolExamples entry={entry} />
     </div> : null}
   </details>

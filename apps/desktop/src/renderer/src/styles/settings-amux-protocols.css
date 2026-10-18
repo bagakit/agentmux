@@ -1,35 +1,39 @@
 .amux-protocols { gap: 0; }
-.amux-protocols__list { min-width: 0; border-bottom: 1px solid var(--line-soft); }
-.amux-protocols__row { min-width: 0; border-top: 1px solid var(--line-soft); }
-.amux-protocols__row > summary { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-4) 0; cursor: pointer; list-style: none; }
-.amux-protocols__row > summary::-webkit-details-marker { display: none; }
-.amux-protocols__row > summary > svg { flex: 0 0 auto; margin-top: 3px; color: var(--text-3); transition: transform var(--dur-fast); }
-.amux-protocols__row[open] > summary > svg { transform: rotate(90deg); }
-.amux-protocols__row > summary > span { min-width: 0; flex: 1; display: grid; gap: var(--sp-1); }
-.amux-protocols__row strong { color: var(--text); font-size: var(--fs-body); font-weight: 600; overflow-wrap: anywhere; }
-.amux-protocols__row small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
-.amux-protocols__row > summary > code { flex: 0 0 auto; color: var(--text-3); font: var(--fs-micro)/1.6 var(--font-mono); }
-.amux-protocols__body { min-width: 0; padding: 0 0 var(--sp-4) var(--sp-5); }
-.amux-protocols h4 { margin: 0 0 var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; }
-.amux-protocols__wire { min-width: 0; margin: var(--sp-3) 0 0; }
-.amux-protocols__wire > summary { color: var(--text-3); font-size: var(--fs-meta); cursor: pointer; }
-.amux-protocols__wire > pre { margin: var(--sp-2) 0 0; padding: var(--sp-3); border-radius: var(--radius-sm); color: var(--text-2); background: var(--surface-1); font: var(--fs-meta)/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
-.amux-protocols__example { min-width: 0; margin-top: var(--sp-4); }
-.amux-protocols__preview { min-width: 0; padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); overflow-wrap: anywhere; }
-.amux-protocols__preview pre { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
-.amux-protocols__preview .log-turn { min-width: 0; }
-@media (prefers-reduced-motion: reduce) {
-  .amux-protocols__row > summary > svg { transition: none; }
-}
-
 .amux-protocols__intro { display: flex; align-items: flex-start; gap: var(--sp-5); padding-bottom: var(--sp-4); }
 .amux-protocols__intro .settings-group-note { flex: 1; margin: 0; max-width: 74ch; font-size: var(--fs-meta); line-height: 1.6; }
 .amux-protocols__intro > button { flex: none; }
-.amux-protocols__preview-label { display: block; margin-bottom: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
-.amux-protocols__row > summary:focus-visible, .amux-protocols__wire > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; border-radius: var(--radius-sm); }
+.amux-protocols__list { min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-md); overflow: hidden; }
+.amux-protocols__row { min-width: 0; border-top: 1px solid var(--line-soft); }
+.amux-protocols__row:first-child { border-top: 0; }
+.amux-protocols__row[open] { background: var(--surface-1); }
+.amux-protocols__row > summary { display: flex; align-items: center; gap: var(--sp-3); padding: var(--sp-3) var(--sp-4); cursor: pointer; list-style: none; }
+.amux-protocols__row > summary::-webkit-details-marker { display: none; }
+.amux-protocols__row > summary > svg { flex: none; color: var(--text-3); transition: transform var(--dur-fast); }
+.amux-protocols__row[open] > summary > svg { transform: rotate(90deg); }
+.amux-protocols__row > summary > span { min-width: 0; flex: 1; display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+.amux-protocols__row strong { color: var(--text); font-size: var(--fs-body); font-weight: 600; overflow-wrap: anywhere; }
+.amux-protocols__row summary code { flex: none; color: var(--text-3); font: var(--fs-micro)/1.6 var(--font-mono); }
+.amux-protocols__row > summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: -3px; border-radius: var(--radius-sm); }
+.amux-protocols__body { min-width: 0; padding: 0 var(--sp-4) var(--sp-4); }
+.amux-protocols__description { margin: 0 0 var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+.amux-protocols__example { min-width: 0; margin-top: var(--sp-4); }
+.amux-protocols h4 { margin: 0 0 var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); font-weight: 600; }
+.amux-protocols__comparison { display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); overflow: hidden; }
+.amux-protocols__wire, .amux-protocols__rendered { min-width: 0; padding: var(--sp-3); }
+.amux-protocols__wire { background: var(--surface-1); border-right: 1px solid var(--line); }
+.amux-protocols__wire > pre { margin: 0; color: var(--text-2); font: var(--fs-meta)/1.65 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.amux-protocols__preview-label { display: block; margin-bottom: var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
+.amux-protocols__preview { min-width: 0; overflow-wrap: anywhere; }
+.amux-protocols__preview pre { max-width: 100%; white-space: pre-wrap; overflow-wrap: anywhere; }
+.amux-protocols__preview .log-turn { min-width: 0; }
+@media (prefers-reduced-motion: reduce) { .amux-protocols__row > summary > svg { transition: none; } }
+@media (max-width: 900px) {
+  .amux-protocols__comparison { grid-template-columns: minmax(0, 1fr); }
+  .amux-protocols__wire { border-right: 0; border-bottom: 1px solid var(--line); }
+}
 @media (max-width: 620px) {
   .amux-protocols__intro { flex-direction: column; gap: var(--sp-3); }
-  .amux-protocols__row > summary { flex-wrap: wrap; gap: var(--sp-2); }
-  .amux-protocols__row > summary > code { margin-left: calc(13px + var(--sp-2)); overflow-wrap: anywhere; white-space: normal; flex-basis: calc(100% - 13px - var(--sp-2)); }
-  .amux-protocols__body { padding-left: 0; }
+  .amux-protocols__row > summary { padding: var(--sp-3); gap: var(--sp-2); }
+  .amux-protocols__row > summary > span { gap: var(--sp-2); }
+  .amux-protocols__body { padding: 0 var(--sp-3) var(--sp-3); }
 }
