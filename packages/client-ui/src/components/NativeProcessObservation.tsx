@@ -28,9 +28,25 @@ function participantKey(source: AgentSessionHistorySource, occurrences: Map<stri
 
 function recordTime(item: AgentSessionHistoryItem, origin?: number): WorkflowRecordedTime | undefined {
   if (item.startedAt === undefined) return undefined
-  const time = describeActivityRecordTime(item.startedAt, item.completedAt ?? item.startedAt, origin ?? Number.NaN)
+  return recordSpan(item.startedAt, item.completedAt ?? item.startedAt, origin)
+}
+
+function recordSpan(from: number, to: number, origin?: number): WorkflowRecordedTime {
+  const time = describeActivityRecordTime(from, to, origin ?? Number.NaN)
   return { ...time, offset: `Observed record span, not execution duration · ${origin === undefined
     ? 'Offset not recorded' : time.offset.replace('from start', 'from this recorded group')}` }
+}
+
+function groupRecordTime(records: ConversationProcessProps['records']): WorkflowRecordedTime | undefined {
+  let first: number | undefined, last = -Infinity
+  for (const { original } of records) {
+    const from = original.kind === 'native' ? original.item.startedAt : original.item.createdAt
+    if (from === undefined) return undefined
+    const to = original.kind === 'native' ? original.item.completedAt ?? from : original.item.updatedAt
+    first ??= from
+    last = Math.max(last, to)
+  }
+  return first === undefined ? undefined : recordSpan(first, last)
 }
 
 /** Read-only observations over Core records. A native reference is never a Desktop Session. */
@@ -50,10 +66,7 @@ export function NativeProcessObservation({ id, records: sourceRecords, entries, 
     : states.every(state => state === 'complete') ? 'complete' : undefined
   const status = nativeOnly ? recordedStepStatus ?? (metrics?.metrics.status === 'completed' ? 'complete' : metrics?.metrics.status) : undefined
   const first = items[0]
-  const last = items.at(-1)
-  const recordedTime = nativeOnly && first && last && items.every(item => item.startedAt !== undefined) ? recordTime({
-    ...first, completedAt: last.completedAt ?? last.startedAt!
-  }) : undefined
+  const recordedTime = groupRecordTime(records)
   return <div className={compact ? 'native-process-observation native-process-observation--compact' : 'native-process-observation'}><WorkflowCard compact={compact} observation={{ id, label: metrics ? conversationMetricsLabel(metrics) : compact ? '执行过程' : 'Process', stepCount: records.length, countUnit: 'records',
     ...(metrics ? { metrics: <ConversationMetricsInline observation={metrics} /> } : {}),
     ...(status ? { status } : {}), ...(recordedTime ? { recordedTime } : {}) }}
