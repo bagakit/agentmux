@@ -98,7 +98,19 @@ app.whenReady().then(async () => {
     })()`)
     const overview = async label => {
       if (await read(`Boolean(document.querySelector('.collaboration-inspector:not([hidden])'))`)) await click('[aria-label="Close map details"]')
-      await move('[aria-label="Overview"]'); await until('original transient Reader departed', () => read(`!document.querySelector('.agent-information-reader:not([data-pinned])')`)); const readCount=(await facts()).reads.length
+      await move('[aria-label="Overview"]'); await until('original transient Reader departed', () => read(`!document.querySelector('.agent-information-reader:not([data-pinned])')`))
+      // Observe the preceding view until its original peek release and debounced
+      // visible-demand report have converged. This neither requests nor prewarms
+      // history. Only the subsequent actual Overview action owns the zero-read budget.
+      const previousView = () => read(`(()=>{const state=window.graphCapture.facts(),world=window.graphCapture.world(),geometry=new Map(world.geometry.map(box=>[box.id,box])),renderer=document.querySelector('.collaboration-map .react-flow__renderer'),r=renderer.getBoundingClientRect(),viewport={x:r.x,y:r.y,width:r.width,height:r.height},visibleSubjects=[...document.querySelectorAll('.collaboration-map [data-collaboration-agent]')].flatMap(element=>{const box=element.getBoundingClientRect(),node=element.closest('.react-flow__node'),original=geometry.get(node?.dataset.id);if(!original||box.width<=0||box.height<=0||box.right<=r.left||box.left>=r.right||box.bottom<=r.top||box.top>=r.bottom)return[];return[{subject:element.dataset.collaborationAgent,nodeId:node.dataset.id,world:original,screen:{x:box.x,y:box.y,width:box.width,height:box.height}}]});return{at:performance.now(),camera:world.camera,viewport,visibleSubjects,reads:state.reads,readingIndicatorVisible:Boolean(document.querySelector('[aria-label="Reading sources"]')),progress:Boolean(document.querySelector('.collaboration-canvas__progress'))}})()`)
+      const admitted = await previousView(), samples = [admitted]; let stable = 0
+      await until('preceding original visible demand settled', async () => {
+        await pause(150); const current=await previousView(), previous=samples.at(-1)
+        stable=!current.progress&&current.camera===previous.camera&&['x','y','width','height'].every(key=>current.viewport[key]===previous.viewport[key])&&current.reads.length===previous.reads.length ? stable+1 : 0
+        samples.push(current); return stable>=3
+      })
+      const settled=samples.at(-1), readCount=settled.reads.length
+      ;(result.overviewSettlements ??= []).push({label,readsBefore:admitted.reads.length,readsAfter:readCount,addedReads:settled.reads.slice(admitted.reads.length),samples:samples.map(({reads,...sample},index)=>({...sample,readCount:reads.length,addedReads:reads.slice(index?samples[index-1].reads.length:reads.length)}))})
       await click('[aria-label="Overview"]'); await pause(350); await until('original overview projection', () => read(`document.querySelectorAll('.collaboration-area[data-overview="true"]').length>0&&!document.querySelector('.collaboration-canvas__progress')`))
       const observation=await read(`({camera:document.querySelector('.collaboration-map .react-flow__viewport').getAttribute('style'),fullCards:document.querySelectorAll('.collaboration-map .focus-context[data-session-id]').length,agentLabels:document.querySelectorAll('.collaboration-agent[data-overview="true"] strong').length,areas:[...document.querySelectorAll('.collaboration-area__summary')].map(e=>({label:e.getAttribute('aria-label'),width:e.getBoundingClientRect().width,height:e.getBoundingClientRect().height})),paths:document.querySelectorAll('.collaboration-map .react-flow__edge-path').length})`)
       // Boxes commit before route completion; a later route job may supersede the original job.
