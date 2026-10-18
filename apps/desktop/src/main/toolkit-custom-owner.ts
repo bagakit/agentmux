@@ -573,6 +573,7 @@ export class CustomToolkitOwner {
       }
       const definition = execution.admission.definition
       const env = { ...this.args.env }
+      delete env.ELECTRON_RUN_AS_NODE
       delete env.AGENTMUX_TOOLKIT_RESULT_PATH; delete env.AGENTMUX_TOOLKIT_RESULT_TOKEN
       const intent = retained ? this.parseCreateIntent(execution.tool.createIntent, execution.admission, false) : null
       if (retained && !intent) throw new AgentMuxError('Original TUI creation intent is missing. The original request and outcome remain unconfirmed.', 'CONTROL_PROTOCOL_ERROR')
