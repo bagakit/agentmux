@@ -11,15 +11,16 @@ import { MobileConversationSurface } from '../src/conversation/MobileConversatio
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, deferred, editor, fixture, history, mount, mounted, paste } from './conversation-fixture'
+import { installConversationReading } from './conversation-reading-fixture'
 
 const connection = { state: 'connected' as const, message: '原 Host' }
 const STORAGE = 'agentmux-mobile-workface-v1'
 const closeActual: Array<() => Promise<unknown>> = []
-beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
+beforeEach(async () => { vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', ''); localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => {
   for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }
   for (const close of closeActual.splice(0).reverse()) await close()
-  document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs()
 })
 function message(id = 'session-original', text = '原生终端实际提交的正文', record = 'original-input'): AgentSessionUserMessage {
   return { id: `native:codex:native-${id}:${record}`, rawId: record, agentSessionId: id,
@@ -34,6 +35,7 @@ function page(input: AgentSessionHistoryReadInput, messages: AgentSessionUserMes
 }
 function consumer() {
   const f = fixture(), read = vi.fn<AgentMuxHostedClient['readAgentSessionHistory']>(), resource = vi.fn<AgentMuxHostedClient['sessionHistoryResource']>()
+  installConversationReading(f)
   read.mockImplementation(async input => page(input, input.source === 'native' ? [message(input.agentSessionId)] : []))
   Object.assign(f.client, { readAgentSessionHistory: read, sessionHistoryResource: (id: string, input: Parameters<AgentMuxHostedClient['sessionHistoryResource']>[1]) => {
     parseSessionHistoryResourceOptions(input)
@@ -237,6 +239,8 @@ describe('Mobile input history consumes the original shared reader and draft own
 
   it('reads and refills original Provider history through the actual Unix Hosted SDK and Core while Runtime remains untouched', async () => {
     const f = await createHostedHistoryFixture('claude', 352); closeActual.push(() => f.dispose())
+    // This fixture owns history only; activity observation is independently unavailable.
+    vi.spyOn(f.client, 'statusAgent').mockRejectedValue(new Error('Declared unavailable Runtime activity observation'))
     const view = await mount(<MobileConversationSurface client={f.client} agentSessionId={f.session.agentSessionId}
       connection={connection} platform={createBrowserPlatform()} />)
     await vi.waitFor(() => expect(view.element.querySelector('[data-native-record-id]')).not.toBeNull())
@@ -256,6 +260,8 @@ describe('Mobile input history consumes the original shared reader and draft own
 
   it('expands the original actual Hosted query budget for a large captured record and copies and fills it completely', async () => {
     const f = await createHostedHistoryFixture(); closeActual.push(() => f.dispose())
+    // The actual history SDK remains connected; this test supplies no Runtime activity owner.
+    vi.spyOn(f.client, 'statusAgent').mockRejectedValue(new Error('Declared unavailable Runtime activity observation'))
     const reads = vi.spyOn(f.ownerClient, 'readAgentSessionHistory')
     const text = 'budget needle · 原记录正文\n' + '完整大段文字🙂'.repeat(5000)
     await f.store.applyTimelineMutation({ type: 'append', agentSessionId: f.session.agentSessionId, item: f.captured(99, text) })

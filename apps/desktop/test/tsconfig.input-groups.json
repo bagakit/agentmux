@@ -1,0 +1,5 @@
+{
+  "extends": "../tsconfig.test.json",
+  "include": ["../src/renderer/src/global.d.ts", "input-groups.test.tsx", "vitest.input-groups.config.mts"],
+  "compilerOptions": { "incremental": false }
+}
