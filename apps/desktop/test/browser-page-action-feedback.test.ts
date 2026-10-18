@@ -1,4 +1,4 @@
-const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
+const { fixturePath: _hygiene_fixturePath, fixtureFileUrl: _hygiene_fixtureFileUrl } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { EventEmitter } from 'node:events'
@@ -6,7 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
 import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../src/shared/browser-agent-control.js'
 
-const native = vi.hoisted(() => ({ views: [] as any[], mode: 'click', key: undefined as string | undefined, onFeedback: undefined as undefined | (() => void), onWaiting: undefined as undefined | (() => Promise<void>), displayFails: false, displayThrows: false, displayAllThrows: false, observe: undefined as undefined | (() => Promise<unknown>), takeover: undefined as undefined | (() => void), deferredCloseId: undefined as number | undefined }))
+const native = vi.hoisted(() => ({ views: [] as any[], mode: 'click', key: undefined as string | undefined, onFeedback: undefined as undefined | (() => void), onWaiting: undefined as undefined | (() => Promise<void>), displayFails: false, displayThrows: false, displayAllThrows: false, observe: undefined as undefined | (() => Promise<unknown>), takeover: undefined as undefined | (() => void), deferredCloseId: undefined as number | undefined,
+  nextLoadURL: undefined as undefined | ((contents: any, url: string) => Promise<void>) }))
 vi.mock('../src/main/browser-page-dispatch.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/main/browser-page-dispatch.js')>()
   return { ...actual, createBrowserPageDispatch: (...args: Parameters<typeof actual.createBrowserPageDispatch>) => {
@@ -98,7 +99,11 @@ vi.mock('electron', async () => {
       return Promise.resolve(!(native.displayFails && running))
     }
     executeJavaScript = vi.fn(async (_code: string) => true)
-    async loadURL(url: string) { this.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url }); this.url = url; this.emit('did-navigate', {}, url); this.emit('dom-ready'); this.emit('did-finish-load'); this.emit('did-stop-loading') }
+    async loadURL(url: string) {
+      const load = native.nextLoadURL; native.nextLoadURL = undefined
+      if (load) await load(this, url)
+      this.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url }); this.url = url; this.emit('did-navigate', {}, url); this.emit('dom-ready'); this.emit('did-finish-load'); this.emit('did-stop-loading')
+    }
     close() { if (this.id !== native.deferredCloseId) this.finishClose() }
     finishClose() { if (this.destroyed) return; this.destroyed = true; this.focused = false; this.emit('destroyed') }
   }
@@ -129,20 +134,24 @@ afterEach(async () => {
     expect(view.webContents.displays.filter((call: any) => call.family === 'unknown')).toEqual([])
   }
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
-  native.views.length = 0; native.mode = 'click'; native.key = undefined; native.onFeedback = undefined; native.onWaiting = undefined; native.displayFails = false; native.displayThrows = false; native.displayAllThrows = false; native.observe = undefined; native.takeover = undefined; native.deferredCloseId = undefined
+  native.views.length = 0; native.mode = 'click'; native.key = undefined; native.onFeedback = undefined; native.onWaiting = undefined; native.displayFails = false; native.displayThrows = false; native.displayAllThrows = false; native.observe = undefined; native.takeover = undefined; native.deferredCloseId = undefined; native.nextLoadURL = undefined
 })
 const actionPayloads = (contents: any, start = 0): any[] => contents.displays.slice(start).filter((call: any) => call.family === 'action').map((call: any) => call.payload)
 const controlPayloads = (contents: any): any[] => contents.displays.filter((call: any) => call.family === 'control').map((call: any) => call.payload)
-async function managerFixture(preferences?: () => BrowserAgentControlPreferences) {
+async function managerFixture(preferences?: () => BrowserAgentControlPreferences, options: { nativeVisible?: boolean } = {}) {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-action-feedback-source-")); roots.push(root)
   const children: any[] = [], events: any[] = []
+  const rendererUrl = _hygiene_fixtureFileUrl('app/renderer/index.html')
+  const frame = { url: rendererUrl, parent: null, processId: 1, frameToken: 'original-renderer-frame', isDestroyed: () => false }
   const window = Object.assign(new EventEmitter(), { isVisible: () => true, isMinimized: () => false, getContentBounds: () => ({ x: 0, y: 0, width: 1000, height: 700 }), isFocused: () => true,
     contentView: { get children() { return [...children] }, addChildView: (view: any, index?: number) => {
       const previous = children.indexOf(view)
       if (previous >= 0) children.splice(previous, 1)
       children.splice(index ?? children.length, 0, view)
     }, removeChildView: (view: any) => { const index = children.indexOf(view); if (index >= 0) children.splice(index, 1) } },
-    isDestroyed: () => false, webContents: Object.assign(new EventEmitter(), { isDestroyed: () => false, getZoomFactor: () => 1, beginFrameSubscription: vi.fn(), endFrameSubscription: vi.fn(),
+    isDestroyed: () => false, webContents: Object.assign(new EventEmitter(), { isDestroyed: () => false, getURL: () => rendererUrl, mainFrame: frame,
+      session: Object.assign(new EventEmitter(), { setDisplayMediaRequestHandler: vi.fn() }),
+      getZoomFactor: () => 1, beginFrameSubscription: vi.fn(), endFrameSubscription: vi.fn(),
       capturePage: vi.fn(async () => ({ isEmpty: () => false, toPNG: () => Buffer.from('original Renderer chrome') })),
       send: (_name: string, e: any) => events.push(structuredClone(e)) }) })
   const manager = new BrowserViewManager(window as never, { defaultProfileId: () => 'default', resolvePartition: () => 'persist:feedback' },
@@ -153,10 +162,180 @@ async function managerFixture(preferences?: () => BrowserAgentControlPreferences
   const source = children.find(view => view.webContents.getURL() === 'https://generic.invalid/one')
   await manager.create('sibling', 'https://generic.invalid/two', 'workspace')
   const sibling = children.find(view => view.webContents.getURL() === 'https://generic.invalid/two')
-  manager.setBounds('browser-one', { x: 0, y: 0, width: 500, height: 400 })
+  if (options.nativeVisible !== false) manager.setBounds('browser-one', { x: 0, y: 0, width: 500, height: 400 })
   const siblingBefore = { scripts: [...sibling.webContents.scripts], commands: [...sibling.webContents.commands] }
-  return { window, manager, contents: source.webContents, sibling: sibling.webContents, siblingBefore, children, events }
+  const register = (id: string, visible = true) => manager.registerPresentation(window.webContents as never, frame as never, {
+    browserId: 'browser-one', occurrence: { presentationId: id,
+      location: { displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'region' } },
+    geometry: visible ? { visible: true, bounds: { x: 20, y: 30, width: 500, height: 400 } } : { visible: false }
+  }, { processId: frame.processId, frameToken: frame.frameToken })
+  return { window, manager, contents: source.webContents, source, frame, register, sibling: sibling.webContents, siblingBefore, children, events }
 }
+
+describe('Browser control decoration through actual Main ownership and presentation callbacks', () => {
+  it('decorates the first visible Return before any operation and reads saved preferences without starting work', async () => {
+    let preferences = { ...DEFAULT_BROWSER_AGENT_CONTROL }
+    const f = await managerFixture(() => preferences)
+    const original = f.manager.target('browser-one')!, commands = [...f.contents.commands]
+    expect(original.control).toMatchObject({ owner: 'human', activeOperationId: null })
+    expect(controlPayloads(f.contents).filter(payload => payload.active)).toEqual([])
+
+    const returned = f.manager.returnControl('browser-one')
+    expect(returned.control).toMatchObject({ owner: 'agent', activeOperationId: null })
+    await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)).toMatchObject({
+      browserId: 'browser-one', ownerId: expect.any(String), navigationId: original.navigationId, active: true
+    }))
+    const first = controlPayloads(f.contents).at(-1)
+    expect(first.ownerId.length).toBeGreaterThan(0); expect(first.operationId).toBeUndefined()
+    expect(returned.activity?.operation).toBeNull()
+    expect(actionPayloads(f.contents)).toEqual([]); expect(f.contents.actions).toBe(0)
+    expect(f.contents.commands).toEqual(commands)
+
+    const count = controlPayloads(f.contents).length
+    f.manager.returnControl('browser-one')
+    expect(controlPayloads(f.contents)).toHaveLength(count)
+    preferences = { ...preferences, glowBlend: 'multiply', glowColor: '#cc3366', glowOpacity: 0.35 }
+    f.manager.refreshAgentFeedback()
+    await vi.waitFor(() => expect(controlPayloads(f.contents)).toHaveLength(count + 1))
+    expect(controlPayloads(f.contents).at(-1)).toMatchObject({ browserId: 'browser-one', ownerId: first.ownerId,
+      active: true, blend: 'multiply', css: expect.stringContaining('--amux-agent-color:#cc3366') })
+    expect(f.manager.target('browser-one')).toMatchObject({ id: original.id, navigationId: original.navigationId,
+      control: { owner: 'agent', activeOperationId: null } })
+    expect(actionPayloads(f.contents)).toEqual([]); expect(f.contents.commands).toEqual(commands)
+    expect(f.contents.isDestroyed()).toBe(false)
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
+    expect(f.sibling.focusCalls).toBe(0)
+  })
+
+  it('uses the first visible passive lease while native is hidden and reconciles mirror removal, remount and explicit handoff', async () => {
+    const f = await managerFixture(undefined, { nativeVisible: false })
+    const original = f.manager.target('browser-one')!, commands = [...f.contents.commands]
+    f.manager.returnControl('browser-one')
+    const hidden = f.register('initial-hidden', false)
+    expect(controlPayloads(f.contents).filter(payload => payload.active)).toEqual([])
+    expect(f.source.getVisible()).toBe(false); expect(f.manager.nativeOwner('browser-one')).toBeUndefined()
+
+    f.manager.updatePresentation(f.window.webContents as never, f.frame as never, hidden.leaseId,
+      { visible: true, bounds: { x: 20, y: 30, width: 500, height: 400 } })
+    await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)?.active).toBe(true))
+    const ownerId = controlPayloads(f.contents).at(-1).ownerId
+    expect(ownerId).toEqual(expect.any(String))
+    expect(await f.manager.activatePresentation(f.window.webContents as never, f.frame as never, hidden.leaseId,
+      { kind: 'select', focus: 'preserve' })).toMatchObject({ outcome: 'input-unconfirmed', reason: 'agent-control-active' })
+    expect(f.manager.nativeOwner('browser-one')).toBeUndefined(); expect(f.source.getVisible()).toBe(false)
+
+    const other = f.register('other-visible')
+    const activeStart = controlPayloads(f.contents).length
+    f.manager.updatePresentation(f.window.webContents as never, f.frame as never, hidden.leaseId, { visible: false })
+    f.manager.setBounds('browser-one', null)
+    expect(controlPayloads(f.contents).slice(activeStart).some(payload => !payload.active)).toBe(false)
+    expect(controlPayloads(f.contents).at(-1)).toMatchObject({ ownerId, active: true })
+
+    f.manager.removePresentation(f.window.webContents as never, f.frame as never, other.leaseId)
+    await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)).toMatchObject({ ownerId, active: false }))
+    expect(f.manager.target('browser-one')?.control).toMatchObject({ owner: 'agent', activeOperationId: null })
+    f.manager.removePresentation(f.window.webContents as never, f.frame as never, hidden.leaseId)
+    const remounted = f.register('remounted-visible')
+    await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)).toMatchObject({ ownerId, active: true }))
+    f.manager.takeControl('browser-one')
+    await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)).toMatchObject({ ownerId, active: false }))
+    expect(f.manager.target('browser-one')?.control).toMatchObject({ owner: 'human', activeOperationId: null })
+    f.manager.returnControl('browser-one')
+    await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)).toMatchObject({ ownerId, active: true }))
+    expect(f.manager.target('browser-one')).toMatchObject({ id: original.id, navigationId: original.navigationId,
+      control: { owner: 'agent', activeOperationId: null } })
+    expect(actionPayloads(f.contents)).toEqual([]); expect(f.contents.actions).toBe(0)
+    expect(f.contents.commands).toEqual(commands); expect(f.contents.isDestroyed()).toBe(false)
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
+    expect(f.sibling.focusCalls).toBe(0)
+    f.manager.removePresentation(f.window.webContents as never, f.frame as never, remounted.leaseId)
+  })
+
+  it.each(['failed', 'cancelled'] as const)('retains the original view decoration after a %s Profile candidate and a fresh Return', async outcome => {
+    const f = await managerFixture()
+    f.manager.returnControl('browser-one')
+    await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)?.active).toBe(true))
+    const ownerId = controlPayloads(f.contents).at(-1).ownerId
+    f.manager.takeControl('browser-one')
+    await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)?.active).toBe(false))
+
+    let candidate: any, finish!: () => void, fail!: (error: Error) => void
+    native.nextLoadURL = async contents => {
+      candidate = contents
+      await new Promise<void>((resolve, reject) => { finish = resolve; fail = reject })
+    }
+    const switching = f.manager.switchProfile('browser-one', 'replacement-profile').catch(error => error as Error)
+    expect(candidate).toBeDefined()
+    expect(f.manager.nativeOwner('browser-one')?.view).toBe(f.source)
+    expect(controlPayloads(candidate).filter(payload => payload.active)).toEqual([])
+    if (outcome === 'failed') fail(new Error('Candidate document load failed'))
+    else await f.manager.navigate('browser-one', 'https://generic.invalid/after-cancel')
+    const rejected = await switching
+    expect(rejected).toBeInstanceOf(Error)
+    expect((rejected as Error).message).toContain(outcome === 'failed' ? 'Candidate document load failed' : 'superseded by navigation')
+    expect(candidate.isDestroyed()).toBe(true); expect(f.contents.isDestroyed()).toBe(false)
+    expect(f.manager.nativeOwner('browser-one')?.view).toBe(f.source)
+
+    const returned = f.manager.returnControl('browser-one')
+    expect(returned).toMatchObject({ profileId: 'default', control: { owner: 'agent', activeOperationId: null } })
+    await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)).toMatchObject({
+      browserId: 'browser-one', ownerId, navigationId: returned.navigationId, active: true
+    }))
+    const active = controlPayloads(f.contents).at(-1), count = controlPayloads(f.contents).length
+    if (outcome === 'cancelled') { finish(); await Promise.resolve(); await Promise.resolve() }
+    candidate.emit('dom-ready'); candidate.emit('did-stop-loading')
+    expect(controlPayloads(f.contents)).toHaveLength(count)
+    expect(controlPayloads(f.contents).at(-1)).toBe(active)
+    expect(controlPayloads(candidate).filter(payload => payload.active)).toEqual([])
+    expect(actionPayloads(f.contents)).toEqual([]); expect(f.contents.actions).toBe(0)
+    expect(f.manager.target('browser-one')?.control?.owner).toBe('agent')
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
+  })
+
+  it('publishes the replacement view only after Profile commit and fences late original-view callbacks', async () => {
+    const f = await managerFixture()
+    f.manager.returnControl('browser-one')
+    await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)?.active).toBe(true))
+    const originalOwnerId = controlPayloads(f.contents).at(-1).ownerId
+    f.manager.takeControl('browser-one')
+    await vi.waitFor(() => expect(controlPayloads(f.contents).at(-1)?.active).toBe(false))
+
+    let candidate: any, finish!: () => void
+    native.nextLoadURL = async contents => {
+      candidate = contents
+      await new Promise<void>(resolve => { finish = resolve })
+    }
+    native.deferredCloseId = f.contents.id
+    const switching = f.manager.switchProfile('browser-one', 'replacement-profile')
+    expect(candidate).toBeDefined()
+    expect(f.manager.nativeOwner('browser-one')?.view).toBe(f.source)
+    expect(controlPayloads(candidate).filter(payload => payload.active)).toEqual([])
+    finish()
+    const switched = await switching
+    expect(switched.profileId).toBe('replacement-profile')
+    expect(f.manager.nativeOwner('browser-one')?.view.webContents).toBe(candidate)
+    expect(f.contents.isDestroyed()).toBe(false) // The original cleanup callback is deliberately still outstanding.
+    expect(controlPayloads(candidate).filter(payload => payload.active)).toEqual([])
+
+    f.manager.returnControl('browser-one')
+    await vi.waitFor(() => expect(controlPayloads(candidate).at(-1)).toMatchObject({
+      browserId: 'browser-one', navigationId: switched.navigationId, active: true
+    }))
+    const active = controlPayloads(candidate).at(-1), count = controlPayloads(candidate).length
+    expect(active.ownerId).toEqual(expect.any(String)); expect(active.ownerId).not.toBe(originalOwnerId)
+    f.contents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url: 'https://generic.invalid/late-old-document' })
+    f.contents.emit('dom-ready'); f.contents.emit('did-stop-loading'); f.contents.finishClose()
+    await Promise.resolve(); await Promise.resolve()
+    expect(controlPayloads(candidate)).toHaveLength(count)
+    expect(controlPayloads(candidate).at(-1)).toBe(active)
+    expect(controlPayloads(f.contents).at(-1)).toMatchObject({ ownerId: originalOwnerId, active: false })
+    expect(f.manager.returnControl('browser-one')).toMatchObject({ profileId: 'replacement-profile', navigationId: switched.navigationId,
+      control: { owner: 'agent', activeOperationId: null } })
+    expect(candidate.isDestroyed()).toBe(false); expect(actionPayloads(candidate)).toEqual([]); expect(candidate.actions).toBe(0)
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
+  })
+})
+
 describe('actual dispatcher action feedback consumer', () => {
   it('passes the resolved node/sender after the original scroll and rechecks control after asynchronous display', async () => {
     const order: string[] = [], recorded: unknown[] = [], notes: string[] = []; let human = false
@@ -393,7 +572,8 @@ describe('actual BrowserViewManager consumer', () => {
     const report = await f.manager.runScript('browser-one', 'actual waiting worker', { id: 'original-agent', name: 'Original Agent' }, undefined, operationId)
     expect(observed, JSON.stringify(report)).toBe(true)
     expect(report.outcome.kind).toBe(end === 'takeover' ? 'stopped' : 'completed')
-    expect(controlPayloads(f.contents).at(-1)).toMatchObject({ operationId, active: end !== 'takeover' })
+    expect(controlPayloads(f.contents).at(-1)).toMatchObject({ browserId: 'browser-one', ownerId: expect.any(String), active: end !== 'takeover' })
+    expect(controlPayloads(f.contents).at(-1).operationId).toBeUndefined()
     expect(f.manager.target('browser-one')?.control).toMatchObject({ owner: end === 'takeover' ? 'human' : 'agent', activeOperationId: null, inputIsolation: end === 'takeover' ? 'inactive' : 'isolated' })
     expect(shield.webContents.isDestroyed()).toBe(end === 'takeover')
     expect(f.children.includes(shield)).toBe(end !== 'takeover')
