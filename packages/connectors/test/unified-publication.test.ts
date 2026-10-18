@@ -517,7 +517,7 @@ it('the actual canonical saved question publishes complete original options; its
     if (!page!.more) break
   }
   for (let effects = 0; effects < 10; effects++) {
-    const operation = store.claimNext(boundary, () => true, adapter.publication!)
+    const operation = store.claimNext(boundary, store.next(boundary)?.operationId ?? '', () => true, adapter.publication!)
     if (!operation) break
     const receipt = await adapter.publication!.dispatch(operation.prepared!, operation.target, 'isolated-credential', signal, operation.mapping)
     store.settle(operation.operationId, operation.attempt!, receipt)

@@ -48,9 +48,15 @@ it('default Desktop Host joins SDK intake, original Core and Mailbox, then autom
   await f.sdk.receive(payload)
   await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
   const [incoming] = (await f.services.ingress!.list({ connectionId: f.config.connectionId })).ingresses
-  const input = incoming!.input!, timeline = await f.client.sessionTimeline(f.session.agentSessionId)
-  const nativeInput = timeline.items.find(item => item.id === `prompt:${input.messageId}`)!
-  const read = await mailbox(f.session, timeline, nativeInput.id)
+  const input = incoming!.input!
+  const isOriginalInput = (item: core.AgentTimelineItem) => item.inputRef?.kind === 'message' && item.inputRef.messageId === input.messageId
+  let timeline: Awaited<ReturnType<typeof f.client.sessionTimeline>>
+  await vi.waitFor(async () => {
+    timeline = await f.client.sessionTimeline(f.session.agentSessionId)
+    expect(timeline.items.some(isOriginalInput)).toBe(true)
+  })
+  const nativeInput = timeline!.items.find(isOriginalInput)!
+  const read = await mailbox(f.session, timeline!, nativeInput.id)
   expect(read.detail.dataset.speakerRole).toBe('external'); await read.copyOriginal(); expect(read.copy).toHaveBeenCalledWith(nativeInput.content)
   const text = 'Original public reply 中文🙂\n'.repeat(300)
   await appendFile(f.transcript, row('original-public-speech', text))
@@ -59,7 +65,7 @@ it('default Desktop Host joins SDK intake, original Core and Mailbox, then autom
   await vi.waitFor(async () => { published = await f.deliveries(); expect(published.deliveries.length).toBeGreaterThan(1); expect(published.deliveries.every((item: { state: string }) => item.state === 'confirmed')).toBe(true) }, { timeout: 5_000 })
   const creates = f.remote.messageCalls().filter(call => call.method === 'POST'), originals = published.deliveries
   expect(new Set(creates.map(call => JSON.parse(call.body).uuid)).size).toBe(creates.length)
-  expect(creates.map(call => JSON.parse(JSON.parse(call.body).content).zh_cn.content[0][0].text).join('')).toBe(text)
+  expect(creates.map(call => JSON.parse(JSON.parse(call.body).content).elements[0].text.content).join('')).toBe(text)
   expect(originals.map((item: { fragment: { ordinal: number } }) => item.fragment.ordinal)).toEqual(creates.map((_call, index) => index))
   for (const delivery of originals) {
     expect(delivery.reference.source.recordId).toBe('original-public-speech')
@@ -75,7 +81,7 @@ it('default Desktop Host joins SDK intake, original Core and Mailbox, then autom
     expect(published.deliveries.every((item: { state: string }) => item.state === 'confirmed')).toBe(true)
   }, { timeout: 5_000 })
   const effects = f.remote.messageCalls().filter(call => call.method !== 'GET')
-  expect(effects.slice(creates.length).map(call => call.method)).toEqual(['PUT', ...originals.slice(1).map(() => 'DELETE')])
+  expect(effects.slice(creates.length).map(call => call.method)).toEqual(['PATCH', ...originals.slice(1).map(() => 'DELETE')])
   expect(effects[creates.length]!.path).toBe('/open-apis/im/v1/messages/' + originals[0].mapping.messageId)
   const updates = published.deliveries.slice(originals.length)
   expect(updates[0].mapping).toEqual(originals[0].mapping)
@@ -101,19 +107,22 @@ it('default Desktop Host joins SDK intake, original Core and Mailbox, then autom
   }, null, 2) + '\n')
 }, 30_000)
 
-it('unknown create is inspect-only and does not take away following authenticated input or the original Session', async () => {
-  const f = await fixture(call => call.method === 'POST' && call.path === '/open-apis/im/v1/messages' ? { status: 200, body: { code: 0, data: {} } } : undefined)
+it('unknown create remains inspect-only while independent speech and authenticated input continue in the original Session', async () => {
+  const f = await fixture(call => call.method === 'POST' && call.path === '/open-apis/im/v1/messages' && call.body.includes('Original unknown effect') ? { status: 200, body: { code: 0, data: {} } } : undefined)
+  const speech = async () => (await f.deliveries()).deliveries.filter((delivery: core.ConnectionDelivery) => delivery.reference.source.kind !== 'binding-operation')
   await appendFile(f.transcript, row('unknown-create', 'Original unknown effect'))
-  await vi.waitFor(async () => expect((await f.deliveries()).deliveries[0]?.state).toBe('unknown'), { timeout: 5_000 })
-  const original = (await f.deliveries()).deliveries[0]
+  await vi.waitFor(async () => expect((await speech())[0]?.state).toBe('unknown'), { timeout: 5_000 })
+  const original = (await speech())[0]
   await appendFile(f.transcript, row('following-speech', 'A separate original speech'))
   f.services.publication!.refresh()
-  await vi.waitFor(async () => expect((await f.deliveries()).deliveries).toHaveLength(2), { timeout: 5_000 })
-  expect(f.remote.messageCalls().filter(call => call.method === 'POST')).toHaveLength(1)
+  await vi.waitFor(async () => expect(await speech()).toHaveLength(2), { timeout: 5_000 })
+  await vi.waitFor(async () => expect((await speech())[1].state).toBe('confirmed'))
+  expect(f.remote.messageCalls().filter(call => call.method === 'POST' && call.body.includes('Original unknown effect'))).toHaveLength(1)
+  expect(f.remote.messageCalls().filter(call => call.method === 'POST' && call.body.includes('A separate original speech'))).toHaveLength(1)
   expect((await f.cli(['delivery', 'inspect', '--operation-id', original.operationId])).delivery).toEqual(original)
   await f.sdk.receive(feishuPayload())
   await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
   expect((await f.client.readAgentSessions()).map(session => session.agentSessionId)).toEqual([f.session.agentSessionId])
   expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.inner.kernel.attach).not.toHaveBeenCalled()
-  expect(f.remote.messageCalls().filter(call => call.method === 'POST')).toHaveLength(1)
+  expect(f.remote.messageCalls().filter(call => call.method === 'POST' && call.body.includes('Original unknown effect'))).toHaveLength(1)
 }, 25_000)

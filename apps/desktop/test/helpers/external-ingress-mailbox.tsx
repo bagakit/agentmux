@@ -21,7 +21,8 @@ export function externalIngressMailbox() {
     const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: 'open' })
     await act(async () => panel.dispatchEvent(event))
     await dom.click('[role="tab"][id$="-outbox-tab"]')
-    const row = panel.querySelector<HTMLButtonElement>(`[data-record-key="timeline:${recordId}"]`)!
+    const row = Array.from(panel.querySelectorAll<HTMLButtonElement>('[data-record-key]'))
+      .find(candidate => candidate.dataset.recordKey === `timeline:${recordId}`)!
     expect(row).not.toBeNull(); await act(async () => row.click())
     const detail = panel.querySelector<HTMLElement>('.log-turn')!
     await dom.click('[aria-label="Message details"]')

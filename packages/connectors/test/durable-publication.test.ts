@@ -36,6 +36,31 @@ function commit(owner: PublicationStore, audience: PublicationBoundary, after: C
 }
 function store() { const database = new DatabaseSync(':memory:'); databases.push(database); const owner = new PublicationStore(database); owner.checkpoint(boundary, 'host-a'); return owner }
 
+it('atomic claim refuses a changed candidate and indexed selection stays inside the original audience open set', () => {
+  const owner = store()
+  commit(owner, boundary, checkpoint(), page([speech('original-a'), speech('independent-b')]), () => true)
+  const selected = owner.next(boundary)!
+  const concurrent = owner.claimNext(boundary, selected.operationId, () => true, adapter)!
+  owner.settle(concurrent.operationId, concurrent.attempt!, { state: 'unknown', reason: 'effect-unconfirmed' })
+  expect(owner.next(boundary)?.reference.source.recordId).toBe('independent-b')
+  expect(owner.claimNext(boundary, selected.operationId, () => true, adapter)).toBeNull()
+  expect(owner.next(boundary)?.state).toBe('pending')
+  const row = owner.database.prepare('SELECT * FROM connector_publication_operation LIMIT 1').get()!
+  const insert = owner.database.prepare('INSERT INTO connector_publication_operation(operation_id,projection_id,source_revision,fragment_ordinal,binding_id,binding_revision,operation_json,state) VALUES (?,?,?,?,?,?,?,?)')
+  owner.database.exec('BEGIN')
+  for (let index = 0; index < 2000; index++) insert.run('unrelated-' + index, 'unrelated-projection-' + index, row.source_revision!, 0, 'unrelated-binding-' + index, 1, row.operation_json!, 'pending')
+  owner.database.exec('COMMIT')
+  const prepare = owner.database.prepare.bind(owner.database), plans: string[] = []
+  owner.database.prepare = ((sql: string) => {
+    if (sql.startsWith('SELECT original.operation_json')) plans.push(...prepare('EXPLAIN QUERY PLAN ' + sql).all(boundary.bindingId, boundary.revision).map(row => String(row.detail)))
+    return prepare(sql)
+  }) as typeof owner.database.prepare
+  expect(owner.next(boundary)?.reference.source.recordId).toBe('independent-b')
+  expect(plans.some(plan => /SEARCH original USING INDEX connector_publication_open_state/u.test(plan))).toBe(true)
+  expect(plans.some(plan => /SEARCH earlier USING INDEX connector_publication_open_projection/u.test(plan))).toBe(true)
+  expect(plans.some(plan => /SCAN (original|earlier|predecessor)/u.test(plan))).toBe(false)
+})
+
 it('commits every required original speech and explicit skip with the same source frontier, excluding internal parts', () => {
   const owner = store()
   commit(owner, boundary, checkpoint(), page([
@@ -84,7 +109,7 @@ it('wrong Host, Session, source, saved cut and revoked audience cannot advance p
   expect(owner.list(boundary)).toEqual([])
 })
 
-it('coalesces only undispatched revisions and never overtakes unknown original effects or changes their recipient', () => {
+it('coalesces undispatched revisions and isolates an unknown predecessor from independent speech without changing its recipient', () => {
   const owner = store()
   commit(owner, boundary, checkpoint(), page([speech('reply-a', 'First')], 'cut-1'), () => true)
   const first = owner.list(boundary)[0]!
@@ -92,21 +117,24 @@ it('coalesces only undispatched revisions and never overtakes unknown original e
   const second = owner.list(boundary)[1]!
   expect(owner.inspect(first.operationId)?.state).toBe('superseded')
   expect(second.predecessorOperationId).toBeUndefined()
-  const claimed = owner.claimNext(boundary, () => true, adapter)!
+  const claimed = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   expect(claimed.operationId).toBe(second.operationId); expect(claimed.state).toBe('dispatching')
   expect(owner.inspect(second.operationId)?.state).toBe('dispatching')
   owner.settle(second.operationId, owner.inspect(second.operationId)!.attempt!, { state: 'unknown', reason: 'effect-unconfirmed' })
   commit(owner, boundary, checkpoint('cut-2'), page([speech('reply-a', 'Third'), speech('reply-b')], 'cut-3'), () => true)
-  expect(owner.claimNext(boundary, () => true, adapter)).toBeNull()
+  const independent = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
+  expect(independent.reference.source.recordId).toBe('reply-b')
+  owner.settle(independent.operationId, independent.attempt!, { state: 'confirmed', mapping: { messageId: 'platform-b' } })
+  expect(owner.next(boundary)).toBeNull()
   expect(() => owner.retry(second.operationId, () => true)).toThrowError(/not confirmed non-application/)
   expect(owner.inspect(second.operationId)).toMatchObject({ target: { externalConversationId: 'room-a' }, payload: { text: 'Second' } })
   const mapping = { messageId: 'platform-a', threadId: 'original-thread' }
   owner.settle(second.operationId, owner.inspect(second.operationId)!.attempt!, { state: 'confirmed', mapping })
-  const third = owner.claimNext(boundary, () => true, adapter)!
+  const third = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   expect(third).toMatchObject({ predecessorOperationId: second.operationId, mapping, payload: { text: 'Third' }, target: { externalConversationId: 'room-a' } })
-  expect(owner.claimNext(boundary, () => true, adapter)).toBeNull()
+  expect(owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)).toBeNull()
   owner.settle(third.operationId, owner.inspect(third.operationId)!.attempt!, { state: 'confirmed', mapping })
-  expect(owner.claimNext(boundary, () => true, adapter)?.reference.source.recordId).toBe('reply-b')
+  expect(owner.next(boundary)).toBeNull()
   expect(() => owner.settle(second.operationId, owner.inspect(second.operationId)!.attempt!, { state: 'confirmed', mapping: { messageId: 'replacement' } })).toThrowError(/cannot be replaced/)
 })
 
@@ -115,34 +143,34 @@ it('restarts with the same unresolved effect, original audience and payload; onl
   const path = join(directory, 'connections.sqlite'), firstDb = new DatabaseSync(path); databases.push(firstDb)
   const first = new PublicationStore(firstDb); first.checkpoint(boundary, 'host-a')
   commit(first, boundary, checkpoint(), page([speech('reply-a')]), () => true)
-  const dispatched = first.claimNext(boundary, () => true, adapter)!
+  const dispatched = first.claimNext(boundary, first.next(boundary)?.operationId ?? '', () => true, adapter)!
   firstDb.close()
   const secondDb = new DatabaseSync(path); databases.push(secondDb)
   const restored = new PublicationStore(secondDb)
   expect(restored.inspect(dispatched.operationId)).toEqual(dispatched)
   expect(restored.checkpoint(boundary, 'host-a')).toEqual(checkpoint('next-cut'))
-  expect(restored.claimNext(boundary, () => true, adapter)).toBeNull()
+  expect(restored.claimNext(boundary, restored.next(boundary)?.operationId ?? '', () => true, adapter)).toBeNull()
   expect(() => restored.retry(dispatched.operationId, () => true)).toThrowError(/not confirmed non-application/)
   restored.settle(dispatched.operationId, restored.inspect(dispatched.operationId)!.attempt!, { state: 'not-applied', reason: 'platform-rejected' })
   expect(() => restored.retry(dispatched.operationId, () => false)).toThrowError(/no longer authorizes/)
   const pending = restored.retry(dispatched.operationId, () => true)
   const receipt = { state: 'not-applied', reason: 'platform-rejected' }
   expect(pending).toEqual({ ...dispatched, state: 'pending', receipt })
-  expect(restored.claimNext(boundary, () => true, adapter)).toEqual({ ...dispatched, attempt: dispatched.attempt! + 1, receipt })
+  expect(restored.claimNext(boundary, restored.next(boundary)?.operationId ?? '', () => true, adapter)).toEqual({ ...dispatched, attempt: dispatched.attempt! + 1, receipt })
 })
 
 it('retains old exact operations after relinking and bounds inspection without allowing the new audience to claim them', () => {
   const owner = store()
   commit(owner, boundary, checkpoint(), page([speech('reply-a')]), () => true)
-  const original = owner.claimNext(boundary, () => true, adapter)!
+  const original = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   const next = { ...boundary, revision: 2, externalConversationId: 'room-b', sourceCheckpoints: [nativeCheckpoint('new-authorized-cut')] }
   owner.checkpoint(next, 'host-a')
   commit(owner, next, checkpoint('new-authorized-cut'), page([speech('reply-a')], 'next-room-cut'), () => true)
-  const nextOperation = owner.claimNext(next, () => true, adapter)!
+  const nextOperation = owner.claimNext(next, owner.next(next)?.operationId ?? '', () => true, adapter)!
   expect(nextOperation.operationId).not.toBe(original.operationId)
   expect(nextOperation.target.externalConversationId).toBe('room-b')
   expect(owner.inspect(original.operationId)).toEqual(original)
-  expect(owner.claimNext(boundary, () => false, adapter)).toBeNull()
+  expect(owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => false, adapter)).toBeNull()
   expect(() => owner.list(boundary, 0)).toThrowError(/limit from 1 to 100/)
 })
 
@@ -150,7 +178,7 @@ it('publishes a genuine content reversion and retains an exact confirmed update 
   const owner = store(), mapping = { messageId: 'original-message', threadId: 'original-thread' }
   for (const [index, text] of ['First', 'Second', 'First'].entries()) {
     commit(owner, boundary, checkpoint(index ? `cut-${index}` : 'original-cut'), page([speech('reply-a', text)], `cut-${index + 1}`), () => true)
-    const operation = owner.claimNext(boundary, () => true, adapter)!
+    const operation = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
     expect(operation.payload.text).toBe(text)
     if (index) expect(() => owner.settle(operation.operationId, owner.inspect(operation.operationId)!.attempt!, { state: 'confirmed', mapping: { messageId: 'other-message' } })).toThrowError(/original exact message/)
     owner.settle(operation.operationId, owner.inspect(operation.operationId)!.attempt!, { state: 'confirmed', mapping })
@@ -169,9 +197,9 @@ it('a later non-public revision cancels only undispatched speech and can explici
   const original = owner.list(boundary)[0]!
   commit(owner, boundary, checkpoint('cut-1'), page([{ id: 'reply-a', kind: 'activity', contentParts: [] }], 'cut-2'), () => true)
   expect(owner.inspect(original.operationId)).toMatchObject({ state: 'cancelled', reason: 'original-speech-withdrawn' })
-  expect(owner.claimNext(boundary, () => true, adapter)).toBeNull()
+  expect(owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)).toBeNull()
   commit(owner, boundary, checkpoint('cut-2'), page([speech('reply-a')], 'cut-3'), () => true)
-  const returned = owner.claimNext(boundary, () => true, adapter)!
+  const returned = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   expect(returned.operationId).not.toBe(original.operationId)
   expect(returned.predecessorOperationId).toBeUndefined()
   commit(owner, boundary, checkpoint('cut-3'), page([{ id: 'reply-a', kind: 'activity', contentParts: [] }], 'cut-4'), () => true)
@@ -208,7 +236,7 @@ it('fragments complete original Unicode speech exactly and records each original
   for (const [ordinal, operation] of operations.entries()) {
     expect(operation.fragment).toEqual({ ordinal, count: operations.length })
     expect(Buffer.byteLength(operation.payload.text)).toBeLessThanOrEqual(16)
-    expect(owner.claimNext(boundary, () => true, adapter)?.operationId).toBe(operation.operationId)
+    expect(owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)?.operationId).toBe(operation.operationId)
     owner.settle(operation.operationId, owner.inspect(operation.operationId)!.attempt!, { state: 'confirmed', mapping: { messageId: `original-fragment-${ordinal}` } })
   }
 })
@@ -218,38 +246,38 @@ it('a shorter revision updates the exact first fragment and withdraws confirmed 
   commit(owner, boundary, checkpoint(), page([speech('reply-a', 'Original full speech')], 'cut-1'), () => true, { fragmentBytes: 8 })
   const originals = owner.list(boundary)
   for (const [ordinal, original] of originals.entries()) {
-    expect(owner.claimNext(boundary, () => true, adapter)?.operationId).toBe(original.operationId)
+    expect(owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)?.operationId).toBe(original.operationId)
     owner.settle(original.operationId, owner.inspect(original.operationId)!.attempt!, { state: 'confirmed', mapping: { messageId: `fragment-${ordinal}`, threadId: 'original-thread' } })
   }
   commit(owner, boundary, checkpoint('cut-1'), page([speech('reply-a', 'Short')], 'cut-2'), () => true, { fragmentBytes: 8 })
-  const updated = owner.claimNext(boundary, () => true, adapter)!
+  const updated = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   expect(updated).toMatchObject({ effect: 'upsert', payload: { text: 'Short' }, mapping: { messageId: 'fragment-0', threadId: 'original-thread' } })
   owner.settle(updated.operationId, owner.inspect(updated.operationId)!.attempt!, { state: 'confirmed', mapping: updated.mapping! })
   for (let ordinal = 1; ordinal < originals.length; ordinal++) {
-    const withdrawn = owner.claimNext(boundary, () => true, adapter)!
+    const withdrawn = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
     expect(withdrawn).toMatchObject({ effect: 'withdraw', fragment: { ordinal, count: 1 }, mapping: { messageId: `fragment-${ordinal}`, threadId: 'original-thread' } })
     owner.settle(withdrawn.operationId, owner.inspect(withdrawn.operationId)!.attempt!, { state: 'confirmed', mapping: withdrawn.mapping! })
   }
-  expect(owner.claimNext(boundary, () => true, adapter)).toBeNull()
+  expect(owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)).toBeNull()
 })
 
 it('unknown original fragments block shortening, then return to a fresh create only after confirmed withdrawal', () => {
   const owner = store()
   commit(owner, boundary, checkpoint(), page([speech('reply-a', 'Old')], 'cut-1'), () => true)
-  const original = owner.claimNext(boundary, () => true, adapter)!
+  const original = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   owner.settle(original.operationId, owner.inspect(original.operationId)!.attempt!, { state: 'unknown', reason: 'effect-unconfirmed' })
   commit(owner, boundary, checkpoint('cut-1'), page([{ id: 'reply-a', kind: 'activity', contentParts: [] }], 'cut-2'), () => true)
-  expect(owner.claimNext(boundary, () => true, adapter)).toBeNull()
+  expect(owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)).toBeNull()
   expect(owner.inspect(original.operationId)).toMatchObject({ state: 'unknown', payload: { text: 'Old' } })
   const mapping = { messageId: 'original-message' }
   owner.settle(original.operationId, owner.inspect(original.operationId)!.attempt!, { state: 'confirmed', mapping })
-  const withdrawal = owner.claimNext(boundary, () => true, adapter)!
+  const withdrawal = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   expect(withdrawal).toMatchObject({ effect: 'withdraw', mapping })
   owner.settle(withdrawal.operationId, owner.inspect(withdrawal.operationId)!.attempt!, { state: 'unknown', reason: 'effect-unconfirmed' })
   commit(owner, boundary, checkpoint('cut-2'), page([speech('reply-a', 'New genuine speech')], 'cut-3'), () => true)
-  expect(owner.claimNext(boundary, () => true, adapter)).toBeNull()
+  expect(owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)).toBeNull()
   owner.settle(withdrawal.operationId, owner.inspect(withdrawal.operationId)!.attempt!, { state: 'confirmed', mapping })
-  const returned = owner.claimNext(boundary, () => true, adapter)!
+  const returned = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   expect(returned).toMatchObject({ effect: 'upsert', payload: { text: 'New genuine speech' } })
   expect(returned.mapping).toBeUndefined()
   expect(returned.operationId).not.toBe(original.operationId)
@@ -258,25 +286,25 @@ it('unknown original fragments block shortening, then return to a fresh create o
 it('superseding a known non-applied fragment retains that receipt while admitting only the newer source version', () => {
   const owner = store()
   commit(owner, boundary, checkpoint(), page([speech('reply-a', 'Old')], 'cut-1'), () => true)
-  const original = owner.claimNext(boundary, () => true, adapter)!
+  const original = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   const receipt = { state: 'not-applied' as const, reason: 'platform-rejected' }
   owner.settle(original.operationId, owner.inspect(original.operationId)!.attempt!, receipt)
   commit(owner, boundary, checkpoint('cut-1'), page([speech('reply-a', 'New')], 'cut-2'), () => true)
   expect(owner.inspect(original.operationId)).toMatchObject({ state: 'superseded', receipt, payload: { text: 'Old' } })
-  expect(owner.claimNext(boundary, () => true, adapter)).toMatchObject({ payload: { text: 'New' } })
+  expect(owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)).toMatchObject({ payload: { text: 'New' } })
   expect(() => owner.retry(original.operationId, () => true)).toThrowError(/not confirmed non-application/)
 })
 
 it('a late authoritative non-application advances an already pending newer source without replaying the old body', () => {
   const owner = store()
   commit(owner, boundary, checkpoint(), page([speech('reply-a', 'Old')], 'cut-1'), () => true)
-  const original = owner.claimNext(boundary, () => true, adapter)!
+  const original = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   owner.settle(original.operationId, owner.inspect(original.operationId)!.attempt!, { state: 'unknown', reason: 'effect-unconfirmed' })
   commit(owner, boundary, checkpoint('cut-1'), page([speech('reply-a', 'New')], 'cut-2'), () => true)
-  expect(owner.claimNext(boundary, () => true, adapter)).toBeNull()
+  expect(owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)).toBeNull()
   const receipt = { state: 'not-applied' as const, reason: 'platform-rejected' as const }
   expect(owner.settle(original.operationId, owner.inspect(original.operationId)!.attempt!, receipt)).toMatchObject({ state: 'superseded', receipt, payload: { text: 'Old' } })
-  const next = owner.claimNext(boundary, () => true, adapter)!
+  const next = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   expect(next).toMatchObject({ payload: { text: 'New' }, effect: 'upsert' })
   expect(next.predecessorOperationId).toBeUndefined(); expect(next.mapping).toBeUndefined()
   expect(() => owner.retry(original.operationId, () => true)).toThrowError(/not confirmed non-application/)
@@ -286,16 +314,16 @@ it('a late non-applied create cancels its redundant withdrawal; a late non-appli
   for (const exists of [false, true]) {
     const owner = store(), mapping = { messageId: 'original-message', threadId: 'original-thread' }
     commit(owner, boundary, checkpoint(), page([speech('reply-a', 'Original')], 'cut-1'), () => true)
-    let attempt = owner.claimNext(boundary, () => true, adapter)!
+    let attempt = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
     if (exists) {
       owner.settle(attempt.operationId, owner.inspect(attempt.operationId)!.attempt!, { state: 'confirmed', mapping })
       commit(owner, boundary, checkpoint('cut-1'), page([speech('reply-a', 'Update')], 'cut-2'), () => true)
-      attempt = owner.claimNext(boundary, () => true, adapter)!
+      attempt = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
     }
     owner.settle(attempt.operationId, owner.inspect(attempt.operationId)!.attempt!, { state: 'unknown', reason: 'effect-unconfirmed' })
     commit(owner, boundary, checkpoint(exists ? 'cut-2' : 'cut-1'), page([{ id: 'reply-a', kind: 'activity', contentParts: [] }], 'withdraw-cut'), () => true)
     owner.settle(attempt.operationId, owner.inspect(attempt.operationId)!.attempt!, { state: 'not-applied', reason: 'platform-rejected' })
-    const next = owner.claimNext(boundary, () => true, adapter)
+    const next = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)
     if (exists) expect(next).toMatchObject({ effect: 'withdraw', mapping })
     else expect(next).toBeNull()
   }
@@ -304,7 +332,7 @@ it('a late non-applied create cancels its redundant withdrawal; a late non-appli
 it('adapter receipt fields cannot rewrite another operation, its audience or the original immutable payload', () => {
   const owner = store()
   commit(owner, boundary, checkpoint(), page([speech('reply-a'), speech('reply-b')]), () => true)
-  const original = owner.claimNext(boundary, () => true, adapter)!, other = owner.list(boundary)[1]!
+  const original = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!, other = owner.list(boundary)[1]!
   for (const extra of [{ operationId: other.operationId }, { target: { externalConversationId: 'other-room' } }, { diagnostic: 'private platform payload' }]) {
     expect(() => owner.settle(original.operationId, owner.inspect(original.operationId)!.attempt!, { state: 'unknown', reason: 'effect-unconfirmed', ...extra } as never)).toThrowError(expect.objectContaining({ code: 'INVALID_CONNECTION_DELIVERY_DATA' }))
   }
@@ -316,7 +344,7 @@ it('adapter receipt fields cannot rewrite another operation, its audience or the
 it('freezes the complete prepared request with the original effect before dispatch and retains it through same-ID retry', () => {
   const owner = store(), mapping = { messageId: 'original-message', threadId: 'original-thread' }
   commit(owner, boundary, checkpoint(), page([speech('reply-a', 'First')], 'cut-1'), () => true)
-  const first = owner.claimNext(boundary, () => true, adapter)!
+  const first = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   expect(first.prepared).toEqual(adapter.prepare(first))
   expect(owner.inspect(first.operationId)?.prepared).toEqual(first.prepared)
   owner.settle(first.operationId, owner.inspect(first.operationId)!.attempt!, { state: 'confirmed', mapping })
@@ -328,15 +356,15 @@ it('freezes the complete prepared request with the original effect before dispat
     return { ...adapter.prepare(operation), request: { method: 'PATCH', path: '/messages/original-message', query: { scope: 'original' },
       contentType: 'application/json', body: JSON.stringify({ text: operation.payload.text, thread: operation.mapping?.threadId }) } }
   } }
-  const update = owner.claimNext(boundary, () => true, originalAdapter)!
+  const update = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, originalAdapter)!
   expect(prepared).toBe(1)
   expect(owner.inspect(update.operationId)?.prepared).toEqual(update.prepared)
   owner.settle(update.operationId, owner.inspect(update.operationId)!.attempt!, { state: 'not-applied', reason: 'platform-rejected' })
   owner.retry(update.operationId, () => true)
-  expect(() => owner.claimNext(boundary, () => true, { ...adapter, renderVersion: 'speech-v2', supportedRenderVersions: ['speech-v2'] }))
+  expect(() => owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, { ...adapter, renderVersion: 'speech-v2', supportedRenderVersions: ['speech-v2'] }))
     .toThrowError(/compatible adapter version/)
   expect(owner.inspect(update.operationId)?.state).toBe('pending')
-  const retried = owner.claimNext(boundary, () => true, { ...adapter, renderVersion: 'speech-v2', supportedRenderVersions: ['speech-v1', 'speech-v2'],
+  const retried = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, { ...adapter, renderVersion: 'speech-v2', supportedRenderVersions: ['speech-v1', 'speech-v2'],
     prepare: () => { throw new Error('Original wire must never be rendered twice.') } })!
   expect(retried.prepared).toEqual(update.prepared)
   expect(retried.operationId).toBe(update.operationId)
@@ -352,27 +380,27 @@ it('preparation and claim persistence fail before any effect, keeping the origin
     { ...adapter, prepare: operation => ({ ...adapter.prepare(operation), secret: 'must-not-be-persisted' }) },
     { ...adapter, prepare: operation => ({ ...adapter.prepare(operation), request: { ...adapter.prepare(operation).request, body: 'x'.repeat(4 * 1024 * 1024 + 1) } }) }
   ] satisfies PublicationPreparer[]) {
-    expect(() => owner.claimNext(boundary, () => true, bad)).toThrow()
+    expect(() => owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, bad)).toThrow()
     expect(owner.inspect(original.operationId)).toEqual(original)
   }
   owner.database.exec("CREATE TRIGGER reject_claim BEFORE UPDATE ON connector_publication_operation WHEN NEW.state='dispatching' BEGIN SELECT RAISE(ABORT, 'fixture failure'); END")
-  expect(() => owner.claimNext(boundary, () => true, adapter)).toThrowError(/could not confirm/)
+  expect(() => owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)).toThrowError(/could not confirm/)
   expect(owner.inspect(original.operationId)).toEqual(original)
   expect(owner.checkpoint(boundary, 'host-a')).toEqual(checkpoint('next-cut'))
   owner.database.exec('DROP TRIGGER reject_claim')
   let current = true
-  expect(owner.claimNext(boundary, () => current, { ...adapter, prepare: operation => { current = false; return adapter.prepare(operation) } })).toBeNull()
+  expect(owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => current, { ...adapter, prepare: operation => { current = false; return adapter.prepare(operation) } })).toBeNull()
   expect(owner.inspect(original.operationId)).toEqual(original)
 })
 
 it('correlates late receipts to their original durable attempt without changing the retried operation or its frozen request key', () => {
   const owner = store()
   commit(owner, boundary, checkpoint(), page([speech('reply-a')]), () => true)
-  const first = owner.claimNext(boundary, () => true, adapter)!
+  const first = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   owner.settle(first.operationId, first.attempt!, { state: 'unknown', reason: 'effect-unconfirmed' })
   owner.settle(first.operationId, first.attempt!, { state: 'not-applied', reason: 'platform-rejected' })
   owner.retry(first.operationId, () => true)
-  const second = owner.claimNext(boundary, () => true, adapter)!
+  const second = owner.claimNext(boundary, owner.next(boundary)?.operationId ?? '', () => true, adapter)!
   expect(second.operationId).toBe(first.operationId)
   expect(second.prepared).toEqual(first.prepared)
   expect(second.attempt).toBe(first.attempt! + 1)

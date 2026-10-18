@@ -22,6 +22,7 @@ async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = fal
         body: JSON.stringify({ room: operation.target.externalConversationId, text: operation.payload.text, mapping: operation.mapping }) } }),
     dispatch: async (request, target, credential, signal, mapping) => {
       expect(credential).toBe('original-private-credential')
+      if (JSON.parse(request.request.body!).text === undefined) return { state: 'confirmed', mapping: { messageId: 'original-binding-notice' } }
       dispatched.push({ request: structuredClone(request), target: structuredClone(target), ...(mapping ? { mapping: structuredClone(mapping) } : {}) })
       return effect ? await effect(request, target, credential, signal, mapping) : { state: 'confirmed', mapping: JSON.parse(request.request.body!).mapping ?? { messageId: 'message-' + request.requestKey } }
     } }
@@ -35,6 +36,7 @@ async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = fal
   await services.connections.configure({ operationId: 'original-configuration', expectedRevision: null, connection: { ...config, credentialRef: credential.credentialRef } })
   const binding = await services.connections.bindings!.bind(original.input, { actor: agentActor ? { kind: 'agent', id: original.input.agentSessionId } : { kind: 'user', id: 'original-user' } })
   expect(binding.state).toBe('applied'); if (binding.state !== 'applied') throw new Error('Original fixture Binding not applied.')
+  await vi.waitFor(() => expect(services.publication!.store.list(binding.binding).some(operation => operation.payload.kind === 'binding-lifecycle' && operation.state === 'confirmed')).toBe(true))
   const server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'publication.sock'), connections: services.connections, spatialState: original.spatial,
     coreClients: () => [{ hostId: 'local', client: original.client }] })
   await server.start(); cleanup.push(() => server.stop())
@@ -42,21 +44,22 @@ async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = fal
     const output = await runCompiledObjectCli(['--endpoint', 'unix:' + join(original.root, 'publication.sock'), 'connection', 'delivery', ...args], env)
     expect(output.code, output.stdout + output.stderr).toBe(0); return JSON.parse(output.stdout).result
   }
-  return { ...original, services, dispatched, adapter, conversation, binding: binding.binding, cli }
+  const speech = () => services.publication!.store.list(binding.binding).filter(operation => operation.reference.source.kind !== 'binding-operation')
+  return { ...original, services, dispatched, adapter, conversation, binding: binding.binding, cli, speech }
 }
 
 it('original Desktop Host automatically publishes shared Core source changes, retaining exact records through compiled CLI inspection', async () => {
   const f = await fixture(), originalMetadata = await readFile(f.storePath)
   await appendFile(f.transcript, row('reply-a') + row('reply-b'))
   await vi.waitFor(() => expect(f.dispatched).toHaveLength(2), { timeout: 5_000 })
-  const operations = f.services.publication!.store.list(f.binding)
+  const operations = f.speech()
   expect(operations.map(operation => operation.reference.source.recordId)).toEqual(['reply-a', 'reply-b'])
   expect(operations.every(operation => operation.state === 'confirmed')).toBe(true)
   expect(f.dispatched.map(value => JSON.parse(value.request.request.body!).text)).toEqual(['Same original reply', 'Same original reply'])
   expect(new Set(f.dispatched.map(value => value.request.requestKey)).size).toBe(2)
   expect(f.dispatched.every(value => value.target.externalConversationId === f.input.externalConversationId)).toBe(true)
   const listed = await f.cli(['ls', '--connection', config.connectionId, '--binding', f.binding.bindingId, '--binding-revision', '1'])
-  expect(listed.deliveries.map((operation: { operationId: string }) => operation.operationId)).toEqual(operations.map(operation => operation.operationId))
+  expect(listed.deliveries.filter((operation: { reference: { source: { kind: string } } }) => operation.reference.source.kind !== 'binding-operation').map((operation: { operationId: string }) => operation.operationId)).toEqual(operations.map(operation => operation.operationId))
   const inspected = await f.cli(['inspect', '--operation-id', operations[0]!.operationId])
   expect(inspected.delivery).toMatchObject({ operationId: operations[0]!.operationId, reference: operations[0]!.reference, receipt: operations[0]!.receipt })
   expect(JSON.stringify(inspected)).not.toMatch(/original-private-credential|prepared|Same original reply|body/)
@@ -67,12 +70,14 @@ it('original Desktop Host automatically publishes shared Core source changes, re
   expect(f.client.connect).not.toHaveBeenCalled()
 }, 20_000)
 
-it('unknown original effects remain inspect-only across worker replacement, with no overtaking, target fallback or new request key', async () => {
-  const f = await fixture(async () => { throw new Error('private adapter transport failure') })
-  await appendFile(f.transcript, row('reply-a') + row('reply-b'))
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)[0]?.state).toBe('unknown'), { timeout: 5_000 })
-  expect(f.dispatched).toHaveLength(1)
-  const original = f.services.publication!.store.list(f.binding)[0]!
+it('unknown original effects retain their identity across worker replacement while independent speech continues', async () => {
+  const f = await fixture(async request => JSON.parse(request.request.body!).text === 'Unconfirmed first reply'
+    ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'confirmed', mapping: { messageId: 'independent-platform-message' } })
+  await appendFile(f.transcript, row('reply-a', 'Unconfirmed first reply') + row('reply-b', 'Independent reply'))
+  await vi.waitFor(() => expect(f.speech()[0]?.state).toBe('unknown'), { timeout: 5_000 })
+  await vi.waitFor(() => expect(f.speech()[1]?.state).toBe('confirmed'))
+  expect(f.dispatched).toHaveLength(2)
+  const original = f.speech()[0]!
   f.services.publication!.close()
   const { PublicationHost } = await import('../src/publication-host.js')
   // Reuse the original database/configuration owner; replacement admits no external effect for an unresolved operation.
@@ -81,9 +86,123 @@ it('unknown original effects remain inspect-only across worker replacement, with
   const restored = new PublicationHost({ connections, bindings: f.services.bindings!, conversation: f.conversation }); cleanup.push(() => restored.close())
   await vi.waitFor(() => expect(restored.observation(f.binding.bindingId, 1)).toEqual({ state: 'unknown', reason: 'effect-unconfirmed' }))
   expect(restored.store.inspect(original.operationId)).toEqual(original)
-  expect(f.dispatched).toHaveLength(1)
+  expect(f.dispatched).toHaveLength(2)
   await expect(restored.retry({ operationId: original.operationId }, { actor: { kind: 'user', id: 'original-user' } })).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
-  expect(restored.store.list(f.binding)[1]?.state).toBe('pending')
+  expect(restored.store.list(f.binding).filter(operation => operation.reference.source.kind !== 'binding-operation')[1]?.state).toBe('confirmed')
+}, 15_000)
+
+it('a single slow inspector never gates independent speech, and its late original receipt releases only the dependent update', async () => {
+  const f = await fixture(async (request, _target, _credential, _signal, mapping) => JSON.parse(request.request.body!).text === 'Original uncertain progress'
+    ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'confirmed', mapping: mapping ?? { messageId: 'independent-message-' + request.requestKey } })
+  let finish!: (value: PublicationReceipt | null) => void
+  const inspector = vi.fn(async () => await new Promise<PublicationReceipt | null>(resolve => { finish = resolve }))
+  f.adapter.inspect = inspector
+  await appendFile(f.transcript, row('unknown-progress', 'Original uncertain progress'))
+  await vi.waitFor(() => expect(f.speech()[0]?.state).toBe('unknown'))
+  const original = f.speech()[0]!, frozen = structuredClone(original.prepared)
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(inspector).toHaveBeenCalledOnce())
+  await appendFile(f.transcript, row('unknown-progress', 'Dependent progress update') + row('independent-final', 'Independent public final'))
+  await vi.waitFor(() => expect(f.dispatched.some(item => JSON.parse(item.request.request.body!).text === 'Independent public final')).toBe(true))
+  for (let repeat = 0; repeat < 4; repeat++) { f.services.publication!.refresh(); await new Promise<void>(resolve => setImmediate(resolve)) }
+  expect(inspector).toHaveBeenCalledOnce()
+  expect(f.dispatched.some(item => JSON.parse(item.request.request.body!).text === 'Dependent progress update')).toBe(false)
+  expect(f.services.publication!.store.inspect(original.operationId)).toMatchObject({ state: 'unknown', attempt: 1, prepared: frozen })
+  expect(f.services.publication!.observation(f.binding.bindingId, 1)).toEqual({ state: 'unknown', reason: 'effect-unconfirmed' })
+  finish({ state: 'confirmed', mapping: { messageId: 'original-progress-message', threadId: 'original-progress-thread' } })
+  await vi.waitFor(() => expect(f.dispatched.some(item => JSON.parse(item.request.request.body!).text === 'Dependent progress update')).toBe(true))
+  const update = f.dispatched.find(item => JSON.parse(item.request.request.body!).text === 'Dependent progress update')!
+  expect(update.mapping).toEqual({ messageId: 'original-progress-message', threadId: 'original-progress-thread' })
+  expect(f.services.publication!.store.inspect(original.operationId)?.prepared).toEqual(frozen)
+  expect(f.dispatched.filter(item => item.request.requestKey === original.operationId)).toHaveLength(1)
+  expect(f.client.connect).not.toHaveBeenCalled()
+}, 15_000)
+
+it('more than one drain of old unknown projections cannot starve later independent speech or spin unchanged inspections', async () => {
+  const f = await fixture(async request => JSON.parse(request.request.body!).text.startsWith('Old uncertain')
+    ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'confirmed', mapping: { messageId: 'fresh-' + request.requestKey } })
+  const inspect = vi.fn(async () => null); f.adapter.inspect = inspect
+  await appendFile(f.transcript, Array.from({ length: 20 }, (_, index) => row('unknown-' + index, 'Old uncertain ' + index)).join(''))
+  await vi.waitFor(() => expect(f.speech().filter(operation => operation.state === 'unknown')).toHaveLength(20))
+  await appendFile(f.transcript, row('fresh-final', 'Fresh independent final'))
+  await vi.waitFor(() => expect(f.speech().find(operation => operation.reference.source.recordId === 'fresh-final')?.state).toBe('confirmed'))
+  await new Promise<void>(resolve => setImmediate(resolve))
+  const count = inspect.mock.calls.length
+  await new Promise(resolve => setTimeout(resolve, 60))
+  expect(inspect).toHaveBeenCalledTimes(count)
+  for (let repeat = 0; repeat < 20; repeat++) {
+    const before = inspect.mock.calls.length
+    f.services.publication!.refresh()
+    await vi.waitFor(() => expect(inspect.mock.calls.length).toBeGreaterThan(before))
+    await new Promise<void>(resolve => setImmediate(resolve))
+  }
+  const inspected = vi.mocked(f.adapter.inspect!).mock.calls.map(call => call[0].requestKey)
+  expect(new Set(inspected).size).toBe(20)
+  expect(f.dispatched).toHaveLength(21)
+  expect(f.services.publication!.observation(f.binding.bindingId, 1)).toEqual({ state: 'unknown', reason: 'effect-unconfirmed' })
+}, 15_000)
+
+it('an unknown original fragment retains same-projection order while another original message is delivered', async () => {
+  const f = await fixture(async request => JSON.parse(request.request.body!).text.startsWith('First original fragment')
+    ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'confirmed', mapping: { messageId: request.requestKey } })
+  await appendFile(f.transcript, row('fragmented-original', 'First original fragment ' + 'x'.repeat(9000)) + row('independent-beside-fragments', 'Independent beside fragments'))
+  await vi.waitFor(() => expect(f.speech().find(op => op.reference.source.recordId === 'independent-beside-fragments')?.state).toBe('confirmed'))
+  const fragments = f.speech().filter(op => op.reference.source.recordId === 'fragmented-original')
+  expect(fragments.map(op => op.state)).toEqual(['unknown', 'pending'])
+  expect(fragments[1]?.predecessorOperationId).toBeUndefined()
+  expect(f.dispatched).toHaveLength(2)
+}, 15_000)
+
+it('a read that ignores abort releases its observation slot and a genuinely late receipt still settles only its original attempt', async () => {
+  const originalTimeout = AbortSignal.timeout.bind(AbortSignal), deadlines: AbortController[] = []
+  vi.spyOn(AbortSignal, 'timeout').mockImplementation(duration => {
+    if (duration !== 30_000) return originalTimeout(duration)
+    const deadline = new AbortController(); deadlines.push(deadline); return deadline.signal
+  })
+  const f = await fixture(async () => ({ state: 'unknown', reason: 'effect-unconfirmed' }))
+  let finishFirst!: (receipt: PublicationReceipt) => void
+  const inspect = vi.fn<NonNullable<PublicationAdapter['inspect']>>(async request => inspect.mock.calls.length === 1
+    ? await new Promise(resolve => { finishFirst = resolve }) : request.requestKey === f.speech()[1]?.operationId ? { state: 'confirmed', mapping: { messageId: 'read-' + request.requestKey } } : null)
+  f.adapter.inspect = inspect
+  await appendFile(f.transcript, row('unknown-first', 'First unknown') + row('unknown-second', 'Second unknown'))
+  await vi.waitFor(() => expect(inspect).toHaveBeenCalledOnce())
+  const [first, second] = f.speech(), frozen = structuredClone(first!.prepared)
+  deadlines.at(-1)!.abort()
+  await new Promise<void>(resolve => setImmediate(resolve))
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(inspect.mock.calls.length).toBeGreaterThanOrEqual(2))
+  expect(inspect.mock.calls[1]![0].requestKey).toBe(second!.operationId)
+  await vi.waitFor(() => expect(f.services.publication!.store.inspect(second!.operationId)?.state).toBe('confirmed'))
+  expect(f.services.publication!.store.inspect(first!.operationId)?.state).toBe('unknown')
+  finishFirst({ state: 'confirmed', mapping: { messageId: 'late-original-message' } })
+  await vi.waitFor(() => expect(f.services.publication!.store.inspect(first!.operationId)?.state).toBe('confirmed'))
+  expect(f.services.publication!.store.inspect(first!.operationId)).toMatchObject({ attempt: 1, prepared: frozen, mapping: { messageId: 'late-original-message' } })
+  expect(f.dispatched).toHaveLength(2)
+}, 15_000)
+
+it('a concurrent original claim cannot switch the Host to an unqualified independent candidate', async () => {
+  const qualified = new Set<string>()
+  const f = await fixture(async request => {
+    expect(qualified.has(request.requestKey), 'the effect must belong to the exact qualified operation').toBe(true)
+    return { state: 'confirmed', mapping: { messageId: 'native-' + request.requestKey } }
+  })
+  const store = f.services.publication!.store, qualify = store.qualifyPending.bind(store)
+  let competed = false
+  vi.spyOn(store, 'qualifyPending').mockImplementation((...args) => {
+    const result = qualify(...args)
+    if (result === 'qualified') qualified.add(args[1].operationId)
+    if (!competed && result === 'qualified') {
+      competed = true
+      const claimed = store.claimNext(f.binding, args[1].operationId, () => true, f.adapter)!
+      store.settle(claimed.operationId, claimed.attempt!, { state: 'unknown', reason: 'effect-unconfirmed' })
+    }
+    return result
+  })
+  await appendFile(f.transcript, row('concurrent-first', 'Original competitor') + row('qualified-next', 'Qualified independent record'))
+  await vi.waitFor(() => expect(competed).toBe(true))
+  await vi.waitFor(() => expect(store.list(f.binding).filter(operation => operation.reference.source.kind !== 'binding-operation').find(operation => operation.reference.source.recordId === 'qualified-next')?.state).toBe('confirmed'))
+  expect(f.dispatched).toHaveLength(1)
+  expect(JSON.parse(f.dispatched[0]!.request.request.body!).text).toBe('Qualified independent record')
 }, 15_000)
 
 it('source replacement exposes a retained source gap without adopting a new cut or mutating the original Agent', async () => {
@@ -91,7 +210,8 @@ it('source replacement exposes a retained source gap without adopting a new cut 
   await rename(f.transcript, join(f.root, 'retained-source.jsonl'))
   await writeFile(f.transcript, row('replacement-speech'))
   f.services.publication!.refresh()
-  await vi.waitFor(() => expect(f.services.publication!.observation(f.binding.bindingId, 1)).toEqual({ state: 'unavailable', reason: 'source-gap' }), { timeout: 5_000 })
+  await vi.waitFor(() => expect(f.services.publication!.observation(f.binding.bindingId, 1)).toEqual({ state: 'unavailable', reason: 'content-unconfirmed' }), { timeout: 5_000 })
+  expect(f.services.publication!.store.coverage(f.binding)).toMatchObject({ state: 'incomplete', gaps: [expect.objectContaining({ reason: 'source-gap' })] })
   expect(f.services.publication!.store.checkpoint(f.binding, 'local')).toEqual(original)
   expect(f.dispatched).toEqual([])
   expect(await readFile(f.storePath)).toEqual(metadata)
@@ -121,15 +241,16 @@ it('a late first dispatch cannot certify a later same-ID retry as not-applied', 
     if (calls === 1) return await new Promise(resolve => { finishFirst = resolve })
     return await new Promise(() => {})
   })
+  const dispatchDeadline = deadlines.length
   await appendFile(f.transcript, row('retry-speech'))
   await vi.waitFor(() => expect(f.dispatched).toHaveLength(1))
-  deadlines[0]!.abort()
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)[0]?.state).toBe('unknown'))
+  deadlines[dispatchDeadline]!.abort()
+  await vi.waitFor(() => expect(f.speech()[0]?.state).toBe('unknown'))
   f.adapter.inspect = async () => ({ state: 'not-applied', reason: 'platform-rejected' })
   f.services.publication!.refresh()
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)[0]?.state).toBe('not-applied'))
+  await vi.waitFor(() => expect(f.speech()[0]?.state).toBe('not-applied'))
   f.adapter.inspect = async () => null
-  const original = f.services.publication!.store.list(f.binding)[0]!
+  const original = f.speech()[0]!
   await f.cli(['retry', '--operation-id', original.operationId])
   await vi.waitFor(() => expect(f.dispatched).toHaveLength(2))
   deadlines.at(-1)!.abort()
@@ -169,21 +290,21 @@ it('a slow Binding effect cannot occupy another Binding or the original Core rea
     connectionId: 'parallel-connection', externalConversationId: 'parallel-group' }, { actor: { kind: 'user', id: 'original-user' } })
   expect(parallel.state).toBe('applied'); if (parallel.state !== 'applied') throw new Error('Parallel Binding was not applied.')
   await appendFile(f.transcript, row('parallel-speech'))
-  await vi.waitFor(() => expect(f.services.publication!.store.list(parallel.binding)[0]?.state).toBe('confirmed'), { timeout: 5_000 })
-  expect(f.services.publication!.store.list(f.binding)[0]?.state).toBe('dispatching')
+  await vi.waitFor(() => expect(f.services.publication!.store.list(parallel.binding).find(operation => operation.reference.source.recordId === 'parallel-speech')?.state).toBe('confirmed'), { timeout: 5_000 })
+  expect(f.speech()[0]?.state).toBe('dispatching')
   const source = await f.client.readSessionHistoryChanges(f.binding.agentSessionId, { checkpoint: f.binding.sourceCheckpoints[0]! })
   expect(source.items.map(item => item.id)).toEqual(['parallel-speech'])
   expect(f.client.connect).not.toHaveBeenCalled()
   finishSlow({ state: 'confirmed', mapping: { messageId: 'slow-message' } })
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)[0]?.state).toBe('confirmed'))
+  await vi.waitFor(() => expect(f.speech()[0]?.state).toBe('confirmed'))
   expect(f.dispatched).toHaveLength(2)
 }, 15_000)
 
 it('closing while current human authorization is pending retains the original non-applied outcome', async () => {
   const f = await fixture(async () => ({ state: 'not-applied', reason: 'platform-rejected' }))
   await appendFile(f.transcript, row('original-not-applied'))
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)[0]?.state).toBe('not-applied'))
-  const original = f.services.publication!.store.list(f.binding)[0]!
+  await vi.waitFor(() => expect(f.speech()[0]?.state).toBe('not-applied'))
+  const original = f.speech()[0]!
   let approve!: () => void
   const current = new Promise<void>(resolve => { approve = resolve })
   const retry = f.services.publication!.retry({ operationId: original.operationId }, { actor: { kind: 'user', id: 'original-user' }, assertCurrent: () => current })
@@ -208,18 +329,18 @@ it('original worker passes durable message and thread mapping to update, inspect
     return readable ? { state: 'confirmed', mapping: original! } : null
   }
   await appendFile(f.transcript, row('mapped-speech', 'Original speech'))
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)[0]?.state).toBe('confirmed'))
+  await vi.waitFor(() => expect(f.speech()[0]?.state).toBe('confirmed'))
   await appendFile(f.transcript, row('mapped-speech', 'Updated speech'))
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)[1]?.state).toBe('unknown'))
+  await vi.waitFor(() => expect(f.speech()[1]?.state).toBe('unknown'))
   expect(f.dispatched[1]?.mapping).toEqual(mapping)
   await vi.waitFor(() => expect(inspections).toContainEqual(mapping))
   readable = true; f.services.publication!.refresh()
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)[1]?.state).toBe('confirmed'))
+  await vi.waitFor(() => expect(f.speech()[1]?.state).toBe('confirmed'))
   await appendFile(f.transcript, row('mapped-speech', '', [{ type: 'thinking', thinking: 'Retained private source' }]))
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)[2]?.state).toBe('confirmed'))
+  await vi.waitFor(() => expect(f.speech()[2]?.state).toBe('confirmed'))
   expect(f.dispatched.map(value => value.request.request.method)).toEqual(['POST', 'PATCH', 'DELETE'])
   expect(f.dispatched[2]?.mapping).toEqual(mapping)
-  const operation = f.services.publication!.store.list(f.binding)[2]!
+  const operation = f.speech()[2]!
   const publicReceipt = await f.cli(['inspect', '--operation-id', operation.operationId])
   expect(publicReceipt.delivery.mapping).toEqual(mapping)
   expect(await readFile(f.storePath)).toEqual(metadata)
@@ -240,5 +361,5 @@ it('publishes future native speech for the exact authenticated Agent author of i
   await vi.waitFor(() => expect(f.dispatched).toHaveLength(1), { timeout: 5_000 })
   expect(f.dispatched[0]!.target.externalConversationId).toBe(f.input.externalConversationId)
   expect(JSON.parse(f.dispatched[0]!.request.request.body!).text).toBe('Original Agent publication')
-  expect(f.services.publication!.store.list(f.binding)).toEqual([expect.objectContaining({ state: 'confirmed', reference: expect.objectContaining({ source: expect.objectContaining({ recordId: 'agent-owned-reply' }) }) })])
+  expect(f.speech()).toEqual([expect.objectContaining({ state: 'confirmed', reference: expect.objectContaining({ source: expect.objectContaining({ recordId: 'agent-owned-reply' }) }) })])
 }, 20_000)

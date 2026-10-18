@@ -62,7 +62,8 @@ async function fixture(providerId: 'codex' | 'claude' | 'droid' = 'codex') {
   const port = createPublicationConversationPort(original.coreClients)
   const adapters = createBuiltinConnectionAdapters(), adapter = adapters.find(adapter => adapter.adapterId === 'feishu')!
   let credentialReadable = true
-  const openServices = () => createDesktopConnections({ directory: join(original.root, 'host'), adapters,
+  let activeServices: Awaited<ReturnType<typeof createDesktopConnections>>
+  const openServices = async () => activeServices = await createDesktopConnections({ directory: join(original.root, 'host'), adapters,
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async bytes => { if (!credentialReadable) throw new Error('Fixture credential temporarily unavailable'); return { result: (bytes.toString()), shouldReEncrypt: false } } },
     bindings: { spatial, checkpoint: ref => original.client.conversationCheckpoint(ref) }, publication: port })
   const services = await openServices()
@@ -82,7 +83,8 @@ async function fixture(providerId: 'codex' | 'claude' | 'droid' = 'codex') {
     expect(result.code, result.stdout + result.stderr).toBe(0); return JSON.parse(result.stdout).result
   }
   return { ...original, transcript, spatial, remote, services, rpc, cli, port, nativeSource, adapter, openServices, credentials: (readable: boolean) => { credentialReadable = readable }, binding: bound.binding,
-    ref: { hostId: 'local', agentSessionId: 'original-agent' }, posts: () => remote.messageCalls().filter(call => call.method === 'POST' && JSON.parse(call.body).msg_type === 'post') }
+    ref: { hostId: 'local', agentSessionId: 'original-agent' }, posts: () => remote.messageCalls().filter(call => call.method === 'POST' &&
+      contentOperations(activeServices.publication!.store, bound.binding, 100).some(operation => operation.prepared?.request.body === call.body)) }
 }
 
 it('original saved context and native input copies stay locally complete while the default Host publishes only independent allowed content', async () => {
@@ -489,7 +491,7 @@ it.each(['dispatching', 'unknown'] as const)('%s original effects are inspected 
     const value = JSON.parse(String(row.decision_json)); delete value.contentEligibility
     f.services.database!.prepare('UPDATE connector_publication_decision SET decision_json=? WHERE rowid=?').run(JSON.stringify(value), Number(row.rowid))
   }
-  const prepared = f.services.publication!.store.claimNext(f.binding, () => true, f.adapter.publication!)!
+  const prepared = f.services.publication!.store.claimNext(f.binding, f.services.publication!.store.next(f.binding)?.operationId ?? '', () => true, f.adapter.publication!)!
   if (state === 'unknown') f.services.publication!.store.settle(prepared.operationId, prepared.attempt!, { state: 'unknown', reason: 'effect-unconfirmed' })
   const inspect = vi.spyOn(f.port, 'inspect'), platformInspect = vi.spyOn(f.adapter.publication!, 'inspect')
   f.credentials(true); f.services.publication!.refresh()
