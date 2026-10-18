@@ -2,7 +2,7 @@
 import { tmpdir as fixtureTmpdir } from 'node:os'
 import { join as fixtureJoin, sep as fixtureSep } from 'node:path'
 const fixturePath = relative => { const temporary = relative.replace(/^(?:private\/)?tmp\//u, ''); return (temporary === relative ? fixtureJoin(fixtureTmpdir(), 'agentmux-fixtures') : fixtureTmpdir()) + fixtureSep + temporary.replaceAll('/', fixtureSep) }
-import { closeSync, mkdirSync, openSync, readFileSync, realpathSync, writeFileSync, writeSync } from 'node:fs'
+import { closeSync, constants, mkdirSync, openSync, readFileSync, realpathSync, writeFileSync, writeSync } from 'node:fs'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
 const args = process.argv.slice(2)
@@ -79,7 +79,8 @@ if (process.env.AGENTMUX_FAKE_NATIVE_RECORD === '1' && process.env.AGENTMUX_FAKE
         bodySha256: createHash('sha256').update(JSON.stringify(bodies)).digest('hex') })}\n`)
     }
   }
-  nativeRecordDescriptor = openSync(nativeRecordPath, preserveNative ? 'a' : 'w', 0o600)
+  nativeRecordDescriptor = openSync(nativeRecordPath,
+    constants.O_WRONLY | constants.O_CREAT | constants.O_APPEND | (preserveNative ? 0 : constants.O_TRUNC), 0o600)
   if (!preserveNative) writeSync(nativeRecordDescriptor, `${JSON.stringify({ type: 'session_meta', payload: {
     id: `native-${agentSessionId}`, source: 'cli', cwd: process.cwd()
   } })}\n`)
