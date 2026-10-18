@@ -99,7 +99,7 @@
     "@types/three": "0.180.0",
     "@types/ws": "8.18.1",
     "@vitejs/plugin-react": "^5.0.0",
-    "electron": "^43.7.7",
+    "electron": "43.7.7",
     "electron-vite": "^5.0.0",
     "happy-dom": "^20.14.0",
     "typescript": "^5.9.0",

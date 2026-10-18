@@ -56,16 +56,72 @@ export class BrowserPopupWindows {
 
   constructor(private readonly host: BrowserPopupHost) {}
 
+  /** Electron 43's public custom-create branch omits OpenURLFromTab's continuation
+   * and lifecycle. Consume that exact native request, rather than reissuing its URL.
+   * Source contract: electron/v43.7.7 lib/browser/{api/web-contents,guest-window-manager}.ts.
+   * The envelope lives only across the original synchronous event/handler dispatch;
+   * neither URL nor disposition correlates requests. Keep Electron's own listeners. */
+  install(source: WebContents, creation: BrowserPopupCreation,
+    handOff: (url: string, scheme: string) => void, report: (warning: string) => void): void {
+    type Request = { event: Electron.Event; navigate: unknown; consumed: boolean }
+    let pending: Request | null = null
+    const events: NodeJS.EventEmitter = source
+    events.prependListener('-new-window', (event: Electron.Event, _url: unknown, _name: unknown,
+      _disposition: unknown, _features: unknown, _referrer: unknown, _body: unknown, _sandbox: unknown, navigate: unknown) => {
+      pending = { event, navigate, consumed: false }
+    })
+    events.prependListener('-will-add-new-contents', () => { pending = null })
+    events.on('-new-window', (event: Electron.Event) => {
+      if (pending?.event === event) pending = null
+    })
+    source.setWindowOpenHandler(({ url }) => {
+      const request = pending
+      pending = null
+      const decision = browserWindowOpenOutcome(url, handOff)
+      if (decision.action === 'deny') return decision
+      return { action: 'allow',
+        overrideBrowserWindowOptions: { webPreferences: { session: source.session } },
+        createWindow: options => {
+          const guest = (options as typeof options & { webContents?: WebContents }).webContents
+          // Only OpenURLFromTab lacks Electron's preference merge. Guestful requests
+          // keep their native feature/security choices (including javascript=no).
+          const page = this.create(guest ? options : { ...options, webPreferences: {
+            ...(source as WebContents & { getLastWebPreferences(): Electron.WebPreferences }).getLastWebPreferences(),
+            ...options.webPreferences, session: source.session
+          } }, creation)
+          if (!guest) {
+            const close = () => { if (!page.isDestroyed()) page.close() }
+            events.once('current-render-view-deleted', close)
+            page.once('destroyed', () => events.removeListener('current-render-view-deleted', close))
+            const warn = (detail: string) => {
+              const warning = `${detail} The original Browser remains usable. Inspect this window before opening the link again.`
+              const popup = this.popups.get(page)
+              if (popup && this.live(popup)) { popup.warning = warning; this.emit(popup) }
+              report(warning)
+            }
+            if (!request || request.consumed || typeof request.navigate !== 'function') {
+              warn('The original new-window navigation could not be confirmed.')
+            } else {
+              request.consumed = true
+              try { request.navigate(page) }
+              catch (error) { warn(`The original new-window navigation returned an unknown result: ${message(error)}.`) }
+            }
+          }
+          return page
+        } }
+    })
+  }
+
   create(options: BrowserWindowConstructorOptions, creation: BrowserPopupCreation): WebContents {
     if (this.disposed) throw new Error('The original Browser popup owner has ended')
     const documentURL = this.host.rendererUrl()
-    // Electron supplies a pre-created guest in this otherwise internal option. Moving it
-    // into the chrome first, or rebuilding only webPreferences, loses native popup identity.
-    const { webContents: _guest, webPreferences: _preferences, ...shellOptions } = options as BrowserWindowConstructorOptions & { webContents?: WebContents }
+    // Renderer-created windows supply their original guest; modifier/middle-click
+    // requests have no guest yet. An explicit undefined is invalid to WebContentsView.
+    const { webContents: guest, webPreferences, ...shellOptions } = options as BrowserWindowConstructorOptions & { webContents?: WebContents }
     const window = new BrowserWindow({ ...shellOptions, frame: true, closable: true, minWidth: 320, minHeight: 220,
       webPreferences: { ...windowSecurityWebPreferences(this.host.preloadPath), focusOnNavigation: false } })
     let view: WebContentsView
-    try { view = new WebContentsView(options) }
+    try { view = new WebContentsView({ ...(webPreferences ? { webPreferences } : {}), ...(guest ? { webContents: guest } : {}) }) }
     catch (error) { window.destroy(); throw error }
     const page = view.webContents
     const popup: Popup = { window, view, documentURL, creation,
@@ -198,9 +254,10 @@ export class BrowserPopupWindows {
   private installPage(popup: Popup): void {
     const page = popup.view.webContents
     const handOff = (url: string, scheme: string) => { void this.handOff(popup, url, scheme) }
-    page.setWindowOpenHandler(({ url }) => {
-      const decision = browserWindowOpenOutcome(url, handOff)
-      return decision.action === 'allow' ? { action: 'allow', createWindow: options => this.create(options, popup.creation) } : decision
+    this.install(page, popup.creation, handOff, warning => {
+      if (!this.live(popup)) return
+      popup.warning = warning
+      this.emit(popup)
     })
     const guard = (event: Electron.Event & { url: string }) => {
       const target = classifyBrowserTarget(event.url)
