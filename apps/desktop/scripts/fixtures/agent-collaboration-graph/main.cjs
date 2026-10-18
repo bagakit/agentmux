@@ -311,10 +311,18 @@ app.whenReady().then(async () => {
       await pause(Math.max(0,event.at+await read('window.graphCapture.activityMS')+60-await read('performance.now()'))); assert.equal((await activity()).markers.length,0)
     })
     await check('late-original-route-keeps-the-original-activity-phase', async () => {
-      await locate('fixture-core'); await mapReady(); await closeReader(); const camera = await matrix()
+      await locate('fixture-core'); await mapReady(); await closeReader()
+      // Keep the explicit Core selection as the original metadata demand, and use
+      // the real Overview action so both exact subjects are painted before input.
+      await click('[aria-label="Overview"]'); await mapReady()
+      const endpointRects = () => read(`(()=>{const world=window.graphCapture.world(),canvas=document.querySelector('.collaboration-canvas').getBoundingClientRect();return['fixture-core','fixture-design'].map(id=>{for(const node of document.querySelectorAll('[data-collaboration-agent]')){if(node.dataset.collaborationAgent!==JSON.stringify(['local',id]))continue;const button=node.querySelector('.collaboration-agent__dot');if(!button)continue;const r=button.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2,onscreen=r.width>0&&r.height>0&&x>canvas.left&&x<canvas.right&&y>canvas.top&&y<canvas.bottom,hit=button.contains(document.elementFromPoint(x,y));if(onscreen&&hit)return{id,box:world.geometry.find(box=>box.id===node.closest('.react-flow__node').dataset.id),painted:{x:r.x,y:r.y,width:r.width,height:r.height},onscreen,hit}}return{id,onscreen:false}})})()`)
+      await until('both original delayed-route endpoints are actually visible and actionable',async()=>{const endpoints=await endpointRects();return endpoints.length===2&&endpoints.every(endpoint=>endpoint.onscreen&&endpoint.hit&&endpoint.box)})
+      assert.equal(await read(`document.querySelector('.collaboration-inspector .collaboration-identity code')?.textContent`),'fixture-core','The exact original selected source still owns metadata demand')
+      const camera = await matrix(); result.delayedRouteSetup={camera,endpoints:await endpointRects()}
       await read('window.graphCapture.delayRoutes(1200)')
       try {
         const event = await read('window.graphCapture.live(true,"fixture-core","fixture-design")'), first = await motionFrame('map-delayed-route-endpoints-live',event,280)
+        result.delayedRoute={event,first}
         assert.ok(first.markers.some(marker=>marker.subject===JSON.stringify(['local','fixture-core'])&&marker.label==='Message sent')); assert.ok(first.markers.some(marker=>marker.subject===JSON.stringify(['local','fixture-design'])&&marker.label==='Message received'))
         const incoming = sample => sample.paths.find(path=>{const id=JSON.parse(path.id);return id[0]==='communication'&&JSON.parse(JSON.parse(id[1])[1])[1]==='fixture-core'&&JSON.parse(JSON.parse(id[2])[1])[1]==='fixture-design'})
         assert.equal(incoming(first),undefined,'The original delayed path is not invented before Worker delivery')
