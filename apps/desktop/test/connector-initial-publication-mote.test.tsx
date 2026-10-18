@@ -1,28 +1,11 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { moteBotUi } from './fixtures/mote-bot-ui'
 
 let f: Awaited<ReturnType<typeof moteBotUi>>
 afterEach(async () => { await f?.close() })
 async function ready(check: () => void) { await vi.waitFor(async () => { await f.settle(); check() }, { timeout: 8000 }) }
-async function click(selector: string) {
-  let button!: HTMLButtonElement
-  await ready(() => { button = document.querySelector(selector)!; expect(button, selector).not.toBeNull(); expect(button.disabled, selector).toBe(false) })
-  for (let parent = button.parentElement; parent; parent = parent.parentElement) if (parent instanceof HTMLDetailsElement && !parent.open) await act(async () => parent!.querySelector<HTMLElement>('summary')!.click())
-  await act(async () => button.click())
-}
-async function fill(label: string, value: string) {
-  const input = document.querySelector<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('[aria-label="' + label + '"]')!
-  expect(input, label).not.toBeNull()
-  await act(async () => {
-    const prototype = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : input.tagName === 'SELECT' ? HTMLSelectElement.prototype : HTMLInputElement.prototype
-    Object.getOwnPropertyDescriptor(prototype, 'value')!.set!.call(input, value)
-    input.dispatchEvent(new Event(input.tagName === 'SELECT' ? 'change' : 'input', { bubbles: true }))
-  })
-}
-
-it('the original mounted Mote creation continues into explicit first bot version creation and exact submission without unrelated publication dependencies', async () => {
+it('the mounted Mote creation consent publishes its exact first bot version without unrelated publication dependencies', async () => {
   f = await moteBotUi()
   const base = f.registration.getMockImplementation()!, requests: Array<{ path: string; body: any }> = [], APP = 'cli_mote_1', VERSION = 'first-mote-version'
   let submitted = false
@@ -46,31 +29,31 @@ it('the original mounted Mote creation continues into explicit first bot version
     }
     return base(url, init)
   })
-  await f.open(); await f.click('Create a bot for this Mote')
+  await f.open()
+  expect(f.creationCount).toBe(0)
+  expect(requests).toEqual([])
+  await f.click('Sign in & continue')
   await ready(() => expect(document.querySelector('[data-mote-enrollment-action="confirm-account"]')).not.toBeNull())
-  await f.click('Confirm this account'); await f.click('Create this bot')
-  await ready(() => expect(document.body.textContent).toContain('Original save confirmed'))
+  expect(f.creationCount).toBe(0)
+  await f.click('Confirm this account')
+  expect(f.creationCount).toBe(0)
+  expect(requests).toEqual([])
   const parentInput = f.parentCalls.mock.calls.find(([method]) => method === 'space.mote.connection.create')![1] as any
+  expect(parentInput).toMatchObject({ source: { target: f.target() }, initialPublication: { version: '1.0.0', notes: 'Enable AMUX conversations.' } })
+  await f.click('Create, configure & publish')
+  await ready(() => expect(document.body.textContent).toContain('Waiting for platform approval'))
   const parent = (await f.client.call('space.mote.connection.inspect', { operationId: parentInput.operationId })).operation!
-  await f.click('Continue bot setup')
-  const origin = f.navigation.openMoteLark.mock.calls[0]![0]
-  await f.render(0, true, { section: 'lark', moteLarkOrigin: origin })
-  await click('[data-management-confirm]')
-  await click('[data-guided-primary]')
-  await ready(() => expect(document.querySelector('[data-management-publication]')).not.toBeNull())
-  expect(f.connectionCalls.mock.calls.find(([method]) => method === 'connection.setup.begin')![1]).toMatchObject({ source: { kind: 'enrollment', operationId: parent.enrollment!.operationId } })
-  await click('[data-publication-review]')
-  await ready(() => expect(document.querySelector('[aria-label="desktop application entry"]')).not.toBeNull())
-  await fill('Publication version', '1.0.0'); await fill('Publication release notes', 'Let the original creator use this bot.')
-  await fill('Publication audience', 'creator-only'); await fill('desktop application entry', 'bot'); await fill('mobile application entry', 'bot')
-  await click('[data-publication-review]'); await click('[data-publication-confirm]')
-  await click('[data-publication-review-created]'); await click('[data-publication-confirm]')
-  await ready(() => expect(document.querySelector('[data-guided-primary]')?.textContent).toBe('Check version status'))
+  expect(parent.enrollment?.initialSetup?.progress).toMatchObject({ stage: 'publication-status', state: 'approval-required', versionId: VERSION })
   const publication = requests.filter(request => request.path.includes('/app_version/') || request.path.includes('/publish/'))
-  expect(publication.map(request => request.path)).toEqual(['/developers/v1/app_version/list/' + APP, '/developers/v1/app_version/list/' + APP, '/developers/v1/app_version/create/' + APP, '/developers/v1/app_version/detail/' + APP + '/' + VERSION, '/developers/v1/publish/commit/' + APP + '/' + VERSION])
-  expect(publication.find(request => request.path.includes('/create/'))!.body).toMatchObject({ pcDefaultAbility: 'bot', mobileDefaultAbility: 'bot', visibleSuggest: { members: ['mote-user-1'] } })
+  expect(publication.map(request => request.path)).toEqual(['/developers/v1/app_version/list/' + APP, '/developers/v1/app_version/create/' + APP, '/developers/v1/app_version/detail/' + APP + '/' + VERSION, '/developers/v1/publish/commit/' + APP + '/' + VERSION, '/developers/v1/app_version/detail/' + APP + '/' + VERSION])
+  expect(publication.find(request => request.path.includes('/create/'))!.body).toEqual({ appVersion: '1.0.0', changeLog: 'Enable AMUX conversations.', pcDefaultAbility: 'bot', mobileDefaultAbility: 'bot', visibleSuggest: { departments: [], members: ['mote-user-1'], groups: [], isAll: 0 }, blackVisibleSuggest: { departments: [], members: [], groups: [], isAll: 0 } })
+  expect(publication.find(request => request.path.includes('/commit/'))!.body).toEqual({ clientId: APP })
   expect(f.beginCount).toBe(1); expect(f.creationCount).toBe(1)
+  await f.click('Check saved progress')
   const after = (await f.client.call('space.mote.connection.inspect', { operationId: parentInput.operationId })).operation!
-  expect(after.defaultSave).toEqual(parent.defaultSave)
-  expect(document.body.textContent).toContain('Submission accepted')
+  expect(after.operationId).toBe(parent.operationId)
+  expect(after.defaultSave?.params).toEqual(parent.defaultSave?.params)
+  expect(after.defaultSave?.observedReceipt).toMatchObject({ operationId: parent.defaultSave!.params.operationId, status: 'saved' })
+  expect(requests.filter(request => request.path.includes('/create/') || request.path.includes('/commit/'))).toEqual(publication.filter(request => request.path.includes('/create/') || request.path.includes('/commit/')))
+  expect(document.body.textContent).toContain('Waiting for platform approval')
 }, 30_000)
