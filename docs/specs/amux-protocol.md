@@ -131,7 +131,7 @@ Core 在首次冻结前通过原 Host 的非 wire reader 有界读取准确 Main
 
 引用只含原作者 `from`、原信 `msg-id` 与固定发现入口 `read-via="message --skill"`，不携带正文、摘要或预览。自闭合表示原文没有在此展开，不能解释成一封空正文原信。Agent 需要处理时，先通过 `"$AGENTMUX_CLI" message --skill` 发现取信用法，再按原 `msg-id` 主动读取；这不要求处理每封无关来信，也不表示已经读取、理解、接单或完成。
 
-`read-via` 的值固定为上述发现入口，由 Core 生成；它不是任意命令、URL 或授权载体。reader 只提供发现提示，不自动执行属性值、取信或确认消费。空闲投递、steer 资格、通知与原信的独立身份及实际回执由[通知行为合同](../design/behavior/a2a-collaboration.md#a2a-引用通知与主动取信)持有，不增加为可读属性。合并通知不新建 A2A 原信，每个 `msg-id` 继续引用原 journal 中的同一原信。
+`read-via` 的值固定为上述发现入口，由 Core 生成；它不是任意命令、URL 或授权载体。普通声明的 reader 只提供发现提示，不自动执行属性值、取信或确认消费。已核 A2A 通知展开后的原信阅读沿[原信阅读行为](../design/behavior/conversation-mode.md#a2a-引用通知中的原信阅读)，只在原 Host／收件 Session 的准确范围内消费既有授权查询；语法识别和属性本身不授予该资格。空闲投递、steer 资格、通知与原信的独立身份及实际回执由[通知行为合同](../design/behavior/a2a-collaboration.md#a2a-引用通知与主动取信)持有，不增加为可读属性。合并通知不新建 A2A 原信，每个 `msg-id` 继续引用原 journal 中的同一原信。
 
 ### 精确文本边界
 
