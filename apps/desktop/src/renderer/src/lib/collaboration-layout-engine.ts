@@ -19,9 +19,10 @@ export type CollaborationPath = {
 }
 export type CollaborationLayoutRequest =
   | { id: string; type: 'arrange'; input: CollaborationLayoutInput }
+  | { id: string; type: 'reconcile'; input: CollaborationLayoutInput; boxes: readonly CollaborationLayoutBox[]; paths: readonly CollaborationPath[]; anchor: string | null }
   | { id: string; type: 'route'; boxes: readonly CollaborationLayoutBox[]; connections: readonly CollaborationLayoutConnection[] }
 export type CollaborationLayoutResponse =
-  | { id: string; type: 'boxes'; boxes: CollaborationLayoutBox[] }
+  | { id: string; type: 'boxes'; boxes: CollaborationLayoutBox[]; retainedPaths?: readonly string[] }
   | { id: string; type: 'paths'; paths: Record<string, CollaborationPath> }
   | { id: string; type: 'error'; message: string; connectionId?: string }
   | { id: string; type: 'complete' }
@@ -69,14 +70,24 @@ export function translateCollaborationPath(path: CollaborationPath, offset: Coll
 function fixedNodes(nodes: readonly { id: string; width: number; height: number }[]) {
   return nodes.map(node => ({ name: node.id, attributes: { width: node.width / 72, height: node.height / 72 } }))
 }
+function layoutMembers(input: CollaborationLayoutInput) {
+  const nodes = new Map(input.nodes.map(node => [node.id, node])), areas = new Map(input.areas.map(area => [area.id, area]))
+  const seen = new Set<string>()
+  if (nodes.size !== input.nodes.length || areas.size !== input.areas.length || input.nodes.some(node => areas.has(node.id) || !dimension(node.width) || !dimension(node.height)))
+    throw Error('Original map identities or dimensions are inconsistent. Existing map positions are kept.')
+  for (const area of input.areas) for (const id of area.members) {
+    const node = nodes.get(id)
+    if (!node || node.areaId !== area.id || seen.has(id)) throw Error('Original area membership is inconsistent. Existing map positions are kept.')
+    seen.add(id)
+  }
+  if (seen.size !== nodes.size) throw Error('Some original members have no original area. Existing map positions are kept.')
+  return { nodes, areas }
+}
 /** Finite structural work only. Every real member and cross-area endpoint participates in one solve. */
 export async function arrangeCollaboration(input: CollaborationLayoutInput, signal?: AbortSignal): Promise<CollaborationLayoutBox[]> {
   signal?.throwIfAborted()
   if (!input.areas.length && !input.nodes.length) return []
-  const nodes = new Map(input.nodes.map(node => [node.id, node]))
-  const areas = new Map(input.areas.map(area => [area.id, area])), seen = new Set<string>()
-  if (nodes.size !== input.nodes.length || areas.size !== input.areas.length || input.nodes.some(node => areas.has(node.id) || !dimension(node.width) || !dimension(node.height)))
-    throw Error('Original map identities or dimensions are inconsistent. Existing map positions are kept.')
+  const { nodes, areas } = layoutMembers(input)
   const emptyAreas: typeof input.areas[number][] = [], occupiedAreas: typeof input.areas[number][] = []
   const clusterNames = new Map<string, string>(), usedNames = new Set([...nodes.keys(), ...areas.keys()])
   const visible = new Map<string, { id: string; width: number; height: number }>(), endpoints = new Map<string, string>()
@@ -86,11 +97,7 @@ export async function arrangeCollaboration(input: CollaborationLayoutInput, sign
   const labelWidth = headingWidth + padding * 2, labelHeight = COLLABORATION_AREA_HEADER + padding
   for (const area of input.areas) {
     signal?.throwIfAborted()
-    const members = area.members.map(id => {
-      const node = nodes.get(id)
-      if (!node || node.areaId !== area.id || seen.has(id)) throw Error('Original area membership is inconsistent. Existing map positions are kept.')
-      seen.add(id); return node
-    })
+    const members = area.members.map(id => nodes.get(id)!)
     if (!members.length) { emptyAreas.push(area); continue }
     occupiedAreas.push(area)
     if (area.folded) {
@@ -108,7 +115,6 @@ export async function arrangeCollaboration(input: CollaborationLayoutInput, sign
       // This blank label reserves the real title, not a synthetic Agent or a relationship.
       label: { html: `<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="${labelWidth}" HEIGHT="${labelHeight}" FIXEDSIZE="TRUE"> </TD></TR></TABLE>` } }, nodes: fixedNodes(members) })
   }
-  if (seen.size !== nodes.size) throw Error('Some original members have no original area. Existing map positions are kept.')
   const pairs = new Set<string>()
   for (const edge of input.connections) {
     const source = endpoints.get(edge.source), target = endpoints.get(edge.target)
@@ -165,26 +171,30 @@ export async function arrangeCollaboration(input: CollaborationLayoutInput, sign
 }
 
 type Obstacle = CollaborationLayoutBounds & Pick<CollaborationLayoutBox, 'id' | 'kind'>
+const layoutObstacle = (original: CollaborationLayoutBox): Obstacle => original.kind === 'area'
+  ? { id: original.id, kind: original.kind, x: original.x + original.heading.x, y: original.y + original.heading.y, width: original.heading.width, height: original.heading.height } : original
 /** Coarse broad phase shared by this bounded route job, never a second map fact store. */
 class Obstacles {
   readonly byId = new Map<string, Obstacle>()
   private cells = new Map<string, Obstacle[]>()
-  private extent: CollaborationLayoutBounds
+  extent: CollaborationLayoutBounds | null = null
   constructor(boxes: readonly CollaborationLayoutBox[]) {
-    for (const original of boxes) {
-      const box: Obstacle = original.kind === 'area' ? { id: original.id, kind: original.kind,
-        x: original.x + original.heading.x, y: original.y + original.heading.y, width: original.heading.width, height: original.heading.height } : original
+    for (const original of boxes) this.add(original)
+  }
+  add(original: CollaborationLayoutBox) {
+      const box = layoutObstacle(original)
       if (this.byId.has(box.id) || !dimension(box.width) || !dimension(box.height) || !Number.isFinite(box.x) || !Number.isFinite(box.y)) throw Error('Original fixed map geometry is inconsistent. Existing connections are kept.')
       this.byId.set(box.id, box)
       for (const key of this.keys(box)) { const values = this.cells.get(key) ?? []; values.push(box); this.cells.set(key, values) }
-    }
-    this.extent = boxes.length ? bounds([...this.byId.values()].flatMap(box => [{ x: box.x, y: box.y }, { x: box.x + box.width, y: box.y + box.height }])) : { x: 0, y: 0, width: 0, height: 0 }
+      this.extent = bounds([...(this.extent ? [{ x: this.extent.x, y: this.extent.y }, { x: this.extent.x + this.extent.width, y: this.extent.y + this.extent.height }] : []),
+        { x: box.x, y: box.y }, { x: box.x + box.width, y: box.y + box.height }])
   }
   private *keys(box: CollaborationLayoutBounds) {
     for (let x = Math.floor(box.x / 512); x <= Math.floor((box.x + box.width) / 512); x++)
       for (let y = Math.floor(box.y / 512); y <= Math.floor((box.y + box.height) / 512); y++) yield `${x},${y}`
   }
   query(box: CollaborationLayoutBounds) {
+    if (!this.extent) return []
     const x = Math.max(box.x, this.extent.x), y = Math.max(box.y, this.extent.y)
     const clipped = { x, y, width: Math.min(box.x + box.width, this.extent.x + this.extent.width) - x, height: Math.min(box.y + box.height, this.extent.y + this.extent.height) - y }
     if (clipped.width < 0 || clipped.height < 0) return []
@@ -192,6 +202,96 @@ class Obstacles {
     for (const key of this.keys(clipped)) for (const value of this.cells.get(key) ?? []) if (overlap(box, value)) result.add(value)
     return [...result]
   }
+}
+
+/** Preserve established positions. Only new or genuinely colliding geometry needs a nearby slot. */
+export function reconcileCollaborationLayout(input: CollaborationLayoutInput, previous: readonly CollaborationLayoutBox[], anchor: string | null, signal?: AbortSignal): CollaborationLayoutBox[] {
+  const { nodes, areas } = layoutMembers(input), held = new Map(previous.map(box => [box.id, box]))
+  const occupied = new Obstacles([]), placed = new Map<string, CollaborationLayoutBox>()
+  const headings = new Map<string, CollaborationLayoutBounds>()
+  const neighbors = new Map<string, string[]>()
+  for (const connection of input.connections) {
+    for (const [from, to] of [[connection.source, connection.target], [connection.target, connection.source]]) {
+      const peers = neighbors.get(from!) ?? []; peers.push(to!); neighbors.set(from!, peers)
+    }
+  }
+  function place(box: CollaborationLayoutBox) {
+    signal?.throwIfAborted()
+    let candidate = box
+    if (occupied.query(expand(box, gap / 2)).length) {
+      const stepX = box.width + gap, stepY = box.height + gap, extent = occupied.extent!
+      // A ring beyond the finite occupied extent must contain a free slot.
+      const rings = Math.ceil(Math.max(Math.abs(extent.x - box.x), Math.abs(extent.x + extent.width - box.x)) / stepX
+        + Math.max(Math.abs(extent.y - box.y), Math.abs(extent.y + extent.height - box.y)) / stepY) + 2
+      search: for (let ring = 1; ring <= rings; ring++) {
+        signal?.throwIfAborted()
+        const offsets: CollaborationLayoutPoint[] = []
+        for (let index = -ring; index <= ring; index++) {
+          offsets.push({ x: index, y: -ring }, { x: index, y: ring })
+          if (Math.abs(index) !== ring) offsets.push({ x: -ring, y: index }, { x: ring, y: index })
+        }
+        offsets.sort((a, b) => (a.x * stepX) ** 2 + (a.y * stepY) ** 2 - (b.x * stepX) ** 2 - (b.y * stepY) ** 2)
+        for (const offset of offsets) {
+          const next = { ...box, x: box.x + offset.x * stepX, y: box.y + offset.y * stepY }
+          if (!occupied.query(expand(next, gap / 2)).length) { candidate = next; break search }
+        }
+      }
+    }
+    occupied.add(candidate); placed.set(candidate.id, candidate)
+    return candidate
+  }
+  function originalNode(id: string) {
+    const node = nodes.get(id)!, old = held.get(id)
+    if (old?.kind !== 'agent' || old.areaId !== node.areaId) return null
+    return { ...old, width: node.width, height: node.height,
+      x: old.x + (old.width - node.width) / 2, y: old.y + (old.height - node.height) / 2 }
+  }
+  // The actual reading occurrence goes first, before its newly expanded body can displace it.
+  const anchored = anchor && nodes.has(anchor) && !areas.get(nodes.get(anchor)!.areaId)?.folded ? originalNode(anchor) : null
+  if (anchored) place(anchored)
+  const orderedAreas = [...input.areas].sort((a, b) => Number(b.id === anchor) - Number(a.id === anchor) || Number(held.has(b.id)) - Number(held.has(a.id)) || a.id.localeCompare(b.id))
+  function placeTitle(area: CollaborationLayoutInput['areas'][number]) {
+    const old = held.get(area.id)
+    const peers = area.members.flatMap(id => (neighbors.get(id) ?? []).flatMap(peer => { const box = held.get(peer); return box ? [box] : [] }))
+    const header = old?.kind === 'area' ? { x: old.x + old.heading.x, y: old.y + old.heading.y }
+      : peers.length ? { x: peers.reduce((sum, box) => sum + box.x + box.width, 0) / peers.length + gap, y: peers.reduce((sum, box) => sum + box.y, 0) / peers.length } : { x: 0, y: 0 }
+    const width = area.folded && area.members.length ? 276 : headingWidth, height = area.members.length ? area.folded ? 54 : COLLABORATION_AREA_HEADER : 32
+    const title = place({ id: area.id, areaId: area.id, kind: 'area', folded: area.folded, ...header, width, height, heading: { x: 0, y: 0, width, height } })
+    headings.set(area.id, { x: title.x, y: title.y, width, height })
+  }
+  for (const area of orderedAreas) if (held.get(area.id)?.kind === 'area') placeTitle(area)
+  const visible = input.nodes.filter(node => !areas.get(node.areaId)!.folded && node.id !== anchored?.id)
+  visible.sort((a, b) => {
+    const left = held.get(a.id), right = held.get(b.id)
+    const rank = (node: typeof a, old: CollaborationLayoutBox | undefined) => old?.kind === 'agent' && !held.get(node.areaId)?.folded ? old.width === node.width && old.height === node.height ? 0 : 1 : 2
+    return rank(a, left) - rank(b, right) || a.id.localeCompare(b.id)
+  })
+  const retained = visible.filter(node => originalNode(node.id)), added = visible.filter(node => !originalNode(node.id))
+  for (const node of retained) place(originalNode(node.id)!)
+  // A newly discovered place must yield to every established member, not claim its old position.
+  for (const area of orderedAreas) if (held.get(area.id)?.kind !== 'area') placeTitle(area)
+  for (const node of added) {
+    let box = originalNode(node.id)
+    if (!box) {
+      const related = (neighbors.get(node.id) ?? []).filter(id => nodes.get(id)?.areaId === node.areaId)
+      const local = related.length ? related : areas.get(node.areaId)!.members.filter(id => id !== node.id)
+      const peers = local.flatMap(id => { const value = placed.get(id) ?? held.get(id); return value ? [value] : [] })
+      const title = headings.get(node.areaId)!
+      const point = peers.length ? { x: peers.reduce((sum, peer) => sum + peer.x + peer.width / 2, 0) / peers.length - node.width / 2,
+        y: peers.reduce((sum, peer) => sum + peer.y + peer.height / 2, 0) / peers.length + gap } : { x: title.x, y: title.y + title.height + gap }
+      box = { ...node, ...point, kind: 'agent', folded: false }
+    }
+    place(box)
+  }
+  const output: CollaborationLayoutBox[] = []
+  for (const area of input.areas) {
+    const title = headings.get(area.id)!, members = area.folded ? [] : area.members.map(id => placed.get(id)!)
+    if (!members.length) { output.push(placed.get(area.id)!); continue }
+    const extent = bounds([title, ...members].flatMap(box => [{ x: box.x, y: box.y }, { x: box.x + box.width, y: box.y + box.height }]))
+    output.push({ id: area.id, areaId: area.id, kind: 'area', folded: false, x: extent.x - padding, y: extent.y - padding, width: extent.width + padding * 2, height: extent.height + padding * 2,
+      heading: { ...title, x: title.x - extent.x + padding, y: title.y - extent.y + padding } }, ...members)
+  }
+  return output
 }
 const expand = (box: CollaborationLayoutBounds, amount: number) => ({ x: box.x - amount, y: box.y - amount, width: box.width + amount * 2, height: box.height + amount * 2 })
 function routeNode(box: Obstacle) {
@@ -310,9 +410,23 @@ export async function handleCollaborationLayoutRequest(request: CollaborationLay
   let pending: Record<string, CollaborationPath> = Object.create(null), size = 0
   const flush = () => { if (size) { emit({ id: request.id, type: 'paths', paths: pending }); pending = Object.create(null); size = 0 } }
   try {
-    const boxes = request.type === 'arrange' ? await arrangeCollaboration(request.input, signal) : request.boxes
-    if (request.type === 'arrange') emit({ id: request.id, type: 'boxes', boxes: [...boxes] })
-    await routeCollaborationLayout(boxes, request.type === 'arrange' ? request.input.connections : request.connections, {
+    const boxes = request.type === 'arrange' ? await arrangeCollaboration(request.input, signal)
+      : request.type === 'reconcile' ? reconcileCollaborationLayout(request.input, request.boxes, request.anchor, signal) : request.boxes
+    let connections = request.type === 'route' ? request.connections : request.input.connections
+    if (request.type === 'reconcile') {
+      const previous = new Map(request.boxes.map(box => [box.id, layoutObstacle(box)])), current = new Map(boxes.map(box => [box.id, layoutObstacle(box)]))
+      const same = (a: Obstacle | undefined, b: Obstacle | undefined) => a && b && a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height
+      const changed = [...current.values()].filter(box => !same(box, previous.get(box.id))), paths = new Map(request.paths.map(path => [path.id, path]))
+      const retainedPaths = connections.filter(connection => {
+        const path = paths.get(connection.id)
+        return path && same(previous.get(connection.source), current.get(connection.source)) && same(previous.get(connection.target), current.get(connection.target))
+          && !changed.some(box => box.id !== connection.source && box.id !== connection.target && overlap(path.bounds, box))
+      }).map(connection => connection.id)
+      const retained = new Set(retainedPaths)
+      connections = connections.filter(connection => !retained.has(connection.id))
+      emit({ id: request.id, type: 'boxes', boxes: [...boxes], retainedPaths })
+    } else if (request.type === 'arrange') emit({ id: request.id, type: 'boxes', boxes: [...boxes] })
+    await routeCollaborationLayout(boxes, connections, {
       signal,
       onPath: path => { pending[path.id] = path; if (++size === 8) flush() },
       onError: (connectionId, error) => { flush(); emit({ id: request.id, type: 'error', connectionId, message: error instanceof Error ? error.message : 'Connection routing failed. Its source remains readable.' }) }
