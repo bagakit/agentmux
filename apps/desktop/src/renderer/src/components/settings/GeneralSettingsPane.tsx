@@ -67,7 +67,7 @@ export function GeneralSettingsPane({ copyPathsAsAbsolute, onSave, onOpenRecover
           <div>
             <dt data-settings-field="session-recovery">Session recovery</dt>
             <dd>Your tabs and layouts are restored when you return. Running agents stay available when the desktop window closes.
-              {onOpenRecovery && <button type="button" className="small-button" onClick={onOpenRecovery}>Open Execution</button>}
+              {onOpenRecovery && <button type="button" className="small-button" onClick={onOpenRecovery}>Open Session recovery</button>}
             </dd>
           </div>
           <div>
