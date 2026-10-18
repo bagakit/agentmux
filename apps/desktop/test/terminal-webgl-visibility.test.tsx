@@ -39,6 +39,8 @@ const fixture = vi.hoisted(() => ({
   resize: vi.fn(),
   write: vi.fn(),
   realViewport: false,
+  viewportDispose: vi.fn(),
+  renderDispose: vi.fn(),
   selection: undefined as IBufferRange | undefined,
   snapshot: undefined as ISelectionSnapshot | undefined,
   grid: { cols: 80, rows: 24 }
@@ -64,7 +66,7 @@ vi.mock('@xterm/xterm', async () => {
     open = vi.fn((root: HTMLElement) => { this.element ??= root.ownerDocument.createElement('div'); root.append(this.element) })
     focus() {}
     onUserInput() { return { dispose() {} } }
-    onRender() { return { dispose() {} } }
+    onRender() { return { dispose: fixture.renderDispose } }
     onSelectionChange() { return { dispose() {} } }
     getSelection() { return '' }
     getSelectionSnapshot() { return fixture.snapshot ?? (fixture.selection ? { anchor: fixture.selection.start, active: fixture.selection.end, mode: 'normal' as const, selectAll: false } : undefined) }
@@ -137,7 +139,7 @@ vi.mock('../src/renderer/src/lib/terminal-viewport-sync', async importOriginal =
     observeViewport() {}
     acceptOwnerSize(_size: { cols: number; rows: number }) {}
     async startLiveSynchronization() {}
-    dispose() {}
+    dispose() { fixture.viewportDispose() }
   } }
 })
 vi.mock('../src/renderer/src/components/TerminalContextMenu', () => ({
@@ -163,6 +165,10 @@ beforeEach(() => {
   fixture.webgl.length = 0
   fixture.receive = null
   fixture.realViewport = false
+  fixture.viewportDispose.mockReset()
+  fixture.renderDispose.mockReset()
+  fixture.unsubscribe.mockReset()
+  fixture.detach.mockReset()
   fixture.write.mockResolvedValue(undefined)
   fixture.selection = undefined
   fixture.snapshot = undefined
@@ -955,3 +961,53 @@ it('does not submit discarded cursor-group cells as a restored range or stop hea
  expect(fixture.terminals).toEqual([terminal]);expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control,0);expect(fixture.detach).not.toHaveBeenCalled();expect(terminal.dispose).not.toHaveBeenCalled();
  }finally{await act(async()=>root!.unmount());root=null;schedule.mockRestore();cancel.mockRestore();frameElement.remove()}
 });
+
+
+it.each(['viewport', 'render-listener', 'subscription'] as const)(
+  'releases later terminal owners when an independent %s disposer throws', async failingOwner => {
+    const failure = new Error('Original independent cleanup failure'), calls: string[] = []
+    const releases: Array<() => void> = []
+    const register = rendererPerformance.registerTerminal, acquire = terminalResourceOwners.acquireTerminalResourceOwners
+    const reader = vi.spyOn(rendererPerformance, 'registerTerminal').mockImplementation(read => {
+      const release = register(read); releases.push(release); return release
+    })
+    const owners = vi.spyOn(terminalResourceOwners, 'acquireTerminalResourceOwners').mockImplementation(input => {
+      const owner = acquire(input); releases.push(() => owner.release()); return owner
+    })
+    let terminal: FixtureTerminal | undefined
+    try {
+      await render(false)
+      terminal = fixture.terminals[0]!
+      const dispose = terminal.dispose.getMockImplementation()!
+      const record = (owner: string) => { calls.push(owner); if (owner === failingOwner) throw failure }
+      fixture.viewportDispose.mockImplementationOnce(() => record('viewport'))
+      fixture.renderDispose.mockImplementationOnce(() => record('render-listener'))
+      fixture.unsubscribe.mockImplementationOnce(() => { fixture.receive = null; record('subscription') })
+      fixture.detach.mockImplementationOnce(async () => { calls.push('detach') })
+      terminal.dispose.mockImplementationOnce(() => { calls.push('xterm'); dispose() })
+      let caught: unknown, threw = false
+      try { await act(async () => root!.unmount()) } catch (error) { caught = error; threw = true }
+      root = null
+      const sample = { failingOwner, threw, caughtOriginal: caught === failure, calls: [...calls],
+        detachCalls: fixture.detach.mock.calls.length, xtermDisposals: terminal.dispose.mock.calls.length,
+        remainingReaders: rendererPerformance.snapshot().terminals.length, owners: terminalResourceOwnerCounts() }
+      cleanupSample('independent-owner-failure', sample)
+      expect(threw).toBe(true)
+      expect(caught).toBe(failure)
+      expect(fixture.unsubscribe).toHaveBeenCalledOnce()
+      expect(fixture.detach).toHaveBeenCalledExactlyOnceWith('attachment-retained')
+      expect(terminal.dispose).toHaveBeenCalledOnce()
+      expect(calls).toEqual(['render-listener', 'viewport', 'subscription', 'detach', 'xterm'])
+      expect(fixture.receive).toBeNull()
+      expect(rendererPerformance.snapshot().terminals).toEqual([])
+      expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 0, terminalAddons: 0, terminalListeners: 0 })
+    } finally {
+      // Fault baselines must not leave test-owned objects or one-shot failures for the next case.
+      if (terminal && terminal.dispose.mock.calls.length === 0) terminal.dispose()
+      for (const release of releases) release()
+      fixture.receive = null
+      fixture.viewportDispose.mockReset(); fixture.renderDispose.mockReset(); fixture.unsubscribe.mockReset()
+      reader.mockRestore(); owners.mockRestore()
+    }
+  }
+)
