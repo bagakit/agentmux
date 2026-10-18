@@ -1,15 +1,25 @@
 import { applyEdits, format } from 'jsonc-parser'
 import { useMemo, useState } from 'react'
 import { ContentCopyButton } from './ContentCopyButton.js'
+import { ConversationProgressiveBody, needsProgressiveText } from './ConversationProgressiveBody.js'
 
-/** Only whitespace changes for reading. The host's exact payload remains the copy source. */
-export function ConversationToolPayload({ text, identity, sourceIdentity, callId, copyLabel }: {
+type PayloadProps = {
   text: string
   identity: object
   sourceIdentity: object
   callId?: string
   copyLabel: string
-}) {
+}
+
+/** Only whitespace changes for reading. The host's exact payload remains the copy source. */
+export function ConversationToolPayload(props: PayloadProps) {
+  const reading = useMemo(() => () => [props.text], [props.text, props.sourceIdentity])
+  return <ConversationProgressiveBody heavy={needsProgressiveText(props.text)} reading={reading}>
+    <ConversationToolPayloadBody {...props} />
+  </ConversationProgressiveBody>
+}
+
+function ConversationToolPayloadBody({ text, identity, sourceIdentity, callId, copyLabel }: PayloadProps) {
   const [view, setView] = useState({ text, sourceIdentity, formatted: false })
   if (view.text !== text || view.sourceIdentity !== sourceIdentity) setView({ text, sourceIdentity, formatted: false })
   const formatted = view.text === text && view.sourceIdentity === sourceIdentity && view.formatted

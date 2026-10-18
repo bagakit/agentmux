@@ -30,7 +30,7 @@ export function MarkdownCodeBlock({ code, language, visible = true, readOnly = f
   }, [owner, code, normalized, diagram, inView])
   const ready = inView && result?.owner === owner ? result.value : null
   const reading = useHorizontalReading<HTMLPreElement>(inView, ready?.html ?? code)
-  return <div ref={ref} className="md-code-container">
+  return <div ref={ref} className="md-code-container" data-reading-find-boundary={diagram && renderDiagram && visible && !readOnly ? true : undefined}>
     {!diagram && !readOnly && copyText ? <div className="md-code-toolbar">
       <span className="md-code-toolbar__language" title={language?.trim() || 'Text'}>{language?.trim() || 'Text'}</span>
       <ContentCopyButton text={code} identity={language} label="Copy code" className="md-code-toolbar__copy" />

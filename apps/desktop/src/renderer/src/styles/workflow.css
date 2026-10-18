@@ -168,8 +168,6 @@
   .wf-observation__body { margin-inline: var(--sp-3); }
   .wf-observation__summary { padding-inline: var(--sp-3); gap: var(--sp-2) var(--sp-3); }
   .wf-observation__caption { width: 100%; }
-  .wf-observation__body > :is(.log-row__payload, .log-row__output, .log-diff, .log-row__prose),
-  .activity-log__segment > .wf-tool-row--observation ~ :is(.log-row__payload, .log-row__output, .log-diff, .log-row__prose) { margin-left: var(--sp-7); margin-right: var(--sp-3); }
 }
 @media (pointer: coarse) { .wf-tool-row--observation[data-expandable], .wf-card--observation > .wf-head { min-height: 44px; } }
 
