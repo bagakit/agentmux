@@ -68,6 +68,8 @@ export interface RoomBindingReadPort {
   grants?(bindingId: string, revision: number): ConnectionGrant[]
   readExact(bindingId: string, revision: number): RoomBinding | null
   readCurrent(bindingId: string): RoomBinding | null
+  /** The original unique native application/group owner, independent of its receiver alias. */
+  findActiveAudience(input: { application: ConnectionApplication; externalConversationId: string }): RoomBinding | null
   listActive(input?: RoomBindingListInput): RoomBinding[]
   publicationAuthority(bindingId: string, revision: number): RoomPublicationAuthority
   readGrant(grantId: string, revision?: number): ConnectionGrant | null

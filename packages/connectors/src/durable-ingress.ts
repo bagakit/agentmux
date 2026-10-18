@@ -152,14 +152,16 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     return saved
   }
   private binding(record: ConnectionIngressMessage): RoomBinding | null {
-    return this.options.bindings.listActive({ connectionId: record.connectionId }).find(binding => equal(binding.application, record.application) && binding.externalConversationId === record.externalConversationId) ?? null
+    return this.options.bindings.findActiveAudience({ application: record.application, externalConversationId: record.externalConversationId })
   }
   private authorize(record: ConnectionIngressMessage, expected?: ConnectionIngressMessage['input'], allowPendingReply = false) {
     this.assertService()
     const connection = this.options.connections.readConfiguration(record.connectionId), binding = this.binding(record)
     if (!connection?.config.enabled || !equal(connection.config.application, record.application)) fail('INGRESS_CONNECTION_UNAVAILABLE')
     if (!binding) fail('INGRESS_BINDING_UNAVAILABLE')
-    const grant = this.options.bindings.findGrant({ connectionId: record.connectionId, externalConversationId: record.externalConversationId, actor: record.actor })
+    const target = binding.connectionId === record.connectionId ? connection : this.options.connections.readConfiguration(binding.connectionId)
+    if (!target?.config.enabled || !equal(target.config.application, record.application)) fail('INGRESS_CONNECTION_UNAVAILABLE')
+    const grant = this.options.bindings.findGrant({ connectionId: binding.connectionId, externalConversationId: record.externalConversationId, actor: record.actor })
     if (!grant || grant.state !== 'active' || grant.bindingId !== binding.bindingId || grant.bindingRevision !== binding.revision || !grant.capabilities.includes('input') || !equal(grant.actor, record.actor)) fail('INGRESS_ACTOR_NOT_AUTHORIZED')
     const event = JSON.parse(String(this.database.prepare('SELECT event_json FROM connection_ingress_message WHERE ingress_id=?').get(record.ingressId)!.event_json)) as VerifiedIngressMessage
     const qualifiedReply = record.addressing?.state === 'confirmed' && record.addressing.selection === 'reply' && record.addressing.replyToMessageId === event.replyToMessageId
@@ -167,7 +169,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       if (!event.replyToMessageId || record.addressing?.state === 'confirmed') fail('INGRESS_INPUT_OUTSIDE_SCOPE')
       if (!allowPendingReply) fail('INGRESS_ADDRESSING_UNCONFIRMED')
     }
-    const author = parseAgentExternalMessageAuthor({ kind: 'external', connectionId: record.connectionId, actor: record.actor, externalConversationId: record.externalConversationId, externalMessageId: record.externalMessageId, bindingId: binding.bindingId, bindingRevision: binding.revision, grantId: grant.grantId, grantRevision: grant.revision })
+    const author = parseAgentExternalMessageAuthor({ kind: 'external', connectionId: binding.connectionId, actor: record.actor, externalConversationId: record.externalConversationId, externalMessageId: record.externalMessageId, bindingId: binding.bindingId, bindingRevision: binding.revision, grantId: grant.grantId, grantRevision: grant.revision })
     if (expected?.admissionIntent) { const { expectedRun: _run, ...target } = expected.admissionIntent; if (!isDeepStrictEqual(target, binding.inputTarget ?? { kind: 'manual-actor' })) fail('INGRESS_AUTHORITY_REVISED') }
     if (expected && (expected.hostId !== binding.executionHostId || expected.agentSessionId !== binding.agentSessionId || !equal(expected.author, author))) fail('INGRESS_AUTHORITY_REVISED')
     return { binding, author, event }
