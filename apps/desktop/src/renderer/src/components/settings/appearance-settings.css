@@ -11,4 +11,9 @@
 .settings-appearance__help .settings-hint { padding-inline: 0; max-width: 68ch; }
 .settings-appearance .settings-theme-choice__sample { min-height: 52px; }
 .settings-appearance .terminal-theme-choice__copy small { font-size: var(--fs-meta); }
+.settings-appearance .terminal-theme-grid { grid-template-columns: repeat(auto-fit, minmax(min(164px, 100%), 1fr)); gap: var(--sp-3); }
+.settings-appearance .terminal-theme-choice { grid-template-columns: minmax(0, 1fr) 16px; align-items: start; gap: var(--sp-3); padding: var(--sp-3); }
+.settings-appearance .terminal-theme-preview { grid-column: 1 / -1; width: 100%; height: 68px; }
+.settings-appearance .terminal-theme-choice__copy { gap: var(--sp-1); }
+.settings-appearance .terminal-theme-choice > svg { margin-top: var(--sp-1); }
 @media (max-width: 700px) { .settings-appearance .settings-theme-grid { grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr)); } }
