@@ -82,8 +82,13 @@ try {
     { find: /^@agentmux\/client-ui\/styles\/(.*)$/u, replacement: path.join(root, 'packages/client-ui/src/styles/$1') }
   ] } }
   for (const [name, format] of [['main', 'es'], ['preload', 'cjs']]) await build({ ...common, plugins: [plugin(false)],
+    ...(name === 'preload' ? { ssr: { noExternal: true } } : {}),
     build: { ssr: path.join(fixture, `${name}.ts`), target: 'node24', outDir: path.join(privateRoot, name), emptyOutDir: true,
-      rollupOptions: { makeAbsoluteExternalsRelative: false, external: ['electron', '@agentmux/core', /^@agentmux\/core\//], output: { format, entryFileNames: `${name}.${format === 'es' ? 'mjs' : 'cjs'}` } } } })
+      rollupOptions: { makeAbsoluteExternalsRelative: false, external: name === 'main' ? ['electron', '@agentmux/core', /^@agentmux\/core\//] : ['electron'], output: { format, entryFileNames: `${name}.${format === 'es' ? 'mjs' : 'cjs'}` } } } })
+  const preloadCode = await fs.readFile(path.join(privateRoot, 'preload/preload.cjs'), 'utf8')
+  const preloadRequires = [...preloadCode.matchAll(/\brequire\(["\x27]([^"\x27]+)["\x27]\)/gu)].map(match => match[1])
+  assert.ok(preloadRequires.length > 0, 'The sandbox preload must consume its original Electron bridge')
+  assert.deepEqual([...new Set(preloadRequires)], ['electron'], 'The sandbox preload must bundle workspace dependencies')
   for (const variant of costPairs ? ['scheduled', 'immediate'] : ['scheduled']) await build({ ...common, base: './', plugins: [plugin(true, variant)], worker: { format: 'es', plugins: () => [plugin(true, variant)] }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
     build: { target: 'esnext', minify: false, reportCompressedSize: false, outDir: path.join(privateRoot, variant === 'scheduled' ? 'renderer' : 'renderer-immediate'), emptyOutDir: true } })
   receipt.transforms = [...transforms.values()]
