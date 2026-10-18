@@ -948,6 +948,13 @@ export type AgentSessionControl = {
   run: AgentMuxRunRef
 }
 
+/** One trusted person-facing transfer, fenced to the original page and Core-created Run. */
+export type BrowserControlHandoff = {
+  agent: AgentSessionControl
+  navigationId: string
+  expectedRevision: number
+}
+
 /** Reading a retained conversation needs identity, never a live Run lease. */
 export type SessionHistoryReference = Pick<AgentSessionControl, 'hostId' | 'agentSessionId'>
 export type SessionDispatchPageOptions = Pick<AgentMuxRpcParams<'message.dispatch.ls'>, 'afterSourceMessageId' | 'limit'>
@@ -2083,7 +2090,7 @@ export type AgentMuxDesktopApi = {
      * 这是 Main 侧唯一对外暴露的驱动入口——页面能力（snapshot/click/...）是注入给那段程序的内部函数库，
      * 不在这个契约上，所以改它们不动这里。
      */
-    runScript(id: string, code: string, operator?: BrowserOperator, operationId?: string): Promise<BrowserScriptRunReport>
+    runScript(id: string, code: string, operator?: BrowserOperator, operationId?: string, caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>): Promise<BrowserScriptRunReport>
     /** Private cosmetic update for an already accepted operation; never an execution or identity grant. */
     setOperatorAvatar(input: { browserId: string; operationId: string; operatorId: string; png: string }): Promise<boolean>
     checkOutcomeFields(id: string, input: BrowserOutcomeFieldRunInput): Promise<BrowserOutcomeEvaluation>
@@ -2113,9 +2120,9 @@ export type AgentMuxDesktopApi = {
      */
     stopOperationById(operationId: string): Promise<BrowserOperation | null>
     replayPlan(operationId: string): Promise<BrowserReplayPlan | null>
-    runReplay(id: string, plan: BrowserReplayPlan, operator?: BrowserOperator): Promise<BrowserScriptRunReport>
+    runReplay(id: string, plan: BrowserReplayPlan, operator?: BrowserOperator, caller?: Pick<import('@agentmux/core').AgentMuxControlCaller, 'agentSessionId'>): Promise<BrowserScriptRunReport>
     takeControl(id: string): Promise<BrowserSnapshot>
-    returnControl(id: string): Promise<BrowserSnapshot>
+    returnControl(id: string, input?: BrowserControlHandoff): Promise<BrowserSnapshot>
     selectElement(id: string): Promise<BrowserElementSelection | null>
     /**
      * 回答这一页上待答的那个应用链接提问。`remember` 为真时把这个答案按 scheme 记进

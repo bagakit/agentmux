@@ -7,6 +7,8 @@ export type AgentMuxBrowserControl = {
   activeOperationId: string | null
   revision: number
   inputIsolation: 'inactive' | 'preparing' | 'isolated' | 'unconfirmed' | 'unsupported'
+  /** Confirmed Browser association, independent of input ownership. Null is none; absence is unknown. */
+  agent?: { hostId: string; agentSessionId: string } | null
 }
 
 /** One addressable page, with its actual transport capabilities. No host UI or profile object. */
