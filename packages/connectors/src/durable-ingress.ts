@@ -434,14 +434,14 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
   async list(value: ConnectionIngressListInput) {
     const input = parseIngressParams('connection.ingress.ls', value)
     return this.safe(() => {
-      const after = input.afterIngressId ? this.database.prepare(`SELECT sequence FROM (${intakeRows}) WHERE ingress_id=? AND connection_id=?` + (input.bindingId ? " AND json_extract(record_json,'$.input.author.bindingId')=?" : '')).get(input.afterIngressId, input.connectionId, ...(input.bindingId ? [input.bindingId] : [])) : undefined
+      const after = input.afterIngressId ? this.database.prepare(`SELECT sequence FROM (${intakeRows}) WHERE ingress_id=? AND connection_id=?` + (input.bindingId ? " AND COALESCE(json_extract(record_json,'$.group.target.bindingId'),json_extract(record_json,'$.input.author.bindingId'))=?" : '')).get(input.afterIngressId, input.connectionId, ...(input.bindingId ? [input.bindingId] : [])) : undefined
       if (input.afterIngressId && !after) fail('INGRESS_CURSOR_MISMATCH')
-      const rows = this.database.prepare(`SELECT record_json FROM (${intakeRows}) WHERE connection_id=? AND sequence>? ` + (input.bindingId ? "AND json_extract(record_json,'$.input.author.bindingId')=? " : '') + 'ORDER BY sequence LIMIT ?').all(input.connectionId, Number(after?.sequence ?? 0), ...(input.bindingId ? [input.bindingId] : []), (input.limit ?? 25) + 1)
+      const rows = this.database.prepare(`SELECT record_json FROM (${intakeRows}) WHERE connection_id=? AND sequence>? ` + (input.bindingId ? "AND COALESCE(json_extract(record_json,'$.group.target.bindingId'),json_extract(record_json,'$.input.author.bindingId'))=? " : '') + 'ORDER BY sequence LIMIT ?').all(input.connectionId, Number(after?.sequence ?? 0), ...(input.bindingId ? [input.bindingId] : []), (input.limit ?? 25) + 1)
       const ingresses = rows.slice(0, input.limit ?? 25).map(row => parseConnectionIngressRecord(JSON.parse(String(row.record_json))))
       return { ingresses, nextAfterIngressId: rows.length > ingresses.length ? ingresses.at(-1)!.ingressId : null }
     })
   }
-  /** Private recovery reader: only unclaimed intake, with a bounded continuation over this connection. */
+  /** Private recovery reader: unfinished observation or unclaimed input, bounded to this connection. */
   received(connectionId: string, afterIngressId?: string, limit = 25): { ingressIds: string[]; nextAfterIngressId: string | null } {
     return this.safe(() => {
       if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) fail('INVALID_CONNECTION_INGRESS')
