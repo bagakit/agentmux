@@ -3,6 +3,7 @@ import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 import { aliases, installedDependency, root } from '../scripts/fixtures/settings-resource-library/environment.mjs'
+import { bundleIdentityRuntime } from '../../../packages/identity/scripts/runtime-bundle.mjs'
 
 export const focusMapMotionMutations = [
   { name: 'first-edit-default', file: 'shared/config-edit.ts', before: "if (path === 'focus.mapMotion') return resolveFocusMapMotion(value)", after: '', assertion: 'merges a first GUI motion edit with a concurrent first Focus edit without writing other defaults' },
@@ -18,8 +19,20 @@ const mutation = focusMapMotionMutations.find(item => item.name === selected)
 if (selected && !mutation) throw Error('Unknown map motion mutation')
 const hash = (source: string) => createHash('sha256').update(source).digest('hex')
 let applied = false
-export default defineConfig({ root, cacheDir: '.cache/focus-map-motion', define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, resolve: { alias: aliases },
-  plugins: [{ name: 'focus-map-motion-source', enforce: 'pre', resolveId: installedDependency, transform(source, id) {
+const identityRuntimeModule = '\0focus-map-motion:identity-runtime-source'
+let identityRuntime: ReturnType<typeof bundleIdentityRuntime> | undefined
+export default defineConfig({ root, cacheDir: '.cache/focus-map-motion', define: { __AGENTMUX_WEB_PREVIEW__: 'true' },
+  resolve: { alias: [{ find: /^@agentmux\/identity\/runtime-source$/u, replacement: identityRuntimeModule }, ...aliases] },
+  plugins: [{ name: 'focus-map-motion-source', enforce: 'pre',
+  resolveId(source, importer) { return source === identityRuntimeModule ? source : installedDependency(source, importer) },
+  async load(id) {
+    if (id !== identityRuntimeModule) return
+    const { source } = await (identityRuntime ??= bundleIdentityRuntime())
+    const code = `export const identityRuntimeSource = ${JSON.stringify(source)};\n`
+    if (process.env.AGENTMUX_FOCUS_MAP_MOTION_GENERATED) appendFileSync(process.env.AGENTMUX_FOCUS_MAP_MOTION_GENERATED,
+      JSON.stringify({ id, sourceSHA256: hash(code) }) + '\n')
+    return code
+  }, transform(source, id) {
     const path = relative(root, id.split('?')[0]!)
     if (!path.startsWith('apps/desktop/src/') && !path.startsWith('packages/')) return
     let code = source
