@@ -9,13 +9,14 @@ import { ConversationImage, type ReadPastedImage } from './ConversationImage.js'
 import { parseHttpLinkUrl } from '../lib/link-url.js'
 import { MarkdownOutline } from './MarkdownOutline.js'
 import { objectLinkReference, splitObjectLinkReferences } from '../lib/object-link-reference.js'
-import { useObjectLinkRenderer, type ClientUiPlatform } from '../platform.js'
-import { MarkdownCodeBlock } from './MarkdownCodeBlock.js'
+import { useObjectLinkRenderer, useMarkdownDiagramRenderer, type ClientUiPlatform } from '../platform.js'
+import { MarkdownCodeBlock, markdownDiagramLanguage } from './MarkdownCodeBlock.js'
 import { MarkdownMath } from './MarkdownMath.js'
 import { ConversationImageCollection } from './ConversationImageCollection.js'
 import { markdownImageReferences, pastedMarkdownImageReference } from '../lib/conversation-image-references.js'
 import { useVisibleWork } from '../lib/use-visible-work.js'
 import { useHorizontalReading } from '../lib/use-horizontal-reading.js'
+import { ConversationProgressiveBody, needsProgressiveText } from './ConversationProgressiveBody.js'
 import { markProgrammaticReadingScroll } from '../lib/reading-scroll.js'
 
 export type LinkClickModifiers = { metaKey: boolean; ctrlKey: boolean; altKey?: boolean; clientX: number; clientY: number }
@@ -41,6 +42,7 @@ type InlineContext = {
   readOnly: boolean
   readOnlyImages: boolean
   visible: boolean
+  hasDiagramRenderer: boolean
   inLink?: boolean
   renderObjectLink?: ClientUiPlatform['renderObjectLink']
 }
@@ -56,12 +58,12 @@ function FileReference({ text, reference, openWorkspaceFile }: {
 function TextWithFileReferences({ text, context }: { text: string; context: InlineContext }) {
   if (context.readOnly && !context.readOnlyImages || context.inLink) return <>{text}</>
   if (context.renderObjectLink) return <>{splitObjectLinkReferences(text).map((segment, index) => segment.kind === 'object'
-    ? <Fragment key={index}>{context.renderObjectLink?.(segment.reference) ?? segment.text}</Fragment>
+    ? <span key={index} data-reading-find-boundary>{context.renderObjectLink?.(segment.reference) ?? segment.text}</span>
     : <TextWithFileReferences key={index} text={segment.text} context={{ ...context, renderObjectLink: undefined }} />)}</>
   const { openWorkspaceFile, readPastedImage, workspaceRoot, homeDir } = context
   const images = readPastedImage ? splitPastedImageReferences(text) : [{ kind: 'text' as const, text }]
   return <>{images.map((image, imageIndex) => {
-    if (image.kind === 'image' && readPastedImage) return <ConversationImage active={context.visible} interactive={!context.readOnly} key={imageIndex} text={image.text} path={image.path} readImage={readPastedImage} />
+    if (image.kind === 'image' && readPastedImage) return <span key={imageIndex} data-reading-find-boundary><ConversationImage active={context.visible} interactive={!context.readOnly} text={image.text} path={image.path} readImage={readPastedImage} /></span>
     if (!openWorkspaceFile) return <Fragment key={imageIndex}>{image.text}</Fragment>
     return <Fragment key={imageIndex}>{splitMarkdownFileReferences(image.text, workspaceRoot, homeDir).map((segment, index) => segment.kind === 'text'
       ? <Fragment key={index}>{segment.text}</Fragment>
@@ -117,27 +119,27 @@ function Inline({ nodes, context }: { nodes: InlineNode[]; context: InlineContex
       if (context.readOnly) {
         if (context.readOnlyImages) {
           const image = context.renderImage?.(node.href, node.alt, context.inLink)
-          if (image !== undefined) return <Fragment key={key}>{image}</Fragment>
+          if (image !== undefined) return <span key={key} data-reading-find-boundary>{image}</span>
           const pasted = context.readPastedImage ? pastedMarkdownImageReference(node.href, node.alt) : undefined
-          if (pasted && context.readPastedImage) return <ConversationImage key={key} active={context.visible} interactive={false}
-            text={node.href} path={pasted.path} label={node.alt || node.href} readImage={context.readPastedImage} />
+          if (pasted && context.readPastedImage) return <span key={key} data-reading-find-boundary><ConversationImage active={context.visible} interactive={false}
+            text={node.href} path={pasted.path} label={node.alt || node.href} readImage={context.readPastedImage} /></span>
         }
-        return <span key={key} className="md-image-attachment md-image-attachment--unavailable" title="Image reference"><ImageReferenceIcon size={14} /> {node.alt || node.href}</span>
+        return <span key={key} data-reading-find-boundary className="md-image-attachment md-image-attachment--unavailable" title="Image reference"><ImageReferenceIcon size={14} /> {node.alt || node.href}</span>
       }
       const image = context.renderImage?.(node.href, node.alt, context.inLink)
-      if (image !== undefined) return <Fragment key={key}>{image}</Fragment>
+      if (image !== undefined) return <span key={key} data-reading-find-boundary>{image}</span>
       const file = classifyMarkdownLinkHref(node.href, context.workspaceRoot, context.homeDir, context.sourcePath)
-      if (file && context.documentMode && context.renderWorkspaceImage) return <Fragment key={key}>{context.inLink
-        ? context.renderWorkspaceImage(file.path, node.alt, true) : context.renderWorkspaceImage(file.path, node.alt)}</Fragment>
-      if (context.inLink) return <span key={key}>{node.alt || node.href}</span>
-      if (file && context.openWorkspaceFile) return <button key={key} type="button" className="md-image-attachment" title={file.path}
-        onClick={event => context.openWorkspaceFile?.(file.path, referenceRevealLocation(file), event)}><ImageReferenceIcon size={14} /> {node.alt || file.path}</button>
-      return <span key={key} className="md-image-attachment md-image-attachment--unavailable" title="Only workspace images can be previewed"><ImageReferenceIcon size={14} /> {node.alt || node.href}</span>
+      if (file && context.documentMode && context.renderWorkspaceImage) return <span key={key} data-reading-find-boundary>{context.inLink
+        ? context.renderWorkspaceImage(file.path, node.alt, true) : context.renderWorkspaceImage(file.path, node.alt)}</span>
+      if (context.inLink) return <span key={key} data-reading-find-boundary>{node.alt || node.href}</span>
+      if (file && context.openWorkspaceFile) return <span key={key} data-reading-find-boundary><button type="button" className="md-image-attachment" title={file.path}
+        onClick={event => context.openWorkspaceFile?.(file.path, referenceRevealLocation(file), event)}><ImageReferenceIcon size={14} /> {node.alt || file.path}</button></span>
+      return <span key={key} data-reading-find-boundary className="md-image-attachment md-image-attachment--unavailable" title="Only workspace images can be previewed"><ImageReferenceIcon size={14} /> {node.alt || node.href}</span>
     }
     const labelContext = { ...context, inLink: true }
     if (context.readOnly) return <span key={key} className="md-link md-link--readonly" title={node.href}><Inline nodes={node.children} context={labelContext} /></span>
     const target = resolveLink(node, context)
-    if (target.kind === 'object') return <Fragment key={key}>{context.renderObjectLink?.(target.object) ?? <Inline nodes={node.children} context={labelContext} />}</Fragment>
+    if (target.kind === 'object') return <span key={key} data-reading-find-boundary>{context.renderObjectLink?.(target.object) ?? <Inline nodes={node.children} context={labelContext} />}</span>
     if (target.kind === 'anchor') return <button key={key} type="button" className="md-link" title={node.href}
       onClick={event => navigateWithinMarkdown(event.currentTarget, 'data-md-anchor', target.anchor)}><Inline nodes={node.children} context={labelContext} /></button>
     if (target.kind === 'file' && context.openWorkspaceFile) {
@@ -199,9 +201,7 @@ function Block({ node, context }: { node: BlockNode; context: InlineContext }) {
   return <p className="md-paragraph"><Inline nodes={node.children} context={context} /></p>
 }
 
-/** Shared safe content renderer. Document mode retains document semantics; the Host retains IO. */
-export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHttpLink, openWorkspaceFile, readPastedImage,
-  workspaceRoot = '', homeDir = '', sourcePath, documentMode = false, inputMode = false, readOnly = false, readOnlyImages = false, renderWorkspaceImage, renderImage, outline = false, visible = true }: {
+type AgentMarkdownProps = {
   content: string
   className?: string
   /** Host activity; viewport visibility is checked independently for each expensive block. */
@@ -225,20 +225,55 @@ export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHt
   renderWorkspaceImage?: RenderWorkspaceImage
   /** Host-owned attachment/resource presentation. Read-only image opt-in requires noninteractive output. Undefined retains the existing path policy. */
   renderImage?: RenderMarkdownImage
-}) {
+  /** Reveal one explicitly located original body, without changing semantic disclosures. */
+  reveal?: boolean
+}
+
+/** Shared safe content renderer. Parsing is lazy until display or an explicit local query. */
+export function AgentMarkdown(props: AgentMarkdownProps) {
+  const { content, className, openHttpLink = defaultOpenHttpLink, openWorkspaceFile, readPastedImage,
+    workspaceRoot = '', homeDir = '', sourcePath, documentMode = false, inputMode = false, readOnly = false,
+    readOnlyImages = false, renderWorkspaceImage, renderImage, outline = false, visible = true, reveal = false } = props
   const renderObjectLink = useObjectLinkRenderer()
+  const hasDiagramRenderer = Boolean(useMarkdownDiagramRenderer())
   const isInput = inputMode && !documentMode
   const parseMode = documentMode && outline && !readOnly ? 'document' : documentMode || isInput ? 'blocks' : 'auto'
-  const parsed = useMemo(() => {
-    if (parseMode === 'auto' && !looksLikeMarkdown(content)) return null
-    const document = parseMode === 'document' ? parseAgentMarkdownDocument(content) : null
-    return { document, blocks: document?.blocks ?? parseAgentMarkdown(content) }
+  const parse = useMemo(() => {
+    let evaluated = false
+    let value: { document: ReturnType<typeof parseAgentMarkdownDocument> | null; blocks: BlockNode[] } | null = null
+    return () => {
+      if (!evaluated) {
+        evaluated = true
+        if (parseMode !== 'auto' || looksLikeMarkdown(content)) {
+          const document = parseMode === 'document' ? parseAgentMarkdownDocument(content) : null
+          value = { document, blocks: document?.blocks ?? parseAgentMarkdown(content) }
+        }
+      }
+      return value
+    }
   }, [content, parseMode])
-  const context: InlineContext = { openHttpLink, workspaceRoot, homeDir, documentMode, inputMode: isInput, readOnly, readOnlyImages, visible,
+  const context: InlineContext = { openHttpLink, workspaceRoot, homeDir, documentMode, inputMode: isInput, readOnly, readOnlyImages, visible, hasDiagramRenderer,
     ...(!readOnly && !documentMode && renderObjectLink ? { renderObjectLink } : {}),
     ...(sourcePath ? { sourcePath } : {}), ...(!readOnly && openWorkspaceFile ? { openWorkspaceFile } : {}),
     ...((!readOnly || readOnlyImages) && readPastedImage ? { readPastedImage } : {}), ...(!readOnly && renderWorkspaceImage ? { renderWorkspaceImage } : {}),
     ...((!readOnly || readOnlyImages) && renderImage ? { renderImage } : {}) }
+  const reading = useMemo(() => {
+    let blocks: string[] | undefined
+    return () => blocks ??= markdownReadingBlocks(parse()?.blocks ?? null, content, context)
+  },
+    [parse, content, isInput, documentMode, readOnly, readOnlyImages, renderObjectLink, readPastedImage, openWorkspaceFile, workspaceRoot, homeDir, sourcePath, hasDiagramRenderer, visible])
+  return <ConversationProgressiveBody heavy={needsProgressiveText(content)} reveal={reveal} reading={reading}>
+    <AgentMarkdownBody content={content} className={className} context={context} parse={parse} />
+  </ConversationProgressiveBody>
+}
+
+function AgentMarkdownBody({ content, className, context, parse }: {
+  content: string; className?: string | undefined; context: InlineContext
+  parse: () => { document: ReturnType<typeof parseAgentMarkdownDocument> | null; blocks: BlockNode[] } | null
+}) {
+  const parsed = parse()
+  const { readPastedImage, readOnly, renderObjectLink, documentMode, openWorkspaceFile, workspaceRoot, homeDir, sourcePath } = context
+  const isInput = context.inputMode
   const plainContent = !parsed || (!parsed.blocks.length && !documentMode)
   const imageReferences = useMemo(() => readPastedImage && !readOnly
     ? markdownImageReferences(content, plainContent ? undefined : parsed?.blocks, Boolean(context.renderObjectLink), node => resolveLink(node, context).kind === 'text') : [],
@@ -249,4 +284,52 @@ export function AgentMarkdown({ content, className, openHttpLink = defaultOpenHt
     {document && <MarkdownOutline headings={document.headings} onNavigate={(source, anchor) => navigateWithinMarkdown(source, 'data-md-anchor', anchor)} />}
     {blocks.map((block, index) => <Block key={index} node={block} context={context} />)}
   </div></ConversationImageCollection>
+}
+
+/** Stable text only. Opaque image/math/Host output splits a block instead of joining its sides. */
+function markdownReadingBlocks(blocks: BlockNode[] | null, content: string, context: InlineContext): string[] {
+  function textPieces(text: string, value: InlineContext): (string | null)[] {
+    if (value.readOnly && !value.readOnlyImages || value.inLink) return [text]
+    if (value.renderObjectLink) return splitObjectLinkReferences(text).flatMap(segment => segment.kind === 'object'
+      ? [null] : textPieces(segment.text, { ...value, renderObjectLink: undefined }))
+    return value.readPastedImage ? splitPastedImageReferences(text).map(segment => segment.kind === 'image' ? null : segment.text) : [text]
+  }
+  function inline(nodes: InlineNode[], value = context): (string | null)[] {
+    return nodes.flatMap(node => {
+      if (node.kind === 'text') return textPieces(node.text, value)
+      if (node.kind === 'code') return textPieces(node.text, { ...value, renderObjectLink: undefined })
+      if (node.kind === 'math' || node.kind === 'image' || node.kind === 'break') return [null]
+      if (node.kind === 'footnote-reference') return [String(node.number)]
+      if (node.kind === 'link') {
+        const target = resolveLink(node, value)
+        return target.kind === 'object' ? [null] : inline(node.children, target.kind === 'text' && !value.readOnly ? value : { ...value, inLink: true })
+      }
+      return inline(node.children, value)
+    })
+  }
+  function segments(pieces: (string | null)[]): string[] {
+    const result: string[] = []
+    let text = ''
+    for (const piece of pieces) {
+      if (piece === null) { if (text) result.push(text); text = '' }
+      else text += piece
+    }
+    if (text) result.push(text)
+    return result
+  }
+  function project(nodes: BlockNode[]): string[] {
+    return nodes.flatMap(node => {
+      if (node.kind === 'paragraph' || node.kind === 'heading') return segments([
+        ...(node.kind === 'heading' && context.inputMode && node.sourceMarker ? [node.sourceMarker + (node.children.length ? ' ' : '')] : []),
+        ...inline(node.children)
+      ])
+      if (node.kind === 'code') return context.hasDiagramRenderer && context.visible && !context.readOnly && markdownDiagramLanguage(node.language) ? [] : [node.text]
+      if (node.kind === 'quote') return project(node.children)
+      if (node.kind === 'list') return node.items.flatMap(project)
+      if (node.kind === 'table') return [node.header, ...node.rows].flatMap(row => row.flatMap(cell => segments(inline(cell))))
+      if (node.kind === 'footnotes') return node.items.flatMap(note => project(note.children))
+      return []
+    })
+  }
+  return blocks?.length ? project(blocks) : segments(textPieces(content, context))
 }

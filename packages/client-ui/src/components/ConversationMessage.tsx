@@ -1,4 +1,4 @@
-import { ConversationProgressiveBody, needsProgressiveText } from './ConversationProgressiveBody.js'
+import { ConversationProgressiveBody } from './ConversationProgressiveBody.js'
 import type { AgentProviderId, AgentSessionHistoryContentPart, AgentSessionHistoryCollaboration, AgentSessionHistoryMessagePhase, AgentSessionHistoryQuestionAnswer, AgentSessionUserMessage, AgentSessionUserMessageSource, AgentTimelineItemStatus } from '@agentmux/core'
 import { AMUX_PROTOCOL_DEFINITIONS, parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import type { ConversationItemRef, ConversationSourceRecord } from '@agentmux/core/conversation'
@@ -410,21 +410,19 @@ export function ConversationMessage({
     </div></ContentCopyIntentContext.Provider>
   )
   function renderBody(contentId?: string): ReactNode {
-    return hasContent ? <ConversationProgressiveBody heavy={parts.some(part => part.kind === 'resource' || (part.kind === 'text' || part.kind === 'reasoning') && needsProgressiveText(part.text)
-      || part.kind === 'tool-call' && part.input !== undefined && needsProgressiveText(part.input)
-      || part.kind === 'tool-result' && needsProgressiveText(part.output))} reveal={located}>{discloseBody(
+    return hasContent ? discloseBody(
         <div ref={bodyRef} id={contentId} className="log-turn__body"
           onMouseUp={canAnnotate ? captureSelection : undefined} onKeyUp={canAnnotate ? captureSelection : undefined}>
-          {hasQuestionAnswers && firstTextIndex < 0 ? <ConversationQuestionReply visible={active} answers={questionAnswers!}
+          {hasQuestionAnswers && firstTextIndex < 0 ? <ConversationQuestionReply visible={active} reveal={located} answers={questionAnswers!}
             inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
             {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} /> : null}
           {parts.map((part, index) => {
             const key = partKeys[index]!
-            return part.kind === 'text' && hasQuestionAnswers && index === firstTextIndex ? <ConversationQuestionReply visible={active} key={key}
+            return part.kind === 'text' && hasQuestionAnswers && index === firstTextIndex ? <ConversationQuestionReply visible={active} reveal={located} key={key}
               answers={questionAnswers!} originalText={part.text} inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
               {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
             : part.kind === 'text' ? <div key={key} className="log-turn__text" tabIndex={-1}>
-              <ConversationInputText visible={active} text={sessionHistoryTextForReading(part)} prefix={index === 0 ? prefix : null}
+              <ConversationInputText visible={active} reveal={located} text={sessionHistoryTextForReading(part)} prefix={index === 0 ? prefix : null}
                 a2aReferenceScope={a2aReferenceScope} describeSpeaker={describeSpeaker}
                 inputContext={index === contextPartIndex ? inputContext : undefined} inputContextSource={inputContextSource}
                 inputMode={inputMarkdown} workspaceRoot={workspaceRoot} homeDir={homeDir}
@@ -459,7 +457,7 @@ export function ConversationMessage({
                 inputContext={index === contextPartIndex ? inputContext : undefined} inputContextSource={inputContextSource}
                 {...(openWorkspaceFile ? { openWorkspaceFile } : {})} {...(readPastedImage ? { readPastedImage } : {})} {...(openHttpLink ? { openHttpLink } : {})} />
             ) : part.resourceType === 'image' && readHistoryResource && nativeResourceRecord ? (
-              <ConversationResourceImage active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} />
+              <ConversationProgressiveBody key={key} heavy reveal={located}><ConversationResourceImage active={active} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} /></ConversationProgressiveBody>
             ) : part.resourceType === 'file' ? (
               <ConversationResourceFile active={active} key={key} part={part} partIndex={index} record={nativeResourceRecord} readResource={readHistoryResource} />
             ) : <div key={key} className="log-turn__resource">
@@ -470,6 +468,6 @@ export function ConversationMessage({
           })}
           {files.length > 0 && openWorkspaceFile ? <ConversationFiles files={files} openFile={openWorkspaceFile} /> : null}
         </div>
-      )}</ConversationProgressiveBody> : null
+      ) : null
   }
 }

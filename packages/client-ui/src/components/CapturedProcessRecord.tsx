@@ -1,4 +1,4 @@
-import { ConversationProgressiveBody, needsProgressiveText } from './ConversationProgressiveBody.js'
+import { ConversationBodyWorkContext, ConversationProgressiveBody, needsProgressiveText } from './ConversationProgressiveBody.js'
 import { ConversationSourceLabels } from './ConversationSourceLabels.js'
 import { useEffect, useId, useMemo, useState } from 'react'
 import { capturedToolEdit } from '@agentmux/core/conversation'
@@ -25,30 +25,34 @@ export function CapturedProcessRecord({ record, disclosure, located = false, wor
   const shown = expanded || presented
   useEffect(() => { if (located) { setOpen(true); setPresented(true) } }, [located])
   useEffect(() => { if (expanded) setPresented(true) }, [expanded])
+  const project = useMemo(() => {
+    let value: ReturnType<typeof projectCapturedBody> | undefined
+    return () => value ??= item ? projectCapturedBody(item) : { diff: null, fields: [] }
+  }, [item])
+  const reading = useMemo(() => () => {
+    const { diff, fields } = project()
+    return [...(diff ? [diff.lines.map(line => line.text).join('')] : []), ...fields.flatMap((text, index) =>
+      text === undefined || text.length === 0 || diff && (index === 1 || index === 0 && item?.toolInput === undefined) ? [] : [text])]
+  }, [project, item?.toolInput])
   if (!item) return null
-  const fields = [item.content, item.toolInput, item.toolOutput]
+  const heavy = [item.content, item.toolInput, item.toolOutput].some(text => text !== undefined && needsProgressiveText(text))
   return <div className="wf-native-process" data-message-source-key={conversationMessageSourceKey(record.agentSessionId, record.source)} data-captured-process-id={item.id} data-conversation-role={record.role}>
     <RecordedToolRow className={`log-row log-row--${item.kind}`} observation={{ id: item.id, title, source: <ConversationSourceLabels sources={record.sources?.fields[item.toolInput !== undefined ? 'toolInput' : 'content'] ?? record.sources?.main} />, persistentSource: true, status: item.status,
       recordedTime: describeActivityRecordTime(item.createdAt, item.createdAt, origin) }} icon={<SemanticIcon name={item.kind === 'tool_call' ? 'conversation.tool-call' : item.kind === 'permission' ? 'status.permission' : 'object.activity'} size={12} />}
       expanded={expanded} controls={bodyId} onToggle={() => { if (!expanded) setPresented(true); setOpen(!expanded); disclosure?.onStepExpandedChange(item.id, !expanded) }} />
-    <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>{shown ? <>
-      <ConversationProgressiveBody heavy={fields.some(text => text !== undefined && needsProgressiveText(text))} reveal={located}>
-        <CapturedProcessBody record={record} item={item} />
-      </ConversationProgressiveBody>
-    </> : null}</div>
+    <div id={bodyId} className="wf-native-process__body" hidden={!expanded} inert={!expanded}>{shown ?
+      <ConversationProgressiveBody heavy={heavy} reveal={located} reading={reading}>
+        <ConversationBodyWorkContext.Provider value={null}><CapturedProcessBody record={record} item={item} project={project} /></ConversationBodyWorkContext.Provider>
+      </ConversationProgressiveBody> : null}</div>
   </div>
 }
 
-function CapturedProcessBody({ record, item }: { record: ConversationRecord; item: Extract<ConversationRecord['original'], { kind: 'captured' }>['item'] }) {
+function CapturedProcessBody({ record, item, project }: { record: ConversationRecord; item: Extract<ConversationRecord['original'], { kind: 'captured' }>['item']; project: () => ReturnType<typeof projectCapturedBody> }) {
   const sourceKey = conversationMessageSourceKey(record.agentSessionId, record.source)
   // Snapshot objects change on status updates. Actions belong to the original source;
   // ConversationToolPayload separately resets when the field's exact text changes.
   const sourceIdentity = useMemo(() => ({}), [record.sourceHostId, sourceKey])
-  const diff = useMemo(() => {
-    const input = item.toolInput ?? (item.kind === 'tool_call' ? item.content : undefined)
-    return toolEditDiff(capturedToolEdit(item)) ?? (input === undefined ? null : parseUnifiedDiff(input))
-  }, [item])
-  const fields = [item.content, item.toolInput, item.toolOutput]
+  const { diff, fields } = project()
   return <>
       {diff ? <ConversationToolDiff diff={diff} /> : null}
       {fields.some(value => value !== undefined && value.length > 0) ? fields.map((text, index) => {
@@ -59,4 +63,11 @@ function CapturedProcessBody({ record, item }: { record: ConversationRecord; ite
           : <div key={index} className="conversation-tool-trace__payload">{payload}</div>
       }) : <details><summary>Original record details</summary><ConversationToolPayload text={JSON.stringify(item, null, 2)} identity={sourceIdentity} sourceIdentity={sourceIdentity} copyLabel="Copy original record" /></details>}
   </>
+}
+
+/** The query and original disclosure share this lazy interpretation of the accepted fields. */
+function projectCapturedBody(item: Extract<ConversationRecord['original'], { kind: 'captured' }>['item']) {
+  const input = item.toolInput ?? (item.kind === 'tool_call' ? item.content : undefined)
+  return { diff: toolEditDiff(capturedToolEdit(item)) ?? (input === undefined ? null : parseUnifiedDiff(input)),
+    fields: [item.content, item.toolInput, item.toolOutput] }
 }

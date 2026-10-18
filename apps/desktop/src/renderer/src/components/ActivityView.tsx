@@ -820,7 +820,7 @@ export function ActivityView({
   const renderSurface = (content: (findTrigger: ReactNode) => JSX.Element): JSX.Element => {
     return <ReadingFind className="activity-feed-frame"
     active={readingEnabled} source={JSON.stringify([executionHostId, sessionId, conversationReading?.identity])}
-    label="loaded conversation" bodySelector=".log-turn__body, .log-row__prose, .log-row__payload, .log-row__output, .log-diff__body" scrollSelector=".activity-feed"
+    label="loaded conversation" bodySelector=".log-turn__body, .log-row__prose, .conversation-tool-trace__payload, .wf-native-process__body, .log-diff__body" scrollSelector=".activity-feed"
     onOpen={() => {
       followRef.current = { ...followRef.current, following: false }
       if (feedEl) anchorRef.current = captureReadingAnchor(feedEl)
