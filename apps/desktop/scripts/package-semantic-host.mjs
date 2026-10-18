@@ -1,4 +1,3 @@
-import { mintObjectId } from '@agentmux/core/object-id'
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { lstat, readFile } from 'node:fs/promises'
@@ -162,6 +161,7 @@ export async function confirmSemanticHostReload(plan, app, ops = operations) {
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1] && process.argv[2] === '--bootstrap') {
+  const { mintObjectId } = await import('@agentmux/core/object-id')
   const { connectAgentMuxRpc } = await import(pathToFileURL(process.argv[3]).href)
   // Observe the installed App through the public contract it actually ships. A new owner
   // requires its exact semantic fence; observing the outgoing App cannot upgrade its API.
