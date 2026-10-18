@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import './helpers/mailbox-note-execution-fence'
 import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { EventEmitter } from 'node:events'
 import { mkdtemp, rm } from 'node:fs/promises'
@@ -145,6 +146,8 @@ it('the visible bounded hook reaches the original SDK through production Rendere
       senderSessionId: 'sender', senderRunId: 'original-sender-run', recipientSessionId: 'child-a', recipientRunId: 'original-child-a',
       threadId: 'original-thread', correlationId: 'original-correlation', replyTo: null, workspaceId: null, body }
     await queue.append(notificationOriginal, { deliveryMode: 'reference' })
+    const retainedRecipient = (await store.load()).find(value => (value as { agentSessionId?: string }).agentSessionId === 'child-a') as import('@agentmux/core').AgentMuxStoredAgentSession
+    await store.compareAndSwap(retainedRecipient, { ...retainedRecipient, run: { runId: 'current-child-a' }, retiredRuns: [retainedRecipient.run] })
     const recipient = { hostId: 'original-host', agentSessionId: 'child-a' }, operationId = 'explicit-notify-operation'
     const notify = vi.spyOn(client, 'notifyMessages')
     await expect(bridge.handlers.get('sessions:notifyMessage')!({ sender: {} }, recipient, 'manual-reference', operationId)).rejects.toThrow('Untrusted')
@@ -155,14 +158,24 @@ it('the visible bounded hook reaches the original SDK through production Rendere
     const notified = await notificationAction
     expect(notify).toHaveBeenCalledExactlyOnceWith({ operationId, messageIds: ['manual-reference'] })
     expect(notified).toMatchObject({ hostId: 'original-host', notification: { notificationId: operationId,
-      messageIds: ['manual-reference'], mode: 'steer', key: { kind: 'prompt', agentSessionId: 'child-a', expectedRun: { runId: 'original-child-a' }, submissionId: operationId } } })
+      messageIds: ['manual-reference'], mode: 'steer', key: { kind: 'prompt', agentSessionId: 'child-a', expectedRun: { runId: 'current-child-a' }, submissionId: operationId } } })
     expect(notified.notification.state).not.toBe('submitted')
     expect((await queue.readByMessageId('manual-reference'))?.envelope).toMatchObject(notificationOriginal)
-    const beforeInspect = await queue.readJournal(), originalKey = notified.notification.key
-    const observed = await api.sessions.inspectMessageNotification(recipient, 'manual-reference', originalKey)
-    expect(observed).toEqual({ record: await client.inspectAgentPromptSubmission(originalKey) })
-    await expect(api.sessions.inspectMessageNotification(recipient, 'manual-reference', { ...originalKey, expectedRun: { runId: 'replacement-run' } })).rejects.toMatchObject({ code: 'MESSAGE_RECIPIENT_MISMATCH' })
-    await expect(bridge.handlers.get('sessions:inspectMessageNotification')!({ sender: {} }, recipient, 'manual-reference', originalKey)).rejects.toThrow('Untrusted')
+    // A second replacement never changes the input identity of this original notification query.
+    const currentRecipient = (await store.load()).find(value => (value as { agentSessionId?: string }).agentSessionId === 'child-a') as import('@agentmux/core').AgentMuxStoredAgentSession
+    await store.compareAndSwap(currentRecipient, { ...currentRecipient, run: { runId: 'later-child-a' },
+      retiredRuns: [retainedRecipient.run, { runId: 'current-child-a' }] })
+    await queue.append({ ...notificationOriginal, messageId: 'another-original-mid', operationId: 'another-original-operation' }, { deliveryMode: 'reference' })
+    const beforeInspect = await queue.readJournal(), inspect = vi.spyOn(client, 'inspectMessageNotification')
+    const observationAction = api.sessions.inspectMessageNotification(recipient, 'manual-reference', operationId)
+    await expect(observationAction).resolves.toMatchObject({ hostId: reference.hostId })
+    const observed = await observationAction
+    expect(observed).toEqual({ hostId: reference.hostId, ...await client.inspectMessageNotification({ operationId }) })
+    expect(observed.notification?.key).toEqual(notified.notification.key)
+    expect(inspect).toHaveBeenCalledWith({ operationId })
+    await expect(api.sessions.inspectMessageNotification(recipient, 'another-original-mid', operationId)).rejects.toMatchObject({ code: 'MESSAGE_RECIPIENT_MISMATCH' })
+    await expect(bridge.handlers.get('sessions:inspectMessageNotification')!({ sender: {} }, recipient, 'manual-reference', operationId)).rejects.toThrow('Untrusted')
+    await expect(api.sessions.inspectMessageNotification(recipient, 'manual-reference', 'not-yet-retained')).resolves.toEqual({ hostId: reference.hostId, notification: null, input: null })
     expect(notify).toHaveBeenCalledTimes(1); expect(await queue.readJournal()).toEqual(beforeInspect)
 
   } finally {

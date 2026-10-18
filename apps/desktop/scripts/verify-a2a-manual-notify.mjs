@@ -4,30 +4,51 @@ import { createHash } from 'node:crypto'
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
 import { join, relative, resolve } from 'node:path'
 import { promisify } from 'node:util'
+import { noteLinkBoundaryFile, noteLinkBoundaryExports, noteLinkParserVersion, noteLinkStructure } from './fixtures/message-tool-workspace/proof-boundary.mjs'
 const root = resolve(import.meta.dirname, '../../..'), exec = promisify(execFile)
-const recovery = process.argv.includes('--recovery')
-const base = join(root, recovery ? '.tmp/a2a-notification-recovery' : '.tmp/a2a-manual-notify'), verified = join(base, 'verified.json')
+const recovery = process.argv.includes('--recovery'), resumed = process.argv.includes('--resumed')
+assert.ok(!recovery || !resumed, 'Choose one notification proof scope')
+const base = join(root, resumed ? '.tmp/a2a-resumed-notify' : recovery ? '.tmp/a2a-notification-recovery' : '.tmp/a2a-manual-notify'), verified = join(base, 'verified.json')
 const hash = value => createHash('sha256').update(value).digest('hex')
-const runtime = { node: process.version, platform: process.platform, arch: process.arch }
-const cases = recovery ? [
+const runtime = { node: process.version, platform: process.platform, arch: process.arch, typescript: noteLinkParserVersion }
+const scope = { ...noteLinkStructure(await readFile(join(root, noteLinkBoundaryFile), 'utf8')),
+  reason: 'Only this module function bodies may vary: every stage loads its actual imports and fences all three exported actions at zero calls. Other imported sources remain exact. This proof does not verify Note opening or an identical whole-App dependency tree.' }
+const cases = resumed ? [
+  ['renderer', null, 'candidate'], ['bridge', null, 'candidate'],
+  ...['notify-historical-run-as-input', 'notify-original-key-rebound', 'notify-inspect-operation-replaced', 'notify-refresh-replays', 'notify-reason-hidden'].map(name => ['renderer', name, 'mutation']),
+  ...['notifyInspectMid', 'notifyInspectHost', 'notifyInspectReplay'].map(name => ['bridge', name, 'mutation']),
+  ['renderer', null, 'restored'], ['bridge', null, 'restored']
+] : recovery ? [
   ['renderer', null, 'candidate'],
   ...['notification-intent-not-persisted', 'notification-history-replaced', 'notification-confirmation-still-busy', 'notification-refusal-event-ignored', 'a2a-fill-caret-captured-late'].map(name => ['renderer', name, 'mutation']),
   ['renderer', null, 'restored']
 ] : [
   ['renderer', null, 'candidate'], ['bridge', null, 'candidate'],
-  ...['notify-original-mid-replaced', 'notify-action-id-reused', 'notify-refresh-replays', 'notify-unrelated-producer-ack'].map(name => ['renderer', name, 'mutation']),
-  ...['notifyHost', 'notifyMid', 'notifyTrust', 'notifyInspectRun'].map(name => ['bridge', name, 'mutation']),
+  ...['notify-original-mid-replaced', 'notify-action-id-reused', 'notify-refresh-replays', 'notify-recipient-mismatch'].map(name => ['renderer', name, 'mutation']),
+  ...['notifyHost', 'notifyMid', 'notifyTrust', 'notifyInspectMid'].map(name => ['bridge', name, 'mutation']),
   ['renderer', null, 'restored'], ['bridge', null, 'restored']
 ]
-const sameFiles = async files => {
+const sameFiles = async (files, scoped = false) => {
   if (!files || Object.keys(files).length === 0) return false
   for (const [file, digest] of Object.entries(files)) {
-    try { if (hash(await readFile(resolve(root, file))) !== digest) return false } catch { return false }
+    try {
+      const value = await readFile(resolve(root, file))
+      if (scoped && file === noteLinkBoundaryFile) {
+        if (noteLinkStructure(value.toString()).structureSha256 !== scope.structureSha256) return false
+      } else if (hash(value) !== digest) return false
+    } catch { return false }
   }
   return true
 }
+function executionBoundary(source, fence) {
+  assert.deepEqual(source.noteLinkBoundary, { file: scope.file, exports: scope.exports, structureSha256: scope.structureSha256 }, 'Only the exact scoped Note import/export structure qualifies')
+  assert.equal(typeof source.sources[noteLinkBoundaryFile], 'string', 'The actual Note module remains in the imported graph')
+  assert.equal(fence.actualModuleLoaded, true, 'The original Note module and its imports were actually loaded')
+  assert.deepEqual(Object.keys(fence.calls).sort(), noteLinkBoundaryExports)
+  assert.deepEqual(Object.values(fence.calls), [0, 0, 0], 'No scoped Note action executes in any candidate, mutant or restored stage')
+}
 function activeInventory(kind, mutation, report, inventories) {
-  const count = kind === 'renderer' ? 36 : 1
+  const count = kind === 'renderer' ? 40 : 1
   const file = kind === 'renderer' ? 'apps/desktop/test/message-tool-workspace.test.tsx' : 'apps/desktop/test/a2a-message-data-bridge.test.tsx'
   assert.equal(report.testResults.length, 1); assert.equal(resolve(report.testResults[0].name), resolve(root, file))
   const inventory = report.testResults[0].assertionResults.map(test => ({ name: test.fullName, status: test.status })).sort((a, b) => a.name.localeCompare(b.name))
@@ -46,22 +67,27 @@ function activeInventory(kind, mutation, report, inventories) {
 let reused = false
 try {
   const prior = JSON.parse(await readFile(verified, 'utf8')), receipt = JSON.parse(await readFile(resolve(root, prior.receipt), 'utf8'))
-  reused = prior.sha256 === hash(JSON.stringify(receipt)) && receipt.schema === 'agentmux.manual-notify-proof.v2' && receipt.passed === true &&
+  reused = prior.sha256 === hash(JSON.stringify(receipt)) && receipt.schema === 'agentmux.manual-notify-proof.v3' && receipt.passed === true &&
+    JSON.stringify(receipt.scope) === JSON.stringify(scope) &&
     JSON.stringify(receipt.runtime) === JSON.stringify(runtime) &&
     JSON.stringify(receipt.cases.map(item => [item.kind, item.mutation, item.stage])) === JSON.stringify(cases) &&
-    await sameFiles(receipt.sourceHashes) && await sameFiles(receipt.evidenceHashes)
+    await sameFiles(receipt.sourceHashes, true) && await sameFiles(receipt.evidenceHashes)
   if (reused) {
     const inventories = {}
     for (const item of receipt.cases) {
       const report = JSON.parse(await readFile(resolve(root, item.report), 'utf8'))
       assert.deepEqual(activeInventory(item.kind, item.mutation, report, inventories), item.inventory)
+      const source = JSON.parse(await readFile(resolve(root, item.sourceReport), 'utf8'))
+      const fence = JSON.parse(await readFile(resolve(root, item.executionFence), 'utf8'))
+      executionBoundary(source, fence)
+      assert.deepEqual(item.sourceHashes, source.sources, 'Every stage retains its complete original graph SHA values')
     }
   }
   if (reused) console.log(JSON.stringify({ passed: true, reused: true, evidence: prior.receipt }))
 } catch { reused = false /* Missing, incomplete or changed proof requires the actual tests. */ }
 if (!reused) {
   const directory = join(base, globalThis.crypto.randomUUID()); await mkdir(directory, { recursive: true })
-  const receipt = { schema: 'agentmux.manual-notify-proof.v2', runtime, passed: false, productionWritten: false, userRunTouched: false, cases: [], sourceHashes: {}, evidenceHashes: {} }
+  const receipt = { schema: 'agentmux.manual-notify-proof.v3', runtime, scope, passed: false, productionWritten: false, userRunTouched: false, cases: [], sourceHashes: {}, evidenceHashes: {} }
   const inventories = {}
   const fixture = 'apps/desktop/scripts/fixtures/message-tool-workspace'
   const fixed = ['package.json', 'pnpm-lock.yaml', 'packages/core/package.json', 'packages/client-ui/package.json', 'apps/desktop/package.json', 'vitest.setup.ts',
@@ -89,20 +115,22 @@ if (!reused) {
       const results = JSON.parse(await readFile(join(output, 'results.json'), 'utf8'))
       const inventory = activeInventory(kind, mutation, results, inventories)
       const proofFile = renderer ? 'discovery.json' : 'mutation.json', source = JSON.parse(await readFile(join(output, proofFile), 'utf8'))
+      executionBoundary(source, JSON.parse(await readFile(join(output, 'note-link-execution.json'), 'utf8')))
       assert.ok(Object.keys(source.sources).length > 0, 'The actual imported source graph is nonempty')
       for (const [file, digest] of Object.entries(source.sources)) {
-        if (receipt.sourceHashes[file]) assert.equal(digest, receipt.sourceHashes[file], 'Related source changed during verification: ' + file)
+        if (receipt.sourceHashes[file] && file !== noteLinkBoundaryFile) assert.equal(digest, receipt.sourceHashes[file], 'Related source changed during verification: ' + file)
         receipt.sourceHashes[file] = digest
       }
       if (mutation) {
         assert.equal(source.applied.length, 1); assert.notEqual(source.applied[0].original, source.applied[0].changed)
         assert.equal(typeof code, 'number'); assert.notEqual(code, 0); assert.ok(results.numFailedTests > 0); assert.match(log, /AssertionError:/)
       } else { assert.equal(code, 0, log); assert.equal(results.numFailedTests, 0) }
-      for (const name of ['results.json', proofFile, 'test.log']) receipt.evidenceHashes[relative(root, join(output, name))] = hash(await readFile(join(output, name)))
+      for (const name of ['results.json', proofFile, 'test.log', 'note-link-execution.json']) receipt.evidenceHashes[relative(root, join(output, name))] = hash(await readFile(join(output, name)))
       receipt.cases.push({ kind, mutation, stage, tests: results.numTotalTests, failed: results.numFailedTests, inventory,
-        report: relative(root, join(output, 'results.json')), applied: source.applied })
+        report: relative(root, join(output, 'results.json')), sourceReport: relative(root, join(output, proofFile)),
+        executionFence: relative(root, join(output, 'note-link-execution.json')), sourceHashes: source.sources, applied: source.applied })
     }
-    assert.ok(await sameFiles(receipt.sourceHashes), 'The exact verified source graph remains unchanged')
+    assert.ok(await sameFiles(receipt.sourceHashes, true), 'The verified source graph remains exact outside the explicitly fenced function bodies')
     receipt.passed = true
   } catch (error) { receipt.failure = { name: error.name, message: error.message }; process.exitCode = 1 }
   const path = join(directory, 'receipt.json'); await writeFile(path, JSON.stringify(receipt, null, 2) + '\n')
