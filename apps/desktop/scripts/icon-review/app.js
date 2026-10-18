@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/identity';
 import * as ThemeBridge from './bridge.js';
 import futureDesigns from './future-designs.json';
 const $ = selector => document.querySelector(selector);
@@ -93,14 +94,14 @@ function patchRole(id,field,value) {
     catch(error){toast(`图标修改无法预览：${error.message} 原草稿保留。`);return;}
   }
   if(Object.keys(after).length)draft.edits[id]=after;else delete draft.edits[id];
-  draft.history.push({event_id:crypto.randomUUID(),at:new Date().toISOString(),case_id:id,action:'edit',field,before:before[field]??baseValue(r,field),after:value,provenance:'user_entered'});
+  draft.history.push({event_id:mintObjectId(),at:new Date().toISOString(),case_id:id,action:'edit',field,before:before[field]??baseValue(r,field),after:value,provenance:'user_entered'});
   saveDraft();if(field==='glyph')applyPreview();renderInventory();refreshInspectorSignals();
 }
 function restoreRole(id) {
   if(!changed(id))return;
   const edits={...draft.edits};delete edits[id];
   try{currentTheme(draft.preview,edits);}catch(error){toast(`撤回失败：${error.message} 原草稿保留。`);return;}
-  draft.history.push({event_id:crypto.randomUUID(),at:new Date().toISOString(),case_id:id,action:'restore',before:draft.edits[id],after:{},provenance:'user_entered'});
+  draft.history.push({event_id:mintObjectId(),at:new Date().toISOString(),case_id:id,action:'restore',before:draft.edits[id],after:{},provenance:'user_entered'});
   delete draft.edits[id];saveDraft();applyPreview();renderInventory();renderInspector();toast('已恢复这一项的原始定义');
 }
 function rows() {
@@ -323,7 +324,7 @@ async function importPacket(file) {
       const imported=ThemeBridge.parseThemeFile(text);
       const preview={...draft.preview,themeId:imported.id,imported};currentTheme(preview);
       draft.preview=preview;
-      draft.history.push({event_id:crypto.randomUUID(),at:new Date().toISOString(),action:'import-theme',themeId:imported.id});
+      draft.history.push({event_id:mintObjectId(),at:new Date().toISOString(),action:'import-theme',themeId:imported.id});
       saveDraft();applyPreview();renderInventory();renderInspector();toast('主题已导入此页预览，已有图标修改和备注保留');return;
     }
     const {parsed,unresolved}=validatePacket(packet),preview=packet.preview?validatePreview(packet.preview):draft.preview;
@@ -333,7 +334,7 @@ async function importPacket(file) {
     draft.edits={...draft.edits,...parsed};draft.unresolved=[...draft.unresolved,...unresolved];draft.preview=preview;
     const seen=new Set(draft.history.map(x=>x.event_id));
     for(const event of packet.history)if(event&&typeof event==='object'&&typeof event.event_id==='string'&&!seen.has(event.event_id)){draft.history.push(event);seen.add(event.event_id);}
-    draft.history.push({event_id:crypto.randomUUID(),at:new Date().toISOString(),action:'import',source_snapshot:packet.source_snapshot,roles:Object.keys(parsed)});
+    draft.history.push({event_id:mintObjectId(),at:new Date().toISOString(),action:'import',source_snapshot:packet.source_snapshot,roles:Object.keys(parsed)});
     saveDraft();applyPreview();renderInventory();renderInspector();
     if(packet.source_snapshot!==data.snapshot||unresolved.length)notice('导入文件来自不同源码快照。已保留可匹配语义项与未匹配记录，请核对后再交给 Agent。');
     toast(`已导入 ${Object.keys(parsed).length} 项修改${unresolved.length?`，${unresolved.length} 项待核对`:''}`);
@@ -445,7 +446,7 @@ function attachEvents() {
   $('#cancel-reset').addEventListener('click',()=>$('#confirm-dialog').close());
   $('#confirm-reset').addEventListener('click',()=>{
     try{currentTheme(draft.preview,{});}catch(error){toast(`撤回失败：${error.message} 原草稿保留。`);return;}
-    draft.history.push({event_id:crypto.randomUUID(),at:new Date().toISOString(),action:'restore-all',before:draft.edits,after:{},provenance:'user_entered'});
+    draft.history.push({event_id:mintObjectId(),at:new Date().toISOString(),action:'restore-all',before:draft.edits,after:{},provenance:'user_entered'});
     draft.edits={};saveDraft();applyPreview();renderInventory();renderInspector();renderDrafts();$('#confirm-dialog').close();toast('已恢复全部原始定义，操作历史仍保留');
   });
   matchMedia('(max-width:950px)').addEventListener('change',()=>{
@@ -480,7 +481,7 @@ async function init() {
         draft={...draft,edits:checked.parsed,history:stored.history,unresolved:checked.unresolved,updatedAt:stored.updatedAt};
         try{draft.preview=validatePreview(stored.preview);}catch{notice('主题预览无法恢复，已保留图标草稿和历史。请重新选择预览主题。');}
         if(stored.snapshot!==data.snapshot){
-          draft.history.push({event_id:crypto.randomUUID(),at:new Date().toISOString(),action:'source-refresh',from:stored.snapshot,to:data.snapshot});
+          draft.history.push({event_id:mintObjectId(),at:new Date().toISOString(),action:'source-refresh',from:stored.snapshot,to:data.snapshot});
           notice('源码目录已更新，原有草稿与历史已保留。请核对修改；未匹配的记录会随导出保留。');
         }
       }
