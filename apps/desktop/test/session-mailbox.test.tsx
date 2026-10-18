@@ -14,6 +14,7 @@ import { composerDOM, composerSession as processSession } from './helpers/compos
 import { journalMessage, mailboxJournal } from './helpers/mailbox-journal-fixture'
 import { SessionMailbox } from '../src/renderer/src/components/SessionMailbox'
 import { sessionServiceNotices } from '../src/renderer/src/lib/session-service-notices'
+import { serviceNoticeFingerprint } from '../src/renderer/src/lib/use-service-notices'
 import { createWorkbenchTab, initialWorkbenchRegionId } from '../src/renderer/src/lib/workbench-tabs'
 import { reduceAgentMembershipSnapshot } from '../src/renderer/src/lib/session-state'
 
@@ -33,10 +34,13 @@ let disposeBootstrap: (() => void) | undefined
 beforeAll(async () => { vi.spyOn(api.sessions, 'notifyInputOccupation').mockResolvedValue(); disposeBootstrap = await useAppStore.getState().initialize() })
 afterAll(() => disposeBootstrap?.())
 afterEach(() => vi.useRealTimers())
-const session = () => ({ ...composerSession(), terminalPromptDelivery: {
-  state: 'unverified' as const, mode: 'degraded' as const, reason: 'screen-evidence-gap' as const,
-  submissionId: 'submission-1', run: { runId: 'run-agent-1' }, observedAt: _reshape_fixtureEpoch(0, 0, 1)
-} })
+const session = (id = 'agent-1') => {
+  const current = composerSession(id)
+  return { ...current, terminalPromptDelivery: {
+    state: 'unverified' as const, mode: 'degraded' as const, reason: 'screen-evidence-gap' as const,
+    submissionId: 'submission-1', run: current.control.run, observedAt: _reshape_fixtureEpoch(0, 0, 1)
+  } }
+}
 beforeEach(() => useAppStore.setState({ sessions: [session()], noticeReadReceipts: {},
   timelines: { 'agent-1': { agentSessionId: 'agent-1', revision: 0, items: [] } } }))
 const trigger = () => dom.container.querySelector<HTMLButtonElement>('.composer__mailbox')!
@@ -187,21 +191,66 @@ async function folder(name: 'inbox' | 'outbox' | 'user' | 'system' | 'progress')
 
 // Only the absent browser methods are supplied here. Native source/focus/light-dismiss are
 // verified separately by trusted Electron input; these tests own the React disclosure/read paths.
-function popoverMethods() {
+function popoverMethods(deferToggle = false) {
   const content = mailbox()
-  function state(newState: 'open' | 'closed') {
+  let nativeOpen = false, pending: 'open' | 'closed' | undefined
+  const matches = content.matches.bind(content)
+  vi.spyOn(content, 'matches').mockImplementation(selector => selector === ':popover-open' ? nativeOpen : matches(selector))
+  function deliver(newState: 'open' | 'closed') {
     const event = new Event('toggle')
     Object.defineProperty(event, 'newState', { value: newState })
     content.dispatchEvent(event)
   }
+  function state(newState: 'open' | 'closed') {
+    nativeOpen = newState === 'open'
+    if (deferToggle) pending = newState
+    else deliver(newState)
+  }
   const show = vi.fn((_options: { source: HTMLButtonElement }) => state('open'))
   const hide = vi.fn(() => state('closed'))
   Object.defineProperties(content, { showPopover: { configurable: true, value: show }, hidePopover: { configurable: true, value: hide } })
-  return { show, hide }
+  return { show, hide, deliverToggle() { if (pending) { const state = pending; pending = undefined; deliver(state) } } }
 }
 async function pointer(target: Element, type: string, pointerType = 'mouse', buttons = 0) {
   await act(async () => target.dispatchEvent(new PointerEvent(type, { bubbles: true, cancelable: true, pointerType, buttons })))
 }
+
+it('pins the native-open hover preview before its toggle reaches React', async () => {
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  const methods = popoverMethods(true)
+  const click = new MouseEvent('click', { bubbles: true, cancelable: true })
+  await act(async () => {
+    trigger().dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 }))
+    expect(mailbox().matches(':popover-open')).toBe(true)
+    expect(mailbox().dataset.state).toBe('closed')
+    trigger().dispatchEvent(click)
+    expect(click.defaultPrevented).toBe(true)
+  })
+  await act(async () => methods.deliverToggle())
+  expect(mailbox().dataset.state).toBe('open')
+  await pointer(trigger(), 'pointerout')
+  expect(methods.hide).not.toHaveBeenCalled()
+  expect(dom.draft()).toBe('Keep my draft')
+})
+
+it('reopens the native-closed hover preview before its close toggle reaches React', async () => {
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  const methods = popoverMethods(true)
+  await pointer(trigger(), 'pointerover')
+  await act(async () => methods.deliverToggle())
+  expect(mailbox().dataset.state).toBe('open')
+  await act(async () => {
+    methods.hide()
+    expect(mailbox().matches(':popover-open')).toBe(false)
+    expect(mailbox().dataset.state).toBe('open')
+    trigger().dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse', buttons: 0 }))
+    expect(mailbox().matches(':popover-open')).toBe(true)
+  })
+  expect(methods.show).toHaveBeenCalledTimes(2)
+  await act(async () => methods.deliverToggle())
+  expect(mailbox().dataset.state).toBe('open')
+  expect(dom.draft()).toBe('Keep my draft')
+})
 
 it('hover previews without reading or moving the current editor, allows crossing the gap, and reads only after entering content', async () => {
   const create = vi.spyOn(api.continuousProgress, 'create')
@@ -376,7 +425,8 @@ it('uses one right Session mailbox, clears Notices attention on read and keeps t
   expect(mailbox().textContent).toContain('screen confirmation')
   expect(useAppStore.getState().sessions[0]).toMatchObject({ terminalPromptDelivery: session().terminalPromptDelivery })
   const persisted = JSON.parse(JSON.stringify(useAppStore.persist.getOptions().partialize!(useAppStore.getState())))
-  expect(persisted.noticeReadReceipts['agent-1'].delivery).toBeTruthy()
+  const delivery = sessionServiceNotices(session()).find(item => item.id === 'delivery')!
+  expect(persisted.noticeReadReceipts['global:sessions'][delivery.readKey!]).toBe(serviceNoticeFingerprint(delivery))
   await dom.render(null)
   await act(async () => useAppStore.setState({ noticeReadReceipts: persisted.noticeReadReceipts }))
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
@@ -421,7 +471,6 @@ it('coalesces repetitions but marks changed causes and a recurrence after recove
   await toggle('open'); await folder('system')
   expect(mailbox().textContent).toContain('No current notices')
   await toggle('closed')
-  expect(useAppStore.getState().noticeReadReceipts['agent-1']).toBeUndefined()
   await act(async () => useAppStore.setState({ sessions: [session()] }))
   expect(unread()).toBe('true')
 })
@@ -435,10 +484,12 @@ it('remains accessible in every mode with input disabled and scopes read receipt
     await dom.click('.composer-tool--mode')
   }
   await toggle('open')
-  await act(async () => useAppStore.setState({ sessions: [session(), { ...session(), id: 'other' }] }))
+  await act(async () => useAppStore.setState({ sessions: [session(), session('other')] }))
   await dom.render(<AgentSessionComposer key="other" sessionId="other" />)
   expect(unread()).toBe('true')
-  expect(useAppStore.getState().noticeReadReceipts['agent-1']?.delivery).toBeTruthy()
+  expect(journal.list).toHaveBeenCalledWith({ hostId: 'local', agentSessionId: 'other' }, { direction: 'incoming', limit: 25 })
+  const delivery = sessionServiceNotices(session()).find(item => item.id === 'delivery')!
+  expect(useAppStore.getState().noticeReadReceipts['global:sessions'][delivery.readKey!]).toBe(serviceNoticeFingerprint(delivery))
 })
 
 it('shows ordered Inputs and wires retry, exact Copy and archive without sending on read', async () => {
@@ -596,13 +647,15 @@ it('does not confuse a healthy pending count with unread notices and supports ke
 it('retains receipts through empty startup snapshots but alerts for a new Run', async () => {
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await toggle('open')
-  const receipt = useAppStore.getState().noticeReadReceipts['agent-1']
+  const delivery = sessionServiceNotices(session()).find(item => item.id === 'delivery')!
+  const receipt = useAppStore.getState().noticeReadReceipts['global:sessions'][delivery.readKey!]
+  expect(receipt).toBe(serviceNoticeFingerprint(delivery))
   await dom.render(null)
   await act(async () => useAppStore.setState({ sessions: [] }))
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
   await toggle('open'); await folder('system')
   expect(mailbox().textContent).toContain('Waiting for Session status')
-  expect(useAppStore.getState().noticeReadReceipts['agent-1']).toEqual(receipt)
+  expect(useAppStore.getState().noticeReadReceipts['global:sessions'][delivery.readKey!]).toBe(receipt)
   await act(async () => useAppStore.setState({ sessions: [session()] }))
   expect(unread()).toBe('false')
   await toggle('closed') // Observe the next Run without acknowledging an open System folder.
@@ -662,7 +715,8 @@ it('separates actual incoming Agent messages, sent user history and system facts
   expect(unread()).toBe('false')
   const persisted = JSON.parse(JSON.stringify(useAppStore.persist.getOptions().partialize!(useAppStore.getState())))
   expect(persisted.noticeReadReceipts['mail:agent-1'][JSON.stringify(['local','in'])]).toBeTruthy()
-  expect(persisted.noticeReadReceipts['agent-1'].delivery).toBeTruthy()
+  const delivery = sessionServiceNotices(session()).find(item => item.id === 'delivery')!
+  expect(persisted.noticeReadReceipts['global:sessions'][delivery.readKey!]).toBe(serviceNoticeFingerprint(delivery))
   await dom.render(null)
   await act(async () => useAppStore.setState({ noticeReadReceipts: persisted.noticeReadReceipts }))
   await dom.render(<AgentSessionComposer sessionId="agent-1" />)
