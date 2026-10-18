@@ -9,7 +9,7 @@ import type { CollaborationLayoutBox as CollaborationBox, CollaborationLayoutInp
 import { useCollaborationLayout } from '../lib/use-collaboration-layout'
 import { collaborationEnvelope, collaborationOverviewPath, collaborationOverviewScale } from '../lib/collaboration-map-geometry'
 import { collaborationCameraTarget, COLLABORATION_OVERVIEW_ZOOM, COLLABORATION_READING_ZOOM, type CollaborationLocate } from '../lib/collaboration-map-camera'
-import { collaborationNodeSize, collaborationRecency, collaborationAgentName } from '../lib/collaboration-map-presentation'
+import { COLLABORATION_ACTIVITY_MS, collaborationNodeSize, collaborationRecency, collaborationAgentName } from '../lib/collaboration-map-presentation'
 import { useAgentInformationPreview } from './AgentInformationPreview'
 import { FocusContextCardBody } from './FocusContextCardBody'
 import type { FocusContextIdentity } from '../lib/focus-context-identity'
@@ -18,15 +18,16 @@ import '@xyflow/react/dist/base.css'
 import '../styles/collaboration.css'
 
 export type CollaborationSelection = { kind: 'agent' | 'relation'; id: string; relatedIds?: readonly string[] } | null
-type AgentData = { box: CollaborationBox; agent: CollaborationAgent; selected: boolean; identity?: FocusContextIdentity | undefined; goals?: FocusGoalLinks | undefined; onPreview(enter: boolean): void; onSelect(): void; onOpen(id: string): void }
-type AreaData = { box: Extract<CollaborationBox, { kind: 'area' }>; envelope: string; memberGeometry: readonly CollaborationBox[]; area: CollaborationArea; folded: boolean; internal: readonly CollaborationRelation[]; onInspect(): void; onLocate(): void; onToggle(): void }
+type NodeActivity = { pulse: CollaborationPulse; direction: 'sent' | 'received' }
+type AgentData = { box: CollaborationBox; agent: CollaborationAgent; selected: boolean; activity?: NodeActivity | undefined; identity?: FocusContextIdentity | undefined; goals?: FocusGoalLinks | undefined; onPreview(enter: boolean): void; onSelect(): void; onOpen(id: string): void }
+type AreaData = { box: Extract<CollaborationBox, { kind: 'area' }>; envelope: string; memberGeometry: readonly CollaborationBox[]; area: CollaborationArea; folded: boolean; activity?: NodeActivity | undefined; internal: readonly CollaborationRelation[]; onInspect(): void; onLocate(): void; onToggle(): void }
 type AgentNode = Node<AgentData, 'agent'>
 type AreaNode = Node<AreaData, 'area'>
 type GraphNode = AgentNode | AreaNode
 type RelationPath = { id: string; label: string; route: CollaborationPath; sourceBox: CollaborationBox; targetBox: CollaborationBox; relations: readonly CollaborationRelation[]; active: number; startedAt: number; count: number; selected: boolean; emphasis: 'normal' | 'related' | 'muted' }
 const emptyHandles: NodeHandle[] = [], emptyEdges: never[] = []
 const sameItems = <T,>(left: readonly T[], right: readonly T[]) => left.length === right.length && left.every((item, index) => item === right[index])
-export const COLLABORATION_LABELS = { communication: 'Communication', creation: 'Creation', supervision: 'Supervision' } as const
+export const COLLABORATION_LABELS = { communication: 'Messages', creation: 'Created', supervision: 'Dispatch' } as const
 const colors = { communication: 'var(--green)', creation: 'var(--text-2)', supervision: 'var(--amber)' } as const
 const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>) {
   const { agent } = data, readable = useStore(state => state.transform[2] >= COLLABORATION_READING_ZOOM)
@@ -39,8 +40,16 @@ const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>
     onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) data.onPreview(false) }}>
     {overview ? <AgentMark data={data} label={label} tier={tier} recency={recency} overview /> : agent.context && tier === 'active' && readable ? <FocusContextCardBody context={agent.context} identity={data.identity} goalLinks={data.goals} selected={data.selected} onSelect={data.onSelect} onOpenWorkface={data.onOpen} />
       : <AgentMark data={data} label={label} tier={tier} recency={recency} />}
+    {data.activity ? <ActivityMark activity={data.activity} /> : null}
   </div>
 })
+function ActivityMark({ activity }: { activity: NodeActivity }) {
+  const { pulse, direction } = activity
+  const label = pulse.kind === 'communication' ? `Message ${direction}` : 'Dispatch updated'
+  const delay = useMemo(() => Math.min(0, pulse.startedAt - Date.now()), [pulse.id, pulse.startedAt])
+  return <span key={pulse.id} className="collaboration-activity" data-kind={pulse.kind} aria-label={label} title={label}
+    style={{ animationDelay: `${delay}ms`, animationDuration: `${COLLABORATION_ACTIVITY_MS}ms` }}><span>{pulse.kind === 'communication' ? direction === 'sent' ? 'Sent ↗' : 'Received ↙' : 'Updated'}</span></span>
+}
 function AgentMark({ data, label, tier, recency, overview = false }: { data: AgentData; label: string; tier: string; recency: ReturnType<typeof collaborationRecency>; overview?: boolean }) {
   const context = data.agent.context
   const preview = useAgentInformationPreview(context, true, data.identity, data.goals, () => { if (context) data.onOpen(context.id) })
@@ -64,12 +73,14 @@ const AreaNodeView = memo(function AreaNodeView({ data }: NodeProps<AreaNode>) {
       <button type="button" className="collaboration-area__summary nodrag nopan" data-compact={compact || undefined} aria-label={`Locate ${data.area.name} · ${data.area.members.length} Agents`} onClick={data.onLocate} title={data.area.issue ?? data.area.name}>
       {compact ? <span className="collaboration-area__symbol" aria-hidden="true" /> : <span>{data.area.name}</span>}
       {!compact && labelWidth >= 160 ? <small>{data.area.members.length} {data.area.members.length === 1 ? 'Agent' : 'Agents'}</small> : null}
+      {data.activity ? <i className="collaboration-area__activity" data-kind={data.activity.pulse.kind} aria-label={data.activity.pulse.kind === 'communication' ? 'Recent message activity' : 'Recent dispatch update'} /> : null}
     </button></div></EdgeLabelRenderer> : <div className="collaboration-area__label" style={{ left: data.box.heading.x, top: data.box.heading.y, width: data.box.heading.width, height: data.box.heading.height }}>
     {empty ? <div className="collaboration-area__heading" title={data.area.issue ?? data.area.name}><span>{data.area.name}</span><small>0</small></div> : <button type="button" className="collaboration-area__heading nodrag nopan" aria-expanded={!data.folded} onClick={data.onToggle} title={data.area.issue ?? undefined}>
       <SemanticIcon name={data.folded ? 'navigation.next' : 'navigation.down'} size={12} /><span>{data.area.name}</span><small>{data.area.members.length}</small>
     </button>}
     </div>}
     {!overview && data.folded && data.internal.length ? <button type="button" className="collaboration-area__internal nodrag nopan" aria-label={`${data.area.name}: ${data.internal.length} internal connections`} onClick={data.onInspect}>{data.internal.length} internal</button> : null}
+    {!overview && data.folded && data.activity ? <ActivityMark activity={data.activity} /> : null}
   </div>
 })
 const nodeTypes = { agent: AgentNodeView, area: AreaNodeView }
@@ -98,7 +109,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
   const visibleIds = useMemo(() => new Set([...areas.flatMap(area => area.members), ...relations.flatMap(relation => [relation.source, relation.target])]), [areas, relations])
   const graphAreas = useMemo(() => {
     const placed = new Set(areas.flatMap(area => area.members)), unplaced = [...visibleIds].filter(id => !placed.has(id))
-    return unplaced.length ? [...areas, { id: 'unplaced-references', name: 'Related Agents', kind: 'unplaced' as const, members: unplaced }] : areas
+    return unplaced.length ? [...areas, { id: 'unplaced-references', name: 'Unresolved references', kind: 'unplaced' as const, members: unplaced }] : areas
   }, [areas, visibleIds])
   const presentation = useMemo(() => collaborationConnections(graphAreas, relations, folded), [graphAreas, relations, folded])
   const allConnections = presentation.connections
@@ -108,6 +119,14 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     connections: allConnections.map(connection => ({ id: connection.id, source: connection.source, target: connection.target, kind: connection.relations[0]!.kind }))
   }), [graphAreas, agents, allConnections, folded])
   const layout = useCollaborationLayout(input, active, readingAnchor), geometry = layout.boxes
+  const activity = useMemo(() => {
+    const result = new Map<string, NodeActivity>()
+    for (const pulse of pulses) {
+      result.set(collaborationSubjectKey({ hostId: pulse.hostId, agentSessionId: pulse.sender }), { pulse, direction: 'sent' })
+      result.set(collaborationSubjectKey({ hostId: pulse.hostId, agentSessionId: pulse.recipient }), { pulse, direction: 'received' })
+    }
+    return result
+  }, [pulses])
   const actions = useRef({ onSelect, onOpen, onPreviewAgent, agents, presentation, locate }); actions.current = { onSelect, onOpen, onPreviewAgent, agents, presentation, locate }
   const gestures = useRef(0)
 
@@ -118,13 +137,14 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
       const areaId = collaborationAreaNode(area.id), box = geometry.get(areaId), previous = nodeCache.current.get(areaId)
       if (box?.kind !== 'area') continue
       const internal = presentation.internal.get(area.id) ?? [], old = previous?.type === 'area' ? previous.data : undefined
+      const live = area.members.reduce<NodeActivity | undefined>((latest, id) => { const value = activity.get(id); return value && (!latest || value.pulse.id > latest.pulse.id) ? value : latest }, undefined)
       const memberGeometry = area.members.flatMap(id => { const member = geometry.get(collaborationAgentNode(area.id, id)); return member ? [member] : [] })
       const sameGeometry = old && sameItems(old.memberGeometry, memberGeometry)
       const envelope = old?.box === box && sameGeometry ? old.envelope : collaborationEnvelope(box, memberGeometry)
-      const areaNode: AreaNode = old?.box === box && sameGeometry && old.area === area && sameItems(old.internal, internal) ? previous as AreaNode : {
+      const areaNode: AreaNode = old?.box === box && sameGeometry && old.area === area && old.activity === live && sameItems(old.internal, internal) ? previous as AreaNode : {
         id: areaId, type: 'area', position: { x: box.x, y: box.y }, width: box.width, height: box.height, measured: { width: box.width, height: box.height }, handles: emptyHandles,
         style: { width: box.width, height: box.height }, selectable: false, draggable: false,
-        data: { box, envelope, memberGeometry, area, folded: box.folded, internal,
+        data: { box, envelope, memberGeometry, area, folded: box.folded, internal, activity: live,
           onLocate: old?.onLocate ?? (() => {
             setFolded(previous => { if (!previous.has(area.id)) return previous; const next = new Set(previous); next.delete(area.id); return next })
             setAreaLocate({ source: actions.current.locate, request: { token: {}, areaIds: [area.id] } })
@@ -140,11 +160,11 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
         if (!card) continue
         const old = previous?.type === 'agent' ? previous.data : undefined, context = agent.context
         const presentationKey = context && JSON.stringify([context.hostId, context.id]), identity = presentationKey ? identities?.get(presentationKey) : undefined, links = presentationKey ? goals?.get(presentationKey) : undefined
-        const selected = selection?.kind === 'agent' && selection.id === id
-        const node: AgentNode = old?.box === card && previous?.position.x === card.x - box.x && previous.position.y === card.y - box.y && old.agent === agent && old.selected === selected && old.identity === identity && old.goals === links ? previous as AgentNode : {
+        const selected = selection?.kind === 'agent' && selection.id === id, live = activity.get(id)
+        const node: AgentNode = old?.box === card && previous?.position.x === card.x - box.x && previous.position.y === card.y - box.y && old.agent === agent && old.selected === selected && old.identity === identity && old.goals === links && old.activity === live ? previous as AgentNode : {
           id: nodeId, type: 'agent', parentId: areaId, position: { x: card.x - box.x, y: card.y - box.y }, width: card.width, height: card.height,
           measured: { width: card.width, height: card.height }, handles: emptyHandles, style: { width: card.width, height: card.height, pointerEvents: 'all' }, draggable: false, selectable: false,
-          data: { box: card, agent, selected, identity, goals: links,
+          data: { box: card, agent, selected, identity, goals: links, activity: live,
             onPreview: old?.onPreview ?? (enter => { if (enter) readingAnchor.current = nodeId; actions.current.onPreviewAgent?.(enter ? id : null) }),
             onSelect: old?.onSelect ?? (() => { readingAnchor.current = nodeId; actions.current.onSelect({ kind: 'agent', id }) }),
             onOpen: old?.onOpen ?? (() => { const context = actions.current.agents.get(id)?.context; if (context) actions.current.onOpen(context) }) }
@@ -155,7 +175,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     nodeCache.current = cache
     if (!sameItems(heldNodes.current, next)) heldNodes.current = next
     return heldNodes.current
-  }, [graphAreas, geometry, agents, presentation, selection, identities, goals])
+  }, [graphAreas, geometry, agents, presentation, selection, identities, goals, activity])
   const areaNames = useMemo(() => new Map(graphAreas.map(area => [collaborationAreaNode(area.id), area.name])), [graphAreas])
   const routeCache = useRef(new Map<string, { path: RelationPath }>())
   const heldPaths = useRef<RelationPath[]>([])
@@ -202,6 +222,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
       <button type="button" className="icon-button" aria-label="Arrange map" title="Arrange map" onClick={layout.arrange}><SemanticIcon name="object.topology" size={14} /></button>
       <button type="button" className="icon-button" aria-label="Overview" title="Show the whole map" onClick={() => { ++gestures.current; void flow.current?.fitView({ padding: .1, maxZoom: 1, includeHiddenNodes: true }) }}><SemanticIcon name="layout.expand" size={14} /></button>
     </div>
+    <div className="collaboration-canvas__legend" aria-label="Relation legend">{Object.entries(COLLABORATION_LABELS).map(([kind, label]) => <span key={kind}><i className="collaboration-relation-key" data-kind={kind} aria-hidden="true" />{label}</span>)}</div>
     {locate?.agentId && geometry.size > 0 && !graphAreas.some(area => area.members.includes(locate.agentId!)) ? <p className="collaboration-canvas__issue" role="status">The original Agent location is unconfirmed. Its identity and sources are retained.</p> : null}
     {layout.issues.size ? <p className="collaboration-canvas__issue" role="status">{[...layout.issues.values()][0]} <button type="button" onClick={layout.retry}>Retry layout</button></p> : layout.busy ? <span className="collaboration-canvas__progress" role="status">{geometry.size ? 'Drawing connections…' : 'Arranging map…'}</span> : null}
     {!visibleIds.size ? <p className="collaboration-canvas__empty">No Agents in this map.</p> : null}
@@ -224,16 +245,19 @@ const CollaborationRelations = memo(function CollaborationRelations({ paths, onS
 })
 const RelationView = memo(function RelationView({ record, markerId, zoom, onSelect, onClear }: { record: RelationPath; markerId: string; zoom: number; onSelect(path: RelationPath): void; onClear(): void }) {
   const kind = record.relations[0]!.kind, { labelX, labelY } = record.route
+  const [hovered, setHovered] = useState(false), [focused, setFocused] = useState(false)
   const path = zoom < COLLABORATION_OVERVIEW_ZOOM ? collaborationOverviewPath(record.route, record.sourceBox, record.targetBox, zoom) : record.route.path
   const delay = useMemo(() => Math.min(0, record.startedAt - Date.now()), [record.active, record.startedAt])
   return <g className={`react-flow__edge selectable nopan collaboration-edge-group--${kind}`} data-id={record.id} data-emphasis={record.emphasis} tabIndex={0} role="button" aria-label={record.label} aria-pressed={record.selected}
-    style={{ pointerEvents: 'stroke' }} onClick={event => { event.stopPropagation(); onSelect(record) }} onKeyDown={event => {
+    style={{ pointerEvents: 'stroke' }} onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} onClick={event => { event.stopPropagation(); onSelect(record) }} onKeyDown={event => {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); onSelect(record) }
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClear() }
     }}>
+    <title>{record.label}</title>
     <BaseEdge id={record.id} path={path} markerEnd={`url(#${markerId}-${kind})`} interactionWidth={22} className={`collaboration-edge collaboration-edge--${kind}${record.selected ? ' is-selected' : ''}`} />
-    {record.active ? <path key={record.active} d={path} pathLength={1} style={{ animationDelay: `${delay}ms` }} className="collaboration-edge__pulse" data-kind={kind} /> : null}
-    {record.emphasis === 'related' && record.count > 1 ? <EdgeLabelRenderer><span className="collaboration-edge__count" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>{record.count}</span></EdgeLabelRenderer> : null}
+    {record.active ? <path key={record.active} d={path} pathLength={1} style={{ animationDelay: `${delay}ms`, animationDuration: `${COLLABORATION_ACTIVITY_MS}ms` }} className="collaboration-edge__pulse" data-kind={kind} /> : null}
+    {record.selected || hovered || focused ? <EdgeLabelRenderer><span className="collaboration-edge__label" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px) scale(${1 / zoom})` }}>{record.label}</span></EdgeLabelRenderer> : null}
+    {record.emphasis === 'related' && record.count > 1 && !record.selected && !hovered && !focused ? <EdgeLabelRenderer><span className="collaboration-edge__count" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>{record.count}</span></EdgeLabelRenderer> : null}
   </g>
 })
 
