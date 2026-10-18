@@ -13,6 +13,7 @@ import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spati
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { draft, surfacePending, sceneRows, appendRow } from './scene.mjs'
 import { acceptedEarlierWindow } from './earlier-frame.mjs'
+import { observeReadingTasks } from './task-observation.mjs'
 import { mailboxMessageKey } from '../../../src/renderer/src/lib/session-mailbox-messages'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import '../../../src/renderer/src/styles/index.css'
@@ -118,7 +119,7 @@ if (setup.phase === 'seed') {
 const heavyIds = new Set([...sceneRows(setup.scene), appendRow(setup.scene, `desktop-${setup.phase}`), appendRow(setup.scene, `mobile-${setup.phase}`)]
   .filter(row => row.payload?.content?.some((part: any) => part.text?.length > 2000)).map(row => row.payload.id))
 const mountedBodies = new WeakSet<Element>(), mountsBySource = new Map<string, number>()
-const metrics = { frames: [] as number[], longTasks: [] as number[], longTaskEntries: [] as object[], added: 0, removed: 0,
+const metrics = { frames: [] as number[], added: 0, removed: 0,
   heavyMounts: [] as { at: number; source: string; ordinal: number }[], firstReadable: null as unknown }
 function observeBodies(root: Element) {
   const bodies = [...(root.matches('.conversation-progressive-body') ? [root] : []), ...root.querySelectorAll('.conversation-progressive-body')]
@@ -149,11 +150,7 @@ const frame = (now: number) => {
   requestAnimationFrame(frame)
 }
 requestAnimationFrame(frame)
-new PerformanceObserver(list => {
-  const entries = list.getEntries()
-  metrics.longTasks.push(...entries.map(entry => entry.duration))
-  metrics.longTaskEntries.push(...entries.map(entry => JSON.parse(JSON.stringify(entry))))
-}).observe({ type: 'longtask', buffered: true })
+const snapshotTasks = observeReadingTasks()
 new MutationObserver(changes => {
   for (const change of changes) {
     metrics.added += change.addedNodes.length; metrics.removed += change.removedNodes.length
@@ -168,6 +165,9 @@ const readingConsumer = () => inspectConversationConsumers({ hostId: 'local', ag
   .consumers.find(item => item.location.regionId === 'reading-region')
 ;(window as any).readingProof = {
   ids, reads, metrics, errors, events, mark,
+  snapshotMetrics() {
+    return { ...structuredClone(metrics), ...snapshotTasks() }
+  },
   inFlightCalls() { return [...pendingCalls] },
   consumer: readingConsumer,
   inputHistoryReads,
