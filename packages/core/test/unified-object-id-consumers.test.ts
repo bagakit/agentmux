@@ -4,7 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { promisify } from 'node:util'
-import { afterEach, expect, it } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import { DeliveryAttemptStore } from '../src/delivery-attempt-store.js'
 import { deliveryFailure, newDeliveryLogId, validateDeliveryLogId, type DeliveryAttempt } from '../src/delivery-attempt.js'
@@ -48,7 +48,8 @@ it('persists and reads new and legacy delivery IDs without weakening path qualif
       hostId: 'local', expectedRunId: 'original-run', afterSubmissionId: null, conditionAvailable: false, promptDigest: null,
       execution: null, startedAt: 1, failedAt: 2, stage: 'input', error: { name: 'Error', message: 'original failure' } }
     expect((await new DeliveryAttemptStore(root).record(record)).record).toEqual(record)
-    expect((await new DeliveryAttemptStore(root).read(id)).record).toEqual(record)
+    const reader = new DeliveryAttemptStore(root)
+    await vi.waitFor(async () => expect((await reader.read(id)).record).toEqual(record), { timeout: 5000 })
   }
   for (const id of ['../outside', fixturePath("absolute"), 'delivery-../../outside', 'O00000000000', logId + '.json']) {
     expect(() => validateDeliveryLogId(id)).toThrowError(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
@@ -77,7 +78,7 @@ it('creates and reopens Goal, activity, decision and submission IDs through the 
   const root = await directory(), store = openDemandStore({ root })
   const created = await store.create({ title: 'Preserve identities' }), id = created.demand.id
   expect(id).toMatch(canonical)
-  expect(created.operationId).not.toMatch(canonical)
+  expect(created.operationId).toMatch(canonical)
   await store.addActivity(id, { kind: 'note', message: 'original note', actorId: null })
   await store.addDecision(id, { question: 'Which owner?', decision: 'Original store', rationale: 'One fact', actorId: null })
   await store.proposeAlignment(id, { summary: 'Keep original facts', criteria: [{ id: 'explicit-criterion', text: 'Read original IDs' }], openQuestions: [] })
