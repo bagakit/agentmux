@@ -102,7 +102,7 @@
 .mote-calendar__point--week { position: relative; display: grid; gap: 0; padding-block: var(--sp-1); align-content: start; }
 .mote-calendar__point--week > time::before { content: '·'; margin-right: var(--sp-2); }
 @container mote-calendar (min-width: 980px) {
-  .mote-calendar__workspace { grid-template-columns: minmax(0, 1fr) 240px; }
+  .mote-calendar__workspace { grid-template-columns: minmax(0, 1.8fr) minmax(320px, 1fr); }
   .mote-calendar__day { border-left: 1px solid var(--line-soft); padding-left: var(--sp-6); }
 }
 @container mote-calendar (max-width: 600px) {
