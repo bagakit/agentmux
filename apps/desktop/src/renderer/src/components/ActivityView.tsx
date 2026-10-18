@@ -43,7 +43,7 @@ import { RULER_WINDOWS, conversationRulerRecords, type RulerRecord, type RulerWi
 import { projectAgentActivityHistory } from '@agentmux/core/timeline'
 import type { DescribeSpeaker } from './ConversationAxis'
 import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
-import type { ConversationProcessProps } from '@agentmux/client-ui/components/ConversationRecordSequence'
+import type { ConversationProcessMember, ConversationProcessProps } from '@agentmux/client-ui/components/ConversationRecordSequence'
 import { renderConversationQuestionNotice } from './ConversationQuestionNotice'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { SemanticIcon } from './semantic-icons'
@@ -652,46 +652,54 @@ export function ActivityView({
     placed.find((entry) => index >= entry.from && index <= entry.to)
 
   const selectEvent = (index: number): void => {
-    setSelectedRecordId(rulerRecords.find(record => record.target.kind === 'observed' && record.target.index === index)?.id ?? null)
-    const host = segmentForIndex(index)
-    const el = host ? segmentEls.current.get(host.key) : undefined
-    // Reuse the same scroll primitive the rest of the app uses to bring a row into view; there is no
-    // second scroll controller for the Activity log.
-    el?.scrollIntoView({ block: 'nearest' })
-    if (feedEl) {
-      anchorRef.current = captureReadingAnchor(feedEl, el)
-      markProgrammaticReadingScroll(feedEl, 'navigation')
-    }
+    const record = rulerRecords.find(record => record.target.kind === 'observed' && record.target.index === index)
+    if (record) selectRulerRecord(record)
   }
 
 
 
-  const locateRef = useRef<{ frame: number | null; source: AgentSessionHistoryPage | null | undefined }>({ frame: null, source: nativeHistoryPage })
-  locateRef.current.source = nativeHistoryPage
+  const locateRef = useRef<{ frame: number | null; source: readonly ConversationRecord[]; enabled: boolean }>({ frame: null, source: conversationRecords, enabled: readingEnabled })
+  locateRef.current.source = conversationRecords
+  locateRef.current.enabled = readingEnabled
   useEffect(() => () => { if (locateRef.current.frame !== null) cancelAnimationFrame(locateRef.current.frame) }, [sessionId])
   function selectRulerRecord(record: RulerRecord): void {
     if (locateRef.current.frame !== null) cancelAnimationFrame(locateRef.current.frame)
+    const accepted = conversationRecords.find(member => member.id === record.id)
+    if (!accepted || !readingEnabled || !feedEl) return
     setSelectedRecordId(record.id)
-    if (record.target.kind === 'observed') { selectEvent(record.target.index); return }
     const target = record.target
-    const page = nativeHistoryPage
-    const thread = feedEl?.querySelector<HTMLElement>('.conversation-native-thread')
+    const source = conversationRecords
+    const thread = feedEl.querySelector<HTMLElement>('.conversation-native-thread')
     if (!thread) return
-    const group = [...thread.querySelectorAll<HTMLElement>('[data-native-record-ids]')]
-      .find(node => node.closest<HTMLElement>('[data-native-source]')?.dataset.nativeSource === target.source && (JSON.parse(node.dataset.nativeRecordIds ?? '[]') as string[]).includes(target.recordId))
+    const current = () => locateRef.current.source === source && locateRef.current.enabled && thread.isConnected
+    const group = [...thread.querySelectorAll<HTMLElement>('[data-conversation-process-members]')]
+      .find(node => (JSON.parse(node.dataset.conversationProcessMembers ?? '[]') as ConversationProcessMember[]).some(member => member.id === record.id))
     const toggle = group?.querySelector<HTMLButtonElement>('.wf-head[aria-expanded="false"]')
     toggle?.click()
+    const sourceKey = conversationMessageSourceKey(accepted.agentSessionId, accepted.source)
+    if (sourceKey) setLocatedMessageKey(sourceKey)
+    const findNode = (): HTMLElement | undefined => {
+      if (target.kind === 'observed') {
+        const host = segmentForIndex(target.index)
+        return host ? segmentEls.current.get(host.key) : undefined
+      }
+      return [...thread.querySelectorAll<HTMLElement>('[data-native-record-id], [data-native-step-id]')]
+        .find(node => node.closest<HTMLElement>('[data-native-source]')?.dataset.nativeSource === target.source && (node.dataset.nativeRecordId === target.recordId || node.dataset.nativeStepId === target.recordId))
+    }
     locateRef.current.frame = requestAnimationFrame(() => {
       locateRef.current.frame = null
-      if (locateRef.current.source !== page || !thread.isConnected) return
-      const node = [...thread.querySelectorAll<HTMLElement>('[data-native-record-id], [data-native-step-id]')]
-        .find(node => node.closest<HTMLElement>('[data-native-source]')?.dataset.nativeSource === target.source && (node.dataset.nativeRecordId === target.recordId || node.dataset.nativeStepId === target.recordId))
-      node?.scrollIntoView({ block: 'nearest' })
-      const viewport = thread.closest<HTMLElement>('.activity-feed')
-      if (viewport) {
-        anchorRef.current = captureReadingAnchor(viewport, node)
-        markProgrammaticReadingScroll(viewport, 'navigation')
-      }
+      if (!current()) return
+      findNode()?.querySelector<HTMLButtonElement>('.wf-tool-row[aria-expanded="false"]')?.click()
+      locateRef.current.frame = requestAnimationFrame(() => {
+        locateRef.current.frame = null
+        if (!current()) return
+        const node = findNode()
+        if (!node) return
+        followRef.current = { ...followRef.current, following: false }
+        node.scrollIntoView({ block: 'nearest' })
+        anchorRef.current = captureReadingAnchor(feedEl, node)
+        markProgrammaticReadingScroll(feedEl, 'navigation')
+      })
     })
   }
 

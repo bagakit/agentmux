@@ -5,7 +5,7 @@ export function selectedConversationReadingNode(root: HTMLElement, selector: str
   const selection = root.ownerDocument.defaultView?.getSelection()
   if (!selection || selection.isCollapsed || !selection.rangeCount) return null
   // Element/offset endpoints can name a process container; it is not an original leaf.
-  const isLeaf = (node: HTMLElement) => !node.hasAttribute('data-conversation-process-key') && !node.hasAttribute('data-native-record-ids')
+  const isLeaf = (node: HTMLElement) => !node.hasAttribute('data-conversation-process-key')
   const range = selection.getRangeAt(0), node = range.startContainer
   const element = node.nodeType === 1 ? node as Element : node.parentElement
   const selected = element?.closest<HTMLElement>(selector)
@@ -27,7 +27,7 @@ export function selectedConversationReadingNode(root: HTMLElement, selector: str
 export function conversationReadingAnchor(viewport: HTMLElement, observedScope?: HTMLElement | null, nativeOnly = false, visibleShells?: Iterable<Element>): ReadingAnchor | null {
   const bounds = viewport.getBoundingClientRect()
   if (bounds.height <= 0) return null
-  const selector = nativeOnly ? '[data-native-record-id], [data-native-record-ids]' : '[data-segment-key], [data-native-record-id], [data-native-record-ids]'
+  const selector = nativeOnly ? '[data-native-record-id], [data-conversation-process-key]' : '[data-segment-key], [data-native-record-id], [data-conversation-process-key]'
   const selected = selectedConversationReadingNode(viewport, selector, row => anchorFromRows([row], bounds) !== null,
     () => visibleShells ?? (observedScope ?? viewport).querySelectorAll<HTMLElement>(selector))
   const selectedAnchor = selected && anchorFromRows([selected], bounds)

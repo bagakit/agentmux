@@ -5,6 +5,7 @@ import { ConversationAxis, type DescribeSpeaker } from './ConversationAxis'
 import { conversationRulerWindow, type RulerRecord, type RulerWindow } from '../lib/conversation-ruler'
 import { rulerBand } from '../lib/activity-ruler'
 import type { projectAgentActivityHistory } from '@agentmux/core/timeline'
+import type { ConversationProcessMember } from '@agentmux/client-ui/components/ConversationRecordSequence'
 
 export type ConversationVisibleShells = { feed: HTMLDivElement; sessionId: string; shells: Set<Element> }
 
@@ -40,6 +41,7 @@ export function ConversationReadingRuler({ feedEl, sessionId, readingEnabled, ru
   useEffect(() => {
     if (!readingEnabled || !feedEl) return
     const expected = new Map<string, string[]>()
+    const recordIds = new Set(rulerRecords.map(record => record.id))
     const segmentsByIndex = new Map<number, string>()
     for (const segment of placed) for (let index = segment.from; index <= segment.to; index++) segmentsByIndex.set(index, segment.key)
     for (const record of rulerRecords) {
@@ -87,22 +89,22 @@ export function ConversationReadingRuler({ feedEl, sessionId, readingEnabled, ru
       const source = node.closest<HTMLElement>('[data-native-source]')?.dataset.nativeSource
       const key = id && source ? JSON.stringify([source, id]) : node.dataset.segmentKey
       // Only a folded header represents the group's records. Expanded steps keep their own visibility.
-      const group = node.matches('.wf-head[aria-expanded="false"]') ? node.closest<HTMLElement>('[data-native-record-ids]') : null
-      const records = group && source
-        ? (JSON.parse(group.dataset.nativeRecordIds ?? '[]') as string[]).flatMap(recordId => expected.get(JSON.stringify([source, recordId])) ?? [])
+      const group = node.matches('.wf-head[aria-expanded="false"]') ? node.closest<HTMLElement>('[data-conversation-process-members]') : null
+      const records = group
+        ? (JSON.parse(group.dataset.conversationProcessMembers!) as ConversationProcessMember[]).flatMap(member => recordIds.has(member.id) ? [member.id] : [])
         : key ? expected.get(key) : undefined
       if (!records?.length) { unregister(node); return }
       mapping.set(node, records)
       observer.observe(node)
     }
-    const selector = '[data-native-record-id], [data-native-step-id], [data-segment-key], [data-native-record-ids] .wf-head'
+    const selector = '[data-native-record-id], [data-native-step-id], [data-segment-key], [data-conversation-process-members] .wf-head'
     feedEl.querySelectorAll<HTMLElement>(selector).forEach(register)
     for (const node of onscreen) if (!mapping.has(node) || !node.isConnected) onscreen.delete(node)
     recompute()
     const mutations = new MutationObserver(entries => {
       if (!active) return
       for (const entry of entries) {
-        if (entry.type === 'attributes' && entry.target instanceof HTMLElement && entry.target.matches('[data-native-record-ids] .wf-head')) register(entry.target)
+        if (entry.type === 'attributes' && entry.target instanceof HTMLElement && entry.target.matches('[data-conversation-process-members] .wf-head')) register(entry.target)
         for (const added of entry.addedNodes) if (added instanceof HTMLElement) {
           if (added.matches(selector)) register(added)
           added.querySelectorAll<HTMLElement>(selector).forEach(register)
