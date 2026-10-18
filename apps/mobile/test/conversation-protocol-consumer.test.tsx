@@ -269,6 +269,24 @@ it('authenticated Hosted preserves ordinary input and the original terminal rout
     controlledLeaves: ['Provider history, observation and original ordinary-input plan', 'screen read', 'ctxmux process transport'], claims: ['no physical-device or vendor Native qualification', 'async reply is unsupported; terminal navigation dispatches no input'] })
 }, 15000)
 
+it('authenticated Mobile manual input remains independent of question capability observation', async () => {
+  const f = await authenticatedFixture()
+  f.client.catalog = () => { throw new Error('Original catalog observation unavailable') }
+  const view = await mount(f.surface())
+  await vi.waitFor(() => expect(view.element.textContent).toContain('异步问题能力观察未确认'))
+  await paste(view.element, 'Manual input on the authenticated original owner')
+  await click(button(view.element, 'Send'))
+  await vi.waitFor(() => expect(f.writes.join('')).toContain('Manual input on the authenticated original owner'))
+  await vi.waitFor(() => expect(saved().attempts[0][1].phase).toBe('confirmed'))
+  expect(f.submit).toHaveBeenCalledOnce()
+  expect(f.submit.mock.calls[0]![0]).toMatchObject({ agentSessionId: sid, expectedRun: { runId: RUN_ID },
+    authorHuman: true, sourceDevice: f.device, admissionIntent: { kind: 'manual-actor' }, execution: 'immediate' })
+  expect(saved().attempts[0][1].operationId).toBe(f.submit.mock.calls[0]![0].operationId)
+  expect(editor(view.element).textContent).toBe('')
+  expect(view.element.textContent).toContain('异步问题能力观察未确认')
+  expect(f.reply).not.toHaveBeenCalled()
+}, 15000)
+
 it('an unaddressable synchronous question opens its original terminal without answering or saving an operation', async () => {
   const request: AgentMuxInteractionRequest = { kind: 'question', id: 'manual-original-request', agentSessionId: sid,
     nativeToolCallId: 'manual-native-question', evidence: { source: 'native-hook', observedAt: _historyTailFixtureEpoch(0, 0, 1), hookReceiptId: 'manual-original-hook', run: { runId: RUN_ID } },
@@ -379,7 +397,7 @@ it('the authenticated Mobile card reaches an open original Hook and adopts its e
   const transport = await authenticatedConsumer(h.client, h.root, OPERATION_SESSION_ID)
   // Reorder the actual decoded Host result at the consumer leaf; no receipt is fabricated.
   const originalRespond = transport.client.respondAgentInteraction.bind(transport.client)
-  vi.spyOn(transport.client, 'respondAgentInteraction').mockImplementation(async input => {
+  const hostedRespond = vi.spyOn(transport.client, 'respondAgentInteraction').mockImplementation(async input => {
     const receipt = await originalRespond(input)
     const reverse = (value: unknown): unknown => Array.isArray(value) ? value.map(reverse)
       : value && typeof value === 'object' ? Object.fromEntries(Object.entries(value).reverse().map(([key, item]) => [key, reverse(item)])) : value
@@ -389,6 +407,8 @@ it('the authenticated Mobile card reaches an open original Hook and adopts its e
   await vi.waitFor(() => expect(view.element.querySelector('[data-request-id="mobile-open-hook"]')).not.toBeNull())
   await paste(view.element, 'Original newer draft remains editable')
   await click(button(view.element, h.request.options.find(option => option.id === 'reject-once')!.label))
+  await vi.waitFor(() => expect(hostedRespond).toHaveBeenCalledOnce())
+  await act(async () => { await hostedRespond.mock.results[0]!.value })
   await vi.waitFor(() => expect(saved().responses[0]?.[1].phase, view.element.textContent!).toBe('confirmed'))
   expect(respond).toHaveBeenCalledOnce()
   const input = respond.mock.calls[0]![0]

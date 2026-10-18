@@ -5,7 +5,7 @@ import type { AgentInputSubmissionReceipt } from '@agentmux/core'
 import { MobileConversationSurface } from '../src/conversation/MobileConversationSurface'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { DeviceWorkfaceStore, emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { acceptedPrompt, button, click, deferred, editor, fixture, mount, mounted, paste } from './conversation-fixture'
+import { acceptedPrompt, button, click, deferred, editor, evidence, fixture, mount, mounted, paste } from './conversation-fixture'
 
 const draftKey = JSON.stringify(['draft', 'session-original'])
 const body = 'A distinct explicit input for the original terminal'
@@ -27,14 +27,16 @@ afterEach(async () => { for (const view of mounted.splice(0)) { await act(async 
 
 it('sends a new manual input without catalog or predecessor gates and keeps first-save waiting distinct from terminal confirmation', async () => {
   const f = fixture()
+  const catalog = f.client.catalog
   f.client.catalog = () => { throw Error('Catalog observation is unavailable') }
   f.sessions.get('session-original')!.promptCompletionAdmission = { operationId: 'older-opaque', startByte: 0, endByte: 1 }
   let current: AgentInputSubmissionReceipt | undefined
   f.submit.mockImplementation(async input => current = waiting(await receiptFor(input)))
   const v = await mount(<MobileConversationSurface {...props(f)} />)
+  expect(v.element.textContent).toContain('异步问题能力观察未确认')
   await paste(v.element, body); await click(button(v.element, 'Send'))
+  await settled(() => expect(f.submit).toHaveBeenCalledOnce())
   await settled(() => expect(attempt().phase).toBe('unknown'))
-  expect(f.submit).toHaveBeenCalledOnce()
   expect(f.submit.mock.calls[0]![0]).toMatchObject({ prompt: body, authorHuman: true, execution: 'immediate', admissionIntent: { kind: 'manual-actor' }, expectedRun: { runId: 'run-original' } })
   expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('afterSubmissionId')
   expect(attempt().manualInput).toMatchObject({ agentSessionId: 'session-original', expectedRun: { runId: 'run-original' }, runtimeId: 'original-runtime' })
@@ -50,6 +52,10 @@ it('sends a new manual input without catalog or predecessor gates and keeps firs
   expect(v.element.textContent).toContain('不是任务完成回执')
   await act(async () => f.emit({ type: 'agent-input', receipt: current! }))
   expect(attempt().phase).toBe('confirmed')
+  expect(v.element.textContent).toContain('异步问题能力观察未确认')
+  f.client.catalog = catalog
+  await click(button(v.element, '重新核对问题能力'))
+  expect(v.element.textContent).not.toContain('异步问题能力观察未确认')
   expect(f.submit).toHaveBeenCalledOnce()
 })
 
@@ -221,4 +227,54 @@ it('keeps exact input observation and stop available when current Runtime metada
  await settled(()=>expect(attempt().manualInput!.stopReceipt).toBeDefined())
  expect(f.stopInput).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ref:receipt!.ref}))
  expect(f.submit).toHaveBeenCalledOnce()
+})
+
+
+it('rejects a foreign first input receipt and settles only an observation of the frozen original key', async () => {
+  const f = fixture()
+  let original: AgentInputSubmissionReceipt | undefined
+  f.submit.mockImplementation(async input => {
+    original = await receiptFor(input)
+    if (original.key.kind !== 'prompt') throw new Error('Expected the original prompt key')
+    return { ...original, key: { ...original.key, submissionId: 'foreign-input' } }
+  })
+  const view = await mount(<MobileConversationSurface {...props(f)} />)
+  await paste(view.element, body); await click(button(view.element, 'Send'))
+  await settled(() => expect(attempt().phase).toBe('unknown'))
+  expect(attempt().inputReceipt).toBeUndefined()
+  expect(attempt().draft).toBe(body)
+  expect(editor(view.element).textContent).toBe(body)
+  expect(view.element.textContent).toContain('Core 返回了另一条输入的回执')
+  f.inspectInput.mockResolvedValue(original!)
+  await act(async () => f.emit({ type: 'connection-state', state: 'restored', evidence }))
+  await settled(() => expect(attempt().phase).toBe('confirmed'))
+  expect(f.inspectInput).toHaveBeenCalledWith({ key: original!.key })
+  expect(f.submit).toHaveBeenCalledOnce()
+})
+
+it('discards a reconnect observation after the selected Host client changes without replaying the retained input', async () => {
+  const first = fixture(), second = fixture(), observed = deferred<AgentInputSubmissionReceipt>()
+  let original: AgentInputSubmissionReceipt | undefined
+  first.submit.mockImplementation(async input => {
+    original = await receiptFor(input)
+    return waiting(original)
+  })
+  second.client.runtimeOwnerIdentity = () => ({ runtimeId: 'different-runtime' })
+  second.sessions.get('session-original')!.hostId = 'different-host'
+  const view = await mount(<MobileConversationSurface {...props(first)} />)
+  await paste(view.element, body); await click(button(view.element, 'Send'))
+  await settled(() => expect(attempt().phase).toBe('unknown'))
+  first.inspectInput.mockImplementation(() => observed.promise)
+  await act(async () => first.emit({ type: 'connection-state', state: 'restored', evidence }))
+  await settled(() => expect(first.inspectInput).toHaveBeenCalledWith({ key: original!.key }))
+  await view.render(<MobileConversationSurface {...props(second)} />)
+  await paste(view.element, ' New selected-owner draft')
+  const edited = editor(view.element).textContent
+  await act(async () => observed.resolve(original!))
+  expect(attempt().phase).toBe('unknown')
+  expect(attempt().operationId).toBe(first.submit.mock.calls[0]![0].operationId)
+  expect(editor(view.element).textContent).toBe(edited)
+  expect(first.submit).toHaveBeenCalledOnce()
+  expect(second.submit).not.toHaveBeenCalled()
+  expect(second.inspectInput).not.toHaveBeenCalled()
 })
