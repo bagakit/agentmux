@@ -157,14 +157,14 @@ it('keeps business callers usable when metadata reads or the diagnostic sink fai
 })
 
 
-it.each(['regionId', 'dropped', 'now', 'monotonic', 'id'] as const)(
+it.each(['regionId', 'reporter', 'now', 'monotonic', 'id'] as const)(
   'isolates a failing %s producer callback and counts the unavailable occurrence after recovery', callback => {
     const reports: AgentMuxClientIncidentReport[] = []
     let broken = false, serial = 0
     const unavailable = () => { if (broken) throw Error('private callback failure') }
     const input = { hostId: 'local', agentSessionId: null, runId: 'run', read: () => ({ visible: true }),
       regionId: () => { if (callback === 'regionId') unavailable(); return 'original-region' },
-      dropped: () => { if (callback === 'dropped') unavailable(); return 0 },
+      reporter: () => { if (callback === 'reporter') unavailable(); return { dropped: 0, rejected: 0, unavailable: 0, coalesced: 0 } },
       now: () => { if (callback === 'now') unavailable(); return 20 },
       monotonic: () => { if (callback === 'monotonic') unavailable(); return 10 },
       id: () => { if (callback === 'id') unavailable(); return `original-${++serial}` },
@@ -208,4 +208,13 @@ it('reads only an own finite code observation without executing an error accesso
   expect(reports).toHaveLength(1)
   expect(reports[0]).toMatchObject({ code: null, metadata: { recorderReadFailures: 1 } })
   expect(JSON.stringify(reports)).not.toContain('private original error')
+})
+
+it('keeps cumulative transport and coalescing observations separate on the next valid report', () => {
+  const reports: AgentMuxClientIncidentReport[] = []
+  const recorder = createClientIncidentRecorder({ hostId: 'local', agentSessionId: null, runId: 'run', regionId: () => null,
+    read: () => ({}), send: report => { reports.push(report) }, reporter: () => ({ dropped: 12, rejected: 2, unavailable: 3, coalesced: 4 }) })
+  recorder.capture('terminal-attach-failed', 'attach-failed')
+  expect(reports[0]!.metadata).toMatchObject({ reporterDropped: 12, reporterRejected: 2, reporterUnavailable: 3, reporterCoalesced: 4 })
+  expect(reports[0]!.relatedOccurrenceId).toBeNull()
 })
