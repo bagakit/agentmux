@@ -1,0 +1,10 @@
+/* Only the private host frame; all message, Markdown and disclosure styling is product CSS. */
+body { display: block; overflow: auto; }
+#root { width: 100%; min-height: 100vh; }
+.original-reading-probe { width: min(100%, 900px); margin-inline: auto; min-height: 100vh; background: var(--surface-1); }
+.original-reading-probe__header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 14px 16px; border-bottom: 1px solid var(--line-soft); }
+.original-reading-probe__header > span { color: var(--text-3); font-size: var(--fs-meta); }
+.original-reading-probe__messages { padding: 10px 12px; min-width: 0; }
+.original-reading-probe__draft { display: grid; gap: 6px; margin: 12px 16px; color: var(--text-3); font-size: var(--fs-meta); }
+.original-reading-probe__draft textarea { width: 100%; min-height: 56px; resize: none; padding: 8px; background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--radius-md); color: var(--text); font: inherit; }
+.original-reading-probe__draft textarea:focus { outline: 1px solid var(--focus-line); outline-offset: 1px; }
