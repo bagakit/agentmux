@@ -42,9 +42,9 @@
   .settings-overview__group { grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
   .settings-overview__group > header { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-4); padding-inline: var(--sp-3); }
   .settings-overview__group > header p { margin-top: var(--sp-1); }
-  .settings-overview__shortcut { grid-template-columns: 20px minmax(0, 1fr); gap: var(--sp-3); padding: var(--sp-4) var(--sp-3); }
+  .settings-overview__shortcut { grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: var(--sp-3); padding: var(--sp-4) var(--sp-3); }
   .settings-overview__shortcut > svg:last-child { display: none; }
-  .settings-overview__shortcut small { font-size: var(--fs-micro); overflow-wrap: anywhere; }
+  .settings-overview__shortcut small { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; overflow-wrap: anywhere; }
 }
 @container settings-home (max-width: 380px) {
   .settings-overview__hero { height: 96px; }
@@ -53,7 +53,7 @@
   .settings-overview__art { object-position: 58% center; }
   .settings-overview__hero::before { background: linear-gradient(90deg, var(--surface-1), color-mix(in srgb, var(--surface-1) 94%, transparent) 48%, transparent 100%); }
   .settings-overview__entries { grid-template-columns: minmax(0, 1fr); }
-  .settings-overview__shortcut { grid-template-columns: minmax(0, 1fr); justify-items: center; gap: var(--sp-2); text-align: center; }
+  .settings-overview__shortcut { grid-template-columns: minmax(0, 1fr); grid-template-rows: 24px 1fr; justify-items: center; gap: var(--sp-2); text-align: center; }
   .settings-overview__directory-heading { margin-top: var(--sp-6); }
 }
 @media (max-width: 560px) {
