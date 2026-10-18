@@ -10,6 +10,7 @@ const settings = 'apps/desktop/src/renderer/src/components/settings/'
 const mutations = [
   { id: 'browser-reason', file: settings + 'BrowserResources.tsx', before: '{directory.notice}</p>', after: '{"Unavailable"}</p>', test: 'Browser summarizes a failed observation' },
   { id: 'host-return', file: settings + 'HostSettingsPane.tsx', before: 'onClick={backToLibrary}', after: 'onClick={() => {}}', test: 'Hosts returns from the compact toolbar' },
+  { id: 'host-return-context', file: settings + 'HostSettingsPane.tsx', before: "view === 'editor' && <button type=\"button\" className=\"settings-resource-back", after: 'true && <button type="button" className="settings-resource-back', test: 'Hosts returns from the compact toolbar' },
   { id: 'mobile-previous', file: settings + 'DeviceManagementSettings.tsx', before: "readIssue ? ' · last observed' : ''", after: "''", test: 'Mobile keeps the original device record' }
 ]
 const files = [...new Set([...mutations.map(item => item.file), settings + 'BrowserSettingsPane.tsx', settings + 'RetainedBrowserUploads.tsx',

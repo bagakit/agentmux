@@ -639,6 +639,7 @@ app.whenReady().then(async () => {
           await captureSegments('page-hosts-compact-detail-'+color,id,color)
           await click(node('[data-settings-pane="hosts"] .settings-resource-back'))
           assert.equal(await read(`${node('[data-settings-pane="hosts"] [data-resource-view]')}.dataset.resourceView`),'library')
+          assert.equal(await read(`${node('[data-settings-pane="hosts"] .settings-resource-back')} === null`),true,'The Host library has no redundant return action')
           assert.equal(await read(`document.activeElement?.dataset.hostPanel`),'connection')
           await capture('page-hosts-compact-return-'+color,id,color,'return to original Host')
         } else if (id==='prompts') {
