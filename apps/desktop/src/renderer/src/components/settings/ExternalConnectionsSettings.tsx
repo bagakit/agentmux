@@ -35,6 +35,7 @@ const platform = (domain: string) => domain === 'open.feishu.cn' ? 'Feishu' : do
 export function ExternalConnectionsSettings({ active, onClose, navigationRequest, channel = 'lark' }: { active: boolean; onClose?: (() => void) | undefined; navigationRequest?: SettingsNavigationRequest | undefined; channel?: 'lark' | 'discord' }) {
   const discord = channel === 'discord'
   const navigation = useContext(SettingsNavigation), origin = navigationRequest?.channelOrigin
+  const [routeIssue, setRouteIssue] = useState('')
   const originalAgent = useAppStore(state => {
     if (!active || !origin) return undefined
     const session = sessionPresentationById(state.sessions).get(origin.sessionId)
@@ -103,6 +104,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   const edit = (record: ConnectionRecord | null) => {
     appliedRoute.current = navigationRequest
     if (pending.current) { setIssue('Check this save before changing the application.'); return }
+    setRouteIssue('')
     clearManagementRoute()
     setSelected(record); setLabel(record?.config.label ?? ''); setAppId(record?.config.application.appId ?? ''); setDomain(record?.config.application.domain ?? (discord ? 'discord.com' : 'open.feishu.cn')); setEnabled(record?.config.enabled ?? true); setSecret(''); setIssue(''); setSaveNotice(''); setView(record ? 'edit' : 'new')
   }
@@ -162,7 +164,7 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
   const existing = () => { clearManagementRoute(); setContinuation(null); appliedRoute.current = navigationRequest; if (selected && !pending.current) edit(null); else setView('new') }
   const startEnrollment = () => { clearManagementRoute(); setContinuation(null); appliedRoute.current = navigationRequest; setMoteSelection(null); enrollment.startAnother(); setView('enrollment') }
   const openMote = (origin: MoteLarkSettingsOrigin, create = false) => { clearManagementRoute(); setContinuation(null); appliedRoute.current = navigationRequest; setMoteSelection({ origin, create }); setView('mote'); setIssue('') }
-  const library = () => { clearManagementRoute(); setContinuation(null); returnMote.current = moteSelection?.origin.topicId ?? null; appliedRoute.current = navigationRequest; setView('library'); setMoteSelection(null); setIssue(''); setLibraryRevision(value => value + 1) }
+  const library = () => { clearManagementRoute(); setContinuation(null); returnMote.current = moteSelection?.origin.topicId ?? null; appliedRoute.current = navigationRequest; setRouteIssue(''); setView('library'); setMoteSelection(null); setIssue(''); setLibraryRevision(value => value + 1) }
   useLayoutEffect(() => {
     const scroll = pane.current?.closest<HTMLElement>('.settings-content__scroll')
     if (!scroll) return
@@ -206,12 +208,16 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     continueMoteSetup(record, setup.source)
   }, [active, navigationRequest, records])
   useEffect(() => {
-    if (!active || appliedRoute.current === navigationRequest || !origin || pending.current) return
+    if (!active || appliedRoute.current === navigationRequest || !origin) return
+    if (pending.current) { setRouteIssue('Check the current original save before opening another application. Your draft and original request are kept.'); return }
     const record = records.find(record => record.config.connectionId === origin.connection.connectionId && record.config.adapterId === origin.connection.adapterId &&
       record.config.application.domain === origin.connection.application.domain && record.config.application.appId === origin.connection.application.appId)
-    if (!record) return
+    if (!record) {
+      if (view !== 'loading') setRouteIssue(`The requested application is not confirmed here: ${origin.connection.application.domain} · ${origin.connection.application.appId} · ${origin.connection.connectionId}. Refresh the bot list to read this exact identity again. Your existing draft and results are kept.`)
+      return
+    }
     appliedRoute.current = navigationRequest; edit(record); setView('saved')
-  }, [active, navigationRequest, records])
+  }, [active, navigationRequest, records, view])
   const editing = view === 'new' || view === 'edit', dirty = !selected || label !== selected.config.label || enabled !== selected.config.enabled || !!secret
   if (!active) return null
   const listFeedback = listIssue ? <div className="connector-list-feedback" data-connection-list-issue>
@@ -220,6 +226,8 @@ export function ExternalConnectionsSettings({ active, onClose, navigationRequest
     <details className="connector-diagnostics"><summary>List error details</summary><p className="connector-enrollment__technical">{listIssue}</p></details>
   </div> : null
   return <div ref={pane} className="settings-pane-stack connector-onboarding" data-connector-settings>
+    {routeIssue ? <div className="connector-list-feedback" data-channel-target-issue><p role="status" className="connector-issue">{routeIssue}</p>
+      <button className="small-button" onClick={() => void read()}>Read requested application again</button></div> : null}
     {view === 'loading' ? <section className="connector-setup">
       <p className="settings-group-note" role="status">Reading saved bots…</p>
       <div className="connector-editor-actions"><button type="button" className="primary-button" onClick={discord ? existing : startEnrollment}>{discord ? 'Connect a bot' : 'Set up a bot'}</button><button type="button" className="small-button" onClick={existing}>Connect an existing bot</button></div>
