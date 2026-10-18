@@ -3,6 +3,7 @@ import type { APIUser } from 'discord-api-types/v10'
 import type { ChannelProfileAdapter, ChannelActorProfileRead } from '../../channel-profile-adapter.js'
 import type { ChannelStoragePort } from '../../channel-storage.js'
 import { discordAvatar, discordId } from './protocol.js'
+import { createDiscordMetadata } from './metadata.js'
 import type { DiscordClients } from './client.js'
 
 const key = (actor: ConnectionActor) => 'actor-profile:' + channelActorKey(actor)
@@ -14,27 +15,31 @@ export function readDiscordActor(input: ChannelActorProfileRead): ChannelActorPr
   const observation = parseChannelActorProfileObservation(row.value.value)
   if (channelActorKey(observation.actor) !== channelActorKey(input.actor)) throw Error('The original Discord profile belongs to another actor')
   // Gateway user observations and explicit refresh update this native cache. Age alone does not certify current data.
-  return { ...observation, freshness: observation.profile ? 'stale' : 'unknown' }
+  return { ...observation, freshness: observation.profile ? observation.state === 'observed' && Date.now() - observation.checkedAt < 5 * 60_000 ? 'current' : 'stale' : 'unknown' }
 }
-export function observeDiscordActor(storage: ChannelStoragePort, actor: ConnectionActor, user: APIUser): ChannelActorProfileObservation {
+export function observeDiscordActor(storage: ChannelStoragePort, actor: ConnectionActor, user: APIUser, expectedRevision?: string | null): ChannelActorProfileObservation {
   if (discordId(user.id) !== actor.userId || actor.idType !== 'snowflake') throw Error('The native user does not match the original actor')
   const now = Date.now(), avatarUrl = discordAvatar(user)
   const observation = parseChannelActorProfileObservation({ actor, state: 'observed', checkedAt: now, freshness: 'current',
     profile: { name: user.global_name || user.username, ...(avatarUrl ? { avatarUrl } : {}), observedAt: now } })
   const old = storage.get(key(actor))
-  storage.put({ key: key(actor), value: { kind: 'json', value: observation }, expectedRevision: old?.revision ?? null })
+  storage.put({ key: key(actor), value: { kind: 'json', value: observation }, expectedRevision: expectedRevision === undefined ? old?.revision ?? null : expectedRevision })
   return observation
 }
 export function createDiscordProfiles(clients: DiscordClients): ChannelProfileAdapter {
-  return { readActor: readDiscordActor, async refreshActor(input, credential, signal) {
-    const cached = readDiscordActor(input)
+  const adapter: ChannelProfileAdapter = { readActor: readDiscordActor, async refreshActor(input, credential, signal) {
+    const cached = readDiscordActor(input), original = input.storage.get(key(input.actor))
     let observation: ChannelActorProfileObservation
     try {
       if (input.actor.idType !== 'snowflake' || (input.actor.application.domain !== input.config.application.domain || input.actor.application.appId !== input.config.application.appId)) return { ...cached, state: 'unavailable', checkedAt: Date.now(), freshness: cached.profile ? 'stale' : 'unknown', reason: 'unsupported-actor' }
+      await clients.identity(input.config, credential, signal)
       const user = await clients.rest(input.config, credential).get(`/users/${discordId(input.actor.userId)}`, { signal }) as APIUser
-      return observeDiscordActor(input.storage, input.actor, user)
+      signal.throwIfAborted()
+      return observeDiscordActor(input.storage, input.actor, user, original?.revision ?? null)
     } catch { observation = { ...cached, state: 'unavailable', checkedAt: Date.now(), freshness: cached.profile ? 'stale' : 'unknown', reason: 'source-unconfirmed' } }
-    const old = input.storage.get(key(input.actor)); input.storage.put({ key: key(input.actor), value: { kind: 'json', value: observation }, expectedRevision: old?.revision ?? null })
+    if (!signal.aborted) try { input.storage.put({ key: key(input.actor), value: { kind: 'json', value: observation }, expectedRevision: original?.revision ?? null }) }
+    catch { return readDiscordActor(input) }
     return observation
   } }
+  return Object.assign(adapter, createDiscordMetadata(clients, adapter))
 }
