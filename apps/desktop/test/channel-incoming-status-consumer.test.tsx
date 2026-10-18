@@ -120,18 +120,27 @@ it('an original record without ingress or input observation remains conversation
 
 it('an active revised grant cannot wake the original external waiting generation or fabricate a refusal on its recorded card', async () => {
   const f = await fixture(); await grant(f)
+  const errors: string[] = [], unsubscribe = f.client.onEvent(event => { if (event.type === 'agent-error') errors.push(event.code) }); cleanup.push(unsubscribe)
+  const apply = f.store.applyTimelineMutation.bind(f.store)
+  const failedProjection = vi.spyOn(f.store, 'applyTimelineMutation').mockImplementation(async (mutation, signal) => {
+    if (mutation.type === 'upsert' && mutation.item.inputRef?.kind === 'message') throw Error('Original captured input IO unavailable')
+    return await apply(mutation, signal)
+  })
   const received = await f.receive({ addressing: 'response' })
   let receipt: Awaited<ReturnType<typeof f.hosted.inspectAgentInput>>
   await vi.waitFor(async () => { receipt = (await f.services.ingress!.inspect({ ingressId: received.ingressId })).inputReceipt; expect(receipt?.status).toBe('waiting') })
+  await vi.waitFor(() => expect(errors).toContain('AGENT_INPUT_CONVERSATION_UNCONFIRMED'), { timeout: 8000 })
+  await f.hosted.stopAgentInputWaiting({ ref: receipt!.ref, cancelOperationId: 'stop-unprojected-original' })
+  failedProjection.mockRestore()
   await f.rpc.call('connection.grant', { operationId: 'revise-original-member', bindingId: f.binding.bindingId, expectedBindingRevision: 1,
     grantId: 'input-member', expectedRevision: 1, actor: f.actor, capabilities: ['input', 'answer'], state: 'active' })
   f.inner.connected = true; f.inner.kernel.isConnected = () => true
   vi.spyOn(f.client.providers.get('claude'), 'planPromptInput').mockImplementation(text => ({ kind: 'single-phase', data: text + '\r' }))
   await expect(f.hosted.rejoinAgentInputWaiting({ ref: receipt!.ref })).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
-  expect((await f.hosted.inspectAgentInput({ key: receipt!.key }))?.status).toBe('waiting')
+  expect((await f.hosted.inspectAgentInput({ key: receipt!.key }))?.status).toBe('stopped')
   const read = await f.hosted.readAgentConversation({ hostId: 'local', agentSessionId: 'original-agent' })
   expect(read.items.some(x => x.kind === 'item' && x.item.records.some(r => r.original.kind === 'captured' && r.original.item.inputRef?.kind === 'message')), JSON.stringify(read)).toBe(true)
-  await mount(f); await ready('已保存 · 等待 Agent')
+  await mount(f); await ready('已保存 · 已停止送达')
   expect(summary().textContent).not.toContain('成员未获输入权限')
   expect((await f.captured())[0]!.item.inputRef).toEqual(receipt!.key)
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
