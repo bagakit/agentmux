@@ -216,9 +216,12 @@ app.whenReady().then(async () => {
       const details = pane+' .browser-agent-control__advanced'
       if (id==='browser-agent-control') await read(`${node(details)}.open=true`)
       for (let repeat=0;repeat<2;repeat++) {
+        // Begin partway through the real reader so returning to zero cannot pass.
+        await read(`${node(pane)}.scrollTop=96`)
         await click(node(pane+' '+controlSelector))
         if (id==='browser-agent-control') await key('ArrowRight')
         await read(`window.settingsPreviewOrigin={control:${node(pane+' '+controlSelector)},value:${node(pane+' '+controlSelector)}.value,scrollTop:${node(pane)}.scrollTop,ancestors:(()=>{const values=[];for(let p=${node(pane)}.parentElement;p;p=p.parentElement)values.push({node:p,top:p.scrollTop,left:p.scrollLeft});return values})()}`)
+        assert.ok(await read('window.settingsPreviewOrigin.scrollTop')>0,'Preview comparison starts from a real nonzero reading position')
         await click(node(pane+` [data-settings-preview-open="${group}"]`))
         const geometry=await read(`(()=>{const r=${node(pane+' '+preview)}.getBoundingClientRect(),p=${node(pane)}.getBoundingClientRect();return {top:r.top,paneTop:p.top,visible:r.top>=p.top-1&&r.top<innerHeight-80}})()`)
         assert.equal(geometry.visible,true,'Preview navigation brings the original example into view')
@@ -452,7 +455,7 @@ app.whenReady().then(async () => {
       assert.equal(await read(`${node(pane+' .focus-settings-preview__links')}.dataset.destination`),'tab')
       assert.equal(await read(`${node(pane+' .focus-settings-preview__links')}.dataset.open`),'true')
       await capture('focus-link-example',id,'dark','original link destination draft')
-      await previewRoundTrip(id,'project-scanning','input[name="focus-reply-lines"][value="3"]')
+      await previewRoundTrip(id,'agent-reading','input[name="focus-recent-inputs"][value="6"]')
     } else if (id==='goals') {
       await click(`${node(pane+' .settings-goals-view [data-view="board"]')}.closest('label')`)
       await choose(pane+' [aria-label="Show finished goals by default"]')
@@ -603,7 +606,7 @@ app.whenReady().then(async () => {
       const id=selected.find(id=>id==='focus'||id==='browser-agent-control')
       assert.ok(id,'A preview mutation selects an original preview page')
       await nav(id); await theme('dark')
-      await previewRoundTrip(id,id==='focus'?'project-scanning':'fine-tuning',id==='focus'?'input[name="focus-reply-lines"][value="3"]':'[data-settings-field="pointerDurationMs"] input')
+      await previewRoundTrip(id,id==='focus'?'agent-reading':'fine-tuning',id==='focus'?'input[name="focus-recent-inputs"][value="6"]':'[data-settings-field="pointerDurationMs"] input')
       result.passed=true; return
     }
     for (const [width,height,label] of [[1440,940,'wide'],[900,620,'short'],[500,840,'compact'],[320,700,'narrow']]) {
