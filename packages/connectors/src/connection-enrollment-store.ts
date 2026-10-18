@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { mintObjectId, AgentMuxError } from '@agentmux/core'
 import {
   parseConnectionEnrollmentOperation,
@@ -284,7 +284,9 @@ export class ConnectionEnrollmentStore {
         actionId !== row.activeActionId
       )
         return { row, claimed: false }
-      const attemptId = mintObjectId()
+      // Create claims cross an external wire boundary (including native cid). Keep
+      // their original format until that protocol's acceptance of shorter IDs is known.
+      const attemptId = kind === 'create' ? randomUUID() : mintObjectId()
       this.host.database
         .prepare('INSERT INTO connection_enrollment_attempt VALUES(?,?,?,?,?)')
         .run(attemptId, operationId, kind, owner, 'claimed')
