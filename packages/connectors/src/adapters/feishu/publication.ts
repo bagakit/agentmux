@@ -268,7 +268,9 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       const card = requestCard(prepared), messageId = feishuIdentity(data.message_id)
       if (data.chat_id !== target.externalConversationId || data.msg_type !== undefined && data.msg_type !== (card ? 'interactive' : requestFile(prepared) ? 'file' : 'post')) return unknown()
       const body = object(data.body)
-      if (body?.content !== undefined && !(card ? sameCard(body.content, prepared) : requestFile(prepared) ? sameFile(body.content, prepared) : requestImage(prepared) ? sameImagePost(body.content, prepared) : samePost(body.content, requestText(prepared)!))) return unknown()
+      // A successful create returns the native reading representation, not the
+      // authored card JSON. The original request's ID/target receipt confirms it.
+      if (!card && body?.content !== undefined && !(requestFile(prepared) ? sameFile(body.content, prepared) : requestImage(prepared) ? sameImagePost(body.content, prepared) : samePost(body.content, requestText(prepared)!))) return unknown()
       if (mapping) return { state: 'confirmed', mapping: { ...mapping } }
       const threadId = data.thread_id === undefined ? undefined : feishuIdentity(data.thread_id)
       return { state: 'confirmed', mapping: { messageId, ...(threadId === undefined ? {} : { threadId }) } }
@@ -280,7 +282,7 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
     try {
       feishuIdentity(mapping.messageId)
       let status: number | undefined
-      const response = await this.clients.withClient(target, credential, client => client.request<unknown>({ url: `${path}/${encodeURIComponent(mapping.messageId)}`, method: 'GET', params: { user_id_type: 'open_id' }, validateStatus: value => { status = value; return true }, signal }), signal)
+      const response = await this.clients.withClient(target, credential, client => client.request<unknown>({ url: `${path}/${encodeURIComponent(mapping.messageId)}`, method: 'GET', params: { user_id_type: 'open_id', ...(requestCard(prepared) ? { card_msg_content_type: 'user_card_content' } : {}) }, validateStatus: value => { status = value; return true }, signal }), signal)
       const result = object(response), items = object(result?.data)?.items
       if (result?.code !== 0 || status !== undefined && (status < 200 || status >= 300) || !Array.isArray(items)) return null
       const matches = items.map(object).filter(item => item?.message_id === mapping.messageId)
