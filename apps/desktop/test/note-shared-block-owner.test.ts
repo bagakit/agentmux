@@ -155,6 +155,66 @@ it('extracts an ordered list item with its original number and leaves valid Mark
   if(restored.status==='valid'){const document=await f.writer.read(f.workspace,f.source.path);if(document.status!=='read')throw Error('fixture');const current=noteKnowledge([{location:{workspaceId:f.workspace.id,path:f.source.path},document:document.document}],'complete');expect(resolveNoteBlock(current,{noteId:'source-note',blockId:'paragraph-1'})).toMatchObject({status:'resolved',source:{note:{noteId:'source-note'}},block:{text:'middle'}})}
 
 })
+async function richSharingFixture(kind: 'taskList' | 'bulletList' | 'orderedList' | 'table') {
+  const f = await fixture(), note = newNoteDocument('', 'source-note', 'unused')
+  note.content.content = kind === 'table' ? [{ type: 'table', attrs: { blockId: 'whole-table' }, content: [{ type: 'tableRow', content: [{ type: 'tableHeader', content: [{ type: 'paragraph', attrs: { blockId: 'cell-body' }, content: [{ type: 'text', text: 'Original table evidence' }] }] }] }] }]
+    : [{ type: kind, ...(kind === 'orderedList' ? { attrs: { start: 7 } } : {}), content: ['before', 'selected', 'after'].map((text, index) => ({ type: kind === 'taskList' || index === 1 ? 'taskItem' : 'listItem', attrs: { blockId: 'item-' + index, ...(kind === 'taskList' || index === 1 ? { checked: index === 1 } : {}) }, content: [{ type: 'paragraph', attrs: { blockId: 'item-body-' + index }, content: [{ type: 'text', text }] }] })) }]
+  const saved = await f.writer.write(f.workspace, { path: f.source.path, content: serializeNoteDocument(note), expectedRevision: f.source.expectedRevision }, { actor: author })
+  if (saved.status !== 'written') throw Error('The actual rich original must save')
+  const original = await readFile(join(f.directory, f.source.path), 'utf8')
+  f.params.promotions[0]!.source = { ...f.source, content: original, baseContent: original, expectedRevision: saved.revision }
+  f.params.promotions[0]!.sourceBlockId = kind === 'table' ? 'whole-table' : 'item-1'
+  return { ...f, original }
+}
+it.each(['taskList', 'bulletList', 'orderedList', 'table'] as const)('shares and undoes a real %s range with original checked state, identities and authors', async kind => {
+  const f = await richSharingFixture(kind), result = await f.port.share(f.params, { actor: person })
+  expect(result.status, JSON.stringify(result)).toBe('committed')
+  const shared = await f.writer.read(f.workspace, 'block-shared.note.md')
+  if (shared.status !== 'read') throw Error('Shared original must read')
+  const parsed = readNoteDocument(shared.document.content)
+  expect(parsed.status).toBe('valid'); if (parsed.status !== 'valid') throw Error(parsed.message)
+  const root = parsed.note.content.content![0]!
+  expect(root.type).toBe(kind === 'bulletList' ? 'taskList' : kind)
+  if (kind !== 'table') expect(root.content![0]).toMatchObject({ type: 'taskItem', attrs: { blockId: 'item-1', checked: true }, content: [{ attrs: { blockId: 'item-body-1' } }] })
+  const movedId = kind === 'table' ? 'cell-body' : 'item-body-1'
+  expect(shared.document.noteProvenance?.blocks[movedId]).toMatchObject({ created: { actor: author }, lastEdited: { actor: author } })
+  expect(await f.port.undoShare(await removal(f), { actor: person })).toMatchObject({ status: 'committed', collections: [{ deletion: { result: { status: 'deleted' } } }] })
+  expect(await readFile(join(f.directory, f.source.path), 'utf8')).toBe(f.original)
+  expect(await readdir(f.directory)).not.toContain('block-shared.note.md')
+  const restored = await f.writer.read(f.workspace, f.source.path)
+  if (restored.status !== 'read') throw Error('Restored original must read')
+  expect(restored.document.noteProvenance?.blocks[movedId]?.created?.actor).toEqual(author)
+})
+it.each(['taskList', 'table'] as const)('rejects an explicit inner %s paragraph without widening its public target or certifying old unknown effects', async kind => {
+  const f = await richSharingFixture(kind), sourceBlockId = kind === 'table' ? 'cell-body' : 'item-body-1'
+  f.params.promotions[0]!.sourceBlockId = sourceBlockId
+  const write = vi.spyOn(f.files, 'write'), result = await f.port.share(f.params, { actor: person })
+  expect(result).toMatchObject({ status: 'error', code: 'NOTE_SHARE_RANGE_UNSUPPORTED', destination: null, promotions: [{ shared: null, source: null }] })
+  expect(write).not.toHaveBeenCalled(); expect(await readFile(join(f.directory, f.source.path), 'utf8')).toBe(f.original)
+  expect(await readdir(f.directory)).not.toContain('block-shared.note.md')
+  expect(f.params.promotions[0]!.sourceBlockId).toBe(sourceBlockId)
+  expect(await f.port.inspectShare({ mode: 'request', request: f.params })).toMatchObject({ mode: 'request', result: { status: 'unknown', code: 'NOTE_SHARE_INSPECTION' } })
+  expect(write).not.toHaveBeenCalled()
+})
+it('uses the executable shared CLI for a checked task and whole table, including inspect, undo and exact invalid target rejection', async () => {
+  for (const kind of ['taskList', 'table'] as const) {
+    const f = await richSharingFixture(kind), server = new AgentMuxControlServer({ socketPath: join(f.root, 'rich-control.sock'), files: f.port, coreClients: () => [] })
+    await server.start(); dispose.push(() => server.stop())
+    const environment = objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path })
+    const cli = async (args: string[], input: unknown) => runCompiledObjectCli(args, environment, JSON.stringify(input))
+    const bad = structuredClone(f.params); bad.promotions[0]!.sourceBlockId = kind === 'table' ? 'cell-body' : 'item-body-1'
+    const rejected = await cli(['file', 'share', '--input', '-'], bad)
+    expect(rejected.code).not.toBe(0); expect(rejected.stdout + rejected.stderr).toContain('NOTE_SHARE_RANGE_UNSUPPORTED')
+    expect(await readFile(join(f.directory, f.source.path), 'utf8')).toBe(f.original)
+    const saved = await cli(['file', 'share', '--input', '-'], f.params)
+    expect(saved.code, saved.stderr + saved.stdout).toBe(0); expect(parseFileShareResult(JSON.parse(saved.stdout).result, f.params).status).toBe('committed')
+    const inspected = await cli(['file', 'share', 'inspect', '--input', '-'], { mode: 'request', request: f.params })
+    expect(inspected.code, inspected.stderr + inspected.stdout).toBe(0); expect(JSON.parse(inspected.stdout).result.result.status).toBe('committed')
+    const undone = await cli(['file', 'share', 'undo', '--input', '-'], await removal(f))
+    expect(undone.code, undone.stderr + undone.stdout).toBe(0); expect(JSON.parse(undone.stdout).result.status).toBe('committed')
+    expect(await readFile(join(f.directory, f.source.path), 'utf8')).toBe(f.original)
+  }
+})
 it('groups different staged blocks from one source into one source write without creating duplicate entities for their repeated uses', async () => {
   const f = await fixture(), note = readNoteDocument(f.params.destination.content); if (note.status !== 'valid') throw Error('Destination must parse')
   note.note.content.content!.push({ type: 'noteInclude', attrs: { blockId: 'second-source-use', referenceId: 'other-source-ref', noteId: 'other-shared', path: 'other-block.note.md' } })
