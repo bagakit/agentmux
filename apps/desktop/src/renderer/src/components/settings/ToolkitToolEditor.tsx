@@ -3,15 +3,16 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { lazy, Suspense, useEffect, useId, useLayoutEffect, useRef, useState, type RefObject } from 'react'
 import type { ToolkitAction, ToolkitToolDefinition, ToolkitToolFields, ToolkitInlineToolConfiguration } from '@agentmux/core/control'
-import { TOOLKIT_ICON_IDS } from '../../../../shared/toolkit-preferences'
 import { TuiToolkitSettings } from '../toolkit/TuiToolkitResult'
-import { ToolkitIcon, toolkitIconLabels } from '../toolkit/ToolkitIcon'
+import { ToolkitIcon } from '../toolkit/ToolkitIcon'
+import { ToolkitIconPicker } from '../toolkit/ToolkitIconPicker'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { SettingsSaveBar } from './SettingsSaveBar'
 import { ConfirmationDialog } from '../ConfirmationDialog'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { toolkitDraftDirty, type ToolkitDraft, type useToolkitDrafts } from './use-toolkit-drafts'
 import { ToolkitWorkingDirectoryField, useToolkitWorkingDirectory } from './ToolkitWorkingDirectoryField'
+import { ToolkitTerminalAppearance } from './ToolkitTerminalAppearance'
 import './settings-toolkit-editor.css'
 
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
@@ -33,7 +34,6 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
   onRemove(): Promise<boolean>; onRun(definition: ToolkitToolDefinition): Promise<string>
 }) {
   const uid = useId()
-  const picker = useRef<HTMLDetailsElement>(null)
   const [confirmDelete, setConfirmDelete] = useState(false)
   const [confirmTui, setConfirmTui] = useState(false)
   useEffect(() => { if (!active) setConfirmDelete(false) }, [active])
@@ -56,7 +56,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
   const scriptTitle = displayOpen ? 'Display script' : actionId === null ? tui ? 'Shell command' : 'Main script' : action?.label.trim() || 'Action script'
   const missingFields = [
     ...(!tool.name.trim() ? ['a name'] : []),
-    ...(!tool.script.trim() ? ['a main script'] : []),
+    ...(!tui && !tool.script.trim() ? ['a main script'] : []),
     ...(actions.some(item => !item.label.trim()) ? ['a label for each result action'] : []),
     ...(actions.some(item => !item.script.trim()) ? ['a script for each result action'] : []),
     ...(tool.display && !tool.display.script.trim() ? ['a display script'] : [])
@@ -85,7 +85,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
   function applyMode(mode: 'script' | 'tui') {
     setActionId(null); setDisplayOpen(false); setConfirmTui(false)
     onEdit({ mode, ...(mode === 'tui' ? { actions: [], ...(tool.display ? { display: null } : {}) } : {}),
-      ...(!entry.expected && tool.script === "console.log('Hello from your toolkit')\n" && mode === 'tui' ? { script: 'exec /bin/sh\n' } : {}) })
+      ...(!entry.expected && tool.script === "console.log('Hello from your toolkit')\n" && mode === 'tui' ? { script: '' } : {}) })
   }
   async function run() {
     if (!entry.expected || dirty || entry.saving || executing) return
@@ -108,18 +108,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
     </header>
     {entry.missing ? <p className="settings-inline-error" role="status">The saved tool is no longer available. Your draft is kept.</p> : null}
     <div className="toolkit-editor__identity">
-      <details ref={picker} className="toolkit-icon-picker" onKeyDown={event => {
-        if (event.key !== 'Escape' || event.nativeEvent.isComposing || event.keyCode === 229 || !picker.current?.open) return
-        event.preventDefault(); event.stopPropagation(); picker.current.open = false; picker.current.querySelector('summary')?.focus()
-      }}>
-        <summary aria-label="Choose tool icon"><ToolkitIcon icon={tool.icon} size={20} /><span>Icon</span></summary>
-        <fieldset><legend>Tool icon</legend><div className="toolkit-icon-picker__grid">
-          {TOOLKIT_ICON_IDS.map(icon => <label key={icon} data-selected={tool.icon === icon} title={toolkitIconLabels[icon]}>
-            <input type="radio" name={`${uid}-icon`} value={icon} checked={tool.icon === icon} aria-label={toolkitIconLabels[icon]} onChange={() => onEdit({ icon })} />
-            <ToolkitIcon icon={icon} size={18} aria-hidden="true" />
-          </label>)}
-        </div></fieldset>
-      </details>
+      <ToolkitIconPicker icon={tool.icon} onChange={icon => onEdit({ icon })} />
       <label className="toolkit-editor__name"><span>Name <small>Required</small></span><TextInput aria-required="true" ref={nameInput} value={tool.name} onChange={event => onEdit({ name: event.target.value })} placeholder="Workspace summary" /></label>
     </div>
     <fieldset className="toolkit-editor__mode"><legend>Tool type</legend>
@@ -134,7 +123,8 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
       <header><span><ThemeObjectSourceCodeIcon size={13} /> {scriptTitle}</span><span>{tui ? 'Shell' : 'JavaScript'}</span></header>
       {active && (displayOpen ? Boolean(tool.display) : actionId === null || action) ? <Suspense fallback={<p className="settings-hint">Opening script editor…</p>}><ScriptEditor key={JSON.stringify([id, displayOpen, actionId])} id={id} actionId={actionId} display={displayOpen} mode={tool.mode ?? 'script'} value={displayOpen ? tool.display!.script : actionId === null ? tool.script : action!.script} onChange={script => editScript({ script })} /></Suspense> : null}
     </section>
-    <p className="settings-hint">{tui ? 'Starts when the enabled tool is loaded. Closing its panel keeps it running. Saving changes does not restart the current terminal.' : displayOpen ? 'Save to enable evaluation when displayed. This script runs as your local user with the same file and network access as the main script.' : actionId === null ? `${dirty ? 'Save before running. ' : ''}Runs as your local user. Saving and hovering do not run the main script.` : 'Save the tool to publish this action. Run it from a confirmed result in the status bar.'}</p>
+    <p className="settings-hint">{tui ? 'Leave blank to open the Host’s default interactive shell. Starts when the enabled tool is loaded. Closing its panel keeps it running. Saving changes does not restart the current terminal.' : displayOpen ? 'Save to enable evaluation when displayed. This script runs as your local user with the same file and network access as the main script.' : actionId === null ? `${dirty ? 'Save before running. ' : ''}Runs as your local user. Saving and hovering do not run the main script.` : 'Save the tool to publish this action. Run it from a confirmed result in the status bar.'}</p>
+    {tui ? <ToolkitTerminalAppearance toolId={id} /> : null}
     {!tui ? <details className="toolkit-editor__result-actions">
       <summary>Result actions <span>· {actions.length || 'optional'}</span></summary>
       <p className="settings-hint">Buttons shown with a confirmed result. Each action runs its saved script in this tool’s fixed directory.</p>
@@ -162,7 +152,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
         </label>)}
       </div></fieldset>
       {(displayOpen ? Boolean(tool.display) : actionId === null || action) ? <details className="toolkit-editor__arguments"><summary>{displayOpen ? 'Display arguments' : actionId === null ? 'Arguments' : 'Action arguments'} <span>{args.length ? `· ${args.length}` : '· optional'}</span></summary>
-        <p className="settings-hint">{tui ? 'Passed as separate shell positional arguments: $1, $2, and so on. Quote them in your command to preserve spaces.' : 'Each argument is a separate value. No shell expansion or interpolation.'}</p>
+        <p className="settings-hint">{tui ? tool.script.trim() ? 'Passed as separate shell positional arguments: $1, $2, and so on. Quote them in your command to preserve spaces.' : 'Passed directly to the Host’s default shell as separate arguments.' : 'Each argument is a separate value. No shell expansion or interpolation.'}</p>
         {args.map((arg, index) => <label className="toolkit-argument" key={index}><span>Argument {index + 1}</span><TextInput value={arg} onChange={event => editScript({ args: args.map((value, i) => i === index ? event.target.value : value) })} /><button type="button" className="small-button" aria-label={`Remove argument ${index + 1}`} onClick={() => editScript({ args: args.filter((_, i) => i !== index) })}><ThemeActionRemoveArgumentIcon size={13} /></button></label>)}
         <button type="button" className="small-button" disabled={args.length >= 32} onClick={() => editScript({ args: [...args, ''] })}><ThemeActionAddArgumentIcon size={13} /> Add argument</button>
       </details> : null}
