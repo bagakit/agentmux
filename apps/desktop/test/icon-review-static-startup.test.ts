@@ -14,14 +14,18 @@ it('starts the real published icon workbench bundle without Node globals', async
     const app = await readFile(join(out, 'app.js'), 'utf8')
     const catalog = await readFile(join(out, 'catalog.json'), 'utf8')
     const manifest = await readFile(join(out, 'review-manifest.json'), 'utf8')
-    document.documentElement.innerHTML = new DOMParser().parseFromString(html, 'text/html').documentElement.innerHTML
+    const page = new DOMParser().parseFromString(html.replace(/<link[^>]*>|<script[^>]*><\/script>/g, ''), 'text/html')
+    page.querySelectorAll('link,script').forEach(node => node.remove())
+    document.documentElement.innerHTML = page.documentElement.innerHTML
     const media = () => ({matches: false, addEventListener() {}, removeEventListener() {}})
     const originalMedia = window.matchMedia
     window.matchMedia = media as typeof window.matchMedia
     const context = createContext({window, document, navigator, localStorage, console, crypto, structuredClone,
       matchMedia: media, getComputedStyle: window.getComputedStyle.bind(window),
       setTimeout, clearTimeout, setInterval, clearInterval, queueMicrotask, performance,
-      TextEncoder, TextDecoder, URL, URLSearchParams, Event, CustomEvent, HTMLElement, Node, MutationObserver,
+      TextEncoder, TextDecoder, URL, URLSearchParams, Event, CustomEvent, HTMLElement, Element, Node, MutationObserver,
+      IntersectionObserver: class { observe() {} unobserve() {} disconnect() {} },
+      requestAnimationFrame: window.requestAnimationFrame.bind(window), cancelAnimationFrame: window.cancelAnimationFrame.bind(window),
       fetch: async (url: string) => new Response(url.endsWith('catalog.json') ? catalog : manifest, {status: 200})})
     try {
       expect(new Script('typeof process').runInContext(context)).toBe('undefined')
@@ -36,6 +40,12 @@ it('starts the real published icon workbench bundle without Node globals', async
       document.getElementById('view-motion')!.click()
       expect(document.querySelectorAll('[data-motion-glyph]').length).toBe(JSON.parse(catalog).customGlyphs.length)
       expect(document.querySelectorAll('[data-motion-glyph]').length).toBeGreaterThan(0)
+      document.getElementById('view-mote')!.click()
+      await vi.waitFor(() => expect(document.querySelector('#mote-preview .mote-companion__rig')).not.toBeNull())
+      document.getElementById('view-future')!.click()
+      expect(document.querySelector('#mote-preview')).toBeNull()
+      expect(document.querySelectorAll('[data-future-glyph]')).toHaveLength(7)
+      expect(await readFile(join(out, 'mote-identity.css'), 'utf8')).toContain('.mote-companion__gaze')
     } finally { window.matchMedia = originalMedia }
   } finally { await rm(out, {recursive: true, force: true}) }
 }, 30000)
