@@ -8,6 +8,8 @@ import { normalizeOperationDevice } from './operation-device.js'
 import { normalizeSessionHistoryContentEligibility, normalizeSessionHistoryMetrics, normalizeSessionHistoryPage, sessionHistoryWithoutMetrics } from './session-history.js'
 import { normalizeAgentTimelineMutation } from './session-timeline.js'
 import { parseConversationLandmarkRef } from './conversation-landmarks.js'
+import { parseConversationProvenance } from './conversation-provenance.js'
+import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import type { AgentSessionHistoryItem, AgentTimelineItem, AgentSessionHistorySource, AgentSessionUserMessage, AgentCapturedTimelineStream } from './types.js'
 
 // Pure wire/data contract. Host readers own crypto, source IO and read leases;
@@ -185,12 +187,23 @@ export function parseUserMessageHistoryPage(value: unknown, input: AgentSessionH
   if (input.source === 'captured' && page.nativeSource !== undefined || nativeSource &&
     (typeof nativeSource.providerId !== 'string' || !nativeSource.providerId || typeof nativeSource.nativeSessionId !== 'string' || !nativeSource.nativeSessionId)) return bad()
   for (const value of page.userMessages) {
-    const message = rpcRecord(value, ['id', 'rawId', 'agentSessionId', 'turnId', 'source', 'sourceRecord', 'author', 'publicContent', 'content', 'contentParts', 'questionAnswers', 'questionDiagnostic', 'recordedAt', 'deliveryStatus'], 'CONTROL_PROTOCOL_ERROR')
+    const message = rpcRecord(value, ['id', 'rawId', 'agentSessionId', 'turnId', 'source', 'sourceRecord', 'inputRef', 'conversation', 'author', 'publicContent', 'content', 'contentParts', 'questionAnswers', 'questionDiagnostic', 'recordedAt', 'deliveryStatus'], 'CONTROL_PROTOCOL_ERROR')
     if (typeof message.id !== 'string' || !message.id || typeof message.rawId !== 'string' || !message.rawId || message.agentSessionId !== input.agentSessionId || typeof message.content !== 'string' ||
       !Array.isArray(message.contentParts) || message.recordedAt !== undefined && (!Number.isSafeInteger(message.recordedAt) || (message.recordedAt as number) < 0) ||
       message.deliveryStatus !== undefined && !['complete', 'failed', 'unverified'].includes(String(message.deliveryStatus))) return bad()
     if (message.publicContent !== undefined && message.publicContent !== 'confirmed' && message.publicContent !== 'unknown') return bad()
     const source = rpcRecord(message.source, input.source === 'native' ? ['kind', 'providerId', 'nativeSessionId', 'recordId'] : ['kind', 'submissionId', 'channel', 'device'], 'CONTROL_PROTOCOL_ERROR')
+    try {
+      if (message.inputRef !== undefined) {
+        const key = validateAgentPromptInputKey(message.inputRef)
+        if (input.source !== 'captured' || message.publicContent !== 'confirmed' || key.agentSessionId !== message.agentSessionId || !sameOriginal(key, message.inputRef)) return bad()
+      }
+      if (message.conversation !== undefined) {
+        const original = rpcRecord(message.conversation, ['sameEvent', 'nativeInput', 'adoptedInput'], 'CONTROL_PROTOCOL_ERROR')
+        // Original optional claims remain readable even when the relation matcher cannot use them.
+        if (!sameOriginal(parseConversationProvenance(original), original)) return bad()
+      }
+    } catch { return bad() }
     if (message.sourceRecord !== undefined) {
       try {
         const boundary = rpcRecord(message.sourceRecord, ['record', 'revision'], 'CONTROL_PROTOCOL_ERROR')

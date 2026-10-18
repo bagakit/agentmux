@@ -1,6 +1,7 @@
 import type { AgentSessionHistoryContentPart, AgentSessionHistoryItem, AgentSessionHistoryPage, AgentSessionHistorySource, AgentSessionUserMessage, AgentTimelineItem, AgentTimelineSnapshot } from './types.js'
 import { projectSessionUserMessages } from './session-user-messages.js'
 import { projectConversationTimeline, projectConversationEventFacts, conversationRecordRole, conversationRecordAuthor, type ConversationAuthor, type ConversationEvent, type ConversationSourceRecord, type ConversationProjectionInput, type ConversationTimeline } from './conversation-timeline.js'
+export { projectSessionInputs, sessionInputMailboxAuthor, type SessionInputGroup } from './session-inputs.js'
 
 export type AgentConversationRecordSource =
   | (AgentSessionHistorySource & { kind: 'native'; recordId: string })
