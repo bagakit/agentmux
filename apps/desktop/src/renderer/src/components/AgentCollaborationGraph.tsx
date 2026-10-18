@@ -60,17 +60,19 @@ const AreaNodeView = memo(function AreaNodeView({ data }: NodeProps<AreaNode>) {
   const labelWidth = Math.min(240, (data.box.width - data.box.heading.x) * zoom)
   const labelHeight = Math.min(24, (data.box.height - data.box.heading.y) * zoom)
   const compact = labelWidth < 80 || labelHeight < 22
-  return <div className="collaboration-area" data-kind={data.area.kind} data-folded={data.folded} data-empty={empty || undefined} data-overview={overview || undefined}
-    style={{ '--collaboration-label-scale': 1 / zoom, '--collaboration-label-width': `${labelWidth}px`, '--collaboration-label-height': `${Math.min(28, labelHeight)}px` } as CSSProperties}>
+  return <div className="collaboration-area" data-kind={data.area.kind} data-folded={data.folded} data-empty={empty || undefined} data-overview={overview || undefined}>
     {!empty && !data.folded ? <svg className="collaboration-area__envelope" width={data.box.width} height={data.box.height} aria-hidden="true"><path d={data.envelope} /></svg> : null}
-    <div className="collaboration-area__label" style={{ left: data.box.heading.x, top: data.box.heading.y, width: data.box.heading.width, height: data.box.heading.height }}>
-    {overview ? <button type="button" className="collaboration-area__summary nodrag nopan" data-compact={compact || undefined} aria-label={`Locate ${data.area.name} · ${data.area.members.length} Agents`} onClick={data.onLocate} title={data.area.issue ?? data.area.name}>
+    {overview ? <EdgeLabelRenderer><div className="collaboration-area__overview-label" data-area-id={data.box.id} data-empty={empty || undefined}
+      style={{ left: data.box.x + data.box.heading.x, top: data.box.y + data.box.heading.y + data.box.heading.height - labelHeight / zoom,
+        '--collaboration-label-scale': 1 / zoom, '--collaboration-label-width': `${labelWidth}px`, '--collaboration-label-height': `${labelHeight}px` } as CSSProperties}>
+      <button type="button" className="collaboration-area__summary nodrag nopan" data-compact={compact || undefined} aria-label={`Locate ${data.area.name} · ${data.area.members.length} Agents`} onClick={data.onLocate} title={data.area.issue ?? data.area.name}>
       {compact ? <span className="collaboration-area__symbol" aria-hidden="true" /> : <span>{data.area.name}</span>}
       {!compact && labelWidth >= 160 ? <small>{data.area.members.length} {data.area.members.length === 1 ? 'Agent' : 'Agents'}</small> : null}
-    </button> : empty ? <div className="collaboration-area__heading" title={data.area.issue ?? data.area.name}><span>{data.area.name}</span><small>0</small></div> : <button type="button" className="collaboration-area__heading nodrag nopan" aria-expanded={!data.folded} onClick={data.onToggle} title={data.area.issue ?? undefined}>
+    </button></div></EdgeLabelRenderer> : <div className="collaboration-area__label" style={{ left: data.box.heading.x, top: data.box.heading.y, width: data.box.heading.width, height: data.box.heading.height }}>
+    {empty ? <div className="collaboration-area__heading" title={data.area.issue ?? data.area.name}><span>{data.area.name}</span><small>0</small></div> : <button type="button" className="collaboration-area__heading nodrag nopan" aria-expanded={!data.folded} onClick={data.onToggle} title={data.area.issue ?? undefined}>
       <SemanticIcon name={data.folded ? 'navigation.next' : 'navigation.down'} size={12} /><span>{data.area.name}</span><small>{data.area.members.length}</small>
     </button>}
-    </div>
+    </div>}
     {!overview && data.folded && data.internal.length ? <button type="button" className="collaboration-area__internal nodrag nopan" aria-label={`${data.area.name}: ${data.internal.length} internal connections`} onClick={data.onInspect}>{data.internal.length} internal</button> : null}
   </div>
 })

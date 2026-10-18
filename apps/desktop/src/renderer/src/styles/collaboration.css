@@ -145,13 +145,14 @@
 .collaboration-area[data-empty=true] { border-color: transparent; background: transparent; }
 .collaboration-area[data-empty=true] .collaboration-area__heading { color: var(--text-3); padding-inline: 8px; }
 .collaboration-area[data-empty=true] .collaboration-area__heading span { color: var(--text-2); font-weight: 400; }
-.collaboration-area__summary { position: absolute; top: 0; left: 0; display: flex; align-items: baseline; gap: 7px; width: var(--collaboration-label-width); height: var(--collaboration-label-height); min-height: 0; padding: 2px 5px; overflow: hidden; transform: scale(var(--collaboration-label-scale)); transform-origin: top left; border: 0; border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font-size: var(--fs-meta); text-align: left; cursor: pointer; pointer-events: auto; }
+.collaboration-area__overview-label { position: absolute; z-index: 1; pointer-events: none; }
+.collaboration-area__summary { position: absolute; top: 0; left: 0; display: flex; align-items: baseline; gap: 7px; width: max-content; max-width: var(--collaboration-label-width); height: var(--collaboration-label-height); min-height: 0; padding: 2px 5px; overflow: hidden; transform: scale(var(--collaboration-label-scale)); transform-origin: top left; border: 0; border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font-size: var(--fs-meta); text-align: left; cursor: pointer; pointer-events: auto; }
 .collaboration-area__summary > span { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
 .collaboration-area__summary small { flex: 0 0 auto; color: var(--text-2); font-size: var(--fs-micro); font-variant-numeric: tabular-nums; }
 .collaboration-area__summary:hover { background: var(--surface-3); }
-.collaboration-area[data-empty=true] .collaboration-area__summary { padding: 0 3px; background: transparent; }
-.collaboration-area[data-empty=true] .collaboration-area__summary span { font-size: var(--fs-micro); font-weight: 400; color: var(--text-2); }
-.collaboration-area[data-empty=true] .collaboration-area__summary small { display: none; }
+.collaboration-area__overview-label[data-empty=true] .collaboration-area__summary { padding: 0 3px; background: transparent; }
+.collaboration-area__overview-label[data-empty=true] .collaboration-area__summary span { font-size: var(--fs-micro); font-weight: 400; color: var(--text-2); }
+.collaboration-area__overview-label[data-empty=true] .collaboration-area__summary small { display: none; }
 .collaboration-area[data-overview=true] .collaboration-area__envelope path { fill: color-mix(in srgb, var(--surface-2) 45%, transparent); }
 .collaboration-agent[data-overview=true] { display: flex; align-items: center; justify-content: center; }
 .collaboration-agent__dot { transform: scale(var(--collaboration-mark-scale, 1)); flex: 0 0 auto; display: grid; place-items: center; width: 28px; height: 28px; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
@@ -162,7 +163,7 @@
 .collaboration-connections .react-flow__edge[data-emphasis=muted] .collaboration-edge__pulse { opacity: .2; }
 .collaboration-connections .react-flow__edge:focus-visible .collaboration-edge, .collaboration-connections .react-flow__edge:hover .collaboration-edge { opacity: 1; stroke-width: 2; }
 .collaboration-edge { vector-effect: non-scaling-stroke; }
-.collaboration-area__summary[data-compact=true] { justify-content: center; align-items: center; padding: 0; background: transparent; }
+.collaboration-area__summary[data-compact=true] { justify-content: center; align-items: center; padding: 0; width: var(--collaboration-label-width); background: transparent; }
 .collaboration-area__symbol { flex: 0 0 auto; width: 7px; height: 7px; border: 1px solid var(--text-2); border-radius: 2px; }
-.collaboration-area[data-empty=true] .collaboration-area__symbol { width: 4px; height: 4px; border-color: var(--text-3); }
+.collaboration-area__overview-label[data-empty=true] .collaboration-area__symbol { width: 4px; height: 4px; border-color: var(--text-3); }
 .collaboration-area__summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; overflow: visible; }
