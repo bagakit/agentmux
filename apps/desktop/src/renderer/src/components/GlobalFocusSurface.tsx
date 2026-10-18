@@ -4,7 +4,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { agentRegionExecution, useAppStore } from '../store'
 import { useShallow } from 'zustand/react/shallow'
-import { createFocusProjectionSelector, focusNeutralGroupSummary, FOCUS_BUCKETS, groupFocusContexts, type FocusBucket } from '../lib/focus-context'
+import { createFocusProjectionSelector, agentContextForSession, retainedFocusContext, focusNeutralGroupSummary, FOCUS_BUCKETS, groupFocusContexts, type FocusBucket } from '../lib/focus-context'
 import { FocusContextCards } from './FocusContextCards'
 import { FOCUS_BUCKET_PRESENTATION } from './FocusContextState'
 import { useFocusHierarchy } from '../lib/use-focus-hierarchy'
@@ -32,10 +32,10 @@ import * as FilterMenu from './HoverDropdownMenu'
 import { RecentFocusTimeline } from './RecentFocusTimeline'
 import type { RevealConversationItem } from '../lib/mailbox-message-navigation'
 import { requestPmoTeamsTopicFloatingOpen, readPmoTeamsTopicFloatingState } from '../lib/pmo-teams-topic-floating'
-import { executionFocusSessionId } from '../lib/agent-focus'
+import { executionFocusSessionId, focusLaneForSession } from '../lib/agent-focus'
 import { workbenchSelectionCatalog } from '../lib/desktop-focus-navigation'
 import { sameWorkbenchProjectionSelection } from '../lib/workbench-projection'
-import { sessionPresentationById } from '../lib/session-presentation'
+import { agentSessionPresentationIndex, sessionPresentationById } from '../lib/session-presentation'
 import { topicIdForSession, workspaceForSession, type WorkbenchTab } from '../lib/workbench-tabs'
 import { useWorkbenchTabRecord, useWorkbenchTabNameMetadata, useWorkbenchTabSessions } from '../lib/workbench-session-subscriptions'
 import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
@@ -113,6 +113,14 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const tabs = useAppStore((state) => state.tabs)
   const layouts = useAppStore(state => state.layouts)
   const selectedId = useAppStore((state) => executionFocusSessionId(state.agentFocus))
+  const agentReveal = useAppStore(state => state.focusAgentReveal)
+  const revealSessions = useAppStore(useShallow(state => !agentReveal ? [] :
+    (agentSessionPresentationIndex(state.sessions).get(agentReveal.agentSessionId) ?? []).filter(session =>
+      session.control.hostId === agentReveal.hostId && session.control.agentSessionId === agentReveal.agentSessionId &&
+      (agentReveal.presentationSessionId === undefined || session.id === agentReveal.presentationSessionId))))
+  const finishReveal = useAppStore(state => state.finishFocusAgentReveal)
+  const clearReveal = useAppStore(state => state.clearFocusAgentReveal)
+  const revealName = useAppStore(state => agentReveal ? state.agentNames[agentReveal.presentationSessionId ?? agentReveal.agentSessionId] : undefined)
   const projection = presentation?.projection ?? null
   const selectedTab = projection?.selection.length === 1 ? tabs[projection.selection[0]!.tabId] ?? null : null
   const activeSurface = projection?.selection[0] && selectedTab?.regions[projection.selection[0].regionId]
@@ -133,7 +141,39 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const catalogue = useFocusHistorySources(visible)
   const focusPmoSession = useAppStore(state => state.focusPmoSession)
   const storedFocusExecutionSession = useAppStore((state) => state.focusExecutionSession)
-  const focusExecutionSession = onSelectContext ?? storedFocusExecutionSession
+  const selectOriginalContext = onSelectContext ?? storedFocusExecutionSession
+  const focusExecutionSession = useCallback((id: string, reference?: WorkbenchProjectionSelection) => {
+    clearReveal(); selectOriginalContext(id, reference)
+  }, [clearReveal, selectOriginalContext])
+  const revealedContext = useMemo(() => {
+    if (!agentReveal) return null
+    if (revealSessions.length > 1) return null
+    const session = revealSessions[0]
+    if (session) {
+      const context = executionRows.find(row => row.hostId === session.hostId && row.id === session.id)
+      if (context) return { context, lane: 'execution' as const }
+      const topics = scratchTopicsForConfig(config, topicSnapshots), workspace = workspaceForSession(config, session, topics)
+      const topicId = topicIdForSession(config, session, topics)
+      return { context: agentContextForSession(session, undefined, revealName, workspace, topicId),
+        lane: focusLaneForSession(topicId, scratchTopicsForWorkspace(topicSnapshots, workspace)) }
+    }
+    const sources = catalogue.sources.filter(source => source.hostId === agentReveal.hostId && source.agentSessionId === agentReveal.agentSessionId)
+    return sources.length === 1 ? { context: retainedFocusContext(sources[0]!, revealName), lane: null } : null
+  }, [agentReveal, revealSessions, executionRows, config, topicSnapshots, catalogue.sources, revealName])
+  const handledReveal = useRef<string | null>(null)
+  useLayoutEffect(() => {
+    if (!agentReveal?.pending) return
+    if (!visible) { finishReveal(agentReveal.requestId); return }
+    if (handledReveal.current === agentReveal.requestId) return
+    if (!revealedContext) {
+      if (catalogue.available || catalogue.error) { handledReveal.current = agentReveal.requestId; finishReveal(agentReveal.requestId) }
+      return
+    }
+    handledReveal.current = agentReveal.requestId
+    // Reading a retained or coordination Context must not write execution history.
+    if (revealedContext.lane === 'execution') storedFocusExecutionSession(revealedContext.context.id, undefined, { navigate: false })
+    else if (revealedContext.lane === 'pmo') focusPmoSession(revealedContext.context.id)
+  }, [agentReveal, visible, revealedContext, catalogue.available, catalogue.error, finishReveal, storedFocusExecutionSession, focusPmoSession])
   const revealFocusRecord = useCallback<RevealConversationItem>(async (itemRef, routeHostId = itemRef.hostId) => {
     const original = sessionPresentationById(useAppStore.getState().sessions).get(itemRef.agentSessionId)
     if (original?.kind !== 'agent' || original.control.hostId !== routeHostId) {
@@ -185,6 +225,7 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
   const { facts, errors: hierarchyErrors, refresh: refreshHierarchy } = useFocusHierarchy(laneContexts, config, visible)
   const allLanes = useMemo(() => deriveFocusProjectLanes(laneContexts, config, facts, tabs, Date.now(), topicSnapshots), [laneContexts, config, facts, tabs, topicSnapshots])
   const boardRowsRef = useRef<HTMLDivElement>(null)
+  const separateRevealRef = useRef<HTMLDivElement>(null)
   const orderedLanes = useFocusProjectOrder(allLanes, visible, boardRowsRef)
   const navigationCatalog = useAppStore(workbenchSelectionCatalog)
   const identityTabs = workbenchNavigationTabs(tabs)
@@ -215,8 +256,13 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
     : resourceLaneIds.size === 1 ? resourceLaneIds.values().next().value ?? null : null
   const matching = executionRows.filter(row => (project === 'all' || (() => { const lane = laneByContext.get(row.id); return lane && focusProjectKey(lane.hostId, lane.projectId) === project })()) &&
     searchResult.contextKeys.has(focusSearchContextKey(row.hostId, row.id, row.kind)))
-  const filtered = matching.filter(row => bucketFilter === 'all' || row.bucket === bucketFilter)
+  const matched = matching.filter(row => bucketFilter === 'all' || row.bucket === bucketFilter)
+  const revealRow = revealedContext?.lane === 'execution' ? revealedContext.context : null
+  const filtered = revealRow && !matched.includes(revealRow) ? [...matched, revealRow] : matched
+  const revealOutsideFilters = Boolean(revealedContext && !matched.includes(revealedContext.context))
   const selected = executionRows.find(row => row.id === shownSessionId)
+  const mapContext = revealedContext?.context ?? selected
+  const selectedContextKey = agentReveal && revealedContext ? JSON.stringify([revealedContext.context.hostId, revealedContext.context.id]) : undefined
   const filteredIds = new Set(filtered.map(row => row.id))
   const focusProjectLanes = orderedLanes.filter(lane => lane.contextIds.some(id => filteredIds.has(id)))
   const rowsByLane = new Map<string, typeof filtered>()
@@ -310,13 +356,13 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
         const label = neutral?.label ?? meta.label
         return <section className="focus-context-group global-agents-group" aria-label={label} data-bucket={bucket} data-focus-sparse={sparse || undefined} style={{ gridRow: layout.rowByBucket[index]! + 1, '--focus-group-offset': `${layout.columnStart[index]}px`, '--focus-card-columns': layout.columns[index], '--focus-group-width': `${layout.widths[index]}px` } as CSSProperties} key={bucket}>
           {!sparse ? groupHeader(bucket) : null}
-            <FocusContextCards contexts={grouped} columns={layout.columns[index]!} layoutReady={laneMetrics.measured} replyLines={replyLines} scrollRef={boardRowsRef} visible={visible && documentActive} selectedId={shownSessionId} goalLinks={goalLinks} identities={contextIdentities} onSelect={focusExecutionSession} />
+            <FocusContextCards contexts={grouped} columns={layout.columns[index]!} layoutReady={laneMetrics.measured} replyLines={replyLines} scrollRef={boardRowsRef} visible={visible && documentActive} selectedId={shownSessionId} selectedKey={selectedContextKey} revealRequest={agentReveal} onRevealed={finishReveal} goalLinks={goalLinks} identities={contextIdentities} onSelect={focusExecutionSession} />
         </section>
       })
     }</FocusLaneGroups> : null}</>
   }
   return <section className={`global-board-surface global-focus-surface ${showWorkspace ? 'global-board-surface--session-open' : ''}`} aria-label="Focus" data-desktop-focus-view="list" data-focus-reply-lines={replyLines} hidden={!surfaceVisible} inert={!visible} aria-hidden={!surfaceVisible} style={{ display: surfaceVisible ? undefined : 'none', '--focus-workspace-width': `calc(${workspaceRatio * 100}% - 6px)`, '--focus-reply-lines': replyLines, '--focus-card-track-height': `${focusCardTrackHeight(replyLines)}px` } as CSSProperties}>
-    <FocusToolbar onOpenCollaboration={selected?.control ? () => useAppStore.getState().openCollaborationMap({ kind: 'focus', subject: { hostId: selected.control!.hostId, agentSessionId: selected.control!.agentSessionId }, name: selected.name }) : undefined} active={visible} selectedId={shownSessionId} selected={selected} tab={selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
+    <FocusToolbar onOpenCollaboration={mapContext?.kind === 'agent' ? () => useAppStore.getState().openCollaborationMap({ kind: 'focus', subject: { hostId: mapContext.control?.hostId ?? mapContext.hostId, agentSessionId: mapContext.control?.agentSessionId ?? mapContext.id }, name: mapContext.name }) : undefined} active={visible} selectedId={shownSessionId} selected={selected} tab={selectedTab} reference={projection?.selection.length === 1 ? projection.selection[0] : undefined} onReview={() => setRequestId(shownSessionId)} onCloseWorkspace={closeWorkspace} regionOnly={regionOnly} onToggleRegion={projection ? onToggleRegion : undefined}>
       <div className="focus-filters">
         <div className="global-board-toolbar__controls">
           <label className="global-board-search"><ThemeActionSearchIcon size={13} /><TextInput ref={searchRef} aria-label="Search contexts" placeholder="Search text, IDs or amux links" title="Filter names, activity, paths and original object IDs or links. Enter searches case-sensitive text in retained conversations." onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); historySearch.start() } }} value={query} onChange={(event) => setQuery(event.target.value)} /></label>
@@ -352,7 +398,19 @@ export function GlobalFocusSurface({ presentation, currentReference = null, dire
       </div>
     </FocusToolbar>
     <div ref={focusLayoutRef} className="global-focus-layout">
-      <div className="global-board-main global-focus-main">
+      <div className="global-board-main global-focus-main" data-agent-reveal={agentReveal ? true : undefined}>
+      {agentReveal ? <div className="focus-agent-reveal" role="status" aria-label="Focus Agent reveal">
+        <span>{revealedContext ? revealOutsideFilters ? 'Showing ' + revealedContext.context.name + ' outside current filters.' : 'Located ' + revealedContext.context.name + '.'
+          : 'Original Context is unconfirmed · ' + agentReveal.hostId + ' · ' + agentReveal.agentSessionId + '. The current filters and work are kept.'}</span>{' '}
+        <button type="button" className="small-button" onClick={clearReveal}>End reveal</button>
+      </div> : null}
+      {revealedContext && revealedContext.lane !== 'execution' ? <div className="focus-agent-reveal-card" ref={separateRevealRef} data-focus-reveal-scroll>
+        <WorkbenchPresentationContext.Provider value={cardPresentation}>
+          <FocusContextCards contexts={[revealedContext.context]} columns={1} scrollRef={separateRevealRef} visible={visible && documentActive}
+            selectedId={null} selectedKey={selectedContextKey} revealRequest={agentReveal} onRevealed={finishReveal}
+            goalLinks={goalLinks} identities={contextIdentities} onSelect={() => {}} />
+        </WorkbenchPresentationContext.Provider>
+      </div> : null}
       <FocusSearchLocations result={searchResult} onRead={historySearch.start} describeLocation={location => {
         const ref = location.reference, layout = layouts[ref.displayWorkspaceId], index = layout ? groupIds(layout.root).indexOf(ref.groupId) : -1
         return `${config?.workspaces.find(workspace => workspace.id === ref.displayWorkspaceId)?.name ?? ref.displayWorkspaceId} · ${index >= 0 ? `Group ${index + 1}` : ref.groupId}`

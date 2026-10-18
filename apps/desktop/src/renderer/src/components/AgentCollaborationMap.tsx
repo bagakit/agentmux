@@ -1,3 +1,4 @@
+import { retainedFocusContext } from '../lib/focus-context'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
@@ -25,15 +26,17 @@ import { MailboxA2A } from './MailboxA2A'
 import type { CollaborationMapTarget } from '../lib/collaboration-map-navigation'
 import { useFocusHistorySources } from '../lib/focus-history-sources'
 import { CollaborationMapToolbar } from './CollaborationMapToolbar'
-import { collaborationAgentPresentation, collaborationAgentName, collaborationHistoryContext } from '../lib/collaboration-map-presentation'
+import { collaborationAgentPresentation, collaborationAgentName } from '../lib/collaboration-map-presentation'
 
 const allKinds = ['communication', 'creation', 'supervision'] as const
 
-export function AgentCollaborationMap({ request, active = true, onOpen }: { request: CollaborationMapTarget | null; active?: boolean; onOpen(context: FocusContext, reference?: WorkbenchProjectionSelection): void }) {
-  return request ? <CollaborationReadingMap request={request} visible={active} onOpen={onOpen} /> : null
+export function AgentCollaborationMap({ request, active = true, onOpen, onViewInFocus }: { request: CollaborationMapTarget | null; active?: boolean; onOpen(context: FocusContext, reference?: WorkbenchProjectionSelection): void
+  onViewInFocus(subject: { hostId: string; agentSessionId: string }, presentationSessionId?: string): void }) {
+  return request ? <CollaborationReadingMap request={request} visible={active} onOpen={onOpen} onViewInFocus={onViewInFocus} /> : null
 }
 
-function CollaborationReadingMap({ request, visible, onOpen }: { request: CollaborationMapTarget; visible: boolean; onOpen(context: FocusContext, reference?: WorkbenchProjectionSelection): void }) {
+function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { request: CollaborationMapTarget; visible: boolean; onOpen(context: FocusContext, reference?: WorkbenchProjectionSelection): void
+  onViewInFocus(subject: { hostId: string; agentSessionId: string }, presentationSessionId?: string): void }) {
   const active = useWorkbenchPresentationActive(), workbenchDocument = useWorkbenchDocument()
   const [documentVisible, setDocumentVisible] = useState(!workbenchDocument.hidden)
   useEffect(() => { const update = () => setDocumentVisible(!workbenchDocument.hidden); workbenchDocument.addEventListener('visibilitychange', update); return () => workbenchDocument.removeEventListener('visibilitychange', update) }, [workbenchDocument])
@@ -106,7 +109,7 @@ function CollaborationReadingMap({ request, visible, onOpen }: { request: Collab
         if (!source) return []
         const key = JSON.stringify([source.hostId, source.agentSessionId]), old = contextCache.current.get(key), name = facts.names[source.agentSessionId]
         if (old?.session === source && old.name === name) return [old.context]
-        const context = collaborationHistoryContext(source, name)
+        const context = retainedFocusContext(source, name)
         contextCache.current.set(key, { session: source, name, workspace: undefined, topicId: null, context })
         return [context]
       }
@@ -188,7 +191,8 @@ function CollaborationReadingMap({ request, visible, onOpen }: { request: Collab
           </> : null}
           <div hidden={sourcesOpen} inert={sourcesOpen}>{selectedAgent ? <>
             <div className="collaboration-inspector__heading"><span className="collaboration-inspector__eyebrow">Agent</span><h3>{collaborationAgentName(selectedAgent)}</h3></div>
-            <div className="collaboration-inspector__actions"><button type="button" className="small-button" onClick={() => locateAgent(selectedAgent.id)}><SemanticIcon name="action.locate" size={13} />Locate</button>
+            <div className="collaboration-inspector__actions">{selectedAgent.subject ? <button type="button" className="small-button"
+              onClick={() => onViewInFocus(selectedAgent.subject!, selectedAgent.context?.id)}>View in Focus <SemanticIcon name="action.open-external" size={12} /></button> : null}<button type="button" className="small-button" onClick={() => locateAgent(selectedAgent.id)}><SemanticIcon name="action.locate" size={13} />Locate</button>
               {selectedAgent.context?.control ? <button type="button" className="small-button" onClick={() => open(selectedAgent.context!)}>Open workface <SemanticIcon name="action.open-external" size={12} /></button> : null}</div>
             <details className="collaboration-identity"><summary>Identity</summary><p>{selectedAgent.provenance ?? selectedAgent.subject?.hostId} · <code>{selectedAgent.sessionId}</code></p>{!selectedAgent.context?.control ? <p>Original workface is not confirmed by this record.</p> : null}</details>
             <h4>Relations <span>{agentRelations.length}</span></h4>{agentRelations.length ? agentRelations.map(relation => <RelationButton key={relation.id} relation={relation} agents={projection.agents} subjectId={selectedAgent.id} onSelect={select} />) : <p>No recorded relations in the loaded window.</p>}

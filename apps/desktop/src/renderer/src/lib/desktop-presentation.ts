@@ -1,3 +1,4 @@
+import type { FocusAgentTarget } from './focus-agent-navigation'
 import { workbenchDocuments, workbenchDocumentIdentity } from './workbench-window-registry'
 import type { AgentMuxDesktopFloating, AgentMuxDesktopInput, AgentMuxDesktopObservation,
   AgentMuxDesktopOverlays, AgentMuxDesktopPresentation, AgentMuxDesktopSelection } from '@agentmux/core'
@@ -28,6 +29,29 @@ export function desktopElementVisible(element: HTMLElement | null): boolean {
   // Native text carriers may have no painted area while participating in the visible layout.
   const laidOutText = Boolean((element as HTMLElement & { editContext?: unknown }).editContext) && element.getClientRects().length > 0
   return style.display !== 'none' && style.visibility !== 'hidden' && (rect.width > 0 && rect.height > 0 || laidOutText)
+}
+/** Only an original mounted selected card can confirm the requested Agent. No title or MRU is read. */
+export function readFocusAgentPresentation(target: FocusAgentTarget | null): AgentMuxDesktopObservation['focus']['agent'] {
+  if (!target) return null
+  const pending = { hostId: target.hostId, agentSessionId: target.agentSessionId, presentationSessionId: null, state: 'unconfirmed' as const }
+  if (typeof document === 'undefined') return pending
+  const matches = [...document.querySelectorAll<HTMLElement>('[data-focus-agent-selected="true"]')].filter(slot =>
+    slot.dataset.focusAgentHost === target.hostId && slot.dataset.focusAgentSession === target.agentSessionId)
+  if (matches.length !== 1) return pending
+  const slot = matches[0]!, rect = slot.getBoundingClientRect()
+  let top = 0, left = 0, right = document.documentElement.clientWidth, bottom = document.documentElement.clientHeight
+  // The selected card can sit in a retained reader, a lane scrollport or a narrow
+  // Focus workface. Intersect the original clipping owners; its own box is not a viewport.
+  for (let parent = slot.parentElement; parent; parent = parent.parentElement) {
+    const style = getComputedStyle(parent), clip = parent.getBoundingClientRect()
+    if (['auto', 'scroll', 'hidden', 'clip'].includes(style.overflowX)) { left = Math.max(left, clip.left); right = Math.min(right, clip.right) }
+    if (['auto', 'scroll', 'hidden', 'clip'].includes(style.overflowY)) { top = Math.max(top, clip.top); bottom = Math.min(bottom, clip.bottom) }
+  }
+  const visible = desktopElementVisible(slot) && slot.dataset.focusCardBody === 'mounted' &&
+    right > left && bottom > top && rect.bottom > top && rect.top < bottom && rect.right > left && rect.left < right &&
+    !appReader?.().overlays.settings && !appReader?.().overlays.quickSwitcher
+  return { hostId: target.hostId, agentSessionId: target.agentSessionId,
+    presentationSessionId: slot.dataset.focusPresentationSession ?? null, state: visible ? 'visible' : 'hidden' }
 }
 function queryIdentity(attribute: string, id: string): HTMLElement | null {
   return document.querySelector<HTMLElement>(`[${attribute}=${CSS.escape(id)}]`)

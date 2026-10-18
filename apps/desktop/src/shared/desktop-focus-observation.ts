@@ -33,8 +33,11 @@ export const desktopObservationSchema: z.ZodType<AgentMuxDesktopObservation> = z
   floating: z.object({ provenance, state: z.enum(['closed', 'preview', 'pinned', 'unknown']), topicId: nullableId,
     tabId: nullableId, regionId: nullableId, sessionId: nullableId, presentation: z.enum(['visible', 'hidden', 'pending', 'unknown']) }).strict(),
   overlays: z.object({ provenance, settings: z.boolean().nullable(), quickSwitcher: z.boolean().nullable() }).strict(),
-  focus: z.object({ executionSessionId: nullableId, pmoSessionId: nullableId }).strict()
+  focus: z.object({ executionSessionId: nullableId, pmoSessionId: nullableId, agent: z.object({ hostId: id, agentSessionId: id,
+    presentationSessionId: nullableId, state: z.enum(['visible', 'hidden', 'unconfirmed']) }).strict().nullable() }).strict()
 }).strict().superRefine((value, context) => {
+  if (value.focus.agent?.state === 'visible' && (value.focus.agent.presentationSessionId === null || value.selection.surface !== 'focus' ||
+    value.selection.focusView !== 'list' || value.presentation.state !== 'main-visible')) context.addIssue({ code: 'custom', message: 'A visible Focus Agent requires the exact actual list card.' })
   if (value.selection.focusView === 'map' && (value.presentation.tabId !== null || value.presentation.regionId !== null ||
     value.presentation.windowId !== undefined || value.presentation.documentGeneration !== undefined || value.presentation.state === 'floating' || value.presentation.state === 'window')) {
     context.addIssue({ code: 'custom', message: 'A map presentation cannot identify a retained, borrowed or native Region.' })

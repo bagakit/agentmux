@@ -7,6 +7,7 @@ export type AgentMuxDesktopMainSurface = 'workbench' | 'agents' | 'board' | 'sur
 export type AgentMuxDesktopFocusTarget =
   | ({ kind: 'space' } & AgentMuxSpaceSelector)
   | { kind: 'goal'; goalId: string }
+  | { kind: 'focus-agent'; hostId: string; agentSessionId: string }
   | { kind: 'surface'; surface: 'focus'; view?: AgentMuxDesktopFocusView }
   | { kind: 'surface'; surface: Exclude<AgentMuxDesktopSurface, 'focus'> }
 export type AgentMuxDesktopInputPolicy = 'preserve' | 'target'
@@ -49,13 +50,17 @@ export type AgentMuxDesktopOverlays = {
   provenance: AgentMuxDesktopProvenance
   settings: boolean | null; quickSwitcher: boolean | null
 }
+export type AgentMuxDesktopFocusAgent = {
+  hostId: string; agentSessionId: string; presentationSessionId: string | null
+  state: 'visible' | 'hidden' | 'unconfirmed'
+}
 export type AgentMuxDesktopObservation = {
   selection: AgentMuxDesktopSelection
   presentation: AgentMuxDesktopPresentation
   input: AgentMuxDesktopInput
   floating: AgentMuxDesktopFloating
   overlays: AgentMuxDesktopOverlays
-  focus: { executionSessionId: string | null; pmoSessionId: string | null }
+  focus: { executionSessionId: string | null; pmoSessionId: string | null; agent: AgentMuxDesktopFocusAgent | null }
 }
 export type AgentMuxDesktopFocusResult = {
   operation: 'focus'

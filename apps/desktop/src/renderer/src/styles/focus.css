@@ -22,6 +22,13 @@
 .focus-filter-menu__check { flex: 0 0 13px; min-height: 16px; }
 .focus-source-status { flex: 0 1 auto; max-width: 180px; padding-inline: 0; }
 .focus-source-status__cause { margin: 0 0 var(--sp-3); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.focus-agent-reveal { display: flex; flex: none; align-items: center; gap: var(--sp-3); padding: var(--sp-2) var(--sp-3); border-bottom: 1px solid var(--line-soft); background: var(--surface-2); color: var(--text-2); font-size: var(--fs-meta); }
+.focus-agent-reveal > span { min-width: 0; overflow-wrap: anywhere; }
+.focus-agent-reveal > button { flex: none; margin-left: auto; }
+.focus-agent-reveal-card { flex: none; }
+.global-focus-main[data-agent-reveal] > .focus-search-locations, .global-focus-main[data-agent-reveal] > .focus-history-search { flex-shrink: 1; min-height: 0; }
+.global-focus-main[data-agent-reveal] > .focus-search-locations > *, .global-focus-main[data-agent-reveal] > .focus-history-search > * { flex-shrink: 0; }
+.global-focus-main[data-agent-reveal]:not(:has(> .focus-agent-reveal-card)) > .global-board-columns { min-height: min(50%, calc(var(--focus-card-track-height) + 40px)); }
 @container focus-filter-area (max-width: 400px) {
   .focus-source-status { flex: none; }
   .focus-source-status .service-disclosure__summary { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }

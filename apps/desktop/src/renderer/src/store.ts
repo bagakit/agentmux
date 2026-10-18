@@ -95,7 +95,8 @@ import { executeWorkfaceFileView } from './lib/workface-file-view'
 import type { WorkbenchProjectionSelection } from './lib/workbench-projection'
 import type { WorkbenchPresentation } from './lib/workbench-presentation'
 import { mainRegionReference, desktopMainSurface, desktopSelection, desktopSpaceSelectionAfterClose, resolveDesktopSpaceSelection, resolveWorkbenchOccurrenceSelection, workbenchSelectionCatalog, projectWorkbenchSpaceSelection, workbenchObjectLayout, restoreWorkbenchSpaceSelection, DesktopFocusFailure } from './lib/desktop-focus-navigation'
-import { captureDesktopInput, readDesktopPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
+import type { FocusAgentReveal, FocusAgentTarget } from './lib/focus-agent-navigation'
+import { captureDesktopInput, readDesktopPresentation, readFocusAgentPresentation, awaitDesktopPresentation, desktopInputPreserved } from './lib/desktop-presentation'
 import { notebookRelocations, refreshNotebookLibrary, recordNotebookChanges, restoreNotebookRecoveries, useNotebookLibrary, type NotebookRecovery } from './lib/notebook-library'
 import type { AgentMuxDesktopSpaceSelection, AgentMuxDesktopFocusResult, AgentMuxSpatialSave, AgentMuxSpatialIssue } from '@agentmux/core/control'
 import type { SpaceZoneBindings, SpatialRequestBinding } from '../../shared/space-addresses'
@@ -953,6 +954,10 @@ export type AppState = {
   /** Original Mote action facts; ephemeral, shared by the status surface and read-only inspection. */
   moteContextOperations: MoteContextOperations
   mainSurface: MainSurface
+  focusAgentReveal: FocusAgentReveal | null
+  revealFocusAgent(target: FocusAgentTarget, presentationSessionId?: string): void
+  finishFocusAgentReveal(requestId: string): void
+  clearFocusAgentReveal(): void
   focusView: 'list' | 'map'
   collaborationMapTarget: CollaborationMapTarget | null
   setFocusView(view: 'list' | 'map'): void
@@ -4910,6 +4915,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   demands: {},
   demandPmoTabIds: {},
   agentFocus: EMPTY_AGENT_FOCUS,
+  focusAgentReveal: null,
   conversationRevealIntent: null,
   focusTimelineNameWidth: FOCUS_TIMELINE_NAME_WIDTH_DEFAULT,
   setFocusTimelineNameWidth(width) {
@@ -5938,7 +5944,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         activeWorkspaceId: state.activeWorkspaceId, mainSurface: state.mainSurface,
         focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId },
         desktop: { selection, ...presentation,
-          focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId } },
+          focus: { executionSessionId: state.agentFocus.execution.sessionId, pmoSessionId: state.agentFocus.pmo.sessionId, agent: readFocusAgentPresentation(state.focusAgentReveal) } },
         layouts: state.layouts,
         tabs: Object.values(state.tabs).map(tab => ({
           id: tab.id, workspaceId: tab.workspaceId, titleRegionId: tab.titleRegionId,
@@ -6324,7 +6330,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       signal?.addEventListener('abort', stopObservingNavigation, { once: true })
       const issues: AgentMuxSpatialIssue[] = []
       let topics: ScratchTopicSnapshot[] = []
-      try { if (get().config?.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) topics = await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) }
+      try { if (request.target.kind === 'space' && get().config?.workspaces.some(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) topics = await api.scratch.listTopics(SCRATCH_WORKSPACE_ID) }
       catch (error) { issues.push({ step: 'discovery', code: 'SPACE_DISCOVERY_UNCONFIRMED', message: presentError(error),
         recovery: 'Existing placement is kept. Inspect the client or retry discovery when its directory owner is available.' }) }
       finally { stopObservingNavigation(); signal?.removeEventListener('abort', stopObservingNavigation) }
@@ -6342,6 +6348,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           // Viewing a Goal never selects its associated execution workface.
           get().setSelectedDemand(request.target.goalId)
           set({ mainSurface: 'board', regionCaretFocus: null, workbenchNavigationInputPolicy: request.inputPolicy })
+        } else if (request.target.kind === 'focus-agent') {
+          get().revealFocusAgent(request.target)
         } else if (request.target.kind === 'surface') {
           get().setMainSurface(desktopMainSurface[request.target.surface])
           if (request.target.surface === 'focus' && request.target.view !== undefined) get().setFocusView(request.target.view)
@@ -6369,7 +6377,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       }
       const expected = desktopSelection(get(), catalog)
       let caretIntentNonce: number | undefined
-      if (navigationState !== 'rejected' && JSON.stringify(expected) === JSON.stringify(beforeSelection)) navigationState = 'unchanged'
+      const revealRequestId = request.target.kind === 'focus-agent' ? get().focusAgentReveal?.requestId : undefined
+      if (navigationState !== 'rejected' && request.target.kind !== 'focus-agent' && JSON.stringify(expected) === JSON.stringify(beforeSelection)) navigationState = 'unchanged'
       if (navigationState !== 'rejected' && request.inputPolicy === 'target' && expected.space?.tabId && expected.space.regionId) {
         const observed = readDesktopPresentation(expected, get().tabs)
         if (observed.overlays.provenance === 'observed' && !observed.presentation.blockers.length) {
@@ -6382,6 +6391,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const actual = desktopSelection(get(), catalog)
         if (JSON.stringify(actual) !== JSON.stringify(expected)) return true
         const observed = readDesktopPresentation(actual, get().tabs)
+        if (request.target.kind === 'focus-agent') return get().focusAgentReveal?.requestId !== revealRequestId ||
+          observed.presentation.state === 'covered' || readFocusAgentPresentation(get().focusAgentReveal)?.state === 'visible' || !get().focusAgentReveal?.pending
         return observed.presentation.state === 'covered' ||
           ((observed.presentation.state === 'main-visible' || observed.presentation.state === 'floating' || observed.presentation.state === 'window') &&
             (request.inputPolicy === 'preserve' || captureDesktopInput(get().tabs).fact.regionId === expected.space?.regionId))
@@ -6404,6 +6415,13 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         }
       }
       const observed = readDesktopPresentation(selection, get().tabs)
+      const focusAgent = readFocusAgentPresentation(get().focusAgentReveal)
+      if (navigationState !== 'rejected' && request.target.kind === 'focus-agent' && (get().focusAgentReveal?.requestId !== revealRequestId ||
+        focusAgent?.hostId !== request.target.hostId || focusAgent.agentSessionId !== request.target.agentSessionId || focusAgent.state !== 'visible')) {
+        navigationState = 'unconfirmed'
+        issues.push({ step: 'presentation', code: 'FOCUS_AGENT_UNCONFIRMED', message: 'The exact original Agent card has not been visibly confirmed in Focus.',
+          recovery: 'The original filters, work and Session are kept. Inspect Focus and its original Context source before another explicit reveal.' })
+      }
       const after = captureDesktopInput(get().tabs)
       const inputOutcome = request.inputPolicy === 'preserve' ? desktopInputPreserved(before, after) ? 'preserved'
         : after.fact.provenance === 'observed' ? 'unavailable' : 'unconfirmed'
@@ -6428,7 +6446,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ...(request.expectedAgentSessionId === undefined ? {} : { expectedAgentSessionId: request.expectedAgentSessionId }) },
         presentation: observed.presentation, input: { policy: request.inputPolicy, outcome: inputOutcome, before: before.fact, after: after.fact },
         floating: observed.floating, overlays: observed.overlays,
-        focus: { executionSessionId: get().agentFocus.execution.sessionId, pmoSessionId: get().agentFocus.pmo.sessionId }, partial, save, issues }
+        focus: { executionSessionId: get().agentFocus.execution.sessionId, pmoSessionId: get().agentFocus.pmo.sessionId, agent: focusAgent }, partial, save, issues }
     }
     if (request.operation === 'arrange') {
       const state = get()
@@ -7616,6 +7634,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     state.reportError(new Error(result.issue ?? 'The selected Agent occurrence is unconfirmed. Its workface is kept; choose an exact original location.'), { kind: 'indeterminate' })
     return false
   },
+  revealFocusAgent(target, presentationSessionId) {
+    set({ mainSurface: 'agents', focusView: 'list', regionCaretFocus: null, workbenchNavigationInputPolicy: 'preserve',
+      focusAgentReveal: { ...target, requestId: mintObjectId(), pending: true,
+        ...(presentationSessionId === undefined ? {} : { presentationSessionId }) } })
+  },
+  finishFocusAgentReveal(requestId) {
+    const current = get().focusAgentReveal
+    if (current?.requestId === requestId && current.pending) set({ focusAgentReveal: { ...current, pending: false } })
+  },
+  clearFocusAgentReveal() { set({ focusAgentReveal: null }) },
   revealConversationItem(itemRef, routeHostId = itemRef.hostId) {
     get().conversationRevealIntent?.complete({ kind: 'cancelled' })
     const state = get(), reference = state.agentFocus.execution.reference
