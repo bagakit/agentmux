@@ -6,6 +6,8 @@ import { resolve } from 'node:path'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { SpaceObjectIcon } from '../src/renderer/src/components/SpaceObjectIcon'
+import { MoteIcon } from '@agentmux/client-ui/components/MoteIcon'
+import { MobileIdentity, type MobileObjectIdentity } from '../../mobile/src/navigation/MobileIdentity'
 import { LiquidSelectionSurface } from '../src/renderer/src/components/LiquidSelectionSurface'
 import { MoteFaceEditor } from '../src/renderer/src/components/MoteFaceEditor'
 import { DEFAULT_MOTE_FACE } from '../src/shared/mote-avatars'
@@ -44,10 +46,83 @@ beforeEach(() => {
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); sheet.remove(); expect(frames.size).toBe(0); expect(changes.size).toBe(0); useAppStore.setState(baseline, true); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 const rect = { x: 180, y: 180, left: 180, top: 180, right: 212, bottom: 212, width: 32, height: 32, toJSON() {} }
-async function mount(node: React.ReactNode) { await act(async () => root.render(<Profiler id="real-face" onRender={() => commits++}>{node}</Profiler>)); for (const svg of container.querySelectorAll<SVGSVGElement>('.mote-face')) vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue(rect) }
+async function mount(node: React.ReactNode) { await act(async () => root.render(<Profiler id="real-face" onRender={() => commits++}>{node}</Profiler>)); for (const svg of container.querySelectorAll<SVGSVGElement>('.mote-face, .mote-companion')) vi.spyOn(svg, 'getBoundingClientRect').mockReturnValue(rect) }
 function face() { const node = container.querySelector<HTMLElement>('[data-mote-expression]'); expect(node).not.toBeNull(); return node! }
 function move(x: number, y = 196) { document.dispatchEvent(new PointerEvent('pointermove', { bubbles: true, pointerType: 'mouse', clientX: x, clientY: y })); const callbacks = [...frames.values()]; frames.clear(); callbacks.forEach(callback => callback(10)) }
 const image = { kind: 'image' as const, fileName: 'c'.repeat(64) + '.png' }
+it('touch press follows only the original control and releases on cancel, backgrounding or reduced motion without consuming input', async () => {
+  await mount(<>{['One', 'Two'].map(name => <button key={name}><SpaceObjectIcon kind="mote" name={name} manualIcon={null} /></button>)}</>)
+  const buttons = [...container.querySelectorAll('button')], identities = [...container.querySelectorAll<HTMLElement>('[data-mote-expression]')]
+  const touch = (target: EventTarget, type: string, pointerId = 7) => {
+    const event = new PointerEvent(type, { bubbles: true, cancelable: true, pointerType: 'touch', pointerId })
+    expect(target.dispatchEvent(event)).toBe(true); expect(event.defaultPrevented).toBe(false)
+  }
+  touch(buttons[0]!, 'pointerdown')
+  expect(identities[0]!.dataset.motePress).toBe('on'); expect(identities[1]!.dataset.motePress).toBeUndefined()
+  touch(document, 'pointerup', 8); expect(identities[0]!.dataset.motePress).toBe('on')
+  touch(document, 'pointercancel'); expect(identities[0]!.dataset.motePress).toBeUndefined()
+  touch(buttons[0]!, 'pointerdown'); touch(document, 'pointerup'); expect(identities[0]!.dataset.motePress).toBeUndefined()
+  touch(buttons[0]!, 'pointerdown'); intersections.get(identities[0]!)!(false); expect(identities[0]!.dataset.motePress).toBeUndefined()
+  touch(buttons[0]!, 'pointerdown'); expect(identities[0]!.dataset.motePress).toBeUndefined()
+  touch(buttons[1]!, 'pointerdown'); window.dispatchEvent(new Event('blur')); expect(identities[1]!.dataset.motePress).toBeUndefined()
+  touch(buttons[1]!, 'pointerdown'); reduced = true; changes.forEach(change => change()); expect(identities[1]!.dataset.motePress).toBeUndefined()
+  touch(buttons[1]!, 'pointerdown'); expect(identities[1]!.dataset.motePress).toBeUndefined()
+  reduced = false; changes.forEach(change => change()); buttons[1]!.disabled = true
+  touch(buttons[1]!, 'pointerdown'); expect(identities[1]!.dataset.motePress).toBeUndefined()
+})
+it('an already mounted Mobile identity registers its restored automatic rig and releases it on an explicit glyph choice', async () => {
+  const mobile = (glyph?: string) => ({ name: 'Same Mote', project: 'Same project', mote: { spaceId: 'same-mote', appearance: { spaceId: 'same-mote', ...(glyph ? { glyph } : {}) } } }) as MobileObjectIdentity
+  await mount(<MobileIdentity identity={mobile('book')} client={null} connected={false} />)
+  const identity = face()
+  move(245); expect(frames.size).toBe(0); expect(identity.dataset.moteGaze).toBe('far')
+  await mount(<MobileIdentity identity={mobile()} client={null} connected={false} />)
+  expect(face()).toBe(identity); expect(container.querySelector('.mote-companion')).not.toBeNull()
+  move(245); expect(identity.dataset.moteGaze).toBe('near')
+  await mount(<MobileIdentity identity={mobile('book')} client={null} connected={false} />)
+  expect(face()).toBe(identity); expect(container.querySelector('.mote-companion')).toBeNull()
+  move(245); expect(frames.size).toBe(0); expect(identity.dataset.moteGaze).toBe('far')
+})
+it('Desktop and Mobile automatic companions share coalesced native gaze and stop at the original visibility gates', async () => {
+  const clicked = vi.fn(), add = vi.spyOn(document, 'addEventListener')
+  const mobile = { name: 'Original Mote', project: 'Original project', mote: { spaceId: 'original-mote' } } as MobileObjectIdentity
+  await mount(<>
+    <button onClick={clicked}><SpaceObjectIcon kind="mote" name="Original" manualIcon={null} /></button>
+    <button><MobileIdentity identity={mobile} client={null} connected={false} /></button>
+    <MoteIcon />
+    {Array.from({ length: 20 }, (_, i) => <SpaceObjectIcon key={i} kind="mote" name="Recorded" manualIcon={null} visible={false} />)}
+  </>)
+  const identities = [...container.querySelectorAll<HTMLElement>('[data-mote-expression]')]
+  const rigs = [...container.querySelectorAll<SVGSVGElement>('.mote-companion')]
+  expect(identities).toHaveLength(2); expect(rigs).toHaveLength(2)
+  expect(add.mock.calls.filter(([type]) => type === 'pointermove')).toHaveLength(1)
+  const before = commits
+  for (let i = 0; i < 20; i++) document.dispatchEvent(new PointerEvent('pointermove', { pointerType: 'mouse', clientX: 245, clientY: 196 }))
+  expect(frames.size).toBe(1)
+  move(245)
+  for (const identity of identities) {
+    expect(identity.dataset.moteGaze).toBe('near')
+    expect(identity.style.getPropertyValue('--mote-gaze-x')).toBe('2.500px')
+  }
+  for (const rig of rigs) expect(rig.getBoundingClientRect).toHaveBeenCalledTimes(1)
+  document.dispatchEvent(new PointerEvent('pointermove', { pointerType: 'touch', clientX: 145, clientY: 196 }))
+  expect(frames.size).toBe(0)
+  container.querySelector('button')!.focus(); container.querySelector('button')!.click()
+  expect(document.activeElement).toBe(container.querySelector('button')); expect(clicked).toHaveBeenCalledTimes(1)
+  expect(commits).toBe(before)
+  for (const identity of identities) intersections.get(identity)!(false)
+  move(145); expect(frames.size).toBe(0)
+  for (const identity of identities) { expect(identity.dataset.moteVisible).toBe('off'); expect(identity.dataset.moteGaze).toBe('far'); expect(identity.style.getPropertyValue('--mote-gaze-x')).toBe('') }
+  for (const identity of identities) intersections.get(identity)!(true)
+  reduced = true; changes.forEach(change => change()); move(245)
+  for (const identity of identities) expect(identity.dataset.moteVisible).toBe('off')
+  expect(frames.size).toBe(0)
+  reduced = false; changes.forEach(change => change()); move(245)
+  for (const identity of identities) expect(identity.dataset.moteGaze).toBe('near')
+  vi.spyOn(document, 'hidden', 'get').mockReturnValue(true)
+  document.dispatchEvent(new Event('visibilitychange')); move(245)
+  for (const identity of identities) { expect(identity.dataset.moteVisible).toBe('off'); expect(identity.dataset.moteGaze).toBe('far') }
+  expect(frames.size).toBe(0); expect(commits).toBe(before)
+})
 it('all explicit image, automatic, manual and face consumers join one native owner without Session selectors or synchronized object phases', async () => {
   const expression = vi.spyOn(expressionAuthority, 'moteExpression')
   const choices = [image, null, null, 'book', DEFAULT_MOTE_FACE] as const
