@@ -633,6 +633,9 @@ app.whenReady().then(async () => {
         } else if (id==='hosts') {
           const leaf = `Array.from(${node('[data-settings-pane="hosts"]')}.querySelectorAll('.settings-host-library [data-host-panel="connection"]')).find(n=>n.checkVisibility())`
           if (await read(`!!(${leaf})`)) await click(leaf)
+          const tabs = await read(`Array.from(${node('[data-settings-pane="hosts"] .remote-detail-tabs')}.children).map(item => { const r = item.getBoundingClientRect(); return {top:r.top, bottom:r.bottom} })`)
+          assert.equal(tabs.length,4,'The compact Host keeps every original section')
+          assert.ok(tabs.every(tab=>Math.abs(tab.top-tabs[0].top)<1),'Compact Host sections stay on one row')
           await captureSegments('page-hosts-compact-detail-'+color,id,color)
           await click(node('[data-settings-pane="hosts"] .settings-resource-back'))
           assert.equal(await read(`${node('[data-settings-pane="hosts"] [data-resource-view]')}.dataset.resourceView`),'library')
