@@ -225,6 +225,16 @@ app.whenReady().then(async () => {
       assert.equal(await read(`${node(windowInput)}.value`),'24')
       assert.equal(await read(`${node(unit)}.value`),'hours')
       assert.equal(await read(`${node(save)}.disabled`),true,'The initial recovery preference is saved')
+      await click(`${node('.recovery-mode input[value="manual"]')}.closest('label')`)
+      assert.equal(await read(`${node('.recovery-mode input[value="manual"]')}.checked`),true)
+      assert.match(await read(`${node('.recovery-mode-effect')}.textContent`),/Recovery waits for you/)
+      assert.equal(await read(`${node(save)}.disabled`),false,'Changing the recovery mode requires an explicit save')
+      await nav('overview'); await nav(id)
+      assert.equal(await read(`${node('.recovery-mode input[value="manual"]')}.checked`),true,'The original mode draft survives navigation')
+      await capture('continuity-on-demand',id,'dark','explicit recovery mode draft')
+      await click(`${node('.recovery-mode input[value="automatic"]')}.closest('label')`)
+      assert.equal(await read(`${node(save)}.disabled`),true,'Returning to the saved mode restores the clean draft')
+      result.interactions.push({kind:'recovery-mode-draft',selected:'manual',retainedAfterNavigation:true,restored:'automatic'})
       const choices=[]
       for (const [choice,expected] of [['minutes','1440'],['seconds','86400'],['hours','24']]) {
         await selectValue(unit,choice)
