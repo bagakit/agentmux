@@ -9,7 +9,7 @@
 | 原生记录、parts、回合、问题与原生延续位置 | Provider；[`AgentProvider`](../../packages/core/src/agent-provider.ts)、[`AgentSessionHistoryItem`](../../packages/core/src/types.ts) |
 | Session、原生绑定、输入／交互回执与 captured 原记录 | Core；[`AgentMuxClient`](../../packages/core/src/client.ts)、[`AgentSessionStore`](../../packages/core/src/agent-session-store.ts) |
 | captured 流、提交序号及旧版本 | 原 Session Store 的 [`captured-history`](../../packages/core/src/captured-history.ts)；[`captured-history-import`](../../packages/core/src/captured-history-import.ts) 在原 writer／事务内接管旧记录，保留原始文件 |
-| 记录到事件、角色、作者、顺序、关系与内容归属 | Core 的纯 [`projectConversationTimeline`](../../packages/core/src/conversation-timeline.ts)；浏览器和 Node 消费同一实现 |
+| 记录到事件、角色、作者、顺序、关系与内容归属 | Core 的纯 [`projectConversationStream`](../../packages/core/src/conversation-stream.ts)；浏览器和 Node 消费同一实现 |
 | 通用 Run、PTY ordered bytes、Replay 与 Gap | ctxmux；Core 经 [`CtxmuxRunAdapter`](../../packages/core/src/ctxmux-run-adapter.ts) 消费，见[Terminal Runtime](terminal-runtime.md) |
 | 消息、过程、Question、来源和载荷的共同呈现 | [`client-ui`](../../packages/client-ui/src/components/ConversationView.tsx)；宿主注入 [`ClientUiPlatform`](../../packages/client-ui/src/platform.tsx) 能力 |
 | 公共读取的已接受贡献、原页邻接和有界临时窗 | 原 [`conversation-reader`](../../packages/core/src/conversation-reader.ts)；持久原记录仍归各原 owner |
@@ -42,6 +42,20 @@ Core 的 [`agent-outbound-message`](../../packages/core/src/agent-outbound-messa
 
 `whoami` 的[原公共类型、服务和严格 codec](../specs/public-capabilities.md)只返回原 Session、状态、View 与 unavailable，不带静态 Topic 提示或通信指南。模块目录及本地 Skill 生成来自 [`agentmux-cli-module-skills`](../../packages/core/src/agentmux-cli-module-skills.ts)的实际命令根；基础目录不内联模块全文。已知任务域可直接读取其模块，root／object help 由原注册表列下一层，叶子 help 提供该操作的参数、选项与回执说明。Browser program／task、原生恢复、空间 playbook 等分别在相关原入口可达，不在所有相邻模块与叶子重复展开。确切路由由 [`agentmux-cli-help`](../../packages/core/src/agentmux-cli-help.ts)持有，不新增规则或已读状态 Store。实际文本可达和读取不证明当前模型已经采用。
 
+## 语义流的模块边界
+
+公开入口保持 `@agentmux/core/conversation`。来源适配、语义归一、读取协调和客户端呈现分别持有自己的事实：
+
+| 边界 | 实现与责任 |
+| --- | --- |
+| 来源适配 | [`conversation-timeline`](../../packages/core/src/conversation-timeline.ts) 将 SDK 的 native page／captured timeline 转为原记录，保原 Host、来源顺序与 writer 版本。Provider 继续解释各自原生协议。 |
+| 纯语义流 | [`conversation-stream`](../../packages/core/src/conversation-stream.ts) 的 `projectConversationStream` 消费已接受 `ConversationSourceRecord`，统一事件、作者、关系、版本、覆盖与部分顺序；无 IO、订阅或持久 Store，不决定输入资格。 |
+| 读取协调 | [`conversation-reader`](../../packages/core/src/conversation-reader.ts) 持有来源读取、cut、分页及临时阅读窗，直接将原版本化 records 交给语义流；不还原 page／timeline 再造记录或重算原版本。 |
+| 公共输送 | [`conversation-changes`](../../packages/core/src/conversation-changes.ts) 校验和组装完整版本化窗口；未收齐的 wire fragments 不表示语义节点处于半开状态。 |
+| 客户端消费 | Desktop、Mobile 和 Connectors 消费同一公共 Reader；`projectConversationWindow` 只适配已接受事件，不重判关联、作者或顺序。 |
+
+当前实时合同是来源 `invalidated`／`unavailable` 通知唤醒准确读取，再交付新版完整窗口。`ConversationEvent` 保留贡献版本与关系，没有一个包办身份、正文结束、投递和采用的 `final` 位；各项确认沿原协议事实。晚到准确关系由同一语义流更新事件和 coalescence，关联缺证仍保独立原记录，不能从同文、时间或终端 ACK 补造。
+
 ## 三种来源怎样读取
 
 Provider 的原生历史解释与 Hook 回调解释消费不同的原信号，提交记录则由 Core 输入 writer 产生；出现多路记录本身不表示同一 payload 被解析两次。它们进入同一 Conversation 处理边界，接入方不承担厂商信号整合。Core 原 Reader 持有有界接受窗口与跨批贡献，Desktop、Mobile 和 Focus 消费该 Reader 的完整窗口。
@@ -70,6 +84,8 @@ Inputs 的有界搜索／分页由原 `agent.history` 与 `agent.input.ls` 提�
 Core 经 [`SessionHistoryObservationPool`](../../packages/core/src/session-history-observation-pool.ts) 共享准确 native source 的 watch；captured 通知沿原 Session Timeline publisher。取消一个 reader 不终止 Run。来源失败保留已接受的其他记录、准确 Gap 与重试位置，不用最新版本替换失效的原锚点。
 
 ## Desktop 的共同阅读链
+
+Composer 通过 `useComposerInputHistory` 持有 Inputs 的原生阅读窗；`SessionMailbox` 接到该 owner 时复用原记录、输入实体、读取错误、观察失败、冻结及刷新动作，不再激活第二份 native view。联合刷新重读原查询与原生归属，主刷新另更新原 input mailbox；独立 Mailbox 仍持有自己的 scoped reader。
 
 ```mermaid
 flowchart LR
