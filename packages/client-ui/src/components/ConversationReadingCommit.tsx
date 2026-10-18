@@ -7,8 +7,7 @@ type Props = { work: ConversationBodyWork; preserve: boolean; children: ReactNod
 export class ConversationReadingCommit extends Component<Props, object, boolean> {
   getSnapshotBeforeUpdate(): boolean {
     if (!this.props.preserve) return false
-    this.props.work.capture(true)
-    return true
+    return this.props.work.capture(true)
   }
   componentDidUpdate(_previous: Props, _state: object, captured: boolean): void {
     if (captured) this.props.work.restore()
