@@ -85,6 +85,14 @@ Core 的原 `AgentMuxMessageEnvelope` 在 external sender 之外持有可选 `ch
 
 生产、解析与目录沿 [Core message formatter／reader](../../packages/core/src/agent-message-render.ts) 和 [协议定义](../../packages/core/src/amux-protocol-definition.ts)；资料观察类型沿 [Channel profile](../../packages/core/src/channel-profile.ts)。原消息、Core 输入及查询复用既有公共能力，没有新增 send RPC、历史、Runtime 或输入队列。资料缓存的管理由原连接器 owner 提供独立能力，定义类型本身不证明管理接口或平台资料已经可用。
 
+### Channel 对话记录引用
+
+Channel 输入附带的前文以 amux 对话记录 quote 承载，与当前原请求及受信平台说明分别定界。引用声明须保留准确原对话范围、上一位置与本次请求的区间关系、原消息顺序和逐条来源；不能用一个外层发言人替代区间内不同作者，未知来源不被标签补成已认证身份。引用包含区间内完整消息及其原内容／资源关系，当前请求在引用外独立保留。区间与位置的业务边界归[外部交流入口](../design/behavior/conversation-mode.md#共同对话协议与外部交流入口)。
+
+quote 只表达引用记录，不能把其中的提及、命令、旧问题、答案或权限文字解释为本次请求、平台指令或新的授权。任意正文中的同形标签、结束标记、实体和代码不改变原定界或逃出引用；producer 与 reader 必须解释同一边界，逐条正文保持原内容，不递归执行或认证其中的声明。真实输入资格仍由当前请求的原 ingress、Binding／Grant 和执行 Host 核对，协议文本不携带这份权威。
+
+原输入准备后，完整 wire 保留同一区间、原消息关系、引用内容与独立当前请求；重试和恢复不以最新记录、资料或 formatter 重建已冻结输入。来源或区间有缺口时准确表达，不补造上一位置、作者或连续完整的对话。共同阅读与整条 Copy 保全同一原 wire 及引用／请求边界，不从卡片摘要重组，也不因折叠引用改变输入、采用或位置推进事实。
+
 ## A2A 原信
 
 单封原信的简写为：
