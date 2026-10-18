@@ -3,7 +3,7 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseConversationVersionedAnchor, parseConversationSource } from './conversation-changes.js'
 import type { ConversationItemRef } from './conversation.js'
-import { conversationRecordId } from './conversation-timeline.js'
+import { conversationRecordId } from './conversation-stream.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
 import type { ConnectionDelivery, ConnectionDeliveryCoverage, ConnectionDeliveryEvent, ConnectionDeliveryGap, ConnectionOriginRepresentation, ConnectionDeliveryMapping, ConnectionDeliveryMethod, ConnectionDeliveryObservation, ConnectionDeliveryParamsMap, ConnectionDeliveryReceipt, ConnectionDeliveryReceiptReason, ConnectionDeliveryReason, ConnectionDeliveryResultMap, ConnectionDeliveryState } from './connection-delivery-contract.js'
 
@@ -44,10 +44,10 @@ function event(value: unknown): ConnectionDeliveryEvent {
   if (typeof p.id !== 'string' || !p.id || p.id.length > 131_072) fail()
   return { id: p.id as string, revision: version(p.revision) }
 }
-function part(value: unknown): import('./conversation-timeline.js').ConversationContentRef {
+function part(value: unknown): import('./conversation-stream.js').ConversationContentRef {
   const p = object(value, ['record', 'recordRevision', 'selector']), record = reference(p.record), s = object(p.selector, ['kind', 'field', 'partIndex'])
   if (record.source.kind !== 'native' && record.source.kind !== 'captured') fail()
-  let selector: import('./conversation-timeline.js').ConversationSelector
+  let selector: import('./conversation-stream.js').ConversationSelector
   if (s.kind === 'native-part' && s.field === undefined && record.source.kind === 'native') selector = { kind: 'native-part', partIndex: integer(s.partIndex, 0) }
   else if (s.kind === 'captured-field' && s.partIndex === undefined && record.source.kind === 'captured' && ['content', 'toolInput', 'toolOutput'].includes(String(s.field))) selector = { kind: 'captured-field', field: s.field as 'content' | 'toolInput' | 'toolOutput' }
   else return fail()

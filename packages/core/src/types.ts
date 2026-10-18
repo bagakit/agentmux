@@ -900,7 +900,7 @@ export type AgentSessionHistoryMetrics = {
 export type AgentSessionHistoryItem = {
   id: string
   /** Read-only typed source relationships, interpreted at the original Provider boundary. */
-  conversation?: import('./conversation-timeline.js').ConversationRecordProvenance
+  conversation?: import('./conversation-stream.js').ConversationRecordProvenance
   conversationDiagnostic?: { code: string; message: string; original?: unknown }
   turnId?: string
   /** System messages describe read-only native history; they grant no input, identity or permission authority. */
@@ -1141,7 +1141,7 @@ export type AgentSessionUserMessage = {
   /** Original captured user input identity; never inferred from the body or submission label. */
   inputRef?: import('./agent-prompt-condition.js').AgentPromptInputKey
   /** Minimal original reading relationships, independent of the projected body and its ID. */
-  conversation?: Pick<import('./conversation-timeline.js').ConversationRecordProvenance, 'sameEvent' | 'nativeInput' | 'adoptedInput'>
+  conversation?: Pick<import('./conversation-stream.js').ConversationRecordProvenance, 'sameEvent' | 'nativeInput' | 'adoptedInput'>
   author: AgentSessionUserMessageAuthor
   /** Original user-content boundary only; absence is unknown. Not sharing authority, safety or identity. */
   publicContent?: 'confirmed' | 'unknown'
@@ -1977,7 +1977,7 @@ export type AgentTimelineItem = {
   /** Original Core notification identity, distinct from the referenced A2A messages. */
   a2aNotificationId?: string
   /** Original typed provenance, never reconstructed from display text or opaque item IDs. */
-  conversation?: import('./conversation-timeline.js').ConversationRecordProvenance
+  conversation?: import('./conversation-stream.js').ConversationRecordProvenance
   conversationDiagnostic?: { code: string; message: string; original?: unknown }
   agentSessionId: string
   kind: AgentTimelineItemKind

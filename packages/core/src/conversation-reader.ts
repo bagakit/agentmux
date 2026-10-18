@@ -2,8 +2,8 @@ import { mintObjectId } from './object-id.js'
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { projectConversationTimeline, conversationRecordId, conversationRevision, conversationSourceKey, conversationInputAdoptionEdges,
-  type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationInputAdoptionContext } from './conversation-timeline.js'
+import { projectConversationStream, conversationRecordId, conversationRevision, conversationSourceKey, conversationInputAdoptionEdges,
+  type ConversationSourceRecord, type ConversationSourceRef, type ConversationSourceCoverage, type ConversationInputAdoptionContext } from './conversation-stream.js'
 import { parseConversationTimelineReadInput, parseConversationChangesInput, parseConversationFrontier, parseConversationReadPage, parseConversationChangesPage,
   CONVERSATION_DEFAULT_READ_BYTES, CONVERSATION_MAX_UNIT_BYTES, CONVERSATION_MAX_WINDOW_RECORDS, type ConversationTimelineReadInput, type ConversationChangesInput, type ConversationFrontier,
   type ConversationCheckpointPage, type AgentConversationReadPage, type ConversationChangesPage, type ConversationUnit, type ConversationUnitEntry, type ConversationVersionedAnchor, type ConversationReadWindow } from './conversation-changes.js'
@@ -159,16 +159,10 @@ export async function conversationCheckpoint(ref: ConversationRef, port: Convers
   return { ...target, sourceHostId: ref.hostId, scope: found.scope, checkpoint: { ...target, sourceHostId: ref.hostId, frontier: checkpoint }, coverage: found.coverage }
 }
 function projection(ref: ConversationRef, accepted: ConversationFrontier['scope'], rows: ConversationSourceRecord[], coverage: ConversationSourceCoverage[], inputAdoption: ConversationInputAdoptionContext, preserveCurrent = false) {
-  const native = rows.filter(r => r.original.kind === 'native'), captured = rows.filter(r => r.original.kind === 'captured')
-  const source = accepted.sources.find((s): s is Extract<ConversationSourceRef, { kind: 'native' }> => s.kind === 'native')
-  const stream = accepted.sources.find((s): s is Extract<ConversationSourceRef, { kind: 'captured' }> => s.kind === 'captured')
-  const timeline = projectConversationTimeline({ agentSessionId: ref.agentSessionId, executionHostId: ref.hostId,
-    ...(native.length && source ? { historyPage: { agentSessionId: ref.agentSessionId, source, items: native.map(r => (r.original as { kind: 'native'; item: AgentSessionHistoryItem }).item), nextCursor: null } } : {}),
-    ...(captured.length ? { timeline: { agentSessionId: ref.agentSessionId, revision: 0, items: captured.map(r => (r.original as Extract<ConversationSourceRecord['original'], { kind: 'captured' }>).item) } } : {}),
-    sourceOrders: new Map(rows.map(r => [r.id, r.order])), coverage, inputAdoption })
+  const source = accepted.sources.find((value): value is Extract<ConversationSourceRef, { kind: 'native' }> => value.kind === 'native')
+  const timeline = projectConversationStream({ agentSessionId: ref.agentSessionId, reference: ref, records: rows,
+    scope: accepted, coverage, inputAdoption, ...(source ? { nativeSource: source } : {}) })
   const records = new Map(timeline.records.map(record => [record.id, record]))
-  // The original committed revision is retained; the normal form uses the same Core version hash.
-  for (const row of rows) if (records.get(row.id)?.revision !== row.revision) return fail('An original record version changed during the frozen read.')
   const units = timeline.events.map(event => ({ event, records: event.recordIds.map(id => records.get(id)!) }))
   if (units.some(unit => Buffer.byteLength(JSON.stringify(unit)) > CONVERSATION_MAX_UNIT_BYTES)) return fail('The original conversation unit exceeds its assembly bound. Its source and cut are retained.', preserveCurrent ? 'AGENT_CONVERSATION_WINDOW_FULL' : 'AGENT_SESSION_HISTORY_BUDGET')
   return { units, coverage: timeline.coverage as ConversationSourceCoverage[], order: timeline.order }

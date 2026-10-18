@@ -6,7 +6,7 @@ import {
   conversationInputAdoptionEdges, conversationInputIdentity, conversationInputKey, conversationRecordAnchors,
   conversationRecordAuthor, conversationRecordId, conversationSameEventTarget, conversationValuesEqual,
   type ConversationAuthor, type ConversationInputRecord, type ConversationSourceRecord
-} from './conversation-timeline.js'
+} from './conversation-stream.js'
 
 export type SessionInputGroup = {
   id: string
