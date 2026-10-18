@@ -1046,3 +1046,96 @@ it.each([[true, false], [false, false], [true, true], [false, true]] as const)(
     } finally { writes.mockRestore() }
   }
 )
+
+
+it.each(['listener', 'addon', 'both', 'undefined'] as const)(
+  'independently releases the exact GPU after a %s context cleanup failure', async fault => {
+    await render(true)
+    const terminal = fixture.terminals[0]!, gpu = fixture.webgl[0]!
+    const first = fault === 'undefined' ? undefined : new Error('Original context listener release failure')
+    const second = new Error('Original GPU addon release failure')
+    if (fault !== 'addon') gpu.contextLossDisposed.mockImplementationOnce(() => { throw first })
+    if (fault !== 'listener') gpu.disposed.mockImplementationOnce(() => { throw second })
+    const registry = () => (terminal as unknown as {
+      _addonManager: { _addons: Array<{ instance: unknown; isDisposed: boolean }> }
+    })._addonManager._addons
+    let threw = false, caught: unknown
+    try { gpu.loseContext() } catch (error) { threw = true; caught = error }
+    const owners = terminalResourceOwnerCounts(), entries = registry().filter(entry => entry.instance === gpu)
+    const sample = { fault, threw, caughtOriginal: caught === (fault === 'addon' ? second : first),
+      listenerCalls: gpu.contextLossDisposed.mock.calls.length, addonCalls: gpu.disposed.mock.calls.length,
+      exactAddonEntries: entries.map(entry => ({ isDisposed: entry.isDisposed })), owners }
+    cleanupSample('independent-gpu-failure', sample)
+    expect(threw).toBe(true)
+    expect(sample.caughtOriginal).toBe(true)
+    expect(gpu.contextLossDisposed).toHaveBeenCalledTimes(1)
+    expect(gpu.disposed).toHaveBeenCalledTimes(1)
+    expect(entries.map(entry => entry.isDisposed)).toEqual(fault === 'listener' ? [] : [true])
+    expect(owners.terminalAddons).toBe(fault === 'listener' ? 3 : 4)
+    // This old callback cannot retry a disposed native body or turn unknown release into success.
+    expect(() => gpu.loseContext()).not.toThrow()
+    expect(gpu.contextLossDisposed).toHaveBeenCalledTimes(1)
+    expect(gpu.disposed).toHaveBeenCalledTimes(1)
+    expect(terminalResourceOwnerCounts()).toEqual(owners)
+    terminal.input('HEALTHY_AFTER_CONTEXT_RELEASE', true)
+    expect(fixture.write).toHaveBeenCalledWith(session.control, 'HEALTHY_AFTER_CONTEXT_RELEASE', 'terminal-protocol', expect.anything())
+    expect(terminal.dispose).not.toHaveBeenCalled()
+    expect(fixture.detach).not.toHaveBeenCalled()
+    expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control, 0)
+  }
+)
+
+it('retires the GPU before xterm after an unmount listener release failure', async () => {
+  await render(true)
+  const terminal = fixture.terminals[0]!, gpu = fixture.webgl[0]!
+  const first = new Error('Original unmount context listener release failure'), calls: string[] = []
+  const dispose = terminal.dispose.getMockImplementation()!
+  gpu.contextLossDisposed.mockImplementationOnce(() => { throw first })
+  gpu.disposed.mockImplementation(() => { calls.push('gpu') })
+  terminal.dispose.mockImplementation(() => { calls.push('xterm'); dispose() })
+  let threw = false, caught: unknown
+  try { await act(async () => root!.unmount()) } catch (error) { threw = true; caught = error }
+  finally { root = null }
+  cleanupSample('independent-gpu-unmount', { threw, caughtOriginal: caught === first, calls,
+    detach: fixture.detach.mock.calls, owners: terminalResourceOwnerCounts() })
+  expect(threw).toBe(true)
+  expect(caught).toBe(first)
+  expect(calls).toEqual(['gpu', 'xterm'])
+  expect(gpu.contextLossDisposed).toHaveBeenCalledTimes(1)
+  expect(gpu.disposed).toHaveBeenCalledTimes(1)
+  expect(terminal.dispose).toHaveBeenCalledTimes(1)
+  expect(fixture.detach).toHaveBeenCalledExactlyOnceWith('attachment-retained')
+  expect(terminalResourceOwnerCounts()).toEqual({ terminalViews: 0, terminalAddons: 0, terminalListeners: 0 })
+})
+
+
+it('keeps a replacement GPU alive when a retired context listener fires again', async () => {
+  await render(true)
+  const terminal = fixture.terminals[0]!, retired = fixture.webgl[0]!
+  const failure = new Error('Original retired context listener release failure')
+  retired.contextLossDisposed.mockImplementationOnce(() => { throw failure })
+  expect(() => retired.loseContext()).toThrow(failure)
+  expect(retired.disposed).toHaveBeenCalledTimes(1)
+  await render(false)
+  await render(true)
+  const current = fixture.webgl[1]!, owners = terminalResourceOwnerCounts()
+  retired.loseContext()
+  cleanupSample('retired-gpu-context', { oldAddonCalls: retired.disposed.mock.calls.length,
+    currentAddonCalls: current.disposed.mock.calls.length, currentListenerCalls: current.contextLossDisposed.mock.calls.length,
+    owners: terminalResourceOwnerCounts() })
+  expect(fixture.webgl).toHaveLength(2)
+  expect(current.disposed).not.toHaveBeenCalled()
+  expect(current.contextLossDisposed).not.toHaveBeenCalled()
+  expect(terminalResourceOwnerCounts()).toEqual(owners)
+  // The exact current callback is still authoritative and releases its own addon.
+  current.loseContext()
+  expect(current.disposed).toHaveBeenCalledTimes(1)
+  expect(current.contextLossDisposed).toHaveBeenCalledTimes(1)
+  expect(terminalResourceOwnerCounts().terminalAddons).toBe(3)
+  terminal.input('HEALTHY_AFTER_RETIRED_CONTEXT', true)
+  expect(fixture.write).toHaveBeenCalledWith(session.control, 'HEALTHY_AFTER_RETIRED_CONTEXT', 'terminal-protocol', expect.anything())
+  expect(fixture.terminals).toHaveLength(1)
+  expect(terminal.dispose).not.toHaveBeenCalled()
+  expect(fixture.detach).not.toHaveBeenCalled()
+  expect(fixture.attach).toHaveBeenCalledExactlyOnceWith(session.control, 0)
+})
