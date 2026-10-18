@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, type ComponentProps } from 'react'
+import { act, startTransition, type ComponentProps } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryPage } from '@agentmux/core'
@@ -24,9 +24,24 @@ async function draw(props: ReturnType<typeof frame>, extra: Partial<ComponentPro
   await act(async () => root.render(<ClientUiProvider platform={platform}><ConversationView {...props} sessionId="session" executionHostId="local"
     renderProcess={props => <NativeProcessObservation {...props} />} {...extra} /></ClientUiProvider>))
 }
+async function transition(props: ReturnType<typeof frame>, extra: Partial<ComponentProps<typeof ConversationView>>) {
+  await act(async () => startTransition(() => root.render(<ClientUiProvider platform={platform}><ConversationView {...props} sessionId="session" executionHostId="local"
+    renderProcess={props => <NativeProcessObservation {...props} />} {...extra} /></ClientUiProvider>)))
+}
 function select(node: Node) {
   const range = document.createRange(); range.selectNodeContents(node); getSelection()!.removeAllRanges(); getSelection()!.addRange(range)
   return range
+}
+function delaySelectionEvents() {
+  const queued: Event[] = [], dispatch = document.dispatchEvent.bind(document)
+  const interception = vi.spyOn(document, 'dispatchEvent').mockImplementation(event => {
+    if (event.type === 'selectionchange') { queued.push(event); return true }
+    return dispatch(event)
+  })
+  return { count: () => queued.length, release: async () => {
+    interception.mockRestore()
+    await act(async () => { for (const event of queued) dispatch(event) })
+  } }
 }
 async function release() { await act(async () => { getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) }) }
 beforeEach(() => { vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
@@ -170,6 +185,80 @@ it('keeps the selected original below a stable leading process header when earli
   expect(host.scrollTop).toBe(1040)
   expect(host.querySelector('[data-native-record-id="selected"]')).toBe(row)
   expect(getSelection()!.getRangeAt(0)).toBe(range); expect(range.startContainer).toBe(text)
+})
+
+it.each(['new', 'moved'])('rechecks a %s selection established after candidate rendering without selectionchange', async mode => {
+  const initial = frame(page(item('selected'), item('stable')))
+  await draw(initial)
+  const events = delaySelectionEvents()
+  const text = host.querySelector('[data-native-record-id="selected"] p')!.firstChild!
+  const priorRange = mode === 'moved' ? select(host.querySelector('[data-native-record-id="stable"] p')!.firstChild!) : null
+  let selected = false
+  const next = frame(page(item('stable')))
+  await transition(next, { renderRecordActions: () => {
+    if (!selected) {
+      selected = true
+      if (priorRange) priorRange.selectNodeContents(text)
+      else select(text)
+    }
+    return null
+  } })
+  expect(selected, 'The range changes after the owner read its render snapshot').toBe(true)
+  expect(events.count()).toBeGreaterThan(0)
+  expect(text.isConnected, 'The precommit check must reject eviction of the actual selected original').toBe(true)
+  expect(getSelection()!.toString()).toBe('selected')
+  expect(getSelection()!.getRangeAt(0).startContainer).toBe(text)
+  await events.release()
+  await release()
+  expect(host.querySelector('[data-native-record-id="selected"]')).toBeNull()
+})
+
+it('captures a late selected leaf immediately before prepending its neighbors', async () => {
+  host.setAttribute('data-workbench-reading-scroll', '')
+  Object.defineProperties(host, { clientHeight: { configurable: true, value: 400 }, scrollHeight: { configurable: true, value: 6000 } })
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this === host) return new DOMRect(0, 0, 600, 400)
+    if (this.matches('.wf-head')) return new DOMRect(0, 30 - host.scrollTop, 600, 32)
+    if (this.dataset.nativeRecordId === 'selected') return new DOMRect(0, 150 + (host.querySelector('[data-native-record-id="earlier"]') ? 1040 : 0) - host.scrollTop, 600, 80)
+    return new DOMRect()
+  })
+  const leading = item('leading', 'activity'), selected = item('selected')
+  await draw(frame(page(leading, selected)))
+  const events = delaySelectionEvents()
+  const row = host.querySelector<HTMLElement>('[data-native-record-id="selected"]')!, text = row.querySelector('p')!.firstChild!
+  let changed = false
+  await transition(frame(page(leading, item('earlier'), selected)), { renderRecordActions: () => {
+    if (!changed) { changed = true; select(text) }
+    return null
+  } })
+  expect(changed).toBe(true)
+  expect(events.count()).toBeGreaterThan(0)
+  expect(row.getBoundingClientRect().top).toBe(150)
+  expect(host.scrollTop).toBe(1040)
+  expect(getSelection()!.getRangeAt(0).startContainer).toBe(text)
+  await events.release()
+})
+
+it.each(['body', 'parent'])('retains the original when its %s changes after a late selection', async kind => {
+  const selected = item('selected', kind === 'parent' ? 'activity' : 'assistant-message', 'Original selected body')
+  const first = item('first', 'activity')
+  await draw(frame(page(first, selected)))
+  if (kind === 'parent') await act(async () => host.querySelector<HTMLButtonElement>('[data-native-step-id="selected"] button')!.click())
+  const text = host.querySelector('[data-native-record-id="selected"] .log-turn__body p')!.firstChild!
+  const events = delaySelectionEvents()
+  let changed = false
+  const next = frame(kind === 'body' ? page(first, item('selected', 'assistant-message', 'Revised selected body')) : page(first, item('between'), selected))
+  await transition(next, { renderRecordActions: () => {
+    if (!changed) { changed = true; select(text) }
+    return null
+  } })
+  expect(changed).toBe(true); expect(events.count()).toBeGreaterThan(0)
+  expect(text.isConnected).toBe(true)
+  expect(getSelection()!.getRangeAt(0).startContainer).toBe(text)
+  expect(getSelection()!.toString()).toBe('Original selected body')
+  expect(host.textContent).not.toContain(kind === 'body' ? 'Revised selected body' : 'between')
+  await events.release(); await release()
+  expect(host.textContent).toContain(kind === 'body' ? 'Revised selected body' : 'between')
 })
 
 it('anchors the visible selected leaf when a cross-record Range starts offscreen before a stable group', async () => {
