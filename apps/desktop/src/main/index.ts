@@ -1,5 +1,6 @@
 import { ClientIncidentArchive } from './client-incident-archive.js'
 import { PerformanceSceneOwner } from './performance-scene.js'
+import { RendererHeapSnapshotOwner } from './renderer-heap-snapshot.js'
 import { createDesktopApplicationAccessOwner } from './application-access-owner.js'
 import { WorkbenchWindows } from './workbench-windows.js'
 import { WorkbenchWindowStore } from './workbench-window-store.js'
@@ -98,6 +99,8 @@ function startPrimaryInstance(): void {
   const clientIncidents = new ClientIncidentArchive(join(app.getPath('userData'), 'client-incidents'))
   const performanceScene = new PerformanceSceneOwner(join(app.getPath('userData'), 'performance-scene.json'))
   app.once('will-quit', () => performanceScene.dispose())
+  const performanceHeap = new RendererHeapSnapshotOwner(join(app.getPath('userData'), 'performance-heap'))
+  app.once('will-quit', () => performanceHeap.dispose())
   const scratchTopics = new ScratchTopics()
   const runtime = new RuntimeController(
     new AgentMuxFileAgentSessionStore(desktopAgentSessionStorePath()),
@@ -273,7 +276,7 @@ function startPrimaryInstance(): void {
     window.once('closed', () => startupCapture.dispose())
     reportStartupStage('before-ipc')
     disposeIpc = await registerIpc({ window, workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, progressLoops, demands, scratchTopics, workspaceFiles, spatialLinks, webLinks,
-      performanceScene, clientIncidents, loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
+      performanceScene, performanceHeap, clientIncidents, loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
       onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, ...(environmentWarning ? { environmentWarning } : {}) })
     reportStartupStage('after-ipc')

@@ -1,6 +1,7 @@
 import { parseRendererAllocationsInput, parseRendererAllocationsResult, parseRendererSceneCaptureInput, parseRendererSceneCaptureResult, parseRendererSceneInspectInput, parseRendererSceneInspection } from '@agentmux/core/control'
 import type { IpcMainInvokeEvent } from 'electron'
 import { parseRendererAnimationsInput, parseRendererAnimationsResult } from '@agentmux/core/control'
+import { parseRendererHeapSnapshotInput, parseRendererHeapSnapshotResult, parseRendererHeapSnapshotInspectInput, parseRendererHeapSnapshotInspection } from '@agentmux/core/control'
 import { AgentMuxError } from '@agentmux/core'
 import { parseRendererV8ProfileInput, parseRendererV8ProfileResult, parseRendererTraceInput, parseRendererTraceResult,
   type AgentMuxMetricsPort } from '@agentmux/core/control'
@@ -8,6 +9,16 @@ import { parseRendererV8ProfileInput, parseRendererV8ProfileResult, parseRendere
 /** Desktop is another consumer of the original public metrics capture owner. */
 export function registerPerformanceCaptureIpc(metrics: AgentMuxMetricsPort,
   handle: (channel: string, listener: (event: IpcMainInvokeEvent, input: unknown) => unknown) => void): void {
+  handle('metrics:captureHeapSnapshot', async (_event, raw) => {
+    const input = parseRendererHeapSnapshotInput(raw)
+    if (!metrics.captureHeapSnapshot) throw new AgentMuxError('Native heap capture is unavailable.', 'METRICS_UNSUPPORTED')
+    return parseRendererHeapSnapshotResult(await metrics.captureHeapSnapshot(input), input)
+  })
+  handle('metrics:inspectHeapSnapshot', async (_event, raw) => {
+    const input = parseRendererHeapSnapshotInspectInput(raw)
+    if (!metrics.inspectHeapSnapshot) throw new AgentMuxError('Native heap inspection is unavailable.', 'METRICS_UNSUPPORTED')
+    return parseRendererHeapSnapshotInspection(await metrics.inspectHeapSnapshot(input), input)
+  })
   handle('metrics:inspectAnimations', async (_event, raw) => {
     const input = parseRendererAnimationsInput(raw)
     if (!metrics.inspectAnimations) throw new AgentMuxError('Renderer animation observation is unavailable.', 'METRICS_UNSUPPORTED')

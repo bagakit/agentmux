@@ -1645,6 +1645,11 @@ export type AgentMuxDesktopApi = {
   }
   conversation: import('./conversation-read').ConversationReadApi
   performance: {
+    captureHeapSnapshot(input: import('@agentmux/core/control').RendererHeapSnapshotInput): Promise<import('@agentmux/core/control').RendererHeapSnapshotResult>
+    inspectHeapSnapshot(input: import('@agentmux/core/control').RendererHeapSnapshotInspectInput): Promise<import('@agentmux/core/control').RendererHeapSnapshotInspection>
+    saveHeapSnapshot(input: { captureId: string }): Promise<{ status: 'saved'; path: string } | { status: 'cancelled' }>
+    revealHeapSnapshot(input: { captureId: string }): Promise<void>
+    openHeapDevTools(input: { captureId: string }): Promise<void>
     inspectAnimations(input: import('@agentmux/core/control').RendererAnimationsInput): Promise<import('@agentmux/core/control').RendererAnimationsResult>
     captureAllocations(input: import('@agentmux/core/control').RendererAllocationsInput): Promise<import('@agentmux/core/control').RendererAllocationsResult>
     captureScene(input: import('@agentmux/core/control').RendererSceneCaptureInput): Promise<import('@agentmux/core/control').RendererSceneCaptureResult>

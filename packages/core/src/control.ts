@@ -22,6 +22,7 @@ import type { BrowserTaskControlPayload, BrowserTaskControlResult } from './brow
 export * from './browser-task-control.js'
 import type { RendererV8ProfileInput, RendererV8ProfileResult } from './renderer-v8-profile.js'
 import type { RendererMemoryInput, RendererMemoryResult } from './renderer-memory.js'
+import type { RendererHeapSnapshotInput, RendererHeapSnapshotResult, RendererHeapSnapshotInspectInput, RendererHeapSnapshotInspection } from './renderer-heap-snapshot.js'
 import type { RendererAnimationsInput, RendererAnimationsResult } from './renderer-animations.js'
 import type { RendererTraceInput, RendererTraceResult } from './renderer-trace.js'
 import type { AgentMuxMetricsPort, MetricsObservation } from './metrics.js'
@@ -249,7 +250,7 @@ export type AgentMuxArrangeMode =
   | { kind: 'active-first' }
 
 type RequestBase = { schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION; requestId: string }
-export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' } | ({ operation: 'metrics.scene.capture' } & RendererSceneCaptureInput) | ({ operation: 'metrics.scene.inspect' } & RendererSceneInspectInput) | ({ operation: 'metrics.allocations.capture' } & RendererAllocationsInput) | ({ operation: 'metrics.memory.inspect' } & RendererMemoryInput) | ({ operation: 'metrics.animations.inspect' } & RendererAnimationsInput) | ({ operation: 'metrics.profile.capture' } & RendererV8ProfileInput) | ({ operation: 'metrics.trace.capture' } & RendererTraceInput))
+export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' } | ({ operation: 'metrics.scene.capture' } & RendererSceneCaptureInput) | ({ operation: 'metrics.scene.inspect' } & RendererSceneInspectInput) | ({ operation: 'metrics.allocations.capture' } & RendererAllocationsInput) | ({ operation: 'metrics.memory.inspect' } & RendererMemoryInput) | ({ operation: 'metrics.heap.capture' } & RendererHeapSnapshotInput) | ({ operation: 'metrics.heap.inspect' } & RendererHeapSnapshotInspectInput) | ({ operation: 'metrics.animations.inspect' } & RendererAnimationsInput) | ({ operation: 'metrics.profile.capture' } & RendererV8ProfileInput) | ({ operation: 'metrics.trace.capture' } & RendererTraceInput))
 /** A host-owned, content-free client observation; the host owns its concrete schema. */
 export type AgentMuxControlInspectClientRequest = RequestBase & { operation: 'inspect.client'; conversation?: ConversationConsumerQuery }
 export type AgentMuxControlInspectMoteContextRequest = RequestBase & {
@@ -759,6 +760,8 @@ export type AgentMuxControlResult =
   | { operation: 'metrics.scene.inspect'; inspection: RendererSceneInspection }
   | { operation: 'metrics.profile.capture'; capture: RendererV8ProfileResult }
   | { operation: 'metrics.memory.inspect'; observation: RendererMemoryResult }
+  | { operation: 'metrics.heap.capture'; capture: RendererHeapSnapshotResult }
+  | { operation: 'metrics.heap.inspect'; inspection: RendererHeapSnapshotInspection }
   | { operation: 'metrics.animations.inspect'; observation: RendererAnimationsResult }
   | { operation: 'metrics.trace.capture'; capture: RendererTraceResult }
   | AgentMuxSpaceControlResult
@@ -1024,6 +1027,8 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'metrics.get': 'short',
   'metrics.watch': 'short',
   'metrics.memory.inspect': 'short',
+  'metrics.heap.capture': 'long',
+  'metrics.heap.inspect': 'long',
   'metrics.animations.inspect': 'short',
   'metrics.allocations.capture': 'long',
   'metrics.scene.capture': 'long',

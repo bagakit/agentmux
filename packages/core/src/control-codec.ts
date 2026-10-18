@@ -2,6 +2,7 @@ import { parseRendererAllocationsInput, parseRendererAllocationsResult } from '.
 import { parseRendererSceneCaptureInput, parseRendererSceneCaptureResult, parseRendererSceneInspectInput, parseRendererSceneInspection } from './renderer-performance-scene.js'
 import { parseRendererV8ProfileInput, parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseRendererMemoryInput, parseRendererMemoryResult } from './renderer-memory.js'
+import { parseRendererHeapSnapshotInput, parseRendererHeapSnapshotResult, parseRendererHeapSnapshotInspectInput, parseRendererHeapSnapshotInspection } from './renderer-heap-snapshot.js'
 import { parseRendererAnimationsInput, parseRendererAnimationsResult } from './renderer-animations.js'
 import { parseRendererTraceInput, parseRendererTraceResult } from './renderer-trace.js'
 import { parseConversationConsumerQuery } from './conversation-consumer-query.js'
@@ -316,6 +317,16 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target'], 'INVALID_CONTROL_REQUEST')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
       ...parseRendererMemoryInput({ target: source.target }) }
+  }
+  if (source.operation === 'metrics.heap.capture') {
+    settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target', 'captureId'], 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
+      ...parseRendererHeapSnapshotInput({ target: source.target, captureId: source.captureId }) }
+  }
+  if (source.operation === 'metrics.heap.inspect') {
+    settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'captureId'], 'INVALID_CONTROL_REQUEST')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
+      ...parseRendererHeapSnapshotInspectInput(source.captureId === undefined ? {} : { captureId: source.captureId }) }
   }
   if (source.operation === 'metrics.profile.capture') {
     settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target', 'durationMs'], 'INVALID_CONTROL_REQUEST')
@@ -1191,6 +1202,16 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
       result: { observation: parseRendererMemoryResult(result.observation) } }
+  }
+  if (operation === 'metrics.heap.capture') {
+    settingsFields(result, ['capture'], 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { capture: parseRendererHeapSnapshotResult(result.capture) } }
+  }
+  if (operation === 'metrics.heap.inspect') {
+    settingsFields(result, ['inspection'], 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { inspection: parseRendererHeapSnapshotInspection(result.inspection) } }
   }
   if (operation === 'metrics.profile.capture') {
     settingsFields(result, ['capture'], 'CONTROL_PROTOCOL_ERROR')

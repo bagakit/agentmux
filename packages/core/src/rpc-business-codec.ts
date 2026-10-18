@@ -2,6 +2,7 @@ import { parseRendererAllocationsResult } from './renderer-allocations.js'
 import { parseRendererSceneCaptureResult, parseRendererSceneInspection } from './renderer-performance-scene.js'
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseRendererMemoryResult } from './renderer-memory.js'
+import { parseRendererHeapSnapshotResult, parseRendererHeapSnapshotInspection } from './renderer-heap-snapshot.js'
 import { parseRendererAnimationsResult } from './renderer-animations.js'
 import { parseRendererTraceResult } from './renderer-trace.js'
 import { randomUUID } from 'node:crypto'
@@ -341,6 +342,12 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
       break
     case 'metrics.memory.inspect':
       parseRendererMemoryResult(actual.observation, request)
+      break
+    case 'metrics.heap.capture':
+      parseRendererHeapSnapshotResult(actual.capture, request)
+      break
+    case 'metrics.heap.inspect':
+      parseRendererHeapSnapshotInspection(actual.inspection, request)
       break
     case 'metrics.profile.capture':
       parseRendererV8ProfileResult(actual.capture, request)
