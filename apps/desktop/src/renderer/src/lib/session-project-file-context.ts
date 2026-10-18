@@ -1,6 +1,7 @@
 import { groupIds, regionIds, type WorkspaceLayout } from '@agentmux/layout'
 import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
 import { directoryIdentity, workspaceZoneId, type SpaceZoneBindings, type SpatialRequestBinding } from '../../../shared/space-addresses'
+import { SCRATCH_WORKSPACE_ID, scratchTopicIdFromWorkspacePath, scratchTopicLogicalPath } from '../../../shared/scratch-topics'
 import type { DemandRecord } from './global-demand-board'
 import { goalProjectContext, type GoalProjectContext } from './goal-project-context'
 import type { FileOpenPlacement } from './file-workbench-state'
@@ -30,10 +31,16 @@ export type SessionProjectFileContext = {
   kind: 'session' | 'goal' | 'unassigned' | 'unconfirmed'
   workspaceRoot: string
   homeDir: string
+  /** File owner address prefix when the parsing root is a Topic's physical directory. */
+  pathPrefix?: string
   goalId?: string
   project?: GoalProjectContext
   placement?: FileOpenPlacement
   issue?: string
+}
+
+export function sessionFileResourcePath(context: SessionProjectFileContext, path: string): string {
+  return context.pathPrefix ? `${context.pathPrefix}/${path}` : path
 }
 
 // This is an index of the immutable mapping, not another mapping owner. Unrelated Session
@@ -66,6 +73,7 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
   let project: GoalProjectContext | null = null
   let metadataInputs: readonly unknown[] | undefined
   let originalSpace: FileOpenPlacement['space'] | undefined
+  let topicDirectory: { root: string; prefix: string } | undefined
   let relatedInputs: readonly unknown[] | undefined
   return (state) => {
     const ids = mappedGoals(state.demandPmoTabIds, origin.tabId)
@@ -111,7 +119,16 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
       if (!metadataInputs || inputs.some((input, index) => input !== metadataInputs![index])) {
         metadataInputs = inputs
         originalSpace = undefined
+        topicDirectory = undefined
         if (occurrence && session && resourceWorkspace?.hostId === session.hostId && tab) {
+          // Directory facts own this mapping. The Scratch container is not the physical
+          // root of a Topic/Mote, and optional sidecar reads do not change that identity.
+          if (resourceWorkspace.id === SCRATCH_WORKSPACE_ID) {
+            const topicId = scratchTopicIdFromWorkspacePath(resourceWorkspace.path, session.workspacePath, topics)
+            const topic = topics?.find(item => item.id === topicId)
+            const prefix = topic && scratchTopicLogicalPath(resourceWorkspace, topic)
+            if (prefix) topicDirectory = { root: session.workspacePath, prefix }
+          }
           const spatialState = { config: state.config, tabs: state.tabs, layouts: state.layouts,
             spaceZoneBindings: state.spaceZoneBindings, spatialRequests: state.spatialRequests,
             ...(state.topicCategories ? { topicCategories: state.topicCategories } : {}),
@@ -142,16 +159,18 @@ export function createSessionProjectFileContextSelector(sessionId: string, origi
     if (!seenGoal && !sessionPlacement) issue = 'The original Session file resource, Space or display occurrence is unconfirmed.'
     const kind = seenGoal ? issue ? 'unconfirmed' : project ? 'goal' : 'unassigned' : issue ? 'unconfirmed' : 'session'
     const root = kind === 'goal' ? project!.path : kind === 'session' && session
-      ? workspaceRootForPath(state.config, session) ?? '' : ''
+      ? topicDirectory?.root ?? workspaceRootForPath(state.config, session) ?? '' : ''
+    const pathPrefix = kind === 'session' ? topicDirectory?.prefix : undefined
     const hostId = kind === 'goal' ? project!.hostId : session?.hostId
     const hosts = state.config?.hosts.filter(host => host.id === hostId) ?? []
     const homeDir = hosts.length === 1 && hosts[0]?.kind === 'local' ? state.localHome : ''
-    const key = JSON.stringify([kind, goalId, goal?.projectId, project, root, homeDir, issue,
+    const key = JSON.stringify([kind, goalId, goal?.projectId, project, root, pathPrefix, homeDir, issue,
       session?.id, session?.hostId, session?.workspacePath, occurrence, sessionPlacement])
     if (previous && key === previousKey) return previous
     previousKey = key
     previous = {
       kind, workspaceRoot: root, homeDir,
+      ...(pathPrefix ? { pathPrefix } : {}),
       ...(goalId ? { goalId } : {}),
       ...(kind === 'goal' ? { project: project!, placement: {
         displayWorkspaceId: origin.workspaceId,
