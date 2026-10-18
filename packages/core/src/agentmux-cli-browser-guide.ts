@@ -111,11 +111,12 @@ hover, wheel, key/IME, paste and drop out of the webpage; these gestures never t
 Host navigation and execution Viewport changes require explicit Take control. Reading activity,
 editing an address draft and messaging the operator remain available. Isolation preparation or
 failure is reported separately; unconfirmed isolation is never a claim that input is blocked.
-Normal program completion releases isolation. Explicit Take control or Stop fences future actions
+Program completion and Stop end execution while retaining Agent control and input isolation.
+Only explicit Take control hands the embedded page to the person and fences future actions
 on the original operation; Chromium actions already dispatched may still complete. Inspect the
 original receipt and page rather than replaying unknown effects. A subsequent \`browser run\`
-returns BROWSER_HUMAN_CONTROL_ACTIVE until the person explicitly chooses Return to Agent.
-Return releases control only; it never resumes or replays the old program. There is no public
+returns BROWSER_HUMAN_CONTROL_ACTIVE after human takeover until the person explicitly chooses Return to Agent.
+Return restores Agent control and isolation only; it never resumes or replays the old program. There is no public
 CLI return/approval flag: an Agent cannot impersonate that human handoff.
 
 Large JSON return values become a durable \`browser-result-artifact\` reference (8 MiB per value,

@@ -2132,6 +2132,10 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:replayPlan', event)
     return await browsers.replayPlan(operationId)
   })
+  handleWithEvent('browser:takeControl', async (event, id: string) => {
+    requireTrustedSender('browser:takeControl', event)
+    return browsers.takeControl(id)
+  })
   handleWithEvent('browser:returnControl', async (event, id: string) => {
     requireTrustedSender('browser:returnControl', event)
     return browsers.returnControl(id)

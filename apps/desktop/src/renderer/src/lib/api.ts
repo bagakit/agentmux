@@ -1466,6 +1466,7 @@ const mockApi: AgentMuxDesktopApi = {
     // 幂等成功答 null（RED-LINES 第 2 类：我们查不到 ≠ Browser 坏了）。
     stopOperationById: async () => null,
     replayPlan: async () => null,
+    takeControl: async (id) => structuredClone(requireMockBrowser(id)),
     returnControl: async (id) => structuredClone(requireMockBrowser(id)),
     runReplay: async () => { throw new Error('Browser replay requires the desktop app.') },
     selectElement: async () => null,

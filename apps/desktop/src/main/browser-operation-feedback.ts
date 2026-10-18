@@ -498,10 +498,12 @@ export class BrowserOperationFeedback {
     this.clickedAction = action
     await this.bounded(this.document(this.target, this.payload('click', 'target', Date.now() + DISPLAY_BUDGET_MS)), action)
   }
-  async end(completed: boolean): Promise<void> {
+  async end(completed: boolean, retainControl = false): Promise<void> {
     if (completed) await this.completeAction()
     else await this.clear()
-    await this.hideControl()
+    if (retainControl) {
+      if (this.controlMayExist) await this.synchronizeControl()
+    } else await this.hideControl()
   }
   /** Readonly calls revalidate the original cue, without stealing an in-flight action's generation. */
   async observe(): Promise<void> {

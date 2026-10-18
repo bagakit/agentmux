@@ -2,7 +2,7 @@ export type AgentMuxBrowserMode = 'normal' | 'private'
 
 /** Current host-owned input facts. A retained operation alone grants no control. */
 export type AgentMuxBrowserControl = {
-  /** Current webpage input recipient; an idle embedded page is human-usable. */
+  /** Current host-owned input recipient; Agent ownership survives execution completion until explicit handoff. */
   owner: 'agent' | 'human' | 'unknown'
   activeOperationId: string | null
   revision: number

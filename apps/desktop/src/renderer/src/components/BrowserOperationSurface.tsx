@@ -52,7 +52,8 @@ type BrowserOperationStatusProps = {
 
 function controlsOperation(operation: BrowserOperation | null, control: AgentMuxBrowserControl | undefined, browserId?: string): boolean {
   return Boolean(operation && (browserId === undefined || operation.browserId === browserId) &&
-    control?.owner === 'agent' && control.activeOperationId === operation.id)
+    control?.owner === 'agent' && (control.activeOperationId === operation.id ||
+      (control.activeOperationId === null && ['completed', 'failed', 'stopped', 'indeterminate'].includes(operation.phase))))
 }
 
 /** The actual BrowserPane consumer starts cosmetic work only after Main publishes its operation. */
@@ -110,7 +111,7 @@ export function BrowserOperationStatus({
   const operation = activity.operation
   const control = currentControl
   const controlled = controlsOperation(operation, control, browserId)
-  const currentDetails = control?.owner !== 'agent' || Boolean(operation && controlled)
+  const currentDetails = control?.owner !== 'agent' || control.activeOperationId === null || Boolean(operation && controlled)
   const terminal = operation && ['completed', 'failed', 'stopped', 'indeterminate'].includes(operation.phase)
   // A cursor is a workflow fact, not the completed Journal action or the editor's selected version.
   // An explicitly continued older cursor remains selected by Main, regardless of timestamp order.
@@ -123,7 +124,7 @@ export function BrowserOperationStatus({
       : control?.owner === 'human') ? latestRun : null
   const phase = !currentDetails ? 'unknown' : taskRun ? taskRun.status === 'waiting-human' ? 'human' : 'waiting' : operation
     ? !terminal && control?.owner === 'human' ? 'human' : operation.phase
-    : control?.owner === 'human' ? 'idle' : 'unknown'
+    : control?.owner === 'human' || (control?.owner === 'agent' && control.activeOperationId === null) ? 'idle' : 'unknown'
   const step = controlled && !terminal && operation ? lastRunningStep(operation) : undefined
   const effect = step ? BROWSER_PAGE_CAPABILITIES.find(capability => capability.name === step.method)?.effect : undefined
   const action = phase !== 'running' ? null : step?.method === 'js' ? { label: 'Running script', short: 'Script', icon: 'object.source-code' as const }
@@ -132,17 +133,19 @@ export function BrowserOperationStatus({
         : effect === 'navigate' ? { label: 'Navigating page', short: 'Navigating', icon: 'object.browser' as const } : null
   const label = taskRun ? taskRun.status === 'waiting-human' ? 'Waiting for human checkpoint' : 'Task ready to continue'
     : phase === 'unknown' ? control?.owner === 'agent' ? 'Agent control active · Activity details are loading' : 'Browser control is unconfirmed · Activity details are loading'
-    : phase === 'idle' ? 'You have control' : action?.label ?? phaseLabel(phase)
+    : phase === 'idle' ? control?.owner === 'agent' ? 'Agent has control' : 'You have control' : action?.label ?? phaseLabel(phase)
   const checkpoint = taskVersion?.steps.find(step => step.id === taskRun?.pendingCheckpointId)
   const target = !currentDetails ? null : taskRun ? [taskVersion!.name, `v${taskRun.version}`, checkpoint?.label,
     taskRun.nextStep < taskVersion!.steps.length ? `Next step ${taskRun.nextStep + 1}` : 'Review final checkpoint'].filter(Boolean).join(' · ')
     : operation ? currentTarget(operation) ?? operation.summary : null
   const identity = currentDetails ? operation?.operator.name : undefined
-  const description = [identity, label, terminal && control?.owner === 'human' ? 'You have control' : null, target].filter(Boolean).join(' · ')
+  const description = [identity, label, terminal ? control?.owner === 'human' ? 'You have control'
+    : control?.owner === 'agent' ? 'Agent retains control' : null : null, target].filter(Boolean).join(' · ')
   const cue = action?.short ?? (phase === 'running' ? 'Operating' : phase === 'waiting' ? 'Waiting' : phase === 'preparing' ? 'Preparing'
     : phase === 'human' ? 'Your turn' : phase === 'completed' ? 'Done' : phase === 'failed' ? 'Failed' : phase === 'stopped' ? 'Stopped'
-      : phase === 'indeterminate' ? 'Review' : phase === 'unknown' ? control?.owner === 'agent' ? 'Agent control' : 'Unconfirmed' : null)
-  const canStop = Boolean(operation && (!terminal || controlled))
+      : phase === 'indeterminate' ? 'Review' : phase === 'idle' && control?.owner === 'agent' ? 'Agent control'
+        : phase === 'unknown' ? control?.owner === 'agent' ? 'Agent control' : 'Unconfirmed' : null)
+  const canStop = Boolean(operation && !terminal)
   const canTakeControl = control?.owner === 'agent'
   const canReturnControl = control?.owner === 'human'
   const providerId = currentDetails ? operatorProviderId ?? operation?.operator.providerId : undefined

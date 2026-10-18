@@ -1235,7 +1235,7 @@ export class BrowserViewManager {
     if (entry.visible) reasons.add('visible')
     if ([...entry.presentationLeaseIds].some(id => this.presentationLeases.get(id)?.geometry.visible)) reasons.add('presentation')
     if (entry.captureId || contents.isBeingCaptured?.()) reasons.add('presentation')
-    if (entry.runInFlight || entry.activeRun || entry.driving || entry.resourceReads || entry.humanControl ||
+    if (entry.runInFlight || entry.activeRun || entry.driving || entry.resourceReads || entry.humanControl || this.agentOwnsInput(entry) ||
       this.taskExecutions.get(entry.id)?.entry === entry || this.taskAssets?.isBrowserExecuting?.(entry.id) ||
       this.demonstrationCapture?.entry === entry) reasons.add('operation')
     if (entry.pendingSwitch) reasons.add('profile-switch')
@@ -1740,6 +1740,7 @@ export class BrowserViewManager {
       throw new Error('Another Browser operation is already running. Wait for it to finish or stop it before starting another program.')
     }
     entry.runInFlight = true
+    const admittedControlRevision = entry.controlRevision
     // attach 抛是**常规路径**，不是意外：用户开着 DevTools 就必然抛（见 browser-cdp-session.ts）。
     // 所以这个 flag 的复位不能只挂在成功之后——attach 在 try 外面抛一次，flag 就永久卡住，
     // 此后每次 run 都报"另一个操作正在运行"，而 `activeRun` 是空的、连能停的东西都没有，
@@ -1801,15 +1802,31 @@ export class BrowserViewManager {
       }
       throw error
     }
+    // A human handoff can arrive while the original journal start is awaiting IO,
+    // before activeRun exists. Return cannot revive that already-fenced request.
+    if (!this.owns(entry, runView) || entry.controlRevision !== admittedControlRevision) {
+      operation.phase = 'stopped'
+      operation.summary = 'Browser control changed before program dispatch'
+      operation.finishedAt = Date.now()
+      operation.warning = 'The original program was stopped before dispatch. Returning control does not resume it; inspect the page before submitting a fresh program.'
+      const cleanupWarning = session.detach()
+      if (cleanupWarning) operation.warning += ` ${cleanupWarning}`
+      entry.runInFlight = false
+      operation.control = this.owns(entry, runView) ? this.controlState(entry) : {
+        owner: 'unknown', activeOperationId: null, revision: entry.controlRevision, inputIsolation: 'unconfirmed'
+      }
+      await this.operationJournal?.finish(operation.id, 'stopped', { summary: operation.summary, warning: operation.warning })
+      return { result: undefined, logs: [], outcome: { kind: 'stopped', message: operation.warning }, runOperation: operation }
+    }
     entry.activity = { operation, control: 'agent' }
     const previousFeedback = entry.feedback
     const feedbackView = entry.view
-    const feedback = showBrowserOperationFeedback({ contents: feedbackView.webContents, operationId: operation.id,
+    const feedback: BrowserOperationFeedback = showBrowserOperationFeedback({ contents: feedbackView.webContents, operationId: operation.id,
       navigationId: () => entry.navigationId, operatorName: operation.operator.name,
       preferences: this.feedbackPreferences,
       nextRevision: () => ++entry.feedbackRevision,
       isCurrent: () => this.entries.get(entry.id) === entry && entry.view === feedbackView && entry.visible &&
-        entry.activeRun?.operationId === operation.id && this.agentOwnsInput(entry) && !feedbackView.webContents.isDestroyed(),
+        entry.feedback === feedback && this.agentOwnsInput(entry) && !feedbackView.webContents.isDestroyed(),
       warn: () => {
         if (this.entries.get(entry.id) !== entry || entry.view !== feedbackView || entry.activity.operation?.id !== operation.id) return
         const warning = 'Browser action feedback could not be displayed. The page and Agent remain usable; inspect the activity and run another action to retry the visual feedback.'
@@ -1827,23 +1844,21 @@ export class BrowserViewManager {
       stop: () => {
         if (stopRequested) return
         stopRequested = true
-        entry.humanControl = true
         ++entry.controlRevision
         entry.driving = false
         operation.phase = 'stopped'
         operation.summary = 'Browser operation stopped explicitly'
         operation.finishedAt = Date.now()
-        operation.warning = 'The Browser operation was stopped explicitly. Earlier actions may have completed. Review the page, explicitly return control, then decide whether to start a fresh program.'
-        entry.activity = { operation, control: 'human', warning: operation.warning }
+        operation.warning = 'The Browser operation was stopped explicitly. Earlier actions may have completed. Agent control remains; review the page before starting a fresh program, or use Take control to interact manually.'
+        entry.activity = { operation, control: entry.activity.control, warning: operation.warning }
         stopController.abort()
-        this.releaseInputShield(entry)
         void this.operationJournal?.setPhase(operation.id, 'stopped', { summary: operation.summary, warning: operation.warning })
         this.emit(entry)
       }
     }
     try {
       this.emit(entry)
-      await this.prepareInputShield(entry, runView, operation.id, stopController.signal)
+      await this.prepareInputShield(entry, runView)
       await previousFeedback?.hide('replace')
       await onOperationStarted?.(operation)
       if (!stopRequested) {
@@ -1878,7 +1893,7 @@ export class BrowserViewManager {
         operation.phase = 'stopped'
         operation.summary = 'Browser operation stopped explicitly'
         operation.finishedAt = operation.finishedAt ?? Date.now()
-        operation.warning = operation.warning ?? 'The Browser operation was stopped explicitly. Earlier actions may have completed. Review the page, explicitly return control, then decide whether to start a fresh program.'
+        operation.warning = operation.warning ?? 'The Browser operation was stopped explicitly. Earlier actions may have completed. Review the current page before starting a fresh program.'
         entry.activity = { operation, control: entry.humanControl ? 'human' : 'agent', warning: operation.warning }
         return {
           result: undefined,
@@ -1994,15 +2009,14 @@ export class BrowserViewManager {
       return { result: undefined, logs: run.logs, outcome, runOperation: operation }
     } finally {
       stopController.abort()
-      // Release native human input as soon as program dispatch ends. Feedback,
-      // debugger cleanup and journal IO do not own the input lease.
+      // Execution ends independently of Browser ownership. Only an explicit human
+      // handoff releases the page's input shield and ownership decoration.
       entry.driving = false
       if (entry.activeRun?.operationId === operation.id) { entry.activeRun = undefined; ++entry.controlRevision }
-      this.releaseInputShield(entry)
       // The original source can end before the live target is projected again.
       // Its returned operation still reports the final dispatch/control facts.
       operation.control = this.controlState(entry)
-      await feedback.end(operation.phase === 'completed')
+      await feedback.end(operation.phase === 'completed', this.agentOwnsInput(entry))
       const cleanupWarning = session.detach()
       if (cleanupWarning) {
         operation.warning ??= cleanupWarning
@@ -2577,15 +2591,24 @@ export class BrowserViewManager {
     this.emit(entry)
   }
 
+  /** Trusted human handoff, including the idle gap after an operation finishes. */
+  takeControl(id: string): BrowserSnapshot {
+    const entry = this.require(id)
+    entry.activeRun?.stop()
+    this.yieldControl(id)
+    return this.snapshot(entry)
+  }
+
   returnControl(id: string): BrowserSnapshot {
     const entry = this.require(id)
     if (this.agentOwnsInput(entry)) return this.snapshot(entry)
-    this.releaseInputShield(entry)
     entry.humanControl = false
     ++entry.controlRevision
     const { warning: _warning, ...activity } = entry.activity
     entry.activity = { ...(entry.inputShield ? entry.activity : activity), control: 'agent' }
+    entry.inputIsolation = 'preparing'
     this.emit(entry)
+    void this.prepareInputShield(entry, entry.view)
     return this.snapshot(entry)
   }
 
@@ -3861,11 +3884,11 @@ export class BrowserViewManager {
     this.send({ type: 'updated', browser })
   }
 
-  private agentOwnsInput(entry: BrowserEntry): boolean { return entry.activeRun !== undefined && !entry.activeRun.signal.aborted && !entry.humanControl }
+  private agentOwnsInput(entry: BrowserEntry): boolean { return entry.activity.control === 'agent' && !entry.humanControl }
 
   /** Saved presentation changes wake only live Browser feedback; input ownership is unchanged. */
   refreshAgentFeedback(): void {
-    for (const entry of this.entries.values()) if (entry.activeRun) {
+    for (const entry of this.entries.values()) if (this.agentOwnsInput(entry)) {
       if (entry.visible) void entry.feedback?.refreshPreferences()
       const shield = entry.inputShield
       void shield?.refreshAppearance().catch(() => {
@@ -3905,24 +3928,31 @@ export class BrowserViewManager {
       inputIsolation: entry.inputIsolation === 'isolated' && !entry.inputShield?.isolated ? 'unconfirmed' : entry.inputIsolation }
   }
 
-  private async prepareInputShield(entry: BrowserEntry, view: WebContentsView, operationId: string, signal: AbortSignal): Promise<void> {
-    if (signal.aborted || !this.owns(entry, view) || !this.agentOwnsInput(entry)) return
+  private async prepareInputShield(entry: BrowserEntry, view: WebContentsView): Promise<void> {
+    if (!this.owns(entry, view) || !this.agentOwnsInput(entry)) return
+    if (entry.inputShield?.isCurrentFor(view) && entry.inputShield.isolated) {
+      entry.inputIsolation = 'isolated'
+      this.synchronizeInputShield(entry)
+      return
+    }
     if (entry.inputShield) {
       this.releaseInputShield(entry)
       if (entry.inputShield) { this.inputIsolationFailed(entry); return }
     }
-    let timer: ReturnType<typeof setTimeout> | undefined, abort: (() => void) | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let preparedShield: BrowserNativeInputShield | undefined
     try {
-      const shield = new BrowserNativeInputShield(view, () => this.windowForView(view), () =>
-        this.owns(entry, view) && entry.activeRun?.operationId === operationId && this.agentOwnsInput(entry), () => {
-        if (!this.owns(entry, view) || entry.activeRun?.operationId !== operationId) return
+      const shield: BrowserNativeInputShield = new BrowserNativeInputShield(view, () => this.windowForView(view), () =>
+        this.owns(entry, view) && this.agentOwnsInput(entry), () => {
+        if (!this.owns(entry, view) || entry.inputShield !== shield || !this.agentOwnsInput(entry)) return
         this.releaseInputShield(entry)
         this.inputIsolationFailed(entry)
       }, this.feedbackPreferences)
+      preparedShield = shield
       entry.inputShield = shield
       shield.contents.once('destroyed', () => queueMicrotask(() => this.observeInputShieldDestruction(entry.id, shield)))
       shield.contents.on('input-event', (_event, input) => {
-        if (!this.agentOwnsInput(entry) || !['mouseDown', 'mouseMove', 'mouseEnter', 'mouseLeave'].includes(input.type)) return
+        if (entry.inputShield !== shield || !this.agentOwnsInput(entry) || !['mouseDown', 'mouseMove', 'mouseEnter', 'mouseLeave'].includes(input.type)) return
         const owner = this.nativeOwner(entry.id)
         if (owner) this.onNativeInput?.(owner, { type: 'pointer', event: input as Electron.MouseInputEvent })
       })
@@ -3935,21 +3965,20 @@ export class BrowserViewManager {
         if (entry.inputShield !== shield || !this.agentOwnsInput(entry)) return
         this.inputIsolationFailed(entry)
       })
-      await Promise.race([shield.prepare(), new Promise<void>((resolve, reject) => {
-        abort = resolve
-        signal.addEventListener('abort', abort, { once: true })
+      await Promise.race([shield.prepare(), new Promise<void>((_resolve, reject) => {
         timer = setTimeout(() => reject(new Error('Native input surface preparation was not confirmed')), 1500)
       })])
-      if (signal.aborted || entry.inputShield !== shield || !this.agentOwnsInput(entry)) return
+      if (entry.inputShield !== shield || !this.agentOwnsInput(entry)) return
       if (!shield.isolated) throw new Error('The original native input surface is not attached')
       entry.inputIsolation = 'isolated'
       this.emit(entry)
     } catch {
+      if (preparedShield && entry.inputShield !== preparedShield) return
+      if (!this.owns(entry, view) || !this.agentOwnsInput(entry)) return
       this.releaseInputShield(entry)
-      if (!signal.aborted && this.owns(entry, view) && entry.activeRun?.operationId === operationId) this.inputIsolationFailed(entry)
+      this.inputIsolationFailed(entry)
     } finally {
       clearTimeout(timer)
-      if (abort) signal.removeEventListener('abort', abort)
     }
   }
 

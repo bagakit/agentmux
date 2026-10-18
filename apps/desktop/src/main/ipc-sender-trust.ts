@@ -212,6 +212,7 @@ export const PRIVILEGED_SENDER_LABELS = {
   'browser:getStepEvidence': 'Browser step evidence',
   'browser:readStepResult': 'Recorded Browser result continuation',
   'browser:replayPlan': 'Browser replay plan',
+  'browser:takeControl': 'Browser handoff',
   'browser:returnControl': 'Browser handoff',
   'browser:stopOperationById': 'Browser handoff',
   'browser:runReplay': 'Browser replay',

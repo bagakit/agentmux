@@ -634,16 +634,8 @@ function BrowserPaneContent({
     }
   }
 
-  // Stopping an Agent operation is a control handoff, not another toolbar action. It must remain
-  // available while a navigation or reload is busy so the page never traps the person behind a stale
-  // busy guard.
-  //
-  // **经协议，不走 `api.browser.stopOperation`。** 这颗按钮与一个 CLI 客户端按下的取消必须是同一件
-  // 事：同一个 `activeRun.stop`、同一份四分类结局、同一条幂等规则（停一个已经结束的操作是成功并
-  // 答出它的终局）。各走一条的后果不是"两种写法"，是两套语义各自漂移——而漂移时两边看起来都对。
-  //
-  // Current Main control names the exact active operation even while its activity details are
-  // loading. Retained activity is only the explicit Stop fallback when no Agent owner is current.
+  // Stop addresses the exact execution through the public protocol. Human takeover
+  // addresses this Browser through its trusted host API, including between executions.
   async function stopBrowserOperation(): Promise<void> {
     const operationId = tab.control?.owner === 'agent' ? tab.control.activeOperationId : tab.activity?.operation?.id
     if (!operationId) {
@@ -660,6 +652,11 @@ function BrowserPaneContent({
     } catch (error) {
       reportError(error)
     }
+  }
+
+  async function takeBrowserControl(): Promise<void> {
+    try { await api.browser.takeControl(tab.browserId) }
+    catch (error) { reportError(error) }
   }
 
   async function beginScreenshot(): Promise<void> {
@@ -1172,7 +1169,7 @@ function BrowserPaneContent({
           browserId={tab.browserId}
           {...(tab.taskAssets ? { taskAssets: tab.taskAssets } : {})}
           onOpenTaskRun={(assetId, version) => { setSelectedTaskAssetId(assetId); setTaskAssetReview({ assetId, version }); openOperationTimeline(key) }}
-          onTakeControl={() => void stopBrowserOperation()}
+          onTakeControl={() => void takeBrowserControl()}
           onStop={() => void stopBrowserOperation()}
           onReturnControl={() => void run(() => api.browser.returnControl(tab.browserId))}
           onOpenTimeline={() => openOperationTimeline(key)}

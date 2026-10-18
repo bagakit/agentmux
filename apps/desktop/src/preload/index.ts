@@ -719,6 +719,7 @@ const api: AgentMuxPreloadApi = {
     stopOperationById: (operationId: string) => ipcRenderer.invoke('browser:stopOperationById', operationId) as Promise<BrowserOperation | null>,
     replayPlan: (operationId: string) => ipcRenderer.invoke('browser:replayPlan', operationId) as Promise<BrowserReplayPlan | null>,
     runReplay: (id: string, plan: BrowserReplayPlan, operator?: BrowserOperator) => ipcRenderer.invoke('browser:runReplay', id, plan, operator),
+    takeControl: (id: string) => ipcRenderer.invoke('browser:takeControl', id),
     returnControl: (id: string) => ipcRenderer.invoke('browser:returnControl', id),
     selectElement: (id: string) => ipcRenderer.invoke('browser:selectElement', id),
     answerAppLink: (id: string, allow: boolean, remember: boolean) =>
