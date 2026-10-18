@@ -27,13 +27,13 @@ const HOUR = 3_600_000
 const pause = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
 const wait = (assertion: () => void) => vi.waitFor(async () => { await pause(); assertion() }, { timeout: 10000, interval: 20 })
 
-async function fixture(options: { total?: number; timed?: boolean; step?: number; pageSize?: number; bodySize?: number; initialShort?: number } = {}) {
+async function fixture(options: { total?: number; timed?: boolean; step?: number; pageSize?: number; bodySize?: number; initialShort?: number; process?: boolean } = {}) {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
   const total = options.total ?? 1000, reference = { hostId: 'local', agentSessionId: 'original-coverage-batch' }
   const source = { providerId: 'claude', nativeSessionId: 'original-native' }
-  const items: AgentSessionHistoryPage['items'] = Array.from({ length: total }, (_, index) => ({ id: `original-${index}`, kind: 'assistant-message',
+  const items: AgentSessionHistoryPage['items'] = Array.from({ length: total }, (_, index) => ({ id: `original-${index}`, kind: options.process ? 'activity' : 'assistant-message',
     ...(options.timed === false ? {} : { startedAt: 1 + index * (options.step ?? 1000) }),
     contentParts: [{ kind: 'text', text: `Original body ${index}.` + 'x'.repeat(options.bodySize ?? 0) }] }))
   const calls: Array<{ cursor?: string; limit: number }> = []
@@ -70,7 +70,7 @@ async function fixture(options: { total?: number; timed?: boolean; step?: number
     return <div>{current.page?.items.map(item => <p key={item.id} data-original={item.id}>{item.contentParts.flatMap(part => part.kind === 'text' ? [part.text] : [])}</p>)}</div>
   }
   const render = (duration = 24 * HOUR, active = true) => act(async () => root.render(<Consumer duration={duration} active={active} />))
-  const activity = () => act(async () => root.render(<ActivityView {...activityReadingProps({ control: { ...reference, run: { runId: 'original-run' } } })} />))
+  const activity = (visible = true) => act(async () => root.render(<ActivityView {...activityReadingProps({ control: { ...reference, run: { runId: 'original-run' } }, visible })} />))
   const appendCaptured = async (id: string) => {
     const item: AgentTimelineItem = { id, agentSessionId: reference.agentSessionId, kind: 'assistant_message', source: 'native-hook',
       status: 'complete', title: 'Original captured record', content: id, createdAt: _followupFixtureEpoch(0, 0, 1), updatedAt: _followupFixtureEpoch(0, 0, 1) }
@@ -184,6 +184,52 @@ it('explicit Earlier supersedes a delayed automatic page and its late reply cann
   const accepted = f.current().page
   await act(async () => f.release()); await pause()
   expect(f.current().page).toBe(accepted); expect(f.calls).toHaveLength(3)
+})
+
+function foldedReadingGeometry(host: HTMLElement) {
+  const feed = host.querySelector<HTMLElement>('.activity-feed')!
+  Object.defineProperties(feed, { clientHeight: { configurable: true, value: 200 }, scrollHeight: { configurable: true, value: 200 } })
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const top = this === feed ? 0 : this.matches('.activity-feed__reading') ? 20 : 80
+    const height = this === feed ? 200 : 24
+    return { x: 0, y: top, top, left: 0, bottom: top + height, right: 600, width: 600, height, toJSON() {} }
+  })
+  return feed
+}
+
+it('one upward demand prepares at most three complete pages of folded process records, preserving the original window', async () => {
+  const f = await fixture({ total: 1000, process: true })
+  const read = vi.mocked(api.conversation.readAgentConversation), original = read.getMockImplementation()!
+  const requests: Array<Parameters<typeof original>[0]> = []
+  read.mockImplementation((input, options) => { requests.push(input); return original(input, options) })
+  await f.activity(); await wait(() => expect(f.calls).toHaveLength(3)); await wait(() => expect(inspectConversationConsumers({ ...f.reference, records: [] }).consumers[0]?.loading).toBe(false))
+  const feed = foldedReadingGeometry(f.host)
+  const before = requests.length
+  await act(async () => feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -40 })))
+  await wait(() => { expect(f.calls).toHaveLength(6); expect(inspectConversationConsumers({ ...f.reference, records: [] }).consumers[0]?.loading).toBe(false) })
+  expect(requests.slice(before).filter(input => !input.view).every(input => input.preserveCurrent === true)).toBe(true)
+  const loaded = () => [...f.host.querySelectorAll('[data-native-record-ids]')].flatMap(node => JSON.parse(node.getAttribute('data-native-record-ids')!))
+  expect(loaded()).toHaveLength(600)
+  await f.activity(); await pause(); await act(async () => window.dispatchEvent(new Event('resize'))); await pause()
+  expect(f.calls).toHaveLength(6)
+  expect(loaded()).toContain('original-999')
+})
+
+it('opposite intent and hiding cancel the remaining read-ahead pages without replaying the batch', async () => {
+  const f = await fixture({ total: 1000, process: true })
+  await f.activity(); await wait(() => { expect(f.calls).toHaveLength(3); expect(inspectConversationConsumers({ ...f.reference, records: [] }).consumers[0]?.loading).toBe(false) })
+  const feed = foldedReadingGeometry(f.host)
+  f.block(3)
+  await act(async () => feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -40 })))
+  await wait(() => expect(f.blocked()).toBe(true))
+  await act(async () => feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: 40 })))
+  await act(async () => f.release()); await wait(() => expect(inspectConversationConsumers({ ...f.reference, records: [] }).consumers[0]?.loading).toBe(false)); await pause()
+  expect(f.calls).toHaveLength(4)
+  f.block(4)
+  await act(async () => feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -40 })))
+  await wait(() => expect(f.blocked()).toBe(true))
+  await f.activity(false); await act(async () => f.release()); await pause(); await f.activity(); await pause()
+  expect(f.calls).toHaveLength(5)
 })
 
 async function seedRetained(f: Awaited<ReturnType<typeof fixture>>, captured: number) {
