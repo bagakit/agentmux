@@ -388,7 +388,7 @@ export function MoteBotSetup({
               <div><span className="mote-details__hint">Your new bot</span><strong>{operation.snapshot.name}</strong>{operation.snapshot.description ? <p>{operation.snapshot.description}</p> : null}</div>
             </div>
             {!originalImage ? <p className="mote-details__hint">The avatar chosen for the original setup is kept. Its preview is unavailable.</p> : null}
-            <p className="mote-details__hint">{enrollment?.initialPublication ? 'Creates this bot with the chosen public details, configures conversations and publishes its first version for your account only. Platform approval may still be required.' : 'Creates one bot with the chosen public details and saves it in AgentMux. Configuration and publication are separate steps.'}</p>
+            <p className="mote-details__hint">{enrollment?.initialPublication ? 'Creates this bot with the chosen public details, configures conversations and publishes its first version for your account only. Requests access to this app’s own resources to identify its creator for group invitations. Platform approval may still be required.' : 'Creates one bot with the chosen public details and saves it in AgentMux. Configuration and publication are separate steps.'}</p>
           </div> : null}
           {enrollmentActions.length ? (
             <div className="mote-bot-actions mote-bot-auth-actions">

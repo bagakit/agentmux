@@ -11,7 +11,8 @@ export const supportedScopeId = (value: unknown): value is string | number => ty
 export function reviewFeishuPermissions(catalogState: string, appliedState: string, _purpose: ConnectionSetupPermissionPurpose): SetupPermissionPlan {
   const required = [
     ...messages.map(name => ({ name, group: 'messages' as const })),
-    ...groups.map(name => ({ name, group: 'groups' as const }))
+    ...groups.map(name => ({ name, group: 'groups' as const })),
+    { name: 'application:application:self_manage', group: 'identity' as const }
   ]
   const parse = (value: string): Record<string, unknown> | null => { try { return record(JSON.parse(value)) } catch { return null } }
   const catalog = parse(catalogState)?.scopes, applied = parse(appliedState)?.scopes
