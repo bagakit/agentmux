@@ -1,3 +1,4 @@
+import { guideActionsMotePmo } from './generated/agentmux-guides.js'
 import { AGENTMUX_CLI_COMMANDS } from './agentmux-cli-commands.js'
 import { goalRoleGuidance } from './goal-role-guidance.js'
 import { guideText } from './guide-text.js'
@@ -13,6 +14,6 @@ export function agentMuxPmoPlaybook(): { readOnly: true; format: 'markdown'; doc
     if (syntax === undefined) throw new Error('Unknown playbook command: ' + key)
     return syntax
   }
-  return { readOnly: true, format: 'markdown', document: guideText('actions/mote-pmo', key =>
+  return { readOnly: true, format: 'markdown', document: guideText(guideActionsMotePmo, key =>
     key === 'goal-manager-context' ? goalRoleGuidance({ role: 'manager' }) : commandFact(key)) }
 }

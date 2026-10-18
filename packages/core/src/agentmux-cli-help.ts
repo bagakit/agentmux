@@ -1,3 +1,4 @@
+import { guideActionsSystemEndpoint, guideSharedCommandSafety } from './generated/agentmux-guides.js'
 import { guideText } from './guide-text.js'
 import { AGENTMUX_NOTE_GUIDE } from './agentmux-cli-note-guide.js'
 import { AGENTMUX_CLI_COMMANDS, type AgentMuxCliCommand } from './agentmux-cli-commands.js'
@@ -18,9 +19,9 @@ const list = (path: string, selected: readonly AgentMuxCliCommand[]) => {
     return `  amux ${child.replaceAll('.', ' ')}${exact?.usage ? ' ' + exact.usage : ''}\n    ${exact?.summary ?? 'Subcommands; read --help at this path.'}`
   }).join('\n')
 }
-const ENDPOINT_GUIDE = guideText("actions/system-endpoint")
+const ENDPOINT_GUIDE = /* @__PURE__ */ guideText(guideActionsSystemEndpoint)
 
-const COMMON = guideText("shared/command-safety")
+const COMMON = /* @__PURE__ */ guideText(guideSharedCommandSafety)
 
 export const AGENTMUX_CLI_HELP = `amux — object-first Agent and Desktop control
 

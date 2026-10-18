@@ -13,7 +13,7 @@ if (args.some(arg => arg !== '--dist') || args.length > 1) throw new Error('Usag
 async function check(directory) {
   const load = name => import(pathToFileURL(join(directory, name + '.js')).href)
   const [modules, help, commands, generated, pmo, outbound, goal, patrol] = await Promise.all([
-    'agentmux-cli-module-skills', 'agentmux-cli-help', 'agentmux-cli-commands', 'generated/agentmux-guides',
+    'agentmux-cli-module-skills', 'agentmux-cli-help', 'agentmux-cli-commands', 'generated/agentmux-guides-index',
     'agentmux-pmo-playbook', 'agent-outbound-message', 'goal-role-guidance', 'goal-patrol'
   ].map(load))
   const roots = [...new Set(commands.AGENTMUX_CLI_COMMANDS.map(command => command.method.split('.')[0]))].sort()

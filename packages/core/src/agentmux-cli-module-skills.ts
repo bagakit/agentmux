@@ -1,8 +1,9 @@
+import { guideIndex, guideSharedModuleCommandContract } from './generated/agentmux-guides.js'
 import { AGENTMUX_CLI_COMMANDS } from './agentmux-cli-commands.js'
 import { AGENTMUX_GOAL_SKILL_ENTRY } from './goal-role-guidance.js'
 import { AGENTMUX_PROTOCOL_CATALOG } from './agent-message-render.js'
 import { guideText } from './guide-text.js'
-import { MODULE_GUIDES } from './generated/agentmux-guides.js'
+import { MODULE_GUIDES } from './generated/agentmux-guides-index.js'
 
 interface ModuleDefinition {
   summary: string
@@ -50,11 +51,11 @@ export function agentMuxCliModuleCatalog(): readonly AgentMuxCliModule[] {
 export function agentMuxModuleSkill(root: string): string | null {
   if (!agentMuxModuleSkillEntry(root)) return null
   const definition = definitions[root]!
-  return `---\nname: amux-${root}\ndescription: ${definition.summary}.\n---\n\n# ${root} module\n\nRoles: ${definition.roles}.\nRead when: ${definition.when}.\n\n${definition.guide}\n\n${guideText('shared/module-command-contract', { 'module-root': root })}`
+  return `---\nname: amux-${root}\ndescription: ${definition.summary}.\n---\n\n# ${root} module\n\nRoles: ${definition.roles}.\nRead when: ${definition.when}.\n\n${definition.guide}\n\n${guideText(guideSharedModuleCommandContract, { 'module-root': root })}`
 }
 
 export function agentMuxBaseSkill(): string {
   const directory = agentMuxCliModuleCatalog().map(module =>
     `| ${module.root} | ${module.when} | \`${module.readCommand}\` |`).join('\n')
-  return guideText('index', { 'module-directory': directory }) + '\n'
+  return guideText(guideIndex, { 'module-directory': directory }) + '\n'
 }

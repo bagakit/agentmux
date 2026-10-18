@@ -1,7 +1,8 @@
+import { guideSharedGoalPatrol } from './generated/agentmux-guides.js'
 import { guideText } from './guide-text.js'
 import { AgentMuxError } from './errors.js'
 
-export const GLOBAL_GOAL_PATROL_GUIDANCE = guideText("shared/goal/patrol")
+export const GLOBAL_GOAL_PATROL_GUIDANCE = /* @__PURE__ */ guideText(guideSharedGoalPatrol)
 
 export function globalGoalPatrolPrompt(totalCount: number, inventoryIssue?: string): string {
   return ['全局 Demand 巡查', 'Read "$AGENTMUX_CLI" goal --skill before inspecting the original Goals.',
