@@ -6,7 +6,7 @@ import { DEFAULT_NOTIFICATION_MODE_ID, DEFAULT_NOTIFICATION_SOUND } from './noti
 import { DEFAULT_A2A_NOTIFICATION, resolveA2ANotifications } from './a2a-preferences'
 import { DEFAULT_PERFORMANCE_PREFERENCES, DEFAULT_MOBILE_CONNECTION_PREFERENCES } from './toolkit-preferences'
 import { resolveUserProfile, type UserProfile } from './user-profile'
-import { resolveFocusRecentActivityHours, resolveFocusLinkDestination, resolveFocusReplyLines, resolveFocusPreviewTrigger, resolveFocusRecentInputs } from './focus-preferences'
+import { resolveFocusRecentActivityHours, resolveFocusLinkDestination, resolveFocusReplyLines, resolveFocusPreviewTrigger, resolveFocusRecentInputs, resolveFocusMapMotion } from './focus-preferences'
 import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from './goals-preferences'
 import { resolveNotesPreferences, type NotesPreferences } from './notes-preferences'
 import { resolveBrowserStartPage, type BrowserStartPageConfig } from './browser-start-page'
@@ -43,6 +43,7 @@ function effective(path: string, value: unknown): unknown {
   if (path === 'focus.replyLines') return resolveFocusReplyLines(value)
   if (path === 'focus.previewTrigger') return resolveFocusPreviewTrigger(value)
   if (path === 'focus.recentInputs') return resolveFocusRecentInputs(value)
+  if (path === 'focus.mapMotion') return resolveFocusMapMotion(value)
   if (path === 'notes') return resolveNotesPreferences(value as NotesPreferences | undefined)
   if (path === 'notes.fontSize') return value ?? resolveNotesPreferences(undefined).fontSize
   if (path === 'notes.contentWidth') return value ?? resolveNotesPreferences(undefined).contentWidth
