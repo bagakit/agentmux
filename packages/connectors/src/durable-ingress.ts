@@ -1,7 +1,6 @@
 import { isDeepStrictEqual } from 'node:util'
 import { PermissionActions } from './permission-actions.js'
-import { randomUUID } from 'node:crypto'
-import { AgentMuxError, parseAgentExternalMessageAuthor, agentInteractionIntentDigest, type AgentInputCallContext, type AgentMuxClient, type AgentMuxMessageEnvelope } from '@agentmux/core'
+import { mintObjectId, AgentMuxError, parseAgentExternalMessageAuthor, agentInteractionIntentDigest, type AgentInputCallContext, type AgentMuxClient, type AgentMuxMessageEnvelope } from '@agentmux/core'
 import { CONNECTION_INGRESS_AUTHORITY_CODES, parseConnectionActor, parseConnectionIngressRecord, parseIngressParams, parseIngressResult, type ConnectionConfig, type ConnectionIngressAuthority, type ConnectionIngressAuthorityCode, type ConnectionIngressInspection, type ConnectionIngressListInput, type ConnectionIngressMessage, type ConnectionIngressAction, type ConnectionIngressReadPort, type ConnectionIngressRecord, type RoomBinding, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 
@@ -133,7 +132,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
         return { ingress: this.read(String(originalEvent.ingress_id))!, duplicate: 'event' as const }
       }
       if (event.kind === 'action') {
-        const ingress = parseConnectionIngressRecord({ ...event, ingressId: `ingress:${randomUUID()}`, connectionId: input.connectionId,
+        const ingress = parseConnectionIngressRecord({ ...event, ingressId: mintObjectId(), connectionId: input.connectionId,
           application: current.config.application, ...(this.permissions.supports(event) ? { state: 'received' } : { state: 'refused', code: 'INGRESS_ACTION_UNSUPPORTED' }) })
         this.database.prepare('INSERT INTO connection_ingress_event (domain,app_id,event_id,ingress_id,event_json,raw_payload,record_json,connection_id,intake_sequence) VALUES (?,?,?,?,?,?,?,?,?)')
           .run(domain, appId, event.eventId, ingress.ingressId, encoded, input.raw, JSON.stringify(ingress), input.connectionId, this.nextSequence())
@@ -144,7 +143,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       const messageFacts = ({ eventId: _eventId, ...facts }: VerifiedIngressMessage) => facts
       if (originalMessage && !equal(messageFacts(JSON.parse(String(originalMessage.event_json))), messageFacts(event))) fail('INGRESS_MESSAGE_CONFLICT')
       const ingress = originalMessage ? this.read(String(originalMessage.ingress_id))! : parseConnectionIngressRecord({
-        ingressId: `ingress:${randomUUID()}`, connectionId: input.connectionId, application: current.config.application,
+        ingressId: mintObjectId(), connectionId: input.connectionId, application: current.config.application,
         eventId: event.eventId, externalMessageId: event.messageId, externalConversationId: event.externalConversationId, actor: event.actor, body: event.body, ...(event.conversationKind === undefined ? {} : { conversationKind: event.conversationKind }),
         ...(event.unsupportedContent ? { state: 'refused', code: 'INGRESS_CONTENT_UNSUPPORTED' } : { state: 'received' })
       })
@@ -268,7 +267,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       const current = this.read(ingressId)!
       if (current.kind === 'action') fail('INGRESS_EVENT_CONFLICT')
       if (current.state !== 'received') return { record: current, own: false as const }
-      const frozen = { hostId: original.binding.executionHostId, agentSessionId: original.binding.agentSessionId, expectedRun: expectedRun!, operationId: `ingress-operation-${randomUUID()}`, messageId: `ingress-message-${randomUUID()}`, author: original.author, admissionIntent: { ...(original.binding.inputTarget ?? { kind: 'manual-actor' as const }), expectedRun } }
+      const frozen = { hostId: original.binding.executionHostId, agentSessionId: original.binding.agentSessionId, expectedRun: expectedRun!, operationId: mintObjectId(), messageId: mintObjectId(), author: original.author, admissionIntent: { ...(original.binding.inputTarget ?? { kind: 'manual-actor' as const }), expectedRun } }
       this.authorize(current, frozen)
       return { record: this.write({ ...current, state: 'claimed', input: frozen }), own: true as const }
     })

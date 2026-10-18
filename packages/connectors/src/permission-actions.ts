@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util'
-import { createHash, randomUUID } from 'node:crypto'
-import { AgentMuxError, agentInteractionIntentDigest, agentInteractionRequestDigest, agentInteractionRequestTarget, parseAgentExternalInteractionAuthor,
+import { createHash } from 'node:crypto'
+import { mintObjectId, AgentMuxError, agentInteractionIntentDigest, agentInteractionRequestDigest, agentInteractionRequestTarget, parseAgentExternalInteractionAuthor,
   type AgentMuxAgentInteractionInput, type AgentMuxPermissionRequest } from '@agentmux/core'
 import { parseConnectionIngressRecord, type ConnectionGrant, type ConnectionIngressAction, type RoomBinding } from '@agentmux/core/connections'
 import type { DurableIngressOptions, VerifiedIngressAction } from './durable-ingress.js'
@@ -71,7 +71,7 @@ export class PermissionActions implements PublicationPermissionsPort {
         database.exec('BEGIN IMMEDIATE')
         try {
           if (!database.prepare('SELECT 1 FROM connection_ingress_action_reference WHERE binding_id=? AND binding_revision=? AND projection_id=? LIMIT 1').get(binding.bindingId, binding.revision, projectionId)) for (const option of target.options) {
-            const reference: Reference = { actionRef: randomUUID(), projectionId, binding: structuredClone(binding), run: { ...session.run }, request: target,
+            const reference: Reference = { actionRef: mintObjectId(), projectionId, binding: structuredClone(binding), run: { ...session.run }, request: target,
               decision: { outcome: 'selected', optionId: option.id }, grants: structuredClone(grants) }
             database.prepare('INSERT INTO connection_ingress_action_reference VALUES (?,?,?,?,?)')
               .run(reference.actionRef, projectionId, binding.bindingId, binding.revision, encode(reference))
@@ -141,7 +141,7 @@ export class PermissionActions implements PublicationPermissionsPort {
       externalConversationId: record.externalConversationId, sourceMessageId: record.sourceMessageId, actionRef: record.actionRef,
       bindingId: ref.binding.bindingId, bindingRevision: ref.binding.revision, grantId: grant.grantId, grantRevision: grant.revision })
     const input: AgentMuxAgentInteractionInput = { agentSessionId: ref.binding.agentSessionId, expectedRun: ref.run,
-      operationId: `permission-response:${randomUUID()}`, expectedRequest: ref.request,
+      operationId: mintObjectId(), expectedRequest: ref.request,
       response: { kind: 'permission', requestId: ref.request.id, decision: ref.decision }, externalAction: author }
     database.prepare('INSERT INTO connection_ingress_action_intent VALUES (?,?)').run(input.operationId, encode(input))
     return { record: { ...record, state: 'claimed', input: { hostId: ref.binding.executionHostId, agentSessionId: input.agentSessionId,

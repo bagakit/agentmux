@@ -1,5 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
-import { AgentMuxError } from '@agentmux/core'
+import { createHash } from 'node:crypto'
+import { mintObjectId, AgentMuxError } from '@agentmux/core'
 import {
   parseConnectionEnrollmentOperation,
   summarizeConnectionEnrollmentPreset,
@@ -143,10 +143,10 @@ export class ConnectionEnrollmentStore {
         version: 2,
         inputDigest,
         ...(adapterProtocolId === undefined ? {} : { adapterProtocolId }),
-        assetOperationId: randomUUID(),
+        assetOperationId: mintObjectId(),
         operation: {
           ...identity,
-          ...(input.initialPublication ? { initialSetup: { operationId: randomUUID(), progress: null } } : {}),
+          ...(input.initialPublication ? { initialSetup: { operationId: mintObjectId(), progress: null } } : {}),
           preset: summarizeConnectionEnrollmentPreset(preset),
           revision: 1,
           authorization: 'not-started',
@@ -154,12 +154,12 @@ export class ConnectionEnrollmentStore {
           configuration: 'not-started',
           application: null,
           configured: null,
-          authentication: { attemptId: randomUUID(), stage: 'not-started' },
+          authentication: { attemptId: mintObjectId(), stage: 'not-started' },
           creation: { upload: 'not-started', create: 'not-started' }
         },
         actor: { ...actor },
-        credentialOperationId: randomUUID(),
-        configureOperationId: randomUUID(),
+        credentialOperationId: mintObjectId(),
+        configureOperationId: mintObjectId(),
         attemptId: null,
         attemptKind: null,
         snapshotOperationId: null,
@@ -253,7 +253,7 @@ export class ConnectionEnrollmentStore {
         receipt: {
           ...input.decision,
           ownRevision: input.ownRevision,
-          stepId: randomUUID(),
+          stepId: mintObjectId(),
           state: 'dispatching'
         }
       }
@@ -284,13 +284,13 @@ export class ConnectionEnrollmentStore {
         actionId !== row.activeActionId
       )
         return { row, claimed: false }
-      const attemptId = randomUUID()
+      const attemptId = mintObjectId()
       this.host.database
         .prepare('INSERT INTO connection_enrollment_attempt VALUES(?,?,?,?,?)')
         .run(attemptId, operationId, kind, owner, 'claimed')
       row.attemptId = attemptId
       row.attemptKind = kind
-      row.snapshotOperationId = randomUUID()
+      row.snapshotOperationId = mintObjectId()
       if (kind === 'begin' || kind === 'authentication')
         row.operation.authentication!.stage = 'unknown'
       if (kind === 'upload' || kind === 'create') row.operation.creation![kind] = 'dispatching'
