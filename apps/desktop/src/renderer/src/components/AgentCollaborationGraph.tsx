@@ -284,7 +284,7 @@ const RelationView = memo(function RelationView({ record, markerId, zoom, onSele
     <title>{record.label}</title>
     <BaseEdge id={record.id} path={path} markerEnd={`url(#${markerId}-${kind})`} interactionWidth={22} className={`collaboration-edge collaboration-edge--${kind}${record.selected ? ' is-selected' : ''}`} />
     {record.active ? <path key={record.active} d={path} pathLength={1} style={{ animationDelay: `${delay}ms`, animationDuration: `${COLLABORATION_ACTIVITY_MS}ms` }} className="collaboration-edge__pulse" data-kind={kind} /> : null}
-    {record.active && kind === 'communication' ? <circle key={`packet-${record.active}`} r={4 / zoom} className="collaboration-edge__packet" aria-hidden="true"
+    {record.active && kind === 'communication' ? <circle key={`packet-${record.active}`} r={4 / zoom} className="collaboration-edge__packet" data-kind={kind} aria-hidden="true"
       style={{ offsetPath: `path("${path}")`, animationDelay: `${delay}ms`, animationDuration: `${COLLABORATION_ACTIVITY_MS}ms` }} /> : null}
     {record.selected || hovered || focused ? <EdgeLabelRenderer><span className="collaboration-edge__label" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px) scale(${1 / zoom})` }}>{record.label}</span></EdgeLabelRenderer> : null}
     {record.emphasis === 'related' && record.count > 1 && !record.selected && !hovered && !focused ? <EdgeLabelRenderer><span className="collaboration-edge__count" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>{record.count}</span></EdgeLabelRenderer> : null}
