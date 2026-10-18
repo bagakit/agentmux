@@ -400,7 +400,13 @@ export class PublicationHost implements ConnectionDeliveryPort {
       }
       if (['permission', 'question'].includes(original.payload.kind) && !this.options.permissions?.authorized(original)) return { state: 'unavailable', reason: 'source-unconfirmed' }
       const claimed = this.store.claimNext(binding, original.operationId, () => authorized() && (!['permission', 'question'].includes(original!.payload.kind) || this.options.permissions?.authorized(original!) === true), adapter, projectionId)
-      if (!claimed) return this.effectObservation(binding, projectionId)
+      if (!claimed) {
+        // A concurrent original claim may expose another candidate. Re-enter qualification
+        // on the existing lane, but never spin on the same unchanged pending operation.
+        const next = this.store.next(binding, projectionId)
+        if (next && next.operationId !== original.operationId) lane.dirty = true
+        return this.effectObservation(binding, projectionId)
+      }
       if (signal.aborted || !authorized() || ['permission', 'question'].includes(claimed.payload.kind) && !this.options.permissions?.authorized(claimed)) { this.store.settle(claimed.operationId, claimed.attempt!, { state: 'not-applied', reason: 'adapter-unavailable' }); return }
       const timeout = AbortSignal.timeout(30_000), dispatchSignal = AbortSignal.any([signal, timeout])
       let effect: Promise<PublicationReceipt>
