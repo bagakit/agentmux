@@ -1570,6 +1570,8 @@ export class RuntimeController {
     const hostId = 'local'
     const client = await this.connectedClient(hostId, 'runtime')
     return {
+      prepare: async input => await client.prepareTerminal(input),
+      createPrepared: async input => await this.trackHostLifecycleOperation(hostId, async () => await client.createPreparedTerminal(input)),
       create: async (input, onEvent, output = 'raw') => await this.trackHostLifecycleOperation(hostId, async () => {
         const run = await client.createTerminal(input)
         if (output === 'raw') this.toolkitRuns.set(terminalInputKey(hostId, run.runId), onEvent)
