@@ -11,7 +11,7 @@ import type { ConnectionGrant, ConnectionRecord, RoomBinding, RoomBindingOperati
 import type { AgentNativeSourceReference } from './AgentNativeSourceControls'
 import { api } from '../lib/api'
 import { clearConnectorRoomIntent, retainConnectorRoomIntent, useAppStore } from '../store'
-import { invalidateConnectorTarget, sameConnectorTarget, type ConnectorRoomIntent } from '../lib/connector-room-intent'
+import { connectorRoomDraftKey, invalidateConnectorTarget, sameConnectorTarget, type ConnectorRoomIntent } from '../lib/connector-room-intent'
 import { MoteWorkfaceContext } from '../lib/mote-workface'
 import { SettingsNavigation } from './SettingsNavigation'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
@@ -48,22 +48,24 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
   original: AgentConnectorTarget; mode: 'create' | 'existing' | 'details'; initialSection?: 'joining'; onClose(): void; returnFocus(): HTMLElement | null
 }) {
   const ownerDocument = useWorkbenchDocument()
-  const [mode, setMode] = useState(initialMode)
   const { target, session } = original, identity = JSON.stringify(target), fieldId = useId()
+  const draftKey = connectorRoomDraftKey(target)
+  const [savedDraft] = useState(() => useAppStore.getState().connectorRoomDrafts[draftKey])
+  const [mode, setMode] = useState(initialMode === 'details' ? initialMode : savedDraft?.mode ?? initialMode)
   const [changingGroup, setChangingGroup] = useState(false)
-  const [disconnecting, setDisconnecting] = useState(false), [selectedBindingId, setSelectedBindingId] = useState(original.bindingId ?? '')
+  const [disconnecting, setDisconnecting] = useState(false), [selectedBindingId, setSelectedBindingId] = useState(original.bindingId ?? savedDraft?.bindingId ?? '')
   const mote = useContext(MoteWorkfaceContext), settings = useContext(SettingsNavigation)
   const [connections, setConnections] = useState<ConnectionRecord[]>([]), [bindings, setBindings] = useState<RoomBinding[]>([])
   const [loaded, setLoaded] = useState(false)
   const [moteDefault, setMoteDefault] = useState<{ status: 'loading' | 'ready' | 'unconfirmed'; ref: MoteConnectionRef | null; issue: string | null }>(() =>
     original.mote && 'target' in original.mote ? { status: 'loading', ref: null, issue: null }
       : { status: original.mote ? 'unconfirmed' : 'ready', ref: null, issue: original.mote && 'issue' in original.mote ? original.mote.issue : null })
-  const initialized = useRef(!!original.connectionId), explicitlySelected = useRef(false)
-  const [connectionId, setConnectionId] = useState(original.connectionId ?? ''), [name, setName] = useState(original.name + ' · AgentMux')
-  const [group, setGroup] = useState(''), [members, setMembers] = useState(''), [memberType, setMemberType] = useState('')
-  const [scope, setScope] = useState<'mentions-and-replies' | 'all-messages'>(initialMode === 'create' ? 'all-messages' : 'mentions-and-replies'), [confirmed, setConfirmed] = useState(false)
-  const [publication, setPublication] = useState<RoomBindingScope['publication']>('future-shared-conversation')
-  const [actorId, setActorId] = useState(''), [actorType, setActorType] = useState(''), [actorInput, setActorInput] = useState(false), [actorAnswer, setActorAnswer] = useState(false), [actorPermission, setActorPermission] = useState(false)
+  const initialized = useRef(!!original.connectionId || !!savedDraft?.connectionId), explicitlySelected = useRef(false)
+  const [connectionId, setConnectionId] = useState(original.connectionId ?? savedDraft?.connectionId ?? ''), [name, setName] = useState(savedDraft?.name ?? original.name + ' · AgentMux')
+  const [group, setGroup] = useState(savedDraft?.group ?? ''), [members, setMembers] = useState(savedDraft?.members ?? ''), [memberType, setMemberType] = useState(savedDraft?.memberType ?? '')
+  const [scope, setScope] = useState<'mentions-and-replies' | 'all-messages'>(savedDraft?.scope ?? (initialMode === 'create' ? 'all-messages' : 'mentions-and-replies')), [confirmed, setConfirmed] = useState(false)
+  const [publication, setPublication] = useState<RoomBindingScope['publication']>(savedDraft?.publication ?? 'future-shared-conversation')
+  const [actorId, setActorId] = useState(savedDraft?.actorId ?? ''), [actorType, setActorType] = useState(savedDraft?.actorType ?? ''), [actorInput, setActorInput] = useState(false), [actorAnswer, setActorAnswer] = useState(false), [actorPermission, setActorPermission] = useState(false)
   const [facts, setFacts] = useState<Record<string, Fact>>({}), [issue, setIssue] = useState(''), [busy, setBusy] = useState(false)
   const [actors, setActors] = useState<{ bindingId: string; revision: number; grants: ConnectionGrant[] } | null>(null)
   const [memberFlights, setMemberFlights] = useState<Set<string>>(() => new Set())
@@ -78,14 +80,19 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
   const room = roomIntent ? facts[roomIntent.input.operationId] : null
   const created = room && 'creation' in room && room.creation.state === 'created' ? room.creation.externalConversationId : null
   const binding = bindings.find(item => item.connectionId === connectionId && item.state !== 'detached' && (!selectedBindingId || item.bindingId === selectedBindingId))
-  const recentApplied = Object.values(facts).reverse().find((fact): fact is Extract<RoomBindingOperation, { state: 'applied' }> => !!fact && 'state' in fact && fact.state === 'applied' && 'action' in fact && !!fact.notices?.length)
-  const detached = recentApplied?.binding.state === 'detached' && recentApplied.binding.connectionId === connectionId ? recentApplied.binding : null
+  const recentApplied = Object.values(facts).reverse().find((fact): fact is Extract<RoomBindingOperation, { state: 'applied' }> => !!fact && 'state' in fact && fact.state === 'applied' && 'action' in fact && fact.action !== 'grant')
+  const detached = !binding && recentApplied?.binding.state === 'detached' && recentApplied.binding.connectionId === connectionId ? recentApplied.binding : null
   const memberKey = (idType: string, userId: string) => JSON.stringify([binding?.bindingId, binding?.revision, idType, userId])
   selectedMember.current = memberKey(actorType, actorId)
   const activeAudience = useRef(''); activeAudience.current = JSON.stringify([binding?.bindingId, binding?.revision])
   const currentGrants = actors && binding && actors.bindingId === binding.bindingId && actors.revision === binding.revision
     ? actors.grants.filter(grant => grant.actor.application.domain === binding.application.domain && grant.actor.application.appId === binding.application.appId) : []
   const actorGrant = currentGrants.find(grant => grant.actor.idType === actorType && grant.actor.userId === actorId)
+  useEffect(() => {
+    setActorInput(actorGrant?.state === 'active' && actorGrant.capabilities.includes('input'))
+    setActorAnswer(actorGrant?.state === 'active' && actorGrant.capabilities.includes('answer'))
+    setActorPermission(actorGrant?.state === 'active' && actorGrant.capabilities.includes('permission'))
+  }, [actorGrant?.grantId, actorGrant?.revision])
   const creatingGroup = (mode === 'create' || !!roomIntent) && !binding && !detached
   const bindingIntent = relevant.find(intent => intent.method === 'connection.bind' || intent.method === 'connection.binding.relink')
   const bindingPending = !!bindingIntent
@@ -119,7 +126,26 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
     if (fact && 'state' in fact && (fact.state === 'applied' || fact.state === 'refused')) return fact.state
     return !fact && intent.phase === 'not-dispatched' ? 'not-dispatched' : 'unconfirmed'
   }
-  useEffect(() => { setGroup(binding?.externalConversationId ?? ''); setScope(binding?.scope.input ?? (mode === 'create' ? 'all-messages' : 'mentions-and-replies')); setPublication(binding?.scope.publication ?? 'future-shared-conversation'); setConfirmed(false); setChangingGroup(false); setDisconnecting(false); setActorId(''); setActorType(''); setActorInput(false); setActorAnswer(false); setActorPermission(false) }, [connectionId, binding?.bindingId, binding?.revision])
+  const restoredAudience = useRef('')
+  useEffect(() => {
+    if (!loaded) return
+    const audienceKey = JSON.stringify([connectionId, binding?.bindingId ?? null, binding?.revision ?? null])
+    if (restoredAudience.current === audienceKey) return
+    const restore = !restoredAudience.current && savedDraft?.connectionId === connectionId && savedDraft.bindingId === (binding?.bindingId ?? null) && savedDraft.bindingRevision === (binding?.revision ?? null)
+    restoredAudience.current = audienceKey
+    // Matching drafts seeded this form before the read. A slow read must not overwrite later typing.
+    if (restore) return
+    setGroup(binding?.externalConversationId ?? '')
+    setScope(binding?.scope.input ?? (mode === 'create' ? 'all-messages' : 'mentions-and-replies'))
+    setPublication(binding?.scope.publication ?? 'future-shared-conversation')
+    setConfirmed(false); setChangingGroup(false); setDisconnecting(false)
+    setActorId(''); setActorType(''); setActorInput(false); setActorAnswer(false); setActorPermission(false)
+  }, [loaded, connectionId, binding?.bindingId, binding?.revision])
+  useEffect(() => {
+    if (!loaded) return
+    const draft = { connectionId, bindingId: binding?.bindingId ?? null, bindingRevision: binding?.revision ?? null, mode, name, group, members, memberType, scope, publication, actorId, actorType }
+    useAppStore.setState(state => ({ connectorRoomDrafts: { ...state.connectorRoomDrafts, [draftKey]: draft } }))
+  }, [loaded, connectionId, binding?.bindingId, binding?.revision, mode, name, group, members, memberType, scope, publication, actorId, actorType, draftKey])
   const frozenRoom = roomIntent?.method === 'connection.room.create' ? roomIntent.input : null
   const creatorInvitation = useConnectorCreatorInvitation(connection, !!connection && availableForNewGroup(connection))
   const awaitingCreator = creatorInvitation.pending && creatorInvitation.included
@@ -241,7 +267,7 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
     }
     const value = await api.connections.call(intent.method, intent.input)
     setFacts(previous => ({ ...previous, [intent.input.operationId]: value }))
-    if ('state' in value && value.state === 'applied') { if (value.grant) acceptGrant(value.grant, value.binding); observeBinding(value.binding.bindingId, value.binding); invalidateConnectorTarget(target); await clearConnectorRoomIntent(intent.input.operationId) }
+    if ('state' in value && value.state === 'applied') { if (value.grant) acceptGrant(value.grant, value.binding); else setSelectedBindingId(value.binding.bindingId); observeBinding(value.binding.bindingId, value.binding); invalidateConnectorTarget(target); await clearConnectorRoomIntent(intent.input.operationId) }
     // An exact grant receipt already updates its member. Other original queries cannot hold that write open.
     if (intent.method !== 'connection.grant') await refresh()
     if ('creation' in value && value.creation.state === 'not-applied' && ['connection-unavailable', 'connection-revised'].includes(value.creation.reason))
@@ -389,7 +415,7 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
       <Dialog.Content ref={content} className="dialog-surface agent-connector-dialog" aria-busy={busy}
         onOpenAutoFocus={event => { event.preventDefault(); (content.current?.querySelector<HTMLElement>('[aria-label="Group name"]') ?? content.current?.querySelector<HTMLElement>('[aria-label="Existing group"]') ?? content.current?.querySelector<HTMLElement>('[aria-label="Close group setup"]'))?.focus({ preventScroll: true }) }}
         onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus(), active = ownerDocument.activeElement; if (node?.isConnected && (active === ownerDocument.body || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}
-        onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}>
+        onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event) || event.target instanceof ownerDocument.defaultView!.Element && event.target.closest('[role="menu"]')) event.preventDefault() }}>
         <header className="agent-connector-dialog__header"><div><Dialog.Title>{joining ? 'Join this group' : binding || detached ? 'Group connection' : 'Connect a group'}</Dialog.Title>
           <Dialog.Description className="agent-connector-identity">{original.identity ? <ResolvedAgentAvatar {...original.identity} label={original.name} size={22} /> : <AgentIcon size={20} aria-hidden="true" />}<span>{original.name}</span></Dialog.Description></div>
           <button type="button" className="icon-button" aria-label="Close group setup" onClick={onClose}><CloseIcon size={15} /></button></header>
@@ -412,7 +438,7 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
             {creatingGroup && !created ? <TextInput aria-label="Group name" title={frozenRoom?.name ?? name} value={frozenRoom?.name ?? name} disabled={busy || !!roomIntent} onChange={event => setName(event.target.value)} />
               : (created && !binding || bindingPending || showingCurrentBinding || detached) ? <ConnectorRoomOverview facts={roomFacts} groupId={audience} requestedName={created === audience ? frozenRoom?.name : undefined} />
               : connection ? <ConnectorRoomSelection key={JSON.stringify([connectionId, connection.revision])} connection={connection} value={audience} disabled={busy || bindingPending} onChange={value => { setGroup(value); setConfirmed(false) }} /> : <p className="agent-connector-note">Choose an application above to find its groups.</p>}
-            {audience && !created && !bindingPending && !showingCurrentBinding ? <ConnectorRoomOverview facts={roomFacts} groupId={audience} /> : null}
+            {audience && !created && !bindingPending && !showingCurrentBinding && !detached ? <ConnectorRoomOverview facts={roomFacts} groupId={audience} /> : null}
           </section>
           <ConnectorServiceControl active />
           {defaultNote ? <p className="agent-connector-note" role="status" data-mote-bot-source>{defaultNote}</p> : null}
@@ -489,7 +515,7 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
           {issue ? <p role="status" className="surface-inline-error">{issue}</p> : null}
         </div><footer className="agent-connector-dialog__footer">
           {issue || relevant.length ? <button className="agent-connector-text-action" disabled={busy} onClick={() => void work(refresh)}>Refresh</button> : null}
-          <button className="small-button" onClick={onClose}>{!binding && !relevant.length ? 'Cancel' : 'Close'}</button>
+          <button className="small-button" onClick={onClose}>{!binding && !detached && !relevant.length ? 'Cancel' : 'Close'}</button>
           {canCreate ? <button className="primary-button" disabled={busy || !connection || !availableForNewGroup(connection) || awaitingCreator || !name.trim() || !!members && !memberType.trim()} onClick={createRoom}>{busy ? 'Creating…' : 'Create group'}</button> : canConnect ? <button className="primary-button" disabled={busy || !connection?.config.enabled || !confirmed || !audience.trim() || session.nativeHandle?.kind !== 'provider'} onClick={bind}>{binding ? audience === binding.externalConversationId ? sameSharing ? 'Reconnect group' : 'Save sharing' : 'Change group' : 'Connect group'}</button> : null}
         </footer>
       </Dialog.Content></DocumentOverlayPortal>
