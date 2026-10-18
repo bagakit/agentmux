@@ -144,6 +144,7 @@ export function conversationRecordAuthor(record: ConversationSourceRecord, sessi
     : record.original.item.kind === 'system-message' && record.order.kind === 'native-page' ? { kind: 'system', providerId: record.order.source.providerId } : { kind: 'unknown' }
   const explicit = recordedConversationAuthor(record.original.item)
   if (explicit.kind !== 'unknown') return explicit
+  if (record.original.item.kind === 'system_message' && record.original.item.source === 'agentmux') return { kind: 'system' }
   return conversationRecordRole(record) === 'message' && record.original.item.kind === 'assistant_message'
     ? { kind: 'agent', agentSessionId: sessionId } : { kind: 'unknown' }
 }
