@@ -32,8 +32,13 @@ export function collaborationEnvelope(area: Extract<CollaborationLayoutBox, { ki
     `L ${start.x} ${start.y} Q ${point.x} ${point.y} ${end.x} ${end.y}`).join(' ') + ' Z'
 }
 
+export const COLLABORATION_OVERVIEW_MARK_SIZE = 28
 /** Small original point slots never expand into overlapping giant overview marks. */
-export const collaborationOverviewScale = (box: CollaborationLayoutBounds, zoom: number) => Math.min(1 / zoom, Math.min(box.width, box.height) / 14)
+export const collaborationOverviewScale = (box: CollaborationLayoutBounds, zoom: number) => Math.min(1 / zoom, Math.min(box.width, box.height) / (COLLABORATION_OVERVIEW_MARK_SIZE / 2))
+export function collaborationOverviewHitBounds(box: CollaborationLayoutBounds, zoom: number): CollaborationLayoutBounds {
+  const size = COLLABORATION_OVERVIEW_MARK_SIZE * collaborationOverviewScale(box, zoom)
+  return { x: box.x + (box.width - size) / 2, y: box.y + (box.height - size) / 2, width: size, height: size }
+}
 
 /** Keep the original obstacle-safe route; connect its terminal stems to visible overview marks.
  * This is a cheap projection at the camera layer, never a new Worker route or relationship. */

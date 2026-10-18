@@ -7,7 +7,8 @@ import { collaborationConnections, collaborationAreaNode, collaborationAgentNode
 import type { CollaborationPulse } from '../lib/use-collaboration-reading'
 import type { CollaborationLayoutBox as CollaborationBox, CollaborationLayoutInput, CollaborationPath } from '../lib/collaboration-layout-engine'
 import { useCollaborationLayout } from '../lib/use-collaboration-layout'
-import { collaborationEnvelope, collaborationOverviewPath, collaborationOverviewScale } from '../lib/collaboration-map-geometry'
+import { COLLABORATION_OVERVIEW_MARK_SIZE, collaborationEnvelope, collaborationOverviewHitBounds, collaborationOverviewPath, collaborationOverviewScale } from '../lib/collaboration-map-geometry'
+import { CollaborationBoundsIndex, collaborationBoundsOverlap, type CollaborationBounds } from '../lib/collaboration-spatial-index'
 import { collaborationCameraTarget, COLLABORATION_OVERVIEW_ZOOM, COLLABORATION_READING_ZOOM, type CollaborationLocate } from '../lib/collaboration-map-camera'
 import { COLLABORATION_ACTIVITY_MS, collaborationNodeSize, collaborationRecency, collaborationAgentName } from '../lib/collaboration-map-presentation'
 import { useAgentInformationPreview } from './AgentInformationPreview'
@@ -54,7 +55,7 @@ function ActivityMark({ activity }: { activity: NodeActivity }) {
 function AgentMark({ data, label, tier, recency, overview = false }: { data: AgentData; label: string; tier: string; recency: ReturnType<typeof collaborationRecency>; overview?: boolean }) {
   const context = data.agent.context
   const preview = useAgentInformationPreview(context, true, data.identity, data.goals, () => { if (context) data.onOpen(context.id) })
-  return <button type="button" ref={preview.anchor} {...preview.triggerEvents} className={overview ? "collaboration-agent__dot" : "collaboration-agent__mark"} data-tier={tier} data-session-id={context?.id}
+  return <button type="button" ref={preview.anchor} {...preview.triggerEvents} className={overview ? "collaboration-agent__dot" : "collaboration-agent__mark"} data-tier={tier} data-session-id={context?.id} style={overview ? { width: COLLABORATION_OVERVIEW_MARK_SIZE, height: COLLABORATION_OVERVIEW_MARK_SIZE } : undefined}
     aria-pressed={data.selected} aria-label={`${label} · ${tier}`} aria-describedby={preview.describedBy} onClick={data.onSelect} title={`${tier} · ${recency.label}`}>
     <span className="collaboration-agent__point" style={{ width: overview ? 12 : recency.radius * 2, height: overview ? 12 : recency.radius * 2, opacity: recency.depth }} />{!overview && tier !== 'closed' ? <strong>{label}</strong> : null}
   </button>
@@ -204,7 +205,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
   return <div className="collaboration-canvas" aria-label="Agent collaboration graph">
     <ReactFlow<GraphNode> nodes={nodes} edges={emptyEdges} nodeTypes={nodeTypes} onInit={instance => { flow.current = instance }} onPaneClick={clearSelection}
       onMoveStart={event => { if (event) ++gestures.current }} onlyRenderVisibleElements nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesReconnectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.05} maxZoom={1.4} proOptions={{ hideAttribution: true }}>
-      <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} />
+      <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} geometry={geometry} />
       <Background gap={22} size={1} />
     </ReactFlow>
     <div className="collaboration-canvas__controls" aria-label="Graph viewport">
@@ -221,34 +222,58 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
 }
 
 /** Camera-only labels retain region context without moving or measuring the world. */
-const CollaborationRegionLabels = memo(function CollaborationRegionLabels({ areas }: { areas: readonly AreaNode[] }) {
+const CollaborationRegionLabels = memo(function CollaborationRegionLabels({ areas, geometry }: { areas: readonly AreaNode[]; geometry: ReadonlyMap<string, CollaborationBox> }) {
   const camera = useStore(state => [...state.transform, state.width, state.height], sameItems)
+  const obstacles = useMemo(() => new CollaborationBoundsIndex([...geometry.values()].flatMap(box => box.kind !== 'agent' ? [] : [{ box,
+    // Overview's original 28px hit target can extend to twice the smaller world slot.
+    x: box.x - box.width / 2, y: box.y - box.height / 2, width: box.width * 2, height: box.height * 2 }])), [geometry])
   const labels = useMemo(() => {
     const [panX = 0, panY = 0, zoom = 1, width = 0, height = 0] = camera
     if (width < 80 || height < 80) return []
     const overview = zoom < COLLABORATION_OVERVIEW_ZOOM
     const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(value, high))
-    const visible = (box: CollaborationBox) => box.x * zoom + panX < width && (box.x + box.width) * zoom + panX > 0 && box.y * zoom + panY < height && (box.y + box.height) * zoom + panY > 0
+    const visible = (box: CollaborationBounds) => box.x * zoom + panX < width && (box.x + box.width) * zoom + panX > 0 && box.y * zoom + panY < height && (box.y + box.height) * zoom + panY > 0
+    const visibleAreas = new Set(overview ? [] : obstacles.query({ x: -panX / zoom, y: -panY / zoom, width: width / zoom, height: height / zoom }).flatMap(({ box }) => visible(box) ? [box.areaId] : []))
     const candidates = areas.flatMap(({ data }) => {
       const { box, area } = data
       if (!visible(box)) return []
       const left = (box.x + box.heading.x) * zoom + panX, top = (box.y + box.heading.y) * zoom + panY
       const headingVisible = left >= 8 && left + box.heading.width * zoom <= width - 8 && top >= 8 && top + box.heading.height * zoom <= height - 8
-      if (!overview && (headingVisible || !data.memberGeometry.some(visible))) return []
+      if (!overview && (headingVisible || !visibleAreas.has(box.id))) return []
       const labelWidth = Math.min(width - 24, Math.max(104, Math.min(224, area.name.length * 6.5 + 62)))
       return [{ data, width: labelWidth, height: 26, x: clamp(left, 12, width - labelWidth - 12),
         y: clamp(top + box.heading.height * zoom - 26, headingVisible ? 8 : 52, height - 38), context: !overview }]
     }).sort((a, b) => Number(!a.data.area.members.length) - Number(!b.data.area.members.length) || b.data.area.members.length - a.data.area.members.length || a.y - b.y || a.x - b.x || a.data.area.id.localeCompare(b.data.area.id))
-    const placed: typeof candidates = []
+    const placed: typeof candidates = [], clearance = 6
+    const blockingAgents = (label: CollaborationBounds) => {
+      const padded = { x: label.x - clearance, y: label.y - clearance, width: label.width + clearance * 2, height: label.height + clearance * 2 }
+      const nearby = obstacles.query({ x: (padded.x - panX) / zoom, y: (padded.y - panY) / zoom, width: padded.width / zoom, height: padded.height / zoom })
+      return nearby.flatMap(({ box }) => {
+        const hit = overview ? collaborationOverviewHitBounds(box, zoom) : box
+        const screen = { x: hit.x * zoom + panX, y: hit.y * zoom + panY, width: hit.width * zoom, height: hit.height * zoom }
+        return collaborationBoundsOverlap(padded, screen) ? [screen] : []
+      })
+    }
     for (const candidate of candidates) {
-      for (const offset of [0, 30, -30, 60, -60, 90, -90, 120, -120]) {
-        const y = clamp(candidate.y + offset, 8, height - candidate.height - 12)
-        if (placed.some(other => candidate.x < other.x + other.width + 6 && candidate.x + candidate.width + 6 > other.x && y < other.y + other.height + 4 && y + candidate.height + 4 > other.y)) continue
-        placed.push({ ...candidate, y }); break
+      const pending = [{ x: candidate.x, y: candidate.y }], seen = new Set<string>()
+      for (let attempts = 0; pending.length && attempts < 32;) {
+        pending.sort((a, b) => (a.x - candidate.x) ** 2 + (a.y - candidate.y) ** 2 - (b.x - candidate.x) ** 2 - (b.y - candidate.y) ** 2)
+        const next = pending.shift()!, x = clamp(next.x, 12, width - candidate.width - 12), y = clamp(next.y, candidate.context ? 52 : 8, height - candidate.height - 12)
+        const key = `${x},${y}`
+        if (seen.has(key)) continue
+        seen.add(key); attempts++
+        const label = { x, y, width: candidate.width, height: candidate.height }
+        const padded = { x: x - clearance, y: y - clearance, width: label.width + clearance * 2, height: label.height + clearance * 2 }
+        const blockers = [...placed.filter(other => collaborationBoundsOverlap(padded, other)), ...blockingAgents(label)]
+        if (!blockers.length) { placed.push({ ...candidate, x, y }); break }
+        const left = Math.min(...blockers.map(box => box.x)), right = Math.max(...blockers.map(box => box.x + box.width))
+        const top = Math.min(...blockers.map(box => box.y)), bottom = Math.max(...blockers.map(box => box.y + box.height))
+        pending.push({ x: left - label.width - clearance, y }, { x: right + clearance, y },
+          { x, y: top - label.height - clearance }, { x, y: bottom + clearance })
       }
     }
     return placed
-  }, [areas, camera])
+  }, [areas, camera, obstacles])
   return <div className="collaboration-region-labels">{labels.map(({ data, x, y, width, height, context }) => <div key={data.area.id} className="collaboration-area__overview-label" data-area-id={data.box.id} data-kind={data.area.kind} data-empty={!data.area.members.length || undefined} data-context={context || undefined} style={{ left: x, top: y, width, height }}>
     <button type="button" className="collaboration-area__summary nodrag nopan" aria-label={`Locate ${data.area.name} · ${data.area.members.length} Agents`} onClick={data.onLocate} title={data.area.issue ?? `${areaKinds[data.area.kind].label} · ${data.area.name}`}>
       <SemanticIcon name={areaKinds[data.area.kind].icon} size={13} /><span>{data.area.name}</span><small>{data.area.members.length}</small>
