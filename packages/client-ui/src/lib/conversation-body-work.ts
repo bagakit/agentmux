@@ -117,17 +117,18 @@ export class ConversationBodyWork {
     const viewport = this.viewport
     if (!viewport) return false
     const bounds = viewport.getBoundingClientRect()
+    const candidates = this.near.size || !cold ? this.near : this.shells
     const selected = this.root && selectedConversationReadingNode(this.root, '[data-conversation-layout-key]', shell => {
       const rect = conversationReadingNode(shell)?.getBoundingClientRect()
       return Boolean(rect && rect.height > 0 && rect.bottom > bounds.top && rect.top < bounds.bottom)
-    }, () => this.near)
+    }, () => candidates)
     const selectedNode = selected && conversationReadingNode(selected)
     const selectedRect = selectedNode?.getBoundingClientRect()
     if (selectedNode && selectedRect && selectedRect.height > 0 && selectedRect.bottom > bounds.top && selectedRect.top < bounds.bottom) {
       this.anchor = { node: selectedNode, viewport, offset: selectedRect.top - bounds.top }; this.anchorCaptured = true; return true
     }
     let first: Anchor | null = null
-    for (const shell of this.near.size || !cold ? this.near : this.shells) {
+    for (const shell of candidates) {
       if (!this.shells.has(shell)) continue
       const node = conversationReadingNode(shell)
       if (!node) continue
