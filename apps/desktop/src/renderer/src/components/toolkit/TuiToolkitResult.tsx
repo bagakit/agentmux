@@ -49,7 +49,11 @@ export function TuiToolkitResult({ definition, reading, active, close, compact =
   const [operationError, setOperationError] = useState('')
   const [busy, setBusy] = useState(false)
   const refreshGeneration = useRef(0)
+  const checkLifetime = useRef(0)
+  useEffect(() => () => { ++checkLifetime.current }, [])
   const currentRun = useRef(run)
+  const terminalRefresh = useRef<(() => Promise<void>) | null>(null)
+  const observeTerminalRefresh = useCallback((refresh: (() => Promise<void>) | null) => { terminalRefresh.current = refresh }, [])
   currentRun.current = run
   const refreshSession = useCallback(async (control: SessionControl) => {
     const generation = ++refreshGeneration.current
@@ -86,8 +90,14 @@ export function TuiToolkitResult({ definition, reading, active, close, compact =
     finally { setBusy(false) }
   }
   async function check() {
+    const lifetime = checkLifetime.current
     await reading.check()
-    if (run && !compact) try { await refreshSession({ kind: 'terminal', hostId: run.hostId, runId: run.runId, run: { runId: run.runId } }) }
+    if (lifetime !== checkLifetime.current) return
+    // A check belongs to its captured Run, even if reading the tool changed its execution.
+    if (run && !compact && currentRun.current?.hostId === run.hostId && currentRun.current.runId === run.runId) try {
+      if (terminalRefresh.current) await terminalRefresh.current()
+      else await refreshSession({ kind: 'terminal', hostId: run.hostId, runId: run.runId, run: { runId: run.runId } })
+    }
     catch { /* The latest refresh already owns its visible error. */ }
   }
   const status = reading.error ? 'Observation unavailable' : snapshot ? stateLabel[snapshot.state] : 'Reading terminal status…'
@@ -112,7 +122,7 @@ export function TuiToolkitResult({ definition, reading, active, close, compact =
       {changed ? <p>Configuration changed. This terminal keeps its captured command and directory.</p> : null}
     </div> : null}
     {!compact ? <div className="toolkit-tui__terminal" data-toolkit-terminal>
-      {terminal ? <TerminalView session={terminal} themeId={themeId} {...(fontSize ? { fontSize } : {})} interactiveResize={false} visible={active} autoFocus={false} {...(workspaceId ? { linkOrigin: { workspaceId } } : {})} onRefreshSession={refreshSession} /> : <p className="toolkit-tui__empty">{run ? 'Connecting to the original terminal…' : snapshot?.admission ? 'Waiting for the original launch receipt…' : 'Start the saved command to open its terminal.'}</p>}
+      {terminal ? <TerminalView session={terminal} themeId={themeId} {...(fontSize ? { fontSize } : {})} interactiveResize={false} visible={active} autoFocus={false} {...(workspaceId ? { linkOrigin: { workspaceId } } : {})} onRefreshSession={refreshSession} onObservationRefresh={observeTerminalRefresh} /> : <p className="toolkit-tui__empty">{run ? 'Connecting to the original terminal…' : snapshot?.admission ? 'Waiting for the original launch receipt…' : 'Start the saved command to open its terminal.'}</p>}
     </div> : null}
     {snapshot?.state === 'unknown' && snapshot.admission?.run === null ? <p className="toolkit-tui__notice">{CONTINUE_TOOLKIT_NOTICE}</p> : null}
     {compact ? <footer className="performance-actions toolkit-tui__actions">{actions}</footer> : null}
