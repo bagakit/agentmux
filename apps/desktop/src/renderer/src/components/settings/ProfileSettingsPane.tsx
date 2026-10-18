@@ -63,18 +63,20 @@ export function ProfileSettingsPane({ profile, onSave }: {
 
   return <div className="settings-pane-stack settings-profile" aria-label="My Profile">
     <section className="settings-profile__identity">
+      <div className="settings-profile__photo" data-settings-field="profile-photo">
       <div className="settings-profile__portrait" role="img" aria-label={value.displayName || 'Your avatar'}>
         {value.avatar ? <img src={value.avatar} alt="" /> : <ThemeObjectUserIcon size={34} strokeWidth={1.5} aria-hidden="true" />}
+      </div>
+      <div className="settings-profile__image-actions">
+        <button ref={photoButton} type="button" className="small-button" onClick={() => upload.current?.click()}><ThemeActionCaptureIcon size={13} aria-hidden="true" /> Change photo</button>
+        {value.avatar && <button type="button" className="settings-profile__remove" onClick={() => draft.setField('avatar', '')}>Remove photo</button>}
+      </div>
       </div>
       <div className="settings-profile__identity-text">
         <label htmlFor="profile-display-name" data-settings-field="display-name">Display name</label>
         <TextInput id="profile-display-name" aria-label="Display name" value={value.displayName} maxLength={USER_PROFILE_NAME_LIMIT}
           placeholder="Your name" autoComplete="nickname" onChange={event => draft.setField('displayName', event.currentTarget.value)} />
         <p className="settings-profile__identity-hint">Shown with your messages and shared context.</p>
-        <div className="settings-profile__image-actions" data-settings-field="profile-photo">
-          <button ref={photoButton} type="button" className="small-button" onClick={() => upload.current?.click()}><ThemeActionCaptureIcon size={13} aria-hidden="true" /> Change photo</button>
-          {value.avatar && <button type="button" className="settings-profile__remove" onClick={() => draft.setField('avatar', '')}>Remove</button>}
-        </div>
         <input ref={upload} hidden type="file" accept="image/png,image/jpeg" aria-label="Choose profile photo"
           onChange={event => { void chooseImage(event.currentTarget.files?.[0]); event.currentTarget.value = '' }} />
       </div>
