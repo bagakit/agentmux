@@ -15,6 +15,7 @@ import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spati
 import { fixturePath } from '../../lib/fixture-values.mjs'
 import type { CollaborationLayoutBox, CollaborationLayoutRequest, CollaborationLayoutResponse } from '../../../src/renderer/src/lib/collaboration-layout-engine'
 import { COLLABORATION_ACTIVITY_MS } from '../../../src/renderer/src/lib/collaboration-map-presentation'
+import { collaborationAreaNode } from '../../../src/renderer/src/lib/collaboration-presentation'
 import '../../../src/renderer/src/styles/index.css'
 
 // Transparent instrumentation: actual browser Workers and original context code execute.
@@ -324,6 +325,7 @@ Object.assign(window, { graphCapture: {
     denseSubjects: [...denseSenders, ...densePeers].map(session => ({ hostId, agentSessionId: session.id })),
     denseCommunication: denseRefs.map(ref => ({ messageId: ref.messageId, sender: JSON.stringify([hostId, ref.senderSessionId]), recipient: JSON.stringify([hostId, ref.recipientSessionId]) })),
     expectedInitialAgentKeys: [...initialSessions.map(session => JSON.stringify([session.hostId, session.kind === 'agent' ? session.control.agentSessionId : session.id])), ...retired.map(source => JSON.stringify([source.hostId, source.agentSessionId]))],
+    projectAreaId: projectSpace, projectAreaNodeId: collaborationAreaNode(projectSpace), retainedSubjects: retired.map(source => ({ hostId: source.hostId, agentSessionId: source.agentSessionId, workspacePath: source.history?.workspacePath })),
     initialCanonicalAgents: initialSessions.length + retired.length, permanentEmptyAreas: emptyProjects.length, initialSnapshotMembers: initialSessions.length } },
   clearFocusForEntry() { useAppStore.getState().focusExecutionSession(null, undefined, { navigate: false }) },
   rememberBody() {
@@ -342,7 +344,8 @@ Object.assign(window, { graphCapture: {
     const animation = (element: Element) => { const a = element.getAnimations()[0], style = getComputedStyle(element); return { currentTime: a?.currentTime ?? null, delay: a?.effect?.getTiming().delay ?? null, progress: a?.effect?.getComputedTiming().progress ?? null, duration: style.animationDuration, opacity: style.opacity, display: style.display, animationName: style.animationName, dashoffset: style.strokeDashoffset } }
     return { at: performance.now(), reducedMotion: matchMedia('(prefers-reduced-motion: reduce)').matches,
       markers: [...document.querySelectorAll('.collaboration-activity')].map(element => ({ subject: element.closest<HTMLElement>('[data-collaboration-agent]')?.dataset.collaborationAgent, label: element.getAttribute('aria-label'), kind: element.getAttribute('data-kind'), ...animation(element), ...screen(element) })),
-      paths: [...document.querySelectorAll('.collaboration-edge__pulse')].map(element => ({ id: element.closest<HTMLElement>('[data-id]')?.dataset.id, kind: element.getAttribute('data-kind'), path: element.getAttribute('d'), ...animation(element), ...screen(element) })) }
+      paths: [...document.querySelectorAll('.collaboration-edge__pulse')].map(element => ({ id: element.closest<HTMLElement>('[data-id]')?.dataset.id, kind: element.getAttribute('data-kind'), path: element.getAttribute('d'), ...animation(element), ...screen(element) })),
+      packets: [...document.querySelectorAll('.collaboration-edge__packet')].map(element => ({ id: element.closest<HTMLElement>('[data-id]')?.dataset.id, kind: element.getAttribute('data-kind'), distance: getComputedStyle(element).offsetDistance, ...animation(element), ...screen(element) })) }
   },
   world() {
     const latest = [...nativeWorkers].reverse().find(sample => sample.geometry)
