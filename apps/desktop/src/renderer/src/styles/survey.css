@@ -13,6 +13,8 @@
   backdrop-filter: blur(20px) saturate(110%); border: 1px solid var(--survey-edge);
   box-shadow: inset 0 1px var(--wash-2), var(--elev-1);
 }
+/* Floating menus share one authored opaque material across DOM and native Browser layers. */
+.survey-topic-menu { --survey-glass: var(--surface-1); backdrop-filter: none; }
 .survey-navigation { position: relative; flex: 0 0 auto; min-width: 0; min-height: 0; display: flex; flex-direction: column; gap: var(--sp-2); padding: 0; border: 0; border-right: 1px solid var(--survey-edge); border-radius: 0; box-shadow: inset 0 1px var(--wash-1); container: survey-list / inline-size; }
 .survey-navigation[data-collapsed="true"] { min-width: 40px; max-width: 40px; align-items: center; padding-inline: var(--sp-1); }
 .survey-titlebar { width: 100%; justify-content: flex-end; padding-inline: var(--sp-3); }
