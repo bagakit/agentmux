@@ -102,6 +102,8 @@ it('keeps a refused enable draft and opens the original Executor preference with
   await button('Save chat settings')
   await ready(() => expect(chat().textContent).toContain('Choose Executor for new chat before enabling this Mote.'))
   expect(useAppStore.getState().moteChatIntents).toEqual({})
+  expect(chat().textContent).toContain('Chat settings were not saved. Your draft is kept.')
+  expect(chat().textContent).not.toContain('original request are kept')
   expect(chat().querySelector<HTMLInputElement>('[aria-label="Enable Feishu private chat"]')!.checked).toBe(true)
   expect((await f.client.call('space.mote.chat.inspect', { target: f.target() })).configuration).toBeNull()
   await button('Choose Executor')
