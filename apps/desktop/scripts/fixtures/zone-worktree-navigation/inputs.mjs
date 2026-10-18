@@ -2,7 +2,8 @@ export const products = [
   'components/WorkspaceZonesPanel.tsx', 'components/ProjectFilesTool.tsx',
   'components/TopicFilesTool.tsx', 'components/WorkspaceGitTool.tsx',
   'components/BranchesPanel.tsx', 'lib/copy-path-display.ts',
-  'styles/workspace-zones.css', 'styles/workspace-git.css', 'hooks/useZoneWorktrees.ts'
+  'styles/workspace-zones.css', 'styles/workspace-git.css', 'hooks/useZoneWorktrees.ts',
+  'lib/zone-worktree-observation.ts', 'components/SurfaceToolDock.tsx', 'styles/source-control.css'
 ].map(file => 'apps/desktop/src/renderer/src/' + file)
 
 export const mutations = [

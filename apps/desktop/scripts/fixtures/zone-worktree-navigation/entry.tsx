@@ -49,8 +49,10 @@ api.git.worktrees = async input => {
   read('git.worktrees', [input])
   const resource = workspaces.find(value => value.id === input.workspaceId)
   if (!resource || resource.hostId !== input.expectedResource.hostId || resource.path !== input.expectedResource.workspacePath) throw new Error('Unknown exact fixture resource')
-  if (resource.id === plain.id) return { kind: 'not-a-git-repository', ...input.expectedResource, checkedAt: 1 }
-  return { kind: 'ready', ...input.expectedResource, repoPath: display.path, checkedAt: 1, warnings: [], worktrees: [
+  if (resource.id === plain.id) return { kind: 'not-a-git-repository', ...input.expectedResource, checkedAt: 1,
+    directories: [{ path: plain.path, kind: 'directory', canonicalPath: plain.path }] }
+  return { kind: 'ready', ...input.expectedResource, repoPath: display.path, checkedAt: 1, warnings: [],
+    directories: [...new Set([display.path, worktree.path, resource.path])].map(path => ({ path, kind: 'directory' as const, canonicalPath: path })), worktrees: [
     { path: display.path, branch: 'main', kind: 'main', detached: false, aliases: [] },
     { path: worktree.path, branch: 'feature/explain-zone-worktree-relationships-with-long-reference', kind: 'linked', detached: false, aliases: [] }
   ] }

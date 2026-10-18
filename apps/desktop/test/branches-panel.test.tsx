@@ -19,7 +19,7 @@ import type {
   WorkspaceRecord
 } from '../src/shared/contracts.js'
 import type { GitAheadBehind } from '../src/shared/git-contracts.js'
-import { allStyles, allStyleRules } from './helpers/styles.js'
+import { readStyleSheet, stripCssComments } from './helpers/styles.js'
 
 const fixture = vi.hoisted(() => ({
   snapshot: null as WorkspaceBranchesSnapshot | null,
@@ -27,7 +27,7 @@ const fixture = vi.hoisted(() => ({
   state: {
     activateWorkspaceSelection: vi.fn(),
     runFanOut: vi.fn(),
-    config: { projects: [], executors: [] },
+    config: { workspaces: [], executors: [] },
     sessions: [] as unknown[],
     pinnedItems: {} as Record<string, string[]>,
     togglePinnedItem: vi.fn()
@@ -47,6 +47,11 @@ vi.mock('../src/renderer/src/hooks/useWorkspaceBranches.js', () => ({
 
 // 同上：ahead/behind 也是 effect 取数。**不替换它，`facts` 就恒为 null，整个同步徽标是死代码而
 // 这个文件照旧全绿**——这正是它需要被守的形状（实测：新增徽标后 6 条断言一条没动）。
+vi.mock('../src/renderer/src/hooks/useZoneWorktrees.js', () => ({ useZoneWorktrees: () => ({
+  snapshot: fixture.snapshot?.kind === 'git-repository' ? { kind: 'ready', hostId: fixture.snapshot.hostId, repoPath: fixture.snapshot.repoPath, workspacePath: fixture.snapshot.repoPath, checkedAt: 1, warnings: [], directories: [],
+    worktrees: fixture.snapshot.branches.filter(value => value.worktreePath).map(value => ({ path: value.worktreePath!, branch: value.name, kind: value.isCurrent ? 'main' : 'linked', detached: false, aliases: [] })) } : null,
+  directories: [], directoryObservation: null, directoryStale: false, stale: false, issue: null, loading: false, refresh: vi.fn()
+}) }))
 vi.mock('../src/renderer/src/hooks/useGitAheadBehind.js', () => ({
   useGitAheadBehind: () => ({
     workspaceId: 'ws-1',
@@ -154,7 +159,10 @@ describe('Branches 面板', () => {
     expect(root.querySelector('.source-control-count')?.textContent).toBe('3 branches')
     const actions = [...root.querySelectorAll('.source-control-actions > button > svg')]
     expect(actions).toHaveLength(3)
-    expect(actions[0]?.getAttribute('class')).not.toBe(actions[1]?.getAttribute('class'))
+    expect(actions.slice(0, 2).map(icon => icon.getAttribute('data-semantic-icon'))).toEqual(['git.compare', 'object.workflow'])
+    expect(actions[0]?.querySelector('use')?.getAttribute('href')).not.toBe(actions[1]?.querySelector('use')?.getAttribute('href'))
+    expect(root.querySelector('[aria-label="Compare two local branches"]')).not.toBeNull()
+    expect(root.querySelector('[aria-label="Fan out a prompt"]')).not.toBeNull()
     const paths = [...root.querySelectorAll('.selector-row__identity small')]
     expect(paths.map(path => [path.textContent, path.getAttribute('title')])).toEqual([
       ['./.worktrees/inside', _hygiene_fixturePath("repo/.worktrees/inside")], [_hygiene_fixturePath("repo-other/tree"), _hygiene_fixturePath("repo-other/tree")]
@@ -198,8 +206,8 @@ describe('Branches 面板', () => {
       ['Branch without worktree', 'Branch without worktree', 'img']
     ])
     expect(states.map((state) => state.textContent)).toEqual(['', '', ''])
-    expect(states.map((state) => state.querySelector('svg')?.getAttribute('class'))).toEqual([
-      'lucide lucide-check', 'lucide lucide-folder-git2', 'lucide lucide-unlink'
+    expect(states.map((state) => state.querySelector('svg')?.getAttribute('data-semantic-icon'))).toEqual([
+      'status.selected', 'object.repository', 'action.unlink'
     ])
     expect(states.map((state) => state.querySelector('svg')?.getAttribute('aria-hidden'))).toEqual(['true', 'true', 'true'])
     // 没 worktree 的那条必须显式带上 unbound 修饰——它是"这行还不能直接进"的唯一视觉线索。
@@ -252,18 +260,9 @@ describe('Branches 面板', () => {
     expect(markup).not.toContain('Not a Git repository')
   })
 
-  /**
-   * 「一个分支有没有 worktree」这个判定在本文件里**只许出现零次**——它整个搬到了
-   * workspace-branches-state 的 branchWorktreePath，由 workspace-branches-state.test.ts 直接质询。
-   *
-   * 为什么需要这道结构守卫而不只是上面那三条渲染断言：渲染断言守的是**当下的取值**，守不住「明天
-   * 有人在这里再手写一次 `branch.worktreePath ? …`」。而那正是这个缺陷的成因——七处独立判定里只有
-   * 露在渲染结果上的几处被守住，`openBranch` 里那处只在 onClick 执行，renderToStaticMarkup 永不触发
-   * 点击，取反后 5 条渲染断言全绿。判据落在「谁读那个字段」上，因为增殖是按读取点发生的。
-   *
-   * 计数而不是 `not.toContain`：本文件合法地保留一个同名的**局部** state（`worktreePath`，创建对话框
-   * 的输入框），裸词匹配会把它一起抓进来。所以判据是 `branch.worktreePath` 这种**从记录上取字段**的
-   * 形状，并且先自检这个形状真能匹配到东西，免得写错正则后这道门恒绿。
+  /** Availability predicates stay in branchWorktreePath. The inventory may compare exact
+   * native-entry and branch paths; mounted zone-clarity tests guard mismatched action targets.
+   * This guard detects new inline truthiness/null availability predicates, not exact joins.
    */
   it('面板里不许再手写第二处 worktreePath 判定', () => {
     // happy-dom 环境下 Vite 会把 `new URL('…', import.meta.url)` 改写成 http: 资源 URL，node:fs 当场
@@ -272,12 +271,13 @@ describe('Branches 面板', () => {
       join(dirname(fileURLToPath(import.meta.url)), '../src/renderer/src/components/BranchesPanel.tsx'),
       'utf8'
     )
-    const fieldReads = source.match(/\bbranch(?:es)?[A-Za-z]*\.worktreePath\b/g) ?? []
+    // Exact native-entry path correlation is not a second availability predicate.
+    const fieldReads = source.match(/\bbranch(?:es)?[A-Za-z]*\.worktreePath\s*(?:\?\??|&&|\|\||[!=]==?\s*null)/g) ?? []
     expect(fieldReads, `面板里又出现了 ${fieldReads.length} 处直接读 worktreePath：${fieldReads.join(', ')}`)
       .toEqual([])
     // 自检：上面那个空数组必须是「真的没有」，而不是正则写错。拿一段已知含有该形状的文本喂给它。
     expect(
-      'const x = branch.worktreePath ?? null'.match(/\bbranch(?:es)?[A-Za-z]*\.worktreePath\b/g),
+      'const x = branch.worktreePath ?? null'.match(/\bbranch(?:es)?[A-Za-z]*\.worktreePath\s*(?:\?\??|&&|\|\||[!=]==?\s*null)/g),
       '判据正则连一段确定含有该形状的文本都匹配不到——这道门是恒绿的'
     ).toHaveLength(1)
     // 且判定必须真的来自那个唯一判定点，不是本地又写了个同名函数。
@@ -387,10 +387,8 @@ describe('Branches 面板的同步计数徽标', () => {
    * kind 收集起来。手抄一份清单就会在加第六种状态时静默漏掉 CSS，而那种漏法的症状是徽标以继承色
    * 出现，测试与 tsc 都不会红。
    *
-   * 扫的是 `allStyles()`（整张表）而不是某一个文件名。此前这里硬写 dock.css，于是把 Source Control
-   * 那一段拆到 source-control.css 时它当场变红——而拆分并没有让任何一条规则失效。判据本来就该是
-   * 「这条规则在层叠里吗」，不是「它在哪个文件里」：后者让每一次按表面再拆一刀都要来改这条断言，
-   * 且反过来，若那个文件从 @import 里掉出去（规则真的失效了），硬写路径的读法照旧全绿。
+   * 本断言只核 Source Control owner 的规则；不要求无关工作面的全部 CSS 都直接挂在顶层 index。
+   * 实际加载与呈现仍由生产构建和 Native 图审验证，不借静态扫描代签。
    */
   it('每种可见 kind 在样式表里都有配色', () => {
     const probes: GitAheadBehind[] = [
@@ -403,7 +401,7 @@ describe('Branches 面板的同步计数徽标', () => {
     const visible = [...new Set(probes.map(gitSyncBadge).filter((b) => b.label !== '').map((b) => b.kind))]
     expect(visible.length, '一种会渲染的 kind 都收集不到——判据落空了').toBeGreaterThan(0)
 
-    const css = allStyles()
+    const css = readStyleSheet('./source-control.css')
     for (const kind of visible) {
       expect(css, `可见状态 ${kind} 没有配色规则，徽标会以继承色出现`).toContain(
         `.branch-row__sync--${kind} {`
@@ -571,7 +569,7 @@ describe('Branches 面板的 pin', () => {
       expect(pin, '没渲染出 pin 键').not.toBeNull()
 
       // 先证前提成立：它静息态确实是透明的。哪天改成常驻可见，这条会红，提醒下面那套理由要重判。
-      const rules = [...allStyleRules().matchAll(/([^{}]+)\{([^{}]*)\}/gu)]
+      const rules = [...stripCssComments(readStyleSheet('./source-control.css')).matchAll(/([^{}]+)\{([^{}]*)\}/gu)]
         .map(([, selector, body]) => ({
           selector: selector!.replace(/\s+/gu, ' ').trim(),
           body: body!.replace(/\s+/gu, ' ').trim()

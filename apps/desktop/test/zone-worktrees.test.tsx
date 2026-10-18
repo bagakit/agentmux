@@ -79,7 +79,7 @@ it('keeps definite non-Git distinct from unavailable and rejects an incorrect or
   const observe = vi.spyOn(native, 'observe')
   await expect(owner.call('git.worktrees', { ...target(), expectedResource: { hostId: 'foreign', workspacePath: workspace.path } })).rejects.toMatchObject({ code: 'GIT_RESOURCE_MISMATCH' })
   expect(observe).not.toHaveBeenCalled()
-  observe.mockImplementationOnce(async () => { const answer = { kind: 'unavailable' as const, ...target().expectedResource, checkedAt: 1, reason: 'private offline' }
+  observe.mockImplementationOnce(async () => { const answer = { kind: 'unavailable' as const, ...target().expectedResource, checkedAt: 1, reason: 'private offline', directories: [{ path: workspace.path, kind: 'missing' as const }] }
     config = { ...config, workspaces: [{ ...workspace, path: repo }] }; return answer })
   await expect(owner.call('git.worktrees', target())).rejects.toMatchObject({ code: 'GIT_RESOURCE_MISMATCH' })
 })
@@ -139,7 +139,7 @@ it('keeps absent optional registrations quiet without removing their Zones and o
   expect(JSON.stringify(config)).toBe(saved)
 })
 
-it.each(['EACCES', 'EPERM', 'EIO', 'ELOOP', 'UNKNOWN', null, undefined, 42])('retains an honest warning for optional alias failure %s', async errorCode => {
+it.each(['EACCES', 'EPERM', 'EIO', 'ELOOP', 'UNKNOWN'])('retains a typed unknown directory outcome for optional path failure %s', async errorCode => {
   const path = join(root, 'unconfirmed')
   workspace = { ...workspace, repoPath: repo }
   config = { ...config, workspaces: [workspace, { ...workspace, id: 'unconfirmed', path }] }
@@ -149,24 +149,24 @@ it.each(['EACCES', 'EPERM', 'EIO', 'ELOOP', 'UNKNOWN', null, undefined, 42])('re
     if (command !== 'node') return result
     // Keep the real Git and Host batch; inject only one original path's native failure.
     const records = JSON.parse(result.stdout).map((value: { path: string }) => value.path === path
-      ? { path, canonicalPath: null, errorCode } : value)
+      ? { path, kind: 'unavailable', reason: `${errorCode}: original path unavailable` } : value)
     return { ...result, stdout: JSON.stringify(records) }
   })
   const result = ready(await owner.call('git.worktrees', target()))
   expect(result.worktrees.map(value => value.path)).toEqual([repo, lane])
-  expect(result.warnings).toHaveLength(1)
-  expect(result.warnings[0]).toContain(errorCode === undefined || typeof errorCode === 'number'
-    ? 'Invalid directory alias observation' : `Directory alias is unconfirmed: ${path}`)
+  expect(result.warnings).toEqual([])
+  expect(result.directories.find(value => value.path === path)).toEqual({ path, kind: 'unavailable', reason: `${errorCode}: original path unavailable` })
 })
 
-it('retains a missing worktree still registered by Git and warns without pruning or rewriting its workspace', async () => {
+it('retains native registration and reports a missing directory without pruning or rewriting its workspace', async () => {
   workspace = { ...workspace, repoPath: repo }
   config = { ...config, workspaces: [workspace, { ...workspace, id: 'linked', path: lane, kind: 'worktree' }] }
   const saved = JSON.stringify(config)
   await rm(lane, { recursive: true })
   const result = ready(await owner.call('git.worktrees', target()))
   expect(result.worktrees.map(value => value.path)).toEqual([repo, lane])
-  expect(result.warnings).toEqual([`Directory alias is unconfirmed: ${lane}. Refresh to retry.`])
+  expect(result.warnings).toEqual([])
+  expect(result.directories.find(value => value.path === lane)).toEqual({ path: lane, kind: 'missing' })
   expect(await git('worktree', 'list', '--porcelain', '-z')).toContain(`worktree ${lane}\0`)
   expect(JSON.stringify(config)).toBe(saved)
 })
@@ -209,6 +209,7 @@ it('exposes the same observation through public RPC, strict codec and discoverab
   const windowsTarget = { ...target(), expectedResource: { hostId: 'windows', workspacePath: drive } }
   expect(parseGitParams('git.worktrees', windowsTarget)).toEqual(windowsTarget)
   const windows = { ...ready(result), hostId: 'windows', workspacePath: drive, repoPath: drive,
+    directories: [drive, unc].map(path => ({ path, kind: 'directory', canonicalPath: path })),
     worktrees: [{ path: drive, branch: 'self', kind: 'main', detached: false, aliases: [] }, { path: unc, branch: null, kind: 'linked', detached: true, aliases: [] }] }
   expect(parseGitResult('git.worktrees', windows, windowsTarget)).toBe(windows)
   for (const bad of [{ ...target(), expectedResource: { hostId: 'local' } }, { ...target(), extra: true }])
@@ -265,7 +266,7 @@ it('shares one Space read across exact Zone rows, refreshes native branch/detach
   expect(row(laneZone).textContent).toContain('Detached HEAD')
   expect(row(laneZone).textContent).toContain('Last observed')
   expect(row(laneZone).dataset.zoneGitState).toBe('stale')
-  expect(dom.container.querySelector('[role="status"]')?.textContent).toContain('Controlled unavailable observation')
+  expect(dom.container.querySelector('.workspace-zones-notice p')?.textContent).toContain('Controlled unavailable observation')
   expect(row(laneZone).hasAttribute('disabled')).toBe(false)
   expect([...dom.container.querySelectorAll<HTMLElement>('[data-zone-id]')].map(node => node.dataset.zoneId)).toEqual(ids)
   expect(useAppStore.getState().config).toBe(before.config)
