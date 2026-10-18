@@ -106,6 +106,10 @@ try {
   assert.deepEqual([...new Set(preloadRequires)], ['electron'], 'The sandbox preload must bundle workspace dependencies')
   for (const variant of costPairs ? ['scheduled', 'immediate'] : ['scheduled']) await build({ ...common, base: './', resolve: { alias: [candidateAlias(root, { browser: true })] }, plugins: [plugin(true, variant)], worker: { format: 'es', plugins: () => [plugin(true, variant)] }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
     build: { target: 'esnext', minify: false, reportCompressedSize: false, outDir: path.join(privateRoot, variant === 'scheduled' ? 'renderer' : 'renderer-immediate'), emptyOutDir: true } })
+  for (const specifier of ['@agentmux/client-ui/styles/conversation-message.css', '@agentmux/client-ui/input/styles.css']) {
+    const file = candidateResolve(root, specifier, { browser: true })
+    assert.ok(cssInputs[path.relative(root, file)], 'Actual shared stylesheet is compiled: ' + specifier)
+  }
   receipt.transforms = [...transforms.values()]
   if (costPairs) assert.equal(receipt.transforms.length, 1)
   if (mobileFixture && !anchorAttempts && !costPairs) {
