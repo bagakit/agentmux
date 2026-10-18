@@ -88,6 +88,21 @@ it('multiple assignees require an explicit recipient; selection sends nothing an
   expect(renders).not.toHaveBeenCalled()
 })
 
+it('a fresh finite task rejected before preparation releases its intent so the restored original Agent can receive the next explicit click', async () => {
+  await act(async () => root.render(null))
+  const originalSessions = useAppStore.getState().sessions, goal = useAppStore.getState().demands.goal!, accepted = [...writes]
+  await act(async () => { useAppStore.setState({ sessions: [] }); root.render(<GoalFiniteStartControl demand={goal} />) })
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent?.startsWith('Start with'))!.click())
+  await vi.waitFor(async () => { await act(async () => {}); expect(container.textContent).toContain('unconfirmed presentation'); expect(useAppStore.getState().goalFiniteStartIntents.goal).toBeUndefined() })
+  expect((await demands.get('goal'))!.dispatches ?? []).toEqual([])
+  expect(writes).toEqual(accepted)
+  expect((await client.agentSession(session.agentSessionId)).run).toEqual(session.run)
+  await act(async () => useAppStore.setState({ sessions: originalSessions }))
+  await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent?.startsWith('Start with'))!.click())
+  await vi.waitFor(async () => { await act(async () => {}); expect((await demands.get('goal'))!.dispatches?.[0]?.stage).toBe('confirmed') })
+  expect((await demands.get('goal'))!.dispatches).toHaveLength(1)
+})
+
 it('original Source CLI finite Start → actual Core prompt receipt → ended original Run → public Goal responsibility → existing Goal proposal remains pending human review', async () => {
   await act(async () => root.render(null))
   expect(isAgentMuxRpcMethod('goal.delegations'), JSON.stringify(Object.keys(AGENTMUX_RPC_NATIVE_METHODS))).toBe(true)
