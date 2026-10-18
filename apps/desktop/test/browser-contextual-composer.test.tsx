@@ -5,6 +5,7 @@ import { beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { createAgentInputContextCaptureRecord } from '@agentmux/core/agent-input-context-capture'
 import { useBrowserContextualComposer } from '../src/renderer/src/components/BrowserContextualComposer'
+import type { AgentMuxBrowserControl } from '@agentmux/core'
 import type { BrowserOperation } from '../src/shared/browser-operation'
 import type { BrowserInputScene } from '../src/shared/browser-input-context-capture'
 import { api } from '../src/renderer/src/lib/api'
@@ -17,8 +18,9 @@ const operation: BrowserOperation = { id: 'operation-original', browserId: 'brow
 const scene: BrowserInputScene = { reference: { hostId: 'local', captureId: 'original-scene' }, diskDurability: 'confirmed',
   inputContext: { kind: 'browser', version: 1, capturedAt: _batchFixtureEpoch(0, 0, 1), browser: { hostId: 'local', browserId: 'browser-original', navigationId: 'navigation-original' },
     page: { url: operation.url, title: 'Original page' }, activity: { operationId: operation.id, stepSequence: 2, phase: 'running', observedAt: _batchFixtureEpoch(0, 0, 1) } } }
-function Harness({ current = operation, visible = true, comment }: { current?: BrowserOperation; visible?: boolean; comment?: { operationId: string; sequence: number } }) {
-  const opinion = useBrowserContextualComposer('browser-original', current, visible)
+const originalAgent = { hostId: 'local', agentSessionId: 'agent-1' }
+function Harness({ current = operation, agent = originalAgent, visible = true, comment }: { current?: BrowserOperation | null; agent?: AgentMuxBrowserControl['agent']; visible?: boolean; comment?: { operationId: string; sequence: number } }) {
+  const opinion = useBrowserContextualComposer('browser-original', agent, current, visible)
   return <><button ref={opinion.buttonRef} onClick={event => opinion.open(event.currentTarget, comment)}>Discuss</button>{opinion.dialog}</>
 }
 const editor = () => document.querySelector<HTMLTextAreaElement>('[aria-label="Opinion for Browser operator"]')!
@@ -47,7 +49,7 @@ beforeEach(() => {
 
 it('keeps authored text, original recipient and captured scene across live operation changes and close', async () => {
   await dom.render(<Harness />); await button('Discuss'); await type('Keep this exact opinion')
-  await dom.render(<Harness current={{ ...operation, id: 'operation-later', operator: { id: 'agent-2', name: 'Other Agent' } }} />)
+  await dom.render(<Harness agent={{ hostId: 'local', agentSessionId: 'agent-2' }} current={{ ...operation, id: 'operation-later', operator: { id: 'agent-2', name: 'Other Agent' } }} />)
   await button('Close discussion'); await button('Discuss')
   expect(editor().value).toBe('Keep this exact opinion')
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Original page')

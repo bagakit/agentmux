@@ -25,7 +25,7 @@ const receipt: BrowserInputSelectionReceipt = { operationId: 'original-selection
   scene: { ...scene, reference: { hostId: 'local', captureId: 'selection-scene' }, inputContext: { ...scene.inputContext, selection } },
   artifact: { path: selection.attachment.path, sha256: selection.attachment.sha256, width: 40, height: 30, byteLength: 100, diskDurability: 'confirmed' } }
 function Harness({ visible = true }: { visible?: boolean }) {
-  const opinion = useBrowserContextualComposer(operation.browserId, operation, visible, 'later-navigation')
+  const opinion = useBrowserContextualComposer(operation.browserId, { hostId: 'local', agentSessionId: 'agent-1' }, operation, visible, 'later-navigation')
   return <><button ref={opinion.buttonRef} onClick={event => opinion.open(event.currentTarget)}>Discuss</button>{opinion.dialog}</>
 }
 async function click(label: string) {
