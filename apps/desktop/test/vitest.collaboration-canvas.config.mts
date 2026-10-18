@@ -13,6 +13,8 @@ const motion = 'the formal motion control changes only original event presentati
 export const collaborationCanvasMutations = [
   { file: graph, name: 'fold-screen-anchor', before: "foldAnchor.current = anchor && box?.kind === 'area' ?", after: "foldAnchor.current = false && box?.kind === 'area' ?", assertion: 'keeps a clamped region label and its Expand action visible after the original world heading folds offscreen' },
   { file: labels, name: 'current-locate-occlusion', before: 'if (contextControl?.current) surfaces.push(contextControl.current)', after: 'if (false) surfaces.push(contextControl!.current!)', assertion: 'measures a newly visible original Locate control as a region-label obstacle without changing world geometry' },
+  { file: 'styles/collaboration.css', name: 'effective-motion-cascade', before: 'animation-duration: var(--collaboration-activity-duration) !important;', after: 'animation-duration: var(--collaboration-activity-duration);', assertion: 'honors explicit map motion through the actual reduced-motion cascade without restoring unrelated animations' },
+  { file: graph, name: 'original-motion-duration', before: "'--collaboration-activity-duration': `${COLLABORATION_ACTIVITY_MS}ms`", after: "'--collaboration-activity-duration': '0ms'", assertion: 'honors explicit map motion through the actual reduced-motion cascade without restoring unrelated animations' },
   { file: graph, name: 'motion-control-action', before: 'onClick={() => void motion.setEnabled(!motion.enabled)}', after: 'onClick={() => {}}', assertion: motion },
   { file: graph, name: 'motion-pulse-gate', before: 'record.active && motion ? <path', after: 'record.active ? <path', assertion: motion },
   { file: graph, name: 'motion-resume-phase', before: '[record.active, record.startedAt, motion]', after: '[record.active, record.startedAt]', assertion: motion },
@@ -79,4 +81,4 @@ export default defineConfig({ ...shared, cacheDir: '.cache/collaboration-canvas'
       JSON.stringify({ path, originalSHA256: hash(source), effectiveSHA256: hash(code), mutant: applied ? selected : null }) + '\n')
     if (source !== code) return { code, map: null }
   }, buildEnd() { if (selected && !loaded) throw Error('The actual canvas mutation source must be loaded') }
-}], test: { ...shared.test, include: ['apps/desktop/test/collaboration-canvas-product.test.tsx', 'apps/desktop/test/collaboration-map-geometry.test.ts'], passWithNoTests: false, maxWorkers: 1, fileParallelism: false, testTimeout: 20000 } })
+}], test: { ...shared.test, css: { include: [/\/styles\/(?:base|collaboration)\.css/u] }, include: ['apps/desktop/test/collaboration-canvas-product.test.tsx', 'apps/desktop/test/collaboration-map-geometry.test.ts', 'apps/desktop/test/collaboration-motion-cascade.test.tsx'], passWithNoTests: false, maxWorkers: 1, fileParallelism: false, testTimeout: 20000 } })
