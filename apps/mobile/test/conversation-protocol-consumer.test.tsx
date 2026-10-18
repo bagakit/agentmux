@@ -278,11 +278,11 @@ it('authenticated Mobile manual input remains independent of question capability
   await click(button(view.element, 'Send'))
   await vi.waitFor(() => expect(f.writes.join('')).toContain('Manual input on the authenticated original owner'))
   await vi.waitFor(() => expect(saved().attempts[0][1].phase).toBe('confirmed'))
+  await vi.waitFor(() => expect(editor(view.element).textContent).toBe(''))
   expect(f.submit).toHaveBeenCalledOnce()
   expect(f.submit.mock.calls[0]![0]).toMatchObject({ agentSessionId: sid, expectedRun: { runId: RUN_ID },
     authorHuman: true, sourceDevice: f.device, admissionIntent: { kind: 'manual-actor' }, execution: 'immediate' })
   expect(saved().attempts[0][1].operationId).toBe(f.submit.mock.calls[0]![0].operationId)
-  expect(editor(view.element).textContent).toBe('')
   expect(view.element.textContent).toContain('异步问题能力观察未确认')
   expect(f.reply).not.toHaveBeenCalled()
 }, 15000)
