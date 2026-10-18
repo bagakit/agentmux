@@ -140,7 +140,8 @@ export class CustomToolkitOwner {
         await this.admit(id, { invocationId: mintObjectId(), expectedRevision: record.revision,
           expectedLatestExecutionId: tool.latest?.executionId ?? null }, null, new AbortController().signal)
       } catch (error) {
-        if (tool && this.configurations().some(value => value.id === id)) {
+        // A concurrent explicit admission owns its own state, including any unknown outcome.
+        if (tool && !tool.admission && this.configurations().some(value => value.id === id)) {
           tool.loadError = 'TUI loading is unconfirmed: ' + message(error)
           this.publish(tool)
         }
