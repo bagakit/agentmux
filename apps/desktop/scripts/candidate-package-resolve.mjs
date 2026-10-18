@@ -30,6 +30,12 @@ export function candidateResolve(root, specifier, { browser = false, source = fa
   return file
 }
 
+/** Vite's CSS importer uses aliases, independently of user resolveId plugins. */
+export function candidateAlias(root, options) {
+  return { find: /^@agentmux\//u, replacement: '@agentmux/',
+    customResolver: specifier => candidateResolve(root, specifier, options) }
+}
+
 /** Ordinary dependencies may be shared; first-party source belongs to this checkout. */
 export function candidateModule(root, file) {
   const actual = realpathSync(file)
