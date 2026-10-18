@@ -72,7 +72,7 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
       if (!result.has(id)) {
         const name = facts.names[session.id], held = catalogCache.current.get(id)
         const presentation = held?.source === session && held.name === name ? held.agent : collaborationAgentPresentation(session, name)
-        const agent = held && held.agent.name === presentation.name && held.agent.tier === presentation.tier && held.agent.lastActivityAt === presentation.lastActivityAt ? held.agent : { id, subject, sessionId: subject.agentSessionId, ...presentation }
+        const agent = held && held.agent.name === presentation.name && held.agent.tier === presentation.tier && held.agent.lastActivityAt === presentation.lastActivityAt && held.agent.providerId === presentation.providerId && held.agent.executorId === presentation.executorId ? held.agent : { id, subject, sessionId: subject.agentSessionId, ...presentation }
         catalogCache.current.set(id, { source: session, name, agent }); result.set(id, agent)
       }
       if (session.hostId === subject.hostId && !sessions.has(id)) sessions.set(id, session)
@@ -80,7 +80,7 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
     for (const source of history.sources) {
       const subject = { hostId: source.hostId, agentSessionId: source.agentSessionId }, id = collaborationSubjectKey(subject)
       descriptors.set(id, source)
-      if (!result.has(id)) result.set(id, { id, subject, sessionId: source.agentSessionId, name: facts.names[source.agentSessionId] ?? source.agentSessionId, tier: source.state === 'retired' ? 'closed' : 'unknown', lastActivityAt: null, provenance: source.state === 'retired' ? 'Retired Session' : 'Retained Session · Current Run unconfirmed' })
+      if (!result.has(id)) result.set(id, { id, subject, sessionId: source.agentSessionId, name: facts.names[source.agentSessionId] ?? source.agentSessionId, ...(source.history ? { providerId: source.history.providerId, executorId: source.history.executorId } : {}), tier: source.state === 'retired' ? 'closed' : 'unknown', lastActivityAt: null, provenance: source.state === 'retired' ? 'Retired Session' : 'Retained Session · Current Run unconfirmed' })
     }
     for (const id of catalogCache.current.keys()) if (!result.has(id)) catalogCache.current.delete(id)
     return { agents: result, sessions, history: descriptors }
