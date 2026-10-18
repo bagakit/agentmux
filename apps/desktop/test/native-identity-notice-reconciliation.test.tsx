@@ -1,4 +1,4 @@
-import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
+import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails, selectNotificationView, expandNotificationGroups, markShownNotificationsRead } from './helpers/notification-center'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 const { fixtureEpoch: _reshape_fixtureEpoch } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 // @vitest-environment happy-dom
@@ -97,7 +97,7 @@ async function showMissing() {
 
 it.each([false, true])('closes the original exact-Run identity notice after confirmation (dismissed: %s)', async dismissed => {
   const record = await showMissing()
-  if (dismissed) { await toggleNotificationCenter(dom.container, 'open'); await toggleNotificationCenter(dom.container, 'closed') }
+  if (dismissed) { await toggleNotificationCenter(dom.container, 'open'); await markShownNotificationsRead(dom.container); await toggleNotificationCenter(dom.container, 'closed') }
   const tabs = useAppStore.getState().tabs, layouts = useAppStore.getState().layouts
   await act(async () => useAppStore.getState().applyEvent(sessionEvent({ nativeHandle: native, nativeHandlePersistence: 'confirmed' })))
   expectSettled(record)
@@ -140,6 +140,7 @@ it.each(['ordinary', 'save-failed', 'save-unconfirmed'] as const)('does not sett
   expectSettled(record)
   expect(useAppStore.getState().error).toBe(later)
   await toggleNotificationCenter(dom.container, 'open')
+  await selectNotificationView(dom.container, 'history')
   await toggleNotificationDetails(notificationEventRows(dom.container)[0]!)
   expect(notificationEventRows(dom.container)).toHaveLength(1)
   expect(notificationEventRows(dom.container)[0]!.textContent).toContain(later)
@@ -256,8 +257,13 @@ it('keeps two native subjects current through ordinary history, wrong facts and 
   expect(notificationEventRows(dom.container)).toHaveLength(0)
   const ordinary = useAppStore.getState().notificationEvents.find(record => !record.context?.cause)!
   await toggleNotificationCenter(dom.container, 'open')
+  await selectNotificationView(dom.container, 'current')
+  await expandNotificationGroups(dom.container)
   expect(currentNotificationRows(dom.container).filter(row => row.dataset.noticeId === first.id || row.dataset.noticeId === second.id)).toHaveLength(2)
+  await markShownNotificationsRead(dom.container)
+  await selectNotificationView(dom.container, 'history')
   expect(notificationEventRows(dom.container)).toHaveLength(1)
+  await markShownNotificationsRead(dom.container)
   await toggleNotificationCenter(dom.container, 'closed')
   await act(async () => useAppStore.getState().clearReadNotificationEvents())
   expect(notificationEventRows(dom.container)).toHaveLength(0)
@@ -286,6 +292,8 @@ it('keeps two native subjects current through ordinary history, wrong facts and 
   expect(useAppStore.getState().noticeReadReceipts['global:events']?.[first.id]).toBe('read')
   expect(useAppStore.getState().noticeReadReceipts['global:events']?.[ordinary.id]).toBe('read')
   await toggleNotificationCenter(dom.container, 'open')
+  await selectNotificationView(dom.container, 'current')
+  await expandNotificationGroups(dom.container)
   expect(currentNotificationRows(dom.container).filter(row => row.dataset.noticeId === first.id || row.dataset.noticeId === second.id)).toHaveLength(1)
   await toggleNotificationCenter(dom.container, 'closed')
   await act(async () => useAppStore.getState().applyEvent(sessionEvent({ nativeHandle: native,

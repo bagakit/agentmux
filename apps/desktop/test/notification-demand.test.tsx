@@ -8,7 +8,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import * as notificationStore from '../src/renderer/src/store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
-import { notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
+import { notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails, selectNotificationView } from './helpers/notification-center'
 
 const dom = composerDOM(), prefix = 'NOTIFICATION_COST '
 beforeEach(() => useAppStore.setState({ loading: false, sessions: [], tabs: {}, notificationEvents: [], noticeReadReceipts: {},
@@ -49,7 +49,7 @@ it.each([2, 32])('derives one original workflow identity across %i records and u
   expect(useAppStore.getState().notificationEvents).toBe(records)
   expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Keep the draft')
   expect(notificationTrigger(dom.container).getAttribute('aria-label')).toBe(`System notifications: ${count} unread, 0 current, ${count} recent events`)
-  await toggleNotificationCenter(dom.container, 'open')
+  await toggleNotificationCenter(dom.container, 'open'); await selectNotificationView(dom.container, 'history')
   expect(notificationEventRows(dom.container)).toHaveLength(count)
   await toggleNotificationCenter(dom.container, 'closed')
   expect(identity).not.toHaveBeenCalled()
@@ -106,7 +106,7 @@ it.each([[1, 262144], [32, 1024]])('keeps closed history out of presentation and
     expect(measured.calls.points).toBe(0)
     expect(useAppStore.getState().notificationEvents).toBe(records)
     expect(useAppStore.getState().agentComposerDrafts[session.id]).toBe('Keep the original draft')
-    await toggleNotificationCenter(dom.container, 'open')
+    await toggleNotificationCenter(dom.container, 'open'); await selectNotificationView(dom.container, 'history')
     const rows = notificationEventRows(dom.container)
     expect(rows).toHaveLength(count)
     expect(dom.container.querySelector('.notification-item__original')).toBeNull()
@@ -117,7 +117,7 @@ it.each([[1, 262144], [32, 1024]])('keeps closed history out of presentation and
     await toggleNotificationCenter(dom.container, 'closed')
     expect(notificationEventRows(dom.container)).toEqual([])
     expect(useAppStore.getState().notificationEvents).toBe(records)
-    expect(notificationTrigger(dom.container).getAttribute('data-unread')).toBe('false')
+    expect(notificationTrigger(dom.container).getAttribute('data-unread')).toBe(count === 1 ? 'false' : 'true')
     sample({ kind: 'history-demand', count, size, rowsWhenOpen: rows.length, measuredPreviewPoints: measured.calls.points,
       sameRecords: useAppStore.getState().notificationEvents === records })
   } finally { measured.restore() }
@@ -144,7 +144,7 @@ it('bounds explicit summary announcements, reveals the complete original summary
   await dom.render(<GlobalSystemNotices />)
   expect(dom.container.querySelector('.global-system-notices__announcement')!.textContent).toBe(
     `${Array.from(summary).slice(0, 100).join('')}. Review system notifications for details.`)
-  await toggleNotificationCenter(dom.container, 'open')
+  await toggleNotificationCenter(dom.container, 'open'); await selectNotificationView(dom.container, 'history')
   const row = notificationEventRows(dom.container)[0]!
   expect(row.querySelector('.notification-item__original')).toBeNull()
   await toggleNotificationDetails(row)
@@ -164,14 +164,14 @@ it('keeps same-preview records distinct and does not replay a pending copy throu
   let finish!: () => void
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockImplementation(() => new Promise(resolve => { finish = resolve }))
   await dom.render(<GlobalSystemNotices />)
-  await toggleNotificationCenter(dom.container, 'open')
+  await toggleNotificationCenter(dom.container, 'open'); await selectNotificationView(dom.container, 'history')
   const rows = notificationEventRows(dom.container)
   expect(rows.map(row => row.querySelector('.notification-item__title')!.textContent)).toEqual([beginning.slice(0, 100) + '…', beginning.slice(0, 100) + '…'])
   await toggleNotificationDetails(rows[0]!)
   await act(async () => rows[0]!.querySelector<HTMLButtonElement>('.notification-item__original button')!.click())
   await toggleNotificationCenter(dom.container, 'closed')
   await act(async () => finish())
-  await toggleNotificationCenter(dom.container, 'open')
+  await toggleNotificationCenter(dom.container, 'open'); await selectNotificationView(dom.container, 'history')
   await toggleNotificationDetails(notificationEventRows(dom.container)[0]!)
   expect(copy).toHaveBeenCalledExactlyOnceWith(records[1]!.message)
   expect(notificationEventRows(dom.container)[0]!.textContent).not.toContain('Copied')

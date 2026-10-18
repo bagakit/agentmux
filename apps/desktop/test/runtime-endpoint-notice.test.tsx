@@ -1,4 +1,4 @@
-import { currentNotificationRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
+import { currentNotificationRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails, expandNotificationGroups, markShownNotificationsRead } from './helpers/notification-center'
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { beforeEach, expect, it, vi } from 'vitest'
@@ -27,7 +27,8 @@ it('explains the exact Host on the first surface and uses real settings navigati
   await toggleNotificationCenter(dom.container, 'open')
   await toggleNotificationDetails(currentNotificationRows(dom.container)[0]!)
   const notice = dom.container.querySelector('.service-window')!
-  expect(currentNotificationRows(dom.container)[0]!.querySelector('.notification-item__title')!.textContent).toBe('Build server: Remote service needs an update')
+  expect(currentNotificationRows(dom.container)[0]!.querySelector('.notification-item__title')!.textContent).toBe('Remote service needs an update')
+  expect(dom.container.querySelector('.notification-group__heading')!.textContent).toContain('Build server')
   expect(notice.querySelector('.service-window__mode')!.textContent).toContain('REMOTE_CORE_UPGRADE_REQUIRED: Original technical receipt problem')
   expect(currentNotificationRows(dom.container)[0]!.querySelector('.notification-item__original')!.textContent).toContain('Original technical receipt problem')
   await dom.click('.notification-item__action')
@@ -42,7 +43,8 @@ it('keeps an unknown handshake distinct from a version update and retains its or
   await toggleNotificationCenter(dom.container, 'open')
   await toggleNotificationDetails(currentNotificationRows(dom.container)[0]!)
   const notice = dom.container.querySelector('.service-window')!
-  expect(currentNotificationRows(dom.container)[0]!.querySelector('.notification-item__title')!.textContent).toBe('Build server: Connection could not be verified')
+  expect(currentNotificationRows(dom.container)[0]!.querySelector('.notification-item__title')!.textContent).toBe('Connection could not be verified')
+  expect(dom.container.querySelector('.notification-group__heading')!.textContent).toContain('Build server')
   expect(notice.querySelector('.service-window__mode')!.textContent).toContain('CONTROL_PROTOCOL_ERROR: Arbitrary malformed result')
   expect(notice.querySelector('.service-window__mode')!.textContent).not.toContain('older')
   expect(currentNotificationRows(dom.container)[0]!.querySelector('.notification-item__original')!.textContent).toContain('Arbitrary malformed result')
@@ -59,6 +61,7 @@ it('consumes typed Native and semantic connection observations in the real globa
       terminalCapability: { state: 'unknown', reason: 'handshake-timeout', run: original.control.run, observedAt: _reshape_fixtureEpoch(0, 0, 1), mode: 'degraded' } }] })
   await mount()
   await toggleNotificationCenter(dom.container, 'open')
+  await expandNotificationGroups(dom.container)
   for (const row of currentNotificationRows(dom.container)) await toggleNotificationDetails(row)
   const rows = dom.container.querySelectorAll('.notification-item[data-notice-id]')
   expect(rows).toHaveLength(3)
@@ -91,7 +94,7 @@ it('keeps compatibility and unknown connection issues in one collapsed entry wit
 
 it('retains exact Host receipts through remount, unknown projection and changed diagnostic prose', async () => {
   const first = useAppStore.getState().runtimeEndpointWarnings![0]!
-  await mount(); await toggleNotificationCenter(dom.container, 'open'); await toggleNotificationCenter(dom.container, 'closed')
+  await mount(); await toggleNotificationCenter(dom.container, 'open'); await markShownNotificationsRead(dom.container); await toggleNotificationCenter(dom.container, 'closed')
   const receipts = useAppStore.getState().noticeReadReceipts
   await dom.render(null); await mount()
   await act(async () => useAppStore.setState({ runtimeEndpointWarnings: undefined }))
@@ -112,7 +115,7 @@ it('acknowledges two exact Hosts together and admits only confirmed recurrence o
   await mount()
   expect(currentNotificationRows(dom.container)).toHaveLength(0)
   expect(useAppStore.getState().runtimeEndpointWarnings).toHaveLength(2)
-  await toggleNotificationCenter(dom.container, 'open'); await toggleNotificationCenter(dom.container, 'closed')
+  await toggleNotificationCenter(dom.container, 'open'); await markShownNotificationsRead(dom.container); await toggleNotificationCenter(dom.container, 'closed')
   expect(Object.keys(useAppStore.getState().noticeReadReceipts['global:runtime-endpoints']!)).toEqual([
     JSON.stringify(['remote-id', first.step]), JSON.stringify(['other-remote', first.step])
   ])
@@ -122,11 +125,13 @@ it('acknowledges two exact Hosts together and admits only confirmed recurrence o
   expect(useAppStore.getState().noticeReadReceipts['global:runtime-endpoints']).toBeUndefined()
   await act(async () => useAppStore.setState({ runtimeEndpointWarnings: [first] }))
   expect(notificationTrigger(dom.container).getAttribute('aria-label')).toBe('System notifications: 1 unread, 1 current, 0 recent events')
-  await toggleNotificationCenter(dom.container, 'open'); await toggleNotificationCenter(dom.container, 'closed')
+  await toggleNotificationCenter(dom.container, 'open'); await markShownNotificationsRead(dom.container); await toggleNotificationCenter(dom.container, 'closed')
   await act(async () => useAppStore.setState({ runtimeEndpointWarnings: [{ ...first, step: 'Reading a new connection receipt' }, { ...first, hostId: 'unconfigured-host' }] }))
   expect(notificationTrigger(dom.container).getAttribute('aria-label')).toBe('System notifications: 2 unread, 2 current, 0 recent events')
   await toggleNotificationCenter(dom.container, 'open')
-  const unconfigured = currentNotificationRows(dom.container).find(row => row.textContent?.includes('unconfigured-host'))!
+  const unconfiguredGroup = [...dom.container.querySelectorAll('.notification-group')].find(group => group.querySelector('.notification-group__heading')?.textContent?.includes('unconfigured-host'))
+  expect(unconfiguredGroup).toBeDefined()
+  const unconfigured = currentNotificationRows(unconfiguredGroup!)[0]!
   await act(async () => unconfigured.querySelector<HTMLButtonElement>('.notification-item__action')!.click())
   expect(openHost).toHaveBeenCalledExactlyOnceWith('unconfigured-host')
 })
@@ -138,7 +143,7 @@ it('acknowledges distinct current Session lanes without resolving their original
   await act(async () => useAppStore.setState({ sessions: [request, disconnected] }))
   await mount()
   expect(notificationTrigger(dom.container).getAttribute('aria-label')).toBe('System notifications: 4 unread, 4 current, 0 recent events')
-  await toggleNotificationCenter(dom.container, 'open'); await toggleNotificationCenter(dom.container, 'closed')
+  await toggleNotificationCenter(dom.container, 'open'); await markShownNotificationsRead(dom.container); await toggleNotificationCenter(dom.container, 'closed')
   expect(notificationTrigger(dom.container).getAttribute('aria-label')).toBe('System notifications: 0 unread, 4 current, 0 recent events')
   expect(useAppStore.getState().sessions).toEqual([request, disconnected])
   expect(currentNotificationRows(dom.container)).toHaveLength(0)
@@ -154,7 +159,7 @@ it('keeps two observation steps on one Host distinct without declaring its Runti
   const notices = warnings.map(warning => runtimeEndpointNotice(warning, 'Build server', openHost))
   expect(new Set(notices.map(notice => notice.id)).size).toBe(2)
   for (const [index, notice] of notices.entries()) {
-    expect(notice.summary!.step).toBe(`Build server: ${warnings[index]!.step}`)
+    expect(notice.summary!.step).toBe(warnings[index]!.step)
     expect(notice.summary!.mode).not.toMatch(/Runtime is connected|settings step|running state is unconfirmed/)
     expect(notice.summary!.restore).toBe(warnings[index]!.recovery)
   }
@@ -162,9 +167,11 @@ it('keeps two observation steps on one Host distinct without declaring its Runti
   await act(async () => useAppStore.setState({ runtimeEndpointWarnings: warnings }))
   await mount()
   await toggleNotificationCenter(dom.container, 'open')
+  await expandNotificationGroups(dom.container)
   expect(dom.container.querySelectorAll('.notification-item[data-notice-id]')).toHaveLength(2)
-  expect(dom.container.textContent).toContain('Build server: Reading Provider catalog')
-  expect(dom.container.textContent).toContain('Build server: Reading retained History sources')
+  expect(dom.container.querySelector('.notification-group__heading')!.textContent).toContain('Build server')
+  expect(dom.container.textContent).toContain('Reading Provider catalog')
+  expect(dom.container.textContent).toContain('Reading retained History sources')
   expect(useAppStore.getState().agentComposerDrafts).toBe(drafts)
   expect(useAppStore.getState().tabs).toBe(tabs)
 })

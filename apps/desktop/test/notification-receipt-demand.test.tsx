@@ -6,7 +6,7 @@ import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystem
 import { useAppStore } from '../src/renderer/src/store'
 import { useReadReceipts, useServiceNotices, type ServiceNoticeItem } from '../src/renderer/src/lib/use-service-notices'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
-import { notificationEventRows, notificationTrigger, toggleNotificationCenter } from './helpers/notification-center'
+import { notificationEventRows, notificationTrigger, toggleNotificationCenter, selectNotificationView, markShownNotificationsRead } from './helpers/notification-center'
 
 const dom = composerDOM()
 beforeEach(() => useAppStore.setState({ loading: false, sessions: [], tabs: {}, notificationEvents: [], noticeReadReceipts: {},
@@ -70,7 +70,10 @@ it('updates closed announcements and read state for new history, exact receipt c
   expect(useAppStore.getState().notificationEvents.map(event => event.message)).toEqual(['Second original failure'])
   expect(notificationTrigger(dom.container).getAttribute('aria-label')).toContain('1 recent events')
   await toggleNotificationCenter(dom.container, 'open')
+  await selectNotificationView(dom.container, 'history')
   expect(notificationEventRows(dom.container)).toHaveLength(1)
+  expect(notificationTrigger(dom.container).getAttribute('aria-label')).toContain('1 unread')
+  await markShownNotificationsRead(dom.container)
   expect(notificationTrigger(dom.container).getAttribute('aria-label')).toContain('0 unread')
   await toggleNotificationCenter(dom.container, 'closed')
   await act(async () => useAppStore.getState().clearReadNotificationEvents())
@@ -89,6 +92,7 @@ it('keeps same-ID original message, summary and announcement urgency current', a
   expect(announcement().getAttribute('aria-live')).toBe('assertive')
   expect(useAppStore.getState().notificationEvents[0]!.id).toBe(event.id)
   await toggleNotificationCenter(dom.container, 'open')
+  await selectNotificationView(dom.container, 'history')
   expect(notificationEventRows(dom.container)[0]!.textContent).toContain('Original urgent summary')
 })
 

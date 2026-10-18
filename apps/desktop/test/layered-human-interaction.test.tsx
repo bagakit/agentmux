@@ -1,4 +1,4 @@
-import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
+import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails, selectNotificationView, expandNotificationGroups, markShownNotificationsRead } from './helpers/notification-center'
 import { withInteractionOperation } from '../../../packages/core/test/fixtures/interaction-client.js'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
@@ -36,6 +36,8 @@ it('projects the same persistent delivery cause locally and globally and locates
     runtimeOwnershipWarnings: [], displacedAgentSessionIds: [], noticeReadReceipts: {} })
   await dom.render(<><GlobalSystemNotices /><AgentSessionComposer sessionId="agent-1" /></>)
   await toggleNotificationCenter(dom.container, 'open')
+  await selectNotificationView(dom.container, 'current')
+  await expandNotificationGroups(dom.container)
   await toggleNotificationDetails(deliveryNotice()!)
   const local = dom.container.querySelector('.composer-notice')
   const global = deliveryNotice()
@@ -100,13 +102,15 @@ it('acknowledged event replay stays read while the persistent issue remains find
     error: null, lastError: null, errorDismissed: false, environmentWarning: undefined })
   await dom.render(<GlobalSystemNotices />)
   await act(async () => useAppStore.getState().reportError(new Error('The receipt was not read'), { kind: 'process-degraded', subject: degraded().control }))
-  await toggleNotificationCenter(dom.container, 'open'); await toggleNotificationCenter(dom.container, 'closed')
+  await toggleNotificationCenter(dom.container, 'open'); await selectNotificationView(dom.container, 'history'); await markShownNotificationsRead(dom.container); await toggleNotificationCenter(dom.container, 'closed')
   await act(async () => useAppStore.getState().reportError(new Error('The receipt was not read'), { kind: 'process-degraded', subject: degraded().control }))
   expect(useAppStore.getState().notificationEvents).toHaveLength(1)
   expect(notificationEventRows(dom.container)).toHaveLength(0)
   expect(notificationTrigger(dom.container).getAttribute('aria-expanded')).toBe('false')
   expect(useAppStore.getState().noticeReadReceipts['global:events']).toHaveProperty(useAppStore.getState().notificationEvents[0]!.id)
   await toggleNotificationCenter(dom.container, 'open')
+  await selectNotificationView(dom.container, 'current')
+  await expandNotificationGroups(dom.container)
   await toggleNotificationDetails(deliveryNotice()!)
   expect(deliveryNotice()?.textContent).toContain('Screen confirmation was interrupted')
 })

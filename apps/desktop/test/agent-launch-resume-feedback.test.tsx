@@ -1,4 +1,4 @@
-import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
+import { currentNotificationRows, notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails, selectNotificationView, expandNotificationGroups, markShownNotificationsRead } from './helpers/notification-center'
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from './helpers/local-runtime-connector.js'
@@ -426,18 +426,22 @@ it('keeps two actual Launcher failures and their Retry Start entries when ordina
   const second = lifecycleNotice({ regionId: secondary.regionId })!
   expectCurrent(first); expectCurrent(second)
   await toggleNotificationCenter(container, 'open')
+  await expandNotificationGroups(container)
   const firstRow = currentNotificationRows(container).find(row => row.dataset.noticeId === first.id)!
   const secondRow = currentNotificationRows(container).find(row => row.dataset.noticeId === second.id)!
   await toggleNotificationDetails(firstRow)
   await toggleNotificationDetails(secondRow)
-  expect(firstRow.querySelector('.notification-item__title')?.textContent).toContain(regionId)
-  expect(secondRow.querySelector('.notification-item__title')?.textContent).toContain(secondary.regionId)
+  expect(firstRow.closest('.notification-group')?.querySelector('.notification-group__heading')?.textContent).toContain(regionId)
+  expect(secondRow.closest('.notification-group')?.querySelector('.notification-group__heading')?.textContent).toContain(secondary.regionId)
   expect(firstRow.textContent).toContain(`Tab ${launcherId}`)
   expect(secondRow.textContent).toContain(`Tab ${secondary.tabId}`)
   expect(currentNotificationRows(container).filter(row => row.dataset.noticeId === first.id || row.dataset.noticeId === second.id)).toHaveLength(2)
   await act(async () => useAppStore.getState().reportError('Independent clipboard refusal'))
+  await selectNotificationView(container, 'history')
   expect(notificationEventRows(container)).toHaveLength(1)
-  await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
+  await markShownNotificationsRead(container)
+  await selectNotificationView(container, 'current')
+  await toggleNotificationCenter(container, 'closed')
   await act(async () => useAppStore.getState().clearReadNotificationEvents())
   expect(notificationEventRows(container)).toHaveLength(0)
   expectCurrent(first); expectCurrent(second)
@@ -476,7 +480,7 @@ it('a successful launch retry settles its captured record without clearing a lat
   expect(later).not.toBe(first)
   expectCurrent(later)
   await collapseFailure(container.querySelector('.agent-launch-notice')!)
-  await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
+  await toggleNotificationCenter(container, 'open'); await selectNotificationView(container, 'current'); await markShownNotificationsRead(container); await toggleNotificationCenter(container, 'closed')
   const laterReads = useAppStore.getState().noticeReadReceipts
   expect(laterReads['global:events']?.[later.id]).toBe('read')
   await act(async () => release())
@@ -531,7 +535,10 @@ it('keeps two actual Resume failures independent and rejects a late success clea
   expect(failureWindow(secondPane).textContent).toContain('Controlled resume refusal')
   await act(async () => useAppStore.getState().reportError('Independent file observation refusal'))
   const ordinary = useAppStore.getState().notificationEvents.find(record => !record.context?.lifecycle)!
-  await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
+  await toggleNotificationCenter(container, 'open')
+  await selectNotificationView(container, 'current'); await markShownNotificationsRead(container)
+  await selectNotificationView(container, 'history'); await markShownNotificationsRead(container)
+  await selectNotificationView(container, 'current'); await toggleNotificationCenter(container, 'closed')
   await act(async () => useAppStore.getState().clearReadNotificationEvents())
   expectCurrent(first); expectCurrent(second)
   // Controlled transport receipts isolate record settlement after the actual Core refusals above.
@@ -548,7 +555,7 @@ it('keeps two actual Resume failures independent and rejects a late success clea
   const later = lifecycleNotice({ subject: firstSession.control })!
   expect(later).not.toBe(first)
   await collapseFailure(firstPane.querySelector('.agent-launch-notice')!)
-  await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
+  await toggleNotificationCenter(container, 'open'); await selectNotificationView(container, 'current'); await markShownNotificationsRead(container); await toggleNotificationCenter(container, 'closed')
   const firstScope = `local:lifecycle:${JSON.stringify(['resume', firstSession.control.hostId, firstId, firstSession.control.run.runId])}`
   const laterReads = useAppStore.getState().noticeReadReceipts
   expect(laterReads['global:events']?.[later.id]).toBe('read')
@@ -603,7 +610,10 @@ it('expires only an accurately settled launch read while a repeated same-cause f
   await collapseFailure(launcherSurface('secondary').querySelector('.agent-launch-notice')!)
   await act(async () => useAppStore.getState().reportError('Independent ordinary reading fact'))
   const ordinary = useAppStore.getState().notificationEvents.find(record => !record.context?.lifecycle)!
-  await toggleNotificationCenter(container, 'open'); await toggleNotificationCenter(container, 'closed')
+  await toggleNotificationCenter(container, 'open')
+  await selectNotificationView(container, 'current'); await markShownNotificationsRead(container)
+  await selectNotificationView(container, 'history'); await markShownNotificationsRead(container)
+  await selectNotificationView(container, 'current'); await toggleNotificationCenter(container, 'closed')
   const firstScope = `local:lifecycle:${JSON.stringify(['launch', regionId])}`
   const secondScope = `local:lifecycle:${JSON.stringify(['launch', secondary.regionId])}`
   const prior = useAppStore.getState().noticeReadReceipts

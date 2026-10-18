@@ -1,4 +1,4 @@
-import { notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
+import { notificationEventRows, notificationTrigger, toggleNotificationCenter, toggleNotificationDetails, selectNotificationView, expandNotificationGroups, markShownNotificationsRead } from './helpers/notification-center'
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -414,6 +414,7 @@ it('startup observation reads partial Provider diagnostics after publishing the 
   expect(useAppStore.getState().runtimeEndpointWarnings, 'A partial successful catalog must expose its exact failed Host diagnostic').toEqual([warning])
   await act(async () => root.render(<Notices />))
   await toggleNotificationCenter(element, 'open')
+  await expandNotificationGroups(element)
   for (const row of element.querySelectorAll('.notification-item')) await toggleNotificationDetails(row)
   expect(element.textContent, 'The actual service window must consume this observation').toContain('Other Host: Reading Provider catalog')
   expect(useAppStore.getState().providerCatalog).toEqual(catalog)
@@ -441,6 +442,7 @@ it('startup observation metadata notice cannot hide a separate Session connectio
     status: { state: 'disconnected', source: 'run-process', observedAt: 10, detail: 'Actual Session connection is unconfirmed' } }] })
   await act(async () => root.render(<Notices />))
   await toggleNotificationCenter(element, 'open')
+  await expandNotificationGroups(element)
   for (const row of element.querySelectorAll('.notification-item')) await toggleNotificationDetails(row)
   expect(element.textContent, 'A metadata warning must not hide the original Session connection notice').toContain('Reconnecting to this Agent')
   expect(useAppStore.getState().sessions[0]!.status.detail).toBe('Actual Session connection is unconfirmed')
@@ -676,7 +678,7 @@ it.each([false, true])('keeps remaining startup issues after acknowledging the o
   const remainder = useAppStore.getState().errorNoticeContext!.startupSessionSnapshot!.remainingMessage
   expect(remainder).toContain('Provider discovery unavailable')
   expect(useAppStore.getState().notificationEvents.map(record => record.message).join('\n')).toContain('Demand filesystem unavailable')
-  if (dismissed) { await toggleNotificationCenter(element, 'open'); await toggleNotificationCenter(element, 'closed') }
+  if (dismissed) { await toggleNotificationCenter(element, 'open'); await markShownNotificationsRead(element); await toggleNotificationCenter(element, 'closed') }
   await f.settle(complete())
   expect(useAppStore.getState()).toMatchObject({ error: remainder, lastError: remainder, errorDismissed: false })
   expect(element.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
@@ -695,12 +697,13 @@ it.each(['same-text', 'different-text'] as const)('settles the original startup 
   await act(async () => useAppStore.getState().reportError(new Error(message), { kind: 'process-degraded' }))
   expect(useAppStore.getState().errorNoticeContext).toBe(originalContext)
   expect(useAppStore.getState()).toMatchObject({ error: f.warning, lastError: f.warning })
-  expect(useAppStore.getState().notificationEvents[0]?.context).toEqual({ kind: 'process-degraded' })
+  expect(useAppStore.getState().notificationEvents[0]?.context).toMatchObject({ kind: 'process-degraded', event: { source: 'operation', key: expect.any(String) } })
   await f.settle(complete())
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(ids)
   expect(useAppStore.getState()).toMatchObject({ error: null, lastError: null, errorNoticeContext: null })
   expect(notificationEventRows(element)).toHaveLength(0)
   await toggleNotificationCenter(element, 'open')
+  await selectNotificationView(element, 'history')
   await toggleNotificationDetails(notificationEventRows(element)[0]!)
   expect(notificationEventRows(element)).toHaveLength(1)
   expect(notificationEventRows(element)[0]!.textContent).toContain(message)
@@ -708,7 +711,7 @@ it.each(['same-text', 'different-text'] as const)('settles the original startup 
 })
 it('removes a current issue only after its owner confirms resolution', async () => {
   const f = await fixture()
-  await toggleNotificationCenter(element, 'open'); await toggleNotificationCenter(element, 'closed')
+  await toggleNotificationCenter(element, 'open'); await markShownNotificationsRead(element); await toggleNotificationCenter(element, 'closed')
   expect(element.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
   expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot).toBeDefined()
   await f.settle(complete())
@@ -719,7 +722,7 @@ it('removes a current issue only after its owner confirms resolution', async () 
 })
 it.each([false, true])('an acknowledged startup notice cannot swallow a later ordinary same-text error (explicit kind: %s)', async explicitKind => {
   const f = await fixture()
-  await toggleNotificationCenter(element, 'open'); await toggleNotificationCenter(element, 'closed')
+  await toggleNotificationCenter(element, 'open'); await markShownNotificationsRead(element); await toggleNotificationCenter(element, 'closed')
   expect(element.querySelector('.notification-item[data-notice-id="current"]')).toBeNull()
   expect(useAppStore.getState().errorNoticeContext?.startupSessionSnapshot).toBeDefined()
   const originalContext = useAppStore.getState().errorNoticeContext
@@ -731,6 +734,7 @@ it.each([false, true])('an acknowledged startup notice cannot swallow a later or
   expect(useAppStore.getState().sessions.map(session => session.id)).toEqual(ids)
   expect(useAppStore.getState()).toMatchObject({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
   await toggleNotificationCenter(element, 'open')
+  await selectNotificationView(element, 'history')
   await toggleNotificationDetails(notificationEventRows(element)[0]!)
   expect(notificationEventRows(element)[0]!.textContent).toContain(f.warning)
   f.retained()
