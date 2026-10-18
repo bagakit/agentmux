@@ -19,6 +19,9 @@ import { composeAgentPrompt } from '@agentmux/core/agent-outbound-message'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { AgentMuxPreloadApi, AppConfig, SessionSnapshot } from '../../src/shared/contracts'
 import { ConfigStore } from '../../src/main/config-store'
+import { WorkbenchWindows } from '../../src/main/workbench-windows'
+import { WorkbenchWindowStore } from '../../src/main/workbench-window-store'
+import { AgentMuxApplicationAccessOwner } from '@agentmux/core'
 import type { WorkspaceFiles } from '../../src/main/workspace-files'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false))
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invoke: vi.fn(),
@@ -35,9 +38,11 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
     send: (channel: string, ...args: any[]) => bridge.reply(channel, ...args) },
   ipcMain: { handle: (channel: string, handler: (...args: any[]) => any) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel),
+    off: (channel: string, fn: (...args: any[]) => any) => bridge.main.get(channel)?.delete(fn),
     on: (channel: string, fn: (...args: any[]) => any) => { const set = bridge.main.get(channel) ?? new Set(); set.add(fn); bridge.main.set(channel, set) },
     removeListener: (channel: string, fn: (...args: any[]) => any) => bridge.main.get(channel)?.delete(fn) },
   webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.storagePath, getAppPath: () => process.env.AGENTMUX_DAILY_GOAL_REPOSITORY + '/apps/desktop', isPackaged: false },
+  safeStorage: { isAsyncEncryptionAvailable: async () => false },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
@@ -63,7 +68,7 @@ import { readFile } from 'node:fs/promises'
 vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json', BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
+vi.mock('../../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() { throw new Error('Browser release is outside this Goal fixture') } dispose() {} } }))
 vi.mock('../../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 // Install the actual mocked Electron bridge before transitive renderer consumers load api.
 await vi.hoisted(async () => { await import('../../src/preload/index') })
@@ -124,6 +129,7 @@ const initial = useAppStore.getState()
 let demands: ReturnType<typeof openDemandStore>
 let directory: string, client: AgentMuxClient, runtime: RuntimeController, manager: ContinuousProgressLoopManager
 let disposeIpc: (() => Promise<void>) | undefined, disposeStore: (() => void) | undefined
+let workbenchWindows: WorkbenchWindows, applicationAccess: AgentMuxApplicationAccessOwner
 let root: Root, container: HTMLDivElement, config: AppConfig, session: AgentMuxStoredAgentSession
 let activityCapability: string
 let writes: string[], cursor: number | null, requests: any[], observations: string[], now: number
@@ -135,6 +141,7 @@ beforeEach(async () => {
   const scratchRoot = join(directory, '.agentmux', 'topics')
   await mkdir(scratchRoot, { recursive: true })
   bridge.storagePath = join(directory, 'chromium')
+  vi.stubEnv('AGENTMUX_DESKTOP_USER_DATA', bridge.storagePath)
   await mkdir(join(bridge.storagePath, 'Local Storage', 'leveldb'), { recursive: true })
   await mkdir(join(directory, 'home'))
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(directory, 'runtime'))
@@ -175,7 +182,9 @@ beforeEach(async () => {
   manager = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(directory, 'loops.json')),
     (loop, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, loop, operationId, isCurrent, signal),
     () => now, (loop, tickId, time, signal) => runtime.observeContinuousProgress(loop, tickId, time, signal), undefined, { read: id => demands.get(id), subscribe: listener => demands.subscribe(snapshot => listener(snapshot.demands)), inspectInitial: loop => runtime.inspectContinuousProgressInitial(loop) })
-  bridge.sender = Object.assign(new EventEmitter(), { id: 7891, isDestroyed: () => false,
+  const frame = { url: 'app://private-goal-fixture', framesInSubtree: [] }
+  bridge.sender = Object.assign(new EventEmitter(), { id: 7891, isDestroyed: () => false, mainFrame: frame,
+    getURL: () => frame.url, getOSProcessId: () => process.pid, isLoadingMainFrame: () => false, getZoomFactor: () => 1,
     send: (channel: string, ...args: any[]) => bridge.deliver(channel, ...args), session: { flushStorageData: vi.fn(), getStoragePath: () => bridge.storagePath } })
   bridge.deliver = (channel, ...args) => {
     if (channel === CONTROL_REQUEST_CHANNEL && args[0].control) {
@@ -194,12 +203,15 @@ beforeEach(async () => {
     } else send()
   }
   const fixtureConfigStore = new ConfigStore(join(directory, 'original-config.json'))
-  disposeIpc = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false } as unknown as BrowserWindow,
+  const mainWindow = Object.assign(new EventEmitter(), { id: 71, setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false }) as unknown as BrowserWindow
+  workbenchWindows = new WorkbenchWindows(mainWindow, new WorkbenchWindowStore(join(directory, 'windows.json')), () => [])
+  applicationAccess = new AgentMuxApplicationAccessOwner({ path: join(directory, 'application-access.sqlite'), resolveHost: async () => { throw new Error('Application access is outside this Goal fixture') } })
+  disposeIpc = await registerIpc({ initialConfig: config, window: mainWindow, workbenchWindows, applicationAccess,
     runtime, progressLoops: manager, demands, configStore: { get: async () => config, validate: (next: AppConfig) => fixtureConfigStore.validate(next), save: async (next: AppConfig) => { config = await fixtureConfigStore.save(next); return config } } as unknown as ConfigStore,
     scratchTopics: new ScratchTopics(), workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
-    return handler!({ sender: bridge.sender } as IpcMainInvokeEvent, ...values)
+    return handler!({ sender: bridge.sender, senderFrame: bridge.sender.mainFrame } as IpcMainInvokeEvent, ...values)
   })
   window.localStorage.clear()
   useAppStore.setState({ ...initial, loading: true, restoredWorkbench: null, tabs: {}, layouts: {}, sessions: [],
@@ -219,6 +231,7 @@ afterEach(async () => {
   await api.ui.requestStorageFlush()
   const cleanup = await Promise.allSettled([manager?.stop(), disposeIpc?.(), runtime?.dispose()])
   disposeIpc = undefined
+  workbenchWindows?.dispose(); await applicationAccess?.dispose()
   bridge.main.clear(); bridge.renderer.clear(); bridge.handlers.clear(); bridge.invoke.mockReset()
   vi.restoreAllMocks(); vi.unstubAllEnvs(); await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 30 })
   expect(cleanup.filter(r => r.status === 'rejected')).toEqual([])
