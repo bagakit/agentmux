@@ -276,7 +276,7 @@ function BrowserPaneContent({
   const windowPresentation = presentations.find(presentation => presentation.target === windowTarget && presentation.visible && presentation.active)
   const sourcePresentations = useRef({ primary: primaryPresentation, targets: presentations })
   sourcePresentations.current = { primary: primaryPresentation, targets: presentations }
-  const discussion = useBrowserContextualComposer(tab.browserId, tab.activity?.operation ?? null, visible, tab.navigationId)
+  const discussion = useBrowserContextualComposer(tab.browserId, tab.control?.agent, tab.activity?.operation ?? null, visible, tab.navigationId)
   const toolbar = useAppStore((state) => state.config?.browser.toolbar)
   const agentAppearance = useAppStore(state => state.config?.browser.agentControl)
   const toolsOpen = useAppStore((state) => state.toolsOpen)
