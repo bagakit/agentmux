@@ -158,7 +158,8 @@
 .collaboration-area[data-empty=true] { border-color: transparent; background: transparent; }
 .collaboration-area[data-empty=true] .collaboration-area__heading { color: var(--text-3); padding-inline: 8px; }
 .collaboration-area[data-empty=true] .collaboration-area__heading span { color: var(--text-2); font-weight: 400; }
-.collaboration-region-labels { position: absolute; inset: 0; z-index: 3; pointer-events: none; }
+/* Match XYFlow's Panel layer above its full-canvas renderer hit surface. */
+.collaboration-region-labels { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
 .collaboration-area__overview-label { position: absolute; pointer-events: none; }
 .collaboration-area__summary { display: flex; align-items: center; gap: 6px; width: 100%; height: 100%; padding: 3px 7px; overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font-size: var(--fs-meta); text-align: left; cursor: pointer; pointer-events: auto; box-shadow: var(--elev-1); }
 .collaboration-area__summary > svg { flex: 0 0 auto; color: var(--text-2); }
