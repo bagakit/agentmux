@@ -73,6 +73,10 @@ Focus 入口与注意力明细使用共享状态语汇、对象数量和可访�
 
 ## Status Bar CPU/Memory 资源面板
 
+独立的对象持有调查由用户显式请求 native heap snapshot，绑定同一准确 Renderer 五字段目标，与普通 metrics／scene 分开。原生快照会暂停 Renderer、可能触发引擎 GC，并可能占用显著内存与磁盘；对象字符串、URL 与秘密可能进入私有文件，不自动采集、上传或写入错误日志。Main 直接生成原生文件，公共 `system metrics heap capture`／`inspect` 与 Performance 消费同一 captureId、Host 归属、文件引用和原完成事实，不把整个 heap 经普通 RPC／Renderer 复制，也不接受调用方任意服务器写路径。GUI 提供原文件另存、显示位置与显式打开原 DevTools；通过 Memory Load／Retainers 分析单份对象持有关系，不自建 heap 图算法。它不代表 worker／native／GPU 或全部 RSS，也不自动判定泄漏；两文件 Comparison 另需证明 isolate／object-ID 连续性，不能只凭 PID 相同。
+
+同一 heap captureId 不重新启动 native；取消或观察超时只结束该读者，不能冒称 V8 已停止，仍在途的原生操作占用原诊断槽，原 Agent／输入／普通 metrics 不受影响。一个最新文件与一个在途／发布未确认的候选有界保留，候选原 ID／目标在 native 前写入固定私有 pending 索引；Main 重建时缺少的原请求／完成观察保持 unknown，文件完整性不能补造 native ACK。新的明确采集会替换已发布文件，保留基线须先另存。已确认替换前保存失败且原材料完整时，显式同 ID 请求只重试小回执发布；替换后 unknown 先按原 ID 检查实际 manifest／文件，不自动重写、回滚或重采，也不以当前可读倒签原耐久 ACK。旧材料合同不可读时保留原字节并说明局部未知；显式另存原文件或无文件时的小回执后，可准确释放该 pending 候选，保留不兼容的旧 latest 字节，不依赖杀 Run／重启恢复。不得无限累积新候选或影响健康工作。
+
 准确 Renderer 的诊断资格由原窗口、WebContents、代次、PID 与创建身份确认；热点详情的合法省略不是该目标不存在。GUI 不因无关进程的热点排序永久关闭原目标入口，采集仍由 Main 在准确目标上复核，来源不可用或目标失配继续明确报告。
 
 - Performance 提供显式的一键现场采集，沿原 metrics owner 绑定准确窗口、WebContents、Renderer 代次、PID 与创建身份，组合资源读数、CPU 调用栈、Chromium timeline、堆分类与短时内存分配采样。各阶段保留实际来源、时间、原件、失败或 unknown；串行采集不冒充同一时刻的快照，部分成功仍可导出。分配采样用于定位窗口内的分配调用栈，不是全部 RSS 分账、历史对象持有链或泄漏判定；不额外调用主动 GC、扫描对象正文或生成会长时间暂停界面的大型堆快照；分配采样所用引擎协议在读取／停止 profile 时仍可能触发 GC，不能承诺零 GC 或把采集成本当作普通观察。严格合同拒绝原件时，沿原错误回执保留有界的固定校验谓词与结构位置；不默认输出 URL、函数名、任意属性名或对象内容，也不放宽合同、把原件清洗成成功或自动重采。
