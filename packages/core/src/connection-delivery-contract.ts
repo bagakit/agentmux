@@ -66,7 +66,7 @@ export type ConnectionDelivery = {
   /** Resource upload is distinct from the original chat-message effect. No bytes or platform asset key are exposed. */
   resourceUpload?: { kind: 'image' | 'file'; part: ConversationContentRef; attempt: number; state: 'pending' | 'dispatching' | 'unknown' | 'confirmed' }
 }
-/** Current process service window for the requested Binding scope; never platform delivery or Agent health. */
+/** Lane-level source, qualification or effect observation for this Binding scope. Each original delivery receipt owns its specific platform result; this is not Agent health. */
 export type ConnectionDeliveryObservation = {
   state: 'unknown' | 'ready' | 'unavailable' | 'disabled'
   reason?: 'not-started' | 'source-unconfirmed' | 'source-gap' | 'content-unconfirmed' | 'storage-unconfirmed' | 'adapter-unavailable' | 'credential-missing' | 'effect-unconfirmed'
