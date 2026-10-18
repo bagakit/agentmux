@@ -1,9 +1,4 @@
-.toolkit-editor__directory { display: grid; min-width: 0; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
-.toolkit-editor__directory > span { display: flex; align-items: center; gap: var(--sp-2); }
-.toolkit-editor__directory > input { min-width: 0; width: 100%; font-family: var(--font-mono); }
-.toolkit-editor__directory small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.5; }
-.toolkit-editor__name > span > small,
-.toolkit-editor__directory > span > small { margin-left: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
+.toolkit-editor__name > span > small { margin-left: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
 .toolkit-editor__save-requirements { margin: 0; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.5; }
 
 .toolkit-editor__mode { display: flex; flex-wrap: wrap; gap: var(--sp-5); margin: 0; padding: 0; border: 0; font-size: var(--fs-meta); color: var(--text-2); }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { ToolkitToolConfiguration, ToolkitInlineToolConfiguration, ToolkitPackageConfiguration, ToolkitConfigurationFields, ToolkitConfigurationChanges, ToolkitToolFields, ToolkitPackageFields } from '@agentmux/core/control'
+import { AgentMuxError, TOOLKIT_WORKSPACE_PATH_ERROR_DETAIL, type ToolkitToolConfiguration, type ToolkitInlineToolConfiguration, type ToolkitPackageConfiguration, type ToolkitConfigurationFields, type ToolkitConfigurationChanges, type ToolkitToolFields, type ToolkitPackageFields } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { configValuesEqual } from '../../../../shared/config-edit'
 
@@ -12,7 +12,7 @@ function assignField(value: ToolkitConfigurationFields, key: string, source: Too
   else Object.assign(value, { [key]: fieldValue(source, key) })
 }
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
-export type ToolkitDraft<F extends ToolkitConfigurationFields = ToolkitConfigurationFields, C extends ToolkitToolConfiguration = ToolkitToolConfiguration> = { value: F; expected: C | null; saving: boolean; state: SaveState; error: string; missing: boolean }
+export type ToolkitDraft<F extends ToolkitConfigurationFields = ToolkitConfigurationFields, C extends ToolkitToolConfiguration = ToolkitToolConfiguration> = { value: F; expected: C | null; saving: boolean; state: SaveState; error: string; errorField: 'workspacePath' | null; missing: boolean }
 export type ToolkitDraftWriter = {
   add(id: string, value: ToolkitConfigurationFields): Promise<ToolkitToolConfiguration>
   update(id: string, changes: ToolkitConfigurationChanges, expected: ToolkitConfigurationChanges): Promise<ToolkitToolConfiguration>
@@ -27,7 +27,7 @@ export function toolkitDraftDirty(entry: ToolkitDraft): boolean {
   return entry.expected === null || fieldsFor(entry.value).some(key => !configValuesEqual(fieldValue(entry.value, key), fieldValue(entry.expected!, key)))
 }
 function clean(tool: ToolkitToolConfiguration): ToolkitDraft {
-  return { value: toolkitFields(tool), expected: tool, saving: false, state: 'idle', error: '', missing: false }
+  return { value: toolkitFields(tool), expected: tool, saving: false, state: 'idle', error: '', errorField: null, missing: false }
 }
 function reconcile(entry: ToolkitDraft, saved: ToolkitToolConfiguration | undefined): ToolkitDraft | undefined {
   if (entry.saving) return entry
@@ -74,17 +74,18 @@ export function useToolkitDrafts(saved: readonly ToolkitToolConfiguration[]) {
     async function run(operation: () => Promise<void>): Promise<boolean> {
       if (pending.current.has(id)) return false
       pending.current.add(id)
-      setEntries(current => ({ ...current, [id]: { ...current[id]!, saving: true, state: 'saving', error: '' } }))
+      setEntries(current => ({ ...current, [id]: { ...current[id]!, saving: true, state: 'saving', error: '', errorField: null } }))
       try {
         await operation()
         setEntries(current => {
-          const finished: ToolkitDraft = { ...current[id]!, saving: false, state: 'saved', error: '' }
+          const finished: ToolkitDraft = { ...current[id]!, saving: false, state: 'saved', error: '', errorField: null }
           return { ...current, [id]: finished }
         })
         return true
       } catch (cause) {
         setEntries(current => {
-          const finished: ToolkitDraft = { ...current[id]!, saving: false, state: 'error', error: presentError(cause) }
+          const finished: ToolkitDraft = { ...current[id]!, saving: false, state: 'error', error: presentError(cause),
+            errorField: cause instanceof AgentMuxError && cause.detail === TOOLKIT_WORKSPACE_PATH_ERROR_DETAIL ? 'workspacePath' : null }
           return { ...current, [id]: reconcile(finished, latest.current.get(id)) ?? finished }
         })
         return false
@@ -92,7 +93,7 @@ export function useToolkitDrafts(saved: readonly ToolkitToolConfiguration[]) {
         pending.current.delete(id)
       }
     }
-    return { state: entry.state, error: entry.error, saving: entry.saving, run }
+    return { state: entry.state, error: entry.error, errorField: entry.errorField, saving: entry.saving, run }
   }
   async function save(id: string, writer: ToolkitDraftWriter): Promise<boolean> {
     const captured = entries[id]!
@@ -119,7 +120,7 @@ export function useToolkitDrafts(saved: readonly ToolkitToolConfiguration[]) {
     })
   }
   function add(id: string, value: ToolkitConfigurationFields) {
-    setEntries(current => ({ ...current, [id]: { value, expected: null, saving: false, state: 'idle', error: '', missing: false } }))
+    setEntries(current => ({ ...current, [id]: { value, expected: null, saving: false, state: 'idle', error: '', errorField: null, missing: false } }))
   }
   function forget(id: string) {
     setEntries(current => { const next = { ...current }; delete next[id]; return next })
