@@ -41,8 +41,8 @@ export function AutomationDefaultsSettingsPane({ preferences, onSave }: {
   onSave(value: AutomationDefaults, expected: AutomationDefaults): Promise<void>
 }) {
   const saved = resolveAutomationPreferences(preferences), draft = useSettingDraftRecord(editValue(saved)), save = useSettingsSave(), id = useId()
-  let issue = ''
-  try { policyValue(draft.value) } catch (error) { issue = error instanceof Error ? error.message : 'Review your automation defaults.' }
+  let issue = '', parsed: AutomationDefaults | undefined
+  try { parsed = policyValue(draft.value) } catch (error) { issue = error instanceof Error ? error.message : 'Review your automation defaults.' }
   const number = (key: keyof typeof units | 'checkInDailyBudget', label: string, unit: string, hint: string) => <div className="continuity-setting-row" data-settings-field={key}>
     <label htmlFor={`${id}-${key}`}><strong>{label}</strong><small>{hint}</small></label>
     <div className="continuity-number"><TextInput id={`${id}-${key}`} aria-label={label} inputMode={key === 'checkInDailyBudget' ? 'numeric' : 'decimal'}
@@ -77,6 +77,16 @@ export function AutomationDefaultsSettingsPane({ preferences, onSave }: {
       {number('checkInSilenceMs', 'Minimum silence before follow-up', 'hours', 'Built-in default: 18 hours. Choose a duration from 5 minutes to 30 days.')}
       {number('checkInMinIntervalMs', 'Minimum follow-up interval', 'hours', 'Built-in default: 20 hours. Choose a duration from 5 minutes to 30 days.')}
       {number('checkInDailyBudget', 'Daily follow-up budget', 'attempts', 'Built-in default: 1 attempt per local day. Choose 1 to 3.')}
+      {parsed && <aside className="automation-policy-example" aria-label="Quiet follow-up example">
+        <header><strong>When a follow-up can happen</strong><small>Draft example</small></header>
+        <p>At a scheduled check, all of these conditions must be met:</p>
+        <dl>
+          <div><dt>Wait for silence</dt><dd>At least <strong>{parsed.checkInSilenceMs / 3_600_000} hours</strong> after your last confirmed message.</dd></div>
+          <div><dt>Respect quiet hours</dt><dd>No question from <strong>{parsed.checkInQuietStart} to {parsed.checkInQuietEnd}</strong>, in the arrangement’s timezone.</dd></div>
+          <div><dt>Space out attempts</dt><dd>At least <strong>{parsed.checkInMinIntervalMs / 3_600_000} hours</strong> after the previous attempt, with at most <strong>{parsed.checkInDailyBudget} {parsed.checkInDailyBudget === 1 ? 'attempt' : 'attempts'} per local day</strong>.</dd></div>
+        </dl>
+        <p className="continuity-hint">Another question also needs a confirmed reply from you. These are defaults for arrangements where you enable quiet follow-up; this example schedules and sends nothing.</p>
+      </aside>}
       </div>
     </details>
     <p className="automation-save-scope">Saves progress, calendar and quiet follow-up defaults. Creates no task and sends no message.</p>
