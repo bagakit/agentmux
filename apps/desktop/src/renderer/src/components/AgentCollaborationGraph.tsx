@@ -24,7 +24,7 @@ import '../styles/collaboration.css'
 export type CollaborationSelection = { kind: 'agent' | 'relation'; id: string; relatedIds?: readonly string[] } | null
 type NodeActivity = { pulse: CollaborationPulse; direction: 'sent' | 'received' }
 type AgentData = { box: CollaborationBox; agent: CollaborationAgent; selected: boolean; activity?: NodeActivity | undefined; identity?: FocusContextIdentity | undefined; goals?: FocusGoalLinks | undefined; onPreview(enter: boolean): void; onSelect(): void; onOpen(id: string): void }
-type AreaData = { box: Extract<CollaborationBox, { kind: 'area' }>; envelope: string; memberGeometry: readonly CollaborationBox[]; area: CollaborationArea; folded: boolean; activity?: NodeActivity | undefined; internal: readonly CollaborationRelation[]; onInspect(): void; onLocate(): void; onToggle(): void }
+type AreaData = { box: Extract<CollaborationBox, { kind: 'area' }>; envelope: string; memberGeometry: readonly CollaborationBox[]; area: CollaborationArea; folded: boolean; activity?: NodeActivity | undefined; internal: readonly CollaborationRelation[]; onInspect(): void; onLocate(): void; onToggle(anchor?: { x: number; y: number }): void }
 type AgentNode = Node<AgentData, 'agent'>
 type AreaNode = Node<AreaData, 'area'>
 type GraphNode = AgentNode | AreaNode
@@ -81,17 +81,19 @@ const AreaNodeView = memo(function AreaNodeView({ data }: NodeProps<AreaNode>) {
 const nodeTypes = { agent: AgentNodeView, area: AreaNodeView }
 
 /** Metadata and pulses reuse geometry; physical size changes retain the current reading occurrence. */
-export function AgentCollaborationGraph({ agents, areas, relations, pulses, selection, onSelect, onOpen, identities, goals, ready = true, active = true, locate, onVisibleAgents, onPreviewAgent, peeked }: {
+export function AgentCollaborationGraph({ agents, areas, relations, pulses, selection, onSelect, onOpen, identities, goals, ready = true, active = true, locate, context, onVisibleAgents, onPreviewAgent, peeked }: {
   agents: ReadonlyMap<string, CollaborationAgent>; areas: readonly CollaborationArea[]; relations: readonly CollaborationRelation[]; pulses: readonly CollaborationPulse[]
   selection: CollaborationSelection; onSelect(selection: CollaborationSelection): void; onOpen(context: FocusContext): void
   ready?: boolean; active?: boolean; locate?: CollaborationLocate | undefined; onVisibleAgents?(ids: readonly string[]): void; onPreviewAgent?(id: string | null): void; peeked?: string | null; identities?: ReadonlyMap<string, FocusContextIdentity>; goals?: ReadonlyMap<string, FocusGoalLinks>
+  context?: { name: string; onLocate(): void }
 }) {
-  const motion = useCollaborationMotion(active), hud = useRef<HTMLDivElement>(null)
+  const motion = useCollaborationMotion(active), hud = useRef<HTMLDivElement>(null), contextControl = useRef<HTMLButtonElement>(null)
   const [areaLocate, setAreaLocate] = useState<{ source: CollaborationLocate | undefined; request: CollaborationLocate }>()
   const effectiveLocate = areaLocate && areaLocate.source === locate ? areaLocate.request : locate
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set())
   const flow = useRef<ReactFlowInstance<GraphNode> | null>(null)
   const readingAnchor = useRef<string | null>(null)
+  const foldAnchor = useRef<{ id: string; folded: boolean; x: number; y: number; gesture: number; source: CollaborationLocate | undefined } | null>(null)
   const preparedLocate = useRef<object | undefined>(undefined)
   useEffect(() => {
     if (!active || !locate?.agentId || preparedLocate.current === locate.token) return
@@ -125,6 +127,19 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
   }, [pulses])
   const actions = useRef({ onSelect, onOpen, onPreviewAgent, agents, presentation, locate }); actions.current = { onSelect, onOpen, onPreviewAgent, agents, presentation, locate }
   const gestures = useRef(0)
+  useEffect(() => {
+    const pending = foldAnchor.current
+    if (!pending) return
+    if (!active || pending.gesture !== gestures.current || pending.source !== locate) { foldAnchor.current = null; return }
+    const box = geometry.get(pending.id)
+    if (box?.kind !== 'area' || box.folded !== pending.folded || !flow.current) return
+    foldAnchor.current = null
+    // A clamped screen label is the user's reading occurrence. Keep that
+    // occurrence when its original world heading was outside the viewport.
+    const { zoom } = flow.current.getViewport()
+    void flow.current.setViewport({ zoom, x: pending.x - (box.x + box.heading.x) * zoom,
+      y: pending.y - (box.y + box.heading.y + box.heading.height) * zoom })
+  }, [geometry, locate, active])
 
   const nodeCache = useRef(new Map<string, GraphNode>()), heldNodes = useRef<GraphNode[]>([])
   const nodes = useMemo(() => {
@@ -142,11 +157,17 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
         style: { width: box.width, height: box.height }, selectable: false, draggable: false,
         data: { box, envelope, memberGeometry, area, folded: box.folded, internal, activity: live,
           onLocate: old?.onLocate ?? (() => {
+            foldAnchor.current = null
             setFolded(previous => { if (!previous.has(area.id)) return previous; const next = new Set(previous); next.delete(area.id); return next })
             setAreaLocate({ source: actions.current.locate, request: { token: {}, areaIds: [area.id] } })
           }),
           onInspect: old?.onInspect ?? (() => { const current = actions.current.presentation.internal.get(area.id) ?? []; if (current[0]) actions.current.onSelect({ kind: 'relation', id: current[0].id, relatedIds: current.map(relation => relation.id) }) }),
-          onToggle: old?.onToggle ?? (() => { readingAnchor.current = areaId; setFolded(previous => { const next = new Set(previous); if (!next.delete(area.id)) next.add(area.id); return next }) }) }
+          onToggle: old?.onToggle ?? (anchor => {
+            readingAnchor.current = areaId
+            const box = nodeCache.current.get(areaId)?.data.box
+            foldAnchor.current = anchor && box?.kind === 'area' ? { ...anchor, id: areaId, folded: !box.folded, gesture: gestures.current, source: actions.current.locate } : null
+            setFolded(previous => { const next = new Set(previous); if (!next.delete(area.id)) next.add(area.id); return next })
+          }) }
       }
       next.push(areaNode); cache.set(areaId, areaNode)
       if (box.folded) continue
@@ -212,9 +233,10 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
   return <MapMotionContext.Provider value={motion.enabled}><div className="collaboration-canvas" data-motion={motion.enabled ? 'on' : 'off'} aria-label="Agent collaboration graph">
     <ReactFlow<GraphNode> nodes={nodes} edges={emptyEdges} nodeTypes={nodeTypes} onInit={instance => { flow.current = instance }} onPaneClick={clearSelection}
       onMoveStart={event => { if (event) ++gestures.current }} onlyRenderVisibleElements nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesReconnectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.05} maxZoom={1.4} proOptions={{ hideAttribution: true }}>
-      <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} active={active} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} geometry={geometry} active={active} selectedAgent={selection?.kind === 'agent' ? selection.id : effectiveLocate?.agentId} locatedAreas={effectiveLocate?.areaIds} hud={hud} />
+      <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} active={active} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} geometry={geometry} active={active} selectedAgent={selection?.kind === 'agent' ? selection.id : effectiveLocate?.agentId} locatedAreas={effectiveLocate?.areaIds} hud={hud} contextControl={context ? contextControl : null} />
       <Background gap={22} size={1} />
     </ReactFlow>
+    {context ? <button ref={contextControl} type="button" className="collaboration-map__locate" title="Locate original context" onClick={context.onLocate}><SemanticIcon name="action.locate" size={14} /><span>{context.name}</span></button> : null}
     <div ref={hud} className="collaboration-canvas__hud"><div className="collaboration-canvas__controls" aria-label="Graph viewport">
       <button type="button" className="collaboration-canvas__motion" aria-label="Map animations" aria-pressed={motion.enabled} aria-busy={motion.saving || undefined} disabled={motion.saving} title={`Map animations: ${motion.enabled ? 'on' : 'off'}${motion.preference === 'system' ? ' · Following system' : ''}. Messages continue updating.`} onClick={() => void motion.setEnabled(!motion.enabled)}><span className="collaboration-canvas__motion-switch" aria-hidden="true" /><span>Motion</span><strong>{motion.enabled ? 'On' : 'Off'}</strong></button>
       <span className="collaboration-canvas__divider" aria-hidden="true" />

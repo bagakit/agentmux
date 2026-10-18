@@ -18,14 +18,15 @@ export const COLLABORATION_AREA_KINDS = {
 } as const
 type Region = { box: Extract<CollaborationLayoutBox, { kind: 'area' }>; area: CollaborationArea; folded: boolean
   activity?: { pulse: { kind: 'communication' | 'supervision' } } | undefined
-  internal: readonly unknown[]; onInspect(): void; onLocate(): void; onToggle(): void }
+  internal: readonly unknown[]; onInspect(): void; onLocate(): void; onToggle(anchor?: { x: number; y: number }): void }
 const same = (a: readonly unknown[], b: readonly unknown[]) => a.length === b.length && a.every((value, index) => value === b[index])
 
 /** One screen-space identity layer. Natural text size is observed only when it
  * changes; camera movement projects the same boxes without measuring the world. */
-export const CollaborationRegionLabels = memo(function CollaborationRegionLabels({ areas, geometry, selectedAgent, locatedAreas, active, hud }: {
+export const CollaborationRegionLabels = memo(function CollaborationRegionLabels({ areas, geometry, selectedAgent, locatedAreas, active, hud, contextControl }: {
   areas: readonly { data: Region }[]; geometry: ReadonlyMap<string, CollaborationLayoutBox>
   selectedAgent?: string | undefined; locatedAreas?: readonly string[] | undefined; active: boolean; hud: RefObject<HTMLDivElement | null>
+  contextControl: RefObject<HTMLButtonElement | null> | null
 }) {
   const camera = useStore(state => [...state.transform, state.width, state.height], same)
   const root = useRef<HTMLDivElement>(null)
@@ -109,7 +110,9 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
     if (!active || !element) return
     const update = () => {
       const canvas = element.parentElement!.getBoundingClientRect()
-      const next = [...element.children].filter(child => child.classList.contains('collaboration-canvas__controls') || child.classList.contains('collaboration-canvas__legend')).map(child => {
+      const surfaces = [...element.children].filter(child => child.classList.contains('collaboration-canvas__controls') || child.classList.contains('collaboration-canvas__legend'))
+      if (contextControl?.current) surfaces.push(contextControl.current)
+      const next = surfaces.map(child => {
         const box = child.getBoundingClientRect()
         return { x: box.x - canvas.x, y: box.y - canvas.y, width: box.width, height: box.height }
       })
@@ -118,15 +121,15 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
       }) ? previous : next)
     }
     const observer = new ResizeObserver(update), window = element.ownerDocument.defaultView!
-    const frame = window.requestAnimationFrame(() => { update(); observer.observe(element.parentElement!); observer.observe(element); for (const child of element.children) observer.observe(child) })
+    const frame = window.requestAnimationFrame(() => { update(); observer.observe(element.parentElement!); observer.observe(element); for (const child of element.children) observer.observe(child); if (contextControl?.current) observer.observe(contextControl.current) })
     return () => { window.cancelAnimationFrame(frame); observer.disconnect() }
-  }, [active, hud])
+  }, [active, hud, contextControl])
   return <div ref={root} className="collaboration-region-labels">{labels.map(({ data, x, y, budget, width, height, context, current }) => <div key={data.area.id} className="collaboration-area__overview-label" data-region-id={data.area.id} data-area-id={data.box.id} data-kind={data.area.kind} data-empty={!data.area.members.length || undefined} data-context={context || undefined} data-current={current || undefined} data-label-width={width} data-label-height={height} style={{ left: x, top: y, maxWidth: budget }}>
-    <RegionIdentity data={data} />
+    <RegionIdentity data={data} onToggle={() => data.onToggle(context ? { x, y: y + height } : undefined)} />
   </div>)}</div>
 })
 
-function RegionIdentity({ data }: { data: Region }) {
+function RegionIdentity({ data, onToggle }: { data: Region; onToggle(): void }) {
   const { area } = data, target = area.iconTarget
   const { manualIcon, configuredHost } = useAppStore(useShallow(state => ({
     manualIcon: target ? state.spaceObjectIcons[target.key] ?? null : null,
@@ -143,6 +146,6 @@ function RegionIdentity({ data }: { data: Region }) {
       <i className="collaboration-area__activity" data-kind={data.activity?.pulse.kind} aria-hidden={!data.activity || undefined} aria-label={data.activity ? data.activity.pulse.kind === 'communication' ? 'Recent message activity' : 'Recent dispatch update' : undefined} />
     </button>
     {data.folded && data.internal.length ? <button type="button" className="collaboration-area__internal nodrag nopan" aria-label={`${area.name}: ${data.internal.length} internal connections`} onClick={data.onInspect}>{data.internal.length} internal connections<SemanticIcon name="navigation.next" size={11} /></button> : null}
-    {area.members.length ? <button type="button" className="collaboration-area__fold nodrag nopan" aria-label={`${data.folded ? 'Expand' : 'Collapse'} ${area.name}`} aria-expanded={!data.folded} onClick={data.onToggle}><SemanticIcon name={data.folded ? 'navigation.next' : 'navigation.down'} size={12} /></button> : null}
+    {area.members.length ? <button type="button" className="collaboration-area__fold nodrag nopan" aria-label={`${data.folded ? 'Expand' : 'Collapse'} ${area.name}`} aria-expanded={!data.folded} onClick={onToggle}><SemanticIcon name={data.folded ? 'navigation.next' : 'navigation.down'} size={12} /></button> : null}
   </>
 }
