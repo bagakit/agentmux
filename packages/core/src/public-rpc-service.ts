@@ -133,6 +133,7 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   goalDelegations?: GoalDelegationsOwner
   moteContext?: import('./diagnostic-evidence.js').AgentMuxMoteContextEvidencePort
   clientIncidents?: import('./client-incident.js').AgentMuxClientIncidentPort
+  clientNotifications?: import('./client-notifications.js').AgentMuxClientNotificationsPort
   deliveryAttempts?: { hostId: string; store: DeliveryAttemptStore }
   /** Original semantic owner identity; never ctxmux identity or a route alias. */
   diagnosticCoreAuthority?(scope: AgentMuxRpcCoreClient): import('./diagnostic-evidence.js').AgentMuxDiagnosticAuthorityObservation | Promise<import('./diagnostic-evidence.js').AgentMuxDiagnosticAuthorityObservation>
@@ -1461,7 +1462,8 @@ export class AgentMuxRpcService {
         // an original local journal, authority or reader for an already-owned domain.
         const local = await inspectDiagnosticEvidence(this.diagnosticQuery, {}, this.ports, caller, context.signal)
         const ownsTarget = local.capabilities.some(capability => capability.domain === input.target?.domain &&
-          (input.target?.domain !== 'client.incident' || capability.target === ('recent' in input.target ? 'recent' : 'log-id')))
+          (input.target?.domain !== 'client.incident' || capability.target === ('recent' in input.target ? 'recent' : 'log-id')) &&
+          (input.target?.domain !== 'client.notifications' || capability.target === ('list' in input.target ? 'notification-list' : 'notification-id')))
         if ((!input.target || !ownsTarget) && this.ports.forwardControl) {
           try {
             const forwarded = parseDiagnosticEvidenceResult(await this.ports.forwardControl('system.diagnostics.inspect', structuredClone(input), context), input)

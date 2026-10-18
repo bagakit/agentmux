@@ -18,6 +18,7 @@ import { isBrowserTaskControlOperation, parseBrowserTaskControlPayload, parseBro
 import { AGENTMUX_RPC_CONTROL_METHODS, type AgentMuxRpcMethod } from './public-rpc.js'
 
 import { parseMotePreferencesReadResult, parseMotePreferencesSaveResult } from './mote-preferences.js'
+import { parseClientNotificationsObservation } from './client-notifications.js'
 import { rpcRecord } from './rpc-data.js'
 export { rpcRecord } from './rpc-data.js'
 
@@ -156,6 +157,9 @@ export function assertControlResultTarget(request: AgentMuxControlRequest, resul
     if (refs?.some(ref => !demand.contentRefs?.some(saved => saved.hostId === ref.hostId && saved.workspaceId === ref.workspaceId && saved.zoneId === ref.zoneId))) fail()
   }
   switch (request.operation) {
+    case 'inspect.notifications':
+      parseClientNotificationsObservation(actual.observation, request.target, request.includeRaw)
+      break
     case 'demand.patrol-all':
       if (actual.requestId !== request.requestId || actual.agent &&
         (actual.agent as Record<string, unknown>).createOperationId !== request.requestId) fail()

@@ -79,6 +79,7 @@ import { settingsResourceBudget, settingsResourceEnvelope, settingsResourceRecor
 import { parseRemoteCoreUpgradeCheck, parseRemoteCoreUpgradeExpected, parseRemoteCoreUpgradeReceipt } from './remote-core-upgrade-codec.js'
 import { isWorkbenchLayoutPreset } from './workbench-layout-preset.js'
 import { parseMoteContextEvidenceTarget, parseMoteContextObservation } from './mote-context-observation.js'
+import { parseClientNotificationsTarget, parseClientNotificationsObservation } from './client-notifications.js'
 import { isSplitDirection } from './split-direction-ssot.js'
 
 const MAX_MESSAGE_BYTES = AGENTMUX_CONTROL_MAX_MESSAGE_BYTES
@@ -416,15 +417,17 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
       ...(source.conversation === undefined ? {} : { conversation: parseConversationConsumerQuery(source.conversation) }) }
   }
-  if (source.operation === 'inspect.mote-context') {
+  if (source.operation === 'inspect.mote-context' || source.operation === 'inspect.notifications') {
     settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target', 'includeRaw', 'maxBytes'], 'INVALID_CONTROL_REQUEST')
     try {
-      const target = parseMoteContextEvidenceTarget(source.target)
       if (typeof source.includeRaw !== 'boolean' || !Number.isSafeInteger(source.maxBytes) ||
         (source.maxBytes as number) < 1 || (source.maxBytes as number) > 128 * 1024) throw new Error('Invalid bounds')
+      if (source.operation === 'inspect.notifications') return {
+        schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
+        target: parseClientNotificationsTarget(source.target), includeRaw: source.includeRaw, maxBytes: source.maxBytes as number }
       return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, operation: source.operation,
-        target, includeRaw: source.includeRaw, maxBytes: source.maxBytes as number }
-    } catch { throw new AgentMuxError('Mote context inspection request is invalid.', 'INVALID_CONTROL_REQUEST') }
+        target: parseMoteContextEvidenceTarget(source.target), includeRaw: source.includeRaw, maxBytes: source.maxBytes as number }
+    } catch { throw new AgentMuxError('Client inspection request is invalid.', 'INVALID_CONTROL_REQUEST') }
   }
   if (source.operation === 'settings.get') {
     settingsFields(source, ['schemaVersion', 'requestId', 'operation', 'target'], 'INVALID_CONTROL_REQUEST')
@@ -1401,6 +1404,12 @@ function parseSuccessReceipt(source: Record<string, unknown>): AgentMuxControlSu
     const observation = object(result.observation, 'Mote context observation is invalid.', 'CONTROL_PROTOCOL_ERROR')
     return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
       result: { observation: parseMoteContextObservation(observation, parseMoteContextEvidenceTarget(observation.target), true) } }
+  }
+  if (operation === 'inspect.notifications') {
+    settingsFields(result, ['observation'], 'CONTROL_PROTOCOL_ERROR')
+    const observation = object(result.observation, 'Client notification observation is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId, ok: true, operation,
+      result: { observation: parseClientNotificationsObservation(observation, parseClientNotificationsTarget(observation.target), true) } }
   }
   if (operation === 'settings.get') {
     settingsFields(result, ['entries', 'partial'], 'CONTROL_PROTOCOL_ERROR')
