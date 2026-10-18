@@ -9,6 +9,7 @@ import type { AgentMuxSessionQuestionReplyInput } from '../../src/client.js'
 import { prepareCodexNativeInput } from '../../src/providers/codex-native-input.js'
 import { agentPromptCondition } from '../../src/agent-prompt-condition.js'
 import { AgentMuxFileAgentSessionStore } from '../../src/agent-session-store.js'
+import { AgentMuxError } from '../../src/errors.js'
 import { rpcOwnerFixture } from './public-rpc-owner.js'
 import { savedQuestionSource as source, savedQuestionTurn, savedQuestionId,
   savedQuestionEvent, savedQuestionJsonl } from './codex-saved-question.js'
@@ -30,7 +31,7 @@ export async function questionReplyOwner(options: { nativeProtocol?: boolean; ou
     const persisted = await new AgentMuxFileAgentSessionStore(f.store.path).readPromptAdmission(input.agentSessionId, input.expectedRun, input.operationId)
     expect(persisted?.admission?.intent?.plan).toEqual(plan)
     expect(persisted?.admission?.inputKey).toEqual(key)
-    expect(persisted?.admission?.intent?.message?.questionReply).toEqual({ source, turnId: input.turnId, recordId: input.recordId, questionIds: input.answers.map(answer => answer.questionId) })
+    expect(persisted?.admission?.intent?.message?.questionReply).toEqual({ source, turnId: input.turnId, recordId: input.recordId, questionIds: input.answers.map(answer => answer.questionId), ...(input.externalAction ? { externalAction: input.externalAction } : {}) })
     expect(persisted?.admission?.intent?.admissionIntent).toEqual({ kind: 'exact-condition', condition: { expectedRun: input.expectedRun, afterSubmissionId: input.afterSubmissionId } })
     if (options.outcome === 'unknown') throw new Error('Native acknowledgement unavailable after dispatch')
     if (options.outcome === 'not-applied') return { outcome: 'not-applied', errorCode: -32602 }
@@ -58,6 +59,7 @@ ws.send(JSON.stringify({jsonrpc:'2.0',id:request.id,result}));});});`)
   } else {
     const provider = f.client.providers.get('codex') as AgentProvider
     provider.prepareNativeInput = vi.fn(async (context, selected) => {
+      if (!context.nativeActor) throw new AgentMuxError('The original native actor is unavailable', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
       expect(context.nativeActor).toEqual(actor)
       expect(selected).toEqual(source)
       return { plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([source.providerId, source.nativeSessionId]),
