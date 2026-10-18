@@ -3339,6 +3339,7 @@ function startSessionMembershipResync(
               continue
             }
             const reduced = projectRuntimeEvent(projected, pending.event)
+            if (pending.event.event.type === 'run-removed') recordClosedWorkbenchEntities(projected.tabs, reduced.state.tabs)
             projected = reduced.state
             membershipGap ||= reduced.sessionMembershipGap === true
             // A reconnect during this read needs its own later canonical cut. A sparse restored
@@ -3959,6 +3960,19 @@ function partializeAppState(state: AppState): PersistedAppState {
 }
 
 let coreSpatialPersistence:DesktopSpatialPersistence|null=null
+
+/** Record the exact result of an admitted close/retirement before spatial capture.
+ * Inventory absence and remote hydration never authorize entity removal here. */
+function recordClosedWorkbenchEntities(before: Record<string, WorkbenchTab>, after: Record<string, WorkbenchTab>): void {
+  if (before === after) return
+  for (const tab of Object.values(before)) {
+    const retained = after[tab.id]
+    if (!retained) coreSpatialPersistence?.removeEntity(tab.id)
+    else for (const regionId of Object.keys(tab.regions)) {
+      if (!retained.regions[regionId]) coreSpatialPersistence?.removeEntity(regionId)
+    }
+  }
+}
 let disposeCoreSpatial:(()=>void)|null=null
 export function currentDisplayNameRevision(kind: string, id: string): number {
   return projectedNameRevision(useAppStore.getState().nameLabels, kind, id)
@@ -7033,7 +7047,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         removedTab = current.tabs[tabId] && !committed.tabs[tabId] ? current.tabs[tabId] : undefined
         removedTabOrder = current.layouts[workspaceId]?.groups.find(group => group.id === tabGroupId)?.tabOrder ?? []
         collectionChanged = committed.surveyCollectedZones !== current.surveyCollectedZones
-        if(removedTab) coreSpatialPersistence?.removeEntity(removedTab.id)
+        recordClosedWorkbenchEntities(current.tabs, committed.tabs)
         const removedTabId = removedTab?.id
         if (!removedTabId || !Object.values(current.recentMoteAgents).some(agent => agent.tabId === removedTabId)) return committed
         return { ...committed, recentMoteAgents: Object.fromEntries(
@@ -11763,11 +11777,18 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         return
       }
       if (recovery.kind === 'retired') {
+        const live = get().sessions.find(session => session.id === sessionId)
+        // A late receipt for the requested Run cannot retire a newer incarnation.
+        if (!live || !sessionOwnsControl(live, current.control)) return
         if (options?.preserveView) {
           get().reportError(new Error('The original Session is retired. Its Mote conversation and history are kept; choose another default conversation in Profile.'), { kind: 'indeterminate', subject: current.control })
           return
         }
-        set((state) => removeSessionProjection(state, sessionId))
+        set((state) => {
+          const next = removeSessionProjection(state, sessionId)
+          recordClosedWorkbenchEntities(state.tabs, next.tabs)
+          return next
+        })
         if (priorFailure && get().notificationEvents.includes(priorFailure)) {
           set(state => settleNotificationRecords(state, [priorFailure]))
         }
@@ -12056,6 +12077,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     let sessionMembershipGap = false
     set((state) => {
       const reduced = projectRuntimeEvent(state, event)
+      if (core.type === 'run-removed') recordClosedWorkbenchEntities(state.tabs, reduced.state.tabs)
       timelineGapSessionId = reduced.timelineGapSessionId
       sessionMembershipGap = reduced.sessionMembershipGap === true
       const projected = reduced.state.sessions === state.sessions ? reduced.state
