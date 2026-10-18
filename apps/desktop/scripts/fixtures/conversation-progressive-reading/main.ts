@@ -71,8 +71,39 @@ ipcMain.handle('reading-proof:request', async (event, operation, ...args) => {
         const stored = await until(async () => { const value = await store.readMetadata(session.id); return value?.nativeHandle?.kind === 'provider' && value.nativeHandle.transcriptPath ? value : null }, 'original native handle')
         const value = { sessionId: session.id, runId: session.control.run.runId, nativeSessionId: stored.nativeHandle!.sessionId }
         await fs.writeFile(path.join(privateRoot, 'ids.json'), JSON.stringify(value))
-        await append(scene === 'surfaces' ? surfaceRows() : sceneRows(scene))
+        const seeded = scene === 'surfaces' ? surfaceRows() : sceneRows(scene), preparationStarted = performance.now()
+        await append(seeded)
         if (scene === 'surfaces') await store.applyTimelineMutation({ type: 'append', agentSessionId: session.id, item: surfaceCaptured(session.id) })
+        // Seeded completed turns are input preparation, not live work during scrolling.
+        // Keep every original observation; wait for its exact durable final projection.
+        const lastTurn = seeded.findLast((row: any) => row.type === 'event_msg' && row.payload?.type === 'task_complete') as
+          { ordinal: number; payload: { turn_id: string } } | undefined
+        if (lastTurn) {
+          assert.ok(Number.isSafeInteger(lastTurn.ordinal) && typeof lastTurn.payload.turn_id === 'string')
+          const turnId = lastTurn.payload.turn_id
+          const prepared = await until(async () => {
+            const current = await store.readMetadata(session.id), commit = current?.activityCommit
+            const scope = current?.nativeTurnEnds, end = scope?.turns[turnId]
+            if (current?.run.runId !== value.runId || current.nativeHandle?.kind !== 'provider' || current.nativeHandle.sessionId !== value.nativeSessionId ||
+              scope?.run.runId !== value.runId || scope.providerId !== 'codex' || scope.nativeHandle.kind !== 'provider' || scope.nativeHandle.sessionId !== value.nativeSessionId || !end ||
+              current.semanticStatus?.source !== 'native-transcript' || current.semanticStatus.nativeTurnId !== turnId || current.semanticStatus.state !== 'done' ||
+              !commit?.latestCommitted || commit.latest.id !== JSON.stringify(['activity-state', 'native-transcript', value.runId, end.recordId])) return null
+            return { semanticStatus: current.semanticStatus, nativeEnd: end, activity: commit.latest }
+          }, 'seeded original native turn and activity committed: ' + turnId, 120000)
+          const captured = await store.readCapturedHistory(session.id, { recordId: prepared.activity.id, limit: 1 })
+          assert.equal(captured.records.length, 1)
+          assert.equal(captured.records[0]!.item.id, prepared.activity.id)
+          assert.deepEqual(captured.records[0]!.item.activityState, prepared.activity.activityState)
+          result.preparation = { kind: 'native-turn-committed', elapsedMs: performance.now() - preparationStarted,
+            original: value, turnId, ordinal: lastTurn.ordinal, ...prepared,
+            captured: { stream: captured.stream, sequence: captured.records[0]!.sequence, revision: captured.records[0]!.revision },
+            boundary: 'Original input preparation completed before App rendering and the first conversation read; no native facts were skipped.' }
+        } else {
+          // The surfaces input has no turn-end protocol fact. In particular its
+          // real pending PermissionRequest must not be guessed into a done state.
+          result.preparation = { kind: 'records-appended-without-turn-end', elapsedMs: performance.now() - preparationStarted,
+            original: value, turnId: null, rows: seeded.length, boundary: 'No seeded native terminal turn; no completion or semantic convergence is claimed.' }
+        }
         return value
       }
       case 'attach': return await runtime.attachSession(event.sender.id, args[0], args[1] ?? 0, config)
@@ -188,7 +219,8 @@ app.whenReady().then(async () => {
     await win.loadFile(html)
     win.webContents.debugger.attach('1.3')
     await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
-    await ready('window.readingProof?.inspect().rows.length > 0 && readingProof.reads.length > 0')
+    await until(() => read('window.readingProof?.inspect().rows.length > 0 && readingProof.reads.length > 0'),
+      'original App records after durable input preparation', phase === 'seed' ? 140000 : 20000)
     result.ids = await ids()
     result.mobileSetup = { url: `http://127.0.0.1:${server.httpAddress!.port}/`, token: mobileToken, agentSessionId: result.ids.sessionId, runtimeId }
     result.initialState = await read('readingProof.state()')
