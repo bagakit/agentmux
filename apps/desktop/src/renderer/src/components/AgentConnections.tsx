@@ -31,7 +31,7 @@ export function AgentConnections({ session, regionId, visible }: { session: Extr
     setIssue('')
     const store = useAppStore.getState(), executorId = session.executorId ?? undefined
     const appearance = executorId ? store.config?.executors[executorId]?.avatar ?? store.config?.appearance.agentAvatars?.[executorId] : undefined
-    returned.current = trigger; setDialog({ name: store.agentNames[session.id] ?? session.label, session, connectionId: binding.connectionId,
+    returned.current = trigger; setDialog({ name: store.agentNames[session.id] ?? session.label, session, connectionId: binding.connectionId, bindingId: binding.bindingId,
       identity: { providerId: session.providerId, executorId, ...(appearance ? { appearance: structuredClone(appearance) } : {}) },
       target: { ...target, regionAnchor: { regionId: anchor } } })
   }
@@ -43,7 +43,7 @@ export function AgentConnections({ session, regionId, visible }: { session: Extr
     {issue ? <span className="agent-connections__error" role="status">{issue}</span> : null}
     {connector.issue ? <span className="agent-connections__error" role="status">{connector.issue}</span> : null}
     {connector.dialog}
-    {dialog ? <AgentConnectorDialog original={dialog} mode="details" initialSection="joining"
+    {dialog ? <AgentConnectorDialog original={dialog} mode="details"
       onClose={() => { setDialog(null); invalidateConnectorTarget(target) }} returnFocus={() => returned.current} /> : null}
   </>
 }

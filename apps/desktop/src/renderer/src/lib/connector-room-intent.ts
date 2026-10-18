@@ -1,11 +1,11 @@
 import { parseConnectionParams, parseRoomBindingTarget, type ConnectionParamsMap, type RoomBindingTarget } from '@agentmux/core/connections'
 
-type Effect = 'connection.room.create' | 'connection.room.link.create' | 'connection.bind' | 'connection.binding.relink' | 'connection.binding.pause' | 'connection.grant'
+type Effect = 'connection.room.create' | 'connection.room.link.create' | 'connection.bind' | 'connection.binding.relink' | 'connection.binding.pause' | 'connection.binding.resume' | 'connection.binding.detach' | 'connection.grant'
 /** Submitted UI correlation only. Original effects and receipts remain with their Core/Host owners. */
 export type ConnectorRoomIntent = { [M in Effect]: {
   target: RoomBindingTarget; method: M; input: ConnectionParamsMap[M]; phase: 'not-dispatched' | 'may-have-dispatched'
 } & (M extends 'connection.room.link.create' ? { replacesOperationId?: string } : {}) }[Effect]
-const effects: readonly string[] = ['connection.room.create', 'connection.room.link.create', 'connection.bind', 'connection.binding.relink', 'connection.binding.pause', 'connection.grant']
+const effects: readonly string[] = ['connection.room.create', 'connection.room.link.create', 'connection.bind', 'connection.binding.relink', 'connection.binding.pause', 'connection.binding.resume', 'connection.binding.detach', 'connection.grant']
 export const sameConnectorTarget = (a: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>, b: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>) => a.executionHostId === b.executionHostId && a.agentSessionId === b.agentSessionId
 const intentTargets = new WeakMap<Readonly<Record<string, ConnectorRoomIntent>>, ReadonlySet<string>>()
 const targetKey = (target: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>) => JSON.stringify([target.executionHostId, target.agentSessionId])

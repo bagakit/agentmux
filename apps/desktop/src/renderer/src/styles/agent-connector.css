@@ -66,6 +66,17 @@
 .agent-connector-menu__label { padding: var(--sp-3) var(--sp-4) var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); font-weight: 500; }
 
 .agent-connector-access-member { display: grid; justify-items: start; gap: var(--sp-2); min-width: 0; }
+.agent-connector-audiences { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.agent-connector-audiences button { text-align: left; overflow-wrap: anywhere; }
+.agent-connector-audiences button[aria-pressed=true] { border-color: var(--green); color: var(--text); }
+.agent-connector-directions { display: grid; flex-basis: 100%; gap: var(--sp-3); margin: 0; padding-block: var(--sp-3); border-block: 1px solid var(--line-soft); }
+.agent-connector-directions > div { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: var(--sp-3); }
+.agent-connector-directions dt { color: var(--text-2); font-size: var(--fs-meta); }
+.agent-connector-directions dd { display: grid; gap: var(--sp-1); margin: 0; color: var(--text); font-size: var(--fs-meta); line-height: 1.5; }
+.agent-connector-directions dd span { color: var(--text-3); }
+.agent-connector-disconnect { display: grid; flex-basis: 100%; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.agent-connector-creator-access { display: grid; justify-items: start; gap: var(--sp-2); padding-bottom: var(--sp-3); border-bottom: 1px solid var(--line-soft); }
+.agent-connector-creator-access small { color: var(--text-3); font-size: var(--fs-micro); }
 
 .agent-connector-progress { display: grid; grid-template-columns: .85fr .85fr 1.2fr; gap: var(--sp-3); margin: 0; padding: 0 0 var(--sp-5); list-style: none; border-bottom: 1px solid var(--line-soft); }
 .agent-connector-progress li { display: flex; align-items: flex-start; gap: var(--sp-2); min-width: 0; color: var(--text-3); }
