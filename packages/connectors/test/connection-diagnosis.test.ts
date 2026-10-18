@@ -151,3 +151,29 @@ it('keeps the original legal room metadata limit through the real binding owner 
   oversized.groups.value!.items[0]!.target.externalConversationId += 'g'
   expect(() => parseConnectionResult('connection.diagnose', oversized, f.target)).toThrow()
 }, 30_000)
+
+
+it('explains source gaps through the real public diagnosis without exposing source errors or records', async () => {
+  const f = await fixture()
+  f.connections.delivery = { inspect: async () => ({ delivery: null }), retry: async () => { throw new Error('Unexpected retry') }, list: async () => ({ deliveries: [], next: null, coverage: {
+    state: 'incomplete', nextContent: null, origins: [], gaps: [
+      { gapId: 'cut-gap', reason: 'source-gap', code: 'AGENT_CONVERSATION_READ_CUT_UNAVAILABLE', source: { kind: 'native', providerId: 'fixture', nativeSessionId: 'private-native-session' } },
+      { gapId: 'private-gap', reason: 'source-gap', code: 'PRIVATE adapter error', record: { hostId: 'local', agentSessionId: 'original-agent', source: { kind: 'captured', epoch: 'private-epoch', sequence: 1 } } },
+      { gapId: 'unrecorded-gap', reason: 'source-gap' }
+    ]
+  } }) }
+  const request = { ...f.target, bindingId: f.input.bindingId }
+  const report = await f.sdk.call('connection.diagnose', request), group = report.groups.value!.items[0]!
+  expect(group.outgoing.value!.coverage!.gaps).toEqual([
+    { gapId: 'cut-gap', reason: 'source-gap', code: 'AGENT_CONVERSATION_READ_CUT_UNAVAILABLE', codeRecorded: true, sourceKind: 'native' },
+    { gapId: 'private-gap', reason: 'source-gap', code: null, codeRecorded: true, sourceKind: null },
+    { gapId: 'unrecorded-gap', reason: 'source-gap', code: null, codeRecorded: false, sourceKind: null }
+  ])
+  expect(output(await f.cli(['diagnose', '--host', 'local', '--session', 'original-agent', '--binding', f.input.bindingId]))).toEqual(report)
+  expect(formatGroupDiagnosis({ ...group, service: report.service })).toContain('source native · code AGENT_CONVERSATION_READ_CUT_UNAVAILABLE')
+  const encoded = JSON.stringify(report)
+  for (const secret of ['PRIVATE', 'private-native-session', 'private-epoch', 'recordId']) expect(encoded).not.toContain(secret)
+  const invalid = structuredClone(report)
+  invalid.groups.value!.items[0]!.outgoing.value!.coverage!.gaps[0]!.code = 'PRIVATE adapter error' as never
+  expect(() => parseConnectionResult('connection.diagnose', invalid, request)).toThrow()
+}, 30_000)
