@@ -10,6 +10,13 @@ import { identityRuntimeSource } from '../dist/runtime-source.js'
 const indexUrl = new URL('../src/index.ts', import.meta.url)
 const index = await readFile(indexUrl, 'utf8')
 
+function exerciseFormat(api) {
+  assert.equal(api.isObjectId('111111111111'), true)
+  for (const value of ['111111111111\n', '111111111111\r', '111111111111\r\n', '11111111111', '1111111111111']) {
+    assert.equal(api.isObjectId(value), false)
+  }
+}
+
 function exercise(source) {
   const sizes = []
   const api = runInNewContext(source, {
@@ -43,6 +50,7 @@ test('published module and isolated source consume the same allocator', async ()
 })
 
 test('business derivation keeps opaque keys and domains independent', () => {
+  exerciseFormat({ isObjectId })
   assert.equal(deriveObjectId('object', ' a:b'), deriveObjectId('object', ' a:b'))
   assert.notEqual(deriveObjectId('object', ' a:b'), deriveObjectId('object', 'a:b'))
   assert.notEqual(deriveObjectId('object', 'a'), deriveObjectId('operation', 'a'))
@@ -72,4 +80,21 @@ test('actual allocator mutations fail the isolated consumer assertions', async (
     assert.throws(() => exercise(`(()=>{${result.outputFiles[0].text};return AgentMuxIdentity;})()`))
   }
   exercise(identityRuntimeSource)
+})
+
+test('removing the actual format boundary fails control-character consumers', async () => {
+  const anchor = '{12}$/u.test(value)'
+  assert.ok(index.includes(anchor))
+  const result = await build({
+    entryPoints: [indexUrl.pathname], bundle: true, platform: 'neutral', format: 'iife',
+    globalName: 'AgentMuxIdentity', write: false, minify: true, legalComments: 'none',
+    plugins: [{ name: 'format-mutation', setup(builder) {
+      builder.onLoad({ filter: /[/\\]identity[/\\]src[/\\]index\.ts$/ }, () => ({
+        contents: index.replace(anchor, '{12}/u.test(value)'), loader: 'ts', resolveDir: new URL('../src/', import.meta.url).pathname,
+      }))
+    } }],
+  })
+  const api = runInNewContext(`(()=>{${result.outputFiles[0].text};return AgentMuxIdentity;})()`)
+  assert.throws(() => exerciseFormat(api))
+  exerciseFormat({ isObjectId })
 })
