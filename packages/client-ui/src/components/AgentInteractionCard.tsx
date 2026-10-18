@@ -1,6 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { SemanticIcon } from '../theme/icons.js'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode, type Ref } from 'react'
 import { agentInteractionRequestTarget } from '@agentmux/core/agent-interaction-state'
 import type {
   AgentMuxInteractionRequest,
@@ -15,6 +15,7 @@ import { presentError } from '../lib/error-presentation.js'
 /** The single typed plan owns answer semantics; this card owns presentation and submission state. */
 export function AgentInteractionCard({
   request,
+  surfaceRef,
   disabled = false,
   readOnly = false,
   responseUnavailableReason,
@@ -24,6 +25,7 @@ export function AgentInteractionCard({
   onInspect,
   onRespond
 }: {
+  surfaceRef?: Ref<HTMLElement>
   request: AgentMuxInteractionRequest
   disabled?: boolean
   readOnly?: boolean
@@ -88,7 +90,7 @@ export function AgentInteractionCard({
   </div>
 
   if (reason) return (
-    <section className="agent-interaction agent-interaction--native" aria-label="Agent interaction needs native confirmation" data-request-id={request.id}>
+    <section ref={surfaceRef} className="agent-interaction agent-interaction--native" aria-label="Agent interaction needs native confirmation" data-request-id={request.id}>
       <div className="agent-interaction__native-heading">
         {request.kind === 'permission' ? <SemanticIcon name="status.permission" size={15} /> : <SemanticIcon name="status.unknown" size={15} />}
         <div>
@@ -123,7 +125,7 @@ export function AgentInteractionCard({
     // 否则塌回紧凑动作行。判据与「答的是什么」同住一处，不在这里重算。
     const { choices, allows, rejects, scoped, dismiss } = permissionPlan(request)
     return (
-      <section className="agent-interaction" aria-label="Agent permission request" data-request-id={request.id}>
+      <section ref={surfaceRef} className="agent-interaction" aria-label="Agent permission request" data-request-id={request.id}>
         {requestStatus}
         {sourceNotice ? <p className="agent-interaction__source-notice">{sourceNotice}</p> : null}
         <div className="agent-interaction__heading">
@@ -190,7 +192,7 @@ export function AgentInteractionCard({
 
   const { question, choices, dismiss } = questionPlan(request)
   return (
-    <section className="agent-interaction" aria-label="Agent question" data-request-id={request.id}>
+    <section ref={surfaceRef} className="agent-interaction" aria-label="Agent question" data-request-id={request.id}>
       {requestStatus}
       {sourceNotice ? <p className="agent-interaction__source-notice">{sourceNotice}</p> : null}
       <div className="agent-interaction__heading">

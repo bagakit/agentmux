@@ -1,3 +1,4 @@
+import type { PendingDeliveryLayout } from '../lib/pending-delivery-layout'
 import { api } from '../lib/api'
 import { inputMailboxKey, inputMailboxItemKey, useAgentInputMailbox } from '@agentmux/client-ui/use-agent-input-mailbox'
 import { InputMailboxRecords, inputMailboxPresentation, type InputMailboxDisplayRow } from '@agentmux/client-ui/components/InputMailboxRecords'
@@ -135,8 +136,9 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
 }
 
 /** Folders project durable delivery facts; read receipts never advance delivery state. */
-export function SessionMailbox({ system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueuedToDraft, onMoveQueued, onSendQueued, onCancelQueuedPreparation, onCopyQueued, onEditQueued, sendImmediately = false, reading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false, noticePresentation, inputHistory, historyResourceReader, onHistoryVisible }: {
-  children?: (mailbox: ReactNode, pending: ReactNode) => ReactNode
+export function SessionMailbox({ pendingLayout, system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueuedToDraft, onMoveQueued, onSendQueued, onCancelQueuedPreparation, onCopyQueued, onEditQueued, sendImmediately = false, reading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false, noticePresentation, inputHistory, historyResourceReader, onHistoryVisible }: {
+  pendingLayout?: PendingDeliveryLayout | undefined
+  children?: (mailbox: ReactNode, pending: ReactNode, composerRef: import('react').RefObject<HTMLDivElement | null>) => ReactNode
   /** Presentation of an existing notice, shared by this mailbox and its right dock. */
   noticePresentation?: { id: string; content: ReactNode } | undefined
   pendingInteraction?: boolean
@@ -170,6 +172,7 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
   const suspension = useRef<{ scope: string; phase: 'hidden' | 'restoring' } | null>(null)
   const [viewed, setViewed] = useState(false)
   const trigger = useRef<HTMLButtonElement>(null)
+  const composerRef = useRef<HTMLDivElement>(null)
   const popover = useRef<HTMLDivElement>(null)
   const dock = useRef<HTMLElement>(null)
   const requestedFolder = useRef<Folder | null>(null)
@@ -647,5 +650,5 @@ export function SessionMailbox({ system, queued, timeline, progressSession, visi
       onOwnerRemoved={() => popover.current?.hidePopover()}
       onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); popover.current?.hidePopover(); trigger.current?.focus({ preventScroll: true }) }} />
   </>
-  return children ? children(mailbox, visible ? <ComposerPendingDelivery surfaceRef={dock} returning={!open && motion.retaining} notice={noticePresentation?.content} suppressed={open} anchorRef={trigger} queued={pendingIntents} pendingInteraction={pendingInteraction} onSend={onSendQueued} onCancelPreparation={onCancelQueuedPreparation} onCopy={onCopyQueued} onEdit={onEditQueued} onArchive={onArchiveQueued} onMoveToDraft={onMoveQueuedToDraft} sendImmediately={sendImmediately} onMore={showUserMessages} /> : null) : mailbox
+  return children ? children(mailbox, visible ? <ComposerPendingDelivery surfaceRef={dock} returning={!open && motion.retaining} notice={noticePresentation?.content} suppressed={open} anchorRef={trigger} composerRef={composerRef} layout={pendingLayout} queued={pendingIntents} pendingInteraction={pendingInteraction} onSend={onSendQueued} onCancelPreparation={onCancelQueuedPreparation} onCopy={onCopyQueued} onEdit={onEditQueued} onArchive={onArchiveQueued} onMoveToDraft={onMoveQueuedToDraft} sendImmediately={sendImmediately} onMore={showUserMessages} /> : null, composerRef) : mailbox
 }

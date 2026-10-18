@@ -1,3 +1,4 @@
+import { usePendingDeliveryLayout, type PendingDeliveryLayout } from '../lib/pending-delivery-layout'
 import { ConversationLandmarkList, renderConversationLandmarkAction } from './ConversationLandmarks'
 import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
 import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-observed-app-store'
@@ -258,6 +259,9 @@ export function SessionPane({
     if (navigation.current.isCurrent && !navigation.current.isCurrent()) navigation.current.cancel?.()
   })
   const surfaceRef = useRef<HTMLElement>(null)
+  const bodyRef = useRef<HTMLDivElement>(null)
+  const interactionSourceRef = useRef<HTMLDivElement>(null)
+  const interactionRef = useRef<HTMLElement>(null)
   const annotationNoteRef = useRef<ConversationAnnotationNoteHandle>(null)
   const selectAnnotation = useCallback((selection: ConversationAnnotationSelection) => {
     annotationNoteRef.current?.select(selection, sessionId)
@@ -314,6 +318,11 @@ export function SessionPane({
   if (terminalLifetime.current.sourceKey !== activitySourceKey) terminalLifetime.current = { sourceKey: activitySourceKey, opened: false }
   const startupDecision = session?.kind === 'agent' ? session.continuity : undefined
   const inlineHistory = pendingAgentRestore && startupDecision?.reason === 'idle-window-expired'
+  const pendingLayout = usePendingDeliveryLayout({ boundaryRef: surfaceRef, bodyRef, interactionSourceRef, interactionRef,
+    interactionId: session?.kind === 'agent' ? session.pendingInteraction?.id : undefined,
+    terminal: visible && !parked && !historyOpen && !inlineHistory && viewMode === 'terminal' && session && linkOrigin.regionId
+      ? { regionId: linkOrigin.regionId, sessionId: session.id, runId: session.control.run.runId } : undefined,
+    active: visible })
   const incomingReveal = useAppStore(state => {
     const intent = state.conversationRevealIntent
     return intent?.itemRef.agentSessionId === sessionId && intent.itemRef.hostId === executionHostId ? intent : null
@@ -828,7 +837,7 @@ export function SessionPane({
       executionHost={preSnapshotHost} eligible={false} recovery={content(target)}
       readOnly={readOnly} resourceOrigin={linkOrigin} renderFrame={renderPresentationFrame}
       selectRegion={() => onPresentationSelected?.(target)}
-      {...(projectionPolicy.allowsRecovery && session?.kind === 'agent' ? { composer: <AgentSessionComposer reading={mailboxReading}
+      {...(projectionPolicy.allowsRecovery && session?.kind === 'agent' ? { renderComposer: (pendingLayout: PendingDeliveryLayout) => <AgentSessionComposer pendingLayout={pendingLayout} reading={mailboxReading}
         mailboxOrigin={{ ...linkOrigin, workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId }}
         onRevealMessage={message => revealMailboxMessage(message, target)} sessionId={session.id}
         visible={false} inputContext={sharingContext(false)} {...(tabName ? { tabName } : {})} /> } : {})} />) : null}
@@ -840,11 +849,11 @@ export function SessionPane({
         detail="Creation is confirmed. Current process and input availability are not yet confirmed."
         actions={unobservedActions} supplement={launchNotice}
         details={{ summary: 'Original reference', content: <dl><dt>Session ID</dt><dd>{acceptedLaunch.agentSessionId}</dd></dl> }} />
-    return retainPresentations(target => cloneElement(acceptedSurface, { actions: unobservedActionsAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)) }), <section className="agent-surface" data-agent-surface-mode="unconfirmed">
+    return retainPresentations(target => cloneElement(acceptedSurface, { actions: unobservedActionsAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)) }), <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="unconfirmed">
       {sessionHeader()}
       {takeoverSurface}
       <div className="agent-body">{acceptedSurface}</div>
-      {!readOnly ? <AgentSessionComposer reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled inputContext={sharingContext(visible)} {...(tabName ? { tabName } : {})} /> : null}
+      {!readOnly ? <AgentSessionComposer pendingLayout={pendingLayout} reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled inputContext={sharingContext(visible)} {...(tabName ? { tabName } : {})} /> : null}
     </section>)
   }
 
@@ -913,7 +922,7 @@ export function SessionPane({
           visible={visible && !parked}
         />
     return retainPresentations(target => cloneElement(connectingSurface, { visible: false, actions: unobservedActionsAt(presentationOrigin(target), workbenchSessionStageHostId(target, linkOrigin.regionId!)) }),
-      <section className="agent-surface" data-agent-surface-mode="connecting">
+      <section ref={surfaceRef} className="agent-surface" data-agent-surface-mode="connecting">
           {sessionHeader()}
           {takeoverSurface}
           {connectingSurface}
@@ -923,7 +932,7 @@ export function SessionPane({
             restore: 'Check again to read the same Session identity; no Agent will be started.' }
         }} actions={<button type="button" className="small-button" disabled={historyCatalogue.loading}
           onClick={historyCatalogue.refresh}><ThemeActionRefreshIcon size={12} /> Check again</button>} /> : null}
-        {!readOnly && surfaceKind === 'agent' ? <AgentSessionComposer reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled inputContext={sharingContext(visible)} {...(tabName ? { tabName } : {})} /> : null}
+        {!readOnly && surfaceKind === 'agent' ? <AgentSessionComposer pendingLayout={pendingLayout} reading={mailboxReading} key={sessionId} sessionId={sessionId} visible={visible} disabled inputContext={sharingContext(visible)} {...(tabName ? { tabName } : {})} /> : null}
       </section>
     )
   }
@@ -1125,7 +1134,7 @@ export function SessionPane({
       readOnly={readOnly} resourceOrigin={linkOrigin}
       {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})}
       renderFrame={renderPresentationFrame} selectRegion={() => onPresentationSelected?.(target)}
-      {...(hasAgentComposer ? { composer: <AgentSessionComposer reading={mailboxReading} mailboxOrigin={{ ...linkOrigin, workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId }} onRevealMessage={message => revealMailboxMessage(message, target)} sessionId={session.id}
+      {...(hasAgentComposer ? { renderComposer: (pendingLayout: PendingDeliveryLayout) => <AgentSessionComposer pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={{ ...linkOrigin, workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId }} onRevealMessage={message => revealMailboxMessage(message, target)} sessionId={session.id}
         visible={target.visible !== false && viewMode !== 'terminal' && !pendingAgentRestore} inputContext={sharingContext(target.visible !== false && viewMode !== 'terminal' && !pendingAgentRestore)} {...(tabName ? { tabName } : {})} /> } : {})}
     />) : null}
     <section
@@ -1144,7 +1153,7 @@ export function SessionPane({
         busy={recovering || refreshing} retry={() => void recover()}
         {...(observationMounted ? { refreshObservation: () => void refresh(true) } : {})} /> : null}
       {frontendObservationNotice}
-      <div className="agent-body" data-pending-interaction={session.kind === 'agent' && session.pendingInteraction ? '' : undefined} style={{ anchorName: resultSurfaceAnchor }} data-observation-surface={session.kind === 'agent' && activityShown ? 'workflow' : undefined}>
+      <div ref={bodyRef} className="agent-body" data-pending-interaction={session.kind === 'agent' && session.pendingInteraction ? '' : undefined} style={{ anchorName: resultSurfaceAnchor }} data-observation-surface={session.kind === 'agent' && activityShown ? 'workflow' : undefined}>
         <div className="agent-terminal-stage">
           {session.kind === 'terminal' || viewMode === 'terminal' || needsSessionSurface || terminalLifetime.current.opened ? (
             <div hidden={session.kind === 'agent' && (historyOpen || inlineHistory || viewMode !== 'terminal' && !pendingAgentRestore)}
@@ -1209,8 +1218,8 @@ export function SessionPane({
           ) : null}
         </div>
         {session.kind === 'agent' && session.pendingInteraction ? (
-          <div className="agent-interaction-source">
-          <AgentInteractionCard
+          <div ref={interactionSourceRef} className="agent-interaction-source">
+          <AgentInteractionCard surfaceRef={interactionRef}
             key={JSON.stringify([session.hostId, session.id, session.control.run.runId, session.pendingInteraction.id])}
             request={session.pendingInteraction}
             readOnly={!hasAgentComposer}
@@ -1243,7 +1252,7 @@ export function SessionPane({
           data-input-surface={session.kind === 'agent' && viewMode === 'terminal' ? 'terminal' : 'activity'}
           aria-label={viewMode === 'terminal' ? 'Agent input channel' : undefined}
         >
-          <AgentSessionComposer reading={mailboxReading} mailboxOrigin={mailboxOrigin} onRevealMessage={revealMailboxMessage} onOpenTerminal={openTerminal} key={sessionId} sessionId={session.id} resultReview={(onNavigate) => <SessionResultReviewContent showStatus={false} sessionId={session.id} items={timeline} origin={linkOrigin} onNavigate={onNavigate} />} visible={visible} inputContext={sharingContext(visible)} {...(tabName ? { tabName } : {})} />
+          <AgentSessionComposer pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={mailboxOrigin} onRevealMessage={revealMailboxMessage} onOpenTerminal={openTerminal} key={sessionId} sessionId={session.id} resultReview={(onNavigate) => <SessionResultReviewContent showStatus={false} sessionId={session.id} items={timeline} origin={linkOrigin} onNavigate={onNavigate} />} visible={visible} inputContext={sharingContext(visible)} {...(tabName ? { tabName } : {})} />
         </div>
       ) : null}
     </section>

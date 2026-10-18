@@ -1,3 +1,4 @@
+import { usePendingDeliveryLayout, type PendingDeliveryLayout } from '../lib/pending-delivery-layout'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { useCallback, useMemo, useRef, useState, type ComponentProps, type ReactNode, type ReactElement } from 'react'
 import { retainActivityControls } from '../lib/retained-activity'
@@ -17,7 +18,7 @@ import { ConversationAnnotationNote, type ConversationAnnotationNoteHandle } fro
 
 /** A reading/input presentation, not a Session, Reader, Terminal or lifecycle owner. */
 export function SessionActivityPresentation({ target, regionId, sourceKey, sessionId, name, executorLabel, executionHost,
-  activity, eligible, recovery, readOnly, resourceOrigin, composer, onAnnotate, renderFrame, selectRegion, header, takeoverSurface, historyOpen = false, onCloseHistory, historyReturnTrigger, historyReturnLabel }: {
+  activity, eligible, recovery, readOnly, resourceOrigin, renderComposer, onAnnotate, renderFrame, selectRegion, header, takeoverSurface, historyOpen = false, onCloseHistory, historyReturnTrigger, historyReturnLabel }: {
   target: WorkbenchViewTarget
   regionId: string
   sourceKey: string
@@ -37,7 +38,7 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
   recovery?: ReactNode
   readOnly: boolean
   resourceOrigin: OpenHttpLinkOrigin
-  composer?: ReactNode
+  renderComposer?: (layout: PendingDeliveryLayout) => ReactNode
   onAnnotate?: ((annotation: ConversationAnnotation) => void) | undefined
   renderFrame: (content: ReactElement<ComponentProps<typeof ActivityView>> | null, target: WorkbenchViewTarget) => ReactNode
   selectRegion: () => void
@@ -57,6 +58,7 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
   const openProjectFile = fileOpening.activateFile
   const openProseLink = fileOpening.activateHttp
   const surfaceRef = useRef<HTMLElement>(null)
+  const pendingLayout = usePendingDeliveryLayout({ boundaryRef: surfaceRef, active: visible && eligible })
   const noteRef = useRef<ConversationAnnotationNoteHandle>(null)
   const historyActions = useRef({ onCloseHistory, selectRegion })
   historyActions.current = { onCloseHistory, selectRegion }
@@ -118,7 +120,7 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
         <ConversationAnnotationNote ref={noteRef} sessionId={sessionId} regionRef={surfaceRef}
           origin={origin}
           active={visible && eligible && Boolean(onAnnotate)} {...(onAnnotate ? { onAnnotate } : {})} />
-        {composer ? <div className="agent-input-stack" data-input-surface="activity" hidden={!eligible} inert={!eligible}>{composer}</div> : null}
+        {renderComposer ? <div className="agent-input-stack" data-input-surface="activity" hidden={!eligible} inert={!eligible}>{renderComposer(pendingLayout)}</div> : null}
       </section>
     </SessionRegionHost>, target)}
   </StableWorkbenchView>

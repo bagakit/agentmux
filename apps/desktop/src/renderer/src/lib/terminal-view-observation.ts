@@ -1,10 +1,10 @@
 import type { AgentMuxTerminalViewObservation } from '@agentmux/core/control'
 
-type TerminalViewIdentity = { regionId: string; sessionId: string; runId: string }
+export type TerminalViewIdentity = { regionId: string; sessionId: string; runId: string }
 type ObservationReader = (identity: TerminalViewIdentity) => AgentMuxTerminalViewObservation | undefined
 export type TerminalInputGeometry = {
-  readOverlapTop(element: HTMLElement, popup: DOMRect): number | undefined
-  subscribe(element: HTMLElement, onChange: () => void): () => void
+  readOverlapTop(popup: DOMRect): number | undefined
+  subscribe(onChange: () => void): () => void
 }
 type Reader = { observation: ObservationReader; inputGeometry?: TerminalInputGeometry }
 type Region = { reader?: Reader; consumers: Set<() => void> }
@@ -38,9 +38,9 @@ export function registerTerminalViewObservation(
     return observed?.runId === runId ? observed : undefined
   }
   const reader: Reader = { observation, ...(inputGeometry ? { inputGeometry: {
-    readOverlapTop: (element, popup) => read()?.runId === runId ? inputGeometry.readOverlapTop(element, popup) : undefined,
-    subscribe: (element, onChange) => read()?.runId === runId
-      ? inputGeometry.subscribe(element, () => { if (region.reader === reader && read()?.runId === runId) onChange() })
+    readOverlapTop: popup => read()?.runId === runId ? inputGeometry.readOverlapTop(popup) : undefined,
+    subscribe: onChange => read()?.runId === runId
+      ? inputGeometry.subscribe(() => { if (region.reader === reader && read()?.runId === runId) onChange() })
       : () => {}
   } } : {}) }
   region.reader = reader
@@ -63,24 +63,25 @@ export function readTerminalViewObservation(identity: TerminalViewIdentity): Age
 }
 
 /** Presentation only: one mounted Region and its actual terminal element, never all Sessions. */
-export function readTerminalInputOverlapTop(regionId: string, element: HTMLElement, popup: DOMRect): number | undefined {
-  const region = readers.get(regionId), reader = region?.reader
+export function readTerminalInputOverlapTop(identity: TerminalViewIdentity, popup: DOMRect): number | undefined {
+  const region = readers.get(identity.regionId), reader = region?.reader
   try {
-    const top = reader?.inputGeometry?.readOverlapTop(element, popup)
+    const top = reader?.observation(identity) ? reader.inputGeometry?.readOverlapTop(popup) : undefined
     return region?.reader === reader ? top : undefined
   } catch { return undefined }
 }
 
-export function observeTerminalInputGeometry(regionId: string, element: HTMLElement, onChange: () => void): () => void {
+export function observeTerminalInputGeometry(identity: TerminalViewIdentity, onChange: () => void): () => void {
+  const { regionId } = identity
   const region = regionOwner(regionId)
   let stop = () => {}
   const rebind = () => {
     stop()
-    try { stop = region.reader?.inputGeometry?.subscribe(element, onChange) ?? (() => {}) }
+    try { stop = region.reader?.observation(identity) ? region.reader.inputGeometry?.subscribe(onChange) ?? (() => {}) : () => {} }
     catch { stop = () => {} }
     onChange()
   }
   region.consumers.add(rebind)
   rebind()
-  return () => { region.consumers.delete(rebind); stop(); releaseEmptyRegion(regionId, region) }
+  return () => { if (!region.consumers.delete(rebind)) return; stop(); releaseEmptyRegion(regionId, region) }
 }

@@ -1,3 +1,4 @@
+import type { PendingDeliveryLayout } from '../lib/pending-delivery-layout'
 import { useWorkbenchWindowDocument } from '../lib/workbench-document'
 import { useObservedAppStore, useObservedConsumerCommit } from '../lib/use-observed-app-store'
 import { reportMessageDeliveryDiagnostics } from '../lib/message-delivery-diagnostics'
@@ -61,6 +62,7 @@ export function agentComposerAvailability(
 }
 
 export function AgentSessionComposer({
+  pendingLayout,
   sessionId,
   disabled = false,
   readOnly = false,
@@ -73,6 +75,7 @@ export function AgentSessionComposer({
   inputContext,
   visible = true
 }: {
+  pendingLayout?: PendingDeliveryLayout | undefined
   sessionId: string
   disabled?: boolean
   readOnly?: boolean
@@ -230,7 +233,7 @@ export function AgentSessionComposer({
   const inbox = useServiceNotices(sessionId, notices, session?.kind === 'agent')
 
   return (
-    <SessionMailbox key={sessionId} inputHistory={inputHistory} historyResourceReader={inputHistory.resourceReader} userMessages={inputHistory.messages} onHistoryVisible={inputHistory.setMailboxOpen} mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
+    <SessionMailbox pendingLayout={pendingLayout} key={sessionId} inputHistory={inputHistory} historyResourceReader={inputHistory.resourceReader} userMessages={inputHistory.messages} onHistoryVisible={inputHistory.setMailboxOpen} mailboxOrigin={mailboxOrigin} reading={reading} onRevealMessage={onRevealMessage} visible={visible} system={inbox} timeline={timeline}
         noticePresentation={feedback.failure ? { id: 'tool', content: <ComposerFeedback compact failure={feedback.failure} onDismiss={feedback.dismiss} /> } : undefined}
         progressSession={!readOnly && session?.kind === 'agent' ? session : undefined}
         control={session?.kind === 'agent' ? session.control : undefined}
@@ -284,12 +287,12 @@ export function AgentSessionComposer({
         } } : {})}
         onCopyQueued={async (text) => { feedback.dismiss(); return copyTextToClipboard(text, feedback.report) }}
     >
-    {(mailbox, pending) => (
+    {(mailbox, pending, composerRef) => (
     <div style={{ display: 'contents' }} onFocusCapture={() => inputHistory.setFocused(true)}
       onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) inputHistory.setFocused(false) }}>
     {fileReferencesOpen && workspace && visible ? <ComposerFileReferences key={attachmentScope} workspace={workspace}
       onClose={() => setFileReferencesOpen(false)} onSelect={path => { void attachments.referencePaths([path]) }} /> : null}
-    <AgentComposer key={sessionId} active={visible} aboveInput={<>{pending}{inputContext}</>} mailbox={mailbox}
+    <AgentComposer surfaceRef={composerRef} key={sessionId} active={visible} aboveInput={<>{pending}{inputContext}</>} mailbox={mailbox}
       readPastedImage={api.ui.readPastedImage}
       insertionRef={insertionRef}
       identity={session?.kind === 'agent' && displayName ? <AgentIdentity session={session} name={displayName}
