@@ -7,7 +7,7 @@ import { flushSync } from 'react-dom'
 import { App } from '../../../src/renderer/src/App'
 import { projectLinksPreview } from './project-links'
 import { mainMotePreview } from './main-mote'
-import { useAppStore, retainGoalFiniteStartIntent, prepareRendererUpdate } from '../../../src/renderer/src/store'
+import { useAppStore, retainGoalFiniteStartIntent } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../src/shared/scratch-topics'
 import type { DemandRecord } from '../../../src/renderer/src/lib/global-demand-board'
@@ -152,9 +152,9 @@ Object.assign(window, { goalsVisual: { seed,
     const state = useAppStore.getState(), goal = state.demands[goals[0]!.id]!
     useAppStore.setState({ agentComposerDrafts: { ...state.agentComposerDrafts, 'workflow-region': 'Keep this original discussion draft.' },
       demandPmoTabIds: { ...state.demandPmoTabIds, 'goal:unobserved': 'original-unobserved-discussion' } })
-    await retainGoalFiniteStartIntent({ goalId: goal.id, operationId: 'workflow-original-request', sessionId: sessions[0]!.control.agentSessionId,
+    const saved = await retainGoalFiniteStartIntent({ goalId: goal.id, operationId: 'workflow-original-request', sessionId: sessions[0]!.control.agentSessionId,
       expectedUpdatedAt: goal.updatedAt, phase: 'may-have-dispatched' })
-    await prepareRendererUpdate('quit')
+    if (!saved.localStorageWritten) throw new Error('Original workflow selection did not reach its actual localStorage owner.')
     return workflowRestartFacts()
   },
   seedWorkflow: (mode: string) => {
