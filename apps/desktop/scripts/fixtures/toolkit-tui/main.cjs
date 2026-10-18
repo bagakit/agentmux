@@ -4,14 +4,17 @@ const path = require('node:path')
 const { pathToFileURL } = require('node:url')
 const { createHash } = require('node:crypto')
 const { app, BrowserWindow, ipcMain } = require('electron')
-const [html, ownerBundle, privateRoot, evidence, phase, asset, cli] = process.argv.slice(2)
+const [html, ownerBundle, privateRoot, evidence, phase, asset, cli, scene = 'terminal'] = process.argv.slice(2)
+assert.ok(['terminal', 'working-directory'].includes(scene), 'Explicit Toolkit scene')
+const directoryScene = scene === 'working-directory'
 for (const key of ['home', 'userData', 'sessionData']) { const value = path.join(privateRoot, key); fs.mkdirSync(value, { recursive: true }); app.setPath(key, value) }
 app.on('window-all-closed', () => {})
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
-const raw = { phase, qualified: false, frames: [], actions: [], errors: [], sessions: { attachments: [], writes: [], detaches: [] },
+const raw = { phase, scene, qualified: false, frames: [], actions: [], errors: [], sessions: { attachments: [], writes: [], detaches: [] },
   boundary: 'Real App, terminal components, ConfigOwner, ToolkitOwner, registered Toolkit IPC, product preload and RuntimeController with two private Native TUI programs. A private local Core connector replaces the product Host process; other App services use preview data. No user Run or installation.' }
+if (directoryScene) raw.boundary = 'Real App Toolkit Settings, ConfigOwner/ConfigStore/ToolkitOwner, registered Toolkit IPC and product preload. Actual native input saves to the isolated authoritative owner and disk; a private local Core connector supplies empty Runtime facts. Other App services use preview data. No terminal interaction or OS folder-dialog qualification.'
 let win, toolkit, runtime, sampler, detachRuntime, detachToolkit, detachTheme, owner, native
-const ids = ['tui-monitor', 'tui-output'], created = []
+const ids = directoryScene ? [] : ['tui-monitor', 'tui-output'], created = []
 const checkpoint = step => { (raw.checkpoints ??= []).push(step); fs.writeFileSync(path.join(evidence, 'progress.json'), JSON.stringify({ steps: raw.checkpoints }) + '\n'); process.stderr.write('TUI_SCENE=' + step + '\n') }
 checkpoint('created')
 app.whenReady().then(async () => {
@@ -31,7 +34,7 @@ app.whenReady().then(async () => {
     const store = new ConfigStore(path.join(app.getPath('userData'), 'config.json'))
     let current = await store.get(), seeded = false
     const work = path.join(privateRoot, 'work'), program = path.join(work, 'tui-program.cjs')
-    fs.mkdirSync(work, { recursive: true }); fs.writeFileSync(program, tuiProgram)
+    fs.mkdirSync(work, { recursive: true }); if (!directoryScene) fs.writeFileSync(program, tuiProgram)
     owner = new ConfigOwner({ read: () => current, prepare: (before, next) => toolkit.prepareConfig(before, next), save: next => store.save(next),
       publish: next => { current = next; toolkit.configurationChanged(); if (win && !win.isDestroyed()) win.webContents.send('proof:tui:config:changed', next) } })
     sampler = new ProcessResourceSampler()
@@ -60,7 +63,7 @@ app.whenReady().then(async () => {
     ipcMain.handle('proof:tui:seed', async (_event, preview) => {
       assert.equal(seeded, false)
       await owner.update(() => ({ ...preview, appearance: { ...preview.appearance, appAppearance: 'dark', terminalTheme: 'graphite' },
-        workspaces: [{ id: 'tui-work', hostId: 'local', name: 'TUI Toolkit', path: work, kind: 'folder' }],
+        workspaces: [{ id: 'tui-work', hostId: 'local', name: directoryScene ? 'Toolkit directory' : 'TUI Toolkit', path: work, kind: 'folder' }],
         toolkit: { performance: { enabled: false, statusBar: 'icon' }, mobileConnection: { enabled: false, statusBar: 'icon' }, tools: [] } }))
       runtime.commit(await runtime.prepare({ ...owner.current, hosts: owner.current.hosts.filter(host => host.kind === 'local') }))
       for (const [index, id] of ids.entries()) { await toolkit.execute({ operation: 'toolkit.add', toolId: id, value: {
@@ -95,6 +98,13 @@ app.whenReady().then(async () => {
     }
     checkpoint('loading-document')
     await win.loadFile(html); checkpoint('document-loaded'); win.show(); win.focus(); win.webContents.focus()
+    if (directoryScene) {
+      await until('window.tuiScene?.ready')
+      await require('./working-directory.cjs')({ win, read, until, waitFor, settle, click, frame, owner, store, created, raw, home: app.getPath('home') })
+      assert.equal(raw.sessions.attachments.length, 0, 'Directory editing does not attach a terminal')
+      raw.qualified = true
+      return
+    }
     await until('window.tuiScene?.ready && !!document.querySelector("[data-toolkit-id=tui-monitor]")')
     await waitFor(async () => (await Promise.all(ids.map(snapshot))).every(value => value.admission?.run && value.state === 'running'), 'Both private TUI Runs started on load')
     checkpoint('runs-started')
