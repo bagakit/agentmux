@@ -48,7 +48,7 @@ async function fixture(publication: 'future-native-user-facing' | 'future-shared
   return { ...f, remote, adapter, port, binding: bound.binding, host, posts, texts }
 }
 
-it('actual Core unified units carry authorized text, captured process and public input through the real Feishu SDK while durable unsupported gaps do not stop later effects', async () => {
+it('actual Core unified units carry ordinary text and public input without captured process through the real Feishu SDK while durable unsupported gaps do not stop later effects', async () => {
   const f = await fixture(), id = f.session.agentSessionId
   const tool = captured(id, 'captured-tool', _historyFixtureEpoch(0, 0, 30), { toolName: 'shell', toolInput: '{"command":"pwd"}', toolOutput: 'Complete original output' })
   await f.store.applyTimelineMutation({ type: 'append', agentSessionId: id, item: tool })
@@ -61,12 +61,12 @@ it('actual Core unified units carry authorized text, captured process and public
   f.host.refresh()
   await vi.waitFor(() => {
     const operations = f.host.store.list(f.binding)
-    expect(operations.length).toBeGreaterThanOrEqual(5)
+    expect(operations.length).toBeGreaterThanOrEqual(4)
     expect(operations.every(o => o.state === 'confirmed')).toBe(true)
   }, { timeout: 10_000 })
   const text = f.texts().join('\n')
-  for (const value of ['Original public answer', 'Complete original output', '{"command":"pwd"}', 'Qualified public original input', 'Supported text beside image', 'Later supported reply']) expect(text).toContain(value)
-  expect(text).toContain('via amux'); expect(text).toContain('process'); expect(text).not.toContain('Never export unknown native input span')
+  for (const value of ['Original public answer', 'Qualified public original input', 'Supported text beside image', 'Later supported reply']) expect(text).toContain(value)
+  expect(text).toContain('via amux'); for (const hidden of ['Complete original output', '{"command":"pwd"}', 'Tool input']) expect(text).not.toContain(hidden); expect(text).not.toContain('Never export unknown native input span')
   const coverage = f.host.store.coverage(f.binding)
   expect(coverage.state).toBe('incomplete')
   expect(coverage.gaps.some(g => g.reason === 'public-content-unconfirmed' && g.part?.record.source.recordId === 'unqualified-user')).toBe(true)
@@ -249,11 +249,11 @@ it('a record-scoped Core relation gap survives empty and unrelated changes until
   expect(f.host.store.coverage(f.binding).gaps).toContainEqual(before)
   await appendFile(f.transcript, row('unrelated-after', _historyFixtureEpoch(0, 0, 300), [{ type: 'text', text: 'Independent supported content' }]))
   f.host.refresh()
-  await vi.waitFor(() => expect(f.posts()).toHaveLength(2), { timeout: 10_000 })
+  await vi.waitFor(() => expect(f.posts()).toHaveLength(1), { timeout: 10_000 })
   expect(f.host.store.coverage(f.binding).gaps).toContainEqual(before)
   await appendFile(f.transcript, row('observed-target', _historyFixtureEpoch(0, 0, 100), [{ type: 'text', text: 'Exact original target now accepted' }]))
   f.host.refresh()
-  await vi.waitFor(() => expect(f.posts()).toHaveLength(3), { timeout: 10_000 })
+  await vi.waitFor(() => expect(f.posts()).toHaveLength(2), { timeout: 10_000 })
   expect(f.host.store.coverage(f.binding)).toMatchObject({ state: 'complete', gaps: [] })
 }, 20_000)
 
