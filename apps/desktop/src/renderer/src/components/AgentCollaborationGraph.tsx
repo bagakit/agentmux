@@ -18,7 +18,7 @@ import '@xyflow/react/dist/base.css'
 import '../styles/collaboration.css'
 
 export type CollaborationSelection = { kind: 'agent' | 'relation'; id: string; relatedIds?: readonly string[] } | null
-type AgentData = { box: CollaborationBox; agent: CollaborationAgent; selected: boolean; identity?: FocusContextIdentity | undefined; goals?: FocusGoalLinks | undefined; peeked: boolean; onPreview(enter: boolean): void; onSelect(): void; onOpen(id: string): void }
+type AgentData = { box: CollaborationBox; agent: CollaborationAgent; selected: boolean; identity?: FocusContextIdentity | undefined; goals?: FocusGoalLinks | undefined; onPreview(enter: boolean): void; onSelect(): void; onOpen(id: string): void }
 type AreaData = { box: Extract<CollaborationBox, { kind: 'area' }>; envelope: string; area: CollaborationArea; folded: boolean; internal: readonly CollaborationRelation[]; onInspect(): void; onLocate(): void; onToggle(): void }
 type AgentNode = Node<AgentData, 'agent'>
 type AreaNode = Node<AreaData, 'area'>
@@ -47,7 +47,6 @@ const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>
 function AgentMark({ data, label, tier, recency, overview = false }: { data: AgentData; label: string; tier: string; recency: ReturnType<typeof collaborationRecency>; overview?: boolean }) {
   const context = data.agent.context!
   const preview = useAgentInformationPreview(context, true, data.identity, data.goals, () => data.onOpen(context.id))
-  useEffect(() => { if (data.peeked) preview.triggerEvents.onPointerEnter() }, [data.peeked])
   return <button type="button" ref={preview.anchor} {...preview.triggerEvents} className={overview ? "collaboration-agent__dot" : "collaboration-agent__mark"} data-tier={tier} data-session-id={context.id}
     aria-pressed={data.selected} aria-label={`${label} · ${tier}`} aria-describedby={preview.describedBy} onClick={data.onSelect} title={`${tier} · ${recency.label}`}>
     <span className="collaboration-agent__point" style={{ width: overview ? 12 : recency.radius * 2, height: overview ? 12 : recency.radius * 2, opacity: recency.depth }} />{!overview && tier !== 'closed' ? <strong>{label}</strong> : null}
@@ -143,10 +142,10 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
         const old = previous?.type === 'agent' ? previous.data : undefined, context = agent.context
         const presentationKey = context && JSON.stringify([context.hostId, context.id]), identity = presentationKey ? identities?.get(presentationKey) : undefined, links = presentationKey ? goals?.get(presentationKey) : undefined
         const selected = selection?.kind === 'agent' && selection.id === id
-        const node: AgentNode = old?.box === card && old.agent === agent && old.selected === selected && old.identity === identity && old.goals === links && old.peeked === (peeked === id) ? previous as AgentNode : {
+        const node: AgentNode = old?.box === card && old.agent === agent && old.selected === selected && old.identity === identity && old.goals === links ? previous as AgentNode : {
           id: nodeId, type: 'agent', parentId: areaId, position: { x: card.x - box.x, y: card.y - box.y }, width: card.width, height: card.height,
           measured: { width: card.width, height: card.height }, handles: emptyHandles, style: { width: card.width, height: card.height, pointerEvents: 'all' }, draggable: false, selectable: false,
-          data: { box: card, agent, selected, identity, goals: links, peeked: peeked === id,
+          data: { box: card, agent, selected, identity, goals: links,
             onPreview: old?.onPreview ?? (enter => { if (enter) readingAnchor.current = nodeId; actions.current.onPreviewAgent?.(enter ? id : null) }),
             onSelect: old?.onSelect ?? (() => { readingAnchor.current = nodeId; actions.current.onSelect({ kind: 'agent', id }) }),
             onOpen: old?.onOpen ?? (() => { const context = actions.current.agents.get(id)?.context; if (context) actions.current.onOpen(context) }) }
@@ -157,7 +156,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     nodeCache.current = cache
     if (!sameItems(heldNodes.current, next)) heldNodes.current = next
     return heldNodes.current
-  }, [graphAreas, geometry, agents, presentation, selection, identities, goals, peeked])
+  }, [graphAreas, geometry, agents, presentation, selection, identities, goals])
   const areaNames = useMemo(() => new Map(graphAreas.map(area => [collaborationAreaNode(area.id), area.name])), [graphAreas])
   const routeCache = useRef(new Map<string, { path: RelationPath }>())
   const heldPaths = useRef<RelationPath[]>([])
