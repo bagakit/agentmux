@@ -12,6 +12,7 @@ import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workben
 import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { draft, surfacePending, sceneRows, appendRow } from './scene.mjs'
+import { acceptedEarlierWindow } from './earlier-frame.mjs'
 import '../../../src/renderer/src/styles/index.css'
 
 const boundary = (window as any).readingBoundary, request = boundary.request
@@ -56,7 +57,7 @@ for (const type of ['wheel', 'scroll', 'selectionchange']) document.addEventList
   if (type === 'selectionchange' || event.target instanceof Element && event.target.closest('.activity-feed'))
     mark(type, event instanceof WheelEvent ? { deltaY: event.deltaY, trusted: event.isTrusted } : undefined)
 }, { capture: true, passive: true })
-let olderCursor: string | undefined, nativeCut: string | undefined
+let nativeCut: string | undefined
 let released: { cursor: string; returned?: { id: string; revision: number } } | undefined
 let held: { cursor: string; received: boolean; release?: () => void } | undefined
 const reads: unknown[] = [], reader = createConversationReadApi(boundary.conversation)
@@ -70,12 +71,12 @@ for (const method of ['readAgentConversation', 'readConversationChanges'] as con
     try {
       const result = await (reader[method] as any)(input, options)
       if (held && held.cursor === input.cursor) {
-        const hold = held; hold.received = true; mark('held-earlier-response')
+        const hold = held; hold.received = true
+        mark('held-earlier-response', { cursor: input.cursor, window: { id: result.window.id, revision: result.window.revision } })
         await new Promise<void>(resolve => { hold.release = resolve })
       }
       const native = result.window?.checkpoint?.frontier?.cuts?.find((cut: any) => cut.kind === 'native')
       if (native) nativeCut = native.checkpoint.cursor
-      if (result.window?.navigation?.older) olderCursor = result.window.navigation.older
       mark('read-end', { method, input, window: result.window })
       if (released && released.cursor === input.cursor) released.returned = { id: result.window.id, revision: result.window.revision }
       reads.push({ method, started, ended: performance.now(), input, window: result.window, records: result.items?.length })
@@ -151,10 +152,12 @@ new MutationObserver(changes => {
 }).observe(document.getElementById('root')!, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-conversation-body-presented'] })
 const feed = () => document.querySelector<HTMLElement>('[data-workbench-region-id="reading-region"] .activity-feed')
 const rows = () => Array.from(feed()?.querySelectorAll<HTMLElement>('[data-conversation-layout-key], [data-message-source-key]') ?? [])
+const readingConsumer = () => inspectConversationConsumers({ hostId: 'local', agentSessionId: ids.sessionId, expectedRunId: ids.runId })
+  .consumers.find(item => item.location.regionId === 'reading-region')
 ;(window as any).readingProof = {
   ids, reads, metrics, errors, events, mark,
   inFlightCalls() { return [...pendingCalls] },
-  consumer() { return inspectConversationConsumers({ hostId: 'local', agentSessionId: ids.sessionId, expectedRunId: ids.runId }).consumers.find(item => item.location.regionId === 'reading-region') },
+  consumer: readingConsumer,
   nativeCut() { return nativeCut },
   appendDisposition(priorCut: string, recordId: string, allowHeld = true) {
     const consumer = inspectConversationConsumers({ hostId: 'local', agentSessionId: ids.sessionId, expectedRunId: ids.runId,
@@ -167,7 +170,12 @@ const rows = () => Array.from(feed()?.querySelectorAll<HTMLElement>('[data-conve
     }
     return changed(consumer.accepted) || allowHeld && consumer.held && changed(consumer.pending) ? consumer : null
   },
-  holdEarlier() { if (!olderCursor) throw new Error('No exact earlier page cursor'); held = { cursor: olderCursor, received: false } },
+  holdEarlier() {
+    const consumer = readingConsumer(), window = acceptedEarlierWindow(reads, consumer?.accepted)
+    held = { cursor: window.navigation.older, received: false }
+    mark('hold-earlier-installed', { consumerId: consumer!.consumerId,
+      accepted: { id: window.id, revision: window.revision }, cursor: held.cursor })
+  },
   heldEarlier() { return held?.received === true },
   releaseEarlier() { if (!held?.release) throw new Error('No original response to release'); released = { cursor: held.cursor }; mark('release-earlier-response'); held.release(); held = undefined },
   releasedEarlier() {
