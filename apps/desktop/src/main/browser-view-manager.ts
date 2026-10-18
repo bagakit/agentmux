@@ -1,3 +1,4 @@
+import { mintObjectId, mintCapabilityToken } from '@agentmux/core/object-id'
 import type { WorkbenchWindowDocument } from '../shared/workbench-windows.js'
 import type { BrowserInputFrameCapture } from '../shared/browser-input-context-capture.js'
 import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favicon.js'
@@ -11,7 +12,7 @@ import { evaluateBrowserOutcomeCriteria } from './browser-outcome-criteria.js'
 import { parseBrowserStructuredOutputRequest } from './browser-structured-output.js'
 import { resolveBrowserStructuredTarget } from './browser-structured-target.js'
 import { parseBrowserOutcomeCriteriaRequest, type BrowserOutcomeEvaluation, type BrowserOutcomeFieldRunInput, type BrowserOutcomeRegistration } from '../shared/browser-outcome-criteria.js'
-import { randomUUID } from 'node:crypto'
+
 import { BaseWindow, session, WebContentsView, type BrowserWindow, type WebContents, type WebFrameMain, type Session } from 'electron'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { BROWSER_PAGE_CAPABILITY_NAMES, BROWSER_PAGE_MUTATING_CAPABILITY_NAMES, browserPageCapabilityNames, type AgentMuxBrowserMode, type AgentMuxBrowserTarget, type AgentMuxBrowserRetention, type AgentMuxBrowserRetentionReason, type AgentMuxBrowserControl, type AgentMuxBrowserReleaseReceipt } from '@agentmux/core'
@@ -611,7 +612,7 @@ export class BrowserViewManager {
         throw new Error('This Browser presentation is already registered')
       }
     }
-    const id = randomUUID()
+    const id = mintObjectId()
     this.presentationLeases.set(id, { id, entry, document, window: nativeWindow, windowDocument: input.window,
       occurrence: { presentationId: occurrence.presentationId, location: { ...occurrence.location } }, geometry })
     entry.presentationLeaseIds.add(id)
@@ -656,7 +657,7 @@ export class BrowserViewManager {
     if (this.pendingPresentationCapture) throw new Error('Another Browser presentation capture is still pending')
     if (lease.entry.view.webContents.isDestroyed()) throw new Error('Browser native page is unavailable')
     const capture: PresentationCapture = {
-      id: randomUUID(), entry: lease.entry, document: lease.document,
+      id: mintObjectId(), entry: lease.entry, document: lease.document,
       source: lease.entry.view, profileId: lease.entry.storage.profileId,
       granted: false, preparingSource: false, preparationWindow: null, revoked: false, trackIds: null
     }
@@ -752,7 +753,7 @@ export class BrowserViewManager {
       if (!capture || capture.id !== activation.captureId || capture.document !== lease.document || !capture.trackIds ||
         !this.isPresentationCaptureCurrent(capture)) return unconfirmed('capture-changed', 'The displayed Browser frame is no longer authorized. The original page remains available.')
       const press: PresentationFirstPress = {
-        id: randomUUID(), lease, source: entry.view, capture, navigationId: entry.navigationId, controlRevision: entry.controlRevision,
+        id: mintObjectId(), lease, source: entry.view, capture, navigationId: entry.navigationId, controlRevision: entry.controlRevision,
         sourceBounds: entry.bounds, sourceInputLeaseId: entry.inputLeaseId,
         geometry: lease.geometry, zoom: entry.view.webContents.getZoomFactor(), viewport: entry.viewport,
         down: { ...activation.down }, button: activation.button, clickCount: activation.clickCount,
@@ -1149,7 +1150,7 @@ export class BrowserViewManager {
     const url = normalizeBrowserUrl(rawUrl)
     let storage: BrowserStorage
     if (mode === 'private') {
-      const partition = `agentmux-browser-private:${randomUUID()}`
+      const partition = `agentmux-browser-private:${mintObjectId()}`
       storage = { mode: 'private', profileId: null, partition, session: session.fromPartition(partition), windows: new Set() }
     } else {
       const profileId = rememberedProfileId ?? this.profiles.defaultProfileId()
@@ -1315,7 +1316,7 @@ export class BrowserViewManager {
       view,
       storage,
       requestedUrl: url,
-      navigationId: randomUUID(),
+      navigationId: mintObjectId(),
       initialDocument: null,
       selectionRevision: 0,
       selectionOperation: null,
@@ -1575,7 +1576,7 @@ export class BrowserViewManager {
       entry.initialDocument = null
       entry.storage = { mode: 'normal', profileId, partition }
       entry.requestedUrl = candidate.webContents.getURL() || url
-      entry.navigationId = randomUUID()
+      entry.navigationId = mintObjectId()
       entry.selectionOperation = null
       entry.selectionRevision += 1
       entry.annotationRevision += 1
@@ -1726,7 +1727,7 @@ export class BrowserViewManager {
    * @param operationId 这次操作的 identity，由调用方给（协议的 `browser.run` 可选字段）。
    *   给了才可能「在飞期间凭 id 查询/取消」：Control 是一问一答，主进程铸的 id 只随终局回执露出，
    *   那时已无可取消。缺席时由 journal 铸——**铸造点仍只有一处**（journal 的 `makeId`），
-   *   这里绝不再补一个 `randomUUID()` 兜底：两个铸造点会让查询用的 id 与记录里的 id 分岔，
+   *   这里绝不再补一个 `mintObjectId()` 兜底：两个铸造点会让查询用的 id 与记录里的 id 分岔，
    *   而分岔时两边各自看起来都正常（MEMORY：读的 key 与写的 key 必须只判一次）。
    */
   async runScript(id: string, code: string, operator?: BrowserOperator, replayOf?: string, operationId?: string, onOperationStarted?: (operation: BrowserOperation) => void | Promise<void>, privateTaskParameters = false, taskPage?: BrowserTaskPageExecution): Promise<BrowserScriptRunReport> {
@@ -1769,7 +1770,7 @@ export class BrowserViewManager {
     let stopRequested = false
     const localOperation: BrowserOperation = {
       // 非空白 id 保留原值；缺席或全空白才由 journal 的 `start` 唯一铸造。
-      // 这里不写 `?? randomUUID()`：那会是第二个铸造点，而它造出来的 id 与 journal 记下的那个可能
+      // 这里不写 `?? mintObjectId()`：那会是第二个铸造点，而它造出来的 id 与 journal 记下的那个可能
       // 不是同一个——查询按一个、记录按另一个，两边各自看起来都正常。
       //
       // 没有 journal 时（只在测试里）这个分支要给一个值才能构成 BrowserOperation，所以用空串占位，
@@ -2987,7 +2988,7 @@ export class BrowserViewManager {
     }
     this.requireHumanInput(entry)
     const operation = ++entry.selectionRevision
-    const inspectionToken = randomUUID()
+    const inspectionToken = mintCapabilityToken()
     entry.selectionOperation = operation
     let timeout: ReturnType<typeof setTimeout> | undefined
     try {
@@ -3375,7 +3376,7 @@ export class BrowserViewManager {
   private attach(entry: BrowserEntry, view: WebContentsView): BrowserControlFeedback {
     this.browserIdsByView.set(view, entry.id)
     const contents = view.webContents
-    const controlFeedback: BrowserControlFeedback = new BrowserControlFeedback({ contents, browserId: entry.id, ownerId: randomUUID(),
+    const controlFeedback: BrowserControlFeedback = new BrowserControlFeedback({ contents, browserId: entry.id, ownerId: mintObjectId(),
       navigationId: () => entry.navigationId, nextRevision: () => ++entry.feedbackRevision,
       isCurrent: () => this.owns(entry, view) && entry.controlFeedback === controlFeedback && this.agentOwnsInput(entry) &&
         (entry.visible || this.hasVisiblePresentation(entry)),
@@ -3521,7 +3522,7 @@ export class BrowserViewManager {
       ).catch(() => {})
       this.clearFavicon(entry, details.isSameDocument)
       entry.requestedUrl = requestedUrl
-      entry.navigationId = randomUUID()
+      entry.navigationId = mintObjectId()
       const document = entry.initialDocument
       if (document?.view === view && (!details.isSameDocument || document.navigationId)) {
         const previous = document.navigationId

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintCapabilityToken } from '@agentmux/core/object-id'
 import type { WebContents } from 'electron'
 import type { BrowserPageNode } from '../shared/contracts.js'
 import type { BrowserCdpSender } from './browser-page-snapshot.js'
@@ -397,7 +397,7 @@ export class BrowserOperationFeedback {
     const generation = ++this.generation
     await this.clearAt(generation, 'replace')
     if (generation !== this.generation || !this.input.isCurrent()) return generation
-    this.navigationId = this.input.navigationId(); this.token = randomUUID()
+    this.navigationId = this.input.navigationId(); this.token = mintCapabilityToken()
     this.method = method
     // Only actual named keys are displayable. Text, credentials and literal chords stay generic.
     const named = ['Enter', 'Tab', 'Escape', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End', 'PageUp', 'PageDown', 'Backspace', 'Delete', 'Space']

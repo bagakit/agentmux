@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintCapabilityToken } from '@agentmux/core/object-id'
 import { BrowserWindow, session, type Session } from 'electron'
 import type {
   BrowserProfileImportSourceSummary,
@@ -148,7 +148,7 @@ export class BrowserProfileManager implements BrowserProfileResolver {
       throwPublicBrowserProfileError('Browser Profile sources could not be detected', error)
     }
     return detected.map((source) => {
-      const token = randomUUID()
+      const token = mintCapabilityToken()
       this.sourceTokens.set(token, { source, expiresAt })
       return {
         token,

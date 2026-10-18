@@ -1,6 +1,7 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { normalizeBrowserOutcomeJournal } from './browser-outcome-journal.js'
 import type { BrowserOutcomeRegistration, BrowserOutcomeEvaluation } from '../shared/browser-outcome-criteria.js'
-import { randomUUID } from 'node:crypto'
+
 import { BROWSER_OPERATION_JOURNAL_VERSION, type BrowserOperationJournalStore, type BrowserOperationJournalChanges } from './browser-operation-store.js'
 export { BrowserOperationFileStore, BROWSER_OPERATION_JOURNAL_VERSION, BROWSER_OPERATION_JOURNAL_FILE } from './browser-operation-store.js'
 export type { BrowserOperationJournalStore, BrowserOperationJournalChanges } from './browser-operation-store.js'
@@ -151,7 +152,7 @@ export class BrowserOperationJournal {
   private saveWarning: { revision: number; message: string } | undefined
   /** 序号属于实际事件引用；裁剪可从中间移除事件，不能从数组下标反推。重启后重新发号。 */
   private sequenced = 0
-  private readonly eventEpoch = randomUUID()
+  private readonly eventEpoch = mintObjectId()
   private readonly eventFacts = new WeakMap<BrowserOperationEvent, { sequence: number; published: boolean }>()
   /** 只在 ACK 未到或同 operation 前序未交付时暂存；Journal 仍是唯一持久事实。 */
   private readonly deliveryQueues = new Map<string, DeliveryQueue>()
@@ -168,7 +169,7 @@ export class BrowserOperationJournal {
   constructor(store: BrowserOperationJournalStore, options: JournalOptions = {}) {
     this.saveStore = store
     this.now = options.now ?? Date.now
-    this.makeId = options.id ?? randomUUID
+    this.makeId = options.id ?? mintObjectId
     this.maxOperations = Math.max(1, Math.floor(options.maxOperations ?? MAX_BROWSER_OPERATIONS))
     this.maxEvents = Math.max(1, Math.floor(options.maxEvents ?? MAX_BROWSER_OPERATION_EVENTS))
   }

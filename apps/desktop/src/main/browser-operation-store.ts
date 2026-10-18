@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
+import { createHash } from 'node:crypto'
 import { chmod, link, mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -116,7 +117,7 @@ export class BrowserOperationFileStore implements BrowserOperationJournalStore {
   }
 
   private async create(changes: BrowserOperationJournalChanges): Promise<void> {
-    const temporary = `${this.path}.${randomUUID()}.sqlite`
+    const temporary = `${this.path}.${mintObjectId()}.sqlite`
     try {
       await this.initialize(temporary)
       const database = this.database(temporary)
@@ -177,7 +178,7 @@ export class BrowserOperationFileStore implements BrowserOperationJournalStore {
     if (parsed.version !== BROWSER_OPERATION_JOURNAL_VERSION || !Array.isArray(parsed.operations) || !Array.isArray(parsed.events)) {
       throw new Error('Original Browser journal is damaged.')
     }
-    const temporary = `${this.path}.${randomUUID()}.sqlite`
+    const temporary = `${this.path}.${mintObjectId()}.sqlite`
     try {
       await this.initialize(temporary)
       const database = this.database(temporary)

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { mintObjectId } from '@agentmux/core/object-id'
 import { BrowserWindow, WebContentsView, dialog, type BrowserWindowConstructorOptions, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import { z } from 'zod'
 import type { AgentMuxBrowserMode } from '@agentmux/core'
@@ -345,7 +345,7 @@ export class BrowserPopupWindows {
       if (!current()) return
       popup.error = null
       const outcome = appLinkOutcome(url, scheme, choice, target => { void this.openExternal(popup, target, current) })
-      popup.appLinkPrompt = outcome.kind === 'ask' ? { id: randomUUID(), url, scheme } : null
+      popup.appLinkPrompt = outcome.kind === 'ask' ? { id: mintObjectId(), url, scheme } : null
       if (outcome.kind === 'refused') popup.error = appLinkRefusedMessage(scheme)
     } catch (error) { if (current()) popup.error = `Could not check the app-link choice: ${message(error)}. Try the original link again.` }
     if (current()) this.emit(popup)
