@@ -32,6 +32,9 @@ import './scene.css'
 if (Object.hasOwn(window, 'agentmux')) throw new Error('A live Desktop preload must never enter this visual fixture.')
 const workspacePath = new URLSearchParams(location.search).get('workspacePath')
 if (!workspacePath || !workspacePath.includes('/capture-')) throw new Error('An exact private capture workspace is required.')
+const scenario = new URLSearchParams(location.search).get('scenario')
+const discussionFilesProof = scenario === 'discussion-files'
+const navigationProof = discussionFilesProof || scenario === 'companion-navigation'
 mountThemeRuntime(window, { appAppearance: 'dark' })
 const workspace: WorkspaceRecord = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: workspacePath, name: 'Motes', kind: 'folder' }
 const rootPath = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)
@@ -127,8 +130,11 @@ const files: Record<string, string> = { [rootPath + '/SOUL.md']: DEFAULT_MOTE_SO
   [rootPath + '/MEMORY.md']: DEFAULT_MOTE_MEMORY, [rootPath + '/experiment-notes.md']: '# 比较一个小实验\n\n来源：项目讨论。范围：本 Mote。\n\n先比较一个原型，再决定是否扩大。\n\n## 下一步值得弄清楚的事\n\n- 哪个选择能让日常协作更自然？\n- 哪些操作必须保留原来的身份与草稿？\n- 一个小实验能否给出足够清楚的证据？\n\n> 先把问题问清楚，再一起决定投入多少。\n',
   [rootPath + '/next-steps.md']: '# 下一步的几个方向\n\n保留可以直接比较的小选择。\n\n从真实工作中收集反馈，再决定是否扩大范围。\n',
   [rootPath + '/a-long-question-about-how-we-build-and-learn-together.md']: '# 关于怎样一起工作与学习的一个长问题\n\n长标题和长内容仍然属于同一个原文件，不应该挤掉编辑与返回动作。\n' }
+if (discussionFilesProof) for (let index = 0; index < 48; index++)
+  files[rootPath + '/working-notes/note-' + String(index).padStart(2, '0') + '.md'] = '# Original working note\n\nKeep the original file and its context.'
 const revision = async (content: string) => 'sha256:' + [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(content)))].map(byte => byte.toString(16).padStart(2, '0')).join('')
-api.files.readDirectory = async (_workspace, directory) => Object.keys(files).filter(file => file.startsWith(directory + '/')).map(file => ({ path: file, name: file.split('/').at(-1)!, isDirectory: false, isSymlink: false, ignored: false, mtimeMs: now }))
+api.files.readDirectory = async (_workspace, directory) => [...new Set(Object.keys(files).filter(file => file.startsWith(directory + '/')).map(file => file.slice(directory.length + 1).split('/')[0]!))]
+  .map(name => ({ path: directory + '/' + name, name, isDirectory: !Object.hasOwn(files, directory + '/' + name), isSymlink: false, ignored: false, mtimeMs: now }))
 api.files.read = async (_workspace, file) => ({ status: 'read', document: { path: file, content: files[file] ?? '', revision: await revision(files[file] ?? '') } })
 api.files.readPublic = async params => {
   const file = rootPath + '/' + params.path
@@ -155,6 +161,7 @@ api.connections.call = async (method, params) => {
 useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'This Mac' }], executors: {}, workspaces: [workspace], appearance: { terminalTheme: 'graphite' } },
   tabs: Object.fromEntries(tabs.map(tab => [tab.id, tab])), layouts: { [workspace.id]: createWorkspaceLayout(groupId, tabs.map(tab => tab.id)) }, sessions,
   workspaceTool: 'files-branches', toolsOpen: true, toolDockWidth: 320,
+  ...(discussionFilesProof ? { explorerCollapsed: { [workspace.id]: false } } : {}),
   activeWorkspaceId: workspace.id, mainSurface: 'workbench', agentComposerDrafts: { ...initialDrafts }, documents: {}, dirtyDocuments: {}, documentIssues: {}, demands: { [goal.id]: goal },
   scratchTopicSnapshots: { [workspace.id]: { scope: scratchTopicsScope(workspace), topics: [topic], revision: 0, reading: false, error: null } },
   spaceZoneBindings: { [zoneId]: { workspaceId: workspace.id, spaceId, topicId: topic.id, contentKind: 'mote', directoryPath: topic.directoryPath } },
@@ -162,7 +169,6 @@ useAppStore.setState({ config: { version: 9, hosts: [{ id: 'local', kind: 'local
   prewarmTerminal: async () => {}, detectExecutors: async () => {}, reportError: error => { calls.push({ method: 'fixture.error', params: String(error) }) },
   send: () => { throw new Error('PRIVATE_FIXTURE_NO_MODEL_OR_INPUT') }, interrupt: async () => { throw new Error('PRIVATE_FIXTURE_NO_RUN_CONTROL') } })
 
-const navigationProof = new URLSearchParams(location.search).get('scenario') === 'companion-navigation'
 function Scene() {
   const presentation = useSpaceContentPresentationOwner()
   const [epoch, setEpoch] = useState(0), [card, setCard] = useState(false)
@@ -190,7 +196,7 @@ function Scene() {
       useAppStore.setState(state => ({ workspaceFileRevisions: { ...state.workspaceFileRevisions, [workspace.id]: (state.workspaceFileRevisions[workspace.id] ?? 0) + 1 } }))
     },
     presentation: (next: 'space' | 'card') => setCard(next === 'card'),
-    facts: () => ({ expanded: presentation.expanded, mode, now, workspacePath, moteDirectory: topic.directoryPath, targets, initialDrafts, drafts: useAppStore.getState().agentComposerDrafts,
+    facts: () => ({ explorer: (() => { const value = useAppStore.getState().fileExplorerStates[workspace.id]; return value ? { expandedPaths: [...value.expandedPaths], activePath: value.selection.activePath, selectedPaths: [...value.selection.selectedPaths] } : null })(), expanded: presentation.expanded, mode, now, workspacePath, moteDirectory: topic.directoryPath, targets, initialDrafts, drafts: useAppStore.getState().agentComposerDrafts,
       selection: useAppStore.getState().workbenchSpaceSelection, tabIds: Object.keys(useAppStore.getState().tabs), sessions: useAppStore.getState().sessions.map(session => session.id), records, calls, opened })
   } })
   const content = <div className={navigationProof ? "workbench-shell" : "calendar-fixture__body"}>
