@@ -1,6 +1,6 @@
-import type { AgentMuxSpaceCatalog } from '@agentmux/core'
+import type { AgentMuxSpaceCatalog, AgentSessionHistoryDescriptor } from '@agentmux/core'
 import type { SessionSnapshot, WorkspaceRecord, ScratchTopicSnapshot } from '../../../shared/contracts'
-import { SCRATCH_WORKSPACE_ID, scratchTopicIdFromWorkspacePath, scratchTopicPhysicalPath } from '../../../shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, scratchTopicIdFromWorkspacePath, scratchTopicPhysicalPath, workspaceOwnsSessionPath } from '../../../shared/scratch-topics'
 import { originalTopicAddress, topicSpatialAddress } from '../../../shared/space-addresses'
 import { workspaceProjectId } from './workspace-projects'
 import type { NavigationState } from './desktop-focus-navigation'
@@ -15,7 +15,13 @@ export type WorkspaceAgentExecutionResolver = (reference: {
 export type WorkspaceAgentScopeState = Pick<NavigationState,
   'config' | 'sessions' | 'tabs' | 'layouts' | 'spaceZoneBindings' | 'scratchTopicSnapshots' |
   'workbenchSpaceSelection' | 'topicCategories' | 'projectGroups' | 'spatialRequests'>
-export type WorkspaceAgentList = { key: string; title: string; sessions: readonly AgentSessionSnapshot[]; issue: string | null }
+export type WorkspaceAgentMember = {
+  subject: { hostId: string; agentSessionId: string }
+  basis: 'spatial' | 'collaborator' | 'workspace'
+  workspacePath?: string
+}
+export type WorkspaceAgentList = { key: string; title: string; sessions: readonly AgentSessionSnapshot[]; members: readonly WorkspaceAgentMember[]; issue: string | null }
+export type WorkspaceAgentSources = ReadonlyMap<string, AgentSessionHistoryDescriptor>
 type Reference = Parameters<WorkspaceAgentExecutionResolver>[0]
 type ObjectScope = {
   key: string; title: string; topicId: string; hostId: string; paths: readonly string[]
@@ -26,6 +32,31 @@ const noExecution: WorkspaceAgentExecutionResolver = () => null
 const same = (a: readonly unknown[], b: readonly unknown[]) => a.length === b.length && a.every((value, i) => value === b[i])
 const sessionKey = (session: AgentSessionSnapshot) => JSON.stringify([session.control.hostId, session.control.agentSessionId])
 const referenceKey = (ref: Reference) => JSON.stringify([ref.tabId, ref.regionId, ref.agentSessionId])
+const subjectKey = (subject: WorkspaceAgentMember['subject']) => JSON.stringify([subject.hostId, subject.agentSessionId])
+const memberRank = { workspace: 0, collaborator: 1, spatial: 2 } as const
+function addMember(target: Map<string, WorkspaceAgentMember>, subject: WorkspaceAgentMember['subject'], basis: WorkspaceAgentMember['basis'], workspacePath?: string) {
+  const key = subjectKey(subject), previous = target.get(key)
+  if (!previous || memberRank[previous.basis] < memberRank[basis]) target.set(key, { subject, basis, ...(workspacePath ? { workspacePath } : {}) })
+}
+const sameMembers = (a: readonly WorkspaceAgentMember[], b: readonly WorkspaceAgentMember[]) => a.length === b.length && a.every((value, i) => {
+  const other = b[i]!
+  return value.subject.hostId === other.subject.hostId && value.subject.agentSessionId === other.subject.agentSessionId && value.basis === other.basis && value.workspacePath === other.workspacePath
+})
+/** Metadata is already observed by the caller. This index requests nothing and expires with that input. */
+const sourcePaths = new WeakMap<WorkspaceAgentSources, ReadonlyMap<string, ReadonlyMap<string, readonly AgentSessionHistoryDescriptor[]>>>()
+function sourcesAtPaths(sources: WorkspaceAgentSources, hostId: string) {
+  let index = sourcePaths.get(sources)
+  if (!index) {
+    const hosts = new Map<string, Map<string, AgentSessionHistoryDescriptor[]>>()
+    for (const source of sources.values()) if (source.history) {
+      const paths = hosts.get(source.hostId) ?? new Map<string, AgentSessionHistoryDescriptor[]>()
+      const bucket = paths.get(source.history.workspacePath) ?? []
+      bucket.push(source); paths.set(source.history.workspacePath, bucket); hosts.set(source.hostId, paths)
+    }
+    sourcePaths.set(sources, index = hosts)
+  }
+  return index.get(hostId)
+}
 
 /** One structural Region index shared across consumers; Runtime publications do not rebuild it. */
 const referenceIndexes = new WeakMap<AgentMuxSpaceCatalog, Map<string, Reference[]>>()
@@ -53,7 +84,7 @@ function append(target: Map<string, AgentSessionSnapshot>, session: SessionSnaps
   if (!old || old.id !== old.control.agentSessionId && session.id === session.control.agentSessionId) target.set(key, session)
 }
 function addReferences(target: Map<string, AgentSessionSnapshot>, sessions: readonly SessionSnapshot[], refs: readonly Reference[], resolve: WorkspaceAgentExecutionResolver,
-  confirmed?: Map<string, { hostId: string }>): boolean {
+  confirmed?: Map<string, { hostId: string }>, members?: Map<string, WorkspaceAgentMember>): boolean {
   if (!refs.length) return false
   const index = agentSessionPresentationIndex(sessions)
   let unconfirmed = false
@@ -63,15 +94,21 @@ function addReferences(target: Map<string, AgentSessionSnapshot>, sessions: read
     else unconfirmed = true
     const execution = observed ?? confirmed?.get(key)
     if (!execution) { unconfirmed = true; continue }
+    if (members) addMember(members, { hostId: execution.hostId, agentSessionId: ref.agentSessionId }, 'spatial')
     for (const session of index.get(ref.agentSessionId) ?? []) append(target, session, execution.hostId, ref.agentSessionId)
   }
   return unconfirmed
 }
 function addCollaborators(target: Map<string, AgentSessionSnapshot>, sessions: readonly SessionSnapshot[], hostId: string,
-  collaborators: ScratchTopicSnapshot['collaborators']) {
+  collaborators: ScratchTopicSnapshot['collaborators'], members?: Map<string, WorkspaceAgentMember>, sources?: WorkspaceAgentSources) {
   if (!collaborators.length) return
   const index = agentSessionPresentationIndex(sessions)
-  for (const plaque of collaborators) for (const session of index.get(plaque.sessionId) ?? []) append(target, session, hostId, plaque.sessionId, plaque.providerId)
+  for (const plaque of collaborators) {
+    const subject = { hostId, agentSessionId: plaque.sessionId }, presentations = (index.get(plaque.sessionId) ?? []).filter(session => session.control.hostId === hostId)
+    for (const session of presentations) append(target, session, hostId, plaque.sessionId, plaque.providerId)
+    const provider = sources?.get(subjectKey(subject))?.history?.providerId
+    if (members && (!provider || provider === plaque.providerId) && (!presentations.length || presentations.some(session => session.providerId === plaque.providerId))) addMember(members, subject, 'collaborator')
+  }
 }
 function catalogFor(state: WorkspaceAgentScopeState) {
   return workbenchNavigationCatalog(state, scratchTopicsForConfig(state.config, state.scratchTopicSnapshots))
@@ -142,7 +179,7 @@ export function createWorkspaceAgentListSelector(resolveExecution: WorkspaceAgen
   let refs: readonly Reference[] = [], refInputs: readonly unknown[] = []
   const confirmedExecutions = new Map<string, { hostId: string }>()
   let previous: WorkspaceAgentList | null = null
-  return (state: WorkspaceAgentScopeState, workspace: WorkspaceRecord, sourceSessions: readonly SessionSnapshot[] = state.sessions): WorkspaceAgentList => {
+  return (state: WorkspaceAgentScopeState, workspace: WorkspaceRecord, sourceSessions: readonly SessionSnapshot[] = state.sessions, sources?: WorkspaceAgentSources): WorkspaceAgentList => {
     const topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots), catalog = catalogFor(state)
     const nextInputs = [workspace, state.workbenchSpaceSelection, topics, state.spaceZoneBindings, catalog]
     if (!same(inputs, nextInputs)) {
@@ -166,19 +203,27 @@ export function createWorkspaceAgentListSelector(resolveExecution: WorkspaceAgen
       for (const key of confirmedExecutions.keys()) if (!retained.has(key)) confirmedExecutions.delete(key)
       refInputs = nextRefInputs
     }
-    const result = new Map<string, AgentSessionSnapshot>()
+    const result = new Map<string, AgentSessionSnapshot>(), members = new Map<string, WorkspaceAgentMember>()
+    const addWorkspace = (session: { hostId: string; workspacePath: string }, agentSessionId: string) => addMember(members, { hostId: session.hostId, agentSessionId }, 'workspace', session.workspacePath)
     if (scope) {
       for (const path of scope.paths) for (const session of sessionPresentationsAtPath(sourceSessions, scope.hostId, path)) append(result, session, scope.hostId)
-      addCollaborators(result, sourceSessions, scope.hostId, scope.collaborators)
     } else {
       for (const session of natural(sourceSessions, workspace, topics)) append(result, session)
-      if (workspace.id === SCRATCH_WORKSPACE_ID) for (const topic of topics ?? []) addCollaborators(result, sourceSessions, workspace.hostId, topic.collaborators)
     }
-    const unknownExecution = addReferences(result, sourceSessions, refs, resolveExecution, confirmedExecutions)
+    for (const session of result.values()) addWorkspace(session, session.control.agentSessionId)
+    if (sources) {
+      const paths = sourcesAtPaths(sources, scope?.hostId ?? workspace.hostId)
+      const relevant = scope?.paths ?? (workspace.id === SCRATCH_WORKSPACE_ID ? [...paths?.keys() ?? []].filter(path => workspaceOwnsSessionPath(workspace, { hostId: workspace.hostId, workspacePath: path }, topics)) : [workspace.path])
+      for (const path of relevant) for (const source of paths?.get(path) ?? []) addWorkspace({ hostId: source.hostId, workspacePath: path }, source.agentSessionId)
+    }
+    if (scope) addCollaborators(result, sourceSessions, scope.hostId, scope.collaborators, members, sources)
+    else if (workspace.id === SCRATCH_WORKSPACE_ID) for (const topic of topics ?? []) addCollaborators(result, sourceSessions, workspace.hostId, topic.collaborators, members, sources)
+    const unknownExecution = addReferences(result, sourceSessions, refs, resolveExecution, confirmedExecutions, members)
     const sessions = [...result.values()], title = scope?.title ?? workspace.name
     const issue = scope?.issue ?? (unknownExecution ? 'Some original Agent execution identities are unconfirmed. Confirmed members remain available; refresh those exact spatial references.' : null)
-    if (previous && previous.key === key && previous.title === title && previous.issue === issue && same(previous.sessions, sessions)) return previous
-    previous = { key, title, sessions: previous?.key === key && same(previous.sessions, sessions) ? previous.sessions : sessions, issue }
+    const values = [...members.values()], sameOriginals = previous?.key === key && sameMembers(previous.members, values)
+    if (previous && previous.key === key && previous.title === title && previous.issue === issue && same(previous.sessions, sessions) && sameOriginals) return previous
+    previous = { key, title, sessions: previous?.key === key && same(previous.sessions, sessions) ? previous.sessions : sessions, members: sameOriginals ? previous!.members : values, issue }
     return previous
   }
 }

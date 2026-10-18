@@ -1,10 +1,11 @@
 import type { AgentMuxMessageEvent, AgentMuxMessageEventReference, AgentMuxSpawnRecord, AgentSessionHistoryDescriptor } from '@agentmux/core'
 import type { SessionHistoryReference, SessionHistorySourceReference } from '../../../shared/contracts'
 import type { FocusContext } from './focus-context'
+import type { WorkspaceAgentMember } from './workspace-agent-scope'
 
 export type CollaborationSubject = SessionHistoryReference
 export const collaborationSubjectKey = (subject: CollaborationSubject) => JSON.stringify([subject.hostId, subject.agentSessionId])
-export type CollaborationArea = { id: string; name: string; kind: 'mote' | 'topic' | 'project' | 'unplaced'; members: readonly string[]; issue?: string | null }
+export type CollaborationArea = { id: string; name: string; kind: 'mote' | 'topic' | 'project' | 'unplaced'; members: readonly string[]; affiliations?: ReadonlyMap<string, WorkspaceAgentMember>; issue?: string | null }
 export type CollaborationReading = {
   subject: CollaborationSubject
   incarnation: string | null

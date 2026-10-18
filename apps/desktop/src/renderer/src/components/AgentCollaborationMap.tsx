@@ -64,7 +64,6 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
   const [selection, setSelection] = useState<CollaborationSelection>(subjectKey ? { kind: 'agent', id: subjectKey } : null)
   const [kinds, setKinds] = useState<ReadonlySet<CollaborationRelation['kind']>>(new Set(allKinds))
   const areaSelector = useMemo(() => createCollaborationAreasSelector(agentRegionExecution), [])
-  const scope = useMemo(() => areaSelector(facts, request.kind === 'space' ? request : undefined), [areaSelector, facts, request])
   const catalogCache = useRef(new Map<string, { source: object; name: string | undefined; agent: CollaborationAgent }>())
   const catalog = useMemo(() => {
     const result = new Map<string, CollaborationAgent>(), sessions = new Map<string, Facts['sessions'][number]>(), descriptors = new Map<string, AgentSessionHistoryDescriptor>()
@@ -86,20 +85,23 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
     for (const id of catalogCache.current.keys()) if (!result.has(id)) catalogCache.current.delete(id)
     return { agents: result, sessions, history: descriptors }
   }, [facts.sessions, facts.names, history.sources])
-  const areas = useMemo<readonly CollaborationArea[]>(() => {
-    const placed = new Set(scope.areas.flatMap(area => area.members)), remaining = [...catalog.agents.keys()].filter(id => !placed.has(id))
-    return remaining.length ? [...scope.areas, { id: 'retained-unplaced', name: 'Unplaced Agents', kind: 'unplaced' as const, members: remaining }] : scope.areas
-  }, [scope.areas, catalog])
+  const scope = useMemo(() => areaSelector(facts, request.kind === 'space' ? request : undefined, catalog.history), [areaSelector, facts, request, catalog.history])
+  const areaReferences = useMemo(() => {
+    const result = new Map<string, CollaborationAgent>()
+    for (const area of scope.areas) for (const [id, member] of area.affiliations ?? []) if (!result.has(id)) result.set(id, { id, subject: member.subject, sessionId: member.subject.agentSessionId })
+    return result
+  }, [scope.areas])
   useEffect(() => {
     setSelection(subjectKey ? { kind: 'agent', id: subjectKey } : null)
     setLocate({ token: request, ...(subjectKey ? { agentId: subjectKey } : { areaIds: scope.current }) })
   }, [request])
   const wanted = useMemo(() => new Set([...visibleIds, ...(peeked ? [peeked] : []), ...(selection?.kind === 'agent' ? [selection.id] : [])]), [visibleIds, selection, peeked])
-  const subjects = useMemo(() => [...wanted].flatMap(id => { const subject = catalog.agents.get(id)?.subject; return subject ? [subject] : subjectKey === id && request.kind === 'focus' ? [request.subject] : [] }), [wanted, catalog, request, subjectKey])
+  const subjects = useMemo(() => [...wanted].flatMap(id => { const subject = (catalog.agents.get(id) ?? areaReferences.get(id))?.subject; return subject ? [subject] : subjectKey === id && request.kind === 'focus' ? [request.subject] : [] }), [wanted, catalog, areaReferences, request, subjectKey])
   const activityScope = useRef<ReadonlySet<string>>(new Set())
   const reading = useCollaborationReading(subjects, enabled, activityScope)
   const project = useMemo(createCollaborationProjector, [])
-  const recorded = useMemo(() => project(reading.facts, history.sources), [project, reading.facts, history.sources])
+  const recordedFacts = useMemo(() => project(reading.facts, history.sources), [project, reading.facts, history.sources])
+  const recorded = useMemo(() => ({ ...recordedFacts, agents: new Map([...areaReferences, ...recordedFacts.agents]) }), [recordedFacts, areaReferences])
   const metadata = useCollaborationIdentities(recorded.agents, wanted, catalog.agents, enabled, facts.config?.hosts)
   const resolved = useMemo(() => resolveCollaborationIdentities(recorded, metadata.reads), [recorded, metadata.reads])
   const descriptors = useMemo(() => new Map([...resolved.sources, ...catalog.history]), [resolved.sources, catalog.history])
@@ -152,6 +154,13 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
     return result
   }, [resolved.agents, catalog.agents, originals])
   const projection = useMemo(() => ({ ...resolved, agents }), [resolved, agents])
+  const affiliation = useMemo(() => areaSelector(facts, request.kind === 'space' ? request : undefined, descriptors), [areaSelector, facts, request, descriptors])
+  const areas = useMemo<readonly CollaborationArea[]>(() => {
+    const placed = new Set(affiliation.areas.flatMap(area => area.members)), unplaced: string[] = [], unresolved: string[] = []
+    for (const [id, agent] of agents) if (!placed.has(id)) (agent.subject ? unplaced : unresolved).push(id)
+    return [...affiliation.areas, ...(unplaced.length ? [{ id: 'retained-unplaced', name: 'Area unconfirmed', kind: 'unplaced' as const, members: unplaced }] : []),
+      ...(unresolved.length ? [{ id: 'unresolved-references', name: 'Unresolved references', kind: 'unplaced' as const, members: unresolved }] : [])]
+  }, [affiliation.areas, agents])
   // The notification scope follows original displayed identities; it never expands history/body demand.
   activityScope.current = useMemo(() => new Set([...agents.values()].flatMap(agent => agent.subject ? [collaborationSubjectKey(agent.subject)] : [])), [agents])
   const resolvedSelection = selection ? { ...selection, id: resolved.aliases.get(selection.id) ?? selection.id } : null
@@ -165,6 +174,7 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
     return retainedIdentities.current
   })), goals = useAppStore(state => goalSelector(state, enabled))
   const selectedAgent = resolvedSelection?.kind === 'agent' ? projection.agents.get(resolvedSelection.id) : undefined
+  const selectedAffiliations = selectedAgent ? areas.filter(area => area.kind !== 'unplaced' && area.affiliations?.has(selectedAgent.id)) : []
   const selectedMetadata = selectedAgent ? [...metadata.reads].find(([id]) => (resolved.aliases.get(id) ?? id) === selectedAgent.id) : undefined
   const selectedRelation = resolvedSelection?.kind === 'relation' ? projection.relations.find(relation => relation.id === resolvedSelection.id) : undefined
   const [navigation, setNavigation] = useState<{ context: FocusContext; locations: WorkbenchProjectionSelection[] } | null>(null)
@@ -209,7 +219,10 @@ function CollaborationReadingMap({ request, visible, onOpen, onViewInFocus }: { 
             <details className="collaboration-identity"><summary>Identity</summary><p>{selectedAgent.provenance ?? selectedAgent.subject?.hostId} · <code>{selectedAgent.sessionId}</code></p>{!selectedAgent.context?.control ? <p>Original workface is not confirmed by this record.</p> : null}</details>
             {selectedMetadata?.[1].loading ? <p role="status">Reading original identity…</p> : selectedMetadata?.[1].issue ? <p role="status">{selectedMetadata[1].issue}<button type="button" className="small-button" onClick={() => metadata.retry(selectedMetadata[0])}>Retry identity</button></p> : null}
             {descriptors.get(selectedAgent.id)?.history ? <dl className="collaboration-identity"><dt>Provider</dt><dd>{descriptors.get(selectedAgent.id)!.history!.providerId}</dd><dt>Workspace</dt><dd>{descriptors.get(selectedAgent.id)!.history!.workspacePath}</dd></dl> : null}
-            {!members.has(selectedAgent.id) ? <p>Area membership is unconfirmed.</p> : null}
+            <section aria-label="Area affiliation">{selectedAffiliations.length ? <dl>{selectedAffiliations.map(area => {
+              const member = area.affiliations!.get(selectedAgent.id)!
+              return <div key={area.id}><dt>{member.basis === 'spatial' ? 'Display binding' : member.basis === 'collaborator' ? 'Recorded collaborator' : 'Workspace association'}</dt><dd>{area.name}{member.workspacePath ? <small>{member.workspacePath}</small> : null}</dd></div>
+            })}</dl> : <p>{selectedAgent.subject ? 'Area unconfirmed. No original binding or matching work resource is confirmed.' : 'Original identity is unresolved. Area association is unconfirmed.'}</p>}</section>
             <h4>Relations <span>{agentRelations.length}</span></h4>{agentRelations.length ? agentRelations.map(relation => <RelationButton key={relation.id} relation={relation} agents={projection.agents} subjectId={selectedAgent.id} onSelect={select} />) : <p>No recorded relations in the loaded window.</p>}
           </> : selectedRelation ? <>
             <div className="collaboration-inspector__heading"><span className="collaboration-inspector__eyebrow">Relation</span><h3>{COLLABORATION_LABELS[selectedRelation.kind]}</h3></div>
