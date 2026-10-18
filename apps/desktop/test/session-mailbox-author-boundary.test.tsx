@@ -51,7 +51,7 @@ it('excludes typed Agent and platform inputs from Inputs while retaining human a
     controlled('controlled-agent', 4, 'agent'), submitted(), controlled('human-input', 2, 'human'), controlled('unknown-input', 1, 'unknown')]
   const read = vi.spyOn(api.sessions, 'inputMailbox').mockImplementation(async (_target, options) => {
     const page = { agentSessionId: session.id, queueId: 'isolated-original-input-journal', cut: { incarnation: 'original-cut', throughSequence: 6 },
-      budgetBytes: options.maxBytes ?? 64 * 1024, items: sourceItems.map(item => ({ kind: 'item' as const, item })), nextCursor: null,
+      budgetBytes: options?.maxBytes ?? 64 * 1024, items: sourceItems.map(item => ({ kind: 'item' as const, item })), nextCursor: null,
       coverage: { kind: 'recorded-inputs' as const, unrecorded: 'unconfirmed' as const } }
     return parseAgentInputMailboxPage(page, { agentSessionId: session.id, ...options })
   })
@@ -62,7 +62,7 @@ it('excludes typed Agent and platform inputs from Inputs while retaining human a
       return { sequence: original.sequence, envelope, delivery: original.delivery, bodyPreview: body, bodyBytes: body.length }
     }), nextBeforeSequence: null }))
   vi.spyOn(api.sessions, 'readMessage').mockImplementation(async (reference, messageId) => ({ hostId: reference.hostId, message: message(messageId) }))
-  await dom.render(<SessionMailbox system={{ available: true, notices: [], unread: [], acknowledge: vi.fn() }} control={session.control} queued={[]} />)
+  await dom.render(<SessionMailbox system={{ scope: session.id, available: true, notices: [], unread: [], acknowledge: vi.fn() }} control={session.control} queued={[]} />)
   const toggle = new Event('toggle'); Object.defineProperty(toggle, 'newState', { value: 'open' })
   await act(async () => dom.container.querySelector('.composer-mailbox')!.dispatchEvent(toggle))
   for (const id of ['controlled-agent', 'submitted-agent']) {

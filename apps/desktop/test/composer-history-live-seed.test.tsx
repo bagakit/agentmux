@@ -85,7 +85,7 @@ it('keeps original retained user facts in the default list and arrows when the c
 
   const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: 'open' })
   await act(async () => panel().dispatchEvent(event))
-  await dom.click('[role="tab"][id$="-outbox-tab"]')
+  await dom.click('[role="tab"][id$="-user-tab"]')
   await wait(() => expect(query).toHaveBeenCalledTimes(2))
   await wait(() => expect(list().textContent).toContain('已检查 200 条'))
   expect(list().textContent).toContain(originalBody)

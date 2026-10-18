@@ -12,7 +12,7 @@ import { fixture, raw } from './helpers/native-async-question-fixture'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { SessionMailbox } from '../src/renderer/src/components/SessionMailbox'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
-import { mailboxMessages } from '../src/renderer/src/lib/session-mailbox-messages'
+import { createMailboxMessagesSelector } from '../src/renderer/src/lib/session-mailbox-messages'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 
@@ -53,7 +53,7 @@ it('mounted original Mailbox preserves Core author, unknown delivery, exact reco
   const timeline = { agentSessionId: session.id, revision: 1, items: [incoming, uncertain] }
   const native = projectSessionUserMessages({ agentSessionId: session.id, historyPage: page })
   const reply = native.find(message => message.questionAnswers)!
-  const projected = mailboxMessages(session.id, timeline, native, 'local')
+  const projected = createMailboxMessagesSelector()(session.id, timeline, native, 'local')
   expect(projected.find(item => item.message.rawId === incoming.id)!.original).toBe(incoming)
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(JSON.stringify([incoming.authorAgentSessionId, incoming.content, incoming.createdAt, incoming.status])))
   const marker = Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('')
@@ -138,7 +138,7 @@ it.each(['enabled', 'dispatch-authorized'] as const)('original Composer and comp
 it('unknown Host retains original mail and opaque question data without inventing a reference', async () => {
   const f = await fixture(), page = await f.client.sessionHistoryPage(f.input.agentSessionId, f.invocation)
   const source = projectSessionUserMessages({ agentSessionId: f.input.agentSessionId, historyPage: page }).filter(message => message.questionAnswers)
-  const [item] = mailboxMessages(f.input.agentSessionId, undefined, source)
+  const [item] = createMailboxMessagesSelector()(f.input.agentSessionId, undefined, source)
   expect(item!.reference).toBeNull()
   expect(item!.message).toBe(source[0]); expect(item!.original).toBe(source[0])
   expect(item!.message.questionAnswers).toEqual(source[0]!.questionAnswers)
@@ -160,7 +160,7 @@ it('unknown Host retains original mail and opaque question data without inventin
   expect(readNative).not.toHaveBeenCalled()
   // Pure presentation preserves typed data with an incomplete source; this does not assert native reader qualification.
   const partial = { ...source[0]!, source: { kind: 'native' as const, providerId: page.source.providerId, nativeSessionId: '', recordId: source[0]!.rawId } }
-  const [unknown] = mailboxMessages(f.input.agentSessionId, undefined, [partial], 'local')
+  const [unknown] = createMailboxMessagesSelector()(f.input.agentSessionId, undefined, [partial], 'local')
   expect(unknown!.message).toBe(partial); expect(unknown!.reference).toBeNull()
   await dom.render(<SessionMailbox system={system} queued={[]} timeline={{ agentSessionId: f.input.agentSessionId, revision: 0, items: [] }} userMessages={[partial]} />)
   await open('outbox'); await read(`native:${partial.id}`)
