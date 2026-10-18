@@ -64,6 +64,7 @@ export async function rereadUnobservedSession(identity: RecoveryRegionIdentity, 
   const canonical = await api.sessions.creation(hostId, identity.agentSessionId)
   assertSource(hostId)
   if (canonical.agentSessionId !== identity.agentSessionId) throw new Error('The original Core owner returned another Session identity.')
+  if (canonical.kind === 'retired-agent') throw new Error('The original Session was closed. Its history and workface are kept; use its explicit recovery action to continue.')
   if (originalOperation && canonical.creation?.createOperationId !== originalOperation)
     throw new Error('The original creation operation is not confirmed. No replacement is attached.')
   const session = await api.sessions.refresh({ kind: 'agent', hostId, agentSessionId: identity.agentSessionId, run: canonical.run })

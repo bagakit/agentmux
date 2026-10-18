@@ -1238,6 +1238,7 @@ export async function registerIpc(args: {
         throw new AgentMuxError('The original prepared Goal Loop does not match this input. Keep its exact target and operation.', 'CONTROL_REQUEST_CONFLICT')
     } else if (!goal.assigneeSessionIds.includes(intent.agentSessionId)) throw new AgentMuxError('This Start must target an exact responsible Agent Session. Its manual input remains available.', 'CONTROL_REQUEST_CONFLICT')
     const native = await args.runtime.agentCreation(intent.hostId, intent.agentSessionId)
+    if (native.kind === 'retired-agent') throw new AgentMuxError('The original Goal target is closed. Keep its request and explicitly recover the Session before preparing input.', 'AGENT_SESSION_RETIRED')
     if (native.agentSessionId !== intent.agentSessionId || native.run.runId !== intent.runId) throw new AgentMuxError('The original Goal Run changed before preparation. Keep the original Agent and inspect this operation.', 'CONTROL_REQUEST_CONFLICT')
     return demands.prepareDispatch(goalId, intent)
   })
@@ -1248,7 +1249,8 @@ export async function registerIpc(args: {
       throw new AgentMuxError('The exact original PMO Goal creation is unconfirmed. Keep the Goal and original request.', 'CONTROL_REQUEST_CONFLICT')
     return goal
   }
-  const confirmedPmoSource = async (intent: GoalPmoIntent, session: import('@agentmux/core').AgentMuxAgentSession, operationId: string) => {
+  const confirmedPmoSource = async (intent: GoalPmoIntent, session: import('@agentmux/core').AgentMuxAgentCreationInspection, operationId: string) => {
+    if (session.kind === 'retired-agent') throw new AgentMuxError('The original PMO Session is closed. Its Goal and request are retained; explicitly recover the Session before linking current participation.', 'AGENT_SESSION_RETIRED')
     const goal = await pmoGoal(intent)
     const context = unknownNameContext('desktop.goal-pmo')
     context.actor = { kind: 'agent', id: session.agentSessionId, verified: true }
@@ -1272,6 +1274,7 @@ export async function registerIpc(args: {
     await pmoGoal(intent)
     if (intent.creationOperationId === undefined || createOperationId !== await goalPmoOperation(intent, 'create')) throw new AgentMuxError('The original PMO creation operation is unconfirmed.', 'CONTROL_REQUEST_CONFLICT')
     const created = await args.runtime.agentCreation(hostId, agentSessionId)
+    if (created.kind === 'retired-agent') throw new AgentMuxError('The original PMO was created and subsequently closed. Its original operation and history are retained.', 'AGENT_SESSION_RETIRED')
     if (created.agentSessionId !== agentSessionId || created.creation?.createOperationId !== createOperationId || created.creation.initialPrompt !== 'confirmed')
       throw new AgentMuxError('The original PMO creation or its initial request is still unconfirmed. Inspect the same operation without starting or sending again.', 'CONTROL_UNAVAILABLE')
     return confirmedPmoSource(intent, created, createOperationId)

@@ -22,6 +22,7 @@ import type {
   AgentSessionQuestionReplyReceipt,
   AgentMuxAgentCreateInput,
   AgentMuxAgentSession,
+  AgentMuxAgentCreationInspection,
   AgentMuxNativeSessionConfirmationInput,
   AgentMuxNativeSessionConfirmation,
   AgentMuxAgentContinuityResult,
@@ -1927,7 +1928,7 @@ export type AgentMuxDesktopApi = {
     observeStorage(session: SessionControl): Promise<import('@agentmux/core').AgentMuxRunStorageObservation>
     launchAgent(input: AgentLaunchInput, goalPmo?: import('./goal-pmo-origin').GoalPmoIntent): Promise<AgentLaunchResult>
     resolveCreationSessionId(hostId: string, createOperationId: string): Promise<string>
-    creation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentSession>
+    creation(hostId: string, agentSessionId: string): Promise<AgentMuxAgentCreationInspection>
     launchTerminal(input: TerminalLaunchInput): Promise<SessionSnapshot>
     historySources(options: { observation: true }): Promise<SessionHistorySourcesObservation>
     historySources(): Promise<AgentSessionHistoryDescriptor[]>

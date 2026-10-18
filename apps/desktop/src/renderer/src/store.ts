@@ -4611,6 +4611,7 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
           await get().refreshDemand(demandId)
           if (get().pendingAgentLaunches[recipientId]) {
             const created = await api.sessions.creation(hostId, canonicalRecipientId)
+            if (created.kind === 'retired-agent') throw new Error('The original PMO Session was closed. Its Goal, request and history are retained; explicitly recover that Session before attaching it.')
             const snapshot = await api.sessions.snapshot()
             const session = snapshot.sessions.find((item): item is Extract<SessionSnapshot, { kind: 'agent' }> => item.kind === 'agent' && item.control.agentSessionId === canonicalRecipientId && item.control.hostId === hostId && item.control.run.runId === created.run.runId)
             const timeline = snapshot.timelines[canonicalRecipientId]
@@ -11533,6 +11534,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       // Core identity first, then use its actual Run for the existing projection reader.
       try {
         const canonical = await api.sessions.creation(reference.hostId, reference.agentSessionId)
+        if (canonical.kind === 'retired-agent') throw new Error('The original Session is still closed. Keep its recovery request and check the same operation; no replacement was started.')
         if (canonical.agentSessionId !== reference.agentSessionId || canonical.hostId !== reference.hostId ||
           (source.history && (canonical.providerId !== source.history.providerId ||
             canonical.executorId !== source.history.executorId || canonical.workspacePath !== source.history.workspacePath)) ||
@@ -11583,7 +11585,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         session = await api.sessions.reconcileReopen(reference, source.managed.retiredAt, input.createOperationId!).catch(() => undefined)
         if (!session) {
           const canonical = await api.sessions.creation(reference.hostId, reference.agentSessionId).catch(() => undefined)
-          if (canonical?.agentSessionId === reference.agentSessionId && canonical.nativeHandle?.kind === 'provider' &&
+          if (canonical?.kind === 'agent' && canonical.agentSessionId === reference.agentSessionId && canonical.nativeHandle?.kind === 'provider' &&
             canonical.nativeHandle.sessionId === source.source.nativeHandle.sessionId) {
             const observed = await api.sessions.refresh({ kind: 'agent', ...reference, run: canonical.run }).catch(() => undefined)
             if (observed?.processState === 'running') session = observed
@@ -11605,6 +11607,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         // Executor settings may have changed since the unknown launch. Inspect the saved
         // operation; resolving today's configuration cannot reproduce that original intent.
         const created = await api.sessions.creation(input.hostId, input.agentSessionId!)
+        if (created.kind === 'retired-agent') throw new Error('The original resume target was closed. Its operation and history are retained; explicitly recover that Session to continue.')
         if (created.creation?.createOperationId !== input.createOperationId) {
           throw new Error('This saved Session belongs to another creation operation. Keep the original resume identity and inspect its receipt.')
         }

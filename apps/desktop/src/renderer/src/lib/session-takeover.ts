@@ -119,6 +119,11 @@ async function nameTakeover(source: TakeoverSource, report: AgentMuxSpaceMutatio
     const observed = state.sessions.find(session => session.kind === 'agent' && session.id === agentSessionId && session.control.hostId === hostId)
     const created = observed ? null : await api.sessions.creation(hostId, agentSessionId)
     if (created && created.agentSessionId !== agentSessionId) throw new Error('The creation reply belongs to another Agent; its name was not used.')
+    if (created?.kind === 'retired-agent') {
+      if (created.history?.creation?.createOperationId !== report.requestId) throw new Error('The retired creation reply belongs to another operation; its name was not used.')
+      return { ...report, outcome: 'retired', agent: { ...report.agent, runId: created.run.runId,
+        retirement: { source: created.source, observedAt: created.observedAt } } }
+    }
     if (currentDisplayNameRevision('agent-session', agentSessionId) > 0) return report
     const createdAt = observed?.createdAt ?? created!.createdAt
     const time = new Date(createdAt), pad = (value: number) => String(value).padStart(2, '0')

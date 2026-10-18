@@ -1164,6 +1164,10 @@ export type AgentNativePromptInputPlan = Readonly<{
   { operation?: 'steer'; expectedTurnId: string }
 )>
 
+/** Original creation facts survive explicit retirement without becoming an active Session. */
+export type AgentMuxAgentCreationInspection = AgentMuxAgentSession |
+  ({ kind: 'retired-agent' } & import('./agent-session-store.js').AgentMuxRetiredAgentSession)
+
 export type AgentMuxAgentSession = {
   /** Read-only admissions retained through explicit retirement and reopen. */
   continuityControlReceipts?: Record<string, import('./agent-session-continuity-control.js').AgentMuxContinuityControlReceipt>

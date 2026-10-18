@@ -20,7 +20,7 @@ import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import type { DatabaseSync } from 'node:sqlite'
-import { openSessionDatabase, promptAdmissionSchema, readCurrentSessionDatabase, syncSessionDatabase } from './agent-session-database.js'
+import { openSessionDatabase, promptAdmissionSchema, retiredCreationIndexSchema, readCurrentSessionDatabase, syncSessionDatabase } from './agent-session-database.js'
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
 import { durableWriteFile, DurableWriteError } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
@@ -1883,8 +1883,10 @@ export function agentLifecycleOperationIdentity(kind: 'create' | 'resume' | 'sto
   return createHash('sha256').update(JSON.stringify(['agentmux-agent-lifecycle-v1', kind, agentSessionId, requestedOperationId])).digest('base64url')
 }
 
-function creationSessionId(sessions: readonly AgentMuxStoredAgentSession[], reservations: readonly AgentMuxLifecycleReservation[], createOperationId: string): string | null {
+function creationSessionId(sessions: readonly AgentMuxStoredAgentSession[], reservations: readonly AgentMuxLifecycleReservation[],
+  retired: readonly AgentMuxRetiredAgentSession[], createOperationId: string): string | null {
   const ids = new Set(sessions.filter(session => session.creation?.createOperationId === createOperationId).map(session => session.agentSessionId))
+  for (const session of retired) if (session.history?.creation?.createOperationId === createOperationId) ids.add(session.agentSessionId)
   for (const reservation of reservations) {
     if (reservation.kind === 'create' && (reservation.preparedCreation?.creation?.createOperationId === createOperationId ||
       agentLifecycleOperationIdentity('create', reservation.agentSessionId, createOperationId) === reservation.operationId)) ids.add(reservation.agentSessionId)
@@ -2363,7 +2365,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   }
 
   async loadCreationSessionId(createOperationId: string): Promise<string | null> {
-    return creationSessionId([...this.sessions.values()], [...this.reservations.values()], createOperationId)
+    return creationSessionId([...this.sessions.values()], [...this.reservations.values()], this.retiredAgentSessions, createOperationId)
   }
 
   async loadCreationCorrelation(agentSessionId: string) {
@@ -2946,8 +2948,10 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     await this.tail
     return await this.withReadDatabase(db => creationSessionId(
       db.prepare('SELECT json FROM sessions WHERE creation_operation=?').all(createOperationId).map(row => normalizeStoredAgentSession(JSON.parse(String(row.json)))),
-      db.prepare("SELECT json FROM reservations WHERE json_extract(json,'$.kind')='create'").all().map(row => lifecycleReservation(JSON.parse(String(row.json)))), createOperationId),
-      document => creationSessionId(document.sessions, document.reservations, createOperationId))
+      db.prepare("SELECT json FROM reservations WHERE json_extract(json,'$.kind')='create'").all().map(row => lifecycleReservation(JSON.parse(String(row.json)))),
+      db.prepare("SELECT json FROM retired_sessions WHERE json_extract(json,'$.history.creation.createOperationId')=?").all(createOperationId)
+        .map(row => retiredAgentSession(JSON.parse(String(row.json)))), createOperationId),
+      document => creationSessionId(document.sessions, document.reservations, document.retiredAgentSessions, createOperationId))
   }
 
   async loadCreationCorrelation(agentSessionId: string) {
@@ -3810,6 +3814,9 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         // in this transaction; absence never means an old input was unapplied.
         if (!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='prompt_admissions'").get()) {
           this.db.exec(promptAdmissionSchema); this.dirty = true
+        }
+        if (!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE type='index' AND name='retired_creation_operation'").get()) {
+          this.db.exec(retiredCreationIndexSchema); this.dirty = true
         }
         if (!this.db.prepare("SELECT 1 FROM sqlite_schema WHERE name='captured_streams'").get()) { this.db.exec(capturedHistorySchema); this.dirty=true }
         stage = 'mutation'
