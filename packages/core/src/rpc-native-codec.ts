@@ -1,3 +1,4 @@
+import { isMoteChatMethod, parseMoteChatParams, parseMoteChatResult } from './mote-chat-codec.js'
 import { parseFileImportParams, parseFileImportResult } from './public-rpc-file-import.js'
 import { parseBroadcastReceipt, normalizeBroadcastInput } from './agent-message-broadcast.js'
 import { parseMessageEventsPage } from './agent-message-events.js'
@@ -318,6 +319,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
     if (method === 'file.share') return parseFileShareResult(value, parseFileShareParams(params)) as unknown as Record<string, unknown>
     if (method === 'file.import') return parseFileImportResult(value, parseFileImportParams(params)) as unknown as Record<string, unknown>
     if (isFileMethod(method)) return (method === 'file.upload' || method === 'file.upload.inspect' ? parseFileUploadResult(value, method === 'file.upload' ? parseFileUploadParams(params) : parseFileUploadIdentity(params)) : method === 'file.history' ? parseFileHistoryResult(value, parseFileHistoryParams(params)) : method === 'file.restore' ? parseFileRestoreResult(value, parseFileRestoreParams(params)) : method === 'file.undo' ? parseFileUndoResult(value, parseFileUndoParams(params)) : method === 'file.create' ? parseFileCreateResult(value, parseFileCreateParams(params)) : method === 'file.write' ? parseFileWriteResult(value, parseFileWriteParams(params)) : method === 'file.list' ? parseFileListResult(value, parseFileListParams(params)) : parseFileReadResult(value, parseFileReadParams(params))) as unknown as Record<string, unknown>
+    if (isMoteChatMethod(method)) return parseMoteChatResult(method, value, parseMoteChatParams(method, params)) as unknown as Record<string, unknown>
     if (isMoteConnectionMethod(method)) return parseMoteConnectionResult(method,value,parseMoteConnectionParams(method,params)) as unknown as Record<string,unknown>
     if (isConnectionMethod(method)) return parseConnectionResult(method, value, parseConnectionParams(method, params)) as unknown as Record<string, unknown>
     if (isApplicationAccessMethod(method)) return parseApplicationAccessResult(method,value,parseApplicationAccessParams(method,params)) as unknown as Record<string,unknown>

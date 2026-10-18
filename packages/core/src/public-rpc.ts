@@ -1,3 +1,5 @@
+import { MOTE_CHAT_RPC_METHODS } from './mote-chat-codec.js'
+import type { MoteChatMethod, MoteChatParamsMap, MoteChatResultMap } from './mote-chat-contract.js'
 import { APPLICATION_ACCESS_METHODS, type ApplicationAccessMethod, type ApplicationAccessParameterMap, type ApplicationAccessResultMap } from './application-access.js'
 import { MOTE_CONNECTION_RPC_METHODS } from './mote-connection-codec.js'
 import type { MoteConnectionMethod, MoteConnectionParamsMap, MoteConnectionResultMap } from './mote-connection-contract.js'
@@ -199,7 +201,7 @@ export type AgentMuxRpcOutputInitial = {
   session: ReturnType<AgentMuxClient['agentSession']>
 } & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
   'run' | 'gap' | 'terminal' | 'resizeRevision'>
-type NativeParams = ApplicationAccessParameterMap & MoteConnectionParamsMap & GoalDelegationParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & AppWindowParamsMap & ScheduleParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
+type NativeParams = ApplicationAccessParameterMap & MoteChatParamsMap & MoteConnectionParamsMap & GoalDelegationParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & AppWindowParamsMap & ScheduleParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
   'settings.appearance.watch': Record<string, never>
   'notebook.ls': Record<string, never>
   'notebook.inspect': { notebookId?: string; noteId?: string; operationId?: string; content?: boolean; maxBytes?: number }
@@ -280,7 +282,7 @@ type NativeParams = ApplicationAccessParameterMap & MoteConnectionParamsMap & Go
   'system.endpoint': Record<string, never>
   'system.subscription.cancel': { subscriptionId: string }
 }
-type NativeResult = ApplicationAccessResultMap & MoteConnectionResultMap & GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & ConnectionResultMap & HostSettingsResultMap & FileResultMap & GitResultMap & AppWindowResultMap & ScheduleResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
+type NativeResult = ApplicationAccessResultMap & MoteChatResultMap & MoteConnectionResultMap & GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & ConnectionResultMap & HostSettingsResultMap & FileResultMap & GitResultMap & AppWindowResultMap & ScheduleResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
   'settings.appearance.watch': never
   'notebook.ls': { state: import('./notebook-catalog.js').NotebookState }
   'notebook.inspect': { state: import('./notebook-catalog.js').NotebookState; notebook: import('./notebook-catalog.js').Notebook | null; pages: import('./notebook-catalog.js').NotebookPage[]; trail: import('./notebook-catalog.js').NoteTrailEvent[]; recordedOperation: import('./notebook-catalog.js').NotebookState['operations'][string] | null; storageOperation?: import('./notes-storage.js').NotesStorageOperation | null; resourceChanges?: import('./notes-storage.js').NotesResourceChange[]; conversionIssues?: import('./notes-storage.js').NotesConversionIssue[]; titleOperation?: import('./note-title.js').NoteTitleInspection; content?: import('./notebook-observation.js').NoteContentObservation }
@@ -360,8 +362,8 @@ type NativeResult = ApplicationAccessResultMap & MoteConnectionResultMap & GoalD
   'system.subscription.cancel': { disposed: boolean }
 }
 export type AgentMuxRpcMethod = ControlMethod | keyof NativeParams
-type PublicParameterMap = ApplicationAccessParameterMap & MoteConnectionParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & AgentMuxHostedRuntimeParameterMap & AgentMuxRpcDeviceParameterMap & {
-  [M in Exclude<keyof NativeParams, keyof AgentMuxHostedRuntimeParameterMap | AgentMuxRpcDeviceMethod | ApplicationAccessMethod | MoteConnectionMethod | MoteAvatarMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | FileMethod | GitMethod | ScheduleMethod>]: NativeParams[M] & { operationId?: string }
+type PublicParameterMap = ApplicationAccessParameterMap & MoteChatParamsMap & MoteConnectionParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & ScheduleParamsMap & AgentMuxHostedRuntimeParameterMap & AgentMuxRpcDeviceParameterMap & {
+  [M in Exclude<keyof NativeParams, keyof AgentMuxHostedRuntimeParameterMap | AgentMuxRpcDeviceMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | FileMethod | GitMethod | ScheduleMethod>]: NativeParams[M] & { operationId?: string }
 } & { [M in ControlMethod]: ControlParams<M> & { operationId?: string } }
 export type AgentMuxRpcParams<M extends AgentMuxRpcMethod> = PublicParameterMap[M]
 type PublicResultMap = NativeResult & {
@@ -376,6 +378,7 @@ export type AgentMuxRpcSpacePresentation = {
 }
 
 export const AGENTMUX_RPC_NATIVE_METHODS = {
+  ...MOTE_CHAT_RPC_METHODS,
   ...MOTE_CONNECTION_RPC_METHODS,
   ...GOAL_DELEGATION_METHODS,
   ...AGENTMUX_RPC_MOTE_AVATAR_METHODS,

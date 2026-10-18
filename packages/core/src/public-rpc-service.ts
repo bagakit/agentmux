@@ -1,3 +1,5 @@
+import { isMoteChatMethod, parseMoteChatParams, parseMoteChatResult } from './mote-chat-codec.js'
+import type { MoteChatPort, MoteChatMethod, MoteChatParamsMap } from './mote-chat-contract.js'
 import { isConnectionDeletionMethod, parseConnectionDeletionParams } from './connection-deletion-codec.js'
 import { readConnectionDiagnosis } from './connection-diagnosis.js'
 import { parseFileImportParams, parseFileImportResult } from './public-rpc-file-import.js'
@@ -125,6 +127,7 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   inputContextCaptures?: AgentInputContextCaptureReader
   applicationAccess?: ApplicationAccessPort
   windows?: AgentMuxRpcWindowsOwner
+  moteChat?: MoteChatPort
   moteConnections?: MoteConnectionPort
   connections?: ConnectionPort
   goalDelegations?: GoalDelegationsOwner
@@ -305,7 +308,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -545,6 +548,29 @@ export class AgentMuxRpcService {
   }
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
+    if (isMoteChatMethod(method)) {
+      const caller = await this.authenticated(context)
+      if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError('Mote chat requires its original authenticated actor.', 'CONTROL_PERMISSION_DENIED')
+      if (caller && method !== 'space.mote.chat.history') throw new AgentMuxError('Managed Agents may read their own chat history; chat settings and audience administration require the original person or device.', 'CONTROL_PERMISSION_DENIED')
+      const input = parseMoteChatParams(method, params), owner = this.ports.moteChat
+      if (!owner) {
+        if (this.ports.forwardControl) {
+          context.signal?.throwIfAborted(); await context.assertCurrent?.()
+          return parseMoteChatResult(method as MoteChatMethod, await this.ports.forwardControl<MoteChatMethod>(method, input as MoteChatParamsMap[MoteChatMethod], context), input as MoteChatParamsMap[MoteChatMethod]) as unknown as AgentMuxRpcResult<M>
+        }
+        throw new AgentMuxError('The original Mote chat owner is unavailable. Existing conversations are retained.', 'CONTROL_UNAVAILABLE')
+      }
+      const actor = caller ? { kind: 'agent' as const, id: caller.agentSessionId } : { kind: context.principal!.kind as 'user' | 'device', id: context.principal!.id }
+      const administration = { actor, ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (caller) await this.authenticated(context) } }
+      await administration.assertCurrent()
+      const result = method === 'space.mote.chat.configure' ? await owner.configure(parseMoteChatParams(method, params), administration)
+        : method === 'space.mote.chat.inspect' ? await owner.inspect(parseMoteChatParams(method, params), administration)
+        : method === 'space.mote.chat.history' ? await owner.history(parseMoteChatParams(method, params), administration)
+        : method === 'space.mote.chat.audience' ? await owner.audience(parseMoteChatParams(method, params), administration)
+        : await owner.allocate(parseMoteChatParams('space.mote.chat.allocate', params), administration)
+      await administration.assertCurrent()
+      return parseMoteChatResult(method as MoteChatMethod, result, input as MoteChatParamsMap[MoteChatMethod]) as unknown as AgentMuxRpcResult<M>
+    }
     if (isMoteConnectionMethod(method)) {
       const caller = await this.authenticated(context)
       if (!caller && (!context.principal || !['user','device'].includes(context.principal.kind))) throw new AgentMuxError('Mote bot operations require an authenticated original actor.', 'CONTROL_PERMISSION_DENIED')
