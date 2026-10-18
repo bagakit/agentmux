@@ -14,6 +14,7 @@ import { agentSessionPresentationIndex, sessionPresentationById } from '../lib/s
 import { useScheduleClock } from '../lib/schedule-clock'
 import { useScheduleRecords, type ScheduleQuery } from '../lib/schedule-controller'
 import { useAppStore } from '../store'
+import { useSpaceContentPresentation } from '../lib/space-content-presentation'
 import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { ScheduleArrangementRow, scheduleStateLabel } from './ScheduleArrangementRow'
 import { ScheduleCreateForm } from './ScheduleCreateForm'
@@ -38,6 +39,7 @@ function matchesTarget(session: SessionSnapshot | undefined, target: ContinuousP
 export function MoteCalendar({ scope, reference, active }: {
   scope: MoteWorkfaceScope; reference?: WorkbenchProjectionSelection | null | undefined; active: boolean
 }) {
+  const contentPresentation = useSpaceContentPresentation()
   const queries = moteScheduleQueries(scope)
   const retained = useRef(queries)
   if (queries.length) retained.current = queries
@@ -94,7 +96,7 @@ export function MoteCalendar({ scope, reference, active }: {
     if (!location || !state.selectMainRegion(location, state.workbenchSpaceSelection)) {
       setNavigationIssue(located.issue ?? 'The original discussion could not be focused. Its arrangement is kept.'); return
     }
-    state.setMainSurface('workbench'); setNavigationIssue(undefined)
+    state.setMainSurface('workbench'); contentPresentation?.collapse(); setNavigationIssue(undefined)
   }
   const records = useMemo(() => source.records.filter(record => showEnded || record.status !== 'stopped'), [source.records, showEnded])
   const ended = source.records.filter(record => record.status === 'stopped').length

@@ -70,6 +70,7 @@ import { mainRegionReference, workbenchZoneProjection } from './lib/desktop-focu
 import { layoutForLogicalRegionFocus } from './lib/region-focus'
 import { sessionPresentationById } from './lib/session-presentation'
 import { isSessionSurface } from './lib/workbench-surface-kinds'
+import { SpaceContentPresentationContext, useSpaceContentPresentationOwner } from './lib/space-content-presentation'
 
 const WorkspaceWorkbench = memo(WorkspaceWorkbenchView)
 
@@ -131,6 +132,7 @@ function DesktopApp() {
   const tabs = useAppStore((state) => workbenchNavigationTabs(state.tabs))
   const resourceWorkspaces = useMemo(() => workbenchResourceTabs(tabs), [tabs])
   const workbenchSpaceSelection = useAppStore(state => state.workbenchSpaceSelection)
+  const spaceContent = useSpaceContentPresentationOwner()
   const [moteFloating, setMoteFloating] = usePmoTeamsTopicFloatingState()
   const agentFocus = useAppStore((state) => state.agentFocus)
 
@@ -151,7 +153,7 @@ function DesktopApp() {
   }, [])
   useLayoutEffect(() => {
     const floating = readPmoTeamsTopicFloatingState()
-    presentationRef.current = { loading,
+    presentationRef.current = { loading, contentExpanded: spaceContent.expanded,
       overlays: { settings: settingsOpen, quickSwitcher: quickSwitchOpen },
       floating: floating ? { state: floating.open ? 'pinned' : floating.preview ? 'preview' : 'closed',
         topicId: pmoTeamsTopicFloatingTargetTopicId(floating, tabs),
@@ -379,7 +381,7 @@ function DesktopApp() {
       const targets = ordinaryWorkbenchViewTargets(projected.layout ?? undefined, tabs, ordinaryProjection.displayWorkspaceId, undefined, selected)
       return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => {
         const reference = projected.selection.find(reference => reference.groupId === target.reference?.groupId && reference.tabId === id) ?? target.reference!
-        return { ...target, reference, visible: target.visible !== false && mainSurface === 'workbench' && !settingsOpen, projection: ordinaryProjection,
+        return { ...target, reference, visible: target.visible !== false && mainSurface === 'workbench' && !settingsOpen && !spaceContent.expanded, projection: ordinaryProjection,
           retainedRegionId: reference.regionId, onSelectRegion: (regionId: string) => selectOrdinaryMember({ ...reference, regionId }) }
       })]))
     }
@@ -389,8 +391,8 @@ function DesktopApp() {
     const held = reference?.displayWorkspaceId === activeWorkspaceId ? reference : retainedSpatialFocus?.displayWorkspaceId === activeWorkspaceId ? retainedSpatialFocus : null
     const displayed = layoutForLogicalRegionFocus(layout, tabs, held)
     const targets = ordinaryWorkbenchViewTargets(displayed, tabs, activeWorkspaceId, undefined, held)
-    return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => ({ ...target, visible: target.visible !== false && mainSurface === 'workbench' && !settingsOpen }))]))
-  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, settingsOpen, retainedSpatialFocus, workbenchSpaceSelection, ordinaryProjection, ordinaryLayout, selectOrdinaryMember]))
+    return Object.fromEntries(Object.entries(targets).map(([id, occurrences]) => [id, occurrences.map(target => ({ ...target, visible: target.visible !== false && mainSurface === 'workbench' && !settingsOpen && !spaceContent.expanded }))]))
+  }, [activeWorkspaceId, ordinaryObject.layout, tabs, mainSurface, settingsOpen, retainedSpatialFocus, workbenchSpaceSelection, ordinaryProjection, ordinaryLayout, selectOrdinaryMember, spaceContent.expanded]))
   const viewTargets = useMemo<WorkbenchViewTargets>(() => {
     const targets: Record<string, readonly WorkbenchViewTarget[]> = { ...ordinaryTargets }
     const append = (tabId: string, target: WorkbenchViewTarget) => { targets[tabId] = [...targets[tabId] ?? [], target] }
@@ -440,6 +442,11 @@ function DesktopApp() {
   const compactSidebars = windowWidth <= 760 && mainSurface === 'workbench' && Boolean(config?.workspaces.some(item => item.id === activeWorkspaceId))
   const windowSidebars = useWindowSidebarLayout(compactSidebars)
   const { projectRailOpen, toolsOpen } = windowSidebars
+  const contentSidebars = { ...windowSidebars, toolsOpen: toolsOpen || spaceContent.expanded,
+    toggleTools: () => {
+      if (spaceContent.expanded) { spaceContent.collapse(); if (toolsOpen) windowSidebars.toggleTools() }
+      else windowSidebars.toggleTools()
+    } }
   const globalSurfaceOwnsProjectRail = mainSurface === 'board' || mainSurface === 'agents' || mainSurface === 'survey' || mainSurface === 'recall'
   const toolDockWidth = useAppStore((state) => state.toolDockWidth)
   const setToolDockWidth = useAppStore((state) => state.setToolDockWidth)
@@ -510,7 +517,7 @@ function DesktopApp() {
     fileEditingProbe || candidate.id === activeWorkspaceId || resourceWorkspaces.has(candidate.id) || candidate.id === focusTab?.workspaceId || candidate.id === surveyCatalog?.zones.find(zone => zone.zoneId === surveySelection?.zoneId)?.workspaceId || layouts[candidate.id]?.groups.some((group) => group.tabOrder.length > 0)
   )) ?? []
   const toolsAvailable = mainSurface === 'workbench' && Boolean(workspace)
-  const toolsVisible = toolsAvailable && toolsOpen
+  const toolsVisible = toolsAvailable && (toolsOpen || spaceContent.expanded)
   const toolDockMinimumWidth = getToolDockMinimumWidth(projectRailOpen)
   const toolDockMaximumWidth = compactSidebars ? Math.max(toolDockMinimumWidth, Math.min(TOOL_DOCK_MAX_WIDTH, windowWidth - 320)) : TOOL_DOCK_MAX_WIDTH
   const renderedToolDockWidth = Math.min(toolDockMaximumWidth, getRenderedToolDockWidth(toolDockWidth, projectRailOpen))
@@ -518,11 +525,12 @@ function DesktopApp() {
   // 主区不再占用独立 topbar 行；Board 与欢迎页仍走顶栏。
   const mergedTopRow = mainSurface === 'agents' || mainSurface === 'survey' || mainSurface === 'recall' || (mainSurface === 'workbench' && Boolean(workspace))
   const workbenchVisible = mainSurface === 'workbench' && !settingsOpen
+  const workfaceVisible = workbenchVisible && !spaceContent.expanded
   const terminalParkingMeasurement = typeof window !== 'undefined' &&
     new URLSearchParams(window.location.search).has('agentmux-resource-probe')
   const { containerRef, isResizing, onResizeStart, onResizeReset } = useSidebarResize<HTMLDivElement>({
-    isOpen: toolsVisible,
-    resizable: toolsVisible && workbenchVisible,
+    isOpen: toolsAvailable && toolsOpen,
+    resizable: toolsVisible && workbenchVisible && !spaceContent.expanded,
     width: toolDockWidth,
     defaultWidth: TOOL_DOCK_DEFAULT_WIDTH,
     minWidth: toolDockMinimumWidth,
@@ -631,9 +639,10 @@ function DesktopApp() {
   return (
     <GitHistoryProvider workspace={gitWorkspace}><WorkbenchWindowNotices />
     <SettingsNavigation.Provider value={settingsNavigation}>
-    <WindowSidebarLayoutContext.Provider value={windowSidebars}>
+    <SpaceContentPresentationContext.Provider value={spaceContent}>
+    <WindowSidebarLayoutContext.Provider value={contentSidebars}>
     <ExecutorIdentityContext.Provider value={executorIdentity}>
-      <RendererResourceOwners workbenchVisible={workbenchVisible} projectedVisibleTabIds={projectedVisibleTabIds} projectedVisibleRegionIds={projectedVisibleRegionIds} measurementActive={terminalParkingMeasurement}>
+      <RendererResourceOwners workbenchVisible={workfaceVisible} projectedVisibleTabIds={projectedVisibleTabIds} projectedVisibleRegionIds={projectedVisibleRegionIds} measurementActive={terminalParkingMeasurement}>
       <div
         className={`app-shell ${globalSurfaceOwnsProjectRail || !projectRailOpen ? 'app-shell--project-rail-collapsed' : ''}`}
       >
@@ -655,10 +664,13 @@ function DesktopApp() {
                 hidden={!toolsVisible}
                 className={`surface-tool-dock ${isResizing ? 'surface-tool-dock--resizing' : ''}`}
                 data-surface-tool-dock
+                data-content-expanded={spaceContent.expanded ? 'true' : 'false'}
+                data-tools-collapsed={!toolsOpen ? 'true' : 'false'}
               >
                 <SurfaceToolDock workspace={workspace} visible={workbenchVisible && toolsVisible} />
                 <div
                   className="surface-tool-width-handle"
+                  hidden={spaceContent.expanded}
                   role="separator"
                   aria-label="Resize surface tools"
                   title="Drag to resize · Double-click or Enter to reset"
@@ -678,7 +690,8 @@ function DesktopApp() {
                   }}
                 />
               </div>
-            <section className="workspace-main-surface" data-desktop-surface={desktopSurface[mainSurface]}>
+            <section className="workspace-main-surface" data-desktop-surface={desktopSurface[mainSurface]}
+              aria-hidden={spaceContent.expanded || undefined} inert={spaceContent.expanded}>
               {!workspace && mainSurface === 'workbench' ? (
                 <section className="welcome">
                   <span className="brand-mark brand-mark--large"><BrandIcon size={34} /></span>
@@ -701,9 +714,10 @@ function DesktopApp() {
                   inert={!workbenchVisible && !focusTab}
                   >
                   {mountedWorkspaces.map((candidate) => {
-                    const visible = workbenchVisible && candidate.id === activeWorkspaceId
+                    const selected = workbenchVisible && candidate.id === activeWorkspaceId
+                    const visible = selected && !spaceContent.expanded
                     const focusSource = Boolean(focusVisible && focusTab && focusTab.workspaceId === candidate.id)
-                    const mounted = visible || focusSource
+                    const mounted = selected || focusSource
                     return (
                       <div
                         key={candidate.id}
@@ -714,10 +728,10 @@ function DesktopApp() {
                         aria-hidden={!mounted}
                         inert={!mounted}
                       >
-                        <MoteWorkface workspaceId={candidate.id} visible={visible}
+                        <MoteWorkface workspaceId={candidate.id} visible={selected}
                           topicId={workbenchSpaceSelection?.workspaceId === candidate.id ? workbenchSpaceSelection.topicId ?? undefined : undefined}>
                         <WorkspaceWorkbench
-                          projection={visible ? ordinaryProjection ?? undefined : undefined}
+                          projection={selected ? ordinaryProjection ?? undefined : undefined}
                           workspaceId={candidate.id}
                           {...(candidate.id === SCRATCH_WORKSPACE_ID && workbenchSpaceSelection?.workspaceId === candidate.id && workbenchSpaceSelection.topicId
                             ? { topicId: workbenchSpaceSelection.topicId, topicIsolation: 'bound-only' as const } : {})}
@@ -769,6 +783,7 @@ function DesktopApp() {
       </RendererResourceOwners>
     </ExecutorIdentityContext.Provider>
     </WindowSidebarLayoutContext.Provider>
+    </SpaceContentPresentationContext.Provider>
     </SettingsNavigation.Provider>
     </GitHistoryProvider>
   )

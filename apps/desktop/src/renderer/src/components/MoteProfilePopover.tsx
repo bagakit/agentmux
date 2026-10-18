@@ -7,6 +7,7 @@ import { useMoteMaterialsActions } from '../lib/mote-materials-actions'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { MoteDetailsPanel } from './MoteDetailsPanel'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
+import { SpaceContentPresentationContext } from '../lib/space-content-presentation'
 
 const ThemeObjectContactIcon = semanticIconComponent('object.contact')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
@@ -64,8 +65,8 @@ export function MoteProfilePopover({ workspaceId, topicId, reference, active, on
         <Dialog.Description hidden>Identity, behavior, current work and ideas for the selected Mote.</Dialog.Description>
         <Dialog.Close className="icon-button mote-profile-popover__close" aria-label="Close Mote profile" title="Close profile"><ThemeActionCloseIcon size={14} /></Dialog.Close>
         {scope?.issue ? <p role="status" className="mote-details__hint">{scope.issue}</p> : null}
-        {scope ? <MoteDetailsPanel key={owner.topicId} scope={scope} reference={owner.reference} active={active && open && !scope.issue}
-          onOpenPath={materials.open} />
+        {scope ? <SpaceContentPresentationContext.Provider value={null}><MoteDetailsPanel key={owner.topicId} scope={scope} reference={owner.reference} active={active && open && !scope.issue}
+          onOpenPath={materials.open} /></SpaceContentPresentationContext.Provider>
           : <p role="status" className="mote-details__hint">The original Mote profile is being read. Your conversation stays available.</p>}
       </Dialog.Content>
     </DocumentOverlayPortal>
