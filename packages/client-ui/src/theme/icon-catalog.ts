@@ -195,6 +195,7 @@ export const SEMANTIC_ICON_CATALOG = {
   'object.map': { label: 'Map', glyph: 'map' },
   'action.choose': { label: 'Choose', glyph: 'chevrons-up-down' },
   'object.folder': { label: 'Folder', glyph: 'folder' },
+  'object.disk': { label: 'Disk', glyph: 'hard-drive' },
   'object.link': { label: 'Link', glyph: 'link-2' },
   'action.create-folder': { label: 'Create Folder', glyph: 'folder-plus' },
   'layout.collapse-all': { label: 'Collapse All', glyph: 'chevrons-down-up' },
