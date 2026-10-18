@@ -44,10 +44,10 @@ export function prepareDiscordPublication(operation: Readonly<PublicationOperati
   const authors = p.kind === 'speech' && p.relay ? p.relay.sources.map(source => source.author.kind) : undefined
   const kinds = new Set(authors), human = !!authors?.length && authors.every(kind => kind === 'human')
   const input = human && p.kind === 'speech' ? p.inputSubmission : undefined
-  const inputStatus = input ? ({ waiting: 'Waiting for the original Agent', stopped: 'Input waiting stopped',
-    'terminal-confirmed': 'Input bytes confirmed; Agent acceptance unconfirmed', admitted: 'Accepted by the original Agent; work completion unconfirmed',
-    'not-applied': 'Input not applied', unknown: 'Input result unknown' }[input.status]
-    + (input.observation === 'rejoin-needed' ? '\nInput observation needs reconnection' : '')) : undefined
+  const inputStatus = input ? ({ waiting: 'Saved · waiting for Agent', stopped: 'Saved · delivery stopped',
+    'terminal-confirmed': 'Sent to Agent · acceptance not confirmed', admitted: 'Accepted by Agent',
+    'not-applied': 'Not delivered to Agent', unknown: 'Saved · delivery to Agent unconfirmed' }[input.status]
+    + (input.observation === 'rejoin-needed' ? '\nReconnect this input in AgentMux' : '')) : undefined
   const relayTitle = authors ? (human ? 'User' : kinds.size > 1 ? 'Mixed authors' : kinds.has('external') ? 'External message'
     : kinds.has('agent') ? 'Agent input' : 'Unknown author') + ' · via amux' : undefined
   const heading = relayTitle ?? (p.kind === 'speech' && p.phase === 'final' ? 'Agent reply'
