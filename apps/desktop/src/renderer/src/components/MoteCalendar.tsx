@@ -57,29 +57,39 @@ export function MoteCalendar({ scope, reference, active, openRequest }: {
   const weekScroll = useRef<HTMLDivElement>(null), weekViewport = useRef<{ period: number; top: number } | undefined>(undefined)
   const visible = useRef(active); visible.current = active
   useEffect(() => () => { if (focusFrame.current !== undefined) cancelAnimationFrame(focusFrame.current) }, [])
-  // Only changed spatial/Session inputs recompute this derived view. Hidden views
-  // retain their last labels without walking the catalog on unrelated Store updates.
+  // Spatial membership and live Session labels have separate inputs. A Session update
+  // cannot move this original Region, but can change its target or discussion labels.
   const queryKey = JSON.stringify(queries)
   const related = useAppStore(useMemo(() => {
     let previous: readonly unknown[] | undefined
+    let sessions: readonly SessionSnapshot[] | undefined
+    let confirmed: WorkbenchProjectionSelection | null = null
     let result: { target?: ContinuousProgressTarget; labels: (string | undefined)[] } = { labels: [] }
     return (state: ReturnType<typeof useAppStore.getState>) => {
       if (!active) return result
-      const facts = [state.config, state.sessions, state.tabs, state.layouts, state.spaceZoneBindings,
+      const facts = [state.config, state.tabs, state.layouts, state.spaceZoneBindings,
         state.scratchTopicSnapshots, state.workbenchSpaceSelection, state.activeWorkspaceId, state.topicCategories, state.projectGroups]
-      if (previous && facts.every((fact, index) => fact === previous![index])) return result
-      previous = facts
-      const confirmed = confirmedMoteReference(state, scope, { reference })
+      const spatialChanged = !previous || facts.some((fact, index) => fact !== previous![index])
+      if (!spatialChanged && sessions === state.sessions) return result
+      if (spatialChanged) {
+        confirmed = confirmedMoteReference(state, scope, { reference })
+        previous = facts
+      }
+      sessions = state.sessions
       const region = confirmed ? state.tabs[confirmed.tabId]?.regions[confirmed.regionId] : undefined
       const current = region?.kind === 'agent' ? sessionPresentationById(state.sessions).get(region.sessionId) : undefined
       const target = current?.kind === 'agent' && current.control.kind === 'agent' && current.control.hostId === current.hostId && queries.some(query =>
         query.scope?.hostId === current.hostId && query.scope.workspacePath === current.workspacePath)
         ? { hostId: current.control.hostId, workspacePath: current.workspacePath, agentSessionId: current.control.agentSessionId, providerId: current.providerId } : undefined
       const index = agentSessionPresentationIndex(state.sessions)
-      result = { ...(target ? { target } : {}), labels: source.records.map(record => {
+      const labels = source.records.map(record => {
         const candidates = index.get(record.agentSessionId)?.filter(session => matchesTarget(session, record)) ?? []
         return candidates.length === 1 ? candidates[0]!.label : undefined
-      }) }
+      })
+      if (target?.hostId === result.target?.hostId && target?.workspacePath === result.target?.workspacePath &&
+        target?.agentSessionId === result.target?.agentSessionId && target?.providerId === result.target?.providerId &&
+        labels.length === result.labels.length && labels.every((label, index) => label === result.labels[index])) return result
+      result = { ...(target ? { target } : {}), labels }
       return result
     }
   }, [active, scope, reference, queryKey, source.records]))
