@@ -12,6 +12,7 @@ import { projectNoteCanvas, canvasSharedObservation, canvasNoteTitle, initialCan
 import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { api } from '../lib/api'
 import { fileNavigationSelection, useAppStore } from '../store'
+import { documentKey } from '../lib/workbench-tabs'
 import type { NoteCanvasBlockPort } from '../lib/note-canvas-block-geometry'
 import { useNoteCanvasBlockPorts } from '../lib/use-note-canvas-block-ports'
 import type { CanvasLayoutInput } from '../lib/note-canvas-layout-engine'
@@ -42,10 +43,16 @@ const NO_BLOCK_IDS: readonly string[] = [], NO_PORTS: NoteCanvasBlockPort[] = []
 function SavedBody({ item, snapshot, active, blockIds, source, content: result, documents, selectedBlockIds, preview, onRead, onPorts, onOpen, onOpenLink, refresh }: Pick<NoteNodeData, 'item' | 'snapshot' | 'active' | 'blockIds' | 'source' | 'content' | 'documents' | 'selectedBlockIds' | 'preview' | 'onRead' | 'onOpen' | 'onOpenLink' | 'refresh'> & { onPorts(ports: NoteCanvasBlockPort[]): void }) {
   const body = useRef<HTMLDivElement>(null)
   const agentNames = useAppStore(state => state.agentNames)
+  const resource = item.page?.resource ?? (item.observation?.status === 'read' ? item.observation.resource : undefined)
+  const dirty = useAppStore(state => {
+    const workspace = resource && state.config?.workspaces.find(value => value.id === resource.workspaceId)
+    return Boolean(resource && workspace?.hostId === resource.hostId && workspace.path === resource.workspacePath && state.dirtyDocuments[documentKey(resource.workspaceId, resource.path)])
+  })
   const [all, showAll] = useState(false), [selected, setSelected] = useState<string | undefined>()
   const ready = result?.snapshot === snapshot ? result : null, content = ready?.value
   const ambiguous = snapshot.graph.duplicateNoteIds.includes(item.id)
   const confirmed = content?.status === 'read' && noteContentMatchesGraph(snapshot, content) && !ambiguous && (item.kind !== 'shared-block' || item.observation?.status === 'read' && item.observation.fileIdentity === 'confirmed') ? content : null
+  const empty = confirmed && source && (source.note.content.content ?? []).every(node => node.type === 'paragraph' && !node.content?.length)
   const whole = preview || item.kind === 'shared-block'
   const summary = !whole && selectedBlockIds.length === 0 && (blockIds.length === 0 || Boolean(source) && blockIds.every(id => source!.blocks.get(id)?.content.type === 'noteInclude'))
   const related = useMemo(() => source ? projectNoteBlocks(source, blockIds).rootBlockIds : NO_BLOCK_IDS, [source, blockIds])
@@ -60,13 +67,15 @@ function SavedBody({ item, snapshot, active, blockIds, source, content: result, 
   }, [confirmed, source, whole, summary, blockIds, displayedIds])
   useNoteCanvasBlockPorts(body, active && Boolean(confirmed), confirmedIds, onPorts)
   return <div className="note-canvas-saved-body"><div ref={body} className="note-canvas-body nodrag nopan nowheel" data-reading-mode={whole ? 'document' : summary ? 'summary' : 'related'} onDoubleClick={event => event.stopPropagation()}>
+    {dirty && <p className="note-canvas-draft" role="status">Unsaved changes in original · showing saved content.</p>}
     {confirmed ? <><div className="note-canvas-saved-heading"><span>{whole ? item.kind === 'shared-block' ? 'Saved original' : 'Full saved note' : summary ? 'Summary' : `${related.length} related block${related.length === 1 ? '' : 's'}`}</span>{item.kind !== 'shared-block' && <span>Saved original</span>}</div>
+      {empty && <p className="note-canvas-empty-body">No saved content yet.</p>}
       <div className="note-canvas-reader" data-selected-block={selected} onClick={event => {
         const block = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-block-id]') : null
         if (block && block.closest('.mobile-note-body') === event.currentTarget.querySelector('.mobile-note-body')) setSelected(block.dataset.blockId)
       }}><NoteReader resource={confirmed.resource} agentNames={agentNames} noteProvenance={confirmed.noteProvenance} content={confirmed.content} path={confirmed.resource.path} workspaceId={confirmed.resource.workspaceId} revision={confirmed.revision} documents={documents} graph={snapshot.graph} readInclude={target => onRead(target.noteId)} blockIds={whole || summary ? undefined : shown} previewBlockCount={summary ? 3 : undefined} compactIncludes highlightBlockIds={selectedBlockIds} readReference={target => onRead(target.noteId)} onOpenLink={onOpenLink} /></div>
       {selected && (item.page || item.kind === 'shared-block') ? <button type="button" className="note-canvas-open-block" onClick={() => onOpen(item.id, selected)}><OpenIcon size={12} />Open selected block</button> : null}</>
-      : <div className="note-canvas-body-state" role="status">{ambiguous ? 'Multiple original files share this Note identity. Open the registered original or refresh to confirm the source.' : item.kind === 'shared-block' && !canvasSharedObservation(snapshot, item.id) ? 'The shared file identity is unconfirmed. Refresh the graph to confirm its original.' : ready?.pending ? 'Reading saved original…' : !ready ? 'Automatic reading covers up to 6 notes in this saved graph. Read this original to continue.' : content?.status === 'read' ? 'Saved snapshot changed. Refresh the graph to read the current original.' : ready.issue ?? (content && 'message' in content ? content.message : 'Original body is unconfirmed.')}
+      : <div className="note-canvas-body-state" role="status">{ambiguous ? 'Multiple original files share this Note identity. Open the registered original or refresh to confirm the source.' : item.kind === 'shared-block' && !canvasSharedObservation(snapshot, item.id) ? 'The shared file identity is unconfirmed. Refresh the graph to confirm its original.' : ready?.pending ? 'Reading saved original…' : !ready ? 'This original is outside the automatic reading window for the current view. Read it to continue.' : content?.status === 'read' ? 'Saved snapshot changed. Refresh the graph to read the current original.' : ready.issue ?? (content && 'message' in content ? content.message : 'Original body is unconfirmed.')}
         {!ready?.pending && <button type="button" onClick={content?.status === 'read' ? refresh : () => onRead(item.id)}>{content?.status === 'read' ? 'Refresh graph' : blockIds.length ? 'Read related blocks' : 'Read original'}</button>}
       </div>}
   </div>{confirmed && !whole && !summary && remaining.length > 0 && <div className="note-canvas-reading-actions nodrag nopan"><button type="button" className="note-canvas-more" onClick={() => showAll(true)}>More {remaining.length} related blocks</button></div>}</div>
@@ -123,7 +132,7 @@ const NoteCard = memo(function NoteCard({ data, selected }: NodeProps<CanvasNode
     </header>
     {readable ? <SavedBody {...data} onPorts={reportPorts} /> : <p className="note-canvas-page-target">Original file identity unconfirmed</p>}
     {mountedPorts.map(port => <div key={port.blockId} className="note-canvas-row-endpoint note-canvas-endpoint" data-port-block-id={port.blockId} title={`Original block: ${port.blockId}`} style={{ top: port.top, visibility: ports.some(visible => visible.blockId === port.blockId) ? 'visible' : 'hidden' }}><EndpointHandles kind="block" blockId={port.blockId} /></div>)}
-    {data.blockIds.length > 0 && <div className="note-canvas-block-summary note-canvas-endpoint" data-endpoint-kind="block" title="Block endpoints are grouped here. Inspect a relationship to see its exact original blocks."><EndpointHandles kind="block" /><span>Blocks</span><span>Grouped endpoints</span></div>}
+    <div className="note-canvas-block-summary note-canvas-endpoint" data-empty={data.blockIds.length === 0} aria-hidden={data.blockIds.length === 0} data-endpoint-kind="block" title="Some relationships attach here until their exact passage is visible. Inspect a relationship to read its original content."><EndpointHandles kind="block" /><span>Referenced passages</span><span>{data.blockIds.length}</span></div>
     <div className="note-canvas-degrees" aria-label={`${item.incoming} incoming, ${item.outgoing} outgoing occurrences in the saved graph`} title="Saved links and references, including notes outside this view. Unmatched links count only as outgoing."><span><SemanticIcon name="note.reference-incoming" size={10} /> {item.incoming} incoming</span><span><SemanticIcon name="note.reference-outgoing" size={10} /> {item.outgoing} outgoing</span></div>
     <footer className="nodrag">{item.kind === 'shared-block' ? <button type="button" onClick={() => data.onOpen(item.id)} disabled={!openable}><OpenIcon size={12} />Open original</button> : <button type="button" aria-expanded={data.preview} aria-label={`${data.preview ? 'Show related blocks' : 'Full note'}: ${title}`} onClick={() => { if (!data.content?.pending && (!data.content?.value || data.content.value.status !== 'read')) data.onRead(item.id); data.onPreview(item.id) }} disabled={!readable}>{data.preview ? <RelatedBlocksIcon size={12} /> : <FullNoteIcon size={12} />}{data.preview ? 'Related blocks' : 'Full note'}</button>}
       <button type="button" aria-expanded={data.expanded} aria-label={`${data.expanded ? 'Collapse' : 'Expand'} relationships: ${item.title}`} onClick={() => data.onNeighbors(item.id)} disabled={!item.neighbors}><RelationshipsIcon size={12} />{data.expanded ? 'Collapse' : 'Explore'}<small>{item.neighbors}</small></button>
@@ -141,10 +150,11 @@ const RelationshipEdge = memo(function RelationshipEdge(props: EdgeProps<CanvasE
   const path = self ? `M ${sourceX},${sourceY} C ${sourceX + 100},${controlY} ${targetX - 100},${controlY} ${targetX},${targetY}`
     : `M ${sourceX},${sourceY} C ${midX},${controlY} ${midX},${controlY} ${targetX},${targetY}`
   const linked = relationship.kind !== 'hierarchy', count = relationship.references.length, noun = relationship.kind === 'embed' ? 'embed' : relationship.kind === 'link' ? 'link' : 'reference'
+  const label = relationship.kind === 'hierarchy' ? 'Subpage' : relationship.kind === 'embed' ? data.targetShared ? 'Uses shared content' : 'Includes content' : relationship.kind === 'link' ? relationship.targetKind === 'block' ? 'Links to passage' : 'Links to note' : 'References passage'
   const endpoints = `${relationship.sourceKind === 'block' ? 'Block' : 'Page'} → ${relationship.targetKind === 'page' && data.targetShared ? 'shared block' : relationship.targetKind}`
   return <><BaseEdge id={id} path={path} {...(markerEnd ? { markerEnd } : {})} className={`note-canvas-edge-${relationship.kind}${data.focused && !data.selected ? ' is-muted' : ''}${data.selected ? ' is-selected' : ''}`} interactionWidth={20} />
     <EdgeLabelRenderer><button type="button" data-edge-id={id} data-source-note={relationship.source} data-target-note={relationship.target} data-source-kind={relationship.sourceKind} data-target-kind={relationship.targetKind} data-source-block={relationship.sourceBlockId} data-target-block={relationship.targetBlockId} data-source-attachment={relationship.sourceKind === 'page' ? 'page' : relationship.sourceBlockId ? 'block' : 'summary'} data-target-attachment={relationship.targetKind === 'page' ? 'page' : relationship.targetBlockId ? 'block' : 'summary'} data-source-handle={props.sourceHandleId} data-target-handle={props.targetHandleId} data-relationship-kind={relationship.kind} data-lane={offset} title={`${data.sourceTitle} → ${data.targetTitle} · ${endpoints}${relationship.sourceBlockId ? ` · From ${relationship.sourceBlockId}` : ''}${relationship.targetBlockId ? ` · To ${relationship.targetBlockId}` : ''}`} className={`note-canvas-edge-label nodrag nopan is-${relationship.kind}`} data-selected={data.selected} data-muted={data.focused && !data.selected} style={{ transform: `translate(-50%, -50%) translate(${midX}px,${labelY}px)` }}
-      aria-label={linked ? `Inspect ${count} ${noun}${count === 1 ? '' : 's'}: ${endpoints}` : 'Inspect parent and subpage relationship: Page → page'} onClick={() => data.inspect(relationship)}><span>{linked ? `${count} ${noun}${count === 1 ? '' : 's'}` : 'Subpage'}</span><small>{endpoints}</small></button></EdgeLabelRenderer>
+      aria-label={linked ? `Inspect ${count} ${noun}${count === 1 ? '' : 's'}: ${endpoints}` : 'Inspect parent and subpage relationship: Page → page'} onClick={() => data.inspect(relationship)}><span>{label}</span>{count > 1 && <small>{count} places</small>}</button></EdgeLabelRenderer>
   </>
 })
 const nodeTypes = { note: NoteCard }, edgeTypes = { relationship: RelationshipEdge }
@@ -152,6 +162,7 @@ const nodeTypes = { note: NoteCard }, edgeTypes = { relationship: RelationshipEd
 type CanvasBodies = ReturnType<typeof useNoteCanvasContent>
 function EndpointContent({ noteId, blockId, snapshot, bodies, refresh, onOpenLink, complete = false }: { noteId: string; blockId?: string; complete?: boolean; snapshot: NotebookGraphSnapshot; bodies: CanvasBodies; refresh(): void; onOpenLink(link: NoteLinkOpenRequest): void }) {
   const agentNames = useAppStore(state => state.agentNames)
+
   const held = bodies.results[noteId], value = held?.snapshot === snapshot ? held.value : undefined
   const confirmed = value?.status === 'read' && noteContentMatchesGraph(snapshot, value) && !snapshot.graph.duplicateNoteIds.includes(noteId) && (value.kind !== 'shared-block' || canvasSharedObservation(snapshot, noteId)) ? value : null
   return confirmed ? <div className="note-canvas-reader note-canvas-comparison-content"><NoteReader resource={confirmed.resource} agentNames={agentNames} noteProvenance={confirmed.noteProvenance} content={confirmed.content} path={confirmed.resource.path} workspaceId={confirmed.resource.workspaceId} revision={confirmed.revision} documents={bodies.documents} graph={snapshot.graph} readInclude={target => bodies.request(target.noteId)} blockIds={blockId ? [blockId] : undefined} highlightBlockIds={blockId ? [blockId] : undefined} clipBlocks={!complete} readReference={target => bodies.request(target.noteId)} onOpenLink={onOpenLink} /></div>
@@ -222,7 +233,7 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
     const add = (noteId: string, blockId: string) => { const held = result.get(noteId) ?? new Set<string>(); held.add(blockId); result.set(noteId, held) }
     for (const relationship of projection.relationships) for (const reference of relationship.references) {
       add(reference.source.noteId, reference.source.blockId)
-      if (reference.resolution === 'resolved' && reference.target.kind === 'block') add(reference.target.noteId, reference.target.blockId)
+      if (reference.target.kind === 'block') add(reference.target.noteId, reference.target.blockId)
     }
     for (const reference of projection.unbound) add(reference.source.noteId, reference.source.blockId)
     return new Map([...result].map(([id, ids]) => [id, [...ids].sort()]))
@@ -240,7 +251,7 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
   const selectedBlocks = useMemo(() => {
     const result = new Map<string, string[]>()
     const add = (note: string, block: string) => result.set(note, [...new Set([...(result.get(note) ?? []), block])])
-    for (const reference of inspectedReferences) { add(reference.source.noteId, reference.source.blockId); if (reference.resolution === 'resolved' && reference.target.kind === 'block') add(reference.target.noteId, reference.target.blockId) }
+    for (const reference of inspectedReferences) { add(reference.source.noteId, reference.source.blockId); if (reference.target.kind === 'block') add(reference.target.noteId, reference.target.blockId) }
     return result
   }, [inspectedReferences])
   const selectedPages = useMemo(() => new Set(relationship?.kind === 'hierarchy' ? [relationship.source, relationship.target] : inspectedReferences.flatMap(reference => reference.resolution === 'resolved' && reference.target.kind === 'page' ? [reference.target.noteId] : [])), [relationship, inspectedReferences])
@@ -401,7 +412,7 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
   const titleFor = (id: string) => { const node = nodes.find(node => node.id === id); return node ? canvasNoteTitle(node.data.item, node.data.source) : pageFor(id)?.title ?? 'Unconfirmed original' }
   function persistViewport() { if (flow) save({ viewport: flow.getViewport() }) }
   return <section className="note-canvas" aria-label="Note relationship canvas" data-scope={scope.kind} data-active={active}>
-    <div className="note-canvas-toolbar"><div className="note-canvas-summary"><RelationshipsIcon size={14} /><strong>{scope.kind === 'note' ? 'Related notes' : 'Relationships'}</strong><span>{projection.notes.filter(item => item.kind !== 'shared-block').length} notes{projection.notes.some(item => item.kind === 'shared-block') && ` · ${projection.notes.filter(item => item.kind === 'shared-block').length} shared block${projection.notes.filter(item => item.kind === 'shared-block').length === 1 ? '' : 's'}`}</span></div>
+    <div className="note-canvas-toolbar"><div className="note-canvas-summary"><RelationshipsIcon size={14} /><strong>{scope.kind === 'note' ? 'Related notes' : 'Relationships'}</strong><span>{projection.notes.filter(item => item.kind !== 'shared-block').length} note{projection.notes.filter(item => item.kind !== 'shared-block').length === 1 ? '' : 's'}{projection.notes.some(item => item.kind === 'shared-block') && ` · ${projection.notes.filter(item => item.kind === 'shared-block').length} shared block${projection.notes.filter(item => item.kind === 'shared-block').length === 1 ? '' : 's'}`}</span></div>
       <div className="note-canvas-tools" role="group" aria-label="Canvas tools"><button type="button" className="note-canvas-tool-text" aria-label="Show related notes" title="Show incoming and outgoing neighbors of the notes in this view" onClick={() => save({ expandedNoteIds: [...new Set([...layout.expandedNoteIds, ...seeds])] })}><RelationshipsIcon size={14} /><span>Show related</span></button><button type="button" title="Zoom out" aria-label="Zoom out" onClick={() => { void flow?.zoomOut({ duration: 150 }).then(persistViewport) }}><MinusIcon size={15} /></button><button type="button" title="Zoom in" aria-label="Zoom in" onClick={() => { void flow?.zoomIn({ duration: 150 }).then(persistViewport) }}><PlusIcon size={15} /></button>
         <button type="button" title="Fit visible notes" aria-label="Fit visible notes" onClick={() => { void flow?.fitView({ padding: .15, maxZoom: 1, duration: 200 }).then(persistViewport) }}><FitIcon size={14} /></button>
         {scope.kind === 'note' && <button type="button" title="Center this note" aria-label="Center this note" onClick={() => { const node = flow?.getNode(scope.noteId); if (node) void flow?.setCenter(node.position.x + (node.measured?.width ?? 288) / 2, node.position.y + (node.measured?.height ?? 180) / 2, { zoom: 1, duration: 200 }).then(persistViewport) }}><FocusIcon size={14} /></button>}
@@ -432,7 +443,7 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
         {selectionExpired ? <p role="status">The selected original occurrence is no longer in this saved graph. Select a relationship again.</p> : relationship?.kind === 'hierarchy' ? <div className="note-canvas-inspector-actions"><button type="button" onClick={() => openOriginal(relationship.source)}>Open parent</button><button type="button" onClick={() => openOriginal(relationship.target)}>Open subpage</button></div> : <ol>{[...sourceGroups].map(([key, references]) => <ReferenceDetails key={key} notes={projection.notes} references={references} snapshot={snapshot} bodies={bodies} onOpen={openOriginal} refresh={refresh} onOpenLink={onOpenLink} />)}</ol>}
       </aside> : null}
     </div></NotebookDirectoryContextMenu>
-    <div className="note-canvas-caption"><span className="note-canvas-legend"><i />Subpage<i data-link />Link<i data-reference />Reference<i data-embed />Embed</span><span role="status">{snapshot ? `${snapshot.graph.completeness === 'complete' ? 'Saved catalog observed' : `${snapshot.graph.completeness === 'partial' ? 'Partial' : 'Unconfirmed'} coverage`} · ${snapshot.graph.observations.filter(value => value.status === 'read').length}/${snapshot.graph.observations.length} originals read · catalog r${snapshot.catalog.revision}` : 'Saved-file graph'}{projection.unbound.length > 0 && ` · ${projection.unbound.length} visible unbound links`}{busy && snapshot ? ' · Refreshing…' : ''}</span></div>
+    <div className="note-canvas-caption"><span className="note-canvas-legend"><i />Subpage<i data-link />Link<i data-reference />Reference<i data-embed />Included content</span><span role="status">{snapshot ? `${snapshot.graph.completeness === 'complete' ? 'Saved relationships' : `${snapshot.graph.completeness === 'partial' ? 'Partial' : 'Unconfirmed'} coverage`}${projection.unbound.length > 0 ? ` · ${projection.unbound.length} visible unbound links` : ''}${busy ? ' · Refreshing…' : ''}` : 'Saved-file graph'}</span>{snapshot && <details className="note-canvas-source-details"><summary>Source details</summary><span>{snapshot.graph.observations.filter(value => value.status === 'read').length}/{snapshot.graph.observations.length} originals read · catalog r{snapshot.catalog.revision}</span></details>}</div>
     {linkNavigation.dialog}
   </section>
 }
