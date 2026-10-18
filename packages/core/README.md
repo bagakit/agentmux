@@ -23,6 +23,8 @@ Core 使用 Node 24+，包不设 OS 安装门，portable API 可独立使用；�
 
 共同记录投影与公开有界读取见[对话协议](../../docs/specs/conversation-protocol.md)。`@agentmux/core/conversation` 不依赖 UI；既有 Desktop/Mobile 消息面与外部接入复用原来源与内容，不另建历史缓存。
 
+该入口的 `projectConversationStream` 直接消费已接受的原 `ConversationSourceRecord`、来源范围及覆盖，保留原记录身份、版本和顺序证据，统一生成事件与关系。`projectConversationTimeline` 适配 native page／captured timeline 后调用同一语义流；公共 Reader 直接传原版本化记录。客户端通过 `readAgentConversation`／`readConversationChanges` 读取已接受窗口，通知只唤醒读取，不另造事件归并。模块职责与实际接线见[语义流边界](../../docs/architecture/conversation.md#语义流的模块边界)。
+
 只需内容、角色与来源摘要时，可对已经取得的同一输入调用 `projectConversationSummary`；它复用完整读取的语义图和内容适配，不生成或返回事件版本、记录集合与输入实体。需要事件版本、关联读取或后续变更消费时，继续使用完整的 `projectConversationReading`／`projectConversationRecords` 及原公开读取接口。
 
 `sessionHistoryPage(agentSessionId, { limit, cursor?, signal? })` 读取原 Session 的 Provider 原生记录；`observeSessionHistory(agentSessionId, onChange)` 观察该原生来源的变化，消费者据此重读最新页。两者独立于 Hook timeline，读取不向 Agent 输入内容或改变 Run。历史 cursor 是 Provider 生成的 opaque 值，不能用数组下标、正文或时间重新生成。

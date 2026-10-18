@@ -68,7 +68,7 @@ Hook 声明由原 [`AgentManagedHookInstaller`](../../packages/core/src/managed-
 | --- | --- |
 | Provider 原生页、精确记录及资源 | `sessionHistoryPage`／Provider history 能力；精确回读保持原 Provider source 和签名资源引用 |
 | captured 近期快照、完整分页及旧版本 | `sessionTimeline`／`readAgentSessionHistory` → 原 Session Store；近期快照不代签全量历史 |
-| 统一事件页、精确锚点、耐久变化 | [`conversation-reader`](../../packages/core/src/conversation-reader.ts) → 原 native/captured 端口 → `projectConversationTimeline` |
+| 统一事件页、精确锚点、耐久变化 | [`conversation-reader`](../../packages/core/src/conversation-reader.ts) → 原 native/captured 端口 → `projectConversationStream` |
 | Terminal Replay | 原 Run output／Attachment → terminal viewport；PTY 字节不自动成为对话或作者事实 |
 
 Inputs 的有界搜索／分页由原 `agent.history` 与 `agent.input.ls` 提供；[`projectSessionInputs`](../../packages/core/src/session-inputs.ts) 在 Core 内复用同一 same-event／adoption 判定，将准确 input key、已查询的原记录及当前 accepted input 关系投影为阅读组。当前实体只贡献关联证明，不把未命中查询的正文塞回结果。原记录版本改变或 native 采用出现歧义时撤销相应归并，保留原正文与未知回执；原 Host 未确认时不拿路由 Host 替代。Desktop Composer／Mailbox 和 Mobile Mailbox 消费这一个纯投影，发送回执占主行时，其来源正文在同一详情逐份展开；没有回执的组使用原生记录优先的原记录作为主行。所有 Copy、填草稿、资源读取和定位仍指向准确原记录，列表不创建新发送或第二份事实 Store。
@@ -77,7 +77,7 @@ Inputs 的有界搜索／分页由原 `agent.history` 与 `agent.input.ls` 提�
 
 调用关联以每个准确 part 对原 scoped invocation 的 `invocation-member` 归属表达，单成员也保留；`conversationInvocationId` 由 Core 唯一定义。归属及其所在事件版本不依赖同批是否读到另一成员，公共 Reader 不反查全史。相同调用身份不合并父发言，也不表示未读的对端内容已经可读。
 
-每条原生答案的 typed `questionAnswers` 独立产生 `answers`，目标只持原 source Host、Session、Provider/native source 与完整 opaque question ID，不要求同批读到问题，也不猜问题 record 或 turn。`conversation-questions` 共同限定读卡片的 Host／来源；`conversation-timeline` 的原记录关系函数同时供投影与严格 codec 使用。`answers`／`observes` 只归发起原记录所在事件，不能因读到目标而改变目标事件版本；未读目标仍保准确 gap。多条原答案分别保留，卡片显示选择不代替关系保全。
+每条原生答案的 typed `questionAnswers` 独立产生 `answers`，目标只持原 source Host、Session、Provider/native source 与完整 opaque question ID，不要求同批读到问题，也不猜问题 record 或 turn。`conversation-questions` 共同限定读卡片的 Host／来源；`conversation-stream` 的原记录关系函数同时供投影与严格 codec 使用。`answers`／`observes` 只归发起原记录所在事件，不能因读到目标而改变目标事件版本；未读目标仍保准确 gap。多条原答案分别保留，卡片显示选择不代替关系保全。
 
 其他关系只对原 Reader 当前已接受的 records 闭合。后续 source page 或 changes 加入同一 view 后，纯投影重新形成完整窗口，晚到的准确 same-event 贡献保留先前原文并更新一个事件。暂未读取或已离开有界窗的关系目标仍有准确 gap；保留边界可沿原 versioned anchor 回读。较早／较新页沿 Core 签发的原页邻接位置读取；previous-source 意图只选择 Session 保留的准确原生绑定。客户端保存 DOM 锚点、选区和已接受 frame，不解码 Provider cursor 或重新拼接贡献。原 `window.anchor` 表明精确单记录 inspect，与可前后翻页的历史窗分开；park/resume 保留该原版本，后到通知不令它自动跟随，显式返回当前历史重新打开正常窗口。自动预读较早页而首页仍在窗口中时，`navigation.newer` 为空，实时尾部仍继续接入；实际逐出首页才保留历史位置，沿 newer 返回后从原 cut 补齐变化。精确原文、来源覆盖与已闭合关系分别解释。
 
@@ -136,7 +136,7 @@ Desktop 将原滚动锚点及跟随动作交给共同布局，Mobile 复用原�
 
 来源标签集中在 [`conversation-sources`](../../packages/client-ui/src/lib/conversation-sources.ts)，只索引已接受 Core records 和精确关系；同一事件可有多个来源，invocation 来源按 Core 归属与唯一调用身份只标对应 selector。Focus、搜索与 Mobile 复用该映射；来源标签不产生关联、作者、采用或完成事实。
 
-原生协作回报由 Provider 历史适配解释，沿既有 `collaboration.kind = message` 保留原 source、发送者、接收者、记录和回合；[`session-history`](../../packages/core/src/session-history.ts) 核对其原生命名空间，[Core timeline](../../packages/core/src/conversation-timeline.ts) 将其作为真实消息边界且不借父 Session 作者。共同 `ConversationView` 显示原生参与者及正文，不以 actor 字符串查询 AgentMux 身份或补头像。无准确原消息关联的 Hook 快照仍是独立观察；[`conversation-reply-preview`](../../packages/client-ui/src/lib/conversation-reply-preview.ts) 只生成有界阅读摘要，不持有关联或正文事实。观察沿同一过程的固定原节点披露，过程开合只隐藏步骤；连续已核作者的进度只收敛重复装饰，准确消息、SID、时间与动作仍独立保留。
+原生协作回报由 Provider 历史适配解释，沿既有 `collaboration.kind = message` 保留原 source、发送者、接收者、记录和回合；[`session-history`](../../packages/core/src/session-history.ts) 核对其原生命名空间，[Core 语义流](../../packages/core/src/conversation-stream.ts) 将其作为真实消息边界且不借父 Session 作者。共同 `ConversationView` 显示原生参与者及正文，不以 actor 字符串查询 AgentMux 身份或补头像。无准确原消息关联的 Hook 快照仍是独立观察；[`conversation-reply-preview`](../../packages/client-ui/src/lib/conversation-reply-preview.ts) 只生成有界阅读摘要，不持有关联或正文事实。观察沿同一过程的固定原节点披露，过程开合只隐藏步骤；连续已核作者的进度只收敛重复装饰，准确消息、SID、时间与动作仍独立保留。
 
 用户命名阅读点由 [`ConversationLandmarks`](../../apps/desktop/src/renderer/src/components/ConversationLandmarks.tsx) 经原 Main／公共控制服务到同一 [`ConversationLandmarkStore`](../../packages/core/src/conversation-landmark-store.ts)。该 Store 只持引用元数据。返回沿原 SessionPane 导航 owner；未确认写入保留原 operation 与暂存草稿，不建立第二份已保存事实。
 
