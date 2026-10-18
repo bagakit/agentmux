@@ -51,6 +51,7 @@ export function useAgentInformationPreview(context: FocusContext | undefined, re
   const active = useWorkbenchPresentationActive(), enabled = requested && active && Boolean(context)
   const previewTrigger = useAppStore(state => resolveFocusPreviewTrigger(state.config?.focus?.previewTrigger))
   const anchor = useRef<HTMLButtonElement>(null), token = useRef({}).current
+  const invoker = useRef({ hasContext: Boolean(context), pointerInside: false })
   const intent = useAgentPreviewIntent(() => show(), previewTrigger, enabled)
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const restoringFocus = useRef(false), id = useId()
@@ -89,11 +90,13 @@ export function useAgentInformationPreview(context: FocusContext | undefined, re
   // Metadata becoming readable must follow the actual held input on this invoker.
   // A cached relationship highlight cannot create a new reading intent.
   useLayoutEffect(() => {
-    if (!enabled || previewTrigger === 'keyboard') return
+    const becameAvailable = !invoker.current.hasContext && Boolean(context)
+    invoker.current.hasContext = Boolean(context)
+    if (!becameAvailable || !enabled || previewTrigger === 'keyboard') return
     const trigger = anchor.current
     if (trigger === document.activeElement) show()
-    else if (trigger?.matches(':hover')) showSoon()
-  }, [enabled, document])
+    else if (invoker.current.pointerInside) showSoon()
+  }, [Boolean(context), enabled, document])
   useLayoutEffect(() => () => { close() }, [close])
   const position = identity?.tabs.some(tab => tab.regions.length > 1) ? <span className="focus-context__position"
     aria-label={`${identity.occurrenceCount} confirmed ${identity.occurrenceCount === 1 ? 'position' : 'positions'}`}
@@ -101,7 +104,8 @@ export function useAgentInformationPreview(context: FocusContext | undefined, re
       if (event.relatedTarget && (event.relatedTarget as Node).nodeType && anchor.current?.contains(event.relatedTarget as Node)) showSoon()
     }}><WorkbenchTopology tabs={identity.tabs} interactive={false} enabled={enabled && !open} /></span> : undefined
   return { anchor, position, describedBy: open ? id : undefined, close, suppressRestoredFocus,
-    triggerEvents: { 'aria-keyshortcuts': enabled ? options?.readingKey ?? 'ArrowDown' : undefined, onPointerEnter: showSoon, onPointerLeave: hideSoon,
+    triggerEvents: { 'aria-keyshortcuts': enabled ? options?.readingKey ?? 'ArrowDown' : undefined,
+      onPointerEnter: () => { invoker.current.pointerInside = true; showSoon() }, onPointerLeave: () => { invoker.current.pointerInside = false; hideSoon() },
       onFocus: () => { if (previewTrigger !== 'keyboard' && !restoringFocus.current) show() }, onBlur: hideSoon, onPointerDown: close,
       onKeyDown: (event: ReactKeyboardEvent<HTMLButtonElement>) => {
         if (event.key !== (options?.readingKey ?? 'ArrowDown') || !enabled) return
