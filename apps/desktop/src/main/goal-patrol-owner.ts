@@ -5,6 +5,7 @@ import { demandExecutionReferences, demandResponsibilityScope, type Demand, type
   type DemandPatrolReportInput, type DemandPatrolTarget, type DemandStore } from '@agentmux/demand'
 import type { GoalDelegationAuthority, GoalDelegationResult } from '@agentmux/core/goal-delegation'
 import type { GoalPatrolObservation } from '@agentmux/core/goal-patrol'
+import type { DemandEvidence } from '@agentmux/demand/goals'
 import type { RuntimeController } from './runtime-controller.js'
 
 type Runtime = Pick<RuntimeController, 'resolveGoalAgent' | 'observeCoreEvents' | 'observeInputOccupation' | 'saveGoalAttention' |
@@ -65,7 +66,7 @@ export class GoalPatrolOwner {
   }
   private attempt(goalId: string, patrolId: string, target: DemandPatrolTarget, context: string, suffix: string): Omit<DemandPatrolAttempt, 'preparedAt'> {
     const operationId = 'goal-patrol-' + createHash('sha256').update(JSON.stringify([goalId, patrolId, suffix])).digest('hex')
-    const frozen = JSON.parse(context) as { alignmentRevision: number | null; executions: unknown[]; alerts: unknown[]; reports: unknown[]; evidence: string[] }
+    const frozen = JSON.parse(context) as { alignmentRevision: number | null; executions: unknown[]; alerts: unknown[]; reports: unknown[]; evidence: DemandEvidence[] }
     // The original Goal holds full tasks/results. Carry exact references and an explicit bounded excerpt.
     const excerpt = { alignmentRevision: frozen.alignmentRevision, executionCount: frozen.executions.length,
       executions: frozen.executions.slice(0, 8), alerts: frozen.alerts.slice(0, 8), reports: frozen.reports.slice(0, 8), evidence: frozen.evidence.slice(0, 8),
@@ -100,7 +101,7 @@ export class GoalPatrolOwner {
       alerts: work.responsibility?.executions.filter(row => row.alert).map(row => ({ execution: row.execution, phase: row.phase, alert: row.alert, basis: row.basis })) ?? [],
       reports: (goal.delegations ?? []).filter(d => d.report).map(d => ({ delegationOperationId: d.operationId, sourceMessageId: d.sourceMessageId, reportOperationId: d.report!.operationId, replyMessageId: d.report!.replyMessageId })),
       progressOperations: (goal.progressUpdates ?? []).map(update => update.operationId), groundingSubmissionId: goal.grounding?.submissionId ?? null,
-      evidence: [...new Set([...(goal.grounding?.checks ?? []).flatMap(c => c.evidence), ...(goal.progressUpdates ?? []).flatMap(p => p.evidence)])] })
+      evidence: [...new Map([...(goal.grounding?.checks ?? []).flatMap(c => c.evidence), ...(goal.progressUpdates ?? []).flatMap(p => p.evidence)].map(evidence => [JSON.stringify(evidence), evidence])).values()] })
     const receipt = await this.demands.preparePatrol(goalId, { operationId, expectedScope, supervisorAgentSessionId: goal.supervisorSessionId,
       executions: demandExecutionReferences(goal), context: frozen, requestedBy: authority.actor,
       ...(target ? { attempt: this.attempt(goalId, operationId, target, frozen, operationId) } : {}) })

@@ -1,3 +1,4 @@
+import { GoalEvidence } from './GoalEvidence'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useRef, useState } from 'react'
 import { formatSessionAddress } from '@agentmux/core/sharing'
@@ -63,7 +64,7 @@ export function GoalDelegationWork({ demand, active = true, compact = false }: {
       if (result.operation === 'focus' && result.navigation.state === 'rejected') setIssue(result.issues.map(item => item.message).join(' '))
     } catch (error) { setIssue(error instanceof Error ? error.message : String(error)) }
   }
-  return <><GoalResponsibilitySummary demand={current} active={active} /><section className="goal-delegation" aria-label="Delegated work">
+  return <><GoalResponsibilitySummary demand={current} active={active} /><section id={`goal-work-${demand.id}`} tabIndex={-1} className="goal-delegation" aria-label="Delegated work">
     <div className="goal-delegation__heading"><strong>Delegated work</strong><button type="button" className="goals-button" onClick={() => void refresh()}>Refresh reports</button></div>
     {current.delegationObservationIssue || issue ? <p className="goals-service" role="status">{issue ?? current.delegationObservationIssue} Original Agents, tasks and last confirmed reports are kept.</p> : null}
     <GoalStartWork rows={starts} supervisorSessionId={current.supervisorSessionId} active={active} openAgent={openAgent} review={review} />
@@ -98,7 +99,7 @@ export function GoalDelegationWork({ demand, active = true, compact = false }: {
         <pre>{row.delegation.requestText ?? row.delegation.text}</pre>
         {row.report ? <div className="goal-delegation__checks"><p>{row.report.grounding.summary}</p>
           {row.report.grounding.checks.map(check => <div key={check.criterionId}><strong>{check.criterionId} · {check.outcome}</strong>
-            {check.note ? <p>{check.note}</p> : null}{check.evidence.map(evidence => <span key={evidence}>{evidence}</span>)}</div>)}
+            {check.note ? <p>{check.note}</p> : null}<GoalEvidence evidence={check.evidence} criterion={check.criterionId} /></div>)}
         </div> : null}
       </details>
     </article>)}

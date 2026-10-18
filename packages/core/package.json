@@ -99,6 +99,10 @@
       "types": "./dist/control.d.ts",
       "import": "./dist/control.js"
     },
+    "./goal-evidence": {
+      "types": "./dist/goal-evidence.d.ts",
+      "import": "./dist/goal-evidence.js"
+    },
     "./files": {
       "types": "./dist/public-rpc-files.d.ts",
       "import": "./dist/public-rpc-files.js"

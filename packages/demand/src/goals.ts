@@ -1,4 +1,6 @@
 /** Pure Goal facts and validation. Safe to consume from a browser. */
+import { parseDemandEvidence, type DemandEvidence } from './evidence.js'
+export { parseDemandEvidence, demandEvidenceText, demandEvidenceLabel, type DemandEvidence, type DemandFileEvidence } from './evidence.js'
 export type DemandCriterion = { id: string; text: string }
 export type DemandAlignmentProposal = {
   summary: string
@@ -12,7 +14,7 @@ export type DemandAlignment = DemandAlignmentProposal & {
 export type DemandGroundingCheck = {
   criterionId: string
   outcome: 'met' | 'gap' | 'unknown'
-  evidence: string[]
+  evidence: DemandEvidence[]
   note: string
 }
 export type DemandGroundingProposal = {
@@ -78,7 +80,8 @@ export function parseGroundingProposal(value: unknown): DemandGroundingProposal 
   const checks: DemandGroundingCheck[] = source.checks.map((value, index) => {
     const entry = record(value, `grounding.checks[${index}]`, ['criterionId', 'outcome', 'evidence', 'note'])
     if (entry.outcome !== 'met' && entry.outcome !== 'gap' && entry.outcome !== 'unknown') throw new Error('grounding outcome must be met, gap or unknown')
-    return { criterionId: text(entry.criterionId, 'check.criterionId'), outcome: entry.outcome, evidence: texts(entry.evidence, 'check.evidence'), note: text(entry.note, 'check.note', true) }
+    if (!Array.isArray(entry.evidence)) throw new Error('check.evidence must be an array')
+    return { criterionId: text(entry.criterionId, 'check.criterionId'), outcome: entry.outcome, evidence: entry.evidence.map(parseDemandEvidence), note: text(entry.note, 'check.note', true) }
   })
   if (new Set(checks.map(entry => entry.criterionId)).size !== checks.length) throw new Error('grounding criterion IDs must be unique')
   return { alignmentRevision: revision(source.alignmentRevision, 'grounding.alignmentRevision'), summary: text(source.summary, 'grounding.summary'), checks }
@@ -91,13 +94,19 @@ export function parseGrounding(value: unknown): DemandGrounding {
 }
 
 /** A location is not a proof: callers still show the Agent's claim and its source. */
-export function isDemandEvidenceReference(value: string): boolean {
+export function isDemandEvidenceReference(value: DemandEvidence): boolean {
+  if (typeof value !== 'string') { try { parseDemandEvidence(value); return true } catch { return false } }
   const reference = value.trim()
   if (!reference || /[\r\n]/u.test(reference)) return false
   if (/^[a-z][a-z0-9+.-]*:\/\//iu.test(reference)) {
     try { const location = new URL(reference); return location.pathname.length > 0 || location.hostname.length > 0 } catch { return false }
   }
   return (reference.includes('/') && !reference.endsWith('/')) || /^(?:[^\s/:]+\.[^\s/:]+(?::[1-9]\d*(?::[1-9]\d*)?)?|[^\s/:]+:[1-9]\d*(?::[1-9]\d*)?)$/u.test(reference)
+}
+
+/** Saved human acceptance is a fact; later readiness checks cannot revoke it. */
+export function isCurrentGroundingAccepted(alignment: DemandAlignment | undefined, grounding: DemandGrounding | undefined): boolean {
+  return Boolean(alignment && alignment.confirmedAt !== null && grounding && grounding.acceptedAt !== null && grounding.alignmentRevision === alignment.revision)
 }
 
 export function alignmentConfirmationIssue(alignment: DemandAlignment | undefined): string | null {

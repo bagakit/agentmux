@@ -792,7 +792,7 @@ export class DemandStore {
             const sources = reports.flatMap(delegation => delegation.report!.grounding.checks.filter(check => check.criterionId === criterion.id).map(check => ({ check, replyMessageId: delegation.report!.replyMessageId })))
             if (sources.length === 0) return { criterionId: criterion.id, outcome: 'unknown' as const, evidence: [], note: 'No collected report for this current success criterion.' }
             const distinct = new Set(sources.map(source => JSON.stringify(source.check)))
-            if (distinct.size > 1) return { criterionId: criterion.id, outcome: 'unknown' as const, evidence: [...new Set(sources.flatMap(source => source.check.evidence))], note: `Conflicting reports: ${sources.map(source => source.replyMessageId).join(', ')}. Review the original reports.` }
+            if (distinct.size > 1) return { criterionId: criterion.id, outcome: 'unknown' as const, evidence: [...new Map(sources.flatMap(source => source.check.evidence).map(evidence => [JSON.stringify(evidence), evidence])).values()], note: `Conflicting reports: ${sources.map(source => source.replyMessageId).join(', ')}. Review the original reports.` }
             return clone(sources[0]!.check)
           }) }
         const current = demand.grounding

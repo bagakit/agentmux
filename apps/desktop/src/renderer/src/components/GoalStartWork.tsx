@@ -1,3 +1,4 @@
+import { GoalEvidence } from './GoalEvidence'
 import type { GoalStartRow } from '../lib/goal-start-presentation'
 import { GoalContinuationAgent } from './GoalContinuationControl'
 
@@ -29,7 +30,7 @@ export function GoalStartWork({ rows, supervisorSessionId, active, openAgent, re
       <pre>{start.prompt}</pre>
       {observation?.goalResult ? <div className="goal-delegation__checks"><p>{observation.goalResult.grounding.summary}</p>
         {observation.goalResult.grounding.checks.map(check => <div key={check.criterionId}><strong>{check.criterionId} · {check.outcome}</strong>
-          {check.note ? <p>{check.note}</p> : null}{check.evidence.map(evidence => <span key={evidence}>{evidence}</span>)}</div>)}
+          {check.note ? <p>{check.note}</p> : null}<GoalEvidence evidence={check.evidence} criterion={check.criterionId} /></div>)}
       </div> : null}
     </details>
   </article>)
