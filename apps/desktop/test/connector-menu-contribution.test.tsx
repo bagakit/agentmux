@@ -273,18 +273,21 @@ it('does not let an earlier service read restore On after the service Off receip
 })
 
 it('does not publish a late service read from a menu opening that has already closed', async () => {
+  await f.mount()
+  const original = await cli(['get'])
   const forward = f.connections.getMockImplementation()!
   let release!: (value: unknown) => void, held = false
   f.connections.mockImplementation(async (method, input) => {
     if (method === 'connection.service.get' && !held) { held = true; return await new Promise(resolve => { release = resolve }) as never }
     return await forward(method, input)
   })
-  await f.mount(); await openMenu('header'); expect(held).toBe(true)
+  await openMenu('header'); expect(held).toBe(true)
   expect(groups()[0]!.textContent).toContain('Lark settings')
   expect(groups()[0]!.textContent).toContain('Connect group…')
   await closeMenu()
-  await act(async () => release({ enabled: true, revision: 0 })); await settleMoteApp()
-  expect(useAppStore.getState().connectorServiceObservation?.state).toBeNull()
+  const before = useAppStore.getState().connectorServiceObservation
+  await act(async () => release(original)); await settleMoteApp()
+  expect(useAppStore.getState().connectorServiceObservation).toBe(before)
   await openMenu('region'); expect(groups()[0]!.textContent).toContain('Connect group…')
 })
 
