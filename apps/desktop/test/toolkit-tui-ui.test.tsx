@@ -30,9 +30,10 @@ const session = (): Extract<SessionSnapshot, { kind: 'terminal' }> => ({
 function observe(value: ToolkitScriptSnapshot) {
   const dispose = vi.fn()
   let publish!: (value: ToolkitScriptSnapshot) => void
-  vi.spyOn(api.toolkit, 'observe').mockImplementation((_id, callback) => { publish = callback; callback(value); return { dispose } })
+  let fail!: (reason: string) => void
+  vi.spyOn(api.toolkit, 'observe').mockImplementation((_id, callback, onError) => { publish = callback; fail = onError!; callback(value); return { dispose } })
   vi.spyOn(api.toolkit, 'get').mockResolvedValue(value)
-  return { dispose, publish: (next: ToolkitScriptSnapshot) => publish(next) }
+  return { dispose, publish: (next: ToolkitScriptSnapshot) => publish(next), fail: (reason: string) => fail(reason) }
 }
 beforeEach(() => {
   terminal.mockClear()
@@ -42,6 +43,35 @@ beforeEach(() => {
 })
 
 describe('TUI toolkit product presentation', () => {
+  it('keeps state and controls in the title of the captured presenter, retaining the original terminal on unknown observation', async () => {
+    const value = { ...running(), definition: { ...definition('script'), revision: 'edited-mode' } }
+    const reading = observe(value)
+    const authoritative = session()
+    vi.spyOn(api.sessions, 'refresh').mockResolvedValue(authoritative)
+    const stop = vi.spyOn(api.toolkit, 'stop'), run = vi.spyOn(api.toolkit, 'run')
+    function Consumer() {
+      const [selected, select] = useState<string | symbol | null>(null)
+      return <ToolkitPopover toolId={value.toolId} name={value.definition.name} icon={<span />} selectedToolId={selected} onSelectTool={select}>{close => <UserToolkitResult definition={value.definition} active close={close} />}</ToolkitPopover>
+    }
+    await dom.render(<Consumer />); await dom.click('[data-toolkit-id="local-tui"]')
+    const panel = document.querySelector('.performance-popover')!, header = panel.querySelector('.toolkit-tui__header')!
+    expect(header.querySelector('h2')?.textContent).toBe(value.definition.name)
+    expect(header.querySelector('[role="status"]')?.textContent).toBe('Running')
+    expect(header.querySelector('[aria-label="Stop command"]')).not.toBeNull()
+    expect(header.querySelector('[aria-label="Check status"]')).not.toBeNull()
+    expect(panel.querySelector('[aria-label="Resize terminal panel"]')).not.toBeNull()
+    expect(panel.querySelector('.toolkit-tui__status')).toBeNull()
+    expect(panel.querySelector('footer')).toBeNull()
+    expect(panel.textContent).not.toContain('Interactive terminal')
+    const input = panel.querySelector('textarea')!
+    await act(async () => { input.focus(); reading.fail('Observation disconnected') })
+    expect(header.querySelector('[role="status"]')?.textContent).toBe('Observation unavailable')
+    expect(header.querySelector('[data-state="unknown"]')).not.toBeNull()
+    expect(panel.querySelector('.toolkit-tui__notices')?.textContent).toContain('The original terminal is kept')
+    expect(panel.querySelector('textarea')).toBe(input); expect(document.activeElement).toBe(input)
+    expect((header.querySelector('[aria-label="Stop command"]') as HTMLButtonElement).disabled).toBe(false)
+    expect(stop).not.toHaveBeenCalled(); expect(run).not.toHaveBeenCalled()
+  })
   it('opens the captured TUI Run after a mode edit and preserves it across observation failure and close', async () => {
     const value = { ...running(), definition: { ...definition('script'), revision: 'edited-mode' } }
     const reading = observe(value)
@@ -151,7 +181,8 @@ describe('TUI toolkit product presentation', () => {
     })
     await dom.click('.toolkit-editor .primary-button')
     expect(add).toHaveBeenCalledOnce()
-    expect(add.mock.calls[0]?.[1]).toMatchObject({ mode: 'tui', script: 'exec /bin/sh\n', actions: [], display: null })
+    expect(add.mock.calls[0]?.[1]).toMatchObject({ mode: 'tui', script: 'exec /bin/sh\n', actions: [] })
+    expect(add.mock.calls[0]?.[1]).not.toHaveProperty('display')
     expect(run).not.toHaveBeenCalled()
   })
 })
