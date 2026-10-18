@@ -1,4 +1,4 @@
-.keyboard-shortcuts { max-width: 760px; padding-bottom: var(--sp-6); }
+.keyboard-shortcuts { max-width: 760px; padding-bottom: var(--sp-3); }
 .keyboard-shortcuts__intro p { margin: 0 0 var(--sp-3); color: var(--text-3); font-size: var(--fs-body); }
 .keyboard-shortcuts__tools { display: flex; align-items: center; gap: var(--sp-4); margin-bottom: var(--sp-3); }
 .keyboard-shortcuts__search { display: flex; flex: 1; align-items: center; gap: var(--sp-2); min-width: 0; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); color: var(--text-3); background: var(--surface-2); }
@@ -17,12 +17,12 @@
 .keyboard-shortcuts__label { min-width: 0; color: var(--text); font-size: var(--fs-body); overflow-wrap: anywhere; }
 .keyboard-shortcuts__label small { display: block; margin-top: var(--sp-1); color: var(--text-3); font-size: var(--fs-micro); }
 .keyboard-shortcuts__chord { display: inline-flex; flex: none; align-items: center; gap: var(--sp-1); }
-.keyboard-shortcuts__chord kbd { display: inline-flex; justify-content: center; align-items: center; min-width: 22px; height: 22px; padding: 0 var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); font: var(--fs-micro) var(--font-mono); }
+.keyboard-shortcuts__chord kbd { display: inline-flex; justify-content: center; align-items: center; min-width: 25px; height: 25px; padding: 0 var(--sp-2); border: 1px solid var(--line); border-bottom-width: 2px; border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font: var(--fs-meta) var(--font-mono); }
 .keyboard-shortcuts__empty { padding: var(--sp-6) 0; color: var(--text-3); font-size: var(--fs-body); }
 .keyboard-shortcuts__empty p { margin: 0 0 var(--sp-3); }
 @media (max-width: 560px) {
-  .keyboard-shortcuts__tools { align-items: stretch; flex-direction: column; gap: var(--sp-2); }
-  .keyboard-shortcuts__group li { align-items: flex-start; flex-direction: column; gap: var(--sp-2); }
+  .keyboard-shortcuts__tools { gap: var(--sp-2); }
+  .keyboard-shortcuts__group li { gap: var(--sp-3); }
 }
 
 @media (forced-colors: active) { .keyboard-shortcuts__search:focus-within { border-color: Highlight; } }
@@ -33,8 +33,10 @@
 .keyboard-shortcuts__contexts button[aria-pressed="true"] { color: var(--text); border-color: var(--line); background: var(--surface-2); }
 .keyboard-shortcuts__contexts button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 2px; }
 @media (max-width: 700px) { .keyboard-shortcuts__group ul { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 560px) {
-  .keyboard-shortcuts__group li[data-tab-selection] { flex-direction: row; align-items: center; }
-  .keyboard-shortcuts__chord { flex-wrap: wrap; }
+@media (max-width: 380px) {
+  .keyboard-shortcuts__tools { flex-wrap: wrap; }
+  .keyboard-shortcuts__search { flex-basis: 100%; }
+  .keyboard-shortcuts__chord { gap: 2px; }
+  .keyboard-shortcuts__chord kbd { padding-inline: var(--sp-1); }
 }
 @media (max-width: 380px) { .keyboard-shortcuts__group ul { grid-template-columns: minmax(0, 1fr); } }
