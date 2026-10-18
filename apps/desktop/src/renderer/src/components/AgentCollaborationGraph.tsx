@@ -7,6 +7,7 @@ import { collaborationConnections, collaborationAreaNode, collaborationAgentNode
 import type { CollaborationPulse } from '../lib/use-collaboration-reading'
 import type { CollaborationLayoutBox as CollaborationBox, CollaborationLayoutInput, CollaborationPath } from '../lib/collaboration-layout-engine'
 import { useCollaborationLayout } from '../lib/use-collaboration-layout'
+import { collaborationEnvelope, collaborationOverviewPath, collaborationOverviewScale } from '../lib/collaboration-map-geometry'
 import { collaborationCameraTarget, COLLABORATION_OVERVIEW_ZOOM, COLLABORATION_READING_ZOOM, type CollaborationLocate } from '../lib/collaboration-map-camera'
 import { collaborationNodeSize, collaborationRecency, collaborationAgentName } from '../lib/collaboration-map-presentation'
 import { useAgentInformationPreview } from './AgentInformationPreview'
@@ -18,11 +19,11 @@ import '../styles/collaboration.css'
 
 export type CollaborationSelection = { kind: 'agent' | 'relation'; id: string; relatedIds?: readonly string[] } | null
 type AgentData = { box: CollaborationBox; agent: CollaborationAgent; selected: boolean; identity?: FocusContextIdentity | undefined; goals?: FocusGoalLinks | undefined; peeked: boolean; onPreview(enter: boolean): void; onSelect(): void; onOpen(id: string): void }
-type AreaData = { box: CollaborationBox; area: CollaborationArea; folded: boolean; internal: readonly CollaborationRelation[]; onInspect(): void; onLocate(): void; onToggle(): void }
+type AreaData = { box: Extract<CollaborationBox, { kind: 'area' }>; envelope: string; area: CollaborationArea; folded: boolean; internal: readonly CollaborationRelation[]; onInspect(): void; onLocate(): void; onToggle(): void }
 type AgentNode = Node<AgentData, 'agent'>
 type AreaNode = Node<AreaData, 'area'>
 type GraphNode = AgentNode | AreaNode
-type RelationPath = { id: string; label: string; route: CollaborationPath; relations: readonly CollaborationRelation[]; active: number; startedAt: number; count: number; selected: boolean; emphasis: 'normal' | 'related' | 'muted' }
+type RelationPath = { id: string; label: string; route: CollaborationPath; sourceBox: CollaborationBox; targetBox: CollaborationBox; relations: readonly CollaborationRelation[]; active: number; startedAt: number; count: number; selected: boolean; emphasis: 'normal' | 'related' | 'muted' }
 const emptyHandles: NodeHandle[] = [], emptyEdges: never[] = []
 const sameItems = <T,>(left: readonly T[], right: readonly T[]) => left.length === right.length && left.every((item, index) => item === right[index])
 export const COLLABORATION_LABELS = { communication: 'Communication', creation: 'Creation', supervision: 'Supervision' } as const
@@ -30,10 +31,12 @@ const colors = { communication: 'var(--green)', creation: 'var(--text-2)', super
 const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>) {
   const { agent } = data, readable = useStore(state => state.transform[2] >= COLLABORATION_READING_ZOOM)
   const overview = useStore(state => state.transform[2] < COLLABORATION_OVERVIEW_ZOOM)
+  const markScale = useStore(state => state.transform[2] < COLLABORATION_OVERVIEW_ZOOM ? collaborationOverviewScale(data.box, state.transform[2]) : 1)
   const recency = collaborationRecency(agent.lastActivityAt), label = collaborationAgentName(agent)
   const tier = agent.tier ?? (agent.context ? 'active' : 'unknown')
-  return <div className={`collaboration-agent collaboration-agent--${tier}${readable ? '' : ' collaboration-agent--overview'} nodrag nopan`} data-collaboration-agent={agent.id} data-overview={overview || undefined}
-    onPointerEnter={() => data.onPreview(true)} onPointerLeave={() => data.onPreview(false)} onFocusCapture={() => data.onPreview(true)}>
+  return <div className={`collaboration-agent collaboration-agent--${tier}${readable ? '' : ' collaboration-agent--overview'} nodrag nopan`} data-collaboration-agent={agent.id} data-overview={overview || undefined} style={{ '--collaboration-mark-scale': markScale } as CSSProperties}
+    onPointerEnter={() => data.onPreview(true)} onPointerLeave={() => data.onPreview(false)} onFocusCapture={() => data.onPreview(true)}
+    onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) data.onPreview(false) }}>
     {overview && agent.context ? <AgentMark data={data} label={label} tier={tier} recency={recency} overview /> : overview ? <button type="button" className="collaboration-agent__dot" aria-label={`${label} · ${tier}`} aria-pressed={data.selected} title={`${label} · ${tier}`} onClick={data.onSelect}><span className="collaboration-agent__point" style={{ opacity: recency.depth }} /></button> : agent.context && tier === 'active' && readable ? <FocusContextCardBody context={agent.context} identity={data.identity} goalLinks={data.goals} selected={data.selected} onSelect={data.onSelect} onOpenWorkface={data.onOpen} />
       : agent.context ? <AgentMark data={data} label={label} tier={tier} recency={recency} />
         : <button type="button" className="collaboration-agent__mark" data-tier={tier} aria-label={`${label} · ${tier}`} aria-pressed={data.selected} onClick={data.onSelect} onFocus={() => data.onPreview(true)} title={`${label} · ${tier} · ${recency.label}`}>
@@ -47,23 +50,27 @@ function AgentMark({ data, label, tier, recency, overview = false }: { data: Age
   useEffect(() => { if (data.peeked) preview.triggerEvents.onPointerEnter() }, [data.peeked])
   return <button type="button" ref={preview.anchor} {...preview.triggerEvents} className={overview ? "collaboration-agent__dot" : "collaboration-agent__mark"} data-tier={tier} data-session-id={context.id}
     aria-pressed={data.selected} aria-label={`${label} · ${tier}`} aria-describedby={preview.describedBy} onClick={data.onSelect} title={`${tier} · ${recency.label}`}>
-    <span className="collaboration-agent__point" style={{ width: recency.radius * 2, height: recency.radius * 2, opacity: recency.depth }} />{!overview && tier !== 'closed' ? <strong>{label}</strong> : null}
+    <span className="collaboration-agent__point" style={{ width: overview ? 12 : recency.radius * 2, height: overview ? 12 : recency.radius * 2, opacity: recency.depth }} />{!overview && tier !== 'closed' ? <strong>{label}</strong> : null}
   </button>
 }
 const AreaNodeView = memo(function AreaNodeView({ data }: NodeProps<AreaNode>) {
   const empty = data.area.members.length === 0
   const zoom = useStore(state => Math.min(1, state.transform[2]))
   const overview = zoom < COLLABORATION_OVERVIEW_ZOOM
-  const labelWidth = data.box.width * zoom, labelHeight = data.box.height * zoom
+  const labelWidth = Math.min(240, (data.box.width - data.box.heading.x) * zoom)
+  const labelHeight = Math.min(24, (data.box.height - data.box.heading.y) * zoom)
   const compact = labelWidth < 80 || labelHeight < 22
   return <div className="collaboration-area" data-kind={data.area.kind} data-folded={data.folded} data-empty={empty || undefined} data-overview={overview || undefined}
     style={{ '--collaboration-label-scale': 1 / zoom, '--collaboration-label-width': `${labelWidth}px`, '--collaboration-label-height': `${Math.min(28, labelHeight)}px` } as CSSProperties}>
+    {!empty && !data.folded ? <svg className="collaboration-area__envelope" width={data.box.width} height={data.box.height} aria-hidden="true"><path d={data.envelope} /></svg> : null}
+    <div className="collaboration-area__label" style={{ left: data.box.heading.x, top: data.box.heading.y, width: data.box.heading.width, height: data.box.heading.height }}>
     {overview ? <button type="button" className="collaboration-area__summary nodrag nopan" data-compact={compact || undefined} aria-label={`Locate ${data.area.name} · ${data.area.members.length} Agents`} onClick={data.onLocate} title={data.area.issue ?? data.area.name}>
       {compact ? <span className="collaboration-area__symbol" aria-hidden="true" /> : <span>{data.area.name}</span>}
       {!compact && labelWidth >= 160 ? <small>{data.area.members.length} {data.area.members.length === 1 ? 'Agent' : 'Agents'}</small> : null}
     </button> : empty ? <div className="collaboration-area__heading" title={data.area.issue ?? data.area.name}><span>{data.area.name}</span><small>0</small></div> : <button type="button" className="collaboration-area__heading nodrag nopan" aria-expanded={!data.folded} onClick={data.onToggle} title={data.area.issue ?? undefined}>
       <SemanticIcon name={data.folded ? 'navigation.next' : 'navigation.down'} size={12} /><span>{data.area.name}</span><small>{data.area.members.length}</small>
     </button>}
+    </div>
     {!overview && data.folded && data.internal.length ? <button type="button" className="collaboration-area__internal nodrag nopan" aria-label={`${data.area.name}: ${data.internal.length} internal connections`} onClick={data.onInspect}>{data.internal.length} internal</button> : null}
   </div>
 })
@@ -96,8 +103,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     return unplaced.length ? [...areas, { id: 'unplaced-references', name: 'Related Agents', kind: 'unplaced' as const, members: unplaced }] : areas
   }, [areas, visibleIds])
   const presentation = useMemo(() => collaborationConnections(graphAreas, relations, folded), [graphAreas, relations, folded])
-  const overview = useMemo(() => collaborationConnections(graphAreas, relations, new Set(graphAreas.map(area => area.id))), [graphAreas, relations])
-  const allConnections = useMemo(() => [...new Map([...presentation.connections, ...overview.connections].map(connection => [connection.id, connection])).values()], [presentation, overview])
+  const allConnections = presentation.connections
   const input = useMemo<CollaborationLayoutInput>(() => ({
     areas: graphAreas.map(area => ({ id: collaborationAreaNode(area.id), name: area.name, members: area.members.map(id => collaborationAgentNode(area.id, id)), folded: folded.has(area.id) })),
     nodes: graphAreas.flatMap(area => area.members.flatMap(id => { const agent = agents.get(id); return agent ? [{ id: collaborationAgentNode(area.id, id), areaId: collaborationAreaNode(area.id), ...collaborationNodeSize(agent.tier ?? (agent.context ? 'active' : 'unknown')) }] : [] })),
@@ -112,12 +118,13 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     const next: GraphNode[] = [], cache = new Map<string, GraphNode>()
     for (const area of graphAreas) {
       const areaId = collaborationAreaNode(area.id), box = geometry.get(areaId), previous = nodeCache.current.get(areaId)
-      if (!box) continue
+      if (box?.kind !== 'area') continue
       const internal = presentation.internal.get(area.id) ?? [], old = previous?.type === 'area' ? previous.data : undefined
+      const envelope = old?.box === box ? old.envelope : collaborationEnvelope(box, area.members.flatMap(id => { const member = geometry.get(collaborationAgentNode(area.id, id)); return member ? [member] : [] }))
       const areaNode: AreaNode = old?.box === box && old.area === area && sameItems(old.internal, internal) ? previous as AreaNode : {
         id: areaId, type: 'area', position: { x: box.x, y: box.y }, width: box.width, height: box.height, measured: { width: box.width, height: box.height }, handles: emptyHandles,
         style: { width: box.width, height: box.height }, selectable: false, draggable: false,
-        data: { box, area, folded: box.folded, internal,
+        data: { box, envelope, area, folded: box.folded, internal,
           onLocate: old?.onLocate ?? (() => {
             setFolded(previous => { if (!previous.has(area.id)) return previous; const next = new Set(previous); next.delete(area.id); return next })
             setAreaLocate({ source: actions.current.locate, request: { token: {}, areaIds: [area.id] } })
@@ -148,7 +155,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     nodeCache.current = cache
     if (!sameItems(heldNodes.current, next)) heldNodes.current = next
     return heldNodes.current
-  }, [graphAreas, geometry, agents, presentation, overview, selection, identities, goals, peeked])
+  }, [graphAreas, geometry, agents, presentation, selection, identities, goals, peeked])
   const areaNames = useMemo(() => new Map(graphAreas.map(area => [collaborationAreaNode(area.id), area.name])), [graphAreas])
   const routeCache = useRef(new Map<string, { path: RelationPath }>())
   const heldPaths = useRef<RelationPath[]>([])
@@ -158,34 +165,35 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     const next = new Map<string, { path: RelationPath }>()
     const paths = allConnections.flatMap(connection => {
       const previous = routeCache.current.get(connection.id), route = layout.paths.get(connection.id)
-      if (!route) return []
+      const sourceBox = geometry.get(connection.source), targetBox = geometry.get(connection.target)
+      if (!route || !sourceBox || !targetBox) return []
       let pulse: CollaborationPulse | undefined
       for (const relation of connection.relations) { const candidate = live.get(JSON.stringify([relation.kind, relation.source, relation.target])); if (candidate && (!pulse || candidate.startedAt > pulse.startedAt || candidate.startedAt === pulse.startedAt && candidate.id > pulse.id)) pulse = candidate }
       const selected = connection.relations.some(relation => selectedRelations?.has(relation.id)), old = previous?.path, first = connection.relations[0]!
       const fromAgent = agents.get(first.source), toAgent = agents.get(first.target)
-      const related = selection?.kind === 'agent' && connection.relations.some(relation => relation.source === selection.id || relation.target === selection.id)
-      const emphasis = selection ? selected || related ? 'related' : 'muted' : 'normal'
+      const emphasizedAgent = selection?.kind === 'agent' ? selection.id : selection ? null : peeked
+      const related = emphasizedAgent && connection.relations.some(relation => relation.source === emphasizedAgent || relation.target === emphasizedAgent)
+      const emphasis = selection || peeked ? selected || related ? 'related' : 'muted' : 'normal'
       const from = areaNames.get(connection.source) ?? (collaborationAgentName(fromAgent) || first.source)
       const to = areaNames.get(connection.target) ?? (collaborationAgentName(toAgent) || first.target)
-      const label = `${COLLABORATION_LABELS[first.kind]}: ${from} → ${to}${connection.relations.length > 1 ? ` · ${connection.relations.length} relations` : ''}`
+      const count = connection.relations.reduce((count, relation) => count + relation.evidence.length, 0)
+      const label = `${COLLABORATION_LABELS[first.kind]}: ${from} → ${to} · ${count} original ${count === 1 ? 'record' : 'records'}`
       const path: RelationPath = old?.route === route && old.label === label && old.active === (pulse?.id ?? 0) && old.selected === selected && old.emphasis === emphasis && sameItems(old.relations, connection.relations) ? old : {
-        id: connection.id, label, route, relations: connection.relations, active: pulse?.id ?? 0, startedAt: pulse?.startedAt ?? 0, selected, emphasis,
-        count: connection.relations.reduce((count, relation) => count + relation.evidence.length, 0)
+        id: connection.id, label, route, sourceBox, targetBox, relations: connection.relations, active: pulse?.id ?? 0, startedAt: pulse?.startedAt ?? 0, selected, emphasis,
+        count
       }
       next.set(connection.id, { path }); return [path]
     })
     routeCache.current = next
     if (!sameItems(heldPaths.current, paths)) heldPaths.current = paths
     return heldPaths.current
-  }, [allConnections, layout.paths, pulses, selection, agents, areaNames])
-  const detailPathIds = useMemo(() => new Set(presentation.connections.map(connection => connection.id)), [presentation])
-  const overviewPathIds = useMemo(() => new Set(overview.connections.map(connection => connection.id)), [overview])
+  }, [allConnections, layout.paths, geometry, pulses, selection, agents, areaNames, peeked])
   const selectConnection = useCallback((path: RelationPath) => { const first = path.relations[0]; if (first) actions.current.onSelect({ kind: 'relation', id: first.id, relatedIds: path.relations.map(relation => relation.id) }) }, [])
   const clearSelection = useCallback(() => actions.current.onSelect(null), [])
   return <div className="collaboration-canvas" aria-label="Agent collaboration graph">
     <ReactFlow<GraphNode> nodes={nodes} edges={emptyEdges} nodeTypes={nodeTypes} onInit={instance => { flow.current = instance }} onPaneClick={clearSelection}
       onMoveStart={event => { if (event) ++gestures.current }} onlyRenderVisibleElements nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesReconnectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.05} maxZoom={1.4} proOptions={{ hideAttribution: true }}>
-      <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} detailPathIds={detailPathIds} overviewPathIds={overviewPathIds} onSelect={selectConnection} onClear={clearSelection} />
+      <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} onSelect={selectConnection} onClear={clearSelection} />
       <Background gap={22} size={1} />
     </ReactFlow>
     <div className="collaboration-canvas__controls" aria-label="Graph viewport">
@@ -201,21 +209,22 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
 }
 
 /** Only this small layer subscribes to camera bounds; xyflow owns its transform and nodes. */
-const CollaborationRelations = memo(function CollaborationRelations({ paths, detailPathIds, overviewPathIds, onSelect, onClear }: { paths: readonly RelationPath[]; detailPathIds: ReadonlySet<string>; overviewPathIds: ReadonlySet<string>; onSelect(path: RelationPath): void; onClear(): void }) {
+const CollaborationRelations = memo(function CollaborationRelations({ paths, onSelect, onClear }: { paths: readonly RelationPath[]; onSelect(path: RelationPath): void; onClear(): void }) {
   const visible = useStore(useCallback((state: { transform: [number, number, number]; width: number; height: number }) => {
     const [x, y, zoom] = state.transform, padding = 32 / zoom
     const left = -x / zoom - padding, top = -y / zoom - padding, right = (state.width - x) / zoom + padding, bottom = (state.height - y) / zoom + padding
-    const ids = zoom < COLLABORATION_OVERVIEW_ZOOM ? overviewPathIds : detailPathIds
-    return paths.filter(({ id, route: { bounds } }) => ids.has(id) && bounds.x <= right && bounds.x + bounds.width >= left && bounds.y <= bottom && bounds.y + bounds.height >= top)
-  }, [paths, detailPathIds, overviewPathIds]), sameItems)
+    return paths.filter(({ route: { bounds }, sourceBox, targetBox }) => [bounds, sourceBox, targetBox].some(box => box.x <= right && box.x + box.width >= left && box.y <= bottom && box.y + box.height >= top))
+  }, [paths]), sameItems)
+  const zoom = useStore(state => state.transform[2])
   const markerId = useId().replace(/:/g, '')
   return <ViewportPortal><svg className="collaboration-connections" style={{ position: 'absolute', width: 1, height: 1, overflow: 'visible', pointerEvents: 'none' }}>
-    <defs>{Object.entries(colors).map(([kind, color]) => <marker key={kind} id={`${markerId}-${kind}`} viewBox="0 0 10 10" refX={10} refY={5} markerWidth={8} markerHeight={8} orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill={color} /></marker>)}</defs>
-    {visible.map(path => <RelationView key={path.id} record={path} markerId={markerId} onSelect={onSelect} onClear={onClear} />)}
+    <defs>{Object.entries(colors).map(([kind, color]) => <marker key={kind} id={`${markerId}-${kind}`} viewBox="0 0 10 10" refX={10} refY={5} markerUnits="userSpaceOnUse" markerWidth={8 / zoom} markerHeight={8 / zoom} orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill={color} /></marker>)}</defs>
+    {visible.map(path => <RelationView key={path.id} record={path} markerId={markerId} zoom={zoom} onSelect={onSelect} onClear={onClear} />)}
   </svg></ViewportPortal>
 })
-const RelationView = memo(function RelationView({ record, markerId, onSelect, onClear }: { record: RelationPath; markerId: string; onSelect(path: RelationPath): void; onClear(): void }) {
-  const kind = record.relations[0]!.kind, { path, labelX, labelY } = record.route
+const RelationView = memo(function RelationView({ record, markerId, zoom, onSelect, onClear }: { record: RelationPath; markerId: string; zoom: number; onSelect(path: RelationPath): void; onClear(): void }) {
+  const kind = record.relations[0]!.kind, { labelX, labelY } = record.route
+  const path = zoom < COLLABORATION_OVERVIEW_ZOOM ? collaborationOverviewPath(record.route, record.sourceBox, record.targetBox, zoom) : record.route.path
   const delay = useMemo(() => Math.min(0, record.startedAt - Date.now()), [record.active, record.startedAt])
   return <g className={`react-flow__edge selectable nopan collaboration-edge-group--${kind}`} data-id={record.id} data-emphasis={record.emphasis} tabIndex={0} role="button" aria-label={record.label} aria-pressed={record.selected}
     style={{ pointerEvents: 'stroke' }} onClick={event => { event.stopPropagation(); onSelect(record) }} onKeyDown={event => {
@@ -223,8 +232,8 @@ const RelationView = memo(function RelationView({ record, markerId, onSelect, on
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClear() }
     }}>
     <BaseEdge id={record.id} path={path} markerEnd={`url(#${markerId}-${kind})`} interactionWidth={22} className={`collaboration-edge collaboration-edge--${kind}${record.selected ? ' is-selected' : ''}`} />
-    {record.active ? <path key={record.active} d={path} style={{ animationDelay: `${delay}ms` }} className="collaboration-edge__pulse" data-kind={kind} /> : null}
-    {record.selected && record.count > 1 ? <EdgeLabelRenderer><span className="collaboration-edge__count" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>{record.count}</span></EdgeLabelRenderer> : null}
+    {record.active ? <path key={record.active} d={path} pathLength={1} style={{ animationDelay: `${delay}ms` }} className="collaboration-edge__pulse" data-kind={kind} /> : null}
+    {record.emphasis === 'related' && record.count > 1 ? <EdgeLabelRenderer><span className="collaboration-edge__count" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>{record.count}</span></EdgeLabelRenderer> : null}
   </g>
 })
 
