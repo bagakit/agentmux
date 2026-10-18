@@ -2,6 +2,7 @@ import { parseFileReadResult, type FileReadParams, type FileReadResult, type Fil
 import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
 import type { FileDocument, ScratchTopicSnapshot } from '../../../shared/contracts'
 import { zoneFileResource } from '../../../shared/zone-file-resource'
+import { directoryIdentity, workspaceZoneId } from '../../../shared/space-addresses'
 import { spatialCatalog, type SpatialWorkbench } from './space-agent-control'
 
 export type NoteHistoryTarget = Omit<FileHistoryParams, 'limit' | 'before' | 'eventId' | 'includeContent'>
@@ -65,6 +66,11 @@ export function noteResourceReadParams(state: SpatialWorkbench, topics: readonly
     } catch { /* This Zone does not own the exact known file; it cannot authorize this request. */ }
   }
   const root = candidates.filter(candidate => candidate.path === resource.path)
+  // A Notebook page may share the same directory through its own workface Zone.
+  // Prefer the original default factory identity only after exact resource validation.
+  const defaultZoneId = workspaceZoneId(directoryIdentity(workspace.hostId, workspace.repoPath ?? workspace.path), workspace.id)
+  const defaultRoot = root.find(candidate => candidate.zoneId === defaultZoneId)
+  if (defaultRoot) return defaultRoot
   if (root.length === 1) return root[0]!
   if (candidates.length === 1) return candidates[0]!
   throw Error('The original shared file directory mapping is unconfirmed. Its draft is kept; restore that original directory before sharing into it.')
