@@ -8,7 +8,7 @@ import { SurfaceState } from './SurfaceState'
 const ThemeStatusInfoIcon = semanticIconComponent('status.info')
 
 
-export type ServiceNoticeDisclosureIdentity = Pick<ServiceNoticeItem, 'id' | 'occurrence' | 'cause'> & {
+export type ServiceNoticeDisclosureIdentity = Pick<ServiceNoticeItem, 'id' | 'occurrence' | 'cause' | 'readKey' | 'readScope' | 'readOrigin'> & {
   scope: string
   available?: boolean
   visible?: boolean

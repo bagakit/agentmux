@@ -1,15 +1,15 @@
 import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { useWorkbenchDocument } from '../lib/workbench-document'
-import { useContext, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useContext, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { autoUpdate, computePosition, offset, shift, size, type VirtualElement } from '@floating-ui/dom'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { notificationEventIdentity, projectNotifications, useAppStore } from '../store'
 import { useReadReceipts, useServiceNotices, type ServiceNoticeItem } from '../lib/use-service-notices'
 import { selectDisplacedAgentNotices, displacedAgentStepOutcome } from '../lib/control-spatial-commit'
 import { classifyServiceNotice, serviceNoticeToRender, serviceNoticeAriaLive } from '../lib/service-window-notice'
-import { NotificationItem } from './NotificationItem'
-import { ServiceWindowNotice } from './ServiceWindowNotice'
+import { NotificationGroup, type NotificationEntry } from './NotificationGroup'
+import { groupNotifications, notificationCategories, notificationTimestamp, type NotificationCategory, type NotificationFilter, type NotificationSection, type NotificationSubject } from '../lib/notification-center'
 import { createSessionServiceNoticeSelector } from '../lib/session-service-notices'
 import { runServiceProjection, useRunServiceHealthChanges } from '../lib/run-service-projection'
 import { agentLifecycleFailureNotice } from '../lib/agent-lifecycle-feedback'
@@ -19,9 +19,8 @@ import { executorsForHost, hostExecutorInventoryMatches } from '../lib/executors
 import { runtimeEndpointNotice } from '../lib/runtime-endpoint-notice'
 import { notificationPreview } from '../lib/notification-preview'
 
-const ThemeStatusUnreadIcon = semanticIconComponent('status.unread')
 const ThemeObjectNotificationsIcon = semanticIconComponent('object.notifications')
-const ThemeNavigationCollapseIcon = semanticIconComponent('navigation.up')
+const ThemeNavigationCollapseIcon = semanticIconComponent('action.close')
 
 
 /** One window-level inbox. Reading a service notice never changes its owner's current facts. */
@@ -78,6 +77,8 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     } }] : [], !loading)
   const id = useId()
   const [open, setOpen] = useState(false)
+  const [section, setSection] = useState<NotificationSection>('current')
+  const [category, setCategory] = useState<NotificationFilter>('all')
   const triggerRef = useRef<HTMLButtonElement>(null)
   const detailsRef = useRef<HTMLDivElement>(null)
   useLayoutEffect(() => {
@@ -160,6 +161,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const endpointInbox = useServiceNotices('global:runtime-endpoints', endpoints, endpointWarnings !== undefined)
   const displacedKnown = !loading && displacedIds.every((sessionId) => sessions.some((session) => session.id === sessionId))
   const displacedInbox = useServiceNotices('global:displaced-agents', displaced, displacedKnown)
+  const sessionSubjects = new Map<string, NotificationSubject>()
   const sessionNotices: ServiceNoticeItem[] = sessions.flatMap(session => sessionServiceNotices(session, queues[session.id], sending[session.id],
     runServiceProjection.read(session),
     !(endpointWarnings ?? []).some(warning => warning.hostId === session.control.hostId &&
@@ -172,6 +174,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
           action: { label: `Open ${session.label} Session`, run: () => selectSession(session.id) } }
         sessionNoticeViews.set(item, view)
       }
+      if (open) sessionSubjects.set(view.id, { key: JSON.stringify(['agent', session.control.hostId, session.id, session.control.run.runId]), label: session.label, context: config?.hosts.find(host => host.id === session.control.hostId)?.label ?? session.control.hostId })
       return view
     }))
   const sessionInbox = useServiceNotices('global:sessions', sessionNotices, !loading)
@@ -208,15 +211,8 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   const notices = inboxes.flatMap((inbox) => inbox.notices)
   const currentCount = notices.length + projection.current.length
   const unread = inboxes.reduce((total, inbox) => total + inbox.unread.length, eventInbox.unread.length)
-  const count = notices.length + events.length
   const available = inboxes.every((inbox) => inbox.available)
-  useEffect(() => {
-    if (!open) return
-    for (const inbox of inboxes) if (inbox.unread.length) inbox.acknowledge(inbox.unread)
-    if (eventInbox.unread.length) eventInbox.acknowledge(eventInbox.unread)
-  }, [open, agentChecksInbox, environmentInbox, ownershipInbox, nameMetadataInbox, endpointInbox, displacedInbox, sessionInbox, storageInbox, chromeInbox, navigationInbox, currentErrorInbox, eventInbox])
-  const recentEvents = open ? [...projection.history].reverse() : []
-  const sessionsByIdentity = new Map((open ? sessions : []).map(session => [JSON.stringify([session.hostId, session.id]), session]))
+  const sessionsByIdentity = new Map((open ? sessions : []).map(session => [JSON.stringify([session.control.hostId, session.id]), session]))
   const unreadEventIds = useMemo(() => new Set(eventInbox.unread), [eventInbox.unread])
   const readEvents = open ? projection.history.filter(event => !unreadEventIds.has(event.id)).length : 0
   const latestUnreadEvent = useMemo(() => [...events].reverse().find(event => unreadEventIds.has(event.id)), [events, unreadEventIds])
@@ -227,73 +223,145 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
   function navigationAction(action: NonNullable<ServiceNoticeItem['action']>) {
     return { label: action.label, run() { action.run(); detailsRef.current?.hidePopover?.() } }
   }
+  const currentEntries: NotificationEntry[] = []
+  const historyEntries: NotificationEntry[] = []
+  if (open) {
+    const append = (inbox: typeof environmentInbox, group: NotificationCategory,
+      subject: (item: ServiceNoticeItem) => NotificationSubject, actionLabel?: string) => {
+      const unreadIds = new Set(inbox.unread.map(item => item.id))
+      for (const item of inbox.notices) currentEntries.push({
+        id: JSON.stringify([inbox.scope, item.id]), noticeId: item.id, category: group, subject: subject(item), kind: item.notice.kind,
+        title: item.summary?.step ?? item.notice.notice.step,
+        impact: item.summary?.mode ?? item.notice.notice.mode,
+        detail: [item.notice.notice.step, item.notice.notice.mode, item.notice.notice.restore].join('\n'),
+        unread: unreadIds.has(item.id), onRead: () => inbox.acknowledge([item]), timestamp: notificationTimestamp(item.observedAt),
+        action: item.action ? navigationAction({ ...item.action, label: actionLabel ?? item.action.label }) : undefined
+      })
+    }
+    const system = (key: string, label: string) => () => ({ key, label })
+    append(agentChecksInbox, 'system', item => ({ key: JSON.stringify(['host-agents', item.id]), label: 'Agent commands', context: config?.hosts.find(host => host.id === item.id)?.label ?? item.id }))
+    append(environmentInbox, 'system', system('environment', 'Local environment'))
+    append(ownershipInbox, 'system', system('runtime', 'Runtime'))
+    append(nameMetadataInbox, 'system', system('session-names', 'Saved Session names'))
+    const endpointSubjects = new Map(endpoints.map((item, index) => [item.id, endpointWarnings![index]!.hostId]))
+    append(endpointInbox, 'connections', item => {
+      const hostId = endpointSubjects.get(item.id)!
+      return { key: JSON.stringify(['host', hostId]), label: config?.hosts.find(host => host.id === hostId)?.label ?? hostId }
+    })
+    append(displacedInbox, 'agents', item => {
+      const session = sessions.find(session => session.id === item.id)
+      return { key: JSON.stringify(['displaced', session?.control.hostId, item.id]), label: session?.label ?? 'Retained Session' }
+    })
+    append(sessionInbox, 'agents', item => sessionSubjects.get(item.id)!, 'View Session')
+    append(storageInbox, 'operations', item => ({ key: JSON.stringify(['storage', item.id]), label: item.id === 'workbench-save' ? 'Workbench storage' : 'Name change' }))
+    append(chromeInbox, 'system', system('window', 'Application window'))
+    append(navigationInbox, 'operations', system('navigation', 'Workspace navigation'))
+    append(currentErrorInbox, 'operations', item => ({ key: JSON.stringify(['workflow', item.id]), label: 'Original operation', context: 'Object not recorded' }))
+    for (const record of projection.current) {
+      const lifecycle = record.context?.lifecycle
+      const notice = lifecycle ? agentLifecycleFailureNotice(lifecycle, record.message) : {
+        kind: 'indeterminate' as const, notice: {
+          step: record.context?.summary ?? 'Operation needs attention', mode: record.message,
+          restore: 'Review the original operation before retrying.'
+        }
+      }
+      const subject = lifecycle?.step === 'resume' ? lifecycle.subject : record.context?.subject
+      const session = subject?.kind === 'agent' ? sessionsByIdentity.get(JSON.stringify([subject.hostId, subject.agentSessionId])) : undefined
+      const launcher = lifecycle?.step === 'launch' ? launcherTabs.get(lifecycle.regionId) : undefined
+      const source = lifecycle?.step === 'launch'
+        ? `Region ${lifecycle.regionId} · Tab ${launcher?.id ?? lifecycle.tabId}`
+        : subject?.kind === 'agent' ? `Host ${subject.hostId} · Session ${subject.agentSessionId} · Run ${subject.run.runId}` : undefined
+      const target: NotificationSubject = subject?.kind === 'agent'
+        ? { key: JSON.stringify(['agent', subject.hostId, subject.agentSessionId, subject.run.runId]), label: session?.label ?? subject.agentSessionId, context: config?.hosts.find(host => host.id === subject.hostId)?.label ?? subject.hostId }
+        : lifecycle?.step === 'launch'
+          ? { key: JSON.stringify(['region', lifecycle.tabId, lifecycle.regionId]), label: launcher?.name ?? 'Original launch location', context: `Region ${lifecycle.regionId}` }
+          : { key: record.id, label: 'Original operation', context: 'Object not recorded' }
+      currentEntries.push({ id: record.id, noticeId: record.id, category: subject?.kind === 'agent' ? 'agents' : 'operations', subject: target,
+        kind: notice.kind, title: notice.notice.step, impact: notice.notice.mode,
+        detail: [source, notice.notice.step, notice.notice.mode, notice.notice.restore].filter(Boolean).join('\n'),
+        unread: unreadEventIds.has(record.id), onRead: () => eventInbox.acknowledge([record.id]),
+        action: session ? navigationAction({ label: 'View Session', run: () => { void selectSession(session.id) } }) : undefined
+      })
+    }
+    for (const event of [...projection.history].reverse()) {
+      const subject = event.context?.subject
+      const session = subject?.kind === 'agent' ? sessionsByIdentity.get(JSON.stringify([subject.hostId, subject.agentSessionId])) : undefined
+      historyEntries.push({ id: event.id, eventId: event.id,
+        category: subject?.kind === 'agent' ? 'agents' : 'operations',
+        subject: subject?.kind === 'agent'
+          ? { key: JSON.stringify(['agent', subject.hostId, subject.agentSessionId, subject.run.runId]), label: session?.label ?? subject.agentSessionId, context: config?.hosts.find(host => host.id === subject.hostId)?.label ?? subject.hostId }
+          : { key: event.id, label: 'Operation', context: 'Object not recorded' },
+        kind: event.context?.kind ?? 'indeterminate',
+        title: event.context?.summary ?? (event.context?.kind === 'agent-broken' ? 'Agent stopped unexpectedly' : event.message),
+        detail: event.message, summary: event.context?.summary,
+        unread: unreadEventIds.has(event.id), onRead: () => eventInbox.acknowledge([event.id]),
+        action: session ? navigationAction({ label: 'View Session', run: () => { void selectSession(session.id) } }) : undefined
+      })
+    }
+  }
+  const entries = section === 'current' ? currentEntries : historyEntries
+  const shown = entries.filter(entry => category === 'all' || entry.category === category)
+  const groups = groupNotifications(shown)
+  const shownUnread = shown.filter(entry => entry.unread)
+  function markShownRead() {
+    const ids = new Set(shownUnread.map(entry => entry.id))
+    for (const inbox of inboxes) inbox.acknowledge(inbox.notices.filter(item => ids.has(JSON.stringify([inbox.scope, item.id]))))
+    eventInbox.acknowledge(events.filter(event => ids.has(event.id)).map(event => event.id))
+  }
   return <div className="global-system-notices">
     <span className="global-system-notices__announcement" role={liveVolume === 'assertive' ? 'alert' : 'status'} aria-live={liveVolume}>
       {latestUnreadEvent ? `${announcement}. Review system notifications for details.` : ''}
     </span>
     <button ref={triggerRef} type="button" className="global-system-notices__trigger" data-unread={unread > 0}
+      data-attention={events.some(event => unreadEventIds.has(event.id) && event.context?.kind === 'agent-broken') ? 'failure' : 'quiet'}
       aria-label={`System notifications: ${unread} unread, ${currentCount} current, ${projection.history.length} recent events`}
       aria-expanded={open} aria-controls={id} title="System notifications"
       popoverTarget={id} popoverTargetAction="toggle">
       <ThemeObjectNotificationsIcon size={14} aria-hidden="true" />
-      {unread ? <span aria-hidden="true">{unread}</span> : null}
-      {unread ? <ThemeStatusUnreadIcon size={5} className="global-system-notices__dot" aria-hidden="true" /> : null}
+      {unread ? <span className="global-system-notices__badge" aria-hidden="true">{unread}</span> : null}
     </button>
     <div ref={detailsRef} id={id} popover="auto" className="global-system-notices__details" aria-label="System notifications"
       data-state={open ? 'open' : 'closed'}
       onToggle={(event) => { if (event.target === event.currentTarget) setOpen(event.newState === 'open') }}>
       {open ? <>
-      <div className="global-system-notices__heading">
-        <strong>System notifications</strong>
-        <button type="button" className="icon-button" aria-label="Collapse system notifications" title="Collapse system notifications"
-          popoverTarget={id} popoverTargetAction="hide"><ThemeNavigationCollapseIcon size={14} /></button>
-      </div>
-      {currentCount ? <h3 className="global-system-notices__section">Current issues <span>{currentCount}</span></h3> : null}
-      {inboxes.map((inbox, index) => <div key={index}>
-        {inbox.notices.map((item) => <NotificationItem key={item.id} noticeId={item.id} kind={item.notice.kind}
-          title={item.summary?.step ?? item.notice.notice.step}
-          detail={[item.notice.notice.step, item.notice.notice.mode, item.notice.notice.restore].join('\n')}
-          {...(item.action ? { action: navigationAction(item.action) } : {})}>
-          <ServiceWindowNotice notice={item.notice} />
-        </NotificationItem>)}
-      </div>)}
-      {projection.current.map(record => {
-        const lifecycle = record.context?.lifecycle
-        const notice = lifecycle ? agentLifecycleFailureNotice(lifecycle, record.message) : {
-          kind: 'indeterminate' as const, notice: {
-            step: record.context?.summary ?? 'Operation needs attention', mode: record.message,
-            restore: 'Review the original operation before retrying.'
-          }
-        }
-        const subject = lifecycle?.step === 'resume' ? lifecycle.subject : record.context?.subject
-        const session = subject?.kind === 'agent' ? sessionsByIdentity.get(JSON.stringify([subject.hostId, subject.agentSessionId])) : undefined
-        const launcher = lifecycle?.step === 'launch' ? launcherTabs.get(lifecycle.regionId) : undefined
-        const location = lifecycle?.step === 'launch'
-          ? `Region ${lifecycle.regionId} · ${launcher?.name ?? (launcher ? 'New Tab' : 'Original location unavailable')}` : undefined
-        const source = lifecycle?.step === 'launch'
-          ? `${location} · ${launcher ? 'Tab' : 'Reported Tab'} ${launcher?.id ?? lifecycle.tabId}`
-          : subject?.kind === 'agent' ? `Host ${subject.hostId} · Session ${subject.agentSessionId} · Run ${subject.run.runId}` : undefined
-        return <NotificationItem key={record.id} noticeId={record.id} kind={notice.kind}
-          title={location ? `${location} · ${notice.notice.step}` : notice.notice.step}
-          detail={[source, notice.notice.step, notice.notice.mode, notice.notice.restore].filter(Boolean).join('\n')}
-          {...(session ? { action: navigationAction({ label: `Open ${session.label}`, run: () => { void selectSession(session.id) } }) } : {})}>
-          {source ? <p>{source}</p> : null}
-          <ServiceWindowNotice notice={notice} />
-        </NotificationItem>
-      })}
-      {projection.history.length ? <div className="global-system-notices__section">
-        <h3>Recent events <span>{projection.history.length}</span></h3>
-        {readEvents ? <button type="button" className="small-button" onClick={clearReadEvents}>Clear read events</button> : null}
-      </div> : null}
-      {recentEvents.map(event => {
-        const subject = event.context?.subject
-        const session = subject?.kind === 'agent' ? sessionsByIdentity.get(JSON.stringify([subject.hostId, subject.agentSessionId])) : undefined
-        return <NotificationItem key={event.id} eventId={event.id} kind={event.context?.kind ?? 'indeterminate'}
-          title={event.context?.summary ?? (event.context?.kind === 'agent-broken' ? `${session?.label ?? 'Agent'} stopped unexpectedly` : event.message)}
-          detail={event.message} summary={event.context?.summary}
-          {...(session ? { action: navigationAction({ label: `Open ${session.label}`, run: () => { void selectSession(session.id) } }) } : {})} />
-      })}
-      {!available ? <p>Waiting for Runtime status.</p> : count === 0 ? <p>No system notifications.</p> : null}
+        <div className="global-system-notices__heading">
+          <strong>Notifications</strong>
+          <button type="button" className="icon-button" aria-label="Collapse system notifications" title="Close notifications"
+            popoverTarget={id} popoverTargetAction="hide"><ThemeNavigationCollapseIcon size={16} /></button>
+        </div>
+        <div className="global-system-notices__tabs" role="tablist" aria-label="Notification view">
+          {([['current', 'Current', currentCount], ['history', 'Activity', projection.history.length]] as const).map(([value, label, total]) =>
+            <button type="button" key={value} role="tab" id={`${id}-${value}`} aria-selected={section === value}
+              aria-controls={`${id}-content`} tabIndex={section === value ? 0 : -1} data-section={value}
+              onClick={() => setSection(value)} onKeyDown={event => {
+                if (isImeOwnedKeyboardEvent(event)) return
+                const next = event.key === 'Home' ? 'current' : event.key === 'End' ? 'history'
+                  : event.key === 'ArrowLeft' || event.key === 'ArrowRight' ? value === 'current' ? 'history' : 'current' : undefined
+                if (!next) return
+                event.preventDefault()
+                setSection(next)
+                document.getElementById(`${id}-${next}`)?.focus()
+              }}>{label}<span>{total}</span></button>)}
+        </div>
+        <div className="global-system-notices__filters" role="group" aria-label="Notification category">
+          {Object.entries(notificationCategories).map(([value, label]) => <button type="button" key={value}
+            data-category={value} aria-pressed={category === value} onClick={() => setCategory(value as NotificationFilter)}>{label}</button>)}
+        </div>
+        <div className="global-system-notices__content" id={`${id}-content`} role="tabpanel" tabIndex={0}
+          aria-labelledby={`${id}-${section}`} aria-label={section === 'current' ? 'Current issues' : 'Recent events'}>
+          {shown.length ? <p className="global-system-notices__summary">{shown.length} {section === 'current' ? 'current' : 'recorded'} {shown.length === 1 ? 'notice' : 'notices'} · {groups.length} {groups.length === 1 ? 'object' : 'objects'}</p> : null}
+          {groups.map(group => <NotificationGroup key={group.id} group={group} />)}
+          {!shown.length ? <div className="global-system-notices__empty"><ThemeObjectNotificationsIcon size={24} />
+            <strong>{category !== 'all' ? 'No notifications in this category' : section === 'current' ? 'No current issues' : 'No recent activity'}</strong>
+            <p>{category !== 'all' ? 'Choose another category to review its notifications.' : section === 'current' ? 'New service issues will appear here. Past events stay in Activity.' : 'New events will appear here with their original details.'}</p>
+          </div> : null}
+          {!available ? <p className="global-system-notices__observation">Some sources are still being checked. Existing notices are kept.</p> : null}
+        </div>
+        <div className="global-system-notices__footer">
+          <span>{shownUnread.length ? `${shownUnread.length} unread in this view` : 'All read in this view'}</span>
+          <div>{section === 'history' && readEvents ? <button type="button" onClick={clearReadEvents} title="Clear read activity across all categories">Clear all read activity</button> : null}
+            {shownUnread.length ? <button type="button" onClick={markShownRead}>Mark shown read</button> : null}</div>
+        </div>
       </> : null}
     </div>
     <ModalAttachmentDismissal active={Boolean(open && detailsRef.current && getModalOverlayContainer(detailsRef.current))} targetRef={detailsRef}

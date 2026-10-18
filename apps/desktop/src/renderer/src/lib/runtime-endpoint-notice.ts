@@ -20,7 +20,7 @@ export function runtimeEndpointNotice(warning: RuntimeEndpointWarning, label: st
       restore: warning.recovery
     } },
     summary: {
-      step: `${label}: ${observation ? warning.step : upgrade ? 'Remote service needs an update' : connected ? 'Connection settings need attention' : 'Connection could not be verified'}`,
+      step: observation ? warning.step : upgrade ? 'Remote service needs an update' : connected ? 'Connection settings need attention' : 'Connection could not be verified',
       mode: connection ? `${warning.message} This connection observation does not confirm Run availability or pending operation receipts.${observed}` :
         observation ? 'This observation could not be completed. It does not determine whether this Host’s Agents are running.' :
         upgrade ? 'This service uses an older Core interface. The connection has not been restored.' :
