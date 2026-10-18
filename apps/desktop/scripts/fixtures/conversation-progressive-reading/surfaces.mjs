@@ -104,8 +104,12 @@ export async function exerciseSurfaces({ read, click, shot, until, copies, resiz
   await control('[aria-label="Show Terminal"]')
   await until(() => read(`!!document.querySelector('.terminal-view__xterm .xterm')`), 'Original terminal')
   await until(() => read(`!!document.querySelector('.composer-pending:not([hidden])')`), 'Original pending surface')
-  const geometry = await read(`(()=>{const rect=n=>{const r=n.getBoundingClientRect();return {left:r.left,top:r.top,right:r.right,bottom:r.bottom}};const pending=document.querySelector('.composer-pending:not([hidden])'),interaction=document.querySelector('.agent-interaction[data-request-id]'),input=document.querySelector('.terminal-view__xterm .xterm-helper-textarea');return {pending:rect(pending),interaction:interaction?rect(interaction):null,input:input?rect(input):null,request:interaction?.dataset.requestId}})()`)
+  const expectedRequest = `permission-${original.reference.agentSessionId}`
+  const requestSelector = `.agent-interaction[data-request-id=${JSON.stringify(expectedRequest)}]`
+  await until(() => read(`!!document.querySelector(${JSON.stringify(requestSelector)})?.getClientRects().length`), 'Original Provider permission request before geometry')
+  const geometry = await read(`(()=>{const rect=n=>{const r=n.getBoundingClientRect();return {left:r.left,top:r.top,right:r.right,bottom:r.bottom}};const pending=document.querySelector('.composer-pending:not([hidden])'),interaction=document.querySelector(${JSON.stringify(requestSelector)}),input=document.querySelector('.terminal-view__xterm .xterm-helper-textarea');return {pending:rect(pending),interaction:interaction?rect(interaction):null,input:input?rect(input):null,request:interaction?.dataset.requestId}})()`)
   assert.ok(geometry.interaction, 'The real Provider hook supplies an original interaction card')
+  assert.equal(geometry.request, expectedRequest, 'Geometry belongs to the exact original Provider request')
   const overlap = (a, b) => a.left < b.right && a.right > b.left && a.top < b.bottom && a.bottom > b.top
   assert.equal(overlap(geometry.pending, geometry.interaction), false)
   if (geometry.input?.bottom > geometry.input?.top) assert.equal(overlap(geometry.pending, geometry.input), false)
