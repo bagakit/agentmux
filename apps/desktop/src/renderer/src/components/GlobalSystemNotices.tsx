@@ -90,7 +90,7 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
       const { x, y } = await computePosition(trigger, details, {
         strategy: 'fixed', placement: 'top-end', middleware: [offset(6), shift({ padding: 8 }), size({ padding: 8,
           apply({ availableHeight }) {
-            if (!disposed) details.style.maxHeight = `${Math.max(0, Math.min(560, availableHeight))}px`
+            if (!disposed) details.style.maxHeight = `${Math.max(0, Math.min(480, availableHeight))}px`
           }
         })]
       })
