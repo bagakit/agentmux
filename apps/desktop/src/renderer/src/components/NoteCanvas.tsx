@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Background, BackgroundVariant, BaseEdge, EdgeLabelRenderer, Handle, MarkerType, Position, ReactFlow, applyNodeChanges, useStore, useUpdateNodeInternals, type Edge, type EdgeProps, type Node, type NodeProps, type NodeChange, type Viewport, type ReactFlowInstance } from '@xyflow/react'
 import { NoteReader, type NoteLinkOpenRequest } from '@agentmux/client-ui/components/NoteReader'
@@ -405,7 +406,7 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
     let worker: Worker
     try { worker = new Worker(new URL('../lib/note-canvas-layout.worker.ts', import.meta.url), { type: 'module' }) }
     catch { setLayoutIssue('Automatic layout could not start. You can still move Notes; retry Arrange.'); frameInitial(); return }
-    const id = crypto.randomUUID(), input: CanvasLayoutInput = { nodes: projection.notes.map(note => {
+    const id = mintObjectId(), input: CanvasLayoutInput = { nodes: projection.notes.map(note => {
       const node = refs.current.nodes.find(node => node.id === note.id)
       return { id: note.id, width: node?.measured?.width ?? 320, height: node?.measured?.height ?? 480 }
     }), edges: projection.relationships }

@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useRef, useState } from 'react'
 import { notebookFingerprint, type NotebookChange } from '@agentmux/core/notebook-catalog'
 import { changeNotebook } from '../lib/notebook-library'
@@ -15,7 +16,7 @@ export function useNotebookOperation() {
       setIssue('The previous change is unconfirmed. Retry it before changing this metadata again. Your Note is kept.')
       return false
     }
-    const original = held.current ?? { operationId: crypto.randomUUID(), change, ...(complete ? { complete } : {}) }
+    const original = held.current ?? { operationId: mintObjectId(), change, ...(complete ? { complete } : {}) }
     held.current = original
     running.current = true
     setBusy(true)

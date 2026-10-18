@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { AgentMuxError, parseNoteContentObservation, parseNotebookObservationParams } from '@agentmux/core/notebook-observation'
 import { parseNotebookGraphSnapshot, type NotebookObservationApi, type NotebookObservationPreloadApi } from '../../../shared/notebook-observation'
 import { parseNotebookResolveParams, parseNotebookResolveResult } from '@agentmux/core/note-links'
@@ -6,7 +7,7 @@ import { parseNotebookResolveParams, parseNotebookResolveResult } from '@agentmu
 export function createRendererNotebookObservation(preload: NotebookObservationPreloadApi): NotebookObservationApi {
   async function read<T>(start: (requestId: string) => Promise<T>, signal?: AbortSignal): Promise<T> {
     signal?.throwIfAborted()
-    const requestId = crypto.randomUUID()
+    const requestId = mintObjectId()
     const cancel = () => { void preload.cancelObservation(requestId).catch(() => {}) }
     signal?.addEventListener('abort', cancel, { once: true })
     try {

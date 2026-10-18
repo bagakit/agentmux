@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { NoteLinkActions } from '@agentmux/client-ui/components/NoteLinkActions'
 import { useNoteAttachments } from '../lib/use-note-attachments'
 import { NoteFileContext, useNoteFileResource, resolveNoteSourceResource } from '@agentmux/client-ui/components/NoteFileContext'
@@ -244,7 +245,7 @@ export function NoteBlockEditor({ note, knowledge, onChange, onOpen, onSave, onI
       const at = editor.state.doc.resolve(from), block = at.parent
       const token = block.type.name !== 'codeBlock' && noteWikiTextTokens(block.toJSON().content ?? []).find(token => at.start() + token.from === from && at.start() + token.to === to && token.text === link.text)
       if (!token) { props.current.onIssue('The original link text changed. Your draft is kept; choose the current link again.'); return }
-      const stored = { referenceId: crypto.randomUUID(), text: link.text, target: null }
+      const stored = { referenceId: mintObjectId(), text: link.text, target: null }
       editor.view.dispatch(editor.state.tr.replaceWith(from, to, editor.schema.nodeFromJSON({ ...noteInlineLinkContent(stored), marks: at.marks().map(mark => mark.toJSON()) })))
       onOpenLink?.(stored); return
     }
