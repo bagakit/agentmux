@@ -67,5 +67,5 @@ export async function rpcOwnerFixture<Client extends Pick<SourceClient, 'dispose
   return { root, store, client, inner, run, observers, closes, capability,
     coreClients: () => [{ hostId: 'local', client }],
     credentials: { agentSessionId: ids[0]!, capability },
-    close: async () => { await client.dispose(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true }) } }
+    close: async () => { await client.dispose(); vi.unstubAllEnvs(); await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }) } }
 }
