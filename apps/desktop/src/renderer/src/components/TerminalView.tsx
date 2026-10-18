@@ -199,7 +199,8 @@ export function TerminalView({
   autoFocus = true,
   readOnly = false,
   linkOrigin,
-  onObservationRefresh
+  onObservationRefresh,
+  onRefreshSession
 }: {
   session: SessionSnapshot
   themeId: TerminalThemeId
@@ -215,9 +216,12 @@ export function TerminalView({
   // The reusable terminal on the create page must not steal focus from the prompt.
   autoFocus?: boolean
   readOnly?: boolean
-  linkOrigin: OpenHttpLinkOrigin
+  linkOrigin?: OpenHttpLinkOrigin
   onObservationRefresh?(refresh: (() => Promise<void>) | null): void
+  onRefreshSession?(control: SessionSnapshot['control']): Promise<SessionSnapshot>
 }) {
+  const refreshSessionRef = useRef(onRefreshSession)
+  refreshSessionRef.current = onRefreshSession
   const autoFocusRef = useRef(autoFocus)
   autoFocusRef.current = autoFocus
   const readOnlyRef = useRef(readOnly)
@@ -234,11 +238,11 @@ export function TerminalView({
   const switchReaderRef = useRef<(() => RendererTabSwitchTerminal | null) | null>(null)
   const presentation = useWorkbenchBrowserPresentation()
   const reference = presentation.reference
-  const displayOrigin: OpenHttpLinkOrigin = reference ? { ...linkOrigin,
+  const displayOrigin: OpenHttpLinkOrigin | undefined = linkOrigin && reference ? { ...linkOrigin,
     workspaceId: reference.displayWorkspaceId, tabGroupId: reference.groupId, tabId: reference.tabId } : linkOrigin
-  const switchTarget = useMemo(() => reference && linkOrigin.regionId ? { ...reference,
-    regionId: linkOrigin.regionId, presentationId: presentation.projection?.presentationId ?? presentation.surface ?? 'space' } : null,
-  [reference?.displayWorkspaceId, reference?.groupId, reference?.tabId, linkOrigin.regionId, presentation.projection?.presentationId, presentation.surface])
+  const switchTarget = useMemo(() => reference && linkOrigin?.regionId ? { ...reference,
+    regionId: linkOrigin?.regionId, presentationId: presentation.projection?.presentationId ?? presentation.surface ?? 'space' } : null,
+  [reference?.displayWorkspaceId, reference?.groupId, reference?.tabId, linkOrigin?.regionId, presentation.projection?.presentationId, presentation.surface])
   useLayoutEffect(() => {
     if (switchTarget) return tabSwitchObservation.registerTerminal(switchTarget, () => switchReaderRef.current?.() ?? null)
   }, [switchTarget, session.id, session.control.run.runId])
@@ -370,12 +374,12 @@ export function TerminalView({
   const reportError = useAppStore((state) => state.reportError)
   const terminalConfig = useAppStore((state) => state.config)
   const workspaceIsLocal = useMemo(() =>
-    terminalConfig?.workspaces.find((workspace) => workspace.id === linkOrigin.workspaceId)?.hostId === 'local',
-  [terminalConfig, linkOrigin.workspaceId])
+    terminalConfig?.workspaces.find((workspace) => workspace.id === linkOrigin?.workspaceId)?.hostId === 'local',
+  [terminalConfig, linkOrigin?.workspaceId])
   const workspaceIsLocalRef = useRef(workspaceIsLocal)
   workspaceIsLocalRef.current = workspaceIsLocal
   const regionCaretFocus = useAppStore((state) =>
-    regionCaretFocusTargets(state.regionCaretFocus, linkOrigin.regionId) ? state.regionCaretFocus : null)
+    regionCaretFocusTargets(state.regionCaretFocus, linkOrigin?.regionId) ? state.regionCaretFocus : null)
   const clearRegionCaretFocus = useAppStore((state) => state.clearRegionCaretFocus)
   // The on-disk root this pane's paths are relative to — the base main resolves openFile against.
   // Read from the WorkspaceRecord (NOT session.workspacePath) so worktree/scratch terminals still
@@ -442,7 +446,7 @@ export function TerminalView({
 
   function consumeCaretFocus(): void {
     const request = useAppStore.getState().regionCaretFocus
-    if (!regionCaretFocusTargets(request, linkOriginRef.current.regionId)) return
+    if (!regionCaretFocusTargets(request, linkOriginRef.current?.regionId)) return
     if (!visibleRef.current) return
     const search = request.target === 'terminal' ? null : searchInputRef.current
     const target = search ?? terminalRef.current
@@ -457,7 +461,7 @@ export function TerminalView({
   }
 
   useEffect(() => {
-    if (!regionCaretFocusTargets(regionCaretFocus, linkOrigin.regionId)) return
+    if (!regionCaretFocusTargets(regionCaretFocus, linkOrigin?.regionId)) return
     const nonce = regionCaretFocus.nonce
     const ownerWindow = hostDocument.defaultView!
     let observer: MutationObserver | undefined
@@ -500,7 +504,7 @@ export function TerminalView({
     observer.observe(hostDocument.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['inert'] })
     frame = ownerWindow.requestAnimationFrame(attempt)
     return dispose
-  }, [regionCaretFocus, visible, searchOpen, hydrating, hostDocument, linkOrigin.regionId])
+  }, [regionCaretFocus, visible, searchOpen, hydrating, hostDocument, linkOrigin?.regionId])
 
   useLayoutEffect(() => {
     // reveal() schedules a commit. Before this commit, the actual xterm host is
@@ -672,6 +676,10 @@ export function TerminalView({
         release: { x: event.clientX, y: event.clientY },
         hasSelection: terminal.hasSelection()
       })) return
+      if (!displayOriginRef.current) {
+        void api.ui.openExternal(url).catch(reportError)
+        return
+      }
       // Cmd (macOS) / Ctrl (elsewhere) + click opens the system browser immediately, skipping the
       // destination picker. A plain click keeps the picker.
       if (terminalLinkModifierOpensSystemBrowser(event, isMac)) {
@@ -729,7 +737,7 @@ export function TerminalView({
       const observationVisible = visibleRef.current
       const observationContext: RendererTerminalWriteContext = { hostId: session.control.hostId,
         sessionId: session.control.kind === 'agent' ? session.control.agentSessionId : session.id,
-        runId: session.control.run.runId, regionId: linkOriginRef.current.regionId ?? null, instanceId: performanceInstance, cause }
+        runId: session.control.run.runId, regionId: linkOriginRef.current?.regionId ?? null, instanceId: performanceInstance, cause }
       linkPreviewWrites++
       clearLinkPreview()
       const cost = writes[cause]
@@ -778,6 +786,7 @@ export function TerminalView({
     // via reportError, never on this path.
     const pathLinks = terminal.registerLinkProvider({
       provideLinks: (bufferLineNumber, callback) => {
+        if (!linkOriginRef.current) return callback(undefined)
         const matches = terminalPathLinksInBuffer(terminal.buffer.active, bufferLineNumber, activeWorkspaceRootRef.current)
         if (matches.length === 0) return callback(undefined)
         callback(matches.map(({ link: match, range }) => {
@@ -807,12 +816,14 @@ export function TerminalView({
               // System artifacts belong to the host OS. Keep the Workspace id on the typed seam so
               // Main can enforce local/root confinement; never turn a `.dmg`/`.app` path into an
               // editor or Browser Tab. Ordinary source paths retain the existing openFile route.
+              const linkOrigin = linkOriginRef.current, displayOrigin = displayOriginRef.current
+              if (!linkOrigin || !displayOrigin) return
               void openTerminalFileLink({
                 link: match,
                 local: workspaceIsLocalRef.current,
-                openSystem: (path) => api.files.openSystem(linkOriginRef.current.workspaceId, path),
+                openSystem: (path) => api.files.openSystem(linkOrigin.workspaceId, path),
                 openFile: async (link) => {
-                  const origin = { ...displayOriginRef.current, sessionId: displayOriginRef.current.sessionId ?? session.id }
+                  const origin = { ...displayOrigin, sessionId: displayOrigin.sessionId ?? session.id }
                   const state = useAppStore.getState()
                   const context = createSessionProjectFileContextSelector(origin.sessionId, origin)(state)
                   const presentation = presentationRef.current
@@ -859,7 +870,7 @@ export function TerminalView({
         start = rendererPerformance.start()
         context = { hostId: session.control.hostId,
           sessionId: session.control.kind === 'agent' ? session.control.agentSessionId : session.id,
-          runId: session.control.run.runId, regionId: linkOriginRef.current.regionId ?? null,
+          runId: session.control.run.runId, regionId: linkOriginRef.current?.regionId ?? null,
           instanceId: performanceInstance, operation }
       } catch { console.warn('[terminal] Cleanup timing observation unavailable') }
       let outcome: RendererTerminalCleanupContext['outcome'] = 'threw'
@@ -939,7 +950,7 @@ export function TerminalView({
         buffer: terminal.buffer.active.type, mouseTrackingMode: terminal.modes.mouseTrackingMode }),
       readSource: () => ({ hostId: session.control.hostId,
         sessionId: session.control.kind === 'agent' ? session.control.agentSessionId : session.id,
-        runId: session.control.run.runId, regionId: linkOriginRef.current.regionId ?? null, instanceId: performanceInstance }),
+        runId: session.control.run.runId, regionId: linkOriginRef.current?.regionId ?? null, instanceId: performanceInstance }),
       slow: (detail, duration, occurrenceMonoMs, source) => rendererPerformance.terminalInteraction(detail, duration, occurrenceMonoMs, source)
     })
     const readObservation = (): AgentMuxTerminalViewObservation | undefined => {
@@ -1018,7 +1029,7 @@ export function TerminalView({
     const incidentDispatcher = clientIncidentDispatcher()
     incidents = createClientIncidentRecorder({
       hostId: session.control.hostId, agentSessionId: session.kind === 'agent' ? session.id : null,
-      runId: session.control.run.runId, regionId: () => linkOriginRef.current.regionId ?? null,
+      runId: session.control.run.runId, regionId: () => linkOriginRef.current?.regionId ?? null,
       send: report => incidentDispatcher.send(report), reporter: incidentDispatcher.inspect,
       read: includeGeometry => {
         const buffer = terminal.buffer.active
@@ -1043,7 +1054,7 @@ export function TerminalView({
     const incidentRender = terminal.onRender(() => { renderCallbacks++ })
     const releasePerformance = rendererPerformance.registerTerminal(() => ({
       hostId: session.control.hostId, sessionId: session.control.kind === 'agent' ? session.control.agentSessionId : session.id, runId: session.control.run.runId,
-      regionId: linkOriginRef.current.regionId ?? null, instanceId: performanceInstance,
+      regionId: linkOriginRef.current?.regionId ?? null, instanceId: performanceInstance,
       writes: { live: { ...writes.live, callbackWall: { ...writes.live.callbackWall } },
         history: { ...writes.history, callbackWall: { ...writes.history.callbackWall } },
         checkpoint: { ...writes.checkpoint, callbackWall: { ...writes.checkpoint.callbackWall } } }, renderCallbacks,
@@ -1775,7 +1786,7 @@ export function TerminalView({
       let readingMarker: ReturnType<Terminal['registerMarker']> | undefined
       try {
         if (refresh && !automatic) {
-          const metadata = await refreshSession(session.id)
+          const metadata = await (refreshSessionRef.current ? refreshSessionRef.current(session.control) : refreshSession(session.id))
           if (disposed) return
           if (!metadata || metadata.control.hostId !== session.control.hostId || metadata.control.run.runId !== session.control.run.runId) {
             throw new Error('Session facts did not confirm this original Run. The original Region is kept.')
@@ -2009,7 +2020,7 @@ export function TerminalView({
 
   // Address changes replace only the observation callback, never the terminal/attachment.
   useEffect(() => {
-    const regionId = linkOrigin.regionId
+    const regionId = linkOrigin?.regionId
     if (!regionId) return
     return registerTerminalViewObservation({
       regionId,
@@ -2019,7 +2030,7 @@ export function TerminalView({
       readOverlapTop: popup => inputGeometryRef.current?.readOverlapTop(popup),
       subscribe: onChange => inputGeometryRef.current?.subscribe(onChange) ?? (() => {})
     })
-  }, [linkOrigin.regionId, session.id, session.control.run.runId])
+  }, [linkOrigin?.regionId, session.id, session.control.run.runId])
 
   async function redrawCurrentScreen(): Promise<boolean> {
     const viewport = viewportRef.current
@@ -2103,9 +2114,11 @@ export function TerminalView({
   }
 
   function pathMenuActions(link: TerminalPathLink | null) {
+    const origin = linkOriginRef.current
+    if (!origin) return []
     return terminalFileMenuActions({ link, local: workspaceIsLocal,
-      onReveal: path => { void api.files.reveal(linkOriginRef.current.workspaceId, path).catch(reportError) },
-      onOpenSystem: path => { void api.files.openSystem(linkOriginRef.current.workspaceId, path).catch(reportError) } })
+      onReveal: path => { void api.files.reveal(origin.workspaceId, path).catch(reportError) },
+      onOpenSystem: path => { void api.files.openSystem(origin.workspaceId, path).catch(reportError) } })
   }
 
   function captureMenuSelection(): boolean {
