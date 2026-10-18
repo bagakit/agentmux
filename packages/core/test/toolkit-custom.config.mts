@@ -21,7 +21,10 @@ const changes: Record<string, [string, string, string]> = {
   'package-config': ['packages/core/src/toolkit.ts', "if (Object.hasOwn(r, 'package')) invalid(code)", 'void r.package'],
   'package-source': ['packages/core/src/toolkit.ts', "!/^[a-f0-9]{64}$/u.test(r.contentSHA256)", 'false'],
   'package-install': ['packages/core/src/agentmux-cli-commands.ts', "...(action === 'install' ? { rpcMethod: 'toolkit.create' } : {}),", '...{},'],
-  'package-receipt-depth': ['packages/core/src/control-codec.ts', "settingsResourceRecord(header, 'CONTROL_PROTOCOL_ERROR')", "settingsResourceRecord(source, 'CONTROL_PROTOCOL_ERROR')"]
+  'package-receipt-depth': ['packages/core/src/control-codec.ts', "settingsResourceRecord(header, 'CONTROL_PROTOCOL_ERROR')", "settingsResourceRecord(source, 'CONTROL_PROTOCOL_ERROR')"],
+  'tui-programs': ['packages/core/src/toolkit.ts', "if (r.mode === 'tui' && ((r.actions as ToolkitAction[] | undefined)?.length || r.display != null)) invalid(code)", 'void r.mode'],
+  'tui-document': ['packages/core/src/toolkit.ts', "if (definition.mode === 'tui' && (r.text !== '' || Object.hasOwn(r, 'document'))) invalid()", 'void definition.mode'],
+  'tui-default-mode': ['apps/desktop/src/main/toolkit-config.ts', "mode: fields.mode ?? 'script', ", '']
 }
 assert.ok(mutant === 'baseline' || changes[mutant], 'The Core mutation must name an actual owning Source change.')
 const sha = (value: string) => createHash('sha256').update(value).digest('hex')
@@ -38,4 +41,5 @@ export default defineConfig({ ...owning, plugins: [...(owning.plugins ?? []), {
     return { code: consumed, map: null }
   }
 }], test: { ...owning.test,
-  include: ['packages/core/test/toolkit-control.test.ts', 'packages/core/test/toolkit-custom.test.ts', 'packages/core/test/toolkit-package.test.ts'] } })
+  include: ['packages/core/test/toolkit-control.test.ts', 'packages/core/test/toolkit-custom.test.ts', 'packages/core/test/toolkit-package.test.ts',
+    'apps/desktop/test/toolkit-tui-config.test.ts'] } })
