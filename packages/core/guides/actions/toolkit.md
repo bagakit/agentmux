@@ -117,9 +117,12 @@ heap inspect --capture-id UUID reads that original operation without recapturing
 is current file integrity, not a past durability ACK. Load an exported .heapsnapshot in DevTools
 Memory and use Retainers. This is V8 object evidence, not all workers/native/GPU/RSS or a leak
 verdict. Two-file Comparison requires independently established isolate/object-ID continuity.
-The same capture-id never starts native collection again. Only a completed original with a
-known before-replace publication failure can explicitly repeat capture to retry its small
-receipt write. After-replace unknown must inspect the actual same-ID manifest/file first;
+While its original attempt remains retained/pending, the same capture-id never starts
+native collection again. Every new capture intent requires a fresh UUID. Inspect a retired
+ID first: replaced IDs report mismatch, or absent when no snapshot is retained. This bounded
+retention is not permanent historical idempotency. Only a completed original with a known
+before-replace publication failure can explicitly repeat capture to retry its small receipt
+write. After-replace unknown must inspect the actual same-ID manifest/file first;
 readability does not turn the original missing durability ACK into confirmed. A pending
 publication preserves the prior file plus one candidate and refuses further native captures.
 system metrics get returns the first bounded frame and releases its own reader; a
