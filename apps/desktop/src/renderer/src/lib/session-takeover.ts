@@ -32,11 +32,33 @@ export function takeoverExecution(agentSessionId: string, histories: readonly Ag
   return identities.size === 1 ? [...identities.values()][0] ?? null : null
 }
 
-/** A repeated click reconciles the same durable spatial intent, never another creation. */
-export async function takeoverRequestId(source: TakeoverSource): Promise<string> {
-  const key = JSON.stringify([source.hostId, source.agentSessionId, source.origin.tabId, source.origin.regionId])
+/** A source and its explicit predecessor identify one durable intent, including repeated clicks. */
+export async function takeoverRequestId(source: TakeoverSource, previousRequestId?: string): Promise<string> {
+  const parts = [source.hostId, source.agentSessionId, source.origin.tabId, source.origin.regionId]
+  if (previousRequestId !== undefined) parts.push(previousRequestId)
+  const key = JSON.stringify(parts)
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key))
   return `takeover:${Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('')}`
+}
+
+/** Follow only this source's retained intent chain; no second ledger or write on reads. */
+async function latestTakeoverRequestId(source: TakeoverSource): Promise<string> {
+  const requests = useAppStore.getState().spatialRequests
+  const visited = new Set<string>()
+  let requestId = await takeoverRequestId(source)
+  while (Object.hasOwn(requests, requestId)) {
+    const binding = requests[requestId]
+    if (visited.has(requestId) || !binding || binding.requestId !== requestId ||
+      binding.operation !== 'agent.open' || !binding.createAgent || !binding.agentSessionId ||
+      !binding.tabId || !binding.regionId || !binding.executionHostId || binding.executionHostId !== source.hostId) {
+      throw new Error('The retained takeover request has a conflicting or incomplete identity. Its result is unconfirmed; keep the original request and check it again.')
+    }
+    visited.add(requestId)
+    const next = await takeoverRequestId(source, requestId)
+    if (!Object.hasOwn(requests, next)) break
+    requestId = next
+  }
+  return requestId
 }
 
 function ownsTakeoverRegion(source: TakeoverSource): boolean {
@@ -141,7 +163,7 @@ async function nameTakeover(source: TakeoverSource, report: AgentMuxSpaceMutatio
 
 export async function inspectTakeover(source: TakeoverSource): Promise<AgentMuxSpaceMutationReport | null> {
   source = await exactTakeoverSource(source)
-  const state = useAppStore.getState(), requestId = await takeoverRequestId(source)
+  const requestId = await latestTakeoverRequestId(source), state = useAppStore.getState()
   if (!state.spatialRequests[requestId]) return null
   const result = await state.executeControl({ schemaVersion: 5, requestId: `inspect:${crypto.randomUUID()}`,
     operation: 'space.inspect', target: { requestId } })
@@ -162,10 +184,9 @@ export function focusTakeoverResult(source: TakeoverSource, report: AgentMuxSpac
   state.focusRegion(target.displayWorkspaceId, target.tabId, target.regionId, 'pointer', target.groupId)
 }
 
-export async function takeOverSession(source: TakeoverSource, executorId: string, current: () => boolean): Promise<AgentMuxSpaceMutationReport> {
+export async function takeOverSession(source: TakeoverSource, executorId: string, current: () => boolean, previousRequestId?: string): Promise<AgentMuxSpaceMutationReport> {
   if (!current() || !ownsTakeoverRegion(source)) throw new Error('The original Region or Session changed. No replacement source was used; its work is kept.')
   source = await exactTakeoverSource(source)
-  const requestId = await takeoverRequestId(source)
   const assertSource = () => {
     if (!current() || !ownsTakeoverRegion(source)) throw new Error('The original Region or Session changed. No replacement source was used; its work is kept.')
     const latest = useAppStore.getState()
@@ -175,7 +196,11 @@ export async function takeOverSession(source: TakeoverSource, executorId: string
   }
   assertSource()
   const existing = await inspectTakeover(source)
-  if (existing) return existing
+  // Only a fresh choice made after presenting this exact retirement authorizes
+  // a successor. Another surface's admission converges on its retained result.
+  if (existing && (previousRequestId !== existing.requestId || existing.outcome !== 'retired')) return existing
+  if (previousRequestId !== undefined && !existing) throw new Error('The previous takeover request is no longer observed. Keep its identity and check it again before creating another Agent.')
+  const requestId = await takeoverRequestId(source, previousRequestId)
   assertSource()
   const state = useAppStore.getState()
   if (!source.hostId || !source.cwd) throw new Error('The original execution Host or directory is unconfirmed. Re-read this Session; its work and draft are kept.')
