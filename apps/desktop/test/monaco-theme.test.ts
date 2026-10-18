@@ -20,12 +20,16 @@ it('updates the same native theme from Root preview and local system changes wit
   const document = structuredClone(GRAPHITE_THEME)
   document.id = 'custom.editor'; document.variants.light.colors.surface0 = '#fffaf0'
   document.variants.light.colors.text = '#243a51'; document.variants.light.colors.danger = '#a52f2f'
+  document.variants.light.colors.info = '#164e91'
   updateThemeSelection({ themeId: document.id, customThemes: { [document.id]: themeValue(document) }, appAppearance: 'system' })
   media.matches = false; media.dispatchEvent(new Event('change'))
   expect(native.defineTheme).toHaveBeenLastCalledWith(MONACO_THEME_ID, expect.objectContaining({ base: 'vs', colors: expect.objectContaining({
     'editor.background': '#fffaf0', 'editor.foreground': '#243a51', 'editorError.foreground': '#a52f2f',
     'diffEditor.removedTextBackground': '#a52f2f25'
   }) }))
+  expect(native.defineTheme.mock.calls.at(-1)?.[1].rules).toEqual(expect.arrayContaining([
+    { token: 'variable', foreground: '164e91' }, { token: 'variable.predefined', foreground: '164e91' }
+  ]))
   const before = native.defineTheme.mock.calls.length
   const edited = structuredClone(document); edited.variants.light.colors.surface0 = '#f5e8ce'
   previewTheme(edited)
