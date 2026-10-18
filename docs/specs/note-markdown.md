@@ -26,7 +26,7 @@ title: "研究记录"
 ```
 
 段落／标题支持尾部 `^blockID`，也支持紧随原块的独立锚点行；canonical serializer 使用独立行。
-代码、引用容器和分隔线的锚点位于该块后的独立行。嵌套内容的锚点仍处于原容器内。
+代码、数学块、引用容器和分隔线的锚点位于该块后的独立行。嵌套内容的锚点仍处于原容器内。
 列表项有自己的 `<!--amux-item:itemID-->`，与其首段落的 block ID 分别保留；
 空段落用 `<!--amux-empty:blockID-->`。ID 字段采用 URI component 编码、解码一次，comment 字段的连字符也编码，避免 `--`。
 
@@ -115,6 +115,28 @@ parser 发现快照不符便将该 occurrence 读成未绑定，再由原 writer
 未改 query 的目标改名仍保准确绑定。原 `[label](note:ID#block)<!--amux-ref:R-->` 可读取，下一次规范保存统一写 wiki 形式；
 显式旧 JSON 转换将原 atom 的文字展开为可编辑内容，必要的 wiki 字面转义保全任意原 label、target 和 occurrence。
 两者都消费同一 schema／codec，不保另一条可写正文格式。
+
+## 数学表达式
+
+行内公式使用 `$x^2$`，块公式使用独立的 `$$` 开闭围栏；块锚点仍位于关闭围栏后的独立行。
+共享 Markdown codec 通过已安装的 `remark-math` 解析和序列化表达式，编辑树分别使用
+`noteMathInline` 和 `noteMathBlock` 的 `latex` 字符串；块公式持有与其他语义块相同的 `blockId` 和原可信作者记录。
+需要时 serializer 使用更长的美元分隔符以保留表达式内的美元字符。清空的行内公式写作 `$ $`，保空白公式和原段落，不能写成块开头 `$$`。
+
+```md
+能量为 $E = mc^2$。 ^energy-paragraph
+
+$$
+\int_0^1 x^2 \, dx = \frac{1}{3}
+$$
+
+^energy-equation
+```
+
+反斜线转义的美元与代码中的美元保持字面内容；普通文本中的未配对美元不生成公式。
+表达式内的 `[[…]]` 不参与页面链接绑定或引用索引，公式源码仍参与块的可读文本检索。
+渲染器不决定正文合法性：无法排版的表达式仍可修改和保存，错误只影响该处预览。
+原 Files／Notebook 公共读写复用相同 codec、准确资源和 revision，不增加数学专用保存接口。
 
 ## 元数据与公共消费
 
