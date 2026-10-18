@@ -326,7 +326,7 @@ app.whenReady().then(async () => {
     if (scene !== 'surfaces') assert.equal(result.delayedPageSelection.passed, true, 'An actual delayed earlier page cannot move the selected original record')
     result.passed = true
   } catch (error: any) {
-    result.failure = { name: error.name, message: error.message, stack: error.stack }
+    result.failure = { name: error.name, message: error.message, stack: error.stack, ...(error.details ? { details: error.details } : {}) }
     await runMobileOnce().catch(error => { result.mobileFailure = { name: error.name, message: error.message } })
     if (win && !win.isDestroyed()) {
       result.atFailure = await read('({state:window.readingProof?.state(),ui:window.readingProof?.inspect(),errors:window.readingProof?.errors,body:document.body.innerText.slice(0,5000)})').catch(() => null)

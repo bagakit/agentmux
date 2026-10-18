@@ -33,6 +33,7 @@ export async function exerciseIsolation({ runtime, core, store, config, privateR
   }
   const receiptFor = snapshot => ({ sessionId: snapshot.window.checkpoint.agentSessionId, window: { id: snapshot.window.id, revision: snapshot.window.revision },
     nativeCut: snapshot.window.checkpoint.frontier.cuts.find(cut => cut.kind === 'native')?.checkpoint.cursor,
+    coverage: snapshot.coverage,
     nativeIds: snapshot.units.flatMap(unit => unit.records.flatMap(record => record.reference?.source.kind === 'native' ? [record.reference.source.recordId] : [])) })
   let before = receiptFor(await complete())
   const appendUnrelated = async suffix => {
@@ -40,10 +41,22 @@ export async function exerciseIsolation({ runtime, core, store, config, privateR
     assert.equal(stored.nativeHandle.kind, 'provider'); assert.equal(stored.nativeHandle.sessionId, unrelated.nativeSessionId)
     const row = appendRow(scene, `unrelated-${phase}-${suffix}`)
     await fs.appendFile(stored.nativeHandle.transcriptPath, JSON.stringify(row) + '\n')
-    const observed = await until(async () => {
-      const next = receiptFor(await complete())
-      return next.nativeIds.includes(row.payload.id) && next.nativeCut !== before.nativeCut ? next : null
-    }, 'Exact unrelated record reaches the original Core read')
+    const attempts = []
+    let observed
+    try {
+      observed = await until(async () => {
+        const next = receiptFor(await complete())
+        attempts.push(next); if (attempts.length > 8) attempts.shift()
+        return next.nativeIds.includes(row.payload.id) && next.nativeCut !== before.nativeCut ? next : null
+      }, 'Exact unrelated record reaches the original Core read')
+    } catch (error) {
+      const current = await store.readMetadata(unrelated.sessionId)
+      const bytes = await fs.readFile(stored.nativeHandle.transcriptPath)
+      error.details = { unrelated, recordId: row.payload.id, before, attempts,
+        source: { nativeHandle: current.nativeHandle, run: current.run, bytes: bytes.length,
+          exactRowPresent: bytes.includes(Buffer.from(JSON.stringify(row) + '\n')) } }
+      throw error
+    }
     assert.equal(observed.sessionId, unrelated.sessionId)
     before = observed
     return { recordId: row.payload.id, observed }
