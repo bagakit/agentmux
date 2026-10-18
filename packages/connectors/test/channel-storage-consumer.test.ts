@@ -7,6 +7,8 @@ import { ChannelStorage } from '../src/channel-storage.js'
 import { DurableIngressHost } from '../src/durable-ingress.js'
 import { RoomBindingHost } from '../src/room-binding.js'
 import { FeishuAdapter } from '../src/adapters/feishu/index.js'
+import { createBuiltinConnectionAdapters } from '../src/platform-adapters.js'
+import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
 import type { ChannelActorProfileObservation, ConnectionActor } from '@agentmux/core/connections'
 import { ingressFixture } from './fixtures/ingress.js'
 import { context } from './fixtures/room-binding.js'
@@ -16,18 +18,19 @@ const closes: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 const actor: ConnectionActor = { application: feishuConfig.application, idType: 'open_id', userId: 'original-external-user' }
 const profileResponse = (name = 'Native human', id = actor.userId) => ({ code: 0, data: { user: { open_id: id, name, avatar: { avatar_240: 'https://cdn.example/avatar.png' }, email: 'private-native-field@example.test' } } })
-async function fixture() {
+async function fixture(builtin = false) {
   const original = await ingressFixture(true, feishuConfig); closes.push(original.close)
   const transport = feishuSdkTransport(), adapter = new FeishuAdapter({ http: transport.http })
+  if (builtin) vi.spyOn(defaultHttpInstance, 'request').mockImplementation(input => transport.request(input))
   const databasePath = join(original.root, 'channel-storage.sqlite')
-  const open = (adapters: ConnectionAdapter[] = [adapter]) => new ConnectionHost({ databasePath, adapters, secrets: { resolve: async () => 'fixture-credential' } })
+  const open = (adapters: readonly ConnectionAdapter[] = builtin ? createBuiltinConnectionAdapters() : [adapter]) => new ConnectionHost({ databasePath, adapters, secrets: { resolve: async () => 'fixture-credential' } })
   let connections = open(); closes.push(() => connections.close())
   await connections.configure({ operationId: 'channel-configure', expectedRevision: null, connection: feishuConfig })
   const bindings = new RoomBindingHost({ connections, spatial: original.spatial, checkpoint: ref => original.client.conversationCheckpoint(ref) }); connections.bindings = bindings
   expect((await bindings.bind(original.input, context)).state).toBe('applied')
   expect((await bindings.grant(original.grant, context)).state).toBe('applied')
-  const ingress = new DurableIngressHost({ connections, bindings, authenticators: [adapter], core: hostId => hostId === 'local' ? original.client : undefined })
-  const receiver = await startFeishuTransport(adapter.transport, feishuConfig, ingress); closes.push(receiver.close)
+  const ingress = new DurableIngressHost({ connections, bindings, authenticators: connections.ingressAuthenticators(), core: hostId => hostId === 'local' ? original.client : undefined })
+  const receiver = await startFeishuTransport(connections.registeredAdapter('feishu')!.transport!, feishuConfig, ingress); closes.push(receiver.close)
   await vi.waitFor(() => expect(receiver.observation().transport.state).toBe('ready'))
   return { ...original, transport, adapter, ingress, bindings, host: () => connections,
     reopen() { receiver.close(); connections.close(); connections = open(); return connections } }
@@ -38,6 +41,15 @@ function actorRow(f: Awaited<ReturnType<typeof fixture>>) {
   if (!entry) throw Error('The real native actor cache consumer did not write a value')
   return { storage, row: storage.get(entry.key)! }
 }
+it('the default Desktop adapter registry joins native SDK intake to the original durable actor cache', async () => {
+  const f = await fixture(true), request = f.transport.request.getMockImplementation()!
+  f.transport.request.mockImplementation(input => input.url?.includes('/contact/v3/users/') ? Promise.resolve(profileResponse('Default registered human')) : request(input))
+  await submit(f, 'default-registry')
+  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
+  await vi.waitFor(() => expect(f.host().readChannelActor(feishuConfig.connectionId, actor)).toMatchObject({ state: 'observed', profile: { name: 'Default registered human' } }))
+  expect(profileRequests(f)).toHaveLength(1)
+  expect(actorRow(f).row.value.kind).toBe('json')
+})
 async function submit(f: Awaited<ReturnType<typeof fixture>>, suffix: string) {
   const payload = feishuPayload({ message_id: 'message-' + suffix }); payload.header.event_id = 'event-' + suffix
   await f.transport.receive(payload)
