@@ -4,6 +4,8 @@ import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 const mutation = process.env.COLLABORATION_MUTATION
 const edits: Record<string, [string, string]> = {
+  'eager-original': ['<ConversationCollaborationOriginal parts={parts} identity={readingIdentity} hasResources={collaborationHasResources} />', 'ConversationCollaborationOriginal({ parts, identity: readingIdentity, hasResources: collaborationHasResources })'],
+  'truncate-original': ["parts.map(partText).join('\\n\\n')", "parts.slice(0, -1).map(partText).join('\\n\\n')"],
   'no-fold': ['setCollaborationOpen(located); setCollaborationPresented(located)', 'setCollaborationOpen(true); setCollaborationPresented(true)'],
   'wrong-avatar': ["{ role: 'agent', id: conversationSessionId } : undefined", "{ role: 'agent', id: nativeCollaboration!.sender! } : undefined"],
   'raw-body': ['text={sessionHistoryTextForReading(part)}', 'text={part.text}'],

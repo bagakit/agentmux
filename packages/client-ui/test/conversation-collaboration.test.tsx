@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto'
+import { appendFileSync } from 'node:fs'
 import { ConversationMessage } from '../src/components/ConversationMessage.js'
 import type { ConversationHistoryResourceReader } from '../src/components/ConversationResourceImage.js'
 import type { AgentTimelineItem } from '@agentmux/core'
@@ -62,6 +63,69 @@ it('retains opened body, links and selection across appends, hidden updates and 
   await click('.log-turn__collaboration-toggle')
   expect(host.querySelector('.log-turn__body')).toBe(body)
   expect(body.querySelector('.md-link')).toBe(link)
+})
+
+it('assembles the full collaboration original only while its Details consumer is open', async () => {
+  const parts = [0, 1, 2].map(index => {
+    const text = `wire-${index}:` + 'x'.repeat(32768)
+    return { kind: 'text' as const, text, readingRange: { start: 7, end: text.length }, contentEligibility: 'public' as const }
+  })
+  const originalItem = { ...item, contentParts: parts }
+  const fullOriginal = parts.map(part => part.text).join('\n\n')
+  const join = Array.prototype.join
+  let originalJoins = 0, originalCharacters = 0
+  const observedJoin = vi.spyOn(Array.prototype, 'join').mockImplementation(function (this: unknown[], separator?: string) {
+    const result = join.call(this, separator)
+    if (separator === '\n\n' && this.length === parts.length && this.every((value, index) => value === parts[index]!.text)) {
+      originalJoins += 1; originalCharacters += result.length
+    }
+    return result
+  })
+  try {
+    await render([originalItem])
+    for (let index = 0; index < 3; index++) await render([originalItem, { id: `unrelated-${index}`, kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Other original message' }] }], index !== 1)
+    expect(host.querySelector('.log-turn__collaboration-content .log-turn__body')).toBeNull()
+    expect(host.querySelector('.conversation-input-details__body')).toBeNull()
+    if (process.env.COLLABORATION_ORIGINAL_COUNTS) appendFileSync(process.env.COLLABORATION_ORIGINAL_COUNTS, JSON.stringify({ parts: parts.length, partCharacters: parts[0]!.text.length, originalJoins, originalCharacters }) + '\n')
+    expect(originalJoins, 'Unopened Details must not assemble the full original').toBe(0)
+    expect(originalCharacters).toBe(0)
+
+    await click('[aria-label="Message details"]')
+    const originalNode = host.querySelector<HTMLDetailsElement>('.log-turn__collaboration-original')!
+    expect(originalNode.querySelector('pre')?.textContent).toBe(fullOriginal)
+    expect(originalJoins).toBe(1)
+    expect(originalCharacters).toBe(fullOriginal.length)
+    originalNode.open = true
+    await click('[aria-label="Copy original record"]')
+    expect(copy).toHaveBeenLastCalledWith(fullOriginal, expect.any(Function))
+
+    await click('[aria-label="Message details"]')
+    const beforeClosedUpdate = originalJoins
+    await render([originalItem])
+    expect(host.querySelector('.log-turn__collaboration-original')).toBeNull()
+    expect(originalJoins).toBe(beforeClosedUpdate)
+    await click('[aria-label="Message details"]')
+    expect(host.querySelector('.log-turn__collaboration-original pre')?.textContent).toBe(fullOriginal)
+    expect(originalJoins).toBe(beforeClosedUpdate + 1)
+  } finally { observedJoin.mockRestore() }
+})
+
+it('preserves opened original nodes and selection across unrelated and hidden updates', async () => {
+  await render(); await click('[aria-label="Message details"]')
+  const details = host.querySelector<HTMLDetailsElement>('.log-turn__collaboration-original')!
+  details.open = true
+  const body = details.querySelector('pre')!, range = document.createRange()
+  range.selectNodeContents(body); getSelection()!.addRange(range)
+  expect(getSelection()!.toString()).toBe(original)
+  const appended: AgentSessionHistoryItem = { id: 'other-report', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Another report' }] }
+  await render([item, appended], false); await render([item, appended])
+  expect(host.querySelector('.log-turn__collaboration-original')).toBe(details)
+  expect(details.open).toBe(true)
+  expect(details.querySelector('pre')).toBe(body)
+  expect(getSelection()!.toString()).toBe(original)
+  await click('[aria-label="Copy original record"]')
+  expect(copy).toHaveBeenLastCalledWith(original, expect.any(Function))
+  expect(getSelection()!.toString()).toBe(original)
 })
 
 it('keeps opaque originals available without putting them in preview or expanded reading', async () => {
