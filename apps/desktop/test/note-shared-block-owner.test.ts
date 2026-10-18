@@ -196,25 +196,23 @@ it.each(['taskList', 'table'] as const)('rejects an explicit inner %s paragraph 
   expect(await f.port.inspectShare({ mode: 'request', request: f.params })).toMatchObject({ mode: 'request', result: { status: 'unknown', code: 'NOTE_SHARE_INSPECTION' } })
   expect(write).not.toHaveBeenCalled()
 })
-it('uses the executable shared CLI for a checked task and whole table, including inspect, undo and exact invalid target rejection', async () => {
-  for (const kind of ['taskList', 'table'] as const) {
-    const f = await richSharingFixture(kind), server = new AgentMuxControlServer({ socketPath: join(f.root, 'rich-control.sock'), files: f.port, coreClients: () => [] })
-    await server.start(); dispose.push(() => server.stop())
-    const environment = objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path })
-    const cli = async (args: string[], input: unknown) => runCompiledObjectCli(args, environment, JSON.stringify(input))
-    const bad = structuredClone(f.params); bad.promotions[0]!.sourceBlockId = kind === 'table' ? 'cell-body' : 'item-body-1'
-    const rejected = await cli(['file', 'share', '--input', '-'], bad)
-    expect(rejected.code).not.toBe(0); expect(rejected.stdout + rejected.stderr).toContain('NOTE_SHARE_RANGE_UNSUPPORTED')
-    expect(await readFile(join(f.directory, f.source.path), 'utf8')).toBe(f.original)
-    const saved = await cli(['file', 'share', '--input', '-'], f.params)
-    expect(saved.code, saved.stderr + saved.stdout).toBe(0); expect(parseFileShareResult(JSON.parse(saved.stdout).result, f.params).status).toBe('committed')
-    const inspected = await cli(['file', 'share', 'inspect', '--input', '-'], { mode: 'request', request: f.params })
-    expect(inspected.code, inspected.stderr + inspected.stdout).toBe(0); expect(JSON.parse(inspected.stdout).result.result.status).toBe('committed')
-    const undone = await cli(['file', 'share', 'undo', '--input', '-'], await removal(f))
-    expect(undone.code, undone.stderr + undone.stdout).toBe(0); expect(JSON.parse(undone.stdout).result.status).toBe('committed')
-    expect(await readFile(join(f.directory, f.source.path), 'utf8')).toBe(f.original)
-  }
-})
+it.each(['taskList', 'table'] as const)('uses the executable shared CLI for a checked task or whole table (%s), including inspect, undo and exact invalid target rejection', async kind => {
+  const f = await richSharingFixture(kind), server = new AgentMuxControlServer({ socketPath: join(f.root, 'rich-control.sock'), files: f.port, coreClients: () => [] })
+  await server.start(); dispose.push(() => server.stop())
+  const environment = objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path })
+  const cli = async (args: string[], input: unknown) => runCompiledObjectCli(args, environment, JSON.stringify(input))
+  const bad = structuredClone(f.params); bad.promotions[0]!.sourceBlockId = kind === 'table' ? 'cell-body' : 'item-body-1'
+  const rejected = await cli(['file', 'share', '--input', '-'], bad)
+  expect(rejected.code).not.toBe(0); expect(rejected.stdout + rejected.stderr).toContain('NOTE_SHARE_RANGE_UNSUPPORTED')
+  expect(await readFile(join(f.directory, f.source.path), 'utf8')).toBe(f.original)
+  const saved = await cli(['file', 'share', '--input', '-'], f.params)
+  expect(saved.code, saved.stderr + saved.stdout).toBe(0); expect(parseFileShareResult(JSON.parse(saved.stdout).result, f.params).status).toBe('committed')
+  const inspected = await cli(['file', 'share', 'inspect', '--input', '-'], { mode: 'request', request: f.params })
+  expect(inspected.code, inspected.stderr + inspected.stdout).toBe(0); expect(JSON.parse(inspected.stdout).result.result.status).toBe('committed')
+  const undone = await cli(['file', 'share', 'undo', '--input', '-'], await removal(f))
+  expect(undone.code, undone.stderr + undone.stdout).toBe(0); expect(JSON.parse(undone.stdout).result.status).toBe('committed')
+  expect(await readFile(join(f.directory, f.source.path), 'utf8')).toBe(f.original)
+}, 15_000)
 it('groups different staged blocks from one source into one source write without creating duplicate entities for their repeated uses', async () => {
   const f = await fixture(), note = readNoteDocument(f.params.destination.content); if (note.status !== 'valid') throw Error('Destination must parse')
   note.note.content.content!.push({ type: 'noteInclude', attrs: { blockId: 'second-source-use', referenceId: 'other-source-ref', noteId: 'other-shared', path: 'other-block.note.md' } })
