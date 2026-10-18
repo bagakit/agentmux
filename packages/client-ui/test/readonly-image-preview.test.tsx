@@ -89,13 +89,13 @@ it('a supplied native image renderer remains the exact resource owner within rea
   const read = vi.fn(async (input: AgentSessionHistoryResourceRequest) => response(input)), open = vi.fn()
   const { host } = await render(<AgentMarkdown readOnly readOnlyImages content="![Original](recorded-image) [site](https://example.invalid)"
     openHttpLink={open} renderImage={(href) => href === nativePath ? <ConversationResourceImage part={part} partIndex={2} record={record} readResource={read} interactive={false} /> : undefined} />)
-  await reveal(); expect(read).toHaveBeenCalledExactlyOnceWith(request); expect(host.querySelector('img')?.getAttribute('src')).toBe(dataUrl)
+  await reveal(); expect(read).toHaveBeenCalledExactlyOnceWith({ ...request, representation: 'image' }); expect(host.querySelector('img')?.getAttribute('src')).toBe(dataUrl)
   expect(host.querySelector('button')).toBeNull(); expect(open).not.toHaveBeenCalled()
 })
 it('a mismatched native resource keeps its exact reference and reason without a retry or gallery', async () => {
   const read = vi.fn(async (input: AgentSessionHistoryResourceRequest) => ({ ...response(input), recordId: 'foreign-record' }))
   const { host } = await render(<ConversationResourceImage part={part} partIndex={2} record={record} readResource={read} interactive={false} />)
-  await reveal(); expect(read).toHaveBeenCalledExactlyOnceWith(request); expect(host.querySelector('img')).toBeNull()
+  await reveal(); expect(read).toHaveBeenCalledExactlyOnceWith({ ...request, representation: 'image' }); expect(host.querySelector('img')).toBeNull()
   expect(host.textContent).toContain(nativePath); expect(host.textContent).toContain('another recorded resource'); expect(host.querySelector('button')).toBeNull()
 })
 it('active false and a hidden image viewport reject late bytes while retaining an already loaded image', async () => {
