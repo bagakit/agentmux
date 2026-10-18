@@ -1,4 +1,4 @@
-import type { Graph, Viz } from '@viz-js/viz'
+import type { Graph, Subgraph, Viz } from '@viz-js/viz'
 
 export type CollaborationLayoutKind = 'communication' | 'creation' | 'supervision'
 export type CollaborationLayoutConnection = { id: string; source: string; target: string; kind: CollaborationLayoutKind }
@@ -90,6 +90,7 @@ export async function arrangeCollaboration(input: CollaborationLayoutInput, sign
   const { nodes, areas } = layoutMembers(input)
   const emptyAreas: typeof input.areas[number][] = [], occupiedAreas: typeof input.areas[number][] = []
   const clusterNames = new Map<string, string>(), usedNames = new Set([...nodes.keys(), ...areas.keys()])
+  const clusters = new Map<string, Subgraph>()
   const visible = new Map<string, { id: string; width: number; height: number }>(), endpoints = new Map<string, string>()
   const graph: Graph = { directed: false,
     graphAttributes: { start: 42, overlap: 'prism', sep: `+${gap}`, splines: false, pack: gap },
@@ -111,9 +112,10 @@ export async function arrangeCollaboration(input: CollaborationLayoutInput, sign
     while (usedNames.has(name)) name += '_'
     usedNames.add(name); clusterNames.set(area.id, name)
     for (const member of members) { visible.set(member.id, member); endpoints.set(member.id, member.id) }
-    graph.subgraphs!.push({ name, graphAttributes: { margin: padding, labeljust: 'l', labelloc: 't', fontsize: 1,
+    const cluster: Subgraph = { name, graphAttributes: { margin: padding, labeljust: 'l', labelloc: 't', fontsize: 1,
       // This blank label reserves the real title, not a synthetic Agent or a relationship.
-      label: { html: `<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="${labelWidth}" HEIGHT="${labelHeight}" FIXEDSIZE="TRUE"> </TD></TR></TABLE>` } }, nodes: fixedNodes(members) })
+      label: { html: `<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0" CELLPADDING="0"><TR><TD WIDTH="${labelWidth}" HEIGHT="${labelHeight}" FIXEDSIZE="TRUE"> </TD></TR></TABLE>` } }, nodes: fixedNodes(members), edges: [] }
+    clusters.set(area.id, cluster); graph.subgraphs!.push(cluster)
   }
   const pairs = new Set<string>()
   for (const edge of input.connections) {
@@ -121,7 +123,9 @@ export async function arrangeCollaboration(input: CollaborationLayoutInput, sign
     if (!source || !target || source === target) continue
     const key = JSON.stringify([source, target].sort())
     if (pairs.has(key)) continue
-    pairs.add(key); graph.edges!.push({ tail: source, head: target })
+    // fdp solves each cluster with its own edges; root-only internal edges do not influence that solve.
+    const areaId = nodes.get(source)?.areaId, cluster = areaId && areaId === nodes.get(target)?.areaId ? clusters.get(areaId) : undefined
+    pairs.add(key); (cluster ?? graph).edges!.push({ tail: source, head: target })
   }
   signal?.throwIfAborted()
   const result = occupiedAreas.length ? render(await graphviz(signal), graph, 'fdp') : { objects: [] }
