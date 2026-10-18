@@ -17,8 +17,9 @@ const providerMutant = process.argv.includes('--provider-scroll-mutation')
 const takeoverMutant = process.argv.includes('--takeover-scroll-mutation')
 const appearanceMutant = process.argv.includes('--appearance-contrast-mutation')
 const previewReturnMutant = process.argv.includes('--preview-return-mutation')
-assert.ok([navigationMutant,providerMutant,takeoverMutant,appearanceMutant,previewReturnMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
-const nativeMutant = navigationMutant || providerMutant || takeoverMutant || appearanceMutant || previewReturnMutant
+const larkNavigationMutant = process.argv.includes('--lark-navigation-mutation')
+assert.ok([navigationMutant,providerMutant,takeoverMutant,appearanceMutant,previewReturnMutant,larkNavigationMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
+const nativeMutant = navigationMutant || providerMutant || takeoverMutant || appearanceMutant || previewReturnMutant || larkNavigationMutant
 const pageArguments = process.argv.filter(argument => argument.startsWith('--pages='))
 assert.ok(pageArguments.length <= 1, 'One explicit page selection')
 const requestedPages = pageArguments.length ? pageArguments[0].slice('--pages='.length).split(',') : null
@@ -27,7 +28,7 @@ if (requestedPages) {
   assert.equal(new Set(requestedPages).size, requestedPages.length, 'Page selection contains no duplicate')
 }
 let navigationMutationLoads = 0, providerMutationLoads = 0, takeoverMutationLoads = 0, appearanceMutationLoads = 0
-let previewReturnMutationLoads = 0
+let previewReturnMutationLoads = 0, larkNavigationMutationLoads = 0
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 await fs.mkdir(evidence,{recursive:true})
 async function bind(file) {
@@ -40,7 +41,7 @@ async function bind(file) {
   }
 }
 try {
-  for (const file of ['index.html','entry.mjs','main.cjs','vitest.config.mts','scenario.md']) await bind(path.join(fixture,file))
+  for (const file of ['index.html','entry.mjs','lark-preview.ts','main.cjs','vitest.config.mts','scenario.md']) await bind(path.join(fixture,file))
   for (const file of ['apps/desktop/scripts/verify-settings-home.mjs','apps/desktop/test/settings-home.test.tsx','apps/desktop/test/settings-overview.test.tsx']) await bind(path.join(root,file))
   await bind(path.join(root,'apps/desktop/resources/icon-512.png'))
   for (const mode of process.argv.includes('--visual-only') || nativeMutant ? [] : ['baseline','expanded','disclosure','entry','drafts','exact','destination','restored']) {
@@ -74,6 +75,17 @@ try {
     plugins:[{name:'bind-settings-home-product',enforce:'pre',async transform(code,id){
       const file=id.split('?')[0]
       if(file.startsWith(root+'/')&&!file.includes('/node_modules/'))await bind(file)
+      if(larkNavigationMutant&&file.endsWith('/components/settings/useConnectionManagementSetup.ts')) {
+        const start=code.indexOf('  function inspectOriginal('),end=code.indexOf('  function inspect()',start)
+        assert.ok(start>=0&&end>start,'Exact original setup inspection owner is present')
+        const owner=code.slice(start,end),anchor="source('connection.setup.inspect',"
+        assert.equal(owner.split(anchor).length,2,'One local original inspection dispatch')
+        const mutated=code.slice(0,start)+owner.replace(anchor,"source('connection.setup.advance',")+code.slice(end)
+        larkNavigationMutationLoads++
+        await fs.writeFile(path.join(evidence,'lark-navigation-mutant.ts'),mutated)
+        await fs.writeFile(path.join(evidence,'lark-navigation-mutation.json'),JSON.stringify({file:path.relative(root,file),original:sha(code),consumed:sha(mutated),owner:'inspectOriginal',change:'inspect becomes advance'},null,2))
+        return {code:mutated,map:null}
+      }
       if(previewReturnMutant&&file.endsWith('/components/settings/use-settings-preview-return.tsx')) {
         const anchor='previous.pane.scrollTop = previous.scrollTop'
         assert.equal(code.split(anchor).length,2,'One actual preview return scroll owner')
@@ -123,13 +135,18 @@ try {
   const visual = path.join(evidence,'visual'), stderr=[]
   await fs.mkdir(visual)
   if(takeoverMutant) assert.equal(takeoverMutationLoads,1,'One exact compact preview declaration is mutated')
-  const capture = await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'index.html'),owned,visual,previewReturnMutant?'preview-return':navigationMutant?'navigation':providerMutant?'provider-scroll':takeoverMutant?'takeover-scroll':'full',requestedPages?.join(',')??''],{
+  const capture = await runProbeProcess(require('electron'),[path.join(fixture,'main.cjs'),path.join(compiled,'index.html'),owned,visual,larkNavigationMutant?'lark-navigation':previewReturnMutant?'preview-return':navigationMutant?'navigation':providerMutant?'provider-scroll':takeoverMutant?'takeover-scroll':'full',requestedPages?.join(',')??''],{
     cwd:root,env,timeoutMs:600000,onLine:line=>stderr.push(line)
   })
   await fs.writeFile(path.join(visual,'stderr.log'),stderr.join('\n'))
   const render = JSON.parse(await fs.readFile(path.join(visual,'render.json'),'utf8'))
   assert.equal(capture.timedOut,false)
-  if (previewReturnMutant) {
+  if (larkNavigationMutant) {
+    assert.equal(larkNavigationMutationLoads,1,'The actual Lark inspection owner mutant was consumed once')
+    assert.equal(capture.exitCode,1)
+    assert.equal(render.failure?.name,'AssertionError')
+    assert.match(render.failure.message,/Lark navigation preserves a read-only connector boundary/u,'Actual navigation, not fixture startup, kills the owner mutant')
+  } else if (previewReturnMutant) {
     assert.equal(previewReturnMutationLoads,1,'The actual preview return mutant was consumed once')
     assert.equal(capture.exitCode,1)
     assert.equal(render.failure?.name,'AssertionError')
@@ -161,9 +178,14 @@ try {
     for (const entry of render.catalog.filter(entry=>render.scope.resolved.includes(entry.id))) for (const theme of ['dark','light']) {
       assert.ok(render.frames.some(frame=>frame.page===entry.id&&frame.theme===theme&&frame.position==='top'),'Every actual page is captured in both themes: '+entry.id)
     }
-    for(const id of render.scope.resolved.filter(id=>id!=='overview'&&id!=='lark')) {
+    for(const id of render.scope.resolved.filter(id=>id!=='overview')) {
       assert.ok(render.interactions.some(event=>event.kind==='page-interactions-complete'&&event.page===id&&event.actions>0&&event.implicitSaves===0),'Every selected original page consumes input without an implicit save: '+id)
       for(const theme of ['dark','light']) assert.ok(render.frames.some(frame=>frame.page===id&&frame.theme===theme&&frame.file===`page-${id}-compact-${theme}.png`),'Every selected page has both compact themes: '+id)
+    }
+    if(render.scope.resolved.includes('lark')) {
+      assert.ok(render.lark.calls.some(call=>call.method==='connection.setup.inspect'),'Lark consumes its actual original Setup path')
+      assert.ok(render.interactions.some(event=>event.kind==='lark-read-only-navigation'&&event.calls>0&&event.implicitConnectorWrites===0))
+      assert.ok(render.interactions.some(event=>event.kind==='lark-explicit-actions'&&event.serviceSaves===1&&event.botSaves===1&&event.permissionRequests===1&&event.versionCreations===1))
     }
   }
   const ts=require('typescript'), callers=[]
@@ -181,7 +203,7 @@ try {
     runs,capture,render,callers,inputs:Object.fromEntries(relevant.map(([file,digest])=>[path.relative(root,file),digest])),boundary:render.boundary}
   await fs.writeFile(path.join(evidence,'receipt.json'),JSON.stringify(receipt,null,2))
   await fs.writeFile(path.join(evidence,'review.md'),['# Settings Home visual review','',render.boundary,'',
-    nativeMutant ? 'The owning mutation failed the expected native geometry assertion. This does not establish aesthetic approval.' : 'Capture succeeded; independent aesthetic review is still required. Read every complete frame before ranking the pages.','',
+    nativeMutant ? 'The owning mutation failed the expected native behavior assertion. This does not establish aesthetic approval.' : 'Capture succeeded; independent aesthetic review is still required. Read every complete frame before ranking the pages.','',
     '| Page | Theme | Position | Screenshot |','| --- | --- | --- | --- |',
     ...render.frames.map(frame=>`| ${frame.page} | ${frame.theme} | ${frame.position} | [${frame.file}](visual/${frame.file}) |`),''].join('\n'))
   if (!nativeMutant) await fs.writeFile(path.join(root,'.tmp/settings-home/latest.json'),JSON.stringify({evidence,receipt:path.join(evidence,'receipt.json')},null,2))
