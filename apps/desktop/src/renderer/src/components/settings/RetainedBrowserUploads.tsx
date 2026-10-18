@@ -13,22 +13,23 @@ export function RetainedBrowserUploads({ active }: { active: boolean }) {
   const dialogDocument = useWorkbenchWindowDocument() ?? undefined
   const [retained, setRetained] = useState<BrowserRetainedUploads | null>(null)
   const [notice, setNotice] = useState('')
+  const [readIssue, setReadIssue] = useState('')
   const [busy, setBusy] = useState<string | null>(null)
   useEffect(() => {
     if (!active) return
     let current = true
     const read = async (): Promise<void> => {
-      try { const value = await api.browser.listRetainedUploads(); if (current) setRetained(value) }
-      catch (error) { if (current) setNotice(presentError(error)) }
+      try { const value = await api.browser.listRetainedUploads(); if (current) { setRetained(value); setReadIssue('') } }
+      catch (error) { if (current) setReadIssue(presentError(error)) }
     }
     const release = api.browser.onTargetsChanged(() => { void read() })
     void read()
     return () => { current = false; release() }
   }, [active])
-  if (!retained?.selections.length && !notice && !retained?.warning) return null
+  if (!retained?.selections.length && !notice && !readIssue && !retained?.warning) return null
   return <section className="settings-group external-browser-connections">
-    <header><span>Selected files</span><small>{retained?.selectionCount ?? 0} selections · {formatBytes(retained?.byteLength ?? 0)}</small></header>
-    <p className="settings-group-note">These snapshots keep the original page’s selected files readable after a disconnect or restart. An unknown document stays retained. Discard only after its upload has finished or been cancelled.</p>
+    <header><span>Selected files</span><small>{retained ? `${retained.selectionCount} selections · ${formatBytes(retained.byteLength)}` : 'Not yet observed'}</small></header>
+    <p className="settings-group-note">Files selected for upload are kept through disconnects and restarts. Discard only after an upload finishes or is cancelled; unconfirmed documents keep their files.</p>
     <ul className="external-browser-connections__targets">{retained?.selections.map(selection => <li key={selection.id}>
       <div><strong>{selection.files.join(', ') || 'Unknown document selection'}</strong><small>{selection.status} · {formatBytes(selection.byteLength)} · {selection.browserId || 'Document owner unavailable'}</small></div>
       <button className="small-button" disabled={busy !== null} onClick={() => {
@@ -45,6 +46,7 @@ export function RetainedBrowserUploads({ active }: { active: boolean }) {
     </li>)}</ul>
     {retained ? <p className="settings-group-note">Shared staging limit: {retained.selectionLimit} selections · {formatBytes(retained.byteLimit)}.</p> : null}
     {retained?.warning ? <p className="settings-group-note" role="status">{retained.warning}</p> : null}
+    {readIssue ? <div className="browser-resources__notices" role="status"><strong>Selected-file status unavailable</strong><details><summary>Observation details</summary><p>{readIssue}</p></details></div> : null}
     {notice ? <p className="settings-group-note" role="status">{notice}</p> : null}
   </section>
 }

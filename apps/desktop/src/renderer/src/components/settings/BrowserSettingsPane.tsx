@@ -38,6 +38,7 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
 
   return (
     <div className="settings-pane-stack settings-browser">
+      <div className="settings-browser__preferences">
       <section className="settings-group" data-settings-field="agent-automation">
         <header><span>Agent automation</span><small>Saved: {saved.agentAutomation ? 'On' : 'Off'}</small></header>
         <label className="browser-automation-toggle">
@@ -48,13 +49,20 @@ export function BrowserSettingsPane({ browser, active, onSave, onForget }: {
           />
           <span>
             <strong>Let agents interact with browser pages</strong>
-            <small>Off by default. When enabled, agents can read pages, follow links and submit forms using your signed-in accounts, including actions that spend money. This applies to all open browsers.</small>
+            <small>Read pages, follow links and submit forms in all open browsers.</small>
           </span>
         </label>
+        <p className="settings-browser__permission-note">Uses your signed-in accounts, including actions that spend money. Off by default.</p>
       </section>
+      <section className="settings-group browser-resources__policy" data-settings-field="automatic-memory-release">
+        <header><span>Idle pages</span><small>Saved: {saved.automaticMemoryRelease ? 'Automatic' : 'Manual'}</small></header>
+        <label><input type="checkbox" checked={draft.value.automaticMemoryRelease} onChange={event => draft.setField('automaticMemoryRelease', event.target.checked)} />
+          <span><strong>Automatically release safe idle pages</strong><small>Reduce memory use while keeping each page in its original workspace.</small></span></label>
+        <details className="browser-resources__help"><summary>What happens when I return?</summary><p>The page reloads in place. Forms and arbitrary page state are not restored; protected pages stay in use. Saving this preference does not release a page immediately.</p></details>
+      </section>
+      </div>
       <AppLinkSchemes browser={browser} onForget={onForget} />
-      <BrowserResources active={active} directory={directory} automatic={draft.value.automaticMemoryRelease}
-        onAutomaticChange={enabled => draft.setField('automaticMemoryRelease', enabled)} />
+      <BrowserResources active={active} directory={directory} />
       <ExternalBrowserConnections targets={directory.rows.map(row => row.target).filter(target => target.source === 'external')}
         observedIds={directory.observedIds} />
       <RetainedBrowserUploads active={active} />
