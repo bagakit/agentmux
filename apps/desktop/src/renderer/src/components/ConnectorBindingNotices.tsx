@@ -24,7 +24,7 @@ export function ConnectorBindingNotices({ operation }: { operation: RoomBindingO
           value.bindingId === binding.bindingId && value.reference.hostId === binding.executionHostId && value.reference.agentSessionId === binding.agentSessionId) delivery = value
       } catch { /* Preserve the applied relationship independently of this bounded receipt read. */ }
       return [notice.deliveryOperationId, delivery] as const
-    })).then(deliveries => { if (live) { setRead(previous => ({ key, deliveries: Object.fromEntries(deliveries.map(([id, delivery]) => [id, delivery ?? (previous?.key === key ? previous.deliveries[id] : null)])), issue: deliveries.some(([, delivery]) => delivery === null) })); setPending(false) } })
+    })).then(deliveries => { if (live) { setRead(previous => ({ key, deliveries: Object.fromEntries(deliveries.map(([id, delivery]) => [id, delivery ?? (previous?.key === key ? previous.deliveries[id] ?? null : null)])), issue: deliveries.some(([, delivery]) => delivery === null) })); setPending(false) } })
     return () => { live = false }
   }, [key, attempt])
   if (!original) return null
@@ -40,6 +40,5 @@ export function ConnectorBindingNotices({ operation }: { operation: RoomBindingO
       return <p key={notice.deliveryOperationId} className="agent-connector-note" role="status"><strong>{labels[notice.event]}</strong> · {status}</p>
     })}
     {read?.key === key && read.issue ? <p className="agent-connector-note" role="status">The latest notice check is unconfirmed. Earlier receipts are kept.</p> : null}
-    {original.binding.state === 'detached' ? <p className="agent-connector-note">The group is disconnected. Your Agent keeps running and its conversation is kept.</p> : null}
   </section>
 }
