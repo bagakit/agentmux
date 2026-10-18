@@ -54,6 +54,30 @@ test('an unlisted package preserves exact, wildcard and browser export meaning',
   assert.throws(() => candidateResolve(root, '@agentmux/new-owner'), /Missing declared candidate export/u)
 }))
 
+test('type resolution consumes the original declaration export rather than the runtime entry', async () => fixture(async ({ root, pkg }) => {
+  const manifest = JSON.parse(await readFile(path.join(pkg, 'package.json'), 'utf8'))
+  manifest.exports['./typed'] = { types: './dist/typed-entry.d.ts', browser: './src/capability.ts', import: './dist/capability.js' }
+  await writeFile(path.join(pkg, 'package.json'), JSON.stringify(manifest))
+  await writeFile(path.join(pkg, 'dist/typed-entry.d.ts'), 'export declare const original: true\n')
+  assert.equal(candidateResolve(root, '@agentmux/new-owner/typed', { types: true }), path.join(pkg, 'dist/typed-entry.d.ts'))
+  assert.equal(candidateResolve(root, '@agentmux/new-owner/typed', { types: true, browser: true }), path.join(pkg, 'dist/typed-entry.d.ts'))
+  assert.equal(candidateResolve(root, '@agentmux/new-owner/typed', { browser: true }), path.join(pkg, 'src/capability.ts'))
+}))
+
+test('source resolution preserves generated exports and selects source only when the implementation exists', async () => fixture(async ({ root, pkg }) => {
+  const manifest = JSON.parse(await readFile(path.join(pkg, 'package.json'), 'utf8'))
+  manifest.exports['./generated'] = { types: './dist/generated-entry.d.ts', import: './dist/generated.js' }
+  manifest.exports['./implemented'] = { types: './dist/capability.d.ts', import: './dist/capability.js' }
+  await writeFile(path.join(pkg, 'package.json'), JSON.stringify(manifest))
+  await writeFile(path.join(pkg, 'dist/generated-entry.d.ts'), 'export declare const original: true\n')
+  await writeFile(path.join(pkg, 'dist/generated.js'), 'export const original = true\n')
+  await writeFile(path.join(pkg, 'dist/capability.d.ts'), 'export declare const original: true\n')
+  assert.equal(candidateResolve(root, '@agentmux/new-owner/generated', { source: true }), path.join(pkg, 'dist/generated.js'))
+  assert.equal(candidateResolve(root, '@agentmux/new-owner/generated', { types: true, source: true }), path.join(pkg, 'dist/generated-entry.d.ts'))
+  assert.equal(candidateResolve(root, '@agentmux/new-owner/implemented', { source: true }), path.join(pkg, 'src/capability.ts'))
+  assert.equal(candidateResolve(root, '@agentmux/new-owner/implemented', { types: true, source: true }), path.join(pkg, 'src/capability.ts'))
+}))
+
 test('a declared first-party export cannot escape through a shared node_modules target', async () => fixture(async ({ directory, root, pkg }) => {
   const shared = path.join(directory, 'shared/node_modules/owner')
   await mkdir(shared, { recursive: true })
