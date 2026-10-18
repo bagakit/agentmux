@@ -33,8 +33,21 @@ export async function exerciseSurfaces({ read, click, shot, until, copies }) {
   await control('.log-turn__collaboration-toggle')
   assert.equal(await read(`document.querySelector('.log-turn__collaboration-toggle').getAttribute('aria-expanded')`), 'true')
   await shot('collaboration')
-  await control('.conversation-record-process .wf-head')
-  await until(() => read(`!!document.querySelector('[data-captured-process-id="surface-captured-tool"]')`), 'Original captured process')
+  const processGroups = await read(`([...document.querySelectorAll('.conversation-record-process .wf-head')].filter(node=>node.getClientRects().length).map((node,index)=>{node.dataset.readingProofGroup=String(index);return index}))`)
+  assert.ok(processGroups.length, 'The actual surface contains process groups')
+  try {
+    for (const index of processGroups) {
+      if (await read(`!!document.querySelector('[data-captured-process-id="surface-captured-tool"]')?.getClientRects().length`)) break
+      const selector = `[data-reading-proof-group="${index}"]`
+      if (await read(`document.querySelector(${JSON.stringify(selector)})?.getAttribute('aria-expanded') === 'false'`)) {
+        await control(selector)
+        await until(() => read(`document.querySelector(${JSON.stringify(selector)})?.getAttribute('aria-expanded') === 'true'`), 'The original process group opens')
+      }
+    }
+    await until(() => read(`!!document.querySelector('[data-captured-process-id="surface-captured-tool"]')?.getClientRects().length`), 'Original captured process')
+  } finally {
+    await read(`document.querySelectorAll('[data-reading-proof-group]').forEach(node=>delete node.dataset.readingProofGroup)`)
+  }
   await control('[data-captured-process-id="surface-captured-tool"] .log-row[aria-expanded]')
   assert.equal(await read(`document.querySelectorAll('[data-captured-process-id="surface-captured-tool"] .log-diff__line').length`), 2)
   await shot('captured-diff')
