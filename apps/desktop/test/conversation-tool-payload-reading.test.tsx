@@ -8,6 +8,31 @@ import { api } from '../src/renderer/src/lib/api'
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 
 describe('original tool payload reading', () => {
+  it('retains the original tool payload node and format choice through disclosure changes', async () => {
+    const host = document.createElement('div'); document.body.append(host)
+    const root = createClientUiRoot(host)
+    try {
+      await act(async () => root.render(<ConversationMessage messageId="retained-tool" content={[{ kind: 'tool-call', name: 'inspect', input: '{"original":[1,2]}', callId: 'retained-call' }]} />))
+      const row = host.querySelector<HTMLButtonElement>('.conversation-tool-trace__row')!
+      expect(host.querySelector('.conversation-tool-trace__payload')).toBeNull()
+      await act(async () => row.click())
+      const format = host.querySelector<HTMLButtonElement>('[aria-label="Format JSON"]')!
+      await act(async () => format.click())
+      const panel = host.querySelector<HTMLElement>('.conversation-tool-trace__payload')!
+      const pre = panel.querySelector('pre')!, text = pre.firstChild
+      await act(async () => row.click())
+      expect(panel.isConnected).toBe(true)
+      expect(panel.hidden).toBe(true)
+      expect(panel.hasAttribute('inert')).toBe(true)
+      expect(pre.firstChild).toBe(text)
+      await act(async () => row.click())
+      expect(host.querySelector('pre')).toBe(pre)
+      expect(pre.firstChild).toBe(text)
+      expect(format.getAttribute('aria-pressed')).toBe('true')
+      expect(panel.hidden).toBe(false)
+    } finally { await act(async () => root.unmount()); host.remove() }
+  })
+
   it('formats only whitespace, preserves JSON tokens and copies the exact original bytes', async () => {
     const input = '{\r\n\t"large":90071992547409931234567890,"negative":-0,"exp":1.00e+12,"dup":1,"dup":2,"escape":"\\u0061\\n","nested":[true,null,{"s":" spaced "}]}\r\n'
     const formatted = '{\n  "large": 90071992547409931234567890,\n  "negative": -0,\n  "exp": 1.00e+12,\n  "dup": 1,\n  "dup": 2,\n  "escape": "\\u0061\\n",\n  "nested": [\n    true,\n    null,\n    {\n      "s": " spaced "\n    }\n  ]\n}'.replaceAll('\n', '\r\n')

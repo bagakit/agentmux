@@ -5,6 +5,7 @@ import { relative, resolve } from 'node:path'
 import base from '../../../apps/desktop/test/vitest.conversation-unified-consumers.config.mts'
 const root = resolve(import.meta.dirname, '../../..'), mutation = process.env.AGENTMUX_PROCESS_MUTATION
 const edits: Record<string, [string, string, string]> = {
+  'unmount-tool-trace': ['packages/client-ui/src/components/ConversationToolTrace.tsx', '{open || presented ? <div', '{open ? <div'],
   'tool-name-classification': ['packages/client-ui/src/components/CapturedProcessRecord.tsx', "item.kind === 'tool_call' ? 'conversation.tool-call'", "item.kind === 'tool_call' ? item.toolName === 'Bash' ? 'object.terminal' : 'conversation.tool-call'"],
   'drop-diff': ['packages/client-ui/src/components/CapturedProcessRecord.tsx', '<ConversationToolDiff diff={diff} />', 'null'],
   'drop-located-expansion': ['packages/client-ui/src/components/ConversationRecordSequence.tsx', 'if (!locatedRecordId || key === located.current) return', 'if (true) return'],
