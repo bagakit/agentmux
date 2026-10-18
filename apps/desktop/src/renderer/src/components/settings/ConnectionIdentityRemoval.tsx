@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import type { ConnectionDeleteOperation, ConnectionRecord } from '@agentmux/core/connections'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -36,7 +37,7 @@ export function ConnectionIdentityRemoval({ record, readings, active, onDeleted 
   }
   async function remove() {
     if (flight.current) return
-    const request = retained ?? { operationId: crypto.randomUUID(), scope: { kind: 'identity-removal' as const,
+    const request = retained ?? { operationId: mintObjectId(), scope: { kind: 'identity-removal' as const,
       connectionId: record.config.connectionId, adapterId: record.config.adapterId, domain: record.config.application.domain,
       appId: record.config.application.appId, expectedRevision: record.revision } }
     setBotTaskSelection(request.scope, request.operationId)
