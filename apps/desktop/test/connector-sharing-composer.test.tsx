@@ -16,7 +16,7 @@ const f = connectorJourneyFixture(), target = { executionHostId: 'local', agentS
 async function wait(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 6000 }) }
 const input = () => document.querySelector<HTMLElement>('[data-workbench-region-id="original-region"] [role="textbox"]')! as HTMLElement & { editor: Editor }
 async function bindExisting() {
-  await f.menu('Bind existing group chat'); await f.fill('Existing group ID', 'existing-exact-group')
+  await f.journey('existing'); await f.fill('Existing group ID', 'existing-exact-group')
   const box = document.querySelector<HTMLInputElement>('.agent-connector-check input')!
   await act(async () => box.click()); await f.button('Connect group')
   await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Group saved'))
@@ -102,8 +102,8 @@ it('the Composer group link opens original details and observes bounded delivery
   await f.mount(); const binding = await bindExisting()
   const before = f.calls.filter(call => ['connection.room.create', 'connection.bind', 'connection.grant'].includes(call.method)).length
   await act(async () => document.querySelector<HTMLButtonElement>('.connector-sharing__group')!.click())
-  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Shared group details'))
-  await f.button('Check delivery')
+  await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Group connection'))
+  await f.button('Check group activity')
   await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Delivery not confirmed'))
   expect(vi.mocked(api.connections.call).mock.calls.filter(([method]) => method === 'connection.delivery.ls').at(-1)?.[1]).toEqual({ connectionId: binding.connectionId, bindingId: binding.bindingId, bindingRevision: binding.revision, limit: 5 })
   expect(f.calls.filter(call => ['connection.room.create', 'connection.bind', 'connection.grant'].includes(call.method))).toHaveLength(before)

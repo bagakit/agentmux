@@ -51,13 +51,21 @@ async function openMenu(kind: 'header' | 'region') {
   }
   return root
 }
+async function serviceNotice() {
+  let trigger: HTMLElement | undefined
+  await waitFor(() => { trigger = [...document.querySelectorAll<HTMLElement>('[role="menuitem"][aria-haspopup="menu"]')].find(item => item.textContent?.trim() === 'Lark service notice'); expect(trigger).toBeDefined() })
+  await act(async () => { trigger!.focus(); trigger!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
+  const content = () => document.getElementById(trigger!.getAttribute('aria-controls')!)
+  await waitFor(() => { expect(content()).not.toBeNull(); expect(content()!.querySelector('[role="status"]')).not.toBeNull() })
+  return content()!
+}
 async function menuAction(label: string) {
   const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent?.trim() === label)
   expect(item, label).toBeDefined(); await moteClick(item!)
 }
 async function openSettings() {
   await openMenu('header')
-  await menuAction('Chat application settings')
+  await menuAction('Lark settings')
   await waitFor(() => expect(policy()?.dataset.connectorServiceState).toBe('on'))
 }
 async function closeSettings() {
@@ -80,7 +88,7 @@ async function cli(args: string[], input?: unknown) {
   return JSON.parse(output.stdout).result
 }
 
-it('uses the mounted App and Settings master to withdraw and restore one complete group in both original menus', async () => {
+it('keeps connection and settings discovery visible while the mounted Settings master pauses automatic sync', async () => {
   const bot = (await f.services.connections.list()).connections.find(record => record.config.connectionId === 'robot-b')!
   await f.services.connections.configure({ operationId: 'pause-original-bot', expectedRevision: bot.revision, connection: { ...bot.config, enabled: false } })
   await f.mount()
@@ -90,7 +98,7 @@ it('uses the mounted App and Settings master to withdraw and restore one complet
     expect(groups()[0]!.getAttribute('role')).toBe('group')
     expect(groups()[0]!.getAttribute('aria-label')).toBe(groupLabel)
     expect(menu.querySelectorAll('[data-connector-menu-separator]')).toHaveLength(1)
-    expect(groups()[0]!.querySelectorAll('[role="menuitem"]')).toHaveLength(4)
+    expect(groups()[0]!.querySelectorAll('[role="menuitem"]')).toHaveLength(3)
   }
   const before = useAppStore.getState(), bots = (await f.services.connections.list()).connections.map(record => record.config)
   await openSettings(); await toggle()
@@ -110,9 +118,10 @@ it('uses the mounted App and Settings master to withdraw and restore one complet
   await closeSettings()
   for (const kind of ['header', 'region'] as const) {
     const menu = await openMenu(kind)
-    expect(groups()).toHaveLength(0)
-    expect(menu.textContent).not.toMatch(/Lark|group chat|Shared group details|Chat application settings|Enable a chat application/)
-    expect(menu.querySelector('[data-connector-menu-separator]')).toBeNull()
+    expect(groups()).toHaveLength(1)
+    expect(groups()[0]!.textContent).toContain('Connect group…')
+    expect(groups()[0]!.textContent).toContain('Lark settings')
+    expect(menu.querySelector('[data-connector-menu-separator]')).not.toBeNull()
     expect(menu.lastElementChild?.getAttribute('role')).not.toBe('separator')
     expect(menu.textContent).toContain('Copy link')
   }
@@ -123,7 +132,7 @@ it('uses the mounted App and Settings master to withdraw and restore one complet
   expect(f.app.launch).not.toHaveBeenCalled(); expect(f.app.stop).not.toHaveBeenCalled(); expect(f.app.send).not.toHaveBeenCalled()
   expect(f.connections.mock.calls.some(([method]) => /room\.create|enrollment\.(begin|poll)|binding\.(relink|pause)/.test(method))).toBe(false)
   await cli(['configure', '--input', '-'], { operationId: 'explicit-service-on', expectedRevision: 1, service: { enabled: true } })
-  for (const kind of ['header', 'region'] as const) { await openMenu(kind); expect(groups()).toHaveLength(1); expect(groups()[0]!.textContent).toContain('Create group chat') }
+  for (const kind of ['header', 'region'] as const) { await openMenu(kind); expect(groups()).toHaveLength(1); expect(groups()[0]!.textContent).toContain('Connect group…') }
   expect((await f.services.connections.list()).connections.find(record => record.config.connectionId === 'robot-b')!.config.enabled).toBe(false)
   evidence('mounted-settings-two-menus', { input, originalReceipt: receipt.operation, current: await cli(['get']), preservedBots: (await f.services.connections.list()).connections.map(record => ({ connectionId: record.config.connectionId, enabled: record.config.enabled })), preservedAgent: defaultAgent.control })
 })
@@ -228,7 +237,7 @@ it('does not let an earlier service read restore On after the service Off receip
   expect(policy().dataset.connectorServiceState).toBe('off')
   expect(master().checked).toBe(false)
   await closeSettings()
-  for (const kind of ['header', 'region'] as const) { await openMenu(kind); expect(groups()).toHaveLength(0) }
+  for (const kind of ['header', 'region'] as const) { await openMenu(kind); expect(groups()).toHaveLength(1) }
 })
 
 it('does not publish a late service read from a menu opening that has already closed', async () => {
@@ -240,11 +249,11 @@ it('does not publish a late service read from a menu opening that has already cl
   })
   await f.mount(); await openMenu('header'); expect(held).toBe(true)
   expect(groups()[0]!.textContent).toContain('Lark settings')
-  expect(groups()[0]!.textContent).not.toContain('Create group chat')
+  expect(groups()[0]!.textContent).toContain('Connect group…')
   await closeMenu()
   await act(async () => release({ enabled: true, revision: 0 })); await settleMoteApp()
   expect(useAppStore.getState().connectorServiceObservation?.state).toBeNull()
-  await openMenu('region'); expect(groups()[0]!.textContent).toContain('Create group chat')
+  await openMenu('region'); expect(groups()[0]!.textContent).toContain('Connect group…')
 })
 
 it('keeps a later explicit selection when an earlier configure acknowledgement arrives late', async () => {
@@ -356,18 +365,19 @@ it('keeps accurate unknown management and last-confirmed menu groups without cha
   expect(document.querySelector('[data-enrollment-new]')).not.toBeNull()
   unavailable = false; await f.button('Refresh status'); await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('on'))
   await closeSettings()
-  for (const kind of ['header', 'region'] as const) { await openMenu(kind); expect(groups()[0]!.textContent).toContain('Create group chat') }
+  for (const kind of ['header', 'region'] as const) { await openMenu(kind); expect(groups()[0]!.textContent).toContain('Connect group…') }
   unavailable = true
   for (const kind of ['header', 'region'] as const) {
     await openMenu(kind)
-    expect(groups()[0]!.textContent).toContain('Create group chat')
-    expect(groups()[0]!.textContent).toContain('keeping the last confirmed policy')
+    expect(groups()[0]!.textContent).toContain('Connect group…')
+    const notice = await serviceNotice()
+    await waitFor(() => expect(notice.textContent).toContain('keeping the last confirmed policy'))
   }
   unavailable = false
   await cli(['configure', '--input', '-'], { operationId: 'known-off', expectedRevision: 0, service: { enabled: false } })
-  await openMenu('header'); expect(groups()).toHaveLength(0)
+  await openMenu('header'); expect(groups()).toHaveLength(1)
   unavailable = true
-  for (const kind of ['header', 'region'] as const) { await openMenu(kind); expect(groups()).toHaveLength(0) }
+  for (const kind of ['header', 'region'] as const) { await openMenu(kind); expect(groups()).toHaveLength(1) }
   await settingsFromApp(); await waitFor(() => expect(policy().textContent).toBe('Last confirmed: Off'))
   expect(document.querySelectorAll('[data-connection]')).toHaveLength(2)
   const retainedBots = (await f.services.connections.list()).connections
@@ -377,7 +387,7 @@ it('keeps accurate unknown management and last-confirmed menu groups without cha
   evidence('actual-policy-read-fault-isolation', { policy: useAppStore.getState().connectorServiceObservation?.state, issue: useAppStore.getState().connectorServiceObservation?.issue, retainedBots: retainedBots.map(record => ({ connectionId: record.config.connectionId, enabled: record.config.enabled })) })
 })
 
-it('contributes the settings path while On without an enabled bot and hides that entire contribution while Off', async () => {
+it('keeps group and settings discovery when no bot is enabled and automatic sync is off', async () => {
   const bots = (await f.services.connections.list()).connections
   expect(bots).toHaveLength(2)
   for (const bot of bots) await f.services.connections.configure({ operationId: 'pause-' + bot.config.connectionId, expectedRevision: bot.revision, connection: { ...bot.config, enabled: false } })
@@ -386,19 +396,21 @@ it('contributes the settings path while On without an enabled bot and hides that
     await openMenu(kind)
     expect(groups()).toHaveLength(1)
     expect(groups()[0]!.getAttribute('aria-label')).toBe(groupLabel)
-    expect([...groups()[0]!.querySelectorAll('[role="menuitem"]')].map(item => item.textContent?.trim())).toEqual(['Enable a chat application'])
+    expect([...groups()[0]!.querySelectorAll('[role="menuitem"]')].map(item => item.textContent?.trim())).toEqual(['Connect group…', 'Shared group details', 'Lark settings'])
   }
-  await menuAction('Enable a chat application'); await waitFor(() => expect(master()).not.toBeNull())
+  await menuAction('Lark settings'); await waitFor(() => expect(master()).not.toBeNull())
   await toggle(); await save(); await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('off'))
   await closeSettings()
-  for (const kind of ['header', 'region'] as const) { await openMenu(kind); expect(groups()).toHaveLength(0) }
+  for (const kind of ['header', 'region'] as const) { await openMenu(kind); expect(groups()).toHaveLength(1) }
   const retainedBots = (await f.services.connections.list()).connections
   expect(retainedBots).toHaveLength(2)
   expect(retainedBots.every(record => !record.config.enabled)).toBe(true)
 })
 
 it('keeps the original group dialog, manually chosen bot and draft mounted when the current service becomes Off', async () => {
-  await f.mount(); await openMenu('header'); await menuAction('Create group chat')
+  await f.mount(); await openMenu('header'); await menuAction('Connect group…')
+  await waitFor(() => expect(document.querySelector('button[aria-pressed][aria-label="New group"]')).not.toBeNull())
+  await moteClick(document.querySelector<HTMLElement>('button[aria-pressed][aria-label="New group"]')!)
   await waitFor(() => expect(document.querySelector('[aria-label="Group name"]')).not.toBeNull())
   await f.choose('Robot B', 'Group application')
   const name = document.querySelector<HTMLInputElement>('[aria-label="Group name"]')!
@@ -417,6 +429,6 @@ it('keeps the original group dialog, manually chosen bot and draft mounted when 
   expect(useAppStore.getState().sessions).toBe(before.sessions)
   expect(f.connections.mock.calls.some(([method]) => method === 'connection.room.create' || method === 'connection.bind')).toBe(false)
   await f.button('Close group setup')
-  await openMenu('header'); expect(groups()).toHaveLength(0)
+  await openMenu('header'); expect(groups()).toHaveLength(1)
   expect(f.app.stop).not.toHaveBeenCalled(); expect(f.app.launch).not.toHaveBeenCalled()
 })

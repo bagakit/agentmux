@@ -93,22 +93,22 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     }
     await dom.render(null); await server?.stop(); services?.close(); await original?.close(); vi.unstubAllEnvs()
   })
-  async function mount() { await dom.render(<SettingsNavigation.Provider value={{ open: settings, openToolkit: () => {}, openHost: () => {} }}><WorkspaceWorkbench workspaceId="workspace" /></SettingsNavigation.Provider>) }
-  async function menu(label: string, regionId = 'original-region', context = false) {
+  async function mount() { await dom.render(<SettingsNavigation.Provider value={{ open: settings, openToolkit: () => {}, openHost: () => {}, openLark: settings, openMoteLark: settings, chooseAgent: () => {} }}><WorkspaceWorkbench workspaceId="workspace" /></SettingsNavigation.Provider>) }
+  async function journey(mode: 'create' | 'existing' | 'details', regionId = 'original-region', context = false) {
     const trigger = document.querySelector<HTMLElement>('[data-workbench-region-id="' + regionId + '"] .agent-region-header__more')
     expect(trigger, 'original Agent More trigger').not.toBeNull()
     await act(async () => {
       if (context) document.querySelector('[data-workbench-region-id="' + regionId + '"]')!.dispatchEvent(new MouseEvent('contextmenu', { button: 2, clientX: 24, clientY: 24, bubbles: true, cancelable: true }))
       else { trigger!.focus(); trigger!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) }
     })
-    let submenu: HTMLElement | undefined
-    await vi.waitFor(async () => { await act(async () => {}); submenu = [...document.querySelectorAll<HTMLElement>('.agent-region-menu[data-owner-region-id="' + regionId + '"] [role="menuitem"][aria-haspopup="menu"]')].find(node => node.textContent?.trim() === 'Lark'); expect(submenu, 'original Lark menu').toBeDefined() }, { timeout: 6000 })
-    await act(async () => { submenu!.focus(); submenu!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })) })
+    const label = mode === 'details' ? 'Shared group details' : 'Connect group…'
     let item: HTMLElement | undefined
     await vi.waitFor(async () => { await act(async () => {}); item = [...document.querySelectorAll<HTMLElement>('[data-connector-menu-group] [role="menuitem"]')].find(node => node.textContent?.trim() === label); expect(item, 'actual ' + label + ' action').toBeDefined() }, { timeout: 6000 })
     await act(async () => item!.click())
     await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')).not.toBeNull() })
     await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector<HTMLElement>('[aria-label="Group application"]')?.dataset.value, document.querySelector('[role="dialog"]')?.textContent).toBe(connectionConfig.connectionId) }, { timeout: 6000 })
+    const modeChoice = document.querySelector<HTMLButtonElement>(`button[aria-pressed][aria-label="${mode === 'create' ? 'New group' : 'Existing group'}"]`)
+    if (mode !== 'details' && modeChoice) await act(async () => { modeChoice.focus(); modeChoice.click() })
   }
   async function fill(label: string, value: string) {
     const input = document.querySelector<HTMLInputElement | HTMLTextAreaElement>('[aria-label="' + label + '"]')!
@@ -131,5 +131,5 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     expect(output.code, output.stdout + output.stderr).toBe(0)
     return JSON.parse(output.stdout).result
   }
-  return { dom, mount, menu, fill, button, cli, settings, get config() { return connectionConfig }, get platformCalls() { return platformCalls }, get ingressTransport() { return ingressTransport }, get original() { return original }, get services() { return services }, get calls() { return calls }, get forward() { return forward }, get session() { return useAppStore.getState().sessions[0]! } }
+  return { dom, mount, journey, fill, button, cli, settings, get config() { return connectionConfig }, get platformCalls() { return platformCalls }, get ingressTransport() { return ingressTransport }, get original() { return original }, get services() { return services }, get calls() { return calls }, get forward() { return forward }, get session() { return useAppStore.getState().sessions[0]! } }
 }

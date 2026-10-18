@@ -24,9 +24,16 @@ beforeEach(() => {
 })
 async function ready(text: string) { await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('[role="dialog"]')?.textContent).toContain(text) }, { timeout: 6000 }) }
 async function consent() { await act(async () => document.querySelector<HTMLInputElement>('.agent-connector-check input')!.click()) }
-async function bindCreated() { await f.mount(); await f.menu('Create group chat'); await f.button('Create group'); await ready('Group created'); await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-busy')).toBe('false')); await consent(); await f.button('Connect group') }
+async function openJoinDetails() {
+  const join = document.querySelector<HTMLDetailsElement>('[aria-label="Joining this group"]')!
+  expect(join.tagName).toBe('DETAILS')
+  if (!join.open) await act(async () => join.querySelector('summary')!.click())
+  expect(join.open).toBe(true)
+}
 
-it('the original menu and default Host keep joining visible after an empty-invitation creation and local bind, then grant only a chosen real member', async () => {
+async function bindCreated() { await f.mount(); await f.journey('create'); await f.button('Create group'); await ready('Group created'); await vi.waitFor(() => expect(document.querySelector('[role="dialog"]')?.getAttribute('aria-busy')).toBe('false')); await consent(); await f.button('Connect group') }
+
+it('the original menu and default Host keep joining reachable after an empty-invitation creation and local bind, then grant only a chosen real member', async () => {
   const open = vi.spyOn(api.ui, 'openExternal').mockResolvedValue(undefined)
   await bindCreated(); await ready('Group saved')
   const binding = (await f.services.connections.bindings!.list({})).bindings[0]!
@@ -34,7 +41,8 @@ it('the original menu and default Host keep joining visible after an empty-invit
   expect(document.querySelector('[aria-label="Group connection status"]')?.textContent).toContain('Sharing enabled locally')
   expect(document.querySelector('[aria-label="Group connection status"]')?.textContent).not.toContain('Sharing on')
   const join = document.querySelector('[aria-label="Joining this group"]')!
-  expect(join.closest('details'), 'the original join next action remains outside collapsed details after bind').toBeNull()
+  expect(join.tagName).toBe('DETAILS')
+  expect((join as HTMLDetailsElement).open, 'joining is optional alongside the member access step').toBe(false)
   expect(join.textContent).toContain('Your own membership is not verified')
   await vi.waitFor(() => expect(document.querySelector('[aria-label="Group member access"]')?.textContent).toContain('No members approved'))
   expect((await f.services.connections.bindings!.inspect({ bindingId: binding.bindingId })).grants).toEqual([])
@@ -43,7 +51,7 @@ it('the original menu and default Host keep joining visible after an empty-invit
   expect(creation.result).toMatchObject({ creation: { state: 'created', externalConversationId: 'oc_created' }, membership: { state: 'not-requested' } })
   expect(f.platformCalls.filter(call => call.url?.endsWith('/members') && call.method?.toUpperCase() === 'POST')).toHaveLength(0)
   expect(f.calls.filter(call => call.method === 'connection.grant')).toHaveLength(0)
-  await f.button('Create join link'); await ready('Join link ready'); await f.button('Open join link')
+  await openJoinDetails(); await f.button('Create join link'); await ready('Join link ready'); await f.button('Open join link')
   expect(open).toHaveBeenCalledOnce()
   expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).grants).toEqual([])
   expect(document.querySelector('[aria-label="Joining this group"]')?.textContent).toContain('Membership and Agent access still need confirmation')
@@ -67,18 +75,18 @@ it('the original menu and default Host keep joining visible after an empty-invit
 it('an unknown join of the original saved group survives remount and checks the same request without creating or inviting again', async () => {
   const original = native
   native = async input => input.url?.endsWith('/link') ? { code: 0, data: {} } : original(input)
-  await bindCreated(); await ready('Group saved'); await f.button('Create join link'); await ready('Join link result not confirmed')
+  await bindCreated(); await ready('Group saved'); await openJoinDetails(); await f.button('Create join link'); await ready('Join link result not confirmed')
   const kept = Object.values(useAppStore.getState().connectorRoomIntents).find(item => item.method === 'connection.room.link.create')!
   expect(kept).toBeDefined()
-  await f.button('Close'); await f.menu('Shared group details'); await ready('Join link result not confirmed')
-  expect(document.querySelector('[aria-label="Joining this group"]')?.closest('details')).toBeNull()
+  await f.button('Close'); await f.journey('details'); await ready('Join link result not confirmed')
+  expect(document.querySelector('[aria-label="Joining this group"]')?.tagName).toBe('DETAILS')
   let release!: () => void
   const held = new Promise<void>(resolve => { release = resolve })
   vi.mocked(api.connections.call).mockImplementation(async (method, input) => {
     if (method === 'connection.room.link.inspect' && 'operationId' in input && input.operationId === kept.input.operationId) await held
     return await f.forward(method, input) as never
   })
-  await f.button('Check link status')
+  await openJoinDetails(); await f.button('Check link status')
   const progress = document.querySelector('[data-connector-request-pending]')
   expect(progress?.textContent ?? '').toContain('Working on this group request')
   expect(progress?.querySelector('svg')).not.toBeNull()
@@ -104,7 +112,7 @@ it('a returned original group keeps its current member page when an earlier read
     if (input.url?.endsWith('/oc_other/members')) return people('ou_other', 'Other member')
     return original(input)
   }
-  await f.mount(); await f.menu('Bind existing group chat'); await f.fill('Existing group ID', 'oc_original')
+  await f.mount(); await f.journey('existing'); await f.fill('Existing group ID', 'oc_original')
   await vi.waitFor(() => expect(reads).toBe(1))
   await f.fill('Existing group ID', 'oc_other'); await ready('Other member')
   await f.fill('Existing group ID', 'oc_original'); await ready('Current member')
