@@ -1,6 +1,6 @@
 export const FOCUS_RECENT_ACTIVITY_HOURS = [12, 24, 48, 72, 168] as const
 export type FocusRecentActivityHours = typeof FOCUS_RECENT_ACTIVITY_HOURS[number]
-export type FocusPreferences = { recentActivityHours: FocusRecentActivityHours; linkDestination?: FocusLinkDestination; replyLines?: FocusReplyLines; previewTrigger?: FocusPreviewTrigger; recentInputs?: FocusRecentInputs }
+export type FocusPreferences = { recentActivityHours: FocusRecentActivityHours; linkDestination?: FocusLinkDestination; replyLines?: FocusReplyLines; previewTrigger?: FocusPreviewTrigger; recentInputs?: FocusRecentInputs; mapMotion?: FocusMapMotion }
 export const DEFAULT_FOCUS_RECENT_ACTIVITY_HOURS: FocusRecentActivityHours = 48
 /** Minimum project visibility guarantee, independent of a shorter sorting preference. */
 export const FOCUS_RECENT_PROJECT_HOURS = 48
@@ -36,7 +36,12 @@ export type FocusRecentInputs = typeof FOCUS_RECENT_INPUTS[number]
 export function resolveFocusRecentInputs(value: unknown): FocusRecentInputs {
   return FOCUS_RECENT_INPUTS.includes(value as FocusRecentInputs) ? value as FocusRecentInputs : 6
 }
+export const FOCUS_MAP_MOTION = ['system', 'on', 'off'] as const
+export type FocusMapMotion = typeof FOCUS_MAP_MOTION[number]
+export function resolveFocusMapMotion(value: unknown): FocusMapMotion {
+  return FOCUS_MAP_MOTION.includes(value as FocusMapMotion) ? value as FocusMapMotion : 'system'
+}
 export function resolveFocusPreferences(value: FocusPreferences | undefined): Required<FocusPreferences> {
   return { recentActivityHours: resolveFocusRecentActivityHours(value?.recentActivityHours), linkDestination: resolveFocusLinkDestination(value?.linkDestination),
-    replyLines: resolveFocusReplyLines(value?.replyLines), previewTrigger: resolveFocusPreviewTrigger(value?.previewTrigger), recentInputs: resolveFocusRecentInputs(value?.recentInputs) }
+    replyLines: resolveFocusReplyLines(value?.replyLines), previewTrigger: resolveFocusPreviewTrigger(value?.previewTrigger), recentInputs: resolveFocusRecentInputs(value?.recentInputs), mapMotion: resolveFocusMapMotion(value?.mapMotion) }
 }

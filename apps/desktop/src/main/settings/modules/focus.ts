@@ -1,4 +1,4 @@
-import { FOCUS_RECENT_ACTIVITY_HOURS, DEFAULT_FOCUS_RECENT_ACTIVITY_HOURS, resolveFocusRecentActivityHours, FOCUS_LINK_DESTINATIONS, DEFAULT_FOCUS_LINK_DESTINATION, resolveFocusLinkDestination, FOCUS_REPLY_LINES, resolveFocusReplyLines, FOCUS_PREVIEW_TRIGGERS, resolveFocusPreviewTrigger, FOCUS_RECENT_INPUTS, resolveFocusRecentInputs } from '../../../shared/focus-preferences.js'
+import { FOCUS_RECENT_ACTIVITY_HOURS, DEFAULT_FOCUS_RECENT_ACTIVITY_HOURS, resolveFocusRecentActivityHours, FOCUS_LINK_DESTINATIONS, DEFAULT_FOCUS_LINK_DESTINATION, resolveFocusLinkDestination, FOCUS_REPLY_LINES, resolveFocusReplyLines, FOCUS_PREVIEW_TRIGGERS, resolveFocusPreviewTrigger, FOCUS_RECENT_INPUTS, resolveFocusRecentInputs, FOCUS_MAP_MOTION, resolveFocusMapMotion } from '../../../shared/focus-preferences.js'
 import type { AppConfig } from '../../../shared/contracts.js'
 import { enumSetting, invalid, type ScalarSetting } from '../scalar-setting.js'
 
@@ -34,4 +34,7 @@ export const focusSettings = [
   enumSetting('focus.previewTrigger', FOCUS_PREVIEW_TRIGGERS, 'quick',
     config => resolveFocusPreviewTrigger(config.focus?.previewTrigger),
     (config, previewTrigger) => ({ ...config, focus: { recentActivityHours: resolveFocusRecentActivityHours(config.focus?.recentActivityHours), ...config.focus, previewTrigger } })),
+  enumSetting('focus.mapMotion', FOCUS_MAP_MOTION, 'system',
+    config => resolveFocusMapMotion(config.focus?.mapMotion),
+    (config, mapMotion) => ({ ...config, focus: { recentActivityHours: resolveFocusRecentActivityHours(config.focus?.recentActivityHours), ...config.focus, mapMotion } })),
 ] satisfies readonly ScalarSetting[]
