@@ -1,3 +1,5 @@
+import { isObjectId } from '@agentmux/core'
+import { expectConnectionAllocations } from './helpers/unified-identifiers.js'
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
 import { DatabaseSync } from 'node:sqlite'
 import { fork } from 'node:child_process'
@@ -65,6 +67,10 @@ it('uses compiled CLI and original SDK through the Desktop owner, preserving enc
   expect(f.begin).toHaveBeenCalledTimes(1); expect(f.authentication).toHaveBeenCalledTimes(1); expect(f.create).toHaveBeenCalledTimes(1); expect(f.credential).toHaveBeenCalledTimes(1)
   const serialized = JSON.stringify([caps, pending, saved]); expect(serialized).not.toContain(fixtureCredential); expect(serialized).not.toContain(fixturePrivateState)
   const rows = f.services.database!.prepare('SELECT record_json FROM connection_enrollment').all(); expect(JSON.stringify(rows)).not.toContain(fixtureCredential); expect(JSON.stringify(rows)).not.toContain('"signed":')
+  expectConnectionAllocations(JSON.parse(String(rows[0]!.record_json)))
+  const owners = f.services.database!.prepare('SELECT owner FROM connection_enrollment_attempt').all()
+  expect(owners.length).toBeGreaterThan(0)
+  for (const owner of owners) expect(isObjectId(owner.owner)).toBe(true)
   const bytes = await readFile(join(f.directory, 'connections.sqlite')); expect(bytes.includes(Buffer.from(fixtureCredential))).toBe(false)
   await f.closeOwner(); await f.reopen()
   const reopened = result(await f.cli(['enrollment', 'ls'])); expect(reopened.operations).toEqual([saved]); expect(f.authentication).toHaveBeenCalledTimes(1)

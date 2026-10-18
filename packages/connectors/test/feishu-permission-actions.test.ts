@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { isObjectId } from '@agentmux/core'
 import { afterEach, expect, it, vi } from 'vitest'
 import { DatabaseSync } from 'node:sqlite'
 import { appendFile, writeFile } from 'node:fs/promises'
@@ -22,6 +23,7 @@ it('authenticates the SDK callback, commits before ACK, restores real execution-
   expect(JSON.stringify(f.card())).toContain('original command')
   const button = f.buttons().find(value => /deny|reject/i.test(value.text.content))!
   expect(button, 'Actual original deny option must be rendered').toBeDefined()
+  expect(isObjectId(button.value.actionRef)).toBe(true)
   const ingress = f.services.ingress!, receive = ingress.receive.bind(ingress)
   const respond = vi.spyOn(f.original.client, 'respondAgentInteraction')
   const receiveSpy = vi.spyOn(ingress, 'receive').mockImplementation(async (input, ack) => await receive(input, async () => {
@@ -41,6 +43,7 @@ it('authenticates the SDK callback, commits before ACK, restores real execution-
   const list = await f.cli(['connection', 'ingress', 'ls', '--connection', 'feishu-connection'])
   expect(list.ingresses).toHaveLength(1)
   const record = list.ingresses[0]
+  expect(isObjectId(record.ingressId)).toBe(true); expect(isObjectId(record.input.operationId)).toBe(true)
   expect(record).toMatchObject({ kind: 'action', state: 'claimed', input: { hostId: 'local', agentSessionId: 'original-agent', expectedRun: { runId: 'run-original-agent' }, author: { actor: f.actor, grantRevision: 1 } } })
   const inspected = await f.cli(['connection', 'ingress', 'inspect', '--ingress', record.ingressId])
   expect(inspected.interactionReceipt).toMatchObject({ operationId: record.input.operationId, delivery: 'hook-written', nativeAdoption: 'unknown' })

@@ -1,3 +1,4 @@
+import { expectConnectionAllocations } from './helpers/unified-identifiers.js'
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
 import { CookieJar } from 'tough-cookie'
 import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
@@ -128,6 +129,7 @@ it('compiled CLI and SDK explicitly inspect the exact saved application after ac
   expect(initial.applicationInspection).toMatchObject({ observations: [], selected: null, next: null, applicationInfoReadPermission: 'unknown' })
   const input = inputFor(initial, 'inspect-application'), count = fetch.mock.calls.length
   const observed = result(await f.cli(['setup', 'advance', '--input', '-'], input))
+  expectConnectionAllocations(observed)
   const request = fetch.mock.calls.filter(([url]) => new URL(String(url)).pathname.startsWith('/developers/'))
   expect(request).toHaveLength(1)
   expect(new Headers(request[0][1]?.headers).get('x-timezone-offset')).toBe(String(new Date().getTimezoneOffset()))

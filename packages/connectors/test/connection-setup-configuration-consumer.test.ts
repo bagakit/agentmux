@@ -1,3 +1,4 @@
+import { expectConnectionAllocations } from './helpers/unified-identifiers.js'
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
 import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
 import { AgentMuxControlServer, AgentMuxRpcService, connectAgentMuxRpc } from '@agentmux/core'
@@ -138,6 +139,7 @@ it('SDK and compiled CLI explicitly enable one exact original bot with a durable
   expect(input.decision.value).toBe('confirm')
   const store = vi.spyOn(DesktopConnectorSecrets.prototype, 'store')
   const accepted = result(await f.cli(['setup', 'advance', '--input', '-'], input)), receipt = effect(accepted)
+  expectConnectionAllocations(accepted)
   expect(receipt).toMatchObject({ effect: 'enable-messaging', sourceStepId: source.stepId, input, request: 'confirmed', secureStorage: 'stored' })
   expect(accepted.receipt).toMatchObject({ actionId: input.decision.actionId, stepId: receipt.stepId, state: 'confirmed' })
   expect(accepted.applicationConfiguration?.capability).not.toBe('enabled')
