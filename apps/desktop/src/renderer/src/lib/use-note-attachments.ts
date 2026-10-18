@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Editor, EditorEvents } from '@tiptap/core'
 import type { NoteResource } from '@agentmux/core/notebook-catalog'
@@ -43,7 +44,7 @@ export function useNoteAttachments(resource: NoteResource | undefined) {
         try {
           if (!current()) throw Error('The original Note changed before insertion. Its draft is retained.')
           if (file.size > FILE_IMPORT_MAX_BYTES) throw Error('The selected file exceeds the 4 MiB Files transfer budget.')
-          operationId = crypto.randomUUID()
+          operationId = mintObjectId()
           // A sibling needs no invented directory, and keeps the original file extension.
           const name = file.name.replace(/[\u0000-\u001f\u007f/\\]/gu, '_').slice(-120) || 'attachment'
           const filename = `attachment-${operationId}-${name}`

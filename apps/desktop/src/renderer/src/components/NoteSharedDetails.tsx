@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { Link2, SquareDot, X } from 'lucide-react'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
@@ -63,7 +64,7 @@ export function NoteSharedDetails({ note, target, host, include, graph, active, 
     try {
       if (shared) writeNoteShareClipboard(anchor.ownerDocument, { version: 1, source: target, block: { path: [], fingerprint: '' }, include: { ...include, path: target.path, workspaceId: target.workspaceId } }, note.title ?? 'Shared content')
       else {
-        const owner = anchor.ownerDocument, attrs = { referenceId: crypto.randomUUID(), text: noteWikiQueryForLabel(note.title ?? 'Shared content'), target: { noteId: note.noteId } }
+        const owner = anchor.ownerDocument, attrs = { referenceId: mintObjectId(), text: noteWikiQueryForLabel(note.title ?? 'Shared content'), target: { noteId: note.noteId } }
         const span = owner.createElement('span'); span.dataset.noteLink = JSON.stringify(attrs); span.textContent = `[[${attrs.text}]]`
         const raw = readNoteMarkdownHeader(serializeNoteDocument({ schema: NOTE_SCHEMA, noteId: note.noteId, content: { type: 'doc', content: [{ type: 'paragraph', content: [noteInlineLinkContent(attrs)] }] } }))
         if (raw.status !== 'valid') throw Error(raw.message)

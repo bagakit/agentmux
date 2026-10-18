@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useId, useState } from 'react'
 import { NOTE_CONTENT_WIDTHS, NOTE_FONT_SIZE_MIN, NOTE_FONT_SIZE_MAX, resolveNotesPreferences, validNoteFontSize, type NotesPreferences } from '../../../../shared/notes-preferences'
@@ -19,7 +20,7 @@ export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
   useEffect(() => { let active = true; void api.notesStorage.inspect().then(value => { if (active) { setStorage(value); setDirectory(value.operation?.phase === 'prepared' ? value.operation.directory : value.directory); if (value.operation) setIntent(value.operation) } }).catch(error => { if (active) setDirectoryIssue(String(error)) }); return () => { active = false } }, [])
   async function moveDirectory() {
     if (!storage || moving) return
-    return changeStorage(intent ?? { operationId: crypto.randomUUID(), expectedDirectory: storage.directory, directory: directory.trim() })
+    return changeStorage(intent ?? { operationId: mintObjectId(), expectedDirectory: storage.directory, directory: directory.trim() })
   }
   async function changeStorage(original: import('@agentmux/core/notebook-store').NotesStorageChange) {
     setIntent(original); setMoving(true); setDirectoryIssue(null)
@@ -73,7 +74,7 @@ export function NotesSettingsPane({ preferences, onSave, onOpenNotes }: {
       {directoryIssue && <p role="alert" className="settings-workflows__note">{directoryIssue}</p>}
       {!!storage?.conversionIssues?.length && <div className="settings-workflows__note" role="status"><p>Some original Notes still need conversion. Other local Notes remain available.</p>
         <ul>{storage.conversionIssues.map((issue, index) => <li key={index}><strong>{issue.noteId ?? 'Original resource not confirmed'}</strong>{issue.resource ? <code>{issue.resource.hostId} · {issue.resource.workspaceId} / {issue.resource.path}</code> : null}<p>{issue.message}</p></li>)}</ul>
-        <button type="button" className="small-button" disabled={moving} onClick={() => void changeStorage(storage.operation ?? { operationId: crypto.randomUUID(), expectedDirectory: storage.directory, directory: storage.directory })}>Retry original Note conversion</button>
+        <button type="button" className="small-button" disabled={moving} onClick={() => void changeStorage(storage.operation ?? { operationId: mintObjectId(), expectedDirectory: storage.directory, directory: storage.directory })}>Retry original Note conversion</button>
       </div>}
     </section>
     <SettingsSaveBar save={saveState} dirty={draft.dirty} onSave={() => void save()} />

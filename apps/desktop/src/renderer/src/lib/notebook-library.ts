@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { create } from 'zustand'
 import { type NotebookChange, type NotebookState, type NoteSource, type NotebookPage, type NoteResource } from '@agentmux/core/notebook-catalog'
 import { api } from './api'
@@ -16,7 +17,7 @@ export function observeNotebookLibrary(): () => void {
     else useNotebookLibrary.setState({ issue: event.issue })
   })
 }
-export async function changeNotebook(change: NotebookChange, operationId: string = crypto.randomUUID()): Promise<NotebookState> {
+export async function changeNotebook(change: NotebookChange, operationId: string = mintObjectId()): Promise<NotebookState> {
   // Reading and writing have distinct receipts. A lost write reply does not turn a confirmed
   // directory into an unreadable one; the caller retains its own exact operation and recovery.
   const original = await refreshNotebookLibrary()

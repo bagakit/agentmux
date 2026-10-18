@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { Editor } from '@tiptap/core'
 import { closeNoteWikiHistory } from '@agentmux/client-ui/note/note-wiki-input'
@@ -110,7 +111,7 @@ export function useNoteWikiCompletion(editor: Editor | null, active: boolean, so
       if (cancel.signal.aborted || !current.current.active || originalSource !== current.current.sourceIdentity || editor.isDestroyed || !sameTrigger(held, editor)) return
       if (result.mode !== 'resolve' || result.result.status !== 'resolved') { if (result.mode === 'resolve') { setLookup(result); setIssue(result.result.status === 'resolved' ? null : result.result.message) } return }
       closeNoteWikiHistory(editor)
-      editor.chain().focus().insertContentAt({ from: held.from, to: held.to }, noteInlineLinkContent({ referenceId: crypto.randomUUID(), text, target: result.result.target })).run()
+      editor.chain().focus().insertContentAt({ from: held.from, to: held.to }, noteInlineLinkContent({ referenceId: mintObjectId(), text, target: result.result.target })).run()
       dismiss(`${held.from}:${held.text}`); setTrigger(null)
     } catch (error) { if (!cancel.signal.aborted) setIssue(presentError(error)) }
     finally { pending.current.delete(cancel); if (!cancel.signal.aborted) setBusy(false) }

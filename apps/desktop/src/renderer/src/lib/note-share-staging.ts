@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { Decoration, type Editor, type JSONContent } from '@tiptap/core'
 import { noteShareSiblingRange, noteBlockFingerprint, noteNodeAtPath } from '../../../shared/note-share-range'
 export { noteBlockFingerprint, noteNodeAtPath } from '../../../shared/note-share-range'
@@ -32,7 +33,7 @@ export function copyNoteBlock(editor: Editor, position: number, source: NoteFile
   const pending = node.type.name === 'noteInclude' ? pendingNoteShares(`${source.workspaceId}\0${source.path}`).get(node.attrs.referenceId) : undefined
   if (pending && node.attrs.noteId === pending.include.noteId && node.attrs.path === pending.include.path && (node.attrs.workspaceId ?? source.workspaceId) === (pending.include.workspaceId ?? source.workspaceId)) return pending.copy
   const copy: NoteShareCopy = { version: 1, source, read, block: { path, fingerprint: noteBlockFingerprint(node.toJSON()), ...(typeof node.attrs.blockId === 'string' ? { blockId: node.attrs.blockId } : {}) }, ...(node.type.name === 'noteInclude' ? { include: node.attrs as NoteInclude } : {}) }
-  if (!copy.include) copy.proposalId = matchingPendingCopy(copy)?.include.noteId ?? crypto.randomUUID()
+  if (!copy.include) copy.proposalId = matchingPendingCopy(copy)?.include.noteId ?? mintObjectId()
   return copy
 }
 export function writeNoteShareClipboard(owner: Document, copy: NoteShareCopy, text: string): void {
@@ -62,7 +63,7 @@ export function readNoteShareClipboard(event: ClipboardEvent, owner: Document): 
   } catch { return null }
 }
 export function stageNoteShare(key: string, copy: NoteShareCopy): NoteInclude {
-  const referenceId = crypto.randomUUID()
+  const referenceId = mintObjectId()
   // A clipboard can outlive its first promotion. Only the exact original identity can
   // turn that old locator into a reuse; matching prose or a nearby position cannot.
   const state = useAppStore.getState(), workspace = state.config?.workspaces.find(value => value.id === copy.source.workspaceId)
@@ -80,9 +81,9 @@ export function stageNoteShare(key: string, copy: NoteShareCopy): NoteInclude {
   const held = new Map(pendingNoteShares(key))
   // Repeated pastes of this exact source share one proposed entity, even before its first commit.
   const same = matchingPendingCopy(copy)
-  const noteId = same?.include.noteId ?? copy.proposalId ?? crypto.randomUUID(), parent = copy.source.path.slice(0, Math.max(0, copy.source.path.lastIndexOf('/') + 1))
+  const noteId = same?.include.noteId ?? copy.proposalId ?? mintObjectId(), parent = copy.source.path.slice(0, Math.max(0, copy.source.path.lastIndexOf('/') + 1))
   const include = { referenceId, noteId, path: same?.include.path ?? `${parent}block-${noteId}.note.md`, ...(copy.source.workspaceId === key.slice(0, key.indexOf('\0')) ? {} : { workspaceId: copy.source.workspaceId }) }
-  held.set(referenceId, { copy, operationId: same?.operationId ?? crypto.randomUUID(), include })
+  held.set(referenceId, { copy, operationId: same?.operationId ?? mintObjectId(), include })
   useAppStore.setState(state => state.documents[key] ? { documents: { ...state.documents, [key]: { ...state.documents[key]!, noteEditing: { ...state.documents[key]!.noteEditing, shares: Object.fromEntries(held) } } } } : state)
   rememberPendingSourceTarget(key)
   return include

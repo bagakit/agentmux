@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { NOTE_FILE_EXTENSION } from '../../../shared/note-format'
 import { scratchWorkspaceFilePath, scratchTopicLogicalPath, scratchTopicPhysicalPath, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { scratchTopicsForWorkspace } from './scratch-topic-snapshots'
@@ -90,13 +91,13 @@ export async function openKnowledgeSource(source: TopicKnowledgeSource): Promise
     const origin = tab?.space?.zoneId ? state.spaceZoneBindings[tab.space.zoneId] : undefined
     if (!tab || origin?.topicId !== source.topicId || origin.contentKind !== 'topic' || groups.length !== 1 || source.threadId && !Object.hasOwn(tab.regions, source.threadId)) throw new Error('The original discussion source and position are not uniquely confirmed. Its reference is kept.')
     const location = groups[0]!
-    const result = await state.executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: `knowledge-source:${crypto.randomUUID()}`, operation: 'focus', target: {
+    const result = await state.executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: `knowledge-source:${mintObjectId()}`, operation: 'focus', target: {
       kind: 'space', zoneId: tab.space!.zoneId, tabId: tab.id, displayWorkspaceId: location.workspaceId, groupId: location.groupId,
       ...(source.threadId ? { regionId: source.threadId } : {}) }, inputPolicy: 'target' })
     if (result.operation !== 'focus' || result.navigation.state === 'rejected' || result.navigation.state === 'unconfirmed') throw new Error('The original discussion position is not confirmed. Its reference is kept; reopen its exact source workface.')
     return
   }
-  const result = await state.executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: `knowledge-source:${crypto.randomUUID()}`, operation: 'focus', target: {
+  const result = await state.executeControl({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: `knowledge-source:${mintObjectId()}`, operation: 'focus', target: {
     kind: 'space', zoneId: source.zoneId, ...(source.tabId ? { tabId: source.tabId } : {}), ...(source.regionId ? { regionId: source.regionId } : {}) }, inputPolicy: 'target' })
   if (result.operation !== 'focus' || result.navigation.state === 'rejected' || result.navigation.state === 'unconfirmed') throw new Error('The original discussion position is not confirmed. Its reference is kept; reopen its exact source workface.')
 }

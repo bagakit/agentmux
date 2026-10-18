@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import type { ConversationAnnotationSelection } from '@agentmux/client-ui/conversation-annotation'
 import { useClientUiPlatform } from '@agentmux/client-ui/platform'
 import { autoUpdate, computePosition, flip, inline, offset, shift } from '@floating-ui/dom'
@@ -82,7 +83,7 @@ export function ConversationAnnotationNote({ ref, sessionId, regionRef, active, 
       if (!onAnnotate || sourceSessionId !== sessionId || !target.messageId || !target.quote.trim()) return
       focusRequested.current = null
       if (!current.current.note.trim() && !current.current.pending) setEdit(null)
-      setSelection({ key: crypto.randomUUID(), target, sessionId: sourceSessionId, ...(origin ? { origin } : {}) })
+      setSelection({ key: mintObjectId(), target, sessionId: sourceSessionId, ...(origin ? { origin } : {}) })
       setOpened(false); setCopied(false); setError(null); setStatus(null); setPosition(null)
     }
   }), [onAnnotate, origin, sessionId])
