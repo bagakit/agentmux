@@ -161,8 +161,8 @@ export class FeishuAdapter implements ConnectionAdapter, IngressAuthenticator {
         const witness = this.callback.getStore()
         if (!witness || !this.witnesses.has(witness) || witness.receiver !== receiver) feishuFailure('FEISHU_TRANSPORT_PROOF_REQUIRED')
         const payload = readFeishuMessage(witness.raw, config.application)
-        // Bot echoes and direct chats are platform scope facts, never inferred from message text.
-        if (payload.event.sender.sender_type !== 'user' || payload.event.message.chat_type !== 'group') return
+        // Sender and chat scope are original platform protocol facts, never inferred from message text.
+        if (payload.event.sender.sender_type !== 'user' || !['group', 'p2p'].includes(payload.event.message.chat_type)) return
         await receive({ raw: witness.raw, transportProof: witness }, () => undefined)
         receiver.observed = true
       }, 'card.action.trigger': async () => {
