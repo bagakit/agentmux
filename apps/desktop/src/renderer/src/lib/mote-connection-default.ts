@@ -23,7 +23,8 @@ export function moteConnectionChoice(ref: MoteConnectionRef, records: readonly C
   if (!record) return { record: null, issue: 'The saved bot is unavailable here. Choose another saved bot or open bot settings.' }
   if (record.config.application.domain !== ref.application.domain || record.config.application.appId !== ref.application.appId)
     return { record: null, issue: 'This connection belongs to a different bot. Keep the original reference or choose another bot.' }
-  return { record, issue: record.config.enabled ? null : 'This bot is paused. Choose another saved bot or enable it in bot settings.' }
+  return { record, issue: !record.config.enabled ? 'This bot is paused. Choose another saved bot or enable it in bot settings.'
+    : connectionNeedsInitialSetup(record) ? 'This bot’s original setup is incomplete. Continue it in bot settings; the saved choice is kept.' : null }
 }
 
 export type AgentMoteConnectionSource = { target: MotePreferencesTarget; name: string } | { issue: string }
@@ -61,7 +62,7 @@ export function connectionInitialSetupLabel(record: ConnectionRecord): string {
 }
 
 export function connectionIdentityObservation(record: ConnectionRecord): { label: string; detail: string } {
-  if (connectionNeedsInitialSetup(record)) return { label: record.initialSetup?.state === 'incomplete' ? 'Setup incomplete' : 'Setup not confirmed',
+  if (connectionNeedsInitialSetup(record)) return { label: 'Setup incomplete',
     detail: 'Saved application. Continue its original setup in application settings before a new group chat.' }
   if (!record.config.enabled) return { label: 'Paused', detail: 'Saved application. Enable it in application settings before a new platform action.' }
   const authentication = record.observation.authentication
@@ -69,10 +70,10 @@ export function connectionIdentityObservation(record: ConnectionRecord): { label
     : authentication.state === 'unavailable' ? authentication.reason === 'credential-missing' ? 'Credential unavailable' : 'Authentication unavailable'
       : authentication.state === 'disabled' ? 'Authentication paused' : 'Authentication not confirmed'
   const stage = (value: ConnectionRecord['observation']['transport']) => value.state === 'ready' ? 'observed' : value.state === 'disabled' ? 'paused' : value.state === 'unavailable' ? 'unavailable' : 'not confirmed'
-  return { label, detail: `${record.initialSetup?.state === 'complete' ? 'Initial setup was completed' : 'Initial setup is not recorded'} · Live connection ${stage(record.observation.transport)} · Incoming ${stage(record.observation.intake)} · Outgoing ${stage(record.observation.delivery)}. Group message delivery is confirmed separately.` }
+  return { label, detail: `${connectionInitialSetupLabel(record)} · Live connection ${stage(record.observation.transport)} · Incoming ${stage(record.observation.intake)} · Outgoing ${stage(record.observation.delivery)}. Group message delivery is confirmed separately.` }
 }
 
 /** Only a matching managed flow supplies this fact; absent history is not a failed manual application. */
 export function connectionNeedsInitialSetup(record: ConnectionRecord): boolean {
-  return record.initialSetup !== undefined && record.initialSetup.state !== 'complete'
+  return record.initialSetup?.state === 'incomplete'
 }
