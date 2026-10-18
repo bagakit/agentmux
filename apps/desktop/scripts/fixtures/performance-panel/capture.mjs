@@ -7,16 +7,17 @@ import path from 'node:path'
 import os from 'node:os'
 import { createRequire } from 'node:module'
 import { isBuiltin } from 'node:module'
-import { pathToFileURL } from 'node:url'
+import { pathToFileURL, fileURLToPath } from 'node:url'
 
 export async function capturePerformancePanel({ root, evidence, captureScope = 'full', cssMutant = 'baseline', fixtureName = 'performance-panel', prepareOnly = false }) {
   assert.ok(['full','placement','buttons','toolkit','attribution','agent-cards','epoch-peak','diagnostic'].includes(captureScope),'已知明确 capture scope')
   assert.ok(typeof prepareOnly === 'boolean' && (!prepareOnly || captureScope === 'attribution'), 'Compile preparation is explicit attribution-only, never a full qualification')
-  const toolkitFixture = fixtureName === 'toolkit-custom-ui'
+  const tuiFixture = fixtureName === 'toolkit-tui'
+  const toolkitFixture = fixtureName === 'toolkit-custom-ui' || tuiFixture
   assert.ok(fixtureName === 'performance-panel' && captureScope !== 'toolkit' || toolkitFixture && captureScope === 'toolkit', '明确产品 fixture 与有界 capture scope')
   assert.ok(['baseline','state','focus'].includes(cssMutant)&& (captureScope==='buttons'||cssMutant==='baseline'),'明确有界私有CSS变异')
   const desktop=path.join(root,'apps/desktop'),fixture=path.join(desktop,'scripts/fixtures',fixtureName)
-  const toolkitQualification=toolkitFixture&&process.env.AGENTMUX_TOOLKIT_UI_PREPARATION_SCOPE==='qualification'
+  const toolkitQualification=toolkitFixture&&!tuiFixture&&process.env.AGENTMUX_TOOLKIT_UI_PREPARATION_SCOPE==='qualification'
   const require=createRequire(path.join(desktop,'package.json')),sha=bytes=>createHash('sha256').update(bytes).digest('hex')
   const {build,loadConfigFromFile}=await import(pathToFileURL(require.resolve('vite')).href)
   const viteRequire=createRequire(require.resolve('vite')),esbuild=viteRequire('esbuild').build
@@ -43,6 +44,16 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
       assert.equal(proof.executionProof.privateChildExited,true)
       receipt.customResult={file:customFile,sha256:sha(bytes),executionProof:proof.executionProof}
       await fs.writeFile(path.join(evidence,'custom-result.json'),bytes)
+    }
+    if(tuiFixture) {
+      // Use the same built public Core modules as Desktop. Bundling the Runtime graph
+      // into a fixture changes its asynchronous module initialization boundary.
+      const core=path.join(root,'packages/core'), source=await fs.readdir(path.join(core,'src'),{recursive:true,withFileTypes:true})
+      const output=await fs.readdir(path.join(core,'dist'),{recursive:true,withFileTypes:true})
+      let newestSource=0, oldestOutput=Infinity
+      for(const item of source) if(item.isFile()) { const file=path.join(item.parentPath,item.name);await bind(file);newestSource=Math.max(newestSource,(await fs.stat(file)).mtimeMs) }
+      for(const item of output) if(item.isFile()) { const file=path.join(item.parentPath,item.name);await bind(file);oldestOutput=Math.min(oldestOutput,(await fs.stat(file)).mtimeMs) }
+      assert.ok(oldestOutput>newestSource,'Current Core dist must be rebuilt before the Native TUI capture')
     }
     const aliases=new Map()
     for(const name of ['core','demand','layout','identity','relay','client-ui','diagnostic-evidence']){
@@ -78,7 +89,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
       fixedSdkEntry=path.join(sdkDirectory,'package/dist/index.js')
       const sdk=await import(pathToFileURL(fixedSdkEntry).href)
       assert.equal(sdk.PROTOCOL_VERSION,manifest.product.protocol,'The actual private SDK matches the bound native artifact protocol')
-      receipt.sdkClosure={archive:path.relative(root,archive),archiveSHA256:sha(await bind(archive)),entry:path.relative(evidence,fixedSdkEntry),entrySHA256:sha(await fs.readFile(fixedSdkEntry)),actualProtocol:sdk.PROTOCOL_VERSION,manifestProtocol:manifest.product.protocol,boundary:'Only this run uses its bound SDK archive; shared node_modules and product protocol checks remain unchanged.'}
+      receipt.sdkClosure={archive:path.relative(root,archive),archiveSHA256:sha(await bind(archive)),entry:path.relative(evidence,fixedSdkEntry),entrySHA256:sha(await fs.readFile(fixedSdkEntry)),actualProtocol:sdk.PROTOCOL_VERSION,manifestProtocol:manifest.product.protocol,boundary:tuiFixture?'Native TUI consumes the current public Core dist bundle. Its SDK archive and binary are hash-bound build inputs; this extracted SDK is only checked for protocol identity.':'Only this run uses its bound SDK archive; shared node_modules and product protocol checks remain unchanged.'}
     }
     await fs.symlink(path.join(desktop,'node_modules'),path.join(compiled,'node_modules'),'dir')
     // Core's createRequire(import.meta.url) also needs its native dependencies at runtime.
@@ -88,14 +99,14 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
       [path.join(desktop,'src/preload/index.ts'),path.join(compiled,'product-preload.cjs'),'cjs'],
       [path.join(fixture,'preload.cjs'),path.join(compiled,'fixture-preload.cjs'),'cjs'],
       [path.join(fixture,(captureScope==='attribution'||captureScope==='agent-cards'||captureScope==='epoch-peak'||captureScope==='diagnostic')?'attribution-owner-entry.ts':'owner-entry.ts'),path.join(compiled,'owner.mjs'),'esm'],
-      [path.join(root,'packages/core/src/agentmux.ts'),path.join(compiled,'agentmux.mjs'),'esm'],
+      ...(!tuiFixture?[[path.join(root,'packages/core/src/agentmux.ts'),path.join(compiled,'agentmux.mjs'),'esm']]:[]),
       ...(toolkitQualification?[[path.join(fixture,'health-entry.ts'),path.join(compiled,'health.mjs'),'esm']]:[])
-    ]) { const built=await esbuild({entryPoints:[entry],outfile,bundle:true,platform:'node',format,target:'node24',packages:format==='cjs'?'bundle':'external',logLevel:'error',metafile:captureScope==='diagnostic',
+    ]) { const built=await esbuild({entryPoints:[entry],outfile,bundle:true,platform:'node',format,target:'node24',packages:format==='cjs'?'bundle':'external',logLevel:'error',metafile:captureScope==='diagnostic'||tuiFixture,
       plugins:[{name:'bind-product-node-source',setup(builder){
-        builder.onResolve({filter:/^@agentmux\//},args=>{const target=resolveAlias(args.path);return target?{path:target}:undefined})
+        builder.onResolve({filter:/^@agentmux\//},args=>{if(tuiFixture&&format==='esm'&&args.path.startsWith('@agentmux/core'))return {path:fileURLToPath(import.meta.resolve(args.path)),external:true};const target=resolveAlias(args.path);return target?{path:target}:undefined})
         builder.onResolve({filter:/^[^./]/},args=>{
           if(args.path==='electron'||isBuiltin(args.path))return {path:args.path,external:true}
-          if(captureScope==='diagnostic'&&format==='cjs'&&args.path==='yaml')return {path:path.join(path.dirname(require.resolve('yaml/package.json',{paths:[path.dirname(args.importer),desktop,path.join(root,'packages/core')]})),'browser/index.js'),external:false}
+          if((captureScope==='diagnostic'||tuiFixture)&&format==='cjs'&&args.path==='yaml')return {path:path.join(path.dirname(require.resolve('yaml/package.json',{paths:[path.dirname(args.importer),desktop,path.join(root,'packages/core')]})),'browser/index.js'),external:false}
           if(resolveAlias(args.path))return
           if(args.path==='@ctxmux/sdk')return {path:fixedSdkEntry,external:true}
           if(args.path==='node-diff3'&&captureScope==='diagnostic')return {path:require.resolve(args.path,{paths:[path.dirname(args.importer),desktop,path.join(root,'packages/core')]}),external:false}
@@ -106,7 +117,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
           const bytes=await bind(args.path);return{contents:bytes.toString(),loader:args.path.endsWith('tsx')?'tsx':'ts'}
         })
       }}]})
-      if(captureScope==='diagnostic'&&format==='cjs') {
+      if((captureScope==='diagnostic'||tuiFixture)&&format==='cjs') {
         const imports=Object.values(built.metafile.outputs).flatMap(output=>output.imports).filter(value=>value.external)
         assert.ok(imports.length>0,'Sandbox preload has an explicit Electron transport')
         assert.ok(imports.every(value=>value.path==='electron'),'Sandbox preload must not externalise Node modules')
@@ -136,6 +147,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
       ...(captureScope==='buttons'?{css:{postcss:{plugins:[cssPlugin]}}}:{}),
       plugins:[bindRendererSource()],worker:{format:'es',plugins:()=>[bindRendererSource()]},
       build:{target:'esnext',outDir:path.join(compiled,'renderer'),sourcemap:false,emptyOutDir:false}})
+    if(tuiFixture)receipt.sdkClosure.boundary='The private Native TUI consumer uses current bundled Core dist; the verified SDK archive is retained as a build input, not a replacement module.'
     if(captureScope==='buttons'){
       assert.equal(cssInputs.length,4,'实际PostCSS owning规则四个非空唯一')
       assert.equal(cssInputs.filter(item=>item.mutated).length,cssMutant==='baseline'?0:2,'只有实际两处状态或焦点owning声明变异')
@@ -145,7 +157,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
     const env={...process.env,AGENTMUX_PERFORMANCE_PRODUCT_PRELOAD:path.join(compiled,'fixture-preload.cjs'),AGENTMUX_PERFORMANCE_BUTTON_MUTANT:cssMutant,
       AGENTMUX_RUNTIME_DIRECTORY:path.join(privateRoot,'runtime'),AGENTMUX_STATE_DIRECTORY:path.join(privateRoot,'runtime/state'),
       AGENTMUX_MESSAGE_QUEUE_PATH:path.join(privateRoot,'runtime/queue.ndjson'),AGENTMUX_AGENT_SESSION_STORE:path.join(privateRoot,'runtime/sessions.json')};delete env.ELECTRON_RUN_AS_NODE
-    if(captureScope==='diagnostic') {
+    if(captureScope==='diagnostic'||tuiFixture) {
       for(const key of Object.keys(env))if(/^(AGENTMUX|AMUX|CODEX|CTXMUX|BAGAKIT|CLAUDE|OPENAI|ANTHROPIC)_/.test(key))delete env[key]
       for(const key of ['ELECTRON_RUN_AS_NODE','NODE_OPTIONS','NODE_PATH'])delete env[key]
       const home=path.join(privateRoot,'home');await fs.mkdir(home,{recursive:true});env.HOME=home
@@ -154,7 +166,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
       env.AGENTMUX_MESSAGE_QUEUE_PATH=path.join(privateRoot,'runtime/queue.ndjson');env.AGENTMUX_AGENT_SESSION_STORE=path.join(privateRoot,'runtime/sessions.json')
     }
     for(const phase of prepareOnly?[]:captureScope==='full'?['control','restart','joined']:[captureScope]){
-      const guiArgs=[path.join(fixture,'main.cjs'),path.join(compiled,'renderer/index.html'),path.join(compiled,'owner.mjs'),privateRoot,evidence,phase,asset,path.join(compiled,'agentmux.mjs'),...(toolkitQualification?[path.join(fixture,'qualification.cjs')]:[])]
+      const guiArgs=[path.join(fixture,'main.cjs'),path.join(compiled,'renderer/index.html'),path.join(compiled,'owner.mjs'),privateRoot,evidence,phase,asset,tuiFixture?path.join(root,'packages/core/dist/agentmux.js'):path.join(compiled,'agentmux.mjs'),...(toolkitQualification?[path.join(fixture,'qualification.cjs')]:[])]
       const executable=toolkitQualification?globalThis.process.execPath:require('electron')
       const args=toolkitQualification?[path.join(fixture,'coordinator.cjs'),require('electron'),path.join(compiled,'health.mjs'),...guiArgs]:guiArgs
       const stderr=[]
@@ -173,6 +185,7 @@ export async function capturePerformancePanel({ root, evidence, captureScope = '
     if(captureScope==='placement')receipt.boundary='仅本次 Settings 左归属修正：实际 App 9 geometry、7 native keyboard、Settings toggle/Escape/snapshot retention、完整 Footer 图；不运行或签原full hidden/restart/joined/T004。'
     if(captureScope==='buttons')receipt.boundary='仅T005底栏七常规按钮actual App样式/几何/原生焦点与原工作面保持；私有CSS输入变异。无旧full hidden/restart/joined、Backend或用户FPS资格。'
     if(captureScope==='toolkit')receipt.boundary=toolkitQualification?'T008 finite actual App/unique ConfigOwner/ToolkitOwner/product preload/compiled CLI/Core Raw actions, original TerminalView input and two ordinary GUI durable restoration. Actual Terminal Session scope; not Agent Provider recovery, user App/Runtime, T004 hidden or aesthetic acceptance.':'T008 actual App准备图：真实ConfigStore/ConfigOwner/ToolkitOwner/registerToolkitIpc及私有Core Raw port；现preview Session transport仍受控，无完整动作/健康Run恢复或Task资格。capture完成不代独立审美。'
+    if(tuiFixture)receipt.boundary='Actual App, Toolkit settings/status bar/popover, TerminalView, product preload, ToolkitOwner and RuntimeController with two isolated Native TUI Runs through an explicit private local Core connector. Other App services use preview data. No user App, user Run, installation or aesthetic approval.'
     if(captureScope==='attribution')receipt.boundary='仅资源归因 actual App/Performance Toolkit/真实 styles：宽窄主题、原生键盘展开、同实例刷新保节点焦点滚动、新实例隔离、工作等待/未知/过期/暂停。私有 sandbox preload 与受控严格 Metrics DTO；不执行 full control/restart/joined/Native，不签用户现场或实际内存归因。'
     if(captureScope==='epoch-peak')receipt.boundary='T003 only: actual App/Toolkit/product styles with controlled recorder-generated peak DTO, native keyboard Current/Previous, retained focus/scroll and two expanded Work and wait captures. No full control/restart/joined/Native/heap/user Run/installed performance claims.'
     if(captureScope==='agent-cards')receipt.boundary='Actual App shared Toolkit cards/Performance totals/Custom result with exact product styles and isolated preload. Controlled Metrics DTO and private ordinary-script confirmed output; no user Runtime or installation claim.'
