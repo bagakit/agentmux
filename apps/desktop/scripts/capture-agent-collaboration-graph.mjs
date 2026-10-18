@@ -125,7 +125,7 @@ try {
   await new Promise(done => server.listen(0, '127.0.0.1', done))
   receipt.phase = 'capturing'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
   receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), `http://127.0.0.1:${server.address().port}/`, privateRoot, evidence],
-    { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 150000, onLine: line => logs.push(line) })
+    { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 210000, onLine: line => logs.push(line) })
   const actualText = await readFile(join(evidence, 'actual.json'), 'utf8').catch(error => error.code === 'ENOENT' ? '' : Promise.reject(error))
   if (actualText.trim()) receipt.actual = JSON.parse(actualText)
   assert.equal(receipt.process.timedOut, false, 'The original source capture timed out; retain its partial scene evidence')

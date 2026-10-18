@@ -32,13 +32,20 @@ app.whenReady().then(async () => {
     const move = async selector => { const point = await rect(selector); assert.ok(point.hit, 'Real pointer target ' + selector); await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y }) }
     const click = async selector => { const point = await rect(selector); assert.ok(point.hit, 'Real click target ' + selector); await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: point.x, y: point.y }); for (const type of ['mousePressed', 'mouseReleased']) await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, x: point.x, y: point.y, button: 'left', clickCount: 1 }); await settle() }
     const key = async (value, modifiers = 0) => { for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: value, code: value === 'a' ? 'KeyA' : value, modifiers, ...(type === 'keyDown' && value === 'a' && modifiers === 4 ? { commands: ['selectAll'] } : type === 'keyDown' && value === 'Backspace' ? { commands: ['deleteBackward'] } : {}) }) }
-    const frame = async name => {
+    const frame = async (name, { motion = false } = {}) => {
       await settle()
-      if (!name.endsWith('-live')) await until('finite entrance settled', () => read(`![...document.getAnimations()].some(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming().iterations)&&a.effect?.target?.closest?.('.collaboration-map,.agent-information-reader,.collaboration-filter-menu'))`))
+      if (!motion && !name.endsWith('-live')) await until('finite entrance settled', () => read(`![...document.getAnimations()].some(a=>a.playState==='running'&&Number.isFinite(a.effect?.getComputedTiming().iterations)&&a.effect?.target?.closest?.('.collaboration-map,.agent-information-reader,.collaboration-filter-menu'))`))
       const file = name + '.png'; await fs.writeFile(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.frames.push({ file, label: name, viewport: win.getContentSize() }); await checkpoint()
     }
     const check = async (name, action) => { phase = name; try { await action(); result.checks.push({ name, passed: true }) } catch (error) { result.checks.push({ name, passed: false }); result.failures.push({ name, message: error.message, stack: error.stack }); await frame('failure-' + name) } finally { await checkpoint() } }
     const facts = () => read('window.graphCapture.facts()')
+    const activity = () => read('window.graphCapture.activity()')
+    const motionFrame = async (label, event, offset) => {
+      await pause(Math.max(0, event.at + offset - await read('performance.now()')))
+      const observed = await activity(); await frame(label, { motion: true })
+      const sample = { label, requestedOffsetMS: offset, elapsedMS: observed.at - event.at, ...observed }
+      ;(result.activityFrames ??= []).push(sample); return sample
+    }
     const intact = async (selection = true, focus = true) => { const state = await facts(); for (const field of ['sameTabs', 'layoutsPreserved', 'sameDrafts', ...(focus ? ['sameFocus'] : []), ...(selection ? ['selectionPreserved'] : []), 'draftMounted', 'sameDraft']) assert.equal(state[field], true, field + ': ' + JSON.stringify(state.layoutDifference ?? state.selectionDifference ?? null)); assert.equal(state.draft, 'Original unsent reply · retain this exact draft.'); assert.equal(state.storedDraft, state.draft); assert.deepEqual(state.range, [4, 12]); assert.deepEqual(state.controls, result.before.controls); assert.deepEqual(state.chrome.preferences,result.before.chrome.preferences,'Map keeps original sidebar preferences'); return state }
     const matrix = () => read(`document.querySelector('.collaboration-map .react-flow__viewport')?.getAttribute('style')`)
     const fullMap = async () => { const state = await facts(), chrome = state.chrome; assert.equal(chrome.map.length,1); assert.equal(chrome.rail.length,0,'Focus Map has no visible Project Rail'); assert.equal(chrome.list.length,0,'Focus Map has no visible List'); assert.equal(chrome.dock.length,0,'Focus Map has no visible Space dock'); assert.ok(chrome.map[0].left<=2&&chrome.map[0].width>=chrome.viewportWidth-4,'Actual Focus Map fills its client width'); return chrome }
@@ -262,7 +269,79 @@ app.whenReady().then(async () => {
     await check('finite-live-without-camera-or-layout-reset', async () => {
       const camera = await matrix(), workers = (await read('window.graphCapture.workerSamples()')).length
       await read('window.graphCapture.live(false)'); await pause(150); assert.equal(await read(`document.querySelectorAll('.collaboration-edge__pulse').length`), 0)
-      await read('window.graphCapture.live(true)'); await until('actual finite source pulse', () => read(`document.querySelectorAll('.collaboration-edge__pulse').length>0`)); await frame('map-live'); await pause(2100); assert.equal(await read(`document.querySelectorAll('.collaboration-edge__pulse').length`), 0); assert.equal(await matrix(), camera); assert.equal((await read('window.graphCapture.workerSamples()')).length, workers); await intact()
+      const event = await read('window.graphCapture.live(true)'); await until('actual finite source pulse', () => read(`document.querySelectorAll('.collaboration-edge__pulse').length>0`))
+      const early = await motionFrame('map-message-early-live', event, 240), middle = await motionFrame('map-message-middle-live', event, 1300), late = await motionFrame('map-message-late-live', event, 2350)
+      for (const sample of [early, middle, late]) { assert.ok(sample.markers.some(marker=>marker.label==='Message sent')); assert.ok(sample.markers.some(marker=>marker.label==='Message received')); assert.ok(sample.paths.some(path=>path.kind==='communication'&&Number(path.opacity)>0),'Actual message ink is visible during its finite phase') }
+      const initial = early.paths.find(path=>path.kind==='communication'), final = late.paths.find(path=>path.id===initial.id)
+      assert.ok(final&&parseFloat(final.dashoffset)<parseFloat(initial.dashoffset),'Original path dash moves from sender to recipient rather than repeatedly blinking')
+      await pause(Math.max(0,event.at+await read('window.graphCapture.activityMS')+80-await read('performance.now()')))
+      assert.equal((await activity()).paths.length,0); assert.equal((await activity()).markers.length,0); assert.equal(await matrix(), camera); assert.equal((await read('window.graphCapture.workerSamples()')).length, workers); await intact()
+    })
+    await check('metadata-reconcile-retains-unrelated-geometry-and-reader', async () => {
+      await locate('fixture-core'); await mapReady(); await move('.collaboration-map [data-session-id="fixture-core"]'); await until('original Reader before metadata update', () => read(`Boolean(document.querySelector('.agent-information-reader'))`)); await move('.agent-information-reader__reading'); await click('[aria-label="Pin Agent bookmark"]'); await move('[aria-label="Find Agent in map"]'); await pause(240)
+      const before = await read('window.graphCapture.world()'), firstWorker = (await read('window.graphCapture.workerSamples()')).length
+      assert.equal(before.reader?.pinned,true)
+      const update = await read('window.graphCapture.reviseSession("fixture-isolated-001")')
+      await until('actual Store consumes updated original Session', async () => (await facts()).metadata.some(session=>session.id===update.id&&session.label===update.label&&session.activity==='active'))
+      await until('original incremental Worker consumes new physical tier', () => read(`window.graphCapture.workerSamples().slice(${firstWorker}).some(sample=>sample.request?.type==='reconcile'&&sample.geometry)`)); await mapReady()
+      const after = await read('window.graphCapture.world()'), changed = before.geometry.find(box=>box.kind==='agent'&&JSON.parse(JSON.parse(box.id)[1])[1]===update.id)
+      assert.ok(changed,'The changed original member had actual initial world geometry')
+      const unrelated = boxes => boxes.filter(box=>box.areaId!==changed.areaId).map(({id,x,y,width,height})=>({id,x,y,width,height})).sort((a,b)=>a.id.localeCompare(b.id))
+      assert.deepEqual(unrelated(after.geometry),unrelated(before.geometry),'Metadata and physical tier changes keep every unrelated absolute Worker box')
+      const unchanged = new Set(unrelated(before.geometry).map(box=>box.id)), painted = nodes => nodes.filter(node=>unchanged.has(node.id)).sort((a,b)=>a.id.localeCompare(b.id))
+      assert.deepEqual(painted(after.nodes),painted(before.nodes),'Actual unrelated DOM transforms and screen rectangles remain fixed'); assert.equal(after.camera,before.camera); assert.deepEqual(after.reader,before.reader,'The held sole Reader stays at its original reading anchor')
+      result.stableMetadata = { update, before, after, workers:(await read('window.graphCapture.workerSamples()')).slice(firstWorker), boundary:'Original Core-shaped Session notification and snapshot through App/Store; real Worker absolute boxes and DOM rectangles, no private xyflow state substitution.' }; await frame('map-stable-metadata-reader'); await click('[aria-label="Remove Agent bookmark"]'); await closeReader(); await intact()
+    })
+    await check('overview-live-needs-no-history-or-body-read', async () => {
+      await overview('map-before-overview-activity'); await pause(300)
+      const before = (await facts()).reads.length, camera = await matrix(), event = await read('window.graphCapture.live(true)')
+      const observed = await motionFrame('map-overview-message-live',event,350)
+      assert.ok(observed.markers.some(marker=>marker.label==='Message sent'&&marker.onscreen)); assert.ok(observed.markers.some(marker=>marker.label==='Message received'&&marker.onscreen)); assert.ok(observed.paths.some(path=>path.kind==='communication'&&Number(path.opacity)>0))
+      assert.equal((await facts()).reads.length,before,'Existing overview activity observes the event without any catalogue, identity, history or body read'); assert.equal(await matrix(),camera)
+      result.overviewActivity = { event, observed, readsBefore:before, readsAfter:(await facts()).reads.length }
+      await pause(Math.max(0,event.at+await read('window.graphCapture.activityMS')+60-await read('performance.now()'))); assert.equal((await activity()).markers.length,0)
+    })
+    await check('late-original-route-keeps-the-original-activity-phase', async () => {
+      await locate('fixture-core'); await mapReady(); await closeReader(); const camera = await matrix()
+      await read('window.graphCapture.delayRoutes(1200)')
+      try {
+        const event = await read('window.graphCapture.live(true,"fixture-core","fixture-design")'), first = await motionFrame('map-delayed-route-endpoints-live',event,280)
+        assert.ok(first.markers.some(marker=>marker.subject===JSON.stringify(['local','fixture-core'])&&marker.label==='Message sent')); assert.ok(first.markers.some(marker=>marker.subject===JSON.stringify(['local','fixture-design'])&&marker.label==='Message received'))
+        const incoming = sample => sample.paths.find(path=>{const id=JSON.parse(path.id);return id[0]==='communication'&&JSON.parse(JSON.parse(id[1])[1])[1]==='fixture-core'&&JSON.parse(JSON.parse(id[2])[1])[1]==='fixture-design'})
+        assert.equal(incoming(first),undefined,'The original delayed path is not invented before Worker delivery')
+        await until('original delayed route delivered during remaining activity', async () => Boolean(incoming(await activity())))
+        const routed = await motionFrame('map-delayed-route-remaining-live',event,1750), pulse = incoming(routed)
+        assert.ok(pulse&&pulse.delay<=-1000&&pulse.progress>.3,'A late-mounted original path starts at its original remaining phase')
+        await pause(Math.max(0,event.at+await read('window.graphCapture.activityMS')+80-await read('performance.now()'))); assert.equal((await activity()).paths.length,0); assert.equal((await activity()).markers.length,0)
+        assert.equal(await matrix(),camera); result.delayedRoute={event,first,routed,workers:(await read('window.graphCapture.workerSamples()')).filter(sample=>sample.request?.delayMS>0)}
+      } finally { await read('window.graphCapture.delayRoutes(0)') }
+      await read('window.graphCapture.delayRoutes(3600,"fixture-design","fixture-core")')
+      try {
+        const before = (await read('window.graphCapture.workerSamples()')).length, event = await read('window.graphCapture.live(true,"fixture-design","fixture-core")')
+        await motionFrame('map-expiring-before-route-live',event,300)
+        await until('the late original route completes after expiry',()=>read(`window.graphCapture.workerSamples().slice(${before}).some(sample=>sample.request?.type==='route'&&sample.complete)`))
+        const observed = await activity(); assert.ok(observed.at-event.at>=await read('window.graphCapture.activityMS')); assert.equal(observed.paths.length,0,'An expired event cannot replay when the original route finally arrives'); assert.equal(observed.markers.length,0); result.expiredRoute={event,observed}; await frame('map-expired-route-no-replay')
+      } finally { await read('window.graphCapture.delayRoutes(0)') }
+      await intact()
+    })
+    await check('relation-legend-native-pointer-and-keyboard', async () => {
+      await locate('fixture-core'); await closeReader(); const legend = await read(`document.querySelector('[aria-label="Relation legend"]')?.textContent`)
+      for(const label of ['Messages','Created','Dispatch'])assert.ok(legend.includes(label),'Persistent legend names '+label)
+      const relations = await read(`[...document.querySelectorAll('.collaboration-map .react-flow__edge')].map(edge=>({id:edge.dataset.id,label:edge.getAttribute('aria-label'),role:edge.getAttribute('role'),tabIndex:edge.tabIndex,title:edge.querySelector('title')?.textContent,marker:edge.querySelector('.react-flow__edge-path')?.getAttribute('marker-end')}))`)
+      assert.ok(relations.some(edge=>JSON.parse(edge.id)[0]==='communication')); assert.ok(relations.every(edge=>edge.role==='button'&&edge.tabIndex===0&&edge.title===edge.label&&edge.marker))
+      const pointer = await read(`(()=>{for(const edge of document.querySelectorAll('.collaboration-map .react-flow__edge')){const path=edge.querySelector('.react-flow__edge-path'),length=path?.getTotalLength(),matrix=path?.getScreenCTM();if(!length||!matrix)continue;for(const fraction of [.5,.35,.65,.2,.8]){const p=path.getPointAtLength(length*fraction),point=new DOMPoint(p.x,p.y).matrixTransform(matrix);if(point.x<8||point.y<44||point.x>innerWidth-8||point.y>innerHeight-44||!edge.contains(document.elementFromPoint(point.x,point.y)))continue;edge.setAttribute('data-capture-semantic-edge','');return{x:point.x,y:point.y,id:edge.dataset.id,label:edge.getAttribute('aria-label')}}}throw Error('No actual relation path is exposed to pointer input')})()`)
+      await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',x:pointer.x,y:pointer.y}); await until('native pointer exposes semantic edge label',()=>read(`document.querySelector('.collaboration-edge__label')?.textContent===${JSON.stringify(pointer.label)}`)); await frame('map-relation-pointer-label')
+      await read(`document.querySelector('[data-capture-semantic-edge]').focus()`); await until('actual semantic edge owns keyboard focus',()=>read(`document.activeElement===document.querySelector('[data-capture-semantic-edge]')`)); await frame('map-relation-keyboard-label'); await key('Enter'); await until('keyboard opens original relation',()=>read(`document.querySelectorAll('.collaboration-endpoints button').length===2&&document.querySelector('.collaboration-inspector__eyebrow')?.textContent==='Relation'`)); await frame('map-relation-keyboard-details')
+      result.edgeSemantics={legend,relations,pointer}; await key('Escape'); await closeReader(); await intact()
+    })
+    await check('reduced-motion-retains-truthful-finite-endpoint-activity', async () => {
+      await locate('fixture-core'); await closeReader(); await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]})
+      try {
+        const event = await read('window.graphCapture.live(true)'), observed = await motionFrame('map-reduced-motion-message-live',event,300)
+        assert.equal(observed.reducedMotion,true); assert.ok(observed.markers.length>=2&&observed.markers.every(marker=>marker.animationName==='none'&&marker.display!=='none'&&Number(marker.opacity)>0),'Reduced motion keeps visible static endpoint feedback'); assert.ok(observed.paths.every(path=>path.display==='none'),'Reduced motion suppresses moving path ink')
+        await pause(Math.max(0,event.at+await read('window.graphCapture.activityMS')+80-await read('performance.now()'))); assert.equal((await activity()).markers.length,0); result.reducedMotion={event,observed}
+      } finally { await win.webContents.debugger.sendCommand('Emulation.setEmulatedMedia',{features:[]}) }
+      await intact()
     })
     await check('local-source-failure-and-explicit-retry', async () => {
       await click('[aria-label="Map sources"]')
@@ -270,13 +349,13 @@ app.whenReady().then(async () => {
       await read('window.graphCapture.fail(false)'); await click('[aria-label="Refresh graph sources"]'); await until('explicit recovery', () => read(`!document.querySelector('.collaboration-sources')?.textContent.includes('temporarily unavailable')`)); await frame('map-source-recovered')
     })
     await check('dark-light-narrow-original-reader', async () => {
-      await click('[aria-label="Close map details"]'); await read('window.graphCapture.appearance("light")'); await until('actual light appearance', () => read(`document.documentElement.dataset.appearance==='light'`)); await frame('map-light'); await read('window.graphCapture.appearance("dark")')
-      win.setContentSize(390,844); try { await settle(); await frame('map-narrow'); await locate('fixture-core'); await move('.collaboration-map [data-session-id="fixture-core"]'); await until('narrow Reader', () => read(`Boolean(document.querySelector('.agent-information-reader'))`)); await frame('map-narrow-reader'); await closeReader() } finally { win.setContentSize(1440,900); await settle() }
+      await click('[aria-label="Close map details"]'); await read('window.graphCapture.appearance("light")'); await until('actual light appearance', () => read(`document.documentElement.dataset.appearance==='light'`)); await frame('map-light'); const lightEvent=await read('window.graphCapture.live(true)'); await motionFrame('map-light-message-live',lightEvent,400); await read('window.graphCapture.appearance("dark")')
+      win.setContentSize(390,844); try { await settle(); await frame('map-narrow'); await locate('fixture-core'); const narrowEvent=await read('window.graphCapture.live(true)'); await motionFrame('map-narrow-message-live',narrowEvent,400); await move('.collaboration-map [data-session-id="fixture-core"]'); await until('narrow Reader', () => read(`Boolean(document.querySelector('.agent-information-reader'))`)); await frame('map-narrow-reader'); await closeReader() } finally { win.setContentSize(1440,900); await settle() }
       await intact()
     })
     await check('inactive-map-keeps-owner-and-does-no-reading', async () => {
       await click('[aria-label="List"]'); await until('Map is retained but inactive', () => read(`!window.graphCapture.facts().graph&&window.graphCapture.facts().sameMap`)); const count = async () => (await facts()).reads.filter(read=>read.kind==='events'||read.kind==='spawns').length
-      const before = await count(); await read('window.graphCapture.live(true)'); await pause(200); assert.equal(await count(),before); result.inactive = { before, after: await count() }; await intact(); await click('[aria-label="Map"]'); await mapReady(); assert.equal((await facts()).sameMap,true)
+      const before = await count(); await read('window.graphCapture.live(true)'); await pause(200); assert.equal(await count(),before); assert.equal((await activity()).markers.length,0); assert.equal((await activity()).paths.length,0); result.inactive = { before, after: await count() }; await intact(); await click('[aria-label="Map"]'); await mapReady(); assert.equal((await facts()).sameMap,true); assert.equal((await activity()).markers.length,0,'Showing retained Map does not replay hidden traffic'); assert.equal((await activity()).paths.length,0)
     })
     await check('open-workface-is-a-separate-original-action', async () => {
       await locate('fixture-core'); await move('.collaboration-map [data-session-id="fixture-core"]'); await until('Reader for original Open', () => read(`Boolean(document.querySelector('.agent-information-reader'))`)); await click('[aria-label="Open Agent"]'); await until('original workface opened', () => read(`!window.graphCapture.facts().graph&&Boolean(document.querySelector('[data-fixture-session="fixture-core"]'))`)); assert.equal((await facts()).selectedSession,'fixture-core'); assert.equal((await facts()).draft,'Original unsent reply · retain this exact draft.'); await frame('opened-original-workface')
@@ -329,6 +408,17 @@ app.whenReady().then(async () => {
         const measurements=result.performance.filter(sample=>sample.label.endsWith('-'+size)); assert.ok(measurements.length>=5); assert.ok(measurements.every(sample=>sample.frameCount>=8),'Nonempty native frame sampling'); assert.ok(measurements.filter(sample=>!sample.label.startsWith('grow-')).every(sample=>sample.builtContextIds.length<128),'Actual context work follows visible demand'); assert.ok((await facts()).census.fullCards<128); assert.equal((await facts()).sameMap,true); assert.deepEqual((await facts()).controls,result.before.controls)
       }
       await click('button[aria-label="Space: show terminal and file workbench"]'); await until('original workface after isolated Map locate', () => read(`window.graphCapture.facts().mainSurface==='workbench'`)); const returned=await facts(); assert.equal(returned.focusView,'map'); assert.equal(returned.selectionPreserved,true); assert.equal(returned.selectedSession,'fixture-core'); assert.equal(returned.storedDraft,'Original unsent reply · retain this exact draft.'); await frame('workbench-after-scale')
+    })
+    await check('exact-related-reference-enriches-without-moving-established-world', async () => {
+      await click('button.surface-navigation__focus'); await mapReady(); await locate('fixture-core'); await mapReady(); await closeReader(); const before = await read('window.graphCapture.world()'), bodyReads = (await facts()).reads.filter(read=>read.kind==='body').length
+      await read('window.graphCapture.live(false,"fixture-core","fixture-relationship-only")')
+      await until('the original relation-only endpoint reaches actual Map geometry',()=>read(`window.graphCapture.workerSamples().some(sample=>sample.geometry?.some(box=>box.kind==='agent'&&JSON.parse(JSON.parse(box.id)[1])[1]==='fixture-relationship-only'))`)); await mapReady()
+      const discovered = await read('window.graphCapture.world()'), originalIds = new Set(before.geometry.map(box=>box.id)), original = boxes=>boxes.filter(box=>originalIds.has(box.id)).map(({id,x,y,width,height})=>({id,x,y,width,height})).sort((a,b)=>a.id.localeCompare(b.id))
+      assert.deepEqual(original(discovered.geometry),original(before.geometry),'A newly discovered reference retains every established original absolute box'); assert.equal(discovered.camera,before.camera)
+      await locate('fixture-relationship-only'); await until('exact original metadata and Provider are disclosed',()=>read(`document.querySelector('.collaboration-inspector dl.collaboration-identity')?.textContent.includes('claude')`)); await mapReady()
+      const metadata = await read(`({identity:document.querySelector('.collaboration-inspector .collaboration-identity')?.textContent,metadata:document.querySelector('.collaboration-inspector dl.collaboration-identity')?.textContent,actions:document.querySelector('.collaboration-inspector__actions')?.textContent,details:document.querySelector('.collaboration-inspector')?.textContent})`)
+      assert.ok(metadata.identity.includes('fixture-relationship-only')); assert.ok(metadata.metadata.includes('claude')); assert.ok(metadata.details.includes('Area membership is unconfirmed')); assert.ok(!metadata.actions.includes('Open workface'),'Retained metadata does not invent an active control target'); assert.equal((await facts()).reads.filter(read=>read.kind==='body').length,bodyReads)
+      const identityReads = (await facts()).reads.filter(read=>read.kind==='identity'&&read.participant==='fixture-relationship-only'); assert.ok(identityReads.length>0&&identityReads.every(read=>read.options.hostId==='local'),'Original exact-owner bridge is consumed by the real Map'); result.relatedIdentity={before,discovered,metadata,identityReads}; await frame('map-related-original-identity'); await intact()
     })
     phase = 'native-visibility-capability'; await checkpoint()
     const visibility = new BrowserWindow({ width:160,height:120,x:-10000,y:-10000,show:false,webPreferences:{contextIsolation:true,sandbox:true,nodeIntegration:false,backgroundThrottling:true} })
