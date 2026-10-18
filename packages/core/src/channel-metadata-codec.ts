@@ -1,6 +1,6 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
-import { parseConnectionActor } from './room-binding-codec.js'
+import { parseConnectionActor, parseConnectionApplication } from './room-binding-codec.js'
 import { channelActorKey, parseChannelActorProfileObservation } from './channel-profile.js'
 import type { ConnectionApplication } from './connections-contract.js'
 import type { ChannelConversationProfileObservation, ChannelMetadataEntry, ChannelMetadataMethod, ChannelMetadataParamsMap, ChannelMetadataResultMap, ChannelMetadataSubject } from './channel-metadata-contract.js'
@@ -11,7 +11,7 @@ const fail = (): never => { throw new AgentMuxError('Channel metadata does not d
 const object = (value: unknown, fields: string[]) => rpcRecord(value, fields, 'INVALID_CHANNEL_METADATA')
 function text(value: unknown): string { if (typeof value !== 'string' || !value.trim() || value.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(value)) return fail(); return value }
 function integer(value: unknown, max = Number.MAX_SAFE_INTEGER): number { if (!Number.isSafeInteger(value) || Number(value) < 1 || Number(value) > max) return fail(); return Number(value) }
-function application(value: unknown): ConnectionApplication { const p = object(value, ['domain', 'appId']); return parseConnectionActor({ application: p, idType: 'metadata', userId: 'subject' }).application }
+const application = parseConnectionApplication
 export function channelMetadataSubjectKey(subject: ChannelMetadataSubject): string { return subject.kind === 'actor' ? 'actor:' + channelActorKey(subject.actor) : 'conversation:' + JSON.stringify(subject.externalConversationId) }
 export function parseChannelMetadataSubject(value: unknown): ChannelMetadataSubject {
   const p = object(value, ['kind', 'actor', 'externalConversationId'])

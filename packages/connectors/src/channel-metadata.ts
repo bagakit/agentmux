@@ -54,7 +54,7 @@ export function createChannelMetadata(connections: Pick<ConnectionHost, 'readCon
       return parseChannelMetadataResult('connection.metadata.refresh', read(input), input)
     },
     clear: async (value, context) => {
-      const input: ChannelMetadataClearInput = parseChannelMetadataParams('connection.metadata.clear', value)
+      const input = parseChannelMetadataParams('connection.metadata.clear', value)
       await context?.assertCurrent?.()
       const { current, adapter, storage } = target(input)
       if (!adapter.clearMetadata) throw new AgentMuxError('The exact Channel cannot clear metadata.', 'CHANNEL_METADATA_UNAVAILABLE')
