@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import type { MoteChatConfiguration, MoteChatPerson } from '@agentmux/core/mote-chat'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -47,7 +48,7 @@ function MoteChatPersonRow({ person, configuration, onSaved }: { person: MoteCha
     setBusy(true); setIssue('')
     try {
       const result = await submitMoteChatIntent({ method: 'space.mote.chat.allocate', phase: 'not-dispatched', input: {
-        operationId: crypto.randomUUID(), target: configuration.target, expectedConfigurationRevision: configuration.revision,
+        operationId: mintObjectId(), target: configuration.target, expectedConfigurationRevision: configuration.revision,
         actor: person.actor, expectedPersonRevision: person.revision, total: count } })
       if (result.action !== 'allocate') throw Error('The original allowance receipt is not confirmed.')
       onSaved(result.person); setEditing(false)

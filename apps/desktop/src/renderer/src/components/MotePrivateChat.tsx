@@ -1,3 +1,4 @@
+import { mintObjectId } from '@agentmux/core/object-id'
 import { useContext, useEffect, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -73,7 +74,7 @@ function MotePrivateChatPanel({ scope, target, active, reference, onOpenPath }: 
     if (!minutes.trim() || !Number.isSafeInteger(idle) || idle <= 0 || !strangers.trim() || !Number.isSafeInteger(limit) || limit < 0) { setIssue('Enter a positive conversation interval and a whole message allowance of zero or more.'); return }
     if (draft.enabled && (!selected || !selected.config.enabled || connectionNeedsInitialSetup(selected))) { setIssue('Choose an enabled bot and finish any incomplete original setup before enabling private chat.'); return }
     if (draft.connection && !selected) { setIssue('The selected saved identity is unavailable. Choose another bot or clear the selection before saving.'); return }
-    const operationId = crypto.randomUUID(), revision = edited.current, epoch = ++lifetime.current
+    const operationId = mintObjectId(), revision = edited.current, epoch = ++lifetime.current
     setReading(false)
     writing.current = true; setSaving(true); setIssue(''); setNotice('')
     try {
