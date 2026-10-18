@@ -1,8 +1,6 @@
 import { readFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { AgentMuxClient } from '../../src/client.js'
-import { AgentMuxFileAgentSessionStore } from '../../src/agent-session-store.js'
-import { AgentProviderRegistry, defineAgentProvider } from '../../src/agent-provider.js'
+import { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentProviderRegistry, defineAgentProvider } from '@agentmux/core'
 
 const [root, phase] = process.argv.slice(2) as [string, string]
 const template = new AgentProviderRegistry().get('codex')

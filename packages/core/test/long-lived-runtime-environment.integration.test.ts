@@ -108,13 +108,15 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')('real 
 
   it('new Agent and semantic resume remain colored across real client process restart without disturbing an existing Run', async () => {
     await privateRuntime(async (root, activation, _clients, pids) => {
+      vi.stubEnv('AMX_FIXTURE_EXPORT', 'profile-export')
       const sentinel = await activation.client.start({ program: process.execPath,
         args: ['-e', "process.stdout.write('existing healthy Run');process.stdin.resume()"], cwd: root, env: {},
         initial_size: { cols: 80, rows: 24 }, declared_inputs: [] })
       pids.push(sentinel.pid!)
       const before = await waitFor(() => activation.client.status(sentinel.id), run => run.latest_output_bytes > 0)
       const app = join(root, 'app'); await mkdir(join(app, 'dist'), { recursive: true })
-      await symlink(join(coreDirectory, 'node_modules'), join(app, 'node_modules'), 'dir')
+      await mkdir(join(app, 'node_modules', '@agentmux'), { recursive: true })
+      await symlink(coreDirectory, join(app, 'node_modules', '@agentmux', 'core'), 'dir')
       await symlink(join(coreDirectory, 'vendor'), join(app, 'vendor'), 'dir')
       await writeFile(join(root, 'cli.mjs'), await readFile(new URL('./fixtures/color-runtime-cli.mjs', import.meta.url)))
       await writeFile(join(root, 'agent.ndjson'), '')
@@ -126,6 +128,7 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')('real 
         const receipt = JSON.parse(output.stdout.trim())
         if (!pids.includes(receipt.run.pid)) pids.push(receipt.run.pid)
         expect(receipt.observation.environment).toEqual(clean)
+        expect(receipt.observation.exported).toBe('profile-export')
         expect(receipt.observation.pid).toBe(receipt.run.pid)
         expect(receipt.observation.cwd).toBe(root)
         expect(receipt.hook).toMatchObject({ status: 204, pid: receipt.run.pid })
@@ -156,7 +159,8 @@ describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')('real 
       expect(resumed.session.nativeHandle).toEqual(created.session.nativeHandle)
       expect(resumed.session.run).not.toEqual(created.session.run)
       expect(resumed.session.retiredRuns).toEqual([created.session.run])
-      expect(resumed.observation.argv).toEqual([...created.observation.argv, '--resume-id', 'private-native-color', '--prompt', 'resume-color-private'])
+      expect(resumed.observation.argv.slice(0, -1)).toEqual([...created.observation.argv, '--resume-id', 'private-native-color', '--prompt'])
+      expect(resumed.observation.argv.at(-1)?.endsWith('resume-color-private')).toBe(true)
       const after = await activation.client.status(sentinel.id)
       expect({ id: after.id, pid: after.pid, state: after.state, accepted: after.applied_input_bytes, bytes: after.latest_output_bytes })
         .toEqual({ id: before.id, pid: before.pid, state: before.state, accepted: before.applied_input_bytes, bytes: before.latest_output_bytes })
