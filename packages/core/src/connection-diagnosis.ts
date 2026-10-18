@@ -2,7 +2,7 @@ import type { ConnectionDelivery } from './connection-delivery-contract.js'
 import type { ConnectionIngressRecord } from './ingress-contract.js'
 import type { RoomBinding } from './room-binding-contract.js'
 import type { ConnectionPort } from './connections-contract.js'
-import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosisInput, type ConnectionDiagnosis, type ConnectionGroupDiagnosis, type ConnectionDiagnosisTarget, type ConnectionDiagnosisWindow, type ConnectionDiagnosisReading, type GroupDiagnosis } from './connection-diagnosis-contract.js'
+import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisSourceCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosisInput, type ConnectionDiagnosis, type ConnectionGroupDiagnosis, type ConnectionDiagnosisTarget, type ConnectionDiagnosisWindow, type ConnectionDiagnosisReading, type GroupDiagnosis } from './connection-diagnosis-contract.js'
 
 export const groupWindowLimit = connectionDiagnosisWindowLimit
 export function groupTarget(binding: RoomBinding) {
@@ -86,7 +86,7 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
     outgoing: { value: scopedOutgoing ? { after: window.after ?? null, afterContent: window.afterContent ?? null, next: outgoing.value!.next,
       deliveries: outgoing.value!.deliveries.map(deliveryFacts), observation: outgoing.value!.observation ? { state: outgoing.value!.observation.state, ...(outgoing.value!.observation.reason ? { reason: outgoing.value!.observation.reason } : {}) } : null,
       coverage: outgoing.value!.coverage ? { state: outgoing.value!.coverage.state, nextContent: outgoing.value!.coverage.nextContent,
-        gaps: outgoing.value!.coverage.gaps.slice(0, groupWindowLimit).map(gap => ({ gapId: gap.gapId, reason: gap.reason })), originCount: outgoing.value!.coverage.origins.length, omittedGapCount: Math.max(0, outgoing.value!.coverage.gaps.length - groupWindowLimit) } : null } : null,
+        gaps: outgoing.value!.coverage.gaps.slice(0, groupWindowLimit).map(gap => ({ gapId: gap.gapId, reason: gap.reason, code: connectionDiagnosisSourceCodes.find(code => code === gap.code) ?? null, codeRecorded: gap.code !== undefined, sourceKind: gap.source?.kind ?? null })), originCount: outgoing.value!.coverage.origins.length, omittedGapCount: Math.max(0, outgoing.value!.coverage.gaps.length - groupWindowLimit) } : null } : null,
       issue: outgoing.issue ?? (scopedOutgoing ? null : 'target-unconfirmed' as const) },
     incoming: { value: incoming.value && incoming.value.ingresses.every(row => ingressMatches(row, target)) ? { beforeIngressId: window.beforeIngressId ?? null, next: incoming.value.nextBeforeIngressId, rows: intake } : null, issue: incoming.issue ?? (incoming.value?.ingresses.every(row => ingressMatches(row, target)) ? null : 'target-unconfirmed' as const) }
   }
@@ -134,7 +134,7 @@ export function formatGroupDiagnosis(report: GroupDiagnosis) {
     for (const d of out.deliveries) lines.push(`Outgoing ${d.operationId}: ${d.kind} · queue ${d.state} · platform receipt ${d.receipt ?? 'unrecorded'} · message ${d.platformMessageId ?? 'unrecorded'} · reason ${d.reason ?? 'unrecorded'} · resource upload ${d.resourceUpload ?? 'unrecorded'}`)
     lines.push(`Content coverage: ${out.coverage?.state ?? 'unrecorded'} · observed origins ${out.coverage?.originCount ?? 'unrecorded'}`)
     if (out.coverage?.omittedGapCount) lines.push(`Additional gaps in this owner page: ${out.coverage.omittedGapCount}`)
-    for (const gap of out.coverage?.gaps ?? []) lines.push(`Content gap ${gap.gapId}: ${gap.reason}`)
+    for (const gap of out.coverage?.gaps ?? []) lines.push(`Content gap ${gap.gapId}: ${gap.reason} · source ${gap.sourceKind ?? 'unrecorded'} · code ${gap.code ?? (gap.codeRecorded ? 'recorded code withheld' : 'unrecorded')}`)
   }
   const input = incoming.value
   if (input) {

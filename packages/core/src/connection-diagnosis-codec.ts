@@ -1,5 +1,5 @@
 import { AgentMuxError } from './errors.js'
-import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosis, type ConnectionDiagnosisInput, type ConnectionDiagnosisReading, type ConnectionGroupDiagnosis } from './connection-diagnosis-contract.js'
+import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisSourceCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosis, type ConnectionDiagnosisInput, type ConnectionDiagnosisReading, type ConnectionGroupDiagnosis } from './connection-diagnosis-contract.js'
 
 function fail(): never { throw new AgentMuxError('The bounded connection diagnosis is malformed or belongs to another target.', 'INVALID_CONNECTION_DIAGNOSIS') }
 function object(value: unknown, fields: readonly string[]): Record<string, unknown> {
@@ -39,6 +39,13 @@ function scope(value: unknown) {
   return { input: member(p.input, ['mentions-and-replies', 'all-messages'] as const), publication: member(p.publication, ['future-native-user-facing', 'future-shared-conversation'] as const) }
 }
 const deliveryReasons = ['effect-unconfirmed', 'platform-rejected', 'adapter-unavailable', 'platform-unavailable', 'rate-limited', 'thread-unavailable', 'unsupported-format', 'binding-revised', 'original-speech-withdrawn', 'outside-conversation-scope', 'private-content', 'public-content-unconfirmed', 'version-unavailable'] as const
+function sourceGap(value: unknown) {
+  const g = object(value, ['gapId', 'reason', 'code', 'codeRecorded', 'sourceKind'])
+  const code = nullable(g.code, value => member(value, connectionDiagnosisSourceCodes)), codeRecorded = bool(g.codeRecorded)
+  if (code !== null && !codeRecorded) return fail()
+  return { gapId: id(g.gapId), reason: member(g.reason, ['public-content-unconfirmed', 'transport-unsupported', 'resource-unavailable', 'start-cut-unconfirmed', 'source-gap', 'version-unavailable'] as const),
+    code, codeRecorded, sourceKind: nullable(g.sourceKind, value => member(value, ['captured', 'native', 'native-unavailable'] as const)) }
+}
 function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGroupDiagnosis {
   const p = object(value, ['target', 'window', 'limit', 'connection', 'binding', 'outgoing', 'incoming']), t = object(p.target, ['bindingId', 'bindingRevision', 'connectionId', 'domain', 'appId', 'externalConversationId', 'executionHostId', 'agentSessionId'])
   const target = { bindingId: id(t.bindingId), bindingRevision: count(t.bindingRevision, 1), connectionId: id(t.connectionId), domain: text(t.domain), appId: text(t.appId), externalConversationId: text(t.externalConversationId), executionHostId: id(t.executionHostId), agentSessionId: id(t.agentSessionId) }
@@ -65,7 +72,7 @@ function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGro
       const s = object(value, ['state', 'reason']); return { state: member(s.state, stageStates), ...(s.reason === undefined ? {} : { reason: member(s.reason, ['not-started', 'source-unconfirmed', 'source-gap', 'content-unconfirmed', 'storage-unconfirmed', 'adapter-unavailable', 'credential-missing', 'effect-unconfirmed'] as const) }) }
     }), coverage: nullable(o.coverage, value => {
       const c = object(value, ['state', 'nextContent', 'gaps', 'originCount', 'omittedGapCount'])
-      return { state: member(c.state, ['complete', 'incomplete'] as const), nextContent: nullable(c.nextContent, text), originCount: count(c.originCount), omittedGapCount: count(c.omittedGapCount), gaps: array(c.gaps, value => { const g = object(value, ['gapId', 'reason']); return { gapId: id(g.gapId), reason: member(g.reason, ['public-content-unconfirmed', 'transport-unsupported', 'resource-unavailable', 'start-cut-unconfirmed', 'source-gap', 'version-unavailable'] as const) } }) }
+      return { state: member(c.state, ['complete', 'incomplete'] as const), nextContent: nullable(c.nextContent, text), originCount: count(c.originCount), omittedGapCount: count(c.omittedGapCount), gaps: array(c.gaps, sourceGap) }
     }) }
   })
   const incoming = reading(p.incoming, value => {
