@@ -53,7 +53,8 @@ function fixture(tools: ToolkitInlineToolConfiguration[] = [definition], env: Re
   const owner = new ConfigOwner({ read: () => config,
     prepare: (current, next) => prepareToolkitConfig(current, next, id => custom.guardDelete(id)),
     save: async next => structuredClone(next), publish: saved => { config = saved as typeof config; custom.configurationChanged() } })
-  const makeOwner = () => new CustomToolkitOwner({ config: owner, receipts: storage, openRunPort: async () => port,
+  const openRunPort = vi.fn(async () => port)
+  const makeOwner = () => new CustomToolkitOwner({ config: owner, receipts: storage, openRunPort,
     runner: process.execPath, env, now: () => fixtureEpoch(0, 0, 2) })
   custom = makeOwner()
   async function snapshot(id = definition.id): Promise<ToolkitScriptSnapshot> {
@@ -66,7 +67,7 @@ function fixture(tools: ToolkitInlineToolConfiguration[] = [definition], env: Re
     return { invocationId: randomUUID(), expectedRevision: snapshot.definition.revision,
       expectedLatestExecutionId: snapshot.admission?.executionId ?? snapshot.latestConfirmed?.executionId ?? null }
   }
-  return { owner, storage, receipts, runs, listeners, port, create, snapshot, input, emit,
+  return { owner, storage, receipts, runs, listeners, port, openRunPort, create, snapshot, input, emit,
     get custom() { return custom }, get config() { return config },
     reopen: async () => { await custom.dispose(); custom = makeOwner(); return custom },
     edit: async (change: Partial<ToolkitInlineToolConfiguration>) => {
@@ -206,6 +207,40 @@ describe('Toolkit TUI lifecycle on the existing admission owner', () => {
     expect(f.create).toHaveBeenCalledTimes(2)
     expect(next.latestConfirmed).toEqual(finished.latestConfirmed)
     expect(next.admission!.run).not.toEqual(original.run)
+    await f.custom.dispose()
+  })
+
+  it.each(['check', 'subscribe'] as const)('reacquires a failed recovery port through %s while retaining the original Run', async reader => {
+    const f = fixture()
+    await f.custom.loadConfigured()
+    const original = (await f.snapshot()).admission!
+    await f.reopen()
+    f.openRunPort.mockRejectedValueOnce(new Error('Runtime temporarily unavailable'))
+    const unavailable = await f.snapshot()
+    expect(unavailable).toMatchObject({ state: 'unknown', admission: { executionId: original.executionId,
+      invocationId: original.invocationId, run: original.run } })
+    expect(unavailable.reason).toContain('Runtime temporarily unavailable')
+    expect(f.openRunPort).toHaveBeenCalledTimes(2)
+    expect(f.listeners.size).toBe(0)
+    expect(f.runs.get(original.run!.runId)?.state).toBe('running')
+    const expected = { state: 'running', admission: { executionId: original.executionId,
+      invocationId: original.invocationId, run: original.run } }
+    if (reader === 'check') expect(await f.snapshot()).toMatchObject(expected)
+    else {
+      const observed = vi.fn()
+      const lease = await f.custom.subscribe(definition.id, observed, vi.fn(), new AbortController().signal)
+      expect(observed).toHaveBeenCalledOnce()
+      expect(observed.mock.calls[0]![0]).toMatchObject(expected)
+      lease.dispose()
+    }
+    expect(f.openRunPort).toHaveBeenCalledTimes(3)
+    expect(f.create).toHaveBeenCalledOnce()
+    expect(f.port.stop).not.toHaveBeenCalled(); expect(f.port.remove).not.toHaveBeenCalled()
+    expect(f.listeners.get(original.run!.runId)?.size).toBe(1)
+    await f.custom.stop(definition.id, original.executionId)
+    expect(f.port.stop).toHaveBeenCalledExactlyOnceWith({ runId: original.run!.runId })
+    expect(await f.snapshot()).toMatchObject({ state: 'stopped', admission: null,
+      latestConfirmed: { executionId: original.executionId, run: original.run } })
     await f.custom.dispose()
   })
 
