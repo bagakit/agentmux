@@ -243,7 +243,7 @@ it.each(['close', 'another-bot'] as const)('a late settings result after %s cann
     if (change === 'close') await click('[aria-label="Close settings"]')
     else {
       await click('[data-management-back]')
-      const all = [...document.querySelectorAll<HTMLButtonElement>('.connector-back')].find(button => button.textContent === 'All identities')!
+      const all = [...document.querySelectorAll<HTMLButtonElement>('.connector-back')].find(button => button.textContent === 'Back to bots')!
       await act(async () => all.click())
       await click('[data-connection="another-bot"] button')
     }
@@ -500,7 +500,7 @@ it('a later bot-list response cannot replace the application the user selected w
     })
   })
   expect(document.querySelector('.connector-editor-title')?.textContent).toBe('Another bot')
-  const all = [...document.querySelectorAll<HTMLButtonElement>('.connector-back')].find(button => button.textContent === 'All identities')!
+  const all = [...document.querySelectorAll<HTMLButtonElement>('.connector-back')].find(button => button.textContent === 'Back to bots')!
   await act(async () => all.click())
   hideOriginal = false
   const refresh = [...document.querySelectorAll<HTMLButtonElement>('.connector-saved-identities header button')].find(button => button.textContent === 'Refresh')!

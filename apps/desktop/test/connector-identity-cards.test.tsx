@@ -71,8 +71,8 @@ it('opens the identity library and the original Mote detail without accessing th
   expect(document.querySelector('[role="dialog"]')).toBeNull()
   await vi.waitFor(async () => { await f.settle(); expect(document.body.textContent).toContain('Saved public name') })
   expect(f.beginCount).toBe(0); expect(secure).not.toHaveBeenCalled()
-  await f.click('All identities'); await click('[data-enrollment-new]')
-  expect(document.body.textContent).toContain('New general identity')
+  await f.click('Back to bots'); await click('[data-enrollment-new]')
+  expect(document.body.textContent).toContain('Create a bot')
   expect(document.querySelector('[data-mote-identity-panel]')).toBeNull()
   expect(f.parentCalls.mock.calls.some(([method]) => method === 'space.mote.connection.create')).toBe(false)
   expect(secure).not.toHaveBeenCalled()
@@ -84,7 +84,7 @@ it('one contextual action creates with the exact saved Mote name and avatar, the
   expect(input.source.target).toEqual(f.target()); expect(input.avatar).toBe('include-saved')
   const operation = (await f.client.call('space.mote.connection.inspect', { operationId: input.operationId })).operation!
   expect(operation.snapshot.name).toBe('Saved public name'); expect(operation.snapshot.avatarSha256).toMatch(/^[a-f0-9]{64}$/)
-  await f.click('Manage bot application'); await f.click('Back to Mote identity'); await ready('[data-mote-identity-unbind]')
+  await f.click('Manage bot application'); await f.click('Back to Mote bot'); await ready('[data-mote-identity-unbind]')
   await f.settle(); expect(f.beginCount).toBe(1)
   const before = (await f.client.call('connection.ls', {})).connections
   expect((await f.preferences.read({ kind: 'connection', target: f.target() })).values?.connection).toEqual(operation.connection)
@@ -92,7 +92,7 @@ it('one contextual action creates with the exact saved Mote name and avatar, the
   await vi.waitFor(async () => expect((await f.preferences.read({ kind: 'connection', target: f.target() })).values?.connection).toBeNull())
   expect(f.saves.mock.calls.at(-1)![0].values).toEqual({ connection: null })
   expect((await f.client.call('connection.ls', {})).connections).toEqual(before)
-  await f.click('All identities'); await ready('[data-mote-card-action="create"]')
+  await f.click('Back to bots'); await ready('[data-mote-card-action="create"]')
   expect(card().dataset.identityState).toBe('unbound'); expect(f.creationCount).toBe(1)
 })
 
@@ -123,6 +123,6 @@ it('keeps unavailable original identity and unknown reads out of the unbound cre
   const forward = vi.mocked(api.motePreferences.read).getMockImplementation()!
   vi.mocked(api.motePreferences.read).mockImplementation(async value => { if (value.target.spaceId === input.target.spaceId) throw Error('Controlled metadata observation gap'); return forward(value) })
   await f.click('Refresh')
-  await vi.waitFor(async () => { await f.settle(); expect(card().textContent).toContain('Identity not confirmed') })
+  await vi.waitFor(async () => { await f.settle(); expect(card().textContent).toContain('Bot not confirmed') })
   expect(card().querySelector('[data-mote-card-action="create"]')).toBeNull(); expect(f.beginCount).toBe(0)
 })
