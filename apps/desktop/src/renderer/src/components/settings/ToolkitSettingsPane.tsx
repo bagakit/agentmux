@@ -30,7 +30,7 @@ const ThemeActionCreateIcon = semanticIconComponent('action.create')
 
 function shortDirectory(path: string) {
   const segments = path.split(/[\\/]/u).filter(Boolean)
-  return { parent: segments.length > 1 ? `${segments.length > 2 ? '…/' : '/'}${segments.at(-2)}/` : '', name: segments.at(-1) ?? path }
+  return { parent: segments.length > 1 ? `${segments.length > 2 ? '…/' : path.startsWith('/') ? '/' : ''}${segments.at(-2)}/` : '', name: segments.at(-1) ?? path }
 }
 
 export function ToolkitSettingsPane({ performance, mobileConnection = DEFAULT_MOBILE_CONNECTION_PREFERENCES, tools, toolId, navigationRequest, active, writer, onSave, onSaveMobileConnection, onRemoveTool, onRunTool }: {
