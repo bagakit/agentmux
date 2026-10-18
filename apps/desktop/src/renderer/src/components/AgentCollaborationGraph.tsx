@@ -29,6 +29,7 @@ const emptyHandles: NodeHandle[] = [], emptyEdges: never[] = []
 const sameItems = <T,>(left: readonly T[], right: readonly T[]) => left.length === right.length && left.every((item, index) => item === right[index])
 export const COLLABORATION_LABELS = { communication: 'Messages', creation: 'Created', supervision: 'Dispatch' } as const
 const colors = { communication: 'var(--green)', creation: 'var(--text-2)', supervision: 'var(--amber)' } as const
+const areaKinds = { project: { icon: 'object.project', label: 'Project' }, topic: { icon: 'object.topic', label: 'Topic' }, mote: { icon: 'object.mote', label: 'Mote' }, unplaced: { icon: 'object.topology', label: 'Unplaced' } } as const
 const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>) {
   const { agent } = data, readable = useStore(state => state.transform[2] >= COLLABORATION_READING_ZOOM)
   const overview = useStore(state => state.transform[2] < COLLABORATION_OVERVIEW_ZOOM)
@@ -60,25 +61,14 @@ function AgentMark({ data, label, tier, recency, overview = false }: { data: Age
 }
 const AreaNodeView = memo(function AreaNodeView({ data }: NodeProps<AreaNode>) {
   const empty = data.area.members.length === 0
-  const zoom = useStore(state => Math.min(1, state.transform[2]))
-  const overview = zoom < COLLABORATION_OVERVIEW_ZOOM
-  const labelWidth = Math.min(240, (data.box.width - data.box.heading.x) * zoom)
-  const labelHeight = Math.min(24, (data.box.height - data.box.heading.y) * zoom)
-  const compact = labelWidth < 80 || labelHeight < 22
+  const overview = useStore(state => state.transform[2] < COLLABORATION_OVERVIEW_ZOOM)
   return <div className="collaboration-area" data-kind={data.area.kind} data-folded={data.folded} data-empty={empty || undefined} data-overview={overview || undefined}>
     {!empty && !data.folded ? <svg className="collaboration-area__envelope" width={data.box.width} height={data.box.height} aria-hidden="true"><path d={data.envelope} /></svg> : null}
-    {overview ? <EdgeLabelRenderer><div className="collaboration-area__overview-label" data-area-id={data.box.id} data-empty={empty || undefined}
-      style={{ left: data.box.x + data.box.heading.x, top: data.box.y + data.box.heading.y + data.box.heading.height - labelHeight / zoom,
-        '--collaboration-label-scale': 1 / zoom, '--collaboration-label-width': `${labelWidth}px`, '--collaboration-label-height': `${labelHeight}px` } as CSSProperties}>
-      <button type="button" className="collaboration-area__summary nodrag nopan" data-compact={compact || undefined} aria-label={`Locate ${data.area.name} · ${data.area.members.length} Agents`} onClick={data.onLocate} title={data.area.issue ?? data.area.name}>
-      {compact ? <span className="collaboration-area__symbol" aria-hidden="true" /> : <span>{data.area.name}</span>}
-      {!compact && labelWidth >= 160 ? <small>{data.area.members.length} {data.area.members.length === 1 ? 'Agent' : 'Agents'}</small> : null}
-      {data.activity ? <i className="collaboration-area__activity" data-kind={data.activity.pulse.kind} aria-label={data.activity.pulse.kind === 'communication' ? 'Recent message activity' : 'Recent dispatch update'} /> : null}
-    </button></div></EdgeLabelRenderer> : <div className="collaboration-area__label" style={{ left: data.box.heading.x, top: data.box.heading.y, width: data.box.heading.width, height: data.box.heading.height }}>
+    {!overview ? <div className="collaboration-area__label" style={{ left: data.box.heading.x, top: data.box.heading.y, width: data.box.heading.width, height: data.box.heading.height }}>
     {empty ? <div className="collaboration-area__heading" title={data.area.issue ?? data.area.name}><span>{data.area.name}</span><small>0</small></div> : <button type="button" className="collaboration-area__heading nodrag nopan" aria-expanded={!data.folded} onClick={data.onToggle} title={data.area.issue ?? undefined}>
-      <SemanticIcon name={data.folded ? 'navigation.next' : 'navigation.down'} size={12} /><span>{data.area.name}</span><small>{data.area.members.length}</small>
+      <SemanticIcon name={data.folded ? 'navigation.next' : 'navigation.down'} size={12} /><span>{data.area.name}</span><em>{areaKinds[data.area.kind].label}</em><small>{data.area.members.length}</small>
     </button>}
-    </div>}
+    </div> : null}
     {!overview && data.folded && data.internal.length ? <button type="button" className="collaboration-area__internal nodrag nopan" aria-label={`${data.area.name}: ${data.internal.length} internal connections`} onClick={data.onInspect}>{data.internal.length} internal</button> : null}
     {!overview && data.folded && data.activity ? <ActivityMark activity={data.activity} /> : null}
   </div>
@@ -210,10 +200,11 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
   }, [allConnections, layout.paths, geometry, pulses, selection, agents, areaNames, peeked])
   const selectConnection = useCallback((path: RelationPath) => { const first = path.relations[0]; if (first) actions.current.onSelect({ kind: 'relation', id: first.id, relatedIds: path.relations.map(relation => relation.id) }) }, [])
   const clearSelection = useCallback(() => actions.current.onSelect(null), [])
+  const areaNodes = useMemo(() => nodes.filter((node): node is AreaNode => node.type === 'area'), [nodes])
   return <div className="collaboration-canvas" aria-label="Agent collaboration graph">
     <ReactFlow<GraphNode> nodes={nodes} edges={emptyEdges} nodeTypes={nodeTypes} onInit={instance => { flow.current = instance }} onPaneClick={clearSelection}
       onMoveStart={event => { if (event) ++gestures.current }} onlyRenderVisibleElements nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesReconnectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.05} maxZoom={1.4} proOptions={{ hideAttribution: true }}>
-      <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} onSelect={selectConnection} onClear={clearSelection} />
+      <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} />
       <Background gap={22} size={1} />
     </ReactFlow>
     <div className="collaboration-canvas__controls" aria-label="Graph viewport">
@@ -228,6 +219,43 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     {!visibleIds.size ? <p className="collaboration-canvas__empty">No Agents in this map.</p> : null}
   </div>
 }
+
+/** Camera-only labels retain region context without moving or measuring the world. */
+const CollaborationRegionLabels = memo(function CollaborationRegionLabels({ areas }: { areas: readonly AreaNode[] }) {
+  const camera = useStore(state => [...state.transform, state.width, state.height], sameItems)
+  const labels = useMemo(() => {
+    const [panX = 0, panY = 0, zoom = 1, width = 0, height = 0] = camera
+    if (width < 80 || height < 80) return []
+    const overview = zoom < COLLABORATION_OVERVIEW_ZOOM
+    const clamp = (value: number, low: number, high: number) => Math.max(low, Math.min(value, high))
+    const visible = (box: CollaborationBox) => box.x * zoom + panX < width && (box.x + box.width) * zoom + panX > 0 && box.y * zoom + panY < height && (box.y + box.height) * zoom + panY > 0
+    const candidates = areas.flatMap(({ data }) => {
+      const { box, area } = data
+      if (!visible(box)) return []
+      const left = (box.x + box.heading.x) * zoom + panX, top = (box.y + box.heading.y) * zoom + panY
+      const headingVisible = left >= 8 && left + box.heading.width * zoom <= width - 8 && top >= 8 && top + box.heading.height * zoom <= height - 8
+      if (!overview && (headingVisible || !data.memberGeometry.some(visible))) return []
+      const labelWidth = Math.min(width - 24, Math.max(104, Math.min(224, area.name.length * 6.5 + 62)))
+      return [{ data, width: labelWidth, height: 26, x: clamp(left, 12, width - labelWidth - 12),
+        y: clamp(top + box.heading.height * zoom - 26, headingVisible ? 8 : 52, height - 38), context: !overview }]
+    }).sort((a, b) => Number(!a.data.area.members.length) - Number(!b.data.area.members.length) || b.data.area.members.length - a.data.area.members.length || a.y - b.y || a.x - b.x || a.data.area.id.localeCompare(b.data.area.id))
+    const placed: typeof candidates = []
+    for (const candidate of candidates) {
+      for (const offset of [0, 30, -30, 60, -60, 90, -90, 120, -120]) {
+        const y = clamp(candidate.y + offset, 8, height - candidate.height - 12)
+        if (placed.some(other => candidate.x < other.x + other.width + 6 && candidate.x + candidate.width + 6 > other.x && y < other.y + other.height + 4 && y + candidate.height + 4 > other.y)) continue
+        placed.push({ ...candidate, y }); break
+      }
+    }
+    return placed
+  }, [areas, camera])
+  return <div className="collaboration-region-labels">{labels.map(({ data, x, y, width, height, context }) => <div key={data.area.id} className="collaboration-area__overview-label" data-area-id={data.box.id} data-kind={data.area.kind} data-empty={!data.area.members.length || undefined} data-context={context || undefined} style={{ left: x, top: y, width, height }}>
+    <button type="button" className="collaboration-area__summary nodrag nopan" aria-label={`Locate ${data.area.name} · ${data.area.members.length} Agents`} onClick={data.onLocate} title={data.area.issue ?? `${areaKinds[data.area.kind].label} · ${data.area.name}`}>
+      <SemanticIcon name={areaKinds[data.area.kind].icon} size={13} /><span>{data.area.name}</span><small>{data.area.members.length}</small>
+      {data.activity ? <i className="collaboration-area__activity" data-kind={data.activity.pulse.kind} aria-label={data.activity.pulse.kind === 'communication' ? 'Recent message activity' : 'Recent dispatch update'} /> : null}
+    </button>
+  </div>)}</div>
+})
 
 /** Only this small layer subscribes to camera bounds; xyflow owns its transform and nodes. */
 const CollaborationRelations = memo(function CollaborationRelations({ paths, onSelect, onClear }: { paths: readonly RelationPath[]; onSelect(path: RelationPath): void; onClear(): void }) {
@@ -256,6 +284,8 @@ const RelationView = memo(function RelationView({ record, markerId, zoom, onSele
     <title>{record.label}</title>
     <BaseEdge id={record.id} path={path} markerEnd={`url(#${markerId}-${kind})`} interactionWidth={22} className={`collaboration-edge collaboration-edge--${kind}${record.selected ? ' is-selected' : ''}`} />
     {record.active ? <path key={record.active} d={path} pathLength={1} style={{ animationDelay: `${delay}ms`, animationDuration: `${COLLABORATION_ACTIVITY_MS}ms` }} className="collaboration-edge__pulse" data-kind={kind} /> : null}
+    {record.active && kind === 'communication' ? <circle key={`packet-${record.active}`} r={4 / zoom} className="collaboration-edge__packet" aria-hidden="true"
+      style={{ offsetPath: `path("${path}")`, animationDelay: `${delay}ms`, animationDuration: `${COLLABORATION_ACTIVITY_MS}ms` }} /> : null}
     {record.selected || hovered || focused ? <EdgeLabelRenderer><span className="collaboration-edge__label" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px) scale(${1 / zoom})` }}>{record.label}</span></EdgeLabelRenderer> : null}
     {record.emphasis === 'related' && record.count > 1 && !record.selected && !hovered && !focused ? <EdgeLabelRenderer><span className="collaboration-edge__count" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>{record.count}</span></EdgeLabelRenderer> : null}
   </g>
