@@ -6,10 +6,14 @@ import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-ser
 import { runSourceObjectCli } from '../../../packages/core/test/helpers/source-object-cli'
 import { ConfigStore } from '../src/main/config-store'
 import { executeSettingsControl } from '../src/main/settings-control'
+import type { AppConfig } from '../src/shared/contracts'
 
 it('discovers and durably saves every map motion choice through the actual source CLI and sole configuration owner', async () => {
   const f = await configOwnerFixture({ copyPathsAsAbsolute: true })
-  const server = new AgentMuxControlServer({ execute: request => executeSettingsControl(request, f.owner) }, join(dirname(f.store.filePath), 'control.sock'))
+  const server = new AgentMuxControlServer({ execute: request => {
+    if (request.operation !== 'settings.get' && request.operation !== 'settings.set') throw new Error('Only the original settings owner participates in this fixture')
+    return executeSettingsControl(request, f.owner)
+  } }, join(dirname(f.store.filePath), 'control.sock'))
   await server.start()
   const env = { ...process.env, AGENTMUX_ENV: undefined, AGENTMUX_AGENT_SESSION_ID: undefined, AGENTMUX_AGENT_CAPABILITY: undefined }
   const call = (args: string[]) => runSourceObjectCli(['--endpoint', `unix:${server.path}`, 'settings', ...args], env)
@@ -56,7 +60,7 @@ it('merges a first GUI motion edit with a concurrent first Focus edit without wr
 it('validates persisted motion values and retains original truth after a genuine file save failure', async () => {
   const f = await configOwnerFixture(), original = f.owner.current
   for (const value of ['auto', true, null, 0, {}, ['off']]) {
-    expect(() => f.store.validate({ ...original, focus: { recentActivityHours: 48, mapMotion: value } })).toThrow()
+    expect(() => f.store.validate({ ...original, focus: { recentActivityHours: 48, mapMotion: value } } as unknown as AppConfig)).toThrow()
   }
   const before = { ...original, focus: { recentActivityHours: 48 as const, mapMotion: 'system' as const } }
   const next = { ...before, focus: { ...before.focus, mapMotion: 'off' as const } }
