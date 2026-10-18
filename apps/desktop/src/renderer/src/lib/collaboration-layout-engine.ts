@@ -197,8 +197,14 @@ const expand = (box: CollaborationLayoutBounds, amount: number) => ({ x: box.x -
 function routeNode(box: Obstacle) {
   return { name: box.id, attributes: { pos: `${box.x + box.width / 2},${-box.y - box.height / 2}!`, width: box.width / 72, height: box.height / 72 } }
 }
-function pointAt(box: Obstacle, kind: CollaborationLayoutKind, outgoing: boolean, right: boolean) {
-  return { x: box.x + (right ? box.width : 0), y: box.y + (kinds.indexOf(kind) * 2 + (outgoing ? .5 : 1.5)) / 6 * box.height }
+type PortSide = 'left' | 'right' | 'top' | 'bottom'
+function pointAt(box: Obstacle, kind: CollaborationLayoutKind, outgoing: boolean, side: PortSide) {
+  // Facing sides use the same physical slot for one direction, so reciprocal
+  // curves remain parallel instead of swapping lanes halfway between neighbors.
+  const fraction = (kinds.indexOf(kind) * 2 + (outgoing === (side === 'right' || side === 'bottom') ? .5 : 1.5)) / 6
+  return side === 'top' || side === 'bottom'
+    ? { x: box.x + fraction * box.width, y: box.y + (side === 'bottom' ? box.height : 0) }
+    : { x: box.x + (side === 'right' ? box.width : 0), y: box.y + fraction * box.height }
 }
 const midpoint = (a: CollaborationLayoutPoint, b: CollaborationLayoutPoint) => ({ x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 })
 /** Conservative subdivision validates library output; it never invents a replacement route. */
@@ -213,12 +219,20 @@ function crosses(points: readonly CollaborationLayoutPoint[], obstacle: Collabor
 function route(viz: Viz, obstacles: Obstacles, connection: CollaborationLayoutConnection, signal?: AbortSignal): CollaborationPath {
   const source = obstacles.byId.get(connection.source), target = obstacles.byId.get(connection.target)
   if (!source || !target || source.id === target.id) throw Error('The original connection endpoints are unavailable. Its source remains readable.')
-  const forward = source.x + source.width / 2 === target.x + target.width / 2 ? source.y < target.y : source.x + source.width / 2 < target.x + target.width / 2
-  const sourcePoint = pointAt(source, connection.kind, true, forward), targetPoint = pointAt(target, connection.kind, false, !forward)
+  const dxCenter = target.x + target.width / 2 - source.x - source.width / 2
+  const dyCenter = target.y + target.height / 2 - source.y - source.height / 2
+  // Use the facing side in the boxes' aspect ratio. Vertical neighbors need real
+  // top/bottom role ports, not several curves squeezed through one side corridor.
+  const vertical = Math.abs(dyCenter) * (source.width + target.width) > Math.abs(dxCenter) * (source.height + target.height)
+  const forward = vertical ? dyCenter > 0 : dxCenter > 0
+  const sourceSide: PortSide = vertical ? forward ? 'bottom' : 'top' : forward ? 'right' : 'left'
+  const targetSide: PortSide = vertical ? forward ? 'top' : 'bottom' : forward ? 'left' : 'right'
+  const sourcePoint = pointAt(source, connection.kind, true, sourceSide), targetPoint = pointAt(target, connection.kind, false, targetSide)
   // Terminal stems are part of every route. Real endpoint rectangles remain obstacles too:
   // nop2's HTML compass ports otherwise permit a spline through its own endpoint body.
-  const sourceAnchor = { x: sourcePoint.x + (forward ? 8 : -8), y: sourcePoint.y }
-  const targetAnchor = { x: targetPoint.x + (forward ? -8 : 8), y: targetPoint.y }
+  const stemX = vertical ? 0 : forward ? 8 : -8, stemY = vertical ? forward ? 8 : -8 : 0
+  const sourceAnchor = { x: sourcePoint.x + stemX, y: sourcePoint.y + stemY }
+  const targetAnchor = { x: targetPoint.x - stemX, y: targetPoint.y - stemY }
   const anchorName = (base: string) => { let id = base; while (obstacles.byId.has(id)) id += '_'; return id }
   const sourceId = anchorName('__source_port__'), targetId = anchorName('__target_port__')
   const anchorNode = (id: string, point: CollaborationLayoutPoint) => ({ name: id, attributes: { pos: `${point.x},${-point.y}!`, shape: 'point', width: 0, height: 0 } })
@@ -267,7 +281,7 @@ function route(viz: Viz, obstacles: Obstacles, connection: CollaborationLayoutCo
     }
     const middle = Math.floor((points.length - 1) / 6) * 3, segment = points.slice(middle, middle + 4)
     return { id: connection.id, path: cubicPath(points), points, bounds: extent,
-      sourceHandle: `${connection.kind}-out-${forward ? 'right' : 'left'}`, targetHandle: `${connection.kind}-in-${forward ? 'left' : 'right'}`,
+      sourceHandle: `${connection.kind}-out-${sourceSide}`, targetHandle: `${connection.kind}-in-${targetSide}`,
       labelX: (segment[0]!.x + 3 * segment[1]!.x + 3 * segment[2]!.x + segment[3]!.x) / 8,
       labelY: (segment[0]!.y + 3 * segment[1]!.y + 3 * segment[2]!.y + segment[3]!.y) / 8 }
   }
