@@ -37,17 +37,14 @@ const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>
   return <div className={`collaboration-agent collaboration-agent--${tier}${readable ? '' : ' collaboration-agent--overview'} nodrag nopan`} data-collaboration-agent={agent.id} data-overview={overview || undefined} style={{ '--collaboration-mark-scale': markScale } as CSSProperties}
     onPointerEnter={() => data.onPreview(true)} onPointerLeave={() => data.onPreview(false)} onFocusCapture={() => data.onPreview(true)}
     onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget)) data.onPreview(false) }}>
-    {overview && agent.context ? <AgentMark data={data} label={label} tier={tier} recency={recency} overview /> : overview ? <button type="button" className="collaboration-agent__dot" aria-label={`${label} · ${tier}`} aria-pressed={data.selected} title={`${label} · ${tier}`} onClick={data.onSelect}><span className="collaboration-agent__point" style={{ opacity: recency.depth }} /></button> : agent.context && tier === 'active' && readable ? <FocusContextCardBody context={agent.context} identity={data.identity} goalLinks={data.goals} selected={data.selected} onSelect={data.onSelect} onOpenWorkface={data.onOpen} />
-      : agent.context ? <AgentMark data={data} label={label} tier={tier} recency={recency} />
-        : <button type="button" className="collaboration-agent__mark" data-tier={tier} aria-label={`${label} · ${tier}`} aria-pressed={data.selected} onClick={data.onSelect} onFocus={() => data.onPreview(true)} title={`${label} · ${tier} · ${recency.label}`}>
-          <span className="collaboration-agent__point" style={{ width: recency.radius * 2, height: recency.radius * 2, opacity: recency.depth }} />{tier !== 'closed' ? <strong>{label}</strong> : null}
-        </button>}
+    {overview ? <AgentMark data={data} label={label} tier={tier} recency={recency} overview /> : agent.context && tier === 'active' && readable ? <FocusContextCardBody context={agent.context} identity={data.identity} goalLinks={data.goals} selected={data.selected} onSelect={data.onSelect} onOpenWorkface={data.onOpen} />
+      : <AgentMark data={data} label={label} tier={tier} recency={recency} />}
   </div>
 })
 function AgentMark({ data, label, tier, recency, overview = false }: { data: AgentData; label: string; tier: string; recency: ReturnType<typeof collaborationRecency>; overview?: boolean }) {
-  const context = data.agent.context!
-  const preview = useAgentInformationPreview(context, true, data.identity, data.goals, () => data.onOpen(context.id))
-  return <button type="button" ref={preview.anchor} {...preview.triggerEvents} className={overview ? "collaboration-agent__dot" : "collaboration-agent__mark"} data-tier={tier} data-session-id={context.id}
+  const context = data.agent.context
+  const preview = useAgentInformationPreview(context, true, data.identity, data.goals, () => { if (context) data.onOpen(context.id) })
+  return <button type="button" ref={preview.anchor} {...preview.triggerEvents} className={overview ? "collaboration-agent__dot" : "collaboration-agent__mark"} data-tier={tier} data-session-id={context?.id}
     aria-pressed={data.selected} aria-label={`${label} · ${tier}`} aria-describedby={preview.describedBy} onClick={data.onSelect} title={`${tier} · ${recency.label}`}>
     <span className="collaboration-agent__point" style={{ width: overview ? 12 : recency.radius * 2, height: overview ? 12 : recency.radius * 2, opacity: recency.depth }} />{!overview && tier !== 'closed' ? <strong>{label}</strong> : null}
   </button>
