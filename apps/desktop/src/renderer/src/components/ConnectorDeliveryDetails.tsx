@@ -35,7 +35,7 @@ export function ConnectorDeliveryDetails({ binding }: { binding: RoomBinding }) 
   async function copyDiagnosis() {
     const request = ++exportRead.current
     // Freeze exact target and current bounded cursors at the click, separately from the changing display.
-    const window: GroupWindow = { ...(visible?.outgoing.value?.after ? { after: visible.outgoing.value.after } : {}), ...(visible?.outgoing.value?.afterContent ? { afterContent: visible.outgoing.value.afterContent } : {}), ...(visible?.incoming.value?.afterIngressId ? { afterIngressId: visible.incoming.value.afterIngressId } : {}) }
+    const window: GroupWindow = { ...(visible?.outgoing.value?.after ? { after: visible.outgoing.value.after } : {}), ...(visible?.outgoing.value?.afterContent ? { afterContent: visible.outgoing.value.afterContent } : {}), ...(visible?.incoming.value?.beforeIngressId ? { beforeIngressId: visible.incoming.value.beforeIngressId } : {}) }
     setCopying(true); setFeedback('Reading this bounded group window…')
     try {
       const report = await readGroupDiagnosis(source, target, window)
@@ -52,7 +52,7 @@ export function ConnectorDeliveryDetails({ binding }: { binding: RoomBinding }) 
   const outgoing = visible?.outgoing.value, incoming = visible?.incoming.value, receipt = outgoing?.deliveries[0]?.receipt
   const incomplete = outgoing?.coverage?.state === 'incomplete' || outgoing?.observation?.reason === 'content-unconfirmed'
   const sectionIssue = (name: string, section: { issue: string | null; retained?: true } | undefined) => section?.issue ? <p className="agent-connector-note" role="status">{name} observation unconfirmed{section.retained ? '; earlier observed facts are kept.' : '.'}</p> : null
-  const lastInput = incoming?.rows.at(-1)
+  const lastInput = incoming?.rows[0]
   const incomingSummary = visible?.service.value?.enabled === false ? 'Automatic service is paused.'
     : lastInput?.scope === 'other-binding' ? 'An earlier group connection has a receipt. Its current result is unconfirmed.'
     : lastInput?.state === 'refused' ? lastInput.code === 'INGRESS_ACTOR_NOT_AUTHORIZED' ? 'Approve this member to send requests.' : 'A request was refused. Check its original receipt below.'
@@ -77,17 +77,18 @@ export function ConnectorDeliveryDetails({ binding }: { binding: RoomBinding }) 
       {outgoing?.observation ? <p className="agent-connector-note">Source observation: {outgoing.observation.state}{outgoing.observation.reason ? ' · ' + outgoing.observation.reason : ''}. This describes local source reading, not platform delivery.</p> : null}
       {sectionIssue('Outgoing', visible?.outgoing)}
       <div className="agent-connector-section-title"><h3>Incoming events & Core input</h3></div>
-      <p className="agent-connector-note">Up to 5 records from this connection, filtered by the original application and group. Platform acknowledgement is not recorded by this read API.</p>
-      {incoming ? <><p className="agent-connector-note">Connection window: {incoming.inspectedConnectionRecords} records · {incoming.rows.length} match this group · has next: {String(incoming.next !== null)}</p>
-        {!incoming.rows.length ? <p className="agent-connector-note">No matching group intake in this connection window. Earlier or later intake is not ruled out.</p> : null}
-        {incoming.rows.map(row => <div className="agent-connector-receipt" key={row.ingressId}><span>Host intake: {row.state}{row.code ? ' · ' + row.code : ''} · Core input: {row.coreStatus ?? (row.inputOperationId ? 'unconfirmed' : 'not started')}{row.scope === 'other-binding' ? ' · another binding revision' : ''}</span><code>{row.ingressId}</code>{row.inputOperationId ? <code>{row.inputOperationId}</code> : null}{row.coreObservation === 'unavailable' ? <small>Original Core receipt read unavailable; no input was replayed.</small> : null}</div>)}
-        {incoming.next ? <button className="small-button" disabled={pending} onClick={() => void inspect({ afterIngressId: incoming.next! })}>Next intake window</button> : null}</> : null}
+      <p className="agent-connector-note">Latest 5 records from this application and group, including other receiving connections. Platform acknowledgement is not recorded by this read API.</p>
+      {incoming ? <><p className="agent-connector-note">Group window: {incoming.rows.length} records, newest first · has next: {String(incoming.next !== null)}</p>
+        {!incoming.rows.length ? <p className="agent-connector-note">No intake in this exact group window. This is not a complete-history or platform-receipt claim.</p> : null}
+        {incoming.rows.map(row => <div className="agent-connector-receipt" key={row.ingressId}><span>Host intake: {row.state}{row.code ? ' · ' + row.code : ''} · Core input: {row.coreStatus ?? (row.inputOperationId ? 'unconfirmed' : 'not started')}{row.scope === 'other-binding' ? ' · another binding revision' : ''}</span><code>{row.ingressId}</code>{row.inputOperationId ? <code>{row.inputOperationId}</code> : null}{row.waiting ? <small>Core waiting: {row.waiting.phase} · {row.waiting.reason} · {row.waiting.wake}</small> : null}{row.coreObservation === 'unavailable' ? <small>Original Core receipt read unavailable; no input was replayed.</small> : null}</div>)}
+        {incoming.next ? <button className="small-button" disabled={pending} onClick={() => void inspect({ beforeIngressId: incoming.next! })}>Earlier intake</button> : null}</> : null}
       {sectionIssue('Incoming', visible?.incoming)}
       <p className="agent-connector-note">Outgoing window: up to 5 receipts · has next: {String(outgoing?.next !== null && outgoing?.next !== undefined)}. These pages are not the complete group history.</p>
       {outgoing?.deliveries.map(delivery => <div className="agent-connector-receipt" key={delivery.operationId}><span>Queue: {delivery.state} · Platform receipt: {delivery.receipt ?? 'Not recorded'}</span><code>{delivery.operationId}</code>{delivery.platformMessageId ? <code>{delivery.platformMessageId}</code> : null}<button className="small-button" disabled={pending} onClick={() => void inspectOriginal(delivery.operationId)}>Check receipt</button></div>)}
       {outgoing?.next ? <button className="small-button" disabled={pending} onClick={() => void inspect({ after: outgoing.next! })}>Earlier receipts</button> : null}
       <p className="agent-connector-note">Content coverage: {outgoing?.coverage?.state ?? 'not recorded'} · content has next: {String(!!outgoing?.coverage?.nextContent)}</p>
       {outgoing?.coverage?.gaps.map(gap => <p className="agent-connector-note" key={gap.gapId}>{gap.reason} · <code>{gap.gapId}</code></p>)}
+      {outgoing?.coverage?.omittedGapCount ? <p className="agent-connector-note">{outgoing.coverage.omittedGapCount} additional gaps in this owner page.</p> : null}
       {outgoing?.coverage?.nextContent ? <button className="small-button" disabled={pending} onClick={() => void inspect({ afterContent: outgoing.coverage!.nextContent! })}>Next content window</button> : null}
       {original ? <p className="agent-connector-note" role="status">{original.value ? 'Original queue: ' + original.value.state + ' · Platform receipt: ' + (original.value.receipt ?? 'Not recorded') + ' · ' + original.value.operationId : 'Original receipt unavailable; no retry was sent.'}</p> : null}
       <button className="small-button" disabled={pending} onClick={() => void inspect()}>Latest receipts</button>
