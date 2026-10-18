@@ -42,20 +42,20 @@ export function collaborationOverviewHitBounds(box: CollaborationLayoutBounds, z
 
 /** Keep the original obstacle-safe route; connect its terminal stems to visible overview marks.
  * This is a cheap projection at the camera layer, never a new Worker route or relationship. */
-export function collaborationOverviewPath(route: CollaborationPath, source: CollaborationLayoutBox, target: CollaborationLayoutBox, zoom: number) {
-  const mark = (box: CollaborationLayoutBox, port: CollaborationLayoutPoint) => {
+export function collaborationOverviewPath(route: CollaborationPath, source: CollaborationLayoutBox, target: CollaborationLayoutBox, zoom: number, sourceRadius: number, targetRadius: number) {
+  const mark = (box: CollaborationLayoutBox, port: CollaborationLayoutPoint, radius: number) => {
     const center = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
     const length = Math.hypot(port.x - center.x, port.y - center.y)
-    const ratio = length ? Math.min(1, 6 * collaborationOverviewScale(box, zoom) / length) : 0
+    const ratio = length ? Math.min(1, radius * collaborationOverviewScale(box, zoom) / length) : 0
     return { x: center.x + (port.x - center.x) * ratio, y: center.y + (port.y - center.y) * ratio }
   }
   const points = [...route.points]
   if (source.kind === 'agent') {
-    const start = points[0]!, visible = mark(source, start)
+    const start = points[0]!, visible = mark(source, start, sourceRadius)
     points.unshift(visible, visible, start)
   }
   if (target.kind === 'agent') {
-    const end = points.at(-1)!, visible = mark(target, end)
+    const end = points.at(-1)!, visible = mark(target, end, targetRadius)
     points.push(end, visible, visible)
   }
   const path = [`M ${points[0]!.x} ${points[0]!.y}`]
