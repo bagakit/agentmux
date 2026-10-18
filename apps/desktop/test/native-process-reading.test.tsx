@@ -22,7 +22,7 @@ let readGroups: Set<string>
 const initial = useAppStore.getState()
 const flush = async () => { await act(async () => { for (let i = 0; i < 10; i++) await Promise.resolve() }) }
 async function show(page = current): Promise<void> {
-  await act(async () => root.render(<ActivityView capability="complete-events" items={[]} userMessages={[]}
+  await act(async () => root.render(<ActivityView capability="complete-events" items={[]}
     sessionId={page.agentSessionId} nativeHistoryPage={page} />))
   await flush()
   for (const head of host.querySelectorAll<HTMLButtonElement>('.conversation-native-thread .wf-head')) {
@@ -246,7 +246,7 @@ it('formats a multi-day recorded span in the noncompact observation without call
 it('keeps exact progress copy and the shared real text selection annotation', async () => {
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   const annotate = vi.fn<(selection: ConversationAnnotationSelection) => void>()
-  await act(async () => root.render(<ActivityView capability="complete-events" items={[]} userMessages={[]}
+  await act(async () => root.render(<ActivityView capability="complete-events" items={[]}
     sessionId={current.agentSessionId} nativeHistoryPage={current} onSelectAnnotation={annotate} />))
   await flush()
   const element = row('progress-a')
