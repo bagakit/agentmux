@@ -3,7 +3,7 @@ import type { ConversationSourceDisplay } from '../lib/conversation-sources.js'
 import { ConversationToolPayload } from './ConversationToolPayload.js'
 import type { AgentSessionHistoryContentPart } from '@agentmux/core'
 import { SemanticIcon } from '../theme/icons.js'
-import { memo, useId, useMemo, useState } from 'react'
+import { memo, useEffect, useId, useMemo, useState } from 'react'
 import { stepTitle } from '../lib/activity-step-summary.js'
 
 export type ConversationToolTraceProps = {
@@ -24,6 +24,8 @@ export const ConversationToolTrace = memo(function ConversationToolTrace({
 }: ConversationToolTraceProps) {
   const [localOpen, setLocalOpen] = useState(false)
   const open = expanded ?? localOpen
+  const [presented, setPresented] = useState(Boolean(expanded))
+  useEffect(() => { if (open) setPresented(true) }, [open])
   const panelId = useId()
   const identity = useMemo(() => ({}), [part, traceId, copyIdentity])
   const sourceIdentity = useMemo(() => ({}), [traceId, copyIdentity, traceId === undefined && copyIdentity === undefined ? part : undefined])
@@ -38,6 +40,7 @@ export const ConversationToolTrace = memo(function ConversationToolTrace({
       <button type="button" className="conversation-tool-trace__row" aria-expanded={open}
         aria-controls={panelId} data-trace-id={traceId}
         onClick={() => {
+          if (!open) setPresented(true)
           if (onToggle) onToggle(!open)
           else setLocalOpen(!open)
         }} title={name}>
@@ -47,7 +50,7 @@ export const ConversationToolTrace = memo(function ConversationToolTrace({
         {failed ? <span className="conversation-tool-trace__failure">Failed</span> : null}
         <SemanticIcon name="navigation.disclosure" className="conversation-tool-trace__chevron" size={12} aria-hidden="true" />
       </button>
-      {open ? <div id={panelId} className="conversation-tool-trace__payload">
+      {open || presented ? <div id={panelId} className="conversation-tool-trace__payload" hidden={!open} inert={!open}>
         <ConversationToolPayload text={text} identity={identity} sourceIdentity={sourceIdentity} {...(part.callId ? { callId: part.callId } : {})}
           copyLabel={isCall ? 'Copy tool input' : 'Copy tool output'} />
       </div> : null}
