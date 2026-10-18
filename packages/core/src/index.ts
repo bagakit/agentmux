@@ -161,3 +161,5 @@ export * from './client-incident.js'
 
 export * from './mote-chat.js'
 export { agentDiscoveryActivity } from './agent-discovery.js'
+
+export * from './external-conversation.js'

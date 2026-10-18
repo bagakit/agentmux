@@ -1,3 +1,4 @@
+import { parseExternalConversationAuthor } from './external-conversation.js'
 import { agentInputContextCaptureProofFields } from './agent-input-context-capture.js'
 import { conversationRevision } from './conversation-timeline.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
@@ -223,7 +224,7 @@ export function normalizeAgentTimelineItem(value: unknown): AgentTimelineItem {
     ...(inputRef ? { inputRef } : {}),
     ...(a2aNotificationId === undefined ? {} : { a2aNotificationId }),
     ...authorAgent,
-    ...(source.authorExternal === undefined ? {} : { authorExternal: parseAgentExternalMessageAuthor(source.authorExternal) }),
+    ...(source.authorExternal === undefined ? {} : { authorExternal: ('grantId' in Object(source.authorExternal) ? parseAgentExternalMessageAuthor(source.authorExternal) : parseExternalConversationAuthor(source.authorExternal)) }),
     ...(source.sourceDevice === undefined ? {} : { sourceDevice: normalizeOperationDevice(source.sourceDevice) }),
     ...(source.sourceChannel === undefined ? {} : { sourceChannel: normalizeMessageChannel(source.sourceChannel) }),
     ...(authorAgent.authorAgentSessionId === undefined && source.authorHuman === true ? { authorHuman: true } : {}),

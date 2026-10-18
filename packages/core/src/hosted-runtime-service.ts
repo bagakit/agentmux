@@ -252,6 +252,7 @@ export class AgentMuxHostedRuntimeService {
       if (invocation.args.length !== 1) throw new AgentMuxError('Mailbox reading accepts one exact read; author authority is supplied by the original Host.', 'INVALID_CONTROL_REQUEST')
       invocation.args[0] = parseAgentInputMailboxRead(invocation.args[0])
     }
+    if (invocation.method === 'recordExternalConversationMessage' && invocation.args.length !== 1) throw new AgentMuxError('The record owner is supplied by the semantic Host, never wire arguments.', 'INVALID_CONTROL_REQUEST')
     const continuityControl = invocation.method === 'controlAgentContinuity'
     if (invocation.method === 'ensureAgentContinuity' && invocation.args.length !== 1) throw new AgentMuxError('Capture producer context is supplied only by the original Host, never by recovery wire arguments.', 'INVALID_CONTROL_REQUEST')
     if (continuityControl && invocation.args.length !== 1) throw new AgentMuxError('Recovery control accepts one exact packet; authority is supplied by the original Host.', 'INVALID_CONTROL_REQUEST')

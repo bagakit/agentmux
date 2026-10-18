@@ -1,3 +1,4 @@
+import { parseExternalConversationReference, parseExternalConversationAuthority, parseExternalConversationReceipt } from './external-conversation.js'
 import { validateAgentPromptAdmissionIntent } from './agent-prompt-condition.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
@@ -6,7 +7,7 @@ import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor } 
 import { parseAgentInputSubmissionReceipt } from './agent-input-receipt-codec.js'
 import type { ConnectionIngressAddressing, ConnectionIngressMethod, ConnectionIngressParamsMap, ConnectionIngressRecord, ConnectionIngressResultMap } from './ingress-contract.js'
 
-export const INGRESS_RPC_METHODS = { 'connection.ingress.inspect': 'long', 'connection.ingress.ls': 'long', 'connection.ingress.authority': 'long' } as const
+export const INGRESS_RPC_METHODS = { 'connection.ingress.inspect': 'long', 'connection.ingress.ls': 'long', 'connection.ingress.authority': 'long', 'connection.ingress.record-authority': 'long' } as const
 export const isIngressMethod = (value: unknown): value is ConnectionIngressMethod => typeof value === 'string' && Object.hasOwn(INGRESS_RPC_METHODS, value)
 const fail = (): never => { throw new AgentMuxError('Ingress data does not describe its original intake or input.', 'INVALID_CONNECTION_INGRESS') }
 const object = (value: unknown, fields: string[]) => rpcRecord(value, fields, 'INVALID_CONNECTION_INGRESS')
@@ -38,24 +39,40 @@ export function parseConnectionIngressRecord(value: unknown): ConnectionIngressR
     if (!/^[a-f0-9]{64}$/u.test(text(input.intentDigest)) || author.connectionId !== base.connectionId || !equal(author.actor, base.actor) || author.externalConversationId !== base.externalConversationId || author.sourceMessageId !== base.sourceMessageId || author.actionRef !== base.actionRef) fail()
     return { ...base, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId: text(input.operationId), intentDigest: text(input.intentDigest), author } }
   }
-  const p = object(value, ['ingressId', 'connectionId', 'application', 'eventId', 'externalMessageId', 'externalConversationId', 'conversationKind', 'actor', 'body', 'state', 'code', 'input', 'addressing'])
+  const p = object(value, ['ingressId', 'connectionId', 'application', 'eventId', 'externalMessageId', 'externalConversationId', 'conversationKind', 'actor', 'body', 'state', 'code', 'input', 'addressing', 'group'])
   const actor = parseConnectionActor(p.actor), app = object(p.application, ['domain', 'appId'])
   const application = { domain: text(app.domain), appId: text(app.appId) }
   if (!equal(actor.application, application) || typeof p.body !== 'string' || p.state !== 'received' && p.state !== 'refused' && p.state !== 'claimed') fail()
   if (p.conversationKind !== undefined && p.conversationKind !== 'direct' && p.conversationKind !== 'group') fail()
   const base = { ingressId: text(p.ingressId), connectionId: text(p.connectionId), application, eventId: text(p.eventId), externalMessageId: text(p.externalMessageId), externalConversationId: text(p.externalConversationId), actor, body: p.body as string, ...(p.conversationKind === undefined ? {} : { conversationKind: p.conversationKind as 'direct' | 'group' }), ...(p.addressing === undefined ? {} : { addressing: addressing(p.addressing) }) }
-  if (p.state === 'refused') { if (p.input !== undefined) fail(); return { ...base, state: 'refused', code: text(p.code) } }
+  let group: import('./ingress-contract.js').ConnectionIngressMessage['group']
+  if (p.group !== undefined) {
+    if (p.conversationKind !== 'group') fail()
+    const g = object(p.group, ['target', 'recorded', 'recording'])
+    let recording: NonNullable<import('./ingress-contract.js').ConnectionIngressMessage['group']>['recording']
+    if (g.recording !== undefined) { const r = object(g.recording, ['state', 'code']); if (!['unavailable', 'refused'].includes(String(r.state))) fail(); recording = { state: r.state as 'unavailable' | 'refused', code: text(r.code) } }
+    if (g.target === null) { if (g.recorded !== undefined) fail(); group = { target: null } }
+    else {
+      const t = object(g.target, ['hostId', 'agentSessionId', 'connectionId', 'bindingId', 'bindingRevision'])
+      if (!Number.isSafeInteger(t.bindingRevision) || Number(t.bindingRevision) < 1) fail()
+      const target = { hostId: text(t.hostId), agentSessionId: text(t.agentSessionId), connectionId: text(t.connectionId), bindingId: text(t.bindingId), bindingRevision: t.bindingRevision as number }
+      group = { target, ...(recording ? { recording } : {}), ...(g.recorded === undefined ? {} : { recorded: parseExternalConversationReceipt(g.recorded, { agentSessionId: target.agentSessionId, ingressId: base.ingressId }) }) }
+    }
+  }
+  const projected = { ...base, ...(group === undefined ? {} : { group }) }
+  if (p.state === 'refused') { if (p.input !== undefined) fail(); return { ...projected, state: 'refused', code: text(p.code) } }
   if (p.code !== undefined) fail()
-  if (p.state === 'received') { if (p.input !== undefined) fail(); return { ...base, state: 'received' } }
+  if (p.state === 'received') { if (p.input !== undefined) fail(); return { ...projected, state: 'received' } }
   const input = object(p.input, ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'messageId', 'author', 'admissionIntent']), run = object(input.expectedRun, ['runId'])
   const admissionIntent = input.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(input.admissionIntent)
   if (admissionIntent && (admissionIntent.kind === 'exact-condition' || admissionIntent.expectedRun.runId !== run.runId)) fail()
   const author = parseAgentExternalMessageAuthor(input.author), operationId = text(input.operationId), messageId = text(input.messageId)
   // Intake retains its receiver alias; the author names the independently authorized Binding connection.
   if (operationId === messageId || !equal(author.actor, actor) || author.externalMessageId !== base.externalMessageId || author.externalConversationId !== base.externalConversationId) fail()
-  return { ...base, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId, messageId, author, ...(admissionIntent === undefined ? {} : { admissionIntent: admissionIntent as Exclude<typeof admissionIntent, { kind: 'exact-condition' }> }) } }
+  return { ...projected, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId, messageId, author, ...(admissionIntent === undefined ? {} : { admissionIntent: admissionIntent as Exclude<typeof admissionIntent, { kind: 'exact-condition' }> }) } }
 }
 export function parseIngressParams<M extends ConnectionIngressMethod>(method: M, value: unknown): ConnectionIngressParamsMap[M] {
+  if (method === 'connection.ingress.record-authority') return parseExternalConversationReference(value) as ConnectionIngressParamsMap[M]
   if (method === 'connection.ingress.authority') { const p = object(value, ['operationId']); return { operationId: text(p.operationId) } as ConnectionIngressParamsMap[M] }
   if (method === 'connection.ingress.inspect') { const p = object(value, ['ingressId']); return { ingressId: text(p.ingressId) } as ConnectionIngressParamsMap[M] }
   const p = object(value, ['connectionId', 'bindingId', 'afterIngressId', 'limit'])
@@ -63,6 +80,7 @@ export function parseIngressParams<M extends ConnectionIngressMethod>(method: M,
   return { connectionId: text(p.connectionId), ...(p.bindingId === undefined ? {} : { bindingId: text(p.bindingId) }), ...(p.afterIngressId === undefined ? {} : { afterIngressId: text(p.afterIngressId) }), ...(p.limit === undefined ? {} : { limit: p.limit as number }) } as ConnectionIngressParamsMap[M]
 }
 export function parseIngressResult<M extends ConnectionIngressMethod>(method: M, value: unknown, input: ConnectionIngressParamsMap[M]): ConnectionIngressResultMap[M] {
+  if (method === 'connection.ingress.record-authority') return parseExternalConversationAuthority(value) as ConnectionIngressResultMap[M]
   if (method === 'connection.ingress.authority') {
     const p = object(value, ['ingress', 'authority', 'code']), ingress = p.ingress === null ? null : parseConnectionIngressRecord(p.ingress)
     if (ingress && (ingress.state !== 'claimed' || ingress.input?.operationId !== (input as ConnectionIngressParamsMap['connection.ingress.authority']).operationId)) fail()

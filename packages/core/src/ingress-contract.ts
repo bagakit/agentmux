@@ -24,6 +24,8 @@ export type ConnectionIngressMessage = {
   actor: ConnectionActor
   body: string
   addressing?: ConnectionIngressAddressing
+  /** Captured at authenticated group intake, before ACK. null means no active relationship then. */
+  group?: { target: { hostId: string; agentSessionId: string; connectionId: string; bindingId: string; bindingRevision: number } | null; recorded?: import('./external-conversation.js').AgentExternalConversationReceipt; recording?: { state: 'unavailable' | 'refused'; code: string } }
   state: 'received' | 'refused' | 'claimed'
   code?: string
   input?: {
@@ -78,15 +80,18 @@ export interface ConnectionIngressReadPort {
   inspect(input: ConnectionIngressInspectInput): Promise<ConnectionIngressInspection>
   list(input: ConnectionIngressListInput): Promise<ConnectionIngressPage>
   authority(input: { operationId: string }): Promise<ConnectionIngressAuthority>
+  recordAuthority(input: import('./external-conversation.js').AgentExternalConversationReference): Promise<import('./external-conversation.js').AgentExternalConversationAuthority>
 }
 export type ConnectionIngressParamsMap = {
   'connection.ingress.inspect': ConnectionIngressInspectInput
   'connection.ingress.ls': ConnectionIngressListInput
+  'connection.ingress.record-authority': import('./external-conversation.js').AgentExternalConversationReference
   'connection.ingress.authority': { operationId: string }
 }
 export type ConnectionIngressResultMap = {
   'connection.ingress.inspect': ConnectionIngressInspection
   'connection.ingress.ls': ConnectionIngressPage
+  'connection.ingress.record-authority': import('./external-conversation.js').AgentExternalConversationAuthority
   'connection.ingress.authority': ConnectionIngressAuthority
 }
 export type ConnectionIngressMethod = keyof ConnectionIngressParamsMap

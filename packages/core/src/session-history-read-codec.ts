@@ -1,3 +1,4 @@
+import { parseExternalConversationAuthor } from './external-conversation.js'
 export { consumeJsonReadEntry, type JsonReadAssembly, type JsonReadEntry } from './json-read-fragments.js'
 import { parseAgentExternalMessageAuthor } from './external-author.js'
 import { AgentMuxError } from './errors.js'
@@ -215,7 +216,7 @@ export function parseUserMessageHistoryPage(value: unknown, input: AgentSessionH
       } catch { return bad() }
     }
     const author = rpcRecord(message.author, undefined, 'CONTROL_PROTOCOL_ERROR')
-    try { if (author.kind === 'external') parseAgentExternalMessageAuthor(author); else rpcRecord(author, ['kind', 'agentSessionId'], 'CONTROL_PROTOCOL_ERROR') } catch { return bad() }
+    try { if (author.kind === 'external') ('grantId' in author ? parseAgentExternalMessageAuthor(author) : parseExternalConversationAuthor(author)); else rpcRecord(author, ['kind', 'agentSessionId'], 'CONTROL_PROTOCOL_ERROR') } catch { return bad() }
     if (input.source === 'native') {
       if (message.publicContent === 'confirmed') return bad()
       if (source.kind !== 'native' || source.providerId !== nativeSource!.providerId || source.nativeSessionId !== nativeSource!.nativeSessionId || source.recordId !== message.rawId || author.kind !== 'unknown' || author.agentSessionId !== undefined || message.deliveryStatus !== undefined) return bad()

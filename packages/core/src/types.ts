@@ -1118,6 +1118,7 @@ export type AgentSessionUserMessageSource =
 
 export type AgentSessionUserMessageAuthor =
   | import('./external-author.js').AgentExternalMessageAuthor
+  | import('./external-conversation.js').AgentExternalConversationAuthor
   | { kind: 'human' }
   | { kind: 'agent'; agentSessionId: string }
   | { kind: 'unknown' }
@@ -1985,7 +1986,7 @@ export type AgentTimelineItem = {
   authorAgentSessionId?: string
   /** Explicit manual origin attributed by trusted host. */
   authorHuman?: boolean
-  authorExternal?: import('./external-author.js').AgentExternalMessageAuthor
+  authorExternal?: import('./external-author.js').AgentExternalMessageAuthor | import('./external-conversation.js').AgentExternalConversationAuthor
   sourceDevice?: AgentOperationDevice
   sourceChannel?: AgentMessageChannel
   content?: string

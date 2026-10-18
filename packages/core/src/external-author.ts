@@ -1,3 +1,4 @@
+import type { AgentExternalConversationAuthorityPort } from './external-conversation.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseConnectionActor } from './room-binding-codec.js'
@@ -24,7 +25,7 @@ export type AgentExternalInputIntent = {
 }
 
 /** Original Host-owned claim/current-authority reader. Never serialized or inferred from a wire author. */
-export interface AgentExternalInputAuthorityPort {
+export interface AgentExternalInputAuthorityPort extends Partial<AgentExternalConversationAuthorityPort> {
   assertCurrent(author: AgentExternalMessageAuthor, intent: AgentExternalInputIntent): void | Promise<void>
   /** The same original intake authority, with a distinct exact interaction intent. */
   assertInteractionCurrent?(author: AgentExternalInteractionAuthor, intent: AgentMuxAgentInteractionInput): void | Promise<void>
