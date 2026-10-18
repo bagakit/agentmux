@@ -4,6 +4,7 @@ import { createHash } from 'node:crypto'
 import { relative } from 'node:path'
 import shared from '../scripts/fixtures/agent-information-card/vitest.owning.config.mts'
 export const identityMutations = [
+  { name: 'retained-provider', file: 'renderer/src/lib/use-collaboration-identities.ts', before: 'providerId: source.history.providerId', after: 'providerId: source.history.executorId' },
   { name: 'exact-store-selector', file: 'main/runtime-controller.ts', before: 'host.client.sessionHistorySources({ agentSessionId: reference.agentSessionId })', after: 'host.client.sessionHistorySources()' },
   { name: 'original-owner', file: 'main/runtime-controller.ts', before: 'hostId === reference.hostId)', after: "hostId === 'another-owner')" },
   { name: 'ipc-consumer', file: 'main/ipc.ts', before: 'args.runtime.sessionHistorySource(reference)', after: 'args.runtime.sessionHistorySources()' },

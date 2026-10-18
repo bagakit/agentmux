@@ -6,6 +6,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { fixturePath } from '../scripts/lib/fixture-values.mjs'
 import { useAppStore } from '../src/renderer/src/store'
 import { createCollaborationAreasSelector } from '../src/renderer/src/lib/collaboration-areas'
+import { collaborationAgentPresentation } from '../src/renderer/src/lib/collaboration-map-presentation'
 import { createWorkspaceAgentListSelector, workspaceAgentListMembers } from '../src/renderer/src/lib/workspace-agent-scope'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
 import { originalTopicAddress, topicSpatialAddress, workspaceZoneId } from '../src/shared/space-addresses'
@@ -91,6 +92,9 @@ it('keeps Topic category Space and original Zone distinct and groups a category 
   const select = createCollaborationAreasSelector(resolve), graph = select(facts, { workspaceId: scratchWorkspace.id, choice: selection })
   expect(graph.issue).toBeNull(); expect(graph.current).toHaveLength(1)
   expect(graph.areas.find(value => value.id === graph.current[0])?.kind).toBe('topic')
+  expect(graph.areas.find(value => value.id === graph.current[0])).toMatchObject({ workspaceId: scratchWorkspace.id, hostId: scratchWorkspace.hostId,
+    iconTarget: { key: source.spaceId, kind: 'topic', imageTarget: { kind: 'topic', workspaceId: scratchWorkspace.id, topicId: topic.id, objectKey: source.spaceId } } })
+  expect(source.spaceId).not.toBe(category.spaceId)
   const categoryGraph = select(facts, { workspaceId: scratchWorkspace.id, choice: { ...selection, topicId: null, zoneId: null } })
   expect(categoryGraph.title).toBe(category.title); expect(categoryGraph.current).toEqual(graph.current)
   const wrong = select(facts, { workspaceId: scratchWorkspace.id, choice: { ...selection, zoneId: workspaceZoneId(category.spaceId, 'wrong-zone') } })
@@ -106,6 +110,10 @@ it('keeps the captured request independent from background selection and coalesc
   const initial = select(facts, request), changed = select({ ...facts, workbenchSpaceSelection: choice(ordinaryTopicId) }, request)
   expect(changed).toBe(initial)
   expect(initial.areas.filter(value => value.kind === 'project').map(value => value.id)).toEqual([workspaceProjectId(project), workspaceProjectId(other)])
+  expect(initial.areas.filter(value => value.kind === 'project').map(value => ({ hostId: value.hostId, workspaceId: value.workspaceId, iconTarget: value.iconTarget }))).toEqual([
+    { hostId: project.hostId, workspaceId: project.id, iconTarget: { key: workspaceProjectId(project), name: project.name, kind: 'folder' } },
+    { hostId: other.hostId, workspaceId: other.id, iconTarget: { key: workspaceProjectId(other), name: other.name, kind: 'folder' } }
+  ])
   expect(initial.current).toHaveLength(1); expect(initial.areas.find(value => value.id === initial.current[0])?.members).toEqual([key(customAgent.id)])
 })
 
@@ -178,4 +186,25 @@ it('preserves all original multi-area bindings without adding an execution-direc
   expect(occurrences.map(area => area.name)).toEqual([moteTopics.find(value => value.id === customMoteId)!.title, moteTopics.find(value => value.id === ordinaryTopicId)!.title])
   expect(occurrences.every(area => area.affiliations?.get(key(customAgent.id))?.basis === 'spatial')).toBe(true)
   expect(graph.areas.find(area => area.id === workspaceProjectId(project))!.members).not.toContain(key(customAgent.id))
+})
+
+
+it('retains original Mote assets and known object Host without inventing an asset identity for an unreadable Topic', () => {
+  const state = useAppStore.getState(), mote = moteTopics.find(value => value.id === customMoteId)!, address = originalTopicAddress(scratchWorkspace, mote, {})!
+  const broken = moteTopics.map(topic => topic.id === ordinaryTopicId ? { ...topic, readError: 'Original Topic directory is unavailable' } : topic)
+  const facts = { ...state, scratchTopicSnapshots: { ...state.scratchTopicSnapshots, [scratchWorkspace.id]: { ...state.scratchTopicSnapshots[scratchWorkspace.id]!, topics: broken } } }
+  const select = createCollaborationAreasSelector(resolve), graph = select(facts)
+  expect(graph.areas.find(area => area.name === mote.title)).toMatchObject({ kind: 'mote', workspaceId: scratchWorkspace.id, hostId: scratchWorkspace.hostId,
+    iconTarget: { key: address.spaceId, kind: 'mote', avatarTarget: { workspaceId: scratchWorkspace.id, topicId: mote.id, objectKey: address.spaceId } } })
+  const unavailable = graph.areas.find(area => area.name === moteTopics.find(topic => topic.id === ordinaryTopicId)!.title)!
+  expect(unavailable).toBeDefined(); expect(unavailable.iconTarget).toBeUndefined()
+  expect(unavailable.hostId).toBe(scratchWorkspace.hostId); expect(unavailable.workspaceId).toBe(scratchWorkspace.id)
+  expect(unavailable.issue).toBeTruthy(); expect(select(facts)).toBe(graph)
+})
+
+it('projects the exact Session Provider and Executor independently of names or display metadata', () => {
+  const session = { ...moteAgent('identity-member', null), providerId: 'original-provider', executorId: 'configured-executor' }
+  const presentation = collaborationAgentPresentation(session, 'A different display name')
+  expect(presentation).toMatchObject({ name: 'A different display name', providerId: 'original-provider', executorId: 'configured-executor' })
+  expect(session.label).toBe('identity-member')
 })
