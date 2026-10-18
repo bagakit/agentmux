@@ -1,0 +1,68 @@
+/* Lark settings share controls with Motes; only this page owns their reading density. */
+.lark-settings { gap: var(--sp-6); }
+.lark-settings .connector-library,
+.lark-settings .connector-setup { gap: var(--sp-5); }
+.lark-settings .connector-identities-heading { gap: var(--sp-4); padding: 0; }
+.lark-settings .connector-identities-heading h3 { font-size: var(--fs-title); letter-spacing: -.015em; }
+.lark-settings .connector-identities-heading p { font-size: var(--fs-meta); line-height: 1.55; }
+.lark-settings .connector-identities-heading__actions { gap: var(--sp-2); }
+.lark-settings .connector-mote-identities { gap: var(--sp-3); }
+.lark-settings .connector-mote-identities h3 { font-size: var(--fs-body); }
+.lark-settings .connector-mote-identities header p { margin-top: var(--sp-1); font-size: var(--fs-meta); }
+.lark-settings .connector-mote-card { gap: var(--sp-3); padding: var(--sp-4); }
+.lark-settings .connector-mote-card__identity { gap: var(--sp-3); }
+.lark-settings .connector-mote-card__identity strong { font-size: var(--fs-body); }
+.lark-settings .connector-saved-identities { margin: 0; padding-top: var(--sp-4); }
+.lark-settings .connector-saved-identities > header > .small-button { border-color: transparent; }
+.lark-settings .connector-service-control { gap: var(--sp-3); }
+.lark-settings .connector-service-control__refresh { display: inline-flex; align-items: center; gap: var(--sp-2); }
+.lark-settings .connector-service-control__refresh > svg { flex: none; }
+.lark-settings .connector-list-feedback { display: grid; justify-items: start; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--amber-line); border-radius: var(--radius); background: var(--amber-bg); }
+.lark-settings .connector-list-feedback > p { margin: 0; }
+.lark-settings .connector-credentials-source { padding: var(--sp-4); border-radius: var(--radius); background: var(--surface-1); gap: var(--sp-3); }
+.lark-settings .connector-credentials-source p { margin: 0; }
+.lark-settings .connector-credentials-source strong { font: inherit; color: var(--text-2); font-weight: 550; }
+.lark-settings .connector-next-step { align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-3); padding-block: var(--sp-4); }
+.lark-settings .connector-next-step > div { min-width: 0; flex: 1 1 220px; }
+.lark-settings .connector-next-step > button { flex: none; }
+.lark-settings .connector-optional > summary,
+.lark-settings .connector-diagnostics > summary,
+.lark-settings .connector-setup-help > summary { min-height: 28px; padding-block: var(--sp-1); line-height: 1.6; }
+.lark-settings .connector-management .bot-setup-guide { padding-block: var(--sp-2); }
+.lark-settings .connector-management .bot-setup-guide li { padding: var(--sp-2); }
+.lark-settings .connector-management .bot-task-heading { gap: var(--sp-2); }
+.lark-settings .connector-management .bot-task-heading .connector-editor-title { font-size: var(--fs-title); letter-spacing: -.015em; line-height: 1.4; }
+.lark-settings .connector-management .bot-task-heading > p { font-size: var(--fs-meta); line-height: 1.6; }
+.lark-settings .connector-management__account--confirmed { display: flex; flex-wrap: wrap; gap: var(--sp-3) var(--sp-6); padding: 0; border: 0; }
+.lark-settings .connector-management__account--confirmed > div { display: flex; align-items: baseline; flex-wrap: wrap; gap: var(--sp-2); }
+.lark-settings .connector-management__account--confirmed dd { margin: 0; font-size: var(--fs-meta); }
+.lark-settings .connector-management > .connector-enrollment__action:empty { display: none; }
+.lark-settings .connector-guided-task { grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--sp-4); padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+.lark-settings .connector-guided-task > div > strong { font-size: var(--fs-body); line-height: 1.5; }
+.lark-settings .connector-guided-task > div > p { margin: var(--sp-2) 0 0; font-size: var(--fs-meta); line-height: 1.6; color: var(--text-2); }
+.lark-settings .connector-configuration-progress { margin-block: var(--sp-2) 0; }
+.lark-settings .connector-configuration { gap: var(--sp-4); }
+.lark-settings :is([data-management-permissions], [data-management-reception]) { display: grid; gap: var(--sp-4); }
+.lark-settings :is([data-management-permissions], [data-management-reception]) .connector-next-step { border-top: 0; padding: 0; }
+.lark-settings .connector-configuration__decision,
+.lark-settings .connector-publication__decision { display: grid; justify-items: start; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); }
+.lark-settings .connector-configuration__decision > p,
+.lark-settings .connector-publication__decision > p { margin: 0; }
+.lark-settings .connector-configuration__tools { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.lark-settings .connector-permission-group { margin-top: var(--sp-4); font-size: var(--fs-meta); }
+.lark-settings .connector-permission-group > strong { color: var(--text-2); font-weight: 550; }
+.lark-settings .connector-permission-list { display: grid; gap: 0; margin-top: var(--sp-2); }
+.lark-settings .connector-permission-list > div { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: var(--sp-3); padding-block: var(--sp-2); border-bottom: 1px solid var(--line-soft); }
+.lark-settings .connector-permission-list dd { margin: 0; font-size: var(--fs-meta); color: var(--text-2); }
+.lark-settings .connector-publication__form { gap: var(--sp-4); }
+.lark-settings .connector-publication__audience { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-4); }
+.lark-settings .connector-publication__audience > div { min-width: 0; }
+.lark-settings .connector-publication__audience dd { margin: var(--sp-2) 0 0; }
+.lark-settings .connector-publication__audience dd > div { display: grid; grid-template-columns: 88px minmax(0, 1fr); align-items: baseline; gap: var(--sp-2); padding-block: var(--sp-2); border-bottom: 1px solid var(--line-soft); }
+.lark-settings .connector-publication__audience dd strong { font-weight: 450; color: var(--text-3); }
+.lark-settings .connector-publication__audience :is(ul, p) { margin: 0; }
+.lark-settings .connector-publication__audience ul { padding-left: var(--sp-4); }
+@container connector (width < 520px) {
+  .lark-settings .connector-guided-task { grid-template-columns: minmax(0, 1fr); }
+  .lark-settings .connector-publication__audience { grid-template-columns: minmax(0, 1fr); }
+}

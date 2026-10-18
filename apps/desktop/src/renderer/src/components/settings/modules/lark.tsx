@@ -2,6 +2,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { ExternalConnectionsSettings } from '../ExternalConnectionsSettings'
 import { ConnectorServiceControl } from '../ConnectorServiceControl'
 import type { SettingsModule } from '../settings-catalog'
+import '../../../styles/settings-lark.css'
 export const larkSettingsModule = {
   id: 'lark', group: 'conversation-channels', title: 'Lark',
   description: 'Chat with your Agents from Feishu or Lark.',
