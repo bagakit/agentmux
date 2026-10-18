@@ -35,6 +35,10 @@
 .collaboration-inspector__actions button { display: inline-flex; align-items: center; gap: 5px; }
 .collaboration-identity { margin-top: 14px; font-size: var(--fs-micro); color: var(--text-2); }
 .collaboration-identity summary { cursor: pointer; }
+.collaboration-inspector [aria-label='Area affiliation'] dl { display: grid; gap: 10px; margin: 14px 0 0; }
+.collaboration-inspector [aria-label='Area affiliation'] dt { margin-bottom: 3px; color: var(--text-2); font-size: var(--fs-micro); }
+.collaboration-inspector [aria-label='Area affiliation'] dd { margin: 0; color: var(--text); font-size: var(--fs-meta); line-height: 1.5; overflow-wrap: anywhere; }
+.collaboration-inspector [aria-label='Area affiliation'] small { display: block; margin-top: 2px; color: var(--text-3); font-size: var(--fs-micro); }
 .collaboration-inspector h4 { display: flex; align-items: center; justify-content: space-between; }
 .collaboration-inspector h4 span { font-variant-numeric: tabular-nums; color: var(--text-2); }
 .collaboration-relation__body { flex: 1; min-width: 0; display: grid; gap: 4px; }
@@ -75,10 +79,10 @@
 .collaboration-edge--supervision { stroke: var(--amber); }
 .collaboration-edge.is-selected { opacity: 1; stroke-width: 2; }
 .collaboration-edge__count { position: absolute; pointer-events: none; background: var(--surface-1); border: 1px solid var(--line); color: var(--text-2); border-radius: 8px; padding: 0 5px; font-size: 10px; line-height: 16px; font-variant-numeric: tabular-nums; }
-.collaboration-edge__pulse { fill: none; stroke: var(--green); stroke-width: 3.5; vector-effect: non-scaling-stroke; stroke-linecap: round; stroke-dasharray: .045 1; animation: collaboration-message linear 1 both; pointer-events: none; filter: drop-shadow(0 0 3px color-mix(in srgb, var(--green) 45%, transparent)); }
+.collaboration-edge__pulse { fill: none; stroke: var(--green); stroke-width: 3.5; vector-effect: non-scaling-stroke; stroke-linecap: round; animation: collaboration-message linear 1 both; pointer-events: none; }
 .collaboration-edge__pulse[data-kind=supervision] { stroke: var(--amber); stroke-dasharray: none; animation-name: collaboration-supervision; animation-timing-function: ease-out; }
 .collaboration-edge__packet { fill: var(--green); stroke: var(--surface-1); stroke-width: 1.5; vector-effect: non-scaling-stroke; offset-rotate: 0deg; pointer-events: none; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--green) 60%, transparent)); animation: collaboration-packet linear 1 both; }
-@keyframes collaboration-message { 0% { stroke-dashoffset: 1; opacity: 0; } 12% { opacity: 1; } 85% { opacity: 1; } 100% { stroke-dashoffset: -.06; opacity: 0; } }
+@keyframes collaboration-message { 0% { opacity: 0; } 12%, 85% { opacity: .38; } 100% { opacity: 0; } }
 @keyframes collaboration-packet { 0% { offset-distance: 0%; opacity: 0; } 8%, 92% { opacity: 1; } 100% { offset-distance: 100%; opacity: 0; } }
 @keyframes collaboration-supervision { 0% { opacity: 0; } 25% { opacity: .9; } 100% { opacity: 0; } }
 .collaboration-canvas__controls { position: absolute; left: 14px; bottom: 14px; display: flex; padding: 3px; gap: 2px; background: var(--surface-1); border: 1px solid var(--line); border-radius: var(--radius-sm); box-shadow: var(--elev-1); }
