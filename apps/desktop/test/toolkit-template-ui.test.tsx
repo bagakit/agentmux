@@ -66,7 +66,7 @@ describe('actual Toolkit Settings account template consumer', () => {
     const name = dom.container.querySelector<HTMLInputElement>('.toolkit-editor__name input')
     expect(name).not.toBeNull(); expect(name!.value).toBe('Account usage'); expect(document.activeElement).toBe(name)
     expect(dom.container.querySelector<HTMLInputElement>('.toolkit-editor__toggle input')?.checked).toBe(false)
-    await input('.toolkit-editor__fields input:not([type])', _hygiene_fixturePath("fixed-fixture"))
+    await input('.toolkit-editor__directory input', _hygiene_fixturePath("fixed-fixture"))
     await button('Save tool')
     expect(m.writer.add).toHaveBeenCalledTimes(1); expect(m.run).not.toHaveBeenCalled()
     const [id, value] = m.writer.add.mock.calls[0]!
@@ -83,7 +83,7 @@ describe('actual Toolkit Settings account template consumer', () => {
     await dom.click('[data-tool-id="template:account-usage"]')
     expect(dom.container.querySelector<HTMLInputElement>('.toolkit-editor__name input')?.value).toBe(original.name)
     await dom.click('[data-tool-template="account-usage"]'); await button('Use this starting point')
-    await input('.toolkit-editor__fields input:not([type])', _hygiene_fixturePath("new-fixed")); await button('Save tool')
+    await input('.toolkit-editor__directory input', _hygiene_fixturePath("new-fixed")); await button('Save tool')
     expect(m.writer.add).toHaveBeenCalledTimes(1)
     const saved: AppConfig = JSON.parse(await readFile(m.path, 'utf8'))
     expect(saved.toolkit!.tools).toHaveLength(2)

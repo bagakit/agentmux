@@ -120,7 +120,7 @@ describe('Toolkit visible reader and shared selection',()=> {
     const name=dom.container.querySelector<HTMLInputElement>('.toolkit-editor__name input')!
     expect(document.activeElement).toBe(name)
     const input=(node:HTMLInputElement,value:string)=> { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(node,value);node.dispatchEvent(new Event('input',{bubbles:true})) }
-    const directory = dom.container.querySelector<HTMLInputElement>('.toolkit-editor__fields > label input[type="text"]')!
+    const directory = dom.container.querySelector<HTMLInputElement>('.toolkit-editor__directory input')!
     expect(directory).not.toBeNull()
     await act(async()=> { input(name,'Local summary');input(directory,_hygiene_fixturePath("fixed")) })
     const save=dom.container.querySelector<HTMLButtonElement>('.toolkit-editor .primary-button')!
