@@ -313,6 +313,15 @@ app.whenReady().then(async () => {
         const workers = await read('window.graphCapture.workerSamples()'), sample = workers.filter(sample=>sample.input?.nodes>=size&&sample.boxes?.agents===sample.input.nodes).at(-1)
         assert.ok(sample&&Object.keys(sample.input.sizes).length>=3,'Actual Worker places mixed sizes, including isolated/closed members'); const expected=result['growth'+size].expectedAgentKeys.slice().sort(), canonical=ids=>[...new Set(ids.map(id=>JSON.parse(id)[1]))].sort(); assert.deepEqual(canonical(sample.input.ids),expected,'Every original identity enters the real Worker'); assert.deepEqual(canonical(sample.boxes.ids),expected,'Every original identity receives actual world geometry'); result['world'+size]=sample
         assert.equal(sample.input.areas.filter(area=>area.members===0).length,60); await overview('map-world-overview-'+size)
+        if (size === 480) {
+          const fresh = await read(`(()=>{for(const button of document.querySelectorAll('.collaboration-agent__dot:not([data-session-id])')){const node=button.closest('[data-collaboration-agent]'),subject=JSON.parse(node.dataset.collaborationAgent),r=button.getBoundingClientRect();if(!subject[1].startsWith('fixture-isolated-')||r.left<8||r.top<44||r.right>innerWidth-8||r.bottom>innerHeight-44||!button.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)))continue;button.setAttribute('data-capture-fresh-point','');return{hostId:subject[0],agentSessionId:subject[1]}}throw Error('No original unread overview point is actionable')})()`)
+          const before = (await facts()).reads.length
+          await move('[data-capture-fresh-point]')
+          await until('original unread point becomes a real Reader', () => read(`(()=>{const button=document.querySelector('.collaboration-map [data-session-id="${fresh.agentSessionId}"]'),reader=document.getElementById(button?.getAttribute('aria-describedby'));return Boolean(reader?.classList.contains('agent-information-reader'))})()`))
+          result.freshOverviewHover = { subject: fresh, reads: (await facts()).reads.slice(before) }
+          assert.ok(result.freshOverviewHover.reads.some(item=>item.kind==='conversation'&&item.participant===fresh.agentSessionId),'Actual original Reader reads the newly hovered exact subject')
+          await frame('map-fresh-overview-reader'); await move('[aria-label="Overview"]'); await until('fresh transient Reader leaves', () => read(`!document.querySelector('.agent-information-reader:not([data-pinned])')`))
+        }
         await locate('fixture-core'); await measure('idle-'+size, () => pause(500)); await measure('pan-'+size, pan)
         const arranged = (await read('window.graphCapture.workerSamples()')).filter(sample=>sample.input).length
         await measure('zoom-'+size, async () => { for(let at=0;at<4;at++){await click('[aria-label="Zoom out"]');await pause(90)}await pause(250) }); assert.equal((await read('window.graphCapture.workerSamples()')).filter(sample=>sample.input).length,arranged,'Zoom does not change original world box sizes'); assert.equal((await facts()).census.fullCards,0)
