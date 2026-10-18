@@ -4,13 +4,16 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { AgentMuxControlServer, AgentMuxHostedRuntimeService, connectAgentMuxRpc, connectHostedAgentMux } from '@agentmux/core'
+import { AgentMuxControlServer, AgentMuxHostedRuntimeService, connectAgentMuxRpc, connectHostedAgentMux, type AgentTimelineSnapshot } from '@agentmux/core'
 import { injectedContextCore } from './helpers/injected-context-core'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
+import { activityReadingProps } from './helpers/activity-reading-props'
+import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 const dom = composerDOM()
 const sessionId='system-reading-session', run={runId:'original-private-run'}
 const source={hostId:'authority-host',deviceId:'paired-device',name:'My other computer'}
@@ -19,20 +22,47 @@ beforeEach(()=>{
  vi.stubGlobal('ResizeObserver',class { observe(){} unobserve(){} disconnect(){} })
  vi.stubGlobal('IntersectionObserver',class { observe(){} unobserve(){} disconnect(){} })
 })
-afterEach(async()=>{for(const dispose of disposers.splice(0).reverse())await dispose();vi.unstubAllGlobals();vi.unstubAllEnvs()})
+afterEach(async()=>{
+ document.getSelection()?.removeAllRanges()
+ await dom.render(null)
+ for(const dispose of disposers.splice(0).reverse())await dispose()
+ vi.unstubAllGlobals();vi.unstubAllEnvs()
+})
 async function fixture(){
  const workspacePath=await mkdtemp(join(tmpdir(),'amux-system-lines-'));disposers.push(()=>rm(workspacePath,{recursive:true}))
  const f=await injectedContextCore(workspacePath,{kind:'agent',agentSessionId:sessionId,providerId:'traex',executorId:'private',hostId:'local',workspacePath,run,retiredRuns:[],createdAt:1,updatedAt:1,hookBindingId:'private-binding',hookToken:'private-token'})
  disposers.push(()=>f.dispose())
  const inner=Reflect.get(f.core,'kernel'),resize=vi.fn(async(_run:string,cols:number,rows:number)=>({cols,rows})),interrupt=vi.fn(async()=>{})
  Object.assign(inner,{resize,interrupt})
- const owner={runtimeId:'private-original-runtime',ownerInstanceId:'private-owner-epoch',protocolVersion:1 as const,processId:123,availability:'connected' as const,ctxmux:f.core.runtimeIdentity()}
+ const owner={runtimeId:'private-original-runtime',ownerInstanceId:'private-owner-epoch',protocolVersion:2 as const,processId:123,availability:'connected' as const,ctxmux:f.core.runtimeIdentity()}
  const hosted=new AgentMuxHostedRuntimeService(f.core,f.store.path,()=>owner);disposers.push(()=>hosted.dispose())
  const activity=vi.fn(async(..._args:unknown[])=>{}),server=new AgentMuxControlServer({socketPath:join(workspacePath,'host.sock'),coreClients:()=>[{hostId:'local',client:f.core}],hostedRuntime:()=>hosted,operationSource:()=>source,recordDeviceOperation:activity})
  await server.start();disposers.push(()=>server.stop())
  const rpc=await connectAgentMuxRpc({endpoint:{transport:'unix',path:join(workspacePath,'host.sock')}});disposers.push(()=>rpc.dispose())
  const client=await connectHostedAgentMux({rpc});disposers.push(()=>client.dispose())
+ await desktopConversationReadBridge({root:workspacePath,client:f.core},disposers)
  return {...f,client,resize,interrupt,activity}
+}
+const reference={hostId:'local',agentSessionId:sessionId}
+function activity(){return <ActivityView {...activityReadingProps({control:{...reference,run}})} displayState="running" />}
+async function renderTimeline(timeline:AgentTimelineSnapshot){
+ const stream=timeline.stream
+ expect(stream,'The original public Timeline must expose its exact captured cut').toBeDefined()
+ const view=activity()
+ await dom.render(view)
+ await vi.waitFor(async()=>{
+  await act(async()=>{await Promise.resolve()})
+  const consumer=inspectConversationConsumers(reference).consumers.find(value=>value.accepted?.checkpoint.frontier.cuts.some(cut=>
+   cut.kind==='captured'&&cut.epoch===stream!.epoch&&cut.sequence===stream!.sequence))
+  expect(consumer,'The Activity must accept the exact public Timeline publication').toMatchObject({loading:false,inFlight:false,dirty:false,watch:{binding:false,bound:true}})
+ },{timeout:3000,interval:10})
+ await act(async()=>{
+  for(const disclosure of dom.container.querySelectorAll<HTMLDetailsElement>('.conversation-submission-record .message-disclosure')){
+   disclosure.open=true;disclosure.dispatchEvent(new Event('toggle'))
+  }
+  for(const toggle of dom.container.querySelectorAll<HTMLButtonElement>('.conversation-reply-observation__toggle[aria-expanded="false"]'))toggle.click()
+ })
+ return view
 }
 it('actual registered Hosted resize preserves Runtime receipt and Host activity without new conversational records',async()=>{
  const f=await fixture()
@@ -48,8 +78,10 @@ it('actual registered Hosted resize preserves Runtime receipt and Host activity 
  expect(await f.client.resizeAgent(sessionId,run,90,30)).toEqual({runId:run.runId,cols:90,rows:30})
  await f.client.signalAgent(sessionId,f.client.agentSession(sessionId).run,'SIGINT')
  const after=await f.core.sessionTimeline(sessionId)
- expect(after.items).toHaveLength(before.items.length+1)
- expect(after.items[0]).toEqual(before.items[0]);expect(after.items.at(-1)).toMatchObject({kind:'system_message',source:'agentmux',content:'signalAgent · 已提交'})
+ expect(after).toEqual(before)
+ const signalAudit=f.activity.mock.calls.slice(-2)
+ expect(signalAudit.map(c=>[c[1],c[3]])).toEqual([['signalAgent','unknown'],['signalAgent','confirmed']])
+ expect(signalAudit[0]![4]).toBeTypeOf('string');expect(signalAudit[0]![4]).toBe(signalAudit[1]![4])
  expect(f.interrupt).toHaveBeenCalledOnce();expect(f.requests).toHaveLength(0);expect(f.start).not.toHaveBeenCalled();expect(f.stop).not.toHaveBeenCalled()
 })
 it('public Timeline through real Activity retains distinct system IDs, context, full Copy, exact Info and ordinary input',async()=>{
@@ -60,13 +92,18 @@ it('public Timeline through real Activity retains distinct system IDs, context, 
  const timeline=await f.client.sessionTimeline(sessionId)
  if (process.env.AGENTMUX_SYSTEM_PUBLIC_SCENE) await writeFile(process.env.AGENTMUX_SYSTEM_PUBLIC_SCENE,JSON.stringify({sessionId,timeline,users:projectSessionUserMessages({agentSessionId:sessionId,timeline})},null,2))
  expect(timeline.items.filter(i=>i.kind==='system_message')).toHaveLength(3)
+ expect(new Set(timeline.items.filter(i=>i.kind==='system_message').map(i=>i.id)).size).toBe(3)
+ const context=timeline.items.find(i=>i.title==='AgentMux context')!
+ expect(context).toBeDefined()
  const read=vi.spyOn(api.sessions,'historyPage'),send=vi.spyOn(api.sessions,'submitPrompt'),copy=vi.fn(async()=>{})
  vi.spyOn(api.ui,'writeClipboardText').mockImplementation(copy)
- const users=projectSessionUserMessages({agentSessionId:sessionId,timeline})
- const view=<ActivityView sessionId={sessionId} items={timeline.items} userMessages={users} capability="complete-events" displayState="running" />
- await dom.render(view)
+ const view=await renderTimeline(timeline)
  const rows=[...dom.container.querySelectorAll<HTMLElement>('[data-speaker-role="system"]')]
  expect(rows).toHaveLength(3);expect(rows.map(r=>r.dataset.messageId)).toEqual(timeline.items.filter(i=>i.kind==='system_message').map(i=>i.id))
+ const originalPage=await vi.mocked(api.conversation.readAgentConversation).mock.results.at(-1)!.value
+ expect(originalPage).toMatchObject({...reference,sourceHostId:'local'})
+ const originalContext=originalPage.items.find(part=>part.kind==='item'&&part.item.records.some(record=>record.original.kind==='captured'&&record.original.item.id===context.id))
+ expect(originalContext?.kind==='item'&&originalContext.item.event.author).toEqual({kind:'system'})
  expect(rows[0]!.querySelector('.log-turn__system-summary')!.textContent).toBe('resizeAgent · 已提交')
  expect(rows[1]!.querySelector('.log-turn__system-summary')!.textContent).toBe('resizeAgent · 已提交')
  expect(dom.container.querySelector('[data-speaker-role="human"] .log-turn__body')!.textContent).toContain('The real user request')
@@ -81,7 +118,7 @@ it('public Timeline through real Activity retains distinct system IDs, context, 
  const text=body.querySelector('p')!.firstChild!,range=document.createRange();range.setStart(text,0);range.setEnd(text,5);document.getSelection()!.removeAllRanges();document.getSelection()!.addRange(range)
  await dom.render(view);expect(body.isConnected).toBe(true);expect(document.getSelection()!.getRangeAt(0).startContainer).toBe(text)
  await act(async()=>rows[2]!.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!.click())
- expect(copy).toHaveBeenCalledWith(timeline.items.find(i=>i.title==='AgentMux context')!.content)
+ expect(copy).toHaveBeenCalledWith(context.content)
  await act(async()=>rows[0]!.querySelector<HTMLButtonElement>('[aria-label="Message details"]')!.click())
  expect(rows[0]!.textContent).toContain(timeline.items[0]!.id)
  expect(await f.core.sessionTimeline(sessionId)).toEqual(timeline)
@@ -94,7 +131,7 @@ it('user-written amux declarations retain their recorded role and literal raw Co
  await f.core.submitAgentPrompt({agentSessionId:sessionId,expectedRun:run,afterSubmissionId:null,operationId:'unverified-declaration',prompt:raw,sourceChannel:'terminal'})
  const timeline=await f.client.sessionTimeline(sessionId), users=projectSessionUserMessages({agentSessionId:sessionId,timeline})
  expect(timeline.items).toHaveLength(1);expect(timeline.items[0]!.kind).toBe('user_message');expect(users[0]!.author.kind).toBe('unknown')
- await dom.render(<ActivityView sessionId={sessionId} items={timeline.items} userMessages={users} capability="complete-events" displayState="running" />)
+ await renderTimeline(timeline)
  expect(dom.container.querySelector('[data-speaker-role="system"]')).toBeNull()
  expect(dom.container.querySelector('[data-speaker-role="human"] .log-turn__body')).not.toBeNull()
  expect(dom.container.querySelector('[data-speaker-role="human"] .log-turn__system-toggle')).toBeNull()
@@ -114,9 +151,10 @@ it('a dense original public Timeline interleaves system records with readable us
  const timeline=await f.client.sessionTimeline(sessionId), users=projectSessionUserMessages({agentSessionId:sessionId,timeline})
  expect(timeline.items).toHaveLength(14)
  const read=vi.spyOn(api.sessions,'historyPage'),send=vi.spyOn(api.sessions,'submitPrompt')
- await dom.render(<ActivityView sessionId={sessionId} items={timeline.items} userMessages={users} capability="complete-events" displayState="running" />)
+ await renderTimeline(timeline)
+ expect(timeline.items.filter(item=>item.kind==='system_message')).toHaveLength(11)
  expect(dom.container.querySelectorAll('[data-speaker-role="system"]')).toHaveLength(11)
- expect(dom.container.querySelectorAll('[data-speaker-role="agent"]')).toHaveLength(2)
+ expect([...dom.container.querySelectorAll<HTMLElement>('[data-captured-reply-observation]')].map(row=>row.dataset.capturedReplyObservation)).toEqual(['controlled-hook-reply-3','controlled-hook-reply-7'])
  expect(dom.container.textContent).toContain('Please keep the conversation compact and readable.')
  expect(dom.container.textContent).toContain('The actual reply remains between the system records.')
  expect(read).not.toHaveBeenCalled();expect(send).not.toHaveBeenCalled();expect(f.requests).toHaveLength(1)
