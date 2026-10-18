@@ -72,6 +72,21 @@ it('reserves before dispatch with per-source sequence and recorder nonce; failed
   expect(noNonce.snapshot().inputRequestDetails).toMatchObject({ completed: 1, pending: 0, recent: [{ parent: null, parentMatch: 'absent' }] })
 })
 
+it('preserves the default Renderer observer identity through the actual Hosted input consumer', async () => {
+  const f = await inputCorrelationCore(), renderer = createRendererPerformance()
+  const request = renderer.beginInputRequest('user', performance.now(), { hostId: 'local', sessionId: 'private-agent', runId: 'original' })
+  try {
+    expect(request.parent).toBeDefined()
+    expect(request.parent?.observerId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/u)
+    const operation = f.hosted.writeAgent({ agentSessionId: 'private-agent', expectedRun: { runId: 'original' }, source: 'user', data: 'original bytes', observation: request.parent })
+    request.observe(operation); await operation; await flushInput()
+    expect((await f.core.clientPerformanceDiagnostics()).input.recent.at(-1)).toMatchObject({ parent: request.parent, parentMatch: 'unique' })
+    expect(renderer.snapshot().inputRequestDetails.recent.at(-1)).toMatchObject({ parent: request.parent, parentMatch: 'unique' })
+    expect(f.input.mock.calls[0]![1].data).toBe('original bytes')
+    expect(f.input.mock.calls[0]![1]).not.toHaveProperty('observation')
+  } finally { await f.dispose() }
+})
+
 it('actual Core FIFO keeps parent tied to original Run and captures the actual native owner after queued connection change', async () => {
   const f = await inputCorrelationCore()
   f.gates.status = inputDeferred(); f.gates.native = inputDeferred()
