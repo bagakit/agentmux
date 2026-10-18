@@ -15,8 +15,9 @@ const inputs = new Map(), runs = []
 const navigationMutant = process.argv.includes('--navigation-mutation')
 const providerMutant = process.argv.includes('--provider-scroll-mutation')
 const takeoverMutant = process.argv.includes('--takeover-scroll-mutation')
-assert.ok([navigationMutant,providerMutant,takeoverMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
-const nativeMutant = navigationMutant || providerMutant || takeoverMutant
+const appearanceMutant = process.argv.includes('--appearance-contrast-mutation')
+assert.ok([navigationMutant,providerMutant,takeoverMutant,appearanceMutant].filter(Boolean).length<=1,'One native source mutation per receipt')
+const nativeMutant = navigationMutant || providerMutant || takeoverMutant || appearanceMutant
 const pageArguments = process.argv.filter(argument => argument.startsWith('--pages='))
 assert.ok(pageArguments.length <= 1, 'One explicit page selection')
 const requestedPages = pageArguments.length ? pageArguments[0].slice('--pages='.length).split(',') : null
@@ -24,7 +25,7 @@ if (requestedPages) {
   assert.ok(requestedPages.every(Boolean), 'Page selection is nonempty')
   assert.equal(new Set(requestedPages).size, requestedPages.length, 'Page selection contains no duplicate')
 }
-let navigationMutationLoads = 0, providerMutationLoads = 0, takeoverMutationLoads = 0
+let navigationMutationLoads = 0, providerMutationLoads = 0, takeoverMutationLoads = 0, appearanceMutationLoads = 0
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 await fs.mkdir(evidence,{recursive:true})
 async function bind(file) {
@@ -39,6 +40,7 @@ async function bind(file) {
 try {
   for (const file of ['index.html','entry.mjs','main.cjs','vitest.config.mts','scenario.md']) await bind(path.join(fixture,file))
   for (const file of ['apps/desktop/scripts/verify-settings-home.mjs','apps/desktop/test/settings-home.test.tsx','apps/desktop/test/settings-overview.test.tsx']) await bind(path.join(root,file))
+  await bind(path.join(root,'apps/desktop/resources/icon-512.png'))
   for (const mode of process.argv.includes('--visual-only') || nativeMutant ? [] : ['baseline','expanded','disclosure','entry','drafts','exact','destination','restored']) {
     const directory = path.join(evidence,mode), temporary = path.join(owned,mode), output = []
     await fs.mkdir(directory)
@@ -70,6 +72,14 @@ try {
     plugins:[{name:'bind-settings-home-product',enforce:'pre',async transform(code,id){
       const file=id.split('?')[0]
       if(file.startsWith(root+'/')&&!file.includes('/node_modules/'))await bind(file)
+      if(appearanceMutant&&file.endsWith('/components/settings/AppearanceSettingsPane.tsx')) {
+        const anchor='background: theme.selectionBackground, color: theme.selectionForeground ?? theme.foreground'
+        assert.equal(code.split(anchor).length,2,'One actual terminal sample color pair')
+        appearanceMutationLoads++
+        const mutated=code.replace(anchor,'background: theme.black, color: theme.foreground')
+        await fs.writeFile(path.join(evidence,'appearance-mutant.tsx'),mutated)
+        return {code:mutated,map:null}
+      }
       if(providerMutant&&file.endsWith('/components/settings/SettingsResourceLibrary.tsx')) {
         const anchor='left: direction * list.current.clientWidth * .75'
         assert.equal(code.split(anchor).length,2,'One actual provider scroll control')
@@ -109,7 +119,12 @@ try {
   await fs.writeFile(path.join(visual,'stderr.log'),stderr.join('\n'))
   const render = JSON.parse(await fs.readFile(path.join(visual,'render.json'),'utf8'))
   assert.equal(capture.timedOut,false)
-  if (takeoverMutant) {
+  if (appearanceMutant) {
+    assert.equal(appearanceMutationLoads,1,'The actual terminal sample mutant was consumed once')
+    assert.equal(capture.exitCode,1)
+    assert.equal(render.failure?.name,'AssertionError')
+    assert.match(render.failure.message,/Workspace terminal sample text keeps readable contrast/u)
+  } else if (takeoverMutant) {
     assert.equal(capture.exitCode,1)
     assert.equal(render.failure?.name,'AssertionError')
     assert.match(render.failure.message,/Compact takeover preview (does not cover|leaves) the original fine tuning control/u)
