@@ -1,4 +1,5 @@
 import { markProgrammaticReadingScroll } from './reading-scroll.js'
+import { selectedConversationReadingNode } from './conversation-reading-anchor.js'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useClientUiOwnerDocument } from '../platform.js'
 import { ConversationBodyWork, conversationReadingNode, conversationScrollParent, type ConversationReadingGeometry } from './conversation-body-work.js'
@@ -64,11 +65,17 @@ function currentAnchor(root: HTMLElement | null) {
   if (!viewport || !root) return null
   const bounds = viewport.getBoundingClientRect()
   if (bounds.height <= 0) return null
-  for (const node of root.querySelectorAll<HTMLElement>('[data-conversation-layout-key]')) {
+  const anchorFor = (node: HTMLElement) => {
     const rect = readingNode(node)?.getBoundingClientRect()
-    if (!rect) continue
-    if (rect.height > 0 && rect.bottom > bounds.top && rect.top < bounds.bottom)
-      return { viewport, key: node.dataset.conversationLayoutKey!, offset: rect.top - bounds.top }
+    return rect && rect.height > 0 && rect.bottom > bounds.top && rect.top < bounds.bottom
+      ? { viewport, key: node.dataset.conversationLayoutKey!, offset: rect.top - bounds.top } : null
+  }
+  const selected = selectedConversationReadingNode(root, '[data-conversation-layout-key]', node => anchorFor(node) !== null,
+    () => root.querySelectorAll<HTMLElement>('[data-conversation-layout-key]'))
+  if (selected) return anchorFor(selected)
+  for (const node of root.querySelectorAll<HTMLElement>('[data-conversation-layout-key]')) {
+    const anchor = anchorFor(node)
+    if (anchor) return anchor
   }
   return null
 }

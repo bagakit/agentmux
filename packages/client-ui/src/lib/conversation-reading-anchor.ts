@@ -1,8 +1,37 @@
 type ReadingAnchor = { kind: 'record' | 'group' | 'segment'; id: string; offset: number }
+/** Prefer a visible selected original; endpoint checks never scan the reading window. */
+export function selectedConversationReadingNode(root: HTMLElement, selector: string,
+  visible: (node: HTMLElement) => boolean, candidates: () => Iterable<Element>): HTMLElement | null {
+  const selection = root.ownerDocument.defaultView?.getSelection()
+  if (!selection || selection.isCollapsed || !selection.rangeCount) return null
+  // Element/offset endpoints can name a process container; it is not an original leaf.
+  const isLeaf = (node: HTMLElement) => !node.hasAttribute('data-conversation-process-key') && !node.hasAttribute('data-native-record-ids')
+  const range = selection.getRangeAt(0), node = range.startContainer
+  const element = node.nodeType === 1 ? node as Element : node.parentElement
+  const selected = element?.closest<HTMLElement>(selector)
+  if (selected && isLeaf(selected) && root.contains(selected) && visible(selected)) return selected
+  const end = range.endContainer.nodeType === 1 ? range.endContainer as Element : range.endContainer.parentElement
+  const last = end?.closest<HTMLElement>(selector)
+  if (last && isLeaf(last) && root.contains(last) && visible(last)) return last
+  let first: HTMLElement | null = null
+  for (const candidate of candidates()) {
+    const row = candidate.closest<HTMLElement>(selector)
+    // A group header can intersect a crossing Range without being its readable leaf.
+    if (!row || !isLeaf(row) || !root.contains(row)) continue
+    if (first && !(row.compareDocumentPosition(first) & 4)) continue
+    try { if (!range.intersectsNode(row)) continue } catch { continue }
+    if (visible(row)) first = row
+  }
+  return first
+}
 export function conversationReadingAnchor(viewport: HTMLElement, observedScope?: HTMLElement | null, nativeOnly = false, visibleShells?: Iterable<Element>): ReadingAnchor | null {
   const bounds = viewport.getBoundingClientRect()
   if (bounds.height <= 0) return null
   const selector = nativeOnly ? '[data-native-record-id], [data-native-record-ids]' : '[data-segment-key], [data-native-record-id], [data-native-record-ids]'
+  const selected = selectedConversationReadingNode(viewport, selector, row => anchorFromRows([row], bounds) !== null,
+    () => visibleShells ?? (observedScope ?? viewport).querySelectorAll<HTMLElement>(selector))
+  const selectedAnchor = selected && anchorFromRows([selected], bounds)
+  if (selectedAnchor) return selectedAnchor
   if (visibleShells) {
     // The host already observes these shells for its visible reading band. Reuse
     // those candidates rather than measuring every earlier record on scroll.
