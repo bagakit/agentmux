@@ -18,6 +18,12 @@ export const AGENTMUX_NOTE_EDITING_PATH = `## Edit an authorized Note
    file share inspect or notebook inspect --operation-id as appropriate; never automatically
    resend a write or infer its earlier receipt from matching current content.
 
+Diagram source stays in fenced code blocks with language mermaid, drawio, dot/gv or
+plantuml/puml; drawio content is its original XML. Inline math uses $expression$ and display
+math uses $$ delimiter lines. Escape literal dollars or use inline/fenced code. Preserve
+formula source and anchors when editing; render failures do not invalidate saved source.
+Previews are client projections and are not stored SVG/HTML or graphical-editing receipts.
+
 Read the matching leaf --help for arguments and receipt fields; amux notebook --help expands
 the original content, link, follow and history contracts.`
 
@@ -51,8 +57,8 @@ A minimal Note body is:
     Original text. ^block1
 
 Preserve the note-id, existing block anchors, occurrence IDs and exact bound targets.
-A paragraph or heading has a trailing ^blockID; code, quotation containers and rules use
-a separate ^blockID line after the original block. A list item has its own
+A paragraph or heading has a trailing ^blockID; code, display math, quotation containers
+and rules use a separate ^blockID line after the original block. A list item has its own
 <!--amux-item:itemID--> marker as well as its child paragraph's anchor. Empty paragraphs
 use <!--amux-empty:blockID-->. IDs in markers and note: targets use URI component encoding;
 encode -- inside comment fields too, and decode once. Never derive identity from names or content.
