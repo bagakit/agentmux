@@ -3,7 +3,7 @@ import type { ChannelQuoteRecord, ChannelTranscriptQuote, ConnectionConfig } fro
 import type { DiscordClients } from './client.js'
 import { discordConfig, discordId } from './protocol.js'
 
-type Request = { externalConversationId: string; range: ChannelTranscriptQuote['range']; knownThreadIds?: string[] }
+type Request = { externalConversationId: string; range: ChannelTranscriptQuote['range']; knownThreadIds?: string[]; assertCurrent?(): void }
 const timestamp = (value: unknown): number | undefined => typeof value === 'string' && Number.isSafeInteger(Date.parse(value)) ? Date.parse(value) : undefined
 
 /** A Discord thread has its own channel identity and Binding; it is not an implicit parent audience. */
@@ -25,10 +25,11 @@ export function createDiscordHistory(clients: DiscordClients) {
       if (input.knownThreadIds?.some(id => id !== channelId)) gap('thread-scope-unconfirmed')
       if (BigInt(lowerId) > BigInt(throughId)) { gap('range-order-unconfirmed'); return finish() }
       const rest = clients.rest(config, credential)
+      input.assertCurrent?.(); signal.throwIfAborted()
       const application = await rest.get('/oauth2/applications/@me', { signal }) as { id?: string; flags?: number; bot?: { id?: string } }
       if (application.id !== config.application.appId || !application.bot?.id) { gap('native-application-mismatch'); return finish() }
       const get = async (id: string) => {
-        signal.throwIfAborted()
+        input.assertCurrent?.(); signal.throwIfAborted()
         const row = await rest.get(`/channels/${channelId}/messages/${id}`, { signal }) as APIMessage
         if (row.id !== id || row.channel_id !== channelId) throw Error('Native anchor mismatch')
         return row
@@ -57,7 +58,7 @@ export function createDiscordHistory(clients: DiscordClients) {
       let before = throughId, reached = false
       const ids = new Set<string>()
       while (!reached) {
-        signal.throwIfAborted()
+        input.assertCurrent?.(); signal.throwIfAborted()
         const response = await rest.get(`/channels/${channelId}/messages`, { query: new URLSearchParams({ before, limit: '100' }), signal })
         if (!Array.isArray(response)) { gap('native-history-unconfirmed'); break }
         if (response.length === 0) { gap('from-anchor-missing'); break }
