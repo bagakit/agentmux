@@ -149,7 +149,7 @@ export const ConversationView = memo(function ConversationView({
       onOpenChange: open => setSubmissionChoice(choiceKey, open)
     } : undefined
     return renderCapturedRecord ? renderCapturedRecord(record, disclosure, submissionDisclosure) : record.role === 'process' || record.role === 'interaction'
-      ? <CapturedProcessRecord record={record} {...(disclosure ? { disclosure } : {})} located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source)} /> : <CapturedConversationMessage
+      ? <CapturedProcessRecord record={record} {...(reading.workspaceRoot ? { workspaceRoot: reading.workspaceRoot } : {})} {...(disclosure ? { disclosure } : {})} located={locatedMessageKey === conversationMessageSourceKey(sessionId, record.source)} /> : <CapturedConversationMessage
         item={record.original.kind === 'captured' ? record.original.item : neverCaptured()} record={record}
         {...(submissionDisclosure ? { submissionDisclosure } : {})}
         {...(record.role === 'observation' ? { replyObservation: { compact: true } } : {})}

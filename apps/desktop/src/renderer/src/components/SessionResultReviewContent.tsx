@@ -5,7 +5,7 @@ import type { AgentTimelineItem } from '../../../shared/contracts'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { parseHttpLinkUrl } from '@agentmux/client-ui/link-url'
 import { type OpenHttpLinkOrigin } from '../lib/open-destination'
-import { toolCallToDiff, parseUnifiedDiff } from '../lib/activity-diff'
+import { capturedToolEdit } from '@agentmux/core/conversation'
 import { workspaceRelativeGitPath } from '../lib/git-path-coordinates'
 import { resolveWorkspaceRelativePath } from '@agentmux/client-ui/terminal-path-link'
 import { workspaceForSession } from '../lib/workbench-tabs'
@@ -24,11 +24,7 @@ function resultTargets(items: readonly AgentTimelineItem[]): { diffPath: string 
   let diffPath: string | null = null
   const previewUrls: string[] = []
   for (const item of [...items].reverse()) {
-    const payload = item.toolInput ?? (item.kind === 'tool_call' ? item.content : undefined)
-    if (!diffPath && payload) {
-      const diff = (item.toolInput ? toolCallToDiff(item.title, item.toolInput) : null) ?? parseUnifiedDiff(payload)
-      if (diff?.filePath) diffPath = diff.filePath
-    }
+    if (!diffPath) diffPath = capturedToolEdit(item)?.filePath ?? null
     for (const match of (item.content ?? '').matchAll(/https?:\/\/[^\s)<>]+/ig)) {
       const parsed = parseHttpLinkUrl(match[0])
       if (parsed && !previewUrls.includes(parsed)) previewUrls.push(parsed)
