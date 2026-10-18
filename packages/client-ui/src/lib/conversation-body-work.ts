@@ -11,7 +11,7 @@ export type ConversationReadingGeometry = {
   /** Desktop can retain a terminal segment outside the shared record sequence. */
   captureAnchor?(): void
   restoreAnchor?(): void
-  onLayout?(): void
+  onLayout?(cause?: 'resize'): void
 }
 type Body = { node: HTMLElement; mount(): void }
 type Anchor = { node: HTMLElement; viewport: HTMLElement; offset: number }
@@ -70,7 +70,7 @@ export class ConversationBodyWork {
     }
     const Resize = view?.ResizeObserver
     if (Resize) {
-      this.resize = new Resize(() => { if (valid() && owner.visibilityState !== 'hidden') { this.restore(); this.schedule() } })
+      this.resize = new Resize(() => { if (valid() && owner.visibilityState !== 'hidden') { this.restore('resize'); this.schedule() } })
       this.resize.observe(root)
       const content = geometry?.content?.()
       if (content && content !== root) this.resize.observe(content)
@@ -139,7 +139,7 @@ export class ConversationBodyWork {
     if (first) { this.anchor = first; this.anchorCaptured = true }
     return Boolean(first)
   }
-  restore(): void {
+  restore(cause?: 'resize'): void {
     if (!this.available()) return
     if (this.geometry?.following()) this.geometry.pinToBottom()
     else if (this.geometry?.restoreAnchor) this.geometry.restoreAnchor()
@@ -148,7 +148,7 @@ export class ConversationBodyWork {
       const delta = node.getBoundingClientRect().top - viewport.getBoundingClientRect().top - offset
       if (delta) { viewport.scrollTop += delta; markProgrammaticReadingScroll(viewport) }
     }
-    this.geometry?.onLayout?.()
+    this.geometry?.onLayout?.(cause)
   }
   committed(node: HTMLElement): void {
     this.restore()
