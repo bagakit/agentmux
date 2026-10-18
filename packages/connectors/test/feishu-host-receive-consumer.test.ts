@@ -37,14 +37,14 @@ it('the actual SDK callback joins original durable intake, Core queue, mounted M
   let timeline = await f.client.sessionTimeline(f.input.agentSessionId)
   await vi.waitFor(async () => {
     timeline = await f.client.sessionTimeline(f.input.agentSessionId)
-    expect(timeline.items.find(item => item.id === `prompt:${input.messageId}`)?.authorExternal).toEqual(input.author)
+    expect(timeline.items.find(item => item.inputRef?.kind === 'message' && item.inputRef.messageId === input.messageId)?.authorExternal).toEqual(input.author)
   })
   expect(f.inner.kernel.input).toHaveBeenCalledOnce()
-  const recorded = timeline.items.find(item => item.id === `prompt:${input.messageId}`)!
-  const read = await mountedMailbox(f.session, timeline, recorded.id)
+  const recorded = timeline.items.find(item => item.inputRef?.kind === 'message' && item.inputRef.messageId === input.messageId)!
+  const read = await mountedMailbox(f.session, f.client, recorded.inputRef!, timeline)
   expect(read.detail.dataset.speakerRole).toBe('external')
   for (const fact of [feishuConfig.application.domain, feishuConfig.application.appId, 'open_id', 'original-external-user', 'original-room', 'platform-message']) expect(read.detail.textContent).toContain(fact)
-  await read.copyOriginal(); expect(read.copy).toHaveBeenCalledWith(recorded.content)
+  await read.copyOriginal(); expect(read.copy).toHaveBeenCalledWith(read.original.admission!.intent!.prompt)
   expect(recorded.content).toContain(original!.envelope.body)
   const server = new core.AgentMuxControlServer({ socketPath: join(f.root, 'feishu.sock'), connections: f.connections, coreClients: f.coreClients })
   await server.start(); cleanup.push(() => server.stop())
@@ -188,12 +188,12 @@ it('Desktop default registration receives an exact SDK reply after durable ACK t
   let timeline = await original.client.sessionTimeline(original.session.agentSessionId)
   await vi.waitFor(async () => {
     timeline = await original.client.sessionTimeline(original.session.agentSessionId)
-    expect(timeline.items.find(item => item.id === `prompt:${input.messageId}`)?.authorExternal).toEqual(input.author)
+    expect(timeline.items.find(item => item.inputRef?.kind === 'message' && item.inputRef.messageId === input.messageId)?.authorExternal).toEqual(input.author)
   })
-  const record = timeline.items.find(item => item.id === `prompt:${input.messageId}`)!, rendered = await mountedMailbox(original.session, timeline, record.id)
+  const record = timeline.items.find(item => item.inputRef?.kind === 'message' && item.inputRef.messageId === input.messageId)!, rendered = await mountedMailbox(original.session, original.client, record.inputRef!, timeline)
   expect(rendered.detail.dataset.speakerRole).toBe('external')
   expect(rendered.detail.textContent).toContain(feishuConfig.application.appId)
-  await rendered.copyOriginal(); expect(rendered.copy).toHaveBeenCalledWith(record.content)
+  await rendered.copyOriginal(); expect(rendered.copy).toHaveBeenCalledWith(rendered.original.admission!.intent!.prompt)
   const row = services.database!.prepare('SELECT raw_payload,event_json FROM connection_ingress_event').get()!
   expect(JSON.parse(String(row.raw_payload))).toEqual(payload)
   expect(JSON.parse(String(row.event_json))).toMatchObject({ selection: 'message', replyToMessageId: 'original-parent' })
