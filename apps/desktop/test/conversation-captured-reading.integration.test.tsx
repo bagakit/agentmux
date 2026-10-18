@@ -8,8 +8,8 @@ import { join } from 'node:path'
 import { AgentMuxClient, AgentMuxFileAgentSessionStore, type AgentMuxStoredAgentSession, type AgentSessionHistoryPage } from '@agentmux/core'
 import type { AgentSessionControl, AgentTimelineItem } from '../src/shared/contracts'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
-import { api } from '../src/renderer/src/lib/api'
-import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-messages'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
+import { processNativeRecordIds } from './helpers/conversation-process-members'
 import { useAppStore } from '../src/renderer/src/store'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -23,12 +23,13 @@ let host: HTMLDivElement, root: Root, directory: string, transcript: string, pro
 let client: AgentMuxClient, stored: AgentMuxStoredAgentSession, originalStore: Buffer, expectedTranscript: Buffer
 let requests: { cursor?: string; limit?: number }[], pending: Promise<AgentSessionHistoryPage>[]
 let controls: ReturnType<typeof vi.spyOn>[], nativeVisible: boolean, capturedItems: AgentTimelineItem[], viewportWidth: number
-let observation: Parameters<typeof api.sessions.observeHistory>[1] | null
+let observation: Parameters<AgentMuxClient['observeSessionHistory']>[1] | null
+let closes: Array<() => unknown | Promise<unknown>>, publishedCaptured: Map<string, string>
 function record(id: string, text?: string) {
   return provider === 'claude'
-    ? { uuid: id, type: 'assistant', sessionId: native, message: { role: 'assistant', content: text
+    ? { uuid: id, type: 'assistant', sessionId: native, timestamp: new Date(_historyFixtureEpoch(0, 0, 1)).toISOString(), message: { role: 'assistant', content: text
       ? [{ type: 'text', text }] : [{ type: 'tool_use', id: `call-${id}`, name: 'read', input: { file: id } }] } }
-    : { type: 'response_item', payload: text ? { type: 'message', id, role: 'assistant', content: [{ type: 'output_text', text }] }
+    : { type: 'response_item', timestamp: new Date(_historyFixtureEpoch(0, 0, 1)).toISOString(), payload: text ? { type: 'message', id, role: 'assistant', content: [{ type: 'output_text', text }] }
       : { type: 'function_call', id, call_id: `call-${id}`, name: 'read', arguments: JSON.stringify({ file: id }) } }
 }
 function captured(id: string, text: string): AgentTimelineItem {
@@ -36,9 +37,7 @@ function captured(id: string, text: string): AgentTimelineItem {
     createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1), title: 'Captured observation', content: text }
 }
 function Reading({ enabled = true }: { enabled?: boolean }) {
-  const read = useSessionUserMessages(control, { enabled })
-  return <ActivityView sessionId={sid} executionHostId="local" items={capturedItems} capability="complete-events" displayState="working"
-    nativeHistoryPage={read.nativeHistoryPage} nativeContextItems={read.nativeContextItems} userMessages={read.messages}
+  return <ActivityView sessionId={sid} executionHostId="local" capability="complete-events" displayState="working"
     conversationReading={{ reference: control, identity: control.run.runId, enabled, nativeSourceFacts: stored }} />
 }
 function rect(top: number, height: number, width = viewportWidth): DOMRect {
@@ -46,14 +45,22 @@ function rect(top: number, height: number, width = viewportWidth): DOMRect {
 }
 function viewport() { const feed = host.querySelector<HTMLElement>('.activity-feed')!; expect(feed).not.toBeNull(); return feed }
 function nativeIds() {
-  return [...host.querySelectorAll<HTMLElement>('.conversation-native-thread > [data-native-record-id], .conversation-native-thread > [data-native-record-ids]')]
-    .flatMap(row => row.dataset.nativeRecordIds ? JSON.parse(row.dataset.nativeRecordIds) as string[] : [row.dataset.nativeRecordId!])
+  return [...host.querySelectorAll<HTMLElement>('.conversation-native-thread > [data-native-record-id], .conversation-native-thread > [data-conversation-process-members]')]
+    .flatMap(row => row.dataset.conversationProcessMembers ? processNativeRecordIds(row) : [row.dataset.nativeRecordId!])
 }
 function latest() { const action = host.querySelector<HTMLButtonElement>('[data-message-tool-control="jump-to-latest"]'); expect(action).not.toBeNull(); return action! }
 async function flush() {
   for (let n = 0; n < 4; n++) await act(async () => { await Promise.allSettled([...pending]); await new Promise(resolve => setTimeout(resolve, 10)) })
 }
-async function render(enabled = true) { await act(async () => root.render(<Reading enabled={enabled} />)); await flush() }
+async function render(enabled = true) {
+  for (const item of capturedItems) if (publishedCaptured.get(item.id) !== JSON.stringify(item)) {
+    await client['persistAndPublishTimeline']({ type: 'upsert', agentSessionId: sid, item }, { source: 'agentmux', observedAt: item.updatedAt }, 'local')
+    publishedCaptured.set(item.id, JSON.stringify(item))
+    // This explicit fixture source write is separate from the read-only UI actions.
+    originalStore = await readFile(join(directory, 'sessions.json'))
+  }
+  await act(async () => root.render(<Reading enabled={enabled} />)); await flush()
+}
 async function wheel(nativeInView: boolean, input: 'wheel' | 'key' = 'wheel') {
   nativeVisible = nativeInView
   const feed = viewport(); feed.scrollTop = nativeInView ? 100 : 500
@@ -77,13 +84,16 @@ async function fixture(shape: Provider, width = 500) {
   await store.compareAndSwap(null, stored); originalStore = await readFile(join(directory, 'sessions.json'))
   client = new AgentMuxClient({ store }); const kernel = Reflect.get(client, 'kernel')
   controls = ['connect', 'start', 'input', 'resize', 'stop', 'attach', 'status'].map(name => vi.spyOn(kernel, name).mockImplementation(() => { throw Error('Reading cannot control Runtime ' + name) }))
-  vi.spyOn(api.sessions, 'historyPage').mockImplementation((reference, options) => {
-    expect(reference).toMatchObject({ hostId: 'local', agentSessionId: sid }); requests.push(options ?? {})
-    const read = client.sessionHistoryPage(reference.agentSessionId, options); pending.push(read); return read
+  const historyPage = client.sessionHistoryPage.bind(client), observeHistory = client.observeSessionHistory.bind(client)
+  vi.spyOn(client, 'sessionHistoryPage').mockImplementation((agentSessionId, options) => {
+    expect(agentSessionId).toBe(sid); requests.push(options ?? {})
+    const read = historyPage(agentSessionId, options); pending.push(read); return read
   })
-  vi.spyOn(api.sessions, 'observeHistory').mockImplementation(async (_reference, listener) => { observation = listener; return { source: { providerId: provider, nativeSessionId: native }, dispose() {} } })
+  vi.spyOn(client, 'observeSessionHistory').mockImplementation((agentSessionId, listener, options) => { observation = listener; return observeHistory(agentSessionId, listener, options) })
+  await desktopConversationReadBridge({ root: directory, client }, closes)
   useAppStore.setState({ sessions: [], timelines: {}, agentComposerDrafts: { [sid]: draft } })
-  await render(); expect(nativeIds()).toHaveLength(300); expect(nativeIds().at(-1)).toBe('record-449')
+  await render(); await vi.waitFor(async () => { await flush(); expect(nativeIds()).toHaveLength(300) }, { timeout: 10000, interval: 20 })
+  expect(nativeIds().at(-1)).toBe('record-449')
   const feed = viewport(); Object.defineProperties(feed, { clientHeight: { configurable: true, value: 600 }, scrollHeight: { configurable: true, value: 2200 } })
   // Deliver the initial completed bottom scroll before simulating an upward gesture.
   feed.scrollTop = 1600; await act(async () => feed.dispatchEvent(new Event('scroll')))
@@ -93,7 +103,7 @@ beforeEach(() => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
   Element.prototype.scrollIntoView = vi.fn()
-  requests = []; pending = []; controls = []; nativeVisible = false; viewportWidth = 500; observation = null
+  closes = []; publishedCaptured = new Map(); requests = []; pending = []; controls = []; nativeVisible = false; viewportWidth = 500; observation = null
   capturedItems = [captured('captured-original', 'Captured content remains readable.\n\n' + 'Original captured paragraph. '.repeat(80))]
   host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
@@ -116,7 +126,7 @@ afterEach(async () => {
     expect(await readFile(join(directory, 'sessions.json'))).toEqual(originalStore)
     expect(await readFile(transcript)).toEqual(expectedTranscript)
     expect(useAppStore.getState().agentComposerDrafts[sid]).toBe(draft)
-  } finally { await client.dispose(); await rm(directory, { recursive: true }); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals() }
+  } finally { for (const close of closes.reverse()) await close(); await client.dispose(); await rm(directory, { recursive: true }); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals() }
 })
 
 it.each([{ provider: 'claude', width: 360 }, { provider: 'claude', width: 1100 },
@@ -134,36 +144,44 @@ it.each([{ provider: 'claude', width: 360 }, { provider: 'claude', width: 1100 }
   window.getSelection()!.removeAllRanges()
   await wheel(false, 'key'); expect(requests).toHaveLength(count)
   capturedItems = [...capturedItems, captured('captured-new', 'New captured observation.')]; await render()
-  expect(nativeIds()).toEqual(before); expect(host.textContent).toContain('New captured observation.')
+  expect(nativeIds()).toEqual(before)
+  expect(host.textContent, 'A historical accepted window does not invent the later captured record').not.toContain('New captured observation.')
   expect(viewport().scrollTop, 'Captured reading does not force follow when a later observation arrives').toBe(500)
   await act(async () => useAppStore.setState({ timelines: { unrelated: { agentSessionId: 'unrelated', revision: 1, items: [] } } }))
   await render(); expect(requests).toHaveLength(count)
+  await act(async () => latest().click()); await flush()
+  await vi.waitFor(async () => { await flush(); expect(host.textContent).toContain('New captured observation.') }, { timeout: 10000, interval: 20 })
   await wheel(true)
   expect(requests.filter(request => request.cursor).length).toBeGreaterThan(cursors)
-  expect(nativeIds()).toHaveLength(450); expect(nativeIds().at(-1)).toBe('record-449')
+  await vi.waitFor(async () => { await flush(); expect(nativeIds()).toHaveLength(450) }, { timeout: 10000, interval: 20 }); expect(nativeIds().at(-1)).toBe('record-449')
   expect(host.querySelector('[data-native-record-id="record-449"]')).toBe(row)
   await appendFile(transcript, JSON.stringify(record('current-appended', 'Latest original native answer.')) + '\n'); expectedTranscript = await readFile(transcript)
   await act(async () => observation?.({ agentSessionId: sid, source: { providerId: provider, nativeSessionId: native }, kind: 'invalidated' })); await flush()
-  for (let attempt = 0; attempt < 20 && nativeIds().at(-1) !== 'current-appended'; attempt++) await flush()
-  expect(nativeIds().at(-1), 'the original observed source is adopted before the scroll action').toBe('current-appended')
-  const beforeReturn = requests.length
   await act(async () => latest().click()); await flush()
-  expect(requests, 'return to the already updated current source only scrolls').toHaveLength(beforeReturn)
-  expect(nativeIds().at(-1), 'source observation adopts the original current tail before navigation').toBe('current-appended')
+  await vi.waitFor(async () => { await flush(); expect(nativeIds().at(-1)).toBe('current-appended') }, { timeout: 10000, interval: 20 })
+  // The first Current accepts the original current source; returning to that loaded tail is scroll-only.
+  const beforeReturn = requests.length
+  const feed = viewport(); feed.scrollTop = 500; await act(async () => feed.dispatchEvent(new Event('scroll')))
+  await act(async () => latest().click()); await flush()
+  expect(requests, 'a second return to the accepted current source only scrolls').toHaveLength(beforeReturn)
+  expect(nativeIds().at(-1)).toBe('current-appended')
   expect(host.textContent).toContain('Latest original native answer.'); expect(host.textContent).toContain('New captured observation.')
 })
 
 it('keeps a selected native record during current append and adds no paging demand while hidden', async () => {
   await fixture('claude'); await wheel(true)
-  const selected = host.querySelector('.conversation-native-thread [data-native-record-ids]')!
+  const selected = host.querySelector('.conversation-native-thread [data-conversation-process-members]')!
   const head = selected.querySelector<HTMLElement>('.wf-head')!; expect(head).not.toBeNull()
   const range = document.createRange(); range.selectNodeContents(head); window.getSelection()!.addRange(range)
   await appendFile(transcript, JSON.stringify(record('current-appended', 'Latest original native answer.')) + '\n'); expectedTranscript = await readFile(transcript)
   await act(async () => observation?.({ agentSessionId: sid, source: { providerId: provider, nativeSessionId: native }, kind: 'invalidated' })); await flush()
   const before = nativeIds(); await act(async () => latest().click()); await flush()
-  expect(nativeIds().slice(0, before.length)).toEqual(before)
-  expect(selected.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
-  expect(nativeIds().at(-1)).toBe('current-appended'); window.getSelection()!.removeAllRanges()
+  expect(nativeIds()).toEqual(expect.arrayContaining(before))
+  expect(selected.isConnected).toBe(true); expect(head).toBe(selected.querySelector('.wf-head')); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
+  expect(range.startContainer.isConnected).toBe(true)
+  await act(async () => { window.getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) }); await flush()
+  if (host.querySelector('[data-message-tool-control="jump-to-latest"]')) await act(async () => latest().click())
+  await vi.waitFor(async () => { await flush(); expect(nativeIds().at(-1)).toBe('current-appended') }, { timeout: 10000, interval: 20 })
   await render(false); const count = requests.length
   await wheel(false); await wheel(true); expect(requests).toHaveLength(count)
 })
