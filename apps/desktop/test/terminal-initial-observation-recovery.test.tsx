@@ -6,6 +6,7 @@ import type { Terminal as BrowserTerminal } from '@xterm/xterm'
 import { readFile, writeFile } from 'node:fs/promises'
 import { readFileSync, writeFileSync, appendFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { inspect } from 'node:util'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxFileAgentSessionStore, AgentMuxError } from '@agentmux/core'
 import { createWorkspaceLayout } from '@agentmux/layout'
@@ -14,6 +15,8 @@ import { bridge, owningBridge } from './fixtures/terminal-observation-bridge'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { TerminalView } from '../src/renderer/src/components/TerminalView'
+import { TuiToolkitResult } from '../src/renderer/src/components/toolkit/TuiToolkitResult'
+import type { ToolkitScriptSnapshot } from '@agentmux/core/control'
 import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { readTerminalViewObservation } from '../src/renderer/src/lib/terminal-view-observation'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
@@ -87,7 +90,9 @@ afterEach(async () => {
   useAppStore.persist.setOptions(persistenceOptions)
   await act(async () => root?.unmount())
   release?.(); release = undefined
-  try { await owner?.dispose() } finally { await scope?.cleanup() }
+  try { await owner?.dispose() }
+  catch (error) { resource({ event: 'cleanup-error', detail: inspect(error, { depth: 8 }) }); throw error }
+  finally { await scope?.cleanup() }
   resource({ event: 'released', root: scope?.root, nativePid: scope?.nativeProcessId, ownerPid: scope?.ownerProcess.pid })
   if (run?.pid) expect(() => process.kill(run.pid!, 0)).toThrow()
   useAppStore.setState(original, true)
@@ -140,6 +145,61 @@ const failure = (code = 'CONTROL_CONNECTION_FAILED') => new AgentMuxError('Origi
 function observation(session: SessionSnapshot) {
   return readTerminalViewObservation({ regionId: origin.regionId, sessionId: session.id, runId: session.control.run.runId })
 }
+
+async function mountToolkit(session: SessionSnapshot) {
+  useAppStore.setState({ config })
+  const definition = { id: 'private-tui', revision: 'original-definition', name: 'Private terminal', icon: 'terminal' as const,
+    mode: 'tui' as const, enabled: true, statusBar: 'icon' as const, workspacePath: scope.root, script: 'private captured command', args: [] }
+  const snapshot: ToolkitScriptSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'script', toolId: definition.id,
+    definition, state: 'running', reason: null, sequence: 1, consumerCount: 1, latestConfirmed: null,
+    admission: { executionId: 'private-execution', invocationId: 'private-invocation', definition, expectedLatestExecutionId: null,
+      target: { workspacePath: scope.root }, run: { hostId: session.hostId, runId: session.control.run.runId },
+      startedAt: session.createdAt, text: '', state: 'running', reason: null } }
+  const check = vi.fn(async () => {})
+  await act(async () => root.render(createElement(TuiToolkitResult, { definition, active: true,
+    reading: { snapshot, pending: false, error: '', sourceReason: '', check } })))
+  await until(() => fixture.terminals[0]?.textarea, Boolean, 'TUI mounted the shared original terminal')
+  return { terminal: fixture.terminals[0]!, check }
+}
+
+it('Toolkit Check status reconnects a failed original output in place without restarting or replacing xterm', async () => {
+  const session = await create('terminal'), client = owner.client as Awaited<ReturnType<typeof scope.client>>
+  const attach = vi.spyOn(owner.runtime, 'attachSession').mockRejectedValueOnce(failure('CONTROL_PROTOCOL_ERROR'))
+  const refresh = vi.spyOn(owner.runtime, 'refreshSessionAttachment')
+  const { terminal, check } = await mountToolkit(session)
+  await act(async () => await vi.waitFor(() => expect(container.querySelector('.terminal-service-window')?.textContent).toContain('Refresh observation')))
+  await act(async () => await wait(650))
+  expect(refresh).not.toHaveBeenCalled()
+  const input = terminal.textarea
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Check status"]')!.click())
+  await act(async () => await vi.waitFor(() => {
+    expect(Array.from({ length: terminal.buffer.active.length }, (_, index) => terminal.buffer.active.getLine(index)?.translateToString(true)).join('\n')).toContain('private-input-owner-ready')
+  }))
+  expect(check).toHaveBeenCalledOnce(); expect(refresh).toHaveBeenCalledOnce(); expect(attach).toHaveBeenCalledTimes(2)
+  expect(refresh.mock.calls[0]?.slice(0, 4)).toEqual([owner.sender.id, session.control, null, 0])
+  expect(fixture.terminals).toEqual([terminal]); expect(terminal.textarea).toBe(input)
+  expect(container.querySelector('.terminal-service-window')?.textContent ?? '').not.toContain('Attaching this Region')
+  await act(async () => { terminal.input('private-after-check', true) })
+  await bytes(Buffer.from('private-after-check'))
+  const original = await client.readRunReplay(session.control.run)
+  expect(original.run.pid).toBe(run.pid); expect(original.run.state).toBe('running')
+  expect(bridge.invoke.mock.calls.filter(call => ['toolkit:run', 'toolkit:stop', 'sessions:restart', 'sessions:recover'].includes(call[0]))).toEqual([])
+}, 15000)
+
+it('Toolkit Check status shares the original pending first attachment request', async () => {
+  const session = await create('terminal'), held = new Promise<void>(resolve => { release = resolve })
+  const originalAttach = owner.runtime.attachSession.bind(owner.runtime)
+  const attach = vi.spyOn(owner.runtime, 'attachSession').mockImplementation(async (...args) => { await held; return await originalAttach(...args) })
+  const refresh = vi.spyOn(owner.runtime, 'refreshSessionAttachment')
+  const { terminal } = await mountToolkit(session)
+  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Check status"]')!.click())
+  expect(attach).toHaveBeenCalledOnce(); expect(refresh).not.toHaveBeenCalled()
+  await act(async () => { release!(); release = undefined })
+  await act(async () => await vi.waitFor(() => {
+    expect(Array.from({ length: terminal.buffer.active.length }, (_, index) => terminal.buffer.active.getLine(index)?.translateToString(true)).join('\n')).toContain('private-input-owner-ready')
+  }))
+  expect(fixture.terminals).toEqual([terminal]); expect(attach).toHaveBeenCalledOnce(); expect(refresh).not.toHaveBeenCalled()
+}, 15000)
 
 it('automatically restores the original private PTY output through the mounted Main consumer without metadata scans, input or restart', async () => {
   const session = await create('agent'), client = owner.client as Awaited<ReturnType<typeof scope.client>>

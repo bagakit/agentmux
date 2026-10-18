@@ -5,6 +5,21 @@ import { relative, resolve } from 'node:path'
 import base from '../scripts/fixtures/settings-overview/vitest.config.mts'
 
 const edits = {
+  'observation-refresh': {
+    file: 'apps/desktop/src/renderer/src/components/toolkit/TuiToolkitResult.tsx',
+    before: ' onObservationRefresh={observeTerminalRefresh}',
+    after: ''
+  },
+  'check-lifetime': {
+    file: 'apps/desktop/src/renderer/src/components/toolkit/TuiToolkitResult.tsx',
+    before: 'if (lifetime !== checkLifetime.current) return',
+    after: ''
+  },
+  'check-target': {
+    file: 'apps/desktop/src/renderer/src/components/toolkit/TuiToolkitResult.tsx',
+    before: ' && currentRun.current?.hostId === run.hostId && currentRun.current.runId === run.runId',
+    after: ''
+  },
   'metadata-order': {
     file: 'apps/desktop/src/renderer/src/components/toolkit/TuiToolkitResult.tsx',
     before: 'generation === refreshGeneration.current && currentRun.current?.hostId',

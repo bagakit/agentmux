@@ -108,6 +108,40 @@ describe('TUI toolkit product presentation', () => {
     await act(async () => { older(original); await first })
     expect(terminal.mock.lastCall![0].session.processState).toBe('exited')
   })
+  it('retires a pending Check status with its original TUI view', async () => {
+    const reading = observe(running())
+    const refresh = vi.spyOn(api.sessions, 'refresh').mockResolvedValue(session())
+    await dom.render(<UserToolkitResult definition={definition()} active />)
+    const reconnect = vi.fn(async () => {})
+    const register = terminal.mock.lastCall![0].onObservationRefresh
+    register(reconnect)
+    let release!: (value: ToolkitScriptSnapshot) => void
+    vi.mocked(api.toolkit.get).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Check status"]')!.click())
+    await dom.render(<></>)
+    register(null)
+    await act(async () => { release(running()) })
+    expect(reading.dispose).toHaveBeenCalledOnce()
+    expect(refresh).toHaveBeenCalledOnce(); expect(reconnect).not.toHaveBeenCalled()
+  })
+  it('does not redirect a pending Check status to a replacement Run', async () => {
+    const reading = observe(running())
+    const original = session(), refresh = vi.spyOn(api.sessions, 'refresh').mockResolvedValue(original)
+    await dom.render(<UserToolkitResult definition={definition()} active />)
+    const previous = vi.fn(async () => {}), replacement = vi.fn(async () => {})
+    terminal.mock.lastCall![0].onObservationRefresh(previous)
+    let release!: (value: ToolkitScriptSnapshot) => void
+    vi.mocked(api.toolkit.get).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+    await act(async () => dom.container.querySelector<HTMLButtonElement>('[aria-label="Check status"]')!.click())
+    const next = running()
+    next.admission = { ...next.admission!, run: { hostId: 'local', runId: 'replacement-run' } }
+    refresh.mockResolvedValue({ ...original, id: 'replacement-run', control: { kind: 'terminal', hostId: 'local', runId: 'replacement-run', run: { runId: 'replacement-run' } } })
+    await act(async () => reading.publish(next))
+    terminal.mock.lastCall![0].onObservationRefresh(replacement)
+    await act(async () => { release(next) })
+    expect(refresh).toHaveBeenCalledTimes(2)
+    expect(previous).not.toHaveBeenCalled(); expect(replacement).not.toHaveBeenCalled()
+  })
   it('keeps an ordinary captured result in its original presenter when the saved mode changes to TUI', async () => {
     const original = definition('script')
     delete original.mode
