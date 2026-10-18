@@ -5,6 +5,7 @@ import { api } from '../../lib/api'
 import { useAppStore } from '../../store'
 import { usePerformanceObservation } from '../../lib/use-performance-observation'
 import { usePerformanceScene } from '../../lib/use-performance-scene'
+import { usePerformanceHeapSnapshot } from '../../lib/use-performance-heap-snapshot'
 import { SettingsNavigation } from '../SettingsNavigation'
 import { ToolkitPopover, type ToolkitPopoverSelection } from './PerformancePopover'
 import { PerformanceOverview } from './PerformanceOverview'
@@ -25,11 +26,12 @@ export const PerformancePanel = memo(function PerformancePanel(selection: Toolki
   const active = enabled && visible && selection.selectedToolId === 'performance' && !paused && !scriptOpen
   const observation = usePerformanceObservation(api.toolkit, active)
   const scene = usePerformanceScene(enabled && visible && selection.selectedToolId === 'performance')
+  const heap = usePerformanceHeapSnapshot()
   const changeVisible = useCallback((next: boolean) => { setVisible(next); if (!next) setScriptOpen(false) }, [])
   if (!enabled) return null
   return <ToolkitPopover {...selection} toolId="performance" name="Performance" icon={<ThemeObjectPerformanceIcon size={14} aria-hidden="true" />} label={layout === 'label'} onVisibleChange={changeVisible} focusKey={scriptOpen ? 'script' : 'overview'}>{close => scriptOpen
     ? <PerformanceScript api={api.toolkit} back={() => setScriptOpen(false)} close={close} />
-    : <PerformanceOverview {...observation} close={close} paused={paused} onPause={() => setPaused(value => !value)} scene={scene}
+    : <PerformanceOverview {...observation} close={close} paused={paused} onPause={() => setPaused(value => !value)} scene={scene} heap={heap}
       singleCaptureBusy={singleCaptureBusy} onSingleCaptureBusyChange={setSingleCaptureBusy}
       onViewScript={() => setScriptOpen(true)} onConfigure={() => { close(); settings.open('toolkit') }}
       onManageBrowsers={() => { close(); settings.open('browser') }} />}</ToolkitPopover>
