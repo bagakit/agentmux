@@ -442,7 +442,7 @@ it('opens the original cards task produced by actual Enrollment through Settings
   await waitStage('confirmed')
   const selected = setupCalls('connection.setup.inspect').find(call => (call.input as { operationId: string }).operationId === original.setupId && view(call)?.operation)!
   expect(view(selected).operation).toMatchObject({ operationId: original.setupId, goal: original.originalInput.goal, source: original.originalInput.source, initialPublication: original.originalInput.initialPublication })
-  expect(panel()?.textContent).toContain('Prepare your bot for conversations')
+  expect(panel()?.textContent).toContain('Bot setup')
   expect(panel()?.textContent).not.toContain('could not be matched')
   expect(setupCalls('connection.setup.begin')).toEqual([]); expect(setupCalls('connection.setup.advance')).toEqual([])
   expect(original.issuer.calls).toHaveLength(before); expect(original.issuer.creates).toBe(1)
