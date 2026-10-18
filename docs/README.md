@@ -11,6 +11,7 @@
 | 浏览研究与知识积累、创建和继续工作 | [Survey／Recall 工作流](design/behavior/knowledge-workflows.md)、[Launcher 工作起点](design/behavior/workface-launcher.md) |
 | 空间持久化、准确位置与跨视图导航怎样实现 | [空间状态与导航机制](architecture/spatial-state.md) |
 | 项目分层、身份与唯一事实 owner | [系统职责地图](architecture/system-ownership.md) |
+| CPU、内存与卡顿的证据 owner、分析链路和缺测 | [性能技术剖面](architecture/performance-diagnostics.md) |
 | 公开 API / CLI 的实际合同与接线来源 | [公共能力源码入口](specs/public-capabilities.md) |
 | Note Markdown、稳定块／引用与独立元数据 | [Note 文件格式与存储](specs/note-markdown.md) |
 | Note 中 Agent 与人的协同编辑、并发与历史回滚 | [协同编辑产品要求](design/behavior/knowledge-workflows.md#note-中-agent-与人的协同编辑) |

@@ -27,6 +27,25 @@ The client route Host and each original notification subject Host are separate i
 this is one registered client document, not an archive of all windows or Hosts.
 
 Metrics watch owns a reader; cancellation detaches that reader and never stops an Agent.
+For a performance technical profile, first separate process identity and interval CPU/RSS
+from Renderer sample weights, browser timeline events and object retention. Keep the loaded
+build, original PID/creation identity and each actual interval; sequential captures are not
+simultaneous evidence. Deduplicate source samples and do not add inclusive parent/child times.
+Use explicit profile/trace capture help for the exact current Renderer target. V8 samples do
+not cover all Main, native, worker or GPU work; a broad unknown share needs another relevant
+source, not a guessed owner. Renderer memory/backing counters overlap and are not an RSS bill.
+
+system metrics profile analyze --input FILE analyses one already-exported local cpuprofile
+without resolving or connecting to an endpoint, opening an App, sampling or uploading.
+It preserves the original byte hash and generated positions, reports original duration,
+weighted samples, last-sample tail/overrun and script/idle/GC/unattributed self weights.
+Those shares are not process CPU or a dropped-sample rate. Bare profiles do not verify a
+capture PID/build or original source map; join the original capture receipt separately.
+Top rows, caller paths and labels are bounded and report omissions; the original is unchanged.
+Keep names and URLs private. For deeper original-material analysis, explicitly load the
+profile in DevTools or a local speedscope viewer, and the timeline in DevTools/Perfetto.
+Do not upload material or fetch arbitrary source maps to explain a local capture.
+
 For a bounded explicit Web Animation instance read in one exact Renderer document, use
 system metrics animations inspect --help. It does not attach a debugger or alter animations;
 labels and play state are observations, not CPU ownership or Agent control facts.
