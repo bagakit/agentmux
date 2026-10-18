@@ -1,3 +1,4 @@
+import { mintObjectId } from './object-id.js'
 import { parseAgentExternalInteractionAuthor } from './external-author.js'
 import { parseAgentContinuityControlReceipts, type AgentMuxContinuityControlReceipt } from './agent-session-continuity-control.js'
 import { normalizeAgentContinuityOperation } from './agent-session-continuity.js'
@@ -14,7 +15,7 @@ import { agentSpawnIndexes, agentSpawnPage, parseAgentSpawnQuery, readAgentSpawn
   type AgentMuxSpawnPage, type AgentMuxSpawnQuery, type AgentMuxSpawnRecord } from './agent-spawn-query.js'
 import { assertCurrentAgentCapabilityBinding, type AgentCapabilityBinding } from './agent-capability.js'
 import { agentActivityTimelineItem } from './agent-activity-state.js'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { mkdir, open, readFile, unlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
@@ -2200,7 +2201,7 @@ function spawnRecord(phase: AgentMuxSpawnRecord['phase'], value: unknown): Agent
 }
 
 export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStore {
-  private readonly spawnQueryOwner = randomUUID()
+  private readonly spawnQueryOwner = mintObjectId()
   private readonly promptSubmissions = new Set<string>()
   private readonly sessions = new Map<string, AgentMuxStoredAgentSession>()
   private readonly promptAdmissions = new Map<string, AgentPromptSubmissionRecord>()
@@ -2602,7 +2603,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
   private memoryCaptured(id: string) {
     let history = this.timelines.get(id);
     if (!history) {
-      history = { stream: { epoch: randomUUID(), sequence: 0, revision: 0, origin: 'beginning' as const, gaps: [] }, heads: new Map(), versions: [] };
+      history = { stream: { epoch: mintObjectId(), sequence: 0, revision: 0, origin: 'beginning' as const, gaps: [] }, heads: new Map(), versions: [] };
       this.timelines.set(id, history);
     }
     return history;

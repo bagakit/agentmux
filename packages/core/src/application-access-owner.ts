@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { mintObjectId } from './object-id.js'
+import { createHash } from 'node:crypto'
 import { chmod, mkdir } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
@@ -151,7 +152,7 @@ export class AgentMuxApplicationAccessOwner {
     if (c.revision !== input.expectedRevision) return failure('APPLICATION_ACCESS_CONFIGURATION_CHANGED', 'Read the current application configuration before planning.')
     const [source,target] = await Promise.all([this.observe(c.profile.source,c.profile,'inspect',signal),this.observe(c.profile.target,c.profile,'inspect',signal)])
     if ((await this.configuration(c.profileId)).revision !== c.revision) return failure('APPLICATION_ACCESS_CONFIGURATION_CHANGED', 'Application configuration changed during observation. Inspect the current configuration again.')
-    const result: ApplicationAccessPlan = { planId: randomUUID(), profileId: c.profileId, configurationRevision: c.revision, createdAt: new Date().toISOString(), source, target, disposition: this.disposition(c.profile,source,target), accountId: c.profile.accountId, scopes: c.profile.scopes }
+    const result: ApplicationAccessPlan = { planId: mintObjectId(), profileId: c.profileId, configurationRevision: c.revision, createdAt: new Date().toISOString(), source, target, disposition: this.disposition(c.profile,source,target), accountId: c.profile.accountId, scopes: c.profile.scopes }
     ;(await this.db()).prepare('INSERT INTO plans VALUES(?,?)').run(result.planId, JSON.stringify(result))
     return result
   }

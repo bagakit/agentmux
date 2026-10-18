@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { mintObjectId } from './object-id.js'
+import { createHash } from 'node:crypto'
 import { chmod, mkdir, open, readFile, rename, unlink } from 'node:fs/promises'
 import { dirname } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
@@ -132,8 +133,8 @@ export async function openSessionDatabase(
     // durableWriteFile publishes only complete archives. An interrupted write leaves the source intact.
     await durableWriteFile(archive, raw, { mode: 0o600, requireDirectorySync: true })
   }
-  const candidate = `${path}.${process.pid}.${randomUUID()}.tmp`
-  const incarnation = randomUUID()
+  const candidate = `${path}.${process.pid}.${mintObjectId()}.tmp`
+  const incarnation = mintObjectId()
   let db: DatabaseSync | undefined
   let published = false
   try {

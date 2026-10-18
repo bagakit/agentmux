@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { mintObjectId } from './object-id.js'
+import { createHash } from 'node:crypto'
 import { chmod, mkdir, open, readFile, type FileHandle } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join } from 'node:path'
@@ -58,7 +59,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
     const identityPath = join(stateDirectory, 'semantic-runtime.json')
     // Explicit non-file Stores keep the existing Unix Host capability. Their owner
     // is ephemeral: no durable identity file can claim continuity for that data.
-    let runtimeId: string = randomUUID()
+    let runtimeId: string = mintObjectId()
     if (storePath !== null) try {
       const state = JSON.parse(await readFile(identityPath, 'utf8')) as { schema?: unknown; runtimeId?: unknown; authority?: unknown }
       if (state.schema !== 'agentmux.semantic-runtime.v1' || typeof state.runtimeId !== 'string' || !state.runtimeId || state.authority !== authority) throw new AgentMuxError(
@@ -66,10 +67,10 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       runtimeId = state.runtimeId
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
-      runtimeId = randomUUID()
+      runtimeId = mintObjectId()
       await durableWriteFile(identityPath, JSON.stringify({ schema: 'agentmux.semantic-runtime.v1', runtimeId, authority }) + '\n')
     }
-    const ownerInstanceId = randomUUID()
+    const ownerInstanceId = mintObjectId()
     const ownerIdentity = (): AgentMuxRuntimeOwnerIdentity => {
       let ctxmux: AgentMuxRuntimeOwnerIdentity['ctxmux'] = null
       try { ctxmux = client!.runtimeIdentity() }

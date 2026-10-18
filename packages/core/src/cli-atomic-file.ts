@@ -1,6 +1,6 @@
+import { mintObjectId } from './object-id.js'
 import { open, link, unlink } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
-import { randomUUID } from 'node:crypto'
 
 export type CliByteWriter = (chunk: Uint8Array) => Promise<void>
 /** The producer must await each write and finish its validation before resolving. */
@@ -8,7 +8,7 @@ export type CliFileProducer = (write: CliByteWriter) => Promise<void>
 
 /** Publish complete local bytes once; this path never crosses the RPC boundary. */
 export async function writeNewCliFile(path: string, content: string | CliFileProducer): Promise<{ path: string; bytes: number }> {
-  const destination = resolve(path), temporary = join(dirname(destination), `.amux-capture-${randomUUID()}.tmp`)
+  const destination = resolve(path), temporary = join(dirname(destination), `.amux-capture-${mintObjectId()}.tmp`)
   let created = false, bytes = 0
   try {
     const file = await open(temporary, 'wx', 0o600)

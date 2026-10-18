@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { mintObjectId } from './object-id.js'
 import type { DatabaseSync } from 'node:sqlite';
 import { AgentMuxError } from './errors.js';
 import { conversationRevision } from './conversation-timeline.js';
@@ -42,7 +42,7 @@ export function capturedStream(db: DatabaseSync, id: string): StreamRow | undefi
 }
 export function beginCapturedStream(db: DatabaseSync, id: string, witness: string | null): StreamRow {
   db.prepare("INSERT OR IGNORE INTO captured_streams VALUES (?,?,0,0,'preparing',?,'[]',?,NULL,0)")
-    .run(id, randomUUID(), witness === null ? 'beginning' : 'retained-prefix', witness);
+    .run(id, mintObjectId(), witness === null ? 'beginning' : 'retained-prefix', witness);
   return capturedStream(db, id)!;
 }
 export function readyCapturedStream(db: DatabaseSync, id: string, witness: string | null, revision: number, gaps: AgentCapturedTimelineStream['gaps']): void {

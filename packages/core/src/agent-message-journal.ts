@@ -1,4 +1,5 @@
-import { createHash, randomUUID } from 'node:crypto'
+import { mintObjectId } from './object-id.js'
+import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { chmod, copyFile, link, mkdir, open, rename, unlink } from 'node:fs/promises'
 import { constants } from 'node:fs'
@@ -248,7 +249,7 @@ async function hashFile(path: string): Promise<string> {
 
 async function archiveOriginal(path: string, sourceHash: string): Promise<string> {
   const archive = `${path}.original-${sourceHash}`
-  const candidate = `${archive}.${process.pid}.${randomUUID()}.tmp`
+  const candidate = `${archive}.${process.pid}.${mintObjectId()}.tmp`
   let failure: unknown
   try {
     // Publish only complete, flushed archives. A killed copy must not occupy the content-
@@ -328,8 +329,8 @@ export async function openMessageJournal(
     sourceHash = await hashFile(path)
     archive = await archiveOriginal(path, sourceHash)
   }
-  const candidate = `${path}.${process.pid}.${randomUUID()}.tmp`
-  const incarnation = randomUUID()
+  const candidate = `${path}.${process.pid}.${mintObjectId()}.tmp`
+  const incarnation = mintObjectId()
   let db: DatabaseSync | undefined
   let published = false
   try {

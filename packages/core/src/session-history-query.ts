@@ -1,4 +1,5 @@
-import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { mintObjectId } from './object-id.js'
+import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import parser from 'stream-json/parser.js'
 import type { Token } from 'stream-json/parser.js'
 import { AgentMuxError } from './errors.js'
@@ -208,7 +209,7 @@ export async function readAgentSessionHistoryQuery(owner: Reader, input: AgentSe
   let view = original ? entries.get(original.readId) : undefined
   if (original && (!view || view.scope !== scope || view.binding !== bindingOf(descriptor, input.source))) return fail('The original query window expired or its retained source changed. Read the first page again.')
   if (!view) {
-    const id = randomUUID()
+    const id = mintObjectId()
     if (input.source === 'captured') {
       if(!options.readCapturedHistory)return fail('Original captured history reader is unavailable.','AGENT_SESSION_HISTORY_CAPTURE_UNCONFIRMED')
       const firstCaptured=await options.readCapturedHistory(input.agentSessionId,{limit:100})

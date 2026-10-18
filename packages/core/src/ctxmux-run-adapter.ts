@@ -1,7 +1,8 @@
+import { mintObjectId } from './object-id.js'
 import { observeRead } from './observation-read.js'
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
 import type { RemoteCoreUpgradeNativeRun } from './remote-core-upgrade.js'
-import { createHash, randomUUID } from 'node:crypto'
+import { createHash } from 'node:crypto'
 import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, isAbsolute, join } from 'node:path'
 import { Socket } from 'node:net'
@@ -616,7 +617,7 @@ async function writeOwnerReceipt(
   runtime: RuntimeIdentity
 ): Promise<void> {
   const path = join(dirname(socketPath), 'owner.json')
-  const temporaryPath = join(dirname(path), `.owner-${process.pid}-${randomUUID()}.json`)
+  const temporaryPath = join(dirname(path), `.owner-${process.pid}-${mintObjectId()}.json`)
   try {
     await writeFile(
       temporaryPath,
@@ -1453,7 +1454,7 @@ export class CtxmuxRunAdapter {
     }
     return {
       daemonInstance: this.runtime.daemonInstanceId,
-      operationKey: operationKey ?? randomUUID(),
+      operationKey: operationKey ?? mintObjectId(),
       runId
     }
   }

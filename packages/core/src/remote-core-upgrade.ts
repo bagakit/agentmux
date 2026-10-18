@@ -61,7 +61,7 @@ const errorText = (error: unknown): string => error instanceof Error ? error.mes
 const wait = async (): Promise<void> => await new Promise(resolve => setTimeout(resolve, 250))
 const native = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
 function maintenanceScope(input: RemoteCoreUpgradeHost): string {
-  // A verified durable Runtime UUID is the authority, even when SSH uses another
+  // A verified durable Runtime identity is the authority, even when SSH uses another
   // DNS name, account or port. The admission still binds the complete route.
   return createHash('sha256').update(JSON.stringify(input.kind === 'ssh' && input.runtimeId ? { kind: 'ssh', runtimeId: input.runtimeId } : input.kind === 'ssh' ? {
     hostname: input.hostname, user: input.user ?? null, port: input.port ?? 22,

@@ -1,5 +1,5 @@
+import { mintObjectId } from './object-id.js'
 import { fork, type ChildProcess } from 'node:child_process'
-import { randomUUID } from 'node:crypto'
 import { chmod, link, lstat, mkdir, rm } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { Socket } from 'node:net'
@@ -87,7 +87,7 @@ export class ControlEndpointPublication {
       }
     }
     let path: string
-    do { path = join(dirname(this.path), randomUUID().replaceAll('-', '').slice(0, Math.min(12, Buffer.byteLength(basename(this.path))))) } while (path === this.path)
+    do { path = join(dirname(this.path), mintObjectId().slice(0, Math.min(12, Buffer.byteLength(basename(this.path))))) } while (path === this.path)
     const packagePath = findPackageJSON('@agentmux/core', import.meta.url)
     if (!packagePath) throw new AgentMuxError('The installed Core listener asset is unavailable.', 'CONTROL_UNAVAILABLE')
     const worker = join(dirname(packagePath), 'dist/control-endpoint-listener-worker.js')

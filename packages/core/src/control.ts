@@ -541,7 +541,7 @@ export type AgentMuxControlBrowserRunRequest = RequestBase & {
    * 调用方给 id 是本仓既有的做法，不是新发明：core 的 `submitInputPlan` 收的 `submissionId` 就是
    * 调用方传进来的 `operationId`，同 id 重投是一条设计好的幂等恢复路径。这里沿用同一套语义。
    *
-   * 可选，因为不关心 identity 的调用方（发一次就等结果）不该被逼着造一个 uuid。缺席时由承载操作的
+   * 可选，因为不关心 identity 的调用方（发一次就等结果）不该被逼着分配一个操作身份。缺席时由承载操作的
    * 那一侧铸一个——铸造点仍只有一个（journal 的 `start`），不是两个：这里给的 id 只是**穿过**它。
    */
   operationId?: string
