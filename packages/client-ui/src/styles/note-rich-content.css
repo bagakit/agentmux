@@ -1,0 +1,12 @@
+.note-rich-insert { max-width: 100%; min-height: 28px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); font: inherit; padding: var(--sp-1) var(--sp-2); }
+.note-formula { max-width: 100%; }
+.note-formula--block { display: block; position: relative; margin-block: var(--sp-3); }
+.note-formula__preview { display: inline-block; max-width: 100%; border: 0; border-radius: var(--radius-sm); color: inherit; background: transparent; padding: 0; text-align: inherit; cursor: text; }
+.note-formula--block > .note-formula__preview { display: block; width: 100%; }
+.note-formula__preview:hover { background: var(--wash-1); }
+.note-formula__preview:focus-visible, .note-formula__done:focus-visible, .note-rich-insert:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.note-formula__edit { display: inline-flex; align-items: flex-start; gap: var(--sp-2); max-width: 100%; vertical-align: middle; }
+.note-formula--block > .note-formula__edit { display: flex; }
+.note-formula__edit > input, .note-formula__edit > textarea { min-width: 0; width: 16em; max-width: 100%; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-0); color: var(--text); padding: var(--sp-2); font: inherit; font-family: var(--font-mono); }
+.note-formula__edit > textarea { flex: 1; resize: vertical; }
+.note-formula__done { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-2); padding: var(--sp-1) var(--sp-2); font: inherit; cursor: pointer; }

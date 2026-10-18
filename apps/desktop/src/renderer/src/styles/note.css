@@ -1,4 +1,6 @@
 @import '@agentmux/client-ui/styles/note-authorship.css';
+@import '@agentmux/client-ui/styles/note-rich-content.css';
+@import '@agentmux/client-ui/styles/note-code-block.css';
 
 .note-surface { height: 100%; min-height: 0; display: flex; flex-direction: column; }
 .note-file-view { height: 100%; min-height: 0; overflow: auto; background: var(--surface-0); container-type: inline-size; }

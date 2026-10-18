@@ -17,6 +17,8 @@
 @import './markdown.css';
 @import './content-copy.css';
 @import './note-authorship.css';
+@import './note-code-block.css';
+@import './note-rich-content.css';
 @import './conversation-image.css';
 @import './conversation-input-details.css';
 @import './conversation-tool-trace.css';

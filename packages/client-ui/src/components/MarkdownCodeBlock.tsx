@@ -6,12 +6,18 @@ import { requestMarkdownRender } from '../lib/markdown-render-job.js'
 import type { MarkdownRenderResult } from '../lib/markdown-render.js'
 import { useHorizontalReading } from '../lib/use-horizontal-reading.js'
 
+/** Ordinary Markdown and Note code nodes share the host's supported diagram dialects. */
+export function markdownDiagramLanguage(language?: string | null): MarkdownDiagramInput['language'] | null {
+  const normalized = language?.trim().toLowerCase()
+  return normalized === 'mermaid' || normalized === 'dot' || normalized === 'gv' || normalized === 'drawio' || normalized === 'plantuml' ? normalized : normalized === 'puml' ? 'plantuml' : null
+}
+
 export function MarkdownCodeBlock({ code, language, visible = true, readOnly = false }: { code: string; language?: string | null; visible?: boolean; readOnly?: boolean }) {
   const { ref, visible: inView } = useVisibleWork<HTMLDivElement>(visible)
   const renderDiagram = useMarkdownDiagramRenderer()
   const copyText = useMarkdownCopyText()
   const normalized = language?.trim().toLowerCase()
-  const diagram = normalized === 'mermaid' || normalized === 'dot' || normalized === 'gv' || normalized === 'drawio' || normalized === 'plantuml' ? normalized : normalized === 'puml' ? 'plantuml' : null
+  const diagram = markdownDiagramLanguage(language)
   const owner = useMemo(() => ({}), [code, normalized, inView])
   const [result, setResult] = useState<{ owner: object; value: MarkdownRenderResult } | null>(null)
   useEffect(() => {
@@ -29,7 +35,7 @@ export function MarkdownCodeBlock({ code, language, visible = true, readOnly = f
       <span className="md-code-toolbar__language" title={language?.trim() || 'Text'}>{language?.trim() || 'Text'}</span>
       <ContentCopyButton text={code} identity={language} label="Copy code" className="md-code-toolbar__copy" />
     </div> : null}
-    {inView && diagram && renderDiagram ? renderDiagram({ code, language: diagram as MarkdownDiagramInput['language'], visible: inView }) :
+    {inView && diagram && renderDiagram ? renderDiagram({ code, language: diagram, visible: inView }) :
       <pre className="md-block-code md-horizontal-reading" {...reading} aria-label={reading.tabIndex === 0 ? 'Scrollable code' : undefined} {...(language ? { 'data-language': language } : {})}>
         {ready?.html !== undefined ? <code dangerouslySetInnerHTML={{ __html: ready.html }} /> : <code>{code}</code>}
       </pre>}
