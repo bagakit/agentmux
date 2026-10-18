@@ -10,12 +10,12 @@ module.exports = async function perception({ win, result, read, click, key, fram
     if ((await motion()).pressed !== String(enabled)) await click(toggle)
     await until('original map motion choice is published', async () => { const state = await motion(); return state.pressed === String(enabled) && state.busy !== 'true' })
   }
-  const hud = () => read(`(()=>{const box=e=>{const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}},intersects=(a,b)=>a.x<b.x+b.width&&a.x+a.width>b.x&&a.y<b.y+b.height&&a.y+a.height>b.y,labels=[...document.querySelectorAll('.collaboration-region-labels > [data-region-id]')].map(e=>({id:e.dataset.areaId,text:e.textContent,bounds:box(e)})),controls=[...document.querySelectorAll('.collaboration-canvas__controls,.collaboration-canvas__legend')].map(e=>({kind:e.className,bounds:box(e)}));return{viewport:{width:innerWidth,height:innerHeight},labels,controls,overlaps:labels.flatMap(label=>controls.filter(control=>intersects(label.bounds,control.bounds)).map(control=>({label:label.id,control:control.kind})))}})()`)
+  const hud = () => read(`(()=>{const box=e=>{const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}},intersects=(a,b)=>a.x<b.x+b.width&&a.x+a.width>b.x&&a.y<b.y+b.height&&a.y+a.height>b.y,labels=[...document.querySelectorAll('.collaboration-region-labels > [data-region-id]')].map(e=>({id:e.dataset.areaId,text:e.textContent,bounds:box(e)})),controls=[...document.querySelectorAll('.collaboration-canvas__controls,.collaboration-canvas__legend,.collaboration-map__locate')].map(e=>({kind:e.className,bounds:box(e)}));return{viewport:{width:innerWidth,height:innerHeight},labels,controls,overlaps:labels.flatMap(label=>controls.filter(control=>intersects(label.bounds,control.bounds)).map(control=>({label:label.id,control:control.kind})))}})()`)
   const assertHud = async name => {
     await settle(); await pause(80)
     const sample = await hud(); (result.hud ??= []).push({ name, ...sample })
-    assert.ok(sample.labels.length > 0 && sample.controls.length === 2, 'Original labels and both HUD controls are mounted')
-    assert.deepEqual(sample.overlaps, [], 'Actual measured region labels keep both HUD surfaces readable')
+    assert.ok(sample.labels.length > 0 && sample.controls.filter(control => control.kind !== 'collaboration-map__locate').length === 2 && sample.controls.some(control => control.kind === 'collaboration-map__locate'), 'Original labels, both bottom HUD controls and the original context Locate are mounted')
+    assert.deepEqual(sample.overlaps, [], 'Actual measured region labels keep every bottom HUD and top Locate surface readable')
     for (const control of sample.controls) assert.ok(control.bounds.x >= 0 && control.bounds.y >= 0 && control.bounds.x + control.bounds.width <= sample.viewport.width + 1 && control.bounds.y + control.bounds.height <= sample.viewport.height + 1, 'Original controls fit the current native window')
   }
   if (denseOnly) {
@@ -80,6 +80,9 @@ module.exports = async function perception({ win, result, read, click, key, fram
     const packet = early.packets.find(value => value.onscreen && Number(value.opacity) > 0)
     const advanced = moving.packets.find(value => value.id === packet?.id)
     assert.ok(packet && advanced?.onscreen && Number(advanced.opacity) > 0 && parseFloat(advanced.distance) > parseFloat(packet.distance) && Math.hypot(advanced.x - packet.x, advanced.y - packet.y) > 8, 'The same original message packet visibly advances along its directional path')
+    assert.equal(early.reducedMotion, true)
+    assert.equal(parseFloat(packet.duration) * (packet.duration.endsWith('ms') ? 1 : 1000), await read('window.graphCapture.activityMS'), 'Explicit On uses the original finite event duration under reduced motion')
+    assert.ok(typeof packet.currentTime === 'number' && typeof advanced.currentTime === 'number' && advanced.currentTime > packet.currentTime, 'The original browser animation playhead advances')
     await setMotion(false)
     const still = await activity(); await frame('perception-motion-off-live', { motion: true })
     assert.equal(still.paths.length, 0); assert.equal(still.packets.length, 0)
@@ -121,8 +124,12 @@ module.exports = async function perception({ win, result, read, click, key, fram
   })
   await check('perception-folded-keyboard-and-pointer-inspection', async () => {
     await locate('fixture-core'); await closeReader()
+    const foldCamera = await read(`new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a`)
     await click(`[aria-label="Collapse ${title}"]`)
     await until('original folded internal relationship action', () => read(`Boolean(document.querySelector('.collaboration-region-labels .collaboration-area__internal'))`))
+    result.foldedViewport = await read(`(()=>{const button=document.querySelector('[aria-label="Expand ${title}"]'),r=button?.getBoundingClientRect();return{zoom:new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a,expand:r&&{x:r.x,y:r.y,width:r.width,height:r.height,visible:r.width>0&&r.height>0&&r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight},area:button?.closest('[data-region-id]')?.dataset.regionId}})()`)
+    assert.equal(result.foldedViewport.zoom, foldCamera, 'Folding the original region preserves the user zoom')
+    assert.ok(result.foldedViewport.expand?.visible, 'The same original region keeps an immediately reachable Expand action without Overview or Locate')
     await click('.collaboration-region-labels .collaboration-area__internal')
     await until('original grouped relation inspector', () => read(`document.querySelectorAll('[aria-label="Grouped connections"] .collaboration-relation').length>0`))
     await frame('perception-folded-pointer-inspector'); await assertHud('folded-inspector')
