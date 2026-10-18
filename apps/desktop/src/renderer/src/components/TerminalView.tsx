@@ -3,11 +3,13 @@ import { TextInput } from '@agentmux/client-ui/input'
 import { rendererPerformance } from '../lib/renderer-performance'
 import { clientIncidentDispatcher, createClientIncidentRecorder } from '../lib/client-incident-recorder'
 import { createTerminalInteractionObservation } from '../lib/terminal-interaction-observation'
+import { observeTerminalAttachment } from '../lib/terminal-attachment-observation'
 import { tabSwitchObservation } from '../lib/tab-switch-observation'
 import { useWorkbenchBrowserPresentation, type WorkbenchPresentation } from '../lib/workbench-presentation'
 import { subscribeTerminalInput } from '@agentmux/client-ui/terminal/input'
 import type { AgentMuxTerminalViewObservation, RendererTabSwitchTerminal, RendererTerminalCleanupContext, RendererTerminalWriteContext } from '@agentmux/core/control'
 import type { AgentMuxRunAttachment, AgentMuxTerminalResize } from '@agentmux/core'
+import { observeRead } from '@agentmux/core/observation-read'
 import { terminalContinuationSteps } from '@agentmux/core/terminal-continuation'
 import { registerTerminalViewObservation, type TerminalInputGeometry } from '../lib/terminal-view-observation'
 import { FitAddon } from '@xterm/addon-fit'
@@ -915,6 +917,7 @@ export function TerminalView({
     synchronizeWebglVisibility(visibleRef.current)
 
     let disposed = false
+    const observationLifetime = new AbortController()
     let observedOutput = false
     let attachmentId: string | null = null
     let initialRecovery: TerminalInitialObservationRecovery | undefined
@@ -1285,7 +1288,7 @@ export function TerminalView({
         const recovered = await recoverTerminalRetainedOutput({
           cursor,
           throughByte,
-          read: (afterByte) => boundedTerminalHistoryRead(api.sessions.replay(attachmentId!, afterByte)),
+          read: (afterByte) => observeRead(boundedTerminalHistoryRead(api.sessions.replay(attachmentId!, afterByte)), observationLifetime.signal),
           write: writeHistoricalOutput
         })
         if (disposed) return
@@ -1300,6 +1303,7 @@ export function TerminalView({
           liveGapRedrawPending = true
         }
       } catch (error) {
+        if (disposed && error === observationLifetime.signal.reason) return
         // Keep live/input available. A failed read says nothing about Runtime eviction, and a
         // later cursor cannot prove that this earlier missing range was ever reconstructed.
         if (!disposed) {
@@ -1775,13 +1779,13 @@ export function TerminalView({
       let readingMarker: ReturnType<Terminal['registerMarker']> | undefined
       try {
         if (refresh && !automatic) {
-          const metadata = await (refreshSessionRef.current ? refreshSessionRef.current(session.control) : refreshSession(session.id))
+          const metadata = await observeRead(refreshSessionRef.current ? refreshSessionRef.current(session.control) : refreshSession(session.id), observationLifetime.signal)
           if (disposed) return
           if (!metadata || metadata.control.hostId !== session.control.hostId || metadata.control.run.runId !== session.control.run.runId) {
             throw new Error('Session facts did not confirm this original Run. The original Region is kept.')
           }
         }
-        await outputTail
+        await observeRead(outputTail, observationLifetime.signal)
         if (disposed) return
         const readingBuffer = terminal.buffer.active
         const readingCols = terminal.cols
@@ -1790,9 +1794,9 @@ export function TerminalView({
           readingMarker = terminal.registerMarker(remembered.line - readingBuffer.baseY - readingBuffer.cursorY)
         }
         observationPending = refresh
-        const result = refresh
-          ? await api.sessions.refreshAttachment(session.control, attachmentId, cursor)
-          : await api.sessions.attach(session.control, 0)
+        const result = await observeTerminalAttachment(refresh
+          ? api.sessions.refreshAttachment(session.control, attachmentId, cursor)
+          : api.sessions.attach(session.control, 0), observationLifetime.signal, attachmentId)
         if (disposed) {
           if (attachmentId === null) await api.sessions.detach(result.attachmentId)
           return
@@ -1952,6 +1956,8 @@ export function TerminalView({
     })
     return () => {
       disposed = true
+      // Pending requests retain this marker; an Error created here would also retain its old effect stack.
+      observationLifetime.abort(Symbol('retired-terminal-observation'))
       let disposalFailure: { error: unknown } | undefined
       const cleanup = (release: () => void): void => {
         try { release() } catch (error) { disposalFailure ??= { error } }
