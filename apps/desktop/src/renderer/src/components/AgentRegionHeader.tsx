@@ -1,4 +1,7 @@
 import { RegionCurrentDemand } from './RegionCurrentDemand'
+import { ConnectorSharing } from './ConnectorSharing'
+import { useAppStore } from '../store'
+import { sessionPresentationById } from '../lib/session-presentation'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
@@ -36,6 +39,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
   currentConversationActions?: ReactNode
   nativeSession?: AgentNativeSourceReference | undefined
 }) {
+  const connectorSession = useAppStore(state => sessionKind === 'agent' ? sessionPresentationById(state.sessions).get(sessionId) : undefined)
   const entries = useRegionMenuEntries()
   const active = useWorkbenchPresentationActive()
   const stop = useSessionStop(active)
@@ -93,6 +97,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
     <HostBadge host={executionHost} />
     {readOnly ? <span className="agent-region-header__mode">Read-only</span> : null}
     {resultReview}
+    {!readOnly && connectorSession?.kind === 'agent' ? <ConnectorSharing session={connectorSession} regionId={regionId} visible={active} presentation="header" /> : null}
     {sessionKind === 'agent' && nativeSession ? <RegionCurrentDemand agentSessionId={nativeSession.control.agentSessionId} hostId={nativeSession.control.hostId} /> : null}
     <DropdownMenu.Root {...(menuObservation.moreOpen !== undefined ? { open: menuObservation.moreOpen } : {})} onOpenChange={menuObservation.onOpen}>
       <DropdownMenu.Trigger ref={moreTrigger} className="agent-region-header__more"
