@@ -1,0 +1,67 @@
+import { useEffect, useRef, useState } from 'react'
+import type { MoteChatConfiguration, MoteChatPerson } from '@agentmux/core/mote-chat'
+import { presentError } from '@agentmux/client-ui/error-presentation'
+import { TextInput } from '@agentmux/client-ui/input'
+import { api } from '../lib/api'
+import { submitMoteChatIntent } from '../lib/mote-chat-request'
+import { useAppStore } from '../store'
+import { sameMotePreferencesTarget } from '@agentmux/core/mote-preferences'
+
+const actorKey = (person: MoteChatPerson) => JSON.stringify(person.actor)
+
+export function MoteChatPeople({ configuration, active, refreshRevision, onSaved }: { configuration: MoteChatConfiguration; active: boolean; refreshRevision: number; onSaved(): void }) {
+  const [people, setPeople] = useState<MoteChatPerson[]>([]), [next, setNext] = useState<string | null>(null)
+  const [reading, setReading] = useState(false), [issue, setIssue] = useState('')
+  const lifetime = useRef(0)
+  async function read(cursor?: string) {
+    const epoch = ++lifetime.current
+    setReading(true)
+    try {
+      const page = await api.moteChat.call('space.mote.chat.audience', { target: configuration.target, ...(cursor ? { cursor } : {}), limit: 20 })
+      if (lifetime.current !== epoch) return
+      setPeople(current => cursor ? [...current, ...page.people.filter(person => !current.some(old => actorKey(old) === actorKey(person)))] : page.people)
+      setNext(page.next); setIssue('')
+    } catch (error) { if (lifetime.current === epoch) setIssue(presentError(error)) }
+    finally { if (lifetime.current === epoch) setReading(false) }
+  }
+  useEffect(() => { if (active) void read(); return () => { lifetime.current++ } }, [active, configuration.revision, refreshRevision])
+  return <div className="mote-chat-people" aria-label="Private chat people" aria-busy={reading}>
+    <p className="mote-details__hint">The confirmed bot creator has unlimited access. Other people have their own message allowance; changing a total keeps messages already used.</p>
+    {people.map(person => <MoteChatPersonRow key={actorKey(person)} person={person} configuration={configuration} onSaved={updated => {
+      lifetime.current++; setReading(false); setPeople(current => current.map(old => actorKey(old) === actorKey(updated) ? updated : old)); onSaved()
+    }} />)}
+    {reading ? <p role="status" className="mote-details__hint">Reading people…</p> : !people.length && !issue ? <p className="mote-details__hint">People appear here when they first message this bot.</p> : null}
+    {issue ? <p role="status" className="mote-details__issue">{issue}</p> : null}
+    <div className="mote-chat-actions"><button type="button" className="small-button" disabled={reading} onClick={() => void read()}>Refresh people</button>{next ? <button type="button" className="small-button" disabled={reading} onClick={() => void read(next)}>More people</button> : null}</div>
+  </div>
+}
+
+function MoteChatPersonRow({ person, configuration, onSaved }: { person: MoteChatPerson; configuration: MoteChatConfiguration; onSaved(person: MoteChatPerson): void }) {
+  const [editing, setEditing] = useState(false), [total, setTotal] = useState(String(person.total ?? 0)), [busy, setBusy] = useState(false), [issue, setIssue] = useState('')
+  const pending = useAppStore(state => Object.values(state.moteChatIntents).some(intent => intent.method === 'space.mote.chat.allocate'
+    && sameMotePreferencesTarget(intent.input.target, configuration.target) && JSON.stringify(intent.input.actor) === actorKey(person)))
+  async function save() {
+    const count = Number(total)
+    if (!Number.isSafeInteger(count) || count < 0 || !total.trim()) { setIssue('Enter a total of zero or more messages.'); return }
+    if (busy || pending) return
+    setBusy(true); setIssue('')
+    try {
+      const result = await submitMoteChatIntent({ method: 'space.mote.chat.allocate', phase: 'not-dispatched', input: {
+        operationId: crypto.randomUUID(), target: configuration.target, expectedConfigurationRevision: configuration.revision,
+        actor: person.actor, expectedPersonRevision: person.revision, total: count } })
+      if (result.action !== 'allocate') throw Error('The original allowance receipt is not confirmed.')
+      onSaved(result.person); setEditing(false)
+    } catch (error) { setIssue('The allowance was not confirmed. Your entered total is kept. ' + presentError(error)) }
+    finally { setBusy(false) }
+  }
+  return <article className="mote-chat-person" data-mote-chat-person={person.actor.userId}>
+    <div className="mote-chat-person__identity"><strong>{person.name ?? (person.creator ? 'Bot creator' : 'Chat participant')}</strong><code>{person.actor.userId}</code><code>{person.actor.application.appId}</code></div>
+    <dl><div><dt>Used</dt><dd>{person.used}</dd></div><div><dt>Total</dt><dd>{person.creator ? 'Unlimited' : person.total}</dd></div><div><dt>Remaining</dt><dd>{person.creator ? 'Unlimited' : person.remaining}</dd></div></dl>
+    {!person.creator ? editing ? <form className="mote-chat-person__allocation" onSubmit={event => { event.preventDefault(); void save() }}>
+      <label><span>Total message allowance</span><TextInput type="number" min="0" step="1" aria-label={`Total allowance for ${person.name ?? person.actor.userId}`} value={total} disabled={busy} onChange={event => setTotal(event.target.value)} /></label>
+      <div className="mote-chat-actions"><button type="submit" className="small-button" disabled={busy || pending}>{busy ? 'Saving…' : 'Save allowance'}</button><button type="button" className="small-button" disabled={busy} onClick={() => setEditing(false)}>Cancel</button></div>
+    </form> : <button type="button" className="small-button" onClick={() => { setTotal(String(person.total)); setEditing(true) }}>Edit allowance</button> : <span className="mote-details__hint">Creator · unlimited</span>}
+    {issue ? <p role="status" className="mote-details__issue">{issue}</p> : null}
+    {pending ? <p role="status" className="mote-details__hint">Check this person’s original allowance request below before another save.</p> : null}
+  </article>
+}
