@@ -38,11 +38,12 @@ export function parseConnectionIngressRecord(value: unknown): ConnectionIngressR
     if (!/^[a-f0-9]{64}$/u.test(text(input.intentDigest)) || author.connectionId !== base.connectionId || !equal(author.actor, base.actor) || author.externalConversationId !== base.externalConversationId || author.sourceMessageId !== base.sourceMessageId || author.actionRef !== base.actionRef) fail()
     return { ...base, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId: text(input.operationId), intentDigest: text(input.intentDigest), author } }
   }
-  const p = object(value, ['ingressId', 'connectionId', 'application', 'eventId', 'externalMessageId', 'externalConversationId', 'actor', 'body', 'state', 'code', 'input', 'addressing'])
+  const p = object(value, ['ingressId', 'connectionId', 'application', 'eventId', 'externalMessageId', 'externalConversationId', 'conversationKind', 'actor', 'body', 'state', 'code', 'input', 'addressing'])
   const actor = parseConnectionActor(p.actor), app = object(p.application, ['domain', 'appId'])
   const application = { domain: text(app.domain), appId: text(app.appId) }
   if (!equal(actor.application, application) || typeof p.body !== 'string' || p.state !== 'received' && p.state !== 'refused' && p.state !== 'claimed') fail()
-  const base = { ingressId: text(p.ingressId), connectionId: text(p.connectionId), application, eventId: text(p.eventId), externalMessageId: text(p.externalMessageId), externalConversationId: text(p.externalConversationId), actor, body: p.body as string, ...(p.addressing === undefined ? {} : { addressing: addressing(p.addressing) }) }
+  if (p.conversationKind !== undefined && p.conversationKind !== 'direct' && p.conversationKind !== 'group') fail()
+  const base = { ingressId: text(p.ingressId), connectionId: text(p.connectionId), application, eventId: text(p.eventId), externalMessageId: text(p.externalMessageId), externalConversationId: text(p.externalConversationId), actor, body: p.body as string, ...(p.conversationKind === undefined ? {} : { conversationKind: p.conversationKind as 'direct' | 'group' }), ...(p.addressing === undefined ? {} : { addressing: addressing(p.addressing) }) }
   if (p.state === 'refused') { if (p.input !== undefined) fail(); return { ...base, state: 'refused', code: text(p.code) } }
   if (p.code !== undefined) fail()
   if (p.state === 'received') { if (p.input !== undefined) fail(); return { ...base, state: 'received' } }
