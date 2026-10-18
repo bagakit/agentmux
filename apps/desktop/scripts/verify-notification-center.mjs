@@ -122,6 +122,10 @@ try {
     receipt.green = await test('candidate-green')
     assert.equal(receipt.green.code, 0, 'Candidate interactions must be green before mutation'); assert.equal(receipt.green.passed, receipt.green.total)
     const mutations = [
+      { name: 'problem-disclosure-title-disconnected', file: src + 'components/NotificationItem.tsx',
+        from: '<strong className="notification-item__title">{heading}</strong>',
+        to: '<strong className="notification-item__title">Details</strong>',
+        expected: 'the problem itself is the details disclosure' },
       { name: 'popover-detached-from-bell', file: src + 'components/GlobalSystemNotices.tsx',
         from: 'computePosition(trigger, details,',
         to: "computePosition({ contextElement: trigger, getBoundingClientRect: () => document.querySelector('.agent-input-stack')!.getBoundingClientRect() }, details,",

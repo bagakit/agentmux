@@ -88,6 +88,25 @@ it('keeps the compact problem and severity discoverable while full impact and re
   expect(useAppStore.getState().environmentWarning).toBe('Complete shell diagnostic and original environment.')
 })
 
+it('the problem itself is the details disclosure and reading stays scoped to that original item', async () => {
+  useAppStore.setState({ sessions: [agent('disclosure-owner', 3)] })
+  await dom.render(<GlobalSystemNotices />); await toggleNotificationCenter(dom.container, 'open')
+  const first = rows()[0]!, disclosure = first.querySelector('summary')!
+  expect(disclosure.querySelector('.notification-item__title')?.textContent).toBe('The original first prompt is unconfirmed')
+  expect(disclosure.textContent).toContain('Unconfirmed')
+  expect(disclosure.querySelector('button')).toBeNull()
+  expect(first.querySelector('.notification-item__read')?.closest('.notification-item__reading')?.contains(disclosure)).toBe(true)
+  expect(first.querySelector('.notification-item__original')).toBeNull()
+  expect(unread()).toBe(3)
+  await toggleNotificationDetails(first)
+  expect(unread()).toBe(2)
+  expect(first.querySelector('.notification-item__original')!.textContent).toContain('Its first prompt will not be sent again automatically.')
+  expect(useAppStore.getState().sessions).toHaveLength(1)
+  await expandGroups()
+  expect(rows()).toHaveLength(3)
+  expect(rows().filter(row => row.dataset.unread === 'true')).toHaveLength(2)
+})
+
 it('groups 98 current facts by exact objects without deleting independent issues or expanding all rows', async () => {
   const sessions = Array.from({ length: 32 }, (_, index) => agent(`owner-${index}`, 3))
   useAppStore.setState({ sessions, environmentWarning: 'Shell lookup did not finish.',
