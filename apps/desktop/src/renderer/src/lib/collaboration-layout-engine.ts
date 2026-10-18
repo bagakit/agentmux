@@ -316,18 +316,30 @@ function crosses(points: readonly CollaborationLayoutPoint[], obstacle: Collabor
   const ab = midpoint(a, b), bc = midpoint(b, c), cd = midpoint(c, d), abc = midpoint(ab, bc), bcd = midpoint(bc, cd), middle = midpoint(abc, bcd)
   return crosses([a, ab, abc, middle], obstacle, depth + 1) || crosses([middle, bcd, cd, d], obstacle, depth + 1)
 }
-function route(viz: Viz, obstacles: Obstacles, connection: CollaborationLayoutConnection, signal?: AbortSignal): CollaborationPath {
+async function route(obstacles: Obstacles, connection: CollaborationLayoutConnection, signal?: AbortSignal): Promise<CollaborationPath> {
   const source = obstacles.byId.get(connection.source), target = obstacles.byId.get(connection.target)
   if (!source || !target || source.id === target.id) throw Error('The original connection endpoints are unavailable. Its source remains readable.')
   const dxCenter = target.x + target.width / 2 - source.x - source.width / 2
   const dyCenter = target.y + target.height / 2 - source.y - source.height / 2
-  // Use the facing side in the boxes' aspect ratio. Vertical neighbors need real
-  // top/bottom role ports, not several curves squeezed through one side corridor.
-  const vertical = Math.abs(dyCenter) * (source.width + target.width) > Math.abs(dxCenter) * (source.height + target.height)
+  // Prefer the larger free corridor between bodies, rather than the aspect ratio of a wide card.
+  const vertical = Math.abs(dyCenter) - (source.height + target.height) / 2 > Math.abs(dxCenter) - (source.width + target.width) / 2
   const forward = vertical ? dyCenter > 0 : dxCenter > 0
   const sourceSide: PortSide = vertical ? forward ? 'bottom' : 'top' : forward ? 'right' : 'left'
   const targetSide: PortSide = vertical ? forward ? 'top' : 'bottom' : forward ? 'left' : 'right'
   const sourcePoint = pointAt(source, connection.kind, true, sourceSide), targetPoint = pointAt(target, connection.kind, false, targetSide)
+  function projected(points: readonly CollaborationLayoutPoint[]): CollaborationPath {
+    const middle = Math.floor((points.length - 1) / 6) * 3, segment = points.slice(middle, middle + 4)
+    return { id: connection.id, path: cubicPath(points), points, bounds: bounds(points),
+      sourceHandle: `${connection.kind}-out-${sourceSide}`, targetHandle: `${connection.kind}-in-${targetSide}`,
+      labelX: (segment[0]!.x + 3 * segment[1]!.x + 3 * segment[2]!.x + segment[3]!.x) / 8,
+      labelY: (segment[0]!.y + 3 * segment[1]!.y + 3 * segment[2]!.y + segment[3]!.y) / 8 }
+  }
+  const tangent = Math.max(8, Math.abs(vertical ? targetPoint.y - sourcePoint.y : targetPoint.x - sourcePoint.x) * .45) * (forward ? 1 : -1)
+  const direct = [sourcePoint, { x: sourcePoint.x + (vertical ? 0 : tangent), y: sourcePoint.y + (vertical ? tangent : 0) },
+    { x: targetPoint.x - (vertical ? 0 : tangent), y: targetPoint.y - (vertical ? tangent : 0) }, targetPoint]
+  const selected = new Set(obstacles.query(expand(bounds(direct), 8)).filter(box => box.id !== source.id && box.id !== target.id && crosses(direct, expand(box, 8))))
+  // A clear pair needs one smooth curve. Only real obstructions enter the library's detour solve.
+  if (!selected.size) return projected(direct)
   // Terminal stems are part of every route. Real endpoint rectangles remain obstacles too:
   // nop2's HTML compass ports otherwise permit a spline through its own endpoint body.
   const stemX = vertical ? 0 : forward ? 8 : -8, stemY = vertical ? forward ? 8 : -8 : 0
@@ -336,9 +348,8 @@ function route(viz: Viz, obstacles: Obstacles, connection: CollaborationLayoutCo
   const anchorName = (base: string) => { let id = base; while (obstacles.byId.has(id)) id += '_'; return id }
   const sourceId = anchorName('__source_port__'), targetId = anchorName('__target_port__')
   const anchorNode = (id: string, point: CollaborationLayoutPoint) => ({ name: id, attributes: { pos: `${point.x},${-point.y}!`, shape: 'point', width: 0, height: 0 } })
-  const direct = [sourceAnchor, sourceAnchor, targetAnchor, targetAnchor]
-  const selected = new Set(obstacles.query(expand(bounds(direct), 64)).filter(box => crosses(direct, expand(box, 64))))
   selected.add(source); selected.add(target)
+  const viz = await graphviz(signal)
   for (;;) {
     signal?.throwIfAborted()
     const result = render(viz, { directed: true, graphAttributes: { notranslate: true, splines: true },
@@ -379,11 +390,7 @@ function route(viz: Viz, obstacles: Obstacles, connection: CollaborationLayoutCo
       for (let index = 0; index < points.length - 1; index += 3) if (crosses(points.slice(index, index + 4), inside))
         throw Error(`Connection routing crosses original ${box.kind === 'area' ? 'area heading' : 'card'} ${box.id}. Its source remains readable; retry the same connection.`)
     }
-    const middle = Math.floor((points.length - 1) / 6) * 3, segment = points.slice(middle, middle + 4)
-    return { id: connection.id, path: cubicPath(points), points, bounds: extent,
-      sourceHandle: `${connection.kind}-out-${sourceSide}`, targetHandle: `${connection.kind}-in-${targetSide}`,
-      labelX: (segment[0]!.x + 3 * segment[1]!.x + 3 * segment[2]!.x + segment[3]!.x) / 8,
-      labelY: (segment[0]!.y + 3 * segment[1]!.y + 3 * segment[2]!.y + segment[3]!.y) / 8 }
+    return projected(points)
   }
 }
 
@@ -396,7 +403,7 @@ export async function routeCollaborationLayout(boxes: readonly CollaborationLayo
   const obstacles = new Obstacles(boxes), output: CollaborationPath[] = []
   for (const [index, connection] of connections.entries()) {
     options.signal?.throwIfAborted()
-    try { const path = route(await graphviz(options.signal), obstacles, connection, options.signal); output.push(path); options.onPath?.(path) }
+    try { const path = await route(obstacles, connection, options.signal); output.push(path); options.onPath?.(path) }
     catch (error) { options.signal?.throwIfAborted(); if (!options.onError) throw error; options.onError(connection.id, error) }
     // Yield between finite library calls so a superseding generation does not start more work.
     if ((index + 1) % 8 === 0) await new Promise<void>(resolve => setTimeout(resolve, 0))
