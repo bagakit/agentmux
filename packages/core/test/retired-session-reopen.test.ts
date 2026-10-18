@@ -8,7 +8,34 @@ import { AgentMuxFileAgentSessionStore, AgentMuxMemoryAgentSessionStore, loadAge
 import { retiredReopenFixture } from './fixtures/retired-reopen.js'
 const fixtures: Awaited<ReturnType<typeof retiredReopenFixture>>[] = []
 afterEach(async () => { for (const f of fixtures.splice(0).reverse()) await f.close(); vi.restoreAllMocks() })
-async function fixture(provider: 'claude' | 'pi' = 'claude') { const f = await retiredReopenFixture(provider); fixtures.push(f); return f }
+async function fixture(provider: 'claude' | 'pi' | 'codex' = 'claude') { const f = await retiredReopenFixture(provider); fixtures.push(f); return f }
+
+it('continues a retired Codex identity while Runtime still retains its ended Run', async () => {
+  const f = await fixture('codex')
+  expect(() => f.client.agentSession(f.old.agentSessionId)).toThrow('Unknown Agent Session')
+  const next = await f.client.reopenAgent(f.input)
+  expect(next).toMatchObject({ agentSessionId: f.old.agentSessionId, nativeHandle: f.old.nativeHandle,
+    workspacePath: f.old.workspacePath, createdAt: f.old.createdAt, run: { runId: 'new-run-1' },
+    reopenedFrom: { run: f.old.run, source: 'user', observedAt: f.retired.observedAt } })
+  expect(f.starts).toHaveLength(1)
+  expect(f.binds).toEqual(['new-run-1'])
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.stops).toEqual([])
+  expect(await f.store.loadTimeline(f.old.agentSessionId)).toEqual(f.timelineBefore)
+  expect(await readFile(f.path)).toEqual(f.nativeBefore)
+  expect(await f.store.loadRetiredAgentSessions()).toEqual([])
+
+  // The wrapper's original invocation is private to this exact SID, Run and lifecycle.
+  const run = await f.inner.kernel.status(next.run.runId)
+  const launch = (f.client as any).providerLaunch.bind(f.client)
+  const nativeActor = { protocolId: 'fixture-native-input', actorId: 'original-actor', token: 'a'.repeat(64),
+    lifecycleOperationId: run.lifecycleOperationId, launch: { command: process.execPath, args: ['original-command'] } }
+  await (f.inner as any).registry.update(next.agentSessionId, next.run, (value: object) => ({ ...value, nativeActor }))
+  expect(launch(next, run)).toEqual(nativeActor.launch)
+  const fallback = { command: run.program, args: run.args }
+  expect(launch({ ...next, agentSessionId: 'another-session' }, run)).toEqual(fallback)
+  expect(launch(next, { ...run, runId: 'another-run' })).toEqual(fallback)
+  expect(launch(next, { ...run, lifecycleOperationId: 'another-lifecycle' })).toEqual(fallback)
+})
 
 it.each(['claude', 'pi'] as const)('continues the same retired %s native identity through the actual Provider and durable transaction', async provider => {
   const f = await fixture(provider), before = await f.client.sessionHistoryPage(f.old.agentSessionId)

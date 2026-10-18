@@ -12,8 +12,8 @@ import { connectHostedAgentMux } from '../src/hosted-client.js'
 import { retiredReopenFixture } from './fixtures/retired-reopen.js'
 const close: Array<() => Promise<void>> = []
 afterEach(async () => { for (const cleanup of close.splice(0).reverse()) await cleanup(); vi.restoreAllMocks() })
-async function endpoint(transport: 'unix' | 'http') {
-  const f = await retiredReopenFixture(); close.push(f.close)
+async function endpoint(transport: 'unix' | 'http', provider: 'claude' | 'codex' = 'claude') {
+  const f = await retiredReopenFixture(provider); close.push(f.close)
   const identity: AgentMuxRuntimeOwnerIdentity = { runtimeId: 'private-reopen-runtime', ownerInstanceId: 'private-reopen-owner',
     protocolVersion: 1, processId: process.pid, ctxmux: f.client.runtimeIdentity(), availability: 'connected' }
   const hosted = new AgentMuxHostedRuntimeService(f.client, f.storePath, () => identity); close.push(() => hosted.dispose())
@@ -41,8 +41,8 @@ it.each(['unix', 'http'] as const)('the actual Hosted %s consumer delegates expl
   expect(sdk.agentSession(f.old.agentSessionId).nativeHandle).toEqual(f.old.nativeHandle)
   expect(f.starts).toHaveLength(1); expect(f.stops).toEqual([]); expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
-it('the real CLI parser and execution use the same public RPC owner without a second control route', async () => {
-  const f = await endpoint('unix')
+it.each(['claude', 'codex'] as const)('the real CLI parser and execution use the same public RPC owner for retired %s', async provider => {
+  const f = await endpoint('unix', provider)
   const { stdout } = await promisify(execFile)(process.execPath, [resolve('packages/core/bin/amux'), '--endpoint', `unix:${join(f.root, 'public.sock')}`,
     'agent', 'reopen', '--session', f.old.agentSessionId, '--retired-at', String(f.retired.observedAt), '--operation-id', 'cli-explicit-continue'],
     { env: { ...process.env }, timeout: 10_000 })
