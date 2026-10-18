@@ -35,6 +35,7 @@
   --agent-avatar-size: 18px;
   --region-focus-ring-width: 1px;
   --pane-tabbar-height: 31px;
+  --window-status-bar-height: 24px;
   /* Desktop typography. Reading surfaces may use the prose role. */
   --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
   --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;

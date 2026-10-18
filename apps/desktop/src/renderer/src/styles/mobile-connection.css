@@ -1,7 +1,5 @@
 .performance-popover:has(.phone-connection) { width:min(380px,calc(100vw - 24px)); max-height:min(760px,calc(100vh - 48px)); }
-.phone-connection__header { padding:18px 20px 12px; }
-.phone-connection__header h2 { font-size:15px; }
-.phone-connection { padding:0 20px 8px; }
+.phone-connection { padding:0 var(--sp-5) var(--sp-3); }
 .phone-connection__connect { text-align:center; padding-bottom:16px; }
 .phone-connection__intro { margin:5px 0 4px; color:var(--text); font-size:var(--fs-body); }
 .phone-connection__hint { margin:4px 0 12px; color:var(--text-3); font-size:var(--fs-meta); line-height:1.5; }
@@ -39,8 +37,6 @@
 .phone-connection__service > button { display:inline-flex; align-items:center; gap:5px; margin:4px 5px 4px 0; }
 .phone-connection__service details { color:var(--text-3); margin-top:5px; }
 .phone-connection__service summary { cursor:pointer; }
-.phone-connection__footer { padding:10px 16px; }
-.phone-connection__footer > button:last-child { padding:7px; }
 
 .phone-connection__code-state { margin:14px 0 -8px; color:var(--amber-text); font-size:var(--fs-meta); }
 

@@ -85,6 +85,8 @@ export function ToolkitPopover({ children, label = false, onVisibleChange, focus
     }
     const escape = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.isComposing || event.keyCode === 229 || event.defaultPrevented) return
+      const menu = event.target instanceof Element ? event.target.closest('[data-toolkit-menu]') : null
+      if (menu && b.contains(menu)) { markWindowOverlayDismissal(event); return }
       const terminal = event.target instanceof Element ? event.target.closest('[data-toolkit-terminal]') : null
       if (terminal && b.contains(terminal) && terminal.contains(document.activeElement)) return
       // A focused local reader consumes its first Escape before the floating owner closes.

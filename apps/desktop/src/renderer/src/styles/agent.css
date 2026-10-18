@@ -68,7 +68,7 @@
    a count crosses zero; until then every dot is the neutral grey of a bare .status. */
 .window-status-bar {
   z-index: 91;
-  height: 24px;
+  height: var(--window-status-bar-height);
   position: relative;
   display: flex;
   align-items: center;

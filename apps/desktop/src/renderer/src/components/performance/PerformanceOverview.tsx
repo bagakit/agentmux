@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { SemanticIcon, semanticIconComponent } from '@agentmux/client-ui/icons'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
+import { ToolkitActions } from '../toolkit/ToolkitActions'
 import type { MetricsSource, RunUsage, ToolkitAgentCard as AgentCard, ToolkitAgentCardField } from '@agentmux/core/control'
 import type { ToolkitMetricsSnapshot } from '../../../../shared/toolkit'
 import { PerformanceAttribution, cpuCoreLabel } from './PerformanceAttribution'
@@ -197,15 +198,18 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
       </Facts><p className="performance-note">Retention is an observation, not a leak verdict.</p></details>
     </section>)}
   </>
+  const viewScriptButton = <button type="button" onClick={onViewScript}><ThemeObjectSourceCodeIcon size={13} /><span>View script</span></button>
   return <>
-    <header className="performance-header"><div className="performance-title"><ThemeObjectProcessorIcon size={15} /><h2>Performance</h2><span className="performance-official">Official</span></div>
+    <header className="performance-header"><div className="performance-title"><ThemeObjectProcessorIcon size={15} /><h2>Performance</h2></div>
+      <span className="performance-status" data-state={paused ? 'paused' : error ? 'failed' : snapshot?.state}><SemanticIcon size={5} name={`status.observation-${paused ? 'paused' : error ? 'failed' : pending ? 'starting' : snapshot?.state ?? 'unknown'}`} />{state}</span>
       <button type="button" className="performance-icon-button" aria-label="Close Performance" data-toolkit-close onClick={close}><ThemeActionCloseIcon size={14} /></button></header>
-    <div className="performance-observation"><span className="performance-status" data-state={paused ? 'paused' : error ? 'failed' : snapshot?.state}><SemanticIcon size={5} name={`status.observation-${paused ? 'paused' : error ? 'failed' : pending ? 'starting' : snapshot?.state ?? 'unknown'}`} />{state}</span><span>{readingTime(source?.lastSuccessAt, snapshot?.observedAt)}</span></div>
+
     <div className="performance-scopes" role="group" aria-label="Resource scope" data-paused={paused}>
       <LiquidSelectionSurface selected={scope} active={!paused} targetAttribute="data-settings-target" />
       {([['app', 'App'], ['runs', 'Runs'], ['runtime', 'Runtime']] as const).map(([id, label]) => <button key={id} type="button" data-settings-target={id} aria-pressed={scope === id} onClick={() => selectScope(id)}>{label}</button>)}
     </div>
     <div className="performance-body">
+      <span className="performance-reading-time">{readingTime(source?.lastSuccessAt, snapshot?.observedAt)}</span>
       {error || snapshot?.reason ? <p className="performance-state" data-tone="warning">{error ?? snapshot?.reason}</p> : null}
       {scope !== 'runtime' ? <>
         {scope === 'app' ? <div className="performance-metrics"><Metric label="CPU" value={cpu(app?.cpuPercent)} hint={`${cpuCoreLabel(app?.cpuPercent, observation?.units.cpuBasis)} · 10s reading peak`} points={trend.map(p => ({ id: JSON.stringify(p), at: p.observedAt, value: p.appCpuPercent }))} sourceKey={observationKey} color="var(--green)" />
@@ -253,9 +257,10 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
         <dt>Run RSS</dt><dd>Root + attributed descendants; shared pages may count in multiple processes.</dd>
       </Facts></details>
     </div>
-    <footer className="performance-actions"><button type="button" onClick={onViewScript}><ThemeObjectSourceCodeIcon size={13} />View script</button>
-      {onPause ? <button type="button" data-performance-observation-toggle onClick={onPause}>{paused ? <ThemeActionResumeIcon size={12} /> : <ThemeActionPauseIcon size={12} />}{paused ? 'Resume' : 'Pause'}</button> : null}
+    <ToolkitActions primary={onPause ? <button type="button" data-performance-observation-toggle onClick={onPause}>{paused ? <ThemeActionResumeIcon size={12} /> : <ThemeActionPauseIcon size={12} />}<span>{paused ? 'Resume' : 'Pause'}</span></button> : viewScriptButton}>
+      {onPause ? viewScriptButton : null}
       {onManageBrowsers ? <button type="button" onClick={onManageBrowsers}>Manage browsers</button> : null}
-      <button type="button" onClick={onConfigure}><ThemeObjectSettingsIcon size={13} />Configure</button></footer>
+      <button type="button" onClick={onConfigure}><ThemeObjectSettingsIcon size={13} /><span>Configure</span></button>
+    </ToolkitActions>
   </>
 }
