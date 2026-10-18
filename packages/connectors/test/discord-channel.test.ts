@@ -239,6 +239,7 @@ it.each([false, true])('native question button and modal submit exact original a
   const record = (await f.services.ingress!.list({ connectionId: discordConfig.connectionId })).ingresses[0]!
   expect(record).toMatchObject({ kind: 'action', state: 'claimed', input: { responseKind: 'question', author: { actor: { userId: '400' }, grantRevision: 2 } } })
   expect((await f.services.ingress!.inspect({ ingressId: record.ingressId })).questionReceipt).toMatchObject({ outcome: 'submitted', operationId: record.input!.operationId })
+  expect(JSON.parse(f.wire.calls.find(call => call.path === '/interactions/903/fixture-interaction-token/callback')!.body)).toEqual({ type: 6 })
   if (longOriginal) {
     await vi.waitFor(() => {
       f.services.publication!.refresh()
@@ -298,6 +299,7 @@ it.each([{ lostCallback: false, longOriginal: false }, { lostCallback: true, lon
   f.wire.interaction('910', 3, { custom_id: button.custom_id, component_type: 2 }, permission.mapping!.messageId)
   await vi.waitFor(async () => expect((await f.services.ingress!.list({connectionId:discordConfig.connectionId})).ingresses[0]?.state).toBe('claimed'))
   expect(await answered).toMatchObject({ hookSpecificOutput: { decision: { behavior: 'allow' } } })
+  expect(JSON.parse(f.wire.calls.find(call => call.path === '/interactions/910/fixture-interaction-token/callback')!.body)).toEqual({ type: 6 })
   expect((await f.services.ingress!.list({ connectionId: discordConfig.connectionId })).ingresses[0]).toMatchObject({ kind: 'action', state: 'claimed', input: { author: { actor: { userId: '400' }, grantRevision: 2 } } })
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
   if (lostCallback) {
@@ -338,6 +340,22 @@ it('native channel discovery, exact reads and invitation receipts reuse the orig
   expect(await f.services.connections.rooms!.createLink!(invitation, context)).toMatchObject({ state: 'confirmed' })
   expect(f.wire.calls.filter(call => call.path === '/channels/300/invites' && call.method === 'POST')).toHaveLength(1)
   expect((await f.services.connections.bindings!.inspect({ bindingId: f.binding.bindingId })).grants[0]!.capabilities).toEqual(['input'])
+})
+
+it('the pinned SDK resumes a physical Gateway disconnect while observations retain the actual gap and Core deduplicates replay', async () => {
+  const f = await fixture(); f.wire.message('700')
+  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
+  f.wire.disconnect()
+  await vi.waitFor(() => expect(f.wire.pausedConnections).toBe(1))
+  expect((await f.services.connections.inspect({ connectionId: discordConfig.connectionId })).connection?.observation.transport).toEqual({ state: 'unknown', reason: 'check-failed' })
+  f.wire.resumeGateway()
+  await vi.waitFor(() => expect(f.wire.sessions.at(-1)?.op).toBe(6))
+  f.wire.message('701', 'Original input after native SDK resume')
+  await vi.waitFor(async () => expect((await f.services.ingress!.list({ connectionId: discordConfig.connectionId })).ingresses.find(record => record.kind !== 'action' && record.externalMessageId === '701')?.state).toBe('claimed'))
+  f.wire.message('700'); await new Promise(resolve => setTimeout(resolve, 40))
+  expect((await f.services.ingress!.list({ connectionId: discordConfig.connectionId })).ingresses).toHaveLength(2)
+  expect((await f.services.connections.inspect({ connectionId: discordConfig.connectionId })).connection?.observation.transport.state).toBe('ready')
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
 it('an explicit connection check rereads native application identity and cannot certify a revoked or changed bot from an earlier cache', async () => {
