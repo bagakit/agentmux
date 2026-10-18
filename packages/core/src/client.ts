@@ -9773,8 +9773,10 @@ export class AgentMuxClient {
   }
 
   private providerLaunch(session: AgentMuxAgentSession, run: CtxmuxAdapterRun): { command: string; args: readonly string[] } {
-    const current = this.registry.get(session.agentSessionId)
-    const actor = sameRun(current.run, session.run) && sameRun(current.run, { runId: run.runId }) ? current.nativeActor : undefined
+    // A retired Session still has an authoritative Run invocation. Only an exact
+    // active binding may replace the managed wrapper with its original launch.
+    const current = this.registry.findByRun(session.run)
+    const actor = current?.agentSessionId === session.agentSessionId && sameRun(current.run, { runId: run.runId }) ? current.nativeActor : undefined
     return actor && actor.lifecycleOperationId === run.lifecycleOperationId ? actor.launch
       : { command: run.program ?? this.providers.get(session.providerId).executable, args: run.args }
   }
