@@ -17,7 +17,7 @@ const definition: ToolkitInlineToolConfiguration = { id: 'interactive-tool', rev
   icon: 'terminal', enabled: true, statusBar: 'icon', workspacePath: fixturePath('tmp'),
   script: 'printf "%s\\n" "$1"; read answer; printf "%s\\n" "$answer"', args: ['ready'], actions: [] }
 const flush = async () => { for (let index = 0; index < 8; index++) await new Promise(resolve => setImmediate(resolve)) }
-function fixture(tools: ToolkitInlineToolConfiguration[] = [definition]) {
+function fixture(tools: ToolkitInlineToolConfiguration[] = [definition], env: Record<string, string> = {}) {
   let config = { ...structuredClone(DEFAULT_CONFIG), toolkit: { tools: structuredClone(tools) } }
   const receipts = new Map<string, unknown>(), runs = new Map<string, AgentMuxRun>(), creates = new Map<string, string>()
   const listeners = new Map<string, Set<(event: AgentMuxClientEvent) => void>>()
@@ -54,7 +54,7 @@ function fixture(tools: ToolkitInlineToolConfiguration[] = [definition]) {
     prepare: (current, next) => prepareToolkitConfig(current, next, id => custom.guardDelete(id)),
     save: async next => structuredClone(next), publish: saved => { config = saved as typeof config; custom.configurationChanged() } })
   const makeOwner = () => new CustomToolkitOwner({ config: owner, receipts: storage, openRunPort: async () => port,
-    runner: process.execPath, env: {}, now: () => fixtureEpoch(0, 0, 2) })
+    runner: process.execPath, env, now: () => fixtureEpoch(0, 0, 2) })
   custom = makeOwner()
   async function snapshot(id = definition.id): Promise<ToolkitScriptSnapshot> {
     const value = await custom.get(id)
@@ -81,12 +81,15 @@ function fixture(tools: ToolkitInlineToolConfiguration[] = [definition]) {
 
 describe('Toolkit TUI lifecycle on the existing admission owner', () => {
   it('loads once, preserves the shell arguments, and never collects terminal bytes', async () => {
-    const f = fixture()
+    const f = fixture([definition], { ELECTRON_RUN_AS_NODE: '1', HOST_TOOL_CONTEXT: 'captured',
+      AGENTMUX_TOOLKIT_RESULT_PATH: fixturePath('tmp'), AGENTMUX_TOOLKIT_RESULT_TOKEN: 'finite-result-token' })
     await Promise.all([f.custom.loadConfigured(), f.custom.loadConfigured()])
     const first = await f.snapshot(), execution = first.admission!
     expect(f.create).toHaveBeenCalledOnce()
     expect(f.create.mock.calls[0]?.[0]).toMatchObject({ createOperationId: execution.executionId, command: '/bin/sh',
-      args: ['-lc', definition.script, 'agentmux-toolkit', ...definition.args], workspacePath: definition.workspacePath })
+      args: ['-lc', definition.script, 'agentmux-toolkit', ...definition.args], workspacePath: definition.workspacePath,
+      env: { HOST_TOOL_CONTEXT: 'captured' } })
+    expect(f.create.mock.calls[0]?.[0].env).toEqual({ HOST_TOOL_CONTEXT: 'captured' })
     expect(f.create.mock.calls[0]?.[2]).toBe('terminal')
     const saved = f.storage.save.mock.calls.length
     await f.snapshot(); await f.snapshot()
@@ -134,11 +137,13 @@ describe('Toolkit TUI lifecycle on the existing admission owner', () => {
   })
 
   it('preserves unknown creation across load and only continues the original explicit invocation', async () => {
-    const f = fixture(), create = f.create.getMockImplementation()!
+    const env = { ELECTRON_RUN_AS_NODE: '1', HOST_TOOL_CONTEXT: 'original' }
+    const f = fixture([definition], env), create = f.create.getMockImplementation()!
     f.create.mockImplementationOnce(async (...args) => { await create(...args); throw new Error('creation reply lost') })
     await f.custom.loadConfigured()
     const original = (await f.snapshot()).admission!
     expect(original).toMatchObject({ state: 'unknown', run: null })
+    env.HOST_TOOL_CONTEXT = 'changed'
     await f.reopen(); await f.custom.loadConfigured()
     await f.custom.subscribe(definition.id, vi.fn(), vi.fn(), new AbortController().signal).then(reader => reader.dispose())
     expect(f.create).toHaveBeenCalledOnce()
