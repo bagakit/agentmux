@@ -14,6 +14,9 @@ import * as engine from '../src/renderer/src/lib/collaboration-layout-engine'
 import type { CollaborationPulse } from '../src/renderer/src/lib/use-collaboration-reading'
 import { agentInformationPreview } from '../src/renderer/src/lib/agent-information-preview'
 import { useAppStore } from '../src/renderer/src/store'
+import { api } from '../src/renderer/src/lib/api'
+import { applyConfigEdit } from '../src/shared/config-edit'
+import { DEFAULT_MOTE_FACE } from '../src/shared/mote-avatars'
 const captured = vi.hoisted(() => ({ nodes: [] as Node[], store: null as ReturnType<typeof useStoreApi> | null, cardRenders: [] as string[], moveStart: undefined as ReactFlowProps['onMoveStart'] }))
 vi.mock('../src/renderer/src/components/FocusContextCardBody', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/renderer/src/components/FocusContextCardBody')>()
@@ -312,7 +315,7 @@ it('locates a member inside a folded area once and preserves a later user fold t
     await viewport(-area.x + 12, -area.y + 12)
     const node = [...dom.container.querySelectorAll('.react-flow__node')].find(element => element.getAttribute('data-id') === areaId)
     expect(node).toBeDefined()
-    const heading = node!.querySelector<HTMLButtonElement>('.collaboration-area__heading')!
+    const heading = dom.container.querySelector<HTMLButtonElement>(`[data-area-id='${areaId}'] .collaboration-area__fold`)!
     expect(heading.getAttribute('aria-expanded')).toBe('true')
     await act(async () => heading.click())
     await settleCollaborationCanvas(() => {
@@ -488,14 +491,14 @@ it('preserves the clicked area heading through folding and unfolding without res
   const heading = headingAt(); await viewport(-heading.x + 12, -heading.y + 12)
   const camera = captured.store!.getState().transform
   holdResponses = true
-  await act(async () => nodeElement(areaId)!.querySelector<HTMLButtonElement>('.collaboration-area__heading')!.click())
+  await act(async () => dom.container.querySelector<HTMLButtonElement>(`[data-area-id='${areaId}'] .collaboration-area__fold`)!.click())
   await settleCollaborationCanvas(() => expect(heldResponses.some(item => item.response.type === 'complete')).toBe(true))
   await releasePlacement()
   expect(captured.nodes.some(node => node.id === reading)).toBe(false)
   expect(headingAt().x).toBeCloseTo(heading.x, 8); expect(headingAt().y).toBeCloseTo(heading.y, 8)
   expect(captured.store!.getState().transform).toBe(camera)
-  expect(nodeElement(areaId)!.querySelector('.collaboration-area__heading')).not.toBeNull()
-  await act(async () => nodeElement(areaId)!.querySelector<HTMLButtonElement>('.collaboration-area__heading')!.click())
+  expect(dom.container.querySelector(`[data-area-id='${areaId}'] .collaboration-area__fold`)).not.toBeNull()
+  await act(async () => dom.container.querySelector<HTMLButtonElement>(`[data-area-id='${areaId}'] .collaboration-area__fold`)!.click())
   await settleCollaborationCanvas(() => { expect(captured.nodes.some(node => node.id === reading)).toBe(true); expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull() })
   const resized = new Map(changed); resized.set(subject('canvas-8'), { ...resized.get(subject('canvas-8'))!, tier: 'closed' })
   await dom.render(graph(scene, null, scene.relations, [], resized, { ready: true, locate }))
@@ -546,8 +549,13 @@ it('overview keeps exact Agent endpoints without relayout and enters a named reg
   const connection = requests.flatMap(request => request.type === 'arrange' ? request.input.connections : []).find(connection => connection.id === edge.dataset.id)!
   const source = renderedBox(connection.source), target = renderedBox(connection.target)
   const ends = curvePoints(edge.querySelector('.react-flow__edge-path')!.getAttribute('d')!)
-  expect(Math.hypot(ends[0]!.x - source.x - source.width / 2, ends[0]!.y - source.y - source.height / 2)).toBeCloseTo(24)
-  expect(Math.hypot(ends.at(-1)!.x - target.x - target.width / 2, ends.at(-1)!.y - target.y - target.height / 2)).toBeCloseTo(24)
+  const visibleRadius = (id: string) => {
+    const mark = nodeElement(id)!.querySelector<HTMLElement>('.collaboration-agent__dot')!
+    expect(mark.querySelector('.agent-avatar')).not.toBeNull()
+    return Number.parseFloat(mark.style.width) / 2 * Number.parseFloat(mark.parentElement!.style.getPropertyValue('--collaboration-mark-scale'))
+  }
+  expect(Math.hypot(ends[0]!.x - source.x - source.width / 2, ends[0]!.y - source.y - source.height / 2)).toBeCloseTo(visibleRadius(connection.source))
+  expect(Math.hypot(ends.at(-1)!.x - target.x - target.width / 2, ends.at(-1)!.y - target.y - target.height / 2)).toBeCloseTo(visibleRadius(connection.target))
   const envelopes = [...dom.container.querySelectorAll('.collaboration-area__envelope path')]
   expect(envelopes).toHaveLength(scene.areas.length)
   expect(envelopes.every(path => path.getAttribute('d')!.includes('Q'))).toBe(true)
@@ -568,10 +576,10 @@ it('overview keeps exact Agent endpoints without relayout and enters a named reg
   const area = heading.closest<HTMLElement>('.collaboration-area__overview-label')!
   const areaBox = renderedBox(JSON.stringify(['area', 'area-0']))
   expect(areaBox.kind).toBe('area')
-  expect(Number.parseFloat(area.style.width)).toBeGreaterThanOrEqual(104)
+  expect(Number(area.dataset.labelWidth)).toBeGreaterThanOrEqual(104)
   expect(area.closest('.collaboration-region-labels')).not.toBeNull()
   const originalHeading = (areaBox as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>).heading
-  expect(Number.parseFloat(area.style.top) + Number.parseFloat(area.style.height)).toBeCloseTo((areaBox.y + originalHeading.y + originalHeading.height - top) * .25 + 20)
+  expect(Number.parseFloat(area.style.top) + Number(area.dataset.labelHeight)).toBeCloseTo((areaBox.y + originalHeading.y + originalHeading.height - top) * .25 + 20)
   await dom.render(graph(scene, null, scene.relations, [], scene.agents, { ready: true }))
   // Locate is an explicit control intent, so it is allowed to replace this already-set camera.
   await viewport(-left * .25 + 20, -top * .25 + 20, 1600, 1200, .25)
@@ -600,7 +608,7 @@ it('keeps every selected original relation emphasized when an explicitly folded 
   const scene = scenario(24); await loaded(scene)
   for (const area of scene.areas) {
     await focusNode(JSON.stringify(['area', area.id]))
-    await act(async () => nodeElement(JSON.stringify(['area', area.id]))!.querySelector<HTMLButtonElement>('.collaboration-area__heading')!.click())
+    await act(async () => dom.container.querySelector<HTMLButtonElement>(`[data-region-id='${area.id}'] .collaboration-area__fold`)!.click())
     await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull())
   }
   const extent = [...boxes.values()], left = Math.min(...extent.map(box => box.x)), top = Math.min(...extent.map(box => box.y))
@@ -613,7 +621,7 @@ it('keeps every selected original relation emphasized when an explicitly folded 
   await dom.render(graph(scene, selection))
   for (const area of scene.areas) {
     await focusNode(JSON.stringify(['area', area.id]))
-    await act(async () => nodeElement(JSON.stringify(['area', area.id]))!.querySelector<HTMLButtonElement>('.collaboration-area__heading')!.click())
+    await act(async () => dom.container.querySelector<HTMLButtonElement>(`[data-region-id='${area.id}'] .collaboration-area__fold`)!.click())
     await settleCollaborationCanvas(() => expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull())
   }
   const operations = requests.length
@@ -726,12 +734,12 @@ it('keeps named region labels separated at distant scale without changing world 
     expect(button.textContent).toContain('6')
     expect(button.title).toContain('Project')
     expect(button.querySelector('svg')).not.toBeNull()
-    expect(Number.parseFloat(label.style.width)).toBeGreaterThanOrEqual(104)
+    expect(Number(label.dataset.labelWidth)).toBeGreaterThanOrEqual(104)
   }
   for (let index = 0; index < labels.length; index++) for (const other of labels.slice(index + 1)) {
     const label = labels[index]!, x = Number.parseFloat(label.style.left), y = Number.parseFloat(label.style.top)
     const ox = Number.parseFloat(other.style.left), oy = Number.parseFloat(other.style.top)
-    expect(x + Number.parseFloat(label.style.width) <= ox || ox + Number.parseFloat(other.style.width) <= x || y + Number.parseFloat(label.style.height) <= oy || oy + Number.parseFloat(other.style.height) <= y).toBe(true)
+    expect(x + Number(label.dataset.labelWidth) <= ox || ox + Number(other.dataset.labelWidth) <= x || y + Number(label.dataset.labelHeight) <= oy || oy + Number(other.dataset.labelHeight) <= y).toBe(true)
   }
   expect(captured.nodes).toBe(before); expect(requests).toHaveLength(operations)
 })
@@ -749,7 +757,7 @@ it('retains exact region context when reading a member with its original heading
   expect(label.textContent).toContain('6')
   expect(label.querySelector('button')!.getAttribute('title')).toContain('Project')
   expect(Number.parseFloat(label.style.left)).toBeGreaterThanOrEqual(0)
-  expect(Number.parseFloat(label.style.top) + Number.parseFloat(label.style.height)).toBeLessThanOrEqual(180)
+  expect(Number.parseFloat(label.style.top) + Number(label.dataset.labelHeight)).toBeLessThanOrEqual(180)
   expect(captured.nodes).toBe(before); expect(requests).toHaveLength(operations)
 })
 
@@ -775,7 +783,7 @@ it('keeps projected region labels clear of original Agent hit targets through ca
     })
     expect(hits.length).toBeGreaterThan(0)
     for (const label of labels) {
-      const rect = { x: Number.parseFloat(label.style.left), y: Number.parseFloat(label.style.top), width: Number.parseFloat(label.style.width), height: Number.parseFloat(label.style.height) }
+      const rect = { x: Number.parseFloat(label.style.left), y: Number.parseFloat(label.style.top), width: Number(label.dataset.labelWidth), height: Number(label.dataset.labelHeight) }
       expect(hits.some(hit => collaborationBoundsOverlap(rect, hit))).toBe(false)
     }
   }
@@ -872,9 +880,10 @@ it('starts original SVG tooltip observation outside its mounting turn and cancel
     await dom.render(graph(scene, null, scene.relations, [], scene.agents, { active: false }))
     expect(frames.size).toBe(0); expect(observed.size).toBe(0); expect(pendingPanel.isConnected).toBe(false)
     await dom.render(graph(scene))
+    const regionFrames = frames.size
     await act(async () => edge.dispatchEvent(new FocusEvent('focusin', { bubbles: true })))
     const activePanel = document.getElementById(edge.getAttribute('aria-describedby')!)!
-    expect(activePanel).not.toBeNull(); expect(observed.has(activePanel)).toBe(false); expect(frames.size).toBe(1)
+    expect(activePanel).not.toBeNull(); expect(observed.has(activePanel)).toBe(false); expect(frames.size).toBe(regionFrames + 1)
     await act(async () => { const pending = [...frames.values()]; frames.clear(); for (const callback of pending) callback(performance.now()) })
     expect(observed.has(activePanel)).toBe(true)
     expect(frames.size).toBe(1)
@@ -889,12 +898,12 @@ it('reserves the same region activity slot and geometry before during and after 
   await viewport(-area.x * .25 + 20, -area.y * .25 + 20, 1600, 1200, .25)
   const label = dom.container.querySelector<HTMLElement>(`[data-area-id='${area.id}']`)!, slot = label.querySelector<HTMLElement>('.collaboration-area__activity')!
   expect(slot).not.toBeNull(); expect(slot.getAttribute('aria-hidden')).toBe('true'); expect(slot.hasAttribute('data-kind')).toBe(false)
-  const before = label.getAttribute('style'), name = label.querySelector('button > span')!, count = label.querySelector('small')!, geometry = captured.nodes.map(node => [node.id, node.position, node.data.box]), operations = requests.length
+  const before = label.getAttribute('style'), name = label.querySelector('.collaboration-area__name strong')!, count = label.querySelector('small')!, geometry = captured.nodes.map(node => [node.id, node.position, node.data.box]), operations = requests.length
   const pulse: CollaborationPulse = { id: 1, startedAt: Date.now(), hostId: 'local', sender: 'canvas-0', recipient: 'canvas-1', kind: 'communication' }
   await dom.render(graph(scene, null, scene.relations, [pulse]))
   expect(label.getAttribute('style')).toBe(before); expect(label.querySelector('.collaboration-area__activity')).toBe(slot)
   expect(slot.getAttribute('data-kind')).toBe('communication'); expect(slot.getAttribute('aria-label')).toBe('Recent message activity'); expect(slot.getAttribute('aria-hidden')).toBeNull()
-  expect(label.querySelector('button > span')).toBe(name); expect(label.querySelector('small')).toBe(count)
+  expect(label.querySelector('.collaboration-area__name strong')).toBe(name); expect(label.querySelector('small')).toBe(count)
   await dom.render(graph(scene))
   expect(label.getAttribute('style')).toBe(before); expect(label.querySelector('.collaboration-area__activity')).toBe(slot)
   expect(slot.getAttribute('aria-hidden')).toBe('true'); expect(slot.hasAttribute('data-kind')).toBe(false)
@@ -967,4 +976,67 @@ it('keeps local route diagnostics inspectable and retries only the failed origin
   expect(retry.type).toBe('route'); if (retry.type !== 'route') throw Error('Original connection retry required')
   expect(retry.connections).toHaveLength(1); expect(retry.connections[0]!.id).toBe(failedId)
   expect(captured.nodes).toBe(originals)
+})
+
+
+it('the formal motion control changes only original event presentation and resumes its elapsed phase', async () => {
+  const scene = scenario(24); await loaded(scene); await revealWorld()
+  const clock = vi.spyOn(Date, 'now').mockReturnValue(10000)
+  let config = useAppStore.getState().config!
+  const save = vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => {
+    config = applyConfigEdit(config, expected, next); useAppStore.setState({ config }); return config
+  })
+  const pulse: CollaborationPulse = { id: 1, startedAt: 9600, hostId: 'local', sender: 'canvas-0', recipient: 'canvas-4', kind: 'communication' }
+  const selected: CollaborationSelection = { kind: 'agent', id: subject('canvas-0') }
+  await dom.render(graph(scene, selected, scene.relations, [pulse]))
+  const control = dom.container.querySelector<HTMLButtonElement>('[aria-label="Map animations"]')!
+  expect(control.getAttribute('aria-pressed')).toBe('true')
+  expect(dom.container.querySelector('.collaboration-edge__packet')).not.toBeNull()
+  const camera = captured.store!.getState().transform, geometry = captured.nodes.map(node => node.data.box), operations = requests.length
+  await dom.click('[aria-label="Map animations"]')
+  expect(save).toHaveBeenCalledOnce(); expect(config.focus?.mapMotion).toBe('off')
+  expect(control.getAttribute('aria-pressed')).toBe('false')
+  expect(dom.container.querySelector('.collaboration-canvas')?.getAttribute('data-motion')).toBe('off')
+  expect(dom.container.querySelector('.collaboration-edge__packet')).toBeNull()
+  expect(dom.container.querySelector('.collaboration-edge__pulse')).toBeNull()
+  expect(dom.container.querySelector('.react-flow__edge[data-recent="true"]')).not.toBeNull()
+  expect(dom.container.querySelector('[aria-label="Message received"]')).not.toBeNull()
+  clock.mockReturnValue(10800)
+  await dom.click('[aria-label="Map animations"]')
+  expect(control.getAttribute('aria-pressed')).toBe('true'); expect(config.focus?.mapMotion).toBe('on')
+  expect(dom.container.querySelector<SVGPathElement>('.collaboration-edge__pulse')?.style.animationDelay).toBe('-1200ms')
+  expect(captured.store!.getState().transform).toBe(camera)
+  expect(captured.nodes.map(node => node.data.box)).toEqual(geometry); expect(requests).toHaveLength(operations)
+  expect(select).not.toHaveBeenCalled(); expect(open).not.toHaveBeenCalled()
+  // The original reading owner expires activity. Preferences never retain or replay it.
+  await dom.render(graph(scene, selected)); await dom.click('[aria-label="Map animations"]'); await dom.click('[aria-label="Map animations"]')
+  expect(dom.container.querySelector('.collaboration-edge__packet')).toBeNull()
+  expect(dom.container.querySelector('[aria-label="Message received"]')).toBeNull()
+  expect(requests).toHaveLength(operations)
+})
+
+it('projects complete region identities and original Host and avatars without replacing map geometry', async () => {
+  const scene = scenario(24), name = 'AgentMux 协作协议与持久运行工作区'
+  scene.areas = scene.areas.map((area, index) => index === 0 ? { ...area, name, hostId: 'remote', iconTarget: { kind: 'folder', key: 'project-source', name } }
+    : index === 1 ? { ...area, kind: 'mote', name: '设计与交互', hostId: 'local', iconTarget: { kind: 'mote', key: 'mote-source', name: '设计与交互' } }
+    : index === 2 ? { ...area, kind: 'topic', name: '通信实验', hostId: 'local' } : area)
+  const config = useAppStore.getState().config!
+  useAppStore.setState({ config: { ...config, hosts: [...config.hosts, { id: 'remote', kind: 'ssh', label: 'Studio', hostname: 'studio.invalid' }] }, spaceObjectIcons: { 'project-source': 'code', 'mote-source': DEFAULT_MOTE_FACE } })
+  await loaded(scene)
+  const extent = [...boxes.values()], left = Math.min(...extent.map(box => box.x)), top = Math.min(...extent.map(box => box.y))
+  await viewport(-left * .12 + 20, -top * .12 + 60, 1600, 1000, .12)
+  const label = (id: string) => dom.container.querySelector<HTMLElement>(`[data-region-id="${id}"]`)!
+  expect(label('area-0').querySelector('strong')?.textContent).toBe(name)
+  expect(label('area-0').querySelector('[data-host-id="remote"]')?.textContent).toContain('Studio')
+  expect(label('area-0').querySelector('[data-host-id="remote"]')?.getAttribute('data-host-kind')).toBe('ssh')
+  expect(label('area-1').querySelector('[data-space-icon-kind="mote"]')).not.toBeNull()
+  expect(label('area-1').querySelector('.collaboration-area__meta')?.textContent).toContain('Mote')
+  expect(label('area-1').querySelector('.host-identity')).toBeNull()
+  expect(label('area-2').querySelector('.collaboration-area__meta')?.textContent).toContain('Topic')
+  expect(label('area-3').querySelector('[aria-label="Host: Host unknown"]')).not.toBeNull()
+  expect(dom.container.querySelector('.collaboration-agent__dot .agent-avatar')).not.toBeNull()
+  const geometry = captured.nodes.map(node => node.data.box), operations = requests.length
+  await dom.render(graph({ ...scene, areas: scene.areas.map(area => area.id === 'area-0' ? { ...area, name: name + ' · 远程构建' } : area) }))
+  expect(label('area-0').querySelector('strong')?.textContent).toBe(name + ' · 远程构建')
+  expect(captured.nodes.map(node => node.data.box)).toEqual(geometry); expect(requests).toHaveLength(operations)
 })
