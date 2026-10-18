@@ -16,7 +16,7 @@ import { LocalExecutionHost } from '@agentmux/core'
 import { RuntimeController } from '../../src/main/runtime-controller'
 
 const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
-  directory: '', invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>(),
+  directory: '', goals: new Map<string, { id: string }>(), invoke: vi.fn(), handlers: new Map<string, (...args: unknown[]) => unknown>(),
   listeners: new Map<string, Set<(...args: unknown[]) => void>>() }))
 export { bridge }
 vi.mock('node:os', async importOriginal => ({ ...await importOriginal<typeof import('node:os')>(), homedir: () => bridge.directory }))
@@ -44,12 +44,17 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { async start() {} async stop() {} }
 }))
-vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ subscribe: () => () => {} }) }))
+vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ subscribe: () => () => {},
+  get: async (id: string) => bridge.goals.get(id) ?? null,
+  list: async () => [...bridge.goals.values()],
+  recordParticipation: async (id: string) => { const goal = bridge.goals.get(id); if (!goal) throw Error('Unknown original fixture Goal'); return goal }
+}) }))
 vi.mock('../../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))
 vi.mock('../../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
-vi.mock('../../src/main/browser-view-manager', () => ({ BrowserViewManager: class { dispose() {} } }))
+vi.mock('../../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() {} dispose() {} } }))
+vi.mock('../../src/main/native-overlay-windows', () => ({ NativeOverlayWindows: class { resourceProcessIds() { return [] } dispose() {} } }))
 vi.mock('../../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 import '../../src/preload/index'
 import { registerIpc } from '../../src/main/ipc'
@@ -57,18 +62,19 @@ import { DEFAULT_CONFIG } from '../../src/main/config-store'
 
 export const control: AgentSessionControl = { kind: 'agent', hostId: 'local', agentSessionId: 'private-agent', run: { runId: 'old-run' } }
 
-export async function owningBridge(actual?: { client: AgentMuxClient; store: AgentMuxAgentSessionStore; config: AppConfig; scratchTopics?: ScratchTopics }) {
+export async function owningBridge(actual?: { client: AgentMuxClient; store: AgentMuxAgentSessionStore; config: AppConfig; scratchTopics?: ScratchTopics; goals?: readonly { id: string }[] }) {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amux-first-execution-ipc-"))
   isolateCoreFixtureEnvironment(actual ? dirname(actual.client.agentMessageQueuePath()) : root)
   if (actual) vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', actual.client.agentMessageQueuePath())
   bridge.directory = root
+  bridge.goals.clear(); for (const goal of actual?.goals ?? []) bridge.goals.set(goal.id, structuredClone(goal))
   await mkdir(join(root, 'Local Storage', 'leveldb'), { recursive: true })
   const runtime = new RuntimeController(actual?.store ?? new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector, actual?.scratchTopics)
   const durable = { kind: 'agent', agentSessionId: control.agentSessionId, providerId: 'codex', executorId: 'private',
     hostId: 'local', workspacePath: _hygiene_fixturePath("private/fixture"), run: control.run, retiredRuns: [],
      createdAt: _reshape_fixtureEpoch(0, 0, 1), updatedAt: _reshape_fixtureEpoch(0, 0, 2) }
   const canonical = { ...durable, run: { runId: 'canonical-run' } }
-  const client = actual?.client ?? { connect: vi.fn().mockResolvedValue(undefined), onEvent: vi.fn().mockReturnValue(vi.fn()),
+  const client = actual?.client ?? { connect: vi.fn().mockResolvedValue(undefined), connectRuntime: vi.fn().mockResolvedValue(undefined), onEvent: vi.fn().mockReturnValue(vi.fn()),
     submitAgentMessage: vi.fn().mockResolvedValue(undefined),
     submitAgentPrompt: vi.fn().mockResolvedValue(undefined),
     statusAgent: vi.fn(async () => ({ session: durable, run: { runId: control.run.runId, state: 'running' } })),
@@ -97,9 +103,10 @@ export async function owningBridge(actual?: { client: AgentMuxClient; store: Age
   try { release = await registerIpc({ initialConfig: config, window: { setBackgroundColor: vi.fn(), id: 77, webContents: sender, isDestroyed: () => false } as unknown as BrowserWindow, runtime,
     configStore: { get: async () => config, validate: (input: AppConfig) => input, save: async (input: AppConfig) => input } as unknown as ConfigStore,
     progressLoops: { pauseTarget, subscribe: () => () => {} } as never,
+    workbenchWindows: { setNativeOwner: () => () => {} } as never, applicationAccess: {} as never,
     scratchTopics: actual?.scratchTopics ?? new ScratchTopics(), workspaceFiles: new WorkspaceFiles(() => new LocalExecutionHost()) }) }
-  catch (error) { await rm(root, { recursive: true, force: true }); throw error }
-  const dispose = async () => { try { await release() } finally { await rm(root, { recursive: true, force: true }) } }
+  catch (error) { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }); throw error }
+  const dispose = async () => { try { await release() } finally { await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }) } }
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel)
     expect(handler).toBeTypeOf('function')

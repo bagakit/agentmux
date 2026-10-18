@@ -6,6 +6,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, expect, it, vi } from 'vitest'
 import { AgentMuxError } from '@agentmux/core'
+import { unwrapSessionInputWriteResult } from '../src/shared/session-input-result'
 import type { AppConfig } from '../src/shared/contracts'
 import type { ScratchTopics } from '../src/main/scratch-topics'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
@@ -16,8 +17,10 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { MOTE_COORDINATION_ROLE, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../src/shared/scratch-topics'
 import { composeAgentPrompt, composeAgentLaunchPrompt } from '@agentmux/core/agent-outbound-message'
+import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { workspaceProjectId } from '../src/renderer/src/lib/workspace-projects'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
 
 const initialRendererState = useAppStore.getState()
 const initialLauncherState = useLauncherState.getState()
@@ -68,7 +71,7 @@ it('actual preload, registered IPC and Main keep injected context separate from 
   try {
     await bridge.api!.sessions.submitPrompt(control, prompt, 'one-original-operation', condition, undefined, true, agentMuxNote)
     expect(client.submitAgentPrompt).toHaveBeenCalledExactlyOnceWith({ agentSessionId: control.agentSessionId, ...condition,
-      operationId: 'one-original-operation', prompt, authorHuman: true, agentMuxNote })
+      operationId: 'one-original-operation', prompt, authorHuman: true, agentMuxNote, sourceChannel: 'message-tool' })
     expect(pauseTarget).toHaveBeenCalledTimes(1)
   } finally { await dispose() }
 })
@@ -79,7 +82,7 @@ it('registered prompt IPC rejects foreign platform provenance before Core or pro
     const handler = bridge.handlers.get('sessions:submitPrompt')!
     const foreign = { ...sender }
     await expect(handler({ sender: foreign }, control, 'ordinary body', 'one-original-operation',
-      { expectedRun: control.run, afterSubmissionId: null }, undefined, false, 'forged platform source')).rejects.toThrow('Untrusted manual prompt sender')
+      { expectedRun: control.run, afterSubmissionId: null }, undefined, false, 'forged platform source')).resolves.toEqual({ ok: false, error: { code: 'SESSION_INPUT_FAILED', message: 'Untrusted manual prompt sender' } })
     expect(client.submitAgentPrompt.mock.calls).toEqual([]); expect(pauseTarget.mock.calls).toEqual([])
   } finally { await dispose() }
 })
@@ -91,9 +94,10 @@ function pmoConfig(root: string): AppConfig {
     { id: 'private-project', name: 'Original Project', hostId: 'local', path: ("" + (root) + _hygiene_fixturePath("project")), kind: 'folder' }] }
 }
 const originalGoal = { id: 'private-goal', title: 'Keep original Goal', description: 'Original <Goal> & context', status: 'backlog' as const,
-  priority: 'normal' as const, projectId: null, projectName: null, sessionIds: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), source: 'default-topic' as const }
+  priority: 'normal' as const, projectId: null, projectName: null, executorId: null, tags: [], plannedStartAt: null, targetAt: null, parentDemandId: null, phaseIndex: null, sessionIds: [], assigneeSessionIds: [], supervisorSessionId: null, participations: [], activities: [], decisions: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), source: 'default-topic' as const }
 function bindRendererBridge() {
-  vi.spyOn(api.sessions, 'submitPrompt').mockImplementation((...args) => bridge.api!.sessions.submitPrompt(...args))
+  vi.spyOn(api.demands, 'list').mockImplementation(() => bridge.api!.demands.list())
+  vi.spyOn(api.sessions, 'submitPrompt').mockImplementation((...args) => bridge.api!.sessions.submitPrompt(...args).then(unwrapSessionInputWriteResult))
   vi.spyOn(api.sessions, 'refresh').mockImplementation((...args) => bridge.api!.sessions.refresh(...args))
   vi.spyOn(api.sessions, 'launchAgent').mockImplementation((...args) => bridge.api!.sessions.launchAgent(...args))
   vi.spyOn(api.sessions, 'onEvent').mockImplementation((...args) => bridge.api!.sessions.onEvent(...args))
@@ -107,7 +111,7 @@ it('PMO mapped Store requests reach registered IPC and real Core as independent 
     hookBindingId: 'private-binding', hookToken: 'private-token' })
   const config = pmoConfig(root)
   config.executors.private!.providerId = 'traex'
-  const b = await owningBridge({ client: f.core, store: f.store, config })
+  const b = await owningBridge({ client: f.core, store: f.store, config, goals: [originalGoal] })
   try {
     bindRendererBridge()
     const recipient = await bridge.api!.sessions.refresh(control)
@@ -136,7 +140,7 @@ it('PMO fresh Store launch keeps explicit note in pending intent and records the
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amux-pmo-fresh-")), f = await injectedContextCore(root), config = pmoConfig(root)
   let release!: () => void
   const prepare = vi.fn(async () => { await new Promise<void>(resolve => { release = resolve }); return { absolutePath: root, prompt: 'Original Topic <metadata> & note' } })
-  const b = await owningBridge({ client: f.core, store: f.store, config, scratchTopics: { prepareAgent: prepare, discardPreparedIdentity: vi.fn() } as unknown as ScratchTopics })
+  const b = await owningBridge({ client: f.core, store: f.store, config, goals: [originalGoal], scratchTopics: { setNameAudit: vi.fn(), readForDirectory: async () => null, read: async () => null, prepareAgent: prepare, discardPreparedIdentity: vi.fn() } as unknown as ScratchTopics })
   try {
     bindRendererBridge(); vi.spyOn(api.scratch, 'ensureTopic').mockResolvedValue({ id: PMO_TEAMS_TOPIC_ID } as never)
     useLauncherState.setState({ executors: { [SCRATCH_WORKSPACE_ID]: 'private' } })
@@ -173,7 +177,7 @@ it('PMO queued recovery hydrates its original work surface and retries the froze
     hostId: 'local', workspacePath: root, run: control.run, retiredRuns: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1),
     hookBindingId: 'private-binding', hookToken: 'private-token' })
   const config = pmoConfig(root); config.executors.private!.providerId = 'traex'
-  const b = await owningBridge({ client: f.core, store: f.store, config })
+  const b = await owningBridge({ client: f.core, store: f.store, config, goals: [originalGoal] })
   let disposeCold: (() => void) | undefined
   try {
     bindRendererBridge()
@@ -182,6 +186,15 @@ it('PMO queued recovery hydrates its original work surface and retries the froze
       workspaceId: SCRATCH_WORKSPACE_ID, sessionId: control.agentSessionId }), topicId: PMO_TEAMS_TOPIC_ID }
     useAppStore.setState({ loading: false, config, activeWorkspaceId: SCRATCH_WORKSPACE_ID, sessions: [recipient], demands: { [originalGoal.id]: originalGoal },
       demandPmoTabIds: { [originalGoal.id]: tab.id }, tabs: { [tab.id]: tab }, layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('original-group', [tab.id]) } })
+    // Persist the same original Core occurrence, including its execution Host.
+    // Renderer descriptors alone cannot authorize attaching a later Runtime fact.
+    if (phase !== 'restore') {
+      const previous = await bridge.api!.spatial.read()
+      await bridge.api!.spatial.commit({ expectedRevision: previous?.revision ?? 0, graph: desktopSpatialGraph(useAppStore.getState(), []) })
+    }
+    expect((await bridge.api!.spatial.read())!.graph.regions).toContainEqual(expect.objectContaining({
+      tabId: tab.id, regionId: tab.layout.activeRegionId, agentSessionId: control.agentSessionId, execution: { hostId: 'local', cwd: root }
+    }))
     let saved: any, pending: any
     if (phase === 'restore') {
       saved = JSON.parse(await readFile(join(root, 'renderer.json'), 'utf8'))
@@ -190,7 +203,7 @@ it('PMO queued recovery hydrates its original work surface and retries the froze
     } else {
       f.loseNextAck()
       await useAppStore.getState().requestDemandPmoTask(originalGoal.id, 'grill')
-      await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues[control.agentSessionId]?.[0]).toMatchObject({ status: 'deferred', error: 'Private Input accepted; ACK lost' }))
+      await vi.waitFor(() => expect(useAppStore.getState().agentSteerQueues[control.agentSessionId]?.[0], JSON.stringify(useAppStore.getState().agentSteerQueues[control.agentSessionId])).toMatchObject({ status: 'deferred', error: 'Private Input accepted; ACK lost [Error]', errorCode: 'Error' }))
       pending = structuredClone(useAppStore.getState().agentSteerQueues[control.agentSessionId]![0]!)
       saved = JSON.parse(JSON.stringify({ state: useAppStore.persist.getOptions().partialize!(useAppStore.getState()), version: 1 }))
       if (phase === 'seed') {
@@ -202,32 +215,42 @@ it('PMO queued recovery hydrates its original work surface and retries the froze
     }
     expect(pending.text).toBe('Clarify goal'); expect(pending.agentMuxNote).toContain(originalGoal.description)
     const cold = phase === 'restore' ? { core: f.core, store: f.store } : await f.make()
-    if (phase !== 'restore') b.runtime.commit({ hosts: [{ id: 'local', client: cold.core, executionHost: { kind: 'local', dispose: vi.fn() } as never }],
+    if (phase !== 'restore') b.runtime.commit({ hosts: [{ id: 'local', config: config.hosts.find(host => host.id === 'local')!, client: cold.core, executionHost: { kind: 'local', dispose: vi.fn() } as never }],
       removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
     useAppStore.setState(initialRendererState, true)
     localStorage.setItem('agentmux-workbench-v1', JSON.stringify(saved))
     await useAppStore.persist.rehydrate()
     vi.spyOn(api.config, 'get').mockResolvedValue(config)
-    vi.spyOn(api.sessions, 'snapshot').mockImplementation(() => bridge.api!.sessions.snapshot())
+    vi.spyOn(api.spatial, 'read').mockImplementation(() => bridge.api!.spatial.read())
+    vi.spyOn(api.spatial, 'commit').mockImplementation(input => bridge.api!.spatial.commit(input))
+    vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => bridge.api!.spatial.retainLabels(values))
+    vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => bridge.api!.spatial.onChange(listener))
+    const coldSnapshots: unknown[] = []
+    vi.spyOn(api.sessions, 'snapshot').mockImplementation(async () => { const value = await bridge.api!.sessions.snapshot(); coldSnapshots.push(structuredClone(value)); return value })
     expect((await bridge.api!.sessions.snapshot()).sessions).toHaveLength(1)
     vi.spyOn(api.demands, 'list').mockResolvedValue([{ ...originalGoal, description: 'Changed after restart', tags: [], activities: [], decisions: [] }] as never)
     disposeCold = await useAppStore.getState().initialize()
     const restored = useAppStore.getState(), queued = restored.agentSteerQueues[control.agentSessionId]!
     expect(queued).toHaveLength(1)
-    expect(queued[0]).toMatchObject({ operationId: pending.operationId, text: pending.text, agentMuxNote: pending.agentMuxNote,
-      runId: pending.runId, promptCondition: pending.promptCondition, status: 'deferred', errorCode: 'AGENT_EXECUTION_NOT_REQUESTED' })
+    expect(queued[0], JSON.stringify(queued[0])).toMatchObject({ operationId: pending.operationId, text: pending.text, agentMuxNote: pending.agentMuxNote,
+      runId: pending.runId, promptCondition: pending.promptCondition, status: 'deferred', awaitingExplicitSend: true, error: 'Private Input accepted; ACK lost [Error]', errorCode: 'Error' })
     expect(restored.tabs[tab.id]).toMatchObject({ id: tab.id, topicId: PMO_TEAMS_TOPIC_ID, layout: tab.layout })
     expect(restored.tabs[tab.id]!.regions[tab.layout.activeRegionId]).toMatchObject({ sessionId: control.agentSessionId, kind: 'agent' })
     expect(restored.layouts[SCRATCH_WORKSPACE_ID]).toMatchObject({ activeGroupId: 'original-group' })
-    expect(restored.sessions, restored.error ?? undefined).toEqual([expect.objectContaining({ id: control.agentSessionId, processState: 'running' })])
+    // Startup publishes the durable workface first; the original membership reader
+    // then attaches current Runtime facts without replacing the hydrated intent.
+    await vi.waitFor(() => expect(useAppStore.getState().sessions, JSON.stringify({ error: useAppStore.getState().error, snapshots: coldSnapshots })).toEqual([expect.objectContaining({ id: control.agentSessionId, processState: 'running' })]))
     expect(f.requests).toHaveLength(phase === 'restore' ? 0 : 1); expect(f.writes).toHaveLength(1)
     await restored.sendQueuedAgentSteer(control.agentSessionId, pending.operationId)
     expect(useAppStore.getState().agentSteerQueues[control.agentSessionId] ?? [], useAppStore.getState().agentSteerQueues[control.agentSessionId]?.[0]?.error).toEqual([])
     expect(f.requests).toHaveLength(phase === 'restore' ? 1 : 2)
     if (phase !== 'restore') expect(f.requests[1]).toEqual(f.requests[0])
     expect(f.writes).toHaveLength(1)
+    const originalSystemContext = [pending.agentMuxNote, goalRoleGuidance({ role: 'manager', goalId: originalGoal.id,
+      agentSessionId: control.agentSessionId, runId: control.run.runId, source: { kind: 'goal-discussion', operationId: pending.operationId } })].join('\n\n')
+    expect(f.writes).toEqual([composeAgentPrompt(pending.text, originalSystemContext).text + '\r'])
     expect((await cold.store.loadTimeline(control.agentSessionId)).items.map(item => [item.kind, item.content])).toEqual([
-      ['system_message', pending.agentMuxNote], ['user_message', pending.text]
+      ['system_message', originalSystemContext], ['user_message', pending.text]
     ])
     expect(cold.core.agentSession(control.agentSessionId).run).toEqual(control.run)
     expect(f.start.mock.calls).toEqual([]); expect(f.stop.mock.calls).toEqual([])
@@ -236,8 +259,8 @@ it('PMO queued recovery hydrates its original work surface and retries the froze
 
 it('PMO retained launcher carries the original producer note after editing raw user bytes and choosing an Executor', async () => {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amux-pmo-edited-")), f = await injectedContextCore(root), config = pmoConfig(root)
-  const b = await owningBridge({ client: f.core, store: f.store, config, scratchTopics: {
-    prepareAgent: vi.fn().mockResolvedValue({ absolutePath: root, prompt: '' }), discardPreparedIdentity: vi.fn()
+  const b = await owningBridge({ client: f.core, store: f.store, config, goals: [originalGoal], scratchTopics: {
+    setNameAudit: vi.fn(), readForDirectory: async () => null, read: async () => null, prepareAgent: vi.fn().mockResolvedValue({ absolutePath: root, prompt: '' }), discardPreparedIdentity: vi.fn()
   } as unknown as ScratchTopics })
   try {
     bindRendererBridge(); vi.spyOn(api.scratch, 'ensureTopic').mockResolvedValue({ id: PMO_TEAMS_TOPIC_ID } as never)
@@ -272,7 +295,7 @@ it('PMO shared queue transports standalone platform context and untouched raw bo
     hostId: 'local', workspacePath: root, run: control.run, retiredRuns: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1),
     hookBindingId: 'private-binding', hookToken: 'private-token' })
   const config = pmoConfig(root); config.executors.private!.providerId = 'traex'
-  const b = await owningBridge({ client: f.core, store: f.store, config })
+  const b = await owningBridge({ client: f.core, store: f.store, config, goals: [originalGoal] })
   try {
     bindRendererBridge()
     const recipient = await bridge.api!.sessions.refresh(control)
