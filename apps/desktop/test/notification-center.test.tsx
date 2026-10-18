@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
+import * as floating from '@floating-ui/dom'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { GlobalSystemNotices } from '../src/renderer/src/components/GlobalSystemNotices'
 import { AgentLifecycleFeedback } from '../src/renderer/src/components/AgentLifecycleFeedback'
@@ -12,6 +13,11 @@ import { api } from '../src/renderer/src/lib/api'
 import { projectNotifications, useAppStore } from '../src/renderer/src/store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { notificationTrigger, toggleNotificationCenter, toggleNotificationDetails } from './helpers/notification-center'
+
+vi.mock('@floating-ui/dom', async importOriginal => {
+  const actual = await importOriginal<typeof import('@floating-ui/dom')>()
+  return { ...actual, computePosition: vi.fn(actual.computePosition) }
+})
 
 const dom = composerDOM()
 beforeEach(() => useAppStore.setState({ loading: false, sessions: [], tabs: {}, notificationEvents: [], noticeReadReceipts: {},
@@ -50,6 +56,37 @@ function LocalService({ id }: { id: string }) {
     {notices.map(item => <ServiceWindowNotice key={item.id} notice={item.notice} />)}
   </ServiceNoticeDisclosure>
 }
+
+it('positions the original popover from its invoking bell independently of unrelated input surfaces', async () => {
+  const position = vi.mocked(floating.computePosition), original = position.getMockImplementation()!
+  position.mockResolvedValue({ x: 100, y: 200,
+    placement: 'top-end', strategy: 'fixed', middlewareData: {} })
+  try {
+    useAppStore.setState({ environmentWarning: 'Original shell setup needs review.' })
+    await dom.render(<><div className="agent-input-stack">Unrelated unsent input</div><GlobalSystemNotices /></>)
+    await toggleNotificationCenter(dom.container, 'open')
+    expect(position).toHaveBeenCalled()
+    const [reference, panel, options] = position.mock.calls.at(-1)!
+    expect(reference).toBe(notificationTrigger(dom.container))
+    expect(panel).toBe(dom.container.querySelector('.global-system-notices__details'))
+    expect(options).toMatchObject({ strategy: 'fixed', placement: 'top-end' })
+    expect(panel.style.left).toBe('100px')
+    expect(panel.style.top).toBe('200px')
+    expect(dom.container.querySelector('.agent-input-stack')!.textContent).toBe('Unrelated unsent input')
+  } finally { position.mockImplementation(original) }
+})
+
+it('keeps the compact problem and severity discoverable while full impact and recovery remain in exact Details', async () => {
+  useAppStore.setState({ environmentWarning: 'Complete shell diagnostic and original environment.' })
+  await dom.render(<GlobalSystemNotices />); await toggleNotificationCenter(dom.container, 'open')
+  expect(rows()[0]!.textContent).toContain('Local shell environment is incomplete')
+  expect(rows()[0]!.textContent).toContain('Degraded')
+  expect(rows()[0]!.textContent).not.toContain('Complete shell diagnostic')
+  await toggleNotificationDetails(rows()[0]!)
+  expect(rows()[0]!.querySelector('.notification-item__original')!.textContent).toContain('Complete shell diagnostic and original environment.')
+  expect(rows()[0]!.querySelector('.notification-item__original')!.textContent).toContain('Existing processes keep their original environment.')
+  expect(useAppStore.getState().environmentWarning).toBe('Complete shell diagnostic and original environment.')
+})
 
 it('groups 98 current facts by exact objects without deleting independent issues or expanding all rows', async () => {
   const sessions = Array.from({ length: 32 }, (_, index) => agent(`owner-${index}`, 3))

@@ -44,10 +44,14 @@ async function resize(width, height) {
 async function open() { await click(trigger); await waitFor(`${panel}.matches(':popover-open')`); await painted() }
 async function close() { await escape(); await waitFor(`!${panel}.matches(':popover-open')`) }
 async function bounded() {
-  const bounds = await evaluate(`(()=>{const r=${panel}.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,vw:innerWidth,vh:innerHeight,scrollWidth:${panel}.scrollWidth,clientWidth:${panel}.clientWidth}})()`)
+  const bounds = await evaluate(`(()=>{const r=${panel}.getBoundingClientRect(),a=${trigger}.getBoundingClientRect(),v=${panel}.querySelector('.global-system-notices__content').getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,vw:innerWidth,vh:innerHeight,scrollWidth:${panel}.scrollWidth,clientWidth:${panel}.clientWidth,anchor:{top:a.top,right:a.right},visibleGroups:[...${panel}.querySelectorAll('.notification-group')].filter(e=>{const g=e.getBoundingClientRect();return g.top>=v.top&&g.bottom<=v.bottom}).length}})()`)
   assert.ok(bounds.width > 250 && bounds.height > 120 && bounds.x >= 0 && bounds.y >= 0 && bounds.x + bounds.width <= bounds.vw + 1 && bounds.y + bounds.height <= bounds.vh + 1,
     'The complete original panel remains usable inside the native viewport')
   assert.ok(bounds.scrollWidth <= bounds.clientWidth + 1, 'Narrow notification panel has no horizontal content loss')
+  assert.ok(Math.abs(bounds.anchor.top - (bounds.y + bounds.height) - 6) <= 1,
+    'The actual native popover stays six pixels above its invoking bell, not another input surface')
+  assert.ok(Math.abs(bounds.x + bounds.width - Math.min(bounds.anchor.right, bounds.vw - 8)) <= 1,
+    'The actual native popover aligns to the bell end with only viewport-edge correction')
   return bounds
 }
 async function surface() { return evaluate('notificationScene.surface()') }
@@ -77,7 +81,15 @@ app.whenReady().then(async () => {
     await frame('dark-wide-status')
     await open()
     assert.equal(await unread(), 98, 'Opening the center never marks unseen facts read')
-    const wide = await bounded(); await frame('dark-wide-current-98')
+    const wide = await bounded()
+    const inputBefore = await evaluate(`document.querySelector('.agent-input-stack').getBoundingClientRect().top`)
+    await evaluate(`document.querySelector('.agent-input-stack').style.paddingTop='96px'`); await painted()
+    assert.notEqual(await evaluate(`document.querySelector('.agent-input-stack').getBoundingClientRect().top`), inputBefore,
+      'An actual private input surface changes height for the anchor counterexample')
+    const withTallInput = await bounded()
+    assert.equal(withTallInput.y, wide.y, 'Unrelated input height does not detach the original notification popover')
+    await evaluate(`document.querySelector('.agent-input-stack').style.removeProperty('padding-top')`); await painted()
+    await frame('dark-wide-current-98')
     await click(category('agents'))
     assert.equal(await evaluate(`document.querySelectorAll('.notification-group[data-group-id]').length`), 32)
     await click(`document.querySelector('.notification-group__more')`)
@@ -150,7 +162,7 @@ app.whenReady().then(async () => {
     const facts = await evaluate('notificationScene.facts()')
     assert.equal(facts.writes.length, 0, 'Notification reading never submits or pastes Agent input')
     assert.ok(facts.trustedEvents.some(event => event.trusted && event.type === 'click'), 'Actual native pointer input reaches production controls')
-    receipt.scenarios.push({ wide, narrow, originalGeometry: geometry, finalGeometry: afterGeometry, originalSurface: before, finalFacts: facts, scroll })
+    receipt.scenarios.push({ wide, withTallInput, narrow, originalGeometry: geometry, finalGeometry: afterGeometry, originalSurface: before, finalFacts: facts, scroll })
     await resize(1280, 900)
     await click(`document.querySelector('[data-shortcut-help-open]')`)
     await waitFor(`document.querySelector('.settings-page:not([hidden])')`)
