@@ -41,6 +41,9 @@ export function useCollaborationLayout(input: CollaborationLayoutInput, active: 
           const anchor = readingAnchor.current, previous = anchor ? geometry.current.boxes.get(anchor) : undefined
           const placed = anchor ? response.boxes.find(box => box.id === anchor) : undefined
           if (previous?.kind === 'agent' && placed?.kind === 'agent') offset = { x: previous.x - placed.x, y: previous.y - placed.y }
+          else if (previous?.kind === 'area' && placed?.kind === 'area') offset = {
+            x: previous.x + previous.heading.x - placed.x - placed.heading.x,
+            y: previous.y + previous.heading.y - placed.y - placed.heading.y }
           else if (anchor) readingAnchor.current = null
           const next = new Map(response.boxes.map(box => [box.id, offset.x || offset.y ? { ...box, x: box.x + offset.x, y: box.y + offset.y } : box]))
           geometry.current = { structure, arrange, boxes: next, paths: new Map() }
