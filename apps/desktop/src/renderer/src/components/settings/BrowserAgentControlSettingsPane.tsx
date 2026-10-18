@@ -1,4 +1,5 @@
 import { useId } from 'react'
+import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import {
   BROWSER_AGENT_CONTROL_LIMITS, BROWSER_AGENT_GLOW_BLENDS, BROWSER_AGENT_GLOW_ANIMATIONS,
   DEFAULT_BROWSER_AGENT_CONTROL, resolveBrowserAgentControl, type BrowserAgentControlPreferences
@@ -6,9 +7,11 @@ import {
 import { BrowserAgentControlPreview } from './BrowserAgentControlPreview'
 import { useSettingDraftRecord } from './use-setting-draft'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'
+import { useSettingsPreviewReturn } from './use-settings-preview-return'
 import '../../styles/browser-agent-control-settings.css'
 import './agent-takeover-settings.css'
 
+const PreviewIcon = semanticIconComponent('action.preview')
 type NumericPreference = keyof typeof BROWSER_AGENT_CONTROL_LIMITS
 export function BrowserAgentControlSettingsPane({ preferences, active, onSave }: {
   preferences: Partial<BrowserAgentControlPreferences> | undefined
@@ -17,54 +20,60 @@ export function BrowserAgentControlSettingsPane({ preferences, active, onSave }:
 }) {
   const saved = resolveBrowserAgentControl(preferences), draft = useSettingDraftRecord(saved), saveState = useSettingsSave(), id = useId()
   const value = draft.value
+  const preview = useSettingsPreviewReturn('Cursor & discussion')
   const defaultsSelected = (Object.keys(DEFAULT_BROWSER_AGENT_CONTROL) as (keyof BrowserAgentControlPreferences)[]).every(key => value[key] === DEFAULT_BROWSER_AGENT_CONTROL[key])
   async function save() {
     const submitted = draft.beginSave()
     submitted.finish(await saveState.run(() => onSave(submitted.value, submitted.expected)))
   }
   function toggle(key: 'showCursor' | 'showCursorLabel' | 'showDiscussion' | 'pointerTween' | 'clickRipple' | 'glowEnabled', title: string, note?: string) {
-    return <label className="browser-agent-control__toggle" data-settings-field={key}>
+    return <label className="browser-agent-control__toggle" data-settings-field={key} data-settings-preview-label={title}>
       <span><strong>{title}</strong>{note ? <small>{note}</small> : null}</span>
       <input type="checkbox" checked={value[key]} onChange={event => draft.setField(key, event.target.checked)} />
     </label>
   }
   function slider(key: NumericPreference, title: string, unit: string) {
     const { min, max, step } = BROWSER_AGENT_CONTROL_LIMITS[key]
-    return <label className="browser-agent-control__range" data-settings-field={key} htmlFor={`${id}-${key}`}>
+    return <label className="browser-agent-control__range" data-settings-field={key} data-settings-preview-label={title} htmlFor={`${id}-${key}`}>
       <span>{title}<output htmlFor={`${id}-${key}`}>{key === 'glowOpacity' ? Math.round(value[key] * 100) : value[key]}{unit}</output></span>
       <input id={`${id}-${key}`} type="range" min={min} max={max} step={step} value={value[key]} onChange={event => draft.setField(key, Number(event.target.value))} />
     </label>
   }
-  return <div className="settings-pane-stack browser-agent-control-settings">
+  function previewButton(group: string, title: string) {
+    return <button type="button" className="small-button settings-preview-open" data-settings-preview-open={group} data-settings-preview-title={title} onClick={event => preview.open(event.currentTarget)}><PreviewIcon size={14} />View preview</button>
+  }
+  return <div ref={preview.rootRef} className="settings-pane-stack browser-agent-control-settings" onFocusCapture={preview.remember} onInputCapture={preview.remember} onChangeCapture={preview.remember} onClickCapture={preview.remember}>
     <p className="settings-group-note">Make agent activity easy to follow. These preferences change its appearance; takeover and messaging remain available.</p>
     <div className="browser-agent-control__layout">
       <div className="browser-agent-control__editor">
-        <section className="settings-group">
+        <section className="settings-group" data-settings-preview-group="cursor">
           <header><span>Cursor & discussion</span></header>
           {toggle('showCursor', 'Show agent cursor')}
           {toggle('showCursorLabel', 'Show avatar & title')}
           {toggle('showDiscussion', 'Show discussion box', 'Open alongside agent activity. You can always open it yourself.')}
           {toggle('pointerTween', 'Animate cursor movement')}
           {toggle('clickRipple', 'Show click ripple')}
+          {previewButton('cursor', 'Cursor & discussion')}
         </section>
-        <section className="settings-group">
+        <section className="settings-group" data-settings-preview-group="glow">
           <header><span>Inner glow</span></header>
           {toggle('glowEnabled', 'Highlight page edges', 'A steady fine edge marks agent control. The soft inner glow can blend and animate.')}
           <div className="browser-agent-control__pair">
-            <label className="browser-agent-control__color" data-settings-field="glowColor"><span>Color</span><span><input aria-label="Glow color" type="color" value={value.glowColor} onChange={event => draft.setField('glowColor', event.target.value)} /><code>{value.glowColor.toUpperCase()}</code></span></label>
-            <label data-settings-field="glowBlend"><span>Blend</span><select aria-label="Glow blend" value={value.glowBlend} onChange={event => draft.setField('glowBlend', event.target.value as BrowserAgentControlPreferences['glowBlend'])}>{BROWSER_AGENT_GLOW_BLENDS.map(blend => <option key={blend} value={blend}>{blend[0]!.toUpperCase() + blend.slice(1)}</option>)}</select></label>
+            <label className="browser-agent-control__color" data-settings-field="glowColor" data-settings-preview-label="Glow color"><span>Color</span><span><input aria-label="Glow color" type="color" value={value.glowColor} onChange={event => draft.setField('glowColor', event.target.value)} /><code>{value.glowColor.toUpperCase()}</code></span></label>
+            <label data-settings-field="glowBlend" data-settings-preview-label="Glow blend"><span>Blend</span><select aria-label="Glow blend" value={value.glowBlend} onChange={event => draft.setField('glowBlend', event.target.value as BrowserAgentControlPreferences['glowBlend'])}>{BROWSER_AGENT_GLOW_BLENDS.map(blend => <option key={blend} value={blend}>{blend[0]!.toUpperCase() + blend.slice(1)}</option>)}</select></label>
           </div>
           {slider('glowWidth', 'Width', ' px')}
           {slider('glowOpacity', 'Intensity', '%')}
-          <label className="browser-agent-control__select" data-settings-field="glowAnimation"><span>Animation</span><select aria-label="Glow animation" value={value.glowAnimation} onChange={event => draft.setField('glowAnimation', event.target.value as BrowserAgentControlPreferences['glowAnimation'])}>{BROWSER_AGENT_GLOW_ANIMATIONS.map(animation => <option key={animation} value={animation}>{animation === 'none' ? 'Static' : animation[0]!.toUpperCase() + animation.slice(1)}</option>)}</select></label>
+          <label className="browser-agent-control__select" data-settings-field="glowAnimation" data-settings-preview-label="Glow animation"><span>Animation</span><select aria-label="Glow animation" value={value.glowAnimation} onChange={event => draft.setField('glowAnimation', event.target.value as BrowserAgentControlPreferences['glowAnimation'])}>{BROWSER_AGENT_GLOW_ANIMATIONS.map(animation => <option key={animation} value={animation}>{animation === 'none' ? 'Static' : animation[0]!.toUpperCase() + animation.slice(1)}</option>)}</select></label>
+          {previewButton('glow', 'Inner glow')}
         </section>
-        <details className="browser-agent-control__advanced">
+        <details className="browser-agent-control__advanced" data-settings-preview-group="fine-tuning">
           <summary>Fine tuning</summary>
-          <div>{slider('pointerDurationMs', 'Cursor travel', ' ms')}{slider('clickDurationMs', 'Ripple duration', ' ms')}{slider('clickRadius', 'Ripple radius', ' px')}{slider('glowSoftness', 'Glow softness', ' px')}{slider('glowDurationMs', 'Glow cycle', ' ms')}</div>
+          <div>{slider('pointerDurationMs', 'Cursor travel', ' ms')}{slider('clickDurationMs', 'Ripple duration', ' ms')}{slider('clickRadius', 'Ripple radius', ' px')}{slider('glowSoftness', 'Glow softness', ' px')}{slider('glowDurationMs', 'Glow cycle', ' ms')}{previewButton('fine-tuning', 'Fine tuning')}</div>
         </details>
         <button type="button" className="small-button browser-agent-control__reset" disabled={defaultsSelected} onClick={() => { for (const key of Object.keys(DEFAULT_BROWSER_AGENT_CONTROL) as (keyof BrowserAgentControlPreferences)[]) draft.setField(key, DEFAULT_BROWSER_AGENT_CONTROL[key]) }}>Reset draft to defaults</button>
       </div>
-      <BrowserAgentControlPreview preferences={value} active={active} dirty={draft.dirty} />
+      <BrowserAgentControlPreview preferences={value} active={active} dirty={draft.dirty} previewRef={preview.previewRef} returnAction={preview.returnAction} />
     </div>
     <SettingsSaveBar save={saveState} dirty={draft.dirty} label="Save agent appearance" onSave={() => void save()} />
   </div>

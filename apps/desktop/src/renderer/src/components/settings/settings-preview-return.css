@@ -1,0 +1,25 @@
+.settings-preview-open, .settings-preview-return { display: none; }
+.settings-preview-open, .settings-preview-return { align-items: center; gap: var(--sp-2); }
+.settings-preview-open { justify-self: start; margin-top: var(--sp-3); }
+.settings-preview-open > svg, .settings-preview-return > svg { flex: none; }
+.settings-preview-return { min-width: 0; max-width: 100%; }
+.settings-preview-return > span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.settings-preview-header-actions { display: flex; flex: 1; min-width: 0; justify-content: flex-end; align-items: center; gap: var(--sp-3); }
+.settings-preview-header-actions > small { color: var(--text-3); font-size: var(--fs-micro); }
+.settings-preview-header-actions > .browser-agent-preview__playback { flex: none; }
+.focus-settings .focus-settings-preview > header,
+.browser-agent-control-settings .browser-agent-preview .browser-agent-preview__header { flex-wrap: nowrap; }
+.focus-settings .focus-settings-preview > header > span { flex: none; }
+.browser-agent-control-settings .browser-agent-preview__header > span { min-width: 0; }
+.browser-agent-control-settings .browser-agent-preview__header > span > small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+@container (max-width: 700px) {
+  .focus-settings :is(.settings-preview-open, .settings-preview-return) { display: inline-flex; }
+  .focus-settings .settings-preview-header-actions > small { display: none; }
+}
+@container agent-control-settings (max-width: 639px) {
+  .browser-agent-control-settings :is(.settings-preview-open, .settings-preview-return) { display: inline-flex; }
+}
+@media (max-height: 620px) {
+  :is(.focus-settings, .browser-agent-control-settings) :is(.settings-preview-open, .settings-preview-return) { display: inline-flex; }
+  .focus-settings .settings-preview-header-actions > small { display: none; }
+}
