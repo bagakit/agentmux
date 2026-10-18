@@ -14,6 +14,7 @@ import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-ser
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { connectHostedAgentMux } from '../../../packages/core/src/hosted-client'
 import { AgentTerminalScreen } from '../../../packages/core/src/agent-terminal-screen'
+import type { DurableAgentMuxMessageQueue } from '../../../packages/core/src/agent-global-message-queue'
 import { interactionOperationHook, OPERATION_SESSION_ID, OPERATION_RUN_ID } from '../../../packages/core/test/fixtures/interaction-operation-hook'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner'
 import type { AgentMuxClient } from '../../../packages/core/src/client'
@@ -92,7 +93,21 @@ async function authenticatedFixture(request?: AgentMuxInteractionRequest, retain
   vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
   const providerId = request ? 'claude' : 'codex', fixtureSource = { ...source, providerId }
   const h = await connectedClient(request, providerId, source.nativeSessionId)
-  closes.push(() => h.client.dispose())
+  const queue = (h.client as unknown as { messageQueue: DurableAgentMuxMessageQueue }).messageQueue
+  const journalReads = new Set<Promise<unknown>>()
+  const messageChanges = queue.messageChanges.bind(queue)
+  vi.spyOn(queue, 'messageChanges').mockImplementation((...args) => {
+    const pending = messageChanges(...args)
+    journalReads.add(pending)
+    const settled = () => { journalReads.delete(pending) }
+    void pending.then(settled, settled)
+    return pending
+  })
+  closes.push(async () => {
+    await h.client.dispose()
+    // Disposing subscriptions stops future reads; their original opening I/O may still settle.
+    while (journalReads.size) await Promise.allSettled([...journalReads])
+  })
   const stored = (await loadAgentSessions(h.store))[0]!
   const retainedInput = request && retainedResponse ? { agentSessionId: sid, expectedRun: { runId: RUN_ID },
     operationId: 'retained-original-' + request.id, expectedRequest: stored.pendingInteraction!.request, response: retainedResponse } : undefined
