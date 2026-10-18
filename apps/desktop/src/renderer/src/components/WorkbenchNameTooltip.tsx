@@ -5,13 +5,13 @@ import { WindowOverlayPortal } from './WindowOverlayHost'
 /** Full names and descriptions stay outside their original surface’s overflow. */
 export function useWorkbenchNameTooltip(name: string, detail: string, suppressed: boolean,
   { placement = 'bottom-start', pointerPassThrough = false }: { placement?: Placement; pointerPassThrough?: boolean } = {}) {
-  const [anchor, setAnchor] = useState<HTMLElement | null>(null)
+  const [anchor, setAnchor] = useState<Element | null>(null)
   const [overflowing, setOverflowing] = useState(false)
   const surface = useRef<HTMLDivElement>(null), id = useId()
   const departure = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const keepOpen = () => clearTimeout(departure.current)
   const hide = () => { keepOpen(); departure.current = setTimeout(() => setAnchor(null), 120) }
-  const showFor = (element: HTMLElement) => { keepOpen(); if (!suppressed) setAnchor(element) }
+  const showFor = (element: Element) => { keepOpen(); if (!suppressed) setAnchor(element) }
   useEffect(() => () => clearTimeout(departure.current), [])
   const visible = anchor !== null && !suppressed
   useEffect(() => {
@@ -29,7 +29,7 @@ export function useWorkbenchNameTooltip(name: string, detail: string, suppressed
         if (pointerPassThrough) setOverflowing(panel.scrollHeight > panel.clientHeight + 1)
       }
     }
-    const stop = autoUpdate(anchor, panel, () => { void update() })
+    const stop = autoUpdate(anchor, panel, () => { void update() }, { animationFrame: anchor.namespaceURI === 'http://www.w3.org/2000/svg' })
     const hide = () => setAnchor(null)
     const key = (event: KeyboardEvent) => { if (event.key === 'Escape') hide() }
     window.addEventListener('blur', hide); document.addEventListener('visibilitychange', hide)
@@ -37,7 +37,7 @@ export function useWorkbenchNameTooltip(name: string, detail: string, suppressed
     return () => { disposed = true; stop(); window.removeEventListener('blur', hide)
       document.removeEventListener('visibilitychange', hide); window.removeEventListener('keydown', key) }
   }, [visible, anchor, name, detail, placement, pointerPassThrough])
-  const show = (event: MouseEvent<HTMLElement> | FocusEvent<HTMLElement>) => showFor(event.currentTarget)
+  const show = (event: MouseEvent<Element> | FocusEvent<Element>) => showFor(event.currentTarget)
   return { showFor, hide, props: { onMouseEnter: show, onMouseLeave: hide, onFocus: show,
     onBlur: hide, 'aria-describedby': visible ? id : undefined },
     content: visible ? <WindowOverlayPortal layer="tooltip"><div ref={surface} id={id} role="tooltip" tabIndex={0} className="workbench-tab-name-tooltip" style={pointerPassThrough && !overflowing ? { pointerEvents: 'none' } : undefined} onMouseEnter={keepOpen} onMouseLeave={hide} onFocus={keepOpen} onBlur={hide}>

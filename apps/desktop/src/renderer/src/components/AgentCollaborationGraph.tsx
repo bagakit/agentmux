@@ -13,6 +13,7 @@ import { collaborationCameraTarget, COLLABORATION_OVERVIEW_ZOOM, COLLABORATION_R
 import { COLLABORATION_ACTIVITY_MS, collaborationNodeSize, collaborationRecency, collaborationAgentName } from '../lib/collaboration-map-presentation'
 import { useAgentInformationPreview } from './AgentInformationPreview'
 import { FocusContextCardBody } from './FocusContextCardBody'
+import { useWorkbenchNameTooltip } from './WorkbenchNameTooltip'
 import type { FocusContextIdentity } from '../lib/focus-context-identity'
 import type { FocusGoalLinks } from '../lib/focus-goal-links'
 import '@xyflow/react/dist/base.css'
@@ -205,7 +206,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
   return <div className="collaboration-canvas" aria-label="Agent collaboration graph">
     <ReactFlow<GraphNode> nodes={nodes} edges={emptyEdges} nodeTypes={nodeTypes} onInit={instance => { flow.current = instance }} onPaneClick={clearSelection}
       onMoveStart={event => { if (event) ++gestures.current }} onlyRenderVisibleElements nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesReconnectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.05} maxZoom={1.4} proOptions={{ hideAttribution: true }}>
-      <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} geometry={geometry} />
+      <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} active={active} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} geometry={geometry} />
       <Background gap={22} size={1} />
     </ReactFlow>
     <div className="collaboration-canvas__controls" aria-label="Graph viewport">
@@ -240,7 +241,7 @@ const CollaborationRegionLabels = memo(function CollaborationRegionLabels({ area
       const left = (box.x + box.heading.x) * zoom + panX, top = (box.y + box.heading.y) * zoom + panY
       const headingVisible = left >= 8 && left + box.heading.width * zoom <= width - 8 && top >= 8 && top + box.heading.height * zoom <= height - 8
       if (!overview && (headingVisible || !visibleAreas.has(box.id))) return []
-      const labelWidth = Math.min(width - 24, Math.max(104, Math.min(224, area.name.length * 6.5 + 62)))
+      const labelWidth = Math.min(width - 24, Math.max(104, Math.min(224, area.name.length * 6.5 + 74)))
       return [{ data, width: labelWidth, height: 26, x: clamp(left, 12, width - labelWidth - 12),
         y: clamp(top + box.heading.height * zoom - 26, headingVisible ? 8 : 52, height - 38), context: !overview }]
     }).sort((a, b) => Number(!a.data.area.members.length) - Number(!b.data.area.members.length) || b.data.area.members.length - a.data.area.members.length || a.y - b.y || a.x - b.x || a.data.area.id.localeCompare(b.data.area.id))
@@ -277,13 +278,13 @@ const CollaborationRegionLabels = memo(function CollaborationRegionLabels({ area
   return <div className="collaboration-region-labels">{labels.map(({ data, x, y, width, height, context }) => <div key={data.area.id} className="collaboration-area__overview-label" data-area-id={data.box.id} data-kind={data.area.kind} data-empty={!data.area.members.length || undefined} data-context={context || undefined} style={{ left: x, top: y, width, height }}>
     <button type="button" className="collaboration-area__summary nodrag nopan" aria-label={`Locate ${data.area.name} · ${data.area.members.length} Agents`} onClick={data.onLocate} title={data.area.issue ?? `${areaKinds[data.area.kind].label} · ${data.area.name}`}>
       <SemanticIcon name={areaKinds[data.area.kind].icon} size={13} /><span>{data.area.name}</span><small>{data.area.members.length}</small>
-      {data.activity ? <i className="collaboration-area__activity" data-kind={data.activity.pulse.kind} aria-label={data.activity.pulse.kind === 'communication' ? 'Recent message activity' : 'Recent dispatch update'} /> : null}
+      <i className="collaboration-area__activity" data-kind={data.activity?.pulse.kind} aria-hidden={!data.activity || undefined} aria-label={data.activity ? data.activity.pulse.kind === 'communication' ? 'Recent message activity' : 'Recent dispatch update' : undefined} />
     </button>
   </div>)}</div>
 })
 
 /** Only this small layer subscribes to camera bounds; xyflow owns its transform and nodes. */
-const CollaborationRelations = memo(function CollaborationRelations({ paths, onSelect, onClear }: { paths: readonly RelationPath[]; onSelect(path: RelationPath): void; onClear(): void }) {
+const CollaborationRelations = memo(function CollaborationRelations({ paths, active, onSelect, onClear }: { paths: readonly RelationPath[]; active: boolean; onSelect(path: RelationPath): void; onClear(): void }) {
   const visible = useStore(useCallback((state: { transform: [number, number, number]; width: number; height: number }) => {
     const [x, y, zoom] = state.transform, padding = 32 / zoom
     const left = -x / zoom - padding, top = -y / zoom - padding, right = (state.width - x) / zoom + padding, bottom = (state.height - y) / zoom + padding
@@ -293,27 +294,29 @@ const CollaborationRelations = memo(function CollaborationRelations({ paths, onS
   const markerId = useId().replace(/:/g, '')
   return <ViewportPortal><svg className="collaboration-connections" style={{ position: 'absolute', width: 1, height: 1, overflow: 'visible', pointerEvents: 'none' }}>
     <defs>{Object.entries(colors).map(([kind, color]) => <marker key={kind} id={`${markerId}-${kind}`} viewBox="0 0 10 10" refX={10} refY={5} markerUnits="userSpaceOnUse" markerWidth={8 / zoom} markerHeight={8 / zoom} orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill={color} /></marker>)}</defs>
-    {visible.map(path => <RelationView key={path.id} record={path} markerId={markerId} zoom={zoom} onSelect={onSelect} onClear={onClear} />)}
+    {visible.map(path => <RelationView key={path.id} record={path} markerId={markerId} zoom={zoom} active={active} onSelect={onSelect} onClear={onClear} />)}
   </svg></ViewportPortal>
 })
-const RelationView = memo(function RelationView({ record, markerId, zoom, onSelect, onClear }: { record: RelationPath; markerId: string; zoom: number; onSelect(path: RelationPath): void; onClear(): void }) {
+const RelationView = memo(function RelationView({ record, markerId, zoom, active, onSelect, onClear }: { record: RelationPath; markerId: string; zoom: number; active: boolean; onSelect(path: RelationPath): void; onClear(): void }) {
   const kind = record.relations[0]!.kind, { labelX, labelY } = record.route
-  const [hovered, setHovered] = useState(false), [focused, setFocused] = useState(false)
+  const tooltip = useWorkbenchNameTooltip(record.label, '', !active, { placement: 'bottom', pointerPassThrough: true })
+  const show = (event: { currentTarget: SVGGElement }) => {
+    const anchor = event.currentTarget.querySelector<SVGPathElement>('.react-flow__edge-path')
+    if (anchor) tooltip.showFor(anchor)
+  }
   const path = zoom < COLLABORATION_OVERVIEW_ZOOM ? collaborationOverviewPath(record.route, record.sourceBox, record.targetBox, zoom) : record.route.path
   const delay = useMemo(() => Math.min(0, record.startedAt - Date.now()), [record.active, record.startedAt])
-  return <g className={`react-flow__edge selectable nopan collaboration-edge-group--${kind}`} data-id={record.id} data-emphasis={record.emphasis} tabIndex={0} role="button" aria-label={record.label} aria-pressed={record.selected}
-    style={{ pointerEvents: 'stroke' }} onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)} onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} onClick={event => { event.stopPropagation(); onSelect(record) }} onKeyDown={event => {
+  return <><g className={`react-flow__edge selectable nopan collaboration-edge-group--${kind}`} data-id={record.id} data-emphasis={record.emphasis} tabIndex={0} role="button" aria-label={record.label} aria-pressed={record.selected} {...tooltip.props}
+    style={{ pointerEvents: 'stroke' }} onMouseEnter={show} onMouseLeave={event => { if (!event.currentTarget.contains(event.currentTarget.ownerDocument.activeElement)) tooltip.hide() }} onFocus={show} onClick={event => { event.stopPropagation(); onSelect(record) }} onKeyDown={event => {
       if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); onSelect(record) }
-      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClear() }
+      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); onClear(); tooltip.hide() }
     }}>
-    <title>{record.label}</title>
     <BaseEdge id={record.id} path={path} markerEnd={`url(#${markerId}-${kind})`} interactionWidth={22} className={`collaboration-edge collaboration-edge--${kind}${record.selected ? ' is-selected' : ''}`} />
     {record.active ? <path key={record.active} d={path} pathLength={1} style={{ animationDelay: `${delay}ms`, animationDuration: `${COLLABORATION_ACTIVITY_MS}ms` }} className="collaboration-edge__pulse" data-kind={kind} /> : null}
     {record.active && kind === 'communication' ? <circle key={`packet-${record.active}`} r={4 / zoom} className="collaboration-edge__packet" data-kind={kind} aria-hidden="true"
       style={{ offsetPath: `path("${path}")`, animationDelay: `${delay}ms`, animationDuration: `${COLLABORATION_ACTIVITY_MS}ms` }} /> : null}
-    {record.selected || hovered || focused ? <EdgeLabelRenderer><span className="collaboration-edge__label" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px) scale(${1 / zoom})` }}>{record.label}</span></EdgeLabelRenderer> : null}
-    {record.emphasis === 'related' && record.count > 1 && !record.selected && !hovered && !focused ? <EdgeLabelRenderer><span className="collaboration-edge__count" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>{record.count}</span></EdgeLabelRenderer> : null}
-  </g>
+    {record.emphasis === 'related' && record.count > 1 && !record.selected && !tooltip.props['aria-describedby'] ? <EdgeLabelRenderer><span className="collaboration-edge__count" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }}>{record.count}</span></EdgeLabelRenderer> : null}
+  </g>{tooltip.content}</>
 })
 
 function CollaborationViewport({ ready, geometry, areas, agents, locate, gestures, readingAnchor, onVisibleAgents }: { ready: boolean; geometry: ReadonlyMap<string, CollaborationBox>; areas: readonly CollaborationArea[]; agents: ReadonlyMap<string, CollaborationAgent>; locate?: CollaborationLocate | undefined; gestures: { current: number }; readingAnchor: { current: string | null }; onVisibleAgents?: ((ids: readonly string[]) => void) | undefined }) {
