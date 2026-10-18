@@ -6,6 +6,9 @@ import path from 'node:path'
 import { runProbeProcess } from '../../probe-process.mjs'
 import { radixOverlayAliases } from '../../radix-overlay-aliases.ts'
 
+const scenario = process.argv.slice(2).length === 0 ? 'workspace' : process.argv[2] === '--scenario=companion-navigation' && process.argv.length === 3 ? 'companion-navigation' : null
+assert.ok(scenario, 'Use no argument or --scenario=companion-navigation')
+const rendererRunner = scenario === 'workspace' ? 'renderer-main.cjs' : 'renderer-navigation.cjs'
 const fixture = import.meta.dirname, root = path.resolve(fixture, '../../../../..')
 const directory = path.join(root, '.local/state/mote-workspace/capture-' + randomUUID()), compiled = path.join(directory, 'compiled')
 // Clear before loading esbuild: its service is a child process too.
@@ -15,7 +18,7 @@ Object.assign(process.env, { AGENTMUX_RUNTIME_DIRECTORY: path.join(directory, 'r
 const require = createRequire(path.join(root, 'apps/desktop/package.json'))
 const { build } = createRequire(require.resolve('vite'))('esbuild')
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
-const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', source: {}, images: {},
+const receipt = { scenario, passed: false, captureOnly: true, aestheticReview: 'not-performed', source: {}, images: {},
   boundary: 'Current MoteFilesTool/MoteProfilePopover/MoteDetailsPanel and AgentSessionComposer, real DesktopClientUiProvider/CSS/theme/icons. Only private outer Space shell, static conversation prose and typed in-memory API replies are synthetic. No user App, preload, journal, schedule, real Session/Run, model, native scheduler, package or install claim.' }
 await fs.mkdir(compiled, { recursive: true })
 for (const name of ['userData', 'runtime', 'state', 'store', 'queue', 'workspace']) await fs.mkdir(path.join(directory, name), { recursive: true })
@@ -27,7 +30,7 @@ try {
     assert.ok(!original || original === hash, 'An input changed during compilation: ' + path.relative(root, file))
     consumed.set(file, hash); return bytes
   }
-  const runnerInputs = ['capture.mjs', 'renderer-main.cjs', 'README.md'].map(file => path.join(fixture, file))
+  const runnerInputs = ['capture.mjs', rendererRunner, 'README.md'].map(file => path.join(fixture, file))
   for (const file of [...runnerInputs, path.join(root, 'apps/desktop/package.json'), path.join(root, 'apps/desktop/scripts/probe-process.mjs'), path.join(root, 'apps/desktop/scripts/radix-overlay-aliases.ts')]) await readBound(file)
   const loaders = { '.ts': 'ts', '.mts': 'ts', '.cts': 'ts', '.tsx': 'tsx', '.js': 'js', '.mjs': 'js', '.cjs': 'js', '.jsx': 'jsx', '.json': 'json', '.css': 'css',
     '.png': 'file', '.gif': 'file', '.svg': 'file', '.woff': 'file', '.woff2': 'file', '.ttf': 'file' }
@@ -102,7 +105,7 @@ try {
   receipt.engine = { executable, sha256: sha(await fs.readFile(executable)), version: require('electron/package.json').version,
     override: process.env.ELECTRON_OVERRIDE_DIST_PATH ?? null }
   const logs = []
-  receipt.process = await runProbeProcess(executable, [path.join(fixture, 'renderer-main.cjs'), path.join(compiled, 'index.html'), directory],
+  receipt.process = await runProbeProcess(executable, [path.join(fixture, rendererRunner), path.join(compiled, 'index.html'), directory],
     { cwd: root, env, timeoutMs: 120_000, onLine: line => logs.push(line) })
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n') + '\n')
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
