@@ -27,7 +27,8 @@ async function fixture() {
     ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'confirmed', mapping: { messageId: 'platform-' + prepared.requestKey } })
   const adapter: PublicationAdapter = { adapterId: 'sample', renderVersion: 'scope-fixture', supportedRenderVersions: ['scope-fixture'], fragmentBytes: 8192,
     prepare: operation => ({ adapterId: 'sample', renderVersion: 'scope-fixture', requestKey: operation.operationId,
-      request: { method: 'POST', path: '/messages', body: operation.reference.source.recordId } }), dispatch }
+      request: { method: 'POST', path: '/messages', ...(operation.payload.kind === 'binding-lifecycle' ? {} : { body: operation.reference.source.recordId }) } }),
+    dispatch: (...args) => args[0].request.body === undefined ? Promise.resolve({ state: 'confirmed', mapping: { messageId: 'notice-' + args[0].requestKey } }) : dispatch(...args) }
   const services = await createDesktopConnections({ directory: join(f.root, 'sharing-host'),
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async bytes => ({ result: (bytes.toString()), shouldReEncrypt: false }) },
     adapters: [{ adapterId: 'sample', publication: adapter, test: async () => ({ authentication: { state: 'ready' }, transport: { state: 'ready' }, intake: { state: 'unknown' }, delivery: { state: 'unknown' } }) }],
@@ -43,6 +44,9 @@ async function fixture() {
     objectCliEnvironment(f.root), input === undefined ? '' : JSON.stringify(input))
   return { ...f, services, dispatch, adapter, sdk, cli }
 }
+function contentOperations(store: PublicationStore, boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>) {
+  return store.list(boundary).filter(operation => operation.payload.kind !== 'binding-lifecycle')
+}
 function result(value: { code: number; stdout: string; stderr: string }) {
   expect(value.code, value.stdout + value.stderr).toBe(0); return JSON.parse(value.stdout).result
 }
@@ -52,7 +56,7 @@ it('public sharing consent keeps the old scope and unknown effect, then explicit
   expect(bound.scope.publication).toBe(original)
   await appendFile(f.transcript, row('before-consent', 'assistant') + row('native-unknown-before', 'user'))
   await vi.waitFor(() => expect(f.dispatch).toHaveBeenCalledTimes(1), { timeout: 5000 })
-  const oldOperation = f.services.publication!.store.list(bound)[0]!
+  const oldOperation = contentOperations(f.services.publication!.store, bound)[0]!
   expect(oldOperation).toMatchObject({ state: 'unknown', publicationScope: original })
   const replacement = { ...f.input, operationId: 'explicit-shared-consent', scope: { ...f.input.scope, publication: shared } }
   expect(result(await f.cli(['bind', '--input', '-'], { ...replacement, operationId: 'no-silent-expansion' })))
@@ -66,7 +70,7 @@ it('public sharing consent keeps the old scope and unknown effect, then explicit
   await appendFile(f.transcript, row('after-consent', 'assistant'))
   await vi.waitFor(() => expect(f.dispatch).toHaveBeenCalledTimes(2), { timeout: 5000 })
   expect(f.dispatch.mock.calls.map(([request]) => request.request.body)).toEqual(['before-consent', 'after-consent'])
-  const next = f.services.publication!.store.list(relink.binding)
+  const next = contentOperations(f.services.publication!.store, relink.binding)
   expect(next).toHaveLength(1); expect(next[0]).toMatchObject({ publicationScope: shared, bindingRevision: 2, state: 'confirmed' })
   expect(f.services.publication!.store.inspect(oldOperation.operationId)).toEqual(oldOperation)
   const inspected = result(await f.cli(['delivery', 'inspect', '--operation-id', oldOperation.operationId]))
@@ -97,7 +101,7 @@ it.each(['confirmed', 'unknown'] as const)('a shared native input gap stays visi
   await appendFile(f.transcript, row(previousState === 'unknown' ? 'before-consent' : 'qualified-assistant-speech', 'assistant'))
   await vi.waitFor(() => expect(f.dispatch).toHaveBeenCalledTimes(1), { timeout: 5000 })
   const store = f.services.publication!.store, initial = bound.sourceCheckpoints[0], frontier = store.checkpoint(bound, 'local')
-  const originalEffect = store.list(bound)[0]!
+  const originalEffect = contentOperations(store, bound)[0]!
   expect(originalEffect.state).toBe(previousState)
   await appendFile(f.transcript, row('unqualified-original-input', 'user') + row('later-speech', 'assistant'))
   await vi.waitFor(() => expect(f.services.publication!.observation(bound.bindingId, 1)).toEqual({ state: 'unavailable', reason: 'content-unconfirmed' }), { timeout: 5000 })
@@ -108,7 +112,7 @@ it.each(['confirmed', 'unknown'] as const)('a shared native input gap stays visi
   expect(JSON.stringify(content)).not.toMatch(/payload|prepared|Original content unqualified-original-input|private-scope-fixture/)
   expect(result(await f.cli(['delivery', 'inspect', '--operation-id', originalEffect.operationId])).delivery.state).toBe(previousState)
   expect(store.checkpoint(bound, 'local')).not.toEqual(frontier)
-  expect(store.list(bound)).toHaveLength(2); expect(f.dispatch).toHaveBeenCalledTimes(previousState === 'unknown' ? 1 : 2)
+  expect(contentOperations(store, bound)).toHaveLength(2); expect(f.dispatch).toHaveBeenCalledTimes(previousState === 'unknown' ? 1 : 2)
   const retainedCut = store.checkpoint(bound, 'local')
   f.services.publication!.close()
   const { PublicationHost } = await import('../src/publication-host.js')
@@ -130,8 +134,8 @@ it('a content gap keeps original effect inspection and already admitted pending 
   f.adapter.inspect = inspect
   await appendFile(f.transcript, row('before-consent', 'assistant') + row('already-admitted-speech', 'assistant'))
   const store = f.services.publication!.store
-  await vi.waitFor(() => expect(store.list(bound).map(operation => operation.state)).toEqual(['unknown', 'pending']), { timeout: 5000 })
-  const [original, pending] = store.list(bound), initial = bound.sourceCheckpoints[0], frontier = store.checkpoint(bound, 'local')
+  await vi.waitFor(() => expect(contentOperations(store, bound).map(operation => operation.state)).toEqual(['unknown', 'pending']), { timeout: 5000 })
+  const [original, pending] = contentOperations(store, bound), initial = bound.sourceCheckpoints[0], frontier = store.checkpoint(bound, 'local')
   await appendFile(f.transcript, row('unqualified-original-input', 'user') + row('later-unadmitted-speech', 'assistant'))
   const args = ['delivery', 'ls', '--connection', config.connectionId, '--binding', bound.bindingId, '--binding-revision', '1']
   await vi.waitFor(() => expect(f.services.publication!.observation(bound.bindingId, 1)).toEqual({ state: 'unavailable', reason: 'content-unconfirmed' }), { timeout: 5000 })
@@ -145,7 +149,7 @@ it('a content gap keeps original effect inspection and already admitted pending 
   expect(result(await f.cli(['delivery', 'inspect', '--operation-id', original!.operationId])).delivery).toMatchObject({ operationId: original!.operationId, state: 'confirmed' })
   expect(result(await f.cli(args)).observation).toEqual({ state: 'unavailable', reason: 'content-unconfirmed' })
   expect(store.checkpoint(bound, 'local')).not.toEqual(frontier)
-  expect(store.list(bound)).toHaveLength(3); expect(f.client.connect).not.toHaveBeenCalled()
+  expect(contentOperations(store, bound)).toHaveLength(3); expect(f.client.connect).not.toHaveBeenCalled()
 }, 20000)
 
 it('stored legacy pending work keeps its original scope instead of inheriting a broader claim', () => {
