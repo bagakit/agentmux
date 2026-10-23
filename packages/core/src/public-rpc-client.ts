@@ -298,10 +298,10 @@ class RpcClient implements AgentMuxRpcClient {
     handlers?: AgentMuxRpcSubscriptionOptions<AgentMuxRpcStreamMethod>, signal?: AbortSignal, options: AgentMuxRpcCallOptions = {}, route = this.route): Promise<{ response: JSONRPCResponse; reader: Reader; subscriptionId?: string }> {
     if (this.closed) throw new AgentMuxError('RPC client is disposed.', 'CONTROL_CANCELLED')
     const body = rpcRecord(params)
+    if (method === 'connection.credential.store' && route.endpoint.transport === 'http') throw new AgentMuxError('Credential entry requires the original protected Unix, SSH-to-Unix or end-to-end relay transport.', 'CONTROL_PERMISSION_DENIED')
     if (Object.hasOwn(body, 'caller') || Object.hasOwn(body, 'runtimeFence')) throw new AgentMuxError('RPC caller is a connection credential, not business input.', 'INVALID_CONTROL_REQUEST')
     const credentials = options.credentials ?? this.credentials, runtimeFence = options.runtimeFence ?? this.runtimeFence
     if (credentials) { rpcRecord(credentials, ['agentSessionId', 'capability']); rpcString(credentials.agentSessionId, 'Caller Session ID'); rpcString(credentials.capability, 'Caller capability') }
-    if (method === 'connection.credential.store' && route.endpoint.transport === 'http') throw new AgentMuxError('Credential entry requires the original protected Unix, SSH-to-Unix or end-to-end relay transport.', 'CONTROL_PERMISSION_DENIED')
     const request: JSONRPCRequest = { jsonrpc: '2.0', id: mintObjectId(), method,
       params: { ...body, ...(credentials ? { caller: credentials } : {}), ...(runtimeFence ? { runtimeFence } : {}) } }
     const controller = new AbortController()
