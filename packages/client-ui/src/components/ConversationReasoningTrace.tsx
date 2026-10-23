@@ -44,7 +44,7 @@ export const ConversationReasoningTrace = memo(function ConversationReasoningTra
 }: ConversationReasoningTraceProps) {
   const [localOpen, setLocalOpen] = useState(false)
   const open = expanded ?? localOpen
-  const identity = useMemo(() => ({}), [part, traceId, copyIdentity])
+  const identity = useMemo(() => ({}), [traceId, copyIdentity, traceId === undefined && copyIdentity === undefined ? part : undefined])
 
   const handleToggle = (event: React.SyntheticEvent<HTMLDetailsElement>) => {
     const nextOpen = event.currentTarget.open
