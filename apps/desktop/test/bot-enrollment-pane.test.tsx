@@ -10,27 +10,36 @@ import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from 
 import { enrollmentFixture } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
 import { ExternalConnectionsSettings } from '../src/renderer/src/components/settings/ExternalConnectionsSettings'
 import { api } from '../src/renderer/src/lib/api'
+import type { ConnectionHostingTarget } from '../src/shared/contracts'
+import { useAppStore } from '../src/renderer/src/store'
+import { connectionSettingsPort } from '../src/renderer/src/lib/connection-settings-port'
 import { composerDOM } from './helpers/composer-dom-fixture'
 
-const dom = composerDOM()
+const dom = composerDOM(), hostingTarget: ConnectionHostingTarget = { hostId: 'local', runtimeId: 'original-enrollment-runtime' }, connections = connectionSettingsPort(hostingTarget)
 let fixture: Awaited<ReturnType<typeof enrollmentFixture>>
 let originalCall: typeof api.connections.call
 async function open(options?: Parameters<typeof enrollmentFixture>[0]) {
   fixture = await enrollmentFixture(options)
-  originalCall = async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => fixture.sdk.call(method, params as AgentMuxRpcParams<M>) as Promise<ConnectionResultMap[M]>
+  originalCall = async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M], target?: ConnectionHostingTarget): Promise<ConnectionResultMap[M]> => { expect(target).toEqual(hostingTarget); return fixture.sdk.call(method, params as AgentMuxRpcParams<M>) as Promise<ConnectionResultMap[M]> }
   vi.spyOn(api.connections, 'call').mockImplementation(originalCall)
   vi.spyOn(api.connections, 'storeCredential').mockImplementation(input => fixture.services.secrets.store(input))
   vi.spyOn(api.connections, 'inspectCredential').mockImplementation(operationId => fixture.services.secrets.inspect(operationId))
 }
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const config = useAppStore.getState().config!
+  vi.spyOn(api.config, 'get').mockResolvedValue(config)
+  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
+  vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue(undefined)
+  window.localStorage.clear(); await useAppStore.persist.rehydrate()
+  const stop = await useAppStore.getState().initialize(); stop()
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   const image = await readFile(join(import.meta.dirname, '../resources/icon-512.png'))
   vi.stubGlobal('fetch', vi.fn(async (url: string) => { expect(url).toBe(iconUrl); return new Response(new Uint8Array(image)) }))
 })
 afterEach(async () => { await dom.render(null); await fixture?.close(); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs() })
 async function mount() {
-  await dom.render(<ExternalConnectionsSettings active />)
+  await dom.render(<ExternalConnectionsSettings connections={connections} hostingTarget={hostingTarget} active />)
   await ready('[data-enrollment-new]'); await click('[data-enrollment-new]')
   await ready('[data-enrollment-create]')
   expect(dom.container.querySelector('[data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('prepare')
@@ -70,7 +79,7 @@ async function fill(label: string, value: string) {
   return field
 }
 
-async function finishCreation() {
+async function finishCreation(intent: 'initial-publication-unsupported' | 'configured-only') {
   if (dom.container.querySelector('[data-enrollment-action="continue-authentication"]'))
     await click('[data-enrollment-action="continue-authentication"]')
   await ready('[data-enrollment-action="confirm-account"]')
@@ -81,7 +90,16 @@ async function finishCreation() {
   expect(fixture.create).not.toHaveBeenCalled()
   await click('[data-enrollment-action="create"]')
   await ready('[data-enrollment-saved]')
-  expect(dom.container.querySelector('[data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('ready')
+  const original = (await fixture.sdk.call('connection.enrollment.ls', {})).operations[0]!
+  expect(original.configuration).toBe('configured')
+  if (intent === 'initial-publication-unsupported') {
+    expect(original.initialPublication).toEqual({ version: '1.0.0', notes: 'Enable AMUX conversations.' })
+    expect(original.initialSetup?.progress?.state).toBe('attention')
+    expect(dom.container.querySelector('[data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('attention')
+  } else {
+    expect(original.initialPublication).toBeUndefined()
+    expect(dom.container.querySelector('[data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('ready')
+  }
 }
 
 it('reads earlier durable setups by their real cursor without selecting or recreating the first pending entry', async () => {
@@ -104,13 +122,13 @@ it('reads earlier durable setups by their real cursor without selecting or recre
   expect(JSON.parse(result.stdout).result.operation).toMatchObject({ operationId: 'setup-0', connectionId: 'connection-0' })
 })
 
-it('explicitly recovers an unknown encrypted handoff locally before a separate user action polls the original challenge', async () => {
+it('explicitly recovers an unknown private handoff locally before a separate user action polls the original challenge', async () => {
   await open()
   const store = ConnectionSecrets.prototype.store
   let loseSnapshot = true
   vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function(this: ConnectionSecrets, input) {
     const result = await store.call(this, input)
-    if (loseSnapshot && input.secret.includes('privateState')) { loseSnapshot = false; throw new Error('Controlled encrypted snapshot receipt loss') }
+    if (loseSnapshot && input.secret.includes('privateState')) { loseSnapshot = false; throw new Error('Controlled private snapshot receipt loss') }
     return result
   })
   await mount(); await click('[data-enrollment-create]')
@@ -126,7 +144,7 @@ it('explicitly recovers an unknown encrypted handoff locally before a separate u
   await ready('[data-enrollment-code] svg')
   expect(dom.container.querySelector('[data-bot-setup-guide]')?.getAttribute('data-bot-setup-guide')).toBe('scan')
   expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.authentication).not.toHaveBeenCalled()
-  await finishCreation()
+  await finishCreation('initial-publication-unsupported')
   const final = (await fixture.sdk.call('connection.enrollment.inspect', { operationId: original!.operationId })).operation!
   expect(final).toMatchObject({ operationId: original!.operationId, connectionId: original.connectionId, configuration: 'configured' })
   expect(fixture.begin).toHaveBeenCalledTimes(1); expect(fixture.authentication).toHaveBeenCalledTimes(1)
@@ -137,18 +155,18 @@ it('a delayed original list cannot regress the same setup after its real configu
   await mount(); await select(original!.operationId)
   let release!: () => void, delayed = false
   const gate = new Promise<void>(resolve => { release = resolve })
-  vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
-    const result = await originalCall(method, params)
+  vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M], target?: ConnectionHostingTarget): Promise<ConnectionResultMap[M]> => {
+    const result = await originalCall(method, params, target)
     if (method === 'connection.enrollment.ls' && !delayed) { delayed = true; await gate }
     return result
   })
   try {
-    await dom.render(<ExternalConnectionsSettings active={false} />)
-    await dom.render(<ExternalConnectionsSettings active />)
+    await dom.render(<ExternalConnectionsSettings connections={connections} hostingTarget={hostingTarget} active={false} />)
+    await dom.render(<ExternalConnectionsSettings connections={connections} hostingTarget={hostingTarget} active />)
     await vi.waitFor(() => expect(delayed).toBe(true))
     await inspectOriginal()
     await ready('[data-enrollment-action="continue-authentication"]')
-    await finishCreation()
+    await finishCreation('configured-only')
     const saved = (await fixture.sdk.call('connection.enrollment.inspect', { operationId: original!.operationId })).operation!
     await act(async () => { release(); await gate })
     expect(dom.container.querySelector('[data-enrollment-saved]')).not.toBeNull()
@@ -165,8 +183,8 @@ it('an earlier lookup failure does not become current after selecting A, B and t
   await mount(); await select(a!.operationId)
   let release!: () => void, read = false, holdFirst = true
   const gate = new Promise<void>(resolve => { release = resolve })
-  vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
-    const result = await originalCall(method, params)
+  vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M], target?: ConnectionHostingTarget): Promise<ConnectionResultMap[M]> => {
+    const result = await originalCall(method, params, target)
     if (method === 'connection.enrollment.inspect' && (params as { operationId: string }).operationId === a!.operationId && holdFirst) { holdFirst = false; read = true; await gate; throw new Error('Only the earlier setup lookup failed') }
     return result
   })
@@ -214,8 +232,8 @@ it('a successful list refresh cannot clear an unconfirmed application save or re
   await dom.click('.connector-setup__fields .connector-optional > summary')
   await click('[aria-label="Connection enabled"]')
   let loseReply = true
-  vi.mocked(api.connections.call).mockImplementation(async (method, input) => {
-    const result = await originalCall(method, input)
+  vi.mocked(api.connections.call).mockImplementation(async (method, input, target) => {
+    const result = await originalCall(method, input, target)
     if (method === 'connection.configure' && loseReply) { loseReply = false; throw new Error('Controlled original save reply gap') }
     return result
   })
@@ -223,8 +241,8 @@ it('a successful list refresh cannot clear an unconfirmed application save or re
   await vi.waitFor(() => expect(dom.container.querySelector('.connector-issue')?.textContent).toContain('Save result not confirmed'))
   const writes = () => vi.mocked(api.connections.call).mock.calls.filter(([method]) => method === 'connection.configure')
   const original = structuredClone(writes()[0]![1])
-  await dom.render(<ExternalConnectionsSettings active={false} />)
-  await dom.render(<ExternalConnectionsSettings active />)
+  await dom.render(<ExternalConnectionsSettings connections={connections} hostingTarget={hostingTarget} active={false} />)
+  await dom.render(<ExternalConnectionsSettings connections={connections} hostingTarget={hostingTarget} active />)
   await vi.waitFor(() => expect(vi.mocked(api.connections.call).mock.calls.filter(([method]) => method === 'connection.ls').length).toBeGreaterThan(1))
   await act(async () => {
     const reader = vi.mocked(api.connections.call)
@@ -274,8 +292,8 @@ it('keeps a submitted original intent reachable after its real begin reply is lo
   await open(); await mount()
   let operationId = '', release!: () => void, delayList = false
   const gate = new Promise<void>(resolve => { release = resolve })
-  vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]): Promise<ConnectionResultMap[M]> => {
-    const result = await originalCall(method, params)
+  vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M], target?: ConnectionHostingTarget): Promise<ConnectionResultMap[M]> => {
+    const result = await originalCall(method, params, target)
     if (method === 'connection.enrollment.begin') { operationId = (params as { operationId: string }).operationId; throw new Error('Controlled Renderer reply loss after original admission') }
     if (method === 'connection.enrollment.ls' && delayList) await gate
     return result
@@ -290,7 +308,7 @@ it('keeps a submitted original intent reachable after its real begin reply is lo
     expect(dom.container.querySelector('[data-enrollment-resume]')).not.toBeNull()
     expect(dom.container.querySelector('[aria-label="New bot name"]')).toBeNull()
     expect(dom.container.querySelector('[aria-label="Bot creation platform"]')).toBeNull()
-    expect(dom.container.querySelector('.connector-enrollment__resume')?.textContent).toMatch(/AMUX-[0-9A-F]{8}/)
+    expect(dom.container.querySelector('.connector-enrollment__resume')?.textContent).toMatch(/AMUX-[0-9A-Z]+/)
     await select(operationId)
     expect(dom.container.querySelector('[data-enrollment-operation]')?.getAttribute('data-enrollment-operation')).toBe(operationId)
     await ready('[data-enrollment-code] svg'); await inspectOriginal()
@@ -305,8 +323,8 @@ it('keeps a generated general identity name stable across catalog reads and free
   await open(); await mount()
   const input = dom.container.querySelector<HTMLInputElement>('[aria-label="New bot name"]')!
   const name = input.value
-  expect(name).toMatch(/^AMUX-[0-9A-F]{8}$/)
-  await dom.render(<ExternalConnectionsSettings active />)
+  expect(name).toMatch(/^AMUX-[0-9A-Z]+$/)
+  await dom.render(<ExternalConnectionsSettings connections={connections} hostingTarget={hostingTarget} active />)
   expect(dom.container.querySelector('[aria-label="New bot name"]')).toBe(input)
   expect(input.value).toBe(name)
   await click('[data-enrollment-create]')
