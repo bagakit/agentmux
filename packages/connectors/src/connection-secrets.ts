@@ -5,6 +5,12 @@ import { mintObjectId, AgentMuxError } from '@agentmux/core'
 import type { WritableSecretPort } from './connection-host.js'
 
 const FORMAT = Buffer.from('amux.connection-credential.raw.v1\0')
+/** The original Store and private maintenance tools share one exact value format. */
+export function encodeConnectionCredential(secret: string): Buffer {
+  if (typeof secret !== 'string' || !secret.length || Buffer.from(secret).toString('utf8') !== secret)
+    throw new AgentMuxError('Credential input or operation identity is invalid.', 'INVALID_CONNECTION_DATA')
+  return Buffer.concat([FORMAT, Buffer.from(secret)])
+}
 const unavailable = (): never => { throw new AgentMuxError('The original private credential storage is unavailable. Restore this Host storage and inspect the original operation; existing Agents and records are retained.', 'CONNECTION_CREDENTIAL_UNAVAILABLE') }
 /** Permission-protected plaintext in the original SQLite owner. The historical column name does not imply encryption. */
 export class ConnectionSecrets implements WritableSecretPort {
@@ -56,7 +62,7 @@ export class ConnectionSecrets implements WritableSecretPort {
           this.database.exec('COMMIT'); return { credentialRef: original.credential_ref as string }
         }
         const credentialRef = mintObjectId()
-        this.database.prepare('INSERT INTO connection_credential (credential_ref, operation_id, ciphertext) VALUES (?, ?, ?)').run(credentialRef, operationId, Buffer.concat([FORMAT, Buffer.from(secret)]))
+        this.database.prepare('INSERT INTO connection_credential (credential_ref, operation_id, ciphertext) VALUES (?, ?, ?)').run(credentialRef, operationId, encodeConnectionCredential(secret))
         this.database.exec('COMMIT'); return { credentialRef }
       } catch (error) {
         try { this.database.exec('ROLLBACK') } catch { /* A committed original remains inspectable after a lost ACK. */ }
