@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
@@ -156,9 +156,15 @@ try {
   if (process.argv.includes('--mutations') || atMutation >= 0) for (const mutation of selected) receipt.mutations.push(await run(mutation.id, mutation))
   for (const [file, identity] of Object.entries(receipt.inputs)) assert.equal(sha(await readFile(join(root, file))), identity, 'Source changed during proof: ' + file)
   receipt.passed = true
+} catch (error) {
+  receipt.error = { name: error.name, message: error.message }
+  throw error
 } finally {
   const at = process.argv.indexOf('--output')
-  if (at >= 0) { assert.ok(process.argv[at + 1], '--output requires a file'); await writeFile(resolve(process.argv[at + 1]), JSON.stringify(receipt, null, 2) + '\n') }
+  if (at >= 0) assert.ok(process.argv[at + 1], '--output requires a file')
+  const resultPath = at >= 0 ? resolve(process.argv[at + 1]) : join(root, '.bagakit/capsule/browser-proof.json')
+  await mkdir(dirname(resultPath), { recursive: true })
+  await writeFile(resultPath, JSON.stringify(receipt, null, 2) + '\n')
   await rm(directory, { recursive: true, force: true })
 }
 process.stdout.write(JSON.stringify(receipt) + '\n')
