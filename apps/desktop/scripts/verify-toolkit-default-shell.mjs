@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { relative, resolve } from 'node:path'
 import { defaultShellMutations } from './fixtures/toolkit-default-shell/mutations.mjs'
 
@@ -152,6 +152,9 @@ async function run(name) {
   assert.ok(cases.includes(name), 'Choose one bounded qualification case')
   const directory = resolve(evidence, name)
   await mkdir(directory, { recursive: true })
+  await rm(resolve(evidence, 'receipt.json'), { force: true })
+  for (const file of ['result.json', 'run.json'])
+    await rm(resolve(directory, file), { force: true })
   const inputs = {}
   for (const path of [
     config,
