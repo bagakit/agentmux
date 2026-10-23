@@ -70,6 +70,12 @@ flowchart LR
 
 普通 Topic 对应原 Zone，Category 对应 Space；该知识层级及本地承接只见[《Topics 知识库的层级与沉淀》](#topics-知识库的层级与沉淀)。公共发现、目标语法及实施边界见[《公共控制与跨客户端接入》](public-control.md)，本节不代签 CUI、实际工作面或迁移验收。既有 Renderer 文案与视觉不作全仓机械改名。 原实体、目录和合法绑定继续保全。
 
+#### Agent 的自身位置与邻居发现
+
+Agent 的自身位置由准确 Host／Session 与原空间绑定关联，执行 Workspace／cwd 不代替展示 Space／Zone／Tab／Region。同一 Session 可以有多处投影，同一 Tab 也可以有多个展示绑定；公共发现保留真实候选及 display Workspace／Group 等准确位置，不从当前焦点、标题、最近活动或第一项推断唯一的“我所在的 Tab”。确切来源位置已给出时沿该位置查询，来源不足或存在歧义时明确未知／候选，并保留已有工作面与能力。
+
+同 Tab 邻居指同一准确 Tab 中其他 Region 及其真实内容绑定；方向相邻由原布局几何决定，不按列表顺序、树深度或相同执行目录猜测。Agent 可沿原空间模块按需读取自己的地址、所在 Tab 的完整组成、邻居身份和相关呈现事实；只读发现不切焦点、不读取无关正文、不创建或关闭工作面，也不授予对邻居内容的额外操作权限。邻居可见、内容可读、页面可操作与本次授权分别成立；Browser 指代解析和复用优先级归[Browser 工作面](browser-workface.md#browser-工作面-1)。
+
 #### Frontend-independent positions
 
 The stable spatial graph is part of amux and is maintained by Core even on a remote host without an App. Identities, topology, ordering, split ratios, selection and every binding are durable; only lookup caches, screen geometry and UI mounts are derived. All clients and the public CLI consume the same owner. Loading a Zone uses its stable identity and complete composition, without a saved display-coordinate gate. Unknown presentation coordinates do not remove original content, references or healthy Runs. Technical ownership and persistence are defined in [Durable spatial state](../../architecture/spatial-state.md). A failed initial read retains the current workbench and later edits. Save Retry reads the same owner again, applies disjoint edits against the retained baseline, and keeps conflicting local and durable facts until the user resolves them; it does not require an App restart or replace a healthy Run.
@@ -431,7 +437,7 @@ Mote 保持自己的 Space 身份并复用共同框架；其持久人格、SOUL�
 
 打开 Agent 和文件都要分清内容用途与空间意图：是否需要和原内容同时阅读、是否需要一张完整工作面、是否需要方便来回切换。执行机制的选择只见[协作执行机制与下属关系](a2a-collaboration.md#协作执行机制与下属关系)；本节只定义空间判断与核验，不新增启动或派发授权。
 
-- **先观察准确的工作面。** 以本次真实展示 Workspace／Group／Tab／Region、可见内容和当前几何判断，不从执行 cwd、旧焦点、Tab 标题或树深度猜位置。新 Tab 与左／右／上／下 Region 都应纳入判断；分割后的宽高和内容用途、原工作面的可用性与焦点影响共同决定选择，不固定默认右侧，也不为获得空位搬走现有内容。具体偏好属于建议级 playbook；真实目标歧义仍沿原公开能力返回候选。
+- **先观察准确的工作面。** 以本次真实展示 Workspace／Group／Tab／Region、可见内容和当前几何判断，不从执行 cwd、旧焦点、Tab 标题或树深度猜位置。新 Tab 与左／右／上／下 Region 都应纳入判断；分割后的宽高和内容用途、原工作面的可用性与焦点影响共同决定选择，不为所有内容固定同一方向，也不为获得空位搬走现有内容。具体内容的落点偏好沿原领域合同，Browser 见[原工作面要求](browser-workface.md#browser-工作面-1)；其他策略由 skill 的建议级 playbook 表达，真实目标歧义仍沿原公开能力返回候选。
 - **相邻 Tab 与同屏分栏分别核对。** 用户明确要求某方向的新分栏时，沿[原方向语义](public-control.md#对象地址分享与方向)创建 Region；明确要求相邻 Tab 时，则按实际 Tab 顺序与能力判断。选择新 Tab 时，可以考虑是否需要紧邻来源 Tab，但创建新 Tab、查询邻居与调整 Tab 顺序是不同能力：只使用本次已确认支持的落点操作，不把同一 Group 的新建成功、列表次序或另一对象的参数当成相邻保证。无法直接指定相邻位置时，如实说明实际落点；任何组合操作都须保留原身份，逐步核对回执，不自动搬动已复用的旧内容。
 - **原工作与后来的人类选择保持。** 开启、分割或检查不覆盖已有草稿、未保存文件、选区、内容实例与原 Session／Run，不改变执行 cwd。焦点变化应符合本次开启或导航意图；操作会切换 Tab 或焦点时纳入选择并如实说明，不借整理布局抢走交流输入，也不以迟到的核验或焦点恢复覆盖用户后来主动选择。
 - **结果以准确落点为准。** 读取动作后的真实展示位置与归属，核对目标 Tab／Region、方向或已请求的相邻关系，再简短说明内容在哪、是否已展示及焦点是否改变。准确落点尚未确认或实际能力不足时保原工作面、内容与健康 Run，明确未知或不满足的范围，不凭计划宣称成功，也不重复创建替代 Session。
