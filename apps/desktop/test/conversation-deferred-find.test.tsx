@@ -39,6 +39,21 @@ async function query(value: string) {
 const count = () => host.querySelector('output')?.textContent
 const current = () => [...highlights.entries()].find(([name]) => name.endsWith('-current'))?.[1].values().next().value
 const body = (index: number) => host.querySelector<HTMLElement>(`[data-native-record-id="heavy-${index}"] [data-conversation-body-presented]`)!
+async function forward(via: 'button' | 'Enter') {
+  if (via === 'button') return click(button('Next match'))
+  const input = host.querySelector<HTMLInputElement>('input[type="search"]')!
+  const event = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })
+  await act(async () => input.dispatchEvent(event)); await tick()
+  expect(event.defaultPrevented).toBe(true)
+}
+function expectInlineHit(index: number) {
+  const range = current()!
+  expect(range).toBeDefined(); expect(range.toString()).toBe('needle across inline')
+  const paragraph = body(index).querySelector('p')!
+  expect(range.startContainer).toBe(paragraph.firstChild); expect(range.startOffset).toBe(0)
+  expect(range.endContainer).toBe(paragraph.lastChild); expect(range.endOffset).toBe(' inline'.length)
+  return range
+}
 async function render(active = true) {
   await act(async () => root.render(<ActivityView {...activityReadingProps({ control: reference, visible: active })} />))
   await settled()
@@ -66,7 +81,10 @@ afterEach(async () => {
   highlights.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals()
 })
 
-it('searches the accepted offscreen window without mounting all bodies, then reveals one exact original inline hit', async () => {
+for (const { name, via } of [
+  { name: 'searches the accepted offscreen window without mounting all bodies, then reveals one exact original inline hit', via: 'button' as const },
+  { name: 'Enter reveals the current original logical hit before advancing through the accepted offscreen window', via: 'Enter' as const }
+]) it(name, async () => {
   const resources = vi.spyOn(api.sessions, 'historyResource')
   await render()
   expect(Array.from({ length: 4 }, (_, index) => body(index).dataset.conversationBodyPresented)).toEqual(['false', 'false', 'false', 'false'])
@@ -78,20 +96,51 @@ it('searches the accepted offscreen window without mounting all bodies, then rev
   expect(count()).toBe('1 / 4')
   expect(host.querySelectorAll('[data-conversation-body-presented="false"]')).toHaveLength(4)
   const reads = fixture.nativeRead.mock.calls.length
-  await click(button('Next match'))
-  expect(count()).toBe('2 / 4'); expect(current()?.toString()).toBe('needle across inline')
-  expect(current()?.startContainer.parentElement?.closest('[data-native-record-id]')?.getAttribute('data-native-record-id')).toBe('heavy-1')
+  expect(current()).toBeUndefined()
+  await forward(via)
+  expect(current()?.startContainer.parentElement?.closest('[data-native-record-id]')?.getAttribute('data-native-record-id'),
+    'First forward navigation reveals the current original logical match').toBe('heavy-0')
+  expect(count()).toBe('1 / 4'); const first = expectInlineHit(0)
+  expect(body(0).dataset.conversationBodyPresented).toBe('true')
+  expect([1, 2, 3].every(index => body(index).dataset.conversationBodyPresented === 'false')).toBe(true)
+  expect(document.activeElement).toBe(host.querySelector('input[type="search"]'))
+  expect(document.getSelection()!.getRangeAt(0)).toBe(selection)
+  await forward(via)
+  expect(count()).toBe('2 / 4'); expectInlineHit(1)
   expect(body(1).dataset.conversationBodyPresented).toBe('true')
-  expect([0, 2, 3].every(index => body(index).dataset.conversationBodyPresented === 'false')).toBe(true)
+  expect([2, 3].every(index => body(index).dataset.conversationBodyPresented === 'false')).toBe(true)
+  await click(button('Previous match'))
+  expect(count()).toBe('1 / 4'); expect(expectInlineHit(0).startContainer).toBe(first.startContainer)
+  await click(button('Previous match'))
+  expect(count()).toBe('4 / 4'); expectInlineHit(3)
+  expect(body(2).dataset.conversationBodyPresented).toBe('false')
+  await forward(via)
+  expect(count()).toBe('1 / 4'); expectInlineHit(0)
+  await forward(via)
+  expect(count()).toBe('2 / 4'); const retained = expectInlineHit(1)
+  await click(body(2).querySelector<HTMLButtonElement>('button')!)
+  expect(count()).toBe('2 / 4'); expect(current()?.startContainer).toBe(retained.startContainer)
   expect(document.activeElement).toBe(host.querySelector('input[type="search"]'))
   expect(document.getSelection()!.getRangeAt(0)).toBe(selection)
   expect(fixture.nativeRead).toHaveBeenCalledTimes(reads); expect(resources).not.toHaveBeenCalled()
-  const retained = current()!
-  await click(body(0).querySelector<HTMLButtonElement>('button')!)
-  expect(count()).toBe('2 / 4'); expect(current()?.startContainer).toBe(retained.startContainer)
   await query('hidden reasoning needle'); expect(count()).toBe('0 / 0')
   await query('hidden output needle'); expect(count()).toBe('0 / 0')
   await query('needle code'); expect(count()).toBe('1 / 4')
+})
+
+it.each(['button', 'Enter'] as const)('advances an already presented original first match on its first forward action (%s)', async via => {
+  await render()
+  await click(body(0).querySelector<HTMLButtonElement>('button')!)
+  await click(button('Find in loaded conversation')); await query('needle across inline')
+  expect(count()).toBe('1 / 4'); const first = expectInlineHit(0)
+  const reads = fixture.nativeRead.mock.calls.length
+  await forward(via)
+  expect(count()).toBe('2 / 4'); expectInlineHit(1)
+  expect([2, 3].every(index => body(index).dataset.conversationBodyPresented === 'false')).toBe(true)
+  await click(button('Previous match'))
+  expect(count()).toBe('1 / 4'); expect(expectInlineHit(0).startContainer).toBe(first.startContainer)
+  expect(document.activeElement).toBe(host.querySelector('input[type="search"]'))
+  expect(fixture.nativeRead).toHaveBeenCalledTimes(reads)
 })
 
 it('uses the original Markdown grammar, keeps block and opaque boundaries, and reuses its lazy parse on display', async () => {
