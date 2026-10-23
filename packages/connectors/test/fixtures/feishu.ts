@@ -26,13 +26,13 @@ export function feishuSdkTransport() {
     ;(this as unknown as InternalWs).wsConfig.setWSInstance(socket)
     return true
   })
-  const request = vi.fn(async (input: { url?: string }) => {
+  const request = vi.fn<(input: Parameters<HttpInstance['request']>[0]) => Promise<unknown>>(async input => {
     if (input.url?.endsWith('/callback/ws/endpoint')) return { code: 0, data: { URL: 'wss://msg-frontier.feishu.cn/ws/v2?device_id=original&service_id=1', ClientConfig: { PingInterval: 30, ReconnectCount: 0, ReconnectInterval: 1, ReconnectNonce: 0 } } }
     if (input.url?.endsWith('/bot/v3/info')) return { code: 0, bot: { open_id: botOpenId } }
     if (input.url?.includes('/auth/v3/')) return { code: 0, tenant_access_token: 'fixture-tenant-access', app_access_token: 'fixture-app-access', expire: 3600 }
     throw new Error('Unexpected protocol request')
   })
-  const http = { request, post: (url: string, data: unknown) => request({ url, data } as { url: string }) } as unknown as HttpInstance
+  const http = { request, post: (url: string, data: unknown) => request({ url, data }) } as unknown as HttpInstance
   const ack = () => frames.filter(entry => entry.frame.payload).map(entry => JSON.parse(new TextDecoder().decode(entry.frame.payload)))
   async function receive(payload: unknown, owner = sockets.at(-1)!) {
     const data = new TextEncoder().encode(JSON.stringify(payload))
@@ -43,8 +43,9 @@ export function feishuSdkTransport() {
 }
 
 /** Exercises the registered transport contract while keeping its original durable target fixed. */
-export function startFeishuTransport(transport: ConnectionIngressTransport, config: ConnectionConfig, ingress: Pick<DurableIngressHost, 'receive'>, signal = new AbortController().signal) {
-  return transport.start({ config, credential: 'fixture-credential', signal, receive: (input, acknowledge) => ingress.receive({ ...input, connectionId: config.connectionId }, acknowledge) })
+export function startFeishuTransport(transport: ConnectionIngressTransport, config: ConnectionConfig, ingress: Pick<DurableIngressHost, 'receive'>,
+  storage: Parameters<ConnectionIngressTransport['start']>[0]['storage'], signal = new AbortController().signal) {
+  return transport.start({ config, credential: 'fixture-credential', signal, storage, receive: (input, acknowledge) => ingress.receive({ ...input, connectionId: config.connectionId }, acknowledge) })
 }
 
 /** Uses the original default adapter registry while controlling only SDK transport I/O. */

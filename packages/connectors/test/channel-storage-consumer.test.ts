@@ -30,7 +30,7 @@ async function fixture(builtin = false) {
   expect((await bindings.bind(original.input, context)).state).toBe('applied')
   expect((await bindings.grant(original.grant, context)).state).toBe('applied')
   const ingress = new DurableIngressHost({ connections, bindings, authenticators: connections.ingressAuthenticators(), core: hostId => hostId === 'local' ? original.client : undefined })
-  const receiver = await startFeishuTransport(connections.registeredAdapter('feishu')!.transport!, feishuConfig, ingress); closes.push(receiver.close)
+  const receiver = await startFeishuTransport(connections.registeredAdapter('feishu')!.transport!, feishuConfig, ingress, () => connections.channelStorage(feishuConfig)); closes.push(receiver.close)
   await vi.waitFor(() => expect(receiver.observation().transport.state).toBe('ready'))
   return { ...original, transport, adapter, ingress, bindings, host: () => connections,
     reopen() { receiver.close(); connections.close(); connections = open(); return connections } }

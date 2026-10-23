@@ -21,7 +21,7 @@ it('the actual SDK callback joins original durable intake, Core queue, mounted M
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   const transport = feishuSdkTransport(), adapter = new FeishuAdapter({ http: transport.http })
   const ingress = new DurableIngressHost({ ...f.options, authenticators: [adapter] }); f.connections.ingress = ingress
-  const receiver = await startFeishuTransport(adapter.transport, feishuConfig, ingress); cleanup.push(() => receiver.close())
+  const receiver = await startFeishuTransport(adapter.transport, feishuConfig, ingress, () => f.connections.channelStorage(feishuConfig)); cleanup.push(() => receiver.close())
   await vi.waitFor(() => expect(receiver.observation().transport.state).toBe('ready'))
   const payload = feishuPayload({ thread_id: 'platform-thread', content: JSON.stringify({ text: '群里的原始消息\nContinue in the original Session.' }) })
   await transport.receive(payload)
@@ -37,10 +37,11 @@ it('the actual SDK callback joins original durable intake, Core queue, mounted M
   let timeline = await f.client.sessionTimeline(f.input.agentSessionId)
   await vi.waitFor(async () => {
     timeline = await f.client.sessionTimeline(f.input.agentSessionId)
-    expect(timeline.items.find(item => item.inputRef?.kind === 'message' && item.inputRef.messageId === input.messageId)?.authorExternal).toEqual(input.author)
+    expect(timeline.items.find(item => item.inputRef?.kind === 'message' && item.inputRef.messageId === input.messageId)?.authorExternal).toEqual(core.externalConversationAuthor(input.author))
   })
   expect(f.inner.kernel.input).toHaveBeenCalledOnce()
   const recorded = timeline.items.find(item => item.inputRef?.kind === 'message' && item.inputRef.messageId === input.messageId)!
+  expect(recorded.authorExternal).not.toHaveProperty('grantId'); expect(recorded.authorExternal).not.toHaveProperty('grantRevision')
   const read = await mountedMailbox(f.session, f.client, recorded.inputRef!, timeline)
   expect(read.detail.dataset.speakerRole).toBe('external')
   for (const fact of [feishuConfig.application.domain, feishuConfig.application.appId, 'open_id', 'original-external-user', 'original-room', 'platform-message']) expect(read.detail.textContent).toContain(fact)
@@ -81,7 +82,7 @@ it('a saved SDK parent stays unknown until its exact application author is reada
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   const transport = feishuSdkTransport(), adapter = new FeishuAdapter({ http: transport.http })
   const ingress = new DurableIngressHost({ ...f.options, authenticators: [adapter] }); f.connections.ingress = ingress
-  const receiver = await startFeishuTransport(adapter.transport, feishuConfig, ingress); cleanup.push(() => receiver.close())
+  const receiver = await startFeishuTransport(adapter.transport, feishuConfig, ingress, () => f.connections.channelStorage(feishuConfig)); cleanup.push(() => receiver.close())
   await vi.waitFor(() => expect(receiver.observation().transport.state).toBe('ready'))
   const payload = feishuPayload({ parent_id: 'original-bot-parent', mentions: [], content: JSON.stringify({ text: 'Reply in the existing Session\n完整原文' }) })
   const request = transport.request.getMockImplementation()!
@@ -187,9 +188,10 @@ it('Desktop default registration receives an exact SDK reply after durable ACK t
   let timeline = await original.client.sessionTimeline(original.session.agentSessionId)
   await vi.waitFor(async () => {
     timeline = await original.client.sessionTimeline(original.session.agentSessionId)
-    expect(timeline.items.find(item => item.inputRef?.kind === 'message' && item.inputRef.messageId === input.messageId)?.authorExternal).toEqual(input.author)
+    expect(timeline.items.find(item => item.inputRef?.kind === 'message' && item.inputRef.messageId === input.messageId)?.authorExternal).toEqual(core.externalConversationAuthor(input.author))
   })
   const record = timeline.items.find(item => item.inputRef?.kind === 'message' && item.inputRef.messageId === input.messageId)!, rendered = await mountedMailbox(original.session, original.client, record.inputRef!, timeline)
+  expect(record.authorExternal).not.toHaveProperty('grantId'); expect(record.authorExternal).not.toHaveProperty('grantRevision')
   expect(rendered.detail.dataset.speakerRole).toBe('external')
   expect(rendered.detail.textContent).toContain(feishuConfig.application.appId)
   await rendered.copyOriginal(); expect(rendered.copy).toHaveBeenCalledWith(rendered.original.admission!.intent!.prompt)

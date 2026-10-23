@@ -16,7 +16,7 @@ async function fixture() {
   const ingress = new DurableIngressHost({ connections, bindings: { findActiveAudience: () => null } as never, core: () => undefined, authenticators: [adapter] })
   connections.ingress = ingress
   const abort = new AbortController()
-  const receiver = await startFeishuTransport(adapter.transport, feishuConfig, ingress, abort.signal); cleanup.push(() => receiver.close())
+  const receiver = await startFeishuTransport(adapter.transport, feishuConfig, ingress, () => connections.channelStorage(feishuConfig), abort.signal); cleanup.push(() => receiver.close())
   await vi.waitFor(() => expect(receiver.observation().transport.state).toBe('ready'))
   return { transport, database, connections, adapter, ingress, receiver, abort }
 }
@@ -43,7 +43,7 @@ it('passes the original Host signal through SDK token, bot and discovery request
   for (const [request] of f.transport.request.mock.calls) expect(request).toMatchObject({ signal: f.abort.signal })
   const abort = new AbortController(); abort.abort()
   const before = f.transport.request.mock.calls.length
-  await expect(startFeishuTransport(f.adapter.transport, feishuConfig, f.ingress, abort.signal)).rejects.toMatchObject({ code: 'FEISHU_CONNECTION_REVISED' })
+  await expect(startFeishuTransport(f.adapter.transport, feishuConfig, f.ingress, () => f.connections.channelStorage(feishuConfig), abort.signal)).rejects.toMatchObject({ code: 'FEISHU_CONNECTION_REVISED' })
   expect(f.transport.request).toHaveBeenCalledTimes(before)
 })
 
@@ -196,10 +196,10 @@ it('keeps exactly one issuer/app receiver and releases only that receiver for ex
   const f = await fixture(), alias = { ...feishuConfig, connectionId: 'same-app-alias' }
   await f.connections.configure({ operationId: 'configure-alias', expectedRevision: null, connection: alias })
   const second = new FeishuAdapter({ http: f.transport.http })
-  await expect(startFeishuTransport(second.transport, alias, f.ingress)).rejects.toMatchObject({ code: 'FEISHU_RECEIVER_ALREADY_OWNED' })
+  await expect(startFeishuTransport(second.transport, alias, f.ingress, () => f.connections.channelStorage(alias))).rejects.toMatchObject({ code: 'FEISHU_RECEIVER_ALREADY_OWNED' })
   const old = f.transport.sockets[0]!
   f.receiver.close()
-  const reopened = await startFeishuTransport(second.transport, alias, f.ingress); cleanup.push(() => reopened.close())
+  const reopened = await startFeishuTransport(second.transport, alias, f.ingress, () => f.connections.channelStorage(alias)); cleanup.push(() => reopened.close())
   await vi.waitFor(() => expect(reopened.observation().transport.state).toBe('ready'))
   await f.transport.receive(feishuPayload(), old)
   expect(f.transport.ack()).toEqual([]) // Original SDK closed its socket; no new ACK can be emitted there.
@@ -210,7 +210,7 @@ it('does not duplicate the SDK app ID syntax gate into REST authentication or co
   const f = await fixture(), original = { ...feishuConfig, connectionId: 'another-platform-app', application: { ...feishuConfig.application, appId: 'original-platform-app-id' } }
   await f.connections.configure({ operationId: 'configure-other-app', expectedRevision: null, connection: original })
   expect((await f.connections.test({ connectionId: original.connectionId })).observation.authentication.state).toBe('ready')
-  await expect(startFeishuTransport(f.adapter.transport, original, f.ingress)).rejects.toMatchObject({ code: 'FEISHU_RECEIVER_UNAVAILABLE' })
+  await expect(startFeishuTransport(f.adapter.transport, original, f.ingress, () => f.connections.channelStorage(original))).rejects.toMatchObject({ code: 'FEISHU_RECEIVER_UNAVAILABLE' })
   // The pinned SDK declines to start this identifier. That transport fact does not erase its original configuration or REST result.
   expect(f.connections.readConfiguration(original.connectionId)!.config).toEqual(original)
   expect((await f.connections.test({ connectionId: original.connectionId })).observation.authentication.state).toBe('ready')
@@ -252,7 +252,7 @@ it('cleans low-level exceptions and refuses non-TLS endpoints without exposing c
   const request = f.transport.request.getMockImplementation()!
   f.transport.request.mockImplementation(async input => input.url?.endsWith('/callback/ws/endpoint') ? { code: 0, data: { URL: 'ws://msg-frontier.feishu.cn/ws/v2', ClientConfig: { PingInterval: 30, ReconnectCount: 0, ReconnectInterval: 1, ReconnectNonce: 0 } } } : request(input))
   const attempts = f.transport.request.mock.calls.filter(([input]) => input.url?.endsWith('/callback/ws/endpoint')).length
-  const receiver = await startFeishuTransport(f.adapter.transport, feishuConfig, f.ingress); cleanup.push(() => receiver.close())
+  const receiver = await startFeishuTransport(f.adapter.transport, feishuConfig, f.ingress, () => f.connections.channelStorage(feishuConfig)); cleanup.push(() => receiver.close())
   await vi.waitFor(() => expect(f.transport.request.mock.calls.filter(([input]) => input.url?.endsWith('/callback/ws/endpoint'))).toHaveLength(attempts + 1))
   expect(receiver.observation().transport.state).toBe('unknown')
   expect(f.transport.sockets).toHaveLength(1)
