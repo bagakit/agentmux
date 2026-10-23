@@ -86,16 +86,19 @@ afterEach(async () => {
 it('actual initialize restores original workface before mandatory Main continuity', async () => {
   const f = await fixture('on-open', true)
   expect(f.recover).toHaveBeenCalledTimes(1)
-  expect(f.recover).toHaveBeenCalledWith(f.selected.control, f.selected.workspacePath, expect.any(String), { trigger: 'mote-startup', timingOverride: 'startup' })
+  expect(f.recover).toHaveBeenCalledWith(f.selected.control, f.selected.workspacePath, expect.any(String), { trigger: 'workspace-startup', timingOverride: 'startup' })
   expectOriginalWorkface(f, true)
 })
 it('actual initialize and later canonical membership do not resume an on-open fixed conversation through the old 24-hour policy', async () => {
   const f = await fixture('on-open', false); expect(f.recover).not.toHaveBeenCalled(); expectOriginalWorkface(f, false)
-  const reads = f.snapshot.mock.calls.length, priorSessions = useAppStore.getState().sessions
+  const reads = f.snapshot.mock.calls.length, label = 'Canonical original conversation'
+  const sessions = f.sessions.map(session => session.id === f.selected.id ? { ...session, label } : session)
+  f.snapshot.mockResolvedValue({ sessions, recoveryCandidates: [],
+    timelines: Object.fromEntries(sessions.map(session => [session.id, { agentSessionId: session.id, revision: 0, items: [] }])) })
   event({ type: 'core', hostId: 'local', event: { type: 'agent-status', agentSessionId: 'late-foreign-agent', state: 'working', evidence: { source: 'native-hook', observedAt: Date.now() } } })
   await vi.waitFor(() => {
     expect(f.snapshot.mock.calls.length).toBeGreaterThan(reads)
-    expect(useAppStore.getState().sessions).not.toBe(priorSessions)
+    expect(useAppStore.getState().sessions.find(session => session.id === f.selected.id)?.label).toBe(label)
   })
   expect(f.recover).not.toHaveBeenCalled(); expectOriginalWorkface(f, false)
 })

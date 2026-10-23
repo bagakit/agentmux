@@ -618,7 +618,7 @@ it('keeps the original on-open recovery eligible while its companion home covers
     expect(recover).not.toHaveBeenCalled()
     await moteClick(node<HTMLButtonElement>('[data-space-nav="topic:' + customMoteId + '"]'))
     expect(homeExpanded()).not.toBeNull()
-    expect(recover).toHaveBeenCalledExactlyOnceWith(customAgent.control, customAgent.workspacePath, expect.any(String), { trigger: 'mote-open', timingOverride: 'on-open' })
+    expect(recover).toHaveBeenCalledExactlyOnceWith(customAgent.control, customAgent.workspacePath, expect.any(String), { trigger: 'workspace-open', timingOverride: 'on-open' })
     await moteClick(button('Discussion'))
     expect(homeExpanded()).toBeNull()
     expect(recover).toHaveBeenCalledTimes(1)
