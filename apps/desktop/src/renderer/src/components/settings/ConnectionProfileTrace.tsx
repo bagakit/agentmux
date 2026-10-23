@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ConnectionProfileDiagnostic, ConnectionProfileOperation } from '@agentmux/core/connections'
 import { api } from '../../lib/api'
+import type { ConnectionHostingTarget } from '../../../../shared/contracts'
 import { profileEffectLabels } from '../ConnectionProfileProgress'
 
 function safeEffect(effect: ConnectionProfileOperation['upload']) {
@@ -17,31 +18,32 @@ function Diagnostic({ diagnostic }: { diagnostic?: ConnectionProfileDiagnostic |
 }
 
 /** Reads the existing original profile receipt; never refreshes platform observations or advances writes. */
-export function ConnectionProfileTrace({ operationId, parentId, original }: {
-  operationId?: string | undefined; parentId: string; original?: ConnectionProfileOperation | null | undefined
+export function ConnectionProfileTrace({ operationId, parentId, original, hostingTarget }: {
+  operationId?: string | undefined; parentId: string; original?: ConnectionProfileOperation | null | undefined; hostingTarget?: ConnectionHostingTarget | null | undefined
 }) {
+  const scope = JSON.stringify([operationId, hostingTarget ?? null])
   const [open, setOpen] = useState(false), epoch = useRef(0)
-  const [reading, setReading] = useState<{ id?: string | undefined; operation: ConnectionProfileOperation | null; busy: boolean; issue: string }>({ id: operationId, operation: original ?? null, busy: false, issue: '' })
+  const [reading, setReading] = useState<{ id?: string | undefined; operation: ConnectionProfileOperation | null; busy: boolean; issue: string }>({ id: scope, operation: original ?? null, busy: false, issue: '' })
   const [copied, setCopied] = useState('')
-  const visible = reading.id === operationId ? reading : null
+  const visible = reading.id === scope ? reading : null
   const operation = visible?.operation ?? (original?.operationId === operationId ? original : null)
   async function load() {
-    if (!operationId) return
+    if (!operationId || !hostingTarget) return
     const token = ++epoch.current
-    setReading(previous => ({ id: operationId, operation: previous.id === operationId ? previous.operation : null, busy: true, issue: '' }))
+    setReading(previous => ({ id: scope, operation: previous.id === scope ? previous.operation : null, busy: true, issue: '' }))
     try {
-      const result = await api.connections.call('connection.profile.inspect', { operationId })
+      const result = await api.connections.call('connection.profile.inspect', { operationId }, hostingTarget)
       if (token !== epoch.current) return
       if (!result.operation || result.operation.operationId !== operationId) throw new Error('Original profile receipt unavailable')
-      setReading({ id: operationId, operation: result.operation, busy: false, issue: '' })
+      setReading({ id: scope, operation: result.operation, busy: false, issue: '' })
     } catch {
       if (token === epoch.current) setReading(previous => ({ ...previous, busy: false, issue: 'The original profile receipt could not be read. Earlier results and the original request are kept.' }))
     }
   }
   useEffect(() => {
-    if (original && original.operationId === operationId) setReading({ id: operationId, operation: original, busy: false, issue: '' })
-  }, [operationId, original])
-  useEffect(() => { setCopied(''); if (open) void load(); return () => { epoch.current++ } }, [operationId, original, open])
+    if (original && original.operationId === operationId) setReading({ id: scope, operation: original, busy: false, issue: '' })
+  }, [scope, original])
+  useEffect(() => { setCopied(''); if (open) void load(); return () => { epoch.current++ } }, [scope, original, open])
   return <details className="connector-request-trace connector-profile-trace" data-profile-trace open={open} onToggle={event => setOpen(event.currentTarget.open)}>
     <summary><strong>Request trace</strong><span>{visible?.busy ? 'Reading…' : operation ? '2 effect receipts' : 'Original profile request'}</span></summary>
     <div className="connector-request-trace__body">

@@ -3,6 +3,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { ConnectionRequestTrace as RequestTracePage, ConnectionSetupView, ConnectionEnrollmentView } from '@agentmux/core/connections'
 import { collectConnectionDiagnosis, formatConnectionDiagnosis, type ConnectionDiagnosisTarget } from '../../lib/connection-diagnosis'
 import { api } from '../../lib/api'
+import type { ConnectionHostingTarget } from '../../../../shared/contracts'
 
 export type ConnectionTraceSource = { kind: 'enrollment' | 'setup'; operationId: string }
 const LoadingIcon = semanticIconComponent('status.loading')
@@ -27,17 +28,17 @@ const requestLabels: Record<string, string> = { 'not-dispatched': 'Not sent', cl
 const storageLabels: Record<string, string> = { 'not-started': 'Not started', storing: 'Saving', stored: 'Saved', unknown: 'Unconfirmed' }
 
 /** A disposable reader of the exact public journal. Opening never advances the original operation. */
-export function ConnectionRequestTrace({ source, revision, title = 'Request trace', setupView, enrollmentView, diagnosisTarget, hideCopy = false }: { source: ConnectionTraceSource | null; revision?: number | string | undefined; title?: string | undefined; setupView?: ConnectionSetupView | null | undefined; enrollmentView?: ConnectionEnrollmentView | null | undefined; diagnosisTarget?: ConnectionDiagnosisTarget | null | undefined; hideCopy?: boolean | undefined }) {
-  const key = source ? JSON.stringify([source.kind, source.operationId]) : ''
+export function ConnectionRequestTrace({ source, revision, title = 'Request trace', setupView, enrollmentView, diagnosisTarget, hideCopy = false, hostingTarget }: { source: ConnectionTraceSource | null; revision?: number | string | undefined; title?: string | undefined; setupView?: ConnectionSetupView | null | undefined; enrollmentView?: ConnectionEnrollmentView | null | undefined; diagnosisTarget?: ConnectionDiagnosisTarget | null | undefined; hideCopy?: boolean | undefined; hostingTarget?: ConnectionHostingTarget | null | undefined }) {
+  const key = source ? JSON.stringify([source.kind, source.operationId, hostingTarget ?? null]) : ''
   const [open, setOpen] = useState(false), [reading, setReading] = useState<{ key: string; page: RequestTracePage | null; issue: string; busy: boolean }>({ key, page: null, issue: '', busy: false })
   const [copied, setCopied] = useState(''), [copying, setCopying] = useState(false), epoch = useRef(0), exportRead = useRef(0)
-  const target = diagnosisTarget ?? source, exportKey = target ? JSON.stringify([target.kind, target.operationId, target.kind === 'mote' ? target.sourceTarget : null]) : ''
+  const target = diagnosisTarget ?? source, exportKey = target ? JSON.stringify([target.kind, target.operationId, target.kind === 'mote' ? target.sourceTarget : null, hostingTarget ?? null]) : ''
   const visible = reading.key === key ? reading : null
   async function readPage(cursor?: string, limit = 25) {
-    if (!source) throw new Error('Original trace unavailable')
+    if (!source || !hostingTarget) throw new Error('Original trace hosting owner is unconfirmed')
     const result = source.kind === 'enrollment'
-      ? await api.connections.call('connection.enrollment.inspect', { operationId: source.operationId, requestTrace: { limit, ...(cursor ? { cursor } : {}) } })
-      : await api.connections.call('connection.setup.inspect', { operationId: source.operationId, requestTrace: { limit, ...(cursor ? { cursor } : {}) } })
+      ? await api.connections.call('connection.enrollment.inspect', { operationId: source.operationId, requestTrace: { limit, ...(cursor ? { cursor } : {}) } }, hostingTarget)
+      : await api.connections.call('connection.setup.inspect', { operationId: source.operationId, requestTrace: { limit, ...(cursor ? { cursor } : {}) } }, hostingTarget)
     const page = result.requestTrace
     if (!page || page.operationId !== source.operationId) throw new Error('Original trace unavailable')
     return page
@@ -63,7 +64,7 @@ export function ConnectionRequestTrace({ source, revision, title = 'Request trac
     const token = ++exportRead.current
     setCopying(true); setCopied('Reading the complete original task…')
     try {
-      const report = await collectConnectionDiagnosis(target, { setupView, enrollmentView, current: () => token === exportRead.current })
+      const report = await collectConnectionDiagnosis(target, { setupView, enrollmentView, hostingTarget, current: () => token === exportRead.current })
       if (token !== exportRead.current) return
       await api.ui.writeClipboardText(formatConnectionDiagnosis(report))
       if (token === exportRead.current) setCopied(report.complete ? 'Complete sanitized diagnosis copied.' : 'Diagnosis copied with unavailable sections; the report is incomplete.')
