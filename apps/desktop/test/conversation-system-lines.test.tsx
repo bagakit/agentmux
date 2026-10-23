@@ -100,7 +100,7 @@ it('public Timeline through real Activity retains distinct system IDs, context, 
  const view=await renderTimeline(timeline)
  const rows=[...dom.container.querySelectorAll<HTMLElement>('[data-speaker-role="system"]')]
  expect(rows).toHaveLength(3);expect(rows.map(r=>r.dataset.messageId)).toEqual(timeline.items.filter(i=>i.kind==='system_message').map(i=>i.id))
- const originalPage=await vi.mocked(api.conversation.readAgentConversation).mock.results.at(-1)!.value
+ const originalPage:Awaited<ReturnType<typeof api.conversation.readAgentConversation>>=await vi.mocked(api.conversation.readAgentConversation).mock.results.at(-1)!.value
  expect(originalPage).toMatchObject({...reference,sourceHostId:'local'})
  const originalContext=originalPage.items.find(part=>part.kind==='item'&&part.item.records.some(record=>record.original.kind==='captured'&&record.original.item.id===context.id))
  expect(originalContext?.kind==='item'&&originalContext.item.event.author).toEqual({kind:'system'})
