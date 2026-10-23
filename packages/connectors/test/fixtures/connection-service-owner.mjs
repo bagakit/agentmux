@@ -68,8 +68,8 @@ if (mode === 'execution') {
       return await authority.assertCurrent(author, intent)
     } } })
 } else {
-  const { createDesktopConnections } = await import('../../../../apps/desktop/src/main/connector-host.ts')
-  const owner = await createDesktopConnections({ directory: root,
+  const { createConnectionServices } = await import('../../src/connection-services.ts')
+  const owner = await createConnectionServices({ directory: root,
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) }, adapters: [] })
   const service = owner.connections.service, configure = service.configure.bind(service)
   service.configure = async input => {

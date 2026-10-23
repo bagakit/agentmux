@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { expect, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import type { ConnectionEnrollmentBeginInput, ConnectionEnrollmentView } from '@agentmux/core/connections'
-import { createDesktopConnections } from '../../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../../src/connection-services.js'
 import { enrollmentEncryption } from './connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../core/test/helpers/object-cli-rpc.js'
 
@@ -68,9 +68,9 @@ export function enrollmentInitialWeb(options: { unknownEffect?: string | null; v
 
 export async function enrollmentInitialFixture(unknownEffect: string | null = null, versionStatus = 2, initialPublication: { version: string; notes: string } | null = { version: '1.0.0', notes: 'Enable AMUX conversations.' }) {
   const root = await mkdtemp(join(tmpdir(), 'initial-setup-')), socketPath = join(root, 'owner.sock')
-  let services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
+  let services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
   const open = async () => {
-    services = await createDesktopConnections({ directory: join(root, 'connections'), encryption: enrollmentEncryption() })
+    services = await createConnectionServices({ directory: join(root, 'connections'), encryption: enrollmentEncryption() })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw Error('Initial setup cannot borrow an Agent Runtime') } })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   }

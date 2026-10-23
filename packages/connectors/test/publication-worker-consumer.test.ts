@@ -1,7 +1,7 @@
 import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { ConnectionHost } from '../src/connection-host.js'
 import { createPublicationConversationPort } from '../src/core-conversation-port.js'
 import type { PublicationAdapter } from '../src/publication-adapter.js'
@@ -27,7 +27,7 @@ async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = fal
       return effect ? await effect(request, target, credential, signal, mapping) : { state: 'confirmed', mapping: JSON.parse(request.request.body!).mapping ?? { messageId: 'message-' + request.requestKey } }
     } }
   const conversation = createPublicationConversationPort(() => [{ hostId: 'local', client: original.client }])
-  const services = await createDesktopConnections({ directory: join(original.root, 'desktop-publication'),
+  const services = await createConnectionServices({ directory: join(original.root, 'desktop-publication'),
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) },
     adapters: [{ adapterId: 'sample', publication: adapter, test: async () => ({ authentication: { state: 'ready' }, transport: { state: 'unknown', reason: 'not-started' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } }) }],
     bindings: { spatial: original.spatial, checkpoint: original.checkpoint }, publication: conversation })

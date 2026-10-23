@@ -30,7 +30,7 @@ vi.mock('electron', () => ({
 // The actual Main registration is retained. No test starts the person's IPC endpoint or connectors.
 vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { async start() {} async stop() {} } }))
-vi.mock('../src/main/connector-host', () => ({ createDesktopConnections: async () => ({
+vi.mock('../src/main/connector-host', () => ({ createConnectionServices: async () => ({
   connections: { list: async () => [] }, secrets: {}, close: async () => {}
 }) }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))

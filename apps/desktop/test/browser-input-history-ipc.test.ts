@@ -27,7 +27,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
 vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { async start() {} async stop() {} } }))
 // Unrelated connector startup must not open the person's durable connection store.
-vi.mock('../src/main/connector-host.js', () => ({ createDesktopConnections: async () => ({
+vi.mock('../../../packages/connectors/src/connection-services.js', () => ({ createConnectionServices: async () => ({
   connections: { list: async () => [] }, secrets: {}, close: async () => {}
 }) }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))

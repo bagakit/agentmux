@@ -2,7 +2,7 @@ import { join } from 'node:path'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { afterEach, expect, it, vi } from 'vitest'
 import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import { roomProvisioningFixture, core } from './fixtures/room-provisioning.js'
 import { feishuConfig } from './fixtures/feishu.js'
@@ -21,7 +21,7 @@ async function fixture(effect?: (request: RoomRequest) => Promise<unknown>) {
   const directory = join(f.root, 'desktop-platform-rooms'), socketPath = join(f.root, 'platform-rooms.sock')
   const open = async () => {
     // Adapters are intentionally omitted: this is the original Desktop default lazy registration.
-    const services = await createDesktopConnections({ directory, bindings: { spatial: f.spatial, checkpoint: f.checkpoint },
+    const services = await createConnectionServices({ directory, bindings: { spatial: f.spatial, checkpoint: f.checkpoint },
       encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) } })
     cleanup.push(() => services.close())
     const server = new core.AgentMuxControlServer({ socketPath, connections: services.connections, spatialState: f.spatial, coreClients: () => [{ hostId: 'local', client: f.client }] })

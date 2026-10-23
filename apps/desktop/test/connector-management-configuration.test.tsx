@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 import { AgentMuxControlServer } from '@agentmux/core'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionRecord, ConnectionResultMap, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupInspectionReceipt, ConnectionSetupConfigurationReceipt, ConnectionSetupAction, ConnectionSetupView } from '@agentmux/core/connections'
-import { createDesktopConnections } from '../src/main/connector-host.js'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
@@ -20,7 +20,7 @@ const dom = composerDOM(), goal = { kind: 'agent-conversation', interaction: 'me
 const TOKEN = 'fixture-settings-configuration-private-qr', FLOW = 'fixture-settings-configuration-private-flow'
 const USER = 'fixture-settings-configuration-account-id', TENANT = 'fixture-settings-configuration-enterprise-id', SECRET = 'fixture-settings-configuration-saved-secret'
 type Call = { method: ConnectionMethod; input: unknown; result?: unknown; delivered?: boolean; error?: { code?: string; message: string } }
-let directory: string, services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer
+let directory: string, services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer
 let forward: typeof api.connections.call, calls: Call[], beforeCall: ((call: Call) => Promise<void>) | undefined, afterCall: ((call: Call) => Promise<void>) | undefined
 let native: Array<{ url: string; at: number; init?: RequestInit }>, trusted: ReturnType<typeof vi.fn>, secureAvailable: boolean
 let reopen: () => void
@@ -31,7 +31,7 @@ beforeEach(async () => {
   useAppStore.setState({ botTaskSelections: {} })
   directory = await mkdtemp(join(tmpdir(), 'settings-configuration-'))
   const encryption = enrollmentEncryption(); secureAvailable = true
-  services = await createDesktopConnections({ directory: join(directory, 'connections'), encryption: { ...encryption, isAsyncEncryptionAvailable: async () => secureAvailable } })
+  services = await createConnectionServices({ directory: join(directory, 'connections'), encryption: { ...encryption, isAsyncEncryptionAvailable: async () => secureAvailable } })
   server = new AgentMuxControlServer({ socketPath: join(directory, 'control.sock'), connections: services.connections,
     coreClients: () => { throw new Error('Connection authentication may not borrow an Agent Runtime') } })
   await server.start()

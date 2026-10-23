@@ -1,6 +1,6 @@
 import { isObjectId } from '@agentmux/core'
 import { expectConnectionAllocations } from './helpers/unified-identifiers.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { DatabaseSync } from 'node:sqlite'
 import { fork } from 'node:child_process'
 import { once } from 'node:events'
@@ -31,9 +31,9 @@ async function create(f: Fixture) { return advance(f, await confirmed(f), 'creat
 function stored(f: Pick<Fixture, 'services' | 'input'>) { return JSON.parse(String(f.services.database!.prepare('SELECT record_json FROM connection_enrollment WHERE operation_id=?').get(f.input.operationId)!.record_json)) }
 async function defaultFixture() {
   const root = await mkdtemp(join(tmpdir(), 'enroll-default-')), directory = join(root, 'connections'), socketPath = join(root, 'public.sock'), encryption = enrollmentEncryption()
-  let services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
+  let services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
   const open = async () => {
-    services = await createDesktopConnections({ directory, encryption })
+    services = await createConnectionServices({ directory, encryption })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw new Error('Registration cannot borrow an Agent Runtime') } })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   }
@@ -173,7 +173,7 @@ it('rejects a stale authentication action after another owner advances its revis
   const waiting = await f.sdk.call('connection.enrollment.begin', f.input), input = decision(waiting, 'continue-authentication')
   const row = f.services.database!.prepare('SELECT record_json FROM connection_enrollment WHERE operation_id=?').get(f.input.operationId)!
   const actor = JSON.parse(String(row.record_json)).actor as { kind: 'user'; id: string }
-  const second = await createDesktopConnections({ directory: f.directory, encryption: f.encryption, adapters: [f.adapter] })
+  const second = await createConnectionServices({ directory: f.directory, encryption: f.encryption, adapters: [f.adapter] })
   clean.push(() => second.close())
   let release!: () => void, paused!: () => void, checks = 0
   const reached = new Promise<void>(r => { paused = r }), resume = new Promise<void>(r => { release = r })
@@ -327,7 +327,7 @@ it('does not attach a late checkpoint error to an original challenge another own
   const original = f.sdk.call('connection.enrollment.begin', f.input)
   const originalResult = original.then(value => ({ value }), error => ({ error }))
   await waiting
-  const second = await createDesktopConnections({ directory: f.directory, encryption: f.encryption, adapters: [f.adapter] }); clean.push(() => second.close())
+  const second = await createConnectionServices({ directory: f.directory, encryption: f.encryption, adapters: [f.adapter] }); clean.push(() => second.close())
   const row = f.services.database!.prepare('SELECT record_json FROM connection_enrollment WHERE operation_id=?').get(f.input.operationId)!
   const actor = JSON.parse(String(row.record_json)).actor as { kind: 'user'; id: string }
   const waitingView = await second.connections.enrollment!.inspect({ operationId: f.input.operationId }, { actor })

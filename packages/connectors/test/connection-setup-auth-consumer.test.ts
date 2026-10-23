@@ -1,4 +1,4 @@
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { DatabaseSync } from 'node:sqlite'
 import { fork, type ChildProcess } from 'node:child_process'
@@ -55,9 +55,9 @@ function advanceInput(view: ConnectionSetupView, kind: 'continue' | 'confirm-acc
 }
 async function fixture(options: { paused?: boolean; operationId?: string; goal?: ConnectionSetupBegin['goal'] } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'setup-auth-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock'), encryption = enrollmentEncryption()
-  let services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
+  let services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
   const open = async () => {
-    services = await createDesktopConnections({ directory, encryption })
+    services = await createConnectionServices({ directory, encryption })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw new Error('Authentication cannot borrow an Agent Runtime') } })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   }
@@ -859,7 +859,7 @@ it('parallel local Vault recovery on a fresh owner returns the same stored actio
   })
   const original = f.sdk.call('connection.setup.advance', input).then(value => ({ status: 'fulfilled' as const, value }), reason => ({ status: 'rejected' as const, reason }))
   await committed.promise
-  const recoveredServices = await createDesktopConnections({ directory: f.directory, encryption: f.encryption })
+  const recoveredServices = await createConnectionServices({ directory: f.directory, encryption: f.encryption })
   const server = new AgentMuxControlServer({ socketPath: join(f.root, 'fresh-recovery.sock'), connections: recoveredServices.connections, coreClients: () => { throw new Error('Local secure recovery cannot borrow an Agent Runtime') } })
   await server.start()
   const sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(f.root, 'fresh-recovery.sock') } })

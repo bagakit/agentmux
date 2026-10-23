@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { WebSocket } from 'ws'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '../../../packages/core/dist/index.js'
-import { createDesktopConnections } from '../src/main/connector-host.js'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
 import { discordSettingsModule } from '../src/renderer/src/components/settings/modules/discord.js'
@@ -31,7 +31,7 @@ async function fixture() {
   const adapter = new DiscordAdapter({ http: { makeRequest: async (url, init) => rejectCheck && new URL(url).pathname.endsWith('/oauth2/applications/@me')
     ? new Response(JSON.stringify({ message: 'Unauthorized', code: 0 }), { status: 401, headers: { 'content-type': 'application/json' } })
     : wire.http.makeRequest!(url, init) } })
-  const services = await createDesktopConnections({ directory: join(original.root, 'discord-settings'), adapters: [adapter],
+  const services = await createConnectionServices({ directory: join(original.root, 'discord-settings'), adapters: [adapter],
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
     bindings: { spatial: original.spatial, checkpoint: ref => original.client.conversationCheckpoint(ref) }, ingress: { core: hostId => hostId === 'local' ? original.client : undefined } })
   cleanup.push(() => services.close())

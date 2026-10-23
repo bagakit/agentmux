@@ -12,7 +12,7 @@ import type {
   ConnectionEnrollmentView,
   ConnectionSetupView
 } from '@agentmux/core/connections'
-import { createDesktopConnections } from '../src/main/connector-host.js'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import type { CredentialEncryption } from '../../../packages/connectors/src/connection-secrets.js'
 import { ingressFixture } from '../../../packages/connectors/test/fixtures/ingress.js'
 import {
@@ -40,7 +40,7 @@ const input: ConnectionEnrollmentBeginInput = {
 }
 const cleanup: Array<() => void | Promise<void>> = []
 let original: Awaited<ReturnType<typeof ingressFixture>>
-let services: Awaited<ReturnType<typeof createDesktopConnections>>
+let services: Awaited<ReturnType<typeof createConnectionServices>>
 let server: AgentMuxControlServer
 let client: Awaited<ReturnType<typeof connectAgentMuxRpc>>
 let sdk: ReturnType<typeof defaultFeishuSdkTransport>
@@ -162,7 +162,7 @@ beforeEach(async () => {
       throw new Error('Unexpected bootstrap network request')
     })
   )
-  services = await createDesktopConnections({
+  services = await createConnectionServices({
     directory: join(original.root, 'enrollment-host'),
     encryption,
     bindings: {

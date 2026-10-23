@@ -10,7 +10,7 @@ import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
 import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
 import { source, turn, user, jsonl } from '../../core/test/helpers/codex-paginated.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { createPublicationConversationPort } from '../dist/index.js'
 import { context } from './fixtures/room-binding.js'
 import { feishuConfig } from './fixtures/feishu.js'
@@ -71,7 +71,7 @@ async function fixture() {
     if (params !== undefined && (params === null || typeof params !== 'object')) throw new Error('Expected original SDK query parameters')
     return remote.http.request({ ...request, ...(params === undefined ? {} : { params }) })
   })
-  const services = await createDesktopConnections({ directory: join(h.root, 'relay-host'),
+  const services = await createConnectionServices({ directory: join(h.root, 'relay-host'),
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async bytes => ({ result: (bytes.toString()), shouldReEncrypt: false }) },
     bindings: { spatial, checkpoint: reference => h.client.conversationCheckpoint(reference) }, publication: createPublicationConversationPort(h.coreClients) })
   cleanup.push(() => services.close())

@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc, AgentMuxError } from '@agentmux/core'
 import type { ConnectionSetupAction, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupConfigurationEffect, ConnectionSetupView } from '@agentmux/core/connections'
 import { ConnectionSecrets } from '../src/connection-secrets.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 
@@ -31,7 +31,7 @@ function action(view: ConnectionSetupView, kind: ConnectionSetupAction['kind']):
 }
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'permission-request-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock')
-  const services = await createDesktopConnections({ directory, encryption: enrollmentEncryption() })
+  const services = await createConnectionServices({ directory, encryption: enrollmentEncryption() })
   const server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw Error('Permission request cannot borrow an Agent Runtime') } })
   await server.start()
   const sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })

@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '@agentmux/core'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap, ConnectionSetupView } from '@agentmux/core/connections'
 import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
-import { createDesktopConnections } from '../src/main/connector-host.js'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
@@ -19,13 +19,13 @@ const dom = composerDOM(), APP = 'cli_settings_permission_request'
 const NAMES = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only', 'application:application:patch', 'application:application:self_manage']
 const IDS = NAMES.map((_, index) => 100 + index)
 const REQUIRED_IDS = [...IDS.slice(0, 7), IDS[8]!] // Creator lookup needs self_manage, not the unrelated patch scope.
-let directory: string, services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer
+let directory: string, services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer
 let applied: unknown, appliedAccept: boolean, accept: boolean, native: Array<{ path: string; body: unknown }>, calls: Array<{ method: ConnectionMethod; input: unknown; result: unknown }>
 beforeEach(async () => {
   applied = { scopes: [] }; appliedAccept = true; accept = true; native = []; calls = []
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   directory = await mkdtemp(join(tmpdir(), 'settings-permission-transport-'))
-  services = await createDesktopConnections({ directory: join(directory, 'connections'), encryption: enrollmentEncryption() })
+  services = await createConnectionServices({ directory: join(directory, 'connections'), encryption: enrollmentEncryption() })
   server = new AgentMuxControlServer({ socketPath: join(directory, 'owner.sock'), connections: services.connections, coreClients: () => { throw new Error('Permission settings cannot borrow an Agent Runtime') } })
   await server.start()
   const handlers = new Map<string, (...args: any[]) => Promise<unknown>>(), sender = { ownedRenderer: true }

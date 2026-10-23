@@ -40,7 +40,7 @@ vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ list: async () =>
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 
 import { AgentMuxMemoryAgentSessionStore, connectAgentMuxRpc, LocalExecutionHost } from '@agentmux/core'
-import { createDesktopConnections } from '../src/main/connector-host.js'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { ClientIncidentArchive } from '../src/main/client-incident-archive.js'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { registerIpc } from '../src/main/ipc.js'
@@ -57,7 +57,7 @@ it.each(['availability', 'decryption'] as const)('publishes the real Main owner 
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(fixture.profile, 'state'))
   vi.stubEnv('AGENTMUX_SPATIAL_STATE_STORE', join(fixture.profile, 'state', 'spatial-state.json'))
   // Configure the existing built-in receiver with real persisted credentials; no network starts before decryption completes.
-  const original = enrollmentEncryption(), seed = await createDesktopConnections({ directory: join(fixture.profile, 'connectors'), encryption: original })
+  const original = enrollmentEncryption(), seed = await createConnectionServices({ directory: join(fixture.profile, 'connectors'), encryption: original })
   const operationId = 'credential-' + phase, connectionId = 'connection-' + phase
   const receipt = await seed.secrets.store({ operationId, secret: 'owned-fixture-credential' })
   await seed.connections.configure({ operationId: 'configure-' + phase, expectedRevision: null,

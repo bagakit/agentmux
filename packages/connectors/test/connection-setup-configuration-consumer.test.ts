@@ -1,5 +1,5 @@
 import { expectConnectionAllocations } from './helpers/unified-identifiers.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { AgentMuxControlServer, AgentMuxRpcService, connectAgentMuxRpc } from '@agentmux/core'
 import type { ConnectionConfig, ConnectionSetupAction, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupInspectionReceipt, ConnectionSetupConfigurationReceipt, ConnectionSetupReadSubject, ConnectionSetupView } from '@agentmux/core/connections'
@@ -80,9 +80,9 @@ function nativeRoute(read: (subject: ConnectionSetupReadSubject, target: URL, in
 }
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'setup-configuration-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock'), encryption = enrollmentEncryption()
-  let services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
+  let services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
   const open = async (missingAdapter = false) => {
-    services = await createDesktopConnections({ directory, encryption, ...(missingAdapter ? { adapters: [] } : {}) })
+    services = await createConnectionServices({ directory, encryption, ...(missingAdapter ? { adapters: [] } : {}) })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw new Error('Configuration cannot borrow an Agent Runtime') } })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   }

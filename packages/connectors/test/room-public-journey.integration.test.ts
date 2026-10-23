@@ -9,7 +9,7 @@ import { hostedTestOwner } from '../../core/test/helpers/hosted-runtime-port.js'
 import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { createDesktopExternalInputAuthority } from '../../../apps/host/src/external-input-authority.js'
 import { startAgentMuxHost } from '../../../apps/host/src/host.js'
 import { externalIngressMailbox } from '../../../apps/desktop/test/helpers/external-ingress-mailbox.js'
@@ -70,7 +70,7 @@ async function fixture(coreAvailable = true, execution: 'direct' | 'hosted' | 'n
   const inputCore = hosted ? createHostedIngressCorePort(executionClients) : () => original.client
   const coreResolver = vi.fn((host: string) => coreAvailable && host === 'local' ? inputCore(host) : undefined)
   const wire = signedRoomAdapter()
-  const services = await createDesktopConnections({ directory: join(original.root, 'connectors'), adapters: [wire.adapter],
+  const services = await createConnectionServices({ directory: join(original.root, 'connectors'), adapters: [wire.adapter],
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) },
     bindings: { spatial, checkpoint: async ref => await (hosted ?? original.client).conversationCheckpoint(ref) },
     publication: createPublicationConversationPort(executionClients), ingress: { core: coreResolver } })

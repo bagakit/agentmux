@@ -57,10 +57,10 @@ vi.mock('@agentmux/core', async load => {
 })
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ list: async () => [], snapshot: async () => ({ demands: [] }), subscribe: () => () => {} }) }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
-vi.mock('../src/main/connector-host.js', async load => {
-  const actual = await load<typeof import('../src/main/connector-host.js')>()
-  return { ...actual, createDesktopConnections: async (options: Parameters<typeof actual.createDesktopConnections>[0]) => {
-    const owner = await actual.createDesktopConnections(options), subscribe = owner.onChannelMetadataChanged
+vi.mock('../../../packages/connectors/src/connection-services.js', async load => {
+  const actual = await load<typeof import('../../../packages/connectors/src/connection-services.js')>()
+  return { ...actual, createConnectionServices: async (options: Parameters<typeof actual.createConnectionServices>[0]) => {
+    const owner = await actual.createConnectionServices(options), subscribe = owner.onChannelMetadataChanged
     owner.onChannelMetadataChanged = listener => {
       const release = subscribe(listener)
       return () => { bridge.releaseMetadata(); release() }

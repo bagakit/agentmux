@@ -43,7 +43,7 @@ vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOUR
 vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} async release() {} dispose() {} } }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
-vi.mock('../src/main/connector-host', () => ({ createDesktopConnections: async () => ({ connections: { list: async () => [] }, secrets: {}, close: async () => {} }) }))
+vi.mock('../src/main/connector-host', () => ({ createConnectionServices: async () => ({ connections: { list: async () => [] }, secrets: {}, close: async () => {} }) }))
 // Install the actual mocked Electron bridge before transitive renderer consumers load api.
 await vi.hoisted(async () => { await import('../src/preload/index') })
 import '../src/preload/index'

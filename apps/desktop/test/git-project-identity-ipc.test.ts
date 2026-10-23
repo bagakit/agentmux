@@ -33,7 +33,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
 vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { async start() {} async stop() {} } }))
 vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ list: async () => [], snapshot: async () => ({ demands: [] }), subscribe: () => () => {} }) }))
-vi.mock('../src/main/connector-host', () => ({ createDesktopConnections: async () => ({ connections: {}, secrets: {}, close: async () => {} }) }))
+vi.mock('../src/main/connector-host', () => ({ createConnectionServices: async () => ({ connections: {}, secrets: {}, close: async () => {} }) }))
 vi.mock('../src/main/browser-profile-manager', () => ({ BrowserProfileManager: class { async initialize() {} async dispose() {} } }))
 vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOURNAL_FILE: 'private-journal.json',
   BrowserOperationFileStore: class {}, BrowserOperationJournal: class { async ready() {} } }))

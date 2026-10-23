@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '../../../packages/core/dist/index.js'
-import { createDesktopConnections } from '../src/main/connector-host.js'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { ExternalConnectionsSettings } from '../src/renderer/src/components/settings/ExternalConnectionsSettings'
 import { api } from '../src/renderer/src/lib/api'
@@ -14,12 +14,12 @@ import { ingressFixture } from '../../../packages/connectors/test/fixtures/ingre
 import { feishuConfig, feishuPayload, defaultFeishuSdkTransport } from '../../../packages/connectors/test/fixtures/feishu.js'
 
 const dom = composerDOM(), cleanup: Array<() => Promise<void> | void> = []
-let services: Awaited<ReturnType<typeof createDesktopConnections>>, sdk: ReturnType<typeof defaultFeishuSdkTransport>
+let services: Awaited<ReturnType<typeof createConnectionServices>>, sdk: ReturnType<typeof defaultFeishuSdkTransport>
 beforeEach(async () => {
   const original = await ingressFixture(true, feishuConfig); cleanup.push(() => original.close())
   sdk = defaultFeishuSdkTransport()
   // Only encryption and platform network I/O are controlled. The original default registry is used.
-  services = await createDesktopConnections({ directory: join(original.root, 'settings-feishu'),
+  services = await createConnectionServices({ directory: join(original.root, 'settings-feishu'),
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
     bindings: { spatial: original.spatial, checkpoint: async ref => await original.client.conversationCheckpoint(ref) },
     ingress: { core: hostId => hostId === 'local' ? original.client : undefined } })

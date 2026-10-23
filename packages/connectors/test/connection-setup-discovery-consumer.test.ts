@@ -1,4 +1,4 @@
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import type { ConnectionConfig, ConnectionSetupResultMap } from '@agentmux/core/connections'
@@ -19,7 +19,7 @@ afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllGlobals(); for (const 
 function result<T = Discovery>(output: CliResult): T { expect(output.code, output.stdout + output.stderr).toBe(0); return JSON.parse(output.stdout).result }
 async function fixture(options: { domain?: string; adapterId?: string; paused?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'setup-discovery-')), socketPath = join(root, 'owner.sock'), encryption = enrollmentEncryption()
-  const services = await createDesktopConnections({ directory: join(root, 'connections'), encryption })
+  const services = await createConnectionServices({ directory: join(root, 'connections'), encryption })
   const server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw new Error('Local implementation discovery cannot borrow an Agent Runtime') } })
   await server.start()
   const sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })

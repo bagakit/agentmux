@@ -7,7 +7,7 @@ import * as core from '../../core/dist/index.js'
 import { parseConnectionDelivery } from '../../core/dist/connections.js'
 import { createPublicationConversationPort } from '../dist/index.js'
 import { isConversationPublicationPart, publicationContent, publicationPartKey } from '../dist/publication-content.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
 import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
@@ -97,7 +97,7 @@ async function fixture(scope: 'future-shared-conversation' | 'future-native-user
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'original-region' }, activeRegionId: 'original-region' } }, resources: {}
   } })
   const remote = await platform(), port = createPublicationConversationPort(h.coreClients)
-  const openServices = () => createDesktopConnections({ directory: join(h.root, 'file-host'),
+  const openServices = () => createConnectionServices({ directory: join(h.root, 'file-host'),
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async data => ({ result: (data.toString()), shouldReEncrypt: false }) },
     bindings: { spatial, checkpoint: ref => h.client.conversationCheckpoint(ref) }, publication: port })
   let services = await openServices(); closes.push(() => services.close())

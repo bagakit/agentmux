@@ -15,7 +15,7 @@ import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
 import { agentPromptCondition } from '../../core/src/agent-prompt-condition.js'
 import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { createBuiltinConnectionAdapters, createPublicationConversationPort } from '../dist/index.js'
 import { context } from './fixtures/room-binding.js'
 import { feishuConfig } from './fixtures/feishu.js'
@@ -62,8 +62,8 @@ async function fixture(providerId: 'codex' | 'claude' | 'droid' = 'codex') {
   const port = createPublicationConversationPort(original.coreClients)
   const adapters = createBuiltinConnectionAdapters(), adapter = adapters.find(adapter => adapter.adapterId === 'feishu')!
   let credentialReadable = true
-  let activeServices: Awaited<ReturnType<typeof createDesktopConnections>>
-  const openServices = async () => activeServices = await createDesktopConnections({ directory: join(original.root, 'host'), adapters,
+  let activeServices: Awaited<ReturnType<typeof createConnectionServices>>
+  const openServices = async () => activeServices = await createConnectionServices({ directory: join(original.root, 'host'), adapters,
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async bytes => { if (!credentialReadable) throw new Error('Fixture credential temporarily unavailable'); return { result: (bytes.toString()), shouldReEncrypt: false } } },
     bindings: { spatial, checkpoint: ref => original.client.conversationCheckpoint(ref) }, publication: port })
   const services = await openServices()

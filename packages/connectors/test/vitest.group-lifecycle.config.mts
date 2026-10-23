@@ -21,7 +21,7 @@ export default defineConfig({ ...original, root, cacheDir: resolve(root, '.cache
   resolve: { alias: [{ find: /^@agentmux\/connectors$/u, replacement: resolve(root, 'packages/connectors/src/index.ts') }] },
   plugins: [{ name: 'actual-lifecycle-source', enforce: 'pre', transform(code, id) {
     const path = relative(root, id.split('?')[0]!)
-    if (!path.startsWith('packages/connectors/src/') && path !== 'apps/desktop/src/main/connector-host.ts') return
+    if (!path.startsWith('packages/connectors/src/') && path !== 'packages/connectors/src/connection-services.ts') return
     const selected = mutation ? mutations[mutation] : undefined, originalSHA256 = createHash('sha256').update(code).digest('hex')
     if (selected?.path === path) {
       if (code.split(selected.before).length !== 2) throw Error('Lifecycle mutation anchor missing or ambiguous')

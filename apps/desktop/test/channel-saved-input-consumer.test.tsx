@@ -21,7 +21,7 @@ import { connectHostedAgentMux } from '../../../packages/core/src/hosted-client.
 import { hostedTestOwner } from '../../../packages/core/test/helpers/hosted-runtime-port.js'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
 import { createWorkspaceLayout } from '../../../packages/core/src/spatial-layout.js'
-import { createDesktopConnections } from '../src/main/connector-host.js'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { createPublicationConversationPort } from '../../../packages/connectors/src/core-conversation-port.js'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { MobileConversationSurface } from '../../mobile/src/conversation/MobileConversationSurface'
@@ -72,7 +72,7 @@ async function fixture() {
   } })
   let activeClient = f.client
   const coreClients = () => [{ hostId: 'local', client: activeClient }]
-  const services = await createDesktopConnections({ directory: join(f.root, 'connections'), encryption: {
+  const services = await createConnectionServices({ directory: join(f.root, 'connections'), encryption: {
     isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value),
     decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false })
   }, bindings: { spatial, checkpoint: input => activeClient.conversationCheckpoint(input) }, publication: createPublicationConversationPort(coreClients) })

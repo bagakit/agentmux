@@ -25,7 +25,7 @@ if (process.argv.includes('--run')) {
     'apps/desktop/src/renderer/src/lib/api.ts', 'apps/desktop/src/preload/index.ts',
     'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/shared/session-observation-result.ts',
     'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/main/desktop-host.ts',
-    'apps/desktop/src/main/connector-host.ts', 'apps/desktop/test/fixtures/input-authority-pty.mjs',
+    'packages/connectors/src/connection-services.ts', 'apps/desktop/test/fixtures/input-authority-pty.mjs',
     'apps/desktop/test/terminal-initial-observation-recovery.test.tsx', 'apps/desktop/test/toolkit-tui-ui.test.tsx',
     'apps/desktop/test/toolkit-first-open.config.mts', 'apps/desktop/test/toolkit-tui-ui.config.mts',
     'apps/desktop/test/fixtures/terminal-observation-bridge.ts', 'apps/desktop/test/helpers/composer-dom-fixture.tsx',

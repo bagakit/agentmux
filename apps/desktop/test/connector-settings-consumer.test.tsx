@@ -11,7 +11,7 @@ import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-ser
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import { ConnectionHost } from '../../../packages/connectors/src/connection-host.js'
 import { ConnectionSecrets, type CredentialEncryption } from '../../../packages/connectors/src/connection-secrets.js'
-import { createDesktopConnections } from '../src/main/connector-host.js'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { larkSettingsModule } from '../src/renderer/src/components/settings/modules/lark'
 import { settingsNavGroups } from '../src/renderer/src/components/settings/settings-modules'
@@ -262,7 +262,7 @@ describe('Host credential and availability boundary', () => {
   })
   it('reports optional connection storage failure without rejecting Host initialization', async () => {
     const file = join(directory, 'occupied'); await writeFile(file, 'keep-original')
-    const services = await createDesktopConnections({ directory: join(file, 'child'), encryption })
+    const services = await createConnectionServices({ directory: join(file, 'child'), encryption })
     expect(services.database).toBeNull()
     await expect(services.connections.list()).rejects.toMatchObject({ code: 'CONNECTION_STORAGE_UNAVAILABLE' })
     expect(await readFile(file, 'utf8')).toBe('keep-original')

@@ -19,7 +19,7 @@ vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('
   constructor(options: unknown) { bridge.options.push(options) }
   async start() {} async stop() {}
 } }))
-vi.mock('../src/main/connector-host', () => ({ createDesktopConnections: async () => ({ connections: { list: async () => [] }, secrets: {}, onChannelMetadataChanged: () => () => {}, close: async () => {} }) }))
+vi.mock('../src/main/connector-host', () => ({ createConnectionServices: async () => ({ connections: { list: async () => [] }, secrets: {}, onChannelMetadataChanged: () => () => {}, close: async () => {} }) }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class {
     // Only native sender/document facts are controlled here; the Main facade remains real.

@@ -18,7 +18,7 @@ if (mutation && !(mutation in mutations)) throw Error('Unknown publication isola
 export default defineConfig({ root, cacheDir: resolve(root, '.cache/publication-isolation'), plugins: [{ name: 'actual-publication-isolation-owner', enforce: 'pre',
   transform(original, id) {
     const path = relative(root, id.split('?')[0]!), selected = mutations[mutation as keyof typeof mutations]
-    if (!/^packages\/(?:core|connectors)\/(?:src|test)\/.+\.tsx?$/u.test(path) && !/^apps\/desktop\/test\/.+\.tsx?$/u.test(path) && path !== 'apps/desktop/src/main/connector-host.ts') return
+    if (!/^packages\/(?:core|connectors)\/(?:src|test)\/.+\.tsx?$/u.test(path) && !/^apps\/desktop\/test\/.+\.tsx?$/u.test(path) && path !== 'packages/connectors/src/connection-services.ts') return
     let code = original
     if (selected?.[0] === path) {
       if (code.split(selected[1]).length !== 2) throw Error('Publication isolation mutation anchor missing or ambiguous')

@@ -1,4 +1,4 @@
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { DatabaseSync } from 'node:sqlite'
 import { fork, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
@@ -24,9 +24,9 @@ function qrResponse() {
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
 async function fixture(options: { paused?: boolean; domain?: string } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'setup-public-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock'), encryption = enrollmentEncryption()
-  let services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
+  let services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
   const open = async () => {
-    services = await createDesktopConnections({ directory, encryption })
+    services = await createConnectionServices({ directory, encryption })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw new Error('Management challenge cannot borrow an Agent Runtime') } })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   }

@@ -6,7 +6,7 @@ import { vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import type { ConnectionEnrollmentBeginInput } from '@agentmux/core/connections'
 import type { ConnectionEnrollmentAdapter } from '../../src/connection-enrollment-adapter.js'
-import { createDesktopConnections } from '../../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../../src/connection-services.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../core/test/helpers/object-cli-rpc.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../../test/fixture-values.mjs'
 
@@ -43,8 +43,8 @@ export async function enrollmentFixture(options: Partial<Pick<ConnectionEnrollme
   const create = vi.fn<ConnectionEnrollmentAdapter['create']>(options.create ?? (async input => ({ kind: 'created', application: { domain: input.domain, appId: 'application-original' }, privateState: input.privateState })))
   const credential = vi.fn<ConnectionEnrollmentAdapter['credential']>(options.credential ?? (async input => ({ kind: 'credential', secret: fixtureCredential, privateState: input.privateState })))
   const adapter = { adapterId: 'signed-challenge', enrollment: { domains: [{ domain: 'verify.example.invalid', label: 'Signed challenge' }], begin, advance: authentication, upload, create, credential }, test: async () => ({ authentication: { state: 'ready' as const }, transport: { state: 'unknown' as const, reason: 'not-started' as const }, intake: { state: 'unknown' as const, reason: 'not-started' as const }, delivery: { state: 'unknown' as const, reason: 'not-started' as const } }) }
-  let services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
-  const open = async () => { services = await createDesktopConnections({ directory, encryption, adapters: [adapter] }); server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw new Error('Enrollment cannot borrow an Agent Runtime') } }); await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } }) }
+  let services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
+  const open = async () => { services = await createConnectionServices({ directory, encryption, adapters: [adapter] }); server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw new Error('Enrollment cannot borrow an Agent Runtime') } }); await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } }) }
   const closeOwner = async () => { const errors: unknown[] = []; for (const close of [async () => { await sdk?.dispose() }, async () => { await server?.stop() }, () => { services?.close() }]) { try { await close() } catch (error) { errors.push(error) } }; if (errors.length) throw new AggregateError(errors, 'Enrollment owner cleanup failed') }
   await open()
   const input: ConnectionEnrollmentBeginInput = { operationId: 'enrollment-original', connectionId: 'connection-original', adapterId: adapter.adapterId, domain: 'verify.example.invalid', label: 'Original bot', preset: { name: 'Original bot', avatar: { pngDataUrl: enrollmentAvatar } } }

@@ -5,7 +5,7 @@ import { DefaultRestOptions } from '@discordjs/rest'
 import * as core from '../../core/src/index.js'
 import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
 import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { createPublicationConversationPort } from '../src/core-conversation-port.js'
 import { createBuiltinConnectionAdapters } from '../src/platform-adapters.js'
 import { context } from './fixtures/room-binding.js'
@@ -46,10 +46,10 @@ async function fixture(providerId = 'claude', currentSource = false) {
     bindings: [{ zoneId: 'zone', spaceId: 'space' }], layouts: { resource: createWorkspaceLayout('group', ['tab']) },
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'region' }, activeRegionId: 'region' } }, resources: {}
   } })
-  const serviceOptions: Parameters<typeof createDesktopConnections>[0] = { directory: join(f.root, 'connections'), encryption: {
+  const serviceOptions: Parameters<typeof createConnectionServices>[0] = { directory: join(f.root, 'connections'), encryption: {
     isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async bytes => ({ result: bytes.toString(), shouldReEncrypt: false })
   }, bindings: { spatial, checkpoint: input => f.client.conversationCheckpoint(input) }, ingress: { core: host => host === 'local' ? f.client : undefined }, publication: createPublicationConversationPort(f.coreClients) }
-  let services = await createDesktopConnections(serviceOptions); cleanup.push(() => services.close())
+  let services = await createConnectionServices(serviceOptions); cleanup.push(() => services.close())
   expect(createBuiltinConnectionAdapters().map(adapter => adapter.adapterId)).toContain('discord')
   const credential = await services.secrets.store({ operationId: 'discord-secret', secret: 'fixture-bot-token' })
   await services.connections.configure({ operationId: 'discord-config', expectedRevision: null, connection: { ...discordConfig, credentialRef: credential.credentialRef } })
@@ -62,7 +62,7 @@ async function fixture(providerId = 'claude', currentSource = false) {
     actor: { application: discordConfig.application, idType: 'snowflake', userId: '400' }, capabilities: ['input'], state: 'active' }, context)
   await vi.waitFor(() => expect(wire.sessions.length).toBeGreaterThan(0))
   return { ...f, wire, transcript, get services() { return services }, binding: result.state === 'applied' ? result.binding : (() => { throw Error('Original Binding required') })(),
-    async restart() { services.close(); services = await createDesktopConnections(serviceOptions); await vi.waitFor(() => expect(wire.sessions.at(-1)?.op).toBe(6)); return services } }
+    async restart() { services.close(); services = await createConnectionServices(serviceOptions); await vi.waitFor(() => expect(wire.sessions.at(-1)?.op).toBe(6)); return services } }
 }
 
 it('default Desktop registration carries authenticated Gateway input through Core and public replies through native REST', async () => {

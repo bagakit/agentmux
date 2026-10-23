@@ -5,7 +5,7 @@ import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
 import * as core from '../../core/src/index.js'
 import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
 import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { createPublicationConversationPort } from '../src/core-conversation-port.js'
 import { feishuConfig } from './fixtures/feishu.js'
 import { feishuPublicationHttp } from './fixtures/feishu-publication.js'
@@ -46,11 +46,11 @@ it.each([false, true])('independent public final follows progress without replay
     bindings: [{ zoneId: 'zone', spaceId: 'space' }], layouts: { resource: createWorkspaceLayout('group', ['tab']) },
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'region' }, activeRegionId: 'region' } }, resources: {}
   } })
-  const options: Parameters<typeof createDesktopConnections>[0] = { directory: join(f.root, 'connectors'), encryption: {
+  const options: Parameters<typeof createConnectionServices>[0] = { directory: join(f.root, 'connectors'), encryption: {
     isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text),
     decryptStringAsync: async bytes => ({ result: bytes.toString(), shouldReEncrypt: false })
   }, bindings: { spatial, checkpoint: input => f.client.conversationCheckpoint(input) }, publication: createPublicationConversationPort(f.coreClients) }
-  let services = await createDesktopConnections(options); cleanup.push(() => services.close())
+  let services = await createConnectionServices(options); cleanup.push(() => services.close())
   const credential = await services.secrets.store({ operationId: 'fixture-credential', secret: 'fixture-credential' })
   await services.connections.configure({ operationId: 'fixture-configure', expectedRevision: null, connection: { ...feishuConfig, credentialRef: credential.credentialRef } })
   const bound = await services.connections.bindings!.bind({ operationId: 'fixture-bind', bindingId: 'fixture-binding', connectionId: feishuConfig.connectionId,
@@ -78,7 +78,7 @@ it.each([false, true])('independent public final follows progress without replay
     await appendFile(transcript, native('original-progress', 'commentary', 'Updated dependent progress')); services.publication!.refresh()
     await vi.waitFor(() => expect(operations().some(operation => operation.predecessorOperationId === original.operationId && operation.state === 'pending')).toBe(true))
     expect(remote.messageCalls().some(call => call.body.includes('Updated dependent progress'))).toBe(false)
-    services.close(); services = await createDesktopConnections(options)
+    services.close(); services = await createConnectionServices(options)
     services.publication!.refresh()
     await vi.waitFor(() => expect(services.publication!.observation(bound.binding.bindingId, 1)).toEqual({ state: 'unknown', reason: 'effect-unconfirmed' }))
     expect(operations()[0]).toEqual(original)

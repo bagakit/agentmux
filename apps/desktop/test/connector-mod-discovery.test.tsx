@@ -8,7 +8,7 @@ import { URL as NodeURL, fileURLToPath } from 'node:url'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '@agentmux/core'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
-import { createDesktopConnections } from '../src/main/connector-host.js'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
@@ -18,7 +18,7 @@ import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/co
 
 const dom = composerDOM(), privateDevice = 'private-mod-discovery-challenge'
 let asset: Buffer
-let directory: string, services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer
+let directory: string, services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer
 let calls: Array<{ method: ConnectionMethod; input: unknown; result: unknown }>, network: string[]
 const trusted = vi.fn()
 beforeEach(async () => {
@@ -26,7 +26,7 @@ beforeEach(async () => {
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', fileURLToPath(new NodeURL('../../../packages/core/bin/amux', import.meta.url)))
   asset = await readFile(join(import.meta.dirname, '../resources/icon-512.png'))
   directory = await mkdtemp(join(tmpdir(), 'lark-settings-'))
-  services = await createDesktopConnections({ directory, encryption: enrollmentEncryption() })
+  services = await createConnectionServices({ directory, encryption: enrollmentEncryption() })
   server = new AgentMuxControlServer({ socketPath: join(directory, 'public.sock'), connections: services.connections,
     coreClients: () => { throw new Error('Discovering a Mod cannot borrow an Agent Runtime') } })
   await server.start()
