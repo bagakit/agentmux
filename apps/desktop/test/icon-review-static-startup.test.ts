@@ -5,6 +5,7 @@ import {tmpdir} from 'node:os'
 import {join, resolve} from 'node:path'
 import {createContext, Script} from 'node:vm'
 import {expect, it, vi} from 'vitest'
+import futureDesigns from '../scripts/icon-review/future-designs.json'
 
 it('starts the real published icon workbench bundle without Node globals', async () => {
   const out = await mkdtemp(join(tmpdir(), 'agentmux-icon-static-startup-'))
@@ -44,7 +45,9 @@ it('starts the real published icon workbench bundle without Node globals', async
       await vi.waitFor(() => expect(document.querySelector('#mote-preview .mote-companion__rig')).not.toBeNull())
       document.getElementById('view-future')!.click()
       expect(document.querySelector('#mote-preview')).toBeNull()
-      expect(document.querySelectorAll('[data-future-glyph]')).toHaveLength(7)
+      expect(futureDesigns.length).toBeGreaterThan(0)
+      expect([...document.querySelectorAll<HTMLElement>('[data-future-glyph]')].map(node => node.dataset.futureGlyph)).toEqual(futureDesigns.map(design => design.id))
+      expect(document.querySelector('[data-future-glyph="shared-content"]')).toBeNull()
       expect(await readFile(join(out, 'mote-identity.css'), 'utf8')).toContain('.mote-companion__gaze')
     } finally { window.matchMedia = originalMedia }
   } finally { await rm(out, {recursive: true, force: true}) }
