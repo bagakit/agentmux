@@ -1,0 +1,109 @@
+import assert from 'node:assert/strict'
+import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
+import { fileURLToPath } from 'node:url'
+
+const root = fileURLToPath(new URL('../../../', import.meta.url))
+const tests = ['packages/core/test/capsule-runtime.test.ts', 'packages/core/test/capsule-terminal-preparation.test.ts']
+const mutations = [
+  { id: 'intent-gap-falsely-superseded', file: 'packages/core/src/capsule-run-manager.ts',
+    from: "if (retained.phase === 'prepared' &&", to: "if (false && retained.phase === 'prepared' &&", assertion: 'retains a command reserved' },
+  { id: 'stale-connection-overwrites-stop', file: 'packages/core/src/capsule-run-manager.ts',
+    from: "if (!current || current.revision !== b.revision || current.desired !== 'running' || current.run?.runId !== run.runId)", to: 'if (false)', assertion: 'preserves a later explicit Stop' },
+  { id: 'stop-token-retargeted', file: 'packages/core/src/capsule-run-manager.ts',
+    from: '(b.stop && b.stop.run.runId !== b.run?.runId)', to: 'false', assertion: 'rejects a restored Stop token' },
+  { id: 'directory-durability-skipped', file: 'packages/core/src/capsule-run-manager.ts',
+    from: 'await this.confirmDurable(this.path)', to: 'void this.path', assertion: 'requires original file and directory durability' },
+  { id: 'historical-interrupted-ignored', file: 'packages/core/src/capsule-run-manager.ts',
+    from: " || run.state === 'interrupted'", to: '', assertion: 'recovers a Native-authoritative interrupted' },
+  { id: 'unknown-start-replayed', file: 'packages/core/src/capsule-run-manager.ts',
+    from: "if (b.launchPhase === 'prepared') {", to: "if (b.launchPhase === 'prepared' || b.launchPhase === 'dispatched') {", assertion: 'observes an unknown original Start' },
+  { id: 'unknown-stop-replayed', file: 'packages/core/src/capsule-run-manager.ts',
+    from: "if (b.stopPhase === 'prepared') {", to: "if (b.stopPhase === 'prepared' || b.stopPhase === 'dispatched') {", assertion: 'persists stopped intent' },
+  { id: 'stopped-read-restarts', file: 'packages/core/src/capsule-run-manager.ts',
+    from: "if (b.desired === 'stopped') throw unavailable", to: "if (false && b.desired === 'stopped') throw unavailable", assertion: 'persists stopped intent' },
+  { id: 'run-fence-removed', file: 'packages/core/src/capsule-run-manager.ts',
+    from: "if (command.kind === 'stop' && !isDeepStrictEqual", to: "if (false && command.kind === 'stop' && !isDeepStrictEqual", assertion: 'requires original revision and Run' },
+  { id: 'revision-fence-removed', file: 'packages/core/src/capsule-run-manager.ts',
+    from: 'if (command.params.expectedRevision !== (b?.revision ?? 0))', to: 'if (false && command.params.expectedRevision !== (b?.revision ?? 0))', assertion: 'requires original revision and Run' },
+  { id: 'exact-spec-weakened', file: 'packages/core/src/ctxmux-run-adapter.ts',
+    from: ' || !isDeepStrictEqual(run.spec, request)', to: '', assertion: 'reads only the exact bound Run' },
+  { id: 'exact-ref-dropped', file: 'packages/core/src/client.ts',
+    from: 'request, prepared.createOperationId, ref?.runId', to: 'request, prepared.createOperationId, undefined', assertion: 'reads only the exact bound Run' },
+  { id: 'stop-owner-replaced', file: 'packages/core/src/client.ts',
+    from: 'daemonInstance: prepared.ownerInstanceId, operationKey: prepared.operationId',
+    to: "daemonInstance: 'replacement-native-owner', operationKey: prepared.operationId", assertion: 'prepares Stop without effects' },
+]
+const sha = bytes => createHash('sha256').update(bytes).digest('hex')
+const directory = await mkdtemp(join(tmpdir(), 'amux-capsule-runtime-unit-'))
+await symlink(join(root, 'node_modules'), join(directory, 'node_modules'), 'dir')
+const receipt = { schema: 'agentmux.capsule-runtime-unit-proof.v1', passed: false,
+  boundary: 'Focused real management source with controlled Native outcomes; the companion runtime proof consumes actual compiled Core, CLI, ctxmux and service processes.',
+  inputs: {}, baseline: null, mutations: [] }
+
+async function run(name, mutation) {
+  const report = join(directory, `${name}.json`), config = join(directory, `${name}.config.mts`)
+  let plugin = ''
+  if (mutation) {
+    const source = await readFile(join(root, mutation.file), 'utf8')
+    assert.equal(source.split(mutation.from).length - 1, 1, `${mutation.id}: source anchor must be unique`)
+    const transformed = source.replace(mutation.from, mutation.to)
+    assert.notEqual(sha(source), sha(transformed))
+    receipt.inputs[mutation.file] = sha(source)
+    // Vite mutates the actual owning implementation as loaded, never shared source or dist.
+    plugin = `plugins:[{name:'capsule-source-mutation',enforce:'pre',transform(code,id){if(id.split('?')[0]===${JSON.stringify(resolve(root, mutation.file))}){if(code.split(${JSON.stringify(mutation.from)}).length!==2)throw new Error('Mutation source anchor unavailable');return {code:code.replace(${JSON.stringify(mutation.from)},${JSON.stringify(mutation.to)}),map:null}}}}],`
+    mutation.loadedSha256 = sha(transformed)
+  }
+  await writeFile(config, `import base from ${JSON.stringify(join(root, 'packages/core/test/capsule-runtime.config.mts'))};export default {...base,root:${JSON.stringify(root)},${plugin}test:{...base.test,passWithNoTests:false,maxWorkers:1}};\n`)
+  const result = await new Promise((resolveRun, reject) => {
+    const args = [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config, '--reporter=json', '--outputFile', report]
+    if (mutation) args.push('-t', mutation.assertion)
+    const child = spawn(process.execPath, args, { cwd: root,
+      env: { ...process.env, pnpm_config_verify_deps_before_run: 'false' }, stdio: ['ignore', 'pipe', 'pipe'] })
+    let output = ''
+    child.stdout.on('data', chunk => { output += chunk }); child.stderr.on('data', chunk => { output += chunk })
+    child.once('error', reject); child.once('close', code => resolveRun({ code, output }))
+  })
+  let data
+  try { data = JSON.parse(await readFile(report, 'utf8')) }
+  catch { throw new Error(`${name}: no valid test report; infrastructure failure is not semantic RED. ${result.output.slice(-4000)}`) }
+  const assertions = data.testResults.flatMap(suite => suite.assertionResults)
+  assert.ok(assertions.length > 0, 'An empty suite is not proof')
+  assert.equal(data.numRuntimeErrorTestSuites ?? 0, 0, result.output.slice(-4000))
+  const failures = assertions.filter(item => item.status === 'failed')
+  if (mutation) {
+    assert.equal(result.code, 1, `${name}: source mutation must fail. ${result.output.slice(-4000)}`)
+    assert.ok(failures.some(item => item.fullName.includes(mutation.assertion) && item.failureMessages.some(message => message.includes('AssertionError') || message.includes('promise resolved'))),
+      `${name}: designated business assertion must fail, not collection/preparation. ${result.output.slice(-4000)}`)
+  } else {
+    assert.equal(result.code, 0, result.output.slice(-4000)); assert.equal(data.numFailedTests, 0)
+    assert.equal(data.numPassedTests, 24, 'Both management and actual Client/adapter suites must execute')
+  }
+  return { exitCode: result.code, passed: data.numPassedTests, failed: data.numFailedTests,
+    reportSha256: sha(await readFile(report)), ...(mutation ? { id: mutation.id, source: mutation.file,
+      loadedSha256: mutation.loadedSha256, assertion: mutation.assertion } : {}) }
+}
+
+try {
+  for (const path of [...tests, 'packages/core/src/capsule-runtime.ts', 'packages/core/src/capsule-run-manager.ts',
+    'packages/core/src/client.ts', 'packages/core/src/ctxmux-run-adapter.ts', 'packages/core/src/terminal-preparation.ts',
+    'packages/core/test/capsule-runtime.config.mts', 'packages/core/scripts/verify-capsule-runtime-unit.mjs'])
+    receipt.inputs[path] = sha(await readFile(join(root, path)))
+  receipt.baseline = await run('baseline')
+  if (process.argv.includes('--mutations')) for (const mutation of mutations) receipt.mutations.push(await run(mutation.id, mutation))
+  for (const [path, digest] of Object.entries(receipt.inputs))
+    assert.equal(sha(await readFile(join(root, path))), digest, `Concurrent source changed; rerun evidence: ${path}`)
+  receipt.passed = true
+} finally {
+  const targetIndex = process.argv.indexOf('--output')
+  if (targetIndex >= 0) {
+    const path = process.argv[targetIndex + 1]
+    assert.ok(path, '--output requires an evidence file')
+    await writeFile(resolve(path), JSON.stringify(receipt, null, 2) + '\n')
+  }
+  await rm(directory, { recursive: true, force: true })
+}
+process.stdout.write(JSON.stringify(receipt) + '\n')
