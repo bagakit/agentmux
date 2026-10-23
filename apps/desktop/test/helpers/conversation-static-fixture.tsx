@@ -48,7 +48,8 @@ export function StaticActivityView(props: ComponentProps<typeof AcceptedActivity
       sourceError: null, observationError: null, held: false, historical: false, newerAvailable: false, pending: null,
       dirty: null, inFlight: false, watch: { binding: false, bound: false, closed: null, windowId: null, invalidations: 0, unavailable: 0 } }),
     noteDiagnostic: noop,
-    showCurrent: noop, showCurrentSource: noop, showPreviousSource: noop
+    showCurrent: noop, showCurrentSource: noop, showPreviousSource: noop,
+    selectRecord: () => { throw new Error('A static presentation fixture cannot read an exact record.') }
   }
   const { items: _items, timelineSnapshot: _timeline, ...presenter } = props
   return <StaticWindow.Provider value={window}><AcceptedActivityView {...presenter} /></StaticWindow.Provider>
