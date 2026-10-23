@@ -27,12 +27,12 @@ it.each([null, { ...DEFAULT_MOTE_FACE, palette: 'rose' }] as Array<SpaceIconChoi
     expect(document.body.textContent).not.toContain('Prepare avatar')
     expect(document.querySelector('.space-icon-picker')).toBeNull()
     const input = f!.parentCalls.mock.calls.find(([method]) => method === 'space.mote.connection.create')![1] as any
-    expect(input.source.target).toEqual(f!.target()); expect(input.avatar).toBe('include-saved')
-    expect(input.source.expectedAvatarRevision).toMatch(/^sha256:[a-f0-9]{64}$/)
+    expect(input.source.target).toEqual(f!.target()); expect(input.desired.avatar.pngDataUrl).toBe(imageInput().dataUrl)
+    expect(input.source.preparedFrom.avatarRevision).toMatch(/^sha256:[a-f0-9]{64}$/)
     const operation = (await f!.client.call('space.mote.connection.inspect', { operationId: input.operationId })).operation!
     expect(operation.snapshot.avatarSha256).toMatch(/^[a-f0-9]{64}$/)
     const read = await f!.client.call('space.mote.avatar.read', { target: { workspaceId: f!.workspace.id, topicId: f!.motes[0]!.id, objectKey: f!.target().spaceId } })
-    expect(read.choice).toEqual(choice); expect(read.revision).toBe(input.source.expectedAvatarRevision)
+    expect(read.choice).toEqual(choice); expect(read.revision).toBe(input.source.preparedFrom.avatarRevision)
     expect(f!.creationCount).toBe(0)
   }
 )

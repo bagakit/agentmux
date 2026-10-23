@@ -4,7 +4,7 @@ import { AgentMuxControlServer, connectAgentMuxRpc, type MoteConnectionCreate } 
 import { AgentMuxSpatialStateStore, spatialCatalog } from '@agentmux/core/spatial-state'
 import { createConnectionServices } from '../../../../packages/connectors/src/connection-services.js'
 import { MoteConnectionOperations } from '@agentmux/connectors'
-import { MoteConnectionSourceOwner } from '../../src/main/mote-connection-source.js'
+import { MoteConnectionTargetOwner } from '../../src/main/mote-connection-target.js'
 import { MoteConnectionPreferences } from '../../src/main/mote-connection-preferences.js'
 import { ScratchTopics } from '../../src/main/scratch-topics.js'
 import { FileReadOwner } from '../../src/main/file-read-owner.js'
@@ -18,7 +18,7 @@ import type { AppConfig } from '../../src/shared/contracts.js'
 import type { SpaceIconChoice } from '../../src/shared/space-object-appearance.js'
 import type { MoteAvatarImage } from '../../src/shared/mote-avatars.js'
 import { directoryIdentity, homeZoneId } from '../../src/shared/space-addresses.js'
-import { SCRATCH_WORKSPACE_ID } from '../../src/shared/scratch-topics.js'
+import { SCRATCH_WORKSPACE_ID, topicPublicCopy } from '../../src/shared/scratch-topics.js'
 import { controlledNativeImage, imageInput } from './mote-identity-image.js'
 import { createBuiltinConnectionAdapters, type ConnectionAdapter } from '@agentmux/connectors'
 import type { ConnectionEnrollmentActionKind } from '@agentmux/core/connections'
@@ -226,18 +226,16 @@ export async function moteConnectionOwner(
       throw new Error('No Renderer or Agent required')
     }
   })
-  const sourcePorts: ConstructorParameters<typeof MoteConnectionSourceOwner>[0] = {
+  const sourcePorts: ConstructorParameters<typeof MoteConnectionTargetOwner>[0] = {
     catalog,
     workspace: (id) => (id === workspace.id ? workspace : undefined),
-    topicForDirectory: (w, d) => topics.readForDirectory(w, d),
-    files: publicFiles,
-    avatars
+    topicForDirectory: (w, d) => topics.readForDirectory(w, d)
   }
-  const source = new MoteConnectionSourceOwner(sourcePorts)
+  const source = new MoteConnectionTargetOwner(sourcePorts)
   // The finite parent consumes the original owners through only their existing structure ports.
   const parent = new MoteConnectionOperations({
     connections: { connections: connections.connections, openDatabase: () => connections.openDatabase() },
-    source: { read: (input, avatar) => source.read(input, avatar) },
+    assertTarget: target => source.assertTarget(target),
     preferences: { read: input => preferences.read(input), save: (input, context) => preferences.save(input, context) }
   })
   const moteChat = connections.moteChat!
@@ -274,8 +272,8 @@ export async function moteConnectionOwner(
     })
     return {
       operationId,
-      source: { target: t, expectedTopicRevision: topic.result.document.revision, expectedAvatarRevision: avatar.revision },
-      avatar: 'include-saved',
+      source: { target: t, preparedFrom: { topicRevision: topic.result.document.revision, avatarRevision: avatar.revision } },
+      desired: { name: topicPublicCopy(topic.result.document.content).title!, description: topicPublicCopy(topic.result.document.content).summary ?? '', avatar: { pngDataUrl: avatar.image!.dataUrl } },
       adapterId: options.generic ? 'signed-profile' : 'feishu',
       domain: options.generic ? 'signed.example' : 'open.feishu.cn'
     }
