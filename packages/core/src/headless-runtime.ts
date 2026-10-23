@@ -16,6 +16,7 @@ import { AgentMuxHostedRuntimeService } from './hosted-runtime-service.js'
 import { AgentMuxHostExecutorOwner } from './executor-owner.js'
 import { AgentMuxCreationAuthority } from './agent-creation-authority.js'
 import type { AgentMuxRuntimeOwnerIdentity } from './hosted-client-contract.js'
+import { CapsuleRunManager, type CapsuleDesktopAdapters } from './capsule-run-manager.js'
 
 export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
   socketPath?: string
@@ -26,6 +27,8 @@ export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
   /** Borrow the original external input owner; the semantic Host never duplicates its grants or journal. */
   inputContextCaptureReader?: import('./agent-input-context-capture.js').AgentInputContextCaptureReader
   externalInputAuthority?: import('./external-author.js').AgentExternalInputAuthorityPort
+  /** Live, call-scoped App capabilities; neither the App nor Core owns the HTTP service. */
+  capsuleAdapters?: CapsuleDesktopAdapters
 }
 export type AgentMuxHeadlessRuntime = {
   readonly client: AgentMuxClient
@@ -54,6 +57,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
   const semanticLease = await acquireOwner(join(stateDirectory, 'semantic-owner.lock'))
   let endpointLease: FileHandle | undefined, client: AgentMuxClient | undefined, server: AgentMuxControlServer | undefined
   let hosted: AgentMuxHostedRuntimeService | undefined, stopping: Promise<void> | undefined
+  let capsules: CapsuleRunManager | undefined
   try {
     endpointLease = await acquireOwner(socketPath + '.owner.lock')
     const identityPath = join(stateDirectory, 'semantic-runtime.json')
@@ -79,7 +83,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
     }
     const stop = (): Promise<void> => stopping ??= (async () => {
       try { await server?.stop() }
-      finally { try { try { await hosted?.dispose() } finally { await client?.dispose() } }
+      finally { try { try { await capsules?.dispose(); await hosted?.dispose() } finally { await client?.dispose() } }
         finally { await endpointLease?.close(); await semanticLease.close() } }
     })()
     // Both namespace leases are already held. One Client owns metadata and Native observation;
@@ -91,20 +95,24 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
       }),
       creationAuthority: options.creationAuthority ?? new AgentMuxCreationAuthority({ stateDirectory, runtimeId }) })
     hosted = new AgentMuxHostedRuntimeService(client, storePath, ownerIdentity, stop, options.externalInputAuthority, options.inputContextCaptureReader)
+    capsules = new CapsuleRunManager(client, stateDirectory, options.capsuleAdapters)
     server = new AgentMuxControlServer({ ...options.service, socketPath, ...(options.http ? { http: options.http } : {}),
+      capsules: options.service?.capsules ?? capsules,
+      capsuleRuntime: options.service?.capsuleRuntime ?? capsules.runtime,
       deliveryAttempts: options.service?.deliveryAttempts ?? { hostId: 'local', store: new DeliveryAttemptStore(join(stateDirectory, 'client-delivery-attempts'), { clientJournal: true }) },
       diagnosticCoreAuthority: options.service?.diagnosticCoreAuthority ?? (() => ({ authority: { kind: 'core-runtime', id: runtimeId, lifetime: storePath === null ? 'instance' : 'durable' }, status: 'verified', causeCode: null })),
       coreClients: () => [{ hostId: 'local', client: client! }],
       hostedRuntime: () => hosted!,
       onControlEndpointState: state => hosted?.publishControlEndpointState(state) })
     await server.start()
+    capsules.start()
     hosted.publishControlEndpointState(server.controlEndpointState())
     // The Client publishes scoped failures and continues its original observation. Metadata
     // and the public semantic owner are available before this independent Native work settles.
     void client.connect().catch(() => {})
     return { client, hosted, server, socketPath, ownerIdentity, stop }
   } catch (error) {
-    await server?.stop().catch(() => {}); await hosted?.dispose().catch(() => {}); await client?.dispose().catch(() => {})
+    await server?.stop().catch(() => {}); await capsules?.dispose().catch(() => {}); await hosted?.dispose().catch(() => {}); await client?.dispose().catch(() => {})
     await endpointLease?.close().catch(() => {}); await semanticLease.close().catch(() => {})
     throw error
   }

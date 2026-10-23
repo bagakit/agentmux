@@ -1,5 +1,6 @@
 import { isChannelMetadataMethod, parseChannelMetadataParams } from './channel-metadata-codec.js'
 import { parseCapsuleInputRequest, parseCapsuleInputResult, type CapsuleInputPort } from './capsule-input.js'
+import { isCapsuleRuntimeMethod, parseCapsuleRuntimeParams, parseCapsuleRuntimeResult, type CapsuleRuntimeMethod, type CapsuleRuntimePort } from './capsule-runtime.js'
 import { isCapsuleMethod, parseCapsuleRpcParams, parseCapsuleRpcResult, type CapsuleCallContext, type CapsuleMethod, type CapsuleParamsMap, type CapsuleResultMap } from './capsule.js'
 import { parseExternalConversationReference, parseExternalConversationReceipt } from './external-conversation.js'
 import { isMoteChatMethod, parseMoteChatParams, parseMoteChatResult } from './mote-chat-codec.js'
@@ -133,6 +134,7 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   capsules?: { call<M extends CapsuleMethod>(method: M, params: CapsuleParamsMap[M], context?: CapsuleCallContext,
     originalContext?: AgentMuxRpcCallContext): Promise<CapsuleResultMap[M]> }
   capsuleInput?: CapsuleInputPort
+  capsuleRuntime?: CapsuleRuntimePort
   inputContextCaptures?: AgentInputContextCaptureReader
   applicationAccess?: ApplicationAccessPort
   windows?: AgentMuxRpcWindowsOwner
@@ -319,7 +321,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, CapsuleMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, CapsuleRuntimeMethod | CapsuleMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -924,6 +926,17 @@ export class AgentMuxRpcService {
       }
     }
     const caller = await this.authenticated(context)
+    if (isCapsuleRuntimeMethod(method)) {
+      const input = parseCapsuleRuntimeParams(method, params)
+      if (!caller && !(context.principal && ['user', 'device'].includes(context.principal.kind) && context.principal.id.trim()))
+        throw new AgentMuxError('Capsule service management requires an authenticated Agent, user or device.', 'CONTROL_PERMISSION_DENIED')
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      if (!this.ports.capsuleRuntime) {
+        if (this.ports.forwardControl) return await this.ports.forwardControl(method, input as AgentMuxRpcParams<M>, context) as AgentMuxRpcResult<M>
+        throw new AgentMuxError('The execution Host service manager is unavailable. Its Run and content are retained.', 'CONTROL_UNAVAILABLE')
+      }
+      return parseCapsuleRuntimeResult(await this.ports.capsuleRuntime.call(method, input)) as AgentMuxRpcResult<M>
+    }
     if (method === 'capsule.input') {
       if (caller || context.transport !== 'unix' || context.principal?.kind !== 'user')
         throw new AgentMuxError('Capsule input requires its original trusted App confirmation. Transport credentials do not certify a human action.', 'CONTROL_PERMISSION_DENIED')

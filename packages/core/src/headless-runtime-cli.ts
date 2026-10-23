@@ -18,7 +18,9 @@ async function main(args: string[]): Promise<void> {
     if (endpoint) throw new AgentMuxError('Serve binds the configured local owner; endpoint selection belongs to clients.', 'INVALID_CLI_ARGUMENT')
     const owner = await startHeadlessAgentMux()
     process.stdout.write(JSON.stringify({ operation: 'serve', owner: owner.ownerIdentity(), socketPath: owner.socketPath }) + '\n')
-    const stop = () => { void owner.stop().then(() => { process.exitCode = 0 }, error => { process.stderr.write(String(error) + '\n'); process.exitCode = 1 }) }
+    // This entry owns this process. After the semantic owner has flushed and detached,
+    // an unacknowledged SDK read wire must not retain it; admitted Native Runs survive.
+    const stop = () => { void owner.stop().then(() => { process.exit(0) }, error => { process.stderr.write(String(error) + '\n'); process.exitCode = 1 }) }
     process.once('SIGINT', stop); process.once('SIGTERM', stop)
     return
   }
