@@ -41,8 +41,7 @@ export function MoteSpaceFrame({ workspaceId, active, children }: {
         <SurfaceModeSwitch value={section} active={visible} ariaLabel="Mote pages" onChange={select}
           options={[{ value: 'profile', label: 'Profile' }, { value: 'discussion', label: 'Discussion' }, { value: 'ideas', label: 'Ideas' }, { value: 'calendar', label: 'Calendar' }]} />
         </div>
-        <div className="mote-space-frame__question" hidden={section !== 'profile' && section !== 'discussion'}>
-          <span>Start a new discussion</span>
+        <div className="mote-space-frame__question">
           <MoteFirstCooperation key={owner} scope={scope} />
         </div>
       </header> : null}
