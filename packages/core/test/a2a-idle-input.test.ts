@@ -12,6 +12,7 @@ import { fixtureEpoch } from './helpers/fixture-values.js'
 import { nativeInputCorrelationKey } from '../src/native-input-correlation.js'
 import type { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
 import { AGENTMUX_A2A_REFERENCE_REMINDER as sourceReferenceReminder } from '../src/agent-messaging-guidance.js'
+import { renderAgentMuxMessageReferences } from '../src/agent-message-render.js'
 
 const entry = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
 const compiled = entry ? await import(entry) : null
@@ -29,7 +30,7 @@ const id = 'original-notification', wire = '<amux>\n<a2a from="peer" msg-id="ori
 const source = { providerId: 'codex', nativeSessionId: 'original-native-thread' }
 const actor = { protocolId: 'original-protocol', actorId: 'original-actor', lifecycleOperationId: 'original-lifecycle', token: 'a'.repeat(64), launch: { command: 'codex', args: [] } }
 
-async function fixture(outcome: 'admitted' | 'unknown' = 'admitted', withActor = true, nativeIdle = false) {
+async function fixture(outcome: 'admitted' | 'unknown' = 'admitted', withActor = true, nativeIdle = false, initialSender?: string) {
   const h = await rpcOwnerFixture(); closes.push(h.close)
   const inner = h.client as unknown as { promptSubmission: SourceCoordinator; messageQueue: DurableAgentMuxMessageQueue }
   const deps = Reflect.get(inner.promptSubmission, 'deps') as ConstructorParameters<typeof AgentPromptSubmissionCoordinator>[0]
@@ -42,7 +43,8 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted', withActor =
   const run = () => ({ ...h.run(original.run.runId), acceptedInputBytes: inputByte, pid: 1234 })
   h.inner.kernel.status = vi.fn(async (runId: string) => runId === original.run.runId ? run() : h.run(runId))
   const key = { kind: 'prompt' as const, agentSessionId: original.agentSessionId, expectedRun: original.run, submissionId: id }
-  const message: AgentPromptMessageContent = { a2aNotificationId: id, systemContext: wire }
+  const expectedWire = initialSender ? renderAgentMuxMessageReferences([{ senderSessionId: initialSender, messageId: 'original-message' }]) : wire
+  const message: AgentPromptMessageContent = { a2aNotificationId: id, systemContext: expectedWire }
   const send = vi.fn(async (_prompt: string, plan: AgentNativePromptInputPlan) => {
     const sentKey = nativeInputCorrelationKey(plan.clientCorrelation!)
     if (sentKey?.kind !== 'prompt') throw new Error('The original typed notification correlation is missing')
@@ -67,16 +69,23 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted', withActor =
   const coordinator = new AgentPromptSubmissionCoordinator({ ...deps, providers: new AgentProviderRegistry([provider]) })
   const session = h.client.agentSession('recipient'), condition = agentPromptCondition(session), completionId = agentTurnCompletionIdentity(session)!
   const idle = nativeIdle ? { nativeEvidence: { sourceId: evidence!.sourceId, id: evidence!.id }, inputByte: 0 } : { completionId, inputByte: 0 }
-  const appendReference = (messageId: string) => inner.messageQueue.append({ messageId, operationId: 'operation-' + messageId, createdAt: fixtureEpoch(0, 1),
-    sender: { kind: 'agent-session', agentSessionId: 'peer' }, recipient: { kind: 'agent-session', agentSessionId: 'recipient' },
-    senderSessionId: 'peer', senderRunId: 'peer-run', recipientSessionId: 'recipient', recipientRunId: original.run.runId,
+  const appendReference = (messageId: string, senderSessionId = 'peer') => inner.messageQueue.append({ messageId, operationId: 'operation-' + messageId, createdAt: fixtureEpoch(0, 1),
+    sender: { kind: 'agent-session', agentSessionId: senderSessionId }, recipient: { kind: 'agent-session', agentSessionId: 'recipient' },
+    senderSessionId, senderRunId: 'peer-run', recipientSessionId: 'recipient', recipientRunId: original.run.runId,
     threadId: 'original-thread', correlationId: 'correlation-' + messageId, replyTo: null, workspaceId: null, body: 'Original Inbox body stays outside notification input' }, { deliveryMode: 'reference' })
-  await appendReference('original-message')
-  expect((await inner.messageQueue.prepareNotification({ notificationId: id, agentSessionId: 'recipient', condition,
-    idle }))?.wire).toBe(wire)
+  if (initialSender) {
+    // Drive the original idle opportunity deterministically with the real Queue
+    // and Input owners; the existing Provider port supplies native I/O.
+    await (h.client as unknown as { messageNotifications: { dispose(): Promise<void> } }).messageNotifications.dispose()
+    Reflect.set(h.client, 'providers', new AgentProviderRegistry([provider]))
+    Reflect.set(h.client, 'promptSubmission', coordinator)
+  }
+  await appendReference('original-message', initialSender)
+  const notification = (await inner.messageQueue.prepareNotification({ notificationId: id, agentSessionId: 'recipient', condition, idle }))!
+  expect(notification?.wire).toBe(expectedWire)
   const control: AgentPromptInputControl = { idleOnly: idle }
   const submit = (changed: { message?: AgentPromptMessageContent; control?: AgentPromptInputControl } = {}) => coordinator.submitInputPlan(
-    session, run(), id, wire, { kind: 'single-phase', data: wire + '\r' }, condition, completionId, undefined, false, undefined, 0,
+    session, run(), id, notification.wire, { kind: 'single-phase', data: notification.wire + '\r' }, condition, completionId, undefined, false, undefined, 0,
     changed.message ?? message, 'default', undefined, undefined, undefined, key, changed.control ?? control)
   const submitIndependent = async (idleOnly: boolean) => {
     const latest = await deps.registry.refresh('recipient', original.run), nextId = 'independent-notification'
@@ -100,11 +109,40 @@ async function fixture(outcome: 'admitted' | 'unknown' = 'admitted', withActor =
         { kind: 'manual-actor', expectedRun: current.run }, undefined, undefined, false, undefined, undefined,
         { userContent: prompt, authorHuman: true }, 'immediate')
   }
-  return { ...h, key, message, prepare, send, submit, assertCurrent, dispose, readEvidence,
+  return { ...h, key, message, notification, appendReference, prepare, send, submit, assertCurrent, dispose, readEvidence,
+    submitNotice: (notice: typeof notification) => (h.client as unknown as {
+      submitMessageNotification(notice: typeof notification): Promise<void>
+    }).submitMessageNotification(notice),
     changeEvidence: (value: AgentPromptExecutionEvidence | null) => { evidence = value }, beforePrepare: (callback: () => Promise<void>) => { beforePrepare = callback },
     changeByte: () => { inputByte++ }, submitIndependent, submitOrdinary, queue: inner.messageQueue,
     read: () => h.store.readPromptAdmission('recipient', original.run, id) }
 }
+
+it('delivers a budget-fitting original Queue reference and continues the next native input', async () => {
+  const prepared = fixture('admitted', false, true, 's'.repeat(65_300))
+  await expect(prepared).resolves.toBeDefined()
+  const f = await prepared, first = f.notification
+  expect(Buffer.byteLength(first.wire)).toBeLessThanOrEqual(64 * 1024)
+  expect(first.wire).not.toContain('<reminder>')
+  await f.submitNotice(first)
+  expect((await f.read())?.admission?.acknowledged).toBe(true)
+  expect((await f.queue.readNotification(id))?.state).toBe('submitted')
+  const ReopenedQueue = f.queue.constructor as new (path: string) => DurableAgentMuxMessageQueue
+  const reopened = new ReopenedQueue(f.queue.path)
+  expect((await reopened.readNotification(id))?.wire).toBe(first.wire)
+  expect((await reopened.readByMessageId('original-message'))?.envelope.senderSessionId).toBe('s'.repeat(65_300))
+  await f.appendReference('next-message')
+  const current = f.client.agentSession('recipient')
+  const next = (await f.queue.prepareNotification({ notificationId: 'next-notification', agentSessionId: 'recipient',
+    condition: agentPromptCondition(current), idle: { nativeEvidence: { sourceId: 'original-native-source', id: 'initial-idle-evidence' }, inputByte: 0 } }))!
+  expect(next.messageIds).toEqual(['next-message'])
+  expect(next.wire).toContain(referenceReminder)
+  await f.submitNotice(next)
+  expect((await f.store.readPromptAdmission('recipient', current.run, next.notificationId))?.admission?.acknowledged).toBe(true)
+  expect((await f.queue.readNotification(next.notificationId))?.state).toBe('submitted')
+  expect(f.send).toHaveBeenCalledTimes(2)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
 
 it('admits an exact Provider initial idle without inventing a completed turn', async () => {
   const f = await fixture('admitted', false, true)

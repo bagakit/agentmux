@@ -47,4 +47,4 @@ export default defineConfig({ root, plugins: [{ name: 'original-workspace-source
   if (process.env.AGENTMUX_IDLE_INPUT_LOADED) appendFileSync(process.env.AGENTMUX_IDLE_INPUT_LOADED,
     JSON.stringify({ file, originalSHA256: hash(before), sha256: hash(code), ...(before === code ? {} : { mutation }) }) + '\n')
   if (before !== code) return { code, map: null }
-} }], test: { include: ['packages/core/test/a2a-idle-input.test.ts', 'packages/core/test/codex-idle-queue.test.ts', 'packages/core/test/current-terminal-prompt.test.ts', 'packages/core/test/native-prompt-authority-store.test.ts'], maxWorkers: 1, globalSetup: [], testTimeout: 20_000 } })
+} }], test: { include: ['packages/core/test/a2a-idle-input.test.ts', 'packages/core/test/a2a-reference-budget.test.ts', 'packages/core/test/codex-idle-queue.test.ts', 'packages/core/test/current-terminal-prompt.test.ts', 'packages/core/test/native-prompt-authority-store.test.ts'], maxWorkers: 1, globalSetup: [], testTimeout: 20_000 } })
