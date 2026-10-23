@@ -26,7 +26,9 @@ export async function submitMoteChatIntent(input: MoteChatIntent): Promise<MoteC
     await clearMoteChatIntent(intent.input.operationId)
     return operation
   } catch (error) {
-    if (!dispatched || typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' && refusedBeforeWrite.has(error.code)) await clearMoteChatIntent(intent.input.operationId)
+    const retained = useAppStore.getState().moteChatIntents[intent.input.operationId]
+    const sameOriginal = retained?.method === intent.method && JSON.stringify(retained.input) === JSON.stringify(intent.input) && JSON.stringify(retained.hostingTarget) === JSON.stringify(intent.hostingTarget)
+    if (sameOriginal && (!dispatched && retained.phase === 'not-dispatched' || typeof error === 'object' && error !== null && 'code' in error && typeof error.code === 'string' && refusedBeforeWrite.has(error.code))) await clearMoteChatIntent(intent.input.operationId)
     throw error
   }
 }
