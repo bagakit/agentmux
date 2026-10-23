@@ -26,7 +26,12 @@ export async function channelMetadataFixture(cleanup: Array<() => void | Promise
     }
     return await fallback(input)
   })
-  vi.spyOn(defaultHttpInstance, 'request').mockImplementation(input => transport.request(input))
+  vi.spyOn(defaultHttpInstance, 'request').mockImplementation(input => {
+    const { params, ...options } = input
+    if (params === undefined) return transport.request(options)
+    if (params === null || typeof params !== 'object' || Array.isArray(params)) throw Error('Fixture expects the original SDK query parameter object')
+    return transport.request({ ...options, params })
+  })
   const directory = join(f.root, 'desktop-metadata'), changes: ChannelMetadataChange[] = []
   const open = async () => {
     // Default registry, original private Connection owner and actual receiver lifecycle.

@@ -10,7 +10,7 @@ it('the pinned SDK retains native private messages before acknowledging and keep
   const f = await ingressFixture(true, feishuConfig); cleanup.push(() => f.close())
   const sdk = feishuSdkTransport(), adapter = new FeishuAdapter({ http: sdk.http })
   const ingress = new DurableIngressHost({ ...f.options, authenticators: [adapter] })
-  const receiver = await startFeishuTransport(adapter.transport, feishuConfig, ingress); cleanup.push(() => receiver.close())
+  const receiver = await startFeishuTransport(adapter.transport, feishuConfig, ingress, () => f.connections.channelStorage(feishuConfig)); cleanup.push(() => receiver.close())
   await vi.waitFor(() => expect(receiver.observation().transport.state).toBe('ready'))
   const message = feishuPayload({ chat_type: 'p2p', mentions: [], content: JSON.stringify({ text: 'Private message, unchanged.' }) })
   await sdk.receive(message)
