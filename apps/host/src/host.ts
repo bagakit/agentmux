@@ -1,7 +1,7 @@
 import { createDesktopInputContextCaptureReader } from './input-context-capture-reader.js'
 import { dirname, join } from 'node:path'
 import { AgentMuxFileAgentSessionStore, AgentMuxError,
-  startHeadlessAgentMux, connectAgentMuxRpc, defaultAgentMuxControlSocketPath,
+  startHeadlessAgentMux, connectAgentMuxRpc, defaultAgentMuxControlSocketPath, isMoteChatMethod,
   type AgentMuxAgentSessionStore, type AgentMuxRpcCallContext, type AgentMuxRpcMethod,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
   type AgentMuxRpcStreamParams, type AgentMuxRpcSubscriptionOptions,
@@ -18,7 +18,6 @@ import { exportPublicKey } from '@agentmux/relay/e2ee'
 import { loadOrCreateRelayKeyPair } from '@agentmux/core/relay-identity'
 import { loadMobileAssets } from './mobile-assets.js'
 import { createDeviceAdministration } from './device-administration.js'
-import { createDesktopExternalInputAuthority } from './external-input-authority.js'
 import { createCapsuleDesktopAdapters } from './capsules.js'
 import { createHostConnectionOwner, type HostConnectionOptions } from './connections.js'
 import { createHostAgentLearning } from './agent-learning.js'
@@ -94,15 +93,17 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       if (isAppWindowMethod(method) && !context.caller && context.principal?.kind === 'device') {
         throw new AgentMuxError('This desktop bridge cannot preserve the authenticated device identity for window control. Use the original desktop workface; original workfaces and Agents remain available.', 'CONTROL_UNAVAILABLE')
       }
-      if ((isConnectionMethod(method) || isMoteConnectionMethod(method)) && !context.caller &&
-          (context.transport !== 'unix' || context.principal?.kind !== 'user' || context.principal.id !== `local-user:${process.getuid?.() ?? 'current'}`)) {
-        throw new AgentMuxError('This desktop bridge cannot preserve the original connection operator identity. Use its original local desktop operator or authenticated Agent; saved bot operations and healthy Agents remain available.', 'CONTROL_UNAVAILABLE')
+      if (isConnectionMethod(method) || isMoteConnectionMethod(method) || isMoteChatMethod(method) ||
+          ((method === 'space.mote.preferences.read' || method === 'space.mote.preferences.save') &&
+            (params as AgentMuxRpcParams<'space.mote.preferences.read'>).kind === 'connection')) {
+        throw new AgentMuxError('The original connection owner is not registered on this Host. Configure its original Host owner; existing Agents and client editing capabilities remain available.', 'CONTROL_UNAVAILABLE')
       }
       const desktop = await desktopClient(context)
       try { return await desktop.call(method, params, context.signal ? { signal: context.signal } : {}) }
       finally { await desktop.dispose() }
     },
     forwardSubscription: async <M extends AgentMuxRpcStreamMethod>(method: M, params: AgentMuxRpcStreamParams<M>, handlers: AgentMuxRpcSubscriptionOptions<M>, context: AgentMuxRpcCallContext) => {
+      if (method === 'connection.metadata.watch') throw new AgentMuxError('The original Channel metadata owner is not registered on this Host. Saved profiles and healthy Agents remain available.', 'CONTROL_UNAVAILABLE')
       const desktop = await desktopClient(context)
       try {
         const subscription = await desktop.subscribe(method, params, { ...handlers,
@@ -170,11 +171,12 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   try {
     // Reserve the public endpoint before constructing/loading any Core owner. A live old owner
     // is never displaced or adopted by speculative workflow probes.
+    const externalInputAuthority = options.externalInputAuthority ?? connectionOwner?.authority
     runtime = await startHeadlessAgentMux({ store: options.store, socketPath: path,
       ...(options.providers ? { providers: options.providers } : {}), service,
       capsuleAdapters: createCapsuleDesktopAdapters({ connect: context => desktopClient(context ?? { transport: 'unix' }) }),
       inputContextCaptureReader: options.inputContextCaptureReader ?? createDesktopInputContextCaptureReader({ desktopSocketPath: desktopPath, captureHostId: 'local', executionHostId: 'local' }),
-      externalInputAuthority: options.externalInputAuthority ?? connectionOwner?.authority ?? createDesktopExternalInputAuthority({ desktopSocketPath: desktopPath, executionHostId: 'local' }) })
+      ...(externalInputAuthority ? { externalInputAuthority } : {}) })
     await connectionOwner?.start(runtime)
     if (options.store instanceof AgentMuxFileAgentSessionStore) {
       try {

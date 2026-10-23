@@ -1,5 +1,5 @@
 import { isDeepStrictEqual } from 'node:util'
-import { AgentMuxError, connectAgentMuxRpc, parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor, agentInteractionIntentDigest, agentQuestionReplyIntentDigest, type AgentExternalInputAuthorityPort } from '@agentmux/core'
+import { AgentMuxError, parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor, agentInteractionIntentDigest, agentQuestionReplyIntentDigest, type AgentExternalInputAuthorityPort } from '@agentmux/core'
 
 import type { ConnectionIngressReadPort } from '@agentmux/core/connections'
 import type { AgentExternalAuthoritySource } from '@agentmux/core'
@@ -86,16 +86,4 @@ export function createConnectionExternalInputAuthority(options: { ingress(): Pro
           JSON.stringify(parseAgentExternalInteractionAuthor(intent.externalAction)) !== JSON.stringify(parseAgentExternalInteractionAuthor(author)) || result.authority !== 'current') throw unavailable()
     } catch { throw unavailable() }
   } }
-}
-
-/** Client-side owner bridge used until Desktop relinquishes its existing connection owner. */
-export function createDesktopExternalInputAuthority(options: { desktopSocketPath: string; executionHostId: string }): AgentExternalInputAuthorityPort {
-  const read = async <T>(call: (rpc: Awaited<ReturnType<typeof connectAgentMuxRpc>>) => Promise<T>): Promise<T> => {
-    const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: options.desktopSocketPath } })
-    try { return await call(rpc) } finally { await rpc.dispose() }
-  }
-  return createConnectionExternalInputAuthority({ executionHostId: options.executionHostId, ingress: async () => ({
-    authority: input => read(rpc => rpc.call('connection.ingress.authority', input)),
-    recordAuthority: input => read(rpc => rpc.call('connection.ingress.record-authority', input))
-  }) })
 }
