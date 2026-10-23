@@ -34,6 +34,7 @@ import { agentInputJournalKey, validateAgentInputControlId, validateAgentInputWa
 import { validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
 import { parseAgentInputMailboxRead, type AgentInputMailboxRead } from './agent-input-mailbox.js'
 import { parseAgentMuxMessagePrefix, renderAgentMuxMessageReferences } from './agent-message-render.js'
+import { AGENTMUX_A2A_REFERENCE_REMINDER } from './agent-messaging-guidance.js'
 import { MAX_A2A_NOTIFICATION_BYTES, validateMessageNotification, type AgentMuxMessageNotification, type AgentMuxMessageNotificationStatus } from './agent-message-notification.js'
 import { messageNotificationJournalSchema, initializeMessageNotificationReferenceIndex } from './agent-message-journal.js'
 
@@ -492,7 +493,7 @@ export class DurableAgentMuxMessageQueue {
         const original = this.messageReference(String(position.message_id))
         if (!original || typeof original.sender_id !== 'string') throw new AgentMuxError('An original peer message is required.', 'MESSAGE_NOT_FOUND')
         const candidate = { senderSessionId: original.sender_id, messageId: String(position.message_id) }
-        const candidateWire = renderAgentMuxMessageReferences([...references, candidate])
+        const candidateWire = renderAgentMuxMessageReferences([...references, candidate], AGENTMUX_A2A_REFERENCE_REMINDER)
         if (Buffer.byteLength(candidateWire) > MAX_A2A_NOTIFICATION_BYTES) {
           if (input.messageIds) throw new AgentMuxError('The selected reference set exceeds the notification byte budget. Select fewer original MIDs.', 'INVALID_A2A_NOTIFICATION')
           break
