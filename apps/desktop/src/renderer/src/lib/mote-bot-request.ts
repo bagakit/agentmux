@@ -1,8 +1,10 @@
+import type { ConnectionHostingTarget } from '../../../shared/contracts'
+import { readConnectionHostingTarget } from '../../../shared/connection-hosting-target'
 import { parseMoteConnectionParams, parseMoteConnectionRecordedSource, type MoteConnectionCreate, type MoteConnectionSync, type MoteConnectionRecordedSource } from '@agentmux/core/mote-connections'
 import { parseDesiredConnectionProfile, parseConnectionSetupInitialPublication } from '@agentmux/core/connections'
 import { parseMoteConnectionValues } from '@agentmux/core/mote-preferences'
 
-type Phase = { phase: 'not-dispatched' | 'may-have-dispatched' }
+type Phase = { phase: 'not-dispatched' | 'may-have-dispatched'; hostingTarget?: ConnectionHostingTarget }
 type PreparedRequest = ({ action: 'create'; input: MoteConnectionCreate } | { action: 'sync'; input: MoteConnectionSync }) & { inspectOnly?: false }
 type HistoricalSource = Extract<MoteConnectionRecordedSource, { expectedTopicRevision: string }>
 type HistoricalInput = { operationId: string; source: HistoricalSource; avatar: 'include-saved' | 'omit' }
@@ -38,15 +40,16 @@ export function restoredMoteBotRequests(value: unknown): Record<string, MoteBotR
     const row = raw as MoteBotRequest
     if (row.action !== 'create' && row.action !== 'sync') continue
     const phase = row.phase === 'not-dispatched' ? 'not-dispatched' : 'may-have-dispatched'
+    const hostingTarget = readConnectionHostingTarget(row.hostingTarget), owner = hostingTarget ? { hostingTarget } : {}
     try {
       const parsed = row.action === 'create'
-        ? { action: row.action, input: parseMoteConnectionParams('space.mote.connection.create', row.input), phase } as const
-        : { action: row.action, input: parseMoteConnectionParams('space.mote.connection.sync', row.input), phase } as const
+        ? { action: row.action, input: parseMoteConnectionParams('space.mote.connection.create', row.input), phase, ...owner } as const
+        : { action: row.action, input: parseMoteConnectionParams('space.mote.connection.sync', row.input), phase, ...owner } as const
       if (parsed.input.operationId === key) result[key] = parsed
     } catch {
       try {
         const input = historical(row.action, row.input)
-        if (input.operationId === key) result[key] = { action: row.action, input, phase, inspectOnly: true } as MoteBotRequest
+        if (input.operationId === key) result[key] = { action: row.action, input, phase, ...owner, inspectOnly: true } as MoteBotRequest
       } catch { /* Malformed local data is not an executable or qualified historical intent. */ }
     }
   }

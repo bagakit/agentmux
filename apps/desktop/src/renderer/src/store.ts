@@ -4312,7 +4312,7 @@ export async function retainMoteBotRequest(request: MoteBotRequest): Promise<Age
   const parsed = restoredMoteBotRequests({ [request.input.operationId]: request })[request.input.operationId]
   if (!parsed) throw new Error('The original Mote bot request is required.')
   const previous = useAppStore.getState().moteBotRequests[parsed.input.operationId]
-  if (previous && (previous.action !== parsed.action || JSON.stringify(previous.input) !== JSON.stringify(parsed.input)))
+  if (previous && (previous.action !== parsed.action || JSON.stringify(previous.input) !== JSON.stringify(parsed.input) || JSON.stringify(previous.hostingTarget) !== JSON.stringify(parsed.hostingTarget)))
     throw new Error('The original Mote bot request cannot be replaced.')
   useAppStore.setState(state => ({ moteBotRequests: { ...state.moteBotRequests, [parsed.input.operationId]: parsed } }))
   return await saveWorkbenchSelection(false)
@@ -4324,7 +4324,7 @@ export async function retireMoteBotRequest(request: MoteBotRequest, operation: i
   if (request.action === 'create') parseMoteConnectionResult('space.mote.connection.create', operation, request.input)
   else parseMoteConnectionResult('space.mote.connection.sync', operation, request.input)
   const previous = useAppStore.getState().moteBotRequests[request.input.operationId]
-  if (!previous || previous.action !== request.action || JSON.stringify(previous.input) !== JSON.stringify(request.input)) return null
+  if (!previous || previous.action !== request.action || JSON.stringify(previous.input) !== JSON.stringify(request.input) || JSON.stringify(previous.hostingTarget) !== JSON.stringify(request.hostingTarget)) return null
   useAppStore.setState(state => {
     const requests = { ...state.moteBotRequests }
     delete requests[request.input.operationId]
@@ -4383,7 +4383,7 @@ export async function retainMoteChatIntent(intent: MoteChatIntent): Promise<Agen
   const parsed = restoredMoteChatIntents({ [intent.input.operationId]: intent })[intent.input.operationId]
   if (!parsed) throw new Error('The exact original Mote chat input is required.')
   const previous = useAppStore.getState().moteChatIntents[parsed.input.operationId]
-  if (previous && (previous.method !== parsed.method || JSON.stringify(previous.input) !== JSON.stringify(parsed.input)))
+  if (previous && (previous.method !== parsed.method || JSON.stringify(previous.input) !== JSON.stringify(parsed.input) || JSON.stringify(previous.hostingTarget) !== JSON.stringify(parsed.hostingTarget)))
     throw new Error('The original Mote chat request cannot be replaced.')
   useAppStore.setState(state => ({ moteChatIntents: { ...state.moteChatIntents, [parsed.input.operationId]: parsed } }))
   return await saveWorkbenchSelection(false)

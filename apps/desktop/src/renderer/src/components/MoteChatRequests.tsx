@@ -26,9 +26,9 @@ export function MoteChatRequests({ target, onConfirmed }: { target: MotePreferen
   return <section className="mote-chat-requests" aria-label="Original chat requests"><h4>Original requests</h4>
     {retained.map(intent => <div key={intent.input.operationId} data-mote-chat-request={intent.input.operationId}>
       <strong>{intent.method === 'space.mote.chat.configure' ? 'Chat settings' : 'Message allowance'} · result not confirmed</strong>
-      <p role="status">{results[intent.input.operationId]?.message ?? (intent.phase === 'not-dispatched' ? 'Original input retained before dispatch.' : 'The original request and its input are kept.')}</p>
-      <div className="mote-chat-actions"><button type="button" className="small-button" disabled={busy !== null} onClick={() => void check(intent)}>{busy === intent.input.operationId ? 'Checking…' : 'Check original request'}</button>
-        {intent.phase === 'not-dispatched' || results[intent.input.operationId]?.absent ? <button type="button" className="small-button" disabled={busy !== null} onClick={() => void check(intent, true)}>Continue original request</button> : null}</div>
+      <p role="status">{results[intent.input.operationId]?.message ?? (!intent.hostingTarget ? 'The original bot hosting owner is unconfirmed. The original request is kept.' : intent.phase === 'not-dispatched' ? 'Original input retained before dispatch.' : 'The original request and its input are kept.')}</p>
+      <div className="mote-chat-actions"><button type="button" className="small-button" disabled={busy !== null || !intent.hostingTarget} onClick={() => void check(intent)}>{busy === intent.input.operationId ? 'Checking…' : 'Check original request'}</button>
+        {intent.hostingTarget && (intent.phase === 'not-dispatched' || results[intent.input.operationId]?.absent) ? <button type="button" className="small-button" disabled={busy !== null} onClick={() => void check(intent, true)}>Continue original request</button> : null}</div>
       <details><summary>Request reference</summary><code>{intent.input.operationId}</code></details>
     </div>)}
   </section>
