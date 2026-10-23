@@ -13,10 +13,10 @@ import { listProbeProcesses, signalOwnedProbeProcess, stopProbeProcesses } from 
 
 const { values } = parseArgs({ options: {
   'build-root': { type: 'string' }, output: { type: 'string' },
-  'check-proof': { type: 'boolean' }, help: { type: 'boolean' },
+  'check-proof': { type: 'boolean' }, 'sdk-operation-only': { type: 'boolean' }, help: { type: 'boolean' },
 } })
 if (values.help) {
-  process.stdout.write('Usage: node scripts/verify-capsule-integration.mjs [--build-root <compiled-root>] [--output <evidence-directory>] [--check-proof]\n')
+  process.stdout.write('Usage: node scripts/verify-capsule-integration.mjs [--build-root <compiled-root>] [--output <evidence-directory>] [--check-proof] [--sdk-operation-only]\n')
   process.exit(0)
 }
 const desktop = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -26,17 +26,21 @@ const executeFile = promisify(execFile)
 // environment must not inherit the private Core/Electron home or Agent secrets.
 const captureEnvironment = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
   ['HOME', 'PATH', 'LANG', 'TZ', 'TMPDIR'].includes(name) || name.startsWith('LC_') || name.startsWith('XDG_') || name.startsWith('ORCA_')))
-const output = resolve(values.output ?? join(repository, '.bagakit/capsule/native-run-proof'))
+const sdkOperationOnly = values['sdk-operation-only'] === true
+const scope = sdkOperationOnly ? 'sdk-operation-boundary' : 'full-native-visual'
+const output = resolve(values.output ?? join(repository, '.bagakit/capsule', sdkOperationOnly ? 'native-sdk-proof' : 'native-run-proof'))
 if (!values['check-proof']) {
   await mkdir(output, { recursive: true, mode: 0o700 })
-  await writeFile(join(output, 'facts.json'), JSON.stringify({ schema: 'agentmux.capsule.native-proof.v3', result: 'starting' }) + '\n', { mode: 0o600 })
+  await writeFile(join(output, 'facts.json'), JSON.stringify({ schema: 'agentmux.capsule.native-proof.v4', scope, result: 'starting' }) + '\n', { mode: 0o600 })
 }
 const build = await realpath(resolve(values['build-root'] ?? join(repository, '.tmp/capsule-native-build/out')))
 for (const name of ['main/index.js', 'main/agentmux-host.js', 'preload/index.cjs', 'preload/browser-popup.cjs', 'preload/capsule.cjs', 'renderer/index.html'])
   assert.ok((await stat(join(build, name))).isFile(), 'Actual compiled product is required: ' + name)
 if (values['check-proof']) {
   await checkProof()
-  process.stdout.write('Current Capsule product proof, input identities, frame bytes and private cleanup verified; aesthetic review remains independent.\n')
+  process.stdout.write(sdkOperationOnly
+    ? 'Current Capsule SDK Native boundary proof, input identities and private cleanup verified; no OS capture or new visual review claimed.\n'
+    : 'Current Capsule product proof, input identities, frame bytes and private cleanup verified; aesthetic review remains independent.\n')
   process.exit(0)
 }
 // macOS sockaddr_un cannot address its longer per-user temporary directory.
@@ -128,9 +132,9 @@ resize(width,height){const w=BrowserWindow.getAllWindows().find(w=>w.webContents
 import(${JSON.stringify(pathToFileURL(join(build, 'main/index.js')).href)}).catch(e=>{process.stderr.write(e.stack+'\\n');app.exit(1)});
 `, { mode: 0o600 })
 
-const facts = { schema: 'agentmux.capsule.native-proof.v3', build, privateRoot: root,
+const facts = { schema: 'agentmux.capsule.native-proof.v4', scope, build, privateRoot: root,
   boundary: 'Actual compiled Desktop/Main/preload/Renderer, detached product Core Host, independent ctxmux Capsule service Run and private HTTP, native Browser documents and authenticated synthetic Provider. No model acceptance claim.',
-  visual: { captureOnly: true, aestheticReview: 'not-performed',
+  visual: { captureOnly: !sdkOperationOnly, captureStatus: sdkOperationOnly ? 'not-requested' : 'requested', aestheticReview: 'not-performed',
     states: ['managed and configured path documents', 'pending draft', 'confirmed answer',
       'restored unsent draft', 'existing Settings pages and long content root', 'page details', 'original Toolkit result'],
     notCaptured: ['empty page registry', 'unknown input delivery', 'unavailable source and port-conflict service window'] },
@@ -201,11 +205,13 @@ async function verifyBuildReceipt(record) {
 async function checkProof() {
   const receipt = await verifyBuildReceipt()
   const proof = JSON.parse(await readFile(join(output, 'facts.json'), 'utf8'))
-  assert.equal(proof.schema, 'agentmux.capsule.native-proof.v3')
+  assert.equal(proof.schema, 'agentmux.capsule.native-proof.v4')
   assert.equal(proof.result, 'passed', 'The original Native scenario did not complete: ' + (proof.error?.message ?? 'unknown stage'))
   assert.equal(proof.error, undefined)
   assert.deepEqual(proof.buildReceipt, receipt, 'The Native proof consumed this exact candidate')
-  assert.equal(proof.visual.captureOnly, true)
+  assert.equal(proof.scope, scope, 'Proof scope must match the explicit invocation')
+  assert.equal(proof.visual.captureOnly, !sdkOperationOnly)
+  assert.equal(proof.visual.captureStatus, sdkOperationOnly ? 'not-requested' : 'requested')
   assert.equal(proof.visual.aestheticReview, 'not-performed')
   for (const name of ['ordinary private Desktop launch', 'SIGKILL original Host and Desktop; retain ctxmux Run', 'original Native workface restored'])
     assert.ok(proof.phases.some(phase => phase.name === name), 'Completed Native phase: ' + name)
@@ -274,7 +280,9 @@ async function checkProof() {
     'capsule-settings-normal', 'capsule-settings-narrow', 'capsule-settings-page-detail-normal',
     'capsule-settings-page-detail-narrow', 'capsule-toolkit-normal', 'capsule-toolkit-narrow',
     'capsule-restored-normal', 'capsule-restored-narrow']
-  for (const name of requiredFrames) assert.ok(proof.frames.some(frame => frame.name === name), 'Actual Native frame: ' + name)
+  for (const name of requiredFrames) assert.ok(proof.resizes.some(value => value.label === name + ' native allocation'), 'Actual named native allocation: ' + name)
+  if (sdkOperationOnly) assert.deepEqual(proof.frames, [], 'SDK-only proof must not claim OS capture')
+  else for (const name of requiredFrames) assert.ok(proof.frames.some(frame => frame.name === name), 'Actual Native frame: ' + name)
   for (const frame of proof.frames) {
     assert.equal(frame.capturePort, 'orca-computer-get-app-state')
     assert.match(frame.nativeWindowId, /^\d+$/u)
@@ -584,7 +592,7 @@ async function readOriginalHttp(endpoint) {
   return { url: url.href, status: response.status, instanceId: endpoint.instanceId, bytes: bytes.length, sha256: sha(bytes) }
 }
 async function resizeNative(app, width, height, label = 'native allocation') {
-  const observation = { pid: app.child.pid, requested: [width, height], status: 'pending' }
+  const observation = { pid: app.child.pid, label, requested: [width, height], status: 'pending' }
   facts.resizes ??= []; facts.resizes.push(observation)
   try {
     observation.actual = await app.main.evaluate(`__capsuleNative.resize(${width},${height})`)
@@ -660,9 +668,11 @@ async function activate(cdp, expression) {
       .catch(error => { observation.observerCleanupError = error.message })
   }
 }
-async function screenshot(app, name, width = 1440, height = 900) {
+async function observeSurface(app, name, width = 1440, height = 900) {
   await resizeNative(app, width, height, name + ' native allocation')
   await delay(250)
+  const readSurface = () => app.cdp.evaluate('({url:location.href,width:innerWidth,height:innerHeight,appearance:document.documentElement.dataset.appearance,regions:[...document.querySelectorAll("[data-workbench-region-id]")].filter(n=>n.getClientRects().length).map(n=>n.dataset.workbenchRegionId)})')
+  if (sdkOperationOnly) return await readSurface()
   const captured = await app.main.evaluate('__capsuleNative.capture()')
   assert.equal(process.platform, 'darwin', 'This Native product fixture currently qualifies macOS window capture')
   const match = /^window:(\d+):/u.exec(captured.mediaSourceId)
@@ -703,7 +713,7 @@ async function screenshot(app, name, width = 1440, height = 900) {
   const metadataBytes = Buffer.from(JSON.stringify({ api: 'orca computer get-app-state', pid, nativeWindow: captured, listed,
     captured: { ...osCapture, result: { ...osCapture.result, screenshot: { ...image, data: undefined } } } }, null, 2) + '\n')
   await writeFile(metadata, metadataBytes)
-  const reading = await app.cdp.evaluate('({url:location.href,width:innerWidth,height:innerHeight,appearance:document.documentElement.dataset.appearance,regions:[...document.querySelectorAll("[data-workbench-region-id]")].filter(n=>n.getClientRects().length).map(n=>n.dataset.workbenchRegionId)})')
+  const reading = await readSurface()
   facts.frames.push({ name, path, sha256: sha(bytes), nativeSize: captured.size, pid, metadata, metadataSha256: sha(metadataBytes),
     capturePort: 'orca-computer-get-app-state', nativeWindowId: match[1], reading })
   return reading
@@ -821,7 +831,7 @@ try {
   assert.equal(isolatedFacts.sdk, 'undefined')
   assert.equal(isolatedFacts.token, '')
   await isolatedDocument.evaluate('localStorage.setItem("capsule-proof-isolation","isolated-only")')
-  await screenshot(first, 'isolated-native')
+  await observeSurface(first, 'isolated-native')
   const openParams = { capsuleId: managed.record.capsuleId, operationId: randomUUID() }
   const opened = await call('capsule.open', openParams)
   assert.equal(opened.rendering.status, 'available')
@@ -875,8 +885,8 @@ try {
   assert.equal((await document.evaluate(`capsule.inspectOperation(${JSON.stringify(question.operationId)})`)).capsuleId, managed.record.capsuleId)
   await activate(first.cdp, `${browserRegion}.querySelector('[aria-label="Page questions"]')`)
   await waitFor('App chrome original saved draft', () => first.cdp.evaluate(`${browserRegion}.querySelector('.capsule-question textarea')?.value==='Preserved page draft'`))
-  const normal = await screenshot(first, 'managed-question-normal')
-  const narrow = await screenshot(first, 'managed-question-narrow', narrowWidth, 900)
+  const normal = await observeSurface(first, 'managed-question-normal')
+  const narrow = await observeSurface(first, 'managed-question-narrow', narrowWidth, 900)
   assert.ok(narrow.width < normal.width, 'Narrow screenshot must consume a smaller real native allocation')
   await resizeNative(first, 1440, 900)
   await activate(first.cdp, `${browserRegion}.querySelector('.capsule-question__confirm')`)
@@ -942,8 +952,8 @@ try {
     assert.equal(projected.colorScheme, appearance)
     facts.themeTransitions.push(projected)
     assert.deepEqual(await isolatedDocument.evaluate('({sdk:typeof window.capsule,bg:getComputedStyle(document.body).backgroundColor,token:document.documentElement.style.getPropertyValue("--bg")})'), isolatedFacts)
-    await screenshot(first, 'capsule-hitl-' + appearance + '-normal')
-    await screenshot(first, 'capsule-hitl-' + appearance + '-narrow', narrowWidth, 900)
+    await observeSurface(first, 'capsule-hitl-' + appearance + '-normal')
+    await observeSurface(first, 'capsule-hitl-' + appearance + '-narrow', narrowWidth, 900)
     await resizeNative(first, 1440, 900)
   }
   facts.content = { managed, managedSourceRemoved: true, isolated, pathSourceObservedLive: true,
@@ -958,13 +968,13 @@ try {
   await waitFor('Settings navigation', () => first.cdp.evaluate('Boolean(document.querySelector("button[data-settings-target=capsule]"))'))
   await activate(first.cdp, 'document.querySelector("button[data-settings-target=capsule]")')
   await waitFor('real Capsule Settings owner result', () => first.cdp.evaluate('document.querySelector(".capsule-settings__pages")?.innerText.includes("Saved review")&&document.querySelector(".capsule-settings__pages")?.innerText.includes("Independent reference")'))
-  await screenshot(first, 'capsule-settings-normal')
-  await screenshot(first, 'capsule-settings-narrow', narrowWidth, 900)
+  await observeSurface(first, 'capsule-settings-normal')
+  await observeSurface(first, 'capsule-settings-narrow', narrowWidth, 900)
   await resizeNative(first, 1440, 900)
   await activate(first.cdp, '[...document.querySelectorAll(".capsule-settings__pages button")].find(n=>n.textContent.includes("Saved review"))')
   await activate(first.cdp, 'document.querySelector(".capsule-settings__detail details > summary")')
-  await screenshot(first, 'capsule-settings-page-detail-normal')
-  await screenshot(first, 'capsule-settings-page-detail-narrow', narrowWidth, 900)
+  await observeSurface(first, 'capsule-settings-page-detail-normal')
+  await observeSurface(first, 'capsule-settings-page-detail-narrow', narrowWidth, 900)
   await resizeNative(first, 1440, 900)
   await activate(first.cdp, 'document.querySelector("button[aria-label=\\"Close settings\\"]")')
   const toolkitId = 'capsule-proof-tool', channelModule = pathToFileURL(join(repository, 'packages/core/dist/toolkit-result-channel.js')).href
@@ -976,8 +986,8 @@ try {
   const toolkitResult = await waitFor('original Toolkit confirmed result', () => first.cdp.evaluate(`(async()=>{const s=await window.agentmux.toolkit.get(${JSON.stringify(toolkitId)});return s.latestConfirmed?.document?.capsules?.[0]?.capsuleId===${JSON.stringify(managed.record.capsuleId)}?s:null})()`))
   await activate(first.cdp, '[...document.querySelectorAll("button")].find(n=>n.getAttribute("title")==="Capsule proof"||n.getAttribute("aria-label")==="Capsule proof")')
   await waitFor('actual Toolkit Capsule consumer', () => first.cdp.evaluate(`Boolean(document.querySelector('[data-toolkit-capsule="${managed.record.capsuleId}"]'))`))
-  await screenshot(first, 'capsule-toolkit-normal')
-  await screenshot(first, 'capsule-toolkit-narrow', narrowWidth, 900)
+  await observeSurface(first, 'capsule-toolkit-normal')
+  await observeSurface(first, 'capsule-toolkit-narrow', narrowWidth, 900)
   await resizeNative(first, 1440, 900)
   const toolkitClick = await activate(first.cdp, `document.querySelector('[data-toolkit-capsule="${managed.record.capsuleId}"] .toolkit-capsules__main button')`)
   const toolkitOpen = await waitFor('Toolkit opens the exact original Capsule without rerunning', async () => {
@@ -1054,8 +1064,8 @@ try {
   assert.deepEqual(originalOpen.operation.result.rendering, opened.rendering)
   await activate(second.cdp, `${browserRegion}.querySelector('[aria-label="Page questions"]')`)
   await waitFor('restored original unsent draft in App chrome', () => second.cdp.evaluate(`[...${browserRegion}.querySelectorAll('.capsule-question textarea')].some(n=>n.value===${JSON.stringify(pending.draft)})`))
-  await screenshot(second, 'capsule-restored-normal')
-  await screenshot(second, 'capsule-restored-narrow', narrowWidth, 900)
+  await observeSurface(second, 'capsule-restored-normal')
+  await observeSurface(second, 'capsule-restored-narrow', narrowWidth, 900)
   const sdkOriginalOperation = await call('capsule.operation.inspect', { operationId: requestOperationId })
   facts.recovery = { recovered, graph, recoveredPending, recoveredAnswer, originalOpen, originalRun, restoredSession, sdkOriginalOperation }
   assert.deepEqual(await productHashes(), facts.product, 'The consumed compiled product remained unchanged')
@@ -1133,4 +1143,6 @@ try {
 if (failure) {
   process.stderr.write(failure.stack + '\n')
   process.exitCode = 1
-} else process.stdout.write('Capsule native product proof passed; screenshots await independent visual review.\n')
+} else process.stdout.write(sdkOperationOnly
+  ? 'Capsule SDK Native boundary proof passed; OS capture and new visual review were not requested.\n'
+  : 'Capsule native product proof passed; screenshots await independent visual review.\n')
