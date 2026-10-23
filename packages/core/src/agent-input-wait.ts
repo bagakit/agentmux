@@ -7,7 +7,7 @@ export type AgentInputCallContext = Readonly<{
   /** Trusted Host capture attribution, never accepted from public business arguments. */
   inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource
   captureReader?: import('./agent-input-context-capture.js').AgentInputContextCaptureReader
-  /** Ends only intake observation until the original Core accepts its waiting owner. */
+  /** Ends semantic intake until Core accepts its waiting owner, or raw observation before native dispatch. */
   requestSignal?: AbortSignal
   /** Trusted Host author owner; identity is attribution, while this callback checks current authority. */
   externalAuthor?: { identity: import('./external-author.js').AgentExternalMessageAuthor; assertCurrent(intent: import('./external-author.js').AgentExternalInputIntent): void | Promise<void> }
@@ -16,6 +16,10 @@ export type AgentInputCallContext = Readonly<{
   /** Restricts the original action using its current author owner; cannot mint authority. */
   assertCurrent?(): void | Promise<void>
 }>
+
+/** Original Host restriction for raw bytes, valid only before native dispatch.
+ * A lost reply after dispatch never cancels or replays the original operation. */
+export type AgentRawInputCallContext = Pick<AgentInputCallContext, 'requestSignal' | 'assertCurrent'>
 
 /** Original input identity, waiting generation and stop action are distinct. */
 export type AgentInputWaitRef = { key: AgentPromptInputKey; waitGeneration: number }

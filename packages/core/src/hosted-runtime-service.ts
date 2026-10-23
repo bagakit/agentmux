@@ -267,7 +267,9 @@ export class AgentMuxHostedRuntimeService {
       messageIntake = retained === null || retained.deliveryMode === 'reference'
     }
     const controlledInput = invocation.method === 'submitAgentPrompt' || invocation.method === 'submitAgentMessage' || invocation.method === 'broadcastMessages' || invocation.method === 'notifyMessages' || invocation.method === 'rejoinAgentInputWaiting' || invocation.method === 'respondAgentInteraction' || invocation.method === 'replySessionQuestion'
-    if (controlledInput && invocation.args.length !== 1) throw new AgentMuxError('Input call context is supplied only by the original Host, never by wire arguments.', 'INVALID_CONTROL_REQUEST')
+    const rawAgentInput = invocation.method === 'writeAgent' || invocation.method === 'pasteAgent'
+    const rawTerminalInput = invocation.method === 'writeTerminal'
+    if ((controlledInput || rawAgentInput) && invocation.args.length !== 1 || rawTerminalInput && (invocation.args.length < 2 || invocation.args.length > 3)) throw new AgentMuxError('Input call context is supplied only by the original Host, never by wire arguments.', 'INVALID_CONTROL_REQUEST')
     const attachment = invocation.method === 'reattachAgent' || invocation.method === 'attachTerminal' || invocation.method === 'refreshRunAttachment'
     // Direct attachment invocations borrow an existing exact event destination;
     // an unattached invocation must not manufacture a consumer with no owner.
@@ -361,7 +363,13 @@ export class AgentMuxHostedRuntimeService {
         return { identity, assertCurrent: (intent: import('./client.js').AgentMuxSessionQuestionReplyInput) => port.assertQuestionCurrent!(structuredClone(identity), structuredClone(intent)) }
       })()
 
-      const pending = operation.apply(this.client, invocation.method === 'readAgentInputMailbox' ? [invocation.args[0], ...(context.caller ? [context.caller] : [])] : continuityControl || invocation.method === 'ensureAgentContinuity' ? [...invocation.args, {
+      const rawContext: import('./agent-input-wait.js').AgentRawInputCallContext = {
+        ...(context.signal ? { requestSignal: context.signal } : {}),
+        ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {})
+      }
+      const pending = operation.apply(this.client, rawAgentInput ? [invocation.args[0], rawContext]
+        : rawTerminalInput ? [invocation.args[0], invocation.args[1], invocation.args[2], rawContext]
+        : invocation.method === 'readAgentInputMailbox' ? [invocation.args[0], ...(context.caller ? [context.caller] : [])] : continuityControl || invocation.method === 'ensureAgentContinuity' ? [...invocation.args, {
         ...(context.signal ? { requestSignal: context.signal } : {}),
         ...(context.assertCurrent ? { assertCurrent: context.assertCurrent } : {}),
         ...(invocation.method === 'ensureAgentContinuity' && this.inputContextCaptureReader ? { captureReader: this.inputContextCaptureReader } : {})
