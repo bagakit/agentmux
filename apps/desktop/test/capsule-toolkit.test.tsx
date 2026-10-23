@@ -67,7 +67,7 @@ async function mount(initial: ToolkitScriptSnapshot, extra = {}) {
   let current = parseToolkitSnapshot(initial), publish!: (value: ToolkitScriptSnapshot) => void
   vi.spyOn(api.toolkit, 'observe').mockImplementation((_id, read) => { publish = read; read(current); return { dispose() {} } })
   vi.spyOn(api.toolkit, 'get').mockImplementation(async () => current)
-  await act(async () => root.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {}, openChannel() {}, channelPresentation: () => null, openMoteLark() {}, chooseAgent() {} }}><UserToolkitResult definition={initial.definition} active close={() => {}} {...extra} /></SettingsNavigation.Provider>))
+  await act(async () => root.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {}, openChannel() {}, channelPresentation: () => null, channelEntries: [], openMoteLark() {}, chooseAgent() {} }}><UserToolkitResult definition={initial.definition} active close={() => {}} {...extra} /></SettingsNavigation.Provider>))
   return async (next: ToolkitScriptSnapshot) => { current = parseToolkitSnapshot(next); await act(async () => publish(current as ToolkitScriptSnapshot)) }
 }
 function row(id = first.record.capsuleId) { return container.querySelector<HTMLElement>(`[data-toolkit-capsule="${id}"]`)! }

@@ -45,13 +45,13 @@ async function bind(shared = false) {
   await act(async () => document.querySelector<HTMLInputElement>('.agent-connector-check input')!.click())
   await f.button('Connect group'); await wait(() => expect(f.services.bindings!.listActive()).toHaveLength(1))
   const binding = f.services.bindings!.listActive()[0]!
-  await f.button('Close'); await wait(() => expect(trigger()?.textContent).toContain('Original status group'))
+  await f.button('Close'); await wait(() => expect(trigger()?.getAttribute('aria-label')).toContain('Original status group'))
   return binding
 }
 const row = (id: string, type: 'user' | 'assistant') => JSON.stringify({ sessionId: 'original-native', uuid: id, type, message: { role: type, content: [{ type: 'text', text: 'PRIVATE original ' + id }] } }) + '\n'
 const speech = (binding: RoomBinding) => f.services.publication!.store.list(binding).filter(value => value.reference.source.kind !== 'binding-operation')
 async function renderHeader(bindings: RoomBinding[], visible = true, version = 0) {
-  await f.dom.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {}, chooseAgent() {}, openMoteLark() {}, channelPresentation: settingsCatalog.channelPresentation }}>
+  await f.dom.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {}, openChannel() {}, chooseAgent() {}, openMoteLark() {}, channelPresentation: settingsCatalog.channelPresentation, channelEntries: settingsCatalog.channelEntries }}>
     <ConnectorHeaderLinks bindings={bindings} visible={visible} nameVersion={version} syncEnabled={true} issue="" checking={false} retainedSetup={false} onOpen={() => {}} onConnect={() => {}} onMenuOpen={() => {}} onSettings={() => {}} />
   </SettingsNavigation.Provider>)
 }
@@ -63,7 +63,7 @@ it('the actual header diagnoses a source gap separately from older unknown platf
   await appendFile(f.original.transcript, row('public-unconfirmed', 'user'))
   await wait(() => expect(f.services.publication!.observation(binding.bindingId, binding.revision).reason).toBe('content-unconfirmed'))
   const before = { writes: writes(), effects: effects() }
-  await open(); await wait(() => expect(trigger().textContent).toContain('Needs attention'))
+  await open(); await wait(() => expect(trigger().getAttribute('aria-label')).toContain('Needs attention'))
   await wait(() => expect(menu().textContent).toContain('Content not confirmed'))
   expect(menu().textContent).toContain('content gap')
   expect(menu().textContent).toContain('unconfirmed')
@@ -80,14 +80,14 @@ it('an empty checked window remains a linked snapshot, and explicit Off and paus
   const binding = await bind(); await open(); await wait(() => expect(checked()).not.toBeNull())
   expect(menu().textContent).toContain('Linked · Sync on · Bot on')
   expect(menu().textContent).toContain('No events in this window')
-  expect(trigger().textContent).not.toMatch(/healthy|working|disconnected/i)
+  expect(trigger().getAttribute('aria-label')).not.toMatch(/healthy|working|disconnected/i)
   const service = await f.forward('connection.service.get', {})
   await f.forward('connection.service.configure', { operationId: 'header-explicit-off', expectedRevision: service.revision, service: { enabled: false } })
-  await check(); await wait(() => expect(trigger().textContent).toContain('Sync off'))
+  await check(); await wait(() => expect(trigger().getAttribute('aria-label')).toContain('Sync off'))
   expect(menu().textContent).toContain('Linked · Sync off')
   const paused = await f.forward('connection.binding.pause', { operationId: 'header-explicit-pause', bindingId: binding.bindingId, expectedRevision: binding.revision })
-  await renderHeader([paused.binding!]); await wait(() => expect(trigger().textContent).toContain('Sharing paused'))
-  expect(trigger().getAttribute('aria-label')).toContain('oc_header_status')
+  await renderHeader([paused.binding!]); await wait(() => expect(trigger().getAttribute('aria-label')).toContain('Sharing paused'))
+  await open(); expect(menu().querySelector('.connector-header-menu__item')?.getAttribute('aria-label')).toContain('oc_header_status')
 }, 30_000)
 
 it('a later failed check retains the exact group and earlier observations, with a stable completed-check time and actions', async () => {
@@ -98,7 +98,7 @@ it('a later failed check retains the exact group and earlier observations, with 
   expect(f.calls.filter(call => call.method === 'connection.diagnose')).toHaveLength(count)
   const original = f.forward
   vi.mocked(api.connections.call).mockImplementation(async (method, input) => { if (method === 'connection.diagnose') throw Error('PRIVATE credential path'); return original(method, input) })
-  await check(); await wait(() => expect(trigger().textContent).toContain('Status unknown'))
+  await check(); await wait(() => expect(trigger().getAttribute('aria-label')).toContain('Status unknown'))
   expect(checked()!.dateTime).not.toBe(first)
   for (const text of ['Original status group', 'Unavailable', 'Kept after this check failed', 'Connect a conversation', 'Automatic sync settings', 'Check group status']) expect(menu().textContent).toContain(text)
   expect(trigger().getAttribute('aria-disabled')).not.toBe('true')
@@ -124,7 +124,10 @@ it('actual recorded refusal and waiting stay separate from adoption, and typed b
   await check(); await wait(() => expect(menu().textContent).toContain('Waiting for Agent'))
   const report = await f.forward('connection.diagnose', { ...target, bindingId: binding.bindingId, bindingRevision: binding.revision })
   const group = report.groups.value!.items[0]!, incoming = group.incoming.value!, original = incoming.rows[0]!
-  expect(original).toMatchObject({ recording: { state: 'recorded' }, coreStatus: 'waiting', nativeAdoption: null })
+  expect(original, JSON.stringify(original)).toMatchObject({ recording: { state: 'recorded' }, coreStatus: 'waiting' })
+  // The strict public contract records no native adoption, or an observed unknown; neither confirms acceptance.
+  expect([null, 'unknown'], JSON.stringify(original)).toContain(original.nativeAdoption)
+  expect(menu().textContent).not.toContain('Accepted by Agent')
   // Pure presentation cases qualify mapping of the public typed receipt, not new native I/O.
   for (const [coreStatus, text] of [['terminal-confirmed', 'Input sent; Agent acceptance unconfirmed'], ['admitted', 'Accepted by Agent'], ['not-applied', 'Not delivered to Agent']] as const) {
     const snapshot = { report: { ...group, service: report.service, incoming: { value: { ...incoming, rows: [{ ...original, coreStatus }] }, issue: null } }, checkedAt: 1, checking: false }
@@ -134,7 +137,7 @@ it('actual recorded refusal and waiting stay separate from adoption, and typed b
 }, 30_000)
 
 it('a late old-source and revised-target result cannot replace the checked current original group', async () => {
-  const binding = await bind(); await renderHeader([binding]); await wait(() => expect(trigger().textContent).not.toContain('Checking…'))
+  const binding = await bind(); await renderHeader([binding]); await wait(() => expect(trigger().getAttribute('aria-label')).not.toContain('Checking…'))
   let release!: () => void, entered = false
   const held = new Promise<void>(resolve => { release = resolve })
   const old = vi.fn(async (...args: Parameters<typeof api.connections.call>) => { const report = await f.forward(...args); if (args[0] === 'connection.diagnose') { entered = true; await held } return report }) as typeof api.connections.call

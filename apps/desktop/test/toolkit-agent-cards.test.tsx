@@ -31,7 +31,7 @@ vi.mock('../src/renderer/src/store', async importOriginal => {
 })
 
 const dom = composerDOM()
-const settingsNavigation = { open() {}, openToolkit() {}, openHost() {}, openChannel() {}, channelPresentation: () => null, openMoteLark() {}, chooseAgent() {} }
+const settingsNavigation = { open() {}, openToolkit() {}, openHost() {}, openChannel() {}, channelPresentation: () => null, channelEntries: [], openMoteLark() {}, chooseAgent() {} }
 beforeEach(() => { cost.cardRenders = 0; cost.storeHooks = 0; cost.sessionVisits = 0 })
 function agent(id: string, hostId = 'local', sid = id, runId = `run-${id}`) {
   const value = composerSession(id)
