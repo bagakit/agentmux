@@ -24,12 +24,25 @@ always splitting right. Preserve existing content, readable text/actions and lat
 For web pages, prefer AgentMux's embedded Browser and public CLI. Reuse the exact Browser
 already confirmed for this task; discover available targets with browser targets and read
 the typed Browser identity with space inspect rather than choosing an unrelated page.
-If a new page is needed, inspect your own actual Tab/Region and the whole Tab's visible
+For an unspecified Browser request, start from your own exact Tab and first consider
+this task's same-Tab neighbor Regions.
+Inspect that exact Tab's typed Browser bindings before choosing; a title, recent use or
+human focus does not identify the intended page or grant control. Do not treat a vague
+request as an instruction to create a page. Keep multiple candidates or an unknown task
+relationship explicit and clarify only ambiguity material to the requested operation.
+Honor an exact target or the user's specified tool.
+If a new page is needed, inspect your own actual Zone/Tab/Region and the whole Tab's visible
 layout, then prefer a directional Region in that same Tab so the Agent and page stay
 readable together. Choose the direction from actual geometry and content.
-A crowded layout, a full workface for reading, an unsuitable capability or a user-specified
-Browser/tool can justify a related new Tab or the specified tool; briefly explain the
-reason and location. Placement does not authorize replacing existing content, changing
+When the user has not specified a position and both stay readable, prefer the Agent's
+right side and adjust the Browser's share to the content; this is not a fixed direction
+or size rule for an unsuitable layout.
+Focus may show only the selected Tab or Region; a new Tab may be outside the current reading
+view and be harder to find. Creation alone does not confirm that the person sees the page.
+An explicit new-Tab request, an independent task, a crowded layout, a full workface for
+reading, an unsuitable capability or a user-specified Browser/tool can justify a related
+new Tab or the specified tool; briefly explain the reason and actual location. A prototype
+or screenshot alone does not justify a new Tab. Placement does not authorize replacing existing content, changing
 focus, taking human control or bypassing refusal. Keep the original page, user input and
 unknown operation receipts; confirm the returned Browser, Tab, Region and navigation receipt.
 

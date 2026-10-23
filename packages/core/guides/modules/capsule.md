@@ -51,9 +51,14 @@ Read the matching leaf help for the exact JSON input:
 - amux capsule update and config update require the original expectedRevision. Creation
   defaults and a changed new-content root do not move or reinterpret existing pages.
 - amux capsule open --input FILE requests display of {capsuleId,operationId,placement?}.
-  Before opening, read amux space --skill and browser --skill; preserve the original page,
-  input and focus and reuse the confirmed Browser. An unavailable presentation can leave
-  the original HTTP page available. Open never confirms Agent delivery.
+  Read amux capsule open --help for the existing placement JSON and original result reads.
+  Before opening, read amux space --skill and browser --skill. With an attached Region,
+  normally pass an explicit readable split in the same Tab instead of relying on the
+  Desktop's new-Tab default when placement is omitted; preserve the user's new-Tab/tool
+  choice and real layout exceptions. Reuse the confirmed Browser. Presentation, navigation
+  and keyboard input focus are separate facts; retain the original page and input. Available rendering returns
+  exact Browser/Tab/Region IDs, not a created/reused assertion. An unavailable presentation
+  can leave the original HTTP page available. Open never confirms Agent delivery.
 - amux capsule operation inspect --input FILE reads {operationId} without replaying it.
 
 Isolated pages have no App theme or communication channel. Injected pages receive only
