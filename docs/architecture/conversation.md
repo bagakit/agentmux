@@ -188,6 +188,14 @@ Desktop Inputs 组合本地队列、Core mailbox 和来源输入历史；各有�
 
 具体行为由[范围与唯一归属](../design/behavior/conversation-mode.md#范围与唯一归属)指向的原专题持有。普通输入和健康能力不以历史探测或 UI 阅读是否成功为门槛。
 
+## 连接器的 Host 组合与设置路由
+
+[`startAgentMuxHost`](../../apps/host/src/host.ts) 将连接器挂在原语义 Host 上；[`createHostConnectionOwner`](../../apps/host/src/connections.ts) 组合一份连接存储、接收器、publication、外部输入授权以及 Mote 私聊和资料操作。普通 `MOTE.md` 偏好与默认身份写入由 Host 内部的原文件 owner 消费；公开 profile／PNG 由显式 client 准备，后续 parent 推进不依赖 Desktop 回调。已配置的执行客户端来自同一 Host 的原配置，连接器托管身份与 Agent 执行身份分别保留。
+
+Desktop 的 [`desktop-host`](../../apps/desktop/src/main/desktop-host.ts) 启动或连接后台 Host，关闭客户端只释放读取连接；Main 不再另建连接器收发 owner。[`connection-host-ipc`](../../apps/desktop/src/main/connection-host-ipc.ts) 经原 RuntimeController 和公共 transport 传递准确托管目标。设置页的 [`ConnectionHostingSettings`](../../apps/desktop/src/renderer/src/components/settings/ConnectionHostingSettings.tsx) 只为全新访问发现默认 Host；已有保存、扫码、Mote 选择和群操作使用各自保留的 Host／Runtime。设置页的手工保存、凭据与 profile 读取复用 [`connectionSettingsPort`](../../apps/desktop/src/renderer/src/lib/connection-settings-port.ts)，其余原操作查询同样携带各自冻结的目标；未记录原 owner 的引用不会绑定到后来选中的 Host。
+
+[`ConnectionSecrets`](../../packages/connectors/src/connection-secrets.ts) 使用原连接数据库及操作回执保存私有凭据，依赖 Host 文件权限保护，不调用 Electron safeStorage 或系统钥匙串。专用写入口由 [`createCredentialAdministration`](../../apps/host/src/credential-administration.ts) 核对原认证身份与当前实例。旧格式字节保留并报告格式不支持，不增加双格式解析；现有 owner 的交接和用户确认边界归[常驻托管合同](../design/behavior/conversation-mode.md#host-常驻托管)。这些是源码接线，不能代替旧凭据交接、安装加载或实际远端收发的验收。
+
 ## 外部 publication 的接线
 
 [`RoomBindingHost`](../../packages/connectors/src/room-binding.ts) 在原授权动作内冻结准确 source frontier；既有 native cut、Binding revision、scope 和受众保持其原含义。旧 Binding 缺少 captured 起点时保留明确 Gap，不用当前 discovery 重设历史起点。
