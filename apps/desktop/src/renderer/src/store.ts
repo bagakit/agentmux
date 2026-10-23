@@ -27,7 +27,7 @@ import { confirmNoteHistoryTarget, confirmDeletedNoteHistoryTarget, noteHistoryR
 import { restoredConnectorRoomDrafts, restoredConnectorRoomIntents, type ConnectorRoomDraft, type ConnectorRoomIntent } from './lib/connector-room-intent'
 import { restoredConnectorServiceIntents, type ConnectorServiceIntent } from './lib/connector-service-intent'
 import { mailboxNotificationIntentKey, mailboxNotificationSubject, restoredMailboxNotificationIntents, type MailboxNotificationIntent, type MailboxNotificationIntents, type MailboxNotificationFeedbackBySubject, type MailboxNotificationHistoryBySubject } from './lib/mailbox-notification-intent'
-import type { ConnectorServiceObservation } from './lib/connector-service-observation'
+import type { ConnectorServiceObservations } from './lib/connector-service-observation'
 import { restoredMoteConnectionSaveIntents, type MoteConnectionSaveIntent } from './lib/mote-connection-save-intent'
 import { restoredMoteChatIntents, type MoteChatIntent } from './lib/mote-chat-intent'
 import { defaultNoteCanvasLayout, mergeNoteCanvasLayout, noteCanvasScopeKey, restoreNoteCanvasLayouts, type NoteCanvasLayout, type NoteCanvasScope } from './lib/note-canvas-state'
@@ -926,7 +926,7 @@ export type AppState = {
   mailboxNotificationFeedback: MailboxNotificationFeedbackBySubject
   mailboxNotificationHistory: MailboxNotificationHistoryBySubject
   /** Current policy is an endpoint-scoped observation, never a durable preference or receipt. */
-  connectorServiceObservation: ConnectorServiceObservation | null
+  connectorServiceObservation: ConnectorServiceObservations
   moteBotRequests: Record<string, MoteBotRequest>
   botTaskSelections: BotTaskSelections
   manualConnectionSelections: Partial<Record<ManualConnectionIntent['channel'], ManualConnectionIntent['target']>>
@@ -4292,7 +4292,7 @@ export async function retainConnectorServiceIntent(intent: ConnectorServiceInten
   const parsed = restoredConnectorServiceIntents({ [intent.input.operationId]: intent })[intent.input.operationId]
   if (!parsed) throw new Error('The exact original Connector service input is required.')
   const previous = useAppStore.getState().connectorServiceIntents[intent.input.operationId]
-  if (previous && JSON.stringify(previous.input) !== JSON.stringify(parsed.input)) throw new Error('The original Connector service input cannot be replaced. Inspect that request separately.')
+  if (previous && JSON.stringify([previous.input, previous.hostingTarget]) !== JSON.stringify([parsed.input, parsed.hostingTarget])) throw new Error('The original Connector service input cannot be replaced. Inspect that request separately.')
   useAppStore.setState(state => ({ connectorServiceIntents: { ...state.connectorServiceIntents, [parsed.input.operationId]: parsed } }))
   return await saveWorkbenchSelection(false)
 }
@@ -4933,7 +4933,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   mailboxNotificationIntents: {},
   mailboxNotificationFeedback: {},
   mailboxNotificationHistory: {},
-  connectorServiceObservation: null,
+  connectorServiceObservation: {},
   moteBotRequests: {},
   botTaskSelections: {},
   manualConnectionIntents: {},

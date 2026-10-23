@@ -1,3 +1,4 @@
+import { selectConnectorServiceObservation } from '../lib/connector-service-observation'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
@@ -70,7 +71,7 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
   const [memberFlights, setMemberFlights] = useState<Set<string>>(() => new Set())
   const memberFlight = useRef(new Set<string>()), selectedMember = useRef('')
   const intents = useAppStore(state => state.connectorRoomIntents)
-  const syncEnabled = useAppStore(state => state.connectorServiceObservation?.source === api.connections.call ? state.connectorServiceObservation.state?.enabled ?? null : null)
+  const syncEnabled = useAppStore(state => selectConnectorServiceObservation(state.connectorServiceObservation)?.state?.enabled ?? null)
   const flight = useRef(false), epoch = useRef({}), content = useRef<HTMLDivElement>(null), initialFocus = useRef(true)
   const connection = connections.find(item => item.config.connectionId === connectionId)
   const creationUnsupported = connection?.capabilities?.roomCreation === false

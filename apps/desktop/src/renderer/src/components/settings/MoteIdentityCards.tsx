@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { parseMotePreferencesReadResult, type MoteConnectionPreferencesReadResult } from '@agentmux/core/mote-preferences'
+import type { ConnectionHostingTarget } from '../../../../shared/contracts'
 import type { ConnectionRecord } from '@agentmux/core/connections'
 import type { MoteChatConfiguration } from '@agentmux/core/mote-chat'
 import { SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } from '../../../../shared/scratch-topics'
@@ -24,7 +25,7 @@ export type MoteIdentityReading = {
 }
 
 /** One metadata read per original Mote, shared by its card and the saved identity library. */
-export function useMoteIdentityReadings(active: boolean, revision: number) {
+export function useMoteIdentityReadings(active: boolean, revision: number, hostingTarget?: ConnectionHostingTarget | null) {
   const workspace = useAppStore(state => state.config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID))
   const bindings = useAppStore(state => state.spaceZoneBindings)
   const directory = useScratchTopics(workspace?.id ?? null, active)
@@ -32,24 +33,29 @@ export function useMoteIdentityReadings(active: boolean, revision: number) {
     const rootPath = scratchTopicLogicalPath(workspace, topic)
     return rootPath === null ? [] : [{ topic, workspace, rootPath }]
   }) : [], [workspace, directory.topics])
-  const targets = scopes.map(scope => moteConnectionTarget(scope, bindings)), identity = JSON.stringify(targets)
+  const targets = scopes.map(scope => moteConnectionTarget(scope, bindings)), identity = JSON.stringify([hostingTarget === undefined ? 'default' : hostingTarget, targets])
   const [readings, setReadings] = useState<{ identity: string; items: MoteIdentityReading[]; reading: boolean }>({ identity: '', items: [], reading: false })
   const [attempt, setAttempt] = useState(0), lifetime = useRef(0)
+  const readPreferences = api.motePreferences.read, readChat = api.moteChat.call
   useEffect(() => {
     const epoch = ++lifetime.current
     if (!active) return
     setReadings(current => ({ identity, items: current.identity === identity ? current.items : [], reading: true }))
+    const original = hostingTarget === undefined && targets.some(Boolean) ? api.connections.hostingTarget() : Promise.resolve(hostingTarget)
     void Promise.all(scopes.map(async (scope, index): Promise<MoteIdentityReading> => {
       const target = targets[index]!
-      if (!target) return { scope, target, saved: null, issue: 'The original Mote home is not confirmed.', chat: null, chatRead: false, chatIssue: 'The original Mote home is not confirmed.' }
+      if (!target || hostingTarget === null) {
+        const issue = !target ? 'The original Mote home is not confirmed.' : 'The original connector hosting target is not confirmed.'
+        return { scope, target, saved: null, issue, chat: null, chatRead: false, chatIssue: issue }
+      }
       const input = { kind: 'connection' as const, target }
-      const [preference, chat] = await Promise.allSettled([api.motePreferences.read(input).then(value => parseMotePreferencesReadResult(value, input)), api.moteChat.call('space.mote.chat.inspect', { target })])
+      const [preference, chat] = await Promise.allSettled([original.then(owner => readPreferences(input, owner!)).then(value => parseMotePreferencesReadResult(value, input)), original.then(owner => readChat('space.mote.chat.inspect', { target }, owner!))])
       return { scope, target, saved: preference.status === 'fulfilled' ? preference.value : null,
         issue: preference.status === 'fulfilled' ? preference.value.issue ?? '' : presentError(preference.reason),
         chat: chat.status === 'fulfilled' ? chat.value.configuration : null, chatRead: chat.status === 'fulfilled', chatIssue: chat.status === 'rejected' ? presentError(chat.reason) : '' }
-    })).then(items => { if (epoch === lifetime.current) setReadings({ identity, items, reading: false }) })
+    })).then(items => { if (epoch === lifetime.current && readPreferences === api.motePreferences.read && readChat === api.moteChat.call) setReadings({ identity, items, reading: false }) })
     return () => { lifetime.current++ }
-  }, [active, identity, revision, attempt])
+  }, [active, identity, revision, attempt, readPreferences, readChat])
   const current = readings.identity === identity ? readings : null
   const items = scopes.map((scope, index) => current?.items[index]
     ? { ...current.items[index]!, scope } : { scope, target: targets[index]!, saved: null, issue: '', chat: null, chatRead: false, chatIssue: '' })
