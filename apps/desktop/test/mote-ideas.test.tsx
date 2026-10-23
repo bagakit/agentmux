@@ -46,6 +46,11 @@ describe('original Ideas request and feedback owners', () => {
     const request = requestNote(); expect(request).toContain('Find a useful next experiment.'); expect(request).toContain('# Latest saved SOUL'); expect(request).toContain(path); expect(request).toContain(revision)
     expect(request).toContain('Explain why each relates'); expect(request).toContain('discussion starter'); expect(request).toContain('separate authorization')
     expect(request).toContain('earlier authorization to maintain this Mote’s original knowledge')
+    const authority = request.split('\n\n')[1]!
+    expect(authority).toContain('This request permits discussion and read-only research.')
+    expect(authority).toContain('earlier authorization to maintain this Mote’s original knowledge without another request')
+    expect(authority).toContain('external writes need separate authorization; this guidance grants no new authorization')
+    expect(request.split('This request permits discussion and read-only research.')).toHaveLength(2)
     expect(request).toContain('Keep an idea a proposal until the user decides')
     expect(request).toContain('source, date and scope'); expect(request).toContain('revision-checked save and readback')
     expect(request).toContain('Do not rewrite SOUL or BEHAVIOR'); expect(request).toContain('extra Agent, model round or background reflection')
