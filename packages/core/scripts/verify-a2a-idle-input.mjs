@@ -9,7 +9,7 @@ import { join, resolve } from 'node:path'
 const root = resolve(import.meta.dirname, '../../..')
 const evidence = join(root, '.tmp', `a2a-idle-input-proof-${Date.now()}`)
 const config = 'packages/core/test/vitest.a2a-idle-input.config.mts'
-const tests = ['packages/core/test/a2a-idle-input.test.ts', 'packages/core/test/codex-idle-queue.test.ts']
+const tests = ['packages/core/test/a2a-idle-input.test.ts', 'packages/core/test/a2a-reference-budget.test.ts', 'packages/core/test/codex-idle-queue.test.ts']
 const regressions = ['packages/core/test/current-terminal-prompt.test.ts', 'packages/core/test/native-prompt-authority-store.test.ts']
 const mutations = ['native-queue-becomes-steer', 'native-idle-target-is-omitted', 'completion-fence-is-omitted',
   'final-input-fence-is-omitted', 'notification-identity-is-omitted', 'edited-notification-is-adopted',
@@ -24,7 +24,7 @@ const hashes = async () => Object.fromEntries(await Promise.all(inputs.map(async
 const receipt = { schema: 'agentmux.a2a-idle-input-owning-proof.v1', sourceOnly: true, sharedTreeMutations: 0, passed: false, cases: [] }
 
 await mkdir(evidence, { recursive: true })
-async function run(label, mutation, selected = tests, count = 37) {
+async function run(label, mutation, selected = tests, count = 40) {
   const output = join(evidence, label + '.json'), loaded = join(evidence, label + '.loaded.jsonl')
   await writeFile(loaded, '')
   const env = { ...process.env, AGENTMUX_IDLE_INPUT_LOADED: loaded }
