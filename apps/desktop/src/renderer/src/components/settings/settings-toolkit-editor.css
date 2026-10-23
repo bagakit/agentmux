@@ -6,8 +6,24 @@
 .toolkit-editor__mode label { display: flex; align-items: center; gap: var(--sp-2); cursor: pointer; }
 .toolkit-editor__mode input { accent-color: var(--text-2); }
 
-.toolkit-editor__terminal-appearance { display: grid; gap: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
-.toolkit-editor__terminal-appearance > span { font-weight: 550; }
-.toolkit-editor__terminal-appearance small { color: var(--text-3); font-size: var(--fs-micro); font-weight: 400; }
-.toolkit-editor__terminal-appearance > span small { margin-left: var(--sp-3); }
-.toolkit-editor__terminal-appearance select { max-width: 100%; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; }
+.toolkit-palette { min-width: 0; display: grid; gap: var(--sp-3); padding-block: var(--sp-4); border-block: 1px solid var(--line-soft); }
+.toolkit-palette__heading { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
+.toolkit-palette__heading h4 { margin: 0; color: var(--text); font-size: var(--fs-meta); font-weight: 550; }
+.toolkit-palette__heading p { margin: var(--sp-1) 0 0; color: var(--text-3); font-size: var(--fs-meta); }
+.toolkit-palette__heading > span { flex-shrink: 0; color: var(--text-3); font-size: var(--fs-micro); }
+.toolkit-palette__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(146px, 100%), 1fr)); gap: var(--sp-2); }
+.toolkit-palette__choice { position: relative; min-width: 0; display: grid; align-content: start; gap: var(--sp-2); padding: var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); cursor: pointer; }
+.toolkit-palette__choice:hover { border-color: var(--line); background: var(--surface-2); }
+.toolkit-palette__choice[data-selected='true'] { border-color: var(--focus-line); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--overlay-line); }
+.toolkit-palette__choice:has(input:focus-visible) { outline: 2px solid var(--focus-line); outline-offset: 2px; }
+.toolkit-palette__sample { min-width: 0; display: grid; gap: 9px; padding: 9px 10px; border-radius: var(--radius-sm); font: 10px/1.4 var(--font-mono); }
+.toolkit-palette__sample > span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.toolkit-palette__sample b { font-weight: 600; }
+.toolkit-palette__ansi { display: flex; gap: 4px; }
+.toolkit-palette__ansi i { width: 12px; height: 4px; border-radius: 1px; }
+.toolkit-palette__name { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-1); min-width: 0; }
+.toolkit-palette__name strong { color: var(--text-2); font-size: var(--fs-meta); font-weight: 500; }
+.toolkit-palette__name svg { flex-shrink: 0; color: var(--green); }
+.toolkit-palette__choice > small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
+.toolkit-palette__summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 26px; font-size: var(--fs-meta); color: var(--text-3); }
+.toolkit-palette__summary .small-button { font-size: var(--fs-meta); }
