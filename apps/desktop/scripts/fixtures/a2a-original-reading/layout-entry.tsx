@@ -24,7 +24,8 @@ const calls: unknown[] = [], copies: string[] = []
 api.sessions.readMessage = async (reference, id) => { calls.push({ reference, id }); return { hostId, message: original } }
 api.ui.writeClipboardText = async text => { copies.push(text) }
 const describeSpeaker = () => ({ name: 'Browser 内发光 Agent', providerId: 'codex' as const })
-const variants = ['human', 'other-agent', 'compact', 'progress', 'system'] as const
+const variants = ['human', 'other-agent', 'compact', 'progress', 'system', 'collaboration'] as const
+const collaboration = { kind: 'message', source: { providerId: 'codex', nativeSessionId: 'layout-native' }, sender: 'review/worker', recipient: 'review' } as const
 type Variant = typeof variants[number]
 let select!: (variant: Variant) => void
 function Scene() {
@@ -35,7 +36,8 @@ function Scene() {
     <section className="original-reading-probe__messages" data-layout-nested key={variant}>
       <ConversationMessage messageId="layout-notice" a2aNotificationId="layout-notice" executionHostId={hostId}
         conversationSessionId={recipientSessionId} content={wire} speaker={speaker} describeSpeaker={describeSpeaker} createdAt={0}
-        compact={variant === 'compact'} messagePhase={variant === 'progress' ? 'progress' : undefined} />
+        compact={variant === 'compact' || variant === 'collaboration'} nativeCollaboration={variant === 'collaboration' ? collaboration : undefined}
+        messagePhase={variant === 'progress' ? 'progress' : undefined} />
     </section>
     <section className="original-reading-probe__messages" data-layout-standalone>
       <ConversationMessage messageId={messageId} compact recordedIdentity expandedContent executionHostId={hostId}
@@ -48,7 +50,7 @@ function Scene() {
   </main></DesktopClientUiProvider>
 }
 mountThemeRuntime(window, { appAppearance: 'dark' })
-Object.assign(window, { messageLayout: { variants, calls, copies, body, plain, hostId, recipientSessionId, senderSessionId, messageId,
+Object.assign(window, { messageLayout: { variants, calls, copies, body, plain, wire, hostId, recipientSessionId, senderSessionId, messageId,
   select(variant: Variant) { if (!variants.includes(variant)) throw new Error('Unknown layout case'); calls.length = 0; copies.length = 0; flushSync(() => select(variant)) }
 } })
 createRoot(document.getElementById('root')!).render(<Scene />)
