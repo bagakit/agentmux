@@ -17,7 +17,7 @@ import { isApplicationAccessMethod, parseApplicationAccessParams, parseApplicati
 import { parseAgentInputMailboxPage } from './agent-input-mailbox-codec.js'
 import { parseRuntimeDiagnostics } from './runtime-observation-codec.js'
 import { parseRuntimeNetworkSnapshot } from './runtime-network.js'
-import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-recovery/control.js'
+import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-recovery/control-contract.js'
 import { parseConversationLandmarkPage, parseConversationLandmarkQuery, parseConversationLandmarkWritePage, parseConversationLandmarkWrite } from './conversation-landmarks.js'
 import { isMoteConnectionMethod, parseMoteConnectionParams, parseMoteConnectionResult } from './mote-connection-codec.js'
 import { parseConversationViewReleaseResult, parseConversationCheckpointPage, parseConversationChangesPage, parseConversationWatchOpening } from './conversation-changes.js'

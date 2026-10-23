@@ -6,7 +6,7 @@ import { AgentMuxError } from '../errors.js'
 import { agentPromptNotApplied } from '../agent-prompt-condition.js'
 import type { AgentPromptInputKey } from '../agent-prompt-condition.js'
 import type { AgentInputCallContext } from '../agent-input-wait.js'
-import type { AgentMuxContinuityInputDelivery, AgentMuxContinuityOperation, AgentMuxContinuityInputRequest, AgentMuxContinuityLaunchInput } from './continuity.js'
+import type { AgentMuxContinuityInputDelivery, AgentMuxContinuityOperation, AgentMuxContinuityInputRequest, AgentMuxContinuityLaunchInput } from './continuity-contract.js'
 export type RecoveryPromptInput = { agentSessionId: string; expectedRun: import('../types.js').AgentMuxRunRef; afterSubmissionId: null; operationId: string; prompt: string; signal: AbortSignal; agentMuxNote?: string }
 import type { AgentMuxStoredAgentSession, AgentPromptSubmissionRecord, AgentCatalogEntry, AgentMuxRunRef } from '../types.js'
 import type { AgentProviderRegistry } from '../agent-provider.js'

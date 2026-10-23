@@ -220,9 +220,9 @@ type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   whoami: Record<string, never>
   'agent.ls': import('./agent-discovery.js').AgentDiscoveryFilters
   'agent.inspect': { target: AgentMuxRpcSessionTarget }
-  'agent.continuity.control': import('./agent-session-recovery/control.js').AgentMuxContinuityControlInput
-  'agent.restart': import('./agent-session-recovery/restart.js').AgentMuxAgentRestartIdentity
-  'agent.restart.inspect': import('./agent-session-recovery/restart.js').AgentMuxAgentRestartIdentity
+  'agent.continuity.control': import('./agent-session-recovery/control-contract.js').AgentMuxContinuityControlInput
+  'agent.restart': import('./agent-session-recovery/restart-contract.js').AgentMuxAgentRestartIdentity
+  'agent.restart.inspect': import('./agent-session-recovery/restart-contract.js').AgentMuxAgentRestartIdentity
   'agent.refresh': { agentSessionId: string }
   'agent.native.confirm': import('./types.js').AgentMuxNativeSessionConfirmationInput
   'agent.native.ls': { hostId: string; executorId: string; workspacePath?: string }
@@ -303,7 +303,7 @@ type NativeResult = { 'capsule.input': import('./capsule-input.js').CapsuleInput
     view: import('./agent-self-context.js').SelfViewOutcome; unavailable: AgentMuxRpcUnavailable[] }
   'agent.ls': import('./agent-discovery.js').AgentDiscoveryPage
   'agent.inspect': AgentMuxRpcAgentInspection
-  'agent.continuity.control': import('./agent-session-recovery/control.js').AgentMuxContinuityControlResult
+  'agent.continuity.control': import('./agent-session-recovery/control-contract.js').AgentMuxContinuityControlResult
   'agent.restart': { session: Awaited<ReturnType<AgentMuxClient['restartAgent']>> }
   'agent.restart.inspect': Awaited<ReturnType<AgentMuxClient['inspectAgentRestart']>>
   'agent.refresh': { session: ReturnType<AgentMuxClient['agentSession']> }

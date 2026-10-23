@@ -1,5 +1,5 @@
 import type { AgentProvider } from '../agent-provider.js'
-import type { AgentMuxContinuityInterruption, AgentMuxContinuityPolicy } from './continuity.js'
+import type { AgentMuxContinuityInterruption, AgentMuxContinuityPolicy } from './continuity-contract.js'
 import type { AgentMuxStoredAgentSession } from '../types.js'
 
 /** Inspect the original native target before starting its next writer. Never observes terminal prose. */

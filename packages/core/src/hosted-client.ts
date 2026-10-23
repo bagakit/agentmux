@@ -1,6 +1,6 @@
 import { parseReadingDiagnosticSourceRead, parseReadingDiagnosticSourceFind, type ReadingDiagnosticExactTarget, type ReadingDiagnosticFindParams } from './reading-diagnostic-query.js'
 import { parseAgentInputMailboxPage } from './agent-input-mailbox-codec.js'
-import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-recovery/control.js'
+import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-recovery/control-contract.js'
 import { parseConversationViewReleaseResult, parseConversationCheckpointPage, parseConversationReadPage, parseConversationChangesPage, parseConversationWatchOpening, parseConversationObservation, type ConversationRef } from './conversation.js'
 import { parseNativeConversationCheckpoint, parseNativeConversationChangesPage } from './session-history-changes.js'
 import { sanitizeInputObservationArguments } from './performance-diagnostics.js'
