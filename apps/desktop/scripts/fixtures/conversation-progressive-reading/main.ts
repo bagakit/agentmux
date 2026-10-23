@@ -4,7 +4,8 @@ import path from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { app, BrowserWindow, ipcMain } from 'electron'
-import { AgentMuxFileAgentSessionStore, AgentMuxControlServer, connectAgentMuxRpc, type AgentMuxClient } from '@agentmux/core'
+import { AgentMuxFileAgentSessionStore, AgentMuxControlServer, connectAgentMuxRpc, defaultAgentMuxRuntimeDirectory,
+  defaultCtxmuxSocketPath, type AgentMuxClient } from '@agentmux/core'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { AgentMuxHostedRuntimeService } from '../../../../../packages/core/dist/hosted-runtime-service.js'
 import { RuntimeController } from '../../../src/main/runtime-controller'
@@ -17,12 +18,11 @@ import { exerciseIsolation } from './isolation.mjs'
 
 const [html, privateRoot, phase, preload, evidence, nodeExecutable, scene, mobileExercise, mobilePreload, proofMode] = process.argv.slice(2)
 app.on('window-all-closed', () => {})
-app.setPath('userData', path.join(privateRoot, 'user-data'))
-app.setPath('sessionData', path.join(privateRoot, 'session-data'))
+const bootstrapIsolation = JSON.parse(await fs.readFile(path.join(privateRoot, 'process-' + phase, 'bootstrap-isolation.json'), 'utf8'))
+assert.equal(bootstrapIsolation.pid, process.pid); assert.equal(bootstrapIsolation.phase, phase)
+const electronPaths = Object.fromEntries(['home', 'appData', 'userData', 'sessionData'].map(name => [name, app.getPath(name as 'home' | 'appData' | 'userData' | 'sessionData')]))
+assert.deepEqual(electronPaths, bootstrapIsolation.paths, 'Main consumes the already isolated original Electron paths')
 process.stderr.write('Reading fixture modules loaded\n')
-process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(privateRoot, 'runtime')
-process.env.AGENTMUX_STATE_DIRECTORY = path.join(privateRoot, 'runtime/state')
-process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(privateRoot, 'messages.ndjson')
 const config: AppConfig = { version: 9, hosts: [{ id: 'local', label: 'Private reading proof', kind: 'local' }],
   executors: { codex: { label: 'Controlled native writer', providerId: 'codex', command: nodeExecutable,
     args: [path.join(privateRoot, 'fake-codex-cli.mjs')], env: { AGENTMUX_FAKE_READY_MODE: 'before', AGENTMUX_FAKE_NATIVE_RECORD: '1',
@@ -306,6 +306,22 @@ app.whenReady().then(async () => {
     await until(() => read('window.readingProof?.inspect().rows.length > 0 && readingProof.reads.length > 0'),
       'original App records after durable input preparation', phase === 'seed' ? 140000 : 20000)
     result.ids = await ids()
+    const nativeMetadata = await store.readMetadata(result.ids.sessionId), diagnostics = await core.runtimeDiagnostics()
+    assert.equal(nativeMetadata?.nativeHandle?.kind, 'provider')
+    assert.equal(nativeMetadata!.nativeHandle!.sessionId, result.ids.nativeSessionId)
+    const nativeTranscript = nativeMetadata!.nativeHandle!.transcriptPath
+    assert.ok(nativeTranscript && !path.relative(path.join(privateRoot, 'native'), nativeTranscript).startsWith('..'))
+    result.isolationPaths = { sceneRoot: privateRoot, bootstrap: bootstrapIsolation, electron: electronPaths,
+      core: { store: store.path, spatial: spatial.path, runtime: defaultAgentMuxRuntimeDirectory(), socket: defaultCtxmuxSocketPath(),
+        state: diagnostics.ctxmux.state, queue: core.agentMessageQueuePath() }, native: nativeTranscript, workspace: config.workspaces[0]!.path,
+      unusedStorageOwners: 'Only this private folder workspace is configured. ScratchTopics is an unbound helper; no scratch/Notes/Mote/connector storage owner is opened by this fixture.' }
+    assert.deepEqual(config.workspaces.map(workspace => ({ kind: workspace.kind, path: workspace.path })), [{ kind: 'folder', path: path.join(privateRoot, 'workspace') }])
+    assert.equal(result.isolationPaths.core.store, path.join(privateRoot, 'agent-sessions.json'))
+    assert.equal(result.isolationPaths.core.spatial, path.join(privateRoot, 'spatial-state.json'))
+    assert.equal(result.isolationPaths.core.runtime, path.join(privateRoot, 'runtime'))
+    assert.equal(result.isolationPaths.core.socket, path.join(privateRoot, 'runtime/ctxmux.sock'))
+    assert.equal(result.isolationPaths.core.state.configuredDirectory, path.join(privateRoot, 'runtime/state/ctxmux'))
+    assert.equal(result.isolationPaths.core.queue, path.join(privateRoot, 'messages.ndjson'))
     result.mobileSetup = { url: `http://127.0.0.1:${server.httpAddress!.port}/`, token: mobileToken, agentSessionId: result.ids.sessionId, runtimeId }
     result.initialState = await read('readingProof.state()')
     assert.equal(result.initialState.drafts[result.ids.sessionId], draft)

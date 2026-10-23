@@ -7,6 +7,7 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { spawnSync } from 'node:child_process'
 import { runProbeProcess, listProbeProcesses, stopProbeProcesses } from './probe-process.mjs'
+import { privatePackageSmokeEnvironment } from './package-smoke-context.mjs'
 import { candidateResolve, candidateAlias, candidateModule } from './candidate-package-resolve.mjs'
 import { sceneNames } from './fixtures/conversation-progressive-reading/scene.mjs'
 import { immediateFirstMount, compareReadingCosts } from './fixtures/conversation-progressive-reading/cost-comparison.mjs'
@@ -30,10 +31,15 @@ const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'amux-r-'))
 const hash = value => createHash('sha256').update(value).digest('hex')
 const files = async directory => (await Promise.all((await fs.readdir(directory, { withFileTypes: true })).map(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
 const inputPaths = [...await files(fixture), path.join(import.meta.dirname, 'verify-conversation-progressive-reading.mjs'),
+  ...await files(mobileFixture), ...await files(path.join(root, 'apps/mobile/src')),
   path.join(import.meta.dirname, 'candidate-package-resolve.mjs'),
-  path.join(import.meta.dirname, 'probe-process.mjs'), path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'pnpm-lock.yaml'),
+  path.join(import.meta.dirname, 'probe-process.mjs'), path.join(import.meta.dirname, 'package-smoke-context.mjs'),
+  path.join(root, 'apps/desktop/test/helpers/local-runtime-connector.ts'), path.join(root, 'test/fixture-values.mjs'),
+  path.join(root, 'vitest.dist-freshness.ts'), path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'pnpm-lock.yaml'),
+  ...['package.json', 'tsconfig.base.json', 'apps/desktop/package.json', 'apps/desktop/tsconfig.json',
+    'apps/mobile/package.json', 'apps/mobile/tsconfig.json'].map(file => path.join(root, file)),
   ...await files(path.join(root, 'apps/desktop/src')), ...await files(path.join(root, 'packages/client-ui/src')), ...await files(path.join(root, 'packages/core/src')),
-  ...await files(path.join(root, 'packages/core/dist')),
+  ...await files(path.join(root, 'packages/core/dist')), ...await files(path.join(root, 'packages/layout/src')),
   ...(await Promise.all(['identity', 'demand', 'relay', 'git', 'diagnostic-evidence', 'connectors'].flatMap(pkg => ['src', 'dist'].map(directory => files(path.join(root, 'packages', pkg, directory)))))).flat()]
 for (const entry of await fs.readdir(path.join(root, 'packages'), { withFileTypes: true })) {
   if (!entry.isDirectory()) continue
@@ -41,24 +47,35 @@ for (const entry of await fs.readdir(path.join(root, 'packages'), { withFileType
   try { await fs.access(manifest); inputPaths.push(manifest) } catch (error) { if (error.code !== 'ENOENT') throw error }
 }
 const hashes = async () => Object.fromEntries(await Promise.all(inputPaths.map(async file => [path.relative(root, file), hash(await fs.readFile(file))])))
-const loaded = new Map(), cssInputs = {}, emitted = [], transforms = new Map()
+const loaded = [], cssInputs = {}, emitted = [], transforms = new Map()
 const plugin = (browser, variant = 'scheduled') => ({ name: 'exact-conversation-candidate', enforce: 'pre',
   resolveId(specifier) {
     if (!browser && specifier.endsWith('/packages/core/dist/hosted-runtime-service.js')) return { id: path.join(root, 'packages/core/dist/hosted-runtime-service.js'), external: true }
   },
-  transform(code, id) {
+  async transform(code, id) {
     const file = id.split('?')[0]
-    if (path.isAbsolute(file)) candidateModule(root, file)
-    if (file.startsWith(root + path.sep) && !file.includes('/node_modules/')) loaded.set(path.relative(root, file), hash(code))
+    if (!path.isAbsolute(file)) return
+    const actual = candidateModule(root, file)
+    if (!actual.startsWith(root + path.sep) || actual.includes('/node_modules/')) return
+    const key = path.relative(root, actual), query = id.slice(file.length)
+    const kind = query === '' && /\.[cm]?[jt]sx?$/.test(actual) ? 'module' : 'resource'
+    const fileSHA256 = hash(await fs.readFile(actual)), originalSHA256 = hash(code)
+    assert.equal(fileSHA256, receipt.inputs[key], 'An actual first-party build input is absent from or changed after the original inventory: ' + key)
+    if (kind === 'module') assert.equal(originalSHA256, fileSHA256, 'An ordinary original module changed before its recorded transform: ' + key)
+    let returned = code, mutation = null
     if (variant === 'immediate' && file === path.join(root, 'packages/client-ui/src/components/ConversationProgressiveBody.tsx')) {
+      assert.equal(kind, 'module', 'Only the exact ordinary body owner can supply the cost baseline')
       const transformed = immediateFirstMount(code)
-      transforms.set(path.relative(root, file), { file: path.relative(root, file), ...transformed.receipt })
-      return transformed.code
+      transforms.set(key, { file: key, ...transformed.receipt })
+      returned = transformed.code; mutation = 'immediate-first-mount'
     }
+    loaded.push({ path: key, query, kind, browser, variant, fileSHA256, originalSHA256,
+      loadedSHA256: hash(returned), mutation })
+    if (mutation) return returned
   } })
 const priorEnvironment = new Map(['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH'].map(name => [name, process.env[name]]))
 const receipt = { schema: 'agentmux.conversation-progressive-reading.v1', passed: false, sourceBound: false, preparation, compileOnly, anchorAttempts, costPairs,
-  candidate: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim(), phases: [], loaded: {}, cssInputs, visualPaths: [],
+  candidate: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).stdout.trim(), phases: [], loaded: [], cssInputs, visualPaths: [],
   independentVisualReview: 'not-performed', boundary: 'Private real Electron and Runtime; controlled native transcript. This runner records a bounded candidate sample. Repeated baseline comparison, Mobile, physical-device operation and independent aesthetic acceptance are separate evidence.' }
 let client, resolver, mobileBuild
 await fs.mkdir(evidence, { recursive: true })
@@ -75,10 +92,15 @@ try {
     const link = path.join(privateRoot, 'node_modules', name)
     await fs.mkdir(path.dirname(link), { recursive: true }); await fs.symlink(target, link)
   }
-  const status = spawnSync('git', ['status', '--porcelain', '--', 'apps/desktop/src', 'apps/mobile/src', 'packages/core/src', 'packages/client-ui/src', path.relative(root, fixture), path.relative(root, mobileFixture), path.relative(root, import.meta.filename)], { cwd: root, encoding: 'utf8' })
-  assert.equal(status.status, 0); await fs.writeFile(path.join(evidence, 'candidate-status.log'), status.stdout)
+  const bound = new Set(Object.keys(receipt.inputs)), changed = []
+  for (const args of [['diff', '--no-renames', '--name-only', '-z', receipt.candidate, '--'], ['ls-files', '--others', '--exclude-standard', '-z']]) {
+    const status = spawnSync('git', args, { cwd: root, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 })
+    assert.equal(status.status, 0)
+    changed.push(...status.stdout.split('\0').filter(file => file && bound.has(file)))
+  }
+  await fs.writeFile(path.join(evidence, 'candidate-status.log'), JSON.stringify([...new Set(changed)], null, 2) + '\n')
   if (!preparation) {
-    assert.equal(status.stdout.trim(), '', 'Formal qualification requires committed candidate inputs; use --prepare for fixture development')
+    assert.deepEqual(changed, [], 'Formal qualification requires committed exact candidate inputs; use --prepare for fixture development')
     const { assertWorkspaceDistBuiltFromCurrentSource } = await import(pathToFileURL(path.join(root, 'vitest.dist-freshness.ts')).href)
     await assertWorkspaceDistBuiltFromCurrentSource(root)
   }
@@ -115,16 +137,19 @@ try {
   if (mobileFixture && !anchorAttempts && !costPairs) {
     const { buildMobile } = await import(pathToFileURL(path.resolve(mobileFixture, 'build.mjs')).href)
     mobileBuild = await buildMobile({ root, output: path.join(privateRoot, 'renderer') })
+    for (const [file, sha256] of Object.entries(mobileBuild.source)) if (!file.includes('/node_modules/') && !file.startsWith('node_modules/'))
+      assert.equal(sha256, receipt.inputs[file], 'Actual Mobile first-party input was absent from or changed after the original inventory: ' + file)
     receipt.mobileBuild = mobileBuild
   }
-  for (const name of ['App.tsx', 'SessionPane.tsx', 'ActivityView.tsx']) assert.ok([...loaded.keys()].some(file => file.endsWith('/' + name)), 'Actual Desktop consumer not compiled: ' + name)
-  for (const name of ['ConversationView.tsx', 'ConversationMessage.tsx']) assert.ok([...loaded.keys()].some(file => file.endsWith('/' + name)), 'Actual shared consumer not compiled: ' + name)
-  receipt.loaded = Object.fromEntries(loaded)
+  for (const name of ['App.tsx', 'SessionPane.tsx', 'ActivityView.tsx']) assert.ok(loaded.some(value => value.kind === 'module' && value.path.endsWith('/' + name)), 'Actual Desktop consumer not compiled: ' + name)
+  for (const name of ['ConversationView.tsx', 'ConversationMessage.tsx']) assert.ok(loaded.some(value => value.kind === 'module' && value.path.endsWith('/' + name)), 'Actual shared consumer not compiled: ' + name)
+  receipt.loaded = loaded
   for (const directory of ['renderer', 'main', 'preload', ...(costPairs ? ['renderer-immediate'] : [])]) emitted.push(...await files(path.join(privateRoot, directory)))
   receipt.compiled = Object.fromEntries(await Promise.all(emitted.map(async file => [path.relative(privateRoot, file), hash(await fs.readFile(file))])))
   // Register before loading the bundled Main so external Core dependencies obey
   // the same exact checkout instead of following shared node_modules symlinks.
-  await fs.writeFile(path.join(privateRoot, 'bootstrap.mjs'), `import {registerHooks} from 'node:module';import {pathToFileURL} from 'node:url';import {candidateResolve} from ${JSON.stringify(pathToFileURL(path.join(import.meta.dirname, 'candidate-package-resolve.mjs')).href)};registerHooks({resolve(s,c,n){return s.startsWith('@agentmux/')?{url:pathToFileURL(candidateResolve(${JSON.stringify(root)},s)).href,shortCircuit:true}:n(s,c)}});try{await import('./main/main.mjs')}catch(error){process.stderr.write(String(error.stack)+'\\n');const {app}=await import('electron');app.exit(1)};`)
+  const bootstrap = path.join(fixture, 'bootstrap.mjs')
+  receipt.bootstrap = { path: path.relative(root, bootstrap), sha256: hash(await fs.readFile(bootstrap)) }
   resolver = registerHooks({ resolve(specifier, context, next) { return specifier.startsWith('@agentmux/') ? { url: pathToFileURL(candidateResolve(root, specifier)).href, shortCircuit: true } : next(specifier, context) } })
   const Core = await import(pathToFileURL(path.join(root, 'packages/core/dist/index.js')).href)
   const runs = anchorAttempts ? Array.from({ length: anchorAttempts }, (_, index) => ({ scene: 'dense', attempt: index + 1 }))
@@ -140,14 +165,16 @@ try {
     await fs.copyFile(path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(sceneRoot, 'fake-codex-cli.mjs'))
     for (const phase of anchorAttempts || costPairs ? ['seed'] : ['seed', 'restore']) {
       const processRoot = path.join(sceneRoot, 'process-' + phase); await fs.mkdir(processRoot)
-      const env = Object.fromEntries(Object.entries(process.env).filter(([name]) => !/^(AGENTMUX_|CTXMUX_)/u.test(name)))
-      delete env.ELECTRON_RUN_AS_NODE
+      const env = privatePackageSmokeEnvironment(process.env, { userData: path.join(sceneRoot, 'user-data'), runtimeRoot: path.join(sceneRoot, 'runtime') })
+      delete env.AGENTMUX_DESKTOP_READY_FILE; delete env.AGENTMUX_DESKTOP_EXIT_AFTER_READY
+      Object.assign(env, { AGENTMUX_AGENT_SESSION_STORE: path.join(sceneRoot, 'agent-sessions.json'),
+        AGENTMUX_MESSAGE_QUEUE_PATH: path.join(sceneRoot, 'messages.ndjson'), AGENTMUX_SPATIAL_STATE_STORE: path.join(sceneRoot, 'spatial-state.json') })
       const log = [], logFile = path.join(runEvidence, `${scene}-${phase}-stderr.log`)
       await fs.writeFile(logFile, '')
       const resultFile = path.join(runEvidence, `${scene}-${phase}.json`)
       await fs.rm(resultFile, { force: true })
-      const exit = await runProbeProcess(electron, [path.join(privateRoot, 'bootstrap.mjs'), path.join(privateRoot, variant === 'immediate' ? 'renderer-immediate/index.html' : 'renderer/index.html'), sceneRoot, phase,
-        path.join(privateRoot, 'preload/preload.cjs'), runEvidence, process.execPath, scene, mobileBuild?.exercise ?? '', mobileBuild?.preload ?? '', costPairs ? 'cost' : anchorAttempts ? 'anchor' : 'acceptance'],
+      const exit = await runProbeProcess(electron, [bootstrap, path.join(privateRoot, variant === 'immediate' ? 'renderer-immediate/index.html' : 'renderer/index.html'), sceneRoot, phase,
+        path.join(privateRoot, 'preload/preload.cjs'), runEvidence, process.execPath, scene, mobileBuild?.exercise ?? '', mobileBuild?.preload ?? '', costPairs ? 'cost' : anchorAttempts ? 'anchor' : 'acceptance', path.join(privateRoot, 'main/main.mjs'), root],
       { temporaryRoot: processRoot, cwd: root, env, timeoutMs: 180000, onLine: line => { log.push(line); void fs.appendFile(logFile, line + '\n') } })
       await fs.writeFile(logFile, log.join('\n'))
       assert.equal(exit.timedOut, false, `${scene}/${phase}: private watchdog fired; read its stderr log`)
@@ -175,6 +202,7 @@ try {
   receipt.sourceBound = !preparation
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack } }
 finally {
+  receipt.loaded = loaded; receipt.transforms = [...transforms.values()]
   // Failed interaction evidence still records exactly which compiled inputs
   // stayed unchanged. A missing final hash must never conceal source drift.
   try {
