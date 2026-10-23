@@ -5,7 +5,7 @@ import { copyFile, readdir } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 const root = resolve(import.meta.dirname, '..')
 await buildWorkspaceMoveHelper()
-await build({ entryPoints: ['index', 'mote-resources', 'mote-chat-agents', 'mote-model', 'credential-encryption', 'credential-administration'].map(name => resolve(root, 'src', name + '.ts')),
+await build({ entryPoints: ['index', 'mote-resources', 'mote-chat-agents', 'mote-model', 'credential-administration'].map(name => resolve(root, 'src', name + '.ts')),
   outdir: resolve(root, 'dist'), bundle: true, packages: 'external', platform: 'node', format: 'esm', target: 'node24' })
 await new Promise((yes, no) => {
   const child = spawn(process.execPath, [resolve(root, 'node_modules/typescript/bin/tsc'), '--emitDeclarationOnly', '-p', resolve(root, 'tsconfig.json')],

@@ -15,7 +15,7 @@ import { MoteChatHost, composeMoteChatBindings, type MoteChatAgentPort } from '.
 import { createBuiltinConnectionAdapters } from './platform-adapters.js'
 import type { ChannelMetadataChange, ConnectionPort } from '@agentmux/core/connections'
 import type { MoteChatPort, MoteChatTarget } from '@agentmux/core/mote-chat'
-import { ConnectionSecrets, type CredentialEncryption } from './connection-secrets.js'
+import { ConnectionSecrets } from './connection-secrets.js'
 
 export type ConnectionServices = {
   connections: ConnectionPort
@@ -32,7 +32,7 @@ export type ConnectionServices = {
 }
 type LiveServices = { lease?: number; database: DatabaseSync; connections: ConnectionHost; secrets: ConnectionSecrets; bindings?: RoomBindingHost; rooms?: RoomProvisioningHost; publication?: PublicationHost; ingress?: DurableIngressHost; receivers?: ConnectionReceivers; moteChat?: MoteChatHost }
 /** Optional failure stays local. A later exact operation retries storage on the same Host and database. */
-export async function createConnectionServices(options: { directory: string; encryption: CredentialEncryption | ((database: DatabaseSync) => CredentialEncryption); adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; ingress?: Pick<DurableIngressOptions, 'core'>; moteChat?: { agents: MoteChatAgentPort; assertTarget(target: MoteChatTarget): Promise<void>; assertReady?(target: MoteChatTarget): Promise<void> } }): Promise<ConnectionServices> {
+export async function createConnectionServices(options: { directory: string; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; ingress?: Pick<DurableIngressOptions, 'core'>; moteChat?: { agents: MoteChatAgentPort; assertTarget(target: MoteChatTarget): Promise<void>; assertReady?(target: MoteChatTarget): Promise<void> } }): Promise<ConnectionServices> {
   const adapters = options.adapters ?? createBuiltinConnectionAdapters()
   let live: LiveServices | undefined, opening: Promise<LiveServices> | undefined, closed = false
   const metadataListeners = new Set<(change: ChannelMetadataChange) => void>()
@@ -44,6 +44,7 @@ export async function createConnectionServices(options: { directory: string; enc
       let database: DatabaseSync | undefined, lease: number | undefined, publication: PublicationHost | undefined, ingress: DurableIngressHost | undefined, receivers: ConnectionReceivers | undefined
       try {
         await mkdir(options.directory, { recursive: true, mode: 0o700 })
+        await chmod(options.directory, 0o700)
         if (options.ingress || options.publication) {
           const fd = openSync(join(options.directory, 'connections.owner.lock'), 'a+', 0o600)
           const native = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
@@ -54,8 +55,7 @@ export async function createConnectionServices(options: { directory: string; enc
         }
         const path = join(options.directory, 'connections.sqlite')
         database = new DatabaseSync(path); await chmod(path, 0o600)
-        const encryption = typeof options.encryption === 'function' ? options.encryption(database) : options.encryption
-        const secrets = new ConnectionSecrets(database, encryption)
+        const secrets = new ConnectionSecrets(database)
         const connections = new ConnectionHost({ database, secrets, adapters })
         connections.onChannelMetadataChanged(relayMetadata)
         const publicationStore = options.publication ? new PublicationStore(database) : undefined
@@ -141,6 +141,7 @@ export async function createConnectionServices(options: { directory: string; enc
         inspect: async input => (await ensure()).connections.service.inspect(input)
       },
       metadata: {
+        watch: async (changed, ended, context) => (await ensure()).connections.metadata.watch(changed, ended, context),
         get: async (input, context) => (await ensure()).connections.metadata.get(input, context),
         list: async (input, context) => (await ensure()).connections.metadata.list(input, context),
         refresh: async (input, context) => (await ensure()).connections.metadata.refresh(input, context),
