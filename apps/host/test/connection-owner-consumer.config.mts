@@ -7,10 +7,12 @@ import { defineConfig } from 'vitest/config'
 const root = resolve(import.meta.dirname, '../../..')
 const connectorRequire = createRequire(resolve(root, 'packages/connectors/package.json'))
 const variants = {
-  'desktop-required-for-local-input': ['apps/host/src/connections.ts', "hostId === 'local' ? runtime!.client : remoteIngress(hostId)", "hostId === 'local' ? undefined : remoteIngress(hostId)"],
+  'desktop-required-for-local-input': ['apps/host/src/connections.ts', "hostId === 'local' ? runtime!.client : remoteIngress(hostId, executionRuntimeId)", "hostId === 'local' ? undefined : remoteIngress(hostId, executionRuntimeId)"],
+  'client-connection-guard-lost': ['apps/host/src/host.ts', 'if (isConnectionMethod(method) || isMoteConnectionMethod(method) || isMoteChatMethod(method) ||', 'if (false || false || false ||'],
   'publication-loses-original-core': ['apps/host/src/connections.ts', 'const publication = createPublicationConversationPort(clients)', 'const publication = createPublicationConversationPort(() => [])'],
   'authority-loses-original-ingress': ['apps/host/src/external-input-authority.ts', 'const result = await ingress.recordAuthority(input)', "throw new AgentMuxError('Mutated original authority', 'EXTERNAL_RECORD_TARGET_UNCONFIRMED'); const result = await ingress.recordAuthority(input)"],
-  'host-rejoin-requires-desktop': ['apps/host/src/host.ts', 'options.externalInputAuthority ?? connectionOwner?.authority ?? createDesktopExternalInputAuthority', 'options.externalInputAuthority ?? undefined ?? createDesktopExternalInputAuthority'],
+  'host-rejoin-requires-desktop': ['apps/host/src/host.ts', 'options.externalInputAuthority ?? connectionOwner?.authority', 'options.externalInputAuthority'],
+  'implicit-client-authority-restored': ['apps/host/src/host.ts', 'options.externalInputAuthority ?? connectionOwner?.authority', "options.externalInputAuthority ?? connectionOwner?.authority ?? (await import('../../../packages/connectors/test/helpers/rpc-external-input-authority.js')).createRpcExternalInputAuthority({ socketPath: desktopPath, executionHostId: 'local' })"],
   'flush-aborts-owner-release': ['apps/host/src/host.ts', 'try { await close() } catch (error) { errors.push(error) }', 'try { await close() } catch (error) { throw error }'],
   'unknown-request-replayed': ['packages/connectors/src/publication-store.ts', "if (original.state !== 'not-applied') throw new AgentMuxError", 'if (false) throw new AgentMuxError']
 } as const
@@ -43,5 +45,5 @@ export default defineConfig({ root, plugins: [{ name: 'actual-host-owner-source'
     const dist = resolve(dirname(importer), source).match(/\/packages\/(core|connectors)\/dist\/(.+)\.js$/u)
     if (dist) return resolve(root, 'packages', dist[1]!, 'src', dist[2]! + '.ts')
   }
-}], test: { include: ['apps/host/test/connection-owner-consumer.test.ts'], environment: 'node', fileParallelism: false,
+}], test: { include: process.env.HOST_CONNECTION_BRIDGE_SLICE ? ['apps/host/test/connection-owner-consumer.test.ts', 'apps/host/test/host-connection-boundary.test.ts'] : ['apps/host/test/connection-owner-consumer.test.ts'], environment: 'node', fileParallelism: false,
   passWithNoTests: false, testTimeout: 35_000, hookTimeout: 15_000 } })
