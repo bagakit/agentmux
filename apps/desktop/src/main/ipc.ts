@@ -136,7 +136,6 @@ import {
   ipcMain,
   nativeImage,
   nativeTheme,
-  safeStorage,
   shell,
   type BrowserWindow,
   type IpcMainEvent,
@@ -2417,7 +2416,7 @@ export async function registerIpc(args: {
   })
   const connectorServices = await createConnectionServices({ directory: process.env.AGENTMUX_DESKTOP_USER_DATA === undefined
     ? join(homedir(), '.agentmux', 'connectors')
-    : join(app.getPath('userData'), 'connectors'), encryption: safeStorage, moteChat: { agents: moteChatAgents, assertTarget: moteChatAgents.assertTarget, assertReady: moteChatAgents.assertReady },
+    : join(app.getPath('userData'), 'connectors'), moteChat: { agents: moteChatAgents, assertTarget: moteChatAgents.assertTarget, assertReady: moteChatAgents.assertReady },
     publication: createPublicationConversationPort(() => args.runtime.rpcClients()),
     ingress: { core: createHostedIngressCorePort(() => args.runtime.rpcClients()) },
     bindings: { spatial: spatialState, checkpoint: async (reference: import("@agentmux/core/conversation").ConversationRef) => {

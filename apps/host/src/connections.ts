@@ -5,9 +5,10 @@ import type { ConnectionPort } from '@agentmux/core/connections'
 import type { MoteChatPort } from '@agentmux/core/mote-chat'
 import { createConnectionExternalInputAuthority } from './external-input-authority.js'
 import { createHostMoteChat } from './mote-chat.js'
+import { createCredentialAdministration } from './credential-administration.js'
 
 type ExecutionClient = AgentMuxClient | AgentMuxHostedClient
-export type HostConnectionOptions = Pick<Parameters<typeof createConnectionServices>[0], 'directory' | 'encryption' | 'adapters' | 'moteChat'> & {
+export type HostConnectionOptions = Pick<Parameters<typeof createConnectionServices>[0], 'directory' | 'adapters' | 'moteChat'> & {
   spatial?: AgentMuxSpatialStateStore
   /** Original profile/workspace configuration; read on demand, never a copied Host snapshot. */
   moteConfigurationPath?: string
@@ -46,6 +47,7 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
   }) : undefined)
   const services = async () => {
     if (closed || !runtime) throw new AgentMuxError('The original Host connection owner is not available. Original records and healthy Agents are retained.', 'CONTROL_UNAVAILABLE')
+    const target = runtime.ownerIdentity()
     return await (opened ??= createConnectionServices({ ...options, ...(moteChat ? { moteChat } : {}),
       bindings: {
         spatial,
@@ -61,6 +63,9 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
       // Local calls retain the original in-process authority callback, including rejoin.
       // Remote clients preserve the existing public endpoint admission contract.
       ingress: { core: hostId => hostId === 'local' ? runtime!.client : remoteIngress(hostId) }
+    }).then(owner => {
+      owner.connections.credential = createCredentialAdministration({ target, secrets: owner.secrets })
+      return owner
     }))
   }
   const connections = servicePort<ConnectionPort>(async () => (await services()).connections)
