@@ -1,3 +1,5 @@
+import { useMoteSpace } from './MoteSpaceFrame'
+import { useSpaceContentPresentation } from '../lib/space-content-presentation'
 import { WorkspaceCollaboration } from './WorkspaceCollaboration'
 import { scratchTopicsForConfig } from '../lib/scratch-topic-snapshots'
 import { WorkspaceAgentRow } from './WorkspaceAgentRow'
@@ -245,6 +247,8 @@ export function SurfaceToolDock({
   workspace: WorkspaceRecord | undefined
   visible?: boolean
 }) {
+  const moteSpace = useMoteSpace()
+  const presentation = useSpaceContentPresentation()
   const workspaceTool = useAppStore((state) => state.workspaceTool)
   const preferredProjects = useAppStore((state) => state.projectRailOpen)
   const projectRailOpen = useContext(WindowSidebarLayoutContext)?.projectRailOpen ?? preferredProjects
@@ -279,10 +283,11 @@ export function SurfaceToolDock({
       })
   const selectedTool = fileEditingProbe ? 'files-branches' : effectiveWorkspaceTool
   const activePaneId = layout?.activeGroupId
+  const showTools = !(moteScope && presentation?.expanded)
   return (
-    <aside className="surface-tool-panel" aria-label="Space tools">
-      <header className={`surface-tool-activitybar surface-tool-activitybar--space ${projectRailOpen ? '' : 'surface-tool-activitybar--compact-chrome'}`}>
-        {!projectRailOpen ? <SidebarToggleChrome /> : null}
+    <aside className="surface-tool-panel" data-tools-header={showTools} aria-label="Space tools">
+      <header hidden={!showTools} className={`surface-tool-activitybar surface-tool-activitybar--space ${projectRailOpen ? '' : 'surface-tool-activitybar--compact-chrome'}`}>
+        {!projectRailOpen && !moteSpace ? <SidebarToggleChrome /> : null}
         <nav aria-label="Space tool selection">
           <LiquidSelectionSurface selected={selectedTool} active={visible} targetAttribute="data-space-tool" />
           {tools.map((tool) => {

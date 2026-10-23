@@ -41,6 +41,8 @@
 .surface-tool-width-handle:hover::after,
 .surface-tool-width-handle:focus-visible::after { background: var(--green-2); }
 .surface-tool-panel { height: 100%; min-width: 0; min-height: 0; display: grid; grid-template-rows: 36px minmax(0, 1fr); background: var(--surface-1); }
+.surface-tool-panel[data-tools-header="false"] { grid-template-rows: minmax(0, 1fr); }
+.surface-tool-activitybar[hidden] { display: none; }
 .surface-tool-activitybar { min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap:var(--sp-3); padding:0 var(--sp-3) 0 var(--sp-2); overflow: visible; background: var(--surface-1); }
 .surface-tool-activitybar--compact-chrome { grid-template-columns: auto minmax(0, 1fr); gap:var(--sp-2); padding:0 var(--sp-2) 0 0; }
 .surface-tool-activitybar--compact-chrome > .sidebar-toggle-chrome { width: auto; height: auto; flex: 0 0 auto; gap:var(--sp-1); padding-top:0; padding-right:0; padding-bottom:0; background:transparent; box-shadow:none; }
