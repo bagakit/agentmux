@@ -1,3 +1,4 @@
+import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useContext, useRef } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { RoomBinding } from '@agentmux/core/connections'
@@ -16,16 +17,16 @@ type RoomName = ReturnType<typeof useConnectorRoomName>
 type Selection = { kind: 'binding'; binding: RoomBinding } | { kind: 'connect' | 'settings' }
 
 /** One connection entry projects the original Session's relations and supported setup actions. */
-export function ConnectorHeaderLinks({ bindings, issue, checking, retainedSetup, syncEnabled, nameVersion, visible, onOpen, onConnect, onMenuOpen, onSettings }: {
-  bindings: RoomBinding[]; issue: string; checking: boolean; retainedSetup: boolean; syncEnabled: boolean | null; nameVersion: number; visible: boolean
+export function ConnectorHeaderLinks({ bindings, issue, checking, retainedSetup, syncEnabled, nameVersion, visible, hostingTarget, onOpen, onConnect, onMenuOpen, onSettings }: {
+  bindings: RoomBinding[]; issue: string; checking: boolean; retainedSetup: boolean; syncEnabled: boolean | null; nameVersion: number; visible: boolean; hostingTarget?: ConnectionHostingTarget | null
   onOpen(binding: RoomBinding, trigger: HTMLElement): void; onConnect(trigger: HTMLElement): void; onMenuOpen(open: boolean): void; onSettings?(trigger: HTMLElement): void
 }) {
   const navigation = useContext(SettingsNavigation)
   const platform = (binding: RoomBinding) => navigation?.channelPresentation(binding.application)?.title ?? binding.application.domain
   const trigger = useRef<HTMLButtonElement>(null), selected = useRef<Selection | null>(null), handingOff = useRef(false)
   const unconfirmed = !!issue
-  const only = bindings.length === 1 ? bindings[0]! : null, name = useConnectorRoomName(only, nameVersion, visible)
-  const diagnosis = useConnectorGroupDiagnosis(bindings, nameVersion, visible, syncEnabled)
+  const only = bindings.length === 1 ? bindings[0]! : null, name = useConnectorRoomName(only, nameVersion, visible, hostingTarget)
+  const diagnosis = useConnectorGroupDiagnosis(bindings, nameVersion, visible, syncEnabled, hostingTarget)
   const platformCounts = new Map<string, number>()
   for (const binding of bindings) platformCounts.set(platform(binding), (platformCounts.get(platform(binding)) ?? 0) + 1)
   const state = (binding: RoomBinding) => {
@@ -61,7 +62,7 @@ export function ConnectorHeaderLinks({ bindings, issue, checking, retainedSetup,
       onCloseAutoFocus={event => { if (handingOff.current) event.preventDefault(); handingOff.current = false }}>
       <DropdownMenu.Label className="connector-header-menu__title">Connections</DropdownMenu.Label>
       {bindings.length ? bindings.map(binding => {
-        const props = { binding, visible, state: state(binding), snapshot: diagnosis.entries[connectorDiagnosisKey(binding)], distinguish: platformCounts.get(platform(binding))! > 1,
+        const props = { binding, visible, hostingTarget, state: state(binding), snapshot: diagnosis.entries[connectorDiagnosisKey(binding)], distinguish: platformCounts.get(platform(binding))! > 1,
           description: description(binding), onSelect: () => { selected.current = { kind: 'binding', binding } } }
         return only ? <ConnectorHeaderItem key={binding.bindingId} {...props} name={name} /> : <NamedConnectorHeaderItem key={binding.bindingId} {...props} />
       }) : <p className="connector-header-menu__empty">{checking ? 'Checking saved connections…' : unconfirmed ? 'Saved connections could not be checked.' : 'No external conversations connected.'}</p>}
@@ -75,9 +76,9 @@ export function ConnectorHeaderLinks({ bindings, issue, checking, retainedSetup,
   </DropdownMenu.Root>
 }
 
-type ItemProps = { binding: RoomBinding; visible: boolean; state: string; snapshot: CheckedGroupDiagnosis | undefined; distinguish: boolean; description: string; onSelect(): void }
+type ItemProps = { hostingTarget?: ConnectionHostingTarget | null | undefined; binding: RoomBinding; visible: boolean; state: string; snapshot: CheckedGroupDiagnosis | undefined; distinguish: boolean; description: string; onSelect(): void }
 function NamedConnectorHeaderItem(props: ItemProps) {
-  return <ConnectorHeaderItem {...props} name={useConnectorRoomName(props.binding, 0, props.visible)} />
+  return <ConnectorHeaderItem {...props} name={useConnectorRoomName(props.binding, 0, props.visible, props.hostingTarget)} />
 }
 function ConnectorHeaderItem({ binding, state, snapshot, distinguish, description, onSelect, name }: ItemProps & { name: RoomName }) {
   const platform = useContext(SettingsNavigation)?.channelPresentation(binding.application)?.title ?? binding.application.domain

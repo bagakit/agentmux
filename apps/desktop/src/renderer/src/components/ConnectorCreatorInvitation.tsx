@@ -1,3 +1,4 @@
+import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useEffect, useState } from 'react'
 import type { ConnectionProfileObservation, ConnectionRecord } from '@agentmux/core/connections'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -6,14 +7,14 @@ import { api } from '../lib/api'
 const LoadingIcon = semanticIconComponent('status.loading')
 
 /** One visible form reads the selected application's creator; submitted members stay in the original room intent. */
-export function useConnectorCreatorInvitation(connection: ConnectionRecord | undefined, active: boolean) {
-  const key = active && connection ? JSON.stringify([connection.config.connectionId, connection.revision, connection.config.application]) : ''
+export function useConnectorCreatorInvitation(connection: ConnectionRecord | undefined, active: boolean, hostingTarget?: ConnectionHostingTarget | null) {
+  const key = active && connection && hostingTarget !== null ? JSON.stringify([connection.config.connectionId, connection.revision, connection.config.application, hostingTarget]) : ''
   const [read, setRead] = useState<{ key: string; observation: ConnectionProfileObservation | null } | null>(null)
   const [choice, setChoice] = useState<{ key: string; include: boolean } | null>(null)
   useEffect(() => {
     if (!key || !connection) return
     let current = true
-    void api.connections.call('connection.profile.get', { connectionId: connection.config.connectionId, expectedConnectionRevision: connection.revision })
+    void api.connections.call('connection.profile.get', { connectionId: connection.config.connectionId, expectedConnectionRevision: connection.revision }, hostingTarget ?? undefined)
       .then(observation => { if (current) setRead({ key, observation }) })
       .catch(() => { if (current) setRead({ key, observation: null }) })
     return () => { current = false }

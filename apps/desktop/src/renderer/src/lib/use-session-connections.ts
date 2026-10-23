@@ -1,3 +1,4 @@
+import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useEffect, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { RoomBinding, RoomBindingTarget } from '@agentmux/core/connections'
@@ -7,17 +8,21 @@ import { observeConnectorTarget } from './connector-room-intent'
 /** A visible Session reads its original relationships; no directory, polling or durable projection. */
 export function useSessionConnections(target: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>, visible: boolean) {
   const identity = JSON.stringify([target.executionHostId, target.agentSessionId])
-  const [read, setRead] = useState<{ identity: string; bindings: RoomBinding[]; issue: string; loading: boolean; version: number } | null>(null)
+  const [read, setRead] = useState<{ identity: string; bindings: RoomBinding[]; hostingTarget: ConnectionHostingTarget | null; issue: string; loading: boolean; version: number } | null>(null)
   useEffect(() => {
     if (!visible) return
     let live = true, generation = 0
     const refresh = () => {
       const request = ++generation
-      setRead(previous => previous?.identity === identity ? { ...previous, loading: true } : { identity, bindings: [], issue: '', loading: true, version: 0 })
-      void api.connections.call('connection.binding.ls', target).then(value => {
-        if (live && request === generation) setRead({ identity, bindings: value.bindings, issue: '', loading: false, version: request })
+      setRead(previous => previous?.identity === identity ? { ...previous, loading: true } : { identity, bindings: [], hostingTarget: null, issue: '', loading: true, version: 0 })
+      void (async () => {
+        const hostingTarget = await api.connections.hostingTarget()
+        const value = await api.connections.call('connection.binding.ls', target, hostingTarget)
+        return { value, hostingTarget }
+      })().then(({ value, hostingTarget }) => {
+        if (live && request === generation) setRead({ identity, bindings: value.bindings, hostingTarget, issue: '', loading: false, version: request })
       }).catch(error => {
-        if (live && request === generation) setRead(previous => ({ identity, bindings: previous?.identity === identity ? previous.bindings : [],
+        if (live && request === generation) setRead(previous => ({ identity, hostingTarget: previous?.identity === identity ? previous.hostingTarget : null, bindings: previous?.identity === identity ? previous.bindings : [],
           issue: presentError(error), loading: false, version: previous?.identity === identity ? previous.version : 0 }))
       })
     }
