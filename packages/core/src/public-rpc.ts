@@ -202,7 +202,7 @@ export type AgentMuxRpcOutputInitial = {
   session: ReturnType<AgentMuxClient['agentSession']>
 } & Pick<Awaited<ReturnType<AgentMuxClient['observeAgentOutput']>>['attachment'],
   'run' | 'gap' | 'terminal' | 'resizeRevision'>
-type NativeParams = CapsuleParamsMap & ApplicationAccessParameterMap & MoteChatParamsMap & MoteConnectionParamsMap & GoalDelegationParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & AppWindowParamsMap & ScheduleParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
+type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInputRequest } & CapsuleParamsMap & ApplicationAccessParameterMap & MoteChatParamsMap & MoteConnectionParamsMap & GoalDelegationParamsMap & MoteAvatarParameterMap & TopicParameterMap & ConnectionParamsMap & HostSettingsParameterMap & FileParameterMap & GitParameterMap & AppWindowParamsMap & ScheduleParamsMap & AgentMuxRpcDeviceParameterMap & AgentMuxHostedRuntimeParameterMap & {
   'settings.appearance.watch': Record<string, never>
   'notebook.ls': Record<string, never>
   'notebook.inspect': { notebookId?: string; noteId?: string; operationId?: string; content?: boolean; maxBytes?: number }
@@ -284,7 +284,7 @@ type NativeParams = CapsuleParamsMap & ApplicationAccessParameterMap & MoteChatP
   'system.endpoint': Record<string, never>
   'system.subscription.cancel': { subscriptionId: string }
 }
-type NativeResult = CapsuleResultMap & ApplicationAccessResultMap & MoteChatResultMap & MoteConnectionResultMap & GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & ConnectionResultMap & HostSettingsResultMap & FileResultMap & GitResultMap & AppWindowResultMap & ScheduleResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
+type NativeResult = { 'capsule.input': import('./capsule-input.js').CapsuleInputResult } & CapsuleResultMap & ApplicationAccessResultMap & MoteChatResultMap & MoteConnectionResultMap & GoalDelegationResultMap & MoteAvatarResultMap & TopicResultMap & ConnectionResultMap & HostSettingsResultMap & FileResultMap & GitResultMap & AppWindowResultMap & ScheduleResultMap & AgentMuxRpcDeviceResultMap & AgentMuxHostedRuntimeResultMap & {
   'settings.appearance.watch': never
   'notebook.ls': { state: import('./notebook-catalog.js').NotebookState }
   'notebook.inspect': { state: import('./notebook-catalog.js').NotebookState; notebook: import('./notebook-catalog.js').Notebook | null; pages: import('./notebook-catalog.js').NotebookPage[]; trail: import('./notebook-catalog.js').NoteTrailEvent[]; recordedOperation: import('./notebook-catalog.js').NotebookState['operations'][string] | null; storageOperation?: import('./notes-storage.js').NotesStorageOperation | null; resourceChanges?: import('./notes-storage.js').NotesResourceChange[]; conversionIssues?: import('./notes-storage.js').NotesConversionIssue[]; titleOperation?: import('./note-title.js').NoteTitleInspection; content?: import('./notebook-observation.js').NoteContentObservation }
@@ -382,6 +382,7 @@ export type AgentMuxRpcSpacePresentation = {
 
 export const AGENTMUX_RPC_NATIVE_METHODS = {
   ...CAPSULE_METHODS,
+  'capsule.input': 'long',
   ...MOTE_CHAT_RPC_METHODS,
   ...MOTE_CONNECTION_RPC_METHODS,
   ...GOAL_DELEGATION_METHODS,
