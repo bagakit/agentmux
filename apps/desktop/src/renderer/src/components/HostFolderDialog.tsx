@@ -3,6 +3,7 @@ import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
+import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
@@ -35,7 +36,7 @@ export function HostFolderDialog({ hostId, label, onClose }: { hostId: string; l
         <header className="confirmation-dialog__heading"><ThemeObjectFolderOpenIcon size={15} /><Dialog.Title className="confirmation-dialog__title">Open Folder · {label}</Dialog.Title>
           <Dialog.Close className="icon-button" disabled={busy} aria-label="Close folder editor"><ThemeActionCloseIcon size={14} /></Dialog.Close></header>
         <Dialog.Description className="confirmation-dialog__description">Open a directory on {label}.</Dialog.Description>
-        <form onSubmit={event => { event.preventDefault(); void open() }}>
+        <form onSubmit={event => { event.preventDefault(); void open() }} onKeyDown={event => { if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event)) event.preventDefault() }}>
           <label className="project-group-dialog__name">Folder path<TextInput autoFocus value={path} disabled={busy} onChange={event => setPath(event.target.value)} placeholder="Project directory" /></label>
           {issue ? <p role="alert" className="project-group-dialog__issue">{issue}</p> : null}
           <footer><button type="button" className="small-button" disabled={busy} onClick={onClose}>Cancel</button>
