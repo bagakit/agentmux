@@ -1,3 +1,4 @@
+import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useEffect, useRef, useState } from 'react'
 import { connectionSetupDecisionForAction, type ConnectionSetupAdvance, type ConnectionSetupAuthenticationAction, type ConnectionSetupConfigurationAction, type ConnectionSetupView } from '@agentmux/core/connections'
 import type { MoteConnectionOperation } from '@agentmux/core/mote-connections'
@@ -63,8 +64,8 @@ export function ConsoleProfileProgress({ progress, started, sourceConfirmed, unc
 }
 
 /** A disposable reader of the original management task. All progression belongs to Setup. */
-export function MoteProfileSetup({ operation, automatic, onOperation }: {
-  operation: MoteConnectionOperation; automatic: boolean; onOperation(value: MoteConnectionOperation): void
+export function MoteProfileSetup({ operation, hostingTarget, automatic, onOperation }: {
+  operation: MoteConnectionOperation; hostingTarget: ConnectionHostingTarget; automatic: boolean; onOperation(value: MoteConnectionOperation): void
 }) {
   const id = operation.setupOperationId!, parentId = operation.operationId
   const [reading, setReading] = useState<{ view: ConnectionSetupView | null; issue: string; issueSource?: 'inspect' | 'advance' }>({ view: null, issue: '' })
@@ -88,7 +89,7 @@ export function MoteProfileSetup({ operation, automatic, onOperation }: {
     if (manual) setManualPending(count => count + 1)
     setChecking(true)
     try {
-      const value = await api.connections.call('connection.setup.inspect', { operationId: id })
+      const value = await api.connections.call('connection.setup.inspect', { operationId: id }, hostingTarget)
       if (active.current && request === sequence.current) { accept(value); setChecked(true) }
     } catch (error) { if (active.current && request === sequence.current) setReading(previous => previous.issueSource === 'advance' ? previous : { ...previous, issue: presentError(error), issueSource: 'inspect' }) }
     finally { if (active.current) { if (request === sequence.current) setChecking(false); if (manual) setManualPending(count => count - 1) } }
@@ -99,7 +100,7 @@ export function MoteProfileSetup({ operation, automatic, onOperation }: {
     try {
       const receipt = await api.moteConnections.call('space.mote.connection.advance', {
         operationId: parentId, ...(setup ? { setup } : {})
-      })
+      }, hostingTarget)
       if (!active.current) return
       const authentication = receipt.setup?.authentication
       const stillWaiting = authentication?.request === 'confirmed' && authentication.secureStorage === 'stored' && (authentication.stage === 'waiting' || authentication.stage === 'scanned')
@@ -197,6 +198,6 @@ export function MoteProfileSetup({ operation, automatic, onOperation }: {
       <p className="mote-profile-scope">Updates this same bot using the saved Mote profile. Its current audience is kept. Other Motes and groups sharing the bot will see the published change.</p>
       <details className="bot-profile-details"><summary>Original update details</summary><dl className="connector-identity"><div><dt>Application</dt><dd><code>{operation.connection?.application.appId}</code></dd></div><div><dt>Management request</dt><dd><code>{id}</code></dd></div>{progress?.versionId ? <div><dt>Original version</dt><dd><code>{progress.versionId}</code></dd></div> : null}</dl></details>
     </div>
-    <ConnectionRequestTrace source={{ kind: 'setup', operationId: id }} revision={reading.view?.operation?.revision} setupView={reading.view} diagnosisTarget={{ kind: 'mote', operationId: parentId, sourceTarget: operation.source.target, action: 'sync' }} title="Profile update requests" />
+    <ConnectionRequestTrace hostingTarget={hostingTarget} source={{ kind: 'setup', operationId: id }} revision={reading.view?.operation?.revision} setupView={reading.view} diagnosisTarget={{ kind: 'mote', operationId: parentId, sourceTarget: operation.source.target, action: 'sync' }} title="Profile update requests" />
   </div>
 }

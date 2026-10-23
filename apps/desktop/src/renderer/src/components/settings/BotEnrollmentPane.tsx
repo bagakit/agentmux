@@ -17,7 +17,7 @@ import type {
 } from '@agentmux/core/connections'
 import { api } from '../../lib/api'
 import { setBotTaskSelection, useAppStore } from '../../store'
-import { botTaskSelectionKey } from '../../lib/bot-task-selection'
+import { botTaskSelectionKey, readBotTaskLocator } from '../../lib/bot-task-selection'
 import { SelectionField } from '../SelectionField'
 import { ConnectionSetupResult } from './ConnectionSetupResult'
 import { BrandIcon } from '../BrandIcon'
@@ -65,7 +65,7 @@ export function useBotEnrollment(active: boolean) {
   const [next, setNext] = useState<string | null>(null)
   const [catalogState, setCatalogState] = useState<'initial' | 'reading' | 'ready' | 'unconfirmed'>('initial')
   const [progressIssue, setProgressIssue] = useState<{ id: string; text: string } | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(() => useAppStore.getState().botTaskSelections[botTaskSelectionKey({ kind: 'enrollment' })] ?? null)
+  const [selectedId, setSelectedId] = useState<string | null>(() => readBotTaskLocator(useAppStore.getState().botTaskSelections[botTaskSelectionKey({ kind: 'enrollment' })])?.operationId ?? null)
   const [checkingId, setChecking] = useState<string | null>(selectedId)
   const [issuer, setIssuer] = useState(''),
     [label, setLabel] = useState(generatedBotName)
