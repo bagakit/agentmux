@@ -10,9 +10,13 @@ import { checkInHumanObservation, type CheckInObservation } from './agent-schedu
 import { isAbsolute } from 'node:path'
 import { AgentMuxError, readRoutedInputMailbox, createInputPerformanceRecorder, hostedCarrierPerformance, parseAgentNativeResumeSource, hostAgentCreationIntent, type AgentMuxHostAgentCreateInput, AGENTMUX_AGENT_MESSAGING_ENTRY, agentPromptPredecessor, agentPromptNotApplied, validateAgentPromptCondition, validateAgentPromptInputBinding, type AgentPromptCondition, type AgentPromptInputBinding, type AgentInputSubmissionReceipt, type AgentPromptExecution, type AgentMessageChannel, type AgentSessionQuestionReplyReceipt, type AgentMuxRpcCallContext, type AgentMuxNativeSessionConfirmationInput, type AgentMuxNativeSessionConfirmation, runtimeStorageUsage, loadSessionHistorySources, agentInteractionResponseUnavailableReason, agentInteractionActiveRequest, type AgentCapabilities, type AgentCatalogEntry, type AgentExecutorId, type AgentProviderId, type AgentSessionHistoryPage, type AgentMuxSshHostedClient, type AgentSessionHistoryDescriptor, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult, type AgentSessionHistoryObservation, type AgentSessionHistoryObservationHandle, type AgentMuxClientEvent, type AgentMuxInteractionResponse, type AgentMuxAgentSessionStore, type AgentMuxRun, type AgentMuxRunInputData, type AgentMuxAgentWriteInput, type AgentMuxRuntimeSubject, type AgentMuxRuntimeSubjectTarget, type ExecutionHost } from '@agentmux/core'
 import { type AgentMuxAgentResumeInput } from '@agentmux/core/agent-session-recovery'
-import { callOriginalDesktopHost } from './desktop-host.js'
-import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
+import { callOriginalDesktopHost, subscribeOriginalDesktopHost } from './desktop-host.js'
+import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRpcSubscriptionOptions, AgentMuxRpcSubscription } from '@agentmux/core'
 import type { ConnectionMethod } from '@agentmux/core/connections'
+import type { MoteConnectionMethod } from '@agentmux/core/mote-connections'
+import type { MoteChatMethod } from '@agentmux/core/mote-chat'
+
+export type ConnectionHostMethod = ConnectionMethod | MoteConnectionMethod | MoteChatMethod | 'space.mote.preferences.read' | 'space.mote.preferences.save'
 import type { ConnectionHostingTarget } from '../shared/contracts.js'
 import type { DesktopRuntimeClient as AgentMuxClient, DesktopRuntimeConnector } from './desktop-host.js'
 // 进程事实的投影走那个 node-free 子路径，与 renderer 侧的实时路径**同一个**实现。走子路径而不是包根，
@@ -2492,16 +2496,67 @@ export class RuntimeController {
     return (method === 'message.read' || method === 'message.dispatch.read') ? { ...result, hostId } as AgentMuxRpcResult<M> : result
   }
 
-  /** Explicit hosting route; the Binding's execution Host never selects this owner. */
-  async callConnectionHost<M extends ConnectionMethod>(target: ConnectionHostingTarget, method: M, params: AgentMuxRpcParams<M>): Promise<AgentMuxRpcResult<M>> {
-    const client = this.configuredClient(target.hostId)
-    const context = { transport: 'unix' as const }
-    const { owner } = await callOriginalDesktopHost(client, 'runtime.owner.identity', { expectedRuntimeId: target.runtimeId }, context)
+  /** Capture only the selected configured endpoint, never a Binding's execution Host. */
+  private async connectionHost(target: { hostId: string; runtimeId?: string }, context: AgentMuxRpcCallContext) {
+    if (context.principal?.kind === 'device') throw new AgentMuxError('The original Host transport cannot preserve this device operator identity.', 'CONTROL_UNAVAILABLE')
+    const { hostId, runtimeId } = target, client = this.configuredClient(hostId)
+    const assertCurrent = () => {
+      context.signal?.throwIfAborted()
+      if (this.configuredClient(hostId) !== client) throw new AgentMuxError('The configured connector Host changed. Inspect the original operation on its original Host.', 'RUNTIME_OWNER_MISMATCH')
+    }
+    // Like the Hosted client bootstrap, these are the configured transport's
+    // identity reads. They grant no business authority; the actual method below
+    // retains its original caller credentials and destination fence.
+    const observation = { ...(context.signal === undefined ? {} : { signal: context.signal }) }
+    const { owner } = await callOriginalDesktopHost(client, 'runtime.owner.identity', runtimeId === undefined ? {} : { expectedRuntimeId: runtimeId }, observation)
     const expectedOwner = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
-    const { ownership } = await callOriginalDesktopHost(client, 'connection.owner.inspect', {}, context, expectedOwner)
+    const { ownership } = await callOriginalDesktopHost(client, 'connection.owner.inspect', {}, observation, expectedOwner)
     if (ownership !== 'local') throw new AgentMuxError('This endpoint does not own connections. Its original connection route and Agents are retained.', 'CONTROL_UNAVAILABLE')
-    if (this.configuredClient(target.hostId) !== client) throw new AgentMuxError('The configured connector Host changed. Inspect the original save on its original Host.', 'RUNTIME_OWNER_MISMATCH')
-    return await callOriginalDesktopHost(client, method, params, context, expectedOwner)
+    assertCurrent()
+    return { client, expectedOwner, assertCurrent, target: { hostId, runtimeId: owner.runtimeId } }
+  }
+
+  /** A new trusted client intent can freeze the original local target before writing. */
+  async connectionHostingTarget(hostId = 'local', context: AgentMuxRpcCallContext = { transport: 'unix' }): Promise<ConnectionHostingTarget> {
+    return (await this.connectionHost({ hostId }, context)).target
+  }
+
+  /** Explicit hosting route; the Binding's execution Host never selects this owner. */
+  async callConnectionHost<M extends ConnectionHostMethod>(target: ConnectionHostingTarget, method: M, params: AgentMuxRpcParams<M>,
+    context: AgentMuxRpcCallContext = { transport: 'unix' }): Promise<AgentMuxRpcResult<M>> {
+    const original = await this.connectionHost(target, context)
+    const result = await callOriginalDesktopHost(original.client, method, params, context, original.expectedOwner)
+    original.assertCurrent()
+    return result
+  }
+
+  async watchConnectionMetadata(target: ConnectionHostingTarget, handlers: AgentMuxRpcSubscriptionOptions<'connection.metadata.watch'>,
+    context: AgentMuxRpcCallContext = { transport: 'unix' }): Promise<AgentMuxRpcSubscription> {
+    // The existing stream wire has no managed caller credentials. Never turn an
+    // authenticated Agent/device into this trusted client observation.
+    if (context.caller) throw new AgentMuxError('The original metadata stream cannot preserve this caller identity.', 'CONTROL_UNAVAILABLE')
+    const signal = context.signal && handlers.signal ? AbortSignal.any([context.signal, handlers.signal]) : context.signal ?? handlers.signal
+    const original = await this.connectionHost(target, { ...context, ...(signal === undefined ? {} : { signal }) })
+    let subscription: AgentMuxRpcSubscription | undefined, ended = false
+    const current = () => {
+      if (ended) return false
+      try { original.assertCurrent(); return true }
+      catch (error) {
+        ended = true
+        void subscription?.dispose().catch(() => {})
+        handlers.onEnd?.(error instanceof Error ? error : new Error(String(error)))
+        return false
+      }
+    }
+    subscription = await subscribeOriginalDesktopHost(original.client, 'connection.metadata.watch', {}, { ...handlers, ...(signal === undefined ? {} : { signal }),
+      onInitial: value => { if (current()) handlers.onInitial(value) },
+      onEvent: value => { if (current()) handlers.onEvent(value) },
+      onFrame: value => { if (current()) handlers.onFrame?.(value) },
+      onEnd: error => { if (current()) { ended = true; handlers.onEnd?.(error) } }
+    }, original.expectedOwner)
+    try { original.assertCurrent() }
+    catch (error) { ended = true; await subscription.dispose(); throw error }
+    return { subscriptionId: subscription.subscriptionId, dispose: async () => { ended = true; await subscription!.dispose() } }
   }
 
   async readOriginalDispatch(hostId: string, sourceMessageId: string) {

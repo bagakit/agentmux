@@ -11,6 +11,7 @@ import { readLoadedPackageIdentity } from './client-observation.js'
 import { RendererUpdates } from './renderer-updates.js'
 import { readFile, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { homedir } from 'node:os'
 import { app, BrowserWindow, crashReporter, dialog, Menu, nativeTheme, shell } from 'electron'
 import { resolveTheme } from '@agentmux/client-ui/theme'
 import { AgentMuxFileAgentSessionStore, hydrateProcessEnvironmentFromLoginShell, loginShellEnvironmentWarning } from '@agentmux/core'
@@ -106,7 +107,8 @@ function startPrimaryInstance(): void {
   const configStore = new ConfigStore()
   const runtime = new RuntimeController(
     new AgentMuxFileAgentSessionStore(desktopAgentSessionStorePath()),
-    configuredDesktopAgentMuxHost(configStore.filePath),
+    configuredDesktopAgentMuxHost(configStore.filePath, process.env.AGENTMUX_DESKTOP_USER_DATA === undefined
+      ? join(homedir(), '.agentmux', 'connectors') : join(app.getPath('userData'), 'connectors')),
     scratchTopics
   )
   const applicationAccess = createDesktopApplicationAccessOwner(runtime, join(app.getPath('userData'), 'application-access.sqlite'))
