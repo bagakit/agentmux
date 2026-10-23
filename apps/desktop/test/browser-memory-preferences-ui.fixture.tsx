@@ -72,7 +72,7 @@ it('the actual Performance popover closes before opening original Browser settin
     const [selectedToolId, setSelectedTool] = useState<string | symbol | null>(null)
     const onSelectTool = (value: string | symbol | null) => { if (value === null) order.push('close'); setSelectedTool(value) }
     return <SettingsNavigation.Provider value={{ open(tab) { opened.push(tab); order.push('open:' + tab) },
-      openToolkit() {}, openHost() {}, openChannel() {}, channelPresentation: () => null, openMoteLark() {}, chooseAgent() {} }}>
+      openToolkit() {}, openHost() {}, openChannel() {}, channelPresentation: () => null, channelEntries: [], openMoteLark() {}, chooseAgent() {} }}>
       <PerformancePanel selectedToolId={selectedToolId} onSelectTool={onSelectTool} /></SettingsNavigation.Provider>
   }
   await act(async () => root!.render(<Fixture />))

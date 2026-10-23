@@ -26,7 +26,7 @@ import { defaultHttpInstance, type RoomReadWire } from '../../../../packages/con
 import type { AgentExternalConversationAuthorityPort } from '@agentmux/core'
 
 /** Original Renderer/IPC and Unix Core owners; hosting route, adapter and terminal I/O leaves are controlled. */
-export function connectorJourneyFixture(options: { platform?: (request: RoomReadWire) => Promise<unknown>; publication?: boolean; ingress?: boolean; conversationAuthority?: AgentExternalConversationAuthorityPort; connection?: ConnectionConfig; adapter?(): ConnectionAdapter } = {}) {
+export function connectorJourneyFixture(options: { platform?: (request: RoomReadWire) => Promise<unknown>; publication?: boolean; ingress?: boolean; conversationAuthority?: AgentExternalConversationAuthorityPort; connection?: ConnectionConfig; adapter?(): ConnectionAdapter; additionalAdapters?(): ConnectionAdapter[] } = {}) {
   const dom = composerDOM(), settings = vi.fn()
   let original: Awaited<ReturnType<typeof roomProvisioningFixture>>, services: Awaited<ReturnType<typeof createConnectionServices>>
   let server: InstanceType<typeof core.AgentMuxControlServer>, calls: { method: ConnectionMethod; input: unknown; result?: unknown }[]
@@ -67,7 +67,7 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
       return await options.platform!(input as RoomReadWire)
     })
     vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
-    services = await createConnectionServices({ directory: join(original.root, 'ui-connections'), ...(options.platform ? {} : { adapters: [options.adapter?.() ?? original.adapter] }), bindings: { spatial: original.spatial, checkpoint: original.checkpoint, session: async ref => {
+    services = await createConnectionServices({ directory: join(original.root, 'ui-connections'), ...(options.platform && !options.additionalAdapters ? {} : { adapters: [options.adapter?.() ?? original.adapter, ...options.additionalAdapters?.() ?? []] }), bindings: { spatial: original.spatial, checkpoint: original.checkpoint, session: async ref => {
       if (ref.hostId !== 'local') return null
       const session = await original.client.readAgentSession(ref.agentSessionId)
       return session ? { hostId: 'local', agentSessionId: session.agentSessionId } : null
@@ -105,7 +105,7 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     tab = addWorkbenchRegion(tab, 'original-region', 'right', { kind: 'agent', phase: 'attached', workspaceId: 'workspace', regionId: 'other-region', sessionId: session.id })
     useAppStore.setState({ loading: false, config: { ...composerConfig, workspaces: [{ ...composerConfig.workspaces[0]!, path: original.root }] }, sessions: [session],
       tabs: { [tab.id]: tab }, layouts: { workspace: createWorkspaceLayout('ui-group', [tab.id]) }, activeWorkspaceId: 'workspace', mainSurface: 'workbench', viewModes: { [session.id]: 'terminal' },
-      agentComposerDrafts: { [session.id]: 'Keep the original draft 中' }, connectorRoomIntents: {}, agentNames: {}, agentSteerQueues: {}, agentSteerInFlight: {}, timelines: {} })
+      agentComposerDrafts: { [session.id]: 'Keep the original draft 中' }, connectorRoomIntents: {}, connectorRoomDrafts: {}, agentNames: {}, agentSteerQueues: {}, agentSteerInFlight: {}, timelines: {} })
     vi.spyOn(api.sessions, 'historyPage').mockImplementation(async (reference, options) => original.client.sessionHistoryPage(reference.agentSessionId, options))
     vi.spyOn(api.sessions, 'notifyInputOccupation').mockResolvedValue(undefined)
   })
@@ -122,7 +122,7 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     }
     await dom.render(null); await rpc?.dispose(); await server?.stop(); services?.close(); await original?.close(); vi.unstubAllEnvs()
   })
-  async function mount() { await dom.render(<SettingsNavigation.Provider value={{ open: settings, openToolkit: () => {}, openHost: () => {}, openChannel: settings, channelPresentation: settingsCatalog.channelPresentation, openMoteLark: settings, chooseAgent: () => {} }}><WorkspaceWorkbench workspaceId="workspace" /></SettingsNavigation.Provider>) }
+  async function mount() { await dom.render(<SettingsNavigation.Provider value={{ open: settings, openToolkit: () => {}, openHost: () => {}, openChannel: settings, channelPresentation: settingsCatalog.channelPresentation, channelEntries: settingsCatalog.channelEntries, openMoteLark: settings, chooseAgent: () => {} }}><WorkspaceWorkbench workspaceId="workspace" /></SettingsNavigation.Provider>) }
   async function journey(mode: 'create' | 'existing' | 'details', regionId = 'original-region', context = false) {
     const trigger = document.querySelector<HTMLElement>('[data-workbench-region-id="' + regionId + '"] .agent-region-header__more')
     expect(trigger, 'original Agent More trigger').not.toBeNull()
