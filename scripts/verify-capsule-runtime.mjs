@@ -7,7 +7,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promis
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 import assertCoreDistBuiltFromCurrentSource from '../vitest.dist-freshness.ts'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -82,6 +82,17 @@ async function call(action, input) {
   assert.equal(response.ok, true)
   return response.result
 }
+async function nativeRuns(socketPath) {
+  const { connectAgentMuxRpc } = await import(pathToFileURL(join(root, 'packages/core/dist/public-rpc-client.js')).href)
+  const { connectHostedAgentMux } = await import(pathToFileURL(join(root, 'packages/core/dist/hosted-client.js')).href)
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
+  let client
+  try {
+    client = await connectHostedAgentMux({ rpc, expectedStorePath: env.AGENTMUX_AGENT_SESSION_STORE })
+    await client.connectRuntime()
+    return (await client.listRuns()).map(run => run.runId).sort()
+  } finally { try { await client?.dispose() } finally { await rpc.dispose() } }
+}
 async function source(name, marker) {
   const path = join(fixture, name)
   await mkdir(path)
@@ -108,10 +119,24 @@ let servicePid
 try {
   await ready(daemon, daemon.stdio[3], 'Native')
   const firstCore = await start()
-  assert.equal((await call('runtime.inspect')).phase, 'unconfigured', 'Empty inspection must not create a service')
+  const unconfigured = await call('runtime.inspect'), runsBefore = await nativeRuns(firstCore.socketPath)
+  assert.equal(unconfigured.phase, 'unconfigured', 'Empty inspection must not create a service')
+  assert.deepEqual(runsBefore, [], 'The original private Native starts without service Runs')
+  for (const [action, input] of [['ls'], ['config.inspect'], ['inspect', { capsuleId: '111111111111' }],
+    ['operation.inspect', { operationId: 'unconfigured-operation' }]]) {
+    const refused = await cli(action, input)
+    assert.notEqual(refused.code, 0, action + ' must not start an unconfigured service')
+    assert.equal(refused.error.code, 'CAPSULE_RUNTIME_UNCONFIGURED')
+    assert.deepEqual(await call('runtime.inspect'), unconfigured, action + ' preserves the empty running intent')
+    await assert.rejects(readFile(join(state, 'capsule-service.json')), { code: 'ENOENT' })
+    assert.deepEqual(await nativeRuns(firstCore.socketPath), runsBefore, action + ' creates no Native service Run')
+  }
   const sourcePath = await source('content', 'original-page')
   const created = await call('create', { operationId: 'create-page', sourcePath, mode: 'injected' })
   assert.equal(created.status, 'committed'); assert.equal(created.endpoint.status, 'available')
+  const originalCreate = await call('operation.inspect', { operationId: 'create-page' })
+  assert.equal(originalCreate.operation.operationId, 'create-page'); assert.equal(originalCreate.operation.status, 'committed')
+  assert.equal(originalCreate.operation.method, 'capsule.create'); assert.equal(originalCreate.operation.capsuleId, created.record.capsuleId)
   const first = await waitRuntime(v => v.phase === 'running', 'Initial independent service handshake')
   servicePid = first.runtime.pid
   assert.notEqual(servicePid, host.pid); assert.notEqual(servicePid, daemon.pid)

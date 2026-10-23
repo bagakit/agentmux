@@ -9,6 +9,9 @@ import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const tests = ['packages/core/test/capsule-runtime.test.ts', 'packages/core/test/capsule-terminal-preparation.test.ts']
 const mutations = [
+  { id: 'unconfigured-read-starts-service', file: 'packages/core/src/capsule-run-manager.ts',
+    from: "        if (method !== 'capsule.create') throw unavailable('The Capsule service has no running intent. Start it explicitly or create a page before using this operation; this operation did not start a service.', 'CAPSULE_RUNTIME_UNCONFIGURED')\n",
+    to: '', assertion: 'keeps unconfigured page reads lazy' },
   { id: 'intent-gap-falsely-superseded', file: 'packages/core/src/capsule-run-manager.ts',
     from: "if (retained.phase === 'prepared' &&", to: "if (false && retained.phase === 'prepared' &&", assertion: 'retains a command reserved' },
   { id: 'stale-connection-overwrites-stop', file: 'packages/core/src/capsule-run-manager.ts',
@@ -37,6 +40,9 @@ const mutations = [
     from: 'daemonInstance: prepared.ownerInstanceId, operationKey: prepared.operationId',
     to: "daemonInstance: 'replacement-native-owner', operationKey: prepared.operationId", assertion: 'prepares Stop without effects' },
 ]
+const mutationIndex = process.argv.indexOf('--mutation')
+const selectedMutations = mutationIndex < 0 ? mutations : mutations.filter(mutation => mutation.id === process.argv[mutationIndex + 1])
+if (mutationIndex >= 0) assert.equal(selectedMutations.length, 1, '--mutation requires one known source mutation ID')
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const directory = await mkdtemp(join(tmpdir(), 'amux-capsule-runtime-unit-'))
 await symlink(join(root, 'node_modules'), join(directory, 'node_modules'), 'dir')
@@ -80,7 +86,7 @@ async function run(name, mutation) {
       `${name}: designated business assertion must fail, not collection/preparation. ${result.output.slice(-4000)}`)
   } else {
     assert.equal(result.code, 0, result.output.slice(-4000)); assert.equal(data.numFailedTests, 0)
-    assert.equal(data.numPassedTests, 24, 'Both management and actual Client/adapter suites must execute')
+    assert.equal(data.numPassedTests, 25, 'Both management and actual Client/adapter suites must execute')
   }
   return { exitCode: result.code, passed: data.numPassedTests, failed: data.numFailedTests,
     reportSha256: sha(await readFile(report)), ...(mutation ? { id: mutation.id, source: mutation.file,
@@ -93,7 +99,8 @@ try {
     'packages/core/test/capsule-runtime.config.mts', 'packages/core/scripts/verify-capsule-runtime-unit.mjs'])
     receipt.inputs[path] = sha(await readFile(join(root, path)))
   receipt.baseline = await run('baseline')
-  if (process.argv.includes('--mutations')) for (const mutation of mutations) receipt.mutations.push(await run(mutation.id, mutation))
+  if (process.argv.includes('--mutations') || mutationIndex >= 0)
+    for (const mutation of selectedMutations) receipt.mutations.push(await run(mutation.id, mutation))
   for (const [path, digest] of Object.entries(receipt.inputs))
     assert.equal(sha(await readFile(join(root, path))), digest, `Concurrent source changed; rerun evidence: ${path}`)
   receipt.passed = true

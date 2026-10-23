@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -54,6 +54,36 @@ it('keeps empty inspection lazy and rejects malformed management targets', async
     expect(() => parseCapsuleRuntimeParams('capsule.runtime.start', value)).toThrow()
   expect(() => parseCapsuleRuntimeParams('capsule.runtime.stop', { operationId: 'stop', expectedRevision: 0 })).toThrow()
   expect(() => parseCapsuleRuntimeResult({ ...observed, arbitrary: true })).toThrow()
+})
+it('keeps unconfigured page reads lazy and admits only an explicit create', async () => {
+  const f = await fixture(); f.unknownCreate()
+  const empty = await f.manager.runtime.call('capsule.runtime.inspect', {})
+  const requests = [
+    ['capsule.ls', {}], ['capsule.config.inspect', {}],
+    ['capsule.inspect', { capsuleId: '111111111111' }], ['capsule.resolve', { capsuleId: '111111111111' }],
+    ['capsule.operation.inspect', { operationId: 'unconfigured-operation' }],
+    ['capsule.open', { capsuleId: '111111111111', operationId: 'unconfigured-open' }],
+  ] as const
+  for (const [method, params] of requests) {
+    await expect(f.manager.call(method, params)).rejects.toMatchObject({ code: 'CAPSULE_RUNTIME_UNCONFIGURED' })
+    expect(await f.manager.runtime.call('capsule.runtime.inspect', {})).toEqual(empty)
+    expect(f.count()).toEqual({ creates: 0, stops: 0, inspections: 0 })
+    expect(await readdir(f.state)).toEqual([])
+  }
+  const create = f.client.createPreparedTerminal.bind(f.client)
+  const started = vi.spyOn(f.client, 'createPreparedTerminal').mockImplementation(async prepared => {
+    expect(await f.binding()).toMatchObject({ revision: 1, desired: 'running', launchPhase: 'dispatched', launch: prepared })
+    return await create(prepared)
+  })
+  await expect(f.manager.call('capsule.create', { operationId: 'explicit-page-create', sourcePath: f.state })).rejects.toMatchObject({ code: 'CAPSULE_RUNTIME_CREATION_UNKNOWN' })
+  expect(started).toHaveBeenCalledOnce()
+  expect(f.count()).toEqual({ creates: 1, stops: 0, inspections: 0 })
+  const retained = await f.binding()
+  expect(retained.launch.createOperationId).toBe('original-create')
+  expect(JSON.parse(retained.launch.launch).createOperationId).toBe('original-create')
+  expect(await f.manager.runtime.call('capsule.runtime.inspect', {})).toMatchObject({ revision: 1, desired: 'running', phase: 'unknown' })
+  expect((await f.binding()).launch).toEqual(retained.launch)
+  expect(f.count().creates).toBe(1)
 })
 it('observes an unknown original Start without resubmitting or changing the frozen launch', async () => {
   const f = await fixture(); f.unknownCreate()
@@ -126,7 +156,7 @@ it('rejects a restored Stop token belonging to another Run before any Native eff
 })
 it('preserves a later explicit Stop when an earlier page connection resumes with an old binding', async () => {
   const f = await fixture(); f.pauseCreation()
-  const pendingPage = f.manager.call('capsule.config.inspect', {})
+  const pendingPage = f.manager.call('capsule.create', { operationId: 'page-before-stop', sourcePath: f.state })
   const expectedFailure = expect(pendingPage).rejects.toMatchObject({ code: 'CAPSULE_RUNTIME_INTENT_CHANGED' })
   await vi.waitFor(() => expect(f.count().creates).toBe(1))
   const stop = f.manager.runtime.call('capsule.runtime.stop', { operationId: 'stop-after-create', expectedRevision: 1, expectedRun: { runId: 'original-run' } })
