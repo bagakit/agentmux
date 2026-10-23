@@ -139,7 +139,7 @@ it('actual Renderer callback → preload → registered IPC → Main → Hosted/
     })
     view.data('actual-user', true); view.binary('\x80\xff'); view.data('\x1b[0n'); view.pasteInput.paste('line\ntwo')
     await flushInput()
-    const waiting = await owner.runtime.performanceDiagnostics(new AbortController().signal)
+    const waiting = await owner.runtime.performanceDiagnostics(new AbortController().signal, 0)
     expect(waiting.main.input.active.map(entry => entry.stage)).toEqual(Array(4).fill('connected-client'))
     expect(waiting.main.input.active.map(entry => entry.parent)).toEqual([parent('user', 1), parent('user', 2), parent('protocol', 1), parent('paste', 1)])
     expect(waiting.main.input.active.every(entry => entry.sender?.webContentsId === 771 && entry.sender.window?.generation === 0)).toBe(true)
@@ -148,7 +148,7 @@ it('actual Renderer callback → preload → registered IPC → Main → Hosted/
     expect(f.input).not.toHaveBeenCalled()
     const firstId = waiting.main.input.active[0]!.id
     f.gates.connect.resolve(); await flushInput()
-    const queued = (await owner.runtime.performanceDiagnostics(new AbortController().signal)).main.input
+    const queued = (await owner.runtime.performanceDiagnostics(new AbortController().signal, 0)).main.input
     expect(queued.active[0]).toMatchObject({ id: firstId, stage: 'current-run', ownerInstanceId: 'controlled-daemon', phases: { 'connected-client': expect.any(Number) } })
     expect(queued.active.slice(1).every(entry => entry.stage === 'queued')).toBe(true)
     f.gates.status.resolve(); await flushInput()
@@ -158,7 +158,7 @@ it('actual Renderer callback → preload → registered IPC → Main → Hosted/
     expect(f.input.mock.calls.map(([run, op]) => [run, op.data])).toEqual([
       ['original', 'actual-user'], ['original', Uint8Array.of(128, 255)], ['original', '\x1b[0n'], ['original', '\x1b[200~line\rtwo\x1b[201~']])
     expect((await f.core.clientPerformanceDiagnostics()).input.queueWait.count).toBe(0)
-    const complete = (await owner.runtime.performanceDiagnostics(new AbortController().signal)).main.input
+    const complete = (await owner.runtime.performanceDiagnostics(new AbortController().signal, 0)).main.input
     expect(complete.queueWait.count).toBe(4)
     expect(complete).toMatchObject({ started: 4, completed: 4, failed: 0, pending: 0, oldestPendingMs: null })
     expect(complete.recent[0]).toMatchObject({ id: firstId, stage: 'reply-ready', parent: parent('user', 1),
@@ -185,7 +185,7 @@ it('actual Agent callbacks keep Core FIFO identity/error and trusted Main window
     }, control)
     view.data('first', true); view.data('failure', true)
     await flushInput()
-    expect((await owner.runtime.performanceDiagnostics(new AbortController().signal)).main.input.active.map(entry => entry.stage)).toEqual(['host-call', 'host-call'])
+    expect((await owner.runtime.performanceDiagnostics(new AbortController().signal, 0)).main.input.active.map(entry => entry.stage)).toEqual(['host-call', 'host-call'])
     const activeCore = (await f.core.clientPerformanceDiagnostics()).input.active
     expect(activeCore.map(entry => entry.stage)).toEqual(['current-run', 'queued'])
     expect(activeCore.map(entry => entry.parent)).toEqual([parent('user', 1), parent('user', 2)])
@@ -193,7 +193,7 @@ it('actual Agent callbacks keep Core FIFO identity/error and trusted Main window
     await Promise.allSettled(view.api.sessions.write.mock.results.map(value => value.value)); await flushInput()
     expect(f.input.mock.calls.map(([, op]) => [op.data, op.expectedByte])).toEqual([['first', 0], ['failure', 5]])
     expect(view.reportError).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: f.originalError.message }))
-    expect((await owner.runtime.performanceDiagnostics(new AbortController().signal)).main.input).toMatchObject({ started: 2, completed: 1, failed: 1 })
+    expect((await owner.runtime.performanceDiagnostics(new AbortController().signal, 0)).main.input).toMatchObject({ started: 2, completed: 1, failed: 1 })
     expect((await f.core.clientPerformanceDiagnostics()).input.recent.at(-1)).toMatchObject({ parent: parent('user', 2), result: 'failed' })
     view.pasteInput.paste('agent paste')
     await view.api.sessions.paste.mock.results[0]!.value
@@ -202,11 +202,11 @@ it('actual Agent callbacks keep Core FIFO identity/error and trusted Main window
     const invalid = { ...parent('user', 3), processId: 9999, window: { generation: 999 } }
     const result = await bridge.api!.sessions.write(control, 'safe', 'user', invalid as never)
     expect(result).toEqual({ ok: true })
-    expect((await owner.runtime.performanceDiagnostics(new AbortController().signal)).main.input.recent.at(-1)).toMatchObject({ parent: null,
+    expect((await owner.runtime.performanceDiagnostics(new AbortController().signal, 0)).main.input.recent.at(-1)).toMatchObject({ parent: null,
       sender: { webContentsId: 771, window: { windowId: 77, webContentsId: 771, generation: 1 } } })
     vi.spyOn(owner.sender, 'isLoadingMainFrame').mockImplementation(() => { throw new Error('diagnostic window unavailable') })
     expect(await bridge.api!.sessions.write(control, 'still healthy', 'user', 1n as never)).toEqual({ ok: true })
-    expect((await owner.runtime.performanceDiagnostics(new AbortController().signal)).main.input.recent.at(-1)).toMatchObject({ parent: null, sender: { webContentsId: 771, window: null } })
+    expect((await owner.runtime.performanceDiagnostics(new AbortController().signal, 0)).main.input.recent.at(-1)).toMatchObject({ parent: null, sender: { webContentsId: 771, window: null } })
     const uncloneable = await bridge.api!.sessions.write(control, 'optional-function-safe', 'user', (() => undefined) as never).then(value => value, error => ({ unexpected: error }))
     expect(uncloneable).toEqual({ ok: true })
     const changed = await bridge.api!.sessions.write({ ...control, run: { runId: 'wrong' } }, 'must not send', 'user', parent('user', 4))
@@ -248,10 +248,10 @@ it('actual Main terminal queue captures the owner used by the original operation
   try {
     const control: SessionControl = { kind: 'terminal', hostId: 'local', runId: 'original', run: { runId: 'original' } }
     const request = bridge.api!.sessions.write(control, 'original', 'user', parent('user', 1)); await flushInput()
-    expect((await owner.runtime.performanceDiagnostics(new AbortController().signal)).main.input.active[0]).toMatchObject({ stage: 'current-run', ownerInstanceId: 'controlled-daemon' })
+    expect((await owner.runtime.performanceDiagnostics(new AbortController().signal, 0)).main.input.active[0]).toMatchObject({ stage: 'current-run', ownerInstanceId: 'controlled-daemon' })
     f.changeDaemon('replacement-daemon'); f.gates.status.resolve()
     expect(await request).toEqual({ ok: true })
-    expect((await owner.runtime.performanceDiagnostics(new AbortController().signal)).main.input.recent[0]).toMatchObject({ ownerInstanceId: 'replacement-daemon', parent: parent('user', 1) })
+    expect((await owner.runtime.performanceDiagnostics(new AbortController().signal, 0)).main.input.recent[0]).toMatchObject({ ownerInstanceId: 'replacement-daemon', parent: parent('user', 1) })
     expect(f.input.mock.calls[0]![1].ownerInstanceId).toBe('replacement-daemon')
   } finally { f.gates.status.resolve(); await owner.dispose(); await f.dispose() }
 })

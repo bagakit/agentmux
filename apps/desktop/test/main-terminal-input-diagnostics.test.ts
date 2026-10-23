@@ -18,7 +18,7 @@ it('actual Main write/paste keeps FIFO, cursor/error semantics and distinct queu
   const inner = owner as any
   inner.connectedClient = async () => client // Controlled existing connection seam; product write and FIFO execute unchanged.
   const control = {kind:'terminal' as const,hostId:'local',runId:'synthetic-run',run:{runId:'synthetic-run'}}
-  const snapshot = async () => (await owner.performanceDiagnostics(new AbortController().signal)).main.input
+  const snapshot = async () => (await owner.performanceDiagnostics(new AbortController().signal, 0)).main.input
   try {
     const one = owner.write(control,'first','user'),two = owner.paste(control,'paste','\u001b[200~paste\u001b[201~')
     await flush()
