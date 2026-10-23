@@ -41,6 +41,15 @@ the actual person's explicit submission to the original Agent target. An Agent, 
 script, source field or HTTP request cannot self-author Human or answer a Provider-native
 permission/question through this module.
 
+In the App's injected Browser, window.capsule exposes capabilities(), theme(), request(),
+read(), saveDraft(), inspectOperation(), createOperationId() and onThemeChanged(). Keep an
+operation ID before issuing a mutation. The SDK derives its page and target from the exact
+native document; do not supply a principal or recipient. It has no reply/approval method.
+The person reviews the original question and answer in the App's Questions control and
+explicitly confirms there. Host/Core's capsule.input is a narrow adapter protocol; it has
+no ordinary CLI authoring command and requires that live native confirmation for prepare
+and submit. A local transport identity or a saved prepared envelope alone grants none.
+
 Keep page/request/answer identities and the original operation after an unknown response.
 Read that same operation and its actual delivery receipt before deciding a next action;
 do not automatically resend an answer, open another Browser or bind a newer Run. Saved
