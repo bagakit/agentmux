@@ -281,7 +281,7 @@ Mote 先发现准确 Project、Executor、Session、Tab／Region 和已有能力
 
 ### Wiki 与应用协调指令
 
-应用署名的通用协调职责由单一 Notes owner 持有，当前源码入口为 [MOTE_COORDINATION_ROLE](../../../apps/desktop/src/shared/scratch-topics.ts)。它适用于 Mote 的实际新讨论与复用请求，不靠改 CTA 原句、复制配置或重建 Mote 生效，也不覆盖用户 SOUL／Wiki。普通 Topic 与执行 Agent 不因复用组件获得协调角色。
+应用署名的通用协调职责由单一 Notes owner 持有，当前源码入口为 [MOTE_COORDINATION_ROLE](../../../apps/host/src/mote-topic-model.ts)。它适用于 Mote 的实际新讨论与复用请求，不靠改 CTA 原句、复制配置或重建 Mote 生效，也不覆盖用户 SOUL／Wiki。普通 Topic 与执行 Agent 不因复用组件获得协调角色。
 
 初始上下文只保通用身份、必要边界、模块路由和重要决定／纠正／结果后的维护责任，日常合作与原文件记忆方法由 `amux mote --skill` 提供，PMO 的发现、派工、命名、跟进与交付方法由原 `amux mote playbook pmo` 按需提供，不在每次启动重复整套规程。普通 Topic 的方法路由由应用按已确认对象类型独立提供，不受旧自定义 AGENTS 或 Wiki 开关影响；完整方法仍归 `amux topic --skill`。这些手册沿公共 CLI 本地只读生成，读取不依赖在线服务，不启动任务或改变用户资料。专业职责在保存的 SOUL 中明确领域、判断方法与交付标准，不只靠名称或四维行为偏好表达，也不扩大原执行授权与默认 PMO 分工。基础 AGENTS 保原文件和模块入口，Goal 的完整管理／执行职责在实际 Goal 操作中按原身份、意图与回执注入；完整合同继续归 Goal owner。精简须分别核对新讨论和复用请求的真实消费链，保完整原草稿与后来启动能力，不通过匹配显示文案或删改用户自写文本去重。模板变化不自动覆盖已保存资料，也不使活跃 Session 热更新。
 
