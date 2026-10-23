@@ -4,10 +4,16 @@ import { parseAgentMuxControlRequest, formatAmuxObjectLink, type AgentMuxControl
 import { focusFacts } from '../../../packages/core/test/fixtures/desktop-focus-facts'
 import { SpatialLinkIngress, receiveSpatialLinkArguments } from '../src/main/spatial-link-ingress'
 import { assertSenderTrusted, senderTrust } from '../src/main/ipc-sender-trust'
+import type { CapsuleOpenResult } from '@agentmux/core/capsule'
 
 const space = (spaceId: string) => formatAmuxObjectLink({ kind: 'space', spaceId })
 const zone = (zoneId: string) => formatAmuxObjectLink({ kind: 'zone', zoneId })
 const settled = async () => { await new Promise(resolve => setImmediate(resolve)) }
+const capsuleId = '4JkN7Q2vR8sW'
+const capsule = () => formatAmuxObjectLink({ kind: 'capsule', capsuleId })
+const capsuleResult = (operationId: string): CapsuleOpenResult => ({ capsuleId, operationId,
+  endpoint: { status: 'available', url: 'http://127.0.0.1:43879/', instanceId: '3LkM7P2vR8sQ' },
+  rendering: { status: 'available', browserId: 'original-browser', tabId: 'original-tab', regionId: 'original-region' } })
 function ports() {
   const requests: AgentMuxControlFocusRequest[] = [], signals: AbortSignal[] = []
   const execute = vi.fn(async (request: AgentMuxControlRequest, signal: AbortSignal): Promise<AgentMuxControlResult> => {
@@ -21,6 +27,54 @@ function ports() {
   return { requests, signals, execute, report: vi.fn() }
 }
 describe('the single native spatial link ingress', () => {
+  it('opens the exact cold Capsule once through its original owner without a parallel generic focus', async () => {
+    const ingress = new SpatialLinkIngress(), p = ports()
+    const open = vi.fn(async (id: string, operationId: string) => {
+      expect(id).toBe(capsuleId)
+      expect(operationId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/)
+      return capsuleResult(operationId)
+    })
+    ingress.receive(capsule()); expect(open).not.toHaveBeenCalled()
+    ingress.ready(p.execute, p.report, open); await settled()
+    expect(open).toHaveBeenCalledTimes(1); expect(p.execute).not.toHaveBeenCalled(); expect(p.report).not.toHaveBeenCalled()
+    ingress.unavailable(); ingress.ready(p.execute, p.report, open); await settled()
+    expect(open).toHaveBeenCalledTimes(1)
+  })
+  it('reports the original Capsule operation when its actual rendering receipt is unavailable without reopening', async () => {
+    const ingress = new SpatialLinkIngress(), p = ports()
+    let originalOperation = ''
+    const open = vi.fn(async (_id: string, operationId: string): Promise<CapsuleOpenResult> => {
+      originalOperation = operationId
+      return { ...capsuleResult(operationId), rendering: { status: 'unavailable', reason: 'The native document is unconfirmed.' } }
+    })
+    ingress.ready(p.execute, p.report, open); ingress.receive(capsule()); await settled()
+    expect(p.report).toHaveBeenCalledTimes(1)
+    expect(p.report.mock.calls[0]![0]).toContain(originalOperation)
+    expect(p.report.mock.calls[0]![0]).toContain('native document is unconfirmed')
+    expect(p.execute).not.toHaveBeenCalled()
+    ingress.ready(p.execute, p.report, open); await settled(); expect(open).toHaveBeenCalledTimes(1)
+  })
+  it.each(['capsuleId', 'operationId'] as const)('rejects another Capsule owner %s without certifying the requested object', async field => {
+    const ingress = new SpatialLinkIngress(), p = ports()
+    const open = vi.fn(async (_id: string, operationId: string) => ({ ...capsuleResult(operationId), [field]: '6JkP7Q2vR8sX' }))
+    ingress.ready(p.execute, p.report, open); ingress.receive(capsule()); await settled()
+    expect(open).toHaveBeenCalledTimes(1); expect(p.execute).not.toHaveBeenCalled()
+    expect(p.report).toHaveBeenCalledTimes(1)
+    expect(p.report.mock.calls[0]![0]).toContain('another object or operation')
+  })
+  it('ignores a late Capsule receipt after a newer object link without replaying either original operation', async () => {
+    const ingress = new SpatialLinkIngress(), p = ports()
+    let finish!: (value: CapsuleOpenResult) => void, originalOperation = '', originalSignal!: AbortSignal
+    const open = vi.fn(async (_id: string, operationId: string, signal: AbortSignal) => {
+      originalOperation = operationId; originalSignal = signal
+      return await new Promise<CapsuleOpenResult>(resolve => { finish = resolve })
+    })
+    ingress.ready(p.execute, p.report, open); ingress.receive(capsule()); ingress.receive(zone('newer')); await settled()
+    expect(originalSignal.aborted).toBe(true)
+    finish({ ...capsuleResult(originalOperation), rendering: { status: 'unavailable', reason: 'Old response.' } }); await settled()
+    expect(p.requests.map(request => request.target)).toEqual([{ kind: 'space', zoneId: 'newer' }])
+    expect(open).toHaveBeenCalledTimes(1); expect(p.report).not.toHaveBeenCalled()
+  })
   it('keeps readiness behind the original trusted sender owner', () => {
     const original = { frame: 'original' }
     expect(() => assertSenderTrusted(senderTrust('ui:spatialLinksReady', original, original))).not.toThrow()
