@@ -27,6 +27,14 @@ The client route Host and each original notification subject Host are separate i
 this is one registered client document, not an archive of all windows or Hosts.
 
 Metrics watch owns a reader; cancellation detaches that reader and never stops an Agent.
+diagnostics.host describes the local machine: CPU uses whole-machine capacity and a
+matching counter interval, separately from App/Run one-logical-core percentages. Physical
+free memory is not memory pressure or reclaimable capacity. Supported macOS sources add
+swap, kernel pressure and per-interface byte rates; each source keeps its own time/reason.
+Interfaces are separate links, not an additive App/Agent traffic bill; VPN/physical/loopback
+may carry the same bytes. First/reset/replaced interfaces have no rate until a new interval.
+Native counters are shared at low frequency only while metrics have consumers. Unsupported
+or failed sources stay unavailable without erasing independent successful observations.
 For a performance technical profile, first separate process identity and interval CPU/RSS
 from Renderer sample weights, browser timeline events and object retention. Keep the loaded
 build, original PID/creation identity and each actual interval; sequential captures are not
