@@ -311,13 +311,13 @@ export interface CapsuleSdk {
   theme(): Promise<CapsuleSdkTheme | null>
   onThemeChanged(listener: (theme: CapsuleSdkTheme | null) => void): () => void
   createOperationId(): string
-  request(question: string, draft?: string, operationId?: string): Promise<CapsuleInteraction>
+  request(question: string, draft: string | undefined, operationId: string): Promise<CapsuleInteraction>
   read(interactionId: string): Promise<CapsuleInteraction>
   saveDraft(
     interactionId: string,
     expectedRevision: number,
     draft: string,
-    operationId?: string,
+    operationId: string,
   ): Promise<CapsuleInteraction>
   inspectOperation(operationId: string): Promise<CapsuleOperation | null>
 }
