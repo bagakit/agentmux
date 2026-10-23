@@ -40,7 +40,18 @@ const mutations = [
   { id: 'inspect-replays-original-write', file: reply,
     from: "api.capsules.call('capsule.operation.inspect', { operationId: held.params.operationId })",
     to: 'api.capsules.call(held.method, held.params)',
-    test: 'keeps unknown draft saves locked to their original operation while preserving later editable text' }
+    test: 'keeps unknown draft saves locked to their original operation while preserving later editable text' },
+  { id: 'waiting-displayed-as-submitted', file: reply, from: "case 'waiting': return 'input waiting in Core'",
+    to: "case 'waiting': return 'input submitted'", test: 'distinguishes Core input waiting without certifying Agent completion' },
+  { id: 'saved-input-inspection-lost', file: reply, from: 'const inspectSavedReply = !attempt && current.reply',
+    to: "const inspectSavedReply = !attempt && delivery?.status === 'unknown' && current.reply",
+    test: 'reopens a waiting answer and reads its original terminal-confirmed receipt without another confirmation' },
+  { id: 'waiting-hidden-in-history', file: reply,
+    from: "['stopped', 'not-applied', 'terminal-confirmed', 'admitted'].includes(delivery.inputStatus ?? '')",
+    to: "['waiting', 'stopped', 'not-applied', 'terminal-confirmed', 'admitted'].includes(delivery.inputStatus ?? '')",
+    test: 'keeps waiting answers prominent and folds confirmed history without losing its original inspection path' },
+  { id: 'history-always-expanded', file: reply, from: 'open={settled ? undefined : true}', to: 'open',
+    test: 'reopens saved terminal answers as compact history with a reachable original operation' }
 ]
 for (const mutation of mutations) assert.equal(sources[mutation.file].split(mutation.from).length - 1, 1,
   'Exactly one actual source mutation anchor: ' + mutation.id)
