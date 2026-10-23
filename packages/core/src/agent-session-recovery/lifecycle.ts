@@ -1,7 +1,7 @@
-import { AgentSessionRecoveryReconciler } from './reconciliation.js'
+import type { AgentSessionRecoveryReconciler } from './reconciliation.js'
 import { assertAgentPromptSize } from '../agent-runtime-helpers.js'
 import { parseAgentRestartInput, type AgentMuxAgentRestartIdentity, type AgentMuxAgentRestartInput, type AgentMuxAgentRestartInspection } from './restart-contract.js'
-import { AgentSessionContinuitySupervisor } from './supervisor.js'
+import type { AgentSessionContinuitySupervisor } from './supervisor.js'
 import { createContinuityInputDelivery, prepareContinuityLaunchInput, bindContinuityLaunchInput } from './input.js'
 import { executorUnavailableError } from '../executable-probe.js'
 import { unconfirmedExecutableObservation } from '../executable-observation.js'
@@ -26,7 +26,6 @@ import type { AgentSessionRecoveryPorts } from './ports.js'
 
 /** Executes original lifecycle reservations; shares the supervisor's single Session serializer. */
 export class AgentSessionRunLifecycle {
-
   private readonly executingRestarts = new Set<string>()
   private readonly restartSettlements = new Map<string, Promise<void>>()
   private readonly executingReopens = new Set<string>()
@@ -37,7 +36,6 @@ export class AgentSessionRunLifecycle {
     private readonly reconciler: AgentSessionRecoveryReconciler,
     private readonly signal: AbortSignal
   ) {}
-
 
   // Per-Agent-Session serialization of continuity attempts. NOT what bounds new Runs to one — the
   // store's `reserveLifecycle` is an atomic check-and-set, so a concurrent loser fails its
