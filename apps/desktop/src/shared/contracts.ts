@@ -1568,6 +1568,8 @@ export const CONFIG_CHANGED_CHANNEL = 'agentmux:config-changed'
 /** Main -> renderer: one runtime/session event from the Agent runtime controller. */
 export const SESSION_EVENT_CHANNEL = 'agentmux:session-event'
 export const SESSION_HISTORY_OBSERVATION_CHANNEL = 'agentmux:session-history-observation'
+/** A configured connector hosting owner; never the Binding's execution Host. */
+export type ConnectionHostingTarget = { hostId: string; runtimeId: string }
 export const CONNECTION_METADATA_CHANGED_CHANNEL = 'connections:metadataChanged'
 export const CONNECTION_METADATA_OBSERVATION_CHANNEL = 'connections:metadataObservation'
 /** Main -> renderer: one embedded-browser lifecycle/navigation event. */
@@ -1655,9 +1657,9 @@ export type AgentMuxDesktopApi = {
   }
   connections: {
     onMetadataChanged(listener: (change: import('@agentmux/core/connections').ChannelMetadataChange) => void, observation?: (state: 'ready' | 'unavailable') => void): () => void
-    call<M extends import('@agentmux/core/connections').ConnectionMethod>(method: M, params: import('@agentmux/core/connections').ConnectionParamsMap[M]): Promise<import('@agentmux/core/connections').ConnectionResultMap[M]>
-    storeCredential(input: { operationId: string; secret: string }): Promise<{ credentialRef: string }>
-    inspectCredential(operationId: string): Promise<{ credentialRef: string } | null>
+    call<M extends import('@agentmux/core/connections').ConnectionMethod>(method: M, params: import('@agentmux/core/connections').ConnectionParamsMap[M], target?: ConnectionHostingTarget): Promise<import('@agentmux/core/connections').ConnectionResultMap[M]>
+    storeCredential(input: { operationId: string; secret: string }, target?: ConnectionHostingTarget): Promise<{ credentialRef: string }>
+    inspectCredential(operationId: string, target?: ConnectionHostingTarget): Promise<{ credentialRef: string } | null>
   }
   deviceManagement: {
     link(params: AgentMuxRpcParams<'device.link'>): Promise<AgentMuxRpcResult<'device.link'>>

@@ -1,6 +1,5 @@
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { ExternalConnectionsSettings } from '../ExternalConnectionsSettings'
-import { ConnectorServiceControl } from '../ConnectorServiceControl'
+import { ConnectionHostingSettings } from '../ConnectionHostingSettings'
 import type { SettingsModule } from '../settings-catalog'
 import '../../../styles/settings-lark.css'
 const feishuArtwork = new URL('../../../assets/connector-icons/feishu.ico', import.meta.url).href
@@ -11,5 +10,5 @@ export const larkSettingsModule = {
   channel: { adapterId: 'feishu', domains: [{ domain: 'open.feishu.cn', title: 'Feishu' }, { domain: 'open.larksuite.com', title: 'Lark' }], icon: ChannelIcon },
   icon: semanticIconComponent('object.conversations'), keywords: 'channel agent conversation feishu lark chat connector application bot scan qr Agent 对话 飞书 群聊 连接器 扫码 机器人',
   savedSummary: () => 'Service control, bot applications and connection setup',
-  Pane({ active, onClose, navigationRequest }) { return <div className="settings-pane-stack lark-settings"><ConnectorServiceControl active={active} /><ExternalConnectionsSettings active={active} onClose={onClose} navigationRequest={navigationRequest} /></div> }
+  Pane({ active, onClose, navigationRequest }) { return <div className="settings-pane-stack lark-settings"><ConnectionHostingSettings active={active} onClose={onClose} navigationRequest={navigationRequest} /></div> }
 } as const satisfies SettingsModule

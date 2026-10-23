@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionObservation, ConnectionRecord, ConnectionStage } from '@agentmux/core/connections'
 import { api } from '../../lib/api'
+import type { ConnectionSettingsPort } from './ConnectionHostingSettings'
 
 const labels = { authentication: 'Application credentials', transport: 'Live connection', intake: 'Receiving messages', delivery: 'Group delivery' } as const
 const stage = (value: ConnectionStage) => value.state === 'ready' ? 'Confirmed' : value.state === 'disabled' ? 'Paused' : value.state === 'unavailable' ? 'Needs attention' : 'Not confirmed'
@@ -23,8 +24,8 @@ export function connectionSummary(record: ConnectionRecord): string {
 type Reading = { key: string; source: typeof api.connections.call; record: ConnectionRecord | null; issue: string; notice: string }
 
 /** One visible reading window on the existing Connection owner; saved receipts stay immutable. */
-export function ConnectionSetupResult({ record, active = true }: { record: ConnectionRecord; active?: boolean }) {
-  const key = scope(record), source = api.connections.call
+export function ConnectionSetupResult({ record, active = true, connections = api.connections }: { record: ConnectionRecord; active?: boolean; connections?: ConnectionSettingsPort }) {
+  const key = scope(record), source = connections.call
   const [reading, setReading] = useState<Reading | null>(null), [busy, setBusy] = useState<string | null>(null)
   const occurrence = useRef(0), target = useRef({ key, source, active })
   target.current = { key, source, active }
@@ -33,7 +34,7 @@ export function ConnectionSetupResult({ record, active = true }: { record: Conne
   const pending = busy === key
   async function read(check: boolean) {
     const request = ++occurrence.current
-    const accepts = () => request === occurrence.current && target.current.active && target.current.key === key && target.current.source === source && api.connections.call === source
+    const accepts = () => request === occurrence.current && target.current.active && target.current.key === key && target.current.source === source
     setBusy(key)
     try {
       const observed = check ? await source('connection.test', { connectionId: record.config.connectionId })

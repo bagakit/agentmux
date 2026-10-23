@@ -6,7 +6,7 @@ import { AgentMuxFileAgentSessionStore, AgentMuxError, connectAgentMuxRpc,
   type AgentMuxAgentSessionStore,
   type AgentMuxRpcMethod, type AgentMuxRpcParams, type AgentMuxRpcCallContext, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
   type AgentMuxRpcStreamParams, type AgentMuxRpcSubscriptionOptions,
-  type AgentMuxClient } from '@agentmux/core'
+  type AgentMuxClient, type AgentMuxRuntimeFence } from '@agentmux/core'
 import { connectHostedAgentMux, type AgentMuxHostedRpcPort, type AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { HostConfig } from '../shared/contracts.js'
 
@@ -14,14 +14,14 @@ export type DesktopRuntimeClient = AgentMuxClient | AgentMuxHostedClient
 export type DesktopRuntimeConnector = (config: HostConfig, store: AgentMuxAgentSessionStore) => Promise<DesktopRuntimeClient>
 const launches = new Map<string, Promise<ChildProcess>>()
 const originalCalls = new WeakMap<DesktopRuntimeClient, <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
-  context: AgentMuxRpcCallContext) => Promise<AgentMuxRpcResult<M>>>()
+  context: AgentMuxRpcCallContext, expectedOwner?: AgentMuxRuntimeFence) => Promise<AgentMuxRpcResult<M>>>()
 
 /** Borrow the original Host transport without changing the client's local/remote routing identity. */
 export async function callOriginalDesktopHost<M extends AgentMuxRpcMethod>(client: DesktopRuntimeClient, method: M,
-  params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> {
+  params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext, expectedOwner?: AgentMuxRuntimeFence): Promise<AgentMuxRpcResult<M>> {
   const call = originalCalls.get(client) ?? ('forwardRpc' in client ? client.forwardRpc : undefined)
   if (!call) throw new AgentMuxError('The original Host public transport is unavailable. Original input and Sessions are retained.', 'CONTROL_UNAVAILABLE')
-  return await call(method, params, context)
+  return await call(method, params, context, expectedOwner)
 }
 
 async function ensureHost(storePath: string, socketPath: string): Promise<void> {
@@ -92,7 +92,7 @@ export const connectDesktopAgentMuxHost: DesktopRuntimeConnector = async (config
   // Return the connection projection while handshake/retry proceeds. The durable UI can hydrate
   // when the Host is unavailable; each actual operation still requires a confirmed identity.
   const client = await connectHostedAgentMux({ rpc: port, waitForReady: false, expectedStorePath: store.path })
-  originalCalls.set(client, async (method, params, context) => {
+  originalCalls.set(client, async (method, params, context, expectedOwner) => {
     await prepare(context.signal)
     const owner = client.runtimeOwnerIdentity()
     if (!owner || owner.availability !== 'connected') await client.readAgentSessions()
@@ -100,7 +100,7 @@ export const connectDesktopAgentMuxHost: DesktopRuntimeConnector = async (config
     if (!confirmed || confirmed.availability !== 'connected') throw new AgentMuxError('The original semantic Host identity is unconfirmed. Its Runs and frozen input remain available.', 'CONTROL_UNAVAILABLE')
     return await rpc.call(method, params, { ...(context.signal ? { signal: context.signal } : {}),
       ...(context.caller ? { credentials: context.caller } : {}),
-      runtimeFence: { runtimeId: confirmed.runtimeId, ownerInstanceId: confirmed.ownerInstanceId } })
+      runtimeFence: expectedOwner ?? { runtimeId: confirmed.runtimeId, ownerInstanceId: confirmed.ownerInstanceId } })
   })
   const dispose = client.dispose.bind(client)
   client.dispose = async () => { originalCalls.delete(client); await dispose(); await rpc.dispose() }

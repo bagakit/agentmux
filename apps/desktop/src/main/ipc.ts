@@ -2431,6 +2431,7 @@ export async function registerIpc(args: {
       workspace: id => config.workspaces.find(item => item.id === id),
       topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory) }) })
   const disposeChannelMetadata = registerConnectorIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), secrets: connectorServices.secrets,
+    callHost: (target, method, params) => args.runtime.callConnectionHost(target, method, params),
     metadata: { publish: change => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send(CONNECTION_METADATA_CHANGED_CHANNEL, change) },
       observation: state => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send(CONNECTION_METADATA_OBSERVATION_CHANNEL, state) } } })
   registerMoteChatIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
