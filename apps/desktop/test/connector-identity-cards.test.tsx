@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { moteConnectionBaseline } from '@agentmux/core/mote-preferences'
-import { DesktopConnectorSecrets } from '../src/main/connector-secrets'
+import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { moteBotUi } from './fixtures/mote-bot-ui'
@@ -60,7 +60,7 @@ async function create() {
 }
 
 it('opens the identity library and the original Mote detail without accessing the vault; the global plus creates a general identity', async () => {
-  const secure = vi.spyOn(DesktopConnectorSecrets.prototype, 'assertAvailable')
+  const secure = vi.spyOn(ConnectionSecrets.prototype, 'assertAvailable')
   await library()
   expect(card().dataset.identityState).toBe('unbound')
   expect(card().textContent).toContain('Saved public name')

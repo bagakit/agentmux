@@ -24,7 +24,7 @@ import { useAppStore } from '../../src/renderer/src/store'
 import { createMoteApp, moteClick, settleMoteApp } from './mote-app'
 import { moteTopics, moteConfig } from './mote-workface'
 import { runCompiledObjectCli, objectCliEnvironment } from '../../../../packages/core/test/helpers/object-cli-rpc.js'
-import type { CredentialEncryption } from '../../src/main/connector-secrets'
+import type { CredentialEncryption } from '../../../../packages/connectors/src/connection-secrets'
 
 /** Original App/Profile/Agent menus -> trusted IPC -> public Core -> Main/Files/Connection Host. */
 export async function moteConnectionJourney(options: { encryption?: CredentialEncryption } = {}) {

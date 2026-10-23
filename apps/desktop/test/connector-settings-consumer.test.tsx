@@ -10,7 +10,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server.js'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import { ConnectionHost } from '../../../packages/connectors/src/connection-host.js'
-import { DesktopConnectorSecrets, type CredentialEncryption } from '../src/main/connector-secrets.js'
+import { ConnectionSecrets, type CredentialEncryption } from '../../../packages/connectors/src/connection-secrets.js'
 import { createDesktopConnections } from '../src/main/connector-host.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { larkSettingsModule } from '../src/renderer/src/components/settings/modules/lark'
@@ -24,12 +24,12 @@ const encryption: CredentialEncryption = {
   encryptStringAsync: async value => { const nonce = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, nonce); return Buffer.concat([nonce, cipher.update(value, 'utf8'), cipher.final(), cipher.getAuthTag()]) },
   decryptStringAsync: async value => { const decipher = createDecipheriv('aes-256-gcm', key, value.subarray(0, 12)); decipher.setAuthTag(value.subarray(-16)); return { result: Buffer.concat([decipher.update(value.subarray(12, -16)), decipher.final()]).toString('utf8'), shouldReEncrypt: false } }
 }
-let directory: string, database: DatabaseSync, owner: ConnectionHost, secrets: DesktopConnectorSecrets, server: AgentMuxControlServer
+let directory: string, database: DatabaseSync, owner: ConnectionHost, secrets: ConnectionSecrets, server: AgentMuxControlServer
 let completedLists = 0, completedChecks = 0
 let handlers: Map<string, (...args: any[]) => Promise<any>>, trusted: ReturnType<typeof vi.fn>, originalCall: typeof api.connections.call
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'connector-settings-'))
-  database = new DatabaseSync(join(directory, 'connections.sqlite')); secrets = new DesktopConnectorSecrets(database, encryption)
+  database = new DatabaseSync(join(directory, 'connections.sqlite')); secrets = new ConnectionSecrets(database, encryption)
   owner = new ConnectionHost({ database, secrets }); server = new AgentMuxControlServer({ socketPath: join(directory, 'public.sock'), connections: owner, coreClients: () => [] }); await server.start()
   handlers = new Map(); trusted = vi.fn()
   registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: trusted, socketPath: join(directory, 'public.sock'), secrets })
@@ -246,16 +246,16 @@ describe('Settings uses the original connection owner through public service', (
 
 describe('Host credential and availability boundary', () => {
   it('rejects plaintext fallback, preserves original credential operations and redacts encryption exceptions', async () => {
-    const unavailable = new DesktopConnectorSecrets(database, { ...encryption, isAsyncEncryptionAvailable: async () => false })
+    const unavailable = new ConnectionSecrets(database, { ...encryption, isAsyncEncryptionAvailable: async () => false })
     await expect(unavailable.store({ operationId: 'unavailable', secret })).rejects.toMatchObject({ code: 'CONNECTION_CREDENTIAL_UNAVAILABLE' })
-    const basicText = new DesktopConnectorSecrets(database, { ...encryption, getSelectedStorageBackend: () => 'basic_text' })
+    const basicText = new ConnectionSecrets(database, { ...encryption, getSelectedStorageBackend: () => 'basic_text' })
     await expect(basicText.store({ operationId: 'basic-text', secret })).rejects.toMatchObject({ code: 'CONNECTION_CREDENTIAL_UNAVAILABLE' })
     expect(database.prepare('SELECT COUNT(*) AS count FROM connection_credential').get()?.count).toBe(0)
     const saved = await secrets.store({ operationId: 'credential-store', secret })
     expect(await secrets.store({ operationId: 'credential-store', secret })).toEqual(saved)
     expect(await secrets.inspect('credential-store')).toEqual(saved)
     await expect(secrets.store({ operationId: 'credential-store', secret: 'different' })).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
-    const faulty = new DesktopConnectorSecrets(database, { ...encryption, encryptStringAsync: async () => { throw new Error(secret) } })
+    const faulty = new ConnectionSecrets(database, { ...encryption, encryptStringAsync: async () => { throw new Error(secret) } })
     const error = await faulty.store({ operationId: 'encryption-failure', secret }).catch(error => error)
     expect(error.code).toBe('CONNECTION_CREDENTIAL_UNCONFIRMED'); expect(JSON.stringify(error)).not.toContain(secret); expect(error.message).not.toContain(secret)
     expect(await secrets.resolve(saved.credentialRef)).toBe(secret)

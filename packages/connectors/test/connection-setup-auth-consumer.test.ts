@@ -1,5 +1,5 @@
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
-import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { DatabaseSync } from 'node:sqlite'
 import { fork, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
@@ -224,7 +224,7 @@ it('original v1 init and v2 authentication snapshots retain the exact saved appl
 
 it.each([1, 2] as const)('the Setup wrapper refuses foreign bindings in a v%s native snapshot before any HTTP request', async version => {
   const f = await fixture(), route = nativeRoute({ scanned: true }), fetch = vi.fn(route); vi.stubGlobal('fetch', fetch)
-  const originalResolve = DesktopConnectorSecrets.prototype.resolve
+  const originalResolve = ConnectionSecrets.prototype.resolve
   const changes = [
     { operationId: 'foreign-management-intent' },
     { connectionId: 'foreign-saved-connection' },
@@ -241,7 +241,7 @@ it.each([1, 2] as const)('the Setup wrapper refuses foreign bindings in a v%s na
     expect(snapshots.find(snapshot => snapshot.version === version)).toBeDefined()
     const original = privateRows(f.services.database!), calls = fetch.mock.calls.length, input = advanceInput(view)
     let substituted = 0
-    const fault = vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve').mockImplementation(async function(this: DesktopConnectorSecrets, ref) {
+    const fault = vi.spyOn(ConnectionSecrets.prototype, 'resolve').mockImplementation(async function(this: ConnectionSecrets, ref) {
       const value = await originalResolve.call(this, ref)
       if (value === null) return null
       let envelope: { operationId?: string; privateState?: string }
@@ -407,8 +407,8 @@ it.each(['waiting', 'scanned', 'expired'] as const)('uses the current %s result 
   const f = await fixture(), entered = deferred<void>(), release = deferred<void>()
   const requests = vi.fn(async (url: string | URL | Request) => new URL(String(url)).pathname.endsWith('/init') ? qrResponse() : polling(stage === 'waiting' ? 1 : stage === 'scanned' ? 2 : 5))
   vi.stubGlobal('fetch', requests)
-  const source = await f.sdk.call('connection.setup.begin', f.input), originalStore = DesktopConnectorSecrets.prototype.store
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function(this: DesktopConnectorSecrets, input) {
+  const source = await f.sdk.call('connection.setup.begin', f.input), originalStore = ConnectionSecrets.prototype.store
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function(this: ConnectionSecrets, input) {
     if (input.operationId.startsWith('connection-setup-step:')) { entered.resolve(); await release.promise }
     return originalStore.call(this, input)
   })
@@ -430,8 +430,8 @@ it.each(['stored', 'unknown'] as const)('keeps profile progress running only for
   const entered = deferred<void>(), release = deferred<void>()
   const requests = vi.fn(async (url: string | URL | Request) => new URL(String(url)).pathname.endsWith('/init') ? qrResponse() : polling(2))
   vi.stubGlobal('fetch', requests)
-  const source = await f.sdk.call('connection.setup.begin', f.input), originalStore = DesktopConnectorSecrets.prototype.store
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function(this: DesktopConnectorSecrets, input) {
+  const source = await f.sdk.call('connection.setup.begin', f.input), originalStore = ConnectionSecrets.prototype.store
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function(this: ConnectionSecrets, input) {
     if (input.operationId.startsWith('connection-setup-step:')) {
       entered.resolve(); await release.promise
       if (storage === 'unknown') throw new Error('Fixture secure ACK unavailable')
@@ -486,8 +486,8 @@ it('reads the current original challenge when its authentication revision advanc
   vi.stubGlobal('fetch', requests)
   const waiting = await advance(f, await f.sdk.call('connection.setup.begin', f.input))
   const source = f.services.database!.prepare('SELECT private_ref FROM connection_setup_auth_step WHERE operation_id=? ORDER BY ordinal DESC LIMIT 1').get(f.input.operationId)!
-  const originalResolve = DesktopConnectorSecrets.prototype.resolve
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve').mockImplementation(async function(this: DesktopConnectorSecrets, ref) {
+  const originalResolve = ConnectionSecrets.prototype.resolve
+  vi.spyOn(ConnectionSecrets.prototype, 'resolve').mockImplementation(async function(this: ConnectionSecrets, ref) {
     const value = await originalResolve.call(this, ref)
     if (!held && ref === source.private_ref) { held = true; entered.resolve(); await release.promise }
     return value
@@ -743,9 +743,9 @@ it('a Connection revision changed during console read preserves the original sav
 it('lost secure ACK reconciles the exact original immutable snapshot and old action without a second poll', async () => {
   const f = await fixture(), fetch = vi.fn(async (url: string | URL | Request) => new URL(String(url)).pathname.endsWith('/init') ? qrResponse() : polling(2))
   vi.stubGlobal('fetch', fetch)
-  const pending = await f.sdk.call('connection.setup.begin', f.input), input = advanceInput(pending), store = DesktopConnectorSecrets.prototype.store
+  const pending = await f.sdk.call('connection.setup.begin', f.input), input = advanceInput(pending), store = ConnectionSecrets.prototype.store
   let lost = false
-  const fault = vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function(this: DesktopConnectorSecrets, value) {
+  const fault = vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function(this: ConnectionSecrets, value) {
     const saved = await store.call(this, value)
     if (!lost) { lost = true; throw new Error('fixture-lost-auth-vault-ack') }
     return saved
@@ -850,9 +850,9 @@ it('parallel local Vault recovery on a fresh owner returns the same stored actio
   const fetch = vi.fn(async (url: string | URL | Request) => new URL(String(url)).pathname.endsWith('/init') ? qrResponse() : polling(2))
   vi.stubGlobal('fetch', fetch)
   const pending = await f.sdk.call('connection.setup.begin', f.input), input = advanceInput(pending)
-  const store = DesktopConnectorSecrets.prototype.store, originalInspect = DesktopConnectorSecrets.prototype.inspect
+  const store = ConnectionSecrets.prototype.store, originalInspect = ConnectionSecrets.prototype.inspect
   let privateOperation = '', reads = 0
-  const fault = vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function(this: DesktopConnectorSecrets, value) {
+  const fault = vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function(this: ConnectionSecrets, value) {
     const saved = await store.call(this, value)
     if (!privateOperation) { privateOperation = value.operationId; committed.resolve(); await release.promise }
     return saved
@@ -866,7 +866,7 @@ it('parallel local Vault recovery on a fresh owner returns the same stored actio
   clean.push(async () => { await sdk.dispose(); await server.stop(); recoveredServices.close() })
   const before = await sdk.call('connection.setup.inspect', { operationId: f.input.operationId })
   expect(before.operation?.authentication).toMatchObject({ request: 'confirmed', secureStorage: 'storing' })
-  const receiptBarrier = vi.spyOn(DesktopConnectorSecrets.prototype, 'inspect').mockImplementation(async function(this: DesktopConnectorSecrets, operationId) {
+  const receiptBarrier = vi.spyOn(ConnectionSecrets.prototype, 'inspect').mockImplementation(async function(this: ConnectionSecrets, operationId) {
     const value = await originalInspect.call(this, operationId)
     if (operationId === privateOperation && ++reads <= 2) { if (reads === 2) inspected.resolve(); await inspected.promise }
     return value

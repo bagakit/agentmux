@@ -6,7 +6,7 @@ import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '@agentmux/core'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import { createDesktopConnections } from '../src/main/connector-host.js'
-import { DesktopConnectorSecrets } from '../src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
@@ -305,9 +305,9 @@ it('keeps a late unchanged check attached to its original setup after the user o
 })
 
 it('an authorized bot whose secure save is interrupted continues locally without polling its one-time credential twice', async () => {
-  const store = DesktopConnectorSecrets.prototype.store
+  const store = ConnectionSecrets.prototype.store
   let unavailable = true
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function(this: DesktopConnectorSecrets, input) {
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function(this: ConnectionSecrets, input) {
     if (input.secret === secret && unavailable) throw new Error('Controlled private credential-store interruption')
     return await store.call(this, input)
   })

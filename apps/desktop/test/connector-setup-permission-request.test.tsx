@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '@agentmux/core'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap, ConnectionSetupView } from '@agentmux/core/connections'
-import { DesktopConnectorSecrets } from '../src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 import { createDesktopConnections } from '../src/main/connector-host.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
@@ -143,9 +143,9 @@ it('permission review preserves a completed half on an unknown read and cannot r
 it('a known accepted request with a lost local ACK makes same-child saving the primary action and never dispatches again', async () => {
   await open(); await click('[data-permission-review]')
   await ready(() => expect(dom.container.querySelector('[data-permission-add]')).not.toBeNull())
-  const store = DesktopConnectorSecrets.prototype.store
+  const store = ConnectionSecrets.prototype.store
   let lost = false
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function (input) {
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function (input) {
     const result = await store.call(this, input)
     if (!lost && input.operationId.startsWith('connection-setup-effect:')) { lost = true; throw Error('Local ACK interrupted after Vault commit') }
     return result

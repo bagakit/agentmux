@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc, AgentMuxError } from '@agentmux/core'
 import { connectionSetupDecisionForAction } from '@agentmux/core/connections'
 import type { ConnectionSetupAction, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupConfigurationEffect, ConnectionSetupView } from '@agentmux/core/connections'
-import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
 import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
@@ -335,8 +335,8 @@ it.each(['pending', 'visibility', 'target', 'actor'] as const)('a %s change duri
   const ref = db.prepare('SELECT private_ref FROM connection_setup_inspection WHERE step_id=?').get(source.stepId)!.private_ref
   const actor = JSON.parse(String(db.prepare('SELECT actor_json FROM connection_setup_operation WHERE operation_id=?').get(f.input.operationId)!.actor_json))
   let entered!: () => void, release!: () => void, held = false, authorized = true
-  const waiting = new Promise<void>(done => { entered = done }), gate = new Promise<void>(done => { release = done }), resolve = DesktopConnectorSecrets.prototype.resolve
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve').mockImplementation(async function (this: DesktopConnectorSecrets, current) {
+  const waiting = new Promise<void>(done => { entered = done }), gate = new Promise<void>(done => { release = done }), resolve = ConnectionSecrets.prototype.resolve
+  vi.spyOn(ConnectionSecrets.prototype, 'resolve').mockImplementation(async function (this: ConnectionSecrets, current) {
     const value = await resolve.call(this, current)
     if (!held && current === ref) { held = true; entered(); await gate }
     return value
@@ -372,8 +372,8 @@ it('the original Enrollment creator creates and submits the first bot version th
   expect(reviewed.applicationConfiguration).toMatchObject({ capability: 'disabled', requiredSubjects: ['publication-versions'], review: { versions: [], audience: null, proposedAudience: { include: { people: ['publication-user'] } }, sharing: null, reasonRequired: null, issues: [] } })
   expect(Object.keys((reviewed.applicationConfiguration as any).sources)).toEqual(['versions'])
   const input = { ...action(reviewed, 'create-application-version'), publicationDraft: initialDraft }
-  const originalStore = DesktopConnectorSecrets.prototype.store
-  const ack = vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function (value) {
+  const originalStore = ConnectionSecrets.prototype.store
+  const ack = vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function (value) {
     const result = await originalStore.call(this, value)
     if (value.operationId.startsWith('connection-setup-effect:')) throw Error('Controlled secure acknowledgement loss')
     return result

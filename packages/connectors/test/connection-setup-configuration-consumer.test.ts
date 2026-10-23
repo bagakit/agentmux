@@ -1,6 +1,6 @@
 import { expectConnectionAllocations } from './helpers/unified-identifiers.js'
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
-import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { AgentMuxControlServer, AgentMuxRpcService, connectAgentMuxRpc } from '@agentmux/core'
 import type { ConnectionConfig, ConnectionSetupAction, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupInspectionReceipt, ConnectionSetupConfigurationReceipt, ConnectionSetupReadSubject, ConnectionSetupView } from '@agentmux/core/connections'
 import { fork, type ChildProcess } from 'node:child_process'
@@ -137,7 +137,7 @@ it('SDK and compiled CLI explicitly enable one exact original bot with a durable
   expect(changes(f)).toEqual(before); expect(fetch).toHaveBeenCalledTimes(calls)
   const input = action(offered, 'enable-messaging')
   expect(input.decision.value).toBe('confirm')
-  const store = vi.spyOn(DesktopConnectorSecrets.prototype, 'store')
+  const store = vi.spyOn(ConnectionSecrets.prototype, 'store')
   const accepted = result(await f.cli(['setup', 'advance', '--input', '-'], input)), receipt = effect(accepted)
   expectConnectionAllocations(accepted)
   expect(receipt).toMatchObject({ effect: 'enable-messaging', sourceStepId: source.stepId, input, request: 'confirmed', secureStorage: 'stored' })
@@ -330,8 +330,8 @@ it.each(['account', 'revision'] as const)('a late original enable ACK retains it
 it('the exact original secure effect ACK is discoverable and locally recoverable after renewal, target revision, missing adapter and owner reopen', async () => {
   const f = await fixture(), native = nativeRoute(), fetch = vi.fn(native.route); vi.stubGlobal('fetch', fetch)
   await confirmed(f); const source = selected(await botRead(f)), bytes = readBytes(f, source.stepId)
-  const input = action(await inspect(f), 'enable-messaging'), originalStore = DesktopConnectorSecrets.prototype.store
-  const fault = vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementationOnce(async function(this: DesktopConnectorSecrets, value) {
+  const input = action(await inspect(f), 'enable-messaging'), originalStore = ConnectionSecrets.prototype.store
+  const fault = vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementationOnce(async function(this: ConnectionSecrets, value) {
     await originalStore.call(this, value); throw new Error('fixture-original-configuration-ack-lost')
   })
   const uncertain = effect(await f.sdk.call('connection.setup.advance', input)); fault.mockRestore()
@@ -509,9 +509,9 @@ it('a newer admitted bot read during the original private source yield invalidat
   const fetch = vi.fn(nativeRoute(async subject => Response.json({ code: 0, data: subject === 'bot-settings' ? data : raw[subject] })).route)
   vi.stubGlobal('fetch', fetch); await confirmed(f)
   const source = selected(await botRead(f)), input = action(await inspect(f), 'enable-messaging')
-  const entered = deferred<void>(), release = deferred<void>(), originalResolve = DesktopConnectorSecrets.prototype.resolve
+  const entered = deferred<void>(), release = deferred<void>(), originalResolve = ConnectionSecrets.prototype.resolve
   let armed = true
-  const pause = vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve').mockImplementation(async function(this: DesktopConnectorSecrets, ref) {
+  const pause = vi.spyOn(ConnectionSecrets.prototype, 'resolve').mockImplementation(async function(this: ConnectionSecrets, ref) {
     const value = await originalResolve.call(this, ref)
     let stepId: unknown; try { stepId = value ? JSON.parse(value).stepId : null } catch { /* Credentials are opaque; only the exact original envelope may pause. */ }
     if (armed && stepId === source.stepId) { armed = false; entered.resolve(); await release.promise }
@@ -580,7 +580,7 @@ it('projects original read subjects and finite effect receipts in one ordered Se
   const f = await fixture(), fetch = vi.fn(nativeRoute().route); vi.stubGlobal('fetch', fetch)
   await confirmed(f)
   const source = selected(await botRead(f)), accepted = await f.sdk.call('connection.setup.advance', action(await inspect(f), 'enable-messaging')), written = effect(accepted)
-  const calls = fetch.mock.calls.length, before = changes(f), resolve = vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve'), store = vi.spyOn(DesktopConnectorSecrets.prototype, 'store')
+  const calls = fetch.mock.calls.length, before = changes(f), resolve = vi.spyOn(ConnectionSecrets.prototype, 'resolve'), store = vi.spyOn(ConnectionSecrets.prototype, 'store')
   f.encryption.isEncryptionAvailable = () => false
   const view = result(await f.cli(['setup', 'inspect', '--operation-id', f.input.operationId, '--request-trace']))
   const entries = view.requestTrace!.entries

@@ -5,7 +5,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { DesktopConnectorSecrets } from '../src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 import { AgentMuxControlServer } from '@agentmux/core'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionRecord, ConnectionResultMap, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupInspectionReceipt, ConnectionSetupConfigurationReceipt, ConnectionSetupAction, ConnectionSetupView } from '@agentmux/core/connections'
 import { createDesktopConnections } from '../src/main/connector-host.js'
@@ -272,8 +272,8 @@ it('selected original read and effect ACKs repair locally with their own revisio
   const saved = await seed(); calls = []; let expire = false
   vi.stubGlobal('fetch', vi.fn(nativeRoute({ poll: () => Response.json({ code: 0, data: { next_step: expire ? null : 'enter_app', step_info: expire ? { status: 5 } : { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross-login' } } }) })))
   await signIn(saved.connection)
-  const originalStore = DesktopConnectorSecrets.prototype.store
-  const loseAck = () => vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementationOnce(async function(this: DesktopConnectorSecrets, input) { await originalStore.call(this, input); throw new Error('fixture-committed-private-ack-lost') })
+  const originalStore = ConnectionSecrets.prototype.store
+  const loseAck = () => vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementationOnce(async function(this: ConnectionSecrets, input) { await originalStore.call(this, input); throw new Error('fixture-committed-private-ack-lost') })
   const readFault = loseAck(), failedRead = await clickAction('[data-management-read-bot]', 'read-bot-settings'); readFault.mockRestore()
   const originalRead = readResult(failedRead)
   expect(originalRead).toMatchObject({ request: 'confirmed', secureStorage: 'unknown' })

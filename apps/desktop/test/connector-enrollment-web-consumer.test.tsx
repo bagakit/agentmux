@@ -9,7 +9,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import type { ConnectionEnrollmentView, ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import { createDesktopConnections } from '../src/main/connector-host.js'
-import { DesktopConnectorSecrets } from '../src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
@@ -322,8 +322,8 @@ it('keeps the offered sign-in recovery reachable for the same known bot after a 
 }, 20_000)
 
 it('keeps the offered same-application credential read reachable when its create snapshot cannot be stored', async () => {
-  const store = DesktopConnectorSecrets.prototype.store
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function(this: DesktopConnectorSecrets, input) {
+  const store = ConnectionSecrets.prototype.store
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function(this: ConnectionSecrets, input) {
     let snapshot: { receipt?: { kind?: string } } | null = null
     try { snapshot = JSON.parse(input.secret) } catch { /* The ordinary secret is not a snapshot. */ }
     if (snapshot?.receipt?.kind === 'created') throw new Error('Controlled persistent create-snapshot storage gap')
@@ -342,9 +342,9 @@ it('keeps the offered same-application credential read reachable when its create
 }, 20_000)
 
 it('repairs an original credential ACK locally while the platform is unavailable', async () => {
-  const store = DesktopConnectorSecrets.prototype.store
+  const store = ConnectionSecrets.prototype.store
   let loseAcknowledgement = true
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function(this: DesktopConnectorSecrets, input) {
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function(this: ConnectionSecrets, input) {
     const result = await store.call(this, input)
     if (loseAcknowledgement && input.secret === 'settings-private-app-secret') {
       loseAcknowledgement = false

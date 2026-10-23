@@ -1,6 +1,6 @@
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, expect, it, vi } from 'vitest'
-import { DesktopConnectorSecrets } from '../src/main/connector-secrets'
+import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets'
 
 const databases: DatabaseSync[] = []
 afterEach(() => { for (const database of databases.splice(0)) database.close() })
@@ -16,7 +16,7 @@ function fixture() {
     encryptString: vi.fn((): never => { throw Error('Synchronous OS access is forbidden') }),
     decryptString: vi.fn((): never => { throw Error('Synchronous OS access is forbidden') }),
   }
-  const secrets = new DesktopConnectorSecrets(database, encryption)
+  const secrets = new ConnectionSecrets(database, encryption)
   const unlocked = () => expect(() => { database.exec('BEGIN IMMEDIATE'); database.exec('ROLLBACK') }).not.toThrow()
   return { database, encryption, secrets, unlocked }
 }

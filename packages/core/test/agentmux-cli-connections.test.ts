@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../../connectors/src/connection-secrets.js'
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
 import { enrollmentAvatar, enrollmentEncryption } from '../../connectors/test/fixtures/connection-enrollment.js'
 import type { ConnectionAdapter } from '../../connectors/src/connection-host.js'
@@ -233,8 +233,8 @@ it('never transfers a user link receipt through Agent create re-entry or the ori
   expect(await f.human.call('connection.room.link.create', input)).toEqual(human)
   let entered!: () => void, release!: () => void, first = true
   const reached = new Promise<void>(done => { entered = done }), held = new Promise<void>(done => { release = done })
-  const resolve = DesktopConnectorSecrets.prototype.resolve
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve').mockImplementation(async function (ref) {
+  const resolve = ConnectionSecrets.prototype.resolve
+  vi.spyOn(ConnectionSecrets.prototype, 'resolve').mockImplementation(async function (ref) {
     const value = await resolve.call(this, ref)
     if (first) { first = false; entered(); await held }
     return value

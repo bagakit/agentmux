@@ -7,7 +7,7 @@ import { createServer, type Socket } from 'node:net'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc, AgentMuxError } from '@agentmux/core'
 import type { ConnectionSetupAction, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupConfigurationEffect, ConnectionSetupView } from '@agentmux/core/connections'
-import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
 import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
@@ -174,8 +174,8 @@ it.each(['catalog', 'settings', 'target', 'actor'] as const)('a %s change during
   const ref = db.prepare('SELECT private_ref FROM connection_setup_inspection WHERE step_id=?').get(source.stepId)!.private_ref
   const actor = JSON.parse(String(db.prepare('SELECT actor_json FROM connection_setup_operation WHERE operation_id=?').get(f.input.operationId)!.actor_json))
   let entered!: () => void, release!: () => void, held = false, authorized = true
-  const waiting = new Promise<void>(done => { entered = done }), gate = new Promise<void>(done => { release = done }), resolve = DesktopConnectorSecrets.prototype.resolve
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve').mockImplementation(async function (current) {
+  const waiting = new Promise<void>(done => { entered = done }), gate = new Promise<void>(done => { release = done }), resolve = ConnectionSecrets.prototype.resolve
+  vi.spyOn(ConnectionSecrets.prototype, 'resolve').mockImplementation(async function (current) {
     const value = await resolve.call(this, current)
     if (!held && current === ref) { held = true; entered(); await gate }
     return value

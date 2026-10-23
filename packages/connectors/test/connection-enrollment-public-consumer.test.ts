@@ -11,7 +11,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, AgentMuxError, AgentMuxRpcService, connectAgentMuxRpc } from '@agentmux/core'
 import { parseConnectionEnrollmentDiagnostic, parseConnectionEnrollmentOperation, parseConnectionEnrollmentResult, type ConnectionEnrollmentActionKind, type ConnectionEnrollmentView } from '@agentmux/core/connections'
 import { ConnectionHost } from '@agentmux/connectors'
-import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import { enrollmentAvatar, enrollmentEncryption, enrollmentFixture, fixtureCredential, fixturePrivateState } from './fixtures/connection-enrollment.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
@@ -111,9 +111,9 @@ it('keeps encryption unavailable before begin, and retains unknown effect withou
 }, 20_000)
 
 it('recovers committed secure credential after acknowledgement loss without reading the original secret again', async () => {
-  const f = await fixture(), original = DesktopConnectorSecrets.prototype.store
+  const f = await fixture(), original = ConnectionSecrets.prototype.store
   let lost = false
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function(this: DesktopConnectorSecrets, input) { const saved = await original.call(this, input); if (input.secret === fixtureCredential && !lost) { lost = true; throw new AgentMuxError('Credential acknowledgement unavailable.', 'CONNECTION_CREDENTIAL_UNCONFIRMED') }; return saved })
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function(this: ConnectionSecrets, input) { const saved = await original.call(this, input); if (input.secret === fixtureCredential && !lost) { lost = true; throw new AgentMuxError('Credential acknowledgement unavailable.', 'CONNECTION_CREDENTIAL_UNCONFIRMED') }; return saved })
   const unknown = await create(f); expect(unknown.operation!.authorization).toBe('authorized'); expect(unknown.operation!.credential).toBe('unknown'); expect(unknown.operation!.application?.appId).toBe('application-original')
   expect(unknown.operation!.diagnostic).toEqual({ stage: 'secure-storage', code: 'credential-unconfirmed' })
   await f.closeOwner(); await f.reopen()
@@ -122,9 +122,9 @@ it('recovers committed secure credential after acknowledgement loss without read
 }, 20_000)
 
 it('continues a live verified secret after transient storage failure without a second native credential read', async () => {
-  const f = await fixture(), original = DesktopConnectorSecrets.prototype.store
+  const f = await fixture(), original = ConnectionSecrets.prototype.store
   let fail = true
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function(this: DesktopConnectorSecrets, input) {
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function(this: ConnectionSecrets, input) {
     if (input.secret === fixtureCredential && fail) throw new AgentMuxError('Secure storage is temporarily locked.', 'CONNECTION_CREDENTIAL_UNAVAILABLE')
     return await original.call(this, input)
   })
@@ -281,9 +281,9 @@ it('public SDK and compiled CLI retain opaque native authentication diagnostics 
 }, 30_000)
 
 it('distinguishes a secure challenge checkpoint failure and clears it on original local recovery', async () => {
-  const f = await fixture(), store = DesktopConnectorSecrets.prototype.store
+  const f = await fixture(), store = ConnectionSecrets.prototype.store
   let blocked = true
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function(this: DesktopConnectorSecrets, input) {
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function(this: ConnectionSecrets, input) {
     if (blocked && JSON.parse(input.secret).receipt) throw new Error('private secure-storage detail')
     return store.call(this, input)
   })
@@ -316,10 +316,10 @@ it.each(['begin', 'authentication'] as const)('does not invent a transport stage
 }, 20_000)
 
 it('does not attach a late checkpoint error to an original challenge another owner has recovered', async () => {
-  const f = await fixture(), store = DesktopConnectorSecrets.prototype.store
+  const f = await fixture(), store = ConnectionSecrets.prototype.store
   let release!: () => void, reached!: () => void, held = true
   const waiting = new Promise<void>(r => { reached = r }), resume = new Promise<void>(r => { release = r })
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function(this: DesktopConnectorSecrets, input) {
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function(this: ConnectionSecrets, input) {
     const saved = await store.call(this, input)
     if (held && JSON.parse(input.secret).receipt) { held = false; reached(); await resume; throw new Error('private late checkpoint acknowledgement') }
     return saved
@@ -494,7 +494,7 @@ it('reads bounded original Enrollment trace through SDK and compiled CLI without
   const f = await fixture(), configured = await create(f), operationId = f.input.operationId
   expect(configured.operation!.configuration).toBe('configured')
   const before = f.services.database!.prepare('SELECT total_changes() AS count').get()
-  const resolve = vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve'), store = vi.spyOn(f.services.secrets, 'store')
+  const resolve = vi.spyOn(ConnectionSecrets.prototype, 'resolve'), store = vi.spyOn(f.services.secrets, 'store')
   f.encryption.isEncryptionAvailable = () => false
   const first = result(await f.cli(['enrollment', 'inspect', '--operation-id', operationId, '--request-trace', '--trace-limit', '2']))
   expect(first.challenge).toBeNull(); expect(first.account).toBeNull(); expect(first.actions).toEqual([])
@@ -515,7 +515,7 @@ it('reads bounded original Enrollment trace through SDK and compiled CLI without
   expect(f.services.database!.prepare('SELECT total_changes() AS count').get()).toEqual(before)
   expect(f.begin).toHaveBeenCalledTimes(1); expect(f.authentication).toHaveBeenCalledTimes(1); expect(f.create).toHaveBeenCalledTimes(1); expect(f.credential).toHaveBeenCalledTimes(1)
   await f.closeOwner(); await f.reopen()
-  const reopenedResolve = vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve')
+  const reopenedResolve = vi.spyOn(ConnectionSecrets.prototype, 'resolve')
   const restored = await f.sdk.call('connection.enrollment.inspect', { operationId, requestTrace: { cursor: first.requestTrace.next, limit: 2 } })
   expect(restored.requestTrace).toEqual(second.requestTrace)
   expect(reopenedResolve).not.toHaveBeenCalled()

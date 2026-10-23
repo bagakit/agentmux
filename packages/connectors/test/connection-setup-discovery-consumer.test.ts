@@ -1,5 +1,5 @@
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
-import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import type { ConnectionConfig, ConnectionSetupResultMap } from '@agentmux/core/connections'
 import type { DatabaseSync } from 'node:sqlite'
@@ -34,7 +34,7 @@ async function fixture(options: { domain?: string; adapterId?: string; paused?: 
 }
 function vaultReads() {
   // Call-through observation of the original security boundary, never a fabricated port.
-  return [vi.spyOn(DesktopConnectorSecrets.prototype, 'assertAvailable'), vi.spyOn(DesktopConnectorSecrets.prototype, 'inspect'), vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve'), vi.spyOn(DesktopConnectorSecrets.prototype, 'store')]
+  return [vi.spyOn(ConnectionSecrets.prototype, 'assertAvailable'), vi.spyOn(ConnectionSecrets.prototype, 'inspect'), vi.spyOn(ConnectionSecrets.prototype, 'resolve'), vi.spyOn(ConnectionSecrets.prototype, 'store')]
 }
 function facts(database: DatabaseSync) {
   const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all()

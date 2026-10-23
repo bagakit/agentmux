@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '@agentmux/core'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap, ConnectionSetupView } from '@agentmux/core/connections'
-import { DesktopConnectorSecrets } from '../src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 import { createDesktopConnections } from '../src/main/connector-host.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
@@ -159,8 +159,8 @@ it('an unknown creation keeps its original while an explicit existing-version su
 
 it('accepted version creation with lost local ACK has one primary saving action and never repeats the native write', async () => {
   await open(); await reviewCreation()
-  const store = DesktopConnectorSecrets.prototype.store; let lost = false
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function (this: DesktopConnectorSecrets, input) {
+  const store = ConnectionSecrets.prototype.store; let lost = false
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function (this: ConnectionSecrets, input) {
     const result = await store.call(this, input)
     if (!lost && input.operationId.startsWith('connection-setup-effect:')) { lost = true; throw Error('Local ACK interrupted after Vault commit') }
     return result

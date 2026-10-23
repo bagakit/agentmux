@@ -1,5 +1,5 @@
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
-import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { AgentMuxControlServer, AgentMuxRpcService, connectAgentMuxRpc } from '@agentmux/core'
 import type { ConnectionConfig, ConnectionSetupAction, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupInspectionReceipt, ConnectionSetupReadSubject, ConnectionSetupView } from '@agentmux/core/connections'
 import { fork, type ChildProcess } from 'node:child_process'
@@ -109,7 +109,7 @@ it('real SDK and compiled CLI read four independently claimed native subjects wh
   const permission = await f.sdk.call('connection.setup.advance', action(await inspect(f), 'inspect-application')), original = selected(permission)
   expect(original).not.toHaveProperty('subject'); expect(permission.applicationInspection?.applicationInfoReadPermission).toBe('confirmed')
   const originalBytes = f.services.database!.prepare('SELECT record_json,private_ref FROM connection_setup_inspection WHERE step_id=?').get(original.stepId)
-  const store = vi.spyOn(DesktopConnectorSecrets.prototype, 'store'), receipts: ConnectionSetupInspectionReceipt[] = []
+  const store = vi.spyOn(ConnectionSecrets.prototype, 'store'), receipts: ConnectionSetupInspectionReceipt[] = []
   const expected = {
     'application-details': { subject: 'application-details', name: raw['application-details'].name, description: raw['application-details'].desc },
     'event-settings': { subject: 'event-settings', transport: 'persistent-connection' },
@@ -229,8 +229,8 @@ it('failed native observations and an unrecoverable original result do not block
 
 it('an exact new-subject vault ACK remains locally recoverable after account renewal, target revision, missing adapter and reopen without activating stale summary', async () => {
   const f = await fixture(), native = nativeRoute(), fetch = vi.fn(native.route); vi.stubGlobal('fetch', fetch); await confirmed(f)
-  const input = action(await inspect(f), 'read-event-settings'), originalStore = DesktopConnectorSecrets.prototype.store
-  const fault = vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementationOnce(async function(this: DesktopConnectorSecrets, value) {
+  const input = action(await inspect(f), 'read-event-settings'), originalStore = ConnectionSecrets.prototype.store
+  const fault = vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementationOnce(async function(this: ConnectionSecrets, value) {
     await originalStore.call(this, value); throw new Error('fixture-original-settings-ack-lost')
   })
   const uncertain = await f.sdk.call('connection.setup.advance', input), receipt = selected(uncertain); fault.mockRestore()

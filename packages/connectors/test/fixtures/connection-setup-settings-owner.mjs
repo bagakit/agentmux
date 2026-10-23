@@ -4,18 +4,18 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { AgentMuxControlServer } from '@agentmux/core'
 import { ConnectionHost, createBuiltinConnectionAdapters } from '@agentmux/connectors'
-import { DesktopConnectorSecrets } from '../../../../apps/desktop/src/main/connector-secrets.ts'
+import { ConnectionSecrets } from '../../src/connection-secrets.ts'
 
 const root = process.argv[2], mode = process.argv[3], key = Buffer.alloc(32, 13)
 const database = new DatabaseSync(join(root, 'connections.sqlite'))
-const secrets = new DesktopConnectorSecrets(database, {
+const secrets = new ConnectionSecrets(database, {
   isAsyncEncryptionAvailable: async () => true,
   encryptStringAsync: async value => { const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, iv); const bytes = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]); return Buffer.concat([iv, cipher.getAuthTag(), bytes]) },
   decryptStringAsync: async value => { const cipher = createDecipheriv('aes-256-gcm', key, value.subarray(0, 12)); cipher.setAuthTag(value.subarray(12, 28)); return { result: (Buffer.concat([cipher.update(value.subarray(28)), cipher.final()]).toString()), shouldReEncrypt: false } }
 })
 let readStarted = false
-const originalStore = DesktopConnectorSecrets.prototype.store
-DesktopConnectorSecrets.prototype.store = async function(input) {
+const originalStore = ConnectionSecrets.prototype.store
+ConnectionSecrets.prototype.store = async function(input) {
   const receipt = await originalStore.call(this, input)
   // Hold only the actual committed Vault ACK; the original durable bytes already exist.
   if (mode === 'vault-committed' && readStarted) { process.send({ kind: 'vault-committed' }); return await new Promise(() => {}) }

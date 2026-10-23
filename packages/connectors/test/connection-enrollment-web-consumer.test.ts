@@ -1,5 +1,5 @@
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
-import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { AgentMuxControlServer, AgentMuxError, AgentMuxRpcService, connectAgentMuxRpc } from '@agentmux/core'
 import type { ConnectionEnrollmentActionKind, ConnectionEnrollmentAdvanceInput, ConnectionEnrollmentBeginInput, ConnectionEnrollmentView } from '@agentmux/core/connections'
 import { once } from 'node:events'
@@ -258,9 +258,9 @@ it('offers an explicit same-app credential read after a failed read without repl
 }, 20_000)
 
 it('continues the exact known app after its create snapshot store failed and a replacement Host has lost all unsettled memory', async () => {
-  const f = await fixture(), network = native(f), store = DesktopConnectorSecrets.prototype.store
+  const f = await fixture(), network = native(f), store = ConnectionSecrets.prototype.store
   let fail = true, blockedSnapshots = 0
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function(this: DesktopConnectorSecrets, input) {
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function(this: ConnectionSecrets, input) {
     let envelope: { kind?: string } | undefined; try { envelope = JSON.parse(input.secret) } catch { /* The app credential is an opaque string. */ }
     if (fail && envelope?.kind === 'create') { blockedSnapshots++; throw new AgentMuxError('Original private create snapshot was not secured.', 'CONNECTION_CREDENTIAL_UNAVAILABLE') }
     return await store.call(this, input)
@@ -283,9 +283,9 @@ it('continues the exact known app after its create snapshot store failed and a r
 }, 20_000)
 
 it('repairs the committed original credential locally after ACK loss and adapter removal without current authentication', async () => {
-  const f = await fixture(), network = native(f), store = DesktopConnectorSecrets.prototype.store
+  const f = await fixture(), network = native(f), store = ConnectionSecrets.prototype.store
   let lose = true
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function(this: DesktopConnectorSecrets, input) {
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function(this: ConnectionSecrets, input) {
     const receipt = await store.call(this, input)
     if (lose && input.secret === SECRET) { lose = false; throw new AgentMuxError('Original secret ACK was lost.', 'CONNECTION_CREDENTIAL_UNCONFIRMED') }
     return receipt
@@ -324,10 +324,10 @@ it('preserves a late exact create receipt while rejecting the former transport a
 it('rechecks the original transport after resolving private account bytes without deleting the original receipt', async () => {
   const f = await fixture(), network = native(f), view = await account(f, await f.sdk.call('connection.enrollment.begin', f.input))
   const service = new AgentMuxRpcService({ connections: f.services.connections }); clean.push(() => service.dispose())
-  const original = DesktopConnectorSecrets.prototype.resolve, saved = encrypted(f), before = JSON.stringify(row(f))
+  const original = ConnectionSecrets.prototype.resolve, saved = encrypted(f), before = JSON.stringify(row(f))
   let entered = false, release!: () => void, current = true
   const barrier = new Promise<void>(resolve => { release = resolve })
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve').mockImplementation(async function(this: DesktopConnectorSecrets, ref) {
+  vi.spyOn(ConnectionSecrets.prototype, 'resolve').mockImplementation(async function(this: ConnectionSecrets, ref) {
     const raw = await original.call(this, ref)
     if (!entered && raw?.includes('"operationId":"' + f.input.operationId + '"')) { entered = true; await barrier }
     return raw
@@ -344,11 +344,11 @@ it('rechecks the original transport after resolving private account bytes withou
 
 it('withholds an old QR read after a real same-intent renewal changes the authentication attempt', async () => {
   const f = await fixture(), network = native(undefined, { poll: async () => { throw new TypeError('The original poll response is unconfirmed') } })
-  const waiting = await f.sdk.call('connection.enrollment.begin', f.input), oldAttempt = waiting.operation!.authentication!.attemptId, original = DesktopConnectorSecrets.prototype.resolve, oldPrivate = encrypted(f)
+  const waiting = await f.sdk.call('connection.enrollment.begin', f.input), oldAttempt = waiting.operation!.authentication!.attemptId, original = ConnectionSecrets.prototype.resolve, oldPrivate = encrypted(f)
   const service = new AgentMuxRpcService({ connections: f.services.connections }); clean.push(() => service.dispose())
   let entered = false, release!: () => void
   const barrier = new Promise<void>(resolve => { release = resolve })
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve').mockImplementation(async function(this: DesktopConnectorSecrets, ref) {
+  vi.spyOn(ConnectionSecrets.prototype, 'resolve').mockImplementation(async function(this: ConnectionSecrets, ref) {
     const raw = await original.call(this, ref)
     if (!entered && raw?.includes('"operationId":"' + f.input.operationId + '"')) { entered = true; await barrier }
     return raw

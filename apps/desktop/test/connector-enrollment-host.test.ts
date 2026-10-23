@@ -13,7 +13,7 @@ import type {
   ConnectionSetupView
 } from '@agentmux/core/connections'
 import { createDesktopConnections } from '../src/main/connector-host.js'
-import type { CredentialEncryption } from '../src/main/connector-secrets.js'
+import type { CredentialEncryption } from '../../../packages/connectors/src/connection-secrets.js'
 import { ingressFixture } from '../../../packages/connectors/test/fixtures/ingress.js'
 import {
   defaultFeishuSdkTransport,

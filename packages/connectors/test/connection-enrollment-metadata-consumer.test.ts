@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import { ConnectionHost } from '@agentmux/connectors'
-import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { enrollmentFixture } from './fixtures/connection-enrollment.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
@@ -15,8 +15,8 @@ afterEach(async () => {
 })
 async function fixture() { const f = await enrollmentFixture(); cleanup.push(f.close); return f }
 function vaultReads() {
-  return [vi.spyOn(DesktopConnectorSecrets.prototype, 'assertAvailable'), vi.spyOn(DesktopConnectorSecrets.prototype, 'inspect'),
-    vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve'), vi.spyOn(DesktopConnectorSecrets.prototype, 'store')]
+  return [vi.spyOn(ConnectionSecrets.prototype, 'assertAvailable'), vi.spyOn(ConnectionSecrets.prototype, 'inspect'),
+    vi.spyOn(ConnectionSecrets.prototype, 'resolve'), vi.spyOn(ConnectionSecrets.prototype, 'store')]
 }
 
 it('SDK and compiled CLI discover enrollment metadata without probing a locked vault, while begin still uses the original secure owner', async () => {

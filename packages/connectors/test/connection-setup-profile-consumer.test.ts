@@ -16,7 +16,7 @@ import {
 } from '@agentmux/core/connections'
 import type { ConnectionAdapter } from '@agentmux/connectors'
 import { ProfileConnectionSetup } from '../dist/connection-setup-profile.js'
-import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
 import {
   enrollmentEncryption,
@@ -900,9 +900,9 @@ it('keeps the frozen original version after an explicit version-list refresh, sa
 }, 30000)
 it('recovers the original persisted upload ACK after owner restart without a second upload', async () => {
   const f = await fixture(),
-    originalStore = DesktopConnectorSecrets.prototype.store
+    originalStore = ConnectionSecrets.prototype.store
   let failed = false
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(
     async function (input) {
       const saved = await originalStore.call(this, input)
       if (!failed && input.operationId.startsWith('connection-setup-effect:')) {

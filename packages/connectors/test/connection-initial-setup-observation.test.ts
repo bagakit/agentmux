@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { closeEnrollmentInitialFixtures, enrollmentInitialFixture } from './fixtures/connection-enrollment-initial.js'
-import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { AgentMuxError } from '@agentmux/core'
 import { ConnectionEnrollmentHost, ConnectionSetupHost, ConnectionHost } from '@agentmux/connectors'
 import { connectionSetupDecisionForAction } from '@agentmux/core/connections'
@@ -12,7 +12,7 @@ it('projects original completed initialization through the public connection rec
   const created = await f.finishCreation()
   expect(created.operation!.initialSetup!.progress!.state).toBe('complete')
   const before = f.requests.length
-  const resolve = vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve')
+  const resolve = vi.spyOn(ConnectionSecrets.prototype, 'resolve')
   const listed = await f.sdk.call('connection.ls', {})
   expect(listed.connections[0]).toHaveProperty('initialSetup', { state: 'complete' })
   expect(resolve).not.toHaveBeenCalled()
@@ -22,7 +22,7 @@ it('projects original completed initialization through the public connection rec
   expect((await f.connectionCli(['inspect', '--connection', f.input.connectionId])).connection.initialSetup).toEqual({ state: 'complete' })
   resolve.mockRestore()
   await f.reopen()
-  const reopenedResolve = vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve')
+  const reopenedResolve = vi.spyOn(ConnectionSecrets.prototype, 'resolve')
   expect((await f.connectionCli(['ls'])).connections[0].initialSetup).toEqual({ state: 'complete' })
   expect(reopenedResolve).not.toHaveBeenCalled()
   expect(f.requests).toHaveLength(before)
