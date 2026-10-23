@@ -1,4 +1,5 @@
 import { copyBrowserExtension } from './prepare-browser-extension-identity.mjs'
+import { resolvePackageRoot } from '../../../scripts/package-dependencies.mjs'
 import { writeEmbeddedCoreCli } from './embedded-core-cli.mjs'
 import { privatePackageSmokeEnvironment, preservePackageSmokeFailure } from './package-smoke-context.mjs'
 import { updateRoute } from '../src/shared/update-policy.ts'
@@ -318,7 +319,7 @@ async function materializeDependencies(sourcePackage, dependencies, destination)
 }
 
 async function materializeDependency(sourcePackage, packageName, destination) {
-  const source = await resolvePackageRoot(sourcePackage, packageName)
+  const source = await resolvePackageRoot(sourcePackage, packageName, repositoryRoot)
   const packageManifest = JSON.parse(await readFile(join(source, 'package.json'), 'utf8'))
   await mkdir(destination, { recursive: true })
   for (const entry of await readdir(source, { withFileTypes: true })) {
@@ -332,21 +333,6 @@ async function materializeDependency(sourcePackage, packageName, destination) {
     packageManifest.dependencies ?? {},
     join(destination, 'node_modules')
   )
-}
-
-async function resolvePackageRoot(sourcePackage, packageName) {
-  let current = sourcePackage
-  while (true) {
-    const candidate = join(current, 'node_modules', ...packageName.split('/'))
-    if (await pathExists(candidate)) return await realpath(candidate)
-    if (current === repositoryRoot) break
-    const parent = dirname(current)
-    // pnpm may resolve a package into a shared store outside this checkout.
-    // Follow Node's ordinary ancestor lookup rather than truncating its dependencies.
-    if (parent === current) break
-    current = parent
-  }
-  throw new Error(`Could not resolve package root for ${packageName} from ${sourcePackage}.`)
 }
 
 async function auditBundleSymlinks(root) {
