@@ -62,11 +62,12 @@ function anchorFromRows(rows: Iterable<HTMLElement>, bounds: DOMRect): ReadingAn
 }
 
 export function restoreConversationAnchor(viewport: HTMLElement, anchor: ReadingAnchor, tailSpace?: HTMLElement | null): void {
+  const id = CSS.escape(anchor.id)
   const row = anchor.kind === 'segment'
-    ? [...viewport.querySelectorAll<HTMLElement>('[data-segment-key]')].find(node => node.dataset.segmentKey === anchor.id)
+    ? viewport.querySelector<HTMLElement>(`[data-segment-key='${id}']`)
     : anchor.kind === 'record'
-    ? [...viewport.querySelectorAll<HTMLElement>('[data-native-record-id]')].find(node => node.dataset.nativeRecordId === anchor.id)
-    : [...viewport.querySelectorAll<HTMLElement>('[data-observation-id]')].find(node => node.dataset.observationId === anchor.id)
+    ? viewport.querySelector<HTMLElement>(`[data-native-record-id='${id}']`)
+    : viewport.querySelector<HTMLElement>(`[data-observation-id='${id}']`)
       ?.querySelector<HTMLElement>(':scope > .wf-head[aria-expanded="false"]')
   if (!row) return
   const bounds = viewport.getBoundingClientRect(), rect = row.getBoundingClientRect()
