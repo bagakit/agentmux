@@ -3,7 +3,7 @@ import { act, useEffect } from 'react'
 import { appendFile, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { connectAgentMuxRpc, type AgentMuxRpcClient, type AgentSessionHistoryPage } from '@agentmux/core'
+import { connectAgentMuxRpc, type AgentMuxRpcClient, type AgentSessionHistoryPage, type AgentSessionHistoryItem, type AgentProvider } from '@agentmux/core'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
@@ -12,6 +12,7 @@ import { readStyleSheet } from './helpers/styles'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
+import * as readingDiagnostics from '../src/renderer/src/lib/reading-diagnostic-publication'
 
 const terminal = vi.hoisted(() => ({ mounts: 0, disposals: 0 }))
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => {
@@ -185,15 +186,15 @@ it.each(['local', 'connected-host'] as const)('an Inputs record read from the or
   }, { timeout: 8000 })
   expect(panel.dataset.state).toBe('closed'); expect(useAppStore.getState().viewModes['agent-1']).toBe('activity')
   const exactReads = frames.filter(receipt => receipt.input.record)
-  expect(exactReads.length).toBeGreaterThanOrEqual(2)
+  const recordStarts = exactReads.filter(receipt => !receipt.input.cursor)
+  expect(recordStarts, 'Only the target Activity may start an exact record navigation').toHaveLength(1)
   for (const receipt of exactReads) {
     expect(receipt.input).toMatchObject({ hostId: route, agentSessionId: reference.agentSessionId,
       record: { ...reference, source: target } })
     expect(receipt.page).toMatchObject({ hostId: route, sourceHostId: reference.hostId })
   }
-  // The Pane summary and actual Activity use their own original Core windows;
-  // an accepted frame belonging to the Mailbox cannot substitute either one.
-  expect(new Set(exactReads.map(receipt => receipt.page!.window.id)).size).toBe(2)
+  // Wire continuations belong to this same target read, not another summary navigation.
+  expect(new Set(exactReads.map(receipt => receipt.page!.window.id)).size).toBe(1)
   const current = useAppStore.getState().sessions.find(session => session.id === reference.agentSessionId)
   if (current?.kind !== 'agent') throw new Error('The original mounted Agent is missing')
   expect(current.control.run).toEqual(run)
@@ -207,7 +208,7 @@ it('a later feed wheel cancels the original Activity record reply without replac
   let replies = 0, produced: ConversationPage | undefined, release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
   recordReply = async (_input, page) => {
-    if (++replies !== 2) return
+    if (++replies !== 1) return
     produced = page
     await gate
   }
@@ -257,7 +258,7 @@ it('a later feed wheel cancels the original Activity record reply without replac
     expect(rows.every(row => row.isConnected)).toBe(true)
     expect(frames).toHaveLength(requests); expect(feed.scrollTop).toBe(top); expect(document.activeElement).toBe(focus)
     expect(feed.querySelector('[data-message-located]')).toBeNull()
-    expect(useAppStore.getState().viewModes['agent-1']).toBe('activity')
+    expect(useAppStore.getState().viewModes['agent-1']).toBe('terminal')
     expect(panel.dataset.state).toBe('open'); expect(dom.draft()).toBe('Keep my draft')
     // This is a new explicit user operation, never an automatic replay of the
     // cancelled request. Cancelling one operation cannot poison later settles.
@@ -312,7 +313,7 @@ it('a later feed wheel settles a hanging original Activity watch opening without
     // response is delayed; no observation, handle or cancellation is invented.
     const receipt = { view: args[0].view, handle: await originalObserve(...args) }
     watches.push(receipt)
-    const exactActivity = frames.filter(frame => frame.input.record)[1]?.page
+    const exactActivity = frames.find(frame => frame.input.record && !frame.input.cursor)?.page
     if (!opening && exactActivity?.window.view !== undefined && exactActivity.window.view === receipt.view) { opening = receipt; await gate }
     return receipt.handle
   })
@@ -359,7 +360,7 @@ it('a completed selection-held Activity record frame is discarded after a later 
   const { panel, row } = await originalInputs()
   let replies = 0, produced: ConversationPage | undefined, release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
-  recordReply = async (_input, page) => { if (++replies === 2) { produced = page; await gate } }
+  recordReply = async (_input, page) => { if (++replies === 1) { produced = page; await gate } }
   const action = row.closest('.composer-mailbox__record')!.querySelector<HTMLButtonElement>('.composer-mailbox__reveal')!
   const selection = document.getSelection()!
   try {
@@ -400,4 +401,180 @@ it('a completed selection-held Activity record frame is discarded after a later 
     await explicitReveal(action, panel, feed)
     lateReplyProof.afterRetry = activityConsumer()
   } finally { release(); selection.removeAllRanges() }
+})
+
+
+it('old-record navigation and Current keep the original summary receiving later inputs and answer context', async () => {
+  const source = original!, run = source.session.run
+  const diagnostics = vi.spyOn(readingDiagnostics, 'publishReadingDiagnostic')
+  const provider = source.client.providers.get('claude')
+  function ownsReading(value: AgentProvider): value is AgentProvider & Required<Pick<AgentProvider, 'readSessionHistoryPage' | 'readConversationChanges'>> {
+    return typeof value.readSessionHistoryPage === 'function' && typeof value.readConversationChanges === 'function'
+  }
+  if (!ownsReading(provider)) throw new Error('The original Provider page/changes owner is unavailable')
+  const questionId = 'original-reading-question', questionRecordId = 'live-question', answerRecordId = 'live-answer'
+  const prompt = 'Keep receiving the original inputs?', answer = 'Keep the original summary current'
+  const revisedQuestion = prompt + ' This is a newer native version.'
+  const wire = '<send_user_message_question_reply>\n' + JSON.stringify([{ questionItemId: questionId, question: prompt, answer }]) + '\n</send_user_message_question_reply>'
+  const decorate = (item: AgentSessionHistoryItem): AgentSessionHistoryItem => item.id === questionRecordId
+    ? { ...item, questionRequest: { delivery: 'async', questions: [{ id: questionId, prompt, options: [], acceptsText: true }] } }
+    : item.id === answerRecordId ? { ...item, questionAnswers: [{ questionId, prompt, answer }] } : item
+  const pageOwner = provider.readSessionHistoryPage, changesOwner = provider.readConversationChanges
+  // The real JSONL converter owns every body, kind, ID, cursor and source. Only
+  // optional typed question facts are controlled at that exact Provider leaf.
+  vi.spyOn(provider, 'readSessionHistoryPage').mockImplementation(async context => {
+    expect(context.agentSessionId).toBe(reference.agentSessionId)
+    expect(context.source).toEqual({ providerId: 'claude', nativeSessionId })
+    const page = await pageOwner.call(provider, context)
+    return { ...page, items: page.items.map(decorate) }
+  })
+  vi.spyOn(provider, 'readConversationChanges').mockImplementation(async context => {
+    expect(context.agentSessionId).toBe(reference.agentSessionId)
+    expect(context.source).toEqual({ providerId: 'claude', nativeSessionId })
+    const page = await changesOwner.call(provider, context)
+    return { ...page, items: page.items.map(decorate) }
+  })
+  const changes: Awaited<ReturnType<typeof api.conversation.readConversationChanges>>[] = []
+  const readChanges = vi.mocked(api.conversation.readConversationChanges).getMockImplementation()!
+  vi.mocked(api.conversation.readConversationChanges).mockImplementation(async (...args) => {
+    const page = await readChanges(...args); changes.push(page); return page
+  })
+  await appendFile(source.path, jsonl([{ sessionId: nativeSessionId, uuid: questionRecordId, type: 'assistant',
+    message: { role: 'assistant', content: prompt } }]))
+  originalNative = await readFile(source.path)
+  const scopeRecords = () => diagnostics.mock.calls.map(([record]) => record).filter(record => record.scope.hostId === routeHost &&
+    record.scope.agentSessionId === reference.agentSessionId && record.scope.runId === run.runId && record.scope.consumerKind === 'input-summary')
+  const { panel, row } = await originalInputs()
+  // Only the original Composer/Mailbox summary exists before this exact reveal;
+  // the never-opened Pane starts its own distinct consumer when navigation begins.
+  const existingConsumers = new Set(scopeRecords().map(record => record.scope.consumerId))
+  expect(existingConsumers.size).toBeGreaterThan(0)
+  const action = row.closest('.composer-mailbox__record')!.querySelector<HTMLButtonElement>('.composer-mailbox__reveal')!
+  expect(action).not.toBeNull()
+  await act(async () => { action.focus(); action.click() })
+  const key = conversationMessageSourceKey(reference.agentSessionId, target)
+  await vi.waitFor(() => expect(dom.container.querySelector(`.activity-feed [data-message-source-key='${key}'][data-message-located]`)).not.toBeNull(), { timeout: 8000 })
+  let summaryConsumerId: string | undefined
+  await vi.waitFor(() => {
+    const introduced = scopeRecords().filter(record => !existingConsumers.has(record.scope.consumerId))
+    const active = [...new Set(introduced.map(record => record.scope.consumerId))].filter(id =>
+      !introduced.some(record => record.scope.consumerId === id && record.events.some(event => event.phase === 'consumer-ended')))
+    expect(active, 'This reveal must create exactly one live original Pane summary consumer').toHaveLength(1)
+    summaryConsumerId = active[0]
+  }, { timeout: 8000 })
+  expect(summaryConsumerId).toBeTypeOf('string')
+  expect(summaryConsumerId).not.toBe('')
+  expect(panel.dataset.state).toBe('closed')
+  const current = dom.container.querySelector<HTMLButtonElement>('[data-conversation-current-entry] button')!
+  // Explicit pre-focus/keyboard activation; pointerdown intentionally preserves focus.
+  expect(current).not.toBeNull(); await act(async () => { current.focus(); current.click() })
+  const summaryEvents = () => scopeRecords().filter(record => record.scope.consumerId === summaryConsumerId).flatMap(record => record.events)
+  const summaryEnded = () => summaryEvents().some(event => event.phase === 'consumer-ended')
+  const assertSummaryAlive = () => expect(summaryEnded(), 'The fixed original Pane summary consumer must remain live').toBe(false)
+  const summaryFrame = () => {
+    assertSummaryAlive()
+    const accepted = summaryEvents().filter(event => event.phase === 'admission-accepted').at(-1)
+    const page = [...frames.flatMap(receipt => receipt.page ? [receipt.page] : []), ...changes].find(page =>
+      page.window.id === accepted?.windowId && page.window.revision === accepted?.windowRevision && page.window.complete)
+    return { accepted, page }
+  }
+  // First prove that Current actually reached the exact target DOM and that
+  // this summary has settled its own accepted frame; do not wait for it to be correct.
+  await vi.waitFor(() => {
+    if (summaryEnded()) return
+    const rows = [...dom.container.querySelectorAll<HTMLElement>(`[data-native-record-id='${questionRecordId}'] .log-turn__body`)]
+    expect(rows).toHaveLength(1); expect(rows[0]!.textContent).toContain(prompt)
+    expect(rows[0]!.closest('[hidden], [inert]')).toBeNull()
+    const { accepted, page } = summaryFrame()
+    expect(page).toBeDefined()
+    expect(summaryEvents().some(event => event.phase === 'read-ended' && event.attemptId === accepted?.attemptId)).toBe(true)
+  }, { timeout: 8000 })
+  assertSummaryAlive()
+  const preparedSummary = summaryFrame()
+  lateReplyProof = { phase: 'summary-current-intent', summaryAccepted: preparedSummary.accepted,
+    summaryPage: preparedSummary.page, targetActivity: activityConsumer(),
+    previousConsumerIds: [...existingConsumers], summaryConsumerId, diagnosticScopes: scopeRecords().map(record => ({ scope: record.scope, events: record.events })) }
+  const page = preparedSummary.page!
+  expect(page!.window.anchor, 'Exact navigation must not freeze the input summary').toBeUndefined()
+  const originalQuestion = page.items.flatMap(entry => entry.kind === 'item' ? entry.item.records : [])
+    .find(record => record.original.kind === 'native' && record.original.item.id === questionRecordId)
+  expect(originalQuestion?.reference).toEqual({ ...reference, source: { kind: 'native', providerId: 'claude', nativeSessionId, recordId: questionRecordId } })
+  expect(originalQuestion?.revision).toBeTruthy()
+  const questionRevision = originalQuestion!.revision
+  let card: HTMLElement | null = null, body: HTMLElement | null = null
+  await vi.waitFor(() => {
+    if (summaryEnded()) return
+    card = dom.container.querySelector('[aria-label="Native asynchronous question"]')
+    body = dom.container.querySelector(`[data-native-record-id='${questionRecordId}'] .log-turn__body`)
+    expect(card).not.toBeNull(); expect(card!.dataset.questionState).toBe('unknown'); expect(body).not.toBeNull()
+    expect(body!.textContent).toContain(prompt)
+  }, { timeout: 8000 })
+  assertSummaryAlive()
+  const originalCard = card!, originalBody = body!, node = originalBody.querySelector('.md-paragraph')?.firstChild
+  expect(node).toBeDefined()
+  const selection = document.getSelection()!, range = document.createRange()
+  range.setStart(node!, 0); range.setEnd(node!, 4)
+  await act(async () => { selection.removeAllRanges(); selection.addRange(range); document.dispatchEvent(new Event('selectionchange')) })
+  try {
+    assertSummaryAlive()
+    const eventsBeforeAnswer = Math.max(...summaryEvents().map(event => event.sequence))
+    // A plain neighbor append does not replace a selected version. The real
+    // Provider UUID update explicitly changes this original question's body in
+    // the same native append as the later answer; no presentation state is forced.
+    await appendFile(source.path, jsonl([
+      { sessionId: nativeSessionId, uuid: questionRecordId, type: 'assistant', message: { role: 'assistant', content: revisedQuestion } },
+      { sessionId: nativeSessionId, uuid: answerRecordId, type: 'user', message: { role: 'user', content: wire } }
+    ]))
+    originalNative = await readFile(source.path)
+    // Wait for the real native invalidation and its actual reader outcome. Both
+    // normal changes and the old historical deferral are terminal observations;
+    // lack of a summary update is asserted below, never qualified as a timeout.
+    await vi.waitFor(() => {
+      if (summaryEnded()) return
+      const later = summaryEvents().filter(event => event.sequence > eventsBeforeAnswer)
+      expect(later.some(event => event.phase === 'invalidation-received')).toBe(true)
+      expect(later.some(event => event.phase === 'read-ended' && event.operation === 'changes' ||
+        event.phase === 'read-deferred' && event.reason === 'historical')).toBe(true)
+      const received = changes.flatMap(page => page.items.flatMap(entry => entry.kind === 'item' ? entry.item.records : []))
+        .find(record => record.original.kind === 'native' && record.original.item.id === answerRecordId)
+      expect(received?.reference).toEqual({ ...reference, source: { kind: 'native', providerId: 'claude', nativeSessionId, recordId: answerRecordId } })
+      expect(received?.original.kind === 'native' && received.original.item.questionAnswers).toEqual([{ questionId, prompt, answer }])
+      const updatedQuestion = changes.flatMap(page => page.items.flatMap(entry => entry.kind === 'item' ? entry.item.records : []))
+        .findLast(record => record.original.kind === 'native' && record.original.item.id === questionRecordId && record.revision !== questionRevision)
+      expect(updatedQuestion?.reference).toEqual(originalQuestion!.reference)
+      expect(updatedQuestion?.revision).toBeTruthy(); expect(updatedQuestion?.revision).not.toBe(questionRevision)
+      expect(updatedQuestion?.original.kind === 'native' && updatedQuestion.original.item.contentParts)
+        .toEqual([expect.objectContaining({ kind: 'text', text: revisedQuestion })])
+      expect(activityConsumer().held).toBe(true)
+      expect(dom.container.querySelector(`[data-native-record-id='${questionRecordId}'] .log-turn__body`)).toBe(originalBody)
+      expect(originalBody.textContent).toContain(prompt); expect(originalBody.textContent).not.toContain(revisedQuestion)
+      expect(selection.getRangeAt(0)).toBe(range); expect(selection.toString()).toBe('Keep')
+    }, { timeout: 8000 })
+    const accepted = summaryEvents().filter(event => event.phase === 'admission-accepted').at(-1)
+    const page = [...frames.flatMap(receipt => receipt.page ? [receipt.page] : []), ...changes].find(page => page.window.id === accepted?.windowId && page.window.revision === accepted?.windowRevision && page.window.complete)
+    assertSummaryAlive()
+    lateReplyProof = { phase: 'summary-after-current', summaryAccepted: accepted, summaryPage: page,
+      summaryEvents: summaryEvents().filter(event => event.sequence > eventsBeforeAnswer), originalChanges: changes, targetActivity: activityConsumer(),
+      previousConsumerIds: [...existingConsumers], summaryConsumerId, diagnosticScopes: scopeRecords().map(record => ({ scope: record.scope, events: record.events })) }
+    expect(page, 'The original summary must have an accepted frame').toBeDefined()
+    const originals = page!.items.flatMap(entry => entry.kind === 'item' ? entry.item.records : [])
+    const received = originals.find(record => record.original.kind === 'native' && record.original.item.id === answerRecordId)
+    expect(received?.reference, 'The original summary must accept the later input after Current').toEqual({ ...reference,
+      source: { kind: 'native', providerId: 'claude', nativeSessionId, recordId: answerRecordId } })
+    expect(received?.original.kind === 'native' && received.original.item.questionAnswers).toEqual([{ questionId, prompt, answer }])
+    await vi.waitFor(() => {
+      if (summaryEnded()) return
+      expect(originalCard.dataset.questionState, 'The original summary supplies later answer context to the retained Activity').toBe('answered')
+      expect(originalCard.querySelector('.agent-question__answer')?.textContent).toBe(answer)
+    }, { timeout: 8000 })
+    assertSummaryAlive()
+    expect(dom.container.querySelector('[aria-label="Native asynchronous question"]')).toBe(originalCard)
+    expect(dom.container.querySelector(`[data-native-record-id='${questionRecordId}'] .log-turn__body`)).toBe(originalBody)
+    expect(selection.anchorNode).toBe(node); expect(selection.focusNode).toBe(node); expect(selection.toString()).toBe('Keep')
+    expect(useAppStore.getState().viewModes['agent-1']).toBe('activity'); expect(dom.draft()).toBe('Keep my draft')
+    expect(frames.filter(receipt => receipt.input.record && !receipt.input.cursor)).toHaveLength(1)
+    expect(terminal.mounts).toBe(1); expect(terminal.disposals).toBe(0)
+    const session = useAppStore.getState().sessions.find(session => session.id === reference.agentSessionId)
+    expect(session?.kind === 'agent' && session.control.run).toEqual(run)
+  } finally { selection.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) }
 })

@@ -6,6 +6,8 @@ import { join } from 'node:path'
 import { AgentMuxError, connectAgentMuxRpc, defaultAgentMuxMessageQueuePath, DurableAgentMuxMessageQueue, type AgentMuxRpcClient } from '@agentmux/core'
 import type { AgentSessionHistoryPage, AgentSessionUserMessage } from '@agentmux/core'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
+import { projectConversationWindow } from '@agentmux/core/conversation'
+import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
@@ -77,7 +79,6 @@ const page = (nativeSessionId = 'native-a', providerId = 'codex'): AgentSessionH
 const incoming = { id: 'same', agentSessionId: 'agent-1', kind: 'user_message' as const, status: 'complete' as const,
   source: 'user' as const, title: 'Recorded input', content: body, authorAgentSessionId: 'declared-peer', createdAt: 1, updatedAt: 1 }
 let witness: ReturnType<typeof useSessionUserMessages> | null = null
-const revealSource = { kind: 'native' as const, providerId: 'codex', nativeSessionId: 'native-a', recordId: 'missing' }
 function Witness() { witness = useSessionUserMessages(originalControl()); return null }
 const panel = () => dom.container.querySelector<HTMLElement>('.composer-mailbox')!
 function originalControl() {
@@ -269,6 +270,12 @@ it.each([false, true])('real Inbox captured action (detail=%s) locates receiving
 
 it.each([false, true])('real Inputs native action (detail=%s) selects complete provider/session/record namespace with stable projection and handoff', async detail => {
   await dom.render(pane()); await open('user'); await navigate('native:native:codex:native-a:same', detail)
+  await vi.waitFor(async () => {
+    await act(async () => { await Promise.resolve() })
+    const located = dom.container.querySelector('.activity-feed [data-message-located="true"]')
+    expect(Boolean(located) || originalReads.some(receipt => receipt.input.record && !receipt.input.cursor)).toBe(true)
+  }, { timeout: 8000 })
+  expect(originalReads.filter(receipt => receipt.input.record && !receipt.input.cursor)).toHaveLength(0)
   const target = await located({ kind: 'native', providerId: 'codex', nativeSessionId: 'native-a', recordId: 'same' })
   expect(target.dataset.messageId).toBe('native:codex:native-a:same')
   // These are key comparisons beside an actual accepted/rendered source. They
@@ -409,30 +416,27 @@ it('same-control native reader performs at most one bounded request, or joins in
     }, { timeout: 8000 })
     expect(original.nativeRead).toHaveBeenCalledTimes(before + 1)
     const window = witness!.conversation.snapshot!.window.id, reads = originalReads.length
-    const frame = witness!.conversation.snapshot!
-    if (!frame.sourceHostId) throw new Error('The original accepted frame has no source Host')
-    const record = (source: typeof revealSource) => ({ hostId: frame.sourceHostId!, agentSessionId: frame.agentSessionId, source })
-    let earlier!: Promise<unknown>, reveal!: ReturnType<NonNullable<typeof witness>['readForReveal']>
-    await act(async () => { earlier = witness!.loadEarlier(); reveal = witness!.readForReveal(record(revealSource)) })
+    let earlier!: Promise<unknown>, reveal!: ReturnType<NonNullable<typeof witness>['conversation']['settle']>
+    await act(async () => { earlier = witness!.loadEarlier(); reveal = witness!.conversation.settle() })
     await vi.waitFor(() => expect(entered).toBe(true), { timeout: 8000 })
     expect(originalReads).toHaveLength(reads + 1); expect(original.nativeRead).toHaveBeenCalledTimes(before + 2)
     await act(async () => { release(); await earlier; await reveal })
     const accepted = await reveal
-    expect(accepted.cancelled).toBe(false); expect(accepted.error).toBeNull()
-    expect(accepted.records.filter(record => record.source.kind === 'native').map(record => record.rawId).sort()).toEqual(['missing', 'same'])
+    expect(accepted).not.toBeNull(); expect(accepted!.error).toBeNull()
+    expect(projectConversationWindow(accepted!.snapshot!).originalRecords.filter(record => record.source.kind === 'native').map(record => record.rawId).sort()).toEqual(['missing', 'same'])
     expect(witness!.conversation.snapshot!.window.id).toBe(window)
     expect(originalReads).toHaveLength(reads + 1); expect(original.nativeRead).toHaveBeenCalledTimes(before + 2)
-    let failedRead!: Promise<unknown>, failedReveal!: ReturnType<NonNullable<typeof witness>['readForReveal']>
+    let failedRead!: Promise<unknown>, failedReveal!: ReturnType<NonNullable<typeof witness>['conversation']['settle']>
     await act(async () => {
       failedRead = witness!.loadEarlier()
-      failedReveal = witness!.readForReveal(record({ ...revealSource, recordId: 'same' }))
+      failedReveal = witness!.conversation.settle()
     })
     await act(async () => { await failedRead; await failedReveal })
     const failed = await failedReveal
     expect(original.nativeRead).toHaveBeenCalledTimes(before + 3); expect(originalReads).toHaveLength(reads + 2)
-    expect(failed.cancelled).toBe(false); expect(failed.error).toMatchObject({ code: 'AGENT_CONVERSATION_SOURCE_READ_UNAVAILABLE' })
-    expect(failed.error!.message).toContain('finite history read unavailable')
-    expect(failed.records.filter(record => record.source.kind === 'native').map(record => record.rawId).sort()).toEqual(['missing', 'same'])
+    expect(failed).not.toBeNull(); expect(failed!.error).toMatchObject({ code: 'AGENT_CONVERSATION_SOURCE_READ_UNAVAILABLE' })
+    expect(failed!.error!.message).toContain('finite history read unavailable')
+    expect(projectConversationWindow(failed!.snapshot!).originalRecords.filter(record => record.source.kind === 'native').map(record => record.rawId).sort()).toEqual(['missing', 'same'])
     expect(witness!.conversation.snapshot!.window.id).toBe(window)
     expect(api.sessions.historyPage).not.toHaveBeenCalled(); expect(dom.draft()).toBe('Keep my draft')
   } finally { release() }
@@ -485,11 +489,82 @@ it.each([{ providerId: 'claude', nativeSessionId: 'native-a' }, { providerId: 'c
   expect(panel().dataset.state).toBe('closed'); expect(originalControl().run).toEqual(run); expect(dom.draft()).toBe('Keep my draft')
 })
 
+it('an accepted complete native target remains locatable when only captured changes are unavailable', async () => {
+  useAppStore.setState({ viewModes: { 'agent-1': 'activity', other: 'terminal' } })
+  await dom.render(pane())
+  const source = { kind: 'native' as const, providerId: 'codex', nativeSessionId: 'native-a', recordId: 'same' }
+  const key = conversationMessageSourceKey('agent-1', source)
+  let target: HTMLElement | null = null
+  await vi.waitFor(() => { target = dom.container.querySelector(`.activity-feed [data-message-source-key='${key}']`); expect(target).not.toBeNull() }, { timeout: 8000 })
+  const consumers = inspectConversationConsumers({ hostId: 'local', agentSessionId: 'agent-1' }).consumers
+  expect(consumers).toHaveLength(1)
+  const acceptedId = consumers[0]!.accepted!.id
+  const changes: Awaited<ReturnType<typeof api.conversation.readConversationChanges>>[] = []
+  const readChanges = vi.mocked(api.conversation.readConversationChanges).getMockImplementation()!
+  vi.mocked(api.conversation.readConversationChanges).mockImplementation(async (...args) => {
+    const page = await readChanges(...args); changes.push(page); return page
+  })
+  const capturedOwner = originalReading!.store.readCapturedHistory.bind(originalReading!.store)
+  const failure = 'The original captured delta is temporarily unavailable'
+  let unavailableReads = 0
+  const capturedRead = vi.spyOn(originalReading!.store, 'readCapturedHistory').mockImplementation(async (sessionId, input) => {
+    if (sessionId === 'agent-1' && input?.afterSequence !== undefined) {
+      unavailableReads++
+      throw new AgentMuxError(failure, 'AGENT_CONVERSATION_SOURCE_UNAVAILABLE')
+    }
+    return capturedOwner(sessionId, input)
+  })
+  try {
+    // Publish an actual durable captured delta. Only its original changes leaf
+    // fails; Core still reads the independently healthy native cut itself.
+    await originalReading!.publishCaptured([{ id: 'later-captured-original', agentSessionId: 'agent-1', kind: 'assistant_message',
+      source: 'native-hook', status: 'complete', title: 'Original captured update', content: 'Later original captured update', createdAt: 2, updatedAt: 2 }])
+    const captured = await capturedOwner('agent-1', { limit: 1 })
+    originalCaptured = { stream: captured.stream, records: captured.records }
+    originalMetadata = await originalReading!.store.loadMetadata()
+    let accepted: (typeof changes)[number] | undefined
+    await vi.waitFor(() => {
+      expect(unavailableReads).toBeGreaterThan(0)
+      accepted = changes.findLast(page => page.window.id === acceptedId && page.window.complete &&
+        page.coverage.some(coverage => coverage.source.kind === 'captured' && coverage.current === 'unavailable'))
+      expect(accepted).toBeDefined()
+      expect(accepted!.coverage.filter(coverage => coverage.source.kind === 'native' && coverage.source.providerId === source.providerId &&
+        coverage.source.nativeSessionId === source.nativeSessionId)).toMatchObject([{ current: 'complete-through-cut' }])
+      expect(accepted!.items.flatMap(entry => entry.kind === 'item' ? entry.item.records.map(record => record.reference) : []))
+        .toContainEqual({ hostId: 'local', agentSessionId: 'agent-1', source })
+      expect(dom.container.querySelector(`.activity-feed [data-message-source-key='${key}']`)).toBe(target)
+      expect(dom.container.querySelector('.activity-feed')!.textContent).toContain(failure)
+    }, { timeout: 8000 })
+    const run = originalControl().run
+    await act(async () => useAppStore.getState().setViewMode('agent-1', 'terminal', { focus: false }))
+    await open('user'); await nativeActionReady()
+    const reads = originalReads.length, physicalReads = originalReading!.nativeRead.mock.calls.length
+    await navigate('native:native:codex:native-a:same', true)
+    await vi.waitFor(() => expect(target!.dataset.messageLocated === 'true' ||
+      Boolean(panel().querySelector('.composer-mailbox__navigation-feedback'))).toBe(true), { timeout: 8000 })
+    expect(target!.dataset.messageLocated, 'An accepted complete native target remains locatable when only captured changes are unavailable').toBe('true')
+    expect(await located(source)).toBe(target)
+    expect(JSON.parse(target!.dataset.conversationItemRef!)).toEqual({ hostId: 'local', agentSessionId: 'agent-1', source })
+    const replayed = originalReads.slice(reads).flatMap(receipt => receipt.page ? [receipt.page] : [])
+    expect(replayed.length).toBeGreaterThan(0)
+    expect(replayed.every(page => page.window.id === acceptedId && page.window.complete)).toBe(true)
+    expect(originalReading!.nativeRead).toHaveBeenCalledTimes(physicalReads)
+    expect(originalReads.slice(reads).filter(receipt => receipt.input.record && !receipt.input.cursor)).toHaveLength(0)
+    expect(dom.container.querySelector('.activity-feed')!.textContent).toContain(failure)
+    expect(panel().dataset.state).toBe('closed'); expect(useAppStore.getState().viewModes['agent-1']).toBe('activity')
+    expect(originalControl().run).toEqual(run); expect(dom.draft()).toBe('Keep my draft')
+    expect(terminals.mounted).toBe(1); expect(terminals.disposed).toBe(0)
+  } finally { capturedRead.mockRestore() }
+})
+
 it('an already loaded native target joins current revalidation (failed) before declaring a location', async () => {
   useAppStore.setState({ viewModes: { 'agent-1': 'activity', other: 'terminal' } })
   await dom.render(pane())
   const key = conversationMessageSourceKey('agent-1', { kind: 'native', providerId: 'codex', nativeSessionId: 'native-a', recordId: 'same' })
   await vi.waitFor(() => expect(dom.container.querySelector(`.activity-feed [data-message-source-key='${key}']`)).not.toBeNull(), { timeout: 8000 })
+  const acceptedActivity = inspectConversationConsumers({ hostId: 'local', agentSessionId: 'agent-1' }).consumers
+  expect(acceptedActivity).toHaveLength(1)
+  const acceptedActivityId = acceptedActivity[0]!.accepted!.id
   await act(async () => useAppStore.getState().setViewMode('agent-1', 'terminal', { focus: false }))
   await open('user'); await nativeActionReady()
   const run = originalControl().run, knownViews = originalReads.flatMap(receipt => receipt.page?.window.view ? [receipt.page.window.view] : [])
@@ -500,9 +575,11 @@ it('an already loaded native target joins current revalidation (failed) before d
   let release!: () => void
   const gate = new Promise<void>(resolve => { release = resolve })
   const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined), send = vi.spyOn(api.sessions, 'write')
-  vi.spyOn(originalReading!.client, 'readAgentConversation').mockImplementationOnce(async (...args) => {
+  vi.spyOn(originalReading!.client, 'readAgentConversation').mockImplementation(async (...args) => {
+    const page = await original(...args)
+    if (page.window.id !== acceptedActivityId) return page
     requested = args[0]
-    produced = await original(...args)
+    produced = page
     // The real Core response exists; this exact RPC invocation stays pending,
     // then reports its controlled transport failure through Main and preload.
     await gate
