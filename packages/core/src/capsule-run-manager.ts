@@ -273,7 +273,10 @@ export class CapsuleRunManager {
     // Reserve/observe management serially, but never hold its lock over a page callback.
     const ready = await this.serial(async () => {
       let b = await this.load()
-      if (!b) { b = this.blank(); await this.save(b) }
+      if (!b) {
+        if (method !== 'capsule.create') throw unavailable('The Capsule service has no running intent. Start it explicitly or create a page before using this operation; this operation did not start a service.', 'CAPSULE_RUNTIME_UNCONFIGURED')
+        b = this.blank(); await this.save(b)
+      }
       if (b.desired === 'stopped') throw unavailable('The Capsule service was explicitly stopped. Its pages and configuration are retained; start it explicitly to serve them.', 'CAPSULE_RUNTIME_STOPPED')
       const result = await this.converge(b)
       if (!result.run || result.run.state !== 'running') throw unavailable('The original Capsule service is not running yet. Inspect its retained Run.')
