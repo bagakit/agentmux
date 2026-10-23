@@ -23,7 +23,8 @@ export type OrdinaryWorkspaceFilesOptions = {
   beforeWrite?: (input: OrdinaryFileWriteInput) => Promise<void>
   localWriteFault?: 'temporary-write' | 'replace' | 'receipt' | 'occupy' | (() => 'temporary-write' | 'replace' | 'receipt' | 'occupy' | undefined)
 }
-const helperPath = resolve(import.meta.dirname, '../resources/bin/agentmux-workspace-move')
+// Embedding launchers supply their own artifact location; standalone Host keeps its package layout.
+const helperPath = process.env.AGENTMUX_WORKSPACE_MOVE_HELPER ?? resolve(import.meta.dirname, '../resources/bin/agentmux-workspace-move')
 // Names only, through the same pinned-cwd READY contract; no Explorer observer/tree owner.
 const FILE_NAME_WORKER_SOURCE = String.raw`
 import { lstat, realpath, stat } from 'node:fs/promises'
