@@ -28,7 +28,7 @@ export const ToolkitAgentCard = memo(function ToolkitAgentCard({ card, fields, r
         <span className="toolkit-agent-card__facts">
           {shown.has('status') ? <span data-card-field="status">{facts.statusLabel}</span> : null}
           {shown.has('provider') ? <span data-card-field="provider">{agentProviderLabel(facts.provider ?? '')}</span> : null}
-          {shown.has('workspace') ? <span data-card-field="workspace" title={facts.workspace}>{facts.workspace}</span> : null}
+          {shown.has('workspace') ? <span data-card-field="workspace" title={facts.workspace}><span data-card-project>{facts.projectName ?? 'Project unavailable'}</span> · {facts.workspace}</span> : null}
           {shown.has('host') ? <span data-card-field="host">{facts.host}</span> : null}
           {shown.has('sessionId') ? <span data-card-field="sessionId">{facts.sessionId}</span> : null}
           {shown.has('runId') ? <span data-card-field="runId">{facts.runId}</span> : null}
