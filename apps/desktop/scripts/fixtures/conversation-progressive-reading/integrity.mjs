@@ -14,6 +14,15 @@ export function integrityCaptured(agentSessionId, recordedAt) {
 export async function exerciseIntegrity({ read, click, shot, until, native, append, appendRow, phase }) {
   const result = { nativeInputs: [], query: null, navigation: [], captured: null, follow: null }
   const ready = (expression, label) => until(() => read(expression), label ?? expression)
+  // The production reader pins this existing content-end sentinel. Physical
+  // scrollHeight also includes the feed's padding and non-reading affordances.
+  const tailGeometry = `(()=>{
+    const f=document.querySelector('.activity-feed'),tails=f?.querySelectorAll('[data-conversation-reading-tail]');
+    if(!f||tails.length!==1||!tails[0].isConnected||!f.checkVisibility()||f.clientHeight<=0)throw Error('The unique original reading tail needs a visible viewport');
+    const viewport=f.getBoundingClientRect(),end=tails[0].getBoundingClientRect().top;
+    const readingHeight=Math.max(f.clientHeight,f.scrollTop+end-viewport.top);
+    return {tailDistance:readingHeight-f.clientHeight-f.scrollTop,physicalTailDistance:f.scrollHeight-f.clientHeight-f.scrollTop,
+      readingTailTop:end,viewportBottom:viewport.top+f.clientHeight,scrollTop:f.scrollTop,scrollHeight:f.scrollHeight,clientHeight:f.clientHeight,consumer:readingProof.consumer()};})()`
   const key = async (key, code, virtualKey, modifiers = 0) => {
     for (const type of ['keyDown', 'keyUp']) await native('Input.dispatchKeyEvent',
       { type, key, code, windowsVirtualKeyCode: virtualKey, modifiers,
@@ -38,18 +47,23 @@ export async function exerciseIntegrity({ read, click, shot, until, native, appe
     const beforeCut = await read('readingProof.nativeCut()'), row = appendRow('integrity', `follow-${phase}`)
     await append([row])
     await ready(`readingProof.appendDisposition(${JSON.stringify(beforeCut)},${JSON.stringify(row.payload.id)},false)`, 'A bottom-following native append reaches this original accepted frame')
-    result.follow = await read(`(()=>{const f=document.querySelector('.activity-feed');return {recordId:${JSON.stringify(row.payload.id)},tailDistance:f.scrollHeight-f.clientHeight-f.scrollTop,consumer:readingProof.consumer()}})()`)
+    const appendedSelector = `.conversation-native-thread__record[data-native-record-id=${JSON.stringify(row.payload.id)}]`
+    const appendedBody = row.payload.content[0].text
+    await ready(`(()=>{const b=document.querySelector(${JSON.stringify(appendedSelector + ' .log-turn__body')});return b?.isConnected&&b.checkVisibility()&&b.textContent===${JSON.stringify(appendedBody)}})()`, 'The original appended short answer is actually presented')
+    result.follow = { recordId: row.payload.id, ...await read(tailGeometry) }
+    result.follow.appendedVisible = await read(`(()=>{const f=document.querySelector('.activity-feed'),n=f.querySelector(${JSON.stringify(appendedSelector)}),b=n?.querySelector('.log-turn__body');if(!b||!b.checkVisibility()||b.textContent!==${JSON.stringify(appendedBody)})return false;const r=n.getBoundingClientRect(),v=f.getBoundingClientRect();return r.height>0&&r.top>=v.top&&r.bottom<=v.top+f.clientHeight})()`)
+    assert.equal(result.follow.appendedVisible, true, 'The complete original appended answer is visible at the reading tail')
     assert.ok(result.follow.tailDistance <= 2, 'A live original append preserves bottom following')
     await read(`document.querySelector('.reading-find__content').focus({preventScroll:true});window.integrityOpener=document.activeElement`)
     await key('f', 'KeyF', 70, 4)
     await ready(`document.activeElement===document.querySelector('.reading-find__tools input')`, 'Native Meta+F opens and focuses this loaded conversation')
     // Let only the already visible scheduled work settle before measuring query demand.
     await read(`new Promise((resolve,reject)=>{let prior=-1,stable=0,frames=0;function tick(){const count=readingProof.metrics.heavyMounts.length;stable=count===prior?stable+1:0;prior=count;if(stable===12)return resolve(true);if(++frames>180)return reject(Error('Visible scheduled bodies did not settle'));requestAnimationFrame(tick)}requestAnimationFrame(tick)})`)
-    const before = await read(`(()=>{const rows=[...document.querySelectorAll('[data-native-record-id^="integrity-answer-"]')];return {records:rows.map(n=>n.dataset.nativeRecordId),deferred:rows.filter(n=>n.querySelector('[data-conversation-body-presented="false"]')).map(n=>n.dataset.nativeRecordId),mounted:rows.filter(n=>n.querySelector('[data-conversation-body-presented="true"]')).map(n=>n.dataset.nativeRecordId),reads:readingProof.reads.length}})()`)
+    const before = await read(`(()=>{const rows=[...document.querySelectorAll('.conversation-native-thread__record[data-native-record-id^="integrity-answer-"]')];return {records:rows.map(n=>n.dataset.nativeRecordId),deferred:rows.filter(n=>n.querySelector('[data-conversation-body-presented="false"]')).map(n=>n.dataset.nativeRecordId),mounted:rows.filter(n=>n.querySelector('[data-conversation-body-presented="true"]')).map(n=>n.dataset.nativeRecordId),reads:readingProof.reads.length}})()`)
     assert.ok(before.records.length > 1 && before.deferred.length > 1, 'The original loaded frame includes multiple unmounted fenced answers')
     const count = await query(integrityCode)
     assert.equal(count.total, before.records.length, 'Find includes each original loaded fenced answer, including deferred bodies')
-    const after = await read(`(()=>{const rows=[...document.querySelectorAll('[data-native-record-id^="integrity-answer-"]')];return {mounted:rows.filter(n=>n.querySelector('[data-conversation-body-presented="true"]')).map(n=>n.dataset.nativeRecordId),deferred:rows.filter(n=>n.querySelector('[data-conversation-body-presented="false"]')).map(n=>n.dataset.nativeRecordId),reads:readingProof.reads.length}})()`)
+    const after = await read(`(()=>{const rows=[...document.querySelectorAll('.conversation-native-thread__record[data-native-record-id^="integrity-answer-"]')];return {mounted:rows.filter(n=>n.querySelector('[data-conversation-body-presented="true"]')).map(n=>n.dataset.nativeRecordId),deferred:rows.filter(n=>n.querySelector('[data-conversation-body-presented="false"]')).map(n=>n.dataset.nativeRecordId),reads:readingProof.reads.length}})()`)
     assert.deepEqual(after.mounted, before.mounted, 'Query does not mount every loaded heavy body')
     assert.equal(after.reads, before.reads, 'Query does not read hidden history, resources or another Session')
     result.query = { before, count, after }
@@ -107,8 +121,8 @@ export async function exerciseIntegrity({ read, click, shot, until, native, appe
     await ready(`!document.querySelector('.reading-find__tools')`)
     result.captured = { initial, first, reopened, sameNode, payloadCount }
     if (await read('!!document.querySelector(".activity-feed__jump")')) await click('document.querySelector(".activity-feed__jump")')
-    await ready(`(()=>{const f=document.querySelector('.activity-feed');return !readingProof.consumer()?.held&&f.scrollHeight-f.clientHeight-f.scrollTop<=2})()`, 'Current returns the original accepted reading window to its tail')
-    result.current = await read(`(()=>{const f=document.querySelector('.activity-feed');return {tailDistance:f.scrollHeight-f.clientHeight-f.scrollTop,consumer:readingProof.consumer()}})()`)
+    await ready(`(()=>{const t=${tailGeometry};return !t.consumer?.held&&t.tailDistance<=2})()`, 'Current returns the original accepted reading window to its tail')
+    result.current = await read(tailGeometry)
   } finally {
     result.nativeInputs = await read(`(()=>{for(const type of ['keydown','keyup','input'])document.removeEventListener(type,integrityObserve,true);return integrityInputs})()`)
   }
