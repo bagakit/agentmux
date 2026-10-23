@@ -16,7 +16,8 @@ import type {
   ConnectionRecord
 } from '@agentmux/core/connections'
 import { api } from '../../lib/api'
-import { setBotTaskSelection, useAppStore } from '../../store'
+import type { ConnectionHostingTarget } from '../../../../shared/contracts'
+import { retainBotTaskSelection, setBotTaskSelection, useAppStore } from '../../store'
 import { botTaskSelectionKey, readBotTaskLocator } from '../../lib/bot-task-selection'
 import { SelectionField } from '../SelectionField'
 import { ConnectionSetupResult } from './ConnectionSetupResult'
@@ -30,6 +31,7 @@ const BotIcon = semanticIconComponent('object.conversations')
 const BackIcon = semanticIconComponent('navigation.back')
 const CheckIcon = semanticIconComponent('status.completed')
 const LoadingIcon = semanticIconComponent('status.loading')
+const hostingKey = (target: ConnectionHostingTarget | null) => JSON.stringify([target?.hostId ?? null, target?.runtimeId ?? null])
 const issuerKey = (issuer: ConnectionEnrollmentCapability) =>
   JSON.stringify([issuer.adapterId, issuer.domain])
 function checkedSetupMessage(operation: ConnectionEnrollmentOperation): string {
@@ -55,9 +57,20 @@ const actionLabel: Record<ConnectionEnrollmentActionKind, string> = {
 }
 
 /** A bounded reading window. The Host owns every durable attempt and its recovery. */
-export function useBotEnrollment(active: boolean) {
+export function useBotEnrollment(active: boolean, hostingTarget: ConnectionHostingTarget | null) {
+  const [locator, setLocator] = useState(() => readBotTaskLocator(useAppStore.getState().botTaskSelections[botTaskSelectionKey({ kind: 'enrollment' })]))
+  const originalTarget = locator ? locator.hostingTarget : hostingTarget
+  const ownerKey = hostingKey(originalTarget), currentOwner = useRef(ownerKey)
+  currentOwner.current = ownerKey
+  const originalOwnerIssue = !originalTarget ? 'The original hosting Host is not recorded. This request is kept; it cannot be checked or continued on the current Host.' : ''
+  const retain = (operationId: string | null) => {
+    const next = operationId && originalTarget ? { operationId, hostingTarget: { ...originalTarget } } : null
+    const saved = setBotTaskSelection({ kind: 'enrollment' }, next)
+    setLocator(next)
+    return saved
+  }
   const [operations, setOperations] = useState<ConnectionEnrollmentOperation[]>([])
-  const observedOperations = useRef(operations)
+  const observedOperations = useRef(operations), operationsOwner = useRef(ownerKey), viewOwner = useRef(ownerKey), catalogOwner = useRef(ownerKey)
   const [privateView, setPrivateView] = useState<ConnectionEnrollmentView | null>(null)
   const [preparing, setPreparing] = useState(false), [driving, setDriving] = useState(false)
   const currentInput = useRef<ConnectionEnrollmentBeginInput | null>(null)
@@ -69,11 +82,14 @@ export function useBotEnrollment(active: boolean) {
   const [checkingId, setChecking] = useState<string | null>(selectedId)
   const [issuer, setIssuer] = useState(''),
     [label, setLabel] = useState(generatedBotName)
-  const [submissions, setSubmissions] = useState<ConnectionEnrollmentBeginInput[]>([])
+  const [submissions, setSubmissions] = useState<Array<ConnectionEnrollmentBeginInput & { hostingTarget: ConnectionHostingTarget }>>([])
+  const [localSaveFailed, setLocalSaveFailed] = useState(() => new Set<string>())
   const [submittedId, setSubmittedId] = useState<string | null>(null)
+  const currentOperations = operationsOwner.current === ownerKey ? operations : []
+  const currentSubmissions = submissions.filter(item => hostingKey(item.hostingTarget) === ownerKey)
   const submitted =
-    submissions.find((item) => item.operationId === submittedId) ??
-    operations.find((item) => item.operationId === submittedId) ??
+    currentSubmissions.find((item) => item.operationId === submittedId) ??
+    currentOperations.find((item) => item.operationId === submittedId) ??
     null
   const [feedback, setFeedback] = useState<{ text: string; detail?: string | undefined }>({ text: '' })
   const setIssue = (text: string, detail?: string) => setFeedback({ text, detail })
@@ -86,22 +102,24 @@ export function useBotEnrollment(active: boolean) {
     writing = useRef(new Set<string>()),
     draft = useRef(0),
     creating = useRef<number | null>(null)
-  const busy = selectedId && pendingWrites.includes(selectedId) ? selectedId : null
+  const busy = selectedId && pendingWrites.includes(JSON.stringify([ownerKey, selectedId])) ? selectedId : null
   const startWrite = (operationId: string) => {
-    if (writing.current.has(operationId)) return false
-    writing.current.add(operationId)
+    const key = JSON.stringify([ownerKey, operationId])
+    if (writing.current.has(key)) return false
+    writing.current.add(key)
     setPendingWrites([...writing.current])
     return true
   }
   const finishWrite = (operationId: string) => {
-    writing.current.delete(operationId)
+    writing.current.delete(JSON.stringify([ownerKey, operationId]))
     setPendingWrites([...writing.current])
   }
   const accept = (operation: ConnectionEnrollmentOperation) => {
-    setSubmissions((previous) => previous.filter((item) => item.operationId !== operation.operationId))
-    const previous = observedOperations.current,
+    setSubmissions((previous) => previous.filter((item) => item.operationId !== operation.operationId || hostingKey(item.hostingTarget) !== ownerKey))
+    const previous = operationsOwner.current === ownerKey ? observedOperations.current : [],
       known = previous.find((item) => item.operationId === operation.operationId)
     if (known && known.revision >= operation.revision) return known
+    operationsOwner.current = ownerKey
     // The same bounded reading window supplies both the rendered state and this request's feedback.
     observedOperations.current = known
       ? previous.map((item) => (item.operationId === operation.operationId ? operation : item))
@@ -110,6 +128,7 @@ export function useBotEnrollment(active: boolean) {
     return operation
   }
   const read = async (cursor?: string, current = epoch.current) => {
+    if (!originalTarget) return
     const request = ++listRead.current,
       message = selectionEpoch.current
     setCatalogState('reading')
@@ -117,15 +136,18 @@ export function useBotEnrollment(active: boolean) {
       const result = await api.connections.call('connection.enrollment.ls', {
         limit: 25,
         ...(cursor ? { cursor } : {})
-      })
-      if (current !== epoch.current || request !== listRead.current) return
+      }, originalTarget)
+      if (current !== epoch.current || currentOwner.current !== ownerKey || request !== listRead.current) return
       for (const operation of result.operations) accept(operation)
+      catalogOwner.current = ownerKey
       setCapabilities(result.capabilities)
       setNext(result.next)
       setCatalogState('ready')
       if (message === selectionEpoch.current) setIssue('')
     } catch (error) {
-      if (current === epoch.current && request === listRead.current) {
+      if (current === epoch.current && currentOwner.current === ownerKey && request === listRead.current) {
+        if (catalogOwner.current !== ownerKey) { setCapabilities([]); setNext(null) }
+        catalogOwner.current = ownerKey
         setCatalogState('unconfirmed')
         setIssue(
           'Could not load your bot setups. You can check again or connect an existing bot.',
@@ -137,6 +159,7 @@ export function useBotEnrollment(active: boolean) {
   useEffect(() => {
     const current = ++epoch.current
     setPrivateView(null)
+    setChecking(null)
     setDriving(false)
     currentInput.current = null
     if (active) {
@@ -147,20 +170,21 @@ export function useBotEnrollment(active: boolean) {
       epoch.current++
       listRead.current++
     }
-  }, [active])
+  }, [active, ownerKey])
   const acceptView = (value: ConnectionEnrollmentView, id: string, current: number, occurrence: number) => {
+    if (current !== epoch.current || currentOwner.current !== ownerKey) return null
     const observed = value.operation ? accept(value.operation) : null
     if (
-      current === epoch.current &&
+      current === epoch.current && currentOwner.current === ownerKey &&
       selection.current === id &&
       occurrence === selectionEpoch.current &&
       (!observed || observed.revision === value.operation?.revision)
-    ) { observationEpoch.current++; setPrivateView(value) }
+    ) { observationEpoch.current++; viewOwner.current = ownerKey; setPrivateView(value) }
     return observed
   }
-  const begin = async (issuer: ConnectionEnrollmentCapability, label: string, preset?: ConnectionEnrollmentPreset) => {
+  const begin = async (issuer: ConnectionEnrollmentCapability | null, label: string, preset?: ConnectionEnrollmentPreset, prepared?: ConnectionEnrollmentBeginInput) => {
     const intent = draft.current, current = epoch.current
-    if (creating.current === intent || issuer.availability !== 'available') return
+    if (!originalTarget || creating.current === intent || !prepared && issuer?.availability !== 'available') return
     const name = label.trim()
     if (!name) { setIssue('Enter a bot name before signing in.'); return }
     creating.current = intent
@@ -169,26 +193,36 @@ export function useBotEnrollment(active: boolean) {
     let input: ConnectionEnrollmentBeginInput | null = null
     let occurrence = selectionEpoch.current
     try {
-      const frozen = preset ?? await desktopBotCreationPreset(name)
-      if (current !== epoch.current || intent !== draft.current) return
-      input = { operationId: mintObjectId(), connectionId: mintObjectId(), adapterId: issuer.adapterId, domain: issuer.domain, label: name, preset: frozen, initialPublication: initialBotPublication }
+      const frozen = prepared?.preset ?? preset ?? await desktopBotCreationPreset(name)
+      if (current !== epoch.current || currentOwner.current !== ownerKey || intent !== draft.current) return
+      input = prepared ?? { operationId: mintObjectId(), connectionId: mintObjectId(), adapterId: issuer!.adapterId, domain: issuer!.domain, label: name, preset: frozen, initialPublication: initialBotPublication }
       occurrence = ++selectionEpoch.current
       currentInput.current = input
       startWrite(input.operationId)
-      setSubmissions(previous => [...previous, input!])
+      setSubmissions(previous => previous.some(item => item.operationId === input!.operationId && hostingKey(item.hostingTarget) === ownerKey) ? previous : [...previous, { ...input!, hostingTarget: { ...originalTarget } }])
       setSubmittedId(input.operationId)
       selection.current = input.operationId
-      setBotTaskSelection({ kind: 'enrollment' }, input.operationId)
+      const locator = { operationId: input.operationId, hostingTarget: { ...originalTarget } }
+      const retained = retainBotTaskSelection({ kind: 'enrollment' }, locator)
+      setLocator(locator)
       setPrivateView(null)
       setSelectedId(input.operationId)
-      const result = await api.connections.call('connection.enrollment.begin', input)
-      if (current === epoch.current) {
+      const saved = await retained
+      if (!saved.localStorageWritten) {
+        setLocalSaveFailed(previous => new Set(previous).add(JSON.stringify([ownerKey, input!.operationId])))
+        if (current === epoch.current && currentOwner.current === ownerKey) setIssue('This request has not been sent. Its original details are kept here; retry saving it before continuing.', saved.reason ?? undefined)
+        return
+      }
+      if (current !== epoch.current || currentOwner.current !== ownerKey || selection.current !== input.operationId) return
+      setLocalSaveFailed(previous => { const next = new Set(previous); next.delete(JSON.stringify([ownerKey, input!.operationId])); return next })
+      const result = await api.connections.call('connection.enrollment.begin', input, originalTarget)
+      if (current === epoch.current && currentOwner.current === ownerKey) {
         acceptView(result, input.operationId, current, occurrence)
         if (selection.current === input.operationId && occurrence === selectionEpoch.current)
           setDriving(result.actions.some(action => action.kind === 'continue-authentication'))
       }
     } catch (error) {
-      if (current === epoch.current && intent === draft.current && (!input || selection.current === input.operationId && occurrence === selectionEpoch.current)) {
+      if (current === epoch.current && currentOwner.current === ownerKey && intent === draft.current && (!input || selection.current === input.operationId && occurrence === selectionEpoch.current)) {
         setDriving(false)
         setIssue(input ? 'The sign-in result is not confirmed. Your original request is kept; check it before continuing.' : 'Could not prepare the bot image. Your name is kept; try again when the image is available.', presentError(error))
       }
@@ -198,7 +232,7 @@ export function useBotEnrollment(active: boolean) {
     }
   }
   const inspect = async (id = selection.current) => {
-    if (!id) return
+    if (!id || !originalTarget) return
     setDriving(false)
     setChecking(id)
     const operationId = id,
@@ -206,8 +240,8 @@ export function useBotEnrollment(active: boolean) {
       occurrence = ++selectionEpoch.current
     setIssue('Reading the original result…')
     try {
-      const result = await api.connections.call('connection.enrollment.inspect', { operationId })
-      if (current === epoch.current) {
+      const result = await api.connections.call('connection.enrollment.inspect', { operationId }, originalTarget)
+      if (current === epoch.current && currentOwner.current === ownerKey) {
         const observed = acceptView(result, operationId, current, occurrence)
         if (selection.current === operationId && occurrence === selectionEpoch.current)
           setIssue(
@@ -218,7 +252,7 @@ export function useBotEnrollment(active: boolean) {
       }
     } catch (error) {
       if (
-        current === epoch.current &&
+        current === epoch.current && currentOwner.current === ownerKey &&
         selection.current === operationId &&
         occurrence === selectionEpoch.current
       ) {
@@ -228,10 +262,10 @@ export function useBotEnrollment(active: boolean) {
           presentError(error)
         )
       }
-    } finally { if (current === epoch.current && selection.current === operationId && occurrence === selectionEpoch.current) setChecking(null) }
+    } finally { if (current === epoch.current && currentOwner.current === ownerKey && selection.current === operationId && occurrence === selectionEpoch.current) setChecking(null) }
   }
   const advance = async (action?: ConnectionEnrollmentAction, automatic = false) => {
-    if (!selectedId || !startWrite(selectedId)) return
+    if (!originalTarget || !selectedId || !startWrite(selectedId)) return
     const operationId = selectedId,
       current = epoch.current,
       occurrence = ++selectionEpoch.current
@@ -244,8 +278,8 @@ export function useBotEnrollment(active: boolean) {
         operationId,
         ownRevision: offered.ownRevision,
         decision: { actionId: offered.actionId, kind: offered.kind }
-      })
-      if (current === epoch.current) {
+      }, originalTarget)
+      if (current === epoch.current && currentOwner.current === ownerKey) {
         const observed = acceptView(result, operationId, current, occurrence)
         if (selection.current === operationId && occurrence === selectionEpoch.current) {
           setDriving(['continue-authentication', 'renew-authentication'].includes(offered.kind) && result.actions.some(item => item.kind === 'continue-authentication'))
@@ -254,7 +288,7 @@ export function useBotEnrollment(active: boolean) {
       }
     } catch (error) {
       if (
-        current === epoch.current &&
+        current === epoch.current && currentOwner.current === ownerKey &&
         selection.current === operationId &&
         occurrence === selectionEpoch.current
       )
@@ -263,52 +297,60 @@ export function useBotEnrollment(active: boolean) {
       finishWrite(operationId)
     }
   }
-  const selectedOperation = operations.find((item) => item.operationId === selectedId) ?? null
+  const selectedOperation = currentOperations.find((item) => item.operationId === selectedId) ?? null
   const view =
-    privateView?.operation?.operationId === selectedId &&
+    viewOwner.current === ownerKey && privateView?.operation?.operationId === selectedId &&
     privateView.operation.revision === selectedOperation?.revision
       ? privateView
       : null
   useEffect(() => {
-    if (!active || !busy || !selectedId) { setProgressIssue(null); return }
+    if (!active || !originalTarget || !busy || !selectedId) { setProgressIssue(null); return }
     let current = true, timer: ReturnType<typeof setTimeout>
     const id = selectedId, token = epoch.current
     async function observe() {
       try {
         const observation = ++observationEpoch.current
-        const value = await api.connections.call('connection.enrollment.inspect', { operationId: id })
-        if (observation === observationEpoch.current && current && token === epoch.current && selection.current === id && writing.current.has(id)) {
-          if (value.operation) { accept(value.operation); setPrivateView(value); setProgressIssue(null) }
+        const value = await api.connections.call('connection.enrollment.inspect', { operationId: id }, originalTarget!)
+        if (observation === observationEpoch.current && current && token === epoch.current && currentOwner.current === ownerKey && selection.current === id && writing.current.has(JSON.stringify([ownerKey, id]))) {
+          if (value.operation) { accept(value.operation); viewOwner.current = ownerKey; setPrivateView(value); setProgressIssue(null) }
           else setProgressIssue({ id, text: 'The original request is pending here, but its progress is not available yet. Earlier results are kept.' })
         }
       } catch {
-        if (current && token === epoch.current && selection.current === id && writing.current.has(id)) setProgressIssue({ id, text: 'The request is still pending here. Its latest progress could not be read; earlier results are kept.' })
+        if (current && token === epoch.current && currentOwner.current === ownerKey && selection.current === id && writing.current.has(JSON.stringify([ownerKey, id]))) setProgressIssue({ id, text: 'The request is still pending here. Its latest progress could not be read; earlier results are kept.' })
       }
       if (current) timer = setTimeout(() => void observe(), 1000)
     }
     void observe()
     return () => { current = false; clearTimeout(timer) }
-  }, [active, busy, selectedId])
+  }, [active, busy, selectedId, ownerKey])
   useEffect(() => {
     if (!active || !driving || busy || !view) return
     const action = view.actions.find(item => item.kind === 'continue-authentication')
     if (!action) return
     const timer = setTimeout(() => void advance(action, true), view.challenge ? Math.max(0, view.challenge.nextPollAt - Date.now()) : 0)
     return () => clearTimeout(timer)
-  }, [active, driving, busy, view])
+  }, [active, driving, busy, view, ownerKey])
   return {
-    operations,
+    originalTarget, originalOwnerIssue, canStartAnother: !!hostingTarget,
+    pendingLocalSave: localSaveFailed.has(JSON.stringify([ownerKey, selectedId])),
+    retryLocalSave() {
+      const original = currentSubmissions.find(item => item.operationId === selectedId)
+      if (!original || !localSaveFailed.has(JSON.stringify([ownerKey, original.operationId]))) return
+      const { hostingTarget: _target, ...input } = original
+      return begin(null, input.label, input.preset, input)
+    },
+    operations: currentOperations,
     view: active ? view : null,
     preparing,
     driving,
     preset: currentInput.current?.operationId === selectedId ? currentInput.current.preset : null,
-    capabilities,
-    next,
-    catalogState,
+    capabilities: catalogOwner.current === ownerKey ? capabilities : [],
+    next: catalogOwner.current === ownerKey ? next : null,
+    catalogState: catalogOwner.current === ownerKey ? catalogState : 'initial' as const,
     selectedId,
     checking: active && checkingId === selectedId && selectedId !== null,
     submitted,
-    submissions,
+    submissions: currentSubmissions,
     issue: feedback.text,
     issueDetail: feedback.detail,
     busy,
@@ -321,10 +363,11 @@ export function useBotEnrollment(active: boolean) {
     inspect,
     advance,
     select(operationId: string | null) {
+      if (operationId && !originalTarget) return
       if (!operationId) draft.current++
       selectionEpoch.current++
       selection.current = operationId
-      setBotTaskSelection({ kind: 'enrollment' }, operationId)
+      retain(operationId)
       setPrivateView(null)
       setDriving(false)
       currentInput.current = null
@@ -337,7 +380,7 @@ export function useBotEnrollment(active: boolean) {
       draft.current++
       selectionEpoch.current++
       selection.current = null
-      setBotTaskSelection({ kind: 'enrollment' }, null)
+      retain(null)
       setPrivateView(null)
       setDriving(false)
       setPreparing(false)
@@ -432,6 +475,10 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
     {enrollment.preset ? <img src={enrollment.preset.avatar.pngDataUrl} alt="Bot avatar" width={40} height={40} /> : current ? <BotIcon size={28} /> : <BrandIcon size={40} />}
     <div><strong>{name}</strong><span>{current ? enrollment.preset ? 'The name and image chosen for this bot' : 'The name and image already chosen for this setup are kept' : 'Uses the AgentMux image'}</span></div>
   </div>
+  if (enrollment.originalOwnerIssue) return <section className="connector-setup connector-enrollment" data-bot-enrollment data-enrollment-operation={selectedId ?? undefined} data-enrollment-owner-unconfirmed>
+    <h3 className="connector-editor-title">Original setup kept</h3><p role="status" className="settings-group-note">{enrollment.originalOwnerIssue}</p>{selectedId ? <code>{selectedId}</code> : null}
+    {enrollment.canStartAnother ? <button className="small-button" data-enrollment-another onClick={enrollment.startAnother}>Open another setup</button> : null}
+  </section>
   return <section className="connector-setup connector-enrollment" data-bot-enrollment data-enrollment-operation={selectedId ?? undefined} data-enrollment-stage={stage}>
     {current || selectedId ? <button className="connector-back connector-enrollment__text-action" onClick={() => { enrollment.select(null); void enrollment.read() }}><BackIcon size={13} />All bot setups</button> : null}
     <BotSetupGuide stage={guideStage} currentStatus={initialProgress ? initialProgress.state === 'complete' ? 'Confirmed' : initialSetupStageLabels[initialProgress.stage] : operation?.application && !saved ? 'Created · saving' : undefined} confirmedSteps={[...(current || label.trim() ? [1] : []), ...(operation?.authentication?.stage === 'confirmed' ? [2] : []), ...(operation?.application ? [3] : []), ...(initialProgress?.state === 'complete' ? [4] : [])]} currentStep={initialProgress?.state === 'complete' ? null : !current ? 1 : saved ? 4 : operation?.application || creationUnconfirmed || stage === 'confirmed' ? 3 : 2} />
@@ -467,7 +514,7 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
       {primary?.kind === 'create' ? <div className="connector-enrollment__creation">{identity}<p>Creates one bot, gets its credentials and saves it securely here. Message setup and publishing come next.</p></div> : null}
       {saved ? onContinue ? <details className="connector-optional"><summary>Connection status and checks</summary><ConnectionSetupResult record={saved} /></details> : <ConnectionSetupResult record={saved} /> : null}
       <div className="connector-enrollment__action" aria-busy={!!busy}>
-        {saved ? <>{primary?.kind === 'continue-setup' ? <button className="primary-button" disabled={!!busy} onClick={() => void enrollment.advance(primary)}>{initialProgress?.state === 'approval-required' ? 'Check approval status' : initialProgress?.state === 'attention' ? 'Check this setup' : 'Continue original setup'}</button> : null}{onContinue && !operation?.initialPublication ? <button data-enrollment-continue className="primary-button" onClick={() => onContinue(saved)}>Continue bot setup</button> : null}<button data-enrollment-saved className="small-button" onClick={() => onSaved(saved)}>Manage bot</button></> : primary ? <button data-enrollment-advance data-enrollment-action={primary.kind} className="primary-button" disabled={!!busy} onClick={() => void enrollment.advance(primary)}>{busy ? <LoadingIcon size={14} animation="spin" /> : null}{busy ? primary.kind === 'create' ? 'Creating your bot…' : 'Checking…' : primary.kind === 'confirm-account' ? 'Use this account' : primary.kind === 'read-credential' ? 'Finish saving this bot' : primary.kind === 'create' && operation?.initialPublication ? 'Create, configure & publish' : actionLabel[primary.kind]}</button> : <button data-enrollment-inspect className="primary-button" onClick={() => void enrollment.inspect()}>Check original setup</button>}
+        {enrollment.pendingLocalSave ? <button className="primary-button" data-enrollment-save-retry disabled={!!busy} onClick={() => void enrollment.retryLocalSave()}>Retry saving this request</button> : saved ? <>{primary?.kind === 'continue-setup' ? <button className="primary-button" disabled={!!busy} onClick={() => void enrollment.advance(primary)}>{initialProgress?.state === 'approval-required' ? 'Check approval status' : initialProgress?.state === 'attention' ? 'Check this setup' : 'Continue original setup'}</button> : null}{onContinue && !operation?.initialPublication ? <button data-enrollment-continue className="primary-button" onClick={() => onContinue(saved)}>Continue bot setup</button> : null}<button data-enrollment-saved className="small-button" onClick={() => onSaved(saved)}>Manage bot</button></> : primary ? <button data-enrollment-advance data-enrollment-action={primary.kind} className="primary-button" disabled={!!busy} onClick={() => void enrollment.advance(primary)}>{busy ? <LoadingIcon size={14} animation="spin" /> : null}{busy ? primary.kind === 'create' ? 'Creating your bot…' : 'Checking…' : primary.kind === 'confirm-account' ? 'Use this account' : primary.kind === 'read-credential' ? 'Finish saving this bot' : primary.kind === 'create' && operation?.initialPublication ? 'Create, configure & publish' : actionLabel[primary.kind]}</button> : <button data-enrollment-inspect className="primary-button" onClick={() => void enrollment.inspect()}>Check original setup</button>}
         {operation?.authentication?.stage === 'confirmed' && !saved && operation.initialPublication ? <p className="settings-group-note">Creates this bot with the chosen public details, configures conversations and publishes its first version for your account only. Requests access to this app’s own resources to identify its creator for group invitations. Platform approval may still be required.</p> : null}
       {saved && operation?.initialPublication && initialProgress?.state !== 'complete' ? <InitialBotSetupResult progress={initialProgress ?? null} /> : null}
       {enrollment.progressIssue ? <p role="status" className="settings-group-note">{enrollment.progressIssue}</p> : null}
@@ -487,8 +534,8 @@ export function BotEnrollmentPane({ enrollment, onExisting, onSaved, onContinue 
     </>}
     {!current && enrollment.issueDetail ? <details className="connector-diagnostics"><summary>Setup service details</summary><p className="connector-enrollment__technical">{enrollment.issueDetail}</p></details> : null}
     {history.length ? <details className="connector-enrollment__history"><summary>Previous bot setups</summary>{history.map(item => <button key={item.operationId} data-enrollment-history={item.operationId} className="connector-enrollment__previous" onClick={() => enrollment.select(item.operationId)}><strong>{item.label}</strong><span>{item.domain}</span></button>)}{enrollment.next ? <button className="small-button" onClick={() => void enrollment.read(enrollment.next!)}>More setups</button> : null}</details> : null}
-    <ConnectionRequestTrace source={selectedId ? { kind: 'enrollment', operationId: selectedId } : null} revision={operation?.revision} enrollmentView={view} title={initialSetup ? "Sign-in & creation requests" : undefined} />
-    {saved && initialSetup ? <ConnectionRequestTrace source={{ kind: 'setup', operationId: initialSetup.operationId }} revision={JSON.stringify(initialProgress)} hideCopy title="Configuration & publication requests" /> : null}
+    <ConnectionRequestTrace hostingTarget={enrollment.originalTarget} source={selectedId ? { kind: 'enrollment', operationId: selectedId } : null} revision={operation?.revision} enrollmentView={view} title={initialSetup ? "Sign-in & creation requests" : undefined} />
+    {saved && initialSetup ? <ConnectionRequestTrace hostingTarget={enrollment.originalTarget} source={{ kind: 'setup', operationId: initialSetup.operationId }} revision={JSON.stringify(initialProgress)} hideCopy title="Configuration & publication requests" /> : null}
     {current || unfinished ? <details className="connector-optional"><summary>Set up another bot</summary><p className="settings-group-note">Opens a separate setup. Every original request is kept; opening this form does not create a bot.</p><button data-enrollment-another className="small-button" onClick={enrollment.startAnother}>Open another setup</button></details> : null}
   </section>
 }

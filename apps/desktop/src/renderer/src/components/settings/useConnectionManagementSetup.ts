@@ -1,17 +1,18 @@
 import { mintObjectId } from '@agentmux/core/object-id'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionRecord, ConnectionSetupAction, ConnectionSetupPublicationDraft, ConnectionSetupPublicationEffect, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupEnrollmentSource, ConnectionSetupInspect, ConnectionSetupConfigurationSelector, ConnectionSetupListing, ConnectionSetupOperation, ConnectionSetupView } from '@agentmux/core/connections'
 import { connectionSetupDecisionForAction } from '@agentmux/core/connections'
 import { connectionManagementTask } from './connection-management-task'
 import { api } from '../../lib/api'
-import { setBotTaskSelection, useAppStore } from '../../store'
+import type { ConnectionHostingTarget } from '../../../../shared/contracts'
+import { retainBotTaskSelection, setBotTaskSelection, useAppStore } from '../../store'
 import { botTaskSelectionKey, managementTaskScope, readBotTaskLocator } from '../../lib/bot-task-selection'
 
 type Source = typeof api.connections.call
 type Submission = { key: string; source: Source; input: ConnectionSetupBegin }
 type Catalog = { key: string; source: Source; value: ConnectionSetupListing | null; issue: string }
-type Reading = { key: string; source: Source; id: string; value: ConnectionSetupView | null; issue: string; absent: boolean; pending: boolean; actionKind?: ConnectionSetupAction['kind'] | undefined; configurationIssue?: string; intent?: ConnectionSetupConfigurationSelector | undefined }
+type Reading = { key: string; source: Source; id: string; value: ConnectionSetupView | null; issue: string; absent: boolean; pending: boolean; actionKind?: ConnectionSetupAction['kind'] | undefined; configurationIssue?: string; localSaveFailed?: boolean; intent?: ConnectionSetupConfigurationSelector | undefined }
 type PublicationForm = { version: string; notes: string; reason: string; visibility: 'current' | 'creator-only'; desktop: string; mobile: string; versionId: string; fullRelease: boolean }
 const emptyPublicationForm: PublicationForm = { version: '1.0.0', notes: '', reason: '', visibility: 'current', desktop: '', mobile: '', versionId: '', fullRelease: false }
 const scope = (record: ConnectionRecord | null) => record ? JSON.stringify([record.config.connectionId, record.config.adapterId, record.config.application, record.revision]) : ''
@@ -21,11 +22,20 @@ const inputOf = (operation: ConnectionSetupOperation): ConnectionSetupBegin => {
 }
 
 /** The mounted Settings task retains safe submissions; private readings and timers are disposable. */
-export function useConnectionManagementSetup(record: ConnectionRecord | null, active: boolean, opened: boolean) {
-  const key = scope(record), source = api.connections.call
+export function useConnectionManagementSetup(record: ConnectionRecord | null, active: boolean, opened: boolean, hostingTarget: ConnectionHostingTarget | null) {
   const locatorScope = record ? managementTaskScope(record) : null
   const locatorKey = locatorScope ? botTaskSelectionKey(locatorScope) : ''
-  const selectedId = useAppStore(state => readBotTaskLocator(state.botTaskSelections[locatorKey])?.operationId ?? null)
+  const retained = useAppStore(state => state.botTaskSelections[locatorKey] ?? null), locator = readBotTaskLocator(retained)
+  const selectedId = locator?.operationId ?? null, originalTarget = locator ? locator.hostingTarget : hostingTarget
+  const ownerKey = JSON.stringify([originalTarget?.hostId ?? null, originalTarget?.runtimeId ?? null]), key = JSON.stringify([scope(record), ownerKey]), call = api.connections.call
+  const originalOwnerIssue = !originalTarget ? 'The original hosting Host is not recorded. This request is kept; it cannot be checked or continued on the current Host.' : ''
+  const source = useMemo<Source>(() => {
+    const target = originalTarget && { ...originalTarget }
+    return (method, input) => {
+      if (!target) return Promise.reject(new Error('The original bot hosting owner is not recorded.'))
+      return call(method, input, target)
+    }
+  }, [call, ownerKey])
   const [catalog, setCatalog] = useState<Catalog | null>(null), [reading, setReading] = useState<Reading | null>(null)
   const [publication, setPublication] = useState<{ key: string; source: Source; id: string; fields: PublicationForm } | null>(null)
   const [submissions, setSubmissions] = useState<Submission[]>([])
@@ -36,9 +46,9 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   const submittedActions = useRef(new Set<string>()), draft = useRef<Submission | null>(null)
   const requestedHandoff = useRef<Submission | null>(null)
   context.current = { key, source, active, opened }
-  const currentSource = () => mounted.current && context.current.active && context.current.key === key && context.current.source === source && api.connections.call === source
+  const currentSource = () => !!originalTarget && mounted.current && context.current.active && context.current.key === key && context.current.source === source && api.connections.call === call
   const visibleCatalog = catalog?.key === key && catalog.source === source ? catalog : null
-  const visible = active && opened && reading?.key === key && reading.source === source && reading.id === selection.current && api.connections.call === source ? reading : null
+  const visible = active && opened && reading?.key === key && reading.source === source && reading.id === selection.current && api.connections.call === call ? reading : null
   const observedView = visible?.value ?? null
   const view = visible?.issue ? null : observedView, operation = view?.operation ?? null
   const configurationEffect = view?.applicationConfiguration?.effect ?? 'enable-messaging'
@@ -51,7 +61,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   const originals = (visibleCatalog?.value?.operations ?? []).filter(operation => operation.goal.kind === 'agent-conversation')
   const local = submissions.filter(item => item.input.connectionId === record?.config.connectionId && item.source === source)
   const choices = [...originals.map(operation => ({ input: inputOf(operation), operation })), ...local.filter(item => !originals.some(o => o.operationId === item.input.operationId)).map(item => ({ input: item.input, operation: null }))]
-  const restoring = active && opened && !!selectedId && !visible
+  const restoring = active && opened && !!originalTarget && !!selectedId && !visible
   const busy = (visible?.pending ?? false) || guidedCheck || restoring
   const activityLabel = guidedCheck ? 'Checking bot settings…' : visible?.actionKind === 'confirm-account' ? 'Saving your account confirmation…' : visible?.actionKind ? 'Continuing this original setup…' : 'Reading the original saved result…'
   // User-authored fields survive an observation failure; no previous authority or private view does.
@@ -64,7 +74,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   const revised = view?.reason === 'connection-revised' || !!chosenInput && chosenInput.expectedConnectionRevision !== record?.revision
 
   async function list(cursor?: string) {
-    if (!record) return
+    if (!record || !originalTarget) return
     const request = ++listOccurrence.current
     setListing(true)
     try {
@@ -84,16 +94,24 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
       operation.goal.kind === 'agent-conversation'
   }
   function matches(operation: ConnectionSetupOperation) { return sameApplication(operation) && operation.expectedConnectionRevision === record?.revision }
-  async function perform(id: string, work: () => Promise<ConnectionSetupView>, run: boolean, actionKind?: ConnectionSetupAction['kind'], requestedConfiguration?: ConnectionSetupConfigurationSelector) {
+  async function perform(id: string, work: () => Promise<ConnectionSetupView>, run: boolean, actionKind?: ConnectionSetupAction['kind'], requestedConfiguration?: ConnectionSetupConfigurationSelector, retainNewInput = false) {
     if (!currentSource() || !context.current.opened) return
     const request = ++occurrence.current
     const intent = requestedConfiguration ?? (visible?.id === id && visible.value?.continuation?.stage === 'confirmed' ? configurationSelector : undefined)
     selection.current = id; setDriving(run)
-    if (locatorScope) setBotTaskSelection(locatorScope, id)
+    const retained = locatorScope ? (retainNewInput ? retainBotTaskSelection : setBotTaskSelection)(locatorScope, { operationId: id, hostingTarget: { ...originalTarget! } }) : null
     setReading(previous => previous?.key === key && previous.source === source && previous.id === id
       ? { ...previous, issue: '', absent: false, pending: true, actionKind, intent } : { key, source, id, value: null, issue: '', absent: false, pending: true, actionKind, intent })
     const accepts = () => currentSource() && context.current.opened && selection.current === id && request === occurrence.current
     try {
+      if (retainNewInput && retained) {
+        const saved = await retained
+        if (!saved.localStorageWritten) {
+          if (accepts()) { setReading(previous => ({ key, source, id, value: previous?.key === key && previous.source === source && previous.id === id ? previous.value : null, issue: 'This request has not been sent. Its original details are kept here; retry saving it before continuing.', absent: false, pending: false, localSaveFailed: true })); setDriving(false) }
+          return
+        }
+      }
+      if (!accepts()) return
       let value = await work()
       const validate = (result: ConnectionSetupView) => {
         if (result.operation && (result.operation.operationId !== id || !matches(result.operation) && !(sameApplication(result.operation) && result.reason === 'connection-revised' && !result.challenge && !result.continuation))) throw new Error('This result could not be matched to the saved application. The original request is kept.')
@@ -133,7 +151,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
       setSubmissions(previous => [...previous, submission])
     }
     const input = draft.current.input
-    void perform(input.operationId, () => source('connection.setup.begin', input), true)
+    void perform(input.operationId, () => source('connection.setup.begin', input), true, undefined, undefined, true)
   }
   function choose(input: ConnectionSetupBegin) {
     setFresh(false)
@@ -141,11 +159,12 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     void perform(input.operationId, () => source('connection.setup.inspect', { operationId: input.operationId, applicationInspection: {}, applicationConfiguration: configurationSelector }), true)
   }
   function handoff(enrollment: ConnectionSetupEnrollmentSource) {
-    if (!record || !currentSource() || !visibleCatalog?.value?.support?.capabilities.includes('enrollment-continuation')) return
-    const original = submissions.find(item => item.key === key && item.source === source && JSON.stringify(item.input.source) === JSON.stringify(enrollment))
-    const submission = original ?? { key, source, input: { operationId: mintObjectId(), connectionId: record.config.connectionId, expectedConnectionRevision: record.revision, goal: { kind: 'agent-conversation', interaction: 'messages' }, source: enrollment } as ConnectionSetupBegin }
-    if (!original) setSubmissions(previous => [...previous, submission])
-    requestedHandoff.current = submission
+    if (!record || !hostingTarget || !currentSource() || !visibleCatalog?.value?.support?.capabilities.includes('enrollment-continuation')) return
+    const target = { ...hostingTarget }, nextKey = JSON.stringify([scope(record), JSON.stringify([target.hostId, target.runtimeId])])
+    const original = submissions.find(item => item.key === nextKey && JSON.stringify(item.input.source) === JSON.stringify(enrollment))
+    const input = original?.input ?? { operationId: mintObjectId(), connectionId: record.config.connectionId, expectedConnectionRevision: record.revision, goal: { kind: 'agent-conversation', interaction: 'messages' }, source: enrollment } as ConnectionSetupBegin
+    requestedHandoff.current = { key: nextKey, source: call, input }
+    if (locatorScope) setBotTaskSelection(locatorScope, { operationId: input.operationId, hostingTarget: target })
   }
   function inspectOriginal(selectors: Omit<ConnectionSetupInspect, 'operationId'> = {}, originalOperationId?: string) {
     const id = originalOperationId ?? selectedId
@@ -265,7 +284,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     const action = view?.continuation?.actions.find(action => action.kind === 'continue')
     if (action) { advance(action); return }
     const input = operation && matches(operation) ? inputOf(operation) : local.find(item => item.key === key && item.input.operationId === visible?.id)?.input
-    if (input) void perform(input.operationId, () => source('connection.setup.begin', input), true)
+    if (input) void perform(input.operationId, () => source('connection.setup.begin', input), true, undefined, undefined, !operation)
   }
   function clearSelection(fresh: boolean) {
     checkOwner.current = null; setGuidedCheck(false)
@@ -285,18 +304,19 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     checkOwner.current = null; setGuidedCheck(false)
     occurrence.current++; selection.current = null; draft.current = null
     setReading(null); setPublication(null); setDriving(false); setFresh(false); submittedActions.current.clear()
-    if (!active || !opened) { requestedHandoff.current = null; return }
-    if (requestedHandoff.current?.key === key && requestedHandoff.current.source === source) return
+    if (!active || !opened) { if (requestedHandoff.current?.key !== key) requestedHandoff.current = null; return }
+    if (requestedHandoff.current?.key === key && requestedHandoff.current.source === call) return
     const id = readBotTaskLocator(useAppStore.getState().botTaskSelections[locatorKey])?.operationId
     if (id) void perform(id, () => source('connection.setup.inspect', { operationId: id, applicationInspection: {}, applicationConfiguration: { effect: 'enable-messaging' } }), false)
   }, [key, source, active, opened])
   useEffect(() => {
     const submission = requestedHandoff.current
-    if (!active || !opened || !submission || submission.key !== key || submission.source !== source) return
+    if (!active || !opened || !submission || submission.key !== key || submission.source !== call) return
     requestedHandoff.current = null
+    setSubmissions(previous => previous.some(item => item.key === key && item.input.operationId === submission.input.operationId) ? previous : [...previous, { ...submission, source }])
     setFresh(false); submittedActions.current.clear()
-    void perform(submission.input.operationId, () => source('connection.setup.begin', submission.input), false)
-  }, [active, opened, key, source])
+    void perform(submission.input.operationId, () => source('connection.setup.begin', submission.input), false, undefined, undefined, true)
+  }, [active, opened, key, source, selectedId])
 
   useEffect(() => {
     if (!active || !opened || !driving || busy || !operation || !matches(operation) || view?.reason || visible?.issue) return
@@ -317,7 +337,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     return () => { cancelled = true; clearTimeout(timer) }
   }, [active, opened, driving, busy, key, source, view])
 
-  return { selectedId, activityLabel, chooseOriginalRequest, canContinueOriginal: !!operation && matches(operation) || !!chosenInput, task: connectionManagementTask(view), guidedCheck, checkGuidedSettings, checkPublicationStatus, returnToGuided, inspectOriginalConfiguration, publicationForm, editPublicationForm, supported, catalog: visibleCatalog, listing, choices, reading: visible, view, observedView, busy, driving, fresh, revised, list, start, handoff, choose, inspect, inspectOriginal, advance, reviewPermissions, reviewMessageReception, reviewPublication, continueOriginal, another }
+  return { originalTarget, originalOwnerIssue, canStartAnother: !!hostingTarget, selectedId, activityLabel, chooseOriginalRequest, canContinueOriginal: !!operation && matches(operation) || !!chosenInput, task: connectionManagementTask(view), guidedCheck, checkGuidedSettings, checkPublicationStatus, returnToGuided, inspectOriginalConfiguration, publicationForm, editPublicationForm, supported, catalog: visibleCatalog, listing, choices, reading: visible, view, observedView, busy, driving, fresh, revised, list, start, handoff, choose, inspect, inspectOriginal, advance, reviewPermissions, reviewMessageReception, reviewPublication, continueOriginal, another }
 }
 
 export type ConnectionManagementModel = ReturnType<typeof useConnectionManagementSetup>
