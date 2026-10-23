@@ -184,18 +184,20 @@ it('explicit public refresh reobserves the original zero-count Provider wait and
   expect(f.start).toHaveBeenCalledTimes(1); expect(f.stop).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled()
   expect((await f.rootOf())?.supervision).toMatchObject({ attemptCount: 1, attemptLimit: 1 }); expect((await f.rootOf())?.policy).toEqual(original!.policy)
 })
-it('cancel preserves an admitted unknown Start and its first input until exact original-operation reconciliation', async () => {
+it('cancel reconciles an admitted unknown startup without synthesizing or replaying input', async () => {
   const f = await fixture(); f.start.mockImplementationOnce(async (spec: any) => { await f.nativeStart(spec); throw new core.AgentMuxError('Original Start receipt unavailable', 'CONTROL_UNAVAILABLE', undefined, { disposition: 'unknown', confirmedInputBytes: null }) })
   await expect(f.client.ensureAgentContinuity({ ...f.request, policy: { ...f.request.policy, activeRecoveryDelayMs: 0 } })).resolves.toMatchObject({ kind: 'pending', reason: 'operation-unconfirmed', continuity: { supervision: { attemptCount: 1 } } })
   const before = await f.rootOf(), runs = await f.nativeList(), admitted = runs.find((run: any) => run.runId !== f.previous.run.runId && run.state.type === 'running')
+  expect(before?.launchInput).toBeUndefined()
+  expect(f.start.mock.calls[0]![0].args).toEqual(['-e', expect.any(String), 'original-native'])
   expect(admitted).toBeDefined(); const cancel = f.client.controlAgentContinuity(await f.packet())
   await expect(cancel).resolves.toMatchObject({ receipt: { outcome: 'cancelled', attemptCount: 1 } })
   await expect(f.client.ensureAgentContinuity(f.request)).resolves.toMatchObject({ kind: 'resumed', run: { runId: admitted!.runId } })
   const current = f.client.agentSession(f.previous.agentSessionId)
-  expect((await f.rootOf())?.launchInput).toMatchObject({ input: before!.launchInput!.input, digest: before!.launchInput!.digest, lifecycleOperationId: before!.launchInput!.lifecycleOperationId, state: 'launch-carried' }); expect((await f.rootOf())?.supervision).toMatchObject({ attemptCount: 1, phase: 'cancelled' })
+  expect((await f.rootOf())?.launchInput).toBeUndefined(); expect((await f.rootOf())?.supervision).toMatchObject({ attemptCount: 1, phase: 'cancelled' })
   expect((await f.nativeStatus(admitted!.runId)).pid).toBe(admitted!.pid); expect(f.start).toHaveBeenCalledTimes(1); expect(f.stop).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled()
   await f.raw(current.run)
-  await consumer('unknown-admitted-start', { run: admitted, current, originalInput: before!.launchInput, starts: 1, stops: 0, inputReplays: 0, rawVerified: true })
+  await consumer('unknown-admitted-start', { run: admitted, current, originalInputPresent: before?.launchInput !== undefined, starts: 1, stops: 0, inputReplays: 0, rawVerified: true })
 })
 it('wrong Run root Host and changed original packet refuse only that control', async () => {
   const f = await fixture(); await f.client.ensureAgentContinuity(f.request); const packet = await f.packet()
