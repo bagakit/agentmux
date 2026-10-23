@@ -42,7 +42,7 @@ function shortIdentity(value: string, others: readonly string[] = []) {
 }
 
 type Fact = RoomProvisioningOperation | RoomBindingOperation | RoomLinkOperation | null
-export type AgentConnectorTarget = { hostingTarget?: ConnectionHostingTarget | null; target: RoomBindingTarget; session: AgentNativeSourceReference; name: string; connectionId?: string; bindingId?: string; mote?: AgentMoteConnectionSource
+export type AgentConnectorTarget = { channel?: string; hostingTarget?: ConnectionHostingTarget | null; target: RoomBindingTarget; session: AgentNativeSourceReference; name: string; connectionId?: string; bindingId?: string; mote?: AgentMoteConnectionSource
   identity?: Pick<ComponentProps<typeof ResolvedAgentAvatar>, 'providerId' | 'appearance' | 'executorId'> }
 type AgentConnectorDialogProps = {
   original: AgentConnectorTarget; mode: 'create' | 'existing' | 'details'; initialSection?: 'joining'; onClose(): void; returnFocus(): HTMLElement | null
@@ -50,10 +50,12 @@ type AgentConnectorDialogProps = {
 const sameHosting = (a: ConnectionHostingTarget | undefined, b: ConnectionHostingTarget) => a?.hostId === b.hostId && a.runtimeId === b.runtimeId
 /** Discover only a new entry. Retained operations always name their original hosting owner. */
 export function AgentConnectorDialog(props: AgentConnectorDialogProps) {
-  const { original, onClose, returnFocus } = props, identity = JSON.stringify([original.target, original.hostingTarget, original.connectionId, original.bindingId])
+  const settings = useContext(SettingsNavigation)
+  const channel = settings?.channelEntries.find(entry => entry.adapterId === props.original.channel)
+  const { original, onClose, returnFocus } = props, identity = JSON.stringify([original.target, original.hostingTarget, original.connectionId, original.bindingId, original.channel])
   const [opened, setOpened] = useState<{ identity: string; original: AgentConnectorTarget } | null>(null)
   const selected = opened?.identity === identity ? opened.original : original
-  const selectedKey = JSON.stringify([selected.target, selected.hostingTarget, selected.connectionId, selected.bindingId])
+  const selectedKey = JSON.stringify([selected.target, selected.hostingTarget, selected.connectionId, selected.bindingId, selected.channel])
   const [read, setRead] = useState<{ key: string; owner?: ConnectionHostingTarget; issue?: string } | null>(null), [retry, setRetry] = useState(0)
   useEffect(() => {
     if (selected.hostingTarget !== undefined) return
@@ -63,27 +65,31 @@ export function AgentConnectorDialog(props: AgentConnectorDialogProps) {
     return () => { live = false }
   }, [selectedKey, retry])
   const owner = selected.hostingTarget ?? (selected.hostingTarget === undefined && read?.key === selectedKey ? read.owner : undefined)
-  if (owner) return <AgentConnectorForm key={JSON.stringify([selected.target, owner, selected.connectionId, selected.bindingId])} {...props} original={{ ...selected, hostingTarget: owner }} onOpenOriginal={intent => {
+  if (owner) return <AgentConnectorForm key={JSON.stringify([selected.target, owner, selected.connectionId, selected.bindingId, selected.channel])} {...props} original={{ ...selected, hostingTarget: owner }} onOpenOriginal={intent => {
     if (!intent.hostingTarget) return
-    const { connectionId: _connection, bindingId: _binding, ...source } = original
+    const { connectionId: _connection, bindingId: _binding, channel: _channel, ...source } = original
     setOpened({ identity, original: { ...source, target: structuredClone(intent.target), hostingTarget: intent.hostingTarget,
       ...('connectionId' in intent.input ? { connectionId: intent.input.connectionId } : {}),
       ...('bindingId' in intent.input ? { bindingId: intent.input.bindingId } : {}) } })
+  }} onOpenDraft={() => {
+    const { channel: _channel, connectionId: _connection, bindingId: _binding, ...source } = selected
+    setOpened({ identity, original: source })
   }} />
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="dialog-scrim" />
     <Dialog.Content className="dialog-surface agent-connector-dialog" onCloseAutoFocus={event => { event.preventDefault(); returnFocus()?.focus({ preventScroll: true }) }}>
-      <header className="agent-connector-dialog__header"><div><Dialog.Title>Connect a group</Dialog.Title><Dialog.Description>{original.name}</Dialog.Description></div><button className="icon-button" aria-label="Close group setup" onClick={onClose}><CloseIcon size={15} /></button></header>
+      <header className="agent-connector-dialog__header"><div><Dialog.Title>{channel ? `${channel.title} connections` : 'Connect a group'}</Dialog.Title><Dialog.Description>{original.name}</Dialog.Description></div><button className="icon-button" aria-label="Close group setup" onClick={onClose}><CloseIcon size={15} /></button></header>
       <div className="agent-connector-dialog__body"><p role="status" className="agent-connector-note">{selected.hostingTarget === null ? 'The original bot hosting owner is unconfirmed. Original requests are kept; no request was sent to another Host.' : read?.key === selectedKey && read.issue ? 'Bot hosting could not be confirmed. ' + read.issue : 'Confirming bot hosting…'}</p></div>
-      <footer className="agent-connector-dialog__footer">{selected.hostingTarget === undefined && read?.key === selectedKey && read.issue ? <button className="small-button" onClick={() => { setRead(null); setRetry(value => value + 1) }}>Check bot hosting</button> : null}<button className="small-button" onClick={onClose}>Close</button></footer>
+      <footer className="agent-connector-dialog__footer">{selected.hostingTarget === undefined && read?.key === selectedKey && read.issue ? <button className="small-button" onClick={() => { setRead(null); setRetry(value => value + 1) }}>Check bot hosting</button> : null}<button className="small-button" onClick={onClose}>Close</button>{channel && settings ? <button className="agent-connector-text-action" onClick={() => { settings.open(channel.section); onClose() }}>Channel settings</button> : null}</footer>
     </Dialog.Content></DocumentOverlayPortal></Dialog.Root>
 }
 /** A bounded form over original public owners. It retains submitted correlations, never another receipt store. */
-function AgentConnectorForm({ original, mode: initialMode, initialSection, onClose, returnFocus, onOpenOriginal }: Omit<AgentConnectorDialogProps, 'original'> & {
-  original: AgentConnectorTarget & { hostingTarget: ConnectionHostingTarget }; onOpenOriginal(intent: ConnectorRoomIntent): void
+function AgentConnectorForm({ original, mode: initialMode, initialSection, onClose, returnFocus, onOpenOriginal, onOpenDraft }: Omit<AgentConnectorDialogProps, 'original'> & {
+  original: AgentConnectorTarget & { hostingTarget: ConnectionHostingTarget }; onOpenOriginal(intent: ConnectorRoomIntent): void; onOpenDraft(): void
 }) {
   const ownerDocument = useWorkbenchDocument()
   const { target, session, hostingTarget } = original, identity = JSON.stringify([target, hostingTarget]), fieldId = useId()
-  const draftKey = connectorRoomDraftKey(target, hostingTarget)
+  const draftKey = connectorRoomDraftKey(target, hostingTarget, original.channel)
+  const earlierDraft = useAppStore(state => original.channel ? state.connectorRoomDrafts[connectorRoomDraftKey(target, hostingTarget)] : undefined)
   const unqualifiedDraft = useAppStore(state => state.connectorRoomDrafts[connectorRoomDraftKey(target)])
   const [savedDraft] = useState(() => useAppStore.getState().connectorRoomDrafts[draftKey])
   const [mode, setMode] = useState(initialMode === 'details' ? initialMode : savedDraft?.mode ?? initialMode)
@@ -95,8 +101,8 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
   const [moteDefault, setMoteDefault] = useState<{ status: 'loading' | 'ready' | 'unconfirmed'; ref: MoteConnectionRef | null; issue: string | null }>(() =>
     original.mote && 'target' in original.mote ? { status: 'loading', ref: null, issue: null }
       : { status: original.mote ? 'unconfirmed' : 'ready', ref: null, issue: original.mote && 'issue' in original.mote ? original.mote.issue : null })
-  const initialized = useRef(!!original.connectionId || !!savedDraft?.connectionId), explicitlySelected = useRef(false)
-  const [connectionId, setConnectionId] = useState(original.connectionId ?? savedDraft?.connectionId ?? ''), [name, setName] = useState(savedDraft?.name ?? original.name + ' · AgentMux')
+  const initialized = useRef(!!original.connectionId || !original.bindingId && !!savedDraft?.connectionId), explicitlySelected = useRef(false)
+  const [connectionId, setConnectionId] = useState(original.connectionId ?? (original.bindingId ? '' : savedDraft?.connectionId) ?? ''), [name, setName] = useState(savedDraft?.name ?? original.name + ' · AgentMux')
   const [group, setGroup] = useState(savedDraft?.group ?? ''), [members, setMembers] = useState(savedDraft?.members ?? ''), [memberType, setMemberType] = useState(savedDraft?.memberType ?? '')
   const [scope, setScope] = useState<'mentions-and-replies' | 'all-messages'>(savedDraft?.scope ?? (initialMode === 'create' ? 'all-messages' : 'mentions-and-replies')), [confirmed, setConfirmed] = useState(false)
   const [publication, setPublication] = useState<RoomBindingScope['publication']>(savedDraft?.publication ?? 'future-shared-conversation')
@@ -109,10 +115,21 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
   const syncEnabled = useAppStore(state => selectConnectorServiceObservation(state.connectorServiceObservation, hostingTarget)?.state?.enabled ?? null)
   const flight = useRef(false), epoch = useRef({}), content = useRef<HTMLDivElement>(null), initialFocus = useRef(true)
   const connection = connections.find(item => item.config.connectionId === connectionId)
+  const channel = settings?.channelEntries.find(entry => entry.adapterId === original.channel)
+  const inChannel = (record: ConnectionRecord) => !original.channel || record.config.adapterId === original.channel
+  const defaultRef = moteDefault.ref && (!original.channel || channel?.domains.includes(moteDefault.ref.application.domain)) ? moteDefault.ref : null
+  const defaultChoice = defaultRef ? moteConnectionChoice(defaultRef, connections) : null
   const creationUnsupported = connection?.capabilities?.roomCreation === false
   const identityReadings = useMoteIdentityReadings(true, 0, hostingTarget)
   const relevant = Object.values(intents).filter(intent => { const input = intent.input; return sameConnectorTarget(intent.target, target) && sameHosting(intent.hostingTarget, hostingTarget) && ('connectionId' in input ? input.connectionId === connectionId : bindings.some(binding => binding.bindingId === input.bindingId && binding.connectionId === connectionId)) })
-  const otherOriginals = Object.values(intents).filter(intent => sameConnectorTarget(intent.target, target) && !sameHosting(intent.hostingTarget, hostingTarget))
+  const otherOriginals = Object.values(intents).filter(intent => {
+    if (!sameConnectorTarget(intent.target, target)) return false
+    if (!sameHosting(intent.hostingTarget, hostingTarget)) return true
+    const input = intent.input
+    if (!original.channel) return false
+    const id = 'connectionId' in input ? input.connectionId : bindings.find(binding => binding.bindingId === input.bindingId)?.connectionId
+    return !connections.some(record => record.config.connectionId === id && inChannel(record))
+  })
   const roomIntent = relevant.find(intent => intent.method === 'connection.room.create')
   const room = roomIntent ? facts[roomIntent.input.operationId] : null
   const created = room && 'creation' in room && room.creation.state === 'created' ? room.creation.externalConversationId : null
@@ -254,18 +271,24 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
   }, [identity])
   useEffect(() => {
     if (initialized.current || !loaded) return
+    if (original.bindingId) {
+      const originalBinding = bindings.find(binding => binding.bindingId === original.bindingId)
+      if (!originalBinding) return
+      initialized.current = true; setConnectionId(originalBinding.connectionId); return
+    }
     const retained = Object.values(intents).filter(intent => sameConnectorTarget(intent.target, target) && sameHosting(intent.hostingTarget, hostingTarget))
-    const originalIds = new Set([...bindings.map(item => item.connectionId), ...retained.flatMap(intent => 'connectionId' in intent.input ? [intent.input.connectionId] : [])])
+    const channelConnections = connections.filter(inChannel)
+    const originalIds = new Set([...bindings.map(item => item.connectionId), ...retained.flatMap(intent => 'connectionId' in intent.input ? [intent.input.connectionId] : [])].filter(id => channelConnections.some(item => item.config.connectionId === id)))
     if (originalIds.size > 1) return
     let selected = originalIds.size === 1 ? [...originalIds][0] : undefined
     if (!selected) {
       if (moteDefault.status !== 'ready') return
-      if (moteDefault.ref) {
-        const choice = moteConnectionChoice(moteDefault.ref, connections)
-        if (choice.issue || connectionNeedsInitialSetup(choice.record!)) return
+      if (defaultRef) {
+        const choice = defaultChoice!
+        if (choice.issue || connectionNeedsInitialSetup(choice.record!) || !inChannel(choice.record!)) return
         selected = choice.record!.config.connectionId
       } else {
-        const enabled = connections.filter(availableForNewGroup)
+        const enabled = connections.filter(inChannel).filter(availableForNewGroup)
         selected = enabled.length === 1 ? enabled[0]!.config.connectionId : undefined
       }
     }
@@ -406,10 +429,9 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
   }
   const applicationChoice = <SelectionField id={fieldId + '-application'} label="Group application" value={connectionId} disabled={busy}
     triggerLabel={connection ? 'Change' : 'Choose'} className="agent-connector-source__change" menuClassName="agent-connector-application-menu"
-    onValueChange={value => { initialized.current = true; explicitlySelected.current = true; setSelectedBindingId(''); setConnectionId(value); setGroup(''); setConfirmed(false) }} options={[{ value: '', label: 'Choose an application…' }, ...connections.filter(availableForNewGroup).map(item => ({ value: item.config.connectionId, label: item.config.label, description: applicationLabel(item) }))]} />
+    onValueChange={value => { initialized.current = true; explicitlySelected.current = true; setSelectedBindingId(''); setConnectionId(value); setGroup(''); setConfirmed(false) }} options={[{ value: '', label: 'Choose an application…' }, ...connections.filter(inChannel).filter(availableForNewGroup).map(item => ({ value: item.config.connectionId, label: item.config.label, description: applicationLabel(item) }))]} />
   const identityObservation = connection ? connectionIdentityObservation(connection) : null
-  const defaultChoice = moteDefault.ref ? moteConnectionChoice(moteDefault.ref, connections) : null
-  const setupPending = connections.filter(connectionNeedsInitialSetup)
+  const setupPending = connections.filter(inChannel).filter(connectionNeedsInitialSetup)
   const currentSetupPending = connection && connectionNeedsInitialSetup(connection) ? connection
     : defaultChoice?.record && connectionNeedsInitialSetup(defaultChoice.record) ? defaultChoice.record : null
   const otherSetupPending = setupPending.filter(item => item.config.connectionId !== currentSetupPending?.config.connectionId)
@@ -426,9 +448,9 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
   const previousActivity = !!original.connectionId || bindings.length > 0 || Object.values(intents).some(intent => sameConnectorTarget(intent.target, target))
   const defaultNote = !explicitlySelected.current && !previousActivity && mode !== 'details'
     ? moteDefault.status === 'loading' ? 'Checking this Mote’s default bot. You can choose a bot now.'
-      : moteDefault.issue ?? (defaultChoice?.issue ? `Saved default ${moteDefault.ref!.application.appId}: ${defaultChoice.issue}`
+      : moteDefault.issue ?? (defaultChoice?.issue ? `Saved default ${defaultRef!.application.appId}: ${defaultChoice.issue}`
         : defaultChoice?.record && connectionNeedsInitialSetup(defaultChoice.record) ? 'This Mote’s saved bot needs its original setup continued. Its preference is kept.'
-        : moteDefault.ref && original.mote && 'name' in original.mote ? `Default bot for ${original.mote.name}` : null)
+        : defaultRef && original.mote && 'name' in original.mote ? `Default bot for ${original.mote.name}` : null)
     : null
 
   const groupSelected = !!audience
@@ -463,13 +485,14 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
         onOpenAutoFocus={event => { event.preventDefault(); (content.current?.querySelector<HTMLElement>('[aria-label="Group name"]') ?? content.current?.querySelector<HTMLElement>('[aria-label="Existing group"]') ?? content.current?.querySelector<HTMLElement>('[aria-label="Close group setup"]'))?.focus({ preventScroll: true }) }}
         onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus(), active = ownerDocument.activeElement; if (node?.isConnected && (active === ownerDocument.body || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}
         onEscapeKeyDown={event => { if (event.target instanceof ownerDocument.defaultView!.Element && event.target.closest('[role="menu"]')) event.preventDefault() }}>
-        <header className="agent-connector-dialog__header"><div><Dialog.Title>{joining ? 'Join this group' : binding || detached ? 'Group connection' : 'Connect a group'}</Dialog.Title>
+        <header className="agent-connector-dialog__header"><div><Dialog.Title>{channel ? channel.title + ' · ' : ''}{joining ? 'Join this group' : binding || detached ? 'Group connection' : 'Connect a group'}</Dialog.Title>
           <Dialog.Description className="agent-connector-identity">{original.identity ? <ResolvedAgentAvatar {...original.identity} label={original.name} size={22} /> : <AgentIcon size={20} aria-hidden="true" />}<span>{original.name}</span></Dialog.Description></div>
           <button type="button" className="icon-button" aria-label="Close group setup" onClick={onClose}><CloseIcon size={15} /></button></header>
         <div className="agent-connector-dialog__body">
-          {unqualifiedDraft || otherOriginals.length ? <details className="agent-connector-disclosure"><summary>Earlier setup references</summary><div className="agent-connector-fields">
+          {unqualifiedDraft || earlierDraft || otherOriginals.length ? <details className="agent-connector-disclosure"><summary>Earlier setup references</summary><div className="agent-connector-fields">
+            {earlierDraft ? <p className="agent-connector-note">An earlier draft is kept in its original scope. <button type="button" className="agent-connector-text-action" onClick={onOpenDraft}>Continue earlier draft</button></p> : null}
             {unqualifiedDraft ? <p className="agent-connector-note">An earlier draft has no confirmed bot hosting owner. It is kept separately from this new form.</p> : null}
-            {otherOriginals.map(intent => <div className="agent-connector-receipt" key={intent.input.operationId}><strong>{intent.hostingTarget ? 'Setup on another bot hosting Host' : 'Original bot hosting owner unconfirmed'}</strong><code>{intent.input.operationId}</code><p className="agent-connector-note">The original request is kept. It has not been resent from this view.</p>{intent.hostingTarget ? <button className="small-button" onClick={() => onOpenOriginal(intent)}>Open original setup</button> : null}</div>)}
+            {otherOriginals.map(intent => <div className="agent-connector-receipt" key={intent.input.operationId}><strong>{intent.hostingTarget ? 'Earlier group setup' : 'Original bot hosting owner unconfirmed'}</strong><code>{intent.input.operationId}</code><p className="agent-connector-note">The original request is kept. It has not been resent from this view.</p>{intent.hostingTarget ? <button className="small-button" onClick={() => onOpenOriginal(intent)}>Open original setup</button> : null}</div>)}
           </div></details> : null}
           {!binding && !detached ? <ol className="agent-connector-progress" aria-label="Group connection progress">
             {steps.map((step, index) => <li key={step.label} data-complete={step.done || undefined} aria-current={currentStep === index ? 'step' : undefined}>
@@ -479,7 +502,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, onClo
           </ol> : null}
           <div className="agent-connector-task-heading"><h3>{taskTitle}</h3><p className="agent-connector-note">{taskDetail}</p></div>
           {application}
-          {bindings.filter(item => item.state !== 'detached').length > 1 ? <section className="agent-connector-fields agent-connector-section" aria-label="Groups sharing this conversation"><h3>Groups sharing this conversation</h3><p className="agent-connector-note">These groups use the same Agent context. Each group has its own sharing scope and member access.</p><div className="agent-connector-audiences">{bindings.filter(item => item.state !== 'detached').map(item => <button type="button" className="small-button" aria-pressed={item.bindingId === binding?.bindingId} key={item.bindingId} onClick={() => { setConnectionId(item.connectionId); setSelectedBindingId(item.bindingId) }}>{connections.find(app => app.config.connectionId === item.connectionId)?.config.label ?? item.application.appId} · {item.externalConversationId} · {item.state === 'paused' ? 'Paused' : 'Connected'}</button>)}</div></section> : null}
+          {bindings.filter(item => item.state !== 'detached' && (!original.channel || connections.some(record => record.config.connectionId === item.connectionId && inChannel(record)))).length > 1 ? <section className="agent-connector-fields agent-connector-section" aria-label="Groups sharing this conversation"><h3>Groups sharing this conversation</h3><p className="agent-connector-note">These groups use the same Agent context. Each group has its own sharing scope and member access.</p><div className="agent-connector-audiences">{bindings.filter(item => item.state !== 'detached' && (!original.channel || connections.some(record => record.config.connectionId === item.connectionId && inChannel(record)))).map(item => <button type="button" className="small-button" aria-pressed={item.bindingId === binding?.bindingId} key={item.bindingId} onClick={() => { setConnectionId(item.connectionId); setSelectedBindingId(item.bindingId) }}>{connections.find(app => app.config.connectionId === item.connectionId)?.config.label ?? item.application.appId} · {item.externalConversationId} · {item.state === 'paused' ? 'Paused' : 'Connected'}</button>)}</div></section> : null}
           {!binding && !detached && !roomIntent && !bindingPending ? <div className="agent-connector-modes" role="group" aria-label="Group choice">
             <button type="button" aria-label="Existing group" aria-pressed={mode !== 'create'} disabled={busy} onClick={() => { setMode('existing'); setScope('mentions-and-replies'); setConfirmed(false) }}>Existing group<span>Connect a group your bot has joined</span></button>
             <button type="button" aria-label="New group" aria-pressed={mode === 'create'} disabled={busy || creationUnsupported} onClick={() => { setMode('create'); setScope('all-messages'); setConfirmed(false) }}>New group<span>{creationUnsupported ? 'Existing groups only' : 'Create a dedicated space'}</span></button>

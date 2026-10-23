@@ -5,6 +5,7 @@ import type { SettingsNavigationRequest } from '../SettingsNavigation'
 import type { SettingsPageId } from './settings-modules'
 import type { ConnectionApplication } from '@agentmux/core/connections'
 
+export type ChannelEntry = { section: SettingsPageId; adapterId: string; title: string; domains: readonly string[]; icon: ComponentType<{ size?: number | undefined }> }
 export type ChannelPresentation = { section: SettingsPageId; title: string; icon: ComponentType<{ size?: number | undefined }> }
 
 export const SETTINGS_GROUPS = [
@@ -98,7 +99,11 @@ export function createSettingsCatalog<const Modules extends readonly SettingsMod
     })
     return matches.length === 1 ? matches[0]! : null
   }
-  return { visibleSections, navGroups, searchResults, channelPresentation }
+  const channelEntries: ChannelEntry[] = orderedModules.flatMap(module => {
+    const channel = (module as SettingsModule).channel
+    return channel ? [{ section: module.id as SettingsPageId, adapterId: channel.adapterId, title: module.title, domains: channel.domains.map(item => item.domain), icon: channel.icon }] : []
+  })
+  return { visibleSections, navGroups, searchResults, channelPresentation, channelEntries }
 }
 
 function targetText(target: SettingsSearchTarget): string {
