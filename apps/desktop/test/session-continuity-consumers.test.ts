@@ -127,7 +127,7 @@ describe('actual Store cold start', () => {
   it.each(['manual', 'delay'] as const)('restores parked interrupted working for the first new manual input (%s)', async mode => {
     const id = 'working-user', authored = 'New user instruction after restart'
     const workface = await seed([id]), previous = { ...projected(id, 'interrupted'),
-      semanticStatus: { state: 'working' as const, source: 'native-hook' as const, observedAt: _historyFixtureEpoch(0, 0, 10) } }
+      semanticStatus: { state: 'working' as const, source: 'native-hook' as const, observedAt: now } }
     let current = previous
     store.setState({ sessions: [previous] })
     const policy = mode === 'manual' ? { activeRecovery: 'manual' as const } : { activeRecoveryDelayMs: 60000 }
@@ -183,7 +183,12 @@ describe('actual Store cold start', () => {
       expect(recover.mock.calls.map(([, , , request]) => request?.trigger)).toEqual(['startup', 'input'])
       expect(continuity[1]).toMatchObject({ kind: 'resumed', continuity: { trigger: 'input', recoveryInputs: { reminder: '', continuation: '' } } })
       expect(submitted).not.toHaveBeenCalled()
-      expect(start.mock.calls[0]![0].args).toContain(authored)
+      const launchInput = continuity[1]?.continuity?.launchInput
+      expect(launchInput).toBeDefined()
+      expect(launchInput!.input.prompt).toBe(authored)
+      expect(launchInput!.message.userContent).toBe(authored)
+      expect(launchInput!.prompt.trim()).not.toBe('')
+      expect(start.mock.calls[0]![0].args).toContain(launchInput!.prompt)
       expect(start).toHaveBeenCalledTimes(1)
       expect(store.getState().agentComposerDrafts).toEqual(workface.drafts)
       expect(store.getState().agentSteerQueues[id]?.filter(entry => entry.text === authored)).toMatchObject([{ archived: true,
