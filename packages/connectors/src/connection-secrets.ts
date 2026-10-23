@@ -1,6 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite'
 import { mintObjectId, AgentMuxError } from '@agentmux/core'
-import type { WritableSecretPort } from '@agentmux/connectors'
+import type { WritableSecretPort } from './connection-host.js'
 
 export type CredentialEncryption = {
   isAsyncEncryptionAvailable(): Promise<boolean>
@@ -8,8 +8,8 @@ export type CredentialEncryption = {
   encryptStringAsync(value: string): Promise<Buffer>
   decryptStringAsync(value: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }>
 }
-/** The executing Desktop Host stores only OS-encrypted bytes; unavailable encryption never writes plaintext. */
-export class DesktopConnectorSecrets implements WritableSecretPort {
+/** The executing Host stores only encrypted credential bytes; unavailable encryption never writes plaintext. */
+export class ConnectionSecrets implements WritableSecretPort {
   constructor(private readonly database: DatabaseSync, private readonly encryption: CredentialEncryption) {
     database.exec('CREATE TABLE IF NOT EXISTS connection_credential (credential_ref TEXT PRIMARY KEY, operation_id TEXT UNIQUE NOT NULL, ciphertext BLOB NOT NULL)')
   }

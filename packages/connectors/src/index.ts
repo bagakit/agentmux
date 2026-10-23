@@ -1,3 +1,4 @@
+export * from './connection-secrets.js'
 export * from './connection-host.js'
 export * from './channel-storage.js'
 export * from './channel-profile-adapter.js'
