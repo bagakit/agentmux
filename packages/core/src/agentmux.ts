@@ -24,6 +24,9 @@ import {
 import { AGENTMUX_CLI_HELP, AGENTMUX_CLI_SKILL, agentMuxCommandHelp } from './agentmux-cli-help.js'
 import { agentMuxPmoPlaybook } from './agentmux-pmo-playbook.js'
 import { agentMuxModuleSkill } from './agentmux-cli-module-skills.js'
+import { isConnectionCredentialMethod } from './connection-credential-codec.js'
+import { prepareConnectionCredentialCli } from './connection-credential-cli.js'
+import type { AgentMuxRpcCallOptions } from './public-rpc-client.js'
 
 function write(value: unknown, stream: NodeJS.WriteStream = process.stdout, boundedReader = false): void {
   const line = boundedReader ? rpcEncode(value) : JSON.stringify(value) + '\n'
@@ -188,6 +191,11 @@ async function main(): Promise<number> {
   }
   const client = await connectAgentMuxRpc({ endpoint, ...(sid && capability ? { credentials: { agentSessionId: sid, capability } } : {}) })
   try {
+    let callOptions: AgentMuxRpcCallOptions | undefined
+    if (isConnectionCredentialMethod(method)) {
+      const prepared = await prepareConnectionCredentialCli(client, method, invocation.params)
+      invocation.params = prepared.params; callOptions = prepared.options
+    }
     if (method === 'space.commit') {
       try { invocation.params.graph = JSON.parse(await readStdin()) }
       catch { throw new AgentMuxError('A spatial graph JSON object is required on stdin.', 'INVALID_CLI_ARGUMENT') }
@@ -220,7 +228,7 @@ async function main(): Promise<number> {
     if (isAgentMuxRpcStream(method, invocation.params)) {
       return await follow(client, method, invocation.params as AgentMuxRpcStreamParams<typeof method>)
     }
-    const result = await client.call(method, invocation.params as AgentMuxRpcParams<AgentMuxRpcMethod>)
+    const result = await client.call(method, invocation.params as AgentMuxRpcParams<AgentMuxRpcMethod>, callOptions)
     let output: { path: string } | undefined
     try {
       output = invocation.output === undefined ? undefined : method === 'system.metrics.profile.capture'

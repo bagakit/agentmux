@@ -1,3 +1,4 @@
+import { isConnectionCredentialMethod } from './connection-credential-codec.js'
 import { isChannelMetadataMethod, parseChannelMetadataParams } from './channel-metadata-codec.js'
 import { parseCapsuleInputRequest, parseCapsuleInputResult, type CapsuleInputPort } from './capsule-input.js'
 import { isCapsuleRuntimeMethod, parseCapsuleRuntimeParams, parseCapsuleRuntimeResult, type CapsuleRuntimeMethod, type CapsuleRuntimePort } from './capsule-runtime.js'
@@ -623,6 +624,19 @@ export class AgentMuxRpcService {
       const caller = await this.authenticated(context)
       if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError('Connection administration requires an authenticated original actor.', 'CONTROL_PERMISSION_DENIED')
       const input = parseConnectionParams(method, params)
+      if (isConnectionCredentialMethod(method)) {
+        if (caller || !context.runtimeFence) throw new AgentMuxError('Credential administration requires the original person/device and exact Runtime owner.', 'CONTROL_PERMISSION_DENIED')
+        if (method === 'connection.credential.store' && context.transport !== 'unix' && context.transport !== 'relay') throw new AgentMuxError('Credential entry requires the original protected Unix, SSH-to-Unix or end-to-end relay transport.', 'CONTROL_PERMISSION_DENIED')
+        await this.assertRuntimeFence(context)
+        context.signal?.throwIfAborted(); await context.assertCurrent?.()
+        const credential = this.ports.connections?.credential
+        if (!credential) throw new AgentMuxError('The original Host credential owner is unavailable. Original references and healthy Agents are retained.', 'CONTROL_UNAVAILABLE')
+        const result = method === 'connection.credential.store'
+          ? await credential.store(input as import('./connection-credential-contract.js').ConnectionCredentialStoreInput, context)
+          : await credential.inspect(input as { operationId: string }, context)
+        context.signal?.throwIfAborted(); await context.assertCurrent?.()
+        return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
+      }
       if (!this.ports.connections) {
         if (this.ports.forwardControl) {
           context.signal?.throwIfAborted(); await context.assertCurrent?.()
