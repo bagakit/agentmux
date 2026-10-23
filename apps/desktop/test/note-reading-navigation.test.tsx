@@ -272,13 +272,15 @@ it.each(['zone', 'region', 'tab'] as const)('returns from a shared Graph origina
     </section>)}</>
   }
   await dom.render(<RetainedGraph />)
-  const graphButton = toolbar.querySelector<HTMLButtonElement>('[aria-label="Graph view"]')!
-  expect(graphButton).not.toBeNull(); await act(async () => graphButton.click())
+  expect(toolbar.querySelector('[aria-label="Graph view"]')).toBeNull()
   const origin = dom.container.querySelector(`[data-reading-tab="${from.tabId}"]`)!
-  await vi.waitFor(() => expect(origin.querySelector(`[data-note-id="${f.shared.noteId}"].note-canvas-title`)).not.toBeNull())
-  const viewport = origin.querySelector('.react-flow__viewport')!, before = viewport.getAttribute('style')
+  await act(async () => origin.querySelector<HTMLButtonElement>('.note-links-toggle')!.click())
+  await vi.waitFor(() => expect(origin.querySelector('.note-links-controls')).not.toBeNull())
+  const sharedTab = [...origin.querySelectorAll<HTMLButtonElement>('.note-links-controls button')].find(button => button.textContent === 'Shared content')!
+  await act(async () => sharedTab.click())
+  await vi.waitFor(() => expect(origin.querySelector('.note-links-shared-original button.note-links-target')).not.toBeNull())
   for (let attempt = 0; attempt < 2; attempt++) {
-  await act(async () => origin.querySelector<HTMLButtonElement>(`[data-note-id="${f.shared.noteId}"].note-canvas-title`)!.click())
+  await act(async () => origin.querySelector<HTMLButtonElement>('.note-links-shared-original button.note-links-target')!.click())
   await vi.waitFor(() => expect(useAppStore.getState().recallZoneSelection?.active?.tabId).toBe(to.tabId))
   const destination = dom.container.querySelector(`[data-reading-tab="${to.tabId}"]`)!
   await vi.waitFor(() => expect(destination.querySelector('.note-reading-return button')).not.toBeNull())
@@ -287,9 +289,7 @@ it.each(['zone', 'region', 'tab'] as const)('returns from a shared Graph origina
   expect(destination.querySelector('.note-backlinks')).toBeNull()
   await act(async () => destination.querySelector<HTMLButtonElement>('.note-reading-return button')!.click())
   expect(useAppStore.getState().recallZoneSelection?.active?.tabId).toBe(from.tabId)
-  expect(origin.querySelector('.note-association-canvas')).not.toBeNull()
-  expect(origin.querySelector('.react-flow__viewport')).toBe(viewport)
-  expect(viewport.getAttribute('style')).toBe(before)
+  expect(origin.querySelector('.note-links-shared-original button.note-links-target')).not.toBeNull()
   expect(useAppStore.getState().documents[hostKey]).toBe(hostDraft)
   expect(useAppStore.getState().dirtyDocuments[hostKey]).toBe(true)
   expect(write).not.toHaveBeenCalled()
