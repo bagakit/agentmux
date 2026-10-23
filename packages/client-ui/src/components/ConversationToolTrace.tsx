@@ -27,8 +27,7 @@ export const ConversationToolTrace = memo(function ConversationToolTrace({
   const [presented, setPresented] = useState(Boolean(expanded))
   useEffect(() => { if (open) setPresented(true) }, [open])
   const panelId = useId()
-  const identity = useMemo(() => ({}), [part, traceId, copyIdentity])
-  const sourceIdentity = useMemo(() => ({}), [traceId, copyIdentity, traceId === undefined && copyIdentity === undefined ? part : undefined])
+  const sourceIdentity = useMemo(() => ({}), [part.kind, traceId, copyIdentity, traceId === undefined && copyIdentity === undefined ? part : undefined])
   const isCall = part.kind === 'tool-call'
   const text = isCall ? part.input : part.output
   const failed = part.kind === 'tool-result' && part.failed === true
@@ -51,7 +50,7 @@ export const ConversationToolTrace = memo(function ConversationToolTrace({
         <SemanticIcon name="navigation.disclosure" className="conversation-tool-trace__chevron" size={12} aria-hidden="true" />
       </button>
       {open || presented ? <div id={panelId} className="conversation-tool-trace__payload" hidden={!open} inert={!open}>
-        <ConversationToolPayload text={text} identity={identity} sourceIdentity={sourceIdentity} {...(part.callId ? { callId: part.callId } : {})}
+        <ConversationToolPayload text={text} identity={sourceIdentity} sourceIdentity={sourceIdentity} {...(part.callId ? { callId: part.callId } : {})}
           copyLabel={isCall ? 'Copy tool input' : 'Copy tool output'} />
       </div> : null}
     </div>
