@@ -36,6 +36,16 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
   const shutdown = new AbortController()
   const spatial = options.spatial ?? new AgentMuxSpatialStateStore()
   const clients = () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.clients?.() ?? [])]
+  const authoritySource = (hostId: string, expectedRuntimeId?: string) => {
+    if (!runtime || closed) return undefined
+    const hostingRuntimeId = runtime.ownerIdentity().runtimeId
+    if (expectedRuntimeId) return { hostingRuntimeId, executionRuntimeId: expectedRuntimeId }
+    if (hostId === 'local') return { hostingRuntimeId, executionRuntimeId: hostingRuntimeId }
+    const exact = options.clients?.().filter(entry => entry.hostId === hostId) ?? []
+    const client = exact.length === 1 ? exact[0]!.client : undefined
+    const executionRuntimeId = client && 'runtimeOwnerIdentity' in client ? client.runtimeOwnerIdentity()?.runtimeId : undefined
+    return executionRuntimeId ? { hostingRuntimeId, executionRuntimeId } : undefined
+  }
   const publication = createPublicationConversationPort(clients)
   const remoteIngress = createHostedIngressCorePort(clients)
   const moteChat = options.moteChat ?? (options.moteConfigurationPath !== undefined ? createHostMoteChat({
@@ -51,6 +61,7 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
     return await (opened ??= createConnectionServices({ ...options, ...(moteChat ? { moteChat } : {}),
       bindings: {
         spatial,
+        executionRuntimeId: hostId => authoritySource(hostId)?.executionRuntimeId,
         checkpoint: reference => publication.checkpoint(reference, shutdown.signal),
         session: async reference => {
           const matches = clients().filter(entry => entry.hostId === reference.hostId)
@@ -62,14 +73,15 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
       }, publication,
       // Local calls retain the original in-process authority callback, including rejoin.
       // Remote clients preserve the existing public endpoint admission contract.
-      ingress: { core: hostId => hostId === 'local' ? runtime!.client : remoteIngress(hostId) }
+      ingress: { core: hostId => hostId === 'local' ? runtime!.client : remoteIngress(hostId), authoritySource }
     }).then(owner => {
       owner.connections.credential = createCredentialAdministration({ target, secrets: owner.secrets })
       return owner
     }))
   }
   const connections = servicePort<ConnectionPort>(async () => (await services()).connections)
-  const authority = createConnectionExternalInputAuthority({ executionHostId: 'local', ingress: async () => {
+  const authority = createConnectionExternalInputAuthority({ executionHostId: 'local', runtimeId: () => runtime?.ownerIdentity().runtimeId,
+    signal: shutdown.signal, clients: () => (options.clients?.() ?? []).flatMap(entry => 'runtimeOwnerIdentity' in entry.client ? [{ hostId: entry.hostId, client: entry.client }] : []), ingress: async () => {
     const ingress = (await services()).connections.ingress
     if (!ingress) throw new AgentMuxError('The original Host ingress owner is unavailable. Original inputs are retained.', 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED')
     return ingress
