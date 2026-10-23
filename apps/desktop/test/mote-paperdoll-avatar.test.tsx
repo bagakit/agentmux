@@ -16,8 +16,10 @@ let app: MoteAppFixture, dispose: (() => void) | undefined
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.spyOn(Date, 'now').mockReturnValue(200)
-  vi.spyOn(api.config, 'get').mockResolvedValue(moteConfig)
-  vi.spyOn(api.providers, 'list').mockResolvedValue([]); vi.spyOn(api.demands, 'list').mockResolvedValue([])
+  let currentConfig = structuredClone(moteConfig)
+  vi.spyOn(api.config, 'get').mockImplementation(async () => structuredClone(currentConfig))
+  vi.spyOn(api.config, 'save').mockImplementation(async next => { currentConfig = structuredClone(next); return structuredClone(currentConfig) })
+  vi.spyOn(api.providers, 'list').mockResolvedValue({ catalog: [], warnings: [] }); vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue()
   dispose = await useAppStore.getState().initialize(); await prepareRendererUpdate(); app = createMoteApp()
@@ -38,7 +40,7 @@ async function edit() {
 }
 function quiet(before: ReturnType<typeof useAppStore.getState>) {
   const after = useAppStore.getState()
-  expect(after.sessions).toBe(before.sessions); expect(after.tabs).toBe(before.tabs)
+  expect(after.sessions).toBe(before.sessions); expect(after.tabs).toStrictEqual(before.tabs)
   expect(after.agentFocus.execution).toEqual(before.agentFocus.execution); expect(after.agentComposerDrafts).toEqual(before.agentComposerDrafts)
   expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.enqueue).not.toHaveBeenCalled()
 }
@@ -61,7 +63,7 @@ it('real primary and custom editor saves one bounded face in the original owner 
   expect(useAppStore.getState().spaceObjectIcons[primary.key]).toEqual(saved)
   await moteClick(app.entry()); await moteClick(button('Show Mote avatars only'))
   expect(app.panel().querySelector(`[data-mote-topic-id="${customMoteId}"] [data-mote-face-shape="square"]`)).not.toBeNull()
-  await moteClick(button('Open Mote Space')); await act(async () => useAppStore.setState({ projectRailOpen: true })); await settleMoteApp()
+  await moteClick(button('Open in Space')); await act(async () => useAppStore.setState({ projectRailOpen: true })); await settleMoteApp()
   const directory = [...app.container.querySelectorAll<HTMLElement>('[data-space-icon-target]')].filter(node => node.dataset.spaceIconTarget === custom.key)
   expect(directory).toHaveLength(1); expect(directory[0]!.querySelector('[data-mote-face-shape="square"]')).not.toBeNull()
   quiet(before)
@@ -91,12 +93,12 @@ it('the actual face editor paints one checked outline per nonempty group without
     expect([...style.sheet!.cssRules].filter(rule => rule.cssText.includes('.mote-avatar-selection-mark')).length).toBeGreaterThan(0)
     function painted(parts: boolean) {
       const source = document.querySelector('.mote-avatar-source')!
-      expect(source.querySelectorAll('button')).toHaveLength(2)
-      const fields = [...document.querySelectorAll('.mote-face-editor:not([hidden]) fieldset')]
-      expect(fields).toHaveLength(parts ? 6 : 0)
-      const groups = [source, ...fields]
-      expect(groups).toHaveLength(parts ? 7 : 1)
-      for (const group of groups) {
+      expect([...source.querySelectorAll('button')].map(node => node.dataset.avatarSource)).toEqual(['alternative', 'face', 'series'])
+      expect(source.querySelectorAll('button[aria-pressed="true"]')).toHaveLength(1)
+      expect(source.querySelectorAll('.mote-avatar-selection-mark')).toHaveLength(0)
+      const fields = [...document.querySelectorAll('.mote-face-editor:not([hidden]) fieldset:not([hidden])')]
+      expect(fields).toHaveLength(parts ? Object.keys(MOTE_FACE_PARTS).length : 0)
+      for (const group of fields) {
         const buttons = [...group.querySelectorAll('button')]
         expect(buttons.length).toBeGreaterThan(1)
         expect(buttons.filter(node => node.getAttribute('aria-pressed') === 'true')).toHaveLength(1)
@@ -104,14 +106,12 @@ it('the actual face editor paints one checked outline per nonempty group without
           const selected = node.getAttribute('aria-pressed') === 'true', marks = node.querySelectorAll('.mote-avatar-selection-mark')
           expect(marks).toHaveLength(1)
           const mark = marks[0]!, markStyle = getComputedStyle(mark)
-          expect(mark.tagName.toLowerCase()).toBe('svg'); expect(mark.querySelectorAll('path')).toHaveLength(1)
+          expect(mark.tagName.toLowerCase()).toBe('svg'); expect(mark.querySelectorAll('use, path')).toHaveLength(1)
           expect(markStyle.width).toBe('12px'); expect(markStyle.height).toBe('12px')
           expect(markStyle.position).toBe('absolute'); expect(markStyle.pointerEvents).toBe('none')
           expect(markStyle.visibility).toBe(selected ? 'visible' : 'hidden')
-          if (group !== source) {
-            expect(node.classList.contains('small-button--active')).toBe(selected)
-            if (selected) expect(getComputedStyle(node).boxShadow).toContain('inset 0 0 0 1px')
-          }
+          expect(node.classList.contains('small-button--active')).toBe(selected)
+          if (selected) expect(getComputedStyle(node).boxShadow).toContain('inset 0 0 0 1px')
         }
       }
     }
@@ -132,22 +132,22 @@ it('failed confirmation retains the real saved face and current editor draft; Re
   await useAppStore.getState().setSpaceObjectIcon(custom.key, DEFAULT_MOTE_FACE)
   localStorage.setItem(savedMoteKey, JSON.stringify({ open: true, targetTopicId: customMoteId, targetTabId: customTab.id }))
   await app.mount(); const before = useAppStore.getState(); await edit(); await moteClick(button('Eyes · oval'))
-  vi.mocked(api.ui.requestStorageFlush).mockRejectedValue(new Error('disk unconfirmed'))
+  vi.mocked(api.config.save).mockRejectedValueOnce(new Error('disk unconfirmed'))
   await moteClick(button('Save avatar'))
   expect(useAppStore.getState().spaceObjectIcons[custom.key]).toEqual(DEFAULT_MOTE_FACE)
   expect(app.entry().querySelector('[data-mote-face-eyes="round"]')).not.toBeNull()
   expect(button('Eyes · oval').getAttribute('aria-pressed')).toBe('true')
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('unconfirmed')
-  vi.mocked(api.ui.requestStorageFlush).mockResolvedValue(); await moteClick(button('Retry saving'))
+  await moteClick(button('Retry saving'))
   expect(app.entry().querySelector('[data-mote-face-eyes="oval"]')).not.toBeNull(); quiet(before)
 })
 it('switched targets reject stale editor completion without publishing or closing the new face editor', async () => {
-  let release!: () => void; const pending = new Promise<void>(resolve => { release = resolve }); const close = vi.fn()
-  vi.mocked(api.ui.requestStorageFlush).mockImplementation(() => pending)
+  let release!: (value: typeof moteConfig) => void; const pending = new Promise<typeof moteConfig>(resolve => { release = resolve }); const close = vi.fn()
+  vi.mocked(api.config.save).mockImplementationOnce(() => pending)
   await app.mount(<SpaceIconPicker target={primary} onClose={close} />)
   await moteClick(button('Make a face')); await moteClick(button('Save avatar'))
   await app.mount(<SpaceIconPicker target={custom} onClose={close} />); await moteClick(button('Make a face')); await moteClick(button('Color · sky'))
-  await act(async () => release()); await settleMoteApp()
+  await act(async () => release(moteConfig)); await settleMoteApp()
   expect(close).not.toHaveBeenCalled(); expect(button('Color · sky').getAttribute('aria-pressed')).toBe('true')
   expect(useAppStore.getState().spaceObjectIcons[custom.key]).toBeUndefined()
   expect(button('Save avatar').disabled).toBe(false)
@@ -156,20 +156,22 @@ it('plain Topic and Folder keep the original icon editor; malformed face cannot 
   const plain = topicSpaceIconTarget(scratchWorkspace, moteTopics.find(topic => topic.id === ordinaryTopicId)!)
   await app.mount(<SpaceIconPicker target={plain} onClose={vi.fn()} />)
   expect([...document.querySelectorAll('button')].filter(node => node.textContent === 'Make a face')).toHaveLength(0)
-  expect(button('Save icon').classList.contains('primary-button')).toBe(false)
+  expect(button('Save avatar').classList.contains('primary-button')).toBe(true)
   expect(document.querySelectorAll('.mote-avatar-selection-mark')).toHaveLength(0)
   expect(document.querySelector('[role="group"][aria-label="Icon choices"]')!.children.length).toBeGreaterThan(0)
-  expect(Object.keys(MOTE_FACE_PARTS)).toEqual(['shape', 'palette', 'eyes', 'brows', 'mouth', 'accessory'])
+  expect(Object.keys(MOTE_FACE_PARTS)).toEqual(['shape', 'palette', 'eyes', 'brows', 'mouth', 'accessory', 'nose', 'marking'])
   expect(isMoteFace(DEFAULT_MOTE_FACE)).toBe(true)
   for (const invalid of [{ ...DEFAULT_MOTE_FACE, eyes: '<script>' }, { ...DEFAULT_MOTE_FACE, palette: 'https://remote' }, { ...DEFAULT_MOTE_FACE, extra: true }, { kind: 'face' }]) expect(isMoteFace(invalid)).toBe(false)
   const saved = restoreSpaceIconOverrides({ [primary.key]: { ...DEFAULT_MOTE_FACE, eyes: '<script>' }, [custom.key]: DEFAULT_MOTE_FACE, [plain.key]: 'book' })
   expect(saved).toEqual({ [custom.key]: DEFAULT_MOTE_FACE, [plain.key]: 'book' })
 })
 
-it.each(['book', { kind: 'image', fileName: 'a'.repeat(64) + '.png' }])('opens Make a face first, preserves the alternative draft and saves exactly the visible face for %j', async original => {
+it.each(['book', { kind: 'image', fileName: 'a'.repeat(64) + '.png' }])('opens Icon or image first for saved icon/image, preserves the alternative draft and saves the visible face for %j', async original => {
   vi.spyOn(api.scratch, 'readMoteAvatar').mockResolvedValue({ dataUrl: 'data:image/png;base64,ORIGINAL', width: 256, height: 256 })
   await useAppStore.getState().setSpaceObjectIcon(primary.key, original as never)
   const close = vi.fn(); await app.mount(<SpaceIconPicker target={primary} onClose={close} />)
+  expect(document.querySelector('[data-avatar-source="alternative"]')!.getAttribute('aria-pressed')).toBe('true')
+  await moteClick(button('Make a face'))
   expect(document.querySelector('[data-avatar-source="face"]')!.getAttribute('aria-pressed')).toBe('true')
   expect(document.querySelector('.mote-face-editor__preview [data-mote-face-palette="mint"]')).not.toBeNull()
   expect(button('Save face').textContent).toBe('Save face')
@@ -181,4 +183,23 @@ it.each(['book', { kind: 'image', fileName: 'a'.repeat(64) + '.png' }])('opens M
   expect(useAppStore.getState().spaceObjectIcons[primary.key]).toEqual(original)
   await moteClick(button('Save face')); expect(close).toHaveBeenCalledTimes(1)
   expect(useAppStore.getState().spaceObjectIcons[primary.key]).toEqual({ ...DEFAULT_MOTE_FACE, eyes: 'oval' })
+})
+
+it('renders focused part glyphs, group tabs, presets, 45/24px stage chips and keeps the active tab on Restore automatic', async () => {
+  await app.mount(<SpaceIconPicker target={primary} onClose={vi.fn()} />)
+  expect(document.querySelector('[data-avatar-source="alternative"]')!.getAttribute('aria-pressed')).toBe('true')
+  expect(document.querySelectorAll('.mote-avatar-stage__slot--45, .mote-avatar-stage__slot--24').length).toBeGreaterThanOrEqual(2)
+  expect(document.querySelector('footer .space-icon-picker__automatic')).not.toBeNull()
+  await moteClick(button('Make a face'))
+  expect(document.querySelectorAll('.mote-face--part').length).toBeGreaterThan(20)
+  const exprTab = [...document.querySelectorAll<HTMLElement>('[role="tab"]')].find(node => node.textContent === 'Expression')!
+  await moteClick(exprTab)
+  expect(document.querySelector<HTMLElement>('fieldset[data-mote-face-part="shape"]')!.hidden).toBe(true)
+  expect(document.querySelector<HTMLElement>('fieldset[data-mote-face-part="eyes"]')!.hidden).toBe(false)
+  const preset = [...document.querySelectorAll<HTMLElement>('.mote-face-editor__preset')].find(node => node.textContent === 'Geek')!
+  await moteClick(preset)
+  expect(document.querySelector('.mote-face-editor__preview [data-mote-face-eyes="spark"]')).not.toBeNull()
+  await moteClick(button('Restore automatic'))
+  expect(document.querySelector('[data-avatar-source="face"]')!.getAttribute('aria-pressed')).toBe('true')
+  expect(button('Restore automatic').getAttribute('aria-pressed')).toBe('true')
 })
