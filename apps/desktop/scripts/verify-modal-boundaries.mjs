@@ -7,6 +7,7 @@ import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { runProbeProcess, stopProbeProcesses, listProbeProcesses } from './probe-process.mjs'
+import { radixOverlayAliases } from './radix-overlay-aliases.ts'
 import { assertWorkspaceDistBuiltFromCurrentSource } from '../../../vitest.dist-freshness.ts'
 import { privatePackageSmokeEnvironment } from './package-smoke-context.mjs'
 
@@ -15,7 +16,7 @@ const require = createRequire(join(desktop, 'package.json')), esbuild = createRe
 const args = process.argv.slice(2), caseIndex = args.indexOf('--case'), outputIndex = args.indexOf('--output')
 const selected = args[caseIndex + 1]
 const workerLabel = process.env.AGENTMUX_MODAL_PRIVATE_WORKER
-assert.ok(caseIndex >= 0 && ['scrim', 'input'].includes(selected), 'Use --case scrim|input [--mutations] [--output DIRECTORY]')
+assert.ok(caseIndex >= 0 && ['scrim', 'input', 'shared'].includes(selected), 'Use --case scrim|input|shared [--mutations] [--output DIRECTORY]')
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--case' || args[i] === '--output') { assert.ok(args[++i], 'Option requires a value'); continue }
   assert.equal(args[i], '--mutations', 'Unknown option')
@@ -35,7 +36,23 @@ const mutations = {
   input: [{ label: 'page-protocol-interception', path: 'apps/desktop/src/main/browser-view-manager.ts',
     before: 'surface.presentations.set(token, failed)',
     after: "surface.presentations.set(token, failed); owner.view.webContents.on('before-mouse-event', event => event.preventDefault())",
-    expected: /input CDP must still perform/ }]
+    expected: /input CDP must still perform/ }], shared: [
+    { label: 'nonfocusable-boundary', path: 'packages/client-ui/src/components/Modal.tsx',
+      before: '<div ref={setBoundary} data-overlay-modal-boundary=""',
+      after: '<div ref={setBoundary} data-overlay-modal-boundary="" style={{ display: \'contents\' }}', expected: /shared focus fallback/ },
+    { label: 'ime-escape-boundary', path: 'packages/client-ui/src/components/Modal.tsx',
+      before: 'if (isImeOwnedKeyboardEvent(event)) { event.preventDefault(); return }',
+      after: 'if (false) { event.preventDefault(); return }', expected: /shared IME Escape/ },
+    { label: 'ime-form-submission', path: 'apps/desktop/src/renderer/src/components/HostFolderDialog.tsx',
+      before: "if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event)) event.preventDefault()",
+      after: 'if (false) event.preventDefault()', expected: /shared IME Enter/ },
+    { label: 'input-selection-adoption', path: 'packages/client-ui/src/components/Modal.tsx',
+      before: "if (textSelection) textControl!.setSelectionRange(textSelection.start, textSelection.end, textSelection.direction ?? 'none')",
+      after: 'void textSelection', expected: /shared document move retains the original text selection/ },
+    { label: 'document-focus-rebind', path: 'packages/client-ui/src/components/Modal.tsx',
+      before: 'if (!close && transferred && transferred.attempt === attemptId && transferred.element.ownerDocument === behaviorDocument && (boundary?.boundary ?? element).contains(transferred.element)) {',
+      after: 'if (false) {', expected: /shared document move retains the original text selection/ }
+  ]
 }
 async function run(label, mutation) {
   if (selected !== 'scrim') await assertWorkspaceDistBuiltFromCurrentSource(repository)
@@ -63,10 +80,22 @@ async function run(label, mutation) {
     })
   } }
   for (const file of ['pnpm-lock.yaml', 'apps/desktop/scripts/verify-modal-boundaries.mjs', 'apps/desktop/scripts/probe-process.mjs',
-    'apps/desktop/scripts/package-smoke-context.mjs', 'vitest.dist-freshness.ts']) await observe(join(repository, file))
+    'apps/desktop/scripts/radix-overlay-aliases.ts', 'apps/desktop/scripts/package-smoke-context.mjs', 'vitest.dist-freshness.ts', ...(selected === 'shared' ? ['apps/desktop/scripts/fixtures/modal-boundaries/index.html'] : [])]) await observe(join(repository, file))
   await esbuild.build({ absWorkingDir: repository, entryPoints: [join(fixture, selected + '.ts')], outfile: join(directory, 'main.mjs'),
     bundle: true, platform: 'node', format: 'esm', external: ['electron'], logLevel: 'silent', plugins: [plugin],
     banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" } })
+  if (selected === 'shared') {
+    const { build } = await import('vite')
+    await build({ configFile: false, root: fixture, base: './', logLevel: 'error', resolve: { alias: radixOverlayAliases }, worker: { format: 'es' },
+      define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' }, esbuild: { jsx: 'automatic' },
+      plugins: [{ name: 'modal-shared-source-identity', enforce: 'pre', async transform(source, id) {
+        const file = id.split('?')[0]
+        if (!/\.(?:tsx?|jsx?|css)$/.test(file) || !file.startsWith(repository + '/')) return
+        const original = await readFile(file, 'utf8'), loaded = await observe(file, original)
+        return loaded === original ? undefined : loaded
+      }, async generateBundle() { for (const file of this.getWatchFiles()) if (file.startsWith(repository + '/') && /\.(?:css|json)$/.test(file)) await observe(file) } }],
+      build: { outDir: join(directory, 'renderer'), emptyOutDir: true, commonjsOptions: { include: [/node_modules/, /xterm-locked-925/] }, rollupOptions: { input: join(fixture, 'index.html') } } })
+  }
   assert.equal(changed.length, mutation ? 1 : 0, 'Only the selected production source may be privately mutated')
   const compiled = {}
   for (const entry of await readdir(directory, { recursive: true, withFileTypes: true })) if (entry.isFile()) {
