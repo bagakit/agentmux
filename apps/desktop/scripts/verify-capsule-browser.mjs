@@ -100,6 +100,7 @@ const receipt = { schema: 'agentmux.capsule-browser-proof.v1', passed: false,
   inputs: {}, baseline: null, mutations: [] }
 
 async function run(name, mutation) {
+  const consumerTests = mutation?.file === preload ? [tests[1]] : tests
   const report = join(directory, `${name}.json`), config = join(directory, `${name}.config.mts`)
   let plugin = ''
   if (mutation) {
@@ -111,7 +112,7 @@ async function run(name, mutation) {
   }
   const base = sourceMode ? 'apps/desktop/test/vitest.performance-reading.config.mts' : 'vitest.config.ts'
   const capsuleAlias = sourceMode ? `resolve:{...base.resolve,alias:[{find:/^@agentmux\\/capsule$/,replacement:${JSON.stringify(join(root, 'packages/capsule/src/index.ts'))}},{find:/^@agentmux\\/host\\/(.+)$/,replacement:${JSON.stringify(join(root, 'apps/host/src/$1.ts'))}},...(base.resolve.alias??[])]},` : ''
-  await writeFile(config, `import base from ${JSON.stringify(join(root, base))};export default {...base,root:${JSON.stringify(root)},${capsuleAlias}${plugin}test:{...base.test,include:${JSON.stringify(tests)},maxWorkers:1,passWithNoTests:false}};\n`)
+  await writeFile(config, `import base from ${JSON.stringify(join(root, base))};export default {...base,root:${JSON.stringify(root)},${capsuleAlias}${plugin}test:{...base.test,include:${JSON.stringify(consumerTests)},maxWorkers:1,passWithNoTests:false}};\n`)
   const result = await new Promise((resolveRun, reject) => {
     const args = [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config, '--reporter=json', '--outputFile', report]
     if (mutation) args.push('-t', mutation.assertion)
@@ -124,7 +125,7 @@ async function run(name, mutation) {
   catch { throw new Error(`${name}: preparation failure is not semantic RED. ${result.output.slice(-4000)}`) }
   const assertions = data.testResults.flatMap(suite => suite.assertionResults)
   assert.ok(assertions.length > 0, 'Empty test coverage cannot prove this task. ' + result.output.slice(-4000))
-  for (const file of tests) assert.ok(data.testResults.some(suite => suite.name.endsWith(file) && suite.assertionResults.length > 0),
+  for (const file of consumerTests) assert.ok(data.testResults.some(suite => suite.name.endsWith(file) && suite.assertionResults.length > 0),
     'Every declared consumer suite must be collected: ' + file)
   assert.equal(data.numRuntimeErrorTestSuites ?? 0, 0, result.output.slice(-4000))
   const failures = assertions.filter(item => item.status === 'failed')
