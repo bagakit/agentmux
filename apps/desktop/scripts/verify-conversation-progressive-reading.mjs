@@ -35,9 +35,10 @@ const inputPaths = [...await files(fixture), path.join(import.meta.dirname, 'ver
   path.join(import.meta.dirname, 'candidate-package-resolve.mjs'),
   path.join(import.meta.dirname, 'probe-process.mjs'), path.join(import.meta.dirname, 'package-smoke-context.mjs'),
   path.join(root, 'apps/desktop/test/helpers/local-runtime-connector.ts'), path.join(root, 'test/fixture-values.mjs'),
-  path.join(root, 'vitest.dist-freshness.ts'), path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'pnpm-lock.yaml'),
+  path.join(root, 'vitest.dist-freshness.ts'), path.join(root, 'packages/core/test/fixtures/fake-codex-cli.mjs'), path.join(root, 'pnpm-lock.yaml'), path.join(root, 'pnpm-workspace.yaml'),
   ...['package.json', 'tsconfig.base.json', 'apps/desktop/package.json', 'apps/desktop/tsconfig.json',
-    'apps/mobile/package.json', 'apps/mobile/tsconfig.json'].map(file => path.join(root, file)),
+    'apps/mobile/package.json', 'apps/mobile/tsconfig.json', 'apps/host/package.json', 'apps/host/scripts/build.mjs'].map(file => path.join(root, file)),
+  ...await files(path.join(root, 'apps/host/src')), ...await files(path.join(root, 'apps/host/dist')),
   ...await files(path.join(root, 'apps/desktop/src')), ...await files(path.join(root, 'packages/client-ui/src')), ...await files(path.join(root, 'packages/core/src')),
   ...await files(path.join(root, 'packages/core/dist')), ...await files(path.join(root, 'packages/layout/src')),
   ...(await Promise.all(['identity', 'demand', 'relay', 'git', 'diagnostic-evidence', 'connectors', 'capsule'].flatMap(pkg => ['src', 'dist'].map(directory => files(path.join(root, 'packages', pkg, directory)))))).flat()]
@@ -82,7 +83,7 @@ await fs.mkdir(evidence, { recursive: true })
 try {
   receipt.inputs = await hashes()
   const dependencies = new Map()
-  for (const owner of ['apps/desktop', 'packages/core', 'packages/relay', 'packages/demand', 'packages/identity', 'packages/git', 'packages/connectors']) {
+  for (const owner of ['apps/desktop', 'apps/host', 'packages/core', 'packages/relay', 'packages/demand', 'packages/identity', 'packages/git', 'packages/connectors']) {
     const metadata = JSON.parse(await fs.readFile(path.join(root, owner, 'package.json'), 'utf8'))
     for (const name of Object.keys(metadata.dependencies ?? {})) if (!name.startsWith('@agentmux/') && !dependencies.has(name)) {
       dependencies.set(name, await fs.realpath(path.join(root, owner, 'node_modules', name)))

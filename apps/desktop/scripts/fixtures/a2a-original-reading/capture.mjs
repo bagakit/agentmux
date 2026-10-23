@@ -28,7 +28,7 @@ export async function captureA2aOriginalReading({ root, evidence, layout = false
   async function bind(file) { return bindBytes(file, await readFile(file)) }
   try {
     await mkdir(evidence, { recursive: true })
-    for (const file of ['package.json', 'pnpm-lock.yaml', 'apps/desktop/package.json', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/scripts/candidate-package-resolve.mjs']) await bind(resolve(root, file))
+    for (const file of ['package.json', 'pnpm-workspace.yaml', 'pnpm-lock.yaml', 'apps/desktop/package.json', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/scripts/candidate-package-resolve.mjs']) await bind(resolve(root, file))
     for (const entry of await readdir(fixture, { withFileTypes: true })) if (entry.isFile()) await bind(resolve(fixture, entry.name))
     const alias = [candidateAlias(root, { browser: true, source: true, onManifest: bindBytes })]
     for (const name of ['react', 'react/jsx-runtime', 'react/jsx-dev-runtime', 'react-dom/client']) alias.push({ find: new RegExp('^' + name + '$'), replacement: require.resolve(name) })
