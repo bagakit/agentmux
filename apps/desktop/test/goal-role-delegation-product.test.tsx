@@ -18,16 +18,19 @@ it('actual compiled delegation preserves the original authenticated Core source 
   expect(original.text.startsWith(original.requestText! + '\n\n')).toBe(true)
   const marker = '[AgentMux delegation]\n', offset = source!.envelope.body.lastIndexOf(marker)
   expect(offset).toBeGreaterThan(0)
-  const coordination = JSON.parse(source!.envelope.body.slice(offset + marker.length))
+  const packet = source!.envelope.body.slice(offset + marker.length), coordination = JSON.parse(packet.split('\n')[0]!)
   const canonical = goalRoleGuidance({ role: 'executor', goalId: 'goal', agentSessionId: 'worker-a', runId: 'worker-a-run',
     source: { kind: 'goal-delegation', operationId: 'delegate-worker-a', sourceMessageId: 'source-worker-a', threadId: 'thread-worker-a' } })
   expect(coordination).toMatchObject({ schema: 'agentmux.goal-delegation.v1', goalId: 'goal', operationId: original.operationId,
-    sourceMessageId: original.sourceMessageId, workerAgentSessionId: original.workerAgentSessionId, roleGuidance: canonical })
+    sourceMessageId: original.sourceMessageId, workerAgentSessionId: original.workerAgentSessionId })
+  expect(coordination).not.toHaveProperty('roleGuidance')
+  expect(packet).toBe(JSON.stringify(coordination) + '\n\n' + canonical)
   expect(canonical).toContain('Required module: ' + AGENTMUX_GOAL_SKILL_ENTRY)
   expect(f.nativeInputs).toMatchObject([{ operationId: original.operationId, messageId: original.sourceMessageId, recipient: 'worker-a', body: original.text }])
   await f.publish(); await mount(createElement(GoalDelegationWork, { demand: useAppStore.getState().demands.goal! }))
   expect(useAppStore.getState().demands.goal!.responsibility!.executions[0]).toMatchObject({
-    binding: 'confirmed', phase: 'executing', execution: { operationId: original.operationId, agentSessionId: 'worker-a', runId: 'worker-a-run' } })
+    binding: 'unconfirmed', phase: 'unknown', basis: { inputSubmissionId: null },
+    execution: { operationId: original.operationId, agentSessionId: 'worker-a', runId: 'worker-a-run' } })
   expect(container.querySelector('[data-goal-responsibility="goal"]')!.textContent).toContain('worker-a')
   expect(f.stop).not.toHaveBeenCalled()
   await evidence('original-delegation-core-source-canonical-executor-role', { ...await f.proof(), originalCoreMessage: source }, 'patrol')

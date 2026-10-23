@@ -51,7 +51,7 @@ it('Main reads original Files once, freezes the actual task text and reuses it a
   const prepared = result.delegations[0]!
   expect(prepared.requestText).toBe(f.intent.text)
   expect(prepared.text.startsWith(f.intent.text + '\n\nTask materials')).toBe(true)
-  expect(JSON.parse(prepared.text.split('\n[AgentMux delegation]\n')[1]!)).toMatchObject({ schema: 'agentmux.goal-delegation.v1',
+  expect(JSON.parse(prepared.text.split('\n[AgentMux delegation]\n')[1]!.split('\n')[0]!)).toMatchObject({ schema: 'agentmux.goal-delegation.v1',
     goalId: f.input.goalId, operationId: f.intent.operationId, sourceMessageId: f.intent.sourceMessageId, threadId: f.intent.threadId,
     ownerAgentSessionId: f.intent.ownerAgentSessionId, workerAgentSessionId: f.intent.workerAgentSessionId, criterionIds: f.intent.criterionIds })
   const sourceLine = prepared.text.split('\n\n').find(line => line.startsWith('{"target":'))

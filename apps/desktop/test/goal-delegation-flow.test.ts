@@ -147,7 +147,7 @@ describe('actual Goal delegation CLI, Main and original Core collaboration', () 
     const f = await fixture(), a = task(), b = task('worker-b', ['AC-02'])
     const prepared = (await f.goal('owner', 'prepare', { goalId: 'goal', intent: a })).result.delegations[0]
     expect(prepared.requestText).toBe(a.text)
-    expect(JSON.parse(prepared.text.split('\n[AgentMux delegation]\n')[1])).toMatchObject({ schema: 'agentmux.goal-delegation.v1', goalId: 'goal',
+    expect(JSON.parse(prepared.text.split('\n[AgentMux delegation]\n')[1]!.split('\n')[0]!)).toMatchObject({ schema: 'agentmux.goal-delegation.v1', goalId: 'goal',
       operationId: a.operationId, sourceMessageId: a.sourceMessageId, workerAgentSessionId: a.workerAgentSessionId, criterionIds: a.criterionIds })
     expect(f.inputs).toEqual([])
     await f.goal('owner', 'delegate', { goalId: 'goal', intent: a }); await f.goal('owner', 'delegate', { goalId: 'goal', intent: b })
@@ -449,7 +449,7 @@ describe('actual Goal delegation CLI, Main and original Core collaboration', () 
     const f = await fixture(), a = task(), b = task('worker-b', ['AC-02'])
     const prepared = (await f.goal('owner', 'prepare', { goalId: 'goal', intent: a })).result.delegations[0]
     expect(prepared.requestText).toBe(a.text)
-    expect(JSON.parse(prepared.text.split('\n[AgentMux delegation]\n')[1])).toMatchObject({ schema: 'agentmux.goal-delegation.v1', goalId: 'goal',
+    expect(JSON.parse(prepared.text.split('\n[AgentMux delegation]\n')[1]!.split('\n')[0]!)).toMatchObject({ schema: 'agentmux.goal-delegation.v1', goalId: 'goal',
       operationId: a.operationId, sourceMessageId: a.sourceMessageId, workerAgentSessionId: a.workerAgentSessionId, criterionIds: a.criterionIds })
     expect(f.inputs).toEqual([])
     await f.goal('owner', 'delegate', { goalId: 'goal', intent: a }); await f.goal('owner', 'delegate', { goalId: 'goal', intent: b })
