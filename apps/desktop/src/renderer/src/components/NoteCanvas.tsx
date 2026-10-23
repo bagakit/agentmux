@@ -142,7 +142,7 @@ const NoteBlockCard = memo(function NoteBlockCard({ id, data, selected }: NodePr
   ]).sort()))
   const draftTarget = useMemo(() => ({ ...data.resource, noteId: data.noteId }), [data.resource, data.noteId])
   const draftIncludes = useNoteCanvasDraftIncludes(data.active && data.draftView, draftTarget, data.readable.content)
-  const readerBlockIds = useMemo(() => data.topBlockIndex !== undefined || data.blockId === '__summary__' ? undefined : [data.blockId], [data.blockId, data.topBlockIndex])
+  const readerBlockIds = useMemo(() => data.topBlockIndex !== undefined ? undefined : [data.blockId], [data.blockId, data.topBlockIndex])
   const [selectedBlock, setSelectedBlock] = useState<string | undefined>()
   const activePorts = data.active && data.desired && !overview && !data.draftView ? data.portBlockIds : NO_BLOCK_IDS
   const activePortsKey = JSON.stringify(activePorts)
@@ -168,12 +168,12 @@ const NoteBlockCard = memo(function NoteBlockCard({ id, data, selected }: NodePr
   useLayoutEffect(() => () => data.onBlockPorts(data.noteId, id, data.snapshot, NO_BLOCK_IDS), [id, data.noteId, data.snapshot, data.onBlockPorts])
   if (overview && !mountedPorts.length) return null
   return <section className="note-canvas-block-node" data-note-id={data.noteId} data-block-node-id={data.blockId} data-reading-mode={data.readingMode} data-body-version={data.draftView ? 'draft' : 'saved'} data-emphasis={data.emphasis} data-selected={selected} style={data.desired && !overview ? undefined : { visibility: 'hidden', pointerEvents: 'none' }}
-    onMouseEnter={() => data.onPeekBlock(data.noteId, data.blockId === '__summary__' ? undefined : data.blockId)}
+    onMouseEnter={() => data.onPeekBlock(data.noteId, data.topBlockIndex !== undefined ? undefined : data.blockId)}
     onMouseLeave={() => data.onPeekBlock(null, undefined)}
     onDoubleClick={event => event.stopPropagation()}>
     <header className="note-canvas-block-drag">
-      <span className="note-canvas-block-badge"><NoteBlockIcon size={12} /><span>{data.blockId === '__summary__' ? 'Summary' : data.blockId}</span></span>
-      {data.openable && data.blockId !== '__summary__' && data.source?.blocks.has(data.blockId) ? <button type="button" className="note-canvas-block-open nodrag" aria-label={`Open block ${data.blockId}`} onClick={() => data.onOpen(data.noteId, data.blockId)}><OpenIcon size={11} /></button> : null}
+      <span className="note-canvas-block-badge"><NoteBlockIcon size={12} /><span>{data.topBlockIndex !== undefined ? `Block ${data.topBlockIndex + 1}` : data.blockId}</span></span>
+      {data.openable && data.topBlockIndex === undefined && data.source?.blocks.has(data.blockId) ? <button type="button" className="note-canvas-block-open nodrag" aria-label={`Open block ${data.blockId}`} onClick={() => data.onOpen(data.noteId, data.blockId)}><OpenIcon size={11} /></button> : null}
     </header>
     {mountedPorts.map(blockId => <div key={blockId} className="note-canvas-row-endpoint note-canvas-endpoint" data-port-block-id={blockId} title={`Original block: ${blockId}`} style={{ visibility: activePorts.includes(blockId) ? 'visible' : 'hidden' }}><EndpointHandles kind="block" blockId={blockId} /></div>)}
     <div className="note-canvas-reader nodrag nopan nowheel" data-selected-block={selectedBlock} onClick={event => {
@@ -651,7 +651,8 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
               const alwaysShow = topNode.type === 'noteInclude' || topNode.type === 'blockReference'
               if (topIndex >= limit && !alwaysShow) continue
               const directId = typeof topNode.attrs?.blockId === 'string' ? topNode.attrs.blockId : undefined
-              const subRoots = allRootIds.filter(id => collectIds(topNode).includes(id))
+              const subtreeIds = collectIds(topNode), subtreeSet = new Set(subtreeIds)
+              const subRoots = allRootIds.filter(id => subtreeSet.has(id))
               if (directId && readingSource.blocks.has(directId)) {
                 const covered = projectNoteBlocks(readingSource, [directId]).shownBlockIds
                 const ports = !draftView && confirmed ? itemBlockIds.filter(id => covered.includes(id)) : []
@@ -688,14 +689,13 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
                 }
               } else {
                 const syntheticId = `block-${topIndex + 1}`
-                const covered = collectIds(topNode)
-                const ports = !draftView && confirmed ? itemBlockIds.filter(id => covered.includes(id)) : []
+                const ports = !draftView && confirmed ? itemBlockIds.filter(id => subtreeSet.has(id)) : []
                 ports.forEach(id => desiredPortBlockIds.add(id))
                 blocks.push({
                   blockNodeId: noteCanvasBlockNodeId(item.id, syntheticId),
                   blockId: syntheticId,
                   topBlockIndex: topIndex,
-                  coveredBlockIds: covered,
+                  coveredBlockIds: subtreeIds,
                   portBlockIds: ports,
                   readingMode,
                   draftView,
@@ -1007,7 +1007,9 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
       worker.terminate(); setArranging(false)
       if (!event.data.positions || event.data.error) { setLayoutIssue(event.data.error ?? 'Layout is unconfirmed. Your positions are kept.'); return }
       const fresh = refs.current.layout.positions, positions = { ...fresh }, next = event.data.positions
-      const heldPoints = Object.values(fresh), missing = projection.notes.filter(note => !fresh[note.id])
+      if (force) for (const key of Object.keys(positions)) if (key.startsWith('block:')) delete positions[key]
+      const heldPoints = Object.entries(fresh).filter(([key]) => !key.startsWith('block:')).map(([, point]) => point)
+      const missing = projection.notes.filter(note => !fresh[note.id])
       const offsetY = !force && heldPoints.length && missing.length ? Math.max(...heldPoints.map(point => point.y)) + 480 - Math.min(...missing.map(note => next[note.id]!.y)) : 0
       for (const note of projection.notes) if (force || !fresh[note.id]) positions[note.id] = { x: next[note.id]!.x, y: next[note.id]!.y + offsetY }
       setNodes(values => values.map(node => node.type === 'note' ? ({ ...node, position: positions[node.id] ?? node.position }) : node))
