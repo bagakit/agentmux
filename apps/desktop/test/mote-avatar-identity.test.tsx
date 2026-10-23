@@ -18,7 +18,7 @@ let app: MoteAppFixture, dispose: (() => void) | undefined
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.spyOn(api.config, 'get').mockResolvedValue(moteConfig)
-  vi.spyOn(api.providers, 'list').mockResolvedValue([]); vi.spyOn(api.demands, 'list').mockResolvedValue([])
+  vi.spyOn(api.providers, 'list').mockResolvedValue({ catalog: [], warnings: [] }); vi.spyOn(api.demands, 'list').mockResolvedValue([])
   vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
   vi.spyOn(api.ui, 'requestStorageFlush').mockResolvedValue()
   dispose = await useAppStore.getState().initialize(); await prepareRendererUpdate()

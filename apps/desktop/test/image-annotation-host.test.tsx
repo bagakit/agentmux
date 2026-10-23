@@ -7,8 +7,8 @@ import { createEditableAnnotationDocument, encodeEditableAnnotationDocument, typ
 import { ANNOTATION_DOCUMENT_LIMITS } from '../src/renderer/src/components/browser-screenshot/document-files'
 
 const fixture = vi.hoisted(() => ({ state: { applyBrowserEvent: vi.fn(), executeControl: vi.fn(async () => ({ operation: 'browser.history', operations: [] })),
-  reportError: vi.fn(), setConfig: vi.fn(), saveBrowserBookmark: vi.fn(), openFile: vi.fn(), addBrowserAnnotation: vi.fn(),
-  browserAnnotationsByBrowserId: {}, noticeReadReceipts: {}, toolsOpen: false, config: null as AppConfig | null },
+  reportError: vi.fn(), setConfig: vi.fn(), saveBrowserBookmark: vi.fn(), openFile: vi.fn(), addBrowserAnnotation: vi.fn(), saveBrowserOpinionDraft: vi.fn(async () => {}),
+  browserAnnotationsByBrowserId: {}, browserOpinionDrafts: {}, noticeReadReceipts: {}, toolsOpen: false, config: null as AppConfig | null },
 compose: vi.fn(), committed: vi.fn(), scene: vi.fn() }))
 vi.mock('../src/renderer/src/store', () => ({ useAppStore: Object.assign((selector: (state: typeof fixture.state) => unknown) => selector(fixture.state),
   { getState: () => fixture.state, setState: vi.fn(), subscribe: () => () => {} }) }))
