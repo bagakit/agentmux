@@ -1,4 +1,5 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { mintObjectId } from '@agentmux/identity'
 import { extname } from 'node:path'
 import { pipeline } from 'node:stream/promises'
 import type { CapsuleEndpoint, CapsuleInjectionPort, CapsuleIssue, CapsuleRecord } from './types.js'
@@ -36,6 +37,8 @@ export function endpointIssue(capsuleId: string, code: string, message: string):
 }
 export class CapsuleHttp {
   readonly server: Server
+  /** Process-lifetime service identity, independent of the durable page and its origin. */
+  readonly instanceId = mintObjectId()
   private issue: CapsuleIssue | undefined
   private injectionIssue: CapsuleIssue | undefined
   private starting: Promise<void> | undefined
@@ -93,6 +96,7 @@ export class CapsuleHttp {
       ? {
           status: 'available',
           port: this.record.port,
+          instanceId: this.instanceId,
           url: `http://127.0.0.1:${this.record.port}/`,
           observedAt,
         }
@@ -176,6 +180,7 @@ export class CapsuleHttp {
     try {
       const type = mime[extname(relative).toLowerCase()] ?? 'application/octet-stream'
       res.setHeader('Content-Type', type)
+      res.setHeader('X-AgentMux-Capsule-Instance', this.instanceId)
       res.setHeader('X-Content-Type-Options', 'nosniff')
       res.setHeader('Cache-Control', 'no-cache')
       res.setHeader('Cross-Origin-Resource-Policy', 'same-origin')
