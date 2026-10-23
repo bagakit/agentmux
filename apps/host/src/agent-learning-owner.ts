@@ -95,6 +95,11 @@ export class AgentLearningOwner implements AgentLearningPort {
     const worker = step === 'extraction' ? value.operation.proposer : value.operation.learner!
     if (launch.dispatched && !explicit) return // An unknown boundary requires an explicit same-operation action.
     await context.assertCurrent?.(); context.signal?.throwIfAborted()
+    if (step === 'learning') {
+      const target = await this.options.target(value.operation.approved!.target)
+      if (target.workspacePath !== launch.input.workspacePath)
+        fail('LEARNING_TARGET_UNCONFIRMED', 'The original learning destination moved after its input was frozen. Restore that exact resource before continuing; the approved scope, original input and existing Agents are kept.')
+    }
     launch.dispatched = true; worker.state = 'unknown'
     await this.save(value) // Before the original Core side effect; no automatic replay across this boundary.
     try {
