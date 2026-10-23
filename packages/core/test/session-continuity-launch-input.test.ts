@@ -122,7 +122,7 @@ it('reconciles an applied Start with lost ACK from the original reservation and 
     const core = next as any; await core.registry.load('local'); core.connected = true
     core.kernel.isConnected = () => true; core.kernel.list = h.core.kernel.list; core.kernel.status = h.core.kernel.status
     core.kernel.start = vi.fn(() => { throw new Error('An unknown Start must not repeat') }); core.kernel.input = vi.fn(() => { throw new Error('A launch must not repeat via PTY') })
-    core.restoreReopenObservation = async () => {}; core.ensureTerminalHandshakeOrDegrade = h.core.ensureTerminalHandshakeOrDegrade
+    core.recovery.lifecycle.restoreReopenObservation = async () => {}; core.ensureTerminalHandshakeOrDegrade = h.core.ensureTerminalHandshakeOrDegrade
     const restored = await next.ensureAgentContinuity(h.request)
     expect(restored.kind, JSON.stringify(restored)).toBe('resumed')
     const packet = next.agentSession('recipient').continuityOperations!['original-resume']!.launchInput!
