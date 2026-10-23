@@ -32,6 +32,7 @@ import { parseConversationLandmarkQuery, parseConversationLandmarkWrite } from '
 import { isConnectionServiceMethod, parseConnectionServiceParams } from './connection-service-codec.js'
 import { isMoteConnectionMethod, parseMoteConnectionParams, parseMoteConnectionResult } from './mote-connection-codec.js'
 import type { MoteConnectionPort, MoteConnectionMethod } from './mote-connection-contract.js'
+import { parseMotePreferencesReadInput, parseMotePreferencesSaveParams, parseMotePreferencesReadResult, parseMotePreferencesSaveResult, type MoteConnectionPreferencesPort, type MoteConnectionPreferencesReadInput, type MoteConnectionPreferencesSaveParams } from './mote-preferences.js'
 import { isConnectionProfileMethod, parseConnectionProfileParams } from './connection-profile-codec.js'
 import { isConnectionEnrollmentMethod, parseConnectionEnrollmentParams } from './connection-enrollment-codec.js'
 import { isConnectionDeliveryMethod, parseConnectionDeliveryParams } from './connection-delivery-codec.js'
@@ -145,6 +146,7 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   /** Host-owned learning workflow; Core neither stores nor interprets its knowledge. */
   agentLearning?: AgentLearningPort
   moteConnections?: MoteConnectionPort
+  motePreferences?: MoteConnectionPreferencesPort
   connections?: ConnectionPort
   goalDelegations?: GoalDelegationsOwner
   moteContext?: import('./diagnostic-evidence.js').AgentMuxMoteContextEvidencePort
@@ -1314,6 +1316,28 @@ export class AgentMuxRpcService {
       return await caller.client.forwardRpc(method, params, context)
     }
     let result: unknown
+    if (this.ports.motePreferences && p.kind === 'connection' &&
+        (method === 'space.mote.preferences.read' || method === 'space.mote.preferences.save')) {
+      const actor = caller ? { kind: 'agent' as const, id: caller.agentSessionId }
+        : context.principal && (context.principal.kind === 'user' || context.principal.kind === 'device')
+          ? { kind: context.principal.kind, id: rpcString(context.principal.id, 'Original preference actor') } : undefined
+      if (!actor) throw new AgentMuxError('Mote preferences require their original authenticated actor. Original files and Agents remain available.', 'CONTROL_PERMISSION_DENIED')
+      const administration = { actor, ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => {
+        context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context)
+        if (caller) await this.authenticated(context)
+      } }
+      await administration.assertCurrent()
+      if (method === 'space.mote.preferences.read') {
+        const input = parseMotePreferencesReadInput(params) as MoteConnectionPreferencesReadInput
+        const result = await this.ports.motePreferences.read(input)
+        await administration.assertCurrent()
+        return parseMotePreferencesReadResult(result, input) as AgentMuxRpcResult<M>
+      }
+      const input = parseMotePreferencesSaveParams(params) as MoteConnectionPreferencesSaveParams
+      const result = await this.ports.motePreferences.save(input, administration)
+      await administration.assertCurrent()
+      return parseMotePreferencesSaveResult(result, input) as AgentMuxRpcResult<M>
+    }
     if (Object.hasOwn(AGENTMUX_RPC_CONTROL_METHODS, method)) {
       if (method === 'toolkit.run' || method === 'toolkit.action' || method === 'toolkit.evaluate') {
         await this.assertToolkitExecutionAuthority(p.toolId, context)

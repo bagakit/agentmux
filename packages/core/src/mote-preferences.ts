@@ -43,6 +43,11 @@ export type MoteConnectionPreferencesSaveParams = MoteConnectionPreferencesSaveI
 export type MoteConnectionPreferencesSaveResult = MoteConnectionPreferencesReadInput & {
   operationId: string; status: 'saved' | 'unchanged' | 'refused-before-write' | 'unconfirmed'; source: MoteConnectionBaseline | null; message: string | null
 }
+/** Borrow the original connection-preference owner without installing a general control handler. */
+export interface MoteConnectionPreferencesPort {
+  read(input: MoteConnectionPreferencesReadInput): Promise<MoteConnectionPreferencesReadResult>
+  save(input: MoteConnectionPreferencesSaveParams, context?: import('./connection-enrollment-contract.js').ConnectionEnrollmentCallContext): Promise<MoteConnectionPreferencesSaveResult>
+}
 export type MotePreferencesReadInput = MoteQuickPreferencesReadInput | MoteConnectionPreferencesReadInput
 export type MotePreferencesReadResult = MoteQuickPreferencesReadResult | MoteConnectionPreferencesReadResult
 export type MotePreferencesSaveInput = MoteQuickPreferencesSaveInput | MoteConnectionPreferencesSaveInput
