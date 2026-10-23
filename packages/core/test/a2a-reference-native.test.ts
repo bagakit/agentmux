@@ -11,6 +11,7 @@ const factsPath = process.env.AGENTMUX_TEST_REFERENCE_FACTS
 const cliEntry = process.env.AGENTMUX_TEST_REFERENCE_CLI
 const coreEntry = process.env.AGENTMUX_TEST_REFERENCE_CORE ?? new URL('../dist/index.js', import.meta.url).href
 const core = await import(/* @vite-ignore */ coreEntry) as typeof import('../src/index.js')
+const { parseAgentMuxMessagePrefix } = await import(new URL('./agent-message-render.js', coreEntry).href) as typeof import('../src/agent-message-render.js')
 const { WebSocket } = createRequire(import.meta.url)('ws') as typeof import('ws')
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { vi.restoreAllMocks(); const errors = []; for (const cleanup of cleanups.splice(0).reverse()) try { await cleanup() } catch (error) { errors.push(error) }; vi.unstubAllEnvs(); if (errors.length) throw new AggregateError(errors, 'Exact private Runtime cleanup failed') })
@@ -23,6 +24,16 @@ async function eventually<T>(read: () => Promise<T>, accept: (value: T) => boole
 }
 async function proof(value: unknown) {
   if (factsPath) await appendFile(factsPath, JSON.stringify(value) + '\n')
+}
+function referenceBridge(wire: string): string {
+  const reading = parseAgentMuxMessagePrefix(wire)
+  expect(reading?.kind).toBe('references'); expect(reading?.body).toBe('')
+  expect(reading?.reminder?.text).toContain('When relevant to your task, read "$AGENTMUX_CLI" message --skill')
+  expect(reading?.reminder?.text).toContain('message read --message-id MID with each exact original MID before acting or replying')
+  expect(reading?.reminder?.text).toContain('Do not guess a message\'s body or task')
+  expect(reading?.reminder?.text).toContain('not proof of reading or accepted delegation and grants no new authorization')
+  expect(reading?.reminder?.text).toContain('no courtesy reply is required')
+  return reading!.reminder!.text
 }
 async function connection(endpoint: string, token: string) {
   const socket = new WebSocket(endpoint, { headers: { authorization: 'Bearer ' + token } })
@@ -159,6 +170,8 @@ describe('A2A references through actual private Runtime and public CLI', () => {
     expect(requests).toHaveLength(1); expect(requests[0].stateAtReceipt).toBe('done')
     const wire = requests[0].params.input[0].text
     expect(wire).toContain('msg-id="original-0"'); expect(wire).toContain('msg-id="original-1"'); expect(wire).toContain('read-via="message --skill"')
+    const bridge = referenceBridge(wire), skill = await h.humanCli(['message', '--skill'])
+    expect(skill.code, skill.stdout + skill.stderr).toBe(0); expect(skill.stdout).toContain(bridge)
     for (const body of bodies) expect(wire).not.toContain(body)
     const original = await eventually(() => h.client.readMessage({ messageId: 'original-0' }), value => value?.notification?.state === 'submitted')
     expect(original?.notification?.key?.kind).toBe('prompt'); expect(original?.notification?.notificationId).not.toBe('original-0')
@@ -283,6 +296,8 @@ describe('A2A references through actual private Runtime and public CLI', () => {
       expect(input.admission.intent.message).toEqual({ a2aNotificationId: notification.notificationId, systemContext: notification.wire })
       expect(input.admission.acknowledged || input.terminalPromptSubmission?.submit.acknowledged).toBe(true)
       expect(notification.wire).toContain('read-via="message --skill"'); expect(notification.wire).not.toContain('Private original body')
+      referenceBridge(notification.wire)
+      expect(parseAgentMuxMessagePrefix(notification.wire)?.references?.map(reference => reference.declaredMessageId)).toEqual(notification.messageIds)
     }
     const written = await eventually(() => readFile(join(h.root, 'recipient-terminal.bytes'), 'utf8').catch(() => ''), value => value.includes(mergedResult.notification.wire))
     for (const result of [singleResult, mergedResult]) expect(written.split(result.notification.wire)).toHaveLength(2)

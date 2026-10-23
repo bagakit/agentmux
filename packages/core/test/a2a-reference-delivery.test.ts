@@ -9,6 +9,8 @@ import type { AgentMuxMessageAppendInput } from '../src/agent-global-message-que
 const entry = process.env.AGENTMUX_TEST_REFERENCE_CORE ?? new URL('../dist/index.js', import.meta.url).href
 const core = await import(/* @vite-ignore */ entry) as typeof import('../src/index.js')
 const { DurableAgentMuxMessageQueue } = core
+const { AGENTMUX_A2A_REFERENCE_REMINDER } = await import(new URL('./agent-messaging-guidance.js', entry).href) as typeof import('../src/agent-messaging-guidance.js')
+const { parseAgentMuxMessagePrefix, renderAgentMuxMessageReferences } = await import(new URL('./agent-message-render.js', entry).href) as typeof import('../src/agent-message-render.js')
 const roots: string[] = []
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 const condition = { expectedRun: { runId: 'recipient-run' }, afterSubmissionId: null }
@@ -45,7 +47,11 @@ describe('original Inbox and independent A2A reference notification', () => {
     expect(frozen).toMatchObject({ mode: 'idle', state: 'pending', messageIds: ['first', 'second'], condition, idle,
       key: { kind: 'prompt', agentSessionId: 'recipient', expectedRun: condition.expectedRun, submissionId: frozen.notificationId } })
     expect(['first', 'second']).not.toContain(frozen.notificationId)
-    expect(frozen.wire).toBe('<amux>\n<a2a from="sender" msg-id="first" read-via="message --skill" />\n<a2a from="sender" msg-id="second" read-via="message --skill" />\n</amux>')
+    expect(frozen.wire).toBe('<amux>\n<a2a from="sender" msg-id="first" read-via="message --skill" />\n<a2a from="sender" msg-id="second" read-via="message --skill" />\n<reminder>' + AGENTMUX_A2A_REFERENCE_REMINDER + '</reminder>\n</amux>')
+    const reading = parseAgentMuxMessagePrefix(frozen.wire)!
+    expect(reading.body).toBe('')
+    expect(reading.reminder?.text).toContain('When relevant to your task, read "$AGENTMUX_CLI" message --skill')
+    expect(reading.reminder?.text).toContain('message read --message-id MID with each exact original MID before acting or replying')
     expect(frozen.wire).not.toContain(originals[0]!.body)
     const reopened = new DurableAgentMuxMessageQueue(queue.path)
     expect(await reopened.readNotification(frozen.notificationId)).toEqual(frozen)
@@ -55,6 +61,37 @@ describe('original Inbox and independent A2A reference notification', () => {
       expect(retained).toMatchObject({ envelope: { messageId: original.messageId, body: original.body }, delivery: { state: 'queued' },
         deliveryMode: 'reference', notification: { state: 'pending', notificationId: frozen.notificationId, key: frozen.key } })
     }
+  })
+
+  it('budgets the complete bridge and escaped identities before freezing automatic or explicit references', async () => {
+    const queue = await fixture(), maxBytes = 64 * 1024
+    const references = Array.from({ length: 30 }, (_, index) => ({ senderSessionId: 'sender', messageId: `budget-${index}-` }))
+    let paddingBytes = maxBytes + 1 - Buffer.byteLength(renderAgentMuxMessageReferences(references, AGENTMUX_A2A_REFERENCE_REMINDER))
+    expect(paddingBytes).toBeGreaterThan(0)
+    for (const reference of references) {
+      const escaped = Math.min(Math.floor(paddingBytes / 5), 480 - reference.messageId.length)
+      reference.messageId += '&'.repeat(escaped); paddingBytes -= escaped * 5
+      const literal = Math.min(paddingBytes, 480 - reference.messageId.length)
+      reference.messageId += 'x'.repeat(literal); paddingBytes -= literal
+    }
+    expect(paddingBytes).toBe(0)
+    expect(references.every(reference => reference.messageId.length <= 480)).toBe(true)
+    expect(Buffer.byteLength(renderAgentMuxMessageReferences(references))).toBeLessThanOrEqual(maxBytes)
+    expect(Buffer.byteLength(renderAgentMuxMessageReferences(references, AGENTMUX_A2A_REFERENCE_REMINDER))).toBe(maxBytes + 1)
+    for (const reference of references) await queue.append(message(reference.messageId), { deliveryMode: 'reference' })
+    await expect(queue.prepareNotification({ ...notice('explicit-over-budget'), messageIds: references.map(reference => reference.messageId) }))
+      .rejects.toMatchObject({ code: 'INVALID_A2A_NOTIFICATION' })
+    expect(await queue.readNotification('explicit-over-budget')).toBeNull()
+    const first = (await queue.prepareNotification(notice('first-bounded-notice')))!
+    expect(first.messageIds).toEqual(references.slice(0, -1).map(reference => reference.messageId))
+    expect(Buffer.byteLength(first.wire)).toBeLessThanOrEqual(maxBytes)
+    expect(parseAgentMuxMessagePrefix(first.wire)?.reminder?.text).toBe(AGENTMUX_A2A_REFERENCE_REMINDER)
+    await queue.recordNotificationResult(first.notificationId, 'submitted')
+    const second = (await queue.prepareNotification(notice('second-bounded-notice')))!
+    expect(second.messageIds).toEqual([references.at(-1)!.messageId])
+    expect(parseAgentMuxMessagePrefix(second.wire)?.references?.map(reference => reference.declaredMessageId)).toEqual(second.messageIds)
+    expect(parseAgentMuxMessagePrefix(second.wire)?.reminder?.text).toBe(AGENTMUX_A2A_REFERENCE_REMINDER)
+    expect((await queue.readJournal()).filter(record => record.kind === 'a2a-notification')).toHaveLength(2)
   })
 
   it('builds reference notifications without decoding any original body into JavaScript', async () => {
@@ -127,7 +164,7 @@ describe('original Inbox and independent A2A reference notification', () => {
     const path = join(dirname(queue.path), 'retained-' + shape + '.ndjson')
     await writeFile(path, records.map(record => JSON.stringify(record)).join('\n') + '\n')
     const imported = new DurableAgentMuxMessageQueue(path), retained = { ...original, wire, state: 'unconfirmed', reason }
-    if (shape !== 'compact') expect(wire).not.toBe(original.wire)
+    expect(wire).not.toBe(original.wire)
     // This resolves through openMessageJournal's actual legacyRecords import callback.
     await expect(imported.readNotification(original.notificationId)).resolves.toEqual(retained)
     expect((await readFile(path)).subarray(0, 16).toString()).toBe('SQLite format 3\0')

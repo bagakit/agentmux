@@ -11,6 +11,7 @@ import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import { fixtureEpoch } from './helpers/fixture-values.js'
 import { nativeInputCorrelationKey } from '../src/native-input-correlation.js'
 import type { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
+import { AGENTMUX_A2A_REFERENCE_REMINDER as sourceReferenceReminder } from '../src/agent-messaging-guidance.js'
 
 const entry = process.env.AGENTMUX_TEST_RPC_CORE_ENTRY
 const compiled = entry ? await import(entry) : null
@@ -19,10 +20,12 @@ const AgentPromptSubmissionCoordinator: typeof SourceCoordinator = entry
   ? (await import(new URL('./prompt-submission.js', entry).href)).AgentPromptSubmissionCoordinator : SourceCoordinator
 const confirmNativeInputAdoption: typeof sourceConfirmAdoption = entry
   ? (await import(new URL('./native-input-adoption.js', entry).href)).confirmNativeInputAdoption : sourceConfirmAdoption
+const referenceReminder: string = entry
+  ? (await import(new URL('./agent-messaging-guidance.js', entry).href)).AGENTMUX_A2A_REFERENCE_REMINDER : sourceReferenceReminder
 
 const closes: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
-const id = 'original-notification', wire = '<amux:a2a from="peer" msg-id="original-message" read-via="message --skill" />'
+const id = 'original-notification', wire = '<amux>\n<a2a from="peer" msg-id="original-message" read-via="message --skill" />\n<reminder>' + referenceReminder + '</reminder>\n</amux>'
 const source = { providerId: 'codex', nativeSessionId: 'original-native-thread' }
 const actor = { protocolId: 'original-protocol', actorId: 'original-actor', lifecycleOperationId: 'original-lifecycle', token: 'a'.repeat(64), launch: { command: 'codex', args: [] } }
 
