@@ -60,6 +60,10 @@
     "./mote-connection-target": {
       "types": "./dist/mote-connection-target.d.ts",
       "import": "./dist/mote-connection-target.js"
+    },
+    "./file-resource-model": {
+      "types": "./dist/file-resource-model.d.ts",
+      "import": "./dist/file-resource-model.js"
     }
   }
 }

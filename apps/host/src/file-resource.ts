@@ -1,15 +1,14 @@
+import { zoneFileResource, type FileWorkspace } from './file-resource-model.js'
+export { zoneFileResource, type FileWorkspace } from './file-resource-model.js'
 import { AgentMuxError } from '@agentmux/core'
 import { parseFileReadParams, parseFileListParams, parseFileWriteParams, parseFileCreateParams,
   type FileReadParams, type FileReadResource, type FileReadResult, type FileListParams, type FileListResult,
   type FileWriteParams, type FileWriteResult, type FileCreateParams, type FileCreateResult, type FileWriteContext,
   type FileDocumentReadResult, type FileWriteReceipt, type FileNameListing } from '@agentmux/core/files'
 import type { AgentMuxSpaceCatalog, AgentMuxZoneFact } from '@agentmux/core/control'
-import { SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, type ScratchDirectoryFact } from './mote-topic-model.js'
-import { directoryIdentity, homeZoneId } from './mote-model.js'
+import { SCRATCH_WORKSPACE_ID, type ScratchDirectoryFact } from './mote-topic-model.js'
 import type { WorkspaceFileReadBudget } from './workspace-file-bytes.js'
 
-export type FileWorkspace = { id: string; hostId: string; path: string; kind?: string; repoPath?: string;
-  closeout?: { targetWorkspaceId: string } }
 export type FileResourcePorts<W extends FileWorkspace> = {
   catalog(): Promise<AgentMuxSpaceCatalog | null>
   retiredZone?(zoneId: string): Promise<unknown>
@@ -26,28 +25,6 @@ const publicWrite = (value: FileWriteReceipt & { fileWitness?: unknown }): FileW
   if (value.status !== 'written') return value
   const { fileWitness: _internal, ...receipt } = value
   return receipt
-}
-
-/** One mapping for public read and open; Files retains the physical read boundary. */
-export function zoneFileResource(workspace: Pick<FileWorkspace, 'id' | 'hostId' | 'path'>, zone: AgentMuxZoneFact,
-  requestedPath = '', topics: readonly ScratchDirectoryFact[] = []): { directoryPath: string; relativeDirectory: string; path: string; logicalDirectory?: string } {
-  if (zone.kind === 'unknown' || zone.workspaceId !== workspace.id || zone.hostId !== workspace.hostId || !zone.directoryPath) {
-    throw new Error('The Zone directory is not confirmed in the original Files scope.')
-  }
-  const root = workspace.path.replace(/\/+$/, '') || '/', directoryPath = zone.directoryPath.replace(/\/+$/, '') || '/'
-  const prefix = root === '/' ? '/' : `${root}/`
-  const outside = directoryPath !== root && !directoryPath.startsWith(prefix)
-  const matches = outside && workspace.id === SCRATCH_WORKSPACE_ID ? topics.filter(topic => topic.identityDirectoryPath && topic.confirmedDirectoryPaths?.includes(directoryPath) &&
-    homeZoneId(directoryIdentity(workspace.hostId, topic.identityDirectoryPath)) === zone.zoneId) : []
-  if (outside && matches.length !== 1) throw new Error('The confirmed Zone directory is outside the original Files scope.')
-  const relativeDirectory = outside ? scratchTopicDirectoryName(matches[0]!.id) : directoryPath === root ? '' : directoryPath.slice(prefix.length)
-  if (relativeDirectory.split('/').some(segment => segment === '.' || segment === '..' || segment.includes('\\'))) {
-    throw new Error('The confirmed Zone directory cannot be represented in the original Files scope.')
-  }
-  if (requestedPath && (requestedPath.startsWith('/') || /^[A-Za-z]:/.test(requestedPath) || requestedPath.includes('\\') ||
-      requestedPath.includes('\0') || requestedPath.split('/').some(segment => segment === '..'))) throw new Error('Choose a relative path inside the selected Zone directory.')
-  const relativePath = requestedPath.split('/').filter(segment => segment && segment !== '.').join('/')
-  return { directoryPath, relativeDirectory, ...(outside ? { logicalDirectory: relativeDirectory } : {}), path: relativeDirectory && relativePath ? `${relativeDirectory}/${relativePath}` : relativeDirectory || relativePath || (requestedPath ? '.' : '') }
 }
 
 /** Original public ordinary methods; richer Main backends keep their existing Note semantics. */
