@@ -14,7 +14,8 @@ const variants = {
   'resume-target': ['apps/host/src/agent-learning-owner.ts', "if (step === 'learning')", 'if (false)'],
   'ipc-trust': ['apps/desktop/src/main/agent-learning-ipc.ts', "assertSenderTrusted(senderTrust('agentLearning:call', event.sender, options.contents))", 'void 0'],
   'ipc-frame': ['apps/desktop/src/main/agent-learning-ipc.ts', 'if (senderFrame !== options.mainFrame())', 'if (false)'],
-  'review-target': ['apps/desktop/src/renderer/src/components/SessionLearningSurface.tsx', 'target: selectedTarget, executorId', 'target: targets[0]!.target, executorId']
+  'review-target': ['apps/desktop/src/renderer/src/components/SessionLearningSurface.tsx', 'target: selectedTarget, executorId', 'target: targets[0]!.target, executorId'],
+  'topic-resource': ['apps/host/src/agent-learning-resources.ts', 'origin.topicId !== target.topicId', 'false']
 } as const
 if (mutation && !Object.hasOwn(variants, mutation)) throw new Error('Unknown learning mutation')
 export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, esbuild: { jsx: 'automatic' },

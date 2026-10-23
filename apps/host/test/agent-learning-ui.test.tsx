@@ -52,6 +52,8 @@ async function consumer() {
   }
   vi.spyOn(api.agentLearning, 'call').mockImplementation(bridge.call)
   vi.spyOn(api.agentLearning, 'confirm').mockImplementation(bridge.confirm)
+  vi.spyOn(api.topics, 'call').mockImplementation((method, input) => track(f.client.call(method, input)))
+  vi.spyOn(api.spatial, 'read').mockImplementation(() => track(f.spatial.read()))
   useAppStore.setState({ config: f.config, executorDetections: {}, hostExecutorInventories: {}, executeControl: async () => ({ operation: 'space.ls', ...(await track(f.client.call('space.ls', { target: {} }))) }) })
   const close = vi.fn(), render = async (active = true) => { await act(async () => root.render(<SessionLearningSurface source={{ hostId: 'local', agentSessionId: 'source' }} label="Original source work" active={active} onClose={close} />)); await settle() }
   return { ...f, frame, contents, invoke, close, render }
