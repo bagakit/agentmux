@@ -13,6 +13,7 @@ import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-mes
 import { workbenchSessionStageHostId, type WorkbenchViewTarget } from '../src/renderer/src/lib/workbench-presentation'
 import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
 import { readStyleSheet } from './helpers/styles'
+import * as readingDiagnostics from '../src/renderer/src/lib/reading-diagnostic-publication'
 
 // Real host, composer, mailbox, Activity and shared readers. Only terminal rendering is a leaf
 // witness here; exact xterm geometry/input is qualified separately by the finite Native command.
@@ -438,6 +439,7 @@ it('same-control native reader performs at most one bounded request, or joins in
 })
 
 it.each([{ providerId: 'claude', nativeSessionId: 'native-a' }, { providerId: 'codex', nativeSessionId: 'native-b' }])('an accepted original view still locates its original record after durable source replacement %s without granting the new source', async source => {
+  const diagnostics = vi.spyOn(readingDiagnostics, 'publishReadingDiagnostic')
   useAppStore.setState({ viewModes: { 'agent-1': 'activity', other: 'terminal' } })
   const originalSource = { kind: 'native' as const, providerId: 'codex', nativeSessionId: 'native-a', recordId: 'same' }, run = originalControl().run
   await dom.render(pane())
@@ -446,6 +448,24 @@ it.each([{ providerId: 'claude', nativeSessionId: 'native-a' }, { providerId: 'c
   await vi.waitFor(() => {
     target = dom.container.querySelector(`.activity-feed [data-message-source-key='${key}']`)
     expect(target).not.toBeNull()
+  }, { timeout: 8000 })
+  // Activity rendering does not prove that this Pane's separate input reader
+  // has admitted its original window before being hidden and parked.
+  await vi.waitFor(() => {
+    const records = diagnostics.mock.calls.map(([record]) => record).filter(record =>
+      record.scope.hostId === 'local' && record.scope.agentSessionId === 'agent-1' &&
+      record.scope.runId === run.runId && record.scope.consumerKind === 'input-summary')
+    const consumers = new Set(records.map(record => record.scope.consumerId))
+    expect(consumers.size).toBe(1)
+    const events = records.flatMap(record => record.events)
+    expect(events.some(event => event.phase === 'consumer-ended')).toBe(false)
+    const accepted = events.find(event => event.phase === 'admission-accepted')
+    expect(accepted?.windowId).toBeTruthy()
+    expect(events.some(event => event.phase === 'read-ended' && event.attemptId === accepted?.attemptId)).toBe(true)
+    const page = originalReads.find(receipt => receipt.page?.window.id === accepted?.windowId)?.page
+    expect(page?.window.complete).toBe(true)
+    expect(page?.items.flatMap(entry => entry.kind === 'item' ? entry.item.records.map(record => record.reference) : []))
+      .toContainEqual({ hostId: 'local', agentSessionId: 'agent-1', source: originalSource })
   }, { timeout: 8000 })
   const acceptedIds = new Set(originalReads.flatMap(receipt => receipt.page?.window.complete ? [receipt.page.window.id] : []))
   expect(acceptedIds.size).toBeGreaterThan(0)
