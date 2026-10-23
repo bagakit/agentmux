@@ -57,16 +57,26 @@ export async function moteBotUi(options: NonNullable<Parameters<typeof moteConne
   const handlers = new Map<string, (...args: any[]) => Promise<any>>(), sender = {}
   const handleWithEvent = (name: string, handler: (...args: any[]) => Promise<any>) => { handlers.set(name, handler) }
   const assertTrusted = (_channel: string, event: { sender: object }) => { if (event.sender !== sender) throw new Error('Untrusted renderer') }
-  registerMoteConnectionIpc({ socketPath: owner.server.path, handleWithEvent, assertTrusted })
-  registerMotePreferencesIpc({ socketPath: owner.server.path, handleWithEvent, assertTrusted })
-  registerMoteChatIpc({ socketPath: owner.server.path, handleWithEvent, assertTrusted })
-  registerConnectorIpc({ socketPath: owner.server.path, handleWithEvent, assertTrusted, secrets: owner.connections.secrets })
-  const forward = async (method: any, input: any) => await handlers.get('moteConnections:call')!({ sender }, method, input)
+  const hostingTarget = { hostId: 'original-host', runtimeId: 'original-host-runtime' }
+  const runtime: import('../../src/main/connection-host-ipc').ConnectionHostIpc = {
+    connectionHostingTarget: async () => structuredClone(hostingTarget),
+    callConnectionHost: async (target, method, params) => {
+      if (JSON.stringify(target) !== JSON.stringify(hostingTarget)) throw new Error('The original controlled hosting owner does not match')
+      return await owner.client.call(method, params)
+    },
+    watchConnectionMetadata: async (_target, handlers) => owner.client.subscribe('connection.metadata.watch', {}, handlers)
+  }
+  registerMoteConnectionIpc({ runtime, handleWithEvent, assertTrusted })
+  registerMotePreferencesIpc({ socketPath: owner.server.path, runtime, handleWithEvent, assertTrusted })
+  registerMoteChatIpc({ runtime, handleWithEvent, assertTrusted })
+  registerConnectorIpc({ runtime, handleWithEvent, assertTrusted, metadata: { publish() {}, observation() {} } })
+  vi.spyOn(api.connections, 'hostingTarget').mockImplementation(hostId => runtime.connectionHostingTarget(hostId))
+  const forward = async (method: any, input: any, target?: import('../../src/shared/contracts').ConnectionHostingTarget) => await handlers.get('moteConnections:call')!({ sender }, method, input, target)
   const parentCalls = vi.spyOn(api.moteConnections, 'call').mockImplementation(forward)
-  const connectionCalls = vi.spyOn(api.connections, 'call').mockImplementation(async (method, input) => unwrapSessionInputOperationResult(await handlers.get('connections:call')!({ sender }, method, input)))
-  const chatRequests = vi.spyOn(api.moteChat, 'call').mockImplementation(async (method, input) => unwrapSessionInputOperationResult(await handlers.get('moteChat:call')!({ sender }, method, input)))
-  const saves = vi.spyOn(api.motePreferences, 'save').mockImplementation(async input => await handlers.get('motePreferences:save')!({ sender }, input))
-  vi.spyOn(api.motePreferences, 'read').mockImplementation(async input => await handlers.get('motePreferences:read')!({ sender }, input))
+  const connectionCalls = vi.spyOn(api.connections, 'call').mockImplementation(async (method, input, target) => unwrapSessionInputOperationResult(await handlers.get('connections:call')!({ sender }, method, input, target)))
+  const chatRequests = vi.spyOn(api.moteChat, 'call').mockImplementation(async (method, input, target) => unwrapSessionInputOperationResult(await handlers.get('moteChat:call')!({ sender }, method, input, target)))
+  const saves = vi.spyOn(api.motePreferences, 'save').mockImplementation(async (input, target) => await handlers.get('motePreferences:save')!({ sender }, input, target))
+  vi.spyOn(api.motePreferences, 'read').mockImplementation(async (input, target) => await handlers.get('motePreferences:read')!({ sender }, input, target))
   vi.spyOn(api.files, 'readPublic').mockImplementation(input => owner.client.call('file.read', input))
   vi.spyOn(api.moteAvatars, 'read').mockImplementation(input => owner.client.call('space.mote.avatar.read', input))
   vi.spyOn(api.files, 'readDirectory').mockResolvedValue([])
@@ -95,7 +105,7 @@ export async function moteBotUi(options: NonNullable<Parameters<typeof moteConne
   async function open(index = 0) { await render(index); await vi.waitFor(() => expect(document.querySelector('.mote-connection__row')).not.toBeNull()); await act(async () => (document.querySelector('.mote-connection__row') as HTMLElement).click()); await settle() }
   async function renderSettings(navigationRequest?: SettingsNavigationRequest, visible = true) { await act(async () => view.render(<SettingsNavigation.Provider value={navigation}><SettingsPanel initialSection="lark" navigationRequest={navigationRequest} visible={visible} onClose={() => {}} /></SettingsNavigation.Provider>)); mounted = true; await settle() }
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', process.env.AGENTMUX_TEST_OBJECT_CLI ?? resolve('packages/core/bin/amux'))
-  return { ...owner, container, scopes, calls, registration, parentCalls, connectionCalls, chatRequests, saves, forward, handlers, sender, navigation, open, click, render, renderSettings, settle,
+  return { ...owner, runtime, hostingTarget, container, scopes, calls, registration, parentCalls, connectionCalls, chatRequests, saves, forward, handlers, sender, navigation, open, click, render, renderSettings, settle,
     async renderCreateShortcut(index = 0) { await act(async () => view.render(<MoteConnectionPanel key={'create-' + index} target={owner.target(index)} topicId={owner.motes[index]!.id} moteName={scopes[index]!.topic.title} onRead={() => {}} createOnOpen />)); mounted = true; await settle() },
     async renderMotePanel(index = 0) { await act(async () => view.render(<SettingsNavigation.Provider value={navigation}><MoteDetailsPanel scope={scopes[index]!} active onOpenPath={async () => {}} /></SettingsNavigation.Provider>)); mounted = true; await settle() },
     get beginCount() { return options.generic ? owner.counts.begin : native.begins }, get authenticationCount() { return options.generic ? owner.counts.authentication : native.authentications },
