@@ -157,7 +157,10 @@ type BrowserEntry = {
   inputShield?: BrowserNativeInputShield | undefined
   inputShieldCleanupNotice?: {
     shield: BrowserNativeInputShield; originalOperation: BrowserOperation | null
-    activity: CleanupWarningContribution; operation?: CleanupWarningContribution
+  }
+  /** One exact native owner's current notice; its original operation keeps the incident history. */
+  inputIsolationNotice?: {
+    view: WebContentsView; operation: BrowserOperation | null; resolved: boolean
   }
   inputIsolation: AgentMuxBrowserControl['inputIsolation']
   feedbackRevision: number
@@ -258,18 +261,13 @@ const BROWSER_FEEDBACK_CLEAR_INPUT_TYPES = new Set([
 const BROWSER_ACTION_PAGE_CALLS = BROWSER_PAGE_MUTATING_CAPABILITY_NAMES
 
 const INPUT_SHIELD_CLEANUP_WARNING = 'The original Browser input surface could not be fully released. The page and operation are retained; use Return to Agent to retry release, then inspect the page before starting a fresh program.'
-type CleanupWarningContribution = { before: string | undefined; after: string }
-function cleanupWarningContribution(before: string | undefined): CleanupWarningContribution {
-  return { before, after: [before, INPUT_SHIELD_CLEANUP_WARNING].filter(Boolean).join('\n') }
+const INPUT_ISOLATION_WARNING = 'Native Browser input isolation is unconfirmed. The original page and Agent remain available. Use Take control before editing manually, or submit a fresh Agent program to retry isolation.'
+const INPUT_ISOLATION_HISTORY = 'Native input isolation was unconfirmed during this operation.'
+function appendWarning(current: string | undefined, warning: string): string {
+  return current && (`\n${current}\n`).includes(`\n${warning}\n`) ? current : [current, warning].filter(Boolean).join('\n')
 }
-function removeCleanupWarning(current: string | undefined, contribution: CleanupWarningContribution): string | undefined {
-  if (current === contribution.after) return contribution.before
-  // Preserve later notices appended by their own owners. An unrelated replacement
-  // is left untouched rather than parsing its prose as a cleanup fact.
-  if (current?.startsWith(contribution.after + '\n')) {
-    return [contribution.before, current.slice(contribution.after.length + 1)].filter(Boolean).join('\n') || undefined
-  }
-  return current
+function removeWarning(current: string | undefined, warning: string): string | undefined {
+  return current?.split('\n').filter(line => line !== warning).join('\n') || undefined
 }
 
 /** Metadata retained while a hidden Browser native owner is released. */
@@ -2054,7 +2052,7 @@ export class BrowserViewManager {
         operation.summary = 'Browser operation stopped explicitly'
         operation.finishedAt = Date.now()
         operation.warning = 'The Browser operation was stopped explicitly. Earlier actions may have completed. Agent control remains; review the page before starting a fresh program, or use Take control to interact manually.'
-        entry.activity = { operation, control: entry.activity.control, warning: operation.warning }
+        entry.activity = { operation, control: entry.activity.control, warning: [entry.activity.warning, operation.warning].filter(Boolean).join('\n') }
         stopController.abort()
         void this.operationJournal?.setPhase(operation.id, 'stopped', { summary: operation.summary, warning: operation.warning })
         this.emit(entry)
@@ -2098,7 +2096,7 @@ export class BrowserViewManager {
         operation.summary = 'Browser operation stopped explicitly'
         operation.finishedAt = operation.finishedAt ?? Date.now()
         operation.warning = operation.warning ?? 'The Browser operation was stopped explicitly. Earlier actions may have completed. Review the current page before starting a fresh program.'
-        entry.activity = { operation, control: entry.humanControl ? 'human' : 'agent', warning: operation.warning }
+        entry.activity = { operation, control: entry.humanControl ? 'human' : 'agent', warning: entry.activity.warning ?? operation.warning }
         return {
           result: undefined,
           logs: run.logs,
@@ -2228,6 +2226,7 @@ export class BrowserViewManager {
       }
       entry.runInFlight = false
       if (this.operationJournal) {
+        this.projectInputIsolationNotice(entry)
         const finalPhase = operation.phase === 'completed' || operation.phase === 'failed' || operation.phase === 'indeterminate' || operation.phase === 'stopped'
           ? operation.phase
           : 'indeterminate'
@@ -2544,6 +2543,7 @@ export class BrowserViewManager {
     const projected = recorded?.operation.outcome?.evaluation ?? evaluation
     if (recorded?.operation.outcome && this.owns(entry, view) && entry.activity.operation?.id === operationId) {
       entry.activity.operation.outcome = recorded.operation.outcome
+      if (projected.warning) this.addCurrentOperationWarning(entry, view, entry.activity.operation, projected.warning)
       this.emit(entry)
     }
     return projected
@@ -2735,7 +2735,9 @@ export class BrowserViewManager {
                 if (saved?.operation.outcome) operation.outcome = saved.operation.outcome
                 if (!bound || !saved?.saved) {
                   await this.taskAssets!.markCompletionUnavailable(cursor)
-                  operation.warning = 'Completion recording is unavailable. Existing Browser and Agent work remains; restore local storage before verifying again.'
+                  const warning = 'Completion recording is unavailable. Existing Browser and Agent work remains; restore local storage before verifying again.'
+                  operation.warning = appendWarning(operation.warning, warning)
+                  this.addCurrentOperationWarning(entry, view, operation, warning)
                 }
               }
               // Preparation can finish after the person stopped this exact cursor.
@@ -2849,8 +2851,7 @@ export class BrowserViewManager {
     if (this.agentOwnsInput(entry)) return this.snapshot(entry)
     entry.humanControl = false
     ++entry.controlRevision
-    const { warning: _warning, ...activity } = entry.activity
-    entry.activity = { ...(entry.inputShield ? entry.activity : activity), control: 'agent' }
+    entry.activity = { ...entry.activity, control: 'agent' }
     entry.inputIsolation = 'preparing'
     this.emit(entry)
     void this.prepareInputShield(entry, entry.view)
@@ -2961,7 +2962,8 @@ export class BrowserViewManager {
       },
       note: (text) => {
         notes.push(text)
-        operation.warning = notes.join('\n')
+        operation.warning = appendWarning(operation.warning, text)
+        this.addCurrentOperationWarning(entry, observingView, operation, text)
         void this.operationJournal?.setPhase(operation.id, operation.phase, { summary: operation.summary, warning: operation.warning })
         this.emit(entry)
       },
@@ -3016,7 +3018,8 @@ export class BrowserViewManager {
           return true
         } catch {
           step.evidenceWarning = 'Step evidence could not be saved. The action result is retained; inspect the page and check local storage before recording again.'
-          operation.warning ??= step.evidenceWarning
+          operation.warning = appendWarning(operation.warning, step.evidenceWarning)
+          this.addCurrentOperationWarning(entry, observingView, operation, step.evidenceWarning)
           return false
         }
       }
@@ -3072,7 +3075,8 @@ export class BrowserViewManager {
           })
           // A proven pre-dispatch recovery keeps its explicit notice without relabeling
           // it as appearance-based historical ref healing in the script outcome owner.
-          operation.warning = [operation.warning, recovered.report.notice].filter(Boolean).join('\n')
+          operation.warning = appendWarning(operation.warning, recovered.report.notice)
+          this.addCurrentOperationWarning(entry, observingView, operation, recovered.report.notice)
           if (recovered.status !== 'action-completed' && recovered.status !== 'observed') throw error
           value = recovered.value
         }
@@ -4214,6 +4218,7 @@ export class BrowserViewManager {
   private emit(entry: BrowserEntry): void {
     if (entry.activity.control === 'human' || ['waiting', 'failed', 'stopped', 'indeterminate'].includes(entry.activity.operation?.phase ?? '')) void entry.feedback?.clear()
     if (this.entries.get(entry.id) !== entry || entry.view.webContents.isDestroyed()) return
+    this.projectInputIsolationNotice(entry)
     void entry.controlFeedback?.synchronize()
     if (entry.activity.operation) entry.activity.operation.control = this.controlState(entry)
     const browser = this.snapshot(entry)
@@ -4276,6 +4281,10 @@ export class BrowserViewManager {
     if (entry.inputShield?.isCurrentFor(view) && entry.inputShield.isolated) {
       entry.inputIsolation = 'isolated'
       this.synchronizeInputShield(entry)
+      if (entry.inputIsolation === 'isolated') {
+        this.resolveInputIsolationNotice(entry, view)
+        this.emit(entry)
+      }
       return
     }
     if (entry.inputShield) {
@@ -4295,6 +4304,7 @@ export class BrowserViewManager {
       if (entry.inputShield !== shield || !this.agentOwnsInput(entry)) return
       if (!shield.isolated) throw new Error('The original native input surface is not attached')
       entry.inputIsolation = 'isolated'
+      this.resolveInputIsolationNotice(entry, view)
       this.emit(entry)
     } catch {
       if (preparedShield && entry.inputShield !== preparedShield) return
@@ -4412,13 +4422,48 @@ export class BrowserViewManager {
 
   private inputIsolationFailed(entry: BrowserEntry): void {
     entry.inputIsolation = 'unconfirmed'
-    const warning = 'Native Browser input isolation is unconfirmed. The original page and Agent remain available; avoid interacting with this page and use Take control before editing. Start a fresh program after returning control to retry isolation.'
-    entry.activity = { ...entry.activity, warning }
-    if (entry.activity.operation && !entry.activity.operation.warning?.includes(warning)) entry.activity.operation.warning = [entry.activity.operation.warning, warning].filter(Boolean).join(' ')
+    const previous = entry.inputIsolationNotice
+    const operation = entry.activity.operation
+    if (!previous || previous.view !== entry.view || previous.operation !== operation) {
+      entry.inputIsolationNotice = { view: entry.view, operation, resolved: false }
+    } else previous.resolved = false
     // A failed native surface is already unknown here. Notification failure must
     // not turn the still-healthy page/program into a failure; inspect retains the
     // original operation, isolation fact and persistent warning for the next read.
     try { this.emit(entry) } catch { /* Keep current owner facts even when this projection is unavailable. */ }
+  }
+
+  private addCurrentOperationWarning(entry: BrowserEntry, view: WebContentsView, operation: BrowserOperation, warning: string): void {
+    if (!this.owns(entry, view) || entry.activity.operation !== operation) return
+    entry.activity = { ...entry.activity, warning: appendWarning(entry.activity.warning, warning) }
+  }
+
+  private resolveInputIsolationNotice(entry: BrowserEntry, view: WebContentsView): void {
+    if (!this.owns(entry, view) || entry.inputIsolationNotice?.view !== view) return
+    entry.inputIsolationNotice.resolved = true
+    this.projectInputIsolationNotice(entry)
+  }
+
+  private projectInputIsolationNotice(entry: BrowserEntry): void {
+    const notice = entry.inputIsolationNotice
+    if (!notice || notice.view !== entry.view) return
+    // The exact native owner above grants removal. Matching its published whole
+    // notice is presentation bookkeeping, never a source of control/isolation facts.
+    let warning = removeWarning(entry.activity.warning, INPUT_ISOLATION_HISTORY)
+    if (notice.resolved) warning = removeWarning(warning, INPUT_ISOLATION_WARNING)
+    if (notice.operation === entry.activity.operation && notice.operation) {
+      // Outcome producers may replace their summary warning. Retain this incident in
+      // the original bounded history before later outcome prose, without projecting
+      // a resolved incident as a live notice.
+      const history = removeWarning(removeWarning(notice.operation.warning, INPUT_ISOLATION_WARNING), INPUT_ISOLATION_HISTORY)
+      notice.operation.warning = [INPUT_ISOLATION_HISTORY, history].filter(Boolean).join('\n')
+    }
+    if (!notice.resolved) {
+      warning = appendWarning(warning, INPUT_ISOLATION_WARNING)
+    } else if (notice.operation !== entry.activity.operation) delete entry.inputIsolationNotice
+    entry.activity = { ...entry.activity }
+    if (warning === undefined) delete entry.activity.warning
+    else entry.activity.warning = warning
   }
 
   private observeInputShieldDestruction(id: string, shield: BrowserNativeInputShield): void {
@@ -4460,27 +4505,26 @@ export class BrowserViewManager {
       const notice = entry.inputShieldCleanupNotice
       if (notice && shield && notice.shield === shield) {
         delete entry.inputShieldCleanupNotice
-        if (notice.originalOperation && notice.operation) {
-          const warning = removeCleanupWarning(notice.originalOperation.warning, notice.operation)
+        if (notice.originalOperation) {
+          const warning = removeWarning(notice.originalOperation.warning, INPUT_SHIELD_CLEANUP_WARNING)
           if (warning === undefined) delete notice.originalOperation.warning
           else notice.originalOperation.warning = warning
         }
         if (entry.activity.operation === notice.originalOperation) {
-          const warning = removeCleanupWarning(entry.activity.warning, notice.activity)
+          const warning = removeWarning(entry.activity.warning, INPUT_SHIELD_CLEANUP_WARNING)
           entry.activity = { ...entry.activity }
           if (warning === undefined) delete entry.activity.warning
           else entry.activity.warning = warning
         }
       }
+      if (entry.humanControl) this.resolveInputIsolationNotice(entry, entry.view)
     } catch {
       entry.inputIsolation = 'unconfirmed'
       if (!shield || entry.inputShieldCleanupNotice?.shield === shield) return
       const originalOperation = entry.activity.operation
-      const activity = cleanupWarningContribution(entry.activity.warning)
-      const operation = originalOperation ? cleanupWarningContribution(originalOperation.warning) : undefined
-      entry.inputShieldCleanupNotice = { shield, originalOperation, activity, ...(operation ? { operation } : {}) }
-      entry.activity = { ...entry.activity, warning: activity.after }
-      if (originalOperation && operation) originalOperation.warning = operation.after
+      entry.inputShieldCleanupNotice = { shield, originalOperation }
+      entry.activity = { ...entry.activity, warning: appendWarning(entry.activity.warning, INPUT_SHIELD_CLEANUP_WARNING) }
+      if (originalOperation) originalOperation.warning = appendWarning(originalOperation.warning, INPUT_SHIELD_CLEANUP_WARNING)
     }
   }
 

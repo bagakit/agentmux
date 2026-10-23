@@ -208,7 +208,7 @@ export function BrowserOperationStatus({
 
 /** Persistent service notice is separate from the optional operation disclosure. */
 export function BrowserOperationWarning({ activity }: { activity: BrowserActivityState }) {
-  const message = activity.warning ?? activity.operation?.warning
+  const message = activity.warning
   return message ? <BrowserOperationNotice message={message} className="browser-operation-warning" /> : null
 }
 

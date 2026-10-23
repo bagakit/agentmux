@@ -41,6 +41,7 @@ export type BrowserOperation = {
   url: string
   steps: BrowserOperationStep[]
   replayOf?: string
+  /** Historical operation warning; recovery of current Browser services does not erase it. */
   warning?: string
   outcome?: { registration: BrowserOutcomeRegistration; evaluation?: BrowserOutcomeEvaluation }
   /** Transient host control facts; persisted history never revives input isolation. */
@@ -55,6 +56,7 @@ export type BrowserReplayPlan = {
 export type BrowserActivityState = {
   operation: BrowserOperation | null
   control: 'agent' | 'human'
+  /** Current Main-owned Browser service notice, independent of operation history. */
   warning?: string
 }
 
