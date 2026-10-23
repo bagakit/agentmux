@@ -36,12 +36,12 @@ it.each([null, 'rocket', { ...DEFAULT_MOTE_FACE, palette: 'rose', accessory: 'gl
     const input = await f.input()
     const created = await f.client.call('space.mote.connection.create', input)
     expect(created.snapshot.avatarSha256).toBe(createHash('sha256').update(imagePng()).digest('hex'))
-    expect(created.source.expectedAvatarRevision).toBe(read.revision)
+    expect(('preparedFrom' in created.source ? created.source.preparedFrom?.avatarRevision : null)).toBe(read.revision)
     expect(f.counts.begin).toBe(1); expect(f.writes).toBe(0); expect(f.config).toEqual(before)
   }
 )
 
-it('refuses a stale exact icon drawing before dispatch while unrelated theme edits do not change its source', async () => {
+it('publishes the already prepared drawing after later icon edits without claiming a current-appearance precondition', async () => {
   const f = await fixture(null), { id: _id, ...theme } = structuredClone(GRAPHITE_THEME)
   f.config.appearance.themeId = 'custom.avatar-test'
   f.config.appearance.customThemes = { 'custom.avatar-test': theme }
@@ -49,8 +49,9 @@ it('refuses a stale exact icon drawing before dispatch while unrelated theme edi
   theme.variants.dark.colors.warning = '#102030'
   expect((await f.client.call('space.mote.avatar.read', { target: f.avatarTarget })).revision).toBe(before.revision)
   theme.icons['object.mote'] = { kind: 'glyph', glyph: SEMANTIC_ICON_CATALOG['space.rocket'].glyph }
-  await expect(f.client.call('space.mote.connection.create', input)).rejects.toMatchObject({ code: 'MOTE_CONNECTION_SOURCE_UNCONFIRMED' })
-  expect(f.counts.begin).toBe(0)
+  const created = await f.client.call('space.mote.connection.create', input)
+  expect(created.snapshot.avatarSha256).toBe(createHash('sha256').update(imagePng()).digest('hex'))
+  expect(f.counts.begin).toBe(1)
   expect((await f.client.call('space.mote.avatar.read', { target: f.avatarTarget })).revision).not.toBe(before.revision)
 })
 

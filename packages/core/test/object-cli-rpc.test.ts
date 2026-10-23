@@ -1,3 +1,4 @@
+import { imagePng } from '../../../apps/desktop/test/fixtures/mote-identity-image.js'
 import { fixtureEpoch as reshapeFixtureEpoch } from './helpers/fixture-values.js'
 import { fixturePath } from './helpers/fixture-values.js'
 import { readFile, writeFile } from 'node:fs/promises'
@@ -57,8 +58,8 @@ describe('compiled object CLI through a private RPC transport probe', () => {
       'capsule.interaction.inspect': JSON.stringify({ capsuleId: '123456789ABC', interactionId: '23456789ABCD' }),
       'capsule.interaction.draft': JSON.stringify({ capsuleId: '123456789ABC', interactionId: '23456789ABCD', operationId: 'capsule-draft', expectedRevision: 1, draft: 'Original answer draft' }),
       'capsule.interaction.reply': JSON.stringify({ capsuleId: '123456789ABC', interactionId: '23456789ABCD', operationId: 'capsule-reply', expectedRevision: 1, answer: 'Original answer' }),
-      'space.mote.connection.create': JSON.stringify({ operationId: 'mote-original', source: {target: {spaceId: 'S', zoneId: 'Z', expectedResource: {hostId: 'local', workspaceId: 'W', workspacePath: fixture.root}}, expectedTopicRevision: 'sha256:'+'a'.repeat(64), expectedAvatarRevision: null}, adapterId: 'sample', domain: 'chat.example', avatar: 'omit' }),
-      'space.mote.connection.sync': JSON.stringify({ operationId: 'mote-original', source: {target: {spaceId: 'S', zoneId: 'Z', expectedResource: {hostId: 'local', workspaceId: 'W', workspacePath: fixture.root}}, expectedTopicRevision: 'sha256:'+'a'.repeat(64), expectedAvatarRevision: null}, connection: {connectionId: 'original', application: {domain: 'chat.example', appId: 'app'}}, expectedConnectionRevision: 1, avatar: 'omit' }),
+      'space.mote.connection.create': JSON.stringify({ operationId: 'mote-original', source: {target: {spaceId: 'S', zoneId: 'Z', expectedResource: {hostId: 'local', workspaceId: 'W', workspacePath: fixture.root}}, preparedFrom: null}, desired: {name: 'Prepared bot', description: '', avatar: {pngDataUrl: 'data:image/png;base64,'+imagePng().toString('base64')}}, adapterId: 'sample', domain: 'chat.example' }),
+      'space.mote.connection.sync': JSON.stringify({ operationId: 'mote-original', source: {target: {spaceId: 'S', zoneId: 'Z', expectedResource: {hostId: 'local', workspaceId: 'W', workspacePath: fixture.root}}, preparedFrom: null}, connection: {connectionId: 'original', application: {domain: 'chat.example', appId: 'app'}}, expectedConnectionRevision: 1, desired: {name: 'Prepared bot', description: ''} }),
       'space.mote.connection.ls': JSON.stringify({ target: {spaceId: 'S', zoneId: 'Z', expectedResource: {hostId: 'local', workspaceId: 'W', workspacePath: fixture.root}} }),
       'connection.metadata.get': JSON.stringify({ connectionId: 'metadata-connection', subject: { kind: 'conversation', externalConversationId: 'original-group' } }),
       'connection.metadata.refresh': JSON.stringify({ connectionId: 'metadata-connection', expectedConnectionRevision: 1, subject: { kind: 'conversation', externalConversationId: 'original-group' } }),

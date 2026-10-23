@@ -72,14 +72,14 @@ it('discovers optional explicit naming and unchanged sync behavior through actua
   const f = await fixture(), env = objectCliEnvironment(f.root)
   const help = await runCompiledObjectCli(['space', 'mote', 'connection', 'create', '--help'], env)
   expect(help.code, help.stderr).toBe(0)
-  expect(help.stdout).toContain('Optional name freezes the bot name for this creation')
-  expect(help.stdout).toContain('omit name to use the exact saved Mote name')
-  expect(help.stdout).toContain('a changed name on the same operationId conflicts')
+  expect(help.stdout).toContain('desired {name,description,avatar:{pngDataUrl}}')
+  expect(help.stdout).toContain('preparedFrom')
+  expect(help.stdout).toContain('changing desired on the same operation conflicts')
   const skill = await runCompiledObjectCli(['connection', '--skill'], env)
   expect(skill.code, skill.stderr).toBe(0)
   expect(skill.stdout).toContain('Create --input')
-  expect(skill.stdout).toContain('accepts optional name to freeze an explicit bot name')
-  expect(skill.stdout).toContain('Sync still uses the saved Mote name and does not accept name')
+  expect(skill.stdout).toContain('prepared')
+  expect(skill.stdout).toContain('desired')
   expect(f.counts.begin).toBe(0)
 })
 
@@ -137,7 +137,8 @@ it.each([undefined, 'AMUX-Orion'])('creates from original saved files and PNG th
     }
   })
   f = await fixture({})
-  const input = { ...await f.input(), ...(name === undefined ? {} : { name }) }, expectedName = name ?? 'Saved public name'
+  const input = await f.input(), expectedName = name ?? input.desired.name
+  input.desired.name = expectedName
   expect(body(await cli(f, 'ls', { target: f.target() })).operations).toEqual([])
   const pending = body(await cli(f, 'create', input))
   expect(pending.enrollment.authentication.stage).toBe('waiting')
@@ -181,13 +182,13 @@ it.each([undefined, 'AMUX-Orion'])('creates from original saved files and PNG th
   expect(effects).toEqual(['begin', 'authentication', 'authentication', 'authentication', 'authentication', 'authentication', 'upload', 'create', 'credential'].map((kind) => ({ kind, preclaimed: true })))
   expect((await f.client.call('connection.inspect', { connectionId: complete.connection.connectionId })).connection?.config.label).toBe(expectedName)
   expect(await readFile(join(f.motes[0]!.directory, 'topic.md'), 'utf8')).toBe('# Saved public name\n\nSaved public summary.\n')
-  await expect(f.client.call('space.mote.connection.create', { ...input, name: 'Changed manual name' })).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
-  expect((await cli(f, 'create', { ...input, name: 'Another manual name' })).code).not.toBe(0)
+  await expect(f.client.call('space.mote.connection.create', { ...input, desired: { ...input.desired, name: 'Changed manual name' } })).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
+  expect((await cli(f, 'create', { ...input, desired: { ...input.desired, name: 'Another manual name' } })).code).not.toBe(0)
   expect(JSON.stringify([pending, complete, http])).not.toContain('DO-NOT-PUBLISH-SOUL')
   expect(JSON.stringify(complete)).not.toContain('private-original')
   expect(JSON.stringify(complete)).not.toContain('data:image')
   expect(http.some((r) => r.url?.includes('/publish'))).toBe(false)
-  const source = vi.spyOn(f.source, 'read'),
+  const source = vi.spyOn(f.source, 'assertTarget'),
     pref = vi.spyOn(f.preferences, 'read'),
     before = effects.length
   expect(body(await cli(f, 'inspect', { operationId: input.operationId })).operation).toEqual(complete)
@@ -198,12 +199,13 @@ it.each([undefined, 'AMUX-Orion'])('creates from original saved files and PNG th
 }, 45_000)
 
 it('freezes an explicit manual name across source edits and owner reopening while later sync still uses the saved Mote name', async () => {
-  const f = await fixture(), input = { ...await f.input(), name: 'AMUX- 旅伴' }
+  const f = await fixture(), input = await f.input()
+  input.desired.name = 'AMUX- 旅伴'
   const pending = await f.client.call('space.mote.connection.create', input)
-  expect(pending.snapshot.name).toBe(input.name)
+  expect(pending.snapshot.name).toBe(input.desired.name)
   const row = JSON.parse(String(f.connections.database!.prepare('SELECT record_json FROM mote_connection_operation WHERE operation_id=?').get(input.operationId)!.record_json))
-  expect(row.input.name).toBe(input.name)
-  expect(row.enrollmentInput).toMatchObject({ label: input.name, preset: { name: input.name } })
+  expect(row.input.desired.name).toBe(input.desired.name)
+  expect(row.enrollmentInput).toMatchObject({ label: input.desired.name, preset: { name: input.desired.name } })
   await writeFile(join(f.motes[0]!.directory, 'topic.md'), '# Later saved Mote name\n\nLater saved summary.\n')
   await f.close()
   const resumed = await moteConnectionOwner(f.root, { generic: true }); clean.push(resumed.close)
@@ -212,14 +214,14 @@ it('freezes an explicit manual name across source edits and owner reopening whil
   const complete = await confirmAndCreateMote(resumed, input.operationId)
   expect(complete.snapshot).toEqual(pending.snapshot)
   expect(complete.profile).toBeNull()
-  expect(complete.enrollment?.preset?.name).toBe(input.name)
-  expect((await resumed.client.call('connection.inspect', { connectionId: complete.connection!.connectionId })).connection?.config.label).toBe(input.name)
-  const changed = { ...input, name: 'AMUX-New' }
+  expect(complete.enrollment?.preset?.name).toBe(input.desired.name)
+  expect((await resumed.client.call('connection.inspect', { connectionId: complete.connection!.connectionId })).connection?.config.label).toBe(input.desired.name)
+  const changed = { ...input, desired: { ...input.desired, name: 'AMUX-New' } }
   await expect(resumed.client.call('space.mote.connection.create', changed)).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
   expect((await cli(resumed, 'create', changed)).code).not.toBe(0)
   const current = await resumed.input('sync-saved-source'), synced = body(await cli(resumed, 'sync', {
     operationId: current.operationId, source: current.source, connection: complete.connection,
-    expectedConnectionRevision: 1, avatar: current.avatar
+    expectedConnectionRevision: 1, desired: current.desired
   }))
   expect(synced.snapshot.name).toBe('Later saved Mote name')
   expect(synced.setup.goal.desired.name).toBe('Later saved Mote name')
@@ -230,7 +232,8 @@ it('freezes an explicit manual name across source edits and owner reopening whil
 }, 30_000)
 
 it('rejects a different explicit frozen name in public create replies while keeping the original durable operation available', async () => {
-  const f = await fixture(), input = { ...await f.input(), name: 'AMUX-Exact' }
+  const f = await fixture(), input = await f.input()
+  input.desired.name = 'AMUX-Exact'
   const pending = await f.client.call('space.mote.connection.create', input), foreign = structuredClone(pending)
   foreign.snapshot.name = 'Different returned name'
   foreign.enrollment!.label = foreign.snapshot.name
@@ -240,8 +243,7 @@ it('rejects a different explicit frozen name in public create replies while keep
   await expect(f.client.call('space.mote.connection.create', input)).rejects.toMatchObject({ code: 'INVALID_MOTE_CONNECTION_DATA' })
   expect((await cli(f, 'create', input)).code).not.toBe(0)
   expect(() => parseMoteConnectionResult('space.mote.connection.create', foreign, input)).toThrow()
-  const { name: _name, ...withoutName } = input
-  expect(parseMoteConnectionResult('space.mote.connection.create', foreign, withoutName).snapshot.name).toBe(foreign.snapshot.name)
+  expect(() => parseMoteConnectionResult('space.mote.connection.create', foreign, { ...input, desired: { description: input.desired.description } } as never)).toThrow()
   reply.mockRestore()
   expect((await f.client.call('space.mote.connection.inspect', { operationId: input.operationId })).operation).toEqual(pending)
   expect(await f.client.call('space.mote.connection.create', input)).toEqual(pending)
@@ -256,7 +258,7 @@ it('rejects malformed explicit create names and any sync name before parent admi
   }
   expect((await f.client.call('space.mote.connection.ls', { target: f.target() })).operations).toEqual([])
   expect(f.counts).toEqual({ begin: 0, authentication: 0, creationUpload: 0, create: 0, credential: 0, upload: 0, patch: 0 })
-  await expect(f.client.call('space.mote.connection.sync', { operationId: 'invalid-sync-name', source: input.source, avatar: input.avatar, connection: { connectionId: 'saved-bot', application: { domain: input.domain, appId: 'saved-app' } }, expectedConnectionRevision: 1, name: 'Forbidden sync name' } as never)).rejects.toMatchObject({ code: 'INVALID_MOTE_CONNECTION_DATA' })
+  await expect(f.client.call('space.mote.connection.sync', { operationId: 'invalid-sync-name', source: input.source, desired: input.desired, connection: { connectionId: 'saved-bot', application: { domain: input.domain, appId: 'saved-app' } }, expectedConnectionRevision: 1, name: 'Forbidden sync name' } as never)).rejects.toMatchObject({ code: 'INVALID_MOTE_CONNECTION_DATA' })
 })
 
 it('retains immutable child identity and snapshot when the original saved topic changes after registration', async () => {
@@ -275,7 +277,7 @@ it('retains immutable child identity and snapshot when the original saved topic 
   expect(done.profile).toBeNull()
   expect(done.enrollment!.preset!.name).toBe('Saved public name')
   expect(f.counts).toEqual({ begin: 1, authentication: 1, creationUpload: 1, create: 1, credential: 1, upload: 0, patch: 0 })
-  await expect(f.client.call('space.mote.connection.create', { ...input, avatar: 'omit' })).rejects.toMatchObject({
+  await expect(f.client.call('space.mote.connection.create', { ...input, desired: { ...input.desired, description: 'Different intent' } })).rejects.toMatchObject({
     code: 'CONNECTION_OPERATION_CONFLICT'
   })
   const original = JSON.parse(String(f.connections.database!.prepare('SELECT record_json FROM mote_connection_operation WHERE operation_id=?').get(input.operationId)!.record_json)).enrollmentInput
@@ -332,64 +334,44 @@ it('uses exact target, topic revision and saved PNG; an existing bot can sync wi
     f.client.call('space.mote.connection.create', {
       ...input,
       source: { ...input.source, expectedTopicRevision: 'sha256:' + '0'.repeat(64) }
-    })
-  ).rejects.toMatchObject({ code: 'MOTE_CONNECTION_SOURCE_UNCONFIRMED' })
+    } as never)
+  ).rejects.toMatchObject({ code: 'INVALID_MOTE_CONNECTION_DATA' })
   await expect(
     f.client.call('space.mote.connection.create', {
       ...input,
       source: { ...input.source, expectedAvatarRevision: 'sha256:' + '0'.repeat(64) }
-    })
-  ).rejects.toMatchObject({ code: 'MOTE_CONNECTION_SOURCE_UNCONFIRMED' })
+    } as never)
+  ).rejects.toMatchObject({ code: 'INVALID_MOTE_CONNECTION_DATA' })
   expect(f.counts.begin).toBe(0)
-  await expect(f.client.call('space.mote.connection.create', { ...input, avatar: 'omit', source: { ...input.source, expectedAvatarRevision: null } })).rejects.toMatchObject({ code: 'MOTE_CONNECTION_SOURCE_UNCONFIRMED' })
+  await expect(f.client.call('space.mote.connection.create', { ...input, desired: { name: input.desired.name, description: input.desired.description } } as never)).rejects.toMatchObject({ code: 'INVALID_MOTE_CONNECTION_DATA' })
   expect(f.counts.begin).toBe(0)
   await f.client.call('space.mote.connection.create', input)
   const saved = await confirmAndCreateMote(f, input.operationId)
   const readAvatar = vi.spyOn(f.avatars, 'call')
   const pending = await f.client.call('space.mote.connection.sync', {
     operationId: 'original-omit-sync', connection: saved.connection!, expectedConnectionRevision: 1,
-    avatar: 'omit',
-    source: { ...input.source, expectedAvatarRevision: null }
+    desired: { name: input.desired.name, description: input.desired.description },
+    source: input.source
   })
   expect(pending.snapshot.avatarSha256).toBeNull()
   expect(readAvatar).not.toHaveBeenCalled()
   expect(f.counts.begin).toBe(1)
 }, 30_000)
 
-it('keeps unavailable or hash-corrupted saved avatars local and preserves explicit omit sync for the healthy saved bot', async () => {
-  const f = await fixture(),
-    input = await f.input(),
-    mote = f.motes[0]!
-  const healthyInput = { ...input, operationId: 'healthy-saved-bot' }
-  await f.client.call('space.mote.connection.create', healthyInput)
-  const healthy = await confirmAndCreateMote(f, healthyInput.operationId), before = f.writes
+it('keeps an already prepared profile usable after its original saved avatar becomes unavailable', async () => {
+  const f = await fixture(), input = await f.input(), mote = f.motes[0]!
   const path = join(mote.directory, '.agentmux', 'avatars', mote.avatar.fileName)
-  await writeFile(path, Buffer.concat([imagePng(), Buffer.from([0])]))
-  let refused: unknown = null
-  try {
-    await f.client.call('space.mote.connection.create', input)
-  } catch (error) {
-    refused = error
-  }
-  expect(refused).toMatchObject({ code: 'MOTE_CONNECTION_SOURCE_UNCONFIRMED' })
   await rm(path)
-  refused = null
-  try {
-    await f.client.call('space.mote.connection.create', input)
-  } catch (error) {
-    refused = error
-  }
-  expect(refused).toMatchObject({ code: 'MOTE_CONNECTION_SOURCE_UNCONFIRMED' })
+  const admitted = await f.client.call('space.mote.connection.create', input)
+  expect(admitted.snapshot.avatarSha256).toBe(createHash('sha256').update(imagePng()).digest('hex'))
   expect(f.counts.begin).toBe(1)
+  const healthy = await confirmAndCreateMote(f, input.operationId), before = f.writes
   const omitted = await f.client.call('space.mote.connection.sync', {
     operationId: 'healthy-omit-sync', connection: healthy.connection!, expectedConnectionRevision: 1,
-    avatar: 'omit',
-    source: { ...input.source, expectedAvatarRevision: null }
+    desired: { name: input.desired.name, description: input.desired.description }, source: input.source
   })
   expect(omitted.snapshot.avatarSha256).toBeNull()
-  expect(f.counts.begin).toBe(1)
-  expect(f.writes).toBe(before)
-  expect((await f.preferences.read({ kind: 'connection', target: f.target() })).values!.connection).toEqual(healthy.connection)
+  expect(f.counts.begin).toBe(1); expect(f.writes).toBe(before)
 }, 30_000)
 
 it('does not make a slow original setup the guard for another Mote or a local read', async () => {
@@ -503,7 +485,7 @@ it('keeps historical profile writes readable without executing them or changing 
   const f = await fixture(), input = await f.input()
   await f.client.call('space.mote.connection.create', input)
   const done = await confirmAndCreateMote(f, input.operationId)
-  const synced = await f.client.call('space.mote.connection.sync', { operationId: 'historical-profile-parent', source: input.source, connection: done.connection!, expectedConnectionRevision: 1, avatar: input.avatar })
+  const synced = await f.client.call('space.mote.connection.sync', { operationId: 'historical-profile-parent', source: input.source, connection: done.connection!, expectedConnectionRevision: 1, desired: input.desired })
   const db = f.connections.database!
   const row = JSON.parse(String(db.prepare('SELECT record_json FROM mote_connection_operation WHERE operation_id=?').get(synced.operationId)!.record_json))
   const child = { operationId: 'historical-profile-child', connectionId: done.connection!.connectionId, connectionRevision: 1, application: done.connection!.application, language: null,
@@ -575,7 +557,7 @@ it('syncs the same exact saved app without another enrollment or default write',
       source: input.source,
       connection: created.connection!,
       expectedConnectionRevision: 1,
-      avatar: 'include-saved' as const
+      desired: input.desired
     }
   const synced = body(await cli(f, 'sync', sync))
   await expect(f.client.call('space.mote.connection.advance', { operationId: sync.operationId, setup: { operationId: 'foreign-child', expectedRevision: 1, decision: { actionId: 'foreign-action', value: 'confirm' } } })).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
