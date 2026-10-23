@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 const root = fileURLToPath(new URL('../../../', import.meta.url))
-const test = 'packages/core/test/capsule-public-rpc.test.ts'
+const tests = ['packages/core/test/capsule-public-rpc.test.ts', 'packages/core/test/public-rpc-dispatch-failure.test.ts']
 const mutations = [
   { id: 'caller-projection-lost', file: 'packages/core/src/public-rpc-service.ts',
     from: 'caller: { hostId: caller.hostId, agentSessionId: caller.agentSessionId }',
@@ -21,6 +21,9 @@ const mutations = [
     from: 'return parseCapsuleResult(method, value, input)',
     to: 'return parseCapsuleResult(method, value)',
     assertion: 'rejects another owner target on both service and client result boundaries' },
+  { id: 'unwritten-request-provenance-lost', file: 'packages/core/src/public-rpc-client.ts',
+    from: '!requestSent && failure instanceof AgentMuxError', to: 'false && failure instanceof AgentMuxError',
+    assertion: 'reports a Unix request that never connected' },
 ]
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const directory = await mkdtemp(join(tmpdir(), 'amux-capsule-core-proof-'))
@@ -42,7 +45,7 @@ async function run(name, mutation) {
     plugin = `plugins:[{name:'capsule-source-mutation',enforce:'pre',transform(code,id){if(id.split('?')[0]===${JSON.stringify(resolve(root, mutation.file))}){if(code.split(${JSON.stringify(mutation.from)}).length!==2)throw new Error('Mutation source anchor unavailable');return {code:code.replace(${JSON.stringify(mutation.from)},${JSON.stringify(mutation.to)}),map:null}}}}],`
     mutation.loadedSha256 = sha(transformed)
   }
-  await writeFile(config, `import base from ${JSON.stringify(join(root, 'vitest.config.ts'))};export default {...base,root:${JSON.stringify(root)},${plugin}test:{...base.test,include:[${JSON.stringify(test)}],passWithNoTests:false,maxWorkers:1}};\n`)
+  await writeFile(config, `import base from ${JSON.stringify(join(root, 'vitest.config.ts'))};export default {...base,root:${JSON.stringify(root)},${plugin}test:{...base.test,include:${JSON.stringify(tests)},passWithNoTests:false,maxWorkers:1}};\n`)
   const result = await new Promise((resolveRun, reject) => {
     const args = [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config, '--reporter=json', '--outputFile', report]
     if (mutation) args.push('-t', mutation.assertion)
@@ -73,7 +76,7 @@ async function run(name, mutation) {
 }
 
 try {
-  receipt.inputs[test] = sha(await readFile(join(root, test)))
+  for (const test of tests) receipt.inputs[test] = sha(await readFile(join(root, test)))
   receipt.baseline = await run('baseline')
   if (process.argv.includes('--mutations')) for (const mutation of mutations) receipt.mutations.push(await run(mutation.id, mutation))
   receipt.passed = true

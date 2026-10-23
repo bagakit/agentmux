@@ -13,6 +13,7 @@ import { AGENTMUX_CLI_COMMANDS, parseAgentMuxCliInvocation } from '../src/agentm
 import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
 import { agentMuxModuleSkill } from '../src/agentmux-cli-module-skills.js'
 import { AgentMuxError } from '../src/errors.js'
+import { CAPSULE_RUNTIME_METHODS, type CapsuleRuntimeObservation } from '../src/capsule-runtime.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 
 const capsuleId = '123456789ABC', otherId = '23456789ABCD'
@@ -34,17 +35,44 @@ async function directory() {
 function port(call: (...args: unknown[]) => Promise<unknown>): CapsulePort { return { call } as CapsulePort }
 
 describe('Capsule public composition', () => {
-  it('derives all wire and CLI methods from the nonempty portable domain registry', () => {
-    const methods = Object.keys(CAPSULE_METHODS)
+  it('derives all wire and CLI methods from the domain and Core runtime registries', () => {
+    const registry = { ...CAPSULE_METHODS, ...CAPSULE_RUNTIME_METHODS }, methods = Object.keys(registry)
     expect(methods.length).toBeGreaterThan(0)
     expect(AGENTMUX_CLI_COMMANDS.filter(command => command.method.startsWith('capsule.')).map(command => command.method)).toEqual(methods)
     for (const method of methods) {
       expect(isAgentMuxRpcMethod(method)).toBe(true)
-      expect(AGENTMUX_RPC_NATIVE_METHODS[method as keyof typeof CAPSULE_METHODS]).toBe(CAPSULE_METHODS[method as keyof typeof CAPSULE_METHODS])
+      expect(AGENTMUX_RPC_NATIVE_METHODS[method as keyof typeof registry]).toBe(registry[method as keyof typeof registry])
       expect(agentMuxCommandHelp(method)).toContain(`Usage: amux ${method.replaceAll('.', ' ')}`)
     }
     expect(agentMuxModuleSkill('capsule')).toContain('The Capsule owner holds each original page')
     expect(agentMuxModuleSkill('capsule')).toContain('cannot self-author Human')
+  })
+
+  it('requires original transport authority before invoking the finite service management owner', async () => {
+    const call = vi.fn(async () => { throw new Error('Unauthenticated management must not reach the owner.') })
+    const service = new AgentMuxRpcService({ coreClients: () => [], capsuleRuntime: { call } })
+    cleanup.push(() => service.dispose())
+    await expect(service.call('capsule.runtime.inspect', {})).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+    await expect(service.call('capsule.runtime.stop', { operationId: 'original-stop', expectedRevision: 2, expectedRun: { runId: 'original-service-run' } }))
+      .rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+    expect(call).not.toHaveBeenCalled()
+  })
+
+  it('forwards exact runtime management identity and validates the original observation over real RPC', async () => {
+    const root = await directory(), seen: unknown[] = []
+    const observation: CapsuleRuntimeObservation = { revision: 2, desired: 'stopped', phase: 'stopped',
+      stateDirectory: join(root, 'capsules'), socketPath: join(root, 'service.sock'), run: { hostId: 'local', runId: 'original-service-run' },
+      runtime: null, operation: { operationId: 'original-stop', kind: 'stop', phase: 'confirmed' }, issue: null }
+    const server = new AgentMuxControlServer({ socketPath: join(root, 'rpc.sock'), coreClients: () => [],
+      capsuleRuntime: { call: async (method, input) => { seen.push({ method, input }); return observation } } })
+    await server.start(); cleanup.push(() => server.stop())
+    const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+    cleanup.push(() => client.dispose())
+    const input = { operationId: 'original-stop', expectedRevision: 2, expectedRun: { runId: 'original-service-run' } }
+    expect(await client.call('capsule.runtime.stop', input)).toEqual(observation)
+    expect(seen).toEqual([{ method: 'capsule.runtime.stop', input }])
+    await expect(client.call('capsule.runtime.stop', { ...input, authorHuman: true } as typeof input)).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+    expect(seen).toHaveLength(1)
   })
 
   it('uses the original strict schema and standard wire error for malformed targets or authored authority', () => {
