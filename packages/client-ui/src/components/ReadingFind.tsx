@@ -85,7 +85,9 @@ export function ReadingFind({ children, source, active = true, label, bodySelect
   function move(direction: number) {
     if (!current() || !open || composing || !matches.current.length) return
     const before = selected.current ? matches.current.findIndex(match => sameMatch(match, selected.current!)) : 0
-    const index = (Math.max(0, before) + direction + matches.current.length) % matches.current.length
+    // A logical current hit needs its first reveal; an existing DOM range can advance.
+    const step = direction > 0 && before >= 0 && !matches.current[before]!.range ? 0 : direction
+    const index = (Math.max(0, before) + step + matches.current.length) % matches.current.length
     const match = matches.current[index]!
     selected.current = match
     setResult({ owner, count: matches.current.length, index }); paint(matches.current, index)
