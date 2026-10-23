@@ -38,11 +38,11 @@ it.each(['Save original', 'Cancel'] as const)('releases pointer input after Orig
   await act(async () => { const trigger = button(editor, 'Original file actions'); trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
   const action = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent?.trim() === 'Save original…')
   expect(action).toBeDefined(); await act(async () => action!.dispatchEvent(new MouseEvent('click', { bubbles: true })))
-  const dialog = document.querySelector<HTMLElement>('.confirmation-dialog[role="dialog"]')!
+  const dialog = document.querySelector<HTMLElement>('[role="dialog"] .confirmation-dialog')!
   expect(dialog).not.toBeNull()
   await act(async () => button(dialog, finish).click())
   await act(async () => new Promise(resolve => setTimeout(resolve, 1)))
-  expect(document.querySelector('.confirmation-dialog[role="dialog"]')).toBeNull()
+  expect(document.querySelector('[role="dialog"] .confirmation-dialog')).toBeNull()
   expect(closed).not.toHaveBeenCalled()
   await act(async () => button(editor, 'Cancel').click())
   await act(async () => new Promise(resolve => setTimeout(resolve, 1)))

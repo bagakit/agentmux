@@ -28,14 +28,14 @@ afterEach(async () => { await app.dispose(); dispose?.(); dispose = undefined; v
 function button(label: string) {
   if (label === 'Save avatar' && document.querySelector('[data-avatar-source=face][aria-pressed=true]')) label = 'Save face'
 
-  const scope = document.querySelector('.space-icon-picker[role="dialog"]') ?? document
+  const scope = document.querySelector('[role="dialog"] .space-icon-picker') ?? document
   const value = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === label || node.getAttribute('aria-label') === label)
   expect(value, label).toBeDefined(); return value!
 }
 async function edit() {
   await act(async () => app.entry().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2, clientX: 10, clientY: 50 }))); await settleMoteApp()
   const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Change avatar…')
-  expect(item).toBeDefined(); await moteClick(item!); expect(document.querySelector('.space-icon-picker[role="dialog"]')).not.toBeNull()
+  expect(item).toBeDefined(); await moteClick(item!); expect(document.querySelector('[role="dialog"] .space-icon-picker')).not.toBeNull()
   await moteClick(button('Make a face'))
 }
 function quiet(before: ReturnType<typeof useAppStore.getState>) {
@@ -74,7 +74,7 @@ it('Cancel and Escape discard actual component drafts, restoring automatic retur
   await moteClick(button('Mouth · grin')); await moteClick(button('Cancel'))
   expect(useAppStore.getState().spaceObjectIcons).toEqual({})
   await edit(); await moteClick(button('Detail · antenna'))
-  await act(async () => document.querySelector('.space-icon-picker[role="dialog"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await settleMoteApp()
+  await act(async () => document.querySelector('[role="dialog"] .space-icon-picker')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await settleMoteApp()
   expect(useAppStore.getState().spaceObjectIcons).toEqual({})
   await edit(); await moteClick(button('Save avatar'))
   expect(app.entry().querySelector('.mote-face')).not.toBeNull()

@@ -59,7 +59,13 @@ it.each(['choices', 'feedback-only'] as const)('projects the complete painted %s
   if (list) expect(getComputedStyle(list).backgroundColor).toBe('')
   const scrim = document.querySelector<HTMLElement>('[data-overlay-modal-part="scrim"]')!
   const content = document.querySelector<HTMLElement>('[data-overlay-modal-part="content"]')!
+  const boundary = content.closest<HTMLElement>('[data-overlay-modal-boundary]')!
+  expect(document.querySelector('[role="dialog"]')).toBe(boundary)
+  expect(boundary.contains(content)).toBe(true)
+  // happy-dom omits Chromium's normalized transparent default for an unpainted box.
+  boundary.style.backgroundColor = 'rgba(0, 0, 0, 0)'
   // The first row crosses the original modal top and the native Browser demand's x range.
+  boundary.getBoundingClientRect = () => new DOMRect(0, 0, window.innerWidth, window.innerHeight)
   scrim.getBoundingClientRect = () => new DOMRect(0, 0, 1180, 740)
   content.getBoundingClientRect = () => new DOMRect(390, 264, 400, 213)
   popup.getBoundingClientRect = () => new DOMRect(410, 234, 360, 112)
@@ -85,7 +91,8 @@ it.each(['choices', 'feedback-only'] as const)('projects the complete painted %s
     expect(documentDraft(editor.getJSON())).toBe('/in')
   }
   expect(submitted).not.toHaveBeenCalled()
-  expect(document.querySelector('[role="dialog"]')).toBe(content)
+  expect(document.querySelector('[role="dialog"]')).toBe(boundary)
+  expect(boundary.contains(content)).toBe(true)
   expect(popup.isConnected).toBe(false)
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); for (const callback of frames.splice(0)) callback(0) })
   expect(publish.mock.calls.at(-1)![0].map((region: any) => region.modal?.part)).toEqual(['scrim', 'content'])

@@ -70,7 +70,7 @@ afterEach(async () => { await act(async () => root.unmount()); node.remove(); do
   vi.restoreAllMocks(); vi.unstubAllGlobals() })
 async function frame() { await act(async () => { const pending = [...frames.values()]; frames.clear(); pending.forEach(callback => callback(16)) }) }
 function editor(): HTMLElement { const value = node.querySelector<HTMLElement>('[aria-label="Screenshot editor"]'); expect(value).not.toBeNull(); return value! }
-function dialog(): HTMLElement { const value = document.querySelector<HTMLElement>('.confirmation-dialog[role="dialog"]'); expect(value).not.toBeNull(); return value! }
+function dialog(): HTMLElement { const value = document.querySelector<HTMLElement>('[role="dialog"] .confirmation-dialog'); expect(value).not.toBeNull(); return value! }
 function button(scope: ParentNode, name: string): HTMLButtonElement { const value = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(button => button.getAttribute('aria-label') === name || button.textContent?.trim() === name)
   expect(value, name).toBeDefined(); return value! }
 async function click(scope: ParentNode, name: string) {
@@ -273,7 +273,7 @@ describe('Browser annotation host save and reopen consumers', () => {
     expect(editor()).toBe(opened); expect(editor().style.display).toBe('none')
     await mount(page, true)
     expect(editor()).toBe(opened)
-    if (document.querySelector('.confirmation-dialog[role="dialog"]')) await click(dialog(), 'Cancel')
+    if (document.querySelector('[role="dialog"] .confirmation-dialog')) await click(dialog(), 'Cancel')
     expect((await copyContext()).source).toEqual(capture.source)
   })
 

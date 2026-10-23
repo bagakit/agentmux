@@ -39,7 +39,7 @@ async function menu() {
   await settleMoteApp()
   const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(one => one.textContent === 'Change avatar…')
   expect(item).toBeDefined(); await moteClick(item!)
-  expect(document.querySelector('.space-icon-picker[role="dialog"]')).not.toBeNull()
+  expect(document.querySelector('[role="dialog"] .space-icon-picker')).not.toBeNull()
 }
 function quiet(before: ReturnType<typeof useAppStore.getState>) {
   const after = useAppStore.getState()
@@ -105,7 +105,7 @@ it.each(['localStorage', 'platform'] as const)('failed %s save keeps both origin
   if (failure === 'platform') vi.mocked(api.ui.requestStorageFlush).mockResolvedValue()
   await moteClick(button('Retry saving'))
   expect(useAppStore.getState().spaceObjectIcons[primary.key]).toBe('book')
-  expect(document.querySelector('.space-icon-picker[role="dialog"]')).toBeNull()
+  expect(document.querySelector('[role="dialog"] .space-icon-picker')).toBeNull()
   expect(app.entry().querySelector('[data-space-icon="book"]')).not.toBeNull()
   quiet(before)
 })
@@ -149,7 +149,7 @@ it('late save completion and failure do not close or leave busy in a newly selec
   expect(button('Save avatar').disabled).toBe(false)
   release(); await settleMoteApp()
   expect(close).not.toHaveBeenCalled()
-  expect(document.querySelector('.space-icon-picker[role="dialog"]')?.textContent).toContain(custom.name)
+  expect(document.querySelector('[role="dialog"] .space-icon-picker')?.textContent).toContain(custom.name)
   expect(button('Save avatar').disabled).toBe(false)
 })
 it('Cancel and Escape leave choice and asset writes untouched through the real original picker', async () => {
@@ -159,8 +159,8 @@ it('Cancel and Escape leave choice and asset writes untouched through the real o
   await moteClick(button('Icon or image')); await moteClick(button('Book icon')); await moteClick(button('Cancel'))
   expect(useAppStore.getState().spaceObjectIcons).toEqual({})
   await menu(); await moteClick(button('Icon or image')); await moteClick(button('Brain icon'))
-  await act(async () => document.querySelector('.space-icon-picker[role="dialog"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await settleMoteApp()
-  expect(document.querySelector('.space-icon-picker[role="dialog"]')).toBeNull()
+  await act(async () => document.querySelector('[role="dialog"] .space-icon-picker')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await settleMoteApp()
+  expect(document.querySelector('[role="dialog"] .space-icon-picker')).toBeNull()
   expect(save).not.toHaveBeenCalled(); quiet(before)
 })
 it('avatar consumer isolates the original directory key when the same workspace/topic locator changes and retains same-key image on read failure', async () => {
