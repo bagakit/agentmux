@@ -9,13 +9,29 @@ import { fileURLToPath } from 'node:url'
 const root = fileURLToPath(new URL('../../../', import.meta.url))
 const tests = ['packages/core/test/capsule-runtime.test.ts', 'packages/core/test/capsule-terminal-preparation.test.ts']
 const mutations = [
+  { id: 'observed-terminal-start-blocked', file: 'packages/core/src/capsule-run-manager.ts',
+    from: "if (b.launchPhase === 'dispatched' && !original || !terminalRun(original))",
+    to: "if (b.launchPhase === 'dispatched' || !terminalRun(original))",
+    assertion: 'allows explicit Start after Native confirms' },
+  { id: 'observed-terminal-binding-lost', file: 'packages/core/src/capsule-run-manager.ts',
+    from: "if (!b.run && original) { b.run = { runId: original.runId }; b.launchPhase = 'confirmed' }", to: '',
+    assertion: 'allows explicit Start after Native confirms' },
+  { id: 'observed-start-stop-fence-lost', file: 'packages/core/src/capsule-run-manager.ts',
+    from: "if (command.kind === 'stop' && !stopRun && b?.launchPhase === 'dispatched') {", to: 'if (false) {',
+    assertion: 'allows an explicit Stop of the exact Run observed' },
+  { id: 'runtime-inspection-converges', file: 'packages/core/src/capsule-run-manager.ts',
+    from: 'const run = await this.observedRun(b)', to: 'const run = (await this.converge(b)).run',
+    assertion: 'keeps inspection of a prepared original Start' },
+  { id: 'page-inspection-converges', file: 'packages/core/src/capsule-run-manager.ts',
+    from: 'const run = serviceReads.has(method) ? await this.observedRun(b) : (await this.converge(b)).run',
+    to: 'const run = (await this.converge(b)).run', assertion: 'keeps inspection of a prepared original Start' },
   { id: 'unconfigured-read-starts-service', file: 'packages/core/src/capsule-run-manager.ts',
     from: "        if (method !== 'capsule.create') throw unavailable('The Capsule service has no running intent. Start it explicitly or create a page before using this operation; this operation did not start a service.', 'CAPSULE_RUNTIME_UNCONFIGURED')\n",
     to: '', assertion: 'keeps unconfigured page reads lazy' },
   { id: 'intent-gap-falsely-superseded', file: 'packages/core/src/capsule-run-manager.ts',
     from: "if (retained.phase === 'prepared' &&", to: "if (false && retained.phase === 'prepared' &&", assertion: 'retains a command reserved' },
   { id: 'stale-connection-overwrites-stop', file: 'packages/core/src/capsule-run-manager.ts',
-    from: "if (!current || current.revision !== b.revision || current.desired !== 'running' || current.run?.runId !== run.runId)", to: 'if (false)', assertion: 'preserves a later explicit Stop' },
+    from: "if (!current || current.revision !== b.revision || current.desired !== 'running' ||\n      current.run?.runId !== b.run?.runId || !isDeepStrictEqual(current.launch, b.launch) ||\n      current.run !== null && current.run.runId !== run.runId)", to: 'if (false)', assertion: 'preserves a later explicit Stop' },
   { id: 'stop-token-retargeted', file: 'packages/core/src/capsule-run-manager.ts',
     from: '(b.stop && b.stop.run.runId !== b.run?.runId)', to: 'false', assertion: 'rejects a restored Stop token' },
   { id: 'directory-durability-skipped', file: 'packages/core/src/capsule-run-manager.ts',
@@ -82,11 +98,11 @@ async function run(name, mutation) {
   const failures = assertions.filter(item => item.status === 'failed')
   if (mutation) {
     assert.equal(result.code, 1, `${name}: source mutation must fail. ${result.output.slice(-4000)}`)
-    assert.ok(failures.some(item => item.fullName.includes(mutation.assertion) && item.failureMessages.some(message => message.includes('AssertionError') || message.includes('promise resolved'))),
+    assert.ok(failures.some(item => item.fullName.includes(mutation.assertion) && item.failureMessages.some(message => message.includes('AssertionError') || message.includes('promise resolved') || message.includes('promise rejected'))),
       `${name}: designated business assertion must fail, not collection/preparation. ${result.output.slice(-4000)}`)
   } else {
     assert.equal(result.code, 0, result.output.slice(-4000)); assert.equal(data.numFailedTests, 0)
-    assert.equal(data.numPassedTests, 25, 'Both management and actual Client/adapter suites must execute')
+    assert.equal(data.numPassedTests, 30, 'Both management and actual Client/adapter suites must execute')
   }
   return { exitCode: result.code, passed: data.numPassedTests, failed: data.numFailedTests,
     reportSha256: sha(await readFile(report)), ...(mutation ? { id: mutation.id, source: mutation.file,

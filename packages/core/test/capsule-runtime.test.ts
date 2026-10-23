@@ -38,7 +38,7 @@ async function fixture() {
   } as unknown as AgentMuxClient
   const manager = new CapsuleRunManager(client, state)
   cleanup.push(() => rm(directory, { recursive: true, force: true }), () => manager.dispose())
-  return { manager, state, count: () => ({ creates, stops, inspections }), unknownCreate: () => { unknownCreation = true },
+  return { manager, state, count: () => ({ creates, stops, inspections }), unknownCreate: () => { unknownCreation = true }, confirmCreate: () => { unknownCreation = false },
     unknownStop: () => { unknownStop = true }, terminal: () => { run.state = 'exited' }, interrupted: () => { run.state = 'interrupted' },
     pauseCreation: () => { creationGate = new Promise<void>(yes => { releaseCreation = yes }) }, releaseCreation: () => releaseCreation?.(),
     pauseInspection: () => { inspectionGate = new Promise(() => {}) }, pauseStop: () => { stopGate = new Promise(() => {}) },
@@ -93,6 +93,10 @@ it('observes an unknown original Start without resubmitting or changing the froz
   await f.manager.runtime.call('capsule.runtime.inspect', {})
   await f.manager.runtime.call('capsule.runtime.start', { operationId: 'start', expectedRevision: 0 })
   expect(f.count()).toEqual({ creates: 1, stops: 0, inspections: 2 })
+  f.manager.start()
+  await vi.waitFor(() => expect(f.count().creates + f.count().inspections).toBeGreaterThan(3))
+  await f.manager.runtime.call('capsule.runtime.inspect', {})
+  expect(f.count().creates).toBe(1)
   expect((await f.binding()).launch).toEqual(frozen)
 })
 it('persists stopped intent and the original Stop fence before effect and never retries an unknown Stop', async () => {
@@ -105,12 +109,74 @@ it('persists stopped intent and the original Stop fence before effect and never 
   expect(before).toMatchObject({ desired: 'stopped', stopPhase: 'dispatched', stop: { run: { runId: 'original-run' }, ownerInstanceId: 'original-native-owner', operationId: 'original-stop' } })
   await f.manager.runtime.call('capsule.runtime.inspect', {})
   await f.manager.runtime.call('capsule.runtime.stop', { operationId: 'stop', expectedRevision: 1, expectedRun: { runId: 'original-run' } })
+  const inspections = f.count().inspections
+  f.manager.start()
+  await vi.waitFor(() => expect(f.count().inspections).toBeGreaterThan(inspections))
+  await f.manager.runtime.call('capsule.runtime.inspect', {})
   expect(f.count().stops).toBe(1)
   expect((await f.binding()).stop).toEqual(before.stop)
   await expect(f.manager.runtime.call('capsule.runtime.start', { operationId: 'new-start', expectedRevision: 2 })).rejects.toMatchObject({ code: 'CAPSULE_RUNTIME_STOP_UNKNOWN' })
   await expect(f.manager.call('capsule.ls', {})).rejects.toMatchObject({ code: 'CAPSULE_RUNTIME_STOPPED' })
   expect(f.count().creates).toBe(1)
 }, 15000)
+
+it.each(['prepared', 'dispatched'] as const)('keeps inspection of a %s original Start free of lifecycle and binding writes', async phase => {
+  const f = await fixture(); f.unknownCreate()
+  await f.manager.runtime.call('capsule.runtime.start', { operationId: 'start', expectedRevision: 0 })
+  const binding = await f.binding(); binding.launchPhase = phase
+  const path = join(f.state, 'capsule-service.json')
+  await writeFile(path, JSON.stringify(binding))
+  const before = await readFile(path, 'utf8'), calls = f.count()
+  await f.manager.runtime.call('capsule.runtime.inspect', {})
+  expect(f.count().creates).toBe(calls.creates)
+  expect(f.count().stops).toBe(calls.stops)
+  expect(await readFile(path, 'utf8')).toBe(before)
+  await expect(f.manager.call('capsule.operation.inspect', { operationId: 'original-page-operation' })).rejects.toBeInstanceOf(AgentMuxError)
+  expect(f.count().creates).toBe(calls.creates)
+  expect(f.count().stops).toBe(calls.stops)
+  expect(await readFile(path, 'utf8')).toBe(before)
+})
+it('allows an explicit Stop of the exact Run observed after an unknown Start without requiring inspection to save it', async () => {
+  const f = await fixture(); f.unknownCreate()
+  await f.manager.runtime.call('capsule.runtime.start', { operationId: 'start', expectedRevision: 0 })
+  f.confirmCreate()
+  const path = join(f.state, 'capsule-service.json'), before = await readFile(path, 'utf8')
+  const observed = await f.manager.runtime.call('capsule.runtime.inspect', {})
+  expect(observed.run).toEqual({ hostId: 'local', runId: 'original-run' })
+  expect(await readFile(path, 'utf8')).toBe(before)
+  expect((await f.binding()).run).toBeNull()
+  await expect(f.manager.runtime.call('capsule.runtime.stop', { operationId: 'wrong-stop', expectedRevision: observed.revision,
+    expectedRun: { runId: 'unrelated-run' } })).rejects.toMatchObject({ code: 'CAPSULE_RUNTIME_RUN_CONFLICT' })
+  await expect(f.manager.runtime.call('capsule.runtime.stop', { operationId: 'original-stop', expectedRevision: observed.revision,
+    expectedRun: { runId: observed.run!.runId } })).resolves.toMatchObject({ phase: 'stopped', run: observed.run })
+  expect(f.count()).toMatchObject({ creates: 1, stops: 1 })
+})
+it('allows explicit Start after Native confirms the stopped original dispatched creation is terminal', async () => {
+  const f = await fixture(); f.unknownCreate()
+  await f.manager.runtime.call('capsule.runtime.start', { operationId: 'original-start', expectedRevision: 0 })
+  await f.manager.runtime.call('capsule.runtime.stop', { operationId: 'original-stop', expectedRevision: 1, expectedRun: null })
+  f.confirmCreate(); f.terminal()
+  const path = join(f.state, 'capsule-service.json'), before = await readFile(path, 'utf8')
+  const observed = await f.manager.runtime.call('capsule.runtime.inspect', {})
+  expect(observed).toMatchObject({ desired: 'stopped', phase: 'stopped', run: { runId: 'original-run' } })
+  expect(await readFile(path, 'utf8')).toBe(before)
+  await expect(f.manager.runtime.call('capsule.runtime.start', { operationId: 'explicit-resume', expectedRevision: observed.revision }))
+    .resolves.toMatchObject({ desired: 'running', run: { runId: 'next-run' } })
+  expect(f.count()).toMatchObject({ creates: 2, stops: 0 })
+})
+it('keeps inspection of a prepared Stop free of lifecycle and binding writes', async () => {
+  const f = await fixture()
+  await f.manager.runtime.call('capsule.runtime.start', { operationId: 'start', expectedRevision: 0 })
+  const binding = await f.binding(); binding.desired = 'stopped'; binding.stopPhase = 'prepared'
+  binding.stop = await f.client.prepareTerminalStop(binding.run)
+  const path = join(f.state, 'capsule-service.json')
+  await writeFile(path, JSON.stringify(binding))
+  const before = await readFile(path, 'utf8'), calls = f.count()
+  const observed = await f.manager.runtime.call('capsule.runtime.inspect', {})
+  expect(f.count().stops).toBe(calls.stops)
+  expect(observed).toMatchObject({ desired: 'stopped', phase: 'stopping', run: { runId: 'original-run' } })
+  expect(await readFile(path, 'utf8')).toBe(before)
+})
 it('requires original revision and Run and rejects operation ID reinterpretation', async () => {
   const f = await fixture()
   await f.manager.runtime.call('capsule.runtime.start', { operationId: 'start', expectedRevision: 0 })
@@ -189,9 +255,15 @@ it('recovers a Native-authoritative interrupted historical Run while preserving 
   const f = await fixture()
   await f.manager.runtime.call('capsule.runtime.start', { operationId: 'start', expectedRevision: 0 })
   f.interrupted()
+  const path = join(f.state, 'capsule-service.json'), before = await readFile(path, 'utf8')
   const observed = await f.manager.runtime.call('capsule.runtime.inspect', {})
-  expect(observed).toMatchObject({ revision: 1, desired: 'running', run: { runId: 'next-run' } })
-  expect(f.count().creates).toBe(2)
+  expect(observed).toMatchObject({ revision: 1, desired: 'running', phase: 'unavailable', run: { runId: 'original-run' } })
+  await expect(f.manager.call('capsule.operation.inspect', { operationId: 'prior-page-create' })).rejects.toMatchObject({ code: 'CAPSULE_RUNTIME_UNAVAILABLE' })
+  expect(f.count().creates).toBe(1)
+  expect(await readFile(path, 'utf8')).toBe(before)
+  f.manager.start()
+  await vi.waitFor(() => expect(f.count().creates).toBe(2))
+  expect(await f.manager.runtime.call('capsule.runtime.inspect', {})).toMatchObject({ revision: 1, desired: 'running', run: { runId: 'next-run' } })
 })
 it('requires original file and directory durability confirmation before any restored lifecycle effect', async () => {
   const f = await fixture()
@@ -199,8 +271,11 @@ it('requires original file and directory durability confirmation before any rest
   const binding = await f.binding(); binding.desired = 'stopped'
   await writeFile(join(f.state, 'capsule-service.json'), JSON.stringify(binding))
   const durableManager = f.manager as unknown as { confirmDurable(path: string): Promise<void> }
-  vi.spyOn(durableManager, 'confirmDurable').mockRejectedValue(new Error('Original directory sync unconfirmed'))
-  await expect(f.manager.runtime.call('capsule.runtime.inspect', {})).rejects.toThrow('Original directory sync unconfirmed')
+  const confirm = vi.spyOn(durableManager, 'confirmDurable').mockRejectedValue(new Error('Original directory sync unconfirmed'))
+  expect(await f.manager.runtime.call('capsule.runtime.inspect', {})).toMatchObject({ desired: 'stopped', phase: 'stopping' })
+  expect(confirm).not.toHaveBeenCalled()
+  const stopped = await f.manager.runtime.call('capsule.runtime.stop', { operationId: 'explicit-stop', expectedRevision: 1, expectedRun: binding.run })
+  expect(stopped.issue?.message).toBe('Original directory sync unconfirmed')
   expect(f.count().stops).toBe(0)
 })
 it.each(['inspection', 'stop'] as const)('detaches a manager waiting for an unacknowledged Native %s without replaying its operation', async kind => {
