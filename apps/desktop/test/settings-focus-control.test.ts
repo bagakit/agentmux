@@ -10,7 +10,7 @@ import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-ser
 import { parseSettingsCommand } from '../../../packages/core/src/settings-cli.js'
 import { executeSettingsControl } from '../src/main/settings-control.js'
 import { ConfigStore } from '../src/main/config-store.js'
-import { agentContinuityAdmission, normalizeAgentContinuityPolicy } from '@agentmux/core/agent-session-continuity'
+import { agentContinuityAdmission, normalizeAgentContinuityPolicy } from '@agentmux/core/agent-session-recovery'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 

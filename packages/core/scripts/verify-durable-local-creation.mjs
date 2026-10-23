@@ -19,7 +19,7 @@ async function bind(path) {
   if (inputs.has(absolute)) assert.equal(inputs.get(absolute), hash, 'Source changed during qualification: ' + path)
   inputs.set(absolute, hash)
 }
-for (const path of ['packages/core/src/client.ts', 'packages/core/src/agent-session-registry.ts', 'packages/core/src/agent-session-store.ts',
+for (const path of ['packages/core/src/client.ts', 'packages/core/src/agent-session-recovery/service.ts', 'packages/core/src/agent-session-recovery/ports.ts', 'packages/core/src/agent-session-recovery.ts', 'packages/core/src/agent-runtime-helpers.ts', 'packages/core/src/agent-session-registry.ts', 'packages/core/src/agent-session-store.ts',
   'packages/core/test/durable-local-creation.test.ts', 'packages/core/test/durable-local-creation.config.mts',
   'packages/core/test/agent-creation-delivery-fact.test.ts', 'packages/core/test/agent-start-failure-recovery.test.ts',
   'packages/core/test/agent-creation-operation-identity.test.ts', 'packages/core/test/agent-creation-operation-identity.config.mts',

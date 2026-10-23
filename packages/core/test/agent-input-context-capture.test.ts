@@ -16,8 +16,8 @@ import { createDesktopInputContextCaptureReader } from '../../../apps/host/src/i
 import { execFile } from 'node:child_process'
 import { promisify } from 'node:util'
 import { join } from 'node:path'
-import { prepareContinuityLaunchInput, bindContinuityLaunchInput } from '../src/agent-session-continuity-input.js'
-import { DEFAULT_AGENT_CONTINUITY_POLICY, normalizeAgentContinuityLaunchInput, type AgentMuxContinuityOperation } from '../src/agent-session-continuity.js'
+import { prepareContinuityLaunchInput, bindContinuityLaunchInput } from '../src/agent-session-recovery/input.js'
+import { DEFAULT_AGENT_CONTINUITY_POLICY, normalizeAgentContinuityLaunchInput, type AgentMuxContinuityOperation } from '../src/agent-session-recovery/continuity.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 
 const closes: Array<() => Promise<void>> = []

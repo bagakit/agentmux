@@ -280,7 +280,7 @@ it('accepts a verified first locator enrichment without changing the frozen nati
   await f.client.writeAgent({ agentSessionId: f.current.agentSessionId, expectedRun: f.current.run, source: 'user', data: 'exit-failed' })
   await vi.waitFor(async () => expect((await f.inner.kernel.status(f.current.run.runId)).state.type).toBe('exited'))
   await f.client.refreshAgentSession(f.current.agentSessionId, f.current.run)
-  await f.inner.continuitySupervisor.serialize(f.current.agentSessionId, async () => {})
+  await f.inner.recovery.continuitySupervisor.serialize(f.current.agentSessionId, async () => {})
   expect((await f.rootOf()).supervision).toMatchObject({ phase: 'settled', reason: 'context-observed', attemptCount: 1 })
   expect(f.start).toHaveBeenCalledTimes(1)
 })
@@ -427,7 +427,7 @@ it('delivers the original waiting post-launch input once after Hook locator enri
   expect(submit.mock.calls[0]![0]).toMatchObject({ operationId: before.key.submissionId, prompt: '<amux:continue />' })
   expect(submit.mock.calls[0]![0]).not.toHaveProperty('agentMuxNote')
   await wakeOriginalInput(f)
-  await f.inner.continuityInputs.tails.get(f.current.agentSessionId)?.pending
+  await f.inner.recovery.continuityInputs.tails.get(f.current.agentSessionId)?.pending
   expect(f.input).toHaveBeenCalledTimes(calls); expect(f.start).toHaveBeenCalledTimes(1)
 })
 
@@ -476,7 +476,7 @@ it('observes the same claimed post-launch input key after an actual Native Input
   expect((await f.inner.kernel.status(f.current.run.runId)).acceptedInputBytes).toBeGreaterThan(0)
   expect((await f.post(locatorOnly, 'observe-unknown-again')).status).toBe(204)
   await wakeOriginalInput(f); await wakeOriginalInput(f)
-  await f.inner.continuityInputs.tails.get(f.current.agentSessionId)?.pending
+  await f.inner.recovery.continuityInputs.tails.get(f.current.agentSessionId)?.pending
   expect((await f.rootOf()).recoveryDelivery).toMatchObject({ phase: 'unknown', key: before.key })
   expect((await f.rootOf()).recoveryDelivery!.reminder.text).toBe(before.reminder.text)
   expect((await f.rootOf()).recoveryDelivery!.continuation.text).toBe(before.continuation.text)

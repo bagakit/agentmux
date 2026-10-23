@@ -78,7 +78,7 @@ async function fixture(options: { healthy?: boolean; noTarget?: boolean } = {}) 
   const saved = async () => (await store.readMetadata(previous.agentSessionId))!
   const rootOf = async () => (await saved()).continuityOperations?.[rootId]
   const packet = async (operationId = 'original-cancel') => ({ agentSessionId: previous.agentSessionId, expectedRun: (await saved()).run, intentOperationId: rootId, operationId, action: 'cancel' as const })
-  const barrier = async () => { await inner.continuitySupervisor.serialize(previous.agentSessionId, async () => {}) }
+  const barrier = async () => { await inner.recovery.continuitySupervisor.serialize(previous.agentSessionId, async () => {}) }
   const raw = async (run = previous.run) => {
     const replay = async () => (await client.readRunReplay(run)).replay.map(chunk => chunk.data).join('')
     await vi.waitFor(async () => expect(await replay()).toContain('NATIVE:'))

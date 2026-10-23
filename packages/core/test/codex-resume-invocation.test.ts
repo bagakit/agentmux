@@ -57,7 +57,7 @@ it.runIf(process.platform === 'darwin')('managed resume parses only its fixed fo
       const prepared = await prepareCodexManagedLaunch(plan, 'original-resume', { kind: 'resume', prompt })
       expect(prepared.nativeActor, 'Normal native resume must retain its managed actor').toBeDefined()
       expect(JSON.parse(prepared.plan.args[1]!).resume).toEqual({ threadId: sid, model: 'resume', sandbox: 'read-only' })
-      expect(prepared.nativeActor?.launch.args).toEqual(['--model', 'resume', '--dangerously-bypass-hook-trust', 'resume', sid, '--', prompt])
+      expect(prepared.nativeActor?.launch.args).toEqual(plan.args)
       const wrapper = { ...plan, args: ['as-ops', '--mode=best-effort', '--', ...plan.args] }
       expect(await prepareCodexManagedLaunch(wrapper, 'original-resume', { kind: 'resume', prompt })).toEqual({ plan: wrapper })
     }

@@ -485,3 +485,45 @@ describe('semantic session registry concurrency', () => {
     expect((await memory.load())[0]).toMatchObject({ updatedAt: reshapeFixtureEpoch(0, 0, 103) })
   })
 })
+
+describe('read-only metadata claim fences', () => {
+  it('checks the original Store without writing unchanged metadata', async () => {
+    const store = new AgentMuxMemoryAgentSessionStore(), registry = new AgentMuxAgentSessionRegistry(store), original = session()
+    await registry.put(original)
+    const read = vi.spyOn(store, 'readMetadata'), write = vi.spyOn(store, 'compareAndSwapMetadata')
+    await expect(registry.update(original.agentSessionId, original.run, value => value)).resolves.toMatchObject(original)
+    expect(read).toHaveBeenCalledExactlyOnceWith(original.agentSessionId)
+    expect(write).not.toHaveBeenCalled()
+  })
+
+  it.each(['metadata', 'run', 'retired'] as const)('rejects a stale no-op after another Client changed the original %s', async shape => {
+    const store = new AgentMuxMemoryAgentSessionStore(), stale = new AgentMuxAgentSessionRegistry(store), writer = new AgentMuxAgentSessionRegistry(store), original = session()
+    await stale.put(original); await writer.load(original.hostId)
+    if (shape === 'metadata') await writer.update(original.agentSessionId, original.run, value => ({ ...value, updatedAt: value.updatedAt + 1 }))
+    else if (shape === 'run') await writer.put({ ...original, run: { runId: 'replacement-run' }, retiredRuns: [original.run] }, original.run)
+    else {
+      const stop = await writer.reserveExisting('stop', original.agentSessionId, original.run, 'original-stop', {
+        daemonInstance: 'original-runtime', operationKey: 'original-stop', runId: original.run.runId
+      })
+      await writer.commitLifecycle(stop, null)
+    }
+    const canonical = await store.readMetadata(original.agentSessionId), write = vi.spyOn(store, 'compareAndSwapMetadata')
+    await expect(stale.update(original.agentSessionId, original.run, value => value)).rejects.toMatchObject({ code: 'STALE_AGENT_SESSION' })
+    expect(write).not.toHaveBeenCalled()
+    expect(await store.readMetadata(original.agentSessionId)).toEqual(canonical)
+  })
+
+  it.each(['author', 'future'] as const)('retains the atomic CAS for unchanged metadata with an exact %s admission', async shape => {
+    const store = new AgentMuxMemoryAgentSessionStore(), registry = new AgentMuxAgentSessionRegistry(store)
+    const original = { ...session(), capabilityHash: 'original-capability-hash'.padEnd(43, 'H') }
+    await registry.put(original)
+    const write = vi.spyOn(store, 'compareAndSwapMetadata')
+    const author = { agentSessionId: original.agentSessionId, workspacePath: original.workspacePath,
+      runId: original.run.runId, capabilityHash: 'changed-capability-hash'.padEnd(43, 'H') }
+    const operation = registry.update(original.agentSessionId, original.run, value => value, undefined,
+      shape === 'future' ? 'original-future' : undefined, shape === 'author' ? author : undefined)
+    if (shape === 'author') await expect(operation).rejects.toMatchObject({ code: 'AGENT_CAPABILITY_INVALID' })
+    else await expect(operation).resolves.toMatchObject(original)
+    expect(write).toHaveBeenCalledTimes(1)
+  })
+})

@@ -6,7 +6,7 @@ import { mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
-import { decideAgentSessionContinuity, agentContinuityAdmission, DEFAULT_AGENT_CONTINUITY_POLICY } from '../src/agent-session-continuity.js'
+import { decideAgentSessionContinuity, agentContinuityAdmission, DEFAULT_AGENT_CONTINUITY_POLICY } from '../src/agent-session-recovery/continuity.js'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxError } from '../src/errors.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
@@ -515,6 +515,20 @@ describe('Core-owned continuity policy and original-operation receipts', () => {
     expect(probe).not.toHaveBeenCalled(); expect(harness.spawnCount()).toBe(0)
     await harness.client.dispose()
   })
+  it('rechecks a changed execution environment instead of reusing another probe context', async () => {
+    const harness = await continuityHarness(); await working(harness)
+    const originalPath = process.env.PATH ?? ''
+    let observedProbes = 0
+    const probe = vi.spyOn(harness.client, 'probeAgent').mockImplementation(async () => {
+      if (++observedProbes === 1) vi.stubEnv('PATH', `${originalPath}:/amx-probe-context-changed`)
+      return structuredClone(CODEX_RESUME_CAPABILITY)
+    })
+    expect(await harness.client.ensureAgentContinuity(original)).toMatchObject({ kind: 'resumed' })
+    expect(probe).toHaveBeenCalledTimes(2)
+    expect(probe.mock.calls[0]![2]?.env?.PATH).not.toBe(probe.mock.calls[1]![2]?.env?.PATH)
+    expect(harness.spawnCount()).toBe(1)
+    await harness.client.dispose()
+  })
   it('delays interrupted work without taking a lifecycle lease and keeps explicit recovery usable', async () => {
     const harness = await continuityHarness(); await working(harness)
     const probe = vi.spyOn(harness.client, 'probeAgent'), reserve = vi.spyOn(harness.store, 'reserveLifecycle')
@@ -922,6 +936,11 @@ function silentObservation(): PromptObservation {
 class CountingMemoryAgentSessionStore extends AgentMuxMemoryAgentSessionStore {
   casWrites = 0
 
+  override async compareAndSwapMetadata(...args: Parameters<AgentMuxMemoryAgentSessionStore['compareAndSwapMetadata']>): Promise<void> {
+    this.casWrites += 1
+    await super.compareAndSwapMetadata(...args)
+  }
+
   override async compareAndSwap(
     expected: AgentMuxStoredAgentSession | null,
     next: AgentMuxStoredAgentSession | null,
@@ -966,6 +985,7 @@ async function promptClient(options: {
   internals.connected = true
   const inputs: string[] = []
   let observeCalls = 0
+  let lastObservation: PromptObservation | undefined
   let acceptedInputBytes = 0
   // ctxmux Input 按 operationId 幂等：重放同一操作拿回原始回执，不重复写字节。
   const inputReceipts = new Map<string, { startByte: number; endByte: number }>()
@@ -1006,7 +1026,14 @@ async function promptClient(options: {
   ): Promise<CtxmuxAdapterOutputObservation> => {
     observeCalls += 1
     if (!options.observeOutput) throw new Error('fixture did not expect a screen observation')
-    return options.observeOutput(listener)
+    lastObservation = options.observeOutput(listener)
+    return lastObservation
+  }
+  // Frame seeding reads the same ordered bytes already owned by the fixture observation.
+  // A basic-vt checkpoint now requires the Runtime replay seam as well as live output.
+  kernel.replay = async () => {
+    if (!lastObservation) throw new Error('Replay requires the original output observation')
+    return lastObservation
   }
   const events: AgentMuxClientEvent[] = []
   client.onEvent((event) => events.push(event))
@@ -1069,7 +1096,7 @@ describe('prompt 屏幕验证失败的服务窗降级（payload 已受据、Run 
 
   it('渲染确认超时：提交键照发，降级原因是 prompt-render-timeout', async () => {
     vi.useFakeTimers()
-    const { client, inputs, events } = await promptClient({
+    const { client, inputs, events, observeCalls } = await promptClient({
       observeOutput: silentObservation
     })
     const submitting = client.submitAgentPrompt({ ...agentPromptCondition(client.agentSession('prompt-agent')),
@@ -1077,6 +1104,8 @@ describe('prompt 屏幕验证失败的服务窗降级（payload 已受据、Run 
       operationId: 'op-timeout',
       prompt: 'hello'
     })
+    // Advance the bounded render deadline only after the actual observer has been installed.
+    await vi.waitFor(() => expect(observeCalls()).toBe(1))
     await vi.advanceTimersByTimeAsync(10_000)
     await expect(submitting).resolves.toBeUndefined()
     expect(inputs.at(-1)).toBe('\r')

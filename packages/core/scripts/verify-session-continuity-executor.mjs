@@ -20,14 +20,14 @@ async function bind(path) {
   if (inputs.has(absolute)) assert.equal(inputs.get(absolute), hash, 'Source changed during qualification: ' + path)
   inputs.set(absolute, hash)
 }
-for (const file of ['packages/core/src/client.ts', 'packages/core/src/agent-session-continuity-control.ts',
-  'packages/core/src/agent-session-continuity.ts', 'packages/core/src/agent-session-store.ts',
+for (const file of ['packages/core/src/client.ts', 'packages/core/src/agent-session-recovery/service.ts', 'packages/core/src/agent-session-recovery/ports.ts', 'packages/core/src/agent-session-recovery.ts', 'packages/core/src/agent-runtime-helpers.ts', 'packages/core/src/agent-session-recovery/control.ts',
+  'packages/core/src/agent-session-recovery/continuity.ts', 'packages/core/src/agent-session-store.ts',
   'packages/core/src/hosted-client-contract.ts', 'packages/core/src/hosted-client.ts', 'packages/core/src/hosted-runtime-service.ts',
   'packages/core/src/public-rpc.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/rpc-native-codec.ts',
   'packages/core/src/agentmux-cli-commands.ts', 'packages/core/src/agentmux-cli-module-skills.ts',
   'packages/core/test/session-continuity-executor.test.ts', 'packages/core/test/session-continuity-executor.config.mts',
   'packages/core/test/hook-postcommit-observation.vitest.config.mts', 'packages/core/test/helpers/object-cli-rpc.ts',
-  'packages/core/test/helpers/continuity-executor-process.mjs', 'packages/core/src/agent-continuity-executor.ts', 'packages/core/src/agent-session-identity.ts', 'packages/core/src/types.ts', 'packages/core/scripts/verify-session-continuity-executor.mjs',
+  'packages/core/test/helpers/continuity-executor-process.mjs', 'packages/core/src/agent-session-recovery/executor.ts', 'packages/core/src/agent-session-identity.ts', 'packages/core/src/types.ts', 'packages/core/scripts/verify-session-continuity-executor.mjs',
   `packages/core/vendor/ctxmux/${process.platform}-${process.arch}/manifest.json`,
   `packages/core/vendor/ctxmux/${process.platform}-${process.arch}/bin/ctxmuxd`]) await bind(file)
 const alias = {}
@@ -48,7 +48,7 @@ const variants = [
   },
   {
     "name": "lose-sdk-command",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": "{ ...originalInput, ...structuredClone(executor.options) }",
     "to": "{ ...originalInput, ...structuredClone(executor.options), ...(receipt.intentOperationId ? { commandOverride: undefined } : {}) }",
     "target": "retains the exact SDK invocation for the context-only retry with Host owner false",
@@ -56,7 +56,7 @@ const variants = [
   },
   {
     "name": "lose-sdk-args",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": "{ ...originalInput, ...structuredClone(executor.options) }",
     "to": "{ ...originalInput, ...structuredClone(executor.options), ...(receipt.intentOperationId ? { args: undefined } : {}) }",
     "target": "retains the exact SDK invocation for the context-only retry with Host owner false",
@@ -64,7 +64,7 @@ const variants = [
   },
   {
     "name": "lose-sdk-env",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": "{ ...originalInput, ...structuredClone(executor.options) }",
     "to": "{ ...originalInput, ...structuredClone(executor.options), ...(receipt.intentOperationId ? { env: undefined } : {}) }",
     "target": "retains the exact SDK invocation for the context-only retry with Host owner false",
@@ -72,23 +72,23 @@ const variants = [
   },
   {
     "name": "unrelated-host-takes-sdk-source",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": "if (current.creation?.executorRevision || executor.source === 'host') {",
-    "to": "if (current.creation?.executorRevision || executor.source === 'host' || receipt.intentOperationId && this.hostExecutorOwner) {",
+    "to": "if (current.creation?.executorRevision || executor.source === 'host' || receipt.intentOperationId && this.ports.executors.hostExecutorOwner) {",
     "target": "retains the exact SDK invocation for the context-only retry with Host owner true",
     "expected": "to be"
   },
   {
     "name": "ignore-current-host-source",
-    "path": "packages/core/src/client.ts",
-    "from": "input = await this.sessionExecutorOptions(current, originalInput)",
-    "to": "input = { ...originalInput, commandOverride: this.providers.get(current.providerId).catalog.executable }",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
+    "from": "input = await this.ports.executors.sessionExecutorOptions(current, originalInput)",
+    "to": "input = { ...originalInput, commandOverride: this.ports.providers.providers.get(current.providerId).catalog.executable }",
     "target": "keeps current target-owned Host authority with a missing private record",
     "expected": "to be"
   },
   {
     "name": "missing-sdk-uses-default",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": ": readContinuityExecutor(current.continuityExecutors, executorRoot) ?? authoredExecutor",
     "to": ": readContinuityExecutor(current.continuityExecutors, executorRoot) ?? authoredExecutor ?? { providerId: current.providerId, executorId: current.executorId, source: 'provider' as const }",
     "target": "keeps an unconfirmed missing SDK source scoped to its exact recovery",
@@ -104,7 +104,7 @@ const variants = [
   },
   {
     "name": "forget-initial-pending-source",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": "return { ...retainExecutor(value),\n            continuity:",
     "to": "return { ...value,\n            continuity:",
     "target": "captures the SDK source before initial Runtime uncertainty and rechecks the same original operation",
@@ -112,7 +112,7 @@ const variants = [
   },
   {
     "name": "change-frozen-sdk-options",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": "if (originalExecutor && ['commandOverride', 'args', 'env'].some",
     "to": "if (false && ['commandOverride', 'args', 'env'].some",
     "target": "rejects an altered args on the frozen original request before its success shortcut",
@@ -128,7 +128,7 @@ const variants = [
   },
   {
     "name": "replay-original-launch-input",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": "...(receipt.launchInput ? { prompt: receipt.launchInput.input.prompt,\n          ...(receipt.launchInput.input.agentMuxNote === undefined ? {} : { agentMuxNote: receipt.launchInput.input.agentMuxNote }) } : {})",
     "to": "...((receipt.launchInput ?? (receipt.intentOperationId ? current.continuityOperations?.[receipt.intentOperationId]?.launchInput : undefined)) ? { prompt: (receipt.launchInput ?? current.continuityOperations![receipt.intentOperationId!]!.launchInput)!.input.prompt, agentMuxNote: (receipt.launchInput ?? current.continuityOperations![receipt.intentOperationId!]!.launchInput)!.input.agentMuxNote } : {})",
     "target": "retains the exact SDK invocation for the context-only retry with Host owner false",

@@ -20,14 +20,14 @@ async function bind(path) {
   if (inputs.has(absolute)) assert.equal(inputs.get(absolute), hash, 'Source changed during qualification: ' + path)
   inputs.set(absolute, hash)
 }
-for (const file of ['packages/core/src/client.ts', 'packages/core/src/agent-session-continuity-control.ts',
-  'packages/core/src/agent-session-continuity.ts', 'packages/core/src/agent-session-continuity-supervisor.ts', 'packages/core/src/agent-session-store.ts',
+for (const file of ['packages/core/src/client.ts', 'packages/core/src/agent-session-recovery/service.ts', 'packages/core/src/agent-session-recovery/ports.ts', 'packages/core/src/agent-session-recovery.ts', 'packages/core/src/agent-runtime-helpers.ts', 'packages/core/src/agent-session-recovery/control.ts',
+  'packages/core/src/agent-session-recovery/continuity.ts', 'packages/core/src/agent-session-recovery/supervisor.ts', 'packages/core/src/agent-session-store.ts',
   'packages/core/src/hosted-client-contract.ts', 'packages/core/src/hosted-client.ts', 'packages/core/src/hosted-runtime-service.ts',
   'packages/core/src/public-rpc.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/rpc-native-codec.ts',
   'packages/core/src/agentmux-cli-commands.ts', 'packages/core/src/agentmux-cli-module-skills.ts',
   'packages/core/test/initial-continuity-cancellation.test.ts', 'packages/core/test/initial-continuity-cancellation.config.mts',
   'packages/core/test/hook-postcommit-observation.vitest.config.mts', 'packages/core/test/helpers/object-cli-rpc.ts',
-  'packages/core/src/agent-continuity-executor.ts', 'packages/core/src/agent-session-identity.ts', 'packages/core/src/types.ts', 'packages/core/scripts/verify-initial-continuity-cancellation.mjs',
+  'packages/core/src/agent-session-recovery/executor.ts', 'packages/core/src/agent-session-identity.ts', 'packages/core/src/types.ts', 'packages/core/scripts/verify-initial-continuity-cancellation.mjs',
   `packages/core/vendor/ctxmux/${process.platform}-${process.arch}/manifest.json`,
   `packages/core/vendor/ctxmux/${process.platform}-${process.arch}/bin/ctxmuxd`]) await bind(file)
 const alias = {}
@@ -48,7 +48,7 @@ const variants = [
   },
   {
     "name": "drop-initial-intent",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": "if (result.kind === 'pending' && current && !receipt.intentOperationId && !receipt.supervision && !['manual', 'input'].includes(receipt.trigger))",
     "to": "if (false && current && !receipt.intentOperationId && !receipt.supervision && !['manual', 'input'].includes(receipt.trigger))",
     "target": "cancels the configured initial delay and keeps the same zero-count receipt across Core process Hosted and compiled CLI",
@@ -56,7 +56,7 @@ const variants = [
   },
   {
     "name": "count-before-admission",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": "attemptCount: 0, attemptLimit: Math.min(Number.MAX_SAFE_INTEGER, 1 + policy.retryMaxAttempts)",
     "to": "attemptCount: 1, attemptLimit: Math.min(Number.MAX_SAFE_INTEGER, 1 + policy.retryMaxAttempts)",
     "target": "cancels the configured initial delay and keeps the same zero-count receipt across Core process Hosted and compiled CLI",
@@ -64,7 +64,7 @@ const variants = [
   },
   {
     "name": "require-native-target-before-cancel",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": "const waiting = root && supervision?.attemptCount === 0",
     "to": "const waiting = false && root && supervision?.attemptCount === 0",
     "target": "cancels an unknown original Runtime observation without Native target while its healthy raw Run survives",
@@ -80,7 +80,7 @@ const variants = [
   },
   {
     "name": "fresh-startup-replaces-paused-intent",
-    "path": "packages/core/src/agent-session-continuity-supervisor.ts",
+    "path": "packages/core/src/agent-session-recovery/supervisor.ts",
     "from": "supervision.phase === 'settled' || root.intentOperationId",
     "to": "['settled', 'paused'].includes(supervision.phase) || root.intentOperationId",
     "target": "a fresh automatic startup joins the original paused intent without resetting its budget or input",
@@ -88,7 +88,7 @@ const variants = [
   },
   {
     "name": "control-codec-rejects-zero",
-    "path": "packages/core/src/agent-session-continuity-control.ts",
+    "path": "packages/core/src/agent-session-recovery/control.ts",
     "from": "attemptCount = count(p.attemptCount)",
     "to": "attemptCount = count(p.attemptCount, 1)",
     "target": "strict codecs accept truthful initial zero counts and reject impossible negative fractional or admitted-zero facts",
@@ -96,7 +96,7 @@ const variants = [
   },
   {
     "name": "zero-count-accepts-admitted-run",
-    "path": "packages/core/src/agent-session-continuity.ts",
+    "path": "packages/core/src/agent-session-recovery/continuity.ts",
     "from": "supervision.attemptCount === 0 && (op.intentOperationId !== undefined",
     "to": "false && (op.intentOperationId !== undefined",
     "target": "strict codecs accept truthful initial zero counts and reject impossible negative fractional or admitted-zero facts",
@@ -104,7 +104,7 @@ const variants = [
   },
   {
     "name": "accept-changed-control-packet",
-    "path": "packages/core/src/agent-session-continuity-control.ts",
+    "path": "packages/core/src/agent-session-recovery/control.ts",
     "from": "a.action === b.action && a.additionalAttempts === b.additionalAttempts",
     "to": "true",
     "target": "wrong Run root Host and changed original packet refuse only that control",
@@ -112,7 +112,7 @@ const variants = [
   },
   {
     "name": "continue-without-reobservation",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": "if (waiting && outcome === 'continued') {",
     "to": "if (false && outcome === 'continued') {",
     "target": "explicit continuation rechecks the original zero-count paused observation without replacing its intent",
@@ -120,7 +120,7 @@ const variants = [
   },
   {
     "name": "refresh-without-reobservation",
-    "path": "packages/core/src/agent-session-continuity-supervisor.ts",
+    "path": "packages/core/src/agent-session-recovery/supervisor.ts",
     "from": "...(supervision.attemptCount === 0 ? { nextActionAt: Date.now() } : {})",
     "to": "...{}",
     "target": "explicit public refresh reobserves the original zero-count Provider wait and admits its first Native attempt",

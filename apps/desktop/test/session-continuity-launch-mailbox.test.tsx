@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { expect, it } from 'vitest'
-import type { AgentMuxContinuityLaunchInput } from '@agentmux/core'
+import type { AgentMuxContinuityLaunchInput } from '@agentmux/core/agent-session-recovery'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'

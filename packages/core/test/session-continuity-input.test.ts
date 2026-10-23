@@ -6,7 +6,7 @@ import { AgentMuxError as SourceError } from '../src/errors.js'
 import { composeAgentPrompt } from '../src/agent-outbound-message.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import { createHash } from 'node:crypto'
-import { DEFAULT_AGENT_CONTINUITY_REMINDER, type AgentMuxContinuityOperation } from '../src/agent-session-continuity.js'
+import { DEFAULT_AGENT_CONTINUITY_REMINDER, type AgentMuxContinuityOperation } from '../src/agent-session-recovery/continuity.js'
 
 const owner = process.env.AGENTMUX_TEST_GUIDANCE_CORE ? await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_GUIDANCE_CORE)
   : { AgentMuxClient: SourceClient, AgentMuxFileAgentSessionStore: SourceStore, AgentMuxError: SourceError }
@@ -16,13 +16,15 @@ type AgentMuxClient = SourceClient
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
-async function fixture(options: { providerId?: 'codex' | 'claude' | 'gemini'; nativeObservation?: 'changed' | 'unknown' | 'ambiguous'; loseInputAck?: boolean; newUserBeforeAutomatic?: boolean; renderObservationUnavailable?: boolean; trigger?: 'startup' | 'mote-startup' | 'input'; reminder?: boolean; continuation?: boolean; handshake?: boolean; ready?: boolean } = {}) {
+async function fixture(options: { deferManagedInput?: boolean; managedDelivery?: boolean; providerId?: 'codex' | 'claude' | 'gemini'; nativeObservation?: 'changed' | 'unknown' | 'ambiguous'; loseInputAck?: boolean; newUserBeforeAutomatic?: boolean; renderObservationUnavailable?: boolean; trigger?: 'startup' | 'mote-startup' | 'input'; reminder?: boolean; continuation?: boolean; handshake?: boolean; ready?: boolean } = {}) {
   const providerId = options.providerId ?? 'codex'
   const h = await rpcOwnerFixture(['recipient'], { AgentMuxClient, AgentMuxFileAgentSessionStore }, () => ({ providerId, executorId: providerId, nativeHandle: { kind: 'provider', providerId, sessionId: 'native-original' } }))
   const inner = h.client as any, originalProvider = h.client.providers.get(providerId)
   // This suite exercises the retained post-launch terminal owner. Native argv
   // carriers are separately verified before any terminal side effect.
-  const provider = { ...originalProvider, catalog: { ...originalProvider.catalog, promptDelivery: 'post-launch-only' as const }, prepareManagedLaunch: async (plan: any) => ({ plan }) }
+  const provider = { ...originalProvider, catalog: { ...originalProvider.catalog, promptDelivery: options.managedDelivery ? 'positional-argv' as const : 'post-launch-only' as const },
+    prepareManagedLaunch: async (plan: any, _operationId: string, context: { prompt?: string }) => options.managedDelivery
+      ? { plan: { ...plan, args: plan.args.filter((value: string) => value !== context.prompt && value !== '--') }, promptDelivery: 'post-launch' as const } : { plan } }
   h.client.providers.replace(provider)
   const status = inner.kernel.status.bind(inner.kernel), input = inner.kernel.input
   let ready = options.ready !== false, handshakeBytes = 0, loseInputAck = options.loseInputAck === true
@@ -39,6 +41,7 @@ async function fixture(options: { providerId?: 'codex' | 'claude' | 'gemini'; na
   inner.hookServer.isRunning = () => true
   inner.hookServer.createBinding = () => ({ bindingId: 'binding'.padEnd(43, 'D'),
     endpoint: { url: 'http://127.0.0.1:0', token: 'endpoint'.padEnd(43, 'C') }, bindRun: async () => {}, close: async () => {} })
+  const managedDispatch = options.deferManagedInput ? vi.spyOn(inner, 'deliverPostLaunchPrompt').mockResolvedValue(false) : undefined
   inner.probeAgent = async () => ({ providerId, executable: providerId, installed: true, capabilities: provider.catalog.capabilities })
   inner.ensureTerminalHandshakeOrDegrade = async (session: AgentMuxStoredAgentSession) => {
     if (options.nativeObservation) await inner.registry.update('recipient', session.run, (current: AgentMuxStoredAgentSession) => {
@@ -66,7 +69,8 @@ async function fixture(options: { providerId?: 'codex' | 'claude' | 'gemini'; na
     const observedAt = Math.max(session.updatedAt + 1, Date.now())
     return { ...session, updatedAt: observedAt, semanticStatus: { state: 'working', source: 'native-hook', observedAt } }
   })
-  const original = { agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' }, operationId: 'original-continuity', trigger: options.trigger ?? 'startup',
+  const original = { agentSessionId: 'recipient', expectedRun: { runId: 'run-recipient' }, operationId: 'original-continuity', trigger: options.managedDelivery ? 'input' as const : options.trigger ?? 'startup',
+    ...(options.managedDelivery ? { input: { submissionId: 'managed-original-input', prompt: 'The original managed resume task.' } } : {}),
     policy: { reminderMode: options.reminder === false ? 'off' as const : 'default-plus-custom' as const, reminderAppend: 'Retain the original constraints.',
       continuationEnabled: options.continuation !== false, continuationPrompt: 'Continue the original task exactly.' } }
   const result = await h.client.ensureAgentContinuity(original)
@@ -94,10 +98,10 @@ async function fixture(options: { providerId?: 'codex' | 'claude' | 'gemini'; na
       if (next.continuity?.operationId === old.operationId) next.continuity = structuredClone(retained)
       return next
     })
-    inner.continuityInputs.restore(inner.registry.list())
+    inner.recovery.continuityInputs.restore(inner.registry.list())
   }
-  const wake = async () => { inner.continuityInputs.track(inner.registry.get('recipient')); await Promise.resolve() }
-  return { ...h, inner, provider, original, operation, wake, setReady: (value: boolean) => { ready = value },
+  const wake = async () => { inner.recovery.continuityInputs.track(inner.registry.get('recipient')); await Promise.resolve() }
+  return { ...h, inner, provider, original, operation, wake, managedDispatch, setReady: (value: boolean) => { ready = value },
     delivery: () => operation().recoveryDelivery!, input: inner.kernel.input,
     settle: async () => { await expect.poll(() => operation().recoveryDelivery?.phase).toBe('accepted') } }
 }
@@ -156,7 +160,7 @@ describe('retained historical continuity combined input consumer', () => {
       expect(original?.admission?.acknowledged).not.toBe(true)
       const submitted = vi.spyOn(h.client, 'submitAgentPrompt')
       await h.wake(); await h.wake()
-      await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+      await expect.poll(() => h.inner.recovery.continuityInputs.tails.size).toBe(0)
       expect(submitted).not.toHaveBeenCalled(); expect(h.input).toHaveBeenCalledTimes(1)
       expect(h.delivery().key).toEqual(frozen.key)
     } finally { await h.close() }
@@ -321,7 +325,7 @@ describe('retained historical continuity combined input consumer', () => {
       vi.spyOn(provider as any, 'verifyPromptExecutionTransport').mockResolvedValue(true)
       vi.spyOn(inner.screenEvidence, 'wait').mockResolvedValue(1)
       // Same production restore entry invoked after Runtime/Store observation on connect.
-      inner.continuityInputs.restore(inner.registry.list())
+      inner.recovery.continuityInputs.restore(inner.registry.list())
       await expect.poll(() => next!.agentSession('recipient').continuityOperations!['original-continuity']!.recoveryDelivery?.phase).toBe('accepted')
       expect(h.input).toHaveBeenCalledTimes(1)
       const recovered = next.agentSession('recipient').continuityOperations!['original-continuity']!.recoveryDelivery!
@@ -339,18 +343,18 @@ describe('retained historical continuity combined input consumer', () => {
     const h = await fixture({ ready: false }), second = await anotherOwner(h)
     let release!: () => void
     try {
-      await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+      await expect.poll(() => h.inner.recovery.continuityInputs.tails.size).toBe(0)
       const entered = Promise.withResolvers<void>(), gate = new Promise<void>(resolve => { release = resolve })
       vi.mocked(second.provider.verifyPromptExecutionTransport!).mockImplementation(async () => { entered.resolve(); await gate; return true })
       const secondSubmit = vi.spyOn(second.client, 'submitAgentPrompt')
-      second.inner.continuityInputs.restore(second.inner.registry.list())
+      second.inner.recovery.continuityInputs.restore(second.inner.registry.list())
       await entered.promise
       // A possibly executing call without an ACK cannot be handed to another observer.
       const firstSubmit = vi.spyOn(h.client, 'submitAgentPrompt').mockRejectedValue(new Error('dispatch response unconfirmed'))
       h.setReady(true); await h.wake()
       await expect.poll(() => h.delivery().phase).toBe('unknown')
       release()
-      await expect.poll(() => second.inner.continuityInputs.tails.size).toBe(0)
+      await expect.poll(() => second.inner.recovery.continuityInputs.tails.size).toBe(0)
       expect(firstSubmit).toHaveBeenCalledTimes(1); expect(secondSubmit).not.toHaveBeenCalled()
       expect(h.input).not.toHaveBeenCalled()
       expect((await h.store.readMetadata('recipient'))!.continuityOperations!['original-continuity']!.recoveryDelivery!.phase).toBe('unknown')
@@ -360,7 +364,7 @@ describe('retained historical continuity combined input consumer', () => {
   it('cannot use an actual different-body ACK on the same key to accept frozen parts', async () => {
     const h = await fixture({ ready: false })
     try {
-      await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+      await expect.poll(() => h.inner.recovery.continuityInputs.tails.size).toBe(0)
       await h.client.submitAgentPrompt({ agentSessionId: 'recipient', expectedRun: { runId: 'recovered-run' }, afterSubmissionId: null,
         operationId: h.delivery().key.submissionId, prompt: 'Another original body under a conflicting key.' })
       h.setReady(true); await h.wake()
@@ -375,7 +379,7 @@ describe('retained historical continuity combined input consumer', () => {
   it('keeps an unknown initial boundary visible and preserves ordinary terminal input', async () => {
     const h = await fixture({ ready: false })
     try {
-      await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+      await expect.poll(() => h.inner.recovery.continuityInputs.tails.size).toBe(0)
       await h.inner.registry.update('recipient', { runId: 'recovered-run' }, (current: AgentMuxStoredAgentSession) => {
         const next = structuredClone(current)
         delete next.continuityOperations!['original-continuity']!.recoveryDelivery!.initialInputByte
@@ -394,14 +398,14 @@ describe('retained historical continuity combined input consumer', () => {
   it('does not wait for an unresponsive native observer when the client is disposed', async () => {
     const h = await fixture({ ready: false })
     try {
-      await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+      await expect.poll(() => h.inner.recovery.continuityInputs.tails.size).toBe(0)
       const entered = Promise.withResolvers<void>(), observation = Promise.withResolvers<any>()
       const submitted = vi.spyOn(h.client, 'submitAgentPrompt')
       vi.mocked(h.provider.readPromptExecutionEvidence!).mockImplementation(async () => { entered.resolve(); return await observation.promise })
       await h.wake(); await entered.promise
       await h.client.dispose()
       observation.resolve({ state: 'idle', id: 'late-idle', sourceId: 'original-source' })
-      await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+      await expect.poll(() => h.inner.recovery.continuityInputs.tails.size).toBe(0)
       expect(submitted).not.toHaveBeenCalled()
       expect(h.delivery().phase).toBe('waiting'); expect(h.input).not.toHaveBeenCalled()
       expect((await h.store.readMetadata('recipient'))!.continuityOperations!['original-continuity']!.recoveryDelivery!.key).toEqual(h.delivery().key)
@@ -411,7 +415,7 @@ describe('retained historical continuity combined input consumer', () => {
   it('does not send recovery input to a changed native conversation', async () => {
     const h = await fixture({ ready: false })
     try {
-      await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+      await expect.poll(() => h.inner.recovery.continuityInputs.tails.size).toBe(0)
       await h.inner.registry.update('recipient', { runId: 'recovered-run' }, (current: AgentMuxStoredAgentSession) => ({ ...current,
         nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'different-native-target' } }))
       h.setReady(true); await h.wake()
@@ -424,10 +428,10 @@ describe('retained historical continuity combined input consumer', () => {
   it('requires actual native idle evidence while preserving working-Run ordinary input', async () => {
     const h = await fixture({ ready: false })
     try {
-      await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+      await expect.poll(() => h.inner.recovery.continuityInputs.tails.size).toBe(0)
       vi.mocked(h.provider.readPromptExecutionEvidence!).mockResolvedValue({ state: 'working', sourceId: 'native-original', id: 'still-native-working' })
       await h.wake()
-      await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+      await expect.poll(() => h.inner.recovery.continuityInputs.tails.size).toBe(0)
       expect(h.delivery().phase).toBe('waiting'); expect(h.input).not.toHaveBeenCalled()
       await h.client.writeAgent({ agentSessionId: 'recipient', expectedRun: { runId: 'recovered-run' }, source: 'user', data: 'ordinary working turn input' })
       expect(h.input).toHaveBeenCalledTimes(1); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
@@ -437,13 +441,53 @@ describe('retained historical continuity combined input consumer', () => {
   it('preserves a declared negative native transport result without revoking ordinary input', async () => {
     const h = await fixture({ ready: false })
     try {
-      await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+      await expect.poll(() => h.inner.recovery.continuityInputs.tails.size).toBe(0)
       vi.mocked(h.provider.verifyPromptExecutionTransport!).mockResolvedValue(false)
       h.setReady(true); await h.wake()
-      await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+      await expect.poll(() => h.inner.recovery.continuityInputs.tails.size).toBe(0)
       expect(h.delivery().phase).toBe('waiting'); expect(h.input).not.toHaveBeenCalled()
       await h.client.writeAgent({ agentSessionId: 'recipient', expectedRun: { runId: 'recovered-run' }, source: 'user', data: 'ordinary input remains available' })
       expect(h.input).toHaveBeenCalledTimes(1); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
     } finally { await h.close() }
   })
+})
+
+it('freezes a managed post-launch carrier before Start and confirms its original receipt rather than the old argv capability', async () => {
+  const h = await fixture({ managedDelivery: true })
+  try {
+    const operation = h.operation(), launch = operation.launchInput!
+    expect(launch).toMatchObject({ delivery: 'post-launch', state: 'terminal-confirmed',
+      input: { submissionId: 'managed-original-input', prompt: 'The original managed resume task.' },
+      key: { expectedRun: { runId: 'recovered-run' }, submissionId: 'managed-original-input' } })
+    expect(h.inner.kernel.start).toHaveBeenCalledOnce()
+    expect(h.inner.kernel.start.mock.calls[0]![0].args).not.toContain(launch.prompt)
+    const receipt = await h.client.inspectAgentPromptSubmission(launch.key!)
+    expect(receipt?.admission).toMatchObject({ inputKey: launch.key, acknowledged: true, intent: { prompt: launch.prompt, message: launch.message } })
+    expect(receipt?.admission?.transport).not.toBe('native')
+    expect(h.input).toHaveBeenCalledOnce()
+    expect((await h.store.readMetadata('recipient'))!.continuityOperations?.[operation.operationId]?.launchInput).toEqual(launch)
+    await h.client.ensureAgentContinuity(h.original)
+    expect(h.inner.kernel.start).toHaveBeenCalledOnce(); expect(h.input).toHaveBeenCalledOnce()
+  } finally { await h.close() }
+})
+
+it('preserves prepared input with no claim and never turns an old unknown plan without a receipt into a new dispatch', async () => {
+  const h = await fixture({ managedDelivery: true, deferManagedInput: true })
+  try {
+    const launch = h.operation().launchInput!
+    expect(launch.state).toBe('prepared')
+    expect(await h.client.inspectAgentPromptSubmission(launch.key!)).toBeNull()
+    expect(h.input).not.toHaveBeenCalled()
+    await h.inner.registry.update('recipient', { runId: 'recovered-run' }, (value: AgentMuxStoredAgentSession) => {
+      const operation = value.continuityOperations!['original-continuity']!
+      const retained = { ...operation, launchInput: { ...operation.launchInput!, state: 'unknown' as const } }
+      return { ...value, continuity: retained, continuityOperations: { ...value.continuityOperations, [retained.operationId]: retained } }
+    })
+    const attempts = h.managedDispatch!.mock.calls.length
+    await h.client.ensureAgentContinuity(h.original)
+    expect(h.managedDispatch).toHaveBeenCalledTimes(attempts)
+    expect(h.operation().launchInput?.state).toBe('unknown')
+    expect(await h.client.inspectAgentPromptSubmission(launch.key!)).toBeNull()
+    expect(h.input).not.toHaveBeenCalled(); expect(h.inner.kernel.start).toHaveBeenCalledOnce()
+  } finally { await h.close() }
 })

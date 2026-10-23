@@ -9,7 +9,7 @@ import { AgentMuxError as SourceError } from '../src/errors.js'
 import { composeAgentResumePrompt } from '../src/agent-outbound-message.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
-import type { AgentMuxContinuityInputRequest } from '../src/agent-session-continuity.js'
+import type { AgentMuxContinuityInputRequest } from '../src/agent-session-recovery/continuity.js'
 
 
 const owner = process.env.AGENTMUX_TEST_GUIDANCE_CORE ? await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_GUIDANCE_CORE)

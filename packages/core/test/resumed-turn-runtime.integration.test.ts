@@ -14,11 +14,11 @@ afterEach(async () => {
 const command = resolve(import.meta.dirname, 'fixtures/resumed-turn-native-cli.mjs')
 const root = resolve(import.meta.dirname, '../../..')
 const evidenceDirectory = resolve(root, '.tmp/recovery-protocol-convergence/provider-runtime-cases')
-const candidateFiles = ['packages/core/src/client.ts', 'packages/core/src/agent-session-resumed-interruption.ts',
-  'packages/core/src/agent-session-continuity-input.ts', 'packages/core/src/providers/codex-resumed-turn-interruption.ts',
+const candidateFiles = ['packages/core/src/client.ts', 'packages/core/src/agent-session-recovery/resumed-interruption.ts',
+  'packages/core/src/agent-session-recovery/input.ts', 'packages/core/src/providers/codex-resumed-turn-interruption.ts',
   'packages/core/src/providers/codex-managed-run.ts', 'packages/core/src/providers/codex-native-input.ts',
-  'packages/core/dist/client.js', 'packages/core/dist/agent-session-resumed-interruption.js',
-  'packages/core/dist/agent-session-continuity-input.js', 'packages/core/dist/providers/codex-resumed-turn-interruption.js',
+  'packages/core/dist/client.js', 'packages/core/dist/agent-session-recovery/resumed-interruption.js',
+  'packages/core/dist/agent-session-recovery/input.js', 'packages/core/dist/providers/codex-resumed-turn-interruption.js',
   'packages/core/dist/providers/codex-managed-run.js', 'packages/core/dist/providers/codex-native-input.js',
   'packages/core/test/fixtures/resumed-turn-native-cli.mjs', 'packages/core/test/resumed-turn-runtime.integration.test.ts']
 const candidateHashes = async () => Object.fromEntries(await Promise.all(candidateFiles.map(async file =>
