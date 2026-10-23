@@ -678,13 +678,16 @@ async function run() {
 
   await openStop(); await nativeReady(); await read('dialogCraft.busy(true)'); await click('.confirmation-dialog button', 'Stop & Close', true)
   await wait(() => read('document.querySelector(".confirmation-dialog")?.closest("[data-overlay-modal-boundary]")?.getAttribute("aria-busy")==="true"'), 'Actual Stop must become busy')
+  const busyControls = await read('(()=>{const content=document.querySelector(".confirmation-dialog"),boundary=content?.closest("[data-overlay-modal-boundary]");return{modalId:content?.dataset.overlayModalId,busy:boundary?.getAttribute("aria-busy"),buttons:[...content.querySelectorAll("button")].map(button=>({label:button.textContent.trim(),disabled:button.disabled,confirm:button.hasAttribute("data-confirm-label")}))}})()')
+  assert.equal(busyControls.buttons.find((button: any) => button.confirm)?.label, 'Working…', 'The original painted Stop control must display its pending action')
+  assert.ok(busyControls.buttons.length > 0 && busyControls.buttons.every((button: any) => button.disabled), 'Every original confirmation control must be disabled while Stop is pending')
   await click('.confirmation-dialog button', 'Working…', true); await key('Escape', 27)
   const during = (await facts()).workbench
   assert.equal(during.stops.length, original.stops.length + 1, 'Busy Stop reaches its original owner exactly once')
   assert.equal(await read('!!document.querySelector(".confirmation-dialog")'), true, 'Busy Escape preserves the same pending action')
   await frame('normal-stop-busy'); await read('dialogCraft.busy(false)'); await nativeReady(0)
   assert.ok((await facts()).events.some((event: any) => event.type === 'click' && event.trusted && event.label?.includes('Stop & Close')), 'Native projection input must reach the original trusted DOM handler')
-  receipt.cases.push({ label: 'native-stop-busy-exactly-once', during })
+  receipt.cases.push({ label: 'native-stop-busy-exactly-once', busyControls, during })
 
   for (const [label, width, height, zoom] of [['narrow-short', 640, 410, 1], ['zoom-125', 960, 680, 1.25]] as const) {
     await openStop(); await nativeReady()
