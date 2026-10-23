@@ -16,6 +16,7 @@ import { createBuiltinConnectionAdapters } from './platform-adapters.js'
 import type { ChannelMetadataChange, ConnectionPort } from '@agentmux/core/connections'
 import type { MoteChatPort, MoteChatTarget } from '@agentmux/core/mote-chat'
 import { ConnectionSecrets } from './connection-secrets.js'
+import { backupConnections, type ConnectionBackupReceipt } from './connection-backup.js'
 
 export type ConnectionServices = {
   connections: ConnectionPort
@@ -23,18 +24,20 @@ export type ConnectionServices = {
   moteChat?: MoteChatPort
   secrets: Pick<ConnectionSecrets, 'store' | 'inspect'>
   openDatabase(): Promise<DatabaseSync>
+  backup(): Promise<ConnectionBackupReceipt>
   readonly database: DatabaseSync | null
   readonly bindings: RoomBindingHost | null
   readonly rooms: RoomProvisioningHost | null
   readonly publication: PublicationHost | null
   readonly ingress: DurableIngressHost | null
-  close(): void
+  close(): Promise<void>
 }
 type LiveServices = { lease?: number; database: DatabaseSync; connections: ConnectionHost; secrets: ConnectionSecrets; bindings?: RoomBindingHost; rooms?: RoomProvisioningHost; publication?: PublicationHost; ingress?: DurableIngressHost; receivers?: ConnectionReceivers; moteChat?: MoteChatHost }
 /** Optional failure stays local. A later exact operation retries storage on the same Host and database. */
 export async function createConnectionServices(options: { directory: string | undefined; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; ingress?: Pick<DurableIngressOptions, 'core' | 'authoritySource'>; moteChat?: { agents: MoteChatAgentPort; assertTarget(target: MoteChatTarget): Promise<void>; assertReady?(target: MoteChatTarget): Promise<void> } }): Promise<ConnectionServices> {
   const adapters = options.adapters ?? createBuiltinConnectionAdapters()
   let live: LiveServices | undefined, opening: Promise<LiveServices> | undefined, closed = false
+  let backingUp: Promise<ConnectionBackupReceipt> | undefined, closing: Promise<void> | undefined
   const metadataListeners = new Set<(change: ChannelMetadataChange) => void>()
   const relayMetadata = (change: ChannelMetadataChange) => { for (const listener of metadataListeners) try { listener(change) } catch { /* Display notification does not own native intake. */ } }
   const ensure = async (): Promise<LiveServices> => {
@@ -124,6 +127,13 @@ export async function createConnectionServices(options: { directory: string | un
     get ingress() { return live?.ingress ?? null },
     get database() { return live?.database ?? null },
     openDatabase: async () => (await ensure()).database,
+    backup: () => {
+      if (closed) return Promise.reject(new AgentMuxError('The original connection owner is closed. Its retained database must be backed up through its current owner.', 'CONNECTION_STORAGE_UNAVAILABLE'))
+      return backingUp ??= (async () => {
+        const owner = await ensure()
+        return await backupConnections(owner.database, options.directory!)
+      })().finally(() => { backingUp = undefined })
+    },
     ...(options.moteChat ? { moteChat: {
       configure: async (input, context) => {
         const owner = (await ensure()).moteChat!
@@ -208,6 +218,21 @@ export async function createConnectionServices(options: { directory: string | un
       test: async input => (await ensure()).connections.test(input)
     },
     secrets: { store: async (input, assertCurrent) => (await ensure()).secrets.store(input, assertCurrent), inspect: async operationId => (await ensure()).secrets.inspect(operationId) },
-    close: () => { closed = true; if (recovery) clearInterval(recovery); metadataListeners.clear(); live?.receivers?.close(); live?.ingress?.close(); live?.publication?.close(); live?.connections.close(); live?.database.close(); if (live?.lease !== undefined) closeSync(live.lease); live = undefined }
+    close: () => closing ??= (async () => {
+      closed = true; if (recovery) clearInterval(recovery); metadataListeners.clear()
+      const failures: unknown[] = []
+      for (const cancel of [() => live?.receivers?.close(), () => live?.ingress?.close(), () => live?.publication?.close()]) {
+        try { cancel() } catch (error) { failures.push(error) }
+      }
+      if (backingUp) await backingUp.catch(() => {})
+      if (opening) await opening.catch(() => {})
+      const owner = live
+      live = undefined
+      for (const release of [() => owner?.connections.close(), () => owner?.database.close(),
+        () => { if (owner?.lease !== undefined) closeSync(owner.lease) }]) {
+        try { release() } catch (error) { failures.push(error) }
+      }
+      if (failures.length) throw failures[0]
+    })()
   }
 }
