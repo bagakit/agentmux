@@ -2,6 +2,10 @@ import { sessionRecoveryOperationResult } from './session-recovery-operation'
 import { createMoteChatAgents } from './mote-chat-agents.js'
 import { registerMoteChatIpc } from './mote-chat-ipc.js'
 import { callCapsuleFromApp } from './capsule-ipc.js'
+import { capsulePresentation, resolveCapsuleColdDocument } from './capsule-presentation.js'
+import { capsuleDocumentIpc } from './capsule-document-ipc.js'
+import { CapsuleReplyAuthority } from './capsule-reply-authority.js'
+import type { CapsulePort } from '@agentmux/core/capsule'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { ClientIncidentIpcOwner } from './client-incident-ipc.js'
 import { ClientIncidentRuntimeOwner } from './client-incident-runtime.js'
@@ -144,6 +148,7 @@ import {
   connectAgentMuxRpc,
   agentMuxRpcHttpOptions,
   AgentMuxError,
+  AGENTMUX_CONTROL_SCHEMA_VERSION,
   type AgentPromptCondition,
   type AgentExecutorId,
   type AgentMuxControlRequest,
@@ -302,6 +307,9 @@ export async function registerIpc(args: {
   loadedRenderer?: () => DesktopLoadedRenderer | null
 }): Promise<() => Promise<void>> {
   const contents = args.window.webContents
+  const capsuleClient: CapsulePort = { call: async (method, params) =>
+    await callCapsuleFromApp(args.runtime.callOriginalCore.bind(args.runtime), method, params) as never }
+  const capsuleReplies = new CapsuleReplyAuthority(capsuleClient, args.runtime)
   const spatialState = new AgentMuxSpatialStateStore()
   const nameAudit = new NameChangeAudit(spatialState)
   args.scratchTopics.setNameAudit(nameAudit)
@@ -470,6 +478,18 @@ export async function registerIpc(args: {
   const disposeBrowserFeedbackPreferences = configOwner.subscribe((saved, previous) => {
     if (JSON.stringify(saved.browser.agentControl) !== JSON.stringify(previous.browser.agentControl)) browsers.refreshAgentFeedback()
   })
+  const capsuleDocuments = capsuleDocumentIpc({ browsers, capsules: capsuleClient, theme: () => {
+    const theme = themeBootstrap(configOwner.current.appearance, nativeTheme.shouldUseDarkColors)
+    return { mode: theme.mode, tokens: theme.variables }
+  } })
+  browsers.capsuleDocumentReady = id => { void capsuleDocuments.pushTheme(id) }
+  const updateCapsuleThemes = () => {
+    for (const id of browsers.capsuleDocumentIds()) void capsuleDocuments.pushTheme(id)
+  }
+  const disposeCapsuleAppearance = configOwner.subscribe((saved, previous) => {
+    if (saved.appearance !== previous.appearance) updateCapsuleThemes()
+  })
+  nativeTheme.on('updated', updateCapsuleThemes)
   const browserInputContextPorts = createBrowserInputContextPorts({ hostId: deliveryAttempts.hostId,
     browsers, home: app.getPath('home'), directory: join(app.getPath('userData'), 'browser-input-context'),
     createFromBuffer: bytes => nativeImage.createFromBuffer(bytes) })
@@ -477,12 +497,13 @@ export async function registerIpc(args: {
   const ensureBrowser = (id: string, input?: Parameters<BrowserViewManager['restore']>[1]) => browsers.ensure(id, async () => {
     let saved = browserColdDescriptor((await spatialState.read())?.graph ?? null, id)
     workspace(config, saved.workspaceId)
-    if (saved.mode !== 'private') {
+    if (saved.mode !== 'private' && !saved.capsuleId) {
       await browserProfiles.initialize()
       // Profile IO must not revive a Region removed while this consumer was waiting.
       saved = browserColdDescriptor((await spatialState.read())?.graph ?? null, id)
       workspace(config, saved.workspaceId)
     }
+    if (saved.capsuleId) saved = resolveCapsuleColdDocument(saved, await capsuleClient.call('capsule.inspect', { capsuleId: saved.capsuleId }))
     return saved
   }, input)
   const resolveRecoveryPreviewScope = async (id: string): Promise<BrowserRecoveryPreviewScope | null> => {
@@ -758,6 +779,13 @@ export async function registerIpc(args: {
     requireTrustedSender('capsules:call', event)
     return sessionInputOperationResult(() => callCapsuleFromApp(args.runtime.callOriginalCore.bind(args.runtime), method, value))
   })
+  handleWithEvent('capsules:reply', async (event, value: unknown) => {
+    requireTrustedSender('capsules:reply', event)
+    if (event.senderFrame !== contents.mainFrame) throw new Error('The original App main frame must confirm this answer.')
+    return sessionInputOperationResult(() => capsuleReplies.confirm(value))
+  })
+  handleWithEvent('capsule:document', async (event, action: unknown, value: unknown) =>
+    await sessionInputOperationResult(() => capsuleDocuments.call(event, action, value)))
   const conversationReads = registerConversationReadIpc({ handle: handleWithEvent, trust: requireTrustedSender,
     connect: () => connectAgentMuxRpc({ endpoint: { transport: 'unix', path: control.path } }) })
   handle('config:get', () => config)
@@ -1519,7 +1547,9 @@ export async function registerIpc(args: {
   handleWithEvent('ui:openDefaultBrowserSettings', event => { requireTrustedSender('ui:openDefaultBrowserSettings', event); return openDefaultBrowserSettings() })
   handleWithEvent('ui:spatialLinksReady', event => {
     requireTrustedSender('ui:spatialLinksReady', event)
-    args.spatialLinks?.ready((request, signal) => executeControl(request, undefined, signal), message => contents.send('ui:spatialLinkIssue', message))
+    args.spatialLinks?.ready((request, signal) => executeControl(request, undefined, signal), message => contents.send('ui:spatialLinkIssue', message),
+      async (capsuleId, operationId, signal) => await args.runtime.callOriginalCore('local', 'capsule.open', { capsuleId, operationId },
+        { transport: 'unix', principal: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }, signal }))
     args.webLinks?.ready((request, signal) => controlBridge.execute(request, signal), message => contents.send('ui:spatialLinkIssue', message))
   })
   handle('ui:readClipboardText' , () => clipboard.readText())
@@ -2013,15 +2043,30 @@ export async function registerIpc(args: {
     requireTrustedSender('browser:stopSharingExternal', event)
     externalBridge.stopSharing(id)
   })
-  handle('browser:create', async (id: string, url: string, workspaceId: unknown, rememberedProfileId?: string, mode?: import('@agentmux/core').AgentMuxBrowserMode, viewport?: BrowserViewport) => {
+  handle('browser:create', async (id: string, url: string, workspaceId: unknown, rememberedProfileId?: string, mode?: import('@agentmux/core').AgentMuxBrowserMode, viewport?: BrowserViewport, capsuleId?: string, capsuleOpenOperationId?: string) => {
     const verifiedWorkspaceId = verifiedBrowserWorkspace(config.workspaces, workspaceId)
+    if (capsuleId !== undefined) {
+      if (mode === 'private' || rememberedProfileId !== undefined) throw new Error('Capsule storage belongs to its original page, independently of Browser user Profiles.')
+      const capsule = await capsuleClient.call('capsule.inspect', { capsuleId })
+      if (capsule.endpoint.status !== 'available') throw new Error(capsule.endpoint.issue.message)
+      const address = new URL(url), endpoint = new URL(capsule.endpoint.url)
+      if (address.origin !== endpoint.origin) throw new Error('The requested address is not the original Capsule endpoint.')
+      return await browsers.create(id, address.href, verifiedWorkspaceId, undefined, 'normal', viewport, {
+        capsule, capsuleOrigin: endpoint.origin, ...(capsuleOpenOperationId ? { capsuleOpenOperationIds: [capsuleOpenOperationId] } : {}) })
+    }
+    if (capsuleOpenOperationId !== undefined) throw new Error('A Capsule open operation requires its original page identity.')
     if (mode !== 'private') await browserProfiles.initialize()
     return await browsers.create(id, url, verifiedWorkspaceId, rememberedProfileId, mode, viewport)
   })
   handle('browser:navigate', async (id: string, url: string) => { await ensureBrowser(id); return await browsers.navigate(id, url) })
   handle('browser:back', async (id: string) => { await ensureBrowser(id); return await browsers.back(id) })
   handle('browser:forward', async (id: string) => { await ensureBrowser(id); return await browsers.forward(id) })
-  handle('browser:reload', async (id: string) => { await ensureBrowser(id); return await browsers.reload(id) })
+  handle('browser:reload', async (id: string) => {
+    await ensureBrowser(id)
+    const capsuleId = browsers.capsuleId(id)
+    return capsuleId ? await browsers.reloadCapsule(id, await capsuleClient.call('capsule.inspect', { capsuleId }))
+      : await browsers.reload(id)
+  })
   handleWithEvent('browser:getRecoveryPreview', async (event, id: string): Promise<BrowserRecoveryPreviewReadResult> => {
     requireTrustedSender('browser:getRecoveryPreview', event)
     try {
@@ -2392,6 +2437,18 @@ export async function registerIpc(args: {
   registerMoteConnectionIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
   registerMotePreferencesIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
   const control = new AgentMuxControlServer({
+    capsules: capsulePresentation({ inspect: id => capsuleClient.call('capsule.inspect', { capsuleId: id }),
+      graph: async () => (await spatialState.read())?.graph ?? null,
+      current: id => browsers.target(id), ensure: id => ensureBrowser(id),
+      recordOpen: (id, capsuleId, operationId) => browsers.recordCapsuleOpen(id, capsuleId, operationId),
+      execute: (request, signal) => executeControl(request, undefined, signal),
+      observe: async signal => {
+        const result = await controlBridge.execute({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+          requestId: mintObjectId(), operation: 'inspect.client' }, signal)
+        if (result.operation !== 'inspect.client') throw new Error('The original Workbench observation is unconfirmed.')
+        return result.observation
+      }, original: (hostId, method, params, context) => args.runtime.callOriginalCore(hostId, method, params, context) }),
+    capsuleInput: capsuleReplies,
     inputContextCaptures,
     windows: args.workbenchWindows,
     connections: connectorServices.connections,
@@ -2505,6 +2562,7 @@ export async function registerIpc(args: {
       { owner: 'workbench-native-window-port', dispose: releaseNativeWindowOwner },
       { owner: 'browsers', dispose: () => browsers.dispose() },
       { owner: 'browser-feedback-preferences', dispose: disposeBrowserFeedbackPreferences },
+      { owner: 'capsule-appearance', dispose: () => { disposeCapsuleAppearance(); nativeTheme.removeListener('updated', updateCapsuleThemes); browsers.capsuleDocumentReady = undefined } },
       { owner: 'browser-input-history', dispose: () => browserInputHistory.flush() },
       { owner: 'browser-profiles', dispose: () => browserProfiles.dispose() },
       { owner: 'file-observations', dispose: () => fileObservations.dispose() },
