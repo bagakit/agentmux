@@ -362,6 +362,7 @@ function replaceOnce(text, before, after) {
 
 async function mutationProof(root, original) {
   const cases = []
+  let previousFixture
   async function sourceDigest(destination) {
     const paths = [...await files(join(destination, 'src')), ...await files(join(destination, 'guides'))]
     return sha(JSON.stringify(await Promise.all(paths.map(async path =>
@@ -369,6 +370,8 @@ async function mutationProof(root, original) {
   }
   async function fixture(label) {
     const destination = join(root, 'mutations', label)
+    if (previousFixture) await rm(previousFixture, { recursive: true, force: true })
+    previousFixture = destination
     await mkdir(destination, { recursive: true })
     for (const entry of ['guides', 'src', 'scripts', 'package.json'])
       await cp(join(core, entry), join(destination, entry), { recursive: true })
