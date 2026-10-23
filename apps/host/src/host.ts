@@ -21,12 +21,15 @@ import { createDeviceAdministration } from './device-administration.js'
 import { createDesktopExternalInputAuthority } from './external-input-authority.js'
 import { createCapsuleDesktopAdapters } from './capsules.js'
 import { createHostConnectionOwner, type HostConnectionOptions } from './connections.js'
+import { createHostAgentLearning } from './agent-learning.js'
 export type AgentMuxHostOptions = {
   store: AgentMuxAgentSessionStore
   providers?: readonly AgentProvider[]
   socketPath?: string
   desktopSocketPath?: string
   connections?: HostConnectionOptions
+  /** Reference to the original client configuration, never a Host configuration copy. */
+  configurationPath?: string
   mobileBuildDirectory?: string
   mobilePort?: number
   inputContextCaptureReader?: import('@agentmux/core').AgentInputContextCaptureReader
@@ -60,11 +63,19 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     endpoint: { transport: 'unix', path: desktopPath },
     ...(context.caller ? { credentials: context.caller } : {})
   })
+  const configurationPath = options.configurationPath ?? options.connections?.moteConfigurationPath
+  const agentLearning = configurationPath && options.store instanceof AgentMuxFileAgentSessionStore ? createHostAgentLearning({
+    configurationPath, directory: join(dirname(options.store.path), 'agent-learning'),
+    ...(options.connections?.spatial ? { spatial: options.connections.spatial } : {}),
+    runtime: () => { if (!runtime) throw new AgentMuxError('The original Host is not yet available. Learning operations and existing Agents are retained.', 'CONTROL_UNAVAILABLE'); return runtime },
+    desktop: desktopClient
+  }) : undefined
   const mobileAccessState = (): AgentMuxRpcMobileAccessState => {
     try { return { ...mobileState, ...(offerUrl ? { origin: new URL(offerUrl()).origin } : {}) } }
     catch { return { ...mobileState, state: 'unavailable', message: '当前没有可用的局域网地址；连接记录和 Agent 会话保留。' } }
   }
   const service = {
+    ...(agentLearning ? { agentLearning } : {}),
     ...(connectionOwner ? { connections: connectionOwner.connections, ...(connectionOwner.moteChat ? { moteChat: connectionOwner.moteChat } : {}) } : {}),
     operationSource: (context: AgentMuxRpcCallContext) => context.caller ? undefined : authority?.operationSource(context.principal),
     recordDeviceOperation: async (source: import('@agentmux/core').AgentOperationDevice, method: string, args: unknown[], result: 'confirmed' | 'failed' | 'unknown', operationId: string) => {
