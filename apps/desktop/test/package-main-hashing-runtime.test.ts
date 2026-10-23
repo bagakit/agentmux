@@ -117,41 +117,66 @@ it('the production Desktop copying block supplies Main hashing, avatars, Host an
     const configFile = join(desktopRoot, 'electron.vite.config.ts')
     const hostEntry = join(repositoryRoot, 'apps/host/src/index.ts')
     const connectionSource = join(repositoryRoot, 'packages/connectors/src/connection-services.ts')
+    const connectionImplementation = process.env.AGENTMUX_PACKAGE_CONNECTION_SOURCE ?? connectionSource
     const connectionEntry = join(temporary, 'connection-consumer.ts')
     // Exercise the maintained factory's real lease branch. Empty adapters and no
     // bindings keep external transport and conversation reads out of this fixture.
     await writeFile(connectionEntry, `
       import { createConnectionServices } from ${JSON.stringify(connectionSource)}
-      import { createRequire } from 'node:module'
+      import { createRequire, syncBuiltinESMExports } from 'node:module'
       import { spawnSync } from 'node:child_process'
       import { fileURLToPath } from 'node:url'
+      import fs from 'node:fs'
+      import { join } from 'node:path'
       const directory = process.argv[2], contender = process.argv[3] === 'contender'
+      const loaderFailure = process.argv[3] === 'loader-failure', opened = []
       let sourceCalls = 0, owner
       const noSource = async () => { sourceCalls++; throw new Error('No external source exists in this private fixture') }
       const result = {}
+      const originalOpen = fs.openSync
+      if (loaderFailure) {
+        fs.openSync = (path, ...args) => {
+          const fd = originalOpen(path, ...args)
+          if (path === join(directory, 'connections.owner.lock')) opened.push({ path, fd })
+          return fd
+        }
+        syncBuiltinESMExports()
+      }
       try {
         owner = await createConnectionServices({ directory, adapters: [], publication: {
           checkpoint: noSource, changes: noSource, inspect: noSource, observe: noSource, resource: noSource
         } })
-        result.listed = await owner.connections.list()
-        const database = await owner.openDatabase()
-        result.databaseSame = database === owner.database
-        result.databaseFile = database.prepare('PRAGMA database_list').all().find(row => row.name === 'main')?.file
-        if (!contender) {
-          result.nativeResolution = createRequire(import.meta.url).resolve('fs-native-extensions')
-          const compete = () => {
-            const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), directory, 'contender'], {
-              cwd: process.cwd(), encoding: 'utf8', timeout: 5000, env: { PATH: process.env.PATH, NODE_PATH: '' }
-            })
-            return { status: child.status, signal: child.signal, error: child.error?.message,
-              stdout: child.stdout, stderr: child.stderr }
+        if (loaderFailure) {
+          try { await owner.openDatabase() } catch (error) { result.storageError = { code: error.code, message: error.message } }
+          result.failedDescriptors = opened.map(({ path, fd }) => {
+            try { fs.fstatSync(fd); return { path, fd, state: 'open' } }
+            catch (error) { return { path, fd, state: error.code } }
+          })
+          result.descriptorObservationPhase = 'after-failed-open-before-owner-close'
+        } else {
+          result.listed = await owner.connections.list()
+          const database = await owner.openDatabase()
+          result.databaseSame = database === owner.database
+          result.databaseFile = database.prepare('PRAGMA database_list').all().find(row => row.name === 'main')?.file
+          if (!contender) {
+            result.nativeResolution = createRequire(import.meta.url).resolve('fs-native-extensions')
+            const compete = () => {
+              const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), directory, 'contender'], {
+                cwd: process.cwd(), encoding: 'utf8', timeout: 5000, env: { PATH: process.env.PATH, NODE_PATH: '' }
+              })
+              return { status: child.status, signal: child.signal, error: child.error?.message,
+                stdout: child.stdout, stderr: child.stderr }
+            }
+            result.whileHeld = compete()
+            owner.close()
+            result.afterRelease = compete()
           }
-          result.whileHeld = compete()
-          owner.close()
-          result.afterRelease = compete()
         }
       } catch (error) { result.error = { code: error.code, message: error.message } }
-      finally { owner?.close() }
+      finally {
+        if (loaderFailure) { fs.openSync = originalOpen; syncBuiltinESMExports() }
+        owner?.close()
+      }
       result.sourceCalls = sourceCalls
       console.log(JSON.stringify(result))
     `)
@@ -161,10 +186,13 @@ it('the production Desktop copying block supplies Main hashing, avatars, Host an
     evidence.hostBuild = execFileSync(process.execPath, ['--input-type=module', '-e', `
       import { resolveConfig } from ${JSON.stringify(pathToFileURL(desktopRequire.resolve('electron-vite')).href)}
       import { build } from ${JSON.stringify(pathToFileURL(desktopRequire.resolve('vite')).href)}
+      import { readFile } from 'node:fs/promises'
       const { config } = await resolveConfig({ root: ${JSON.stringify(desktopRoot)}, configFile: ${JSON.stringify(configFile)} }, 'build', 'production')
       if (!config?.main) throw new Error('The production Main configuration is absent')
       const main = config.main
       const built = await build({ ...main, root: ${JSON.stringify(desktopRoot)}, configFile: false,
+        plugins: [...main.plugins, ...(${JSON.stringify(connectionImplementation !== connectionSource)} ? [{ name: 'private-connection-source',
+          enforce: 'pre', load: id => id === ${JSON.stringify(connectionSource)} ? readFile(${JSON.stringify(connectionImplementation)}, 'utf8') : null }] : [])],
         build: { ...main.build, outDir: ${JSON.stringify(mainDirectory)}, emptyOutDir: false,
           rollupOptions: { ...main.build?.rollupOptions, input: { 'agentmux-host': ${JSON.stringify(hostEntry)},
             'connection-consumer': ${JSON.stringify(connectionEntry)} } } } })
@@ -216,7 +244,7 @@ it('the production Desktop copying block supplies Main hashing, avatars, Host an
     })
     evidence.connection = { status: connection.status, signal: connection.signal, error: connection.error?.message,
       stdout: connection.stdout, stderr: connection.stderr, environmentKeys: Object.keys(childEnvironment),
-      factorySource: { path: connectionSource, sha256: digest(await readFile(connectionSource)) } }
+      factorySource: { path: connectionImplementation, sha256: digest(await readFile(connectionImplementation)) } }
     expect(connection.error).toBeUndefined(); expect(connection.signal).toBeNull(); expect(connection.status).toBe(0)
     type ConnectionRead = { listed?: { connections: unknown[] }; databaseSame?: boolean; databaseFile?: string;
       error?: { code: string; message: string }; sourceCalls: number }
@@ -237,6 +265,27 @@ it('the production Desktop copying block supplies Main hashing, avatars, Host an
     expect(released.error).toBeUndefined(); expect(released.listed).toEqual({ connections: [] })
     expect(released.databaseSame).toBe(true); expect(released.databaseFile).toBe(owner.databaseFile)
     expect(released.sourceCalls).toBe(0)
+
+    // The missing module is real and local to this copied App. Observe the exact
+    // fd returned to the original factory, before close() or child exit can help.
+    await rm(join(appResources, 'node_modules/fs-native-extensions'), { recursive: true })
+    const failureDirectory = join(temporary, 'connection-loader-failure')
+    const loader = spawnSync(process.execPath, [join(mainDirectory, 'connection-consumer.js'), failureDirectory, 'loader-failure'], {
+      cwd: temporary, encoding: 'utf8', env: childEnvironment, timeout: 5000
+    })
+    evidence.connectionLoaderFailure = { status: loader.status, signal: loader.signal, error: loader.error?.message,
+      stdout: loader.stdout, stderr: loader.stderr, environmentKeys: Object.keys(childEnvironment) }
+    expect(loader.error).toBeUndefined(); expect(loader.signal).toBeNull(); expect(loader.status).toBe(0)
+    const failed = JSON.parse(loader.stdout) as { error?: unknown; storageError: { code: string };
+      failedDescriptors: { path: string; fd: number; state: string }[]; descriptorObservationPhase: string; sourceCalls: number }
+    expect(failed.error).toBeUndefined(); expect(failed.storageError).toMatchObject({ code: 'CONNECTION_STORAGE_UNAVAILABLE' })
+    expect(failed.failedDescriptors.length).toBeGreaterThan(0)
+    expect(failed.descriptorObservationPhase).toBe('after-failed-open-before-owner-close')
+    for (const descriptor of failed.failedDescriptors) {
+      expect(descriptor.path).toBe(join(failureDirectory, 'connections.owner.lock'))
+      expect(descriptor.state, 'The exact native-load failure descriptor must already be closed before owner cleanup or process exit').toBe('EBADF')
+    }
+    expect(failed.sourceCalls).toBe(0)
 
 
     const identityResolution = execFileSync(process.execPath, ['--input-type=module', '-e',
