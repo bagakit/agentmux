@@ -4,14 +4,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 
-const native = vi.hoisted(() => ({ spawn: vi.fn(), live: false, socketPath: '', rpc: vi.fn(), dispose: vi.fn() }))
+const native = vi.hoisted(() => ({ spawn: vi.fn(), live: false as boolean | 'unknown', socketPath: '', rpc: vi.fn(), dispose: vi.fn() }))
 vi.mock('node:child_process', async importOriginal => ({
   ...await importOriginal<typeof import('node:child_process')>(), spawn: native.spawn
 }))
 vi.mock('@agentmux/core', async importOriginal => ({
   ...await importOriginal<typeof import('@agentmux/core')>(),
   defaultAgentMuxControlSocketPath: () => native.socketPath,
-  probeSocketLiveness: async () => native.live ? 'alive' : 'dead',
+  probeSocketLiveness: async () => native.live === 'unknown' ? 'unknown' : native.live ? 'alive' : 'dead',
   connectAgentMuxRpc: async () => ({ call: native.rpc,
     subscribe: async () => { throw new Error('Only the general observation transport is unavailable') }, dispose: native.dispose })
 }))
@@ -154,4 +154,15 @@ it('cancels only the requesting reader and leaves the original launch available 
   native.live = true; await vi.advanceTimersByTimeAsync(50)
   expect(await pending).toHaveLength(1)
   expect('runtimeOwnerIdentity' in nextClient && nextClient.runtimeOwnerIdentity()).toEqual(owner)
+})
+
+// Observation uncertainty cannot authorize replacing a serving original owner.
+it.each(['alive', 'unknown'] as const)('keeps the original %s endpoint without spawning another owner', async liveness => {
+  const directory = await mkdtemp(join(tmpdir(), 'amx-host-existing-')); directories.push(directory)
+  native.socketPath = join(directory, 'control.sock'); native.live = liveness === 'alive' ? true : 'unknown'
+  const store = new AgentMuxFileAgentSessionStore(join(directory, 'sessions.json'))
+  const client = await connectDesktopAgentMuxHost({ id: 'local', kind: 'local', label: 'Local' }, store); clients.push(client)
+  expect(await client.readAgentSessions()).toEqual([{ agentSessionId: 'retained-session', run: { runId: 'retained-run' } }])
+  expect(native.spawn).not.toHaveBeenCalled()
+  expect('runtimeOwnerIdentity' in client && client.runtimeOwnerIdentity()).toEqual(owner)
 })
