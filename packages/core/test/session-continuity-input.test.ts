@@ -6,7 +6,7 @@ import { AgentMuxError as SourceError } from '../src/errors.js'
 import { composeAgentPrompt } from '../src/agent-outbound-message.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import { createHash } from 'node:crypto'
-import { DEFAULT_AGENT_CONTINUITY_REMINDER, type AgentMuxContinuityOperation } from '../src/agent-session-recovery/continuity.js'
+import { DEFAULT_AGENT_CONTINUITY_REMINDER, type AgentMuxContinuityOperation } from '../src/agent-session-recovery/continuity-contract.js'
 
 const owner = process.env.AGENTMUX_TEST_GUIDANCE_CORE ? await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_GUIDANCE_CORE)
   : { AgentMuxClient: SourceClient, AgentMuxFileAgentSessionStore: SourceStore, AgentMuxError: SourceError }

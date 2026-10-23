@@ -15,7 +15,7 @@ import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import type { AgentTerminalFrontendObservation, AgentTerminalInitialization } from '../src/agent-terminal-frontend.js'
 import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
 import { hostedTestClient } from './helpers/hosted-runtime-port.js'
-import { normalizeAgentContinuityPolicy, type AgentMuxContinuityOperation } from '../src/agent-session-recovery/continuity.js'
+import { normalizeAgentContinuityPolicy, type AgentMuxContinuityOperation } from '../src/agent-session-recovery/continuity-contract.js'
 
 const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })

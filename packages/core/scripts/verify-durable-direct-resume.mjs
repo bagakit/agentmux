@@ -20,7 +20,7 @@ async function bind(path) {
   inputs.set(absolute, hash)
 }
 for (const path of ['packages/core/src/client.ts', 'packages/core/src/agent-session-recovery/service.ts', 'packages/core/src/agent-session-recovery/ports.ts', 'packages/core/src/agent-session-recovery.ts', 'packages/core/src/agent-runtime-helpers.ts', 'packages/core/src/agent-session-registry.ts', 'packages/core/src/agent-session-store.ts',
-  'packages/core/src/agent-session-recovery/continuity.ts', 'packages/core/src/ctxmux-run-adapter.ts',
+  'packages/core/src/agent-session-recovery/continuity-contract.ts', 'packages/core/src/agent-session-recovery/continuity-policy.ts', 'packages/core/src/ctxmux-run-adapter.ts',
   'packages/core/test/durable-direct-resume.test.ts', 'packages/core/test/durable-direct-resume.config.mts',
   'packages/core/test/agent-start-failure-recovery.test.ts', 'apps/desktop/src/main/runtime-controller.ts',
   'packages/core/src/hosted-runtime-service.ts', 'packages/core/src/hosted-client-contract.ts', 'packages/core/src/public-rpc-service.ts',

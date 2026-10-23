@@ -23,7 +23,7 @@ const relative = {
   fields: 'apps/desktop/src/renderer/src/components/settings/continuity-settings-fields.ts',
   schema: 'apps/desktop/src/main/config-store.ts',
   settingsEntry: 'apps/desktop/src/main/settings/modules/continuity.ts',
-  policy: 'packages/core/src/agent-session-recovery/continuity.ts',
+  policy: 'packages/core/src/agent-session-recovery/continuity-contract.ts',
   owner: 'apps/desktop/src/main/config-owner.ts',
   handler: 'apps/desktop/src/main/settings-control.ts',
   uiCases: 'apps/desktop/test/session-continuity-settings.test.tsx',

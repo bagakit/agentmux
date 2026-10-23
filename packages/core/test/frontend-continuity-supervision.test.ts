@@ -2,7 +2,7 @@ import { fixtureEpoch as _tailFixtureEpoch, fixturePath as _tailFixturePath } fr
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentSessionContinuitySupervisor as SourceSupervisor } from '../src/agent-session-recovery/supervisor.js'
 const AgentSessionContinuitySupervisor: typeof SourceSupervisor = process.env.AGENTMUX_TEST_FRONTEND_SUPERVISOR_ENTRY ? (await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_FRONTEND_SUPERVISOR_ENTRY)).AgentSessionContinuitySupervisor : SourceSupervisor
-import { DEFAULT_AGENT_CONTINUITY_POLICY } from '../src/agent-session-recovery/continuity.js'
+import { DEFAULT_AGENT_CONTINUITY_POLICY } from '../src/agent-session-recovery/continuity-contract.js'
 import type { AgentTerminalFrontend } from '../src/agent-terminal-frontend.js'
 
 const cleanup: Array<() => Promise<void>> = []

@@ -3,7 +3,7 @@ import { readFileSync, readdirSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { AGENTMUX_PROTOCOL_CATALOG, AMUX_PROTOCOL_DEFINITIONS, parseAgentMuxMessagePrefix, renderAgentMuxMessageEnvelope } from '../src/agent-message-render.js'
 import { composeOutboundMessage } from '../src/agent-outbound-message.js'
-import { DEFAULT_AGENT_CONTINUITY_CONTINUATION } from '../src/agent-session-recovery/continuity.js'
+import { DEFAULT_AGENT_CONTINUITY_CONTINUATION } from '../src/agent-session-recovery/continuity-contract.js'
 import { promptReactionMessage, PROMPT_REACTION_STARTERS } from '../src/prompt-reaction.js'
 import { parseAmuxObjectLink } from '../src/sharing.js'
 
