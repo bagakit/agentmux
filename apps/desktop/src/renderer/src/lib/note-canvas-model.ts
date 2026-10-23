@@ -122,7 +122,7 @@ export function projectNoteCanvas(snapshot: NotebookGraphSnapshot, scope: NoteCa
     const sharedPlacement: CanvasSharedPlacement | undefined = shared ? (hostNoteId ? 'area-member' : 'bridge') : undefined
     return {
       id,
-      ...(shared ? { kind: 'shared-block' as const, hostNoteIds, ...(hostNoteId ? { hostNoteId } : {}), sharedPlacement } : {}),
+      ...(shared ? { kind: 'shared-block' as const, ...(hostNoteIds ? { hostNoteIds } : {}), ...(hostNoteId ? { hostNoteId } : {}), ...(sharedPlacement ? { sharedPlacement } : {}) } : {}),
       ...(page ? { page } : {}),
       ...(observation ? { observation } : {}),
       title: page?.title ?? (shared ? 'Shared block' : 'Uncatalogued note'),
