@@ -1343,6 +1343,15 @@ export class AgentMuxRpcService {
       if (method === 'toolkit.run' || method === 'toolkit.action' || method === 'toolkit.evaluate') {
         await this.assertToolkitExecutionAuthority(p.toolId, context)
       }
+      if (this.ports.spatialState && !this.ports.execute &&
+          (method === 'space.ls' || method === 'space.inspect') && p.presentation !== true) {
+        const target = rpcRecord(p.target)
+        if (!Object.hasOwn(target, 'operationId') && !Object.hasOwn(target, 'requestId') &&
+            target.regionId !== 'self' && target.tabId !== 'self') {
+          const request = rpcControlRequest(method, params)
+          return rpcControlResult(method, await this.execute(request)) as AgentMuxRpcResult<M>
+        }
+      }
       if (this.ports.forwardControl) return await this.ports.forwardControl(method, params, context)
       let body = p
       if (method === 'space.inspect') {
