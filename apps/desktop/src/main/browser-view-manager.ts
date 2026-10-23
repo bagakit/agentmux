@@ -3879,7 +3879,7 @@ export class BrowserViewManager {
   }
 
   private retainClosedInputShield(entry: BrowserEntry): void {
-    if (!entry.inputShield) return
+    if (!entry.inputShield && !this.inputSurfaceCleanup.has(entry.id)) return
     this.releasedEntries.set(entry.id, { id: entry.id, workspaceId: entry.workspaceId, storage: entry.storage,
       requestedUrl: entry.requestedUrl, viewport: entry.viewport, agent: entry.agent, agentWarning: entry.agentWarning, inputShield: entry.inputShield, cleanupOnly: true })
     entry.inputShield = undefined
@@ -4152,6 +4152,8 @@ export class BrowserViewManager {
     shield.contents.once('destroyed', () => queueMicrotask(() => {
       if (!page.webContents.isDestroyed()) page.webContents.off('destroyed', pageDestroyed)
       const retained = this.forgetInputSurfaceCleanup(surface)
+      const retired = this.releasedEntries.get(entry.id)
+      if (retained && retired?.cleanupOnly && !retired.inputShield && !retired.pendingSwitch && !retired.detachedView && !this.inputSurfaceCleanup.has(entry.id)) this.releasedEntries.delete(entry.id)
       this.observeInputShieldDestruction(entry.id, shield)
       this.inputSurfaceFailed(surface)
       if (retained && this.entries.get(entry.id) === entry) {
