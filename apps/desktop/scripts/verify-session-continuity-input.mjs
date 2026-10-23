@@ -48,7 +48,7 @@ const mutations = [
   ['live-projection', 'clears the original pending notice through actual Store Core event consumption'],
   ['persistent-notice', 'shows the actual mailbox notice']
 ]
-const ownerFiles = ['packages/core/src/agent-session-recovery/input.ts', 'packages/core/src/agent-session-recovery/continuity.ts',
+const ownerFiles = ['packages/core/src/agent-session-recovery/input.ts', 'packages/core/src/agent-session-recovery/continuity-contract.ts', 'packages/core/src/agent-session-recovery/continuity-policy.ts',
   'packages/core/src/client.ts', 'packages/core/src/prompt-submission.ts', 'packages/core/src/agent-session-store.ts', 'packages/core/src/prompt-submission-record.ts', 'packages/core/src/rpc-native-codec.ts', 'packages/core/src/types.ts',
   'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/renderer/src/store.ts',
   'apps/desktop/src/renderer/src/lib/session-service-notices.ts', 'apps/desktop/src/renderer/src/components/AgentSessionComposer.tsx', 'apps/desktop/src/renderer/src/components/ComposerOutbox.tsx', 'apps/desktop/src/renderer/src/lib/steer-queue-delivery.ts', 'apps/desktop/src/renderer/src/lib/session-state.ts']

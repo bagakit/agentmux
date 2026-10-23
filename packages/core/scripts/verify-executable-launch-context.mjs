@@ -32,7 +32,7 @@ const variants = {
   'unknown-resume-block': { path: client,
     needle: 'const capability = await this.probeAgent(current.providerId, plan.command, executableContext)\n      if (!capability.installed && !(capability.providerId === provider.id && unconfirmedExecutableObservation(capability, plan.command)))',
     replacement: 'const capability = await this.probeAgent(current.providerId, plan.command, executableContext)\n      if (!capability.installed)', test: 'stat observation failure preserves real Native' },
-  'unknown-continuity-block': { path: 'packages/core/src/agent-session-recovery/continuity.ts',
+  'unknown-continuity-block': { path: 'packages/core/src/agent-session-recovery/continuity-policy.ts',
     needle: "(!facts.capability.installed && !unconfirmedExecutableObservation(facts.capability, facts.launchExecutable ?? ''))",
     replacement: '!facts.capability.installed', test: 'stat observation failure preserves real Native' },
   'provider-refusal-bypass': { path: client,
@@ -70,7 +70,7 @@ if (process.argv[2] === '--worker') {
 } else {
   const output = join(root, '.tmp/session-capability-recovery/executable-context')
   await mkdir(output, { recursive: true })
-  const sources = [client, probe, observation, 'packages/core/src/agent-provider.ts', 'packages/core/src/types.ts', 'packages/core/src/agent-session-recovery/continuity.ts',
+  const sources = [client, probe, observation, 'packages/core/src/agent-provider.ts', 'packages/core/src/types.ts', 'packages/core/src/agent-session-recovery/continuity-contract.ts', 'packages/core/src/agent-session-recovery/continuity-policy.ts',
     'packages/core/src/doctor.ts', 'packages/core/src/control.ts', 'packages/core/src/control-codec.ts',
     'apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/shared/contracts.ts',
     'apps/desktop/src/shared/executor-probe-context.ts', 'apps/desktop/src/renderer/src/lib/executor-detection.ts',

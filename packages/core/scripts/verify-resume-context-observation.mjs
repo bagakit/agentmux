@@ -20,7 +20,7 @@ async function bind(path) {
   inputs.set(absolute, hash)
 }
 for (const path of ['packages/core/src/client.ts', 'packages/core/src/agent-session-recovery/service.ts', 'packages/core/src/agent-session-recovery/ports.ts', 'packages/core/src/agent-session-recovery.ts', 'packages/core/src/agent-runtime-helpers.ts', 'packages/core/src/hook-normalizer.ts', 'packages/core/src/types.ts', 'packages/core/src/providers/codex.ts',
-  'packages/core/src/agent-native-locator.ts', 'packages/core/src/agent-session-store.ts', 'packages/core/src/agent-session-recovery/supervisor.ts', 'packages/core/src/agent-session-recovery/continuity.ts',
+  'packages/core/src/agent-native-locator.ts', 'packages/core/src/agent-session-store.ts', 'packages/core/src/agent-session-recovery/supervisor.ts', 'packages/core/src/agent-session-recovery/continuity-contract.ts', 'packages/core/src/agent-session-recovery/continuity-policy.ts',
   'packages/core/test/resume-context-observation.test.ts', 'packages/core/test/resume-context-observation.config.mts',
   'packages/core/test/helpers/object-cli-rpc.ts', 'packages/core/src/hosted-client-contract.ts', 'packages/core/src/public-rpc-service.ts',
   'packages/core/scripts/verify-resume-context-observation.mjs',

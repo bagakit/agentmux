@@ -8,7 +8,7 @@ const mutant = process.env.AGENTMUX_POLICY_EFFECT_MUTANT
 const edits: Record<string, [string, string, string]> = {
   automation: ['apps/desktop/src/renderer/src/components/settings/AutomationDefaultsSettingsPane.tsx', 'try { parsed = policyValue(draft.value) }', 'try { parsed = policyValue(editValue(saved)) }'],
   recovery: ['apps/desktop/src/renderer/src/components/settings/ContinuitySettingsPane.tsx', '<RetryExample policy={parsed} />', '<RetryExample policy={executionSettings(saved)} />'],
-  delay: ['packages/core/src/agent-session-recovery/continuity.ts', 'policy.retryInitialDelayMs * 2 ** Math.min(retry - 1, 52)', 'policy.retryInitialDelayMs']
+  delay: ['packages/core/src/agent-session-recovery/continuity-policy.ts', 'policy.retryInitialDelayMs * 2 ** Math.min(retry - 1, 52)', 'policy.retryInitialDelayMs']
 }
 if (mutant && !edits[mutant]) throw new Error('Unknown policy effect mutation')
 export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, resolve: { alias: aliases },

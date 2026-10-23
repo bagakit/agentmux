@@ -20,7 +20,7 @@ const mutations = [
   ['ended-fresh-input', 'restores parked interrupted working for the first new manual input'],
   ['startup-trigger', 'submits every saved ended/working candidate']
 ]
-const ownerFiles = ['packages/core/src/agent-session-recovery/continuity.ts', 'packages/core/src/client.ts', 'packages/core/src/agent-session-store.ts',
+const ownerFiles = ['packages/core/src/agent-session-recovery/continuity-contract.ts', 'packages/core/src/agent-session-recovery/continuity-policy.ts', 'packages/core/src/client.ts', 'packages/core/src/agent-session-store.ts',
   'packages/core/src/agent-session-registry.ts', 'apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/src/main/ipc.ts',
   'apps/desktop/src/preload/index.ts', 'apps/desktop/src/renderer/src/store.ts', 'apps/desktop/src/renderer/src/lib/mote-session-recovery.ts']
 const fingerprint = async () => Object.fromEntries(await Promise.all(ownerFiles.map(async file => [file,

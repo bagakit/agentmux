@@ -2,7 +2,8 @@ import { fixtureEpoch as _lateFixtureEpoch, fixturePath as _lateFixturePath } fr
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { inspectAgentSessionInterruption } from '../src/agent-session-recovery/interruption.js'
-import { agentContinuityAdmission, DEFAULT_AGENT_CONTINUITY_POLICY } from '../src/agent-session-recovery/continuity.js'
+import { DEFAULT_AGENT_CONTINUITY_POLICY } from '../src/agent-session-recovery/continuity-contract.js'
+import { agentContinuityAdmission } from '../src/agent-session-recovery/continuity-policy.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 

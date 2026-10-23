@@ -15,7 +15,7 @@ const names = {
 }
 const sourceFiles = [...Object.values(names), 'apps/desktop/scripts/verify-initial-continuity-supervision.mjs',
   'apps/desktop/scripts/fixtures/initial-continuity-supervision/vitest.config.mts', 'apps/desktop/src/renderer/src/lib/continuity-control-intent.ts',
-  'packages/core/src/agent-session-recovery/control.ts', 'packages/core/src/agent-session-recovery/continuity.ts', 'packages/core/src/client.ts']
+  'packages/core/src/agent-session-recovery/control-contract.ts', 'packages/core/src/agent-session-recovery/continuity-contract.ts', 'packages/core/src/agent-session-recovery/continuity-policy.ts', 'packages/core/src/client.ts']
 const pins = async () => Object.fromEntries(await Promise.all(sourceFiles.map(async file => [file, sha(await fs.readFile(path.join(root, file)))])))
 const before = await pins(), text = Object.fromEntries(await Promise.all(Object.entries(names).map(async ([key, file]) => [key, await fs.readFile(path.join(root, file), 'utf8')])))
 const waiting = 'shows an unstarted automatic intent and its original next check without inventing an attempt'
