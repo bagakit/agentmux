@@ -118,6 +118,10 @@ it('actual recorded refusal and waiting stay separate from adoption, and typed b
   await open(); await wait(() => expect(menu().textContent).toContain('Conversation recorded · not sent; member request access missing'))
   await f.forward('connection.grant', { operationId: 'header-explicit-grant', bindingId: binding.bindingId, expectedBindingRevision: binding.revision, grantId: 'header-input', expectedRevision: null,
     actor: { application: f.config.application, idType: 'open_id', userId: 'original-external-user' }, capabilities: ['input'], state: 'active' })
+  // This case qualifies a real durable Runtime-unavailable wait, not a transient pre-dispatch read.
+  const runtime = (f.original.client as unknown as { kernel: { isConnected(): boolean; input: ReturnType<typeof vi.fn> } }).kernel
+  vi.spyOn(runtime, 'isConnected').mockReturnValue(false)
+  const byteWrites = runtime.input.mock.calls.length
   payload.event.message.message_id = 'header-byte-original'; payload.header.event_id = 'header-byte-event'
   await f.ingressTransport!.receive(payload)
   let originalIngressId = ''
@@ -125,10 +129,17 @@ it('actual recorded refusal and waiting stay separate from adoption, and typed b
     const original = (await f.forward('connection.ingress.ls', { connectionId: binding.connectionId })).ingresses.find(value => value.kind !== 'action' && value.externalMessageId === 'header-byte-original')
     expect(original?.state).toBe('claimed'); originalIngressId = original!.ingressId
     const saved = await f.forward('connection.diagnose', { ...target, bindingId: binding.bindingId, bindingRevision: binding.revision })
-    expect(saved.groups.value?.items[0]?.incoming.value?.rows.find(row => row.ingressId === originalIngressId)?.coreStatus).toBe('waiting')
+    expect(saved.groups.value?.items[0]?.incoming.value?.rows.find(row => row.ingressId === originalIngressId)).toMatchObject({ coreStatus: 'waiting', waiting: { phase: 'runtime', reason: 'runtime-unavailable', wake: 'runtime-restored' } })
   }, { timeout: 8000 })
+  const checkStart = f.calls.length
   await check(); await wait(() => expect(menu().textContent).toContain('Waiting for Agent'))
-  const report = await f.forward('connection.diagnose', { ...target, bindingId: binding.bindingId, bindingRevision: binding.revision })
+  // This is the original completed Check snapshot, not a later observation of a progressing input.
+  const report = f.calls.slice(checkStart).find(call => call.method === 'connection.diagnose' &&
+    (call.input as { bindingId?: string }).bindingId === binding.bindingId)?.result as import('@agentmux/core/connections').ConnectionDiagnosis
+  expect(report).toBeDefined()
+  const currentReceipt = await f.original.client.inspectAgentInput({ kind: 'message-control', originalControlOperationId: report.groups.value!.items[0]!.incoming.value!.rows.find(row => row.ingressId === originalIngressId)!.inputOperationId! })
+  expect(currentReceipt).toMatchObject({ status: 'waiting', control: { state: 'enabled', waiting: { phase: 'runtime', reason: 'runtime-unavailable' } }, admission: null })
+  expect(runtime.input.mock.calls).toHaveLength(byteWrites)
   const group = report.groups.value!.items[0]!, incoming = group.incoming.value!, original = incoming.rows.find(row => row.ingressId === originalIngressId)!
   expect(original, JSON.stringify(original)).toMatchObject({ recording: { state: 'recorded' }, coreStatus: 'waiting' })
   // The strict public contract records no native adoption, or an observed unknown; neither confirms acceptance.
