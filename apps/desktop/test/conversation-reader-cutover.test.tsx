@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
-import { appendFile } from 'node:fs/promises'
+import { appendFile, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
@@ -185,6 +185,116 @@ it('explicit latest supersedes an in-flight older read and rejects its late fram
     expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
   } finally { release(); await act(async () => { await older }) }
 })
+
+async function admissionFixture() {
+  const f = await nativeHistoryFixture('claude', jsonl(Array.from({ length: 3 }, (_, index) => ({
+    type: 'user', uuid: 'lease-original-' + index, sessionId: 'native-main',
+    message: { role: 'user', content: 'Original admission body ' + index }
+  })))); closes.push(f.close)
+  await f.store.readCapturedHistory(f.session.agentSessionId, { limit: 1 })
+  const metadata = await f.store.loadMetadata(), nativeBytes = await readFile(f.path)
+  await desktopBridge(f)
+  const reference = { hostId: f.session.hostId, agentSessionId: f.session.agentSessionId }
+  const reads = vi.mocked(api.conversation.readAgentConversation), changes = vi.mocked(api.conversation.readConversationChanges)
+  const watches = vi.mocked(api.conversation.observeConversation)
+  let view!: ReturnType<typeof useConversationView>, present = true
+  function NavigationConsumer() {
+    // Exercise the original shared Hook's public admission callback, with real
+    // Core frames. This is one consumer, not a borrowed frame or another Store.
+    view = useConversationView(api.conversation, reference, true, { beforeCommit: () => present })
+    const reading = view.reading
+    return <ConversationView sessionId={reference.agentSessionId} executionHostId={reference.hostId}
+      records={reading?.records ?? []} originalRecords={reading?.originalRecords ?? []}
+      page={reading?.historyPage ?? null} timeline={reading?.captured} coverage={reading?.timeline.coverage ?? []} />
+  }
+  const { host, root } = mount()
+  await act(async () => root.render(<NavigationConsumer />))
+  await flush(() => {
+    expect(host.querySelectorAll('.log-turn__body')).toHaveLength(3)
+    expect(view.inspect()).toMatchObject({ loading: false, inFlight: false, dirty: false, error: null,
+      watch: { bound: true, closed: false } })
+  })
+  const previous = view.snapshot!, record = previous.units.flatMap(unit => unit.records)
+    .find(record => record.original.item.id === 'lease-original-0')!
+  expect(record.reference).toBeDefined()
+  const nodes = [...host.querySelectorAll<HTMLElement>('.log-turn__body')]
+  type Watch = Awaited<ReturnType<typeof api.conversation.observeConversation>>
+  const watch = async (snapshot: typeof previous): Promise<Watch> => {
+    const pages: Array<Awaited<ReturnType<typeof api.conversation.readAgentConversation>>> = await Promise.all(reads.mock.results.map(result => result.value))
+    const openings = pages.filter(page => page.window.id === snapshot.window.id).map(page => page.window.view)
+    const at = watches.mock.calls.findIndex(([input]) => input.view !== undefined && openings.includes(input.view))
+    expect(at, JSON.stringify({ originalWindowId: snapshot.window.id, acceptedView: snapshot.window.view,
+      openingViews: openings, observedViews: watches.mock.calls.map(([input]) => input.view) })).toBeGreaterThanOrEqual(0)
+    return await watches.mock.results[at]!.value
+  }
+  const originalWatch = await watch(previous)
+  const heads = () => reads.mock.calls.filter(([input]) => !input.view && !input.cursor && !input.record && !input.anchor).length
+  closes.push(async () => {
+    expect(await f.store.loadMetadata()).toEqual(metadata); expect(await readFile(f.path)).toEqual(nativeBytes)
+    expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
+  })
+  return { host, nodes, previous, originalWatch, record, reads, changes, watch, heads,
+    view: () => view, present: (allow: boolean) => { present = allow } }
+}
+
+it('same held original record resume and changes retain its navigation lease until cancellation restores only its prior frame and observer', async () => {
+  const f = await admissionFixture(), lease = new AbortController(), heads = f.heads()
+  f.present(false)
+  await act(async () => { await f.view().selectRecord(f.record.reference!, { signal: lease.signal }) })
+  const held = f.view().inspect().pending!
+  expect(held).not.toBeNull(); expect(held.window.id).not.toBe(f.previous.window.id)
+  expect(f.view().snapshot).toBe(f.previous); expect(f.view().held).toBe(true)
+  const resumed = f.reads.mock.calls.length
+  await act(async () => { await f.view().resume() })
+  expect(f.reads.mock.calls.slice(resumed)).toHaveLength(1)
+  expect(f.reads.mock.calls[resumed]![0].view).toEqual(held.window.view)
+  expect(f.view().inspect().pending?.window.id).toBe(held.window.id)
+  expect(f.view().snapshot).toBe(f.previous); expect(f.view().held).toBe(true)
+  const changes = f.changes.mock.calls.length
+  await act(async () => { await f.view().changes() })
+  expect(f.changes.mock.calls.slice(changes)).toHaveLength(1)
+  expect(f.changes.mock.calls[changes]![0].view).toEqual(held.window.view)
+  expect(f.view().inspect().pending?.window.id).toBe(held.window.id)
+  expect(lease.signal.aborted).toBe(false); expect(f.heads()).toBe(heads)
+  await act(async () => lease.abort())
+  await flush(() => {
+    expect(f.view().inspect()).toMatchObject({ loading: false, inFlight: false, held: false, pending: null,
+      watch: { bound: true, closed: false, windowId: f.previous.window.id } })
+    expect(f.view().snapshot).toBe(f.previous)
+  })
+  expect([...f.host.querySelectorAll('.log-turn__body')]).toEqual(f.nodes)
+  expect(f.nodes.every(node => node.isConnected)).toBe(true); expect(f.originalWatch.closed.aborted).toBe(false)
+  f.present(true); await act(async () => f.view().acceptHeld())
+  expect(f.view().snapshot).toBe(f.previous); expect(f.heads()).toBe(heads)
+})
+
+it('an original candidate observer closed while held is not installed and existing observation recovery keeps the original body readable', async () => {
+  const f = await admissionFixture(), lease = new AbortController(), heads = f.heads()
+  f.present(false)
+  await act(async () => { await f.view().selectRecord(f.record.reference!, { signal: lease.signal }) })
+  const held = f.view().inspect().pending!, candidate = await f.watch(held)
+  expect(held).not.toBeNull(); expect(f.view().snapshot).toBe(f.previous)
+  expect(f.view().inspect().watch.windowId).toBe(f.previous.window.id)
+  await act(async () => candidate.dispose())
+  expect(candidate.closed.aborted).toBe(true)
+  const reason: unknown = candidate.closed.reason
+  expect(reason).toBeDefined()
+  f.present(true); await act(async () => f.view().acceptHeld())
+  expect(f.view().observationError?.message).toBe(reason instanceof Error ? reason.message : String(reason))
+  expect(f.view().inspect().watch).toMatchObject({ bound: true, closed: false, windowId: f.previous.window.id })
+  expect(f.originalWatch.closed.aborted).toBe(false)
+  const body = f.host.querySelector('[data-native-record-id="lease-original-0"] .log-turn__body')
+  expect(body).toBe(f.nodes[0]); expect(body!.isConnected).toBe(true)
+  expect(body!.textContent).toContain('Original admission body 0')
+  await act(async () => { await f.view().retry() })
+  await flush(() => {
+    expect(f.view().inspect()).toMatchObject({ loading: false, inFlight: false, held: false, observationError: null,
+      watch: { bound: true, closed: false, windowId: held.window.id } })
+    expect(f.host.querySelector('[data-native-record-id="lease-original-0"] .log-turn__body')).toBe(body)
+  })
+  expect(f.heads()).toBe(heads)
+})
+
 it('the actual shared consumer holds an evicted head, then catches up its original cut when newer navigation returns to the head', async () => {
   const originals = Array.from({ length: 1400 }, (_, index) => ({ type: 'user', uuid: 'bounded-' + index, sessionId: 'native-main', message: { role: 'user', content: 'Bounded original ' + index } }))
   const f = await nativeHistoryFixture('claude', jsonl(originals)); closes.push(f.close); await desktopBridge(f)
@@ -272,7 +382,7 @@ it('actual Focus retains read Context frames and exact pinned versions while unr
   const another = { ...composerSession(secondSession.agentSessionId, 'claude'), control: { kind: 'agent' as const, hostId: 'local', agentSessionId: secondSession.agentSessionId, run: secondSession.run } }
   const unread = composerSession('unread-context', 'claude')
   const nativeRaw = vi.spyOn(api.sessions, 'historyPage'), capturedRaw = vi.spyOn(api.sessions, 'timeline')
-  vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
+  vi.spyOn(api.sessions, 'historySources').mockResolvedValue({ sources: [], warnings: [] })
   useAppStore.setState({ sessions: [session, another, unread], config: composerConfig, timelines: {}, tabs: {}, layouts: {}, agentNames: {}, agentComposerDrafts: { [session.id]: 'Original Focus draft' } })
   const contexts = createFocusProjectionSelector()(useAppStore.getState()).contexts
   const { host, root } = mount(), inspect = vi.spyOn(f.client, 'readAgentConversation'), changes = vi.spyOn(f.client, 'readConversationChanges')
@@ -362,7 +472,7 @@ it('actual Focus consumes the same five-original unified inventory as Desktop an
   vi.spyOn(Date, 'now').mockReturnValue(original.captured.createdAt + 1000)
   const baseline = useAppStore.getState(); closes.push(() => useAppStore.setState(baseline, true))
   const session = { ...composerSession(f.session.agentSessionId, 'claude'), control: { kind: 'agent' as const, hostId: 'local', agentSessionId: f.session.agentSessionId, run: f.session.run } }
-  vi.spyOn(api.sessions, 'historySources').mockResolvedValue([])
+  vi.spyOn(api.sessions, 'historySources').mockResolvedValue({ sources: [], warnings: [] })
   const raw = [vi.spyOn(api.sessions, 'historyPage'), vi.spyOn(api.sessions, 'timeline')]
   useAppStore.setState({ sessions: [session], config: composerConfig, timelines: {}, tabs: {}, layouts: {}, agentNames: {} })
   const contexts = createFocusProjectionSelector()(useAppStore.getState()).contexts, { host, root } = mount()
@@ -405,6 +515,9 @@ it('actual Activity retains a selected original native body through changes and 
   const resources = vi.spyOn(f.client, 'sessionHistoryResource'), changes = vi.spyOn(f.client, 'readConversationChanges')
   await act(async () => root.render(<ActivityView {...activityReadingProps({ control, workspaceRoot: f.root })}
     readHistoryResource={input => f.client.sessionHistoryResource(control.agentSessionId, input)} />))
+  await flush(() => expect(host.querySelector('[data-native-record-id="original-image-input"]')).not.toBeNull())
+  const deferred = host.querySelector<HTMLButtonElement>('[data-native-record-id="original-image-input"] .conversation-progressive-body__placeholder button')
+  if (deferred) await act(async () => deferred.click())
   await flush(() => expect(host.querySelector('.md-conversation-image__thumb')?.getAttribute('src')).toBe('data:image/png;base64,' + png))
   expect(resources).toHaveBeenCalledWith(control.agentSessionId, expect.objectContaining({ source: { providerId: 'claude', nativeSessionId: 'native-main' },
     recordId: original.uuid, turnId: original.user_message_uuid, partIndex: 1, expectedReference: 'data:image/png;base64,' + png }))
