@@ -32,6 +32,8 @@ it('retries the exact Capsule Browser through restore-aware reload without recre
   const create = vi.spyOn(api.browser, 'create'), reload = vi.spyOn(api.browser, 'reload').mockResolvedValue(page)
   await retry(true)
   expect(reload).toHaveBeenCalledExactlyOnceWith(page.id); expect(create).not.toHaveBeenCalled()
+  expect(container.querySelector('[aria-label="Page questions"]')?.closest('.browser-toolbar')).not.toBeNull()
+  expect(container.querySelector<HTMLElement>('.capsule-chrome')!.hidden).toBe(true)
 })
 it('keeps ordinary Browser recovery on its existing creation path', async () => {
   const create = vi.spyOn(api.browser, 'create').mockResolvedValue(page), reload = vi.spyOn(api.browser, 'reload')
