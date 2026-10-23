@@ -3,18 +3,22 @@ import { spawn, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import { createRequire } from 'node:module'
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import assertCoreDistBuiltFromCurrentSource, { staleDistComplaint } from '../vitest.dist-freshness.ts'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const mutations = process.argv.includes('--mutations')
 const run = (command, args) => execFileSync(command, args, { cwd: root, stdio: 'inherit' })
-run('pnpm', ['--filter', '@agentmux/host...', 'build'])
+await assertCoreDistBuiltFromCurrentSource()
+assert.equal(await staleDistComplaint(join(root, 'packages/capsule')), null, 'Build the current standalone Capsule package before this product proof')
+run(process.execPath, ['apps/host/scripts/build.mjs'])
 run('pnpm', ['--filter', '@agentmux/host', 'typecheck'])
-run('pnpm', ['--filter', '@agentmux/capsule', 'test'])
+run(process.execPath, ['--test', ...(await readdir(join(root, 'packages/capsule/test')))
+  .filter(name => name.endsWith('.test.mjs')).map(name => join('packages/capsule/test', name))])
 run(process.execPath, ['packages/core/scripts/verify-capsule-core.mjs', ...(mutations ? ['--mutations'] : [])])
 if (mutations) run('pnpm', ['--filter', '@agentmux/capsule', 'test:mutation'])
 
@@ -80,6 +84,8 @@ async function cli(action, input) {
 }
 async function call(action, input) {
   const response = await cli(action, input)
+  if (response.code !== 0 && input?.operationId && response.error?.code === 'CAPSULE_OPERATION_UNKNOWN')
+    process.stderr.write('Original operation observation: ' + JSON.stringify(await cli('operation.inspect', { operationId: input.operationId })) + '\n')
   assert.equal(response.code, 0, `Original public CLI must complete ${action}: ${JSON.stringify(response)}`)
   assert.equal(response.ok, true)
   return response.result
@@ -144,12 +150,26 @@ try {
   assert.equal(opened.rendering.status, 'unavailable')
   assert.equal((await call('operation.inspect', { operationId: 'headless-open' })).operation.status, 'committed')
   await stop(host)
+  await page(managed.endpoint.url, 'published-revision-two')
+  await start()
+  const service = await call('runtime.inspect')
+  await call('runtime.stop', { operationId: 'stop-for-port-conflict', expectedRevision: service.revision, expectedRun: { runId: service.run.runId } })
+  let stopped
+  for (let attempt = 0; attempt < 100; attempt++) {
+    stopped = await call('runtime.inspect')
+    if (stopped.phase === 'stopped') break
+    await new Promise(yes => setTimeout(yes, 100))
+  }
+  assert.equal(stopped.phase, 'stopped')
+  await stop(host)
   const occupied = createServer((_req, res) => res.end('private-conflict'))
   await new Promise((yes, no) => { occupied.once('error', no); occupied.listen(managed.record.port, '127.0.0.1', yes) })
   try {
     const restarted = await start()
     assert.notEqual(restarted.pid, firstHost.pid, 'A real new Host process must read the original durable data')
     assert.equal(restarted.owner.runtimeId, firstHost.owner.runtimeId)
+    assert.equal((await call('runtime.inspect')).phase, 'stopped')
+    await call('runtime.start', { operationId: 'start-with-port-conflict', expectedRevision: stopped.revision })
     const retained = await call('inspect', { capsuleId: managed.record.capsuleId })
     assert.equal(retained.record.port, managed.record.port); assert.equal(retained.record.revision, 2)
     assert.equal(retained.endpoint.status, 'unavailable', 'A conflict must retain the original endpoint, never silently choose another port')
@@ -171,32 +191,37 @@ try {
 
   if (mutations) {
     const require = createRequire(join(root, 'apps/host/package.json'))
-    const { build } = require('esbuild')
+    const { transform } = require('esbuild')
     const entry = join(fixture, 'host-without-capsule.mjs')
-    await symlink(join(root, 'apps/host/node_modules'), join(fixture, 'node_modules'), 'dir')
-    let loaded
-    await build({ entryPoints: [join(root, 'apps/host/src/index.ts')], outfile: entry, bundle: true, packages: 'external',
-      platform: 'node', format: 'esm', target: 'node24', plugins: [{ name: 'capsule-owner-mutation', setup(builder) {
-        builder.onLoad({ filter: /apps\/host\/src\/host\.ts$/ }, async args => {
-          const original = await readFile(args.path, 'utf8')
-          assert.equal(original.split('capsules: capsules.port,').length, 2, 'Mutant must select exactly one actual production composition')
-          const contents = original.replace('capsules: capsules.port,', 'capsules: undefined,')
-          loaded = { original: createHash('sha256').update(original).digest('hex'), consumed: createHash('sha256').update(contents).digest('hex') }
-          return { contents, loader: 'ts' }
-        })
-      } }] })
-    assert.ok(loaded && loaded.original !== loaded.consumed, 'The production Host must consume the changed source')
+    const modules = join(fixture, 'node_modules/@agentmux'), isolatedCore = join(modules, 'core')
+    await mkdir(isolatedCore, { recursive: true })
+    await cp(join(root, 'packages/core/dist'), join(isolatedCore, 'dist'), { recursive: true })
+    await cp(join(root, 'packages/core/package.json'), join(isolatedCore, 'package.json'))
+    await symlink(join(root, 'packages/core/node_modules'), join(isolatedCore, 'node_modules'), 'dir')
+    await symlink(join(root, 'packages/core/vendor'), join(isolatedCore, 'vendor'), 'dir')
+    for (const name of ['capsule', 'relay']) await symlink(join(root, 'packages', name), join(modules, name), 'dir')
+    await cp(join(root, 'apps/host/dist/index.js'), entry)
+    const original = await readFile(join(root, 'packages/core/src/headless-runtime.ts'), 'utf8')
+    const anchor = 'capsules: options.service?.capsules ?? capsules,'
+    assert.equal(original.split(anchor).length, 2, 'Mutant must consume the actual default Core owner composition')
+    const changed = original.replace(anchor, 'capsules: options.service?.capsules,')
+    assert.notEqual(createHash('sha256').update(original).digest('hex'), createHash('sha256').update(changed).digest('hex'))
+    await writeFile(join(isolatedCore, 'dist/headless-runtime.js'), (await transform(changed, { loader: 'ts', format: 'esm', target: 'node24' })).code)
     await start(entry)
     let semanticRed = false
     try { await call('create', { operationId: 'must-use-host-owner', sourcePath: replacement }) }
     catch (error) { semanticRed = error.code === 'ERR_ASSERTION' && error.message.includes('Original public CLI must complete create') }
-    assert.ok(semanticRed, 'Removing the actual Host owner must break the real CLI outcome')
+    assert.ok(semanticRed, 'Removing the actual default Core owner must break the real CLI outcome')
     await stop(host)
     await start()
     assert.equal((await call('resolve', { capsuleId: managed.record.capsuleId })).endpoint.status, 'available')
   }
   process.stdout.write(`Capsule public path: real CLI, Host, HTTP, persistent identities and process restart passed${mutations ? '; source mutations passed' : ''}.\n`)
 } finally {
+  if (host?.exitCode === null && host?.signalCode === null) try {
+    const service = await call('runtime.inspect')
+    if (service.desired === 'running') await call('runtime.stop', { operationId: 'public-proof-cleanup', expectedRevision: service.revision, expectedRun: service.run ? { runId: service.run.runId } : null })
+  } catch {}
   await stop(host); await stop(daemon)
   await rm(fixture, { recursive: true, force: true })
 }
