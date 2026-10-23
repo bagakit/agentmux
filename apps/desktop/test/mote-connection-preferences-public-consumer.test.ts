@@ -8,7 +8,7 @@ import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import { AgentMuxSpatialStateStore, spatialCatalog } from '@agentmux/core/spatial-state'
 import { moteConnectionBaseline, parseMotePreferencesReadResult, parseMotePreferencesSaveParams, parseMotePreferencesSaveResult,
   type MoteConnectionPreferencesSaveParams, type MoteConnectionValues } from '@agentmux/core/mote-preferences'
-import { createConnectionServices } from '../src/main/connector-host'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { MoteConnectionPreferences } from '../src/main/mote-connection-preferences'
 import { registerMotePreferencesIpc, type MotePreferencesIpcChannel } from '../src/main/mote-preferences-ipc'
 import { assertSenderTrusted, senderTrust } from '../src/main/ipc-sender-trust'
@@ -48,9 +48,7 @@ async function fixture(fault?: 'receipt' | 'occupy') {
   const noteWriter = new NoteFileWriter(files)
   const publicFiles = new FileReadOwner({ catalog, workspace: id => id === workspace.id ? workspace : undefined,
     files: { read: noteWriter.read.bind(noteWriter), listFiles: files.listFiles.bind(files), write: noteWriter.write.bind(noteWriter) } })
-  const connections = await createConnectionServices({ directory: join(root, 'connections'), encryption: {
-    isAsyncEncryptionAvailable: async () => false, encryptStringAsync: async () => { throw new Error('Preferences cannot request a credential') }, decryptStringAsync: async () => { throw new Error('Preferences cannot read a credential') }
-  } })
+  const connections = await createConnectionServices({ directory: join(root, 'connections') })
   clean.push(() => connections.close())
   await connections.connections.configure({ operationId: 'configure-original', expectedRevision: null, connection: {
     connectionId: values.connection!.connectionId, adapterId: 'feishu', application: values.connection!.application,

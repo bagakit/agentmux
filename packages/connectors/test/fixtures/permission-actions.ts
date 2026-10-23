@@ -77,7 +77,6 @@ export async function permissionActionsFixture(initialCoreAvailable = true) {
       return sdk.request({ url: path })
     })
     const services = await createConnectionServices({ directory: join(original.root, 'connectors'),
-      encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) },
       bindings: { spatial, checkpoint: async ref => await hosted.conversationCheckpoint(ref) },
       publication: createPublicationConversationPort(clients), ingress: { core: hostId => coreAvailable ? ingressCore(hostId) : undefined } })
     cleanup.push(() => services.close())

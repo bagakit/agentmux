@@ -21,8 +21,6 @@ afterAll(async () => { if (process.env.HOST_CONNECTION_FACTS) await writeFile(pr
   facts: runtimeFacts
 }, null, 2) + '\n') })
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
-const encryption = { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async (value: string) => Buffer.from(value),
-  decryptStringAsync: async (value: Buffer) => ({ result: value.toString(), shouldReEncrypt: false }) }
 
 /** Real original Host/Core/SQLite/public endpoint; only native platform and Runtime I/O leaves are controlled. */
 async function independentHost() {
@@ -39,7 +37,7 @@ async function independentHost() {
   await writeFile(transcript, native('private-before-sharing', 'Original earlier unshared answer'))
   await mkdir(directory)
   // Seed only synthetic credential bytes through the original credential owner; never a second connection/SDK owner.
-  const database = new DatabaseSync(join(directory, 'connections.sqlite')), secrets = new ConnectionSecrets(database, encryption)
+  const database = new DatabaseSync(join(directory, 'connections.sqlite')), secrets = new ConnectionSecrets(database)
   const configs: ConnectionConfig[] = []
   for (const config of [feishuConfig, discordConfig]) {
     const receipt = await secrets.store({ operationId: config.adapterId + '-secret', secret: 'synthetic-' + config.adapterId })
@@ -61,7 +59,7 @@ async function independentHost() {
     try {
       host = await startAgentMuxHost({ store: original.store, socketPath,
         desktopSocketPath: join(original.root, 'never-created-desktop.sock'), mobileBuildDirectory: join(original.root, 'absent-mobile-assets'),
-        connections: { directory, encryption } })
+        connections: { directory } })
       await vi.waitFor(() => expect((host!.client as unknown as typeof original.inner).connected).toBe(true))
       return host
     } finally { connect.mockRestore() }

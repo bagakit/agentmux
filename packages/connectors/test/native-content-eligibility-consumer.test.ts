@@ -64,7 +64,6 @@ async function fixture(providerId: 'codex' | 'claude' | 'droid' = 'codex') {
   let credentialReadable = true
   let activeServices: Awaited<ReturnType<typeof createConnectionServices>>
   const openServices = async () => activeServices = await createConnectionServices({ directory: join(original.root, 'host'), adapters,
-    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async bytes => { if (!credentialReadable) throw new Error('Fixture credential temporarily unavailable'); return { result: (bytes.toString()), shouldReEncrypt: false } } },
     bindings: { spatial, checkpoint: ref => original.client.conversationCheckpoint(ref) }, publication: port })
   const services = await openServices()
   closes.push(() => services.close())

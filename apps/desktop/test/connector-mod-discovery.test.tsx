@@ -13,7 +13,6 @@ import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
 import { composerDOM } from './helpers/composer-dom-fixture'
-import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 
 const dom = composerDOM(), privateDevice = 'private-mod-discovery-challenge'
@@ -26,7 +25,7 @@ beforeEach(async () => {
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', fileURLToPath(new NodeURL('../../../packages/core/bin/amux', import.meta.url)))
   asset = await readFile(join(import.meta.dirname, '../resources/icon-512.png'))
   directory = await mkdtemp(join(tmpdir(), 'lark-settings-'))
-  services = await createConnectionServices({ directory, encryption: enrollmentEncryption() })
+  services = await createConnectionServices({ directory })
   server = new AgentMuxControlServer({ socketPath: join(directory, 'public.sock'), connections: services.connections,
     coreClients: () => { throw new Error('Discovering a Mod cannot borrow an Agent Runtime') } })
   await server.start()

@@ -32,7 +32,6 @@ async function fixture() {
     ? new Response(JSON.stringify({ message: 'Unauthorized', code: 0 }), { status: 401, headers: { 'content-type': 'application/json' } })
     : wire.http.makeRequest!(url, init) } })
   const services = await createConnectionServices({ directory: join(original.root, 'discord-settings'), adapters: [adapter],
-    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
     bindings: { spatial: original.spatial, checkpoint: ref => original.client.conversationCheckpoint(ref) }, ingress: { core: hostId => hostId === 'local' ? original.client : undefined } })
   cleanup.push(() => services.close())
   const server = new AgentMuxControlServer({ socketPath: join(original.root, 'discord-ui.sock'), connections: services.connections, coreClients: original.coreClients })

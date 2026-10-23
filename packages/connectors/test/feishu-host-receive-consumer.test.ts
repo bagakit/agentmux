@@ -149,7 +149,6 @@ it('Desktop default registration receives an exact SDK reply after durable ACK t
   // Only platform network I/O is controlled. The original default adapter registry and Host composition are used.
   vi.spyOn(defaultHttpInstance, 'request').mockImplementation(sdk.http.request)
   const services = await createConnectionServices({ directory: join(original.root, 'desktop-feishu'),
-    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) },
     bindings: { spatial: original.spatial, checkpoint: async ref => await original.client.conversationCheckpoint(ref) },
     ingress: { core: hostId => hostId === 'local' ? original.client : undefined } })
   cleanup.push(() => services.close())

@@ -71,7 +71,6 @@ async function fixture(coreAvailable = true, execution: 'direct' | 'hosted' | 'n
   const coreResolver = vi.fn((host: string) => coreAvailable && host === 'local' ? inputCore(host) : undefined)
   const wire = signedRoomAdapter()
   const services = await createConnectionServices({ directory: join(original.root, 'connectors'), adapters: [wire.adapter],
-    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) },
     bindings: { spatial, checkpoint: async ref => await (hosted ?? original.client).conversationCheckpoint(ref) },
     publication: createPublicationConversationPort(executionClients), ingress: { core: coreResolver } })
   cleanup.push(() => services.close())

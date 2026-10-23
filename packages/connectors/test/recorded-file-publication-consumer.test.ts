@@ -98,7 +98,6 @@ async function fixture(scope: 'future-shared-conversation' | 'future-native-user
   } })
   const remote = await platform(), port = createPublicationConversationPort(h.coreClients)
   const openServices = () => createConnectionServices({ directory: join(h.root, 'file-host'),
-    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async data => ({ result: (data.toString()), shouldReEncrypt: false }) },
     bindings: { spatial, checkpoint: ref => h.client.conversationCheckpoint(ref) }, publication: port })
   let services = await openServices(); closes.push(() => services.close())
   const credential = await services.secrets.store({ operationId: 'file-credential', secret: 'fixture-file-credential' })

@@ -46,9 +46,7 @@ async function fixture(providerId = 'claude', currentSource = false) {
     bindings: [{ zoneId: 'zone', spaceId: 'space' }], layouts: { resource: createWorkspaceLayout('group', ['tab']) },
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'region' }, activeRegionId: 'region' } }, resources: {}
   } })
-  const serviceOptions: Parameters<typeof createConnectionServices>[0] = { directory: join(f.root, 'connections'), encryption: {
-    isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async bytes => ({ result: bytes.toString(), shouldReEncrypt: false })
-  }, bindings: { spatial, checkpoint: input => f.client.conversationCheckpoint(input) }, ingress: { core: host => host === 'local' ? f.client : undefined }, publication: createPublicationConversationPort(f.coreClients) }
+  const serviceOptions: Parameters<typeof createConnectionServices>[0] = { directory: join(f.root, 'connections'), bindings: { spatial, checkpoint: input => f.client.conversationCheckpoint(input) }, ingress: { core: host => host === 'local' ? f.client : undefined }, publication: createPublicationConversationPort(f.coreClients) }
   let services = await createConnectionServices(serviceOptions); cleanup.push(() => services.close())
   expect(createBuiltinConnectionAdapters().map(adapter => adapter.adapterId)).toContain('discord')
   const credential = await services.secrets.store({ operationId: 'discord-secret', secret: 'fixture-bot-token' })

@@ -2,7 +2,6 @@
 import { act } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { moteConnectionBaseline } from '@agentmux/core/mote-preferences'
-import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment'
 import { enrollmentInitialWeb } from '../../../packages/connectors/test/fixtures/connection-enrollment-initial'
 import { moteConnectionJourney } from './fixtures/mote-connection-journey'
 import { moteClick, settleMoteApp } from './fixtures/mote-app'
@@ -11,7 +10,7 @@ let f: Awaited<ReturnType<typeof moteConnectionJourney>>
 afterEach(async () => { await f?.dispose(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
 
 async function managedIdentity(unknownEffect: string | null) {
-  f = await moteConnectionJourney({ encryption: enrollmentEncryption() })
+  f = await moteConnectionJourney()
   const web = enrollmentInitialWeb({ unknownEffect })
   vi.stubGlobal('fetch', web.fetch)
   let view = await f.client.call('connection.enrollment.begin', { operationId: 'managed-original', connectionId: 'managed-bot', adapterId: 'feishu', domain: 'open.feishu.cn', label: 'AMUX identity',

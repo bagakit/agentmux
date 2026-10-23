@@ -75,10 +75,7 @@ async function fixture() {
     bindings: [{ zoneId: 'zone', spaceId: 'space' }], layouts: { workspace: createWorkspaceLayout('group', ['tab']) },
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'original-region' }, activeRegionId: 'original-region' } }, resources: {}
   } })
-  const services = await createConnectionServices({ directory: join(f.root, 'connections'), encryption: {
-    isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value),
-    decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false })
-  }, bindings: { spatial, checkpoint: input => f.client.conversationCheckpoint(input) }, publication: createPublicationConversationPort(f.coreClients) })
+  const services = await createConnectionServices({ directory: join(f.root, 'connections'), bindings: { spatial, checkpoint: input => f.client.conversationCheckpoint(input) }, publication: createPublicationConversationPort(f.coreClients) })
   cleanup.push(() => services.close())
   for (const config of [feishuConfig, discordConfig]) {
     const secret = await services.secrets.store({ operationId: config.adapterId + '-secret', secret: 'controlled-private-' + config.adapterId })

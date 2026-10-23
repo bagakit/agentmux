@@ -69,8 +69,7 @@ if (mode === 'execution') {
     } } })
 } else {
   const { createConnectionServices } = await import('../../src/connection-services.ts')
-  const owner = await createConnectionServices({ directory: root,
-    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) }, adapters: [] })
+  const owner = await createConnectionServices({ directory: root, adapters: [] })
   const service = owner.connections.service, configure = service.configure.bind(service)
   service.configure = async input => {
     const result = await configure(input)

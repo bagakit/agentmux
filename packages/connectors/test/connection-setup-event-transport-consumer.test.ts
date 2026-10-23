@@ -9,7 +9,6 @@ import { AgentMuxControlServer, connectAgentMuxRpc, AgentMuxError } from '@agent
 import type { ConnectionSetupAction, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupConfigurationEffect, ConnectionSetupView } from '@agentmux/core/connections'
 import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { createConnectionServices } from '../src/connection-services.js'
-import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 
 const APP = 'cli_event_transport_original', effect = 'use-persistent-connection' as const
@@ -27,7 +26,7 @@ function action(view: ConnectionSetupView, kind: ConnectionSetupAction['kind']):
 }
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'event-transport-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock')
-  const services = await createConnectionServices({ directory, encryption: enrollmentEncryption() })
+  const services = await createConnectionServices({ directory })
   const server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw Error('Event transport cannot borrow an Agent Runtime') } })
   await server.start()
   const sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })

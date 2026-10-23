@@ -14,7 +14,6 @@ import { api } from '../src/renderer/src/lib/api'
 import { createMoteApp } from './fixtures/mote-app'
 import { useAppStore } from '../src/renderer/src/store'
 import { defaultAgent, ordinaryAgent } from './fixtures/mote-workface'
-import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
 
 const APP = 'cli_guided_setup', VERSION = 'guided-original-version'
 let app: ReturnType<typeof createMoteApp>
@@ -28,7 +27,7 @@ beforeEach(async () => {
   failObservation = false; accept = true; native = []; calls = []
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   directory = await mkdtemp(join(tmpdir(), 'settings-publication-transport-'))
-  services = await createConnectionServices({ directory: join(directory, 'connections'), encryption: enrollmentEncryption() })
+  services = await createConnectionServices({ directory: join(directory, 'connections') })
   server = new AgentMuxControlServer({ socketPath: join(directory, 'owner.sock'), connections: services.connections, coreClients: () => { throw new Error('Publication settings cannot borrow an Agent Runtime') } })
   await server.start()
   const handlers = new Map<string, (...args: any[]) => Promise<unknown>>(), sender = { ownedRenderer: true }

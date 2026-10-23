@@ -24,7 +24,7 @@ import { feishuConfig, feishuSdkTransport, botOpenId } from '../../../../package
 import { createPublicationConversationPort } from '../../../../packages/connectors/src/core-conversation-port.js'
 import { defaultHttpInstance, type RoomReadWire } from '../../../../packages/connectors/test/fixtures/room-discovery.js'
 
-/** Production Renderer, IPC, public Core and Desktop Host; only encryption/adapter/terminal leaves are controlled. */
+/** Production Renderer, IPC, public Core and Desktop Host; only adapter/terminal I/O leaves are controlled. */
 export function connectorJourneyFixture(options: { platform?: (request: RoomReadWire) => Promise<unknown>; publication?: boolean; ingress?: boolean; connection?: ConnectionConfig; adapter?(): ConnectionAdapter } = {}) {
   const dom = composerDOM(), settings = vi.fn()
   let original: Awaited<ReturnType<typeof roomProvisioningFixture>>, services: Awaited<ReturnType<typeof createConnectionServices>>
@@ -62,7 +62,6 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     })
     vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
     services = await createConnectionServices({ directory: join(original.root, 'ui-connections'), ...(options.platform ? {} : { adapters: [options.adapter?.() ?? original.adapter] }), bindings: { spatial: original.spatial, checkpoint: original.checkpoint },
-      encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
       ...(options.ingress ? { ingress: { core: hostId => hostId === 'local' ? original.client : undefined } } : {}),
       ...(options.publication ? { publication: createPublicationConversationPort(() => [{ hostId: 'local', client: original.client }]) } : {}) })
     const secret = await services.secrets.store({ operationId: 'ui-credential', secret: 'controlled-host-credential' })
@@ -95,7 +94,7 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
       const test = expect.getState().currentTestName!, directory = resolve(process.env['AGENTMUX_TEST_CONNECTOR_ARTIFACTS'] ?? '.bagakit/feature-tracker/features/f-2wr8fmvnv/artifacts/T-013-relationship-consumers')
       await mkdir(directory, { recursive: true })
       await writeFile(join(directory, createHash('sha256').update(test).digest('hex').slice(0, 12) + '.json'), JSON.stringify({
-        test, scope: 'Mounted original Workbench/menu/Composer through trusted IPC and compiled public Core/CLI into the original Desktop Host. Adapter, encryption and terminal rendering are controlled; no real platform or provider qualification.',
+        test, scope: 'Mounted original Workbench/menu/Composer through trusted IPC and compiled public Core/CLI into the original Desktop Host. Adapter I/O and terminal rendering are controlled; no real platform or provider qualification.',
         publicCalls: calls, platformBoundary: options.platform ? 'Original default adapter registry and official SDK; HTTP I/O only is controlled.' : 'Controlled room adapter.', platformCalls,
         originalRoomRequests: original.create.mock.calls.map(call => call[0]), originalMemberRequests: original.addMembers.mock.calls.map(call => call[0]),
         retainedClientIntents: useAppStore.getState().connectorRoomIntents, originalDraft: useAppStore.getState().agentComposerDrafts['original-agent']

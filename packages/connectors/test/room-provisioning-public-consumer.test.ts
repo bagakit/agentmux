@@ -10,8 +10,7 @@ const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 async function fixture() {
   const f = await roomProvisioningFixture({ managedCaller: true }); cleanup.push(() => f.close())
-  const services = await createConnectionServices({ directory: join(f.root, 'desktop-rooms'), adapters: [f.adapter], bindings: { spatial: f.spatial, checkpoint: f.checkpoint },
-    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) } })
+  const services = await createConnectionServices({ directory: join(f.root, 'desktop-rooms'), adapters: [f.adapter], bindings: { spatial: f.spatial, checkpoint: f.checkpoint } })
   cleanup.push(() => services.close())
   const secret = await services.secrets.store({ operationId: 'public-room-credential', secret: 'private-fixture-credential' })
   await services.connections.configure({ operationId: 'public-room-configure', expectedRevision: null, connection: { ...config, credentialRef: secret.credentialRef } })

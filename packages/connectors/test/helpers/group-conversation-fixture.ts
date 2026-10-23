@@ -72,7 +72,6 @@ export async function groupConversationFixture(running = false, updatePublicatio
   let services: Awaited<ReturnType<typeof createConnectionServices>>, desktop: core.AgentMuxControlServer, rpc: Awaited<ReturnType<typeof core.connectAgentMuxRpc>>
   async function open() {
     services = await createConnectionServices({ directory: join(f.root, 'connectors'), adapters: [adapter],
-      encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
       bindings: { spatial, checkpoint: ref => hosted.conversationCheckpoint(ref) }, publication: createPublicationConversationPort(clients), ingress: { core: createHostedIngressCorePort(clients) } })
     desktop = new core.AgentMuxControlServer({ socketPath: desktopPath, connections: services.connections, spatialState: spatial, coreClients: clients })
     await desktop.start(); rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: desktop.path } })

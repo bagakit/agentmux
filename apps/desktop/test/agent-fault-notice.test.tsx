@@ -59,7 +59,7 @@ vi.mock('@agentmux/core', async (importOriginal) => ({
   ...await importOriginal<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { async start() {} async stop() {} }
 }))
-vi.mock('../src/main/connector-host', () => ({ createConnectionServices: async () => ({ connections: {}, secrets: {}, close() {} }) }))
+vi.mock('@agentmux/connectors', async actual => ({ ...await actual<typeof import('@agentmux/connectors')>(), createConnectionServices: async () => ({ connections: {}, secrets: {}, close() {} }) }))
 vi.mock('@agentmux/core/notebook-store', async importOriginal => {
   const actual = await importOriginal<typeof import('@agentmux/core/notebook-store')>()
   return { ...actual, AgentMuxNotesStorage: class extends actual.AgentMuxNotesStorage {

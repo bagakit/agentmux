@@ -8,7 +8,6 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc, AgentMuxError } from '@agentmux/core'
 import { createConnectionServices } from '../src/connection-services.js'
 import { ConnectionSecrets } from '../src/connection-secrets.js'
-import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import type { ConnectionSetupView, ConnectionSetupListing } from '@agentmux/core/connections'
 
@@ -26,7 +25,7 @@ async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'setup-continuation-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock')
   let services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>, closed = false
   const open = async () => {
-    services = await createConnectionServices({ directory, encryption: enrollmentEncryption() })
+    services = await createConnectionServices({ directory })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw Error('Local handoff cannot borrow an Agent Runtime') } })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } }); closed = false
   }

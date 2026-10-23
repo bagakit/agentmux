@@ -17,8 +17,6 @@ it.each([false, true])('default Host Mote join reads its original AppConfig-only
   } } }))
   const previous = f.client as unknown as Record<string, any>
   const connection = createHostConnectionOwner({ directory: join(f.root, 'connectors'),
-    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value),
-      decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
     spatial: new core.AgentMuxSpatialStateStore(join(f.root, 'spatial.json')), moteConfigurationPath: f.configurationPath,
     adapters: [{ ...f.wire.adapter, ingress: { ...f.wire.adapter.ingress!, verify: async (...args) => {
       const event = await f.wire.adapter.ingress!.verify(...args)

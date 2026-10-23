@@ -41,10 +41,7 @@ it('one original session broadcasts public human and Agent speech to Feishu and 
     bindings: [{ zoneId: 'zone', spaceId: 'space' }], layouts: { resource: createWorkspaceLayout('group', ['tab']) },
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'region' }, activeRegionId: 'region' } }, resources: {}
   } })
-  const services = await createConnectionServices({ directory: join(f.root, 'connections'), encryption: {
-    isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value),
-    decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false })
-  }, bindings: { spatial, checkpoint: input => f.client.conversationCheckpoint(input) },
+  const services = await createConnectionServices({ directory: join(f.root, 'connections'), bindings: { spatial, checkpoint: input => f.client.conversationCheckpoint(input) },
   ingress: { core: host => host === 'local' ? f.client : undefined }, publication: createPublicationConversationPort(f.coreClients) })
   cleanup.push(() => services.close())
   const bindings: RoomBinding[] = []
