@@ -330,6 +330,15 @@ export class NativeJsonlHistoryReader {
     } finally { this.forwardPosition = original; this.lastForwardStart = originalLastStart }
   }
 
+  /** Inspect the original record immediately before the validated changes cut.
+   * Provider lineage checks must not move either paging direction. */
+  async readBeforeChanges(): Promise<NativeJsonlHistoryRecord | null> {
+    const original = this.position, originalEnd = this.lastRecordEnd
+    this.position = this.forwardPosition
+    try { return await this.readPrevious() }
+    finally { this.position = original; this.lastRecordEnd = originalEnd }
+  }
+
   /** Forward metadata reads reuse the same bounded parser; large message text stays unmaterialized. */
   async readNext(): Promise<NativeJsonlHistoryRecord | null> {
     while (this.forwardPosition < this.cut) {
@@ -437,7 +446,8 @@ export class NativeJsonlHistoryReader {
     await this.verifyUnchanged()
     const before = Math.min(this.context.cursor ? decodeCursor(this.context.cursor).before : this.cut, this.cut)
     return Buffer.from(JSON.stringify({ version: 1, ...this.context.source, path: this.context.transcriptPath!,
-      ...this.identity, cut: this.cut, before, head: this.head, tail: this.tail })).toString('base64url')
+      ...this.identity, cut: this.cut, before, head: this.head, tail: this.tail,
+      ...(this.continuation === undefined ? {} : { continuation: this.continuation }) })).toString('base64url')
   }
 
   async nextCursor(continuation?: string): Promise<string | null> {
