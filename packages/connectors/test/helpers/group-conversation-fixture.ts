@@ -10,13 +10,13 @@ import { hostedTestOwner } from '../../../core/test/helpers/hosted-runtime-port.
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../core/test/helpers/object-cli-rpc.js'
 import { createWorkspaceLayout } from '../../../core/src/spatial-layout.js'
 import { createConnectionServices } from '../../src/connection-services.js'
-import { createDesktopExternalInputAuthority } from '../../../../apps/host/src/external-input-authority.js'
+import { createRpcExternalInputAuthority } from './rpc-external-input-authority.js'
 import { createHostedIngressCorePort, createPublicationConversationPort, type ConnectionAdapter } from '@agentmux/connectors'
 import { signedRoomAdapter, type SignedRoomMessage } from '../fixtures/signed-room-adapter.js'
 
 export const cleanup: Array<() => void | Promise<void>> = []
 export async function groupConversationFixture(running = false, updatePublications = false, nativeOutcome?: 'admitted' | 'unknown' | 'not-applied') {
-  let bridge: ReturnType<typeof createDesktopExternalInputAuthority>
+  let bridge: ReturnType<typeof createRpcExternalInputAuthority>
   class Owner extends core.AgentMuxClient {
     constructor(options: { store: core.AgentMuxAgentSessionStore }) {
       super({ ...options, externalConversationAuthority: { resolveConversationMessage: input => bridge.resolveConversationMessage!(input) } })
@@ -49,7 +49,7 @@ export async function groupConversationFixture(running = false, updatePublicatio
   const spatial = new core.AgentMuxSpatialStateStore(join(f.root, 'spatial.json'))
   await spatial.commit({ expectedRevision: 0, graph: { spaces: [{ spaceId: 'space', kind: 'topic', name: 'Original', hostId: 'local', directoryPath: f.root, projectId: 'project' }], zones: [{ zoneId: 'zone', workspaceId: 'workspace', kind: 'directory', hostId: 'local', directoryPath: f.root, branch: null }], tabs: [{ tabId: 'tab', zoneId: 'zone', workspaceId: 'workspace', name: null, regionIds: ['region'] }], regions: [{ regionId: 'region', tabId: 'tab', kind: 'agent', agentSessionId: 'original-agent', runId: null, execution: { hostId: 'local', cwd: f.root } }], bindings: [{ zoneId: 'zone', spaceId: 'space' }], layouts: { workspace: createWorkspaceLayout('group', ['tab']) }, tabLayouts: { tab: { root: { type: 'leaf', regionId: 'region' }, activeRegionId: 'region' } }, resources: {} } })
   const desktopPath = join(f.root, 'desktop.sock')
-  bridge = createDesktopExternalInputAuthority({ desktopSocketPath: desktopPath, executionHostId: 'local' })
+  bridge = createRpcExternalInputAuthority({ socketPath: desktopPath, executionHostId: 'local' })
   const runtime = new AgentMuxHostedRuntimeService(f.client, f.store.path, () => hostedTestOwner(f.client), undefined, bridge)
   cleanup.push(() => runtime.dispose())
   const host = new core.AgentMuxControlServer({ socketPath: join(f.root, 'host.sock'), coreClients: f.coreClients, hostedRuntime: () => runtime })

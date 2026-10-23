@@ -18,8 +18,8 @@ registerHooks({ resolve(specifier, context, next) {
 const root = process.argv[2], mode = process.argv[3]
 if (mode === 'execution') {
   const { startAgentMuxHost } = await import('../../../../apps/host/src/host.ts')
-  const { createDesktopExternalInputAuthority } = await import('../../../../apps/host/src/external-input-authority.ts')
-  const authority = createDesktopExternalInputAuthority({ desktopSocketPath: join(root, 'service.sock'), executionHostId: 'local' })
+  const { createRpcExternalInputAuthority } = await import('../helpers/rpc-external-input-authority.ts')
+  const authority = createRpcExternalInputAuthority({ socketPath: join(root, 'service.sock'), executionHostId: 'local' })
   let checks = 0, release
   const held = Number(process.argv[4])
   process.on('message', message => { if (message.kind === 'release-authority') release?.() })
