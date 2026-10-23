@@ -90,6 +90,7 @@ export async function connectSshAgentMux(
       ...(options.expectedRuntimeId === undefined ? {} : { expectedRuntimeId: options.expectedRuntimeId }),
       ...(options.waitForReady === undefined ? {} : { waitForReady: options.waitForReady }),
       ...(options.consumerId === undefined ? {} : { consumerId: options.consumerId }),
+      subscribeRpc: (method, params, handlers) => rpc.subscribe(method, params, handlers),
       forwardRpc: (method, params, context = {}) => rpc.call(method, params, {
         ...(context.signal === undefined ? {} : { signal: context.signal }),
         ...(context.caller === undefined ? {} : { credentials: context.caller }),
