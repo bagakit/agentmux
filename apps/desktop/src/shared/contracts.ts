@@ -1601,6 +1601,10 @@ export type ThemeFileExportResult = { status: 'saved'; path: string } | { status
 
 export type AgentMuxDesktopApi = {
   capsules: import('@agentmux/core/capsule').CapsulePort
+  agentLearning: {
+    call<M extends import('@agentmux/core/agent-learning').AgentLearningMethod>(method: M, input: import('@agentmux/core/agent-learning').AgentLearningParamsMap[M]): Promise<import('@agentmux/core/agent-learning').AgentLearningResultMap[M]>
+    confirm(input: import('@agentmux/core/agent-learning').AgentLearningConfirm): Promise<import('@agentmux/core/agent-learning').AgentLearningResultMap['agent.learning.confirm']>
+  }
   capsuleRuntime: import('@agentmux/core').CapsuleRuntimePort
   capsuleReplies: { confirm(input: import('@agentmux/core/capsule').CapsuleParamsMap['capsule.interaction.reply']): Promise<import('@agentmux/core/capsule').CapsuleReplyResult> }
   clientIncidents: {

@@ -24,7 +24,7 @@ export async function callOriginalDesktopHost<M extends AgentMuxRpcMethod>(clien
   return await call(method, params, context, expectedOwner)
 }
 
-async function ensureHost(storePath: string, socketPath: string): Promise<void> {
+async function ensureHost(storePath: string, socketPath: string, configurationPath?: string): Promise<void> {
   const liveness = await probeSocketLiveness(socketPath)
   if (liveness !== 'dead') return
   let launching = launches.get(socketPath)
@@ -37,7 +37,8 @@ async function ensureHost(storePath: string, socketPath: string): Promise<void> 
       try {
         child = spawn(process.execPath, [join(import.meta.dirname, 'agentmux-host.js'), '--store', storePath], {
           detached: true, stdio: ['ignore', log.fd, log.fd],
-          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', AGENTMUX_AGENT_SESSION_STORE: storePath, AGENTMUX_MOBILE_BUILD_DIRECTORY: join(import.meta.dirname, '../mobile') }
+          env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', AGENTMUX_AGENT_SESSION_STORE: storePath, AGENTMUX_MOBILE_BUILD_DIRECTORY: join(import.meta.dirname, '../mobile'),
+            ...(configurationPath === undefined ? {} : { AGENTMUX_HOST_CONFIGURATION_PATH: configurationPath }) }
         })
         child.once('exit', retire)
         await new Promise<void>((resolve, reject) => {
@@ -67,7 +68,7 @@ async function ensureHost(storePath: string, socketPath: string): Promise<void> 
 }
 
 /** Product connector: the Desktop never constructs a local semantic Core owner. */
-export const connectDesktopAgentMuxHost: DesktopRuntimeConnector = async (config, store) => {
+async function connectOriginalDesktopHost(config: HostConfig, store: AgentMuxAgentSessionStore, configurationPath?: string): Promise<DesktopRuntimeClient> {
   if (config.kind === 'ssh') return await connectSshAgentMux({ waitForReady: false,
     ...(config.runtimeId ? { expectedRuntimeId: config.runtimeId } : {}), target: { hostId: config.id,
     hostname: config.hostname, ...(config.user ? { user: config.user } : {}),
@@ -79,7 +80,7 @@ export const connectDesktopAgentMuxHost: DesktopRuntimeConnector = async (config
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   const prepare = async (signal?: AbortSignal) => {
     signal?.throwIfAborted()
-    await observeRead(ensureHost(store.path, socketPath), signal)
+    await observeRead(ensureHost(store.path, socketPath, configurationPath), signal)
   }
   const port: AgentMuxHostedRpcPort = {
     call: async <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, options?: { signal?: AbortSignal }) => {
@@ -105,6 +106,11 @@ export const connectDesktopAgentMuxHost: DesktopRuntimeConnector = async (config
   const dispose = client.dispose.bind(client)
   client.dispose = async () => { originalCalls.delete(client); await dispose(); await rpc.dispose() }
   return client
+}
+
+export const connectDesktopAgentMuxHost: DesktopRuntimeConnector = (config, store) => connectOriginalDesktopHost(config, store)
+export function configuredDesktopAgentMuxHost(configurationPath: string): DesktopRuntimeConnector {
+  return (config, store) => connectOriginalDesktopHost(config, store, configurationPath)
 }
 
 export function desktopBusinessSocketPath(): string {

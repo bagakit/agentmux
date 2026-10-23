@@ -21,7 +21,7 @@ const ThemeActionMoreIcon = semanticIconComponent('action.more')
 
 
 /** SessionPane owns identity/reading; layout and address actions arrive already bound to the Region. */
-export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind, executionHost, regionId, readOnly, onHistory, onTakeOver, onRefreshObservation, refreshing = false, portalTargetId = null, resultReview, nativeSession, currentConversationActions }: {
+export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind, executionHost, regionId, readOnly, onHistory, onTakeOver, onLearn, onRefreshObservation, refreshing = false, portalTargetId = null, resultReview, nativeSession, currentConversationActions }: {
   name: string
   executorLabel: string
   sessionId: string
@@ -31,6 +31,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
   readOnly: boolean
   onHistory: ((trigger?: HTMLButtonElement) => void) | undefined
   onTakeOver?: ((trigger?: HTMLButtonElement) => void) | undefined
+  onLearn?: ((trigger?: HTMLButtonElement) => void) | undefined
   onRefreshObservation?: (() => void) | undefined
   refreshing?: boolean
   /** One precise owner may present its existing controls in the Focus bar. */
@@ -83,6 +84,7 @@ export function AgentRegionHeader({ name, executorLabel, sessionId, sessionKind,
       stop.requestStop(nativeSession ? { id: nativeSession.id, hostId: nativeSession.control.hostId, control: nativeSession.control } : null, name, moreTrigger.current)
     } }] : entries)]}
     onTakeOver={onTakeOver ? () => { handoffFocus.current = true; onTakeOver(moreTrigger.current ?? undefined) } : undefined}
+    onLearn={onLearn ? () => { handoffFocus.current = true; onLearn(moreTrigger.current ?? undefined) } : undefined}
     onHistory={onHistory ? () => { handoffFocus.current = true; onHistory(moreTrigger.current ?? undefined) } : undefined} onRefreshObservation={onRefreshObservation} refreshing={refreshing}
     nativeSourceActions={nativeSourceActions} currentConversationActions={currentConversationActions} contextualActions={contextual?.tools} />
   function closeMenuFocus(event: Event) {

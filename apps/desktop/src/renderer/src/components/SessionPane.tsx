@@ -61,6 +61,7 @@ import { AgentRegionHeader } from './AgentRegionHeader'
 import { ConversationSharingNotice } from './ConversationSharingNotice'
 import { useAgentCurrentForkControls } from './AgentCurrentForkControls'
 import { SessionTakeoverSurface } from './SessionTakeoverSurface'
+import { SessionLearningSurface } from './SessionLearningSurface'
 import { takeoverExecution } from '../lib/session-takeover'
 import { executionHostProjection, regionExecutionHost } from '../lib/region-execution-host'
 import { SessionActivityPresentation } from './SessionActivityPresentation'
@@ -140,6 +141,7 @@ export function SessionPane({
   const consumerScope = useMemo(() => ({ sessionIds: [sessionId], navigation: visible && !readOnly }), [sessionId, visible, readOnly])
   const projectionPolicy = sessionRegionProjectionPolicy(readOnly)
   const [takeoverSelection, setTakeoverSelection] = useState<{ key: string; displayId: string | null; origin: OpenHttpLinkOrigin; trigger: HTMLButtonElement | null } | null>(null)
+  const [learningSelection, setLearningSelection] = useState<{ key: string; displayId: string | null; origin: OpenHttpLinkOrigin; trigger: HTMLButtonElement | null; open: boolean } | null>(null)
   const primaryPresentation = useWorkbenchBrowserPresentation()
   const primaryReference = primaryPresentation.reference
   const mailboxOrigin = primaryReference ? { ...linkOrigin, workspaceId: primaryReference.displayWorkspaceId,
@@ -638,7 +640,12 @@ export function SessionPane({
   const takeOverAt = (origin: OpenHttpLinkOrigin, displayId: string | null = null) => surfaceKind === 'agent' && projectionPolicy.allowsRecovery && origin.tabId && origin.regionId
     ? (trigger?: HTMLButtonElement) => setTakeoverSelection({ key: takeoverKey, displayId, origin, trigger: trigger ?? null }) : undefined
   const onTakeOver = takeOverAt(mailboxOrigin)
-  const takeoverAt = (origin: OpenHttpLinkOrigin, active: boolean, displayId: string | null = null) => takeoverSelection?.key === takeoverKey && takeoverSelection.displayId === displayId &&
+  const learnAt = (origin: OpenHttpLinkOrigin, displayId: string | null = null) => surfaceKind === 'agent' && projectionPolicy.allowsRecovery && takeoverOriginal?.hostId && origin.tabId && origin.regionId
+    ? (trigger?: HTMLButtonElement) => setLearningSelection({ key: takeoverKey, displayId, origin, trigger: trigger ?? null, open: true }) : undefined
+  const takeoverAt = (origin: OpenHttpLinkOrigin, active: boolean, displayId: string | null = null) => <>{learningSelection?.key === takeoverKey && learningSelection.displayId === displayId &&
+    JSON.stringify(learningSelection.origin) === JSON.stringify(origin) && takeoverOriginal?.hostId ? <SessionLearningSurface key={takeoverKey} active={active && learningSelection.open}
+      source={{ hostId: takeoverOriginal.hostId, agentSessionId: sessionId }} label={agentInputIdentity ?? userName ?? tabName ?? session?.label ?? sessionId}
+      returnTrigger={learningSelection.trigger} onClose={() => setLearningSelection(value => value ? { ...value, open: false } : null)} /> : null}{takeoverSelection?.key === takeoverKey && takeoverSelection.displayId === displayId &&
     JSON.stringify(takeoverSelection.origin) === JSON.stringify(origin) ? <SessionTakeoverSurface key={takeoverKey} active={active}
     returnTrigger={takeoverSelection.trigger} onClose={() => setTakeoverSelection(null)} source={{
     agentSessionId: sessionId, hostId: takeoverOriginal?.hostId, cwd: takeoverOriginal?.cwd,
@@ -647,7 +654,7 @@ export function SessionPane({
     diagnostic: JSON.stringify({ status: session?.status ?? null, processState: session?.processState ?? 'unobserved',
       interruptionReason: session?.interruptionReason, projectionFailures: pendingLaunch?.projectionFailures ?? [],
       recovery: recoveryCandidate ?? null, pendingRequest: pendingLaunch?.request ?? null }, null, 2)
-  }} /> : null
+  }} /> : null}</>
   const takeoverSurface = takeoverAt(mailboxOrigin, visible)
   const presentationOrigin = (target: WorkbenchViewTarget): OpenHttpLinkOrigin => ({ ...linkOrigin,
     workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId })
@@ -785,6 +792,7 @@ export function SessionPane({
     <AgentRegionHeader name={name} executorLabel={surfaceKind === 'terminal' ? 'Shell' : executorLabel}
       sessionId={sessionId} sessionKind={surfaceKind} executionHost={preSnapshotHost}
       regionId={origin.regionId} readOnly={readOnly} portalTargetId={portalTargetId} onHistory={onHistory} onTakeOver={takeOverAt(origin, displayId)}
+      onLearn={learnAt(origin, displayId)}
       currentConversationActions={currentConversationActions(origin)} resultReview={resultReview}
       onRefreshObservation={session?.kind === 'agent' && observationMounted ? () => void refresh(true) : undefined} refreshing={refreshing}
       nativeSession={session?.kind === 'agent' ? session : recoveryCandidate ? {

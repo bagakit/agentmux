@@ -25,7 +25,7 @@ import { registerWorkbenchStartupCapture } from './workbench-startup-capture.js'
 import { ConfigStore } from './config-store.js'
 import { registerIpc } from './ipc.js'
 import { RuntimeController } from './runtime-controller.js'
-import { connectDesktopAgentMuxHost } from './desktop-host.js'
+import { configuredDesktopAgentMuxHost } from './desktop-host.js'
 import { ScratchTopics } from './scratch-topics.js'
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { runDesktopResourceProbe } from './resource-probe.js'
@@ -103,13 +103,13 @@ function startPrimaryInstance(): void {
   const performanceHeap = new RendererHeapSnapshotOwner(join(app.getPath('userData'), 'performance-heap'))
   app.once('will-quit', () => performanceHeap.dispose())
   const scratchTopics = new ScratchTopics()
+  const configStore = new ConfigStore()
   const runtime = new RuntimeController(
     new AgentMuxFileAgentSessionStore(desktopAgentSessionStorePath()),
-    connectDesktopAgentMuxHost,
+    configuredDesktopAgentMuxHost(configStore.filePath),
     scratchTopics
   )
   const applicationAccess = createDesktopApplicationAccessOwner(runtime, join(app.getPath('userData'), 'application-access.sqlite'))
-  const configStore = new ConfigStore()
   const demands = openDemandStore({ root: join(app.getPath('userData'), 'demands') })
   const progressLoops = new ContinuousProgressLoopManager(
     ContinuousProgressLoopStore.forUserData(app.getPath('userData')),

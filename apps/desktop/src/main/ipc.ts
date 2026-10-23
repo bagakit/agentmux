@@ -5,6 +5,8 @@ import { callCapsuleFromApp } from './capsule-ipc.js'
 import { capsulePresentation, resolveCapsuleColdDocument } from './capsule-presentation.js'
 import { capsuleDocumentIpc } from './capsule-document-ipc.js'
 import { CapsuleReplyAuthority } from './capsule-reply-authority.js'
+import { AgentLearningAuthority } from './agent-learning-authority.js'
+import { registerAgentLearningIpc } from './agent-learning-ipc.js'
 import type { CapsulePort } from '@agentmux/core/capsule'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { ClientIncidentIpcOwner } from './client-incident-ipc.js'
@@ -309,6 +311,7 @@ export async function registerIpc(args: {
   const capsuleClient: CapsulePort = { call: async (method, params) =>
     await callCapsuleFromApp(args.runtime.callOriginalCore.bind(args.runtime), method, params) as never }
   const capsuleReplies = new CapsuleReplyAuthority(capsuleClient, args.runtime)
+  const agentLearningAuthority = new AgentLearningAuthority(args.runtime)
   const spatialState = new AgentMuxSpatialStateStore()
   const nameAudit = new NameChangeAudit(spatialState)
   args.scratchTopics.setNameAudit(nameAudit)
@@ -783,6 +786,7 @@ export async function registerIpc(args: {
     if (event.senderFrame !== contents.mainFrame) throw new Error('The original App main frame must confirm this answer.')
     return sessionInputOperationResult(() => capsuleReplies.confirm(value))
   })
+  registerAgentLearningIpc({ handle: handleWithEvent, contents, runtime: args.runtime, authority: agentLearningAuthority })
   handleWithEvent('capsule:document', async (event, action: unknown, value: unknown) =>
     await sessionInputOperationResult(() => capsuleDocuments.call(event, action, value)))
   const conversationReads = registerConversationReadIpc({ handle: handleWithEvent, trust: requireTrustedSender,
@@ -2450,6 +2454,7 @@ export async function registerIpc(args: {
         return result.observation
       }, original: (hostId, method, params, context) => args.runtime.callOriginalCore(hostId, method, params, context) }),
     capsuleInput: capsuleReplies,
+    agentLearning: agentLearningAuthority,
     inputContextCaptures,
     windows: args.workbenchWindows,
     connections: connectorServices.connections,
