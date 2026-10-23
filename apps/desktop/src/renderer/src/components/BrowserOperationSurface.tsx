@@ -25,7 +25,7 @@ const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 const ThemeObjectUserIcon = semanticIconComponent('object.user')
 const ThemeActionPanIcon = semanticIconComponent('action.pan')
 const ThemeActionReturnControlIcon = semanticIconComponent('action.return-control')
-const ThemeActionCreateAgentIcon = semanticIconComponent('action.create-agent')
+const ThemeObjectAgentIcon = semanticIconComponent('object.agent')
 const ThemeActionReplayIcon = semanticIconComponent('action.replay')
 const ThemeActionStopIcon = semanticIconComponent('action.stop')
 const ThemeActionStartIcon = semanticIconComponent('action.start')
@@ -183,7 +183,7 @@ export function BrowserOperationStatus({
               onSelect={() => onOpenTaskRun(taskRun.assetId, taskRun.version)}><ThemeObjectUserIcon size={13} aria-hidden="true" /><span>Review and continue v{taskRun.version}</span></DropdownMenu.Item> : null}
             {canTakeControl && onTakeControl ? <DropdownMenu.Item className="browser-menu__item" onSelect={() => onTakeControl()}><ThemeActionPanIcon size={13} aria-hidden="true" /><span>Take control</span></DropdownMenu.Item> : null}
             {canCreateAgent && onCreateAgent ? <DropdownMenu.Item className="browser-menu__item" aria-label={createAgentLabel} title={createAgentLabel}
-              disabled={creatingAgent} onSelect={() => onCreateAgent()}><ThemeActionCreateAgentIcon size={14} aria-hidden="true" /><span>{createAgentLabel}</span></DropdownMenu.Item> : null}
+              disabled={creatingAgent} onSelect={() => onCreateAgent()}><ThemeObjectAgentIcon size={14} aria-hidden="true" /><span>{createAgentLabel}</span></DropdownMenu.Item> : null}
             {canReturnControl && onReturnControl ? <DropdownMenu.Item className="browser-menu__item" onSelect={() => onReturnControl()}><ThemeActionReturnControlIcon size={13} aria-hidden="true" /><span>Return to Agent</span></DropdownMenu.Item> : null}
             {canStop && onStop ? <DropdownMenu.Item className="browser-menu__item" aria-label="Stop browser operation" onSelect={() => onStop()}><ThemeActionStopIcon size={12} aria-hidden="true" /><span>Stop operation</span></DropdownMenu.Item> : null}
             {onOpenTimeline ? <DropdownMenu.Item className="browser-menu__item" aria-label="Open browser activity timeline" onSelect={() => onOpenTimeline()}><ThemeObjectHistoryIcon size={13} aria-hidden="true" /><span>Activity</span></DropdownMenu.Item> : null}
@@ -194,9 +194,9 @@ export function BrowserOperationStatus({
         aria-label="Take control of Browser" title="Take control of Browser" onClick={() => onTakeControl()}>
         <ThemeActionPanIcon size={14} aria-hidden="true" />
       </button> : null}
-      {canCreateAgent && onCreateAgent ? <button type="button" className="browser-operation-status__trigger browser-operation-status__trigger--create"
+      {canCreateAgent && onCreateAgent ? <button type="button" className="browser-operation-status__trigger"
         aria-label={createAgentLabel} title={createAgentLabel} aria-busy={creatingAgent} disabled={creatingAgent} onClick={() => onCreateAgent()}>
-        <ThemeActionCreateAgentIcon size={14} aria-hidden="true" /><span className="browser-operation-status__action-label">{creatingAgent ? '创建中' : 'Agent'}</span>
+        {creatingAgent ? <ThemeStatusLoadingIcon animation="spin" size={16} aria-hidden="true" /> : <ThemeObjectAgentIcon size={16} aria-hidden="true" />}
       </button> : null}
       {canReturnControl && onReturnControl ? <button type="button" className="browser-operation-status__trigger"
         aria-label="Return to Agent" title="Return to Agent" onClick={() => onReturnControl()}>
