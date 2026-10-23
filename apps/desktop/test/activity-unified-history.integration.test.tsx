@@ -1,3 +1,4 @@
+import { processNativeRecordIds } from './helpers/conversation-process-members'
 import { fixtureEpoch as _newTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixtureTime as _hygiene_fixtureTime } from "../scripts/lib/fixture-values.mjs"
 // @vitest-environment happy-dom
@@ -7,8 +8,7 @@ import { beforeEach, afterEach, describe, it, expect, vi } from 'vitest'
 import { mkdtemp, mkdir, writeFile, readFile, appendFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { AgentMuxClient, AgentMuxFileAgentSessionStore, type AgentSessionHistoryPage, type AgentSessionHistoryPageOptions, type AgentMuxStoredAgentSession } from '@agentmux/core'
-import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
+import { AgentMuxClient, AgentMuxFileAgentSessionStore, type AgentSessionHistoryPage, type AgentSessionHistoryPageOptions, type AgentMuxStoredAgentSession } from '../../../packages/core/src/index.js'
 import type { AgentSessionControl, AgentTimelineItem, AppConfig, SessionSnapshot } from '../src/shared/contracts'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { useAppStore } from '../src/renderer/src/store'
@@ -17,6 +17,8 @@ import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-messages'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { SessionActivityPresentation } from '../src/renderer/src/components/SessionActivityPresentation'
+import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
 import { conversationReadingAnchor, restoreConversationAnchor } from '../src/renderer/src/lib/session-conversation-window'
 
 // Heavy paint/input leaves are isolated; both real callers, store, read owner and common body are mounted.
@@ -34,8 +36,13 @@ const initial = useAppStore.getState()
 let container: HTMLDivElement, root: Root, home: string, transcript: string, client: AgentMuxClient, store: AgentMuxFileAgentSessionStore
 let requests: { cursor?: string; limit?: number }[], promises: Promise<AgentSessionHistoryPage>[], controls: ReturnType<typeof vi.spyOn>[]
 let recent: ReturnType<typeof useSessionUserMessages> | null
-let observation: Parameters<typeof api.sessions.observeHistory>[1] | null
-let originalStore: Buffer, stored: AgentMuxStoredAgentSession
+let readingSummary: ReturnType<typeof useSessionUserMessages> | null
+let observation: Parameters<AgentMuxClient['observeSessionHistory']>[1] | null
+let readOriginalPage: (id: string, options?: AgentSessionHistoryPageOptions, source?: AgentSessionHistoryPage['source']) => Promise<AgentSessionHistoryPage>
+let nativePage: ReturnType<typeof vi.fn<AgentMuxClient['readSessionHistoryPage']>>
+let closes: Array<() => unknown | Promise<unknown>>
+let readingReceipts: Array<Awaited<ReturnType<typeof api.conversation.readAgentConversation>> | Awaited<ReturnType<typeof api.conversation.readConversationChanges>>>
+let originalStore: readonly AgentMuxStoredAgentSession[], stored: AgentMuxStoredAgentSession
 // Six-minute records let the default 24h coverage settle within the first 300-record batch; older pages remain real navigation input.
 function record(n: number) {
  const type = n < 100 || n > 300 ? (n % 8 === 0 ? 'user' : n % 8 === 1 ? 'assistant' : 'assistant') : 'assistant'
@@ -46,15 +53,54 @@ function Witness({ visible = true }: { visible?: boolean }) {
  const result = useSessionUserMessages(control, { enabled: visible }); recent = result
  return <div data-shared-recent={JSON.stringify(result.nativeHistoryPage?.items.map(item => item.id) ?? [])} />
 }
-function Reading({ visible = true, opened = false, captured = [] }: { visible?: boolean; opened?: boolean; captured?: AgentTimelineItem[] }) {
+function Reading({ visible = true, opened = false }: { visible?: boolean; opened?: boolean }) {
  const facts = useSessionUserMessages(control, { enabled: visible })
- return <ActivityView sessionId={sid} executionHostId="local" items={captured} capability="complete-events" nativeHistoryPage={facts.nativeHistoryPage} nativeContextItems={facts.nativeContextItems}
-  userMessages={facts.messages} userMessageRead={{ loading: facts.loading, error: facts.error, hasMore: facts.hasMore, windowIncomplete: facts.windowIncomplete, onRetry: facts.refresh, onReadEarlier: () => {} }}
+ readingSummary = facts
+ return <ActivityView sessionId={sid} executionHostId="local" capability="complete-events" nativeHistoryPage={facts.nativeHistoryPage} nativeContextItems={facts.nativeContextItems}
   conversationReading={{ reference: control, identity: control.run.runId, enabled: visible, opened }} />
 }
 function compose(visible = true, opened = false) { return <><Reading visible={visible} opened={opened} /><Witness /></> }
-async function flush() { for (let i = 0; i < 8; i++) await act(async () => { await Promise.allSettled([...promises]); await new Promise(resolve => setTimeout(resolve, 10)) }) }
-async function render(node: ReactNode) { await act(async () => root.render(node)); await flush() }
+function acceptedWindow() {
+ const accepted = inspectConversationConsumers(control).consumers[0]?.accepted
+ expect(accepted).not.toBeNull()
+ const receipt = [...readingReceipts].reverse().find(page => page.window.id === accepted?.id && page.window.revision === accepted.revision && page.window.complete)
+ expect(receipt, 'The UI must identify its exact original accepted public window receipt').toBeDefined()
+ return receipt!.window
+}
+async function publishCaptured(items: readonly AgentTimelineItem[]) {
+ for (const item of items) await client['persistAndPublishTimeline']({ type: 'upsert', agentSessionId: sid, item },
+  { source: 'agentmux', observedAt: item.updatedAt }, 'local')
+}
+async function flush({ pending = false }: { pending?: boolean } = {}) {
+ for (let i = 0; i < 2; i++) await act(async () => { await Promise.allSettled([...promises]); await new Promise(resolve => setTimeout(resolve, 10)) })
+ if (pending) return
+ await vi.waitFor(async () => {
+  await act(async () => { await Promise.allSettled([...promises]); await new Promise(resolve => setTimeout(resolve, 10)) })
+  const consumers = [
+   ...inspectConversationConsumers(control).consumers.filter(consumer => consumer.gates.enabled),
+   ...[readingSummary, recent].flatMap(summary => summary ? [summary.conversation.inspect()] : [])
+  ]
+  // A healthy current reader must consume its own continuation before a read
+  // baseline is sampled. Historical, held or failed readers can retain dirty
+  // facts until their original explicit action; dirty alone is not active IO.
+  expect(consumers.filter(consumer => consumer.loading || consumer.inFlight || consumer.watch.binding
+   || consumer.dirty && !consumer.historical && !consumer.held && !consumer.error && !consumer.sourceError && !consumer.observationError)
+   .map(consumer => ({ loading: consumer.loading, inFlight: consumer.inFlight, watchBinding: consumer.watch.binding,
+    dirty: consumer.dirty, historical: consumer.historical, held: consumer.held, error: consumer.error?.message }))).toEqual([])
+ }, { timeout: 4000, interval: 10 })
+}
+async function render(node: ReactNode) {
+ await act(async () => root.render(node)); await flush()
+ const feed = container.querySelector<HTMLElement>('.activity-feed')
+ if (!feed || feed.closest('[hidden], [inert]')) return
+ await vi.waitFor(async () => {
+  await act(async () => { await Promise.allSettled([...promises]); await new Promise(resolve => setTimeout(resolve, 10)) })
+  const all = inspectConversationConsumers(control).consumers
+  expect(all.length).toBeGreaterThan(0)
+  const consumers = all.filter(consumer => consumer.gates.enabled)
+  expect(consumers.every(consumer => !consumer.loading && !consumer.inFlight && !consumer.watch.binding)).toBe(true)
+ }, { timeout: 4000, interval: 10 })
+}
 async function click(label: string) {
  const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label)
  expect(button, label).toBeDefined(); expect(button!.disabled, label).toBe(false)
@@ -71,7 +117,7 @@ function ids(): string[] {
  return [...thread.children].flatMap(node => {
   const e = node as HTMLElement
   if (e.dataset.nativeRecordId) return [e.dataset.nativeRecordId]
-  if (e.dataset.nativeRecordIds) return JSON.parse(e.dataset.nativeRecordIds) as string[]
+  if (e.dataset.conversationProcessMembers) return processNativeRecordIds(e)
   return []
  })
 }
@@ -81,15 +127,18 @@ async function writeEdgeHistory(count: number) {
  await writeFile(transcript, Array.from({ length: count }, (_, n) => JSON.stringify({ ...record(n),
   timestamp: new Date(_hygiene_fixtureTime(-37225600000) + n * 3_600_000).toISOString() })).join('\n') + '\n')
 }
-function markerGeometry(viewport: HTMLElement) {
+function viewportGeometry(viewport: HTMLElement) {
  Object.defineProperties(viewport, { clientHeight: { configurable: true, value: 200 }, scrollHeight: { configurable: true, value: 10000 } })
  viewport.getBoundingClientRect = () => rect(100, 200)
- const entry = viewport.querySelector<HTMLElement>('.activity-feed__reading')!
- expect(entry).not.toBeNull()
- entry.getBoundingClientRect = () => rect(100 - viewport.scrollTop, 40)
  for (const tail of viewport.querySelectorAll<HTMLElement>('[data-conversation-native-tail], [data-conversation-reading-tail]')) {
   tail.getBoundingClientRect = () => rect(100 + viewport.scrollHeight - viewport.scrollTop, 0)
  }
+}
+function markerGeometry(viewport: HTMLElement) {
+ viewportGeometry(viewport)
+ const entry = viewport.querySelector<HTMLElement>('.activity-feed__reading')!
+ expect(entry).not.toBeNull()
+ entry.getBoundingClientRect = () => rect(100 - viewport.scrollTop, 40)
  return entry
 }
 async function scrollTo(viewport: HTMLElement, top: number) {
@@ -108,67 +157,90 @@ beforeEach(async () => {
  stored = { kind: 'agent', agentSessionId: sid, providerId: 'claude', executorId: 'claude', hostId: 'local', workspacePath: join(home, 'workspace'), run: control.run,
   retiredRuns: [], hookBindingId: 'private-history-hook', hookToken: 'private-history-token', createdAt: 1, updatedAt: 1,
   nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: native, transcriptPath: transcript } }
- await store.compareAndSwap(null, stored); originalStore = await readFile(join(home, 'sessions.json'))
+ await store.compareAndSwap(null, stored); originalStore = await store.loadMetadata()
  client = new AgentMuxClient({ store })
+ const originalPageOwner = client['readSessionHistoryPage']
+ readOriginalPage = (id, options = {}, source) => originalPageOwner.call(client, id, options, source)
+ closes = [() => { client['readSessionHistoryPage'] = originalPageOwner }]
+ const bridge = await desktopConversationReadBridge({ root: home, client }, closes)
+ readingReceipts = []
+ vi.mocked(api.conversation.readAgentConversation).mockImplementation(async (...args) => {
+  const page = await bridge.readAgentConversation(...args); readingReceipts.push(page); return page
+ })
+ vi.mocked(api.conversation.readConversationChanges).mockImplementation(async (...args) => {
+  const page = await bridge.readConversationChanges(...args); readingReceipts.push(page); return page
+ })
  const kernel = Reflect.get(client, 'kernel')
  controls = ['connect', 'start', 'input', 'resize', 'stop', 'attach', 'status'].map(key => vi.spyOn(kernel, key).mockImplementation(() => { throw new Error(`Forbidden Runtime operation ${key}`) }))
- requests = []; promises = []; recent = null; observation = null
- vi.spyOn(api.sessions, 'historyPage').mockImplementation((reference, options) => {
-  expect(reference.agentSessionId).toBe(sid); expect(reference.hostId).toBe('local')
-  requests.push(options ?? {}); const request = client.sessionHistoryPage(reference.agentSessionId, options); promises.push(request); return request
+ requests = []; promises = []; recent = null; readingSummary = null; observation = null
+ nativePage = vi.fn((agentSessionId, options, originalSource) => {
+  expect(agentSessionId).toBe(sid)
+  requests.push(options); const request = originalPageOwner.call(client, agentSessionId, options, originalSource)
+  promises.push(request); return request
  })
+ client['readSessionHistoryPage'] = nativePage
  vi.spyOn(api.sessions, 'timeline').mockImplementation(reference => client.sessionTimeline(reference.agentSessionId))
- vi.spyOn(api.sessions, 'historySources').mockImplementation(() => client.sessionHistorySources())
- vi.spyOn(api.sessions, 'observeHistory').mockImplementation(async (_reference, listener) => {
-  observation = listener
-  // Controlled observer transport; records and cursor are actual public Core/Claude/FileStore facts.
-  return { source: { providerId: 'claude', nativeSessionId: native }, dispose() {} }
+ vi.spyOn(api.sessions, 'historySources').mockImplementation(async () => ({ sources: await client.sessionHistorySources(), warnings: [] }))
+ const observers = new Set<Parameters<AgentMuxClient['observeSessionHistory']>[1]>()
+ observation = event => { for (const listener of observers) listener(event) }
+ vi.spyOn(client, 'observeSessionHistory').mockImplementation(async (agentSessionId, listener) => {
+  observers.add(listener)
+  return { agentSessionId, source: { providerId: 'claude', nativeSessionId: native }, dispose() { observers.delete(listener) } }
  })
  container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
 })
 afterEach(async () => {
- await act(async () => root.unmount()); container.remove()
- expect(controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
- expect(await readFile(join(home, 'sessions.json'))).toEqual(originalStore)
- await client.dispose(); await rm(home, { recursive: true }); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
- window.getSelection()?.removeAllRanges()
+ try {
+  await act(async () => root.unmount()); container.remove()
+  expect(controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
+  expect(await store.loadMetadata()).toEqual(originalStore)
+ } finally {
+  try { for (const close of closes.reverse()) await close() }
+  finally {
+   try { await client.dispose() }
+   finally {
+    await rm(home, { recursive: true }); useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
+    window.getSelection()?.removeAllRanges()
+   }
+  }
+ }
 })
 
 describe('One Activity reading surface over public original-sequence windows', () => {
- it('keeps the Earlier entry before complete native and captured cards without deleting either original source', async () => {
+ it('keeps Earlier before one accepted native and captured sequence without deleting original sources', async () => {
   await writeEdgeHistory(1200)
-  const current = await client.sessionHistoryPage(sid, { limit: 30 })
-  const input = current.items.find(item => item.kind === 'user-message')!
-  const supplements = projectSessionUserMessages({ agentSessionId: sid,
-   historyPage: { ...current, source: { ...current.source, nativeSessionId: 'earlier-supplement-source' }, items: [input] } })
   const captured: AgentTimelineItem[] = [
-   { id: 'captured-edge-input', agentSessionId: sid, kind: 'user_message', source: 'user', title: 'Original captured input',
-    content: 'Captured original input remains complete.', status: 'complete', createdAt: _newTailFixtureEpoch(0, 0, 1), updatedAt: _newTailFixtureEpoch(0, 0, 1) },
-   { id: 'captured-edge-reply', agentSessionId: sid, kind: 'assistant_message', source: 'native-hook', title: 'Original captured reply',
-    content: 'Captured original reply remains complete.', status: 'complete', createdAt: _newTailFixtureEpoch(0, 0, 2), updatedAt: _newTailFixtureEpoch(0, 0, 2) }
+   { id: 'captured-edge-input', agentSessionId: sid, kind: 'user_message', source: 'user', authorHuman: true,
+    title: 'Original captured input', content: 'Captured original input remains complete.', status: 'complete',
+    createdAt: _newTailFixtureEpoch(0, 0, 1), updatedAt: _newTailFixtureEpoch(0, 0, 1) },
+   { id: 'captured-edge-reply', agentSessionId: sid, kind: 'assistant_message', source: 'native-hook', authorAgentSessionId: sid,
+    title: 'Original captured reply', content: 'Captured original reply remains complete.', status: 'complete',
+    createdAt: _newTailFixtureEpoch(0, 0, 2), updatedAt: _newTailFixtureEpoch(0, 0, 2) }
   ]
-  await render(<ActivityView sessionId={sid} items={captured} userMessages={supplements} capability="complete-events" nativeHistoryPage={current}
-   conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
+  await publishCaptured(captured); await render(compose())
   const feed = container.querySelector<HTMLElement>('.activity-feed')!, entry = feed.querySelector<HTMLElement>('.activity-feed__reading')!
-  const thread = feed.querySelector<HTMLElement>('.conversation-native-thread')!, observations = feed.querySelector<HTMLElement>('.activity-log')!
-  const supplement = [...feed.querySelectorAll<HTMLElement>('.log-turn')].find(node => node.dataset.messageSourceKey?.includes('earlier-supplement-source'))!
-  const capturedCards = [...observations.querySelectorAll<HTMLElement>('.log-turn')].filter(card => card !== supplement)
-  expect(entry).not.toBeNull(); expect(thread).not.toBeNull(); expect(observations).not.toBeNull(); expect(supplement).toBeDefined()
-  for (const body of [thread, supplement, observations]) {
-   expect(Boolean(entry.compareDocumentPosition(body) & Node.DOCUMENT_POSITION_FOLLOWING), 'Earlier must precede every retained record surface').toBe(true)
+  const thread = feed.querySelector<HTMLElement>('.conversation-native-thread')!
+  const submission = thread.querySelector<HTMLElement>('[data-submission-id="captured-edge-input"]')!
+  expect(submission).not.toBeNull()
+  await act(async () => {
+   const details = submission.querySelector<HTMLDetailsElement>('.message-disclosure')!
+   details.open = true; details.dispatchEvent(new Event('toggle'))
+  })
+  const capturedCards = captured.map(item => [...thread.querySelectorAll<HTMLElement>('.log-turn')].find(card => card.textContent?.includes(item.content!))!)
+  expect(entry).not.toBeNull(); expect(thread).not.toBeNull()
+  for (const card of capturedCards) {
+   expect(card).toBeDefined(); expect(Boolean(entry.compareDocumentPosition(card) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
+   expect(card.dataset.compact).not.toBe('true')
   }
-  expect(Boolean(thread.compareDocumentPosition(supplement) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true)
-  expect(feed.querySelector('.activity-feed__observations')).toBeNull()
-  expect(capturedCards).toHaveLength(2)
-  expect(capturedCards.every(card => card.dataset.compact !== 'true')).toBe(true)
-  expect(observations.textContent).toContain(captured[0]!.content); expect(observations.textContent).toContain(captured[1]!.content)
   const nativeBody = thread.querySelector('[data-native-record-id="record-1193"] .log-turn__body')!
+  expect(nativeBody).not.toBeNull()
   await click('Earlier')
   expect(feed.querySelector('.conversation-native-thread')).toBe(thread)
-  expect(nativeBody.isConnected).toBe(true); expect(supplement.isConnected).toBe(true)
-  expect(feed.querySelector('.activity-log')).toBe(observations)
+  expect(nativeBody.isConnected).toBe(true); expect(submission.isConnected).toBe(true)
   expect(capturedCards.every(card => card.isConnected)).toBe(true)
-  expect(observations.textContent).toContain(captured[0]!.content); expect(observations.textContent).toContain(captured[1]!.content)
+  for (const item of captured) expect(thread.textContent).toContain(item.content)
+  const original = await client.sessionTimeline(sid)
+  expect(original.items).toEqual(captured)
  })
  it('loads the original earlier cursor on upward scroll with inline loading and preserves the actual body, Range, anchor and draft', async () => {
   await writeEdgeHistory(1200)
@@ -184,20 +256,20 @@ describe('One Activity reading surface over public original-sequence windows', (
   const text = [...body.querySelectorAll('p')].find(node => node.textContent === `Reply ${Number(anchorId.slice('record-'.length))}`)!.firstChild!
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 5); window.getSelection()!.addRange(range)
   await scrollTo(viewport, 700)
-  const before = ids(), start = requests.length, page = await promises[requests.findLastIndex(request => request.limit === 100)]!
+  const before = ids(), start = requests.length, page = await promises[requests.map((request, index) => request.limit === 100 ? index : -1).reduce((last, index) => Math.max(last, index), -1)]!
   let release!: (page: AgentSessionHistoryPage) => void
-  vi.mocked(api.sessions.historyPage).mockImplementationOnce((_reference, options) => {
+  nativePage.mockImplementationOnce((_reference, options) => {
    requests.push(options ?? {}); return new Promise(resolve => { release = resolve })
   })
   await scrollTo(viewport, 20)
-  expect(requests).toHaveLength(start + 1); expect(requests[start]!.cursor).toBe(page.nextCursor)
+  await vi.waitFor(() => { expect(requests).toHaveLength(start + 1); expect(requests[start]!.cursor).toBe(page.nextCursor) })
   const status = entry.querySelector<HTMLElement>('[role="status"]')!
   expect(status).not.toBeNull(); expect(status.getAttribute('aria-live')).toBe('polite'); expect(status.textContent).toBe('Loading earlier…')
   expect(status.closest('button')?.querySelector('svg[data-semantic-icon="status.loading"]')).not.toBeNull()
   expect(viewport.hasAttribute('aria-busy')).toBe(false); expect(ids()).toEqual(before)
   expect(body.isConnected).toBe(true); expect(trace.open).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
   await scrollTo(viewport, 10); expect(requests).toHaveLength(start + 1)
-  await act(async () => release(await client.sessionHistoryPage(sid, { limit: 100, cursor: page.nextCursor! }))); await flush()
+  await act(async () => release(await readOriginalPage(sid, { limit: 100, cursor: page.nextCursor! }))); await flush()
   expect(ids()).toHaveLength(before.length + 300); expect(requests).toHaveLength(start + 3)
   expect(row.querySelector('.log-turn__body')).toBe(body); expect(trace.open).toBe(true)
   expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(window.getSelection()!.toString()).toBe('Reply')
@@ -211,14 +283,14 @@ describe('One Activity reading surface over public original-sequence windows', (
   await render(compose())
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!; markerGeometry(viewport)
   await scrollTo(viewport, 700)
-  const originalCount = ids().length, start = requests.length, firstPage = await promises[requests.findLastIndex(request => request.limit === 100)]!
+  const originalCount = ids().length, start = requests.length, firstPage = await promises[requests.map((request, index) => request.limit === 100 ? index : -1).reduce((last, index) => Math.max(last, index), -1)]!
   let release!: (page: AgentSessionHistoryPage) => void
-  vi.mocked(api.sessions.historyPage).mockImplementationOnce((_reference, options) => {
+  nativePage.mockImplementationOnce((_reference, options) => {
    requests.push(options ?? {}); return new Promise(resolve => { release = resolve })
   })
   await scrollTo(viewport, 20); await scrollTo(viewport, 10)
-  expect(requests).toHaveLength(start + 1); expect(requests[start]!.cursor).toBe(firstPage.nextCursor)
-  await act(async () => release(await client.sessionHistoryPage(sid, { limit: 100, cursor: firstPage.nextCursor! }))); await flush()
+  await vi.waitFor(() => { expect(requests).toHaveLength(start + 1); expect(requests[start]!.cursor).toBe(firstPage.nextCursor) })
+  await act(async () => release(await readOriginalPage(sid, { limit: 100, cursor: firstPage.nextCursor! }))); await flush()
   expect(ids()).toHaveLength(originalCount + 300); expect(requests).toHaveLength(start + 3)
   const retained = ids(), cursor = (await promises.at(-1)!).nextCursor!, stable = requests.length
   // A passive notification of the known layout restoration cannot pull another batch.
@@ -229,7 +301,7 @@ describe('One Activity reading surface over public original-sequence windows', (
   expect(anchorRow).not.toBeNull()
   anchorRow.getBoundingClientRect = () => rect(100 + 20 + ([...viewport.querySelectorAll('.activity-feed__read-notice')]
    .some(notice => notice.textContent?.includes('Original scroll page unavailable')) ? 40 : 0) - viewport.scrollTop)
-  vi.mocked(api.sessions.historyPage).mockImplementationOnce(async (_reference, options) => {
+  nativePage.mockImplementationOnce(async (_reference, options) => {
    requests.push(options ?? {}); throw new Error('Original scroll page unavailable')
   })
   // The edge remains visible: a new upward movement, rather than leaving an arbitrary zone,
@@ -239,8 +311,8 @@ describe('One Activity reading surface over public original-sequence windows', (
   expect(ids()).toEqual(retained); expect(container.textContent).toContain('Original scroll page unavailable')
   expect(conversationReadingAnchor(viewport), 'The known read-error notice cannot move the original visible record').toEqual({ kind: 'record', id: anchorId, offset: 20 })
   await flush(); expect(requests).toHaveLength(stable + 1)
-  await click('Retry')
-  expect(requests[stable + 1]!.cursor).toBe(cursor); expect(ids()).toHaveLength(originalCount + 600)
+  await click('Retry reading')
+  expect(requests[stable + 1]!.cursor).toBe(cursor); expect(ids()).toHaveLength(originalCount + 400)
   const ended = requests.length; await flush(); expect(requests).toHaveLength(ended)
  })
  it.each(['footnote', 'ruler'] as const)('keeps actual %s navigation out of page demand and retains that reading position when live records append', async navigation => {
@@ -283,19 +355,29 @@ describe('One Activity reading surface over public original-sequence windows', (
   await writeEdgeHistory(1200)
   const captured: AgentTimelineItem[] = [{ id: 'captured-tail-input', agentSessionId: sid, kind: 'user_message', source: 'user',
    title: 'Original captured input', content: 'Complete captured original. '.repeat(500), status: 'complete', createdAt: _newTailFixtureEpoch(0, 0, 1), updatedAt: _newTailFixtureEpoch(0, 0, 1) }]
-  await render(<><Reading captured={captured} /><Witness /></>)
+  await publishCaptured(captured)
+  await render(compose())
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!; markerGeometry(viewport)
-  Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 5000 })
-  const tail = viewport.querySelector<HTMLElement>('[data-conversation-native-tail]')!, observations = viewport.querySelector<HTMLElement>('.activity-log')!
+  let readingBottom = 5000
+  Object.defineProperty(viewport, 'scrollHeight', { configurable: true, get: () => readingBottom })
+  const tail = viewport.querySelector<HTMLElement>('[data-conversation-native-tail]')!
   expect(tail).not.toBeNull(); let nativeBottom = 1800
   tail.getBoundingClientRect = () => rect(100 + nativeBottom - viewport.scrollTop, 0)
-  const original = observations.querySelector('.log-turn__body')!
+  const capturedOwner = viewport.querySelector<HTMLElement>('[data-submission-id="captured-tail-input"]')!
+  expect(capturedOwner).not.toBeNull()
+  await act(async () => {
+   const disclosure = capturedOwner.querySelector<HTMLDetailsElement>('.message-disclosure')!
+   disclosure.open = true; disclosure.dispatchEvent(new Event('toggle'))
+  })
+  const show = [...capturedOwner.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '显示正文')
+  if (show) await act(async () => show.click())
+  const original = capturedOwner.querySelector('.log-turn__body')!
+  expect(original).not.toBeNull()
   const readingTail = viewport.querySelector<HTMLElement>('[data-conversation-reading-tail]')!
-  let readingBottom = 5000
   readingTail.getBoundingClientRect = () => rect(100 + readingBottom - viewport.scrollTop, 0)
   await scrollTo(viewport, readingBottom - viewport.clientHeight)
   await scrollTo(viewport, 1000)
-  const jump = container.querySelector<HTMLButtonElement>('[aria-label="Return to latest messages"]')!
+  const jump = container.querySelector<HTMLButtonElement>('[data-message-tool-control="jump-to-latest"]')!
   expect(jump).not.toBeNull(); await act(async () => jump.click()); await flush()
   expect(viewport.scrollTop).toBe(readingBottom - viewport.clientHeight)
   expect(viewport.querySelector('.activity-feed__observations')).toBeNull(); expect(original.isConnected).toBe(true); expect(original.textContent?.trim() === captured[0]!.content!.trim(), 'The complete captured original stays readable').toBe(true)
@@ -315,7 +397,6 @@ describe('One Activity reading surface over public original-sequence windows', (
   const nativeOriginal = viewport.querySelector<HTMLElement>('[data-native-record-id="record-1200"]')!
   nativeOriginal.getBoundingClientRect = () => rect(100 + nativeBottom - 30 - viewport.scrollTop, 60)
   segment.getBoundingClientRect = () => rect(100 + actualNativeBottom() + currentNoticeHeight() + 30 - viewport.scrollTop, 3000)
-  observations.getBoundingClientRect = () => rect(100 + actualNativeBottom() + currentNoticeHeight() - viewport.scrollTop, 3000)
   // The user selects a visible captured body while an older native row is still above it.
   // A selection, without a wheel target on that body, must qualify its own reading anchor.
   await scrollTo(viewport, 1850)
@@ -329,42 +410,57 @@ describe('One Activity reading surface over public original-sequence windows', (
   expect(original.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
   expect(window.getSelection()!.toString()).toBe('Complete'); expect(viewport.scrollTop).toBe(1950)
  })
- it.each(['scroll', 'Home'] as const)('reads Newer at the real native tail after %s returns from visible captured originals', async returning => {
+ it.each(['scroll', 'Home'] as const)('reads the original Newer token after %s returns to a bounded historical native tail and restores captured originals', async returning => {
   await writeEdgeHistory(2400)
   const captured: AgentTimelineItem[] = [{ id: 'captured-newer-input', agentSessionId: sid, kind: 'user_message', source: 'user',
    title: 'Original captured input', content: 'Captured tail stays available. '.repeat(500), status: 'complete', createdAt: _newTailFixtureEpoch(0, 0, 1), updatedAt: _newTailFixtureEpoch(0, 0, 1) }]
-  await render(<><Reading captured={captured} /><Witness /></>)
-  for (let n = 0; n < 8; n++) await click('Earlier')
+  await publishCaptured(captured)
+  await render(compose())
+  expect(container.querySelector('[data-submission-id="captured-newer-input"]')).not.toBeNull()
+  // All sources share the Core window budget. A captured tail may leave this
+  // frame with the newer native side; its durable source is not deleted.
+  for (let n = 0; n < 12 && ids().at(-1) === 'record-2399'; n++) await click('Earlier')
+  const originalWindow = acceptedWindow(), newer = originalWindow.navigation.newer
+  expect(newer).toBeTypeOf('string'); expect(originalWindow.outside.newer).not.toBeNull()
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!; markerGeometry(viewport)
   Object.defineProperty(viewport, 'scrollHeight', { configurable: true, value: 5000 })
-  const tail = viewport.querySelector<HTMLElement>('[data-conversation-native-tail]')!, observations = viewport.querySelector<HTMLElement>('.activity-log')!
+  const tail = viewport.querySelector<HTMLElement>('[data-conversation-native-tail]')!
   const nativeBottom = returning === 'Home' ? 150 : 1800
   expect(tail).not.toBeNull(); tail.getBoundingClientRect = () => rect(100 + nativeBottom - viewport.scrollTop, 0)
   const nativeGroup = [...viewport.querySelectorAll<HTMLElement>('.wf-card--observation > .wf-head[aria-expanded="false"]')].at(-1)!
   expect(nativeGroup).toBeDefined()
   nativeGroup.getBoundingClientRect = () => rect(100 + (returning === 'Home' ? 100 : 1730) - viewport.scrollTop, 40)
   const last = Number(ids().at(-1)!.slice('record-'.length)); expect(last).toBeLessThan(2399)
-  const original = observations.querySelector('.log-turn__body')!
-  const segment = original.closest<HTMLElement>('[data-segment-key]')!
-  expect(segment).not.toBeNull()
-  observations.getBoundingClientRect = () => rect(100 + nativeBottom - viewport.scrollTop, 3000)
-  segment.getBoundingClientRect = () => rect(100 + nativeBottom + 30 - viewport.scrollTop, 3000)
-  const auxiliary = requests.length
+  const auxiliary = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
   await scrollTo(viewport, 1900); await scrollTo(viewport, 2000); await flush()
-  expect(requests).toHaveLength(auxiliary)
+  expect(vi.mocked(api.conversation.readAgentConversation)).toHaveBeenCalledTimes(auxiliary)
   if (returning === 'Home') {
    // Home at an already clamped top has no scroll event to clear the previous auxiliary target.
    await act(async () => { viewport.scrollTop = 0; viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true, cancelable: true })) })
   } else await scrollTo(viewport, 1700)
-  const start = requests.length
+  const start = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  const completedBefore = readingReceipts.filter(page => page.window.complete).length
   if (returning === 'Home') await act(async () => viewport.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })))
   else await scrollTo(viewport, 1750)
   await flush()
-  expect(requests.length).toBeGreaterThan(start); expect(requests.length).toBeLessThanOrEqual(start + 3)
+  const navigation = vi.mocked(api.conversation.readAgentConversation).mock.calls.slice(start)
+  expect(navigation.length).toBeGreaterThan(0)
+  const completed = readingReceipts.filter(page => page.window.complete).length - completedBefore
+  expect(completed).toBeGreaterThan(0); expect(completed).toBeLessThanOrEqual(3)
+  expect(navigation[0]![0].cursor).toBe(newer)
   expect(Number(ids().at(-1)!.slice('record-'.length))).toBeGreaterThan(last)
-  expect(viewport.querySelector('.activity-feed__observations')).toBeNull(); expect(original.isConnected).toBe(true)
-  expect(original.textContent?.trim() === captured[0]!.content!.trim(), 'The complete captured original stays readable').toBe(true)
-  const ended = requests.length; await flush(); expect(requests).toHaveLength(ended)
+  const restored = viewport.querySelector<HTMLElement>('[data-submission-id="captured-newer-input"]')!
+  expect(restored).not.toBeNull()
+  await act(async () => {
+   const disclosure = restored.querySelector<HTMLDetailsElement>('.message-disclosure')!
+   disclosure.open = true; disclosure.dispatchEvent(new Event('toggle'))
+  })
+  const show = [...restored.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '显示正文')
+  if (show) await act(async () => show.click())
+  expect(restored.querySelector('.log-turn__body')?.textContent?.trim()).toBe(captured[0]!.content!.trim())
+  expect((await client.sessionTimeline(sid)).items).toEqual(captured)
+  const ended = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  await flush(); expect(vi.mocked(api.conversation.readAgentConversation)).toHaveBeenCalledTimes(ended)
  })
  it('does not turn a viewport-height clamp into earlier intent, while the next real upward movement still reads', async () => {
   await writeEdgeHistory(1200)
@@ -450,7 +546,8 @@ describe('One Activity reading surface over public original-sequence windows', (
   const body = container.querySelector<HTMLElement>('[data-native-record-id="record-353"] .log-turn__body')!
   const text = [...body.querySelectorAll('p')].find(node => node.textContent === 'Reply 353')!.firstChild!
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 5); window.getSelection()!.addRange(range)
-  const before = ids(), count = requests.length
+  const before = ids(), count = requests.length, changes = vi.mocked(api.conversation.readConversationChanges).mock.calls.length
+  const divider = container.querySelector('.activity-feed__history-divider')
   expect(container.querySelector('.activity-feed__latest-held')).toBeNull()
   await appendFile(transcript, JSON.stringify(record(360)) + '\n')
   await act(async () => observation?.({ source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated', agentSessionId: sid })); await flush()
@@ -459,275 +556,503 @@ describe('One Activity reading surface over public original-sequence windows', (
   expect(ids()).toEqual([...before, 'record-360']); expect(container.textContent).toContain('Input 360')
   expect(body.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
   expect(container.querySelector('.activity-feed__latest-held')).toBeNull()
-  const reads = requests.length; expect(reads).toBeGreaterThan(count)
-  await click('最新消息')
-  expect(ids().at(-1)).toBe('record-360'); expect(container.querySelector('.activity-feed__history-divider')).toBeNull()
-  expect(body.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(requests).toHaveLength(reads + 3)
+  expect(requests).toHaveLength(count)
+  expect(vi.mocked(api.conversation.readConversationChanges).mock.calls.length).toBeGreaterThan(changes)
+  // Already-current accepted originals advance through deltas. No redundant
+  // current-page action or native page reread is needed while this tail remains.
+  expect(container.querySelector('[data-message-tool-control="jump-to-latest"]')).toBeNull()
+  expect(ids().at(-1)).toBe('record-360'); expect(container.querySelector('.activity-feed__history-divider')).toBe(divider)
+  expect(body.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(requests).toHaveLength(count)
  })
- it('updates current-head content under the same raw identity without inventing a new-message count', async () => {
-  await render(compose()); await click('Earlier'); const before = ids()
+ it('retains an original body after a source rewrite and explicitly recovers its same raw identity', async () => {
+  useAppStore.setState({ agentComposerDrafts: { [sid]: 'Original source-recovery draft' } })
+  await render(compose()); const before = ids(), accepted = acceptedWindow()
+  expect(accepted.navigation.newer).toBeNull()
+  const original = container.querySelector('[data-native-record-id="record-353"] .log-turn__body')!
+  const failedReadStart = vi.mocked(api.conversation.readConversationChanges).mock.calls.length
   await writeFile(transcript, Array.from({ length: 360 }, (_, n) => JSON.stringify(n === 359
    ? { ...record(n), message: { role: 'assistant', content: [{ type: 'text', text: 'Updated native reply 359' }] } } : record(n))).join('\n') + '\n')
-  await act(async () => observation?.({ source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated', agentSessionId: sid }))
-  await act(async () => { await new Promise(resolve => setTimeout(resolve, 80)) }); await flush()
-  expect(ids()).toEqual(before); expect(container.textContent).toContain('Updated native reply 359')
+  await act(async () => observation?.({ source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated', agentSessionId: sid })); await flush()
+  await vi.waitFor(async () => {
+   await flush()
+   const consumer = inspectConversationConsumers(control).consumers[0]
+   expect(consumer?.error?.code).toBe('AGENT_CONVERSATION_SOURCE_READ_UNAVAILABLE')
+   expect(consumer?.accepted?.coverage.flatMap(source => source.gaps.map(gap => gap.code))).toContain('AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+  })
+  expect(ids()).toEqual(before); expect(original.isConnected).toBe(true)
+  expect(container.textContent).toContain('Conversation reading interrupted')
+  expect(container.textContent).not.toContain('Updated native reply 359')
+  const count = requests.length
+  await act(async () => document.dispatchEvent(new Event('selectionchange'))); await render(compose())
+  expect(requests).toHaveLength(count); expect(original.isConnected).toBe(true)
+  const publicReads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  const publicChanges = vi.mocked(api.conversation.readConversationChanges).mock.calls.length
+  const originalChanges = async (start: number) => Promise.all(vi.mocked(api.conversation.readConversationChanges).mock.calls.slice(start).map(async ([input], offset) => {
+   const result = vi.mocked(api.conversation.readConversationChanges).mock.results[start + offset]
+   if (result?.type !== 'return') throw new Error('The original public changes call must return its response Promise')
+   return { input, page: await result.value }
+  }))
+  const changedPages = (await originalChanges(failedReadStart)).filter(({ page }) => page.window.id === accepted.id)
+  const lastLogicalRead = changedPages.reduce((last, { input }, index) => input.cursor ? last : index, -1)
+  expect(lastLogicalRead).toBeGreaterThanOrEqual(0)
+  const failedPages = changedPages.slice(lastLogicalRead)
+  const failedChange = failedPages[0]!.input
+  expect(failedChange).toMatchObject({ hostId: 'local', agentSessionId: sid, checkpoint: accepted.checkpoint })
+  const failedFrame = acceptedWindow()
+  expect(failedFrame.id).toBe(accepted.id)
+  const current = container.querySelector<HTMLButtonElement>('[data-message-tool-control="jump-to-latest"]')!
+  expect(current, 'A failed loaded-tail cut needs its own explicit current action').not.toBeNull()
+  expect(current.textContent).toBe('读取当前记录')
+  await click('Retry reading')
+  expect(vi.mocked(api.conversation.readAgentConversation), 'Retry must repeat the original public operation instead of reading latest').toHaveBeenCalledTimes(publicReads)
+  const retries = (await originalChanges(publicChanges)).filter(({ page }) => page.window.id === accepted.id)
+  expect(retries).toHaveLength(failedPages.length)
+  expect(retries[0]!.input).toEqual({ ...failedChange, view: failedFrame.view })
+  for (const [index, { input: retry }] of retries.entries()) {
+   expect(retry).toMatchObject({ hostId: 'local', agentSessionId: sid, checkpoint: failedChange.checkpoint, view: failedFrame.view })
+   if (index > 0) expect(retry.cursor).toBeTypeOf('string')
+  }
+  const retryPages = retries.map(({ page }) => page)
+  expect(retryPages.filter(page => page.window.complete)).toHaveLength(1)
+  expect(retryPages.at(-1)!.window.complete).toBe(true)
+  expect(retryPages.every(page => page.window.id === failedFrame.id)).toBe(true)
+  expect(ids()).toEqual(before); expect(original.isConnected).toBe(true)
+  expect(inspectConversationConsumers(control).consumers[0]?.error?.code).toBe('AGENT_CONVERSATION_SOURCE_READ_UNAVAILABLE')
+  expect(container.textContent).not.toContain('Updated native reply 359')
+  await click('读取当前记录')
+  expect(vi.mocked(api.conversation.readAgentConversation).mock.calls.length, 'Explicit current must request a new public cut').toBeGreaterThan(publicReads)
+  const latest = vi.mocked(api.conversation.readAgentConversation).mock.calls[publicReads]![0]
+  expect(latest).toMatchObject({ hostId: 'local', agentSessionId: sid })
+  expect(latest.cursor).toBeUndefined(); expect(latest.view).toBeUndefined(); expect(latest.nativeSource).toBeUndefined()
+  expect(ids().at(-1)).toBe('record-359')
+  expect(container.textContent).toContain('Updated native reply 359')
+  expect(inspectConversationConsumers(control).consumers[0]?.error).toBeNull()
+  expect(original.isConnected).toBe(true)
+  expect(acceptedWindow().id).not.toBe(accepted.id)
+  expect(acceptedWindow().checkpoint).not.toEqual(accepted.checkpoint)
+  expect(useAppStore.getState().agentComposerDrafts[sid]).toBe('Original source-recovery draft')
   expect(container.querySelector('.activity-feed__latest-held')).toBeNull()
  })
- it('keeps a protected historical selection on Latest and cancels a superseded pending older page after selection is cleared', async () => {
-  await render(compose()); await click('Earlier')
-  const group = container.querySelector<HTMLElement>('[data-native-record-ids]')!, label = group.querySelector<HTMLElement>('.wf-head .wf-observation__recorded')!
-  const range = document.createRange(); range.selectNodeContents(label); window.getSelection()!.addRange(range)
-  const before = ids(); await click('最新消息')
-  expect(ids()).toEqual(before); expect(group.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
-  expect(container.textContent).toContain('保留阅读位置')
-  window.getSelection()!.removeAllRanges()
-  // A fresh long transcript permits one more genuinely pending original earlier read.
-  await writeFile(transcript, Array.from({ length: 1800 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+ it.each(['selection', 'focus'] as const)('keeps an explicit current recovery behind the original %s admission after a source rewrite', async protection => {
+  await render(compose()); const before = ids(), accepted = acceptedWindow()
+  const body = container.querySelector<HTMLElement>('[data-native-record-id="record-353"] .log-turn__body')!
+  const text = [...body.querySelectorAll('p')].find(node => node.textContent === 'Reply 353')!.firstChild!
+  await writeFile(transcript, Array.from({ length: 360 }, (_, n) => JSON.stringify(n === 353
+   ? { ...record(n), message: { role: 'assistant', content: 'Changed protected original 353' } } : record(n))).join('\n') + '\n')
   await act(async () => observation?.({ source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated', agentSessionId: sid })); await flush()
-  await click('最新消息'); await click('Earlier')
-  const page = recent!.nativeHistoryPage!
-  let release!: (page: AgentSessionHistoryPage) => void
-  vi.mocked(api.sessions.historyPage).mockImplementationOnce((_reference, options) => {
-   requests.push(options ?? {}); return new Promise(resolve => { release = resolve })
+  await vi.waitFor(async () => {
+   await flush()
+   const consumer = inspectConversationConsumers(control).consumers[0]
+   expect(consumer?.error?.code).toBe('AGENT_CONVERSATION_SOURCE_READ_UNAVAILABLE')
+   expect(consumer?.accepted?.coverage.flatMap(source => source.gaps.map(gap => gap.code))).toContain('AGENT_SESSION_HISTORY_SOURCE_CHANGED')
   })
+  expect(ids()).toEqual(before); expect(container.textContent).toContain('Conversation reading interrupted')
+  const range = document.createRange(); range.selectNodeContents(text)
+  const focused = body.closest<HTMLElement>('[data-native-record-id]')!.querySelector<HTMLButtonElement>('[aria-label="Copy message"]')!
+  expect(focused).not.toBeNull()
+  const current = container.querySelector<HTMLButtonElement>('[data-message-tool-control="jump-to-latest"]')!
+  expect(current, 'Explicit recovery must remain reachable before presentation admission').not.toBeNull()
+  await act(async () => {
+   if (protection === 'selection') window.getSelection()!.addRange(range)
+   else focused.focus()
+   current.click()
+  })
+  await vi.waitFor(async () => {
+   await flush({ pending: true })
+   expect(inspectConversationConsumers(control).consumers[0]).toMatchObject({ held: true, loading: false, inFlight: false })
+  })
+  expect(ids()).toEqual(before); expect(body.isConnected).toBe(true); expect(text.isConnected).toBe(true)
+  expect(body.textContent).toContain('Reply 353')
+  expect(acceptedWindow().id).toBe(accepted.id)
+  if (protection === 'selection') expect(window.getSelection()!.getRangeAt(0)).toBe(range)
+  else expect(document.activeElement).toBe(focused)
+  await act(async () => {
+   window.getSelection()!.removeAllRanges(); focused.blur(); document.dispatchEvent(new Event('selectionchange'))
+  }); await flush()
+  expect(container.textContent).toContain('Changed protected original 353')
+  expect(inspectConversationConsumers(control).consumers[0]?.error).toBeNull()
+  expect(acceptedWindow().id).not.toBe(accepted.id)
+ })
+ it('does not execute a failed-cut current action while its original Activity consumer is hidden', async () => {
+  await render(compose()); const before = ids()
+  await writeFile(transcript, Array.from({ length: 360 }, (_, n) => JSON.stringify(n === 359
+   ? { ...record(n), message: { role: 'assistant', content: 'Hidden source-recovery original 359' } } : record(n))).join('\n') + '\n')
+  await act(async () => observation?.({ source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated', agentSessionId: sid })); await flush()
+  await vi.waitFor(async () => {
+   await flush()
+   const consumer = inspectConversationConsumers(control).consumers[0]
+   expect(consumer?.error?.code).toBe('AGENT_CONVERSATION_SOURCE_READ_UNAVAILABLE')
+   expect(consumer?.accepted?.coverage.flatMap(source => source.gaps.map(gap => gap.code))).toContain('AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+  })
+  expect(container.textContent).toContain('Conversation reading interrupted')
+  await render(compose(false))
+  const current = container.querySelector<HTMLButtonElement>('[data-message-tool-control="jump-to-latest"]')!
+  expect(current).not.toBeNull(); expect(current.disabled).toBe(true)
+  const reads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  const changes = vi.mocked(api.conversation.readConversationChanges).mock.calls.length
+  await act(async () => current.click()); await flush()
+  expect(ids()).toEqual(before)
+  expect(vi.mocked(api.conversation.readAgentConversation)).toHaveBeenCalledTimes(reads)
+  expect(vi.mocked(api.conversation.readConversationChanges)).toHaveBeenCalledTimes(changes)
+  expect(container.textContent).not.toContain('Hidden source-recovery original 359')
+  await render(compose())
+  await click('读取当前记录')
+  expect(container.textContent).toContain('Hidden source-recovery original 359')
+ })
+ it('keeps a protected historical selection on Latest until its original Range is cleared', async () => {
+  await writeFile(transcript, Array.from({ length: 1400 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+  await render(compose())
+  expect(ids()).toHaveLength(300)
+  for (let n = 0; n < 10 && !acceptedWindow().navigation.newer; n++) await click('Earlier')
+  expect(ids()).toHaveLength(1200)
+  expect(acceptedWindow().navigation.newer).toBeTypeOf('string')
+  const group = container.querySelector<HTMLElement>('[data-conversation-process-members]')!, label = group.querySelector<HTMLElement>('.wf-head .wf-observation__recorded')!
+  const text = label.firstChild!, quote = label.textContent
+  const range = document.createRange(); range.selectNodeContents(label); window.getSelection()!.addRange(range)
+  const before = ids(), currentButton = container.querySelector<HTMLButtonElement>('[data-message-tool-control="jump-to-latest"]')!
+  expect(currentButton).not.toBeNull()
+  await click('滚动到最新')
+  expect(inspectConversationConsumers(control).consumers[0]).toMatchObject({ held: true, loading: false, inFlight: false })
+  expect(ids()).toEqual(before); expect(group.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
+  expect(label.firstChild).toBe(text); expect(window.getSelection()!.toString()).toBe(quote)
+  expect(inspectConversationConsumers(control).consumers[0]?.held).toBe(true)
+  window.getSelection()!.removeAllRanges()
+  await act(async () => document.dispatchEvent(new Event('selectionchange'))); await flush()
+  expect(ids()).toEqual(Array.from({ length: 300 }, (_, n) => `record-${1100 + n}`))
+  expect(acceptedWindow().navigation.newer).toBeNull()
+ })
+ it('cancels a superseded pending older page after explicit Current and rejects its late original result', async () => {
+  await writeFile(transcript, Array.from({ length: 1400 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+  await render(compose())
+  expect(ids()).toHaveLength(300)
+  for (let n = 0; n < 10 && !acceptedWindow().navigation.newer; n++) await click('Earlier')
+  expect(ids()).toHaveLength(1200)
+  expect(acceptedWindow().navigation.newer).toBeTypeOf('string')
+  let release!: (page: AgentSessionHistoryPage) => void
+  let requested: AgentSessionHistoryPageOptions | undefined
+  nativePage.mockImplementationOnce((_reference, options) => {
+   requested = options; requests.push(options ?? {}); return new Promise(resolve => { release = resolve })
+  })
+  const olderCursor = acceptedWindow().navigation.older
+  expect(olderCursor).toBeTypeOf('string')
+  const readStart = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
   const earlier = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Earlier')!
   await act(async () => { earlier.focus(); earlier.click() })
-  expect(container.querySelector<HTMLButtonElement>('button[aria-label="Return to latest messages"]')!.disabled).toBe(false)
-  const count = requests.length; await click('最新消息'); const current = ids()
-  expect(current.at(-1)).toBe('record-1799')
-  await act(async () => release(await client.sessionHistoryPage(sid, { limit: 30, cursor: page.nextCursor! }))); await flush()
-  expect(ids()).toEqual(current); expect(requests).toHaveLength(count + 3); expect(container.querySelector('[data-conversation-reading]')?.getAttribute('data-conversation-reading')).toBe('current')
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+  expect(requested?.cursor).toBeTypeOf('string')
+  const late = await readOriginalPage(sid, requested)
+  const pendingRead = vi.mocked(api.conversation.readAgentConversation).mock.calls[readStart]!
+  expect(pendingRead[0].cursor).toBe(olderCursor)
+  expect(pendingRead[1]?.signal?.aborted).toBe(false)
+  expect(container.querySelector<HTMLButtonElement>('button[data-message-tool-control="jump-to-latest"]')!.disabled).toBe(false)
+  const count = requests.length, currentStart = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  await act(async () => container.querySelector<HTMLButtonElement>('button[data-message-tool-control="jump-to-latest"]')!.click())
+  expect(pendingRead[1]?.signal?.aborted).toBe(true)
+  await vi.waitFor(() => {
+   const latest = vi.mocked(api.conversation.readAgentConversation).mock.calls[currentStart]?.[0]
+   expect(latest).toMatchObject({ hostId: 'local', agentSessionId: sid })
+   expect(latest?.cursor).toBeUndefined()
+  })
+  // The original provider read may finish after its UI request is cancelled.
+  // Release that actual result before awaiting the independent current frame.
+  await act(async () => release(late)); await flush()
+  expect(ids()).toEqual(Array.from({ length: 300 }, (_, n) => `record-${1100 + n}`))
+  expect(acceptedWindow().navigation.newer).toBeNull()
+  expect(requests).toHaveLength(count + 3); expect(container.querySelector('[data-conversation-reading]')?.getAttribute('data-conversation-reading')).toBe('current')
  })
- it('does not label a foreign or missing current source as an update and disables the historical Latest action while hidden', async () => {
-  const current = await client.sessionHistoryPage(sid)
-  const surface = (page: AgentSessionHistoryPage | null, enabled = true) => <ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={page}
+ it('does not replace the accepted original source with foreign or missing context props and disables Earlier while hidden', async () => {
+  const current = await readOriginalPage(sid)
+  const surface = (page: AgentSessionHistoryPage | null, enabled = true) => <ActivityView sessionId={sid} capability="complete-events" nativeHistoryPage={page}
    conversationReading={{ reference: control, identity: control.run.runId, enabled }} />
-  await render(surface(current)); await click('Earlier'); const before = ids(), count = requests.length
+  await render(surface(current)); const before = ids(), accepted = acceptedWindow(), count = requests.length
+  expect(before).toHaveLength(300)
+  const publicReads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
   for (const page of [null, { ...current, items: [] }, { ...current, agentSessionId: 'foreign-agent' },
    { ...current, source: { ...current.source, providerId: 'foreign-provider' } }, { ...current, source: { ...current.source, nativeSessionId: 'foreign-native' } }]) {
    await render(surface(page)); expect(ids()).toEqual(before)
-   expect(container.querySelector('button[aria-label="Return to latest messages"]')).not.toBeNull()
+   expect(acceptedWindow()).toEqual(accepted)
    expect(container.textContent, JSON.stringify({source:page?.source,session:page?.agentSessionId,count:page?.items.length,entry:container.querySelector('[data-conversation-current-entry]')?.textContent})).not.toContain('Current records updated')
   }
   await render(surface(current, false))
-  const latest = container.querySelector<HTMLButtonElement>('button[aria-label="Return to latest messages"]')!
-  expect(latest.disabled).toBe(true); await act(async () => latest.click()); await flush()
+  const earlier = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Earlier')!
+  expect(earlier).toBeDefined(); expect(earlier.disabled).toBe(true)
+  await act(async () => earlier.click()); await flush()
   expect(ids()).toEqual(before); expect(requests).toHaveLength(count)
+  expect(vi.mocked(api.conversation.readAgentConversation)).toHaveBeenCalledTimes(publicReads)
  })
 
- it('seeds normal unopened Activity with300 raw and keeps shared streaming and distinct same-body appended records live', async () => {
+ it('seeds normal unopened Activity with300 raw and keeps distinct same-body appended records live', async () => {
   await render(compose())
   expect(ids()).toEqual(Array.from({ length: 300 }, (_, n) => `record-${String(60 + n).padStart(3, '0')}`))
   expect(container.querySelector('[data-conversation-reading]')?.getAttribute('data-conversation-reading')).toBe('current')
   const body = container.querySelector<HTMLElement>('[data-native-record-id="record-353"] .log-turn__body')!
   const localReads = requests.filter(request => request.limit === 100).length
-  const original = Array.from({ length: 360 }, (_, n) => n === 353 ? { ...record(n), message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'Trace 353' }, { type: 'text', text: 'Reply 353 streamed' }] } } : record(n))
+  const activityWindow = acceptedWindow().id
+  const ownChangeCalls = () => {
+   const views = new Set(readingReceipts.flatMap(page => page.window.id === activityWindow && page.window.view ? [page.window.view] : []))
+   return vi.mocked(api.conversation.readConversationChanges).mock.calls.filter(([input]) => input.view !== undefined && views.has(input.view))
+  }
+  const ownChanges = () => ownChangeCalls().filter(([input]) => !input.cursor).length
+  const beforeBurst = ownChanges(), beforeWire = ownChangeCalls().length
   const appended = [360, 361].map(n => ({ ...record(n), type: 'user', message: { role: 'user', content: 'Same actual body, two native UUIDs' } }))
-  await writeFile(transcript, [...original, ...appended].map(row => JSON.stringify(row)).join('\n') + '\n')
-  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
-  expect(body.isConnected).toBe(true); expect(body.textContent).toContain('Reply 353 streamed')
+  await appendFile(transcript, appended.map(row => JSON.stringify(row)).join('\n') + '\n')
+  await act(async () => {
+   for (let event = 0; event < 3; event++) observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })
+  }); await flush()
+  expect(ownChanges() - beforeBurst, 'One relevant invalidation burst coalesces into one change read for this original Activity window').toBe(1)
+  const burst = ownChangeCalls().slice(beforeWire)
+  // A full replacement window spans four 100-item transport pages. Its
+  // continuation pages do not start another source changes transaction.
+  expect(burst).toHaveLength(4)
+  expect(burst.slice(1).every(([input]) => Boolean(input.cursor))).toBe(true)
+  for (const [input] of burst) {
+   expect(input.view).toBe(burst[0]![0].view)
+   expect(input.checkpoint).toEqual(burst[0]![0].checkpoint)
+  }
+  expect(body.isConnected).toBe(true); expect(body.textContent).toContain('Reply 353')
   expect(ids().slice(-2)).toEqual(['record-360', 'record-361'])
   expect([...container.querySelectorAll('.conversation-native-thread .log-turn__body')].filter(node => node.textContent === 'Same actual body, two native UUIDs')).toHaveLength(2)
   expect(requests.filter(request => request.limit === 100)).toHaveLength(localReads)
   expect(container.querySelector('.activity-feed__newer-edge')).toBeNull()
  })
- it('slides beyond1200 then replays adjacent visited pages toward its fixed head without null replay, and latest refreshes after a live gap', async () => {
-  await writeFile(transcript, Array.from({ length: 2400 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+ it('slides beyond1200 then replays adjacent visited pages and catches up from its original cut after a live gap', async () => {
+  await writeFile(transcript, Array.from({ length: 1600 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
   await render(compose())
   expect(ids()).toHaveLength(300)
-  await appendFile(transcript, JSON.stringify(record(2400)) + '\n')
+  await appendFile(transcript, JSON.stringify(record(1600)) + '\n')
   await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
-  expect(ids().at(-1)).toBe('record-2400')
-  const originalHead = ids().slice(-101), shared = recent!.nativeHistoryPage
-  expect(originalHead[0]).toBe('record-2300')
-  for (let n = 0; n < 5; n++) await click('Earlier')
-  expect(ids().length).toBeLessThanOrEqual(1200); expect(ids()).not.toContain('record-2300')
+  expect(ids().at(-1)).toBe('record-1600')
+  const historyCut = ids()[0]!
+ const originalHead = ids().slice(-101), shared = recent!.nativeHistoryPage
+  expect(originalHead[0]).toBe('record-1500')
+  // Each explicit navigation admits one original 100-record page. Continue far
+  // enough to exercise the actual 1,200-record window rather than the old batch.
+  for (let n = 0; n < 10; n++) await click('Earlier')
+  expect(ids().length).toBeLessThanOrEqual(1200); expect(ids()).not.toContain('record-1500')
+  expect(ids()).toContain(historyCut)
+  const boundary = container.querySelector<HTMLElement>('.activity-feed__history-divider')!.parentElement!
+  const next = boundary.nextElementSibling as HTMLElement
+  expect(next.dataset.nativeRecordId ?? processNativeRecordIds(next)[0]).toBe(historyCut)
+  const previous = boundary.previousElementSibling as HTMLElement
+  const previousId = previous.dataset.nativeRecordId ?? processNativeRecordIds(previous).at(-1)
+  expect(previousId).toBe(`record-${Number(historyCut.slice('record-'.length)) - 1}`)
+  expect(boundary.textContent).toBe(`以上是历史消息（${new Date(record(Number(historyCut.slice('record-'.length)) - 1).timestamp).toLocaleString()}）`)
+  for (let n = 0; ids().includes(historyCut) && n < 3; n++) await click('Earlier')
+  expect(ids()).not.toContain(historyCut)
   expect(container.querySelector('.activity-feed__history-divider')).toBeNull()
   expect([...container.querySelectorAll('button')].some(button => button.textContent?.trim() === 'Newer')).toBe(true)
   expect(recent!.nativeHistoryPage).toBe(shared)
   const nullReads = requests.filter(request => request.limit === 100 && !request.cursor).length
-  await appendFile(transcript, Array.from({ length: 130 }, (_, n) => JSON.stringify(record(2401 + n))).join('\n') + '\n')
+  await appendFile(transcript, Array.from({ length: 130 }, (_, n) => JSON.stringify(record(1601 + n))).join('\n') + '\n')
   await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
-  for (let n = 0; n < 3; n++) await click('Newer')
-  expect(ids().slice(-101)).toEqual(originalHead); expect(ids()).toContain('record-2400')
+  let visitedNewer = 0
+  while (!ids().includes('record-1600') && visitedNewer < 10) {
+   const cursor = acceptedWindow().navigation.newer
+   expect(cursor).toBeTruthy()
+   const reads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+   await click('Newer'); visitedNewer++
+   expect(vi.mocked(api.conversation.readAgentConversation).mock.calls[reads]?.[0].cursor).toBe(cursor)
+  }
+  expect(visitedNewer).toBeGreaterThan(0)
+  const after = ids(), head = after.indexOf(originalHead[0]!)
+  expect(head).toBeGreaterThanOrEqual(0); expect(after.slice(head, head + originalHead.length)).toEqual(originalHead)
+  const ordinals = after.map(id => Number(id.slice('record-'.length)))
+  expect(ordinals).toEqual(Array.from({ length: ordinals.length }, (_, n) => ordinals[0]! + n))
+  expect(after.at(-1)).toBe('record-1730'); expect(after.length).toBeLessThanOrEqual(1200)
   expect(requests.filter(request => request.limit === 100 && !request.cursor)).toHaveLength(nullReads)
-  expect(container.querySelector('button[aria-label="Return to latest messages"]')?.textContent).toBe('最新消息')
-  await click('最新消息'); expect(ids()).toHaveLength(300); expect(ids().at(-1)).toBe('record-2530')
+  const viewport = container.querySelector<HTMLElement>('.activity-feed')!
+  markerGeometry(viewport); await scrollTo(viewport, 5000)
+  const reads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  await click('滚动到最新'); expect(ids()).toEqual(after)
+  expect(vi.mocked(api.conversation.readAgentConversation)).toHaveBeenCalledTimes(reads)
   if (process.env.AGENTMUX_SLIDING_SCENE_PAGES) await writeFile(process.env.AGENTMUX_SLIDING_SCENE_PAGES, JSON.stringify({ provenance: 'Controlled native Claude JSONL -> real public Core/FileStore; original API request and response in order, no user App/vendor writer', receipts: await Promise.all(promises.map(async (response, index) => ({ request: requests[index], response: await response }))) }, null, 2) + '\n')
  })
 
- it('provides one latest action for a detached native gap and reads its real current source', async () => {
+
+ it('returns to an appended loaded tail without creating a false gap or another read', async () => {
   await render(compose())
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!
-  Object.defineProperties(viewport, { clientHeight: { configurable: true, value: 200 }, scrollHeight: { configurable: true, value: 10000 } })
-  viewport.getBoundingClientRect = () => rect(100, 200)
-  for (const tail of viewport.querySelectorAll<HTMLElement>('[data-conversation-native-tail], [data-conversation-reading-tail]')) tail.getBoundingClientRect = () => rect(10100 - viewport.scrollTop, 0)
-  await scrollTo(viewport, 9800); await scrollTo(viewport, 500); await flush()
+  markerGeometry(viewport); await scrollTo(viewport, 9800); await scrollTo(viewport, 500)
   const before = ids(), body = viewport.querySelector<HTMLElement>('[data-native-record-id="record-353"] .log-turn__body')!
-  const beforeReads = requests.filter(request => request.limit === 100).length
-  await appendFile(transcript, Array.from({ length: 400 }, (_, n) => JSON.stringify(record(360 + n))).join('\n') + '\n')
+  const reads = requests.length
+  await appendFile(transcript, Array.from({ length: 301 }, (_, n) => JSON.stringify(record(360 + n))).join('\n') + '\n')
   await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
-  expect(recent!.nativeHistoryPage!.items.at(-1)!.id).toBe('record-759')
-  expect(ids()).toEqual(before); expect(body.isConnected).toBe(true)
-  expect(requests.filter(request => request.limit === 100)).toHaveLength(beforeReads)
-  await act(async () => document.dispatchEvent(new Event('selectionchange'))); await render(compose())
-  expect(ids()).toEqual(before); expect(requests.filter(request => request.limit === 100)).toHaveLength(beforeReads)
-  const latest = container.querySelectorAll<HTMLButtonElement>('button[aria-label="Return to latest messages"]')
-  expect(latest).toHaveLength(1); expect(latest[0]!.textContent).toBe('最新消息')
+  await vi.waitFor(async () => {
+   await flush()
+   expect(ids()).toEqual([...before, ...Array.from({ length: 301 }, (_, n) => `record-${360+n}`)])
+   expect(readingSummary).not.toBeNull(); expect(recent).not.toBeNull()
+   const consumers = [...inspectConversationConsumers(control).consumers.filter(consumer => consumer.gates.enabled),
+    readingSummary!.conversation.inspect(), recent!.conversation.inspect()]
+   expect(consumers).toHaveLength(3)
+   for (const consumer of consumers) expect(consumer).toMatchObject({ historical: false, dirty: false, inFlight: false, loading: false, error: null,
+    watch: { binding: false } })
+  }, { timeout: 4000, interval: 10 })
+  expect(body.isConnected).toBe(true); expect(viewport.scrollTop).toBe(500)
+  expect(requests).toHaveLength(reads)
+  const latest = container.querySelectorAll<HTMLButtonElement>('[data-message-tool-control="jump-to-latest"]')
+  expect(latest).toHaveLength(1)
   expect([...container.querySelectorAll('button')].some(button => ['Current', 'Show latest messages', 'Jump to latest'].includes(button.textContent?.trim() ?? ''))).toBe(false)
-  const first = requests.length; await click('最新消息')
-  expect(requests.slice(first).find(request => request.limit === 100)).toMatchObject({ limit: 100 })
-  expect(requests.slice(first).find(request => request.limit === 100)!.cursor).toBeUndefined()
-  expect(ids().at(-1)).toBe('record-759'); expect(ids()).toHaveLength(300)
-  expect(container.querySelector('.activity-feed__newer-edge')).toBeNull()
+  const changes = vi.mocked(api.conversation.readConversationChanges).mock.calls.length
+  const pages = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  await act(async () => latest[0]!.click()); await flush()
+  expect(viewport.scrollTop).toBe(9800)
+  expect(ids().at(-1)).toBe('record-660'); expect(body.isConnected).toBe(true)
+  expect(requests).toHaveLength(reads)
+  expect(vi.mocked(api.conversation.readConversationChanges).mock.calls).toHaveLength(changes)
+  expect(vi.mocked(api.conversation.readAgentConversation).mock.calls).toHaveLength(pages)
  })
 
- it('retains a genuine failed current-source read without selection or render retry polling', async () => {
+ it('retains a failed public changes read without selection or render retry polling', async () => {
   await render(compose())
-  const before = ids(), viewport = container.querySelector<HTMLElement>('.activity-feed')!, body = viewport.querySelector<HTMLElement>('[data-native-record-id="record-353"] .log-turn__body')!
-  Object.defineProperties(viewport, { clientHeight: { configurable: true, value: 200 }, scrollHeight: { configurable: true, value: 10000 } })
-  viewport.getBoundingClientRect = () => rect(100, 200)
-  for (const tail of viewport.querySelectorAll<HTMLElement>('[data-conversation-native-tail], [data-conversation-reading-tail]')) tail.getBoundingClientRect = () => rect(10100 - viewport.scrollTop, 0)
-  await scrollTo(viewport, 9800)
-  const original = vi.mocked(api.sessions.historyPage).getMockImplementation()!
-  let failedReads = 0
-  vi.mocked(api.sessions.historyPage).mockImplementation((reference, options) => {
-   if (options?.limit === 100) { failedReads++; requests.push(options); return Promise.reject(new Error('Original current source read unavailable')) }
-   return original(reference, options)
-  })
-  await appendFile(transcript, Array.from({ length: 400 }, (_, n) => JSON.stringify(record(360 + n))).join('\n') + '\n')
+  const before = ids(), body = container.querySelector('[data-native-record-id="record-353"] .log-turn__body')!
+  const original = vi.mocked(api.conversation.readConversationChanges).getMockImplementation()!
+  vi.mocked(api.conversation.readConversationChanges).mockRejectedValue(new Error('Original current source read unavailable'))
+  const reads = vi.mocked(api.conversation.readConversationChanges).mock.calls.length
+  await appendFile(transcript, JSON.stringify(record(360)) + '\n')
   await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
-  expect(recent!.nativeHistoryPage!.items.at(-1)!.id).toBe('record-759')
-  expect(failedReads).toBe(1); expect(ids()).toEqual(before); expect(body.isConnected).toBe(true)
+  expect(vi.mocked(api.conversation.readConversationChanges).mock.calls.length).toBeGreaterThan(reads)
+  expect(ids()).toEqual(before); expect(body.isConnected).toBe(true)
+  expect(container.querySelector('.activity-feed__reading-service')).not.toBeNull()
   expect(container.textContent).toContain('Original current source read unavailable')
-  await act(async () => document.dispatchEvent(new Event('selectionchange'))); await render(compose()); await flush()
-  expect(failedReads).toBe(1); expect(ids()).toEqual(before); expect(body.isConnected).toBe(true)
-  expect(container.textContent).toContain('Original current source read unavailable')
-  // Explicit latest retries this real failure; merely setting follow=true cannot clear an IO error.
-  vi.mocked(api.sessions.historyPage).mockImplementation(original)
-  const retryStart = requests.length; await click('最新消息')
-  expect(requests.slice(retryStart).some(request => request.limit === 100 && !request.cursor)).toBe(true)
-  expect(ids().at(-1)).toBe('record-759'); expect(container.textContent).not.toContain('Original current source read unavailable')
+  const failed = vi.mocked(api.conversation.readConversationChanges).mock.calls.length
+  await act(async () => document.dispatchEvent(new Event('selectionchange'))); await render(compose())
+  expect(vi.mocked(api.conversation.readConversationChanges).mock.calls).toHaveLength(failed)
+  expect(ids()).toEqual(before); expect(body.isConnected).toBe(true)
+  vi.mocked(api.conversation.readConversationChanges).mockImplementation(original)
+  await click('Retry reading')
+  expect(ids().at(-1)).toBe('record-360'); expect(body.isConnected).toBe(true)
+  expect(container.textContent).not.toContain('Original current source read unavailable')
  })
-
  it('keeps a genuine read failure and Retry when a later same-source update is held by the original Range', async () => {
-  const original = vi.mocked(api.sessions.historyPage).getMockImplementation()!
-  let failed = false
-  vi.mocked(api.sessions.historyPage).mockImplementation((reference, options) => {
-   if (!failed && options?.limit === 100 && options.cursor) { failed = true; requests.push(options); return Promise.reject(new Error('Original background source read unavailable')) }
-   return original(reference, options)
+  await writeFile(transcript, Array.from({ length: 1260 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+  await render(compose()); for (let batch = 0; batch < 9; batch++) await click('Earlier')
+  const original = vi.mocked(api.conversation.readAgentConversation).getMockImplementation()!
+  const cursor = acceptedWindow().navigation.older!
+  expect(cursor).toBeTruthy()
+  let failed = 0
+  vi.mocked(api.conversation.readAgentConversation).mockImplementation(input => {
+   if (input.cursor === cursor) { failed++; return Promise.reject(new Error('Original background source read unavailable')) }
+   return original(input)
   })
-  await render(compose())
-  expect(failed).toBe(true); expect(container.textContent).toContain('Original background source read unavailable')
-  const group = [...container.querySelectorAll<HTMLElement>('[data-native-record-ids]')].find(node => (JSON.parse(node.dataset.nativeRecordIds!) as string[]).includes('record-359'))!
-  expect(group).toBeDefined()
-  const label = group.querySelector<HTMLElement>('.log-fold__steps')!, range = document.createRange()
-  range.selectNodeContents(label); window.getSelection()!.addRange(range)
-  const before = ids(), beforeReads = requests.filter(request => request.limit === 100).length
-  await writeFile(transcript, Array.from({ length: 360 }, (_, n) => JSON.stringify(n === 359
-   ? { ...record(n), message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'Changed original final native process' }] } } : record(n))).join('\n') + '\n')
+  await click('Earlier')
+  expect(failed).toBe(1); expect(container.textContent).toContain('Original background source read unavailable')
+  const body = container.querySelector<HTMLElement>('[data-native-record-id="record-065"] .log-turn__body')!
+  const range = document.createRange(); range.selectNodeContents(body.querySelector('p')!); window.getSelection()!.addRange(range)
+  const before = ids()
+  // A legal append crosses the actual current-window budget. Rewriting a
+  // native prefix would instead invalidate its checkpoint before admission.
+  await appendFile(transcript, Array.from({ length: 30 }, (_, n) => JSON.stringify(record(1260 + n))).join('\n') + '\n')
   await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
-  expect(ids()).toEqual(before); expect(group.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
-  expect(container.textContent).toContain('保留阅读位置'); expect(container.textContent).toContain('Original background source read unavailable')
-  expect([...container.querySelectorAll('button')].some(button => button.textContent === 'Retry')).toBe(true)
+  expect(ids()).toEqual(before); expect(body.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
+  expect(inspectConversationConsumers(control).consumers[0]?.held).toBe(true); expect(container.textContent).toContain('Original background source read unavailable')
+  expect([...container.querySelectorAll('button')].some(button => button.textContent === 'Retry reading')).toBe(true)
   await act(async () => { window.getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) }); await flush(); await render(compose())
-  expect(requests.filter(request => request.limit === 100)).toHaveLength(beforeReads)
-  expect(ids()).toEqual(before); expect(container.textContent).toContain('Original background source read unavailable')
+  expect(failed).toBe(1); expect(container.textContent).toContain('Original background source read unavailable')
  })
 
  it('keeps a latest action for a held-only current window and uses a real current read after the Range is cleared', async () => {
-  const original = vi.mocked(api.sessions.historyPage).getMockImplementation()!
-  let release: ((page: AgentSessionHistoryPage) => void) | undefined, cursor: string | undefined
-  vi.mocked(api.sessions.historyPage).mockImplementation((reference, options) => {
-   if (!release && options?.limit === 100 && options.cursor) { cursor = options.cursor; requests.push(options); return new Promise(resolve => { release = resolve }) }
-   return original(reference, options)
-  })
-  await render(compose()); expect(release).toBeTypeOf('function')
-  const group = container.querySelector<HTMLElement>('[data-native-record-ids]')!, label = group.querySelector<HTMLElement>('.log-fold__steps')!
+  await render(compose())
+  const group = [...container.querySelectorAll<HTMLElement>('[data-conversation-process-members]')]
+   .find(node => processNativeRecordIds(node).includes('record-359'))!, label = group.querySelector<HTMLElement>('.log-fold__steps')!
   const range = document.createRange(); range.selectNodeContents(label); window.getSelection()!.addRange(range)
-  const before = ids()
-  await act(async () => release!(await client.sessionHistoryPage(sid, { limit: 100, cursor }))); await flush()
+  const before = ids(), originalCount = label.textContent
+  await appendFile(transcript, JSON.stringify({ ...record(360), type: 'assistant',
+   message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'A genuinely appended process member' }] } }) + '\n')
+  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
   expect(ids()).toEqual(before); expect(group.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
-  expect(container.textContent).toContain('保留阅读位置')
-  expect(container.querySelectorAll('button[aria-label="Return to latest messages"]')).toHaveLength(1)
+  expect(label.textContent).toBe(originalCount)
+  expect(inspectConversationConsumers(control).consumers[0]?.held).toBe(true)
+  expect(container.querySelectorAll('button[data-message-tool-control="jump-to-latest"]'), 'A held-only current frame keeps its explicit current action').toHaveLength(1)
   window.getSelection()!.removeAllRanges()
-  const readStart = requests.length; await click('最新消息')
-  expect(requests.slice(readStart).some(request => request.limit === 100 && !request.cursor)).toBe(true)
-  expect(ids().at(-1)).toBe('record-359'); expect(container.textContent).not.toContain('保留阅读位置')
+  const readStart = vi.mocked(api.conversation.readAgentConversation).mock.calls.length; await click('滚动到最新')
+  expect(vi.mocked(api.conversation.readAgentConversation).mock.calls.slice(readStart)
+   .some(([input]) => !input.cursor && !input.view && !input.anchor)).toBe(true)
+  expect(ids().at(-1)).toBe('record-360'); expect(inspectConversationConsumers(control).consumers[0]?.held).toBe(false)
  })
 
  it('bounds a continuously updated current head, preserves a protected Range without polling, and automatically resumes when that protection clears', async () => {
-  await render(compose())
-  const body = container.querySelector<HTMLElement>('[data-native-record-id="record-065"] .log-turn__body')!
+  await writeFile(transcript, Array.from({ length: 1200 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
+  await render(compose()); for (let batch = 0; batch < 9; batch++) await click('Earlier')
+  const body = container.querySelector<HTMLElement>('[data-native-record-id="record-009"] .log-turn__body')!
   const range = document.createRange(); range.selectNodeContents(body.querySelector('p')!); window.getSelection()!.addRange(range)
-  const publish = async (first: number) => {
-   await appendFile(transcript, Array.from({ length: 30 }, (_, n) => JSON.stringify(record(first + n))).join('\n') + '\n')
+  const publish = async (first: number, count = 30) => {
+   await appendFile(transcript, Array.from({ length: count }, (_, n) => JSON.stringify(record(first + n))).join('\n') + '\n')
    await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
   }
-  for (let n = 0; n < 7; n++) await publish(360 + n * 30)
+  await publish(1200)
   expect(body.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
-  expect(container.textContent).toContain('保留阅读位置')
-  const attempted = requests.filter(request => request.limit === 100).length
-  await publish(570); await publish(600)
-  expect(requests.filter(request => request.limit === 100)).toHaveLength(attempted)
-  expect(body.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('Reply 65')
-  const beforeResume = requests.filter(request => request.limit === 100).length
-  const beforeCurrentCuts = requests.filter(request => request.limit === 100 && !request.cursor).length
+  expect(inspectConversationConsumers(control).consumers[0]?.held).toBe(true)
+  const activityWindow = acceptedWindow().id
+  const ownChanges = () => {
+   const views = new Set(readingReceipts.flatMap(page => page.window.id === activityWindow && page.window.view ? [page.window.view] : []))
+   return vi.mocked(api.conversation.readConversationChanges).mock.calls.filter(([input]) => input.view !== undefined && views.has(input.view)).length
+  }
+  const attempted = ownChanges()
+  await publish(1230); await publish(1260)
+  expect(ownChanges()).toBe(attempted)
+  expect(body.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('Reply 9')
   await act(async () => { window.getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) }); await flush()
-  expect(ids().at(-1)).toBe('record-629'); expect(ids()).toHaveLength(300)
-  const resumedReads = requests.filter(request => request.limit === 100).length - beforeResume
-  expect(resumedReads).toBeGreaterThan(0); expect(resumedReads).toBeLessThanOrEqual(3)
-  expect(requests.filter(request => request.limit === 100 && !request.cursor)).toHaveLength(beforeCurrentCuts + 1)
-  const afterResume = requests.length
+  await vi.waitFor(async () => { await flush(); expect(ids().at(-1)).toBe('record-1289') })
+  expect(ids()).toHaveLength(1200)
+  const afterResume = vi.mocked(api.conversation.readConversationChanges).mock.calls.length
   await act(async () => document.dispatchEvent(new Event('selectionchange'))); await render(compose())
-  expect(requests).toHaveLength(afterResume)
-  expect(container.textContent).not.toContain('保留阅读位置')
-  for (let n = 0; n < 7; n++) await publish(630 + n * 30)
-  expect(ids().length).toBeLessThanOrEqual(500); expect(ids().at(-1)).toBe('record-839')
-  await flush()
-  await click('Earlier'); expect(ids()[0]).toBe('record-240'); expect(ids().at(-1)).toBe('record-839')
+  expect(vi.mocked(api.conversation.readConversationChanges).mock.calls).toHaveLength(afterResume)
+  expect(inspectConversationConsumers(control).consumers[0]?.held).toBe(false)
+  await publish(1290)
+  expect(ids()).toHaveLength(1200); expect(ids().at(-1)).toBe('record-1319')
+  const cursor = acceptedWindow().navigation.older
+  expect(cursor).toBeTruthy()
+  const reads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  await click('Earlier')
+  expect(vi.mocked(api.conversation.readAgentConversation).mock.calls[reads]?.[0].cursor).toBe(cursor)
+  expect(ids().length).toBeLessThanOrEqual(1200)
   expect(container.textContent).not.toContain('byte budget')
  })
- it('keeps the displayed current window when an automatic larger seed finishes hidden, then resumes the same following tail once visible', async () => {
+ it('keeps the displayed current window when a real current change finishes hidden, then resumes the same following tail once visible', async () => {
   await render(compose())
-  const publish = async (first: number) => {
-   await appendFile(transcript, Array.from({ length: 30 }, (_, n) => JSON.stringify(record(first + n))).join('\n') + '\n')
-   await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
-  }
-  for (let n = 0; n < 6; n++) await publish(360 + n * 30)
-  const before = ids(), original = vi.mocked(api.sessions.historyPage).getMockImplementation()!
-  let release!: (page: AgentSessionHistoryPage) => void, waiting = true
-  vi.mocked(api.sessions.historyPage).mockImplementation((reference, options) => {
-   if (waiting && options?.limit === 100) { waiting = false; requests.push(options); return new Promise(resolve => { release = resolve }) }
-   return original(reference, options)
+  const before = ids(), original = vi.mocked(api.conversation.readConversationChanges).getMockImplementation()!
+  const view = acceptedWindow().view!
+  expect(view).toBeTruthy()
+  let release: (() => Promise<void>) | undefined
+  vi.mocked(api.conversation.readConversationChanges).mockImplementation(input => {
+   if (input.view === view && !release) return new Promise(resolve => { release = async () => resolve(await original(input)) })
+   return original(input)
   })
-  await publish(540); expect(release).toBeTypeOf('function')
-  await render(compose(false)); await act(async () => release(await client.sessionHistoryPage(sid, { limit: 100 }))); await flush()
-  expect(ids()).toEqual(before); expect(container.textContent).toContain('paused while hidden')
-  const reads = requests.filter(request => request.limit === 100).length
-  const currentCuts = requests.filter(request => request.limit === 100 && !request.cursor).length
+  await appendFile(transcript, Array.from({ length: 30 }, (_, n) => JSON.stringify(record(360 + n))).join('\n') + '\n')
+  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' }))
+  await vi.waitFor(async () => { await flush({ pending: true }); expect(release).toBeTypeOf('function') })
+  await render(compose(false)); await act(async () => release!()); await flush()
+  expect(ids()).toEqual(before)
+  const hidden = inspectConversationConsumers(control).consumers[0]!
+  expect(hidden.gates.enabled).toBe(false); expect(hidden.loading).toBe(false)
+  const reads = vi.mocked(api.conversation.readConversationChanges).mock.calls.length
+  await render(compose(false))
+  expect(vi.mocked(api.conversation.readConversationChanges).mock.calls).toHaveLength(reads)
   await render(compose()); await flush()
-  expect(ids().at(-1)).toBe('record-569'); expect(ids()).toHaveLength(300)
-  expect(requests.filter(request => request.limit === 100)).toHaveLength(reads + 3)
-  expect(requests.filter(request => request.limit === 100 && !request.cursor)).toHaveLength(currentCuts + 1)
-  const resumed = requests.length
+  await vi.waitFor(async () => { await flush(); expect(ids().at(-1)).toBe('record-389') })
+  expect(ids()).toEqual([...before, ...Array.from({ length: 30 }, (_, n) => `record-${360+n}`)])
+  const resumed = vi.mocked(api.conversation.readConversationChanges).mock.calls.length
   await act(async () => document.dispatchEvent(new Event('selectionchange'))); await render(compose())
-  expect(requests).toHaveLength(resumed)
+  expect(vi.mocked(api.conversation.readConversationChanges).mock.calls).toHaveLength(resumed)
  })
- it('protects an expanded real body and Range before newer navigation trims the old side, then retries the same adjacent input', async () => {
+ it('protects an expanded real body and Range before newer navigation trims the old side, then presents that same adjacent frame', async () => {
   await writeFile(transcript, Array.from({ length: 2400 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
-  await render(compose()); for (let n = 0; n < 4; n++) await click('Earlier')
+  await render(compose()); for (let n = 0; n < 12; n++) await click('Earlier')
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!, body = viewport.querySelector<HTMLElement>('[data-native-record-id="record-921"] .log-turn__body')!
   const row = body.closest<HTMLElement>('[data-native-record-id]')!, trace = body.querySelector<HTMLDetailsElement>('[data-trace-kind="reasoning"]')!
   trace.open = true; const range = document.createRange(); range.selectNodeContents(body.querySelector('p')!); window.getSelection()!.addRange(range)
   viewport.getBoundingClientRect = () => rect(0, 200); row.getBoundingClientRect = () => rect(10)
-  const before = ids(), start = requests.length; await click('Newer')
+  const before = ids(), input = acceptedWindow().navigation.newer
+  expect(input).toBeTruthy()
+  const start = vi.mocked(api.conversation.readAgentConversation).mock.calls.length; await click('Newer')
   expect(ids()).toEqual(before); expect(body.isConnected).toBe(true); expect(trace.open).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
-  const input = requests[start]!.cursor; expect(input).toBeTruthy()
+  expect(vi.mocked(api.conversation.readAgentConversation).mock.calls[start]?.[0].cursor).toBe(input)
   window.getSelection()!.removeAllRanges(); row.getBoundingClientRect = () => rect(-200)
   const retained = viewport.querySelector<HTMLElement>('[data-native-record-id="record-1601"]')!; retained.getBoundingClientRect = () => rect(10)
-  const retry = requests.length; await click('Newer')
-  expect(requests[retry]!.cursor).toBe(input); expect(ids()[0]).toBe('record-1200'); expect(ids().at(-1)).toBe('record-2299'); expect(retained.isConnected).toBe(true)
+  const retry = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  await act(async () => document.dispatchEvent(new Event('selectionchange'))); await flush()
+  expect(vi.mocked(api.conversation.readAgentConversation)).toHaveBeenCalledTimes(retry)
+  expect(ids()[0]).toBe('record-1000'); expect(ids().at(-1)).toBe('record-2199'); expect(retained.isConnected).toBe(true)
  })
  it('prefetches only on a real directional edge entry and keeps ruler and editable keys from reading pages', async () => {
   await render(compose()); const viewport = container.querySelector<HTMLElement>('.activity-feed')!, slider = container.querySelector<HTMLElement>('[role="slider"]')!
@@ -771,18 +1096,21 @@ describe('One Activity reading surface over public original-sequence windows', (
   await wheel(-100, 5000); expect(requests).toHaveLength(before + 3)
   // A single large input crosses into the prefetch edge without a second event.
   await wheel(-200000, 5000)
+  // A synthetic wheel has no browser default scrolling. Complete the actual
+  // physical edge movement before expecting layout feedback to spend demand.
+  await scrollTo(viewport, 0); await flush()
   expect(requests).toHaveLength(before + 6); expect(ids()[0]).toBe(`record-${first - 600}`)
  })
  it('places an inline history boundary at the actual wider displayed context without remounting its expanded process or nonempty Range', async () => {
-  const current = await client.sessionHistoryPage(sid, { limit: 30 })
-  const context = await client.sessionHistoryPage(sid, { limit: 100 })
-  const olderContext = await client.sessionHistoryPage(sid, { limit: 100, cursor: context.nextCursor! })
+  const current = await readOriginalPage(sid, { limit: 30 })
+  const context = await readOriginalPage(sid, { limit: 100 })
+  const olderContext = await readOriginalPage(sid, { limit: 100, cursor: context.nextCursor! })
   const contextItems = [...olderContext.items, ...context.items]
   expect(current.items[0]!.id).toBe('record-330'); expect(contextItems[0]!.id).toBe('record-160')
-  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={current} nativeContextItems={contextItems}
+  await render(<ActivityView sessionId={sid} capability="complete-events" nativeHistoryPage={current} nativeContextItems={contextItems}
    conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
   const thread = container.querySelector('.conversation-native-thread')!, viewport = container.querySelector<HTMLElement>('.activity-feed')!
-  const parent = [...thread.querySelectorAll<HTMLElement>('[data-native-record-ids]')].find(node => JSON.parse(node.dataset.nativeRecordIds!).includes('record-250'))!
+  const parent = [...thread.querySelectorAll<HTMLElement>('[data-conversation-process-members]')].find(node => processNativeRecordIds(node).includes('record-250'))!
   const head = parent.querySelector<HTMLButtonElement>('.wf-head')!
   await act(async () => head.click())
   const row = parent.querySelector<HTMLElement>('[data-native-record-id="record-250"]')!
@@ -797,7 +1125,7 @@ describe('One Activity reading surface over public original-sequence windows', (
   viewport.getBoundingClientRect = () => rect(100, 200); row.getBoundingClientRect = () => rect(110)
   const preserved = () => {
    expect(container.querySelector('.conversation-native-thread')).toBe(thread)
-   expect(row.closest('[data-native-record-ids]')).toBe(parent); expect(parent.isConnected).toBe(true)
+   expect(row.closest('[data-conversation-process-members]')).toBe(parent); expect(parent.isConnected).toBe(true)
    expect(row.querySelector('.log-turn__body')).toBe(body); expect(body.isConnected).toBe(true)
    expect(head.getAttribute('aria-expanded')).toBe('true'); expect(step.getAttribute('aria-expanded')).toBe('true'); expect(trace.open).toBe(true)
    expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(window.getSelection()!.toString()).toBe('Process')
@@ -806,36 +1134,41 @@ describe('One Activity reading surface over public original-sequence windows', (
   expect(thread.querySelector('[role="separator"]')).toBeNull()
   await click('Earlier'); expect(ids()[0]).toBe('record-000'); preserved()
   const divider = thread.querySelector<HTMLElement>('.activity-feed__history-divider')!
-  expect(divider).not.toBeNull(); expect(divider.parentElement).toBe(thread)
-  expect(divider.previousElementSibling).not.toBeNull()
-  expect(JSON.parse((divider.previousElementSibling as HTMLElement).dataset.nativeRecordIds!).at(-1)).toBe('record-059')
-  expect(divider.nextElementSibling).not.toBeNull()
-  const previous = await client.sessionHistoryPage(sid, { limit: 1, cursor: (await client.sessionHistoryPage(sid, { limit: 100, cursor: olderContext.nextCursor! })).nextCursor! })
+  expect(divider).not.toBeNull()
+  const marker = divider.parentElement!
+  expect(marker.dataset.conversationLayoutKey).toBe(JSON.stringify(['anchor', 'history-boundary']))
+  expect(marker.parentElement).toBe(thread); expect(marker.previousElementSibling).not.toBeNull()
+  expect(processNativeRecordIds(marker.previousElementSibling!).at(-1)).toBe('record-059')
+  expect(marker.nextElementSibling).not.toBeNull()
+  const previous = await readOriginalPage(sid, { limit: 1, cursor: (await readOriginalPage(sid, { limit: 100, cursor: olderContext.nextCursor! })).nextCursor! })
   expect(previous.items[0]!.id).toBe('record-059')
   expect(divider.textContent).toBe(`以上是历史消息（${new Date(previous.items[0]!.startedAt!).toLocaleString()}）`)
-  await click('最新消息'); preserved(); expect(thread.querySelector('[role="separator"]')).toBe(divider)
-  expect(container.textContent).toContain('保留阅读位置')
-  window.getSelection()!.removeAllRanges(); await click('最新消息')
-  expect(ids()).toHaveLength(300); expect(ids().at(-1)).toBe('record-359')
-  expect(thread.querySelector('[role="separator"]')).toBeNull()
+  expect(viewport.querySelector('.activity-feed__reading')).toBeNull()
+  viewportGeometry(viewport); await scrollTo(viewport, 500)
+  const beforeReturn = ids(), acceptedBeforeReturn = acceptedWindow(), readsBeforeReturn = requests.length
+  await click('滚动到最新'); preserved()
+  expect(inspectConversationConsumers(control).consumers[0]?.held).toBe(false)
+  expect(ids()).toEqual(beforeReturn); expect(ids()).toHaveLength(360); expect(ids().at(-1)).toBe('record-359')
+  expect(acceptedWindow()).toBe(acceptedBeforeReturn); expect(requests).toHaveLength(readsBeforeReturn)
+  expect(thread.querySelector('[role="separator"]')).toBe(divider)
  })
  it('keeps an old-only window honest without a trailing divider after the current cut is evicted, and does not invent a cut on an initial read', async () => {
   await writeFile(transcript, Array.from({ length: 2400 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
-  const current = await client.sessionHistoryPage(sid, { limit: 30 })
-  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={current}
+  const current = await readOriginalPage(sid, { limit: 30 })
+  await render(<ActivityView sessionId={sid} capability="complete-events" nativeHistoryPage={current}
    conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
   expect(container.querySelector('.activity-feed__history-divider')).toBeNull()
   await click('Earlier')
   let divider = container.querySelector<HTMLElement>('.activity-feed__history-divider')!
-  expect(divider.nextElementSibling).not.toBeNull()
-  for (let n = 0; n < 4; n++) await click('Earlier')
-  expect(ids()).toHaveLength(1100); expect(ids()).not.toContain('record-2100')
+  expect(divider.parentElement?.nextElementSibling).not.toBeNull()
+  for (let n = 0; n < 12; n++) await click('Earlier')
+  expect(ids()).toHaveLength(1200); expect(ids()).not.toContain('record-2100')
   expect(container.querySelector('.activity-feed__history-divider')).toBeNull()
   expect([...container.querySelectorAll('button')].some(button => button.textContent?.trim() === 'Newer')).toBe(true)
-  expect(ids().at(-1)).toBe('record-1699')
-  await click('最新消息'); expect(ids().at(-1)).toBe('record-2399'); expect(container.querySelector('.activity-feed__history-divider')).toBeNull()
+  expect(ids().at(-1)).toBe('record-1999')
+  await click('滚动到最新'); expect(ids().at(-1)).toBe('record-2399'); expect(container.querySelector('.activity-feed__history-divider')).toBeNull()
   await act(async () => root.unmount()); root = createClientUiRoot(container)
-  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events"
+  await render(<ActivityView sessionId={sid} capability="complete-events"
    conversationReading={{ reference: control, identity: 'retired-without-current-context', enabled: true, opened: true }} />)
   expect(ids().length).toBeGreaterThan(0); expect(container.querySelector('.activity-feed__history-divider')).toBeNull()
  })
@@ -864,15 +1197,16 @@ describe('One Activity reading surface over public original-sequence windows', (
   await render(compose(false)); await wheel()
   expect(requests).toHaveLength(before); await render(compose())
   let release!: (page: AgentSessionHistoryPage) => void
-  const page = await promises[requests.findLastIndex(request => request.limit === 100)]!, pending = new Promise<AgentSessionHistoryPage>(resolve => { release = resolve })
-  vi.mocked(api.sessions.historyPage).mockImplementationOnce((_reference, options) => { requests.push(options ?? {}); return pending })
+  const page = await promises[requests.map((request, index) => request.limit === 100 ? index : -1).reduce((last, index) => Math.max(last, index), -1)]!, pending = new Promise<AgentSessionHistoryPage>(resolve => { release = resolve })
+  nativePage.mockImplementationOnce((_reference, options) => { requests.push(options ?? {}); return pending })
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!; viewport.scrollTop = 0
   await act(async () => {
    viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }))
    viewport.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 }))
   })
+  await vi.waitFor(() => expect(requests).toHaveLength(before + 1))
   expect(requests).toHaveLength(before + 1); expect(requests.at(-1)!.cursor).toBe(page.nextCursor)
-  await act(async () => release(await client.sessionHistoryPage(sid, { limit: 100, cursor: page.nextCursor! }))); await flush()
+  await act(async () => release(await readOriginalPage(sid, { limit: 100, cursor: page.nextCursor! }))); await flush()
   expect(ids()).toHaveLength(600); expect(requests).toHaveLength(before + 3)
  })
  it('preserves the current original body, expanded trace, Range and visible anchor through the first wheel prepend', async () => {
@@ -891,12 +1225,12 @@ describe('One Activity reading surface over public original-sequence windows', (
   expect(viewport.scrollTop).toBe(0)
  })
  it('retains the current records and opaque cursor after a first-wheel read failure, then explicitly retries that original page', async () => {
-  await render(compose()); const before = ids(), page = await promises[requests.findLastIndex(request => request.limit === 100)]!, count = requests.length
-  vi.mocked(api.sessions.historyPage).mockImplementationOnce(async (_reference, options) => { requests.push(options ?? {}); throw new Error('Private read unavailable') })
+  await render(compose()); const before = ids(), page = await promises[requests.map((request, index) => request.limit === 100 ? index : -1).reduce((last, index) => Math.max(last, index), -1)]!, count = requests.length
+  nativePage.mockImplementationOnce(async (_reference, options) => { requests.push(options ?? {}); throw new Error('Private read unavailable') })
   await wheel()
   expect(ids()).toEqual(before); expect(requests.at(-1)!.cursor).toBe(page.nextCursor)
   expect(container.textContent).toContain('Private read unavailable'); await flush(); expect(requests).toHaveLength(count + 1)
-  await click('Retry'); expect(ids()).toHaveLength(360)
+  await click('Retry reading'); expect(ids()).toHaveLength(360)
   expect(requests[count + 1]!.cursor).toBe(page.nextCursor)
  })
  it('uses the same wheel navigation with actual public indexed stdio history and its opaque cursor', async () => {
@@ -905,14 +1239,21 @@ describe('One Activity reading surface over public original-sequence windows', (
 const records=Array.from({length:120},(_,n)=>({turnId:'turn-'+n,item:{type:n%2?'agentMessage':'userMessage',id:'indexed-'+n,...(n%2?{text:'Reply '+n}:{content:[{type:'text',text:'Input '+n}]})}}));
 createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line);appendFileSync(${JSON.stringify(log)},line+'\\n');const send=result=>process.stdout.write(JSON.stringify({id:r.id,result})+'\\n');if(r.method==='initialize')send({userAgent:'private-indexed-reader'});else if(r.method==='thread/read')send({thread:{id:${JSON.stringify(native)},historyMode:'paginated',turns:[]}});else if(r.method==='thread/items/list'){const end=r.params.cursor?Number(r.params.cursor):records.length,start=Math.max(0,end-r.params.limit);send({data:records.slice(start,end).reverse(),nextCursor:start?String(start):null})}});`)
   const next = { ...stored, providerId: 'codex', executorId: 'codex', nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: native }, updatedAt: 2 }
-  await store.compareAndSwap(stored, next); stored = next; originalStore = await readFile(join(home, 'sessions.json'))
-  vi.mocked(api.sessions.historyPage).mockImplementation((reference, options) => {
-   expect(reference.agentSessionId).toBe(sid); requests.push(options ?? {})
-   const promise = client.sessionHistoryPage(sid, { ...options, commandOverride: process.execPath, args: [script] }); promises.push(promise); return promise
+  await store.compareAndSwap(stored, next); stored = next; originalStore = await store.loadMetadata()
+  const observers = new Set<Parameters<AgentMuxClient['observeSessionHistory']>[1]>()
+  observation = event => { for (const listener of observers) listener(event) }
+  vi.mocked(client.observeSessionHistory).mockImplementation(async (agentSessionId, listener) => {
+   observers.add(listener)
+   return { agentSessionId, source: { providerId: next.nativeHandle.providerId, nativeSessionId: next.nativeHandle.sessionId },
+    dispose() { observers.delete(listener) } }
   })
-  const current = await client.sessionHistoryPage(sid, { limit: 30, commandOverride: process.execPath, args: [script] })
+  nativePage.mockImplementation((reference, options, originalSource) => {
+   expect(reference).toBe(sid); requests.push(options ?? {})
+   const promise = readOriginalPage(sid, { ...options, commandOverride: process.execPath, args: [script] }, originalSource); promises.push(promise); return promise
+  })
+  const current = await readOriginalPage(sid, { limit: 30, commandOverride: process.execPath, args: [script] })
   expect(current.source).toEqual({ providerId: 'codex', nativeSessionId: native }); expect(current.nextCursor).not.toBeNull()
-  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={current}
+  await render(<ActivityView sessionId={sid} capability="complete-events" nativeHistoryPage={current}
    conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
   await wheel(); expect(ids()).toEqual(Array.from({ length: 120 }, (_, n) => `indexed-${n}`))
   const ended = requests.length; await wheel(); expect(ids()).toHaveLength(120); expect(requests).toHaveLength(ended)
@@ -922,6 +1263,8 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
  })
  it('continues beyond 290 records and a 201-process burst without losing raw pages or moving shared recent facts', async () => {
   await render(compose())
+  const seedReads = requests.length, cursor = acceptedWindow().navigation.older
+  const publicReads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
   const currentIds = recent!.nativeHistoryPage!.items.map(item => item.id)
   expect(currentIds.length).toBeGreaterThan(0); expect(currentIds.at(-1)).toBe('record-359')
   await click('Earlier')
@@ -930,140 +1273,56 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(recent!.nativeHistoryPage!.items.map(item => item.id)).toEqual(currentIds)
   expect(container.querySelectorAll('.activity-feed')).toHaveLength(1)
   expect(container.querySelector('.activity-feed__history-divider')?.textContent).toContain('以上是历史消息')
-  expect(requests.filter(options => options.limit === 100)).toHaveLength(4)
+  expect(requests.slice(seedReads)).toHaveLength(1)
+  expect(requests[seedReads]!.limit).toBe(100)
+  expect(vi.mocked(api.conversation.readAgentConversation).mock.calls[publicReads]?.[0].cursor).toBe(cursor)
  })
  it('allows explicit deep-window latest navigation without a Range, while original records retain their source identity', async () => {
-  await render(compose()); await click('Earlier')
+  await writeEdgeHistory(2400)
+  await render(compose()); for (let n = 0; n < 12; n++) await click('Earlier')
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!
   viewport.getBoundingClientRect = () => rect(0, 200)
-  const group = viewport.querySelector<HTMLElement>('[data-native-record-ids]')!
+  const group = viewport.querySelector<HTMLElement>('[data-conversation-process-members]')!
+  group.getBoundingClientRect = () => rect(10, 40)
   group.querySelector<HTMLElement>('.wf-head')!.getBoundingClientRect = () => rect(10)
   expect(conversationReadingAnchor(viewport)?.kind).toBe('group')
-  await click('最新消息')
-  expect(ids().at(-1)).toBe('record-359')
+  await click('滚动到最新')
+  expect(ids().at(-1)).toBe('record-2399')
   expect(container.querySelector('[data-conversation-reading]')?.getAttribute('data-conversation-reading')).toBe('current')
  })
- it('keeps same-source recent native input out of a historical raw window, while captured input and latest remain reachable', async () => {
+ it('keeps current native and captured contributions separate from an older bounded window while both remain durably reachable', async () => {
   await writeFile(transcript, Array.from({ length: 2400 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
-  await store.applyTimelineMutation({ type: 'append', agentSessionId: sid, item: { id: 'accepted-independent-input', agentSessionId: sid,
-   kind: 'user_message', source: 'user', sourceChannel: 'message-tool', title: 'Accepted input', status: 'complete', content: 'Independent Message Tool input', createdAt: 1, updatedAt: 1 } })
-  const timeline = await client.sessionTimeline(sid)
+  const at = Date.parse(record(2350).timestamp)
+  const item: AgentTimelineItem = { id: 'accepted-independent-input', agentSessionId: sid,
+   kind: 'user_message', source: 'user', sourceChannel: 'message-tool', title: 'Accepted input', status: 'complete', content: 'Independent Message Tool input', createdAt: at, updatedAt: at }
+  await publishCaptured([item])
   const Reader = () => { const facts = useSessionUserMessages(control, { enabled: true }); recent = facts
-   return <ActivityView sessionId={sid} items={timeline.items} userMessages={facts.messages} nativeHistoryPage={facts.nativeHistoryPage} nativeContextItems={facts.nativeContextItems} capability="complete-events"
-    userMessageRead={{ loading: facts.loading, error: facts.error, hasMore: facts.hasMore, windowIncomplete: facts.windowIncomplete, onRetry: facts.refresh, onReadEarlier() {} }}
+   return <ActivityView sessionId={sid} nativeHistoryPage={facts.nativeHistoryPage} nativeContextItems={facts.nativeContextItems} capability="complete-events"
     conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} /> }
   await render(<Reader />)
-  expect(container.textContent).toContain('Input 2392'); for (let batch = 0; batch < 5; batch++) await click('Earlier')
+  const showSubmission = async () => {
+   const submission = container.querySelector<HTMLElement>('[data-submission-id="accepted-independent-input"]')!
+   expect(submission).not.toBeNull()
+   const details = submission.querySelector<HTMLDetailsElement>('.message-disclosure')!
+   await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) })
+   expect(submission.querySelector('.log-turn__body')?.textContent).toContain(item.content)
+  }
+  await showSubmission()
+  expect(container.textContent).toContain('Input 2392'); for (let batch = 0; batch < 12; batch++) await click('Earlier')
   expect(ids()).not.toContain('record-2392'); expect(container.textContent).not.toContain('Input 2392')
-  expect(container.textContent).toContain('Independent Message Tool input')
+  expect(container.querySelector('[data-submission-id="accepted-independent-input"]')).toBeNull()
+  expect((await client.sessionTimeline(sid)).items.find(original => original.id === item.id)).toEqual(item)
   expect(recent!.messages.find(message => message.rawId === 'record-2392')?.content).toContain('Input 2392')
-  await click('最新消息'); expect(container.textContent).toContain('Input 2392'); expect(container.textContent).toContain('Independent Message Tool input')
- })
- it('keeps the displayed original page and its actual cursor when legal public pages exceed the local reading memory budget together', async () => {
-  await writeFile(transcript, Array.from({ length: 300 }, (_, n) => JSON.stringify({ ...record(n), type: 'assistant',
-   message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'Original process '.repeat(2000) }] } })).join('\n') + '\n')
-  const current = await client.sessionHistoryPage(sid, { limit: 30 })
-  expect(current.items).toHaveLength(30); expect(current.nextCursor).not.toBeNull()
-  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={current}
-   userMessageRead={{ loading: false, error: null, hasMore: true, onRetry() {}, onReadEarlier() {} }}
-   conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
-  const before = ids(), head = container.querySelector<HTMLElement>('[data-native-record-ids] .wf-head')!
-  await click('Earlier')
-  expect(ids()).toEqual(before); expect(head.isConnected).toBe(true)
-  expect(container.querySelector('.activity-feed__read-notice')?.textContent).toContain('byte budget')
-  expect(requests).toHaveLength(4); expect(requests[0]!.cursor).toBeUndefined()
-  expect(requests[2]!.cursor).toBe(requests[1]!.cursor); expect(requests[3]!.cursor).toBe((await promises[2]!).nextCursor)
-  expect(requests.every(read => read.limit === 100)).toBe(true)
- })
- it('keeps every original adjacent raw record when a real shared observation projection has clipped older process facts', async () => {
-  await render(compose())
-  for (let batch = 0; batch < 6; batch++) {
-   const n = 360 + batch * 30
-   await appendFile(transcript, Array.from({ length: 30 }, (_, offset) => JSON.stringify({ ...record(n + offset), type: 'assistant',
-    message: { role: 'assistant', content: [{ type: 'thinking', thinking: `Observed process ${n + offset}` }] } })).join('\n') + '\n')
-   await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
-  }
-  expect(recent!.windowIncomplete).toBe(true)
-  const current = ids(); expect(current.length).toBeGreaterThan(0)
-  expect(container.textContent).toContain('Reply 353'); expect(container.textContent).toContain('Input 352')
-  expect(recent!.nativeContextItems.find(item => item.id === 'record-353')?.contentParts).toBeDefined()
-  expect(recent!.messages.find(message => message.rawId === 'record-352')?.content).toContain('Input 352')
-  const original = recent!.nativeHistoryPage!, rawIds = original.items.map(item => Number(item.id.slice('record-'.length)))
-  expect(rawIds).toEqual(Array.from({ length: rawIds.length }, (_, n) => rawIds[0]! + n))
-  const earlier = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === 'Earlier')
-  if (earlier) await click('Earlier')
-  else {
-   // The real 24h coverage may already have reached EOF; every raw record must then be present.
-   expect(current).toEqual(Array.from({ length: 540 }, (_, n) => `record-${String(n).padStart(3, '0')}`))
-   expect(earlier).toBeUndefined()
-  }
-  const actual = ids(), ordinals = actual.map(id => Number(id.slice('record-'.length)))
-  expect(actual.length).toBeLessThanOrEqual(1200)
-  if (process.env.AGENTMUX_UNIFIED_GAP_OBSERVATIONS) await writeFile(process.env.AGENTMUX_UNIFIED_GAP_OBSERVATIONS, JSON.stringify({ windowIncomplete: recent!.windowIncomplete, recentIds: recent!.nativeHistoryPage!.items.map(item => item.id), currentIds: current, resultingIds: actual, ordinals, gaps: ordinals.flatMap((n, index) => index && n !== ordinals[index - 1]! + 1 ? [{ before: ordinals[index - 1], after: n }] : []), requests, controls: controls.map(spy => spy.mock.calls.length) }, null, 2))
-  expect(ordinals).toEqual(Array.from({ length: ordinals.length }, (_, n) => ordinals[0]! + n))
-  expect(ordinals[0]).toBeLessThan(rawIds[0]!)
-  if (process.env.AGENTMUX_UNIFIED_RECENT_FACTS) await writeFile(process.env.AGENTMUX_UNIFIED_RECENT_FACTS, JSON.stringify({ before: original, after: recent!.nativeHistoryPage }))
-  expect(recent!.nativeHistoryPage).toStrictEqual(original)
-  const currentAction = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === '最新消息')
-  if (currentAction) await click('最新消息')
-  else {
-   // Already current at exact EOF: no redundant navigation action is required.
-   expect(earlier).toBeUndefined()
-   expect(actual).toEqual(Array.from({ length: 540 }, (_, n) => `record-${String(n).padStart(3, '0')}`))
-  }
-  expect(container.textContent).toContain('Reply 353'); expect(container.textContent).toContain('Input 352')
- })
- it('retains actual continuous local context across shared sparse clipping without evicting selected body', async () => {
-  await render(compose())
-  for (let batch = 0; batch < 6; batch++) {
-   const n = 360 + batch * 30
-   await appendFile(transcript, Array.from({ length: 30 }, (_, offset) => JSON.stringify({ ...record(n + offset), type: 'assistant',
-    message: { role: 'assistant', content: [{ type: 'thinking', thinking: `Observed process ${n + offset}` }] } })).join('\n') + '\n')
-   const reads = requests.length
-   await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' }))
-   await vi.waitFor(async () => {
-    await act(async () => { await Promise.allSettled([...promises]) })
-    expect(requests.length).toBeGreaterThan(reads); expect(recent!.loading).toBe(false)
-    expect(recent!.nativeHistoryPage!.items.at(-1)!.id).toBe(`record-${n + 29}`)
-   }, { interval: 10, timeout: 2000 })
-  }
-  const original = recent!.nativeHistoryPage!, viewport = container.querySelector<HTMLElement>('.activity-feed')!
-  const old = viewport.querySelector<HTMLElement>('[data-native-record-id="record-353"]')!
-  expect(original.items[0]!.id).toBe('record-450'); expect(old).not.toBeNull(); expect(original.items.some(item => item.id === 'record-353')).toBe(false)
-  viewport.getBoundingClientRect = () => rect(0, 200); old.getBoundingClientRect = () => rect(10)
-  const text = [...old.querySelectorAll('p')].find(p => p.textContent === 'Reply 353')!.firstChild!
-  const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 5); window.getSelection()!.addRange(range)
-  const before = ids(), count = requests.length; await click('Earlier')
-  expect(ids()).toHaveLength(540); expect(old.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('Reply')
-  expect(recent!.nativeHistoryPage).toBe(original)
-  expect(ids()).toEqual(Array.from({ length: 540 }, (_, n) => `record-${String(n).padStart(3, '0')}`))
-  expect(requests.slice(count)).toHaveLength(1)
-  expect(recent!.nativeHistoryPage).toBe(original); expect(recent!.nativeContextItems.some(item => item.id === 'record-353')).toBe(true)
- })
- it('preserves observed native input when no page exists or the actual public page has a different source', async () => {
-  const originalPage = await client.sessionHistoryPage(sid)
-  const messages = projectSessionUserMessages({ agentSessionId: sid, historyPage: originalPage })
-  expect(messages.find(message => message.rawId === 'record-352')?.content).toContain('Input 352')
-  await render(<ActivityView sessionId={sid} items={[]} userMessages={messages} capability="complete-events" />)
-  expect(container.textContent).toContain('Input 352')
-  const nextNative = 'different-public-native', nextTranscript = join(home, 'different-source.jsonl')
-  await writeFile(nextTranscript, Array.from({ length: 360 }, (_, n) => JSON.stringify({ ...record(n), sessionId: nextNative, message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'Different original process' }] } })).join('\n') + '\n')
-  const next = { ...stored, updatedAt: 2, nativeHandle: { kind: 'provider' as const, providerId: 'claude', sessionId: nextNative, transcriptPath: nextTranscript } }
-  await store.compareAndSwap(stored, next); stored = next; originalStore = await readFile(join(home, 'sessions.json'))
-  await render(<ActivityView sessionId={sid} items={[]} userMessages={messages} capability="complete-events"
-   conversationReading={{ reference: control, identity: control.run.runId, enabled: true, opened: true }} />)
-  expect(container.querySelector('[data-native-source]')?.getAttribute('data-native-source')).toBe(JSON.stringify(['claude', nextNative]))
-  expect(container.textContent).toContain('Input 352')
+  await click('滚动到最新'); expect(container.textContent).toContain('Input 2392'); await showSubmission()
  })
  it('protects the real visible current anchor on the very first Earlier entry without advancing past an unread page', async () => {
-  const latest = await client.sessionHistoryPage(sid, { limit: 100 })
-  const older = await client.sessionHistoryPage(sid, { limit: 100, cursor: latest.nextCursor! })
+  const latest = await readOriginalPage(sid, { limit: 100 })
+  const older = await readOriginalPage(sid, { limit: 100, cursor: latest.nextCursor! })
   const current = { ...latest, items: [...older.items, ...latest.items], nextCursor: older.nextCursor }
-  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={current}
-   userMessageRead={{ loading: false, error: null, hasMore: current.nextCursor !== null, onRetry() {}, onReadEarlier() {} }}
+  await render(<ActivityView sessionId={sid} capability="complete-events" nativeHistoryPage={current}
    conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!, before = ids()
-  const first = viewport.querySelector<HTMLElement>('[data-native-record-ids] .wf-head')!
+  const first = viewport.querySelector<HTMLElement>('[data-conversation-process-members] .wf-head')!
   expect(before).toHaveLength(300); expect(before.includes('record-359')).toBe(true)
   viewport.getBoundingClientRect = () => rect(0, 200); first.getBoundingClientRect = () => rect(10)
   await click('Earlier')
@@ -1073,53 +1332,48 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(requests).toHaveLength(4)
 
  })
- it('keeps a real visible raw anchor when Earlier would remove it, then advances the same cursor after deliberate upward reading', async () => {
+ it('keeps a real visible raw anchor when Earlier would remove it, then presents that same page after deliberate reading', async () => {
   await writeFile(transcript, Array.from({ length: 2400 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
-  const current = await client.sessionHistoryPage(sid, { limit: 90 })
-  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={current}
-   userMessageRead={{ loading: false, error: null, hasMore: true, onRetry() {}, onReadEarlier() {} }}
-   conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
-  for (let batch = 0; batch < 3; batch++) await click('Earlier')
-  const acceptedCursor = (await promises.at(-1)!).nextCursor, rejectedStart = requests.length
+  await render(compose()); for (let batch = 0; batch < 9; batch++) await click('Earlier')
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!, original = ids()
   const tail = viewport.querySelector<HTMLElement>('[data-native-record-id="record-2353"]')!
-  viewport.getBoundingClientRect = () => rect(0, 200); tail.getBoundingClientRect = () => rect(10)
+  expect(original).toHaveLength(1200); expect(original[0]).toBe('record-1200')
+  markerGeometry(viewport); viewport.getBoundingClientRect = () => rect(0, 200); tail.getBoundingClientRect = () => rect(10)
+  const cursor = acceptedWindow().navigation.older, reads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
   await click('Earlier'); expect(ids()).toEqual(original); expect(tail.isConnected).toBe(true)
-  expect(requests[rejectedStart]!.cursor).toBe(acceptedCursor)
+  expect(inspectConversationConsumers(control).consumers[0]?.held).toBe(true)
+  expect(vi.mocked(api.conversation.readAgentConversation).mock.calls[reads]?.[0].cursor).toBe(cursor)
   const retained = viewport.querySelector<HTMLElement>('[data-native-record-id="record-1601"]')!
   tail.getBoundingClientRect = () => rect(-200); retained.getBoundingClientRect = () => rect(10)
-  viewport.scrollTop = 10; await act(async () => viewport.dispatchEvent(new Event('scroll')))
-  const retryStart = requests.length
-  await click('Earlier'); expect(ids()).toHaveLength(1100); expect(ids()[0]).toBe('record-900')
-  expect(retained.isConnected).toBe(true); expect(requests[retryStart]!.cursor).toBe(acceptedCursor)
+  const resumed = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  await scrollTo(viewport, 10); await flush()
+  expect(ids()).toHaveLength(1200); expect(ids()[0]).toBe('record-1100'); expect(ids().at(-1)).toBe('record-2299')
+  expect(retained.isConnected).toBe(true); expect(tail.isConnected).toBe(false)
+  expect(vi.mocked(api.conversation.readAgentConversation)).toHaveBeenCalledTimes(resumed)
  })
- it('keeps selected Workflow step-count text and the actual cursor until selection clears, then reads genuinely earlier records', async () => {
+ it('keeps selected Workflow record-count text and the actual cursor until selection clears, then presents the earlier frame', async () => {
   await writeFile(transcript, Array.from({ length: 1260 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
-  const current = await client.sessionHistoryPage(sid, { limit: 90 })
-  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={current}
-   userMessageRead={{ loading: false, error: null, hasMore: true, onRetry() {}, onReadEarlier() {} }}
-   conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
-  await click('Earlier')
-  const viewport = container.querySelector<HTMLElement>('.activity-feed')!
-  const head = viewport.querySelector<HTMLElement>('[data-native-record-ids] .wf-head')!
+  await render(compose()); await click('Earlier')
+  const viewport = container.querySelector<HTMLElement>('.activity-feed')!, head = viewport.querySelector<HTMLElement>('[data-conversation-process-members] .wf-head')!
   const count = head.querySelector<HTMLElement>('.log-fold__steps')!
-  expect(count.textContent).toBe('4 步')
+  expect(count.textContent).toBe('4 条已加载记录')
   const range = document.createRange(); range.setStart(count.firstChild!, 0); range.setEnd(count.firstChild!, 1)
-  window.getSelection()!.addRange(range); viewport.getBoundingClientRect = () => rect(0, 200); head.getBoundingClientRect = () => rect(10)
-  const before = ids(), rejectedStart = requests.length
-  expect(before).toHaveLength(600); expect(before[0]).toBe('record-660')
+  window.getSelection()!.addRange(range)
+  const before = ids(), cursor = acceptedWindow().navigation.older, reads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  expect(before).toHaveLength(400); expect(before[0]).toBe('record-860')
   await click('Earlier')
   expect(ids()).toEqual(before); expect(head.isConnected).toBe(true); expect(range.startContainer.isConnected).toBe(true)
-  expect(window.getSelection()!.toString()).toBe('4')
-  expect(container.textContent).toContain('保留阅读位置'); expect(requests).toHaveLength(rejectedStart + 3)
-  expect(requests[rejectedStart]!.cursor).toBe((await promises[rejectedStart - 1]!).nextCursor)
-  window.getSelection()!.removeAllRanges(); await click('Earlier')
-  expect(ids()[0]).toBe('record-360'); expect(ids()).toHaveLength(900); expect(head.isConnected).toBe(true)
-  expect(count.textContent).toBe('6 步')
-  expect(requests).toHaveLength(12); expect(requests[rejectedStart + 3]!.cursor).toBe(requests[rejectedStart]!.cursor)
+  expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(range.toString()).toBe('4')
+  expect(inspectConversationConsumers(control).consumers[0]?.held).toBe(true)
+  expect(vi.mocked(api.conversation.readAgentConversation).mock.calls[reads]?.[0].cursor).toBe(cursor)
+  const resumed = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  await act(async () => { window.getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) }); await flush()
+  expect(ids()[0]).toBe('record-760'); expect(ids()).toHaveLength(500); expect(head.isConnected).toBe(true)
+  expect(count.textContent).toBe('6 条已加载记录')
+  expect(vi.mocked(api.conversation.readAgentConversation)).toHaveBeenCalledTimes(resumed)
  })
  it('uses the public native source namespace, not a repeated raw ID, to protect a selected node through explicit source refresh', async () => {
-  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events"
+  await render(<ActivityView sessionId={sid} capability="complete-events"
    conversationReading={{ reference: control, identity: control.run.runId, enabled: true, opened: true }} />)
   const node = container.querySelector<HTMLElement>('[data-native-record-id="record-353"] .log-turn__body')!
   const text = [...node.querySelectorAll('p')].find(p => p.textContent === 'Reply 353')!.firstChild!
@@ -1127,20 +1381,20 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   const nextNative = 'public-new-source-same-raw-ids', nextTranscript = join(home, 'new-source.jsonl')
   await writeFile(nextTranscript, Array.from({ length: 360 }, (_, n) => JSON.stringify({ ...record(n), sessionId: nextNative })).join('\n') + '\n')
   const next = { ...stored, updatedAt: 2, nativeHandle: { kind: 'provider' as const, providerId: 'claude', sessionId: nextNative, transcriptPath: nextTranscript } }
-  await store.compareAndSwap(stored, next); stored = next; originalStore = await readFile(join(home, 'sessions.json'))
-  const actualNewPage = await client.sessionHistoryPage(sid)
+  await store.compareAndSwap(stored, next); stored = next; originalStore = await store.loadMetadata()
+  const actualNewPage = await readOriginalPage(sid)
   expect(actualNewPage.source.nativeSessionId).toBe(nextNative); expect(actualNewPage.items.at(-1)!.id).toBe('record-359')
-  await click('最新消息')
+  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
+  await click('读取当前记录')
   expect(node.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('Reply')
   expect(container.querySelector('[data-native-source]')?.getAttribute('data-native-source')).toBe(JSON.stringify(['claude', native]))
-  window.getSelection()!.removeAllRanges(); await click('最新消息')
+  await act(async () => { window.getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) }); await flush()
   expect(node.isConnected).toBe(false)
   expect(container.querySelector('[data-native-source]')?.getAttribute('data-native-source')).toBe(JSON.stringify(['claude', nextNative]))
  })
  it('keeps selected overlap bodies and trace disclosures through prepend and observation append', async () => {
   await writeFile(transcript, Array.from({ length: 2400 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
-  await render(compose())
-  await click('Earlier')
+  await render(compose()); await click('Earlier')
   const body = container.querySelector<HTMLElement>('[data-native-record-id="record-2361"] .log-turn__body')!
   expect(body.textContent).toContain('Reply 2361')
   const text = [...body.querySelectorAll('p')].find(p => p.textContent === 'Reply 2361')!.firstChild!
@@ -1148,57 +1402,58 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   const trace = body.querySelector<HTMLDetailsElement>('[data-trace-kind="reasoning"]')!
   await act(async () => { trace.open = true; trace.dispatchEvent(new Event('toggle')) })
   expect(trace.textContent).toContain('Trace 2361')
-  await click('Earlier')
-  expect(body.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('Reply')
+  for (let batch = 0; batch < 8; batch++) await click('Earlier')
+  expect(ids()).toHaveLength(1200); expect(body.isConnected).toBe(true)
   expect(body.querySelector('[data-trace-kind="reasoning"]')).toBe(trace); expect(trace.open).toBe(true)
-  await click('Earlier'); await click('Earlier')
-  const rejectedStart = requests.length; await click('Earlier')
-  // This read would discard selected record2361 in the newest page; cursor remains at the accepted window.
-  const lastCursor = requests[rejectedStart]?.cursor
-  expect(container.textContent).toContain('保留阅读位置')
-  expect(body.isConnected).toBe(true)
+  const cursor = acceptedWindow().navigation.older, reads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  await click('Earlier')
+  expect(vi.mocked(api.conversation.readAgentConversation).mock.calls[reads]?.[0].cursor).toBe(cursor)
+  expect(inspectConversationConsumers(control).consumers[0]?.held).toBe(true)
+  expect(body.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
   await appendFile(transcript, JSON.stringify(record(2400)) + '\n')
-  await act(async () => observation?.({ source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated', agentSessionId: sid }))
-  await flush()
-  expect(ids()).toContain('record-2361'); expect(window.getSelection()!.toString()).toBe('Reply')
-  window.getSelection()!.removeAllRanges(); const retryStart = requests.length; await click('Earlier')
-  // The live append may trim one unprotected oldest part at the1200-record bound.
-  // The next earlier batch must still cross the original failed cursor in source order.
-  expect(requests.slice(retryStart).map(request => request.cursor)).toContain(lastCursor)
+  await act(async () => observation?.({ source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated', agentSessionId: sid })); await flush()
+  expect(ids()).toContain('record-2361'); expect(window.getSelection()!.toString()).toBe('Reply'); expect(trace.open).toBe(true)
+  const resumed = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  await act(async () => { window.getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) }); await flush()
+  expect(ids()).toHaveLength(1200); expect(ids()[0]).toBe('record-1100'); expect(ids().at(-1)).toBe('record-2299')
+  expect(vi.mocked(api.conversation.readAgentConversation)).toHaveBeenCalledTimes(resumed)
  })
  it('does not start a hidden read or commit a hidden late page, while another visible recent consumer remains usable', async () => {
   await writeFile(transcript, Array.from({ length: 1200 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
   await render(compose()); await click('Earlier')
-  const before = ids(), originalRead = api.sessions.historyPage
-  let release!: (page: AgentSessionHistoryPage) => void
-  const pending = new Promise<AgentSessionHistoryPage>(resolve => { release = resolve })
-  const pendingStart = requests.length
-  vi.mocked(api.sessions.historyPage).mockImplementationOnce((_reference, options) => { requests.push(options ?? {}); return pending })
+  const before = ids(), cursor = acceptedWindow().navigation.older!, original = vi.mocked(api.conversation.readAgentConversation).getMockImplementation()!
+  let release: (() => void) | undefined
+  vi.mocked(api.conversation.readAgentConversation).mockImplementation(async (...args) => {
+   const page = await original(...args)
+   if (args[0].cursor === cursor && !release) return new Promise(resolve => { release = () => resolve(page) })
+   return page
+  })
   const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Earlier')!
+  const start = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
   await act(async () => button.click())
-  expect(requests).toHaveLength(pendingStart + 1)
-  expect(button.querySelector('[role="status"]')?.textContent).toBe('Loading earlier…')
-  await render(compose(false))
-  const actual = await client.sessionHistoryPage(sid, requests.at(-1))
-  await act(async () => release(actual)); await flush()
+  await vi.waitFor(async () => { await act(async () => { await Promise.resolve() }); expect(release).toBeTypeOf('function') })
+  const pending = vi.mocked(api.conversation.readAgentConversation).mock.calls[start]!
+  expect(pending[0].cursor).toBe(cursor); expect(button.querySelector('[role="status"]')?.textContent).toBe('Loading earlier…')
+  await render(compose(false)); expect(pending[1]?.signal?.aborted).toBe(true)
+  await act(async () => release!()); await flush()
   expect(ids()).toEqual(before)
-  const reads = requests.length
-  await act(async () => button.click()); await flush(); expect(requests).toHaveLength(reads)
+  const reads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  expect(button.disabled).toBe(true); await act(async () => button.click()); await flush()
+  expect(vi.mocked(api.conversation.readAgentConversation)).toHaveBeenCalledTimes(reads)
   expect(recent!.messages.length).toBeGreaterThan(0)
-  expect(originalRead).toBeDefined()
  })
  it('keeps a legitimate290-raw recent page through initial300 and original older100-page reading with the original body and Range', async () => {
   await writeFile(transcript, Array.from({ length: 380 }, (_, n) => JSON.stringify(n >= 90 && n < 290
    ? { ...record(n), type: 'user', message: { role: 'user', content: `Original maximum input ${n}` } }
    : { ...record(n), type: 'assistant', message: { role: 'assistant', content: [{ type: 'thinking', thinking: `Original maximum process ${n}` }] } })).join('\n') + '\n')
-  const tail = await client.sessionHistoryPage(sid, { limit: 100 })
-  const middle = await client.sessionHistoryPage(sid, { limit: 100, cursor: tail.nextCursor! })
-  const front = await client.sessionHistoryPage(sid, { limit: 90, cursor: middle.nextCursor! })
+  const tail = await readOriginalPage(sid, { limit: 100 })
+  const middle = await readOriginalPage(sid, { limit: 100, cursor: tail.nextCursor! })
+  const front = await readOriginalPage(sid, { limit: 90, cursor: middle.nextCursor! })
   const current = { ...front, items: [...front.items, ...middle.items, ...tail.items] }
   expect(current.items).toHaveLength(290)
   expect(current.items.filter(item => item.kind === 'activity')).toHaveLength(90)
   expect(current.items.filter(item => item.kind === 'user-message')).toHaveLength(200)
-  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={current}
+  await render(<ActivityView sessionId={sid} capability="complete-events" nativeHistoryPage={current}
    conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
   const viewport = container.querySelector<HTMLElement>('.activity-feed')!, row = viewport.querySelector<HTMLElement>('[data-native-record-id="record-289"]')!
   const body = row.querySelector<HTMLElement>('.log-turn__body')!, paragraph = body.querySelector('p')!
@@ -1220,7 +1475,7 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
  })
  it('shows actual inline earlier loading without a second demand, keeps the old cursor on page2 failure and explicitly retries', async () => {
   await writeEdgeHistory(1200)
-  await render(compose()); const before = ids(), oldBody = container.querySelector('[data-native-record-id="record-1193"] .log-turn__body')!, page = await promises[requests.findLastIndex(request => request.limit === 100)]!, start = requests.length
+  await render(compose()); const before = ids(), oldBody = container.querySelector('[data-native-record-id="record-1193"] .log-turn__body')!, page = await promises[requests.map((request, index) => request.limit === 100 ? index : -1).reduce((last, index) => Math.max(last, index), -1)]!, start = requests.length
   const countText = container.querySelector('.activity-ruler__count')!.textContent
   expect(countText).toMatch(/^\d+ records$/)
   const earlier = container.querySelector<HTMLButtonElement>('.activity-feed__reading button')!, slider = container.querySelector<HTMLElement>('[role="slider"]')!
@@ -1230,9 +1485,9 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(requests).toHaveLength(reads); expect(container.querySelector('.activity-ruler__readout')).not.toBeNull()
   let release!: (page: AgentSessionHistoryPage) => void
   const pending = new Promise<AgentSessionHistoryPage>(resolve => { release = resolve })
-  vi.mocked(api.sessions.historyPage).mockImplementationOnce((_reference, options) => { requests.push(options ?? {}); return pending })
+  nativePage.mockImplementationOnce((_reference, options) => { requests.push(options ?? {}); return pending })
    .mockImplementationOnce(async (_reference, options) => { requests.push(options ?? {}); throw new Error('Original second page unavailable') })
-  await act(async () => { earlier.focus(); earlier.click() })
+  await act(async () => { earlier.focus(); container.querySelector('.activity-feed')!.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 })) })
   expect(container.querySelector('.activity-ruler__readout')).toBeNull()
   const status = earlier.querySelector<HTMLElement>('[role="status"]')!
   expect(status).not.toBeNull(); expect(status.getAttribute('role')).toBe('status'); expect(status.getAttribute('aria-live')).toBe('polite')
@@ -1246,12 +1501,13 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
 
   expect(earlier.isConnected).toBe(true); expect(earlier.disabled).toBe(true); expect(slider.getAttribute('aria-disabled')).toBeNull(); expect(oldBody.isConnected).toBe(true)
   await act(async () => { earlier.click(); container.querySelector('.activity-feed')!.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 })) })
+  await vi.waitFor(() => expect(requests).toHaveLength(start + 1))
   expect(requests).toHaveLength(start + 1)
-  await act(async () => release(await client.sessionHistoryPage(sid, { limit: 100, cursor: page.nextCursor! }))); await flush()
-  expect(ids()).toEqual(before); expect(requests).toHaveLength(start + 2); expect(oldBody.isConnected).toBe(true)
+  await act(async () => release(await readOriginalPage(sid, { limit: 100, cursor: page.nextCursor! }))); await flush()
+  expect(ids()).toEqual(Array.from({ length: 200 }, (_, n) => `record-${1000 + n}`)); expect(requests).toHaveLength(start + 2); expect(oldBody.isConnected).toBe(true)
   expect(container.querySelector('.activity-ruler__count[data-loading]')).toBeNull(); expect(container.textContent).toContain('Original second page unavailable')
-  const retryStart = requests.length; await click('Retry')
-  expect(requests[retryStart]!.cursor).toBe(page.nextCursor); expect(requests).toHaveLength(retryStart + 3); expect(ids()).toHaveLength(before.length + 300)
+  const failedCursor = requests[start + 1]!.cursor, retryStart = requests.length; await click('Retry reading')
+  expect(requests[retryStart]!.cursor).toBe(failedCursor); expect(requests).toHaveLength(retryStart + 1); expect(ids()).toHaveLength(before.length + 200)
  })
  it('keeps unknown and reversed native times honest while the unread edge and overview never issue reads', async () => {
   // Keep an actual unread page beyond the default 24h coverage, while times remain reversed and partly unknown.
@@ -1260,8 +1516,8 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
    if (n % 3 === 0) Reflect.deleteProperty(original, 'timestamp')
    return JSON.stringify(original)
   }).join('\n') + '\n')
-  const current = await client.sessionHistoryPage(sid, { limit: 30 })
-  await render(<ActivityView sessionId={sid} items={[]} capability="complete-events" nativeHistoryPage={current}
+  const current = await readOriginalPage(sid, { limit: 30 })
+  await render(<ActivityView sessionId={sid} capability="complete-events" nativeHistoryPage={current}
    conversationReading={{ reference: control, identity: control.run.runId, enabled: true }} />)
   const before = ids(), reads = requests.length, edge = container.querySelector('.conversation-ruler__unread-edge')!
   expect(edge).not.toBeNull(); expect(edge.getAttribute('style')).toBeNull(); expect(edge.getAttribute('aria-hidden')).toBe('true')
@@ -1283,107 +1539,105 @@ createInterface({input:process.stdin}).on('line',line=>{const r=JSON.parse(line)
   expect(container.querySelector('.activity-feed__reading')).toBeNull()
   expect(container.querySelector('.activity-feed__reading-status')).toBeNull()
   expect(container.querySelector('.activity-ruler__count')!.textContent).toBe('2 records')
-  expect(requests).toHaveLength(2) // Shared recent + one original page, no synthetic UI demand.
+  expect(requests).toHaveLength(3) // The Activity and two input-summary consumers each own one current source cut.
  })
- it('keeps a no-record first read visible with the public SVG and no invented zero-count slider', async () => {
+ it('keeps a no-record first read visible in the public loading surface without an invented zero-count slider', async () => {
   let release!: (page: AgentSessionHistoryPage) => void
   const pending = new Promise<AgentSessionHistoryPage>(resolve => { release = resolve })
-  vi.mocked(api.sessions.historyPage).mockImplementationOnce((_reference, options) => { requests.push(options ?? {}); return pending })
-  await act(async () => root.render(<ActivityView sessionId={sid} items={[]} capability="complete-events"
+  nativePage.mockImplementationOnce((_reference, options) => { requests.push(options ?? {}); return pending })
+  await act(async () => root.render(<ActivityView sessionId={sid} capability="complete-events"
    conversationReading={{ reference: control, identity: control.run.runId, enabled: true, opened: true }} />))
   expect(container.querySelector('[role="slider"]')).toBeNull()
   const status = container.querySelector('.activity-feed__empty-reading')!
-  expect(status.textContent).toContain('Reading records'); expect(status.querySelector('[data-icon-animation="spin"] [data-semantic-icon="status.loading"]')).not.toBeNull()
+  expect(status.textContent).toContain('Reading conversation…'); expect(status.querySelector('.full-page-loading__light')).not.toBeNull()
   expect(status.getAttribute('role')).toBe('status'); expect(status.getAttribute('aria-live')).toBe('polite')
   expect(container.querySelector('.activity-feed__loading-layer')).toBeNull()
   expect(container.textContent).not.toContain('No structured activity yet'); expect(container.textContent).not.toContain('No inputs in the recent conversation window')
-  expect(requests).toEqual([{ limit: 100 }])
-  await act(async () => release(await client.sessionHistoryPage(sid, { limit: 100 }))); await flush()
+  await vi.waitFor(() => expect(requests).toHaveLength(1)); expect(requests[0]).toMatchObject({ limit: 100 }); expect(requests[0]!.cursor).toBeUndefined()
+  await act(async () => release(await readOriginalPage(sid, { limit: 100 }))); await flush()
   expect(ids()).toHaveLength(300); expect(requests).toHaveLength(3)
   expect(container.querySelector('[role="slider"]')).not.toBeNull(); expect(container.querySelector('.activity-feed__empty-reading')).toBeNull()
  })
- it('coalesces actual shared and local pending in one retained ruler slot, while Earlier owns its original inline status', async () => {
+ it('keeps current loading in one retained ruler slot, while Earlier owns its original inline status', async () => {
   await render(compose(true, true))
   const slot = container.querySelector<HTMLElement>('.activity-ruler__pending')!, count = container.querySelector<HTMLElement>('.activity-ruler__count')!
   expect(slot).not.toBeNull(); expect(slot.textContent).toBe(''); expect(slot.getAttribute('role')).toBeNull()
   const body = container.querySelector<HTMLElement>('[data-native-record-id="record-353"] .log-turn__body')!, text = body.querySelector('p')!.firstChild!
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 5); window.getSelection()!.addRange(range)
-  const before = ids(), originalCount = count.textContent, original = vi.mocked(api.sessions.historyPage).getMockImplementation()!
-  let holdLocal = true, holdShared = true
-  const held: { options: NonNullable<Parameters<typeof api.sessions.historyPage>[1]>; release: (page: AgentSessionHistoryPage) => void }[] = []
-  vi.mocked(api.sessions.historyPage).mockImplementation((reference, options = {}) => {
-   if (options.limit === 100 && holdLocal || options.limit === 30 && holdShared) {
-    if (options.limit === 100) holdLocal = false; else holdShared = false
-    requests.push(options); return new Promise(resolve => held.push({ options, release: resolve }))
-   }
-   return original(reference, options)
-  })
-  const release = async () => { for (const request of held.splice(0)) request.release(await client.sessionHistoryPage(sid, request.options)) }
+  const originalCount = count.textContent, view = acceptedWindow().view, changes = vi.mocked(api.conversation.readConversationChanges).getMockImplementation()!
+  let releaseChanges: (() => Promise<void>) | undefined
+  vi.mocked(api.conversation.readConversationChanges).mockImplementation((...args) => args[0].view === view && !releaseChanges
+   ? new Promise(resolve => { releaseChanges = async () => resolve(await changes(...args)) }) : changes(...args))
   const retained = () => { expect(body.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range); expect(range.toString()).toBe('Reply') }
-  const start = requests.length
-  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
-  expect(held.map(request => request.options.limit)).toEqual([30])
+  await appendFile(transcript, JSON.stringify(record(360)) + '\n')
+  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' }))
+  await vi.waitFor(async () => { await act(async () => { await Promise.resolve() }); expect(releaseChanges).toBeTypeOf('function') })
   expect(slot.getAttribute('role')).toBe('status'); expect(slot.getAttribute('aria-live')).toBe('polite'); expect(slot.textContent).toBe('Reading records…')
   expect(slot.querySelector('svg[data-semantic-icon="status.loading"]')).not.toBeNull()
-  await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Return to latest messages"]')!.click()); await flush()
-  expect(held.map(request => request.options.limit)).toEqual([30, 100]); expect(ids()).toEqual(before); retained()
   expect(container.querySelectorAll('.activity-ruler__pending[role="status"]')).toHaveLength(1)
   expect(count.textContent).toBe(originalCount); expect(count.querySelector('svg, [role="status"]')).toBeNull()
-  expect(container.querySelector('.activity-feed__loading-layer, .activity-feed__empty-reading')).toBeNull()
-  expect(requests).toHaveLength(start + 2)
-  await act(release); await flush()
-  expect(requests).toHaveLength(start + 4); expect(requests.slice(start).filter(request => request.limit === 100)).toHaveLength(3)
-  expect(ids()).toEqual(before); retained(); expect(container.querySelector('.activity-ruler__pending')).toBe(slot)
+  expect(container.querySelector('.activity-feed__loading-layer, .activity-feed__empty-reading')).toBeNull(); retained()
+  await act(async () => releaseChanges!()); await flush()
+  expect(ids().at(-1)).toBe('record-360'); retained(); expect(container.querySelector('.activity-ruler__pending')).toBe(slot)
   expect(slot.textContent).toBe(''); expect(slot.getAttribute('role')).toBeNull()
-  holdLocal = true; holdShared = true
-  const earlierStart = requests.length, earlier = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Earlier')!
-  await act(async () => earlier.click()); await flush()
-  await act(async () => observation?.({ agentSessionId: sid, source: { providerId: 'claude', nativeSessionId: native }, kind: 'invalidated' })); await flush()
-  expect(held.map(request => request.options.limit)).toEqual([100, 30])
+  const cursor = acceptedWindow().navigation.older, original = vi.mocked(api.conversation.readAgentConversation).getMockImplementation()!
+  let releaseEarlier: (() => Promise<void>) | undefined
+  vi.mocked(api.conversation.readAgentConversation).mockImplementation((...args) => args[0].cursor === cursor
+   ? new Promise(resolve => { releaseEarlier = async () => resolve(await original(...args)) }) : original(...args))
+  const earlier = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Earlier')!
+  await act(async () => earlier.click())
+  await vi.waitFor(async () => { await act(async () => { await Promise.resolve() }); expect(releaseEarlier).toBeTypeOf('function') })
+  const reads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
   expect(earlier.getAttribute('aria-busy')).toBe('true'); expect(earlier.querySelector('[role="status"]')?.textContent).toBe('Loading earlier…')
   expect(slot.getAttribute('role')).toBeNull(); expect(slot.textContent).toBe(''); expect(slot.querySelector('svg')).toBeNull()
-  expect(container.querySelector('.activity-feed__loading-layer, .activity-feed__empty-reading')).toBeNull()
-  expect(requests).toHaveLength(earlierStart + 2); expect(ids()).toEqual(before); retained()
-  await act(release); await flush()
-  expect(requests).toHaveLength(earlierStart + 2); expect(ids()).toHaveLength(360); expect(ids()[0]).toBe('record-000'); retained()
+  expect(container.querySelector('.activity-feed__loading-layer, .activity-feed__empty-reading')).toBeNull(); retained()
+  await act(async () => { earlier.click(); container.querySelector('.activity-feed')!.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 })) })
+  expect(vi.mocked(api.conversation.readAgentConversation)).toHaveBeenCalledTimes(reads)
+  await act(async () => releaseEarlier!()); await flush()
+  expect(ids()).toHaveLength(361); expect(ids()[0]).toBe('record-000'); retained()
   expect(slot.getAttribute('role')).toBeNull(); expect(slot.textContent).toBe(''); expect(earlier.isConnected).toBe(false)
   expect(container.querySelector('.activity-feed__reading [aria-busy="true"]')).toBeNull()
  })
  it('keeps local-only pending and a genuine first read failure honest until explicit Retry returns an actual empty source', async () => {
   let reject!: (error: Error) => void
-  vi.mocked(api.sessions.historyPage).mockImplementationOnce((_reference, options) => { requests.push(options ?? {}); return new Promise((_resolve, failure) => { reject = failure }) })
-  await act(async () => root.render(<ActivityView sessionId={sid} items={[]} capability="complete-events"
+  nativePage.mockImplementationOnce((_reference, options) => { requests.push(options ?? {}); return new Promise((_resolve, failure) => { reject = failure }) })
+  await act(async () => root.render(<ActivityView sessionId={sid} capability="complete-events"
    conversationReading={{ reference: control, identity: control.run.runId, enabled: true, opened: true }} />))
   expect(container.querySelector('.activity-feed__empty-reading[role="status"]')).not.toBeNull()
-  expect(container.querySelector('[role="slider"]')).toBeNull(); expect(requests).toEqual([{ limit: 100 }])
+  expect(container.querySelector('[role="slider"]')).toBeNull(); await vi.waitFor(() => expect(requests).toHaveLength(1)); expect(requests[0]).toMatchObject({ limit: 100 }); expect(requests[0]!.cursor).toBeUndefined()
   expect(container.textContent).not.toContain('No structured activity yet'); expect(container.textContent).not.toContain('No inputs in the recent conversation window')
   await act(async () => reject(new Error('Original first conversation read unavailable'))); await flush()
-  expect(container.querySelector('.activity-feed__empty-reading')).toBeNull(); expect(container.textContent).toContain('Original first conversation read unavailable')
+  expect(container.querySelector('.activity-feed__empty-reading')?.getAttribute('data-loading-phase')).toBe('failed'); expect(container.textContent).toContain('Original first conversation read unavailable')
   expect(container.textContent).not.toContain('No structured activity yet'); expect(container.textContent).not.toContain('No inputs in the recent conversation window')
   expect(container.querySelector('[role="slider"]')).toBeNull(); expect(requests).toHaveLength(1)
-  await writeFile(transcript, ''); await click('Retry')
-  expect(requests).toEqual([{ limit: 100 }, { limit: 100 }]); expect(container.querySelector('[role="slider"]')).toBeNull()
+  await writeFile(transcript, ''); await click('Retry reading')
+  expect(requests).toHaveLength(2); expect(requests.every(request => request.limit === 100 && request.cursor === undefined)).toBe(true); expect(container.querySelector('[role="slider"]')).toBeNull()
   expect(container.querySelector('.activity-feed__empty-reading')).toBeNull(); expect(container.textContent).not.toContain('Original first conversation read unavailable')
   expect(container.textContent).toContain('No structured activity yet. Terminal remains available.')
  })
  it('keeps a selected folded Process title before explicit latest would evict the group', async () => {
-  await render(compose()); await click('Earlier')
-  const group = container.querySelector<HTMLElement>('[data-native-record-ids]')!
+  await writeEdgeHistory(2400)
+  await render(compose()); for (let batch = 0; batch < 12; batch++) await click('Earlier')
+  const group = container.querySelector<HTMLElement>('[data-conversation-process-members]')!
   const label = group.querySelector<HTMLElement>('.wf-head .wf-observation__recorded')!
   expect(label.textContent).toBe('执行过程')
   const range = document.createRange(); range.selectNodeContents(label); window.getSelection()!.addRange(range)
-  const before = ids(); await click('最新消息')
-  expect(ids()).toEqual(before); expect(group.isConnected).toBe(true); expect(window.getSelection()!.toString()).toBe('执行过程')
-  window.getSelection()!.removeAllRanges(); await click('最新消息'); expect(ids().at(-1)).toBe('record-359')
+  const before = ids(); await click('滚动到最新')
+  expect(ids()).toEqual(before); expect(group.isConnected).toBe(true); expect(window.getSelection()!.getRangeAt(0)).toBe(range)
+  expect(inspectConversationConsumers(control).consumers[0]?.held).toBe(true)
+  const reads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  await act(async () => { window.getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) }); await flush()
+  expect(ids().at(-1)).toBe('record-2399'); expect(group.isConnected).toBe(false)
+  expect(vi.mocked(api.conversation.readAgentConversation)).toHaveBeenCalledTimes(reads)
  })
  it('restores a retained folded group using its observation identity when prepend changes its raw-member list', async () => {
   await render(compose()); await click('Earlier')
-  const viewport = container.querySelector<HTMLElement>('.activity-feed')!, group = viewport.querySelector<HTMLElement>('[data-native-record-ids]')!
+  const viewport = container.querySelector<HTMLElement>('.activity-feed')!, group = viewport.querySelector<HTMLElement>('[data-conversation-process-members]')!
   viewport.getBoundingClientRect = () => rect(100, 200)
-  const head = group.querySelector<HTMLElement>('.wf-head')!; head.getBoundingClientRect = () => rect(110)
+  const head = group.querySelector<HTMLElement>('.wf-head')!; group.getBoundingClientRect = () => rect(110, 40); head.getBoundingClientRect = () => rect(110)
   const anchor = conversationReadingAnchor(viewport)!; expect(anchor.kind).toBe('group')
-  group.dataset.nativeRecordIds = JSON.stringify(['new-member', ...JSON.parse(group.dataset.nativeRecordIds!)])
-  head.getBoundingClientRect = () => rect(140)
+  group.dataset.conversationProcessMembers = JSON.stringify([{ id: 'new-member', sources: [] }, ...JSON.parse(group.dataset.conversationProcessMembers!)])
+  group.getBoundingClientRect = () => rect(140, 40); head.getBoundingClientRect = () => rect(140)
   viewport.scrollTop = 200; restoreConversationAnchor(viewport, anchor)
   expect(viewport.scrollTop).toBe(230)
  })
@@ -1409,7 +1663,7 @@ async function retired() {
   agentSessionId: sid, operationId: 'retire', expiresAt: Date.now() + 60000, expectedRun: control.run,
   stopOperation: { daemonInstance: 'private-not-connected', operationKey: 'retire', runId: control.run.runId } }
  await store.reserveLifecycle(reservation); await store.commitLifecycle(reservation, null)
- originalStore = await readFile(join(home, 'sessions.json'))
+ originalStore = await store.loadMetadata()
 }
 
 describe('Real caller ownership and healthy retained identities', () => {
@@ -1474,30 +1728,52 @@ describe('Real caller ownership and healthy retained identities', () => {
   await seed(); await render(pane()); await click('Earlier')
   const feed = container.querySelector('.activity-feed')!, before = ids()
   let release!: (page: AgentSessionHistoryPage) => void
-  vi.mocked(api.sessions.historyPage).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+  let requested: AgentSessionHistoryPageOptions | undefined
+  nativePage.mockImplementationOnce((_reference, options) => {
+   requested = options; requests.push(options ?? {})
+   return new Promise(resolve => { release = resolve })
+  })
   const earlier = [...container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Earlier')!
-  await act(async () => { earlier.focus(); earlier.click() }); await render(pane(false))
-  await act(async () => release(await client.sessionHistoryPage(sid)))
+  await act(async () => { earlier.focus(); earlier.click() })
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+  expect(requested?.cursor).toBeTypeOf('string')
+  const originalEarlierPage = await readOriginalPage(sid, requested)
+  expect(originalEarlierPage.items.some(item => !before.includes(item.id))).toBe(true)
+  await render(pane(false))
+  await act(async () => release(originalEarlierPage))
   await flush(); expect(container.querySelector('.activity-feed')).toBe(feed); expect(ids()).toEqual(before)
   const count = requests.length; await act(async () => { earlier.focus(); earlier.click() }); await flush(); expect(requests).toHaveLength(count)
  })
  it('passes visible eligibility through the secondary cached ReactElement without redirecting its local earlier window', async () => {
   await writeFile(transcript, Array.from({ length: 1200 }, (_, n) => JSON.stringify(record(n))).join('\n') + '\n')
-  await seed(); const page = await client.sessionHistoryPage(sid)
+  await seed(); const page = await readOriginalPage(sid)
   const stage = (visible: boolean) => <SessionActivityPresentation target={{ hostId: 'private-stage', active: true, visible,
     reference: { displayWorkspaceId: 'ws', groupId: 'group', tabId: 'tab', regionId: 'region' } }} regionId="region" sourceKey="original-source"
    sessionId={sid} name="Original Agent" executorLabel="Claude" executionHost={{ configured: true, id: 'local', cwd: stored.workspacePath, label: 'Private host', kind: 'local' }}
-   activity={{ sessionId: sid, items: [], nativeHistoryPage: page, capability: 'complete-events',
-    conversationReading: { reference: control, identity: control.run.runId, enabled: true },
-    userMessageRead: { loading: false, error: null, hasMore: true, onRetry() {}, onReadEarlier() {} } }}
+   activity={{ sessionId: sid, executionHostId: 'local', nativeHistoryPage: page, capability: 'complete-events',
+    conversationReading: { reference: control, identity: control.run.runId, enabled: true } }}
    eligible readOnly={false} resourceOrigin={{ workspaceId: 'ws', tabId: 'tab', regionId: 'region' }}
    renderFrame={content => content} selectRegion={() => {}} />
-  await render(stage(true)); await click('Earlier'); expect(ids()).toHaveLength(600)
+  await render(stage(true)); const originalWindow = ids()
+  expect(originalWindow).toHaveLength(300)
+  await click('Earlier')
+  await vi.waitFor(() => expect(ids()).toHaveLength(originalWindow.length + 100))
+  expect(ids().slice(-originalWindow.length)).toEqual(originalWindow)
+  expect(ids()[0]).toBe('record-800'); expect(ids().at(-1)).toBe('record-1199')
   let release!: (page: AgentSessionHistoryPage) => void
-  vi.mocked(api.sessions.historyPage).mockImplementationOnce(() => new Promise(resolve => { release = resolve }))
+  let requested: AgentSessionHistoryPageOptions | undefined
+  nativePage.mockImplementationOnce((_reference, options) => {
+   requested = options; requests.push(options ?? {})
+   return new Promise(resolve => { release = resolve })
+  })
   const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === 'Earlier')!
-  await act(async () => button.click()); await render(stage(false)); const before = ids()
-  await act(async () => release(await client.sessionHistoryPage(sid))); await flush()
+  await act(async () => button.click())
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'))
+  expect(requested?.cursor).toBeTypeOf('string')
+  const before = ids(), originalEarlierPage = await readOriginalPage(sid, requested)
+  expect(originalEarlierPage.items.some(item => !before.includes(item.id))).toBe(true)
+  await render(stage(false))
+  await act(async () => release(originalEarlierPage)); await flush()
   expect(ids()).toEqual(before); const count = requests.length
   await act(async () => button.click()); await flush(); expect(requests).toHaveLength(count)
   await render(stage(true)); expect(ids()).toEqual(before)
@@ -1506,7 +1782,14 @@ describe('Real caller ownership and healthy retained identities', () => {
  it('keeps the idle-over-day pending recovery surface readable inline through the same Activity without starting a Run', async () => {
   await seed('terminal')
   const original = liveSession()
-  useAppStore.setState({ sessions: [{ ...original, processState: 'exited', semanticStatus: { state: 'done', source: 'native-hook', observedAt: 1, stateEnteredAt: 1 } }] })
+  const { DEFAULT_AGENT_CONTINUITY_POLICY } = await import('@agentmux/core')
+  // Core owns the idle admission. This caller consumes its typed projection;
+  // semantic display state alone does not authorize an inline recovery decision.
+  useAppStore.setState({ sessions: [{ ...original, processState: 'exited',
+   semanticStatus: { state: 'done', source: 'native-hook', observedAt: 1, stateEnteredAt: 1 },
+   continuity: { operationId: 'original-startup-admission', agentSessionId: sid, trigger: 'startup',
+    policy: { ...DEFAULT_AGENT_CONTINUITY_POLICY }, previousRun: control.run, admittedAt: 1, observedAt: 1, rechecks: 0,
+    kind: 'pending', reason: 'idle-window-expired', evidence: { kind: 'agent-session-store' } } }] })
   const recover = vi.spyOn(useAppStore.getState(), 'recoverSession')
   await render(pane())
   const feed = container.querySelector<HTMLElement>('.activity-feed')!
