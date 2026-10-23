@@ -97,7 +97,7 @@ it('default Desktop Host joins SDK intake, original Core and Mailbox, then autom
   const next = feishuPayload({ message_id: 'following-input', content: JSON.stringify({ text: 'Continue in the same original Session' }) }); next.header.event_id = 'following-event'
   await f.sdk.receive(next); await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledTimes(2))
   expect(f.remote.calls.filter(call => call.path.includes('/auth/v3/'))).toHaveLength(1)
-  const shown = await settings({ socketPath: f.server.path, secrets: f.services.secrets, connectionId: f.config.connectionId })
+  const shown = await settings({ socketPath: f.server.path, connectionId: f.config.connectionId })
   const scope = await f.cli(['inspect', '--connection', f.config.connectionId])
   expect(scope.connection.observation.delivery.state).toBe('unknown')
   expect(shown.groupDeliveryText).toBe('View delivery in each Agent’s Shared group details')
