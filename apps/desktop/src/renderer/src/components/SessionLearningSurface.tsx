@@ -56,7 +56,7 @@ export function SessionLearningSurface({ source, label, active, onClose, returnT
   }
   async function run(action: () => Promise<void>, origin: 'read' | 'confirm' = 'read') {
     if (admitted.current) return
-    admitted.current = true; setBusy(true); setIssue(null)
+    admitted.current = true; setBusy(true); setIssue(current => origin === 'confirm' || current?.action !== 'confirm' ? null : current)
     try { await action() } catch (error) { setIssue({ message: presentError(error), action: origin }) }
     finally { admitted.current = false; setBusy(false) }
   }
@@ -109,11 +109,9 @@ export function SessionLearningSurface({ source, label, active, onClose, returnT
         values.push({ value: JSON.stringify(target), label: topic.title, description: `Topic · ${topic.hostId}${categories.length ? ' · ' + categories.join(', ') : ''}`, target })
       }
       setTargets(values)
-      if (topics.unavailable.length) setIssue({ message: topics.unavailable.map(item => item.message).join('\n'), action: 'read' })
+      if (topics.unavailable.length) setIssue(current => current?.action === 'confirm' ? current : { message: topics.unavailable.map(item => item.message).join('\n'), action: 'read' })
     })
   }
-  const issueNotice = issue ? <div className="session-takeover__issue" role="status"><strong>Original result needs attention</strong><p>{issue.message}</p>
-    <p>The original work and request are kept.</p><button type="button" className="small-button" disabled={busy} onClick={() => void refresh()}>Inspect original request</button></div> : null
   useEffect(() => { if (active) void refresh() }, [active, source.hostId, source.agentSessionId])
   useLayoutEffect(() => {
     if (!active || !surface.current) return
@@ -156,6 +154,9 @@ export function SessionLearningSurface({ source, label, active, onClose, returnT
         expectedRevision: operation.revision, target: selectedTarget, executorId, confirmationId: mintObjectId() })).operation, submittedDraft)
     }, 'confirm')
   }
+  const issueNotice = issue ? <div className="session-takeover__issue" role="status"><strong>Original result needs attention</strong><p>{issue.message}</p>
+    <p>The original work and request are kept.</p><div className="session-learning__actions"><button type="button" className="small-button" disabled={busy} onClick={() => void refresh()}>Inspect original request</button>
+      {issue.action === 'confirm' ? <button type="button" className="small-button" disabled={busy || dirty || !executorId || !selectedTarget} onClick={() => void confirm()}>Retry exact confirmation</button> : null}</div></div> : null
   return <section ref={surface} className="session-takeover session-learning" aria-label="Review Agent experience" hidden={!active} inert={!active} aria-busy={busy}
     onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
     <div className="session-takeover__content">
@@ -191,7 +192,10 @@ export function SessionLearningSurface({ source, label, active, onClose, returnT
               {selectedTarget ? <p className="session-learning__destination">{targets.find(item => item.value === targetKey)!.description}</p> : null}</div>
             <div className="session-learning__field"><span aria-hidden="true">Learning Agent</span>
               <AgentExecutorPicker presentation="field" label="Learning Agent" unsetLabel="Choose an Agent" executors={executors} selected={executorId} onSelect={id => { setExecutorId(id); keep({ executorId: id }) }} disabled={busy} /></div>
-            <div className="session-learning__confirmation"><button type="button" className="small-button" aria-label="Confirm & send for learning" disabled={busy || dirty || !executorId || !selectedTarget} onClick={() => void confirm()}>Confirm &amp; send for learning{issue?.action === 'confirm' ? <span className="session-learning__action-result">Last result needs attention</span> : null}</button>
+            <div className="session-learning__confirmation"><button type="button" className="small-button" aria-label={issue?.action === 'confirm' ? 'Result needs attention · Inspect original result' : 'Confirm & send for learning'} disabled={busy || issue?.action !== 'confirm' && (dirty || !executorId || !selectedTarget)} onClick={() => {
+              if (issue?.action === 'confirm') surface.current?.querySelector<HTMLElement>('.session-learning__confirmation .session-takeover__issue')?.scrollIntoView({ block: 'nearest' })
+              else void confirm()
+            }}>{issue?.action === 'confirm' ? 'Result needs attention · Inspect original result' : 'Confirm & send for learning'}</button>
               {issue?.action === 'confirm' ? issueNotice : null}</div>
           </> : null}
         </>}
