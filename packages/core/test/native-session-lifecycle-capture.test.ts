@@ -15,6 +15,8 @@ import type { CtxmuxRunAdapter, CtxmuxAdapterRun } from '../src/ctxmux-run-adapt
 import type { AgentMuxClientEvent, AgentMuxStoredAgentSession } from '../src/types.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { parseRpcAgentSession } from '../src/rpc-native-codec.js'
+import { captureAgentNativeSessionIdentity } from '../src/agent-native-session-capture.js'
+import type { AgentMuxAgentSessionRegistry } from '../src/agent-session-registry.js'
 
 const SID = 'lifecycle-original', RUN = 'lifecycle-original-run', NATIVE = 'lifecycle-native-main'
 const cleanups: Array<() => Promise<void>> = []
@@ -25,6 +27,7 @@ afterEach(async () => {
 
 async function fixture(options: { existing?: boolean; resume?: boolean; records?: Array<{ id: string; source: unknown }>;
   deferNativeFiles?: boolean;
+  initialization?: boolean; native?: 'plain' | 'located' | 'acp';
   provider?: (base: AgentProvider) => AgentProvider } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-native-lifecycle-')))
   vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(root, 'runtime'))
@@ -38,22 +41,28 @@ async function fixture(options: { existing?: boolean; resume?: boolean; records?
     return path
   }))
   const holder = spawn(process.execPath, ['-e',
-    "const fs=require('fs');const [mode,...paths]=process.argv.slice(1);let opened=false;const open=()=>{if(!opened){opened=true;for(const p of paths)fs.openSync(p,'r')}};if(mode==='open')open();process.stdin.on('data',data=>{if(data.toString()==='open-native-records')open()});console.log(process.pid);process.stdin.resume();setInterval(()=>{},1000)",
+    "const fs=require('fs');const [mode,...paths]=process.argv.slice(1);let opened=false;const open=()=>{if(!opened){opened=true;for(const p of paths)fs.openSync(p,'r+')}};if(mode==='open')open();process.stdin.on('data',data=>{if(data.toString()==='open-native-records')open()});console.log(process.pid);process.stdin.resume();setInterval(()=>{},1000)",
     options.deferNativeFiles ? 'defer' : 'open',
     ...files], { detached: true, stdio: ['pipe', 'pipe', 'pipe'] })
   await once(holder.stdout!, 'data')
   cleanups.push(async () => {
     if (holder.exitCode === null && holder.signalCode === null) { const end = once(holder, 'exit'); holder.kill('SIGTERM'); await end }
-    await rm(root, { recursive: true, force: true })
+    await rm(root, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
   })
   const { terminalHandshake: _handshake, terminalPromptRender: _render, planManagedHooks: _hooks,
     ...base } = new AgentProviderRegistry().get('codex')
-  const passive = { ...base, catalog: { ...base.catalog, hookStrategy: { kind: 'none' as const } } }
+  const passive = { ...base, ...(options.initialization ? { observeTerminalFrontend: undefined } : {}),
+    catalog: { ...base.catalog, hookStrategy: { kind: 'none' as const } } }
   const provider = options.provider?.(passive) ?? passive
   const store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
   const stored: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: SID, providerId: provider.id,
     executorId: provider.id, hostId: 'local', workspacePath: root, run: { runId: options.resume ? 'lifecycle-ended-run' : RUN }, retiredRuns: [],
-    ...(options.resume ? { nativeHandle: { kind: 'provider' as const, providerId: provider.id, sessionId: NATIVE, transcriptPath: files[0]! } } : {}),
+    ...(options.native === 'acp' ? { nativeHandle: { kind: 'acp' as const, adapterId: 'original-adapter', sessionId: NATIVE } }
+      : options.resume || options.native ? { nativeHandle: { kind: 'provider' as const, providerId: provider.id, sessionId: NATIVE,
+        ...(options.resume || options.native === 'located' ? { transcriptPath: files[0]! } : {}) } } : {}),
+    ...(options.initialization ? { nativeActor: { protocolId: 'private-native', actorId: 'original-actor',
+      lifecycleOperationId: 'original-initialization', token: 'a'.repeat(64), frontendControl: true as const,
+      initializationControl: true as const, launch: { command: process.execPath, args: [] } } } : {}),
     hookBindingId: 'b'.repeat(43), hookToken: 't'.repeat(43), createdAt: reshapeFixtureEpoch(0, 0, 1), updatedAt: reshapeFixtureEpoch(0, 0, 1) }
   if (options.existing || options.resume) await store.compareAndSwap(null, stored)
   const client = new AgentMuxClient({ store, providers: [provider] })
@@ -91,6 +100,100 @@ async function fixture(options: { existing?: boolean; resume?: boolean; records?
   const write = () => client.writeAgent({ agentSessionId: SID, expectedRun: { runId: RUN }, source: 'user', data: 'z' })
   return { root, files, holder, provider, store, client, kernel, run, status, start, input, events, create, saved, waitIdentity, write }
 }
+
+async function captureConfirmed(f: Awaited<ReturnType<typeof fixture>>, provider = f.provider) {
+  return await captureAgentNativeSessionIdentity({ session: await f.saved(), provider,
+    registry: Reflect.get(f.client, 'registry') as AgentMuxAgentSessionRegistry, kernel: f.kernel,
+    signal: new AbortController().signal, assertConnection: () => {},
+    command: process.execPath, args: [], env: {}, enrichConfirmedIdentity: true })
+}
+
+it('initialized native record: public refresh enriches the original confirmed SID with its witnessed locator', async () => {
+  const f = await fixture({ existing: true, initialization: true, native: 'plain' })
+  const discover = vi.spyOn(f.provider, 'discoverNativeSession')
+  await f.client.connect()
+  await vi.waitFor(async () => expect((await f.saved()).nativeHandle).toEqual({ kind: 'provider', providerId: 'codex',
+    sessionId: NATIVE, transcriptPath: f.files[0] }))
+  expect(discover).toHaveBeenCalledOnce()
+  await f.client.refreshAgentSession(SID, { runId: RUN })
+  expect(discover).toHaveBeenCalledOnce()
+  expect((await f.saved()).nativeActor?.actorId).toBe('original-actor')
+  await f.write(); expect(f.input).toHaveBeenCalledOnce(); expect(f.start).not.toHaveBeenCalled()
+})
+
+it.each(['legacy', 'located', 'acp'] as const)('initialized native record: %s identity adds no discovery cost', async mode => {
+  const f = await fixture({ existing: true, initialization: mode !== 'legacy', native: mode === 'legacy' ? 'plain' : mode })
+  const discover = vi.spyOn(f.provider, 'discoverNativeSession'), before = (await f.saved()).nativeHandle
+  await f.client.connect(); await f.client.refreshAgentSession(SID, { runId: RUN })
+  expect(discover).not.toHaveBeenCalled(); expect((await f.saved()).nativeHandle).toEqual(before)
+  await f.write(); expect(f.start).not.toHaveBeenCalled()
+})
+
+it.each(['same', 'foreign'] as const)('initialized native record: protocol %s SID arriving during the first capture preserves the original target', async target => {
+  let release!: () => void, calls = 0
+  const held = new Promise<void>(resolve => { release = resolve })
+  const f = await fixture({ existing: true, initialization: true, provider: base => ({ ...base,
+    async discoverNativeSession(context) { calls++; const witness = await base.discoverNativeSession!(context); await held; return witness }
+  }) })
+  await f.client.connect(); await vi.waitFor(() => expect(calls).toBe(1))
+  const registry = Reflect.get(f.client, 'registry') as AgentMuxAgentSessionRegistry
+  const sessionId = target === 'same' ? NATIVE : 'another-confirmed-native'
+  const bound = await registry.update(SID, { runId: RUN }, value => ({ ...value,
+    nativeHandle: { kind: 'provider', providerId: 'codex', sessionId } }))
+  Reflect.get(f.client, 'queueNativeIdentityCapture').call(f.client, bound)
+  expect(calls).toBe(1); release()
+  if (target === 'same') {
+    await vi.waitFor(async () => expect((await f.saved()).nativeHandle?.transcriptPath).toBe(f.files[0]))
+    expect(calls).toBe(1)
+  } else {
+    await vi.waitFor(() => expect(f.events).toContainEqual(expect.objectContaining({ type: 'agent-error',
+      code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED', message: expect.stringContaining(`native conversation ${sessionId} is confirmed`) })), { timeout: 12_000 })
+    expect((await f.saved()).nativeHandle).toEqual({ kind: 'provider', providerId: 'codex', sessionId })
+    const failure = f.events.findLast(event => event.type === 'agent-error')
+    expect(failure && 'message' in failure && failure.message).toContain('record locator/source')
+  }
+  await f.write(); expect(f.input).toHaveBeenCalledOnce(); expect(f.start).not.toHaveBeenCalled(); expect(f.holder.exitCode).toBeNull()
+}, 15_000)
+
+it.each(['provider', 'session'] as const)('initialized native record: refuses a foreign discovered %s without replacing the confirmed identity', async target => {
+  const f = await fixture({ existing: true, native: 'plain' }); await f.client.connect()
+  const discoverNativeSession: NonNullable<AgentProvider['discoverNativeSession']> = async context => {
+    const witness = await f.provider.discoverNativeSession!(context)
+    return { ...witness!, handle: { ...witness!.handle,
+      ...(target === 'provider' ? { providerId: 'another-provider' } : { sessionId: 'another-native' }) } }
+  }
+  await expect(captureConfirmed(f, { ...f.provider, discoverNativeSession })).rejects.toMatchObject({ code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' })
+  expect((await f.saved()).nativeHandle).toEqual({ kind: 'provider', providerId: 'codex', sessionId: NATIVE })
+  await f.write(); expect(f.start).not.toHaveBeenCalled()
+})
+
+it('initialized native record: same SID without an additional locator remains a valid Provider discovery', async () => {
+  const f = await fixture({ existing: true, native: 'plain' }); await f.client.connect()
+  const discoverNativeSession: NonNullable<AgentProvider['discoverNativeSession']> = async context => {
+    const witness = await f.provider.discoverNativeSession!(context)
+    const { transcriptPath: _path, ...handle } = witness!.handle
+    return { ...witness!, handle }
+  }
+  await expect(captureConfirmed(f, { ...f.provider, discoverNativeSession })).resolves.toMatchObject({ nativeHandle: {
+    kind: 'provider', providerId: 'codex', sessionId: NATIVE } })
+  expect((await f.saved()).nativeHandle).not.toHaveProperty('transcriptPath')
+  await f.write(); expect(f.start).not.toHaveBeenCalled()
+})
+
+it.each(['same', 'foreign', 'locator'] as const)('initialized native record: preserves a concurrent %s confirmation at the final CAS', async target => {
+  const f = await fixture({ existing: true, native: 'plain' }); await f.client.connect()
+  const registry = Reflect.get(f.client, 'registry') as AgentMuxAgentSessionRegistry, update = registry.update.bind(registry)
+  const concurrent = { kind: 'provider' as const, providerId: 'codex', sessionId: target === 'foreign' ? 'concurrent-native' : NATIVE,
+    transcriptPath: target === 'locator' ? join(f.root, 'concurrent.jsonl') : f.files[0]! }
+  vi.spyOn(registry, 'update').mockImplementationOnce(async (...args) => {
+    await update(SID, { runId: RUN }, value => ({ ...value, nativeHandle: concurrent }))
+    return await update(...args)
+  })
+  if (target === 'same') await expect(captureConfirmed(f)).resolves.toMatchObject({ nativeHandle: concurrent })
+  else await expect(captureConfirmed(f)).rejects.toMatchObject({ code: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' })
+  expect((await f.saved()).nativeHandle).toEqual(concurrent)
+  await f.write(); expect(f.start).not.toHaveBeenCalled(); expect(f.holder.exitCode).toBeNull()
+})
 
 it('public create persists the witnessed main without main Hook or any history consumer', async () => {
   const f = await fixture()
