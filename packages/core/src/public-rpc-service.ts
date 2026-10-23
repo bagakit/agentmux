@@ -128,7 +128,7 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
       Awaited<ReturnType<AgentMuxClient['handOff']>> | Promise<Awaited<ReturnType<AgentMuxClient['handOff']>>>
   }
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
-type BorrowedHostedRuntime = Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe' | 'assertFence'> & Partial<Pick<AgentMuxHostedRuntimeService, 'client'>>
+type BorrowedHostedRuntime = Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe' | 'assertFence'> & Partial<Pick<AgentMuxHostedRuntimeService, 'client' | 'externalAuthor'>>
 export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   /** Borrow the original UI-free Capsule owner; no content or configuration is stored here. */
   capsules?: { call<M extends CapsuleMethod>(method: M, params: CapsuleParamsMap[M], context?: CapsuleCallContext,
@@ -2033,8 +2033,18 @@ export class AgentMuxRpcService {
         if (scope.client.forwardRpc) return await scope.client.forwardRpc(method, p as AgentMuxRpcParams<typeof method>,
           await this.inputForwardContext(context)) as AgentMuxRpcResult<M>
         const author = caller ? { caller: { agentSessionId: caller.agentSessionId, capability: caller.capability } } : {}
+        let inputContext = this.inputCallContext(context)
+        if (method === 'agent.input.rejoin') {
+          const owner = await this.ports.hostedRuntime?.()
+          // Only the same semantic owner can restore its retained external attribution.
+          // Wire data and another endpoint never supply an authorization callback.
+          if (owner?.client === scope.client) {
+            const externalAuthor = await owner.externalAuthor?.({ method: 'rejoinAgentInputWaiting', args: [{ ref, ...author }] })
+            if (externalAuthor) inputContext = { ...inputContext, externalAuthor }
+          }
+        }
         result = method === 'agent.input.stop' ? await scope.client.stopAgentInputWaiting({ ref, cancelOperationId: validateAgentInputControlId(p.cancelOperationId), ...author })
-          : await scope.client.rejoinAgentInputWaiting({ ref, ...author }, this.inputCallContext(context))
+          : await scope.client.rejoinAgentInputWaiting({ ref, ...author }, inputContext)
         break
       }
       case 'agent.send': result = await this.send(p, caller, context); break

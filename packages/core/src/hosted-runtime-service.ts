@@ -145,7 +145,8 @@ export class AgentMuxHostedRuntimeService {
     this.endpointState = { ...state, type: 'control-endpoint-state', evidence: { source: 'agentmux', observedAt: Date.now() } }
     this.publish(this.endpointState)
   }
-  private async externalAuthor(invocation: AgentMuxHostedInvocation): Promise<import('./agent-input-wait.js').AgentInputCallContext['externalAuthor']> {
+  /** Trusted in-process input context. This callback is never part of a wire invocation. */
+  async externalAuthor(invocation: AgentMuxHostedInvocation): Promise<import('./agent-input-wait.js').AgentInputCallContext['externalAuthor']> {
     if (!this.externalInputAuthority) return undefined
     let author: import('./agent-global-message-queue.js').AgentMuxMessageEnvelope['sender'] | undefined
     if (invocation.method === 'submitAgentMessage') author = invocation.args[0]?.envelope?.sender
