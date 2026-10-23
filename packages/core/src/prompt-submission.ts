@@ -761,7 +761,6 @@ export class AgentPromptSubmissionCoordinator {
         let failure: unknown
         let dispatchAttempted = false
         try {
-          await control?.authority?.assertCurrent()
           const current = await refreshSession(session.agentSessionId, session.run)
           if (!isDeepStrictEqual(current.promptCompletionAdmission, record.admission) || !isDeepStrictEqual(current.nativeActor, original.nativeActor) ||
               source && !isDeepStrictEqual(defaultNativeSource(current), source)) throw new AgentMuxError('The original native input claim changed.', 'STALE_AGENT_SESSION')
@@ -772,6 +771,8 @@ export class AgentPromptSubmissionCoordinator {
           if (currentRun.state.type !== 'running' || currentRun.pid !== run.pid) throw new AgentMuxError('The original native Run changed before input.', 'STALE_AGENT_SESSION')
           if (control?.idleOnly && currentRun.acceptedInputBytes !== control.idleOnly.inputByte) throw new AgentMuxError(
             'The original input fence changed before notification admission. Ordinary input remains available.', 'AGENT_COMPLETION_CHANGED')
+          // Provider/Runtime reads can yield to an accepted recovery cancellation.
+          await control?.authority?.assertCurrent()
           dispatchAttempted = true
           result = await prepared.send(prompt, frozenPlan)
         } catch (error) { failure = error }
