@@ -4,7 +4,8 @@ import type { AgentLearningOperation, AgentLearningSource, AgentLearningTarget }
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../lib/api'
 import { executorsForHost } from '../lib/executors'
-import { useAppStore } from '../store'
+import { retainAgentLearningReviewDraft, useAppStore } from '../store'
+import { learningReviewKey, type AgentLearningReviewDraft } from '../lib/agent-learning-review-draft'
 import { homeZoneId } from '../../../shared/space-addresses'
 import { desktopBindingsFromSpatial } from '../lib/desktop-spatial-state'
 import { AgentExecutorPicker } from './AgentExecutorPicker'
@@ -18,32 +19,49 @@ export function SessionLearningSurface({ source, label, active, onClose, returnT
   const detections = useAppStore(state => state.executorDetections)
   const inventory = useAppStore(state => state.hostExecutorInventories[source.hostId])
   const executors = useMemo(() => executorsForHost(config, source.hostId, detections, inventory), [config, detections, inventory, source.hostId])
-  const [executorId, setExecutorId] = useState<string | null>(null)
+  const saved = useAppStore.getState().agentLearningReviewDrafts[learningReviewKey(source)]
+  const view = useRef<AgentLearningReviewDraft>(saved ?? { source, operationId: null, executorId: null, target: null, draft: null, extraction: null })
+  const [executorId, setExecutorId] = useState<string | null>(view.current.executorId)
   const [operation, setOperation] = useState<AgentLearningOperation | null>(null)
   const [operations, setOperations] = useState<AgentLearningOperation[]>([])
-  const [draft, setDraft] = useState('')
-  const [targets, setTargets] = useState<Array<{ value: string; label: string; description: string; target: AgentLearningTarget }>>([])
-  const [targetKey, setTargetKey] = useState('')
-  const [issue, setIssue] = useState<string | null>(null)
+  const [draft, setDraft] = useState(view.current.draft?.content ?? '')
+  const [targets, setTargets] = useState<Array<{ value: string; label: string; description: string; target: AgentLearningTarget }>>(() => {
+    const target = view.current.target
+    return target ? [{ value: JSON.stringify(target), label: `Original ${target.kind === 'mote' ? 'Mote' : 'Topic'}`, description: 'Saved selection · current resource details unconfirmed', target }] : []
+  })
+  const [targetKey, setTargetKey] = useState(view.current.target ? JSON.stringify(view.current.target) : '')
+  const [issue, setIssue] = useState<{ message: string; action: 'read' | 'confirm' } | null>(null)
   const [busy, setBusy] = useState(false)
-  const admitted = useRef(false), pendingId = useRef<string | null>(null), surface = useRef<HTMLElement>(null)
-  const draftRef = useRef(draft), operationRef = useRef(operation)
-  draftRef.current = draft; operationRef.current = operation
+  const admitted = useRef(false), pendingId = useRef<string | null>(view.current.operationId), surface = useRef<HTMLElement>(null), navigating = useRef(false)
+  const draftRef = useRef(draft)
+  draftRef.current = draft
   const dirty = operation?.candidate !== null && draft !== (operation?.candidate?.content ?? '')
-  function accept(value: AgentLearningOperation, expectedDraft = draftRef.current) {
+  const conflict = !!operation?.candidate && !!view.current.draft && view.current.draft.expectedRevision !== operation.revision && dirty
+  async function retain(patch: Partial<AgentLearningReviewDraft>, flush = false) {
+    view.current = { ...view.current, ...patch }
+    await retainAgentLearningReviewDraft(view.current, flush)
+  }
+  function keep(patch: Partial<AgentLearningReviewDraft>) { void retain(patch).catch(error => setIssue({ message: presentError(error), action: 'read' })) }
+  function accept(value: AgentLearningOperation, expectedDraft = draftRef.current, preserveDraft = false, submittedRevision?: number) {
     if (value.source.hostId !== source.hostId || value.source.agentSessionId !== source.agentSessionId) throw new Error('This operation belongs to another original source. The current draft and work are kept.')
     setOperation(value); pendingId.current = value.operationId
-    if (draftRef.current === expectedDraft) setDraft(value.candidate?.content ?? '')
+    if (!preserveDraft && draftRef.current === expectedDraft) {
+      setDraft(value.candidate?.content ?? '')
+      keep({ operationId: value.operationId, draft: null })
+    } else {
+      const later = view.current.draft
+      keep({ operationId: value.operationId, ...(later && submittedRevision !== undefined && value.revision === submittedRevision + 1 && value.candidate?.content === expectedDraft
+        ? { draft: { ...later, expectedRevision: value.revision } } : {}) })
+    }
   }
-  async function run(action: () => Promise<void>) {
+  async function run(action: () => Promise<void>, origin: 'read' | 'confirm' = 'read') {
     if (admitted.current) return
     admitted.current = true; setBusy(true); setIssue(null)
-    try { await action() } catch (error) { setIssue(presentError(error)) }
+    try { await action() } catch (error) { setIssue({ message: presentError(error), action: origin }) }
     finally { admitted.current = false; setBusy(false) }
   }
   async function refresh() {
     const originalDraft = draftRef.current
-    const wasDirty = originalDraft !== (operationRef.current?.candidate?.content ?? '')
     await run(async () => {
       const rows: AgentLearningOperation[] = []
       let cursor: string | undefined
@@ -55,8 +73,11 @@ export function SessionLearningSurface({ source, label, active, onClose, returnT
       const id = pendingId.current ?? operation?.operationId ?? (rows.length === 1 ? rows[0]!.operationId : null)
       if (id) {
         const result = await api.agentLearning.call('agent.learning.inspect', { hostId: source.hostId, operationId: id })
-        if (result.operation && !wasDirty) accept(result.operation, originalDraft)
-        else if (result.operation && result.operation.revision !== operation?.revision) setIssue('The original candidate changed. Your edits are kept here; save will check the original revision before changing it.')
+        if (result.operation) {
+          const retained = view.current.draft
+          accept(result.operation, originalDraft, retained !== null && retained.content !== result.operation.candidate?.content)
+          if (retained && retained.expectedRevision !== result.operation.revision) setIssue({ message: 'The original candidate changed. Your edits are kept here; save will check their original revision before changing it.', action: 'read' })
+        }
       }
       const result = await useAppStore.getState().executeControl({ schemaVersion: 5, requestId: mintObjectId(), operation: 'space.ls', target: {} })
       if (result.operation !== 'space.ls') throw new Error('The original destination catalogue is unavailable.')
@@ -88,33 +109,42 @@ export function SessionLearningSurface({ source, label, active, onClose, returnT
         values.push({ value: JSON.stringify(target), label: topic.title, description: `Topic · ${topic.hostId}${categories.length ? ' · ' + categories.join(', ') : ''}`, target })
       }
       setTargets(values)
-      if (topics.unavailable.length) setIssue(topics.unavailable.map(item => item.message).join('\n'))
+      if (topics.unavailable.length) setIssue({ message: topics.unavailable.map(item => item.message).join('\n'), action: 'read' })
     })
   }
+  const issueNotice = issue ? <div className="session-takeover__issue" role="status"><strong>Original result needs attention</strong><p>{issue.message}</p>
+    <p>The original work and request are kept.</p><button type="button" className="small-button" disabled={busy} onClick={() => void refresh()}>Inspect original request</button></div> : null
   useEffect(() => { if (active) void refresh() }, [active, source.hostId, source.agentSessionId])
   useLayoutEffect(() => {
     if (!active || !surface.current) return
     const node = surface.current, held = Array.from(node.parentElement?.children ?? []).filter((value): value is HTMLElement => value instanceof HTMLElement && value !== node).map(value => ({ value, inert: value.inert }))
     held.forEach(({ value }) => { value.inert = true })
     node.querySelector<HTMLButtonElement>('[aria-label="Close experience review"]')?.focus({ preventScroll: true })
-    return () => { held.forEach(({ value, inert }) => { value.inert = inert }); if (returnTrigger?.isConnected) returnTrigger.focus({ preventScroll: true }) }
+    navigating.current = false
+    return () => { const focusedHere = node.contains(document.activeElement); held.forEach(({ value, inert }) => { value.inert = inert }); if (!navigating.current && focusedHere && returnTrigger?.isConnected) returnTrigger.focus({ preventScroll: true }) }
   }, [active])
   const selectedTarget = targets.find(item => item.value === targetKey)?.target
-  function viewAgent(agentSessionId: string) { useAppStore.getState().revealFocusAgent({ hostId: source.hostId, agentSessionId }); onClose() }
+  const approvedTarget = operation?.approved ? targets.find(item => JSON.stringify(item.target) === JSON.stringify(operation.approved!.target)) : null
+  function viewAgent(agentSessionId: string) { navigating.current = true; useAppStore.getState().revealFocusAgent({ hostId: source.hostId, agentSessionId }); onClose() }
   async function continueOriginal(step: 'extraction' | 'learning') {
     if (!operation) return
     const originalDraft = draftRef.current
-    await run(async () => accept((await api.agentLearning.call('agent.learning.continue', { hostId: source.hostId, operationId: operation.operationId, step })).operation, originalDraft))
+    await run(async () => accept((await api.agentLearning.call('agent.learning.continue', { hostId: source.hostId, operationId: operation.operationId, step })).operation, originalDraft, view.current.draft !== null))
   }
   async function extract() {
-    if (!executorId || pendingId.current || operation) return
-    pendingId.current = mintObjectId()
-    await run(async () => accept((await api.agentLearning.call('agent.learning.prepare', { operationId: pendingId.current!, source, executorId })).operation))
+    if (!executorId || operation) return
+    const original = view.current.extraction ?? { operationId: pendingId.current ?? mintObjectId(), executorId }
+    pendingId.current = original.operationId
+    await run(async () => {
+      await retain({ operationId: original.operationId, extraction: original }, true)
+      accept((await api.agentLearning.call('agent.learning.prepare', { operationId: original.operationId, source, executorId: original.executorId })).operation)
+    })
   }
-  async function save() {
+  async function save(mergeCurrent = false) {
     if (!operation || !draft.trim()) return
-    const submittedDraft = draft
-    await run(async () => accept((await api.agentLearning.call('agent.learning.revise', { hostId: source.hostId, operationId: operation.operationId, expectedRevision: operation.revision, content: submittedDraft })).operation, submittedDraft))
+    const submittedDraft = draft, expectedRevision = mergeCurrent ? operation.revision : view.current.draft?.expectedRevision ?? operation.revision
+    if (mergeCurrent) keep({ draft: { expectedRevision, content: submittedDraft } })
+    await run(async () => accept((await api.agentLearning.call('agent.learning.revise', { hostId: source.hostId, operationId: operation.operationId, expectedRevision, content: submittedDraft })).operation, submittedDraft, false, expectedRevision))
   }
   async function confirm() {
     if (!operation?.candidate || dirty || !executorId || !selectedTarget) return
@@ -124,43 +154,57 @@ export function SessionLearningSurface({ source, label, active, onClose, returnT
       const candidateDigest = Array.from(new Uint8Array(bytes), value => value.toString(16).padStart(2, '0')).join('')
       accept((await api.agentLearning.confirm({ hostId: source.hostId, operationId: operation.operationId, ownerRuntimeId: operation.ownerRuntimeId, candidateDigest,
         expectedRevision: operation.revision, target: selectedTarget, executorId, confirmationId: mintObjectId() })).operation, submittedDraft)
-    })
+    }, 'confirm')
   }
   return <section ref={surface} className="session-takeover session-learning" aria-label="Review Agent experience" hidden={!active} inert={!active} aria-busy={busy}
     onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); onClose() } }}>
     <div className="session-takeover__content">
       <header className="session-takeover__heading"><div><h2>Pass on what worked.</h2><p>Extract experience, review it, then choose who learns.</p></div>
         <button type="button" className="icon-button" aria-label="Close experience review" onClick={onClose}>×</button></header>
-      <p className="session-learning__source"><strong>{label}</strong><span>{source.hostId} · {source.agentSessionId}</span></p>
+      <p className="session-learning__source"><strong>{label}</strong><span>Original work · {source.hostId}</span></p>
+      {issue?.action === 'read' ? issueNotice : null}
       {!operation ? <>
         {operations.length > 1 ? <SelectionField label="Original extraction" value="" onValueChange={id => { const row = operations.find(item => item.operationId === id); if (row) accept(row) }} options={[
           { value: '', label: 'Choose an existing extraction' }, ...operations.map(row => ({ value: row.operationId, label: row.operationId, description: row.candidate ? 'Candidate ready for review' : 'Extraction in progress' }))]} /> : null}
-        <AgentExecutorPicker presentation="field" label="Extraction Agent" unsetLabel="Choose an Agent" executors={executors} selected={executorId} onSelect={setExecutorId} disabled={busy || pendingId.current !== null} />
+        <AgentExecutorPicker presentation="field" label="Extraction Agent" unsetLabel="Choose an Agent" executors={executors} selected={executorId} onSelect={id => { setExecutorId(id); keep({ executorId: id }) }} disabled={busy || pendingId.current !== null} />
         <p>The extraction Agent reads the original work and proposes reusable experience. This step does not send anything to a Mote or Topic.</p>
-        <button type="button" className="small-button" disabled={busy || !executorId || pendingId.current !== null} onClick={() => void extract()}>Extract experience</button>
+        <button type="button" className="small-button" disabled={busy || !executorId} onClick={() => void extract()}>{pendingId.current ? 'Continue original extraction' : 'Extract experience'}</button>
+        {pendingId.current ? <p>The original request is retained. Check it or explicitly continue this same request; no new identity will be created.</p> : null}
       </> : <>
-        <div className="session-learning__status" role="status">Extraction · {operation.proposer.state} · Context {operation.proposer.context}
-          <span>Agent {operation.proposer.agentSessionId}</span>
+        {operation.approved ? <div className="session-learning__status" role="status"><strong>Reviewed candidate confirmed</strong><span>{operation.approved.target.kind === 'mote' ? 'Mote' : 'Topic'} · {approvedTarget?.label ?? 'Original destination'}</span>
+          <p>{operation.learner?.state === 'created' && operation.learner.context === 'confirmed' ? 'The learning task was delivered. Review its result and saved content to confirm knowledge changes.' : 'Learning delivery is unconfirmed. Use Check original to inspect this same request.'}</p>
+          {operation.learner ? <div className="session-learning__actions"><button type="button" className="small-button" onClick={() => viewAgent(operation.learner!.agentSessionId)}>View learning Agent</button>
+            {['prepared', 'unknown', 'not-applied'].includes(operation.learner.state) ? <button type="button" className="small-button" disabled={busy} onClick={() => void continueOriginal('learning')}>Continue original delivery</button> : null}</div> : null}
+        </div> : <div className="session-learning__status" role="status"><strong>{operation.candidate ? 'Experience ready to review' : operation.proposer.state === 'created' ? 'Extraction task created' : 'Extraction delivery is unconfirmed'}</strong>
           <div className="session-learning__actions"><button type="button" className="small-button" onClick={() => viewAgent(operation.proposer.agentSessionId)}>View extraction Agent</button>
-            {['prepared', 'unknown', 'not-applied'].includes(operation.proposer.state) ? <button type="button" className="small-button" disabled={busy} onClick={() => void continueOriginal('extraction')}>Continue original extraction</button> : null}</div></div>
+            {['prepared', 'unknown', 'not-applied'].includes(operation.proposer.state) ? <button type="button" className="small-button" disabled={busy} onClick={() => void continueOriginal('extraction')}>Continue original extraction</button> : null}</div></div>}
         {!operation.candidate ? <p>The candidate is not ready. Read the original extraction again to check its proposal.</p> : <>
-          <label className="session-learning__draft">Candidate · revision {operation.revision}<textarea aria-label="Experience candidate" value={draft} readOnly={!!operation.approved} onChange={event => setDraft(event.target.value)} spellCheck={false} /></label>
-          {!operation.approved ? <><div className="session-learning__actions"><button type="button" className="small-button" disabled={busy || !dirty || !draft.trim()} onClick={() => void save()}>Save draft</button>{dirty ? <span>Save your edits before confirmation.</span> : <span>Review the sources, conditions and uncertainty.</span>}</div>
-            <SelectionField label="Learning destination" value={targetKey} onValueChange={setTargetKey} disabled={busy} options={[{ value: '', label: 'Choose a Mote or Topic' }, ...targets]} />
-            <AgentExecutorPicker presentation="field" label="Learning Agent" unsetLabel="Choose an Agent" executors={executors} selected={executorId} onSelect={setExecutorId} disabled={busy} />
-            {selectedTarget ? <p className="session-learning__destination">{targets.find(item => item.value === targetKey)!.description}</p> : null}
-            <button type="button" className="small-button" disabled={busy || dirty || !executorId || !selectedTarget} onClick={() => void confirm()}>Confirm &amp; send for learning</button>
-          </> : <div className="session-learning__status" role="status"><strong>Reviewed candidate confirmed</strong><span>{operation.approved.target.kind} · {operation.approved.target.topicId} · {operation.approved.target.expectedResource.hostId}</span>
-            <span>Learning Agent · {operation.learner?.state ?? 'Unconfirmed'} · Context {operation.learner?.context ?? 'unknown'}</span>
-            {operation.learner ? <span>Agent {operation.learner.agentSessionId}</span> : null}
-            {operation.learner ? <div className="session-learning__actions"><button type="button" className="small-button" onClick={() => viewAgent(operation.learner!.agentSessionId)}>View learning Agent</button>
-              {['prepared', 'unknown', 'not-applied'].includes(operation.learner.state) ? <button type="button" className="small-button" disabled={busy} onClick={() => void continueOriginal('learning')}>Continue original delivery</button> : null}</div> : null}
-            <p>Task delivery does not prove saved knowledge. Inspect the learner’s original result and the destination’s saved content before claiming it learned.</p></div>}
+          {!operation.approved || dirty ? <label className="session-learning__draft">{operation.approved ? 'Later edit retained · outside the confirmed candidate' : `Candidate · revision ${operation.revision}`}<textarea aria-label="Experience candidate" value={draft} readOnly={!!operation.approved} onChange={event => { const content = event.target.value; setDraft(content); keep({ draft: { expectedRevision: view.current.draft?.expectedRevision ?? operation.revision, content } }) }} spellCheck={false} /></label> : null}
+          {operation.approved ? <details className="session-learning__candidate"><summary>Read the exact confirmed candidate · revision {operation.approved.candidateRevision}</summary><pre className="session-learning__confirmed">{operation.candidate.content}</pre>
+            <button type="button" className="small-button" onClick={() => viewAgent(operation.proposer.agentSessionId)}>View extraction Agent</button></details> : null}
+          {!operation.approved ? <>{conflict ? <div className="session-learning__conflict"><p>The saved candidate changed. Compare it below and merge the changes you want into your retained draft above.</p>
+            <details open><summary>Current saved candidate · revision {operation.revision}</summary><pre className="session-learning__confirmed">{operation.candidate.content}</pre></details>
+            <button type="button" className="small-button" disabled={busy || !draft.trim()} onClick={() => void save(true)}>Save merged draft against revision {operation.revision}</button></div> : null}
+            <div className="session-learning__actions"><button type="button" className="small-button" disabled={busy || conflict || !dirty || !draft.trim()} onClick={() => void save()}>Save draft</button>{dirty ? <span>Save your edits before confirmation.</span> : <span>Review the sources, conditions and uncertainty.</span>}</div>
+            <div className="session-learning__field"><span aria-hidden="true">Learning destination</span>
+              <SelectionField label="Learning destination" value={targetKey} onValueChange={key => { setTargetKey(key); keep({ target: targets.find(item => item.value === key)?.target ?? null }) }} disabled={busy} options={[{ value: '', label: 'Choose a Mote or Topic' }, ...targets]} />
+              {selectedTarget ? <p className="session-learning__destination">{targets.find(item => item.value === targetKey)!.description}</p> : null}</div>
+            <div className="session-learning__field"><span aria-hidden="true">Learning Agent</span>
+              <AgentExecutorPicker presentation="field" label="Learning Agent" unsetLabel="Choose an Agent" executors={executors} selected={executorId} onSelect={id => { setExecutorId(id); keep({ executorId: id }) }} disabled={busy} /></div>
+            <div className="session-learning__confirmation"><button type="button" className="small-button" aria-label="Confirm & send for learning" disabled={busy || dirty || !executorId || !selectedTarget} onClick={() => void confirm()}>Confirm &amp; send for learning{issue?.action === 'confirm' ? <span className="session-learning__action-result">Last result needs attention</span> : null}</button>
+              {issue?.action === 'confirm' ? issueNotice : null}</div>
+          </> : null}
         </>}
         {[...operation.issues, ...operation.unavailable].map((item, index) => <p className="session-learning__issue" key={index}>{item.step}: {item.message}</p>)}
-        <p className="session-learning__source"><span>Original operation · {operation.operationId}</span></p>
+        <details className="session-learning__details"><summary>Original operation details</summary>
+          <dl><dt>Source</dt><dd>{source.hostId} · {source.agentSessionId}</dd>
+            <dt>Operation</dt><dd>{operation.operationId}</dd>
+            <dt>Extraction</dt><dd>{operation.proposer.agentSessionId} · {operation.proposer.state} · Context {operation.proposer.context}</dd>
+            {operation.learner ? <><dt>Learning</dt><dd>{operation.learner.agentSessionId} · {operation.learner.state} · Context {operation.learner.context}</dd></> : null}
+            {operation.approved || selectedTarget ? <><dt>Destination</dt><dd>{(operation.approved?.target ?? selectedTarget)!.topicId}<br />{(operation.approved?.target ?? selectedTarget)!.zoneId}</dd></> : null}
+          </dl>
+        </details>
       </>}
-      {issue ? <div className="session-takeover__issue" role="status"><strong>Original result needs attention</strong><p>{issue}</p><p>The original work and request are kept. Check this same operation before taking another action.</p></div> : null}
       <footer className="session-takeover__footer"><span>{busy ? 'Reading the original operation…' : 'Your original Agent and work stay here.'}</span><button type="button" className="small-button" disabled={busy} onClick={() => void refresh()}>Check original</button></footer>
     </div>
   </section>
