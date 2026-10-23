@@ -19,7 +19,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "pnpm build && node --test test/*.test.mjs",
     "test:mutation": "node scripts/mutation.mjs",
-    "test:reply:mutation": "node scripts/reply-mutation.mjs"
+    "test:reply:mutation": "node scripts/reply-mutation.mjs",
+    "test:runtime": "pnpm build && node --test test/runtime.test.mjs",
+    "test:runtime:mutation": "node scripts/runtime-mutation.mjs"
   },
   "dependencies": { "@agentmux/identity": "workspace:*", "fs-native-extensions": "1.5.1" },
   "devDependencies": { "@types/node": "^24.0.0", "typescript": "^5.9.0" }
