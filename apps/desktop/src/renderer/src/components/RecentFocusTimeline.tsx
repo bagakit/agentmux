@@ -9,7 +9,7 @@ import { focusMessageMarkers } from '../lib/focus-message-markers'
 import { usePathDisplay } from '../hooks/usePathDisplay'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { projectConversationWindow, type ConversationRecord } from '@agentmux/client-ui/conversation-records'
+import { describeConversationWindow, projectConversationWindow, type ConversationRecord } from '@agentmux/client-ui/conversation-records'
 import { EMPTY_FOCUS_WORK_ITEMS, MAX_FOCUS_WORK_RECORDS, clipFocusWorkInterval, createFocusWorkSelector, mergeFocusWorkItems, projectFocusWorkHistory, type FocusWorkFacts, type FocusWorkInterval } from '../lib/focus-work-history'
 import { useShallow } from 'zustand/react/shallow'
 import type { AgentSessionHistoryPage, AgentTimelineItem, AgentTimelineSnapshot } from '@agentmux/core'
@@ -137,7 +137,7 @@ const FocusInputSource = memo(function FocusInputSource({ reference, scope, acti
     if (!pinned || !previous.current.some(record => record.id === pinned.id)) return true
     return projectConversationWindow(frame).records.some(record => record.id === pinned.id && record.event?.revision === pinned.event?.revision)
   } })
-  const projection = useMemo(() => view.snapshot ? projectConversationWindow(view.snapshot) : null, [view.snapshot])
+  const projection = useMemo(() => view.reading ? describeConversationWindow(view.reading) : null, [view.reading])
   const messages = useMemo(() => projection?.records.filter(record => record.role !== 'process') ?? EMPTY_LATEST_INPUTS.messages, [projection])
   previous.current = messages
   useEffect(() => { view.acceptHeld() }, [pinned, view.acceptHeld])

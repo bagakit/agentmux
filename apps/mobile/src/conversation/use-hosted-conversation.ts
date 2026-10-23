@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useConversationView } from '@agentmux/client-ui/use-conversation-view'
-import { projectConversationWindow } from '@agentmux/client-ui/conversation-records'
+import { describeConversationWindow, projectConversationWindow } from '@agentmux/client-ui/conversation-records'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentSession, AgentSessionHistoryPage } from '@agentmux/core'
 import { agentEvidenceStale, msUntilSemanticStatusStale, type AgentObservation } from '@agentmux/core/agent-status'
@@ -22,7 +22,7 @@ export function useHostedConversation(client: AgentMuxHostedClient | null, id: s
   const view = useConversationView(client, id ? { hostId: 'local', agentSessionId: id } : undefined, active, {
     beforeCommit: snapshot => beforeCommit?.(projectConversationWindow(snapshot)) !== false
   })
-  const reading = useMemo(() => view.snapshot ? projectConversationWindow(view.snapshot) : null, [view.snapshot])
+  const reading = useMemo(() => view.reading ? describeConversationWindow(view.reading) : null, [view.reading])
   const pageOwner = useRef<{ snapshot: typeof view.snapshot; owner: PageOwner } | null>(null)
   // A retained frame keeps its original client until that client supplies a newly accepted frame.
   if (view.snapshot && view.snapshot !== pageOwner.current?.snapshot && client && id) {

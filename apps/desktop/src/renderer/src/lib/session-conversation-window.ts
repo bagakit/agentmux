@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef } from 'react'
 import type { AgentSessionHistoryPage, AgentSessionHistorySource } from '@agentmux/core'
 import { useConversationView, type ConversationViewOperation } from '@agentmux/client-ui/use-conversation-view'
-import { projectConversationWindow } from '@agentmux/client-ui/conversation-records'
+import { describeConversationWindow, projectConversationWindow } from '@agentmux/client-ui/conversation-records'
 import { CONVERSATION_MAX_WINDOW_RECORDS, type ConversationItemRef, type ConversationReadOptions, type ConversationWindowSnapshot } from '@agentmux/core/conversation'
 import { api } from './api'
 import type { SessionHistoryReference } from '../../../shared/contracts'
@@ -70,7 +70,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
       return true
     }
   })
-  const projection = useMemo(() => view.snapshot ? projectConversationWindow(view.snapshot) : null, [view.snapshot])
+  const projection = useMemo(() => view.reading ? describeConversationWindow(view.reading) : null, [view.reading])
   const page = projection?.historyPage ?? null
   const currentSource = handleSource(reading?.nativeSourceFacts?.nativeHandle)
   const previousSource = Boolean(page && currentSource && !matchesSource(page.source, currentSource))
