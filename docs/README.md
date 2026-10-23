@@ -46,7 +46,7 @@
 | 新功能需要哪些 JSON-RPC／CLI、如何接线交付 | [公共能力贡献约定](guides/public-capability-contributions.md) |
 | 跨模块观测诊断、证据与错误码、历史/采样接入边界 | [Diagnostic Evidence 设计](design/diagnostic-evidence.md) |
 | 模块接入统一证据查询 | [Diagnostic Evidence 协议](specs/diagnostic-evidence-protocol.md) · [接入指南](guides/diagnostic-evidence-integration.md) |
-| 任务验证、变异、调用者、假绿防护 | [测试策略](testing/strategy.md) |
+| 任务验证、变异、调用者、假绿防护 | [测试策略](testing/strategy.md) · [从需求到行为场景](testing/product-behavior-validation.md) |
 | UI 场景采图与独立审美评审 | [视觉验收指南](guides/agent-visual-e2e-review.md) |
 | Agent 用 CLI 操作原工作面 | [对象操作指南](guides/agentmux-cli-object-control.md) |
 | 整理具有长期价值的事故案例 | [事故案例写作指南](guides/incident-writing.md) |

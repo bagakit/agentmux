@@ -6,6 +6,10 @@ AgentMux 只测试自己的公共 Core/Client 行为和 CtxMux public boundary�
 
 Terminal output 是 raw PTY bytes 的 UTF-8 投影，不是模型上下文、Tool、Permission、Reply 或 Worker Done 证据。
 
+## 从需求选择行为场景
+
+从产品需求／设计推导可证伪行为、枚举关键场景与选择实际行为证据，见[从产品需求到行为验证](product-behavior-validation.md)。该方法同时说明 Agent 上下文的知情／盲读诊断及按需人类 GT 裁定；本页继续持有验证分层、实现验收和公开 oracle。
+
 ## Suite 分层
 
 | Lane | 命令 | 证明范围 |
