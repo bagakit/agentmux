@@ -36,7 +36,7 @@ export function useWindowSidebarLayout(compact: boolean) {
     toggleProjectRail: () => compact ? setCompactChoice(projectRailOpen ? null : 'projects') : toggleProjects(),
     toggleTools: () => compact ? setCompactChoice(toolsOpen ? null : 'tools') : toggleTools() }
 }
-export const WindowSidebarLayoutContext = createContext<ReturnType<typeof useWindowSidebarLayout> | null>(null)
+export const WindowSidebarLayoutContext = createContext<(ReturnType<typeof useWindowSidebarLayout> & { chromeInFrame?: boolean }) | null>(null)
 
 function useSurfaceIdentity() {
   const config = useAppStore((state) => state.config)
@@ -58,7 +58,7 @@ export function TopRowLeadingChrome() {
   const toolDockOwnsChrome = !projectRailOpen
     && toolsOpen
     && mainSurface === 'workbench' && Boolean(workspace)
-  const chromeOwnedOutsideMain = !focusMap && (projectRailOpen || toolDockOwnsChrome)
+  const chromeOwnedOutsideMain = !focusMap && (projectRailOpen || toolDockOwnsChrome || sidebars?.chromeInFrame === true)
   const globalSurfaceNeedsTrafficLightInset = focusMap || (mainSurface === 'agents' || mainSurface === 'board' || mainSurface === 'survey' || mainSurface === 'recall') && chromeOwnedOutsideMain
   return (
     <div
