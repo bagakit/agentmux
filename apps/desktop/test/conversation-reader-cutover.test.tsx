@@ -1,9 +1,11 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, useLayoutEffect } from 'react'
 import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
-import { appendFile, readFile } from 'node:fs/promises'
+import { appendFile, mkdtemp, readFile, rm } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { isolateCoreFixtureEnvironment } from './helpers/isolate-core-environment'
 import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
@@ -13,7 +15,8 @@ import type { AgentSessionControl } from '../src/shared/contracts'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
 import { useConversationView } from '@agentmux/client-ui/use-conversation-view'
-import { consumeConversationWindowPage, parseConversationReadPage } from '@agentmux/core/conversation'
+import { consumeConversationWindowPage, parseConversationReadPage, projectConversationWindow as projectCoreWindow,
+  type ConversationWindowSnapshot } from '@agentmux/core/conversation'
 import { projectConversationWindow } from '@agentmux/client-ui/conversation-records'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { activityReadingProps } from './helpers/activity-reading-props'
@@ -28,10 +31,69 @@ import { composerSession, composerConfig } from './helpers/composer-dom-fixture'
 import { savedQuestionFixture, savedQuestionSource, savedQuestionId, savedQuestionPrompt, savedQuestionAnswer } from '../../../packages/core/test/helpers/codex-saved-question'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
+const projectionWork = vi.hoisted(() => ({ candidateCalls: new Set<number>(), accepted: [] as Array<{
+  snapshot: ConversationWindowSnapshot; reading: ReturnType<typeof projectCoreWindow>; active: boolean
+}> }))
+vi.mock('@agentmux/core/conversation', async importOriginal => {
+  const actual = await importOriginal<typeof import('@agentmux/core/conversation')>()
+  return { ...actual, projectConversationWindow: vi.fn(actual.projectConversationWindow) }
+})
+// Observe the original hook and its synchronous candidate work without replacing
+// its Reader, frames, admission result or returned Core reading.
+vi.mock('@agentmux/client-ui/use-conversation-view', async importOriginal => {
+  const actual = await importOriginal<typeof import('@agentmux/client-ui/use-conversation-view')>()
+  return { ...actual, useConversationView: (...args: Parameters<typeof actual.useConversationView>) => {
+    const options = args[3], originalAdmission = options?.beforeCommit
+    const beforeCommit = originalAdmission ? (...values: Parameters<typeof originalAdmission>) => {
+      const start = vi.mocked(projectCoreWindow).mock.calls.length
+      try { return originalAdmission(...values) }
+      finally {
+        for (let index = start; index < vi.mocked(projectCoreWindow).mock.calls.length; index++) projectionWork.candidateCalls.add(index)
+      }
+    } : undefined
+    const view = actual.useConversationView(args[0], args[1], args[2], originalAdmission ? { ...options, beforeCommit: beforeCommit! } : options)
+    useLayoutEffect(() => {
+      if (view.snapshot && view.reading) projectionWork.accepted.push({ snapshot: view.snapshot, reading: view.reading, active: args[2] })
+    }, [view.snapshot, view.reading, args[2]])
+    return view
+  } }
+})
 
 
 const closes: Array<() => unknown | Promise<unknown>> = []
-afterEach(async () => { getSelection()?.removeAllRanges(); for (const close of closes.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllGlobals() })
+beforeEach(async () => {
+  const directory = await mkdtemp(join(process.platform === 'darwin' ? '/private/tmp' : tmpdir(), 'amx-reader-'))
+  closes.push(() => rm(directory, { recursive: true, force: true }))
+  isolateCoreFixtureEnvironment(directory)
+  // Each adopted FileStore owns its queue; separate real clients must not share
+  // an inherited or phase-wide queue merely because they use the same native SID.
+  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', undefined)
+})
+afterEach(async () => {
+  getSelection()?.removeAllRanges(); for (const close of closes.splice(0).reverse()) await close()
+  projectionWork.candidateCalls.clear(); projectionWork.accepted.length = 0; vi.mocked(projectCoreWindow).mockClear()
+  vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.unstubAllEnvs()
+})
+
+function expectAcceptedProjectionWork(agentSessionId: string, original: ReturnType<typeof unifiedConversationOriginals>) {
+  const accepted = projectionWork.accepted.filter(value => value.active && value.snapshot.agentSessionId === agentSessionId)
+  expect(accepted.length, 'The actual consumer must commit nonempty original Core readings').toBeGreaterThan(0)
+  const snapshots = [...new Set(accepted.map(value => value.snapshot))]
+  for (const snapshot of snapshots) {
+    const readings = accepted.filter(value => value.snapshot === snapshot).map(value => value.reading)
+    expect(new Set(readings).size, 'Unchanged accepted snapshots keep the original Core reading object').toBe(1)
+    const reading = readings[0]!
+    expect(snapshot.sourceHostId).toBe('local')
+    expect(reading.historyPage?.source).toEqual(original.source)
+    expect(reading.historyPage?.items.some(item => item.id === original.native.id)).toBe(true)
+    expect(reading.captured.items.some(item => item.id === original.captured.id)).toBe(true)
+    expect(reading.originalRecords.length).toBeGreaterThan(0)
+    const calls = vi.mocked(projectCoreWindow).mock.calls.flatMap(([frame], index) =>
+      frame === snapshot && !projectionWork.candidateCalls.has(index) ? [index] : [])
+    expect(calls.length, 'Accepted original frame reuses its Core reading without another host projection').toBe(1)
+    expect(vi.mocked(projectCoreWindow).mock.results[calls[0]!]!.value).toBe(reading)
+  }
+}
 let current: ReturnType<typeof useSessionUserMessages>
 function Consumer({ control, active = true }: { control: AgentSessionControl; active?: boolean }) {
   current = useSessionUserMessages(control, { enabled: active })
@@ -129,6 +191,7 @@ it('actual Activity reads the retained unified inventory through IPC/RPC and kee
   expect(host.querySelector('[data-native-record-id="' + original.native.id + '"]')?.textContent).toContain('ac700ed633')
   expect(rawNative).not.toHaveBeenCalled(); expect(rawCaptured).not.toHaveBeenCalled()
   expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
+  expectAcceptedProjectionWork(f.session.agentSessionId, original)
 })
 it('automatic Activity coverage keeps the retained head live and clears the latest affordance after catch-up', async () => {
   const at = Date.now(), originals = Array.from({ length: 150 }, (_, index) => ({ type: 'user', uuid: 'coverage-' + index, sessionId: 'native-main',
@@ -368,6 +431,7 @@ it('actual Mobile uses the original Hosted public Reader for the same inventory 
   expect(inspect.mock.calls.at(-1)![0].view).toBeTruthy()
   expect(rawNative).not.toHaveBeenCalled(); expect(rawCaptured).not.toHaveBeenCalled()
   expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
+  expectAcceptedProjectionWork(f.session.agentSessionId, original)
 })
 it('actual Focus retains read Context frames and exact pinned versions while unread Contexts perform no conversation reads', async () => {
   const at = new Date().toISOString()
@@ -486,6 +550,7 @@ it('actual Focus consumes the same five-original unified inventory as Desktop an
   await flush(() => expect(document.querySelector('[role="dialog"].recent-focus__message-preview')?.textContent).toContain('ac700ed633'))
   expect(raw.map(spy => spy.mock.calls.length)).toEqual([0, 0])
   expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
+  expectAcceptedProjectionWork(f.session.agentSessionId, original)
 })
 
 it('the original Codex question and late recorded answer reach actual Activity through the public Reader without dispatching a reply', async () => {
