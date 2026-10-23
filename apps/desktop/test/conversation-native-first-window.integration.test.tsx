@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { appendFile, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentMuxHostExecutorOwner, AgentProviderRegistry, projectSessionUserMessages, type AgentMuxStoredAgentSession, type AgentSessionHistoryPage } from '@agentmux/core'
+import { AgentMuxClient, AgentMuxFileAgentSessionStore, AgentMuxHostExecutorOwner, AgentProviderRegistry, projectSessionUserMessages, type AgentMuxStoredAgentSession, type AgentSessionHistoryPage } from '../../../packages/core/src/index.js'
 import type { AgentSessionControl } from '../src/shared/contracts'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 
@@ -23,7 +23,7 @@ const initial = useAppStore.getState()
 type ProtocolRecord = { turnId: string; item: Record<string, unknown> }
 type Request = { method?: string; params?: { cursor?: string; limit?: number }; kind?: string; pid?: number; args?: string[] }
 let host: HTMLDivElement, root: Root, sequence = 0
-const fixtures: Awaited<ReturnType<typeof fixture>>[] = []
+const fixtureCleanups: Array<() => Promise<void>> = []
 
 function records(count: number, userAt: number): ProtocolRecord[] {
   return Array.from({ length: count }, (_, i) => ({ turnId: 'original-turn', item: i === userAt
@@ -49,27 +49,8 @@ beforeEach(() => {
 afterEach(async () => {
   window.getSelection()?.removeAllRanges(); await act(async () => root.unmount()); host.remove()
   try {
-    expect(fixtures.length).toBeGreaterThan(0)
-    for (const f of fixtures.splice(0)) {
-      try {
-        expect(useAppStore.getState().agentComposerDrafts[f.control.agentSessionId]).toBe(DRAFT)
-        expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
-        expect(await readFile(f.nativePath)).toEqual(f.expectedNative)
-        expect(await f.store.loadMetadata()).toEqual(f.originalStore)
-      } finally {
-        for (const close of f.closes.reverse()) await close()
-        await f.client.dispose(); await Promise.allSettled(f.physicalLoads)
-        try {
-          const trace = await f.trace()
-          expect(trace.filter(value => value.kind === 'helper').length > 0).toBe(f.mode === 'stdio')
-          expect(trace.filter(value => value.method && !['initialize', 'initialized', 'thread/read', 'thread/items/list'].includes(value.method))).toEqual([])
-          for (const helper of trace.filter(value => value.kind === 'helper')) {
-            expect(helper.args?.slice(-6)).toEqual(['-s', 'read-only', '-a', 'never', 'app-server', '--stdio'])
-            expect(() => process.kill(helper.pid!, 0)).toThrow(/ESRCH/)
-          }
-        } finally { await rm(f.directory, { recursive: true }) }
-      }
-    }
+    expect(fixtureCleanups.length).toBeGreaterThan(0)
+    for (const close of fixtureCleanups.splice(0)) await close()
     expect(useAppStore.getState().agentComposerDrafts['first-window-draft']).toBe(DRAFT)
   } finally { useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals() }
 })
@@ -111,9 +92,11 @@ else if(q.method!=='initialized')throw Error('Unexpected control '+q.method);}`)
   vi.spyOn(store, 'load').mockImplementation(() => { const pending = load(); physicalLoads.push(pending); return pending })
   const client = new AgentMuxClient({ store, hostExecutorOwner: owner }), kernel = Reflect.get(client, 'kernel')
   const controls = ['connect', 'start', 'input', 'resize', 'stop', 'attach', 'status'].map(name => vi.spyOn(kernel, name).mockImplementation(() => { throw Error('Reading cannot control Run ' + name) }))
-  const pages: AgentSessionHistoryPage[] = [], read = client.sessionHistoryPage.bind(client)
-  const reads = vi.spyOn(client, 'sessionHistoryPage').mockImplementation(async (...args) => { const page = await read(...args); pages.push(page); return page })
-  const closes: Array<() => unknown | Promise<unknown>> = []
+  const pages: AgentSessionHistoryPage[] = [], originalPageOwner = client['readSessionHistoryPage']
+  const read = originalPageOwner.bind(client)
+  const reads = vi.fn(async (...args: Parameters<typeof read>) => { const page = await read(...args); pages.push(page); return page })
+  client['readSessionHistoryPage'] = reads
+  const closes: Array<() => unknown | Promise<unknown>> = [() => { client['readSessionHistoryPage'] = originalPageOwner }]
   await desktopConversationReadBridge({ root: directory, client }, closes)
   const control: AgentSessionControl = { kind: 'agent', hostId: 'local', agentSessionId, run: stored.run! }
   useAppStore.setState(state => ({ agentComposerDrafts: { ...state.agentComposerDrafts, [agentSessionId]: DRAFT } }))
@@ -124,7 +107,27 @@ else if(q.method!=='initialized')throw Error('Unexpected control '+q.method);}`)
       await wait(() => { const consumer = inspectConversationConsumers(control).consumers[0]; expect(consumer?.accepted).toBeTruthy(); expect(consumer?.loading).toBe(false); expect(consumer?.inFlight).toBe(false) })
     } }
 
-  fixtures.push(f); return f
+  fixtureCleanups.push(async () => {
+    try {
+      expect(useAppStore.getState().agentComposerDrafts[f.control.agentSessionId]).toBe(DRAFT)
+      expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0, 0])
+      expect(await readFile(f.nativePath)).toEqual(f.expectedNative)
+      expect(await f.store.loadMetadata()).toEqual(f.originalStore)
+    } finally {
+      for (const close of f.closes.reverse()) await close()
+      await f.client.dispose(); await Promise.allSettled(f.physicalLoads)
+      try {
+        const trace = await f.trace()
+        expect(trace.filter(value => value.kind === 'helper').length > 0).toBe(f.mode === 'stdio')
+        expect(trace.filter(value => value.method && !['initialize', 'initialized', 'thread/read', 'thread/items/list'].includes(value.method))).toEqual([])
+        for (const helper of trace.filter(value => value.kind === 'helper')) {
+          expect(helper.args?.slice(-6)).toEqual(['-s', 'read-only', '-a', 'never', 'app-server', '--stdio'])
+          expect(() => process.kill(helper.pid!, 0)).toThrow(/ESRCH/)
+        }
+      } finally { await rm(f.directory, { recursive: true }) }
+    }
+  })
+  return f
 }
 async function wait(check: () => void) {
   await vi.waitFor(async () => { await act(async () => { await Promise.resolve() }); check() }, { timeout: 5000, interval: 10 })
