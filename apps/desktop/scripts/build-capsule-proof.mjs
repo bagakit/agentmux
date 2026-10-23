@@ -30,6 +30,8 @@ async function command(name, executable, args, cwd = repository) {
 /** Build actual product consumers; the sole overlay keeps this private window from taking focus. */
 export async function buildCapsuleProof(output = join(repository, '.tmp/capsule-native-build/out')) {
   output = resolve(output)
+  // This is the original App prebuild, needed by real workspace operations in Main.
+  await command('workspace move helper', process.execPath, [join(desktop, 'scripts/build-workspace-move-helper.mjs')])
   await mkdir(output, { recursive: true })
   await writeFile(join(output, 'package.json'), JSON.stringify({ type: 'module' }) + '\n')
   const dependencyRoot = join(desktop, 'node_modules')
@@ -44,6 +46,8 @@ export async function buildCapsuleProof(output = join(repository, '.tmp/capsule-
     assert.equal(await realpath(link), await realpath(target), 'Original App-relative resource layout: ' + name)
   }
   const sourcePaths = [join(repository, 'pnpm-lock.yaml'), join(repository, 'package.json'), join(desktop, 'package.json'),
+    fileURLToPath(import.meta.url), join(desktop, 'scripts/build-workspace-move-helper.mjs'),
+    ...await files(join(desktop, 'native')),
     join(repository, 'apps/host/package.json'), join(desktop, 'electron.vite.config.ts'),
     ...await files(join(desktop, 'src')), ...await files(join(repository, 'apps/host/src')),
     ...(await Promise.all(assets.map(name => files(join(desktop, name))))).flat(),
