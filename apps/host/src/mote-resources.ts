@@ -2,7 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { topicPublicCopy } from './mote-topic-model.js'
 import { MOTE_QUICK_MODE_PATH, parseMoteQuickMode, type MoteQuickMode } from './mote-quick-mode.js'
 import { directoryIdentity, homeZoneId } from './mote-model.js'
-import { constants, lstat, mkdir, open, readdir, realpath, stat, unlink } from 'node:fs/promises'
+import { constants, lstat, mkdir, open, readFile, readdir, realpath, stat, unlink } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { basename, dirname, join, sep } from 'node:path'
 import { ensureScratchStorageRoot, resolveScratchTopicDirectory, scratchDirectoryAddress, scratchDirectoryIdentity, scratchStorageTopicIds, scratchIdentityContext, scratchConfirmedDirectoryPaths } from './mote-directories.js'
@@ -682,7 +682,7 @@ export type MoteResourceConfiguration = { workspace: ScratchWorkspace | null; pr
 export async function readMoteResourceConfiguration(path: string, resource: import('@agentmux/core/mote-chat').MoteChatTarget['expectedResource']): Promise<MoteResourceConfiguration> {
   const fail = (): never => { throw new AgentMuxError('The original Mote resource configuration is unconfirmed. Retain its files and conversations; restore the original configuration.', 'MOTE_CHAT_TARGET_UNCONFIRMED') }
   let raw: Record<string, unknown>
-  try { raw = JSON.parse(await readRegularFile(path)) } catch { return fail() }
+  try { raw = JSON.parse(await readFile(path, 'utf8')) } catch { return fail() }
   if (!raw || typeof raw !== 'object' || !Array.isArray(raw.workspaces)) return fail()
   const found = raw.workspaces.filter((value): value is ScratchWorkspace => !!value && typeof value === 'object' && value.id === resource.workspaceId)
   if (found.length !== 1 || typeof found[0]!.path !== 'string' || typeof found[0]!.hostId !== 'string') return fail()
