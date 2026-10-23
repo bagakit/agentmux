@@ -24,8 +24,10 @@ assert.ok(Buffer.byteLength(join(runtimeDirectory, 'control.sock.desktop')) < 10
 const inherited = Object.keys(process.env).filter(name => /^AGENTMUX_(?:ENV|CLI|AGENT_SESSION(?:_.*)?|AGENT_CAPABILITY|HOOK(?:_.*)?|PROVIDER_ID|EXECUTOR_ID|LIFECYCLE_OPERATION_ID|USAGE_TRANSCRIPT_FORMAT)$/u.test(name))
 const previous = new Map([...Object.keys(environment), ...inherited, 'ELECTRON_RUN_AS_NODE'].map(name => [name, process.env[name]]))
 const children = new Set(), connections = new Set(), frames = [], events = []
+const affectedFeedback = process.argv.includes('--affected-feedback')
 const digest = bytes => createHash('sha256').update(bytes).digest('hex')
 const receipt = { scope: 'Private production App/Host process restart and real native review controls with controlled Provider input. No actual person, model extraction, knowledge save or future adoption claim.', passed: false, root, pathForm: process.argv.includes('--alias-path') ? 'original-alias' : 'canonical', frames, events }
+if (affectedFeedback) receipt.scope = 'Affected confirmation feedback and current-stage visuals through the real private App and original consumer chain. Original process restart evidence is reused separately; this run does not claim another restart or knowledge adoption.'
 let core, rpc, session, failure, currentProbe
 await mkdir(output, { recursive: true })
 async function bindings() {
@@ -192,30 +194,36 @@ try {
   await waitFor('original draft after source-extraction-source navigation', async () => (await snapshot(first)).draft === unsaved)
   await size(first, 1440, 1000); await shot(first, 'review-wide')
   await size(first, 820, 900); await shot(first, 'review-narrow')
-  receipt.beforeRestart = await snapshot(first)
-  await quit(first)
-  await rpc.dispose(); rpc = undefined
-  await stopOriginalHost()
-  const second = await launch('second'); currentProbe = second; await openReview(second)
-  await waitFor('restored complete draft', async () => (await snapshot(second)).draft === unsaved)
-  await waitFor('restored original destination observation', async () => {
-    const value = await snapshot(second)
-    return value.destination === receipt.beforeRestart.destination && value.executor === receipt.beforeRestart.executor
-  })
-  receipt.afterRestart = await snapshot(second)
-  assert.equal(receipt.afterRestart.executor, receipt.beforeRestart.executor); assert.equal(receipt.afterRestart.destination, receipt.beforeRestart.destination)
-  assert.equal(receipt.afterRestart.composer[session.agentSessionId], composer)
-  const afterRun = await originalRun(); assert.equal(afterRun.pid, receipt.source.run.pid); assert.equal(afterRun.runId, receipt.source.run.runId)
-  rpc = await module.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
-  const restored = (await rpc.call('agent.learning.inspect', { hostId: 'local', operationId: proposed.operationId })).operation
-  assert.equal(restored.ownerRuntimeId, proposed.ownerRuntimeId)
-  assert.equal(restored.proposer.agentSessionId, operation.proposer.agentSessionId); assert.equal(restored.proposer.createOperationId, operation.proposer.createOperationId)
-  await shot(second, 'restored-review'); await action(second, 'Save draft')
+  let second = first
+  if (!affectedFeedback) {
+    receipt.beforeRestart = await snapshot(first)
+    await quit(first)
+    await rpc.dispose(); rpc = undefined
+    await stopOriginalHost()
+    second = await launch('second'); currentProbe = second; await openReview(second)
+    await waitFor('restored complete draft', async () => (await snapshot(second)).draft === unsaved)
+    await waitFor('restored original destination observation', async () => {
+      const value = await snapshot(second)
+      return value.destination === receipt.beforeRestart.destination && value.executor === receipt.beforeRestart.executor
+    })
+    receipt.afterRestart = await snapshot(second)
+    assert.equal(receipt.afterRestart.executor, receipt.beforeRestart.executor); assert.equal(receipt.afterRestart.destination, receipt.beforeRestart.destination)
+    assert.equal(receipt.afterRestart.composer[session.agentSessionId], composer)
+    const afterRun = await originalRun(); assert.equal(afterRun.pid, receipt.source.run.pid); assert.equal(afterRun.runId, receipt.source.run.runId)
+    rpc = await module.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
+    const restored = (await rpc.call('agent.learning.inspect', { hostId: 'local', operationId: proposed.operationId })).operation
+    assert.equal(restored.ownerRuntimeId, proposed.ownerRuntimeId)
+    assert.equal(restored.proposer.agentSessionId, operation.proposer.agentSessionId); assert.equal(restored.proposer.createOperationId, operation.proposer.createOperationId)
+  } else {
+    receipt.reusedRestart = { path: '.local/state/agent-learning/desktop/process-v2-alias/receipt.json', sha256: digest(await readFile(join(repository, '.local/state/agent-learning/desktop/process-v2-alias/receipt.json'))) }
+  }
+  await shot(second, affectedFeedback ? 'retained-review' : 'restored-review'); await action(second, 'Save draft')
   await waitFor('saved review', async () => (await rpc.call('agent.learning.inspect', { hostId: 'local', operationId: proposed.operationId })).operation.candidate.content === unsaved)
   const directory = topic.physicalDirectoryPath; await rename(directory, directory + '-moved')
   await action(second, 'Confirm & send for learning'); await waitFor('real target failure', async () => (await snapshot(second)).review?.includes('Original result needs attention'))
   await shot(second, 'target-unconfirmed'); assert.equal((await rpc.call('agent.learning.inspect', { hostId: 'local', operationId: proposed.operationId })).operation.learner, null)
-  await rename(directory + '-moved', directory); await action(second, 'Confirm & send for learning')
+  await action(second, 'Result needs attention · Inspect original result'); await shot(second, 'target-unconfirmed-detail')
+  await rename(directory + '-moved', directory); await action(second, 'Retry exact confirmation')
   const confirmed = await waitFor('original approved learner', async () => { const value = (await rpc.call('agent.learning.inspect', { hostId: 'local', operationId: proposed.operationId })).operation; return value.learner?.state === 'created' ? value : null })
   assert.equal(confirmed.approved.target.topicId, topic.id); assert.equal(confirmed.candidate.content, unsaved)
   await waitFor('actual learning request view', async () => (await snapshot(second)).review?.includes('Reviewed candidate confirmed'))
@@ -223,18 +231,21 @@ try {
   receipt.operation = confirmed; receipt.sourceAfter = await originalRun()
   const learner = await rpc.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: confirmed.learner.agentSessionId } })
   const learnerRun = (await core.listRuns()).find(run => run.runId === learner.session.run.runId)
-  assert.equal(learnerRun.state, 'running'); receipt.learnerBeforeRestart = { session: learner.session, run: learnerRun }
-  await quit(second); await rpc.dispose(); rpc = undefined; await stopOriginalHost()
-  const third = await launch('third'); currentProbe = third; await openReview(third)
-  await waitFor('restored original learner view', async () => (await snapshot(third)).review?.includes('Reviewed candidate confirmed'))
-  rpc = await module.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
-  const reopened = (await rpc.call('agent.learning.inspect', { hostId: 'local', operationId: confirmed.operationId })).operation
-  assert.deepEqual(reopened.approved, confirmed.approved); assert.deepEqual(reopened.learner, confirmed.learner)
-  const currentLearner = await rpc.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: reopened.learner.agentSessionId } })
-  const currentRun = (await core.listRuns()).find(run => run.runId === learner.session.run.runId)
-  assert.deepEqual(currentLearner.session.run, learner.session.run); assert.equal(currentRun.pid, learnerRun.pid); assert.equal(currentRun.state, 'running')
-  receipt.learnerAfterRestart = { session: currentLearner.session, run: currentRun }
-  await shot(third, 'restored-learning-request')
+  assert.equal(learnerRun.state, 'running'); receipt[affectedFeedback ? 'learner' : 'learnerBeforeRestart'] = { session: learner.session, run: learnerRun }
+  let third = second
+  if (!affectedFeedback) {
+    await quit(second); await rpc.dispose(); rpc = undefined; await stopOriginalHost()
+    third = await launch('third'); currentProbe = third; await openReview(third)
+    await waitFor('restored original learner view', async () => (await snapshot(third)).review?.includes('Reviewed candidate confirmed'))
+    rpc = await module.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(runtimeDirectory, 'control.sock') } })
+    const reopened = (await rpc.call('agent.learning.inspect', { hostId: 'local', operationId: confirmed.operationId })).operation
+    assert.deepEqual(reopened.approved, confirmed.approved); assert.deepEqual(reopened.learner, confirmed.learner)
+    const currentLearner = await rpc.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: reopened.learner.agentSessionId } })
+    const currentRun = (await core.listRuns()).find(run => run.runId === learner.session.run.runId)
+    assert.deepEqual(currentLearner.session.run, learner.session.run); assert.equal(currentRun.pid, learnerRun.pid); assert.equal(currentRun.state, 'running')
+    receipt.learnerAfterRestart = { session: currentLearner.session, run: currentRun }
+    await shot(third, 'restored-learning-request')
+  }
   receipt.stopped = []
   for (const agentSessionId of [session.agentSessionId, confirmed.proposer.agentSessionId, confirmed.learner.agentSessionId]) {
     await rpc.call('agent.stop', { target: { kind: 'agent-session', agentSessionId } }); receipt.stopped.push(agentSessionId)
