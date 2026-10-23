@@ -587,7 +587,7 @@ it('reveals an explicitly opened late original block inside the File viewport wh
   other.remove()
 })
 
-it.each(['different-note', 'whole-page', 'external-block', 'graph-view'] as const)('keeps a hidden Graph block request from overriding the later %s navigation intent', async later => {
+it.each(['different-note', 'whole-page', 'external-block'] as const)('keeps a hidden linked-reference block request from overriding the later %s navigation intent', async later => {
   installNoteCanvasGeometry()
   const note = newNoteDocument('Original first block ', source.noteId, 'source-block')
   note.content.content![0]!.content!.push(
@@ -603,7 +603,11 @@ it.each(['different-note', 'whole-page', 'external-block', 'graph-view'] as cons
   catalog.pages[page.noteId] = page
   useNotebookLibrary.setState({ state: catalog })
   const observation = { status: 'read' as const, noteId: note.noteId, actualNoteId: note.noteId, revision: saved.revision, resource: page.resource, blockIds: ['source-block', 'tail-block'] }
-  vi.spyOn(api.notebooks, 'graph').mockResolvedValue({ catalog, graph: { catalogRevision: catalog.revision, scope: { kind: 'catalog' }, scannedScope: 'catalog', completeness: 'complete', hierarchy: [], references: [], observations: [observation], duplicateNoteIds: [] } })
+  const references = [
+    { source: { noteId: note.noteId, blockId: 'source-block' }, sourceResource: page.resource, target: { kind: 'block' as const, noteId: note.noteId, blockId: 'tail-block' }, occurrence: { kind: 'stored' as const, referenceId: 'local-tail' }, mode: 'link' as const, resolution: 'resolved' as const },
+    { source: { noteId: note.noteId, blockId: 'source-block' }, sourceResource: page.resource, target: { kind: 'page' as const, noteId: note.noteId }, occurrence: { kind: 'stored' as const, referenceId: 'local-page' }, mode: 'link' as const, resolution: 'resolved' as const },
+  ]
+  vi.spyOn(api.notebooks, 'graph').mockResolvedValue({ catalog, graph: { catalogRevision: catalog.revision, scope: { kind: 'catalog' }, scannedScope: 'catalog', completeness: 'complete', hierarchy: [], references, observations: [observation], duplicateNoteIds: [] } })
   vi.spyOn(api.notebooks, 'content').mockResolvedValue({ ...observation, content: saved.content })
   vi.spyOn(api.notebooks, 'onChange').mockImplementation(() => () => {})
   const viewport = dom.container
@@ -613,42 +617,32 @@ it.each(['different-note', 'whole-page', 'external-block', 'graph-view'] as cons
   const scrolled: string[] = []
   vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(function(this: HTMLElement) { scrolled.push(this.dataset.blockId ?? '') })
   await mount()
-  async function graphLink(text: string) {
-    await dom.click('[aria-label="Graph view"]')
-    await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-title[data-note-id="source-note"]')).not.toBeNull())
-    if (dom.container.querySelector('[aria-label="Full note: Original Note"]')) await dom.click('[aria-label="Full note: Original Note"]')
-    else if (dom.container.querySelector('.note-canvas-body-state button')) await dom.click('.note-canvas-body-state button')
-    await vi.waitFor(() => expect([...dom.container.querySelectorAll('.note-canvas-reader [data-note-inline-link]')].some(element => element.textContent?.includes(text)), dom.container.textContent ?? '').toBe(true))
-    const link = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-canvas-reader [data-note-inline-link]')].find(element => element.textContent?.includes(text))!
-    await act(async () => { viewport.hidden = true; link.click() })
-    await vi.waitFor(() => expect(dom.container.querySelector('.note-association-canvas')).toBeNull())
+  await dom.click('.note-links-toggle')
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-links-controls')).not.toBeNull())
+  const outgoing = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-links-controls button')].find(button => button.textContent?.includes('Links from this note'))!
+  await act(async () => outgoing.click())
+  async function openOutgoingTarget(label: string) {
+    await vi.waitFor(() => expect(dom.container.querySelector(`[aria-label="${label}: Original Note"]`)).not.toBeNull())
+    const target = dom.container.querySelector<HTMLButtonElement>(`[aria-label="${label}: Original Note"]`)!
+    await act(async () => { viewport.hidden = true; target.click() })
   }
-  await graphLink('Exact original tail')
+  await openOutgoingTarget('Open target block')
   expect(dom.container.textContent).toContain('selected original block has not been revealed yet')
   expect(scrolled).toEqual([])
   if (later === 'different-note') {
     const replacement = { ...note, noteId: 'replacement-note' }
     await act(async () => useAppStore.setState(state => ({ documents: { ...state.documents, [sourceKey]: { ...saved, content: serializeNoteDocument(replacement) } } })))
   } else if (later === 'whole-page') {
-    await graphLink('Whole original page')
+    await openOutgoingTarget('Open target page')
   } else {
     await act(async () => {
-      useAppStore.setState({ documentRevealTargets: { [sourceKey]: { line: 1, noteBlock: { noteId: note.noteId, blockId: later === 'graph-view' ? 'not-yet-present' : 'source-block' } } } })
+      useAppStore.setState({ documentRevealTargets: { [sourceKey]: { line: 1, noteBlock: { noteId: note.noteId, blockId: 'source-block' } } } })
     })
-    if (later === 'graph-view') {
-      await act(async () => { viewport.hidden = false })
-      await dom.click('[aria-label="Graph view"]')
-      await vi.waitFor(() => expect(dom.container.querySelector('.note-association-canvas')).not.toBeNull())
-    }
   }
   await act(async () => { viewport.hidden = false })
   if (later === 'external-block') await vi.waitFor(() => expect(useAppStore.getState().documentRevealTargets[sourceKey]).toBeUndefined())
   await act(async () => {})
   expect(scrolled).toEqual(later === 'external-block' ? ['source-block'] : [])
-  if (later === 'graph-view') {
-    expect(dom.container.querySelector('.note-association-canvas')).not.toBeNull()
-    expect(useAppStore.getState().documentRevealTargets[sourceKey]?.noteBlock).toEqual({ noteId: note.noteId, blockId: 'not-yet-present' })
-  }
   if (later === 'different-note') expect(dom.container.textContent).toContain('belongs to a different Note or file location')
   expect(editor().state.selection.$from.parent.attrs.blockId).toBe('source-block')
   expect(useAppStore.getState().dirtyDocuments[sourceKey]).toBe(true)

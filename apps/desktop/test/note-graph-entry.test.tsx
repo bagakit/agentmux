@@ -115,33 +115,29 @@ it('does not read Graph while the actual Recall surface is hidden', async () => 
   expect(api.notebooks.graph).toHaveBeenCalledTimes(calls)
 })
 
-it('switches Note/Graph in the real File surface without replacing its editor, and saves only from the original Save action', async () => {
+it('keeps the real File surface focused on continuous editing and bidirectional links without an embedded Note/Graph switch', async () => {
   const state = useAppStore.getState(), reference = { displayWorkspaceId: 'workspace', groupId, tabId, regionId: surface.regionId }
   const projection = resolveWorkbenchZone(zoneId, spatialCatalog(state, []), state.layouts, state.tabs, 'recall-workbench', [reference], () => {})!
   await dom.render(<DesktopClientUiProvider><WorkbenchPresentationContext.Provider value={{ active: true, retainedRegionId: null, tabHostId: 'entry-file-host', reference, projection }}><FileSurfaceView tabId={tabId} surface={surface} /></WorkbenchPresentationContext.Provider></DesktopClientUiProvider>)
   await noteReady(); const originalEditor = editor(), originalDom = originalEditor.view.dom
   const frameHeader = dom.container.querySelector('.editor-header')!
-  expect(frameHeader.querySelector('[aria-label="Note presentation"]')).not.toBeNull()
-  expect(dom.container.querySelector('.note-file-view [aria-label="Note presentation"]')).toBeNull()
+  expect(frameHeader.querySelector('.note-file-identity-icon')).not.toBeNull()
+  expect(frameHeader.querySelector('[aria-label="Note presentation"]')).toBeNull()
+  expect(dom.container.querySelector('.note-association-canvas')).toBeNull()
+  expect(dom.container.querySelector('.note-reading-footer .note-links-toggle')?.textContent).toContain('Linked references')
   await act(async () => { originalEditor.view.focus(); originalEditor.commands.setTextSelection(originalEditor.state.doc.content.size - 1); originalEditor.commands.insertContent(' Keep this unsaved draft') })
   const draft = useAppStore.getState().documents[sourceKey], caret = originalEditor.state.selection.toJSON()
-  await dom.click('[role="tab"][aria-label="Graph view"]'); await graphReady()
-  expect(dom.container.querySelector('.note-original-editor')?.hasAttribute('hidden')).toBe(true)
-  expect(editor()).toBe(originalEditor); expect(editor().view.dom).toBe(originalDom); expect(editor().state.selection.toJSON()).toEqual(caret)
-  expect(dom.container.textContent).toContain('Saved relationships'); expect(dom.container.textContent).toContain('Save your note to update this graph.')
   expect(api.files.write).not.toHaveBeenCalled(); expect(useAppStore.getState().documents[sourceKey]).toBe(draft)
   const save = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === 'Save')!
   expect(save).toBeDefined(); await act(async () => save.click())
   await vi.waitFor(() => expect(useAppStore.getState().dirtyDocuments[sourceKey]).toBe(false))
   expect(api.files.write).toHaveBeenCalledTimes(1); expect(await readFile(join(directory, surface.path), 'utf8')).toContain('Keep this unsaved draft')
-  expect(dom.container.textContent).not.toContain('Save your note to update this graph.')
-  await dom.click('[role="tab"][aria-label="Note view"]')
-  expect(editor()).toBe(originalEditor); expect(editor().getText()).toContain('Keep this unsaved draft'); expect(editor().state.selection.toJSON()).toEqual(caret)
-  expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
+  expect(editor()).toBe(originalEditor); expect(editor().view.dom).toBe(originalDom); expect(editor().getText()).toContain('Keep this unsaved draft'); expect(editor().state.selection.toJSON()).toEqual(caret)
+  expect(api.notebooks.graph).not.toHaveBeenCalled()
   await dom.click('[aria-label="Show source"]')
-  await vi.waitFor(() => expect(frameHeader.querySelector('[aria-label="Note presentation"]')).toBeNull())
+  await vi.waitFor(() => expect(frameHeader.querySelector('.note-file-identity-icon')).toBeNull())
   expect(editor()).toBe(originalEditor)
   await dom.click('[aria-label="Preview current content"]')
-  await vi.waitFor(() => expect(frameHeader.querySelector('[aria-label="Note view"]')?.getAttribute('aria-selected')).toBe('true'))
+  await vi.waitFor(() => expect(frameHeader.querySelector('.note-file-identity-icon')).not.toBeNull())
   expect(editor()).toBe(originalEditor); expect(editor().state.selection.toJSON()).toEqual(caret)
 })
