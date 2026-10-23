@@ -1,10 +1,28 @@
 .session-learning .session-takeover__content { width: min(680px, 100%); }
 .session-learning p { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; }
 .session-learning__source, .session-learning__status { display: flex; flex-direction: column; gap: 4px; overflow-wrap: anywhere; }
-.session-learning__source span, .session-learning__status { color: var(--text-3); font-size: var(--fs-micro); }
+.session-learning__source span { color: var(--text-3); font-size: var(--fs-micro); }
 .session-learning__draft { display: flex; flex-direction: column; gap: 8px; margin-block: 20px 12px; color: var(--text-2); font-size: var(--fs-meta); }
 .session-learning__draft textarea { resize: vertical; width: 100%; min-height: 240px; padding: 14px; border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); color: var(--text); font: inherit; line-height: 1.6; }
 .session-learning__actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px; font-size: var(--fs-micro); color: var(--text-3); }
 .session-learning__status { margin-block: 16px; padding-block: 12px; border-block: 1px solid var(--line-soft); }
+.session-learning__status strong { color: var(--text); font-size: var(--fs-meta); }
+.session-learning__status > span, .session-learning__details { color: var(--text-3); font-size: var(--fs-micro); }
+.session-learning__status .session-learning__actions { margin: 8px 0 0; }
+.session-learning__details { margin-top: 20px; }
+.session-learning__details summary { cursor: pointer; }
+.session-learning__details dl { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 8px 12px; margin-block: 12px 0; }
+.session-learning__details dt { color: var(--text-2); }
+.session-learning__details dd { margin: 0; overflow-wrap: anywhere; }
 .session-learning__destination, .session-learning__issue { overflow-wrap: anywhere; white-space: pre-wrap; }
 .session-learning .session-takeover__footer { margin-top: 24px; }
+.session-learning__confirmed { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow: auto; }
+.session-learning__field { display: flex; flex-direction: column; gap: 6px; margin-block: 12px; }
+.session-learning__field > span { color: var(--text-2); font-size: var(--fs-micro); }
+.session-learning__field p { margin: 0; }
+.session-learning__confirmation { margin-top: 16px; }
+.session-learning__confirmation > button { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.session-learning__action-result { color: var(--text); font-size: var(--fs-micro); }
+.session-learning__confirmation .session-takeover__issue { margin-block: 8px 0; }
+.session-learning__candidate { color: var(--text-2); font-size: var(--fs-meta); margin-block: 16px; }
+.session-learning__candidate summary { cursor: pointer; }
