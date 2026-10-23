@@ -16,6 +16,15 @@ opens no connector database and confirms no credentials, lease, platform connect
 Choose the connector hosting Host separately from an Agent's execution Host. Keep the original
 Runtime and operation for an in-flight request; an already-provided Runtime fence is checked before
 connection dispatch or forwarding. Owner inspection grants no configuration or member authority.
+Cross-Host ingress retains authoritySource {hostingRuntimeId,executionRuntimeId} on its original
+author and group-record reference. The Binding's executionRuntimeId is confirmed by its target
+owner, not accepted from a caller. The executing Host needs an existing authenticated route back
+to the exact hosting Runtime to read the original claim and current grant. A one-way execution
+connection is insufficient. Reads confirm the destination instance and registered local port;
+Host aliases never authenticate that source. Retain original references during an unavailable
+authority read or revoked grant; ordinary local input remains available. Continue from the original
+journal source, without substituting a current same-name Host. An old remote binding without a
+confirmed Runtime requires an explicit original relink, not an inferred target or automatic move.
 For a human-selected exact Session, use connection diagnose --host ID --session ID [--binding ID].
 This bounded local read is available with the original managed caller. It exposes service,
 transport, binding scope/grant counts and newest application/group intake with original Core
