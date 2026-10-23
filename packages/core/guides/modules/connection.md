@@ -169,6 +169,8 @@ changing them; use the current help's exact input and operation identities. A gr
 explicit authority decision, not an effect of reading this guide or an adapter message.
 Read connection ingress and delivery records for their original source and acknowledgement.
 
+Use connection metadata watch as the original authenticated person/device to observe this exact Host’s change hints. It returns no snapshot, body or credential and performs no native lookup. Managed Agents cannot subscribe to all connections. On opening or reconnection, reread only the relevant exact profiles; a lost watch retains saved observations, and cancelling it releases only this reader.
+
 Use connection metadata get --input FILE|- for one exact cached actor or group, and
 connection metadata ls --connection ID --kind actor|conversation for a bounded local page.
 Both are local reads, including when the original Connection is disabled. Actor subjects are
@@ -188,7 +190,21 @@ supported delivery operation with its frozen facts; never generate a second logi
 because a response was lost. Unavailable adapters retain configured bindings and known receipts.
 Enrollment begin creates an original application intent; advance may perform a platform request.
 Enrollment ls/inspect are local reads for restart recovery. Unknown one-time credential delivery
-is inspect-only, never a reason to begin or poll again. Credentials never belong on public wire.
+is inspect-only, never a reason to begin or poll again.
+
+Credential administration belongs to the original authenticated person/device, never a managed
+Agent. Use connection credential store --operation-id ORIGINAL_OPERATION --secret-stdin for
+verbatim UTF-8 stdin through the selected Host's original Unix, SSH-to-Unix or end-to-end relay
+transport. The CLI obtains and fences that exact current Runtime owner. Secret values never
+belong in arguments, environment variables, input files, activity, device audit or diagnosis.
+This dedicated transient store input is the only credential-bearing business DTO; ordinary
+configuration and all results contain opaque references alone. New Host values use explicitly
+marked plaintext in the original private SQLite owner (0700 directory, 0600 database), without
+an OS key service. Unsupported original ciphertext stays untouched and is not decoded or
+converted. Use connection credential inspect --operation-id ORIGINAL_OPERATION after an unknown
+response; a null receipt is only the current observation. Explicit same-input continuation
+retains the original reference, while changed input conflicts. Neither command grants external
+actors, replays input or changes an Agent's capabilities.
 
 Group conversation sharing uses an exact Binding and future source cut. The publication scope
 future-native-user-facing retains public Agent replies only. future-shared-conversation shares
