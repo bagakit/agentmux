@@ -30,7 +30,7 @@ import {
   type ConnectionSetupBegin,
   type ConnectionSetupAdvance
 } from '@agentmux/core/connections'
-import type { DesktopConnectionServices } from './connector-host.js'
+import type { ConnectionServices } from '@agentmux/connectors'
 import type { MoteConnectionPreferences } from './mote-connection-preferences.js'
 import type { MoteConnectionSourceOwner } from './mote-connection-source.js'
 
@@ -64,7 +64,7 @@ export class MoteConnectionOperations implements MoteConnectionPort {
   private readonly active = new Map<string, Promise<MoteConnectionOperation>>()
   constructor(
     private readonly ports: {
-      connections: DesktopConnectionServices
+      connections: ConnectionServices
       source: MoteConnectionSourceOwner
       preferences: Pick<MoteConnectionPreferences, 'read' | 'save'>
     }

@@ -1,17 +1,27 @@
+import { openSync, closeSync } from 'node:fs'
+import { createRequire } from 'node:module'
 import { chmod, mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from '@agentmux/core'
-import { ConnectionHost, RoomBindingHost, RoomProvisioningHost, PublicationHost, PublicationStore, DurableIngressHost, ConnectionReceivers, MoteChatHost, composeMoteChatBindings, createBuiltinConnectionAdapters, type DurableIngressOptions, type PublicationConversationPort, type RoomBindingHostOptions, type ConnectionAdapter, type MoteChatAgentPort } from '@agentmux/connectors'
+import { ConnectionHost, type ConnectionAdapter } from './connection-host.js'
+import { RoomBindingHost, type RoomBindingHostOptions } from './room-binding.js'
+import { RoomProvisioningHost } from './room-provisioning.js'
+import { PublicationHost, type PublicationConversationPort } from './publication-host.js'
+import { PublicationStore } from './publication-store.js'
+import { DurableIngressHost, type DurableIngressOptions } from './durable-ingress.js'
+import { ConnectionReceivers } from './connection-receivers.js'
+import { MoteChatHost, composeMoteChatBindings, type MoteChatAgentPort } from './mote-chat.js'
+import { createBuiltinConnectionAdapters } from './platform-adapters.js'
 import type { ChannelMetadataChange, ConnectionPort } from '@agentmux/core/connections'
 import type { MoteChatPort, MoteChatTarget } from '@agentmux/core/mote-chat'
-import { DesktopConnectorSecrets, type CredentialEncryption } from './connector-secrets.js'
+import { ConnectionSecrets, type CredentialEncryption } from './connection-secrets.js'
 
-export type DesktopConnectionServices = {
+export type ConnectionServices = {
   connections: ConnectionPort
   onChannelMetadataChanged(listener: (change: ChannelMetadataChange) => void): () => void
   moteChat?: MoteChatPort
-  secrets: Pick<DesktopConnectorSecrets, 'store' | 'inspect'>
+  secrets: Pick<ConnectionSecrets, 'store' | 'inspect'>
   openDatabase(): Promise<DatabaseSync>
   readonly database: DatabaseSync | null
   readonly bindings: RoomBindingHost | null
@@ -20,9 +30,9 @@ export type DesktopConnectionServices = {
   readonly ingress: DurableIngressHost | null
   close(): void
 }
-type LiveServices = { database: DatabaseSync; connections: ConnectionHost; secrets: DesktopConnectorSecrets; bindings?: RoomBindingHost; rooms?: RoomProvisioningHost; publication?: PublicationHost; ingress?: DurableIngressHost; receivers?: ConnectionReceivers; moteChat?: MoteChatHost }
+type LiveServices = { lease?: number; database: DatabaseSync; connections: ConnectionHost; secrets: ConnectionSecrets; bindings?: RoomBindingHost; rooms?: RoomProvisioningHost; publication?: PublicationHost; ingress?: DurableIngressHost; receivers?: ConnectionReceivers; moteChat?: MoteChatHost }
 /** Optional failure stays local. A later exact operation retries storage on the same Host and database. */
-export async function createDesktopConnections(options: { directory: string; encryption: CredentialEncryption; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; ingress?: Pick<DurableIngressOptions, 'core'>; moteChat?: { agents: MoteChatAgentPort; assertTarget(target: MoteChatTarget): Promise<void>; assertReady?(target: MoteChatTarget): Promise<void> } }): Promise<DesktopConnectionServices> {
+export async function createConnectionServices(options: { directory: string; encryption: CredentialEncryption | ((database: DatabaseSync) => CredentialEncryption); adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; ingress?: Pick<DurableIngressOptions, 'core'>; moteChat?: { agents: MoteChatAgentPort; assertTarget(target: MoteChatTarget): Promise<void>; assertReady?(target: MoteChatTarget): Promise<void> } }): Promise<ConnectionServices> {
   const adapters = options.adapters ?? createBuiltinConnectionAdapters()
   let live: LiveServices | undefined, opening: Promise<LiveServices> | undefined, closed = false
   const metadataListeners = new Set<(change: ChannelMetadataChange) => void>()
@@ -31,12 +41,21 @@ export async function createDesktopConnections(options: { directory: string; enc
     if (closed) throw new AgentMuxError('The original connection owner is closed.', 'CONNECTION_STORAGE_UNAVAILABLE')
     if (live) return live
     opening ??= (async () => {
-      let database: DatabaseSync | undefined, publication: PublicationHost | undefined, receivers: ConnectionReceivers | undefined
+      let database: DatabaseSync | undefined, lease: number | undefined, publication: PublicationHost | undefined, ingress: DurableIngressHost | undefined, receivers: ConnectionReceivers | undefined
       try {
         await mkdir(options.directory, { recursive: true, mode: 0o700 })
+        if (options.ingress || options.publication) {
+          const fd = openSync(join(options.directory, 'connections.owner.lock'), 'a+', 0o600)
+          const native = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
+          try {
+            if (!native.tryLock(fd)) throw new AgentMuxError('The original connection database has another live receive/publication owner. Its records and healthy Agents are retained.', 'CONNECTION_OWNER_BUSY')
+            lease = fd
+          } catch (error) { closeSync(fd); throw error }
+        }
         const path = join(options.directory, 'connections.sqlite')
         database = new DatabaseSync(path); await chmod(path, 0o600)
-        const secrets = new DesktopConnectorSecrets(database, options.encryption)
+        const encryption = typeof options.encryption === 'function' ? options.encryption(database) : options.encryption
+        const secrets = new ConnectionSecrets(database, encryption)
         const connections = new ConnectionHost({ database, secrets, adapters })
         connections.onChannelMetadataChanged(relayMetadata)
         const publicationStore = options.publication ? new PublicationStore(database) : undefined
@@ -60,9 +79,9 @@ export async function createDesktopConnections(options: { directory: string; enc
             return await bindings.inspect(input)
           }
         } : bindings
-        const rooms = options.bindings ? new RoomProvisioningHost({ connections, spatial: options.bindings.spatial }) : undefined
+        const rooms = options.bindings ? new RoomProvisioningHost({ connections, spatial: options.bindings.spatial, ...(options.bindings.session ? { session: options.bindings.session } : {}) }) : undefined
         if (rooms) connections.rooms = { ...connections.rooms, create: (input, context) => rooms.create(input, context), inspect: input => rooms.inspect(input) }
-        const ingress = routing && options.ingress ? new DurableIngressHost({ connections, bindings: routing, authenticators: connections.ingressAuthenticators(), core: options.ingress.core,
+        ingress = routing && options.ingress ? new DurableIngressHost({ connections, bindings: routing, authenticators: connections.ingressAuthenticators(), core: options.ingress.core,
           ...(publicationStore ? { contextPublications: publicationStore } : {}),
           ...(moteChat ? { prepareInput: async (record: import('@agentmux/core/connections').ConnectionIngressMessage) => {
             if (record.conversationKind === 'direct') {
@@ -76,15 +95,23 @@ export async function createDesktopConnections(options: { directory: string; enc
         if (ingress) connections.ingress = ingress
         receivers = ingress ? new ConnectionReceivers(connections, ingress) : undefined
         if (closed) { receivers?.close(); ingress?.close(); publication?.close(); database.close(); throw new Error('Owner closed while opening.') }
-        return live = { database, connections, secrets, ...(bindings ? { bindings } : {}), ...(rooms ? { rooms } : {}), ...(publication ? { publication } : {}), ...(ingress ? { ingress } : {}), ...(receivers ? { receivers } : {}), ...(moteChat ? { moteChat } : {}) }
-      } catch {
-        receivers?.close(); publication?.close()
+        return live = { ...(lease === undefined ? {} : { lease }), database, connections, secrets, ...(bindings ? { bindings } : {}), ...(rooms ? { rooms } : {}), ...(publication ? { publication } : {}), ...(ingress ? { ingress } : {}), ...(receivers ? { receivers } : {}), ...(moteChat ? { moteChat } : {}) }
+      } catch (error) {
+        receivers?.close(); ingress?.close(); publication?.close()
         try { database?.close() } catch { /* Original Host remains usable; connection storage is unconfirmed. */ }
+        if (lease !== undefined) closeSync(lease)
+        if (error instanceof AgentMuxError && error.code === 'CONNECTION_OWNER_BUSY') throw error
         throw new AgentMuxError('Connection storage is unavailable on this Host. Existing Agents remain available. Restore access to the Host connection storage and retry the original operation.', 'CONNECTION_STORAGE_UNAVAILABLE')
       }
     })().finally(() => { opening = undefined })
     return await opening
   }
+  // An old owner can relinquish this exact database after startup. Recover without a GUI read;
+  // only an unopened owner is retried, never a healthy receiver or an unknown native effect.
+  const recovery = options.ingress || options.publication ? setInterval(() => {
+    if (!closed && !live) void ensure().catch(() => {})
+  }, 5_000) : undefined
+  recovery?.unref()
   // Warm the optional owner without making its availability a Host startup prerequisite.
   await ensure().catch(() => {})
   return {
@@ -177,7 +204,7 @@ export async function createDesktopConnections(options: { directory: string; enc
       configure: async input => { const owner = await ensure(); const result = await owner.connections.configure(input); owner.publication?.refresh(); owner.receivers?.refresh(); return result },
       test: async input => (await ensure()).connections.test(input)
     },
-    secrets: { store: async input => (await ensure()).secrets.store(input), inspect: async operationId => (await ensure()).secrets.inspect(operationId) },
-    close: () => { closed = true; metadataListeners.clear(); live?.receivers?.close(); live?.ingress?.close(); live?.publication?.close(); live?.connections.close(); live?.database.close(); live = undefined }
+    secrets: { store: async (input, assertCurrent) => (await ensure()).secrets.store(input, assertCurrent), inspect: async operationId => (await ensure()).secrets.inspect(operationId) },
+    close: () => { closed = true; if (recovery) clearInterval(recovery); metadataListeners.clear(); live?.receivers?.close(); live?.ingress?.close(); live?.publication?.close(); live?.connections.close(); live?.database.close(); if (live?.lease !== undefined) closeSync(live.lease); live = undefined }
   }
 }
