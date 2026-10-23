@@ -19,6 +19,8 @@ const compiled = await runA2aProof({
     'packages/core/src/agent-message-journal.ts', 'packages/core/src/agent-message-query.ts', 'packages/core/src/agent-message-notification.ts',
     'packages/core/src/agent-message-notifications.ts', 'packages/core/src/agent-provider.ts', 'packages/core/src/providers/codex-native-input.ts', 'packages/core/src/native-input-adoption.ts', 'packages/core/src/prompt-submission.ts', 'packages/core/src/prompt-submission-record.ts',
     'packages/core/src/agent-messaging-guidance.ts', 'packages/core/src/agentmux-cli-module-skills.ts', 'packages/core/src/agentmux-cli-help.ts', 'packages/core/src/agent-message-render.ts', 'packages/core/src/agentmux-cli-commands.ts',
+    'packages/core/guides/shared/messaging/reference-reminder.md', 'packages/core/guides/shared/messaging/contract.md',
+    'packages/core/src/generated/agentmux-guides.ts', 'packages/core/src/generated/agentmux-guides-index.ts',
     'packages/core/src/public-rpc-service.ts', 'packages/core/src/public-rpc.ts', 'packages/core/src/rpc-native-codec.ts', 'packages/core/src/types.ts',
     'packages/core/scripts/verify-a2a-reference-delivery.mjs', 'packages/core/scripts/lib/a2a-proof.mjs', 'packages/core/scripts/lib/a2a-reference-proof.mjs',
     'packages/core/test/helpers/object-cli-rpc.ts', 'packages/core/test/fixtures/a2a-reference/native-actor.mjs'],
@@ -42,7 +44,7 @@ const compiled = await runA2aProof({
       after: 'false ||' },
     { label: 'retained-notice-uses-current-formatter', file: 'agent-global-message-queue.js', tests: journal,
       before: 'const reading = parseAgentMuxMessagePrefix(notice.wire);',
-      after: 'const reading = notice.wire === renderAgentMuxMessageReferences(references) ? parseAgentMuxMessagePrefix(notice.wire) : null;' },
+      after: 'const reading = notice.wire === renderAgentMuxMessageReferences(references, AGENTMUX_A2A_REFERENCE_REMINDER) ? parseAgentMuxMessagePrefix(notice.wire) : null;' },
     { label: 'retained-notice-sender-is-unchecked', file: 'agent-global-message-queue.js', tests: journal,
       before: 'reference.declaredAgentSessionId !== references[index].senderSessionId', after: 'false' },
     { label: 'retained-notice-mid-order-is-unchecked', file: 'agent-global-message-queue.js', tests: journal,
@@ -53,7 +55,13 @@ const compiled = await runA2aProof({
       before: 'reading.declaredContexts?.length', after: 'false' },
     { label: 'submitted-reference-leaves-pending-index', file: 'agent-global-message-queue.js', tests: journal,
       before: 'UPDATE a2a_message_notifications SET submitted=1 WHERE notification_id=?',
-      after: 'UPDATE a2a_message_notifications SET submitted=0 WHERE notification_id=?' }
+      after: 'UPDATE a2a_message_notifications SET submitted=0 WHERE notification_id=?' },
+    { label: 'new-reference-bridge-is-omitted', file: 'agent-global-message-queue.js', tests: native,
+      before: 'const candidateWire = renderAgentMuxMessageReferences([...references, candidate], AGENTMUX_A2A_REFERENCE_REMINDER);',
+      after: 'const candidateWire = renderAgentMuxMessageReferences([...references, candidate]);' },
+    { label: 'reference-guide-adapter-is-disconnected', file: 'agent-messaging-guidance.js', tests: journal,
+      before: 'export const AGENTMUX_A2A_REFERENCE_REMINDER = /* @__PURE__ */ guideText(guideSharedMessagingReferenceReminder);',
+      after: "export const AGENTMUX_A2A_REFERENCE_REMINDER = '';" }
   ]
 })
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { composeOutboundMessage } from '../src/agent-outbound-message.js'
+import { AGENTMUX_A2A_REFERENCE_REMINDER } from '../src/agent-messaging-guidance.js'
 import { parseAgentMuxMessagePrefix as parse, renderAgentMuxMessageEnvelope as full, renderAgentMuxMessageReferences as references } from '../src/agent-message-render.js'
 
 const records = [{ senderSessionId: 'first-source', messageId: 'first-message' }, { senderSessionId: 'second-source', messageId: 'second-message' }]
@@ -55,6 +56,19 @@ describe('A2A reference and full-content reading boundaries', () => {
     expect(reading.references![0]!.raw).toBe(row)
     expect(reading.reminder?.raw).not.toContain('<literal>')
     expect(reading.body).toBe('')
+  })
+
+  it.each([1, 2])('reads the shared original-message bridge separately from %i exact references', count => {
+    const selected = records.slice(0, count), reading = parse(references(selected, AGENTMUX_A2A_REFERENCE_REMINDER))!
+    expect(reading.kind).toBe('references'); expect(reading.body).toBe('')
+    expect(reading.references?.map(item => [item.declaredAgentSessionId, item.declaredMessageId, item.readVia]))
+      .toEqual(selected.map(item => [item.senderSessionId, item.messageId, 'message --skill']))
+    expect(reading.reminder?.text).toBe(AGENTMUX_A2A_REFERENCE_REMINDER)
+    expect(reading.reminder?.text).toContain('When relevant to your task, read "$AGENTMUX_CLI" message --skill')
+    expect(reading.reminder?.text).toContain('message read --message-id MID with each exact original MID before acting or replying')
+    expect(reading.reminder?.text).toContain('Do not guess a message\'s body or task')
+    expect(reading.reminder?.text).toContain('not proof of reading or accepted delegation and grants no new authorization')
+    expect(reading.reminder?.text).toContain('no courtesy reply is required')
   })
 
   it('does not manufacture an empty notification', () => {

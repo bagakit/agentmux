@@ -8,7 +8,8 @@ const json = async path => JSON.parse(await readFile(path, 'utf8'))
 const indexPath = root => join(root, '.tmp/a2a-reference-delivery/current.json')
 const edits = ['default-managed-inbox-producer', 'notice-does-not-become-user-request', 'frozen-notice-run-boundary',
   'retained-notice-uses-current-formatter', 'retained-notice-sender-is-unchecked', 'retained-notice-mid-order-is-unchecked',
-  'retained-notice-count-is-unchecked', 'retained-notice-context-is-unchecked', 'submitted-reference-leaves-pending-index']
+  'retained-notice-count-is-unchecked', 'retained-notice-context-is-unchecked', 'submitted-reference-leaves-pending-index',
+  'new-reference-bridge-is-omitted', 'reference-guide-adapter-is-disconnected']
 const nativeEdits = ['native-queue-becomes-steer', 'native-idle-target-is-omitted', 'completion-fence-is-omitted',
   'final-input-fence-is-omitted', 'notification-identity-is-omitted', 'edited-notification-is-adopted',
   'native-queue-receipt-is-unchecked', 'notification-identity-is-not-restored',
@@ -63,7 +64,8 @@ async function deliveryFacts({ root, receipt }) {
   assert.deepEqual(Object.keys(compiled.compiledInputs).sort(), actualJs, 'The entire actual Core executable graph is bound')
   for (const file of actualJs) assert.equal(referenceProofSha(await readFile(join(root, 'packages/core/dist', file))), compiled.compiledInputs[file], 'Actual compiled Core: ' + file)
   const directory = dirname(compiledPath), baseline = await testRun(root, directory, compiled.baseline, false, artifacts)
-  assert.equal(baseline.length, 25); assert.ok(baseline.some(name => name.includes('across concurrent Core processes and reopening')))
+  assert.equal(baseline.length, 26); assert.ok(baseline.some(name => name.includes('across concurrent Core processes and reopening')))
+  assert.ok(baseline.some(name => name.includes('budgets the complete bridge and escaped identities')))
   assert.ok(baseline.some(name => name.includes('imports retained container notification history')))
   assert.ok(baseline.some(name => name.includes('invalid retained preceding-context packet')))
   assert.ok(baseline.some(name => name.includes('coalesces at native idle and reads without input or batch ACK')))
