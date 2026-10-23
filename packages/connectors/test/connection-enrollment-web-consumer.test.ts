@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
 import { afterEach, expect, it, vi } from 'vitest'
 import { objectCliEnvironment, runCompiledObjectCli, type CliResult } from '../../core/test/helpers/object-cli-rpc.js'
-import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
+import { privateCredentialValues, assertPrivateCredentialFiles } from './fixtures/connection-enrollment.js'
 
 const TOKEN = 'web-original-private-qr', FLOW = 'web-original-private-flow', SESSION = 'web-original-private-session', CSRF = 'web-original-private-csrf'
 const USER = 'web-original-user', TENANT = 'web-original-tenant', SECRET = 'web-original-private-secret'
@@ -32,10 +32,10 @@ function action(view: ConnectionEnrollmentView, kind: ConnectionEnrollmentAction
 }
 const delay = (milliseconds: number) => new Promise<void>(resolve => setTimeout(resolve, milliseconds))
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), 'enrollment-web-')), directory = join(root, 'connections'), socketPath = join(root, 'public.sock'), encryption = enrollmentEncryption()
+  const root = await mkdtemp(join(tmpdir(), 'enrollment-web-')), directory = join(root, 'connections'), socketPath = join(root, 'public.sock')
   let services: Awaited<ReturnType<typeof createConnectionServices>> | undefined, server: AgentMuxControlServer | undefined, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
   const open = async (withoutAdapter = false) => {
-    services = await createConnectionServices({ directory, encryption, ...(withoutAdapter ? { adapters: [] } : {}) })
+    services = await createConnectionServices({ directory, ...(withoutAdapter ? { adapters: [] } : {}) })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw new Error('Application creation cannot borrow an Agent Runtime') } })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   }
@@ -49,11 +49,11 @@ async function fixture() {
   const off = await sdk!.call('connection.service.configure', { operationId: 'web-service-off', expectedRevision: 0, service: { enabled: false } })
   const input: ConnectionEnrollmentBeginInput = { operationId: 'web-original-enrollment', connectionId: 'web-original-connection', adapterId: 'feishu', domain: APP.domain, label: 'Original bot', preset: { name: 'Original bot', description: 'Frozen original description', avatar: { pngDataUrl: PNG } } }
   const cli = (args: string[], body?: unknown) => runCompiledObjectCli(['--endpoint', 'unix:' + socketPath, 'connection', 'enrollment', ...args], objectCliEnvironment(root), body === undefined ? '' : JSON.stringify(body))
-  return { root, directory, encryption, input, off, cli, close, reopen: open, get sdk() { return sdk! }, get services() { return services! } }
+  return { root, directory, input, off, cli, close, reopen: open, get sdk() { return sdk! }, get services() { return services! } }
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>
 function row(f: Fixture, operationId = f.input.operationId) { return JSON.parse(String(f.services.database!.prepare('SELECT record_json FROM connection_enrollment WHERE operation_id=?').get(operationId)!.record_json)) }
-function encrypted(f: Fixture) { return f.services.database!.prepare('SELECT operation_id,ciphertext FROM connection_credential ORDER BY operation_id').all().map(r => ({ operationId: String(r.operation_id), bytes: Buffer.from(r.ciphertext as Uint8Array) })) }
+function privateRows(f: Fixture) { return f.services.database!.prepare('SELECT operation_id,ciphertext FROM connection_credential ORDER BY operation_id').all().map(r => ({ operationId: String(r.operation_id), bytes: Buffer.from(r.ciphertext as Uint8Array) })) }
 async function inspect(f: Fixture) { return await f.sdk.call('connection.enrollment.inspect', { operationId: f.input.operationId }) }
 async function advance(f: Pick<Fixture, 'sdk'>, view: ConnectionEnrollmentView, kind: ConnectionEnrollmentActionKind) { return await f.sdk.call('connection.enrollment.advance', action(view, kind)) }
 function native(f?: Fixture, overrides: { poll?: () => Promise<Response>; create?: () => Promise<Response>; credential?: () => Promise<Response> } = {}) {
@@ -96,15 +96,13 @@ async function safeDiscovery(f: Fixture, view: ConnectionEnrollmentView) {
   expect(page.operations).toEqual([view.operation]); expect(page.next).toBeNull()
   const tables = f.services.database!.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()
   expect(tables.length).toBeGreaterThan(0)
-  const rows = tables.map(t => f.services.database!.prepare('SELECT * FROM "' + String(t.name).replaceAll('"', '""') + '"').all())
+  const rows = tables.filter(t => t.name !== 'connection_credential').map(t => f.services.database!.prepare('SELECT * FROM "' + String(t.name).replaceAll('"', '""') + '"').all())
   const plain = JSON.stringify({ page, rows })
   for (const secret of [TOKEN, FLOW, SESSION, CSRF, USER, TENANT, SECRET, PNG]) expect(plain).not.toContain(secret)
-  const sealed = encrypted(f); expect(sealed.length).toBeGreaterThan(1)
-  expect(sealed.map(r => f.encryption.decryptString(r.bytes)).some(v => v.includes(TOKEN))).toBe(true)
-  f.services.database!.exec('PRAGMA wal_checkpoint(FULL)')
-  const bytes = [await readFile(join(f.directory, 'connections.sqlite'))]
-  try { bytes.push(await readFile(join(f.directory, 'connections.sqlite-wal'))) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-  for (const secret of [TOKEN, FLOW, SESSION, CSRF, USER, TENANT, SECRET, PNG]) expect(Buffer.concat(bytes).includes(Buffer.from(secret))).toBe(false)
+  const values = await privateCredentialValues(f.services.database!)
+  expect(values.length).toBeGreaterThan(1)
+  expect(values.some(value => value.includes(TOKEN))).toBe(true)
+  await assertPrivateCredentialFiles(f.directory)
 }
 
 it('compiled CLI and SDK confirm the original account, explicitly create, and save the exact app through separately claimed native steps', async () => {
@@ -118,7 +116,7 @@ it('compiled CLI and SDK confirm the original account, explicitly create, and sa
   const beforeConfirm = network.calls.length
   view = result(await f.cli(['advance', '--input', '-'], action(view, 'confirm-account')))
   expect(view.operation?.authentication?.stage).toBe('confirmed'); expect(network.calls).toHaveLength(beforeConfirm)
-  const create = action(view, 'create'), originalPrivate = encrypted(f)
+  const create = action(view, 'create'), originalPrivate = privateRows(f)
   view = result(await f.cli(['advance', '--input', '-'], create))
   expect(view.operation).toMatchObject({ application: APP, authorization: 'authorized', credential: 'stored', configuration: 'configured', creation: { upload: 'confirmed', create: 'confirmed' } })
   expect(view.operation!.configured).toMatchObject({ status: 'configured', connection: { revision: 1, config: { connectionId: f.input.connectionId, application: APP, enabled: true }, observation: { transport: { state: 'unknown' }, intake: { state: 'unknown' }, delivery: { state: 'unknown' } } } })
@@ -133,9 +131,9 @@ it('compiled CLI and SDK confirm the original account, explicitly create, and sa
   expect([form.get('uploadType'), form.get('isIsv'), form.get('scale')]).toEqual(['4', 'false', '{"width":1,"height":1}'])
   expect(JSON.parse(String(network.calls[7]!.options.body))).toEqual({ appManifestTemplateID: 'developer_console', createAppUserCustomField: { avatar: 'https://images.example.test/original.png', i18n: { zh_cn: { name: f.input.preset.name, description: f.input.preset.description } }, primaryLang: 'zh_cn' }, cid: network.claims[7]!.attemptId, HTTPHead: {} })
   expect(network.calls[8]!.options.body).toBe('{}')
-  const snapshots = encrypted(f).map(r => { try { return JSON.parse(f.encryption.decryptString(r.bytes)) } catch { return null } }).filter(r => r?.operationId === f.input.operationId && r.receipt)
+  const snapshots = (await privateCredentialValues(f.services.database!)).map(value => { try { return JSON.parse(value) } catch { return null } }).filter(r => r?.operationId === f.input.operationId && r.receipt)
   expect(snapshots.map(s => s.kind).sort()).toEqual(['begin', 'authentication', 'authentication', 'authentication', 'authentication', 'authentication', 'upload', 'create', 'credential'].sort())
-  for (const original of originalPrivate) expect(encrypted(f).find(p => p.operationId === original.operationId)?.bytes).toEqual(original.bytes)
+  for (const original of originalPrivate) expect(privateRows(f).find(p => p.operationId === original.operationId)?.bytes).toEqual(original.bytes)
   const saved = view.operation!.configured, calls = network.calls.length
   expect((await f.sdk.call('connection.enrollment.advance', create)).operation?.configured).toEqual(saved)
   await f.close(); await f.reopen()
@@ -324,7 +322,7 @@ it('preserves a late exact create receipt while rejecting the former transport a
 it('rechecks the original transport after resolving private account bytes without deleting the original receipt', async () => {
   const f = await fixture(), network = native(f), view = await account(f, await f.sdk.call('connection.enrollment.begin', f.input))
   const service = new AgentMuxRpcService({ connections: f.services.connections }); clean.push(() => service.dispose())
-  const original = ConnectionSecrets.prototype.resolve, saved = encrypted(f), before = JSON.stringify(row(f))
+  const original = ConnectionSecrets.prototype.resolve, saved = privateRows(f), before = JSON.stringify(row(f))
   let entered = false, release!: () => void, current = true
   const barrier = new Promise<void>(resolve => { release = resolve })
   vi.spyOn(ConnectionSecrets.prototype, 'resolve').mockImplementation(async function(this: ConnectionSecrets, ref) {
@@ -337,14 +335,14 @@ it('rechecks the original transport after resolving private account bytes withou
   try { await vi.waitFor(() => expect(entered).toBe(true)); current = false } finally { release() }
   expect(await settled).toMatchObject({ error: { code: 'CONTROL_PERMISSION_DENIED' } })
   expect(JSON.stringify(row(f))).toBe(before)
-  for (const receipt of saved) expect(encrypted(f).find(p => p.operationId === receipt.operationId)?.bytes).toEqual(receipt.bytes)
+  for (const receipt of saved) expect(privateRows(f).find(p => p.operationId === receipt.operationId)?.bytes).toEqual(receipt.bytes)
   expect((await inspect(f)).account).toEqual(view.account)
   expect(network.calls.filter(c => c.path.startsWith('/developers/'))).toEqual([])
 }, 20_000)
 
 it('withholds an old QR read after a real same-intent renewal changes the authentication attempt', async () => {
   const f = await fixture(), network = native(undefined, { poll: async () => { throw new TypeError('The original poll response is unconfirmed') } })
-  const waiting = await f.sdk.call('connection.enrollment.begin', f.input), oldAttempt = waiting.operation!.authentication!.attemptId, original = ConnectionSecrets.prototype.resolve, oldPrivate = encrypted(f)
+  const waiting = await f.sdk.call('connection.enrollment.begin', f.input), oldAttempt = waiting.operation!.authentication!.attemptId, original = ConnectionSecrets.prototype.resolve, oldPrivate = privateRows(f)
   const service = new AgentMuxRpcService({ connections: f.services.connections }); clean.push(() => service.dispose())
   let entered = false, release!: () => void
   const barrier = new Promise<void>(resolve => { release = resolve })
@@ -367,7 +365,7 @@ it('withholds an old QR read after a real same-intent renewal changes the authen
   expect(late.challenge).toBeNull(); expect(late.account).toBeNull()
   expect(late.actions.map(a => a.kind)).toEqual(['recover-local'])
   expect((await inspect(f)).challenge).toEqual(renewed.challenge)
-  for (const receipt of oldPrivate) expect(encrypted(f).find(p => p.operationId === receipt.operationId)?.bytes).toEqual(receipt.bytes)
+  for (const receipt of oldPrivate) expect(privateRows(f).find(p => p.operationId === receipt.operationId)?.bytes).toEqual(receipt.bytes)
   expect(network.calls.filter(c => c.path.startsWith('/developers/'))).toEqual([])
 }, 20_000)
 
