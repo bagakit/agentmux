@@ -10,7 +10,7 @@ const commonSources = ['apps/desktop/scripts/verify-session-continuity-product.m
   'apps/desktop/scripts/fixtures/session-continuity/main.ts', 'apps/desktop/scripts/fixtures/session-continuity/entry.mjs',
   'apps/desktop/src/renderer/src/components/ContinuitySupervisionNotice.tsx', 'apps/desktop/src/renderer/src/store.ts',
   'apps/desktop/src/renderer/src/lib/continuity-supervision.ts', 'packages/core/src/client.ts',
-  'packages/core/src/agent-session-recovery/control.ts', 'packages/core/dist/index.js', 'packages/core/bin/amux']
+  'packages/core/src/agent-session-recovery/control-contract.ts', 'packages/core/dist/index.js', 'packages/core/bin/amux']
 
 async function readNative(project, receiptFile, schema, scene) {
   const file = path.resolve(project, receiptFile), bytes = await fs.readFile(file), receipt = JSON.parse(bytes), directory = path.dirname(file)
