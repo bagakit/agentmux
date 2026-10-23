@@ -31,14 +31,18 @@ export type ConnectionConfigureInput = { operationId: string; expectedRevision: 
 export type ConnectionOperation = { operationId: string; status: 'configured'; connection: ConnectionRecord }
 export type ConnectionInspectInput = { connectionId: string; operationId?: never } | { operationId: string; connectionId?: never }
 export type ConnectionInspectResult = { connection: ConnectionRecord | null; operation: ConnectionOperation | null }
+/** Registration on this exact endpoint, independent of storage, leases or platform health. */
+export type ConnectionOwnerObservation = { ownership: 'local' | 'forwarded' | 'unavailable' }
 export type ConnectionMethod = keyof ConnectionParamsMap
 export type ConnectionParamsMap = import('./connection-credential-contract.js').ConnectionCredentialParamsMap & import('./channel-metadata-contract.js').ChannelMetadataParamsMap & import('./connection-deletion-contract.js').ConnectionDeletionParamsMap & import('./connection-setup-contract.js').ConnectionSetupParamsMap & import('./connection-service-contract.js').ConnectionServiceParamsMap & import('./connection-profile-contract.js').ConnectionProfileParamsMap & import('./connection-enrollment-contract.js').ConnectionEnrollmentParamsMap & import('./room-discovery-contract.js').RoomDiscoveryParamsMap & import('./room-provisioning-contract.js').RoomProvisioningParamsMap & import('./room-binding-contract.js').RoomBindingParamsMap & import('./connection-delivery-contract.js').ConnectionDeliveryParamsMap & import('./ingress-contract.js').ConnectionIngressParamsMap & import('./connection-diagnosis-contract.js').ConnectionDiagnosisParamsMap & {
+  'connection.owner.inspect': Record<string, never>
   'connection.ls': Record<string, never>
   'connection.inspect': ConnectionInspectInput
   'connection.configure': ConnectionConfigureInput
   'connection.test': { connectionId: string }
 }
 export type ConnectionResultMap = import('./connection-credential-contract.js').ConnectionCredentialResultMap & import('./channel-metadata-contract.js').ChannelMetadataResultMap & import('./connection-deletion-contract.js').ConnectionDeletionResultMap & import('./connection-setup-contract.js').ConnectionSetupResultMap & import('./connection-service-contract.js').ConnectionServiceResultMap & import('./connection-profile-contract.js').ConnectionProfileResultMap & import('./connection-enrollment-contract.js').ConnectionEnrollmentResultMap & import('./room-discovery-contract.js').RoomDiscoveryResultMap & import('./room-provisioning-contract.js').RoomProvisioningResultMap & import('./room-binding-contract.js').RoomBindingResultMap & import('./connection-delivery-contract.js').ConnectionDeliveryResultMap & import('./ingress-contract.js').ConnectionIngressResultMap & import('./connection-diagnosis-contract.js').ConnectionDiagnosisResultMap & {
+  'connection.owner.inspect': ConnectionOwnerObservation
   'connection.ls': { connections: ConnectionRecord[] }
   'connection.inspect': ConnectionInspectResult
   'connection.configure': ConnectionOperation

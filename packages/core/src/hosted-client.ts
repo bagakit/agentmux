@@ -625,8 +625,8 @@ export async function connectHostedAgentMux(options: {
     disconnect: () => { publicReaderEpoch++; for (const controller of publicOpenings) controller.abort(); publicOpenings.clear(); for (const reading of publicReaders) void reading.dispose().catch(() => {}); publicReaders.clear(); eventEpoch++; controlEpoch++; controlOwner = undefined; openingReaders.clear(); const previous = stream; stream = undefined; void previous?.dispose();
       for (const reading of attached.values()) void reading.stream.dispose(); attached.clear();
       for (const read of [...histories]) releaseHistory(read) },
-    ...(options.forwardRpc ? { forwardRpc: async (method: Parameters<AgentMuxHostedForwardRpc>[0], params: Parameters<AgentMuxHostedForwardRpc>[1], context: Parameters<AgentMuxHostedForwardRpc>[2] = {}) => {
-      await connectControl(); return await options.forwardRpc!(method, params, { ...context, signal: observationSignal(context.signal), runtimeFence: fence() }) } } : {}),
+    ...(options.forwardRpc ? { forwardRpc: async (method: Parameters<AgentMuxHostedForwardRpc>[0], params: Parameters<AgentMuxHostedForwardRpc>[1], context: Parameters<AgentMuxHostedForwardRpc>[2] = {}, expectedOwner?: AgentMuxRuntimeFence) => {
+      await connectControl(); return await options.forwardRpc!(method, params, { ...context, signal: observationSignal(context.signal), runtimeFence: expectedOwner ?? fence() }) } } : {}),
     ...(options.subscribeRpc ? { subscribeRpc: async (...[method, params, handlers]: Parameters<AgentMuxHostedSubscribeRpc>) => {
       if (disposed) throw new AgentMuxError('Hosted consumer is disposed.', 'CONTROL_CANCELLED')
       const epoch = publicReaderEpoch, controller = new AbortController()

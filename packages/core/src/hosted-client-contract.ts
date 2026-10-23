@@ -78,7 +78,9 @@ export type AgentMuxRuntimeOwnerIdentity = {
 export type AgentMuxRuntimeFence = Pick<AgentMuxRuntimeOwnerIdentity, 'runtimeId' | 'ownerInstanceId'>
 export type AgentMuxHostedForwardRpc = <M extends import('./public-rpc.js').AgentMuxRpcMethod>(
   method: M, params: import('./public-rpc.js').AgentMuxRpcParams<M>,
-  context?: import('./public-rpc-service.js').AgentMuxRpcCallContext
+  context?: import('./public-rpc-service.js').AgentMuxRpcCallContext,
+  /** Optional exact destination owner, unlike an inbound context.runtimeFence. Omission keeps normal owner refresh. */
+  expectedOwner?: AgentMuxRuntimeFence
 ) => Promise<import('./public-rpc.js').AgentMuxRpcResult<M>>
 
 /** Borrow the existing public transport for a read lease; no Runtime event or second owner. */
