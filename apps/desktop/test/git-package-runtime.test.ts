@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process'
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import ts from 'typescript'
 import { expect, it } from 'vitest'
 
@@ -17,14 +18,15 @@ it('the actual packaging dependency materializer copies a standalone usable neut
   }
   visit(source)
   expect(calls).toHaveLength(1)
-  const functions = ['pathExists', 'materializeDependencies', 'materializeDependency', 'resolvePackageRoot'].map(name => {
+  const functions = ['pathExists', 'materializeDependencies', 'materializeDependency'].map(name => {
     const declaration = source.statements.find(statement => ts.isFunctionDeclaration(statement) && statement.name?.text === name)
     expect(declaration, `Actual packaging function ${name}`).toBeDefined()
     return declaration!.getText(source)
   })
+  const { resolvePackageRoot } = await import(pathToFileURL(join(root, 'scripts/package-dependencies.mjs')).href)
   // Execute unchanged private packaging functions, without launching/signing/installing an App.
-  const materialize = new Function('readFile', 'mkdir', 'cp', 'readdir', 'join', 'dirname', 'lstat', 'realpath', 'repositoryRoot',
-    functions.join('\n') + '\nreturn materializeDependency;')(readFile, mkdir, cp, readdir, join, dirname, lstat, realpath, root) as
+  const materialize = new Function('readFile', 'mkdir', 'cp', 'readdir', 'join', 'dirname', 'lstat', 'realpath', 'repositoryRoot', 'resolvePackageRoot',
+    functions.join('\n') + '\nreturn materializeDependency;')(readFile, mkdir, cp, readdir, join, dirname, lstat, realpath, root, resolvePackageRoot) as
     (source: string, name: string, destination: string) => Promise<void>
   const temporary = await mkdtemp(join(tmpdir(), 'agentmux-git-runtime-'))
   try {
