@@ -1,17 +1,34 @@
 import assert from 'node:assert/strict'
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, globSync, readFileSync, realpathSync } from 'node:fs'
 import path from 'node:path'
+import { parse } from 'yaml'
 
-/** Follow declared exports in this checkout, including public subpath patterns. */
+/** Follow this checkout's workspace exports and report every declaration read. */
 export function candidateResolve(root, specifier, { browser = false, source = false, types = false, onManifest } = {}) {
   root = realpathSync(root)
-  const [, name, ...parts] = specifier.split('/'), directory = path.join(root, 'packages', name)
-  const manifestPath = realpathSync(path.join(directory, 'package.json'))
-  assert.ok(manifestPath.startsWith(root + path.sep), 'Candidate manifest escaped its checkout: ' + specifier)
-  const bytes = readFileSync(manifestPath)
-  onManifest?.(manifestPath, bytes)
-  const manifest = JSON.parse(bytes)
-  assert.equal(manifest.name, '@agentmux/' + name)
+  const [, name, ...parts] = specifier.split('/')
+  const workspacePath = realpathSync(path.join(root, 'pnpm-workspace.yaml'))
+  assert.ok(workspacePath.startsWith(root + path.sep), 'Candidate workspace escaped its checkout')
+  const workspaceBytes = readFileSync(workspacePath)
+  onManifest?.(workspacePath, workspaceBytes)
+  const { packages } = parse(workspaceBytes.toString())
+  assert.ok(Array.isArray(packages) && packages.length > 0 && packages.every(pattern => typeof pattern === 'string' && pattern.length > 0),
+    'Candidate workspace must declare package patterns')
+  const manifestPattern = pattern => path.posix.join(pattern, 'package.json')
+  const manifests = globSync(packages.filter(pattern => !pattern.startsWith('!')).map(manifestPattern), {
+    cwd: root, exclude: packages.filter(pattern => pattern.startsWith('!')).map(pattern => manifestPattern(pattern.slice(1)))
+  })
+  const matches = []
+  for (const relative of new Set(manifests)) {
+    const manifestPath = realpathSync(path.join(root, relative))
+    assert.ok(manifestPath.startsWith(root + path.sep), 'Candidate manifest escaped its checkout: ' + specifier)
+    const bytes = readFileSync(manifestPath)
+    onManifest?.(manifestPath, bytes)
+    const manifest = JSON.parse(bytes)
+    if (manifest.name === '@agentmux/' + name) matches.push({ manifestPath, manifest })
+  }
+  assert.equal(matches.length, 1, 'Expected one declared candidate package: ' + specifier)
+  const [{ manifestPath, manifest }] = matches, directory = path.dirname(manifestPath)
   const key = parts.length ? './' + parts.join('/') : '.'
   let entry = manifest.exports[key], wildcard
   if (!entry) {
