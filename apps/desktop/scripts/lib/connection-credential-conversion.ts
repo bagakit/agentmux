@@ -50,7 +50,7 @@ export async function convertConnectionCredentials(input: {
     for (const row of originals) {
       try { if (await secrets.resolve(row.ref) === null) throw new Error('Missing original credential.') }
       catch (error) {
-        if (!(error instanceof Error) || !('code' in error) || error.code !== 'CONNECTION_CREDENTIAL_FORMAT_UNSUPPORTED' || row.bytes.subarray(0, 3).toString('ascii') !== 'v10') throw error
+        if (!(error instanceof Error) || !('code' in error) || error.code !== 'CONNECTION_CREDENTIAL_FORMAT_UNSUPPORTED' || !row.bytes.subarray(0, 3).equals(Buffer.from('v10'))) throw error
         legacy.push(row)
       }
     }
