@@ -17,7 +17,7 @@ const temporary = await mkdtemp(join(tmpdir(), 'amux-credential-transfer-'))
 const require = createRequire(resolve(root, 'apps/desktop/package.json'))
 const events = []
 try {
-  const { build } = require('esbuild')
+  const { build } = createRequire(require.resolve('electron-vite/package.json'))('esbuild')
   const outfile = join(temporary, 'main.cjs')
   const compiled = await build({ entryPoints: [resolve(root, 'apps/desktop/scripts/lib/migrate-connection-credentials-main.ts')], outfile,
     bundle: true, platform: 'node', format: 'cjs', target: 'node24', packages: 'external', metafile: true,
