@@ -7,7 +7,7 @@ import { decodeObjectAvatar, previewObjectAvatar, objectAvatarPng } from './obje
 import { readObjectAvatarFile, saveObjectAvatarFile } from './object-avatar-files.js'
 import { migrateTopicDirectories } from './scratch-directory-maintenance.mjs'
 import { normalizeDirectoryIdentity, retainDirectoryIdentity, inspectDirectoryIdentity, type DirectoryIdentityWriteOptions } from './scratch-directory-identity.mjs'
-import { resolveScratchTopicDirectory, scratchStorageTopicIds, scratchIdentityContext, scratchDirectoryIdentity } from './scratch-topic-directories.js'
+import { resolveScratchTopicDirectory, scratchStorageTopicIds, scratchIdentityContext, scratchDirectoryIdentity, scratchDirectoryAddress } from './scratch-topic-directories.js'
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 function errorCode(error: unknown): string | undefined { return (error as NodeJS.ErrnoException | null)?.code }
 function requireScratchWorkspace(workspace: WorkspaceRecord): void {
@@ -39,7 +39,8 @@ export class ScratchTopics extends ScratchTopicResources {
             const context = await scratchIdentityContext(workspace.path, topicId)
             const existing = await inspectDirectoryIdentity(resolved, context)
             if (existing) await normalizeDirectoryIdentity(resolved, context, options)
-            else await retainDirectoryIdentity(resolved, { ...context, original: await scratchDirectoryIdentity(workspace.path, topicId, resolved) }, options)
+            // Match read()'s verified logical address; canonical IO must not rename published content.
+            else await retainDirectoryIdentity(resolved, { ...context, original: await scratchDirectoryIdentity(workspace.path, topicId, await scratchDirectoryAddress(workspace.path, topicId, resolved)) }, options)
           }
         } catch (error) { issues.push(`${topicId}: ${errorCode(error) ?? 'DIRECTORY_IDENTITY_UNCONFIRMED'}: ${error instanceof Error ? error.message : String(error)}`) }
       }

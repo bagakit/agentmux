@@ -501,6 +501,10 @@ export class ScratchTopics {
       } else await retainDirectoryIdentity(absolutePath, context)
     }
     await ensureDirectory(absolutePath)
+    // Freeze the same identity read() will publish before a new ordinary Topic reaches Core.
+    if (!existing && !mote) await retainDirectoryIdentity(absolutePath,
+      await scratchIdentityContext(workspace.path, topicId, absolutePath),
+      { ...(this.options.directoryIdentityHelper ? { helperPath: this.options.directoryIdentityHelper } : {}) })
     if (mote && existing) {
       const context = await scratchIdentityContext(workspace.path, topicId)
       const saved = await inspectDirectoryIdentity(absolutePath, context)
