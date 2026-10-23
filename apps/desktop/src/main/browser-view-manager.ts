@@ -322,6 +322,15 @@ export interface AppLinkHost {
 
 export const DEFAULT_BROWSER_ZOOM_FACTOR = 0.9
 export interface NativeBrowserOwner { browserId: string; bounds: BrowserBounds; view: WebContentsView; inputShield?: WebContentsView }
+export interface NativeBrowserInputBarrier { ready: Promise<void>; release(): Promise<void> }
+type NativeBrowserInputSurface = {
+  entry: BrowserEntry
+  page: WebContentsView
+  shield: BrowserNativeInputShield
+  ready?: Promise<void>
+  presentations: Map<object, () => void>
+}
+
 export type NativeBrowserPageInput = { type: 'pointer'; event: Electron.MouseInputEvent } | { type: 'escape' }
 const BROWSER_SELECTION_TIMEOUT_MS = 120_000
 // Standalone observations have no script worker deadline. End only this first-document
@@ -430,8 +439,10 @@ export class BrowserViewManager {
       let retention: AgentMuxBrowserRetention = { status: 'unknown', reasons: ['owner-unavailable'] }
       try {
         retention = this.retention(entry)
+        const shield = this.inputSurfaces.get(entry.view)?.shield ?? entry.inputShield
         if (!entry.view.webContents.isDestroyed()) observed = identities([entry.view.webContents,
-          ...(entry.inputShield && !entry.inputShield.contents.isDestroyed() ? [entry.inputShield.contents] : []),
+          ...(shield && !shield.contents.isDestroyed() ? [shield.contents] : []),
+          ...[...(this.inputSurfaceCleanup.get(entry.id) ?? [])].filter(surface => !surface.shield.contents.isDestroyed()).map(surface => surface.shield.contents),
           ...this.closingOwners(entry.id).filter(owner => !owner.view.webContents.isDestroyed()).map(owner => owner.view.webContents)])
       } catch { /* Keep this original target; incomplete native observation is unknown. */ }
       const warning = this.closingWarning(entry.id, target.warning)
@@ -440,6 +451,7 @@ export class BrowserViewManager {
     })
     const released = [...this.releasedEntries.values(), ...[...this.closingViews.keys()].filter(id => !this.entries.has(id) && !this.releasedEntries.has(id))
       .map<ReleasedBrowser>(id => ({ ...this.closingOwners(id)[0]!, cleanupOnly: true }))]
+      .map(entry => ({ ...entry, inputShield: entry.inputShield ?? [...(this.inputSurfaceCleanup.get(entry.id) ?? [])][0]?.shield }))
       .map<AgentMuxBrowserTarget>(entry => ({
       id: entry.id, workspaceId: entry.workspaceId, source: 'embedded', mode: entry.storage.mode,
       status: 'unavailable', url: entry.cleanupOnly ? '' : entry.requestedUrl, title: '', capabilities: [],
@@ -454,6 +466,8 @@ export class BrowserViewManager {
     return [...live, ...released]
   }
   private readonly entries = new Map<string, BrowserEntry>()
+  private readonly inputSurfaces = new Map<WebContentsView, NativeBrowserInputSurface>()
+  private readonly inputSurfaceCleanup = new Map<string, Set<NativeBrowserInputSurface>>()
   /** Actual native handles awaiting destruction, grouped by their original Browser identity. */
   private readonly closingViews = new Map<string, Map<WebContentsView, ClosingBrowserView>>()
 
@@ -1094,8 +1108,24 @@ export class BrowserViewManager {
   nativeOwner(browserId: string, window?: BrowserWindow): NativeBrowserOwner | undefined {
     const entry = this.entries.get(browserId)
     if (!entry || window && this.windowForView(entry.view) !== window || !entry.visible || !entry.bounds || !this.owns(entry, entry.view) || entry.view.webContents.isDestroyed() || !entry.view.getVisible()) return
+    const shield = this.inputSurfaces.get(entry.view)?.shield ?? entry.inputShield
     return { browserId, bounds: entry.view.getBounds(), view: entry.view,
-      ...(entry.inputShield?.isCurrentFor(entry.view) ? { inputShield: entry.inputShield.view } : {}) }
+      ...(shield?.isCurrentFor(entry.view) ? { inputShield: shield.view } : {}) }
+  }
+
+  /** Presentation blocks human hit-testing on the exact native page, never page protocol input. */
+  acquireNativeInputBarrier(owner: NativeBrowserOwner, failed: () => void): NativeBrowserInputBarrier {
+    const entry = this.entries.get(owner.browserId)
+    if (!entry || this.nativeOwner(owner.browserId)?.view !== owner.view) throw new Error('The original native Browser input target is unavailable. Original page remains.')
+    const surface = this.inputSurface(entry, owner.view), token = {}
+    surface.presentations.set(token, failed)
+    const ready = this.prepareInputSurface(surface).then(() => {
+      if (surface.presentations.has(token) && !surface.shield.isolated) throw new Error('The original native Browser input barrier is unconfirmed. Original page remains.')
+    })
+    return { ready, release: async () => {
+      if (!surface.presentations.delete(token)) return
+      await this.releasePresentationInputSurface(surface)
+    } }
   }
 
   /** Resolve an actual attachment without interpreting its geometry, title or page DOM. */
@@ -1109,6 +1139,7 @@ export class BrowserViewManager {
   resourceProcessIds(): number[] {
     const pids = new Set<number>()
     const live = [...this.entries.values()].flatMap(entry => [entry.view.webContents, ...(entry.inputShield ? [entry.inputShield.contents] : [])])
+    live.push(...[...this.inputSurfaces.values(), ...[...this.inputSurfaceCleanup.values()].flatMap(surfaces => [...surfaces])].map(surface => surface.shield.contents))
     const retired = [...this.releasedEntries.values()].flatMap(entry => entry.inputShield ? [entry.inputShield.contents] : [])
     for (const contents of [...live, ...retired, ...this.closingOwners().map(owner => owner.view.webContents)]) {
       if (!contents || contents.isDestroyed()) continue
@@ -1262,6 +1293,7 @@ export class BrowserViewManager {
     if (!entry.resourceDocumentConfirmed || typeof contents.isBeingCaptured !== 'function' || typeof contents.isCurrentlyAudible !== 'function') reasons.add('document-unconfirmed')
     if (entry.releaseAttempt?.pending && entry.releaseAttempt.view === entry.view) reasons.add('close-unconfirmed')
     if (entry.inputShield && (entry.inputIsolation === 'unconfirmed' || !this.agentOwnsInput(entry))) reasons.add('close-unconfirmed')
+    if (this.inputSurfaceCleanup.has(entry.id)) reasons.add('close-unconfirmed')
     return { status: reasons.has('document-unconfirmed') || reasons.has('close-unconfirmed') ? 'unknown' : reasons.size ? 'retained' : 'eligible', reasons: [...reasons] }
   }
 
@@ -3360,8 +3392,13 @@ export class BrowserViewManager {
       if (!released) return false
       if (released.inputShield) released.cleanupOnly = true
       this.cleanupReleasedOwner(released)
-      if (!released.inputShield) this.releasedEntries.delete(id)
+      if (!released.inputShield && !this.inputSurfaceCleanup.has(id)) this.releasedEntries.delete(id)
       return true
+    }
+    const surface = this.inputSurfaces.get(entry.view)
+    if (surface) {
+      surface.presentations.clear()
+      if (!entry.inputShield) entry.inputShield = surface.shield
     }
     this.releaseInputShield(entry)
     this.cancelPendingSwitch(entry, new Error('Browser owner released during profile switch'))
@@ -3478,7 +3515,10 @@ export class BrowserViewManager {
       // shield takes focus. CDP key input bypasses this native boundary in Electron.
       if (this.owns(entry, view) && this.agentOwnsInput(entry) && entry.inputShield?.isolated) {
         event.preventDefault()
-        if (contents.isFocused()) entry.inputShield.contents.focus()
+        if (contents.isFocused()) {
+          if (this.inputSurfaces.get(view)?.presentations.size) this.windowForView(view).webContents.focus()
+          else entry.inputShield.contents.focus()
+        }
         return
       }
       // Only this real page's non-IME Escape may be consumed by its open containing float.
@@ -3845,6 +3885,12 @@ export class BrowserViewManager {
 
   private cleanupReleasedOwner(released: ReleasedBrowser): void {
     const errors: unknown[] = []
+    for (const surface of this.inputSurfaceCleanup.get(released.id) ?? []) {
+      try {
+        surface.shield.dispose()
+        this.forgetInputSurfaceCleanup(surface)
+      } catch { /* The exact pending native cleanup remains available for another explicit Close. */ }
+    }
     if (released.inputShield) {
       try { released.inputShield.dispose(); delete released.inputShield }
       catch { /* Keep its unique cleanup reference; a healthy same-ID restore remains available. */ }
@@ -3993,13 +4039,17 @@ export class BrowserViewManager {
       void entry.controlFeedback?.synchronize()
       if (entry.visible) void entry.feedback?.refreshPreferences()
       const shield = entry.inputShield
-      void shield?.refreshAppearance().catch(() => {
-        if (entry.inputShield !== shield || !this.agentOwnsInput(entry)) return
-        const warning = 'Browser edge appearance could not be updated. The page and Agent remain usable; save the appearance again to retry.'
-        entry.activity = { ...entry.activity, warning: entry.activity.warning ?? warning }
-        try { this.emit(entry) } catch { /* The current owner retains its notice without affecting input. */ }
-      })
+      if (shield) this.refreshInputAppearance(entry, shield)
     }
+  }
+
+  private refreshInputAppearance(entry: BrowserEntry, shield: BrowserNativeInputShield): void {
+    void shield.refreshAppearance().catch(() => {
+      if (this.entries.get(entry.id) !== entry || this.inputSurfaces.get(entry.view)?.shield !== shield) return
+      const warning = 'Browser edge appearance could not be updated. The page and Agent remain usable; save the appearance again to retry.'
+      entry.activity = { ...entry.activity, warning: entry.activity.warning ?? warning }
+      try { this.emit(entry) } catch { /* The original owner retains its presentation notice without changing input. */ }
+    })
   }
 
   /** Trusted presentation bytes for an already-live owner; never acquires or restores a Browser. */
@@ -4045,30 +4095,11 @@ export class BrowserViewManager {
     let timer: ReturnType<typeof setTimeout> | undefined
     let preparedShield: BrowserNativeInputShield | undefined
     try {
-      const shield: BrowserNativeInputShield = new BrowserNativeInputShield(view, () => this.windowForView(view), () =>
-        this.owns(entry, view) && this.agentOwnsInput(entry), () => {
-        if (!this.owns(entry, view) || entry.inputShield !== shield || !this.agentOwnsInput(entry)) return
-        this.releaseInputShield(entry)
-        this.inputIsolationFailed(entry)
-      }, this.feedbackPreferences)
+      const surface = this.inputSurface(entry, view), shield = surface.shield
       preparedShield = shield
       entry.inputShield = shield
-      shield.contents.once('destroyed', () => queueMicrotask(() => this.observeInputShieldDestruction(entry.id, shield)))
-      shield.contents.on('input-event', (_event, input) => {
-        if (entry.inputShield !== shield || !this.agentOwnsInput(entry) || !['mouseDown', 'mouseMove', 'mouseEnter', 'mouseLeave'].includes(input.type)) return
-        const owner = this.nativeOwner(entry.id)
-        if (owner) this.onNativeInput?.(owner, { type: 'pointer', event: input as Electron.MouseInputEvent })
-      })
-      shield.contents.on('before-input-event', (event, input) => {
-        if (entry.inputShield !== shield || !this.agentOwnsInput(entry) || input.type !== 'keyDown' || input.key !== 'Escape' || input.isComposing) return
-        const owner = this.nativeOwner(entry.id)
-        if (owner && this.onNativeInput?.(owner, { type: 'escape' })) event.preventDefault()
-      })
-      shield.contents.on('render-process-gone', () => {
-        if (entry.inputShield !== shield || !this.agentOwnsInput(entry)) return
-        this.inputIsolationFailed(entry)
-      })
-      await Promise.race([shield.prepare(), new Promise<void>((_resolve, reject) => {
+      if (surface.ready) this.refreshInputAppearance(entry, shield)
+      await Promise.race([this.prepareInputSurface(surface), new Promise<void>((_resolve, reject) => {
         timer = setTimeout(() => reject(new Error('Native input surface preparation was not confirmed')), 1500)
       })])
       if (entry.inputShield !== shield || !this.agentOwnsInput(entry)) return
@@ -4083,6 +4114,107 @@ export class BrowserViewManager {
     } finally {
       clearTimeout(timer)
     }
+  }
+
+  private retainInputSurfaceCleanup(surface: NativeBrowserInputSurface): void {
+    let surfaces = this.inputSurfaceCleanup.get(surface.entry.id)
+    if (!surfaces) { surfaces = new Set(); this.inputSurfaceCleanup.set(surface.entry.id, surfaces) }
+    surfaces.add(surface)
+  }
+
+  private forgetInputSurfaceCleanup(surface: NativeBrowserInputSurface): boolean {
+    const surfaces = this.inputSurfaceCleanup.get(surface.entry.id), removed = surfaces?.delete(surface) === true
+    if (surfaces?.size === 0) this.inputSurfaceCleanup.delete(surface.entry.id)
+    return removed
+  }
+
+  private inputSurface(entry: BrowserEntry, page: WebContentsView): NativeBrowserInputSurface {
+    const existing = this.inputSurfaces.get(page)
+    if (existing?.shield.isCurrentFor(page)) return existing
+    if (existing) {
+      this.inputSurfaces.delete(page)
+      if (!existing.shield.contents.isDestroyed()) this.retainInputSurfaceCleanup(existing)
+    }
+    const presentations = new Map<object, () => void>()
+    const surface: NativeBrowserInputSurface = { entry, page, presentations, shield: undefined! }
+    const shield: BrowserNativeInputShield = new BrowserNativeInputShield(page, () => this.windowForView(page), () =>
+      this.owns(entry, page) && (presentations.size > 0 || entry.inputShield === shield && this.agentOwnsInput(entry)),
+      () => this.inputSurfaceFailed(surface), () => this.agentOwnsInput(entry) ? this.feedbackPreferences() : null,
+      () => {
+        if (presentations.size > 0) this.windowForView(page).webContents.focus()
+        else shield.contents.focus()
+      })
+    surface.shield = shield
+    this.inputSurfaces.set(page, surface)
+    const pageDestroyed = (): void => this.inputSurfaceFailed(surface)
+    shield.contents.once('destroyed', () => queueMicrotask(() => {
+      if (!page.webContents.isDestroyed()) page.webContents.off('destroyed', pageDestroyed)
+      const retained = this.forgetInputSurfaceCleanup(surface)
+      this.observeInputShieldDestruction(entry.id, shield)
+      this.inputSurfaceFailed(surface)
+      if (retained && this.entries.get(entry.id) === entry) {
+        try { this.emit(entry) } catch { /* Native completion remains authoritative if projection is unavailable. */ }
+      }
+    }))
+    shield.contents.on('input-event', (_event, input) => {
+      if (this.inputSurfaces.get(page) !== surface || !['mouseDown', 'mouseMove', 'mouseEnter', 'mouseLeave'].includes(input.type)) return
+      const owner = this.nativeOwner(entry.id)
+      if (owner?.view === page) this.onNativeInput?.(owner, { type: 'pointer', event: input as Electron.MouseInputEvent })
+    })
+    shield.contents.on('before-input-event', (event, input) => {
+      if (this.inputSurfaces.get(page) !== surface || input.type !== 'keyDown' || input.key !== 'Escape' || input.isComposing) return
+      const owner = this.nativeOwner(entry.id)
+      if (owner?.view === page && this.onNativeInput?.(owner, { type: 'escape' })) event.preventDefault()
+    })
+    shield.contents.on('render-process-gone', () => this.inputSurfaceFailed(surface))
+    page.webContents.once('destroyed', pageDestroyed)
+    return surface
+  }
+
+  private prepareInputSurface(surface: NativeBrowserInputSurface): Promise<void> {
+    if (!surface.ready) {
+      try { surface.ready = surface.shield.prepare() }
+      catch (error) { surface.ready = Promise.reject(error) }
+    }
+    return surface.ready
+  }
+
+  private releaseInputSurface(surface: NativeBrowserInputSurface): void {
+    try { surface.shield.dispose() } finally {
+      if (this.inputSurfaces.get(surface.page) === surface) this.inputSurfaces.delete(surface.page)
+      if (!surface.shield.contents.isDestroyed()) this.retainInputSurfaceCleanup(surface)
+    }
+  }
+
+  private async releasePresentationInputSurface(surface: NativeBrowserInputSurface): Promise<void> {
+    if (surface.presentations.size || surface.entry.inputShield === surface.shield) return
+    const contents = surface.shield.contents
+    let settle!: () => void
+    const destroyed = new Promise<void>(resolve => { settle = resolve })
+    if (contents.isDestroyed()) settle()
+    else contents.once('destroyed', settle)
+    try {
+      try { this.releaseInputSurface(surface) } catch (error) {
+        if (!surface.shield.closing) throw error
+        await destroyed
+        surface.shield.dispose()
+      }
+    } finally {
+      if (!contents.isDestroyed()) contents.off('destroyed', settle)
+    }
+  }
+
+  private inputSurfaceFailed(surface: NativeBrowserInputSurface): void {
+    if (this.inputSurfaces.get(surface.page) !== surface) return
+    for (const failed of [...surface.presentations.values()]) {
+      try { failed() } catch { /* Each original presentation retains its own failure receipt. */ }
+    }
+    surface.presentations.clear()
+    if (surface.entry.inputShield === surface.shield) {
+      this.releaseInputShield(surface.entry)
+      if (this.agentOwnsInput(surface.entry)) this.inputIsolationFailed(surface.entry)
+    }
+    try { this.releaseInputSurface(surface) } catch { /* Keep the exact native cleanup identity for its original owner. */ }
   }
 
   private inputIsolationFailed(entry: BrowserEntry): void {
@@ -4113,15 +4245,24 @@ export class BrowserViewManager {
   }
 
   private synchronizeInputShield(entry: BrowserEntry): void {
-    try { entry.inputShield?.synchronize() }
-    catch { this.releaseInputShield(entry); this.inputIsolationFailed(entry) }
+    const surface = this.inputSurfaces.get(entry.view)
+    try { (surface?.shield ?? entry.inputShield)?.synchronize() }
+    catch {
+      if (surface) this.inputSurfaceFailed(surface)
+      else { this.releaseInputShield(entry); this.inputIsolationFailed(entry) }
+    }
   }
 
   private releaseInputShield(entry: BrowserEntry): void {
     const shield = entry.inputShield
     try {
-      shield?.dispose()
+      const surface = this.inputSurfaces.get(entry.view)
+      if (!surface || surface.shield !== shield || !surface.presentations.size) {
+        shield?.dispose()
+        if (surface?.shield === shield) this.inputSurfaces.delete(entry.view)
+      }
       entry.inputShield = undefined
+      if (surface && shield && surface.shield === shield && surface.presentations.size) this.refreshInputAppearance(entry, shield)
       entry.inputIsolation = 'inactive'
       const notice = entry.inputShieldCleanupNotice
       if (notice && shield && notice.shield === shield) {

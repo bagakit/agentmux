@@ -16,7 +16,7 @@ export class NativeOverlayWindows {
   private disposed = false
   private readonly releaseFocus: () => void
 
-  constructor(private readonly main: BrowserWindow, private readonly browsers: Pick<BrowserViewManager, 'visibleNativeBounds' | 'nativeOwner' | 'nativeOwnerForView' | 'windowForView'>,
+  constructor(private readonly main: BrowserWindow, private readonly browsers: Pick<BrowserViewManager, 'visibleNativeBounds' | 'nativeOwner' | 'nativeOwnerForView' | 'windowForView' | 'acquireNativeInputBarrier'>,
     private readonly windows: Pick<WorkbenchWindows, 'windowForDocument'>) {
     this.releaseFocus = installNativeOverlayFocus(main,
       { hasProjectionInFocusedWindow: () => this.entries.get(main)?.surfaces.hasProjectionInFocusedWindow() === true },
@@ -86,7 +86,8 @@ export class NativeOverlayWindows {
       surfaces: new NativeOverlaySurfaces(window, {
         visibleNativeBounds: () => this.browsers.visibleNativeBounds(window),
         nativeOwner: browserId => this.browsers.nativeOwner(browserId, window),
-        nativeOwnerForView: view => this.browsers.nativeOwnerForView(view, window)
+        nativeOwnerForView: view => this.browsers.nativeOwnerForView(view, window),
+        acquireNativeInputBarrier: (owner, failed) => this.browsers.acquireNativeInputBarrier(owner, failed)
       }, (message, modalId) => this.warning(entry, message, modalId), input => this.send(NATIVE_BROWSER_INPUT_CHANNEL,
         { ...input, ...(entry.document ? { document: entry.document } : {}) })),
       release: () => {
