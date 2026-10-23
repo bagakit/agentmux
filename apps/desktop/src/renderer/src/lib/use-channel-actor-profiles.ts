@@ -42,6 +42,12 @@ export function useChannelActorProfiles(messages: readonly AgentSessionUserMessa
         if (change.subject.kind !== 'actor') return
         const key = JSON.stringify([change.connectionId, channelActorKey(change.subject.actor)])
         if (actors.has(key)) load(key)
+      }, state => {
+        notificationIssue = state === 'ready' ? undefined : 'Live profile updates unavailable'
+        if (state === 'ready') for (const key of actors.keys()) load(key)
+        else setRead(previous => ({ identity, profiles: new Map([...actors.keys()].map(key => [key, {
+          ...(previous.identity === identity ? previous.profiles.get(key) : {}), ...(notificationIssue ? { issue: notificationIssue } : {})
+        }])) }))
       })
     } catch (error) { notificationIssue = `Live profile updates unavailable: ${presentError(error)}` }
     for (const key of actors.keys()) load(key)

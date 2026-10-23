@@ -1,5 +1,5 @@
 import { isConnectionCredentialMethod } from './connection-credential-codec.js'
-import { isChannelMetadataMethod, parseChannelMetadataParams } from './channel-metadata-codec.js'
+import { isChannelMetadataMethod, parseChannelMetadataParams, parseChannelMetadataChange } from './channel-metadata-codec.js'
 import { parseCapsuleInputRequest, parseCapsuleInputResult, type CapsuleInputPort } from './capsule-input.js'
 import { isCapsuleRuntimeMethod, parseCapsuleRuntimeParams, parseCapsuleRuntimeResult, type CapsuleRuntimeMethod, type CapsuleRuntimePort } from './capsule-runtime.js'
 import { isCapsuleMethod, parseCapsuleRpcParams, parseCapsuleRpcResult, type CapsuleCallContext, type CapsuleMethod, type CapsuleParamsMap, type CapsuleResultMap } from './capsule.js'
@@ -685,6 +685,7 @@ export class AgentMuxRpcService {
       if (isChannelMetadataMethod(method)) {
         const metadata = owner.metadata
         if (!metadata) throw new AgentMuxError('Channel metadata management is unavailable on this Host. Existing input remains available.', 'CONTROL_UNAVAILABLE')
+        if (method === 'connection.metadata.watch') return {} as AgentMuxRpcResult<M>
         const callContext = { ...administration, ...(context.signal ? { signal: context.signal } : {}) }
         const result = method === 'connection.metadata.get' ? await metadata.get(parseChannelMetadataParams(method, params), callContext)
           : method === 'connection.metadata.ls' ? await metadata.list(parseChannelMetadataParams(method, params), callContext)
@@ -2548,7 +2549,19 @@ export class AgentMuxRpcService {
     const emit = (event: unknown) => { if (!closed) return onEvent(event as AgentMuxRpcStreamEvent<M>) }
     try {
       let initial: unknown, start: (() => void | Promise<void>) | undefined
-      if (method === 'agent.conversation.watch') {
+      if (method === 'connection.metadata.watch') {
+        parseChannelMetadataParams(method, params)
+        if (caller || !context.principal || !context.principal.id || !['user', 'device'].includes(context.principal.kind)) throw new AgentMuxError('Host metadata observation requires its original authenticated person or device.', 'CONTROL_PERMISSION_DENIED')
+        const metadata = this.ports.connections?.metadata
+        if (!metadata) throw new AgentMuxError('The original Channel metadata owner is unavailable. Saved profiles and healthy Agents are retained.', 'CONTROL_UNAVAILABLE')
+        const assertCurrent = async () => { controller.signal.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context); controller.signal.throwIfAborted() }
+        await assertCurrent()
+        const failed = (error?: unknown) => { void emit(error ? { type: 'error', error: readerError(error) } : { type: 'end', data: {} }); void dispose().catch(() => {}) }
+        const sub = await metadata.watch(change => {
+          void assertCurrent().then(() => emit({ type: 'change', data: parseChannelMetadataChange(change) })).catch(failed)
+        }, failed, { actor: { kind: context.principal.kind as 'user' | 'device', id: context.principal.id }, signal: controller.signal, assertCurrent })
+        initial = {}; cleanup = () => sub.dispose()
+      } else if (method === 'agent.conversation.watch') {
         const input = parseConversationWatchInput(params), forwarded = forwardConversationInput(input), owners = (await this.clients()).filter(entry => entry.hostId === input.hostId)
         if (owners.length !== 1) throw new AgentMuxError('The exact conversation Host is unavailable or ambiguous.', 'RUNTIME_UNAVAILABLE')
         // Hosted Clients delegate this same reader to the original semantic Host.

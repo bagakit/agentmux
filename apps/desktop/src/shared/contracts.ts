@@ -1569,6 +1569,7 @@ export const CONFIG_CHANGED_CHANNEL = 'agentmux:config-changed'
 export const SESSION_EVENT_CHANNEL = 'agentmux:session-event'
 export const SESSION_HISTORY_OBSERVATION_CHANNEL = 'agentmux:session-history-observation'
 export const CONNECTION_METADATA_CHANGED_CHANNEL = 'connections:metadataChanged'
+export const CONNECTION_METADATA_OBSERVATION_CHANNEL = 'connections:metadataObservation'
 /** Main -> renderer: one embedded-browser lifecycle/navigation event. */
 export const BROWSER_EVENT_CHANNEL = 'agentmux:browser-event'
 export const NATIVE_BROWSER_VISIBILITY_CHANNEL = 'ui:nativeBrowserVisibility'
@@ -1653,7 +1654,7 @@ export type AgentMuxDesktopApi = {
     upgradeInspect(host: HostConfig, operationId: string): Promise<import('@agentmux/core').RemoteCoreUpgradeReceipt | null>
   }
   connections: {
-    onMetadataChanged(listener: (change: import('@agentmux/core/connections').ChannelMetadataChange) => void): () => void
+    onMetadataChanged(listener: (change: import('@agentmux/core/connections').ChannelMetadataChange) => void, observation?: (state: 'ready' | 'unavailable') => void): () => void
     call<M extends import('@agentmux/core/connections').ConnectionMethod>(method: M, params: import('@agentmux/core/connections').ConnectionParamsMap[M]): Promise<import('@agentmux/core/connections').ConnectionResultMap[M]>
     storeCredential(input: { operationId: string; secret: string }): Promise<{ credentialRef: string }>
     inspectCredential(operationId: string): Promise<{ credentialRef: string } | null>

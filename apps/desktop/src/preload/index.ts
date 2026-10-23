@@ -24,7 +24,7 @@ import {
   BROWSER_EVENT_CHANNEL,
   BROWSER_PRESENTATION_EVENT_CHANNEL,
   CONFIG_CHANGED_CHANNEL,
-  CONNECTION_METADATA_CHANGED_CHANNEL,
+  CONNECTION_METADATA_CHANGED_CHANNEL, CONNECTION_METADATA_OBSERVATION_CHANNEL,
   CONTROL_CANCEL_CHANNEL,
   CONTROL_REQUEST_CHANNEL,
   CONTROL_RESPONSE_CHANNEL,
@@ -205,10 +205,12 @@ const api: AgentMuxPreloadApi = {
     call: (method, params) => ipcRenderer.invoke('applications:call', method, params)
   },
   connections: {
-    onMetadataChanged: listener => {
+    onMetadataChanged: (listener, observation) => {
       const receive = (_event: unknown, change: import('@agentmux/core/connections').ChannelMetadataChange) => listener(change)
+      const observed = (_event: unknown, state: unknown) => { if (state === 'ready' || state === 'unavailable') observation?.(state) }
       ipcRenderer.on(CONNECTION_METADATA_CHANGED_CHANNEL, receive)
-      return () => ipcRenderer.removeListener(CONNECTION_METADATA_CHANGED_CHANNEL, receive)
+      ipcRenderer.on(CONNECTION_METADATA_OBSERVATION_CHANNEL, observed)
+      return () => { ipcRenderer.removeListener(CONNECTION_METADATA_CHANGED_CHANNEL, receive); ipcRenderer.removeListener(CONNECTION_METADATA_OBSERVATION_CHANNEL, observed) }
     },
     call: async (method, params) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('connections:call', method, params)),
     storeCredential: input => ipcRenderer.invoke('connections:storeCredential', input),

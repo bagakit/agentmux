@@ -3,9 +3,9 @@ import { rpcRecord } from './rpc-data.js'
 import { parseConnectionActor, parseConnectionApplication } from './room-binding-codec.js'
 import { channelActorKey, parseChannelActorProfileObservation } from './channel-profile.js'
 import type { ConnectionApplication } from './connections-contract.js'
-import type { ChannelConversationProfileObservation, ChannelMetadataEntry, ChannelMetadataMethod, ChannelMetadataParamsMap, ChannelMetadataResultMap, ChannelMetadataSubject } from './channel-metadata-contract.js'
+import type { ChannelConversationProfileObservation, ChannelMetadataEntry, ChannelMetadataMethod, ChannelMetadataParamsMap, ChannelMetadataResultMap, ChannelMetadataSubject, ChannelMetadataChange } from './channel-metadata-contract.js'
 
-export const CHANNEL_METADATA_RPC_METHODS = { 'connection.metadata.get': 'long', 'connection.metadata.ls': 'long', 'connection.metadata.refresh': 'long', 'connection.metadata.clear': 'long' } as const
+export const CHANNEL_METADATA_RPC_METHODS = { 'connection.metadata.watch': 'long', 'connection.metadata.get': 'long', 'connection.metadata.ls': 'long', 'connection.metadata.refresh': 'long', 'connection.metadata.clear': 'long' } as const
 export const isChannelMetadataMethod = (value: unknown): value is ChannelMetadataMethod => typeof value === 'string' && Object.hasOwn(CHANNEL_METADATA_RPC_METHODS, value)
 const fail = (): never => { throw new AgentMuxError('Channel metadata does not describe the exact original subject.', 'INVALID_CHANNEL_METADATA') }
 const object = (value: unknown, fields: string[]) => rpcRecord(value, fields, 'INVALID_CHANNEL_METADATA')
@@ -18,6 +18,11 @@ export function parseChannelMetadataSubject(value: unknown): ChannelMetadataSubj
   if (p.kind === 'actor' && p.externalConversationId === undefined) return { kind: 'actor', actor: parseConnectionActor(p.actor) }
   if (p.kind === 'conversation' && p.actor === undefined) return { kind: 'conversation', externalConversationId: text(p.externalConversationId) }
   return fail()
+}
+export function parseChannelMetadataChange(value: unknown): ChannelMetadataChange {
+  const p = object(value, ['connectionId', 'application', 'subject']), app = application(p.application), subject = parseChannelMetadataSubject(p.subject)
+  if (subject.kind === 'actor' && (subject.actor.application.domain !== app.domain || subject.actor.application.appId !== app.appId)) return fail()
+  return { connectionId: text(p.connectionId), application: app, subject }
 }
 export function parseChannelConversationProfileObservation(value: unknown): ChannelConversationProfileObservation {
   const p = object(value, ['application', 'externalConversationId', 'state', 'profile', 'checkedAt', 'freshness', 'reason'])
@@ -35,6 +40,7 @@ export function parseChannelMetadataEntry(value: unknown, app: ConnectionApplica
   return { subject, observation, cacheRevision: p.cacheRevision === null ? null : text(p.cacheRevision) }
 }
 export function parseChannelMetadataParams<M extends ChannelMetadataMethod>(method: M, value: unknown): ChannelMetadataParamsMap[M] {
+  if (method === 'connection.metadata.watch') { object(value, []); return {} as ChannelMetadataParamsMap[M] }
   const list = method === 'connection.metadata.ls', clear = method === 'connection.metadata.clear', write = clear || method === 'connection.metadata.refresh'
   const p = object(value, ['connectionId', ...(write ? ['expectedConnectionRevision'] : []), ...(list ? ['kind', 'limit', 'cursor'] : ['subject']), ...(clear ? ['expectedCacheRevision'] : [])])
   const scope = { connectionId: text(p.connectionId), ...(write ? { expectedConnectionRevision: integer(p.expectedConnectionRevision) } : {}) }
@@ -45,6 +51,7 @@ export function parseChannelMetadataParams<M extends ChannelMetadataMethod>(meth
   return { ...scope, subject: parseChannelMetadataSubject(p.subject), ...(clear ? { expectedCacheRevision: p.expectedCacheRevision === null ? null : text(p.expectedCacheRevision) } : {}) } as ChannelMetadataParamsMap[M]
 }
 export function parseChannelMetadataResult<M extends ChannelMetadataMethod>(method: M, value: unknown, input: ChannelMetadataParamsMap[M]): ChannelMetadataResultMap[M] {
+  if (method === 'connection.metadata.watch') { object(value, []); return {} as ChannelMetadataResultMap[M] }
   const list = method === 'connection.metadata.ls', clear = method === 'connection.metadata.clear'
   const p = object(value, ['connectionId', 'connectionRevision', 'application', ...(list ? ['entries', 'next'] : ['entry']), ...(clear ? ['cleared'] : [])])
   const app = application(p.application), scope = { connectionId: text(p.connectionId), connectionRevision: integer(p.connectionRevision), application: app }

@@ -37,6 +37,10 @@ export function useConnectorRoomName(binding: RoomBinding | null, refresh = 0, v
       release = api.connections.onMetadataChanged(change => {
         if (change.connectionId === binding.connectionId && change.application.domain === binding.application.domain && change.application.appId === binding.application.appId &&
           change.subject.kind === 'conversation' && change.subject.externalConversationId === binding.externalConversationId) load(false)
+      }, state => {
+        subscriptionIssue = state === 'ready' ? '' : 'Group name updates unconfirmed'
+        if (state === 'ready') load(false)
+        else setRead(previous => ({ ...(previous?.identity === identity ? previous : {}), identity, issue: subscriptionIssue, loading: false }))
       })
     } catch { subscriptionIssue = 'Group name updates unconfirmed' }
     load(true)

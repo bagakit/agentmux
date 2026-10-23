@@ -1,3 +1,4 @@
+import { parseChannelMetadataChange } from './channel-metadata-codec.js'
 import { mintObjectId } from './object-id.js'
 import { parseConversationWatchOpening, parseConversationObservation, type ConversationWatchOpening } from './conversation-changes.js'
 import { parseAppearanceObservation } from './public-rpc-settings-observation.js'
@@ -184,6 +185,7 @@ function streamInitial(method: AgentMuxRpcStreamMethod, value: unknown, params: 
     return p
   }
   if (method === 'agent.conversation.watch') return parseConversationWatchOpening(p, params as import('./conversation.js').ConversationRef)
+  if (method === 'connection.metadata.watch') { rpcRecord(p, [], 'CONTROL_PROTOCOL_ERROR'); return {} }
   if (method === 'settings.appearance.watch') { rpcRecord(p, ['observation'], 'CONTROL_PROTOCOL_ERROR'); return { observation: parseAppearanceObservation(p.observation) } }
   if (method === 'system.metrics.watch') return { observation: parseMetricsObservation(p.observation) }
   if (method === 'toolkit.watch') {
@@ -244,6 +246,7 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
     return { ...event, data: parseHostedTransferChunk(event.data) }
   }
   if (method === 'agent.conversation.watch' && event.type === 'snapshot') return { ...event, data: parseConversationObservation(event.data, initial as ConversationWatchOpening) }
+  if (method === 'connection.metadata.watch' && event.type === 'change') return { type: 'change', data: parseChannelMetadataChange(event.data) }
   if (method === 'settings.appearance.watch' && event.type === 'snapshot') {
     const observation = parseAppearanceObservation(event.data, appearancePrevious)
     return { ...event, data: observation }
