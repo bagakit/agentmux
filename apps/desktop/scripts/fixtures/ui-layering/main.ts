@@ -677,7 +677,7 @@ async function run() {
   receipt.cases.push({ label: 'native-keep-original-session', kept })
 
   await openStop(); await nativeReady(); await read('dialogCraft.busy(true)'); await click('.confirmation-dialog button', 'Stop & Close', true)
-  await wait(() => read('document.querySelector(".confirmation-dialog")?.getAttribute("aria-busy")==="true"'), 'Actual Stop must become busy')
+  await wait(() => read('document.querySelector(".confirmation-dialog")?.closest("[data-overlay-modal-boundary]")?.getAttribute("aria-busy")==="true"'), 'Actual Stop must become busy')
   await click('.confirmation-dialog button', 'Working…', true); await key('Escape', 27)
   const during = (await facts()).workbench
   assert.equal(during.stops.length, original.stops.length + 1, 'Busy Stop reaches its original owner exactly once')
