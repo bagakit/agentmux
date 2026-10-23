@@ -28,6 +28,7 @@
     "build:browser-extension-identity": "node scripts/prepare-browser-extension-identity.mjs"
   },
   "dependencies": {
+    "@agentmux/capsule": "workspace:*",
     "@agentmux/client-ui": "workspace:*",
     "@agentmux/core": "workspace:*",
     "@agentmux/demand": "workspace:*",
