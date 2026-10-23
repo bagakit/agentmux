@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { AgentMuxControlServer } from '../../core/dist/public-rpc-server.js'
 import { AgentMuxRpcService } from '../../core/dist/public-rpc-service.js'
 import { connectAgentMuxRpc } from '../../core/dist/public-rpc-client.js'
-import { parseConnectionParams, parseConnectionResult, formatGroupDiagnosis } from '../../core/dist/connections.js'
+import { parseConnectionParams, parseConnectionResult, formatGroupDiagnosis, connectionDiagnosisRecordKey, connectionDiagnosisSourceKey, connectionDiagnosisPartKey, connectionDiagnosisEventKey, connectionDiagnosisGapKey } from '../../core/dist/connections.js'
 import { runCompiledObjectCli, objectCliEnvironment } from '../../core/test/helpers/object-cli-rpc.js'
 import { ingressFixture } from './fixtures/ingress.js'
 import { config, context } from './fixtures/room-binding.js'
@@ -136,7 +136,7 @@ it('bounds large original coverage pages without hiding the remaining gaps or un
   f.connections.delivery = { inspect: async () => ({ delivery: null }), retry: async () => { throw new Error('Unexpected retry') }, list: async () => ({ deliveries: [], next: null, coverage: { state: 'incomplete', nextContent: null, origins: [], gaps: Array.from({ length: 105 }, (_, index) => ({ gapId: 'original-gap-' + index, reason: 'source-gap' })) } }) }
   const report = await f.sdk.call('connection.diagnose', f.target), group = report.groups.value!.items[0]!
   expect(group.outgoing.value?.coverage).toMatchObject({ state: 'incomplete', omittedGapCount: 100 })
-  expect(group.outgoing.value?.coverage?.gaps.map(gap => gap.gapId)).toEqual(['original-gap-0', 'original-gap-1', 'original-gap-2', 'original-gap-3', 'original-gap-4'])
+  expect(group.outgoing.value?.coverage?.gaps.map(gap => gap.gapKey)).toEqual(Array.from({ length: 5 }, (_, index) => connectionDiagnosisGapKey(group.target, 'original-gap-' + index)))
   expect(group.binding.value?.activeInputGrants).toBe(1); expect(group.incoming.issue).toBeNull()
   expect(formatGroupDiagnosis({ ...group, service: report.service })).toContain('Additional gaps in this owner page: 100')
 }, 30_000)
@@ -158,16 +158,16 @@ it('explains source gaps through the real public diagnosis without exposing sour
   f.connections.delivery = { inspect: async () => ({ delivery: null }), retry: async () => { throw new Error('Unexpected retry') }, list: async () => ({ deliveries: [], next: null, coverage: {
     state: 'incomplete', nextContent: null, origins: [], gaps: [
       { gapId: 'cut-gap', reason: 'source-gap', code: 'AGENT_CONVERSATION_READ_CUT_UNAVAILABLE', source: { kind: 'native', providerId: 'fixture', nativeSessionId: 'private-native-session' } },
-      { gapId: 'private-gap', reason: 'source-gap', code: 'PRIVATE adapter error', record: { hostId: 'local', agentSessionId: 'original-agent', source: { kind: 'captured', epoch: 'private-epoch', sequence: 1 } } },
+      { gapId: 'private-gap', reason: 'source-gap', code: 'PRIVATE adapter error', record: { hostId: 'local', agentSessionId: 'original-agent', source: { kind: 'captured', recordId: 'private-epoch' } } },
       { gapId: 'unrecorded-gap', reason: 'source-gap' }
     ]
   } }) }
   const request = { ...f.target, bindingId: f.input.bindingId }
   const report = await f.sdk.call('connection.diagnose', request), group = report.groups.value!.items[0]!
-  expect(group.outgoing.value!.coverage!.gaps).toEqual([
-    { gapId: 'cut-gap', reason: 'source-gap', code: 'AGENT_CONVERSATION_READ_CUT_UNAVAILABLE', codeRecorded: true, sourceKind: 'native' },
-    { gapId: 'private-gap', reason: 'source-gap', code: null, codeRecorded: true, sourceKind: null },
-    { gapId: 'unrecorded-gap', reason: 'source-gap', code: null, codeRecorded: false, sourceKind: null }
+  expect(group.outgoing.value!.coverage!.gaps.map(({ association: _association, ...gap }) => gap)).toEqual([
+    { gapKey: connectionDiagnosisGapKey(group.target, 'cut-gap'), reason: 'source-gap', code: 'AGENT_CONVERSATION_READ_CUT_UNAVAILABLE', codeRecorded: true, sourceKind: 'native' },
+    { gapKey: connectionDiagnosisGapKey(group.target, 'private-gap'), reason: 'source-gap', code: null, codeRecorded: true, sourceKind: null },
+    { gapKey: connectionDiagnosisGapKey(group.target, 'unrecorded-gap'), reason: 'source-gap', code: null, codeRecorded: false, sourceKind: null }
   ])
   expect(output(await f.cli(['diagnose', '--host', 'local', '--session', 'original-agent', '--binding', f.input.bindingId]))).toEqual(report)
   expect(formatGroupDiagnosis({ ...group, service: report.service })).toContain('source native · code AGENT_CONVERSATION_READ_CUT_UNAVAILABLE')
@@ -176,4 +176,74 @@ it('explains source gaps through the real public diagnosis without exposing sour
   const invalid = structuredClone(report)
   invalid.groups.value!.items[0]!.outgoing.value!.coverage!.gaps[0]!.code = 'PRIVATE adapter error' as never
   expect(() => parseConnectionResult('connection.diagnose', invalid, request)).toThrow()
+}, 30_000)
+
+it('SDK and compiled CLI correlate original source records and effects using safe keys and finite source evidence', async () => {
+  const f = await fixture(), reference = { hostId: 'local', agentSessionId: 'original-agent', source: { kind: 'native' as const, providerId: 'fixture', nativeSessionId: 'PRIVATE native identity', recordId: 'same-physical-id' } }
+  const part = { record: reference, recordRevision: 'a'.repeat(64), selector: { kind: 'native-part' as const, partIndex: 0 } }
+  const event = { id: 'PRIVATE event identity', revision: 'b'.repeat(64) }, checkpointKey = 'c'.repeat(64)
+  const delivery = { operationId: 'original-outgoing', projectionId: 'original-projection', sourceRevision: 'a'.repeat(64), bindingId: f.input.bindingId, bindingRevision: 1,
+    reference, target: { connectionId: config.connectionId, application: config.application, externalConversationId: f.input.externalConversationId }, effect: 'upsert' as const, fragment: { ordinal: 0, count: 1 }, state: 'unknown' as const, reason: 'effect-unconfirmed' as const, receipt: { state: 'unknown' as const, reason: 'effect-unconfirmed' as const }, event }
+  const sourceObservation = { state: 'unavailable' as const, reason: 'source-gap' as const, code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' as const, codeRecorded: true, checkpointKey }
+  const owner = { deliveries: [delivery], next: null, sourceObservation, effectObservation: { state: 'unknown' as const, reason: 'effect-unconfirmed' as const }, coverage: { state: 'incomplete' as const, origins: [], nextContent: null,
+    gaps: [{ gapId: 'original-source-gap', reason: 'source-gap' as const, code: sourceObservation.code, source: { kind: 'native' as const, providerId: reference.source.providerId, nativeSessionId: reference.source.nativeSessionId }, record: reference, part, event }] } }
+  f.connections.delivery = { list: async () => owner, inspect: vi.fn(async () => ({ delivery: null })), retry: vi.fn(async () => ({ delivery })) }
+  const report = await f.sdk.call('connection.diagnose', f.target), group = report.groups.value!.items[0]!, outgoing = group.outgoing.value!
+  const association = { sourceKey: connectionDiagnosisSourceKey(reference, reference.source), recordKey: connectionDiagnosisRecordKey(reference), eventKey: connectionDiagnosisEventKey(reference, event), partKey: connectionDiagnosisPartKey(part) }
+  expect(outgoing).toMatchObject({ sourceObservation, effectObservation: owner.effectObservation, deliveries: [{ operationId: delivery.operationId, receipt: 'unknown', association: { ...association, partKey: null } }], coverage: { gaps: [{ gapKey: connectionDiagnosisGapKey(group.target, 'original-source-gap'), code: sourceObservation.code, association }] } })
+  expect(output(await f.cli(['diagnose', '--host', 'local', '--session', 'original-agent']))).toEqual(report)
+  const exported = formatGroupDiagnosis({ ...group, service: report.service })
+  expect(exported).toContain('Source read: unavailable · source-gap · code AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+  expect(exported).toContain('Unresolved effects: unknown · effect-unconfirmed')
+  for (const key of Object.values(association)) expect(exported).toContain(key)
+  expect(JSON.stringify(report) + exported).not.toMatch(/PRIVATE|same-physical-id|recordId|nativeSessionId|opaque/)
+  expect(connectionDiagnosisRecordKey({ ...reference, hostId: 'another-host' })).not.toBe(association.recordKey)
+  expect(connectionDiagnosisRecordKey({ ...reference, agentSessionId: 'another-session' })).not.toBe(association.recordKey)
+  expect(connectionDiagnosisRecordKey({ ...reference, source: { ...reference.source, nativeSessionId: 'another-native' } })).not.toBe(association.recordKey)
+  expect(connectionDiagnosisSourceKey(reference, { ...reference.source, nativeSessionId: 'another-native' })).not.toBe(association.sourceKey)
+  expect(connectionDiagnosisEventKey({ ...reference, agentSessionId: 'another-session' }, event)).not.toBe(association.eventKey)
+  expect(connectionDiagnosisEventKey({ ...reference, source: { ...reference.source, nativeSessionId: 'another-native' } }, event)).not.toBe(association.eventKey)
+  for (const change of [
+    (r: any) => { r.sourceObservation.code = 'PRIVATE code' },
+    (r: any) => { r.sourceObservation.checkpointKey = 'PRIVATE cursor' },
+    (r: any) => { r.sourceObservation.codeRecorded = false },
+    (r: any) => { r.sourceObservation.body = 'PRIVATE' },
+    (r: any) => { r.deliveries[0].association.recordKey = reference.source.recordId },
+    (r: any) => { r.coverage.gaps[0].association.record = reference },
+    (r: any) => { r.effectObservation.state = 'ready' }
+  ]) { const altered = structuredClone(report); change(altered.groups.value!.items[0]!.outgoing.value!); expect(() => parseConnectionResult('connection.diagnose', altered, f.target)).toThrow() }
+  for (const foreign of [{ ...reference, hostId: 'another-host' }, { ...reference, agentSessionId: 'another-session' }]) {
+    owner.deliveries[0] = { ...delivery, reference: foreign }
+    expect((await f.sdk.call('connection.diagnose', f.target)).groups.value!.items[0]!.outgoing).toEqual({ value: null, issue: 'target-unconfirmed' })
+  }
+  owner.deliveries[0] = delivery; owner.coverage.gaps[0]!.record = { ...reference, agentSessionId: 'another-session' }
+  expect((await f.sdk.call('connection.diagnose', f.target)).groups.value!.items[0]!.outgoing).toEqual({ value: null, issue: 'target-unconfirmed' })
+  expect(f.connections.delivery.retry).not.toHaveBeenCalled(); expect(f.connections.delivery.inspect).not.toHaveBeenCalled()
+}, 30_000)
+
+it('diagnosis keeps raw JSON gap identities private and separates the same original gap across binding revisions', async () => {
+  const f = await fixture(), originalGapId = JSON.stringify(['local', 'original-agent', 'native', 'fixture', 'PRIVATE native/path', 'PRIVATE record'])
+  const originalGap = { gapId: originalGapId, reason: 'source-gap' as const, code: 'AGENT_SESSION_HISTORY_INVALID_CURSOR' }
+  const list = vi.fn(async () => ({ deliveries: [], next: null, coverage: { state: 'incomplete' as const, gaps: [originalGap], nextContent: null, origins: [] } }))
+  f.connections.delivery = { inspect: async () => ({ delivery: null }), retry: vi.fn(), list }
+  const request = { ...f.target, bindingId: f.input.bindingId }, report = await f.sdk.call('connection.diagnose', request)
+  const group = report.groups.value!.items[0]!, gap = group.outgoing.value!.coverage!.gaps[0]!
+  expect(gap).toMatchObject({ gapKey: connectionDiagnosisGapKey(group.target, originalGapId), code: 'AGENT_SESSION_HISTORY_INVALID_CURSOR' })
+  expect(gap.gapKey).toMatch(/^[a-f0-9]{64}$/u)
+  expect(group.binding.value?.state).toBe('active'); expect(group.incoming.issue).toBeNull()
+  expect(output(await f.cli(['diagnose', '--host', 'local', '--session', 'original-agent', '--binding', f.input.bindingId]))).toEqual(report)
+  const exported = formatGroupDiagnosis({ ...group, service: report.service })
+  expect(exported).toContain('Content gap ' + gap.gapKey)
+  expect(JSON.stringify(report) + exported).not.toMatch(/PRIVATE|native\/path|gapId/)
+  expect(originalGap.gapId).toBe(originalGapId)
+  const altered = structuredClone(report), changed = altered.groups.value!.items[0]!.outgoing.value!.coverage!.gaps[0]!
+  changed.gapKey = originalGapId
+  expect(() => parseConnectionResult('connection.diagnose', altered, request)).toThrow()
+  expect(await f.bindings.relink({ ...f.input, operationId: 'same-gap-next-binding', expectedRevision: 1 }, context)).toMatchObject({ state: 'applied' })
+  const next = await f.sdk.call('connection.diagnose', request), nextGroup = next.groups.value!.items[0]!
+  expect(nextGroup.target.bindingRevision).toBe(2)
+  expect(nextGroup.outgoing.value!.coverage!.gaps[0]!.gapKey).not.toBe(gap.gapKey)
+  expect(connectionDiagnosisGapKey({ ...group.target, executionHostId: 'foreign-host' }, originalGapId)).not.toBe(gap.gapKey)
+  expect(connectionDiagnosisGapKey({ ...group.target, agentSessionId: 'foreign-session' }, originalGapId)).not.toBe(gap.gapKey)
+  expect(f.connections.delivery.retry).not.toHaveBeenCalled()
 }, 30_000)

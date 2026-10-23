@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseConnectionDelivery, parseConnectionDeliveryParams, parseConnectionDeliveryReceipt, parseConnectionDeliveryResult, type ConnectionDelivery } from '../src/connections.js'
+import { parseConnectionDelivery, parseConnectionDeliveryParams, parseConnectionDeliveryReceipt, parseConnectionDeliveryResult, connectionDiagnosisSourceCodes, type ConnectionDelivery } from '../src/connections.js'
 import { deliveryFact } from './fixtures/connection-delivery.js'
 
 const scope = { connectionId: 'original-connection', bindingId: 'original-binding', bindingRevision: 3 }
@@ -68,4 +68,21 @@ describe('finite original delivery DTO', () => {
     for (const method of ['connection.delivery.inspect', 'connection.delivery.retry'] as const) expect(() => parseConnectionDeliveryResult(method, { delivery: original }, { operationId: 'foreign' })).toThrow()
     expect(() => parseConnectionDeliveryResult('connection.delivery.retry', { delivery: null }, { operationId: original.operationId })).toThrow()
   })
+})
+
+it('keeps only finite original source evidence independently of platform effects', () => {
+  const sourceObservation = { state: 'unavailable', reason: 'source-gap', code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED', codeRecorded: true, checkpointKey: 'a'.repeat(64) }
+  const page = { deliveries: [], next: null, sourceObservation, effectObservation: { state: 'unknown', reason: 'effect-unconfirmed' } }
+  for (const code of connectionDiagnosisSourceCodes) expect(parseConnectionDeliveryResult('connection.delivery.ls', { ...page, sourceObservation: { ...sourceObservation, code } }, scope)).toEqual({ ...page, sourceObservation: { ...sourceObservation, code } })
+  expect(parseConnectionDeliveryResult('connection.delivery.ls', { ...page, sourceObservation: { ...sourceObservation, code: null } }, scope).sourceObservation?.codeRecorded).toBe(true)
+  const ready = { state: 'ready', code: null, codeRecorded: false, checkpointKey: sourceObservation.checkpointKey }
+  expect(parseConnectionDeliveryResult('connection.delivery.ls', { ...page, sourceObservation: ready }, scope)).toEqual({ ...page, sourceObservation: ready })
+  for (const invalid of [
+    { ...sourceObservation, code: 'AGENT_SESSION_HISTORY_PRIVATE_DIAGNOSTIC' },
+    { ...sourceObservation, codeRecorded: false }, { ...sourceObservation, state: 'ready' },
+    { ...sourceObservation, checkpointKey: 'opaque private cursor' }, { ...sourceObservation, exception: 'private failure' },
+    { ...ready, codeRecorded: true }, { ...sourceObservation, reason: undefined }
+  ]) expect(() => parseConnectionDeliveryResult('connection.delivery.ls', { ...page, sourceObservation: invalid }, scope)).toThrow()
+  // Historical owners without these observations remain explicit rather than inventing a successful read.
+  expect(parseConnectionDeliveryResult('connection.delivery.ls', { deliveries: [], next: null }, scope)).toEqual({ deliveries: [], next: null })
 })

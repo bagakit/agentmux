@@ -8,6 +8,9 @@ import type { PublicationAdapter } from '../src/publication-adapter.js'
 import type { PublicationReceipt, PublicationMapping } from '../src/publication-store.js'
 import { config, roomBindingFixture, core } from './fixtures/room-binding.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
+import { AgentMuxError } from '../../core/dist/errors.js'
+import { connectAgentMuxRpc } from '../../core/dist/public-rpc-client.js'
+import { connectionDiagnosisRecordKey, connectionDiagnosisEventKey, connectionDiagnosisCheckpointKey, formatGroupDiagnosis } from '../../core/dist/connections.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
@@ -45,8 +48,59 @@ async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = fal
     expect(output.code, output.stdout + output.stderr).toBe(0); return JSON.parse(output.stdout).result
   }
   const speech = () => services.publication!.store.list(binding.binding).filter(operation => operation.reference.source.kind !== 'binding-operation')
-  return { ...original, services, dispatched, adapter, conversation, binding: binding.binding, cli, speech }
+  const sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); cleanup.push(() => sdk.dispose())
+  const diagnose = async () => {
+    const output = await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'connection', 'diagnose', '--host', 'local', '--session', original.session.agentSessionId], env)
+    expect(output.code, output.stdout + output.stderr).toBe(0); return JSON.parse(output.stdout).result
+  }
+  return { ...original, services, dispatched, adapter, conversation, binding: binding.binding, cli, speech, sdk, diagnose }
 }
+
+it('publication source failures remain distinct from old unknown effects through SDK, CLI and diagnosis export', async () => {
+  const f = await fixture(async () => ({ state: 'unknown', reason: 'effect-unconfirmed' }))
+  const target = { hostId: 'local', agentSessionId: f.session.agentSessionId }
+  await appendFile(f.transcript, row('original-unknown', 'Original public progress'))
+  await vi.waitFor(() => expect(f.speech()[0]?.state).toBe('unknown'))
+  const original = structuredClone(f.speech()[0]!), dispatched = f.dispatched.length
+  const before = await f.services.publication!.list({ connectionId: config.connectionId, bindingId: f.binding.bindingId, bindingRevision: 1 })
+  const checkpoint = (await f.client.conversationCheckpoint(target)).checkpoint
+  const reordered = { frontier: { cuts: checkpoint.frontier.cuts, scope: checkpoint.frontier.scope, agentSessionId: checkpoint.frontier.agentSessionId, hostId: checkpoint.frontier.hostId }, sourceHostId: checkpoint.sourceHostId, agentSessionId: checkpoint.agentSessionId, hostId: checkpoint.hostId }
+  expect(connectionDiagnosisCheckpointKey(reordered)).toBe(connectionDiagnosisCheckpointKey(checkpoint))
+  expect(before.sourceObservation?.state).toBe('ready')
+  const changes = vi.spyOn(f.conversation, 'changes').mockRejectedValue(new AgentMuxError('PRIVATE source failure ' + f.root, 'AGENT_SESSION_HISTORY_SOURCE_CHANGED'))
+  f.services.publication!.refresh()
+  await vi.waitFor(async () => expect((await f.services.publication!.list({ connectionId: config.connectionId, bindingId: f.binding.bindingId, bindingRevision: 1 })).sourceObservation?.state).toBe('unavailable'))
+  const report = await f.sdk.call('connection.diagnose', { executionHostId: target.hostId, agentSessionId: target.agentSessionId }), group = report.groups.value!.items[0]!, outgoing = group.outgoing.value!
+  expect(outgoing).toMatchObject({ observation: { state: 'unavailable', reason: 'source-gap' }, sourceObservation: { state: 'unavailable', reason: 'source-gap', code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED', codeRecorded: true, checkpointKey: before.sourceObservation!.checkpointKey }, effectObservation: { state: 'unknown', reason: 'effect-unconfirmed' } })
+  expect(outgoing.deliveries.find(delivery => delivery.operationId === original.operationId)).toMatchObject({ receipt: 'unknown', association: { recordKey: connectionDiagnosisRecordKey(original.reference as any), eventKey: connectionDiagnosisEventKey(original.reference as any, original.event!) } })
+  expect(await f.diagnose()).toEqual(report)
+  const exported = formatGroupDiagnosis({ ...group, service: report.service })
+  expect(exported).toContain('Source read: unavailable · source-gap · code AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+  expect(exported).toContain('Unresolved effects: unknown · effect-unconfirmed')
+  expect(JSON.stringify(report) + exported).not.toMatch(/PRIVATE|original-native|Original public progress|original-unknown/)
+  expect(JSON.stringify(report) + exported).not.toContain(f.root)
+  expect(f.services.publication!.store.inspect(original.operationId)).toEqual(original)
+  expect(f.dispatched).toHaveLength(dispatched)
+  const read = core.consumeConversationWindowPage(await f.client.readAgentConversation({ ...target, record: original.reference as any }))
+  expect(read.kind).toBe('complete')
+  if (read.kind !== 'complete') throw new Error('The controlled original record must be completely read.')
+  expect(read.snapshot.units.flatMap(unit => unit.records).some(record => record.reference && connectionDiagnosisRecordKey(record.reference) === outgoing.deliveries.find(delivery => delivery.operationId === original.operationId)!.association.recordKey)).toBe(true)
+  changes.mockRestore(); f.services.publication!.refresh()
+  await vi.waitFor(async () => expect((await f.services.publication!.list({ connectionId: config.connectionId, bindingId: f.binding.bindingId, bindingRevision: 1 })).sourceObservation?.state).toBe('ready'))
+  // Current reader success leaves the original unknown receipt and durable identity unchanged.
+  expect(f.services.publication!.store.inspect(original.operationId)).toEqual(original); expect(f.dispatched).toHaveLength(dispatched)
+  const human = JSON.stringify({ sessionId: 'original-native', uuid: 'local-unshared-input', type: 'user', message: { role: 'user', content: 'PRIVATE local input' } }) + '\n'
+  await appendFile(f.transcript, human)
+  await vi.waitFor(async () => {
+    const page = await f.client.readAgentConversation({ ...target, record: { ...target, source: { kind: 'native', providerId: 'claude', nativeSessionId: 'original-native', recordId: 'local-unshared-input' } } })
+    expect(core.consumeConversationWindowPage(page).kind).toBe('complete')
+    expect(page.items.length).toBeGreaterThan(0)
+  })
+  f.services.publication!.refresh()
+  await vi.waitFor(async () => expect((await f.services.publication!.list({ connectionId: config.connectionId, bindingId: f.binding.bindingId, bindingRevision: 1 })).sourceObservation?.checkpointKey).not.toBe(before.sourceObservation!.checkpointKey))
+  expect(f.speech()).toHaveLength(1); expect(f.dispatched).toHaveLength(dispatched)
+  expect(f.client.connect).not.toHaveBeenCalled()
+}, 30_000)
 
 it('original Desktop Host automatically publishes shared Core source changes, retaining exact records through compiled CLI inspection', async () => {
   const f = await fixture(), originalMetadata = await readFile(f.storePath)
