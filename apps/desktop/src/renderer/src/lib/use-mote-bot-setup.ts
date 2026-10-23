@@ -121,6 +121,11 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
   }
   const accept = (value: MoteConnectionOperation) => {
     if (!target || !sameMotePreferencesTarget(value.source.target, target)) return
+    const retained = useAppStore.getState().moteBotRequests[value.operationId]
+    if (retained && !retained.inspectOnly) {
+      if (retained.action === 'create') parseMoteConnectionResult('space.mote.connection.create', value, retained.input)
+      else parseMoteConnectionResult('space.mote.connection.sync', value, retained.input)
+    }
     setOperations((previous) =>
       previous.some((item) => item.operationId === value.operationId)
         ? previous.map((item) => (item.operationId === value.operationId ? value : item))
@@ -147,8 +152,10 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       })
       if (token !== lifetime.current || request !== listRead.current) return
       for (const operation of result.operations)
-        if (before.get(operation.operationId) === occurrences.current.get(operation.operationId))
-          accept(operation)
+        if (before.get(operation.operationId) === occurrences.current.get(operation.operationId)) {
+          try { accept(operation) }
+          catch (error) { if (message === feedback.current) setIssue(presentError(error)) }
+        }
       setNext(result.next)
       if (!cursor) setHistoryRead(historySource)
     } catch (error) {
@@ -243,9 +250,8 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
               await api.moteConnections.call('space.mote.connection.sync', request.input),
               request.input
             )
-      let retentionIssue = ''
-      try { await retireMoteBotRequest(request, result) }
-      catch { retentionIssue = 'The original Host accepted this request. Its local saved view could not be retained; check the same operation.' }
+      const retired = await retireMoteBotRequest(request, result)
+      const retentionIssue = retired && !retired.localStorageWritten ? 'The original Host accepted this request. Its local saved view could not be retained; check the same operation.' : ''
       if (token === lifetime.current && order === occurrences.current.get(id)) {
         accept(result)
         if (result.enrollmentOperationId) {
@@ -359,9 +365,10 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
         if (operation) {
           const retained = useAppStore.getState().moteBotRequests[id]
           if (retained && !retained.inspectOnly) {
-            try { await retireMoteBotRequest(retained, operation) }
-            catch { retentionIssue = 'The original Host receipt is available. Its local saved view could not be retained.' }
+            const retired = await retireMoteBotRequest(retained, operation)
+            if (retired && !retired.localStorageWritten) retentionIssue = 'The original Host receipt is available. Its local saved view could not be retained.'
           }
+          if (token !== lifetime.current || order !== occurrences.current.get(id)) return
           accept(operation)
         }
         if (operation?.enrollmentOperationId) {
