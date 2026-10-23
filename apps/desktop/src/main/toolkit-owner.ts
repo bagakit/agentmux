@@ -80,6 +80,10 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     return { operation, message, code, phase: error instanceof DurableWriteError ? error.phase : null }
   }
   private wanted() { return !this.closed && (this.manual || this.leases.size > 0) }
+  private hasUnconfirmedAdmission() {
+    return this.value.state === 'unknown' && this.execution?.id === this.value.executionId &&
+      (this.execution.admissionSaved || this.execution.receiptUnconfirmed)
+  }
   private newExecution(id: string): Execution {
     let ready!: () => void
     const runReady = new Promise<void>(resolve => { ready = resolve })
@@ -193,7 +197,20 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     this.leases.add(lease); signal.addEventListener('abort', lease.release, { once: true })
     if (signal.aborted) lease.release()
     try {
-      await this.ensure(options?.captureFailure === true)
+      await this.reconcileUnknown()
+      if (!this.hasUnconfirmedAdmission()) {
+        try { await this.ensure(options?.captureFailure === true) }
+        catch (error) {
+          // A recorded execution failure is observable state, not a failed reader.
+          // Never infer a negative creation receipt or retry the original admission.
+          if (released || !this.hasUnconfirmedAdmission() || !this.execution?.ended ||
+            this.failure?.executionId !== this.execution.id) throw error
+        }
+      }
+      if (this.hasUnconfirmedAdmission()) {
+        this.allowed(signal)
+        if (released) throw new AgentMuxError('Toolkit observation ended before establishment.', 'CONTROL_UNAVAILABLE')
+      }
       if (!released && !signal.aborted) snapshot(this.snapshot(lease.includeFailureEvidence))
       else lease.release()
       return { dispose: lease.release }
