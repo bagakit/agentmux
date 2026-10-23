@@ -3,7 +3,7 @@ import { shallow } from 'zustand/shallow'
 import type { ActivityView } from '../components/ActivityView'
 
 type Activity = ReactElement<ComponentProps<typeof ActivityView>>
-type Controls = Pick<Activity['props'], 'conversationReading' | 'activitySemantic'>
+type Controls = Pick<Activity['props'], 'conversationReading' | 'activitySemantic' | 'revealRequest'>
 
 function sameReadingControls(previous: Controls['conversationReading'], current: Controls['conversationReading']): boolean {
   if (previous === current) return true
@@ -16,7 +16,8 @@ function sameReadingControls(previous: Controls['conversationReading'], current:
 
 /** Keep the retained body stable without freezing its live reading controls. */
 export function retainActivityControls(content: Activity, controls: Controls): Activity {
-  if (content.props.activitySemantic === controls.activitySemantic &&
+  if (content.props.revealRequest === controls.revealRequest &&
+    content.props.activitySemantic === controls.activitySemantic &&
     sameReadingControls(content.props.conversationReading, controls.conversationReading)) return content
   return cloneElement(content, controls)
 }

@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef } from 'react'
-import { conversationRecordId, projectConversationWindow, type ConversationItemRef, type ConversationReadOptions } from '@agentmux/core/conversation'
 import { useConversationView } from '@agentmux/client-ui/use-conversation-view'
 import type { AgentSessionControl } from '../../../shared/contracts'
 import { api } from './api'
@@ -34,23 +33,8 @@ export function useSessionUserMessages(control?: AgentSessionControlInput, optio
   // Exact-source history seeds retain record IDs; they are not entity list rows.
   const sourceMessages = useMemo(() => view.reading?.originalRecords.flatMap(record => record.input ? [record.input] : []) ?? [], [view.reading])
   const sourceChanged = ['AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'native-source-changed'].includes((view.error as (Error & { code?: string }) | null)?.code ?? '')
-  const readForReveal = useCallback(async (record: ConversationItemRef, readOptions: ConversationReadOptions = {}) => {
-    let settled = await view.settle()
-    let accepted = settled?.snapshot ? projectConversationWindow(settled.snapshot) : null
-    const id = conversationRecordId(record)
-    const loaded = accepted?.originalRecords.some(item => item.records?.some(original => original.id === id))
-    if (!loaded && settled && !readOptions.signal?.aborted) {
-      const pending = view.selectRecord(record, readOptions)
-      settled = await view.settle()
-      await pending
-      accepted = settled?.snapshot ? projectConversationWindow(settled.snapshot) : null
-    }
-    return { page: accepted?.historyPage ?? null, records: accepted?.originalRecords ?? [], error: settled?.error ?? null, cancelled: !settled || Boolean(readOptions.signal?.aborted),
-      windowFrozen: settled?.historical ?? false,
-      sourceChanged: ['AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'native-source-changed'].includes((settled?.error as (Error & { code?: string }) | null)?.code ?? '') }
-  }, [view.selectRecord, view.settle])
   const windowFull = (view.error as (Error & { code?: string }) | null)?.code === 'AGENT_CONVERSATION_WINDOW_FULL'
   return { messages, sourceMessages, conversation: view, nativeHistoryPage: page, nativeContextItems: page?.items ?? [], nextCursor: view.snapshot?.window.navigation.older ?? null,
     hasMore: view.hasMore, loading: view.loading || initialLoading, error: windowFull ? view.sourceError : view.error, observationError: view.observationError, windowFrozen: view.historical,
-    windowIncomplete: Boolean(view.snapshot?.window.outside.older || target > 0 && view.hasMore), sourceChanged, loadEarlier, refresh: view.refresh, readForReveal }
+    windowIncomplete: Boolean(view.snapshot?.window.outside.older || target > 0 && view.hasMore), sourceChanged, loadEarlier, refresh: view.refresh }
 }

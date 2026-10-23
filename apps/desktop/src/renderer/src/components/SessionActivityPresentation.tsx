@@ -80,7 +80,8 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
   }, [selectRegion, sessionId])
   const presented = useRef<{ sourceKey: string; content: ReactElement<ComponentProps<typeof ActivityView>> | null }>({ sourceKey, content: null })
   if (presented.current.sourceKey !== sourceKey) presented.current = { sourceKey, content: null }
-  if (visible && eligible && activity) {
+  const revealPending = Boolean(activity?.revealRequest)
+  if (visible && (eligible || revealPending) && activity) {
     const { openWorkspaceFile: _primaryFile, onSelectAnnotation: _primaryAnnotation, ...facts } = activity
     presented.current.content = <ActivityView {...facts}
       workspaceRoot={fileContext.workspaceRoot} homeDir={fileContext.homeDir}
@@ -88,14 +89,14 @@ export function SessionActivityPresentation({ target, regionId, sourceKey, sessi
       {...(fileContext.kind !== 'unconfirmed' && fileContext.kind !== 'unassigned' ? { openWorkspaceFile: openProjectFile } : {})}
       openHttpLink={openProseLink}
       {...(onAnnotate ? { onSelectAnnotation: selectAnnotation } : {})}
-      {...(activity.conversationReading ? { conversationReading: { ...activity.conversationReading, enabled: visible && eligible, opened: historyOpen, onClose: historyOpen ? closeHistory : undefined, ...(historyReturnLabel ? { returnLabel: historyReturnLabel } : {}),
+      {...(activity.conversationReading ? { conversationReading: { ...activity.conversationReading, enabled: visible && (eligible || revealPending), opened: historyOpen, onClose: historyOpen ? closeHistory : undefined, ...(historyReturnLabel ? { returnLabel: historyReturnLabel } : {}),
         consumer: { ...activity.conversationReading.consumer, regionId, presentationId: workbenchSessionStageHostId(target, regionId),
           visible, activityShown: eligible, viewMode: 'activity' } } } : {})} />
   }
   const reading = activity?.conversationReading ?? presented.current.content?.props.conversationReading
   if (presented.current.content) presented.current.content = retainActivityControls(presented.current.content, {
-    activitySemantic: activity?.activitySemantic ?? 'unknown',
-    ...(reading ? { conversationReading: { ...reading, enabled: visible && eligible, opened: historyOpen, onClose: historyOpen ? closeHistory : undefined, ...(historyReturnLabel ? { returnLabel: historyReturnLabel } : {}),
+    activitySemantic: activity?.activitySemantic ?? 'unknown', revealRequest: activity?.revealRequest ?? null,
+    ...(reading ? { conversationReading: { ...reading, enabled: visible && (eligible || revealPending), opened: historyOpen, onClose: historyOpen ? closeHistory : undefined, ...(historyReturnLabel ? { returnLabel: historyReturnLabel } : {}),
       consumer: { ...reading.consumer, regionId, presentationId: workbenchSessionStageHostId(target, regionId),
         visible, activityShown: eligible, viewMode: 'activity' } } } : {})
   })
