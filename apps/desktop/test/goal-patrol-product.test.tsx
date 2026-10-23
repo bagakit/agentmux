@@ -149,7 +149,7 @@ describe('actual original PMO patrol CLI, Core Input and mounted business consum
       inputOperationId: attempt.operationId, read: { method: 'goal.delegations', params: { goalId: 'goal' } } })
     expect(metadata).not.toHaveProperty('roleGuidance')
     expect(attempt.agentMuxNote).toBe(JSON.stringify(metadata) + '\n\n' + guidance)
-    expect(guidance).toContain('Required module: ' + AGENTMUX_GOAL_SKILL_ENTRY)
+    expect(guidance.split(AGENTMUX_GOAL_SKILL_ENTRY)).toHaveLength(2)
     expect(f.nativeWrites.length).toBeGreaterThan(0)
     expect(saved.progressUpdates).toBeUndefined(); expect(saved.patrols![0]!.report).toBeUndefined(); expect(saved.status).toBe('in_progress')
     expect(current().responsibility!.executions[0]).toMatchObject({ phase: 'stalled', alert: 'stalled' })

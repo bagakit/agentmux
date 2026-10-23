@@ -25,7 +25,7 @@ it('actual compiled delegation preserves the original authenticated Core source 
     sourceMessageId: original.sourceMessageId, workerAgentSessionId: original.workerAgentSessionId })
   expect(coordination).not.toHaveProperty('roleGuidance')
   expect(packet).toBe(JSON.stringify(coordination) + '\n\n' + canonical)
-  expect(canonical).toContain('Required module: ' + AGENTMUX_GOAL_SKILL_ENTRY)
+  expect(canonical.split(AGENTMUX_GOAL_SKILL_ENTRY)).toHaveLength(2)
   expect(f.nativeInputs).toMatchObject([{ operationId: original.operationId, messageId: original.sourceMessageId, recipient: 'worker-a', body: original.text }])
   await f.publish(); await mount(createElement(GoalDelegationWork, { demand: useAppStore.getState().demands.goal! }))
   expect(useAppStore.getState().demands.goal!.responsibility!.executions[0]).toMatchObject({
