@@ -296,7 +296,7 @@ Settings 为 Browser 提供独立的 **Browser use** 组，收拢原基础设置
 
 ### 会话连续性设置
 
-Agents 中的 Session recovery 模块编辑全局恢复偏好，侧栏、Overview、搜索和窄窗分类使用同一模块目录。恢复时机、等待、自动恢复活动时间窗、确证退出后原生 resume、同一操作的复查次数与间隔沿同一配置 owner 编辑；默认值与合法政策由 Core 的 [continuity policy](../../../packages/core/src/agent-session-recovery/continuity.ts) 持有，恢复资格与执行语义仍归[Session 恢复](session-recovery.md)，设置页不另判 Run 或 Provider 状态。
+Agents 中的 Session recovery 模块编辑全局恢复偏好，侧栏、Overview、搜索和窄窗分类使用同一模块目录。恢复时机、等待、自动恢复活动时间窗、确证退出后原生 resume、同一操作的复查次数与间隔沿同一配置 owner 编辑；默认值与合法政策由 Core 的 [continuity policy](../../../packages/core/src/agent-session-recovery/continuity-contract.ts) 持有，恢复资格与执行语义仍归[Session 恢复](session-recovery.md)，设置页不另判 Run 或 Provider 状态。
 
 Automation 提供“Provider 不支持中断识别时，使用退出前 active 状态”的独立开关，默认关闭，与恢复后续行同组。页面明确 Provider 已支持但本次 unknown 不使用该兜底，并展示准确中断的原生恢复成功后只发送一次固定 `<amux:continue />`；正常结束回合、健康接回和 unknown 不主动发送。该标记可能开启一个普通 User 回合，投递不代表模型已经完成任务。技术恢复信息留在操作回执与服务窗，不提供新的恢复提醒或自定义续行正文编辑；历史已冻结正文和未知输入受据保留。Session recovery 保留自动原生恢复的活动时间窗，覆盖退出前活动与已确认闲置，不能只将旧 working 作为不限时恢复资格。
 
