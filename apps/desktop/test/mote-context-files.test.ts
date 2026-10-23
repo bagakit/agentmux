@@ -161,13 +161,15 @@ it('reports a concurrent context edit as unloaded and preserves the actual later
   expect(await readFile(join(mote.physicalDirectoryPath!, 'AGENTS.md'), 'utf8')).toContain('Concurrent original edit.')
 })
 
-it('omits the exact 64 KiB file when final overhead prevents whole delivery', async () => {
-  const h = await fixture(), mote = await h.owner.ensureMote(h.workspace, 'launcher:boundary-entry')
-  const content = 'x'.repeat(65535) + '\n'; await writeFile(join(mote.physicalDirectoryPath!, 'AGENTS.md'), content)
-  const prepared = await h.owner.prepareAgent(h.workspace, mote.id, { providerId: 'codex', sessionId: 'boundary-new' })
+it.each(['topic', 'mote'] as const)('keeps the $0 platform entry when final overhead omits the exact 64 KiB original AGENTS', async kind => {
+  const h = await fixture(), topic = await h.owner.ensure(h.workspace, 'launcher:boundary-entry-' + kind, undefined, kind === 'mote')
+  const content = 'x'.repeat(65535) + '\n'; await writeFile(join(topic.physicalDirectoryPath!, 'AGENTS.md'), content)
+  const prepared = await h.owner.prepareAgent(h.workspace, topic.id, { providerId: 'codex', sessionId: 'boundary-new' })
   expect(preparedContext(prepared)).not.toContain(content)
-  expect(preparedContext(prepared)).toContain('final message budget')
-  expect(await readFile(join(mote.physicalDirectoryPath!, 'AGENTS.md'), 'utf8')).toBe(content)
+  expect(preparedContext(prepared)).toContain('Original AGENTS.md was not loaded into this new Session because the complete context exceeds the final message budget.')
+  expect(preparedContext(prepared)).toContain(join(topic.physicalDirectoryPath!, 'AGENTS.md'))
+  expect(preparedContext(prepared)).toContain('"$AGENTMUX_CLI" ' + kind + ' --skill')
+  expect(await readFile(join(topic.physicalDirectoryPath!, 'AGENTS.md'), 'utf8')).toBe(content)
 })
 
 it.each([
@@ -222,6 +224,11 @@ it.each([
     expect(system).toMatch(/confirmed[\s\S]*decision[\s\S]*correction[\s\S]*result/i)
     expect(system).toMatch(/maintain|update/i)
     if (kind === 'mote') {
+      const authority = 'Current user instructions, authorization, actual capabilities and authoritative Runtime, permission, Project, Goal, Session and Run facts take precedence over defaults, saved context and history.'
+      expect(system.split(authority)).toHaveLength(2)
+      expect(system).not.toContain('Current user instructions, authorization, actual capabilities and authoritative Runtime, permission, Session, Project and Run facts take precedence over saved context.')
+      expect(system).toContain('This identity is independent of the current execution Session and selected Folder or Topic.')
+      expect(system).toContain('Saved context, when included, applies only to this new Session. Recovery retains the Session\'s existing context; editing the file does not hot-update a running Session.')
       expect(system).toContain(memory)
       expect(system).toContain('mote playbook pmo')
       expect(system).toContain('original knowledge, reusable methods and short memory index')
