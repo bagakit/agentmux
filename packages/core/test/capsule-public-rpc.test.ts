@@ -22,7 +22,7 @@ const inspection: CapsuleInspection = {
     sourcePath: '/build/original', entry: 'index.html', routing: 'file', mode: 'isolated', theme: 'none',
     port: 43123, createdAt: 1, updatedAt: 1 },
   content: { status: 'available', observedAt: 1 },
-  endpoint: { status: 'available', url: 'http://127.0.0.1:43123/', port: 43123, observedAt: 1 }, issues: []
+  endpoint: { status: 'available', url: 'http://127.0.0.1:43123/', port: 43123, observedAt: 1, instanceId: '4JkN7Q2vR8sW' }, issues: []
 }
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close() })
