@@ -66,7 +66,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const configurationPath = options.configurationPath ?? options.connections?.moteConfigurationPath
   const agentLearning = configurationPath && options.store instanceof AgentMuxFileAgentSessionStore ? createHostAgentLearning({
     configurationPath, directory: join(dirname(options.store.path), 'agent-learning'),
-    ...(options.connections?.spatial ? { spatial: options.connections.spatial } : {}),
+    ...(connectionOwner ? { spatial: connectionOwner.spatial } : {}),
     runtime: () => { if (!runtime) throw new AgentMuxError('The original Host is not yet available. Learning operations and existing Agents are retained.', 'CONTROL_UNAVAILABLE'); return runtime },
     desktop: desktopClient
   }) : undefined
@@ -76,7 +76,9 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   }
   const service = {
     ...(agentLearning ? { agentLearning } : {}),
-    ...(connectionOwner ? { connections: connectionOwner.connections, ...(connectionOwner.moteChat ? { moteChat: connectionOwner.moteChat } : {}) } : {}),
+    ...(connectionOwner ? { connections: connectionOwner.connections, spatialState: connectionOwner.spatial,
+      ...(connectionOwner.moteChat ? { moteChat: connectionOwner.moteChat } : {}),
+      ...(connectionOwner.moteConnections ? { moteConnections: connectionOwner.moteConnections, motePreferences: connectionOwner.motePreferences } : {}) } : {}),
     operationSource: (context: AgentMuxRpcCallContext) => context.caller ? undefined : authority?.operationSource(context.principal),
     recordDeviceOperation: async (source: import('@agentmux/core').AgentOperationDevice, method: string, args: unknown[], result: 'confirmed' | 'failed' | 'unknown', operationId: string) => {
       if (authority) {
