@@ -4,6 +4,7 @@ import { createSettingsCatalog } from './settings-catalog'
 import { appearanceSettingsModule } from './modules/appearance'
 import { notificationsSettingsModule } from './modules/notifications'
 import { browserSettingsModule } from './modules/browser'
+import { capsuleSettingsModule } from './modules/capsule'
 import { browserAgentControlSettingsModule } from './modules/browser-agent-control'
 import { generalSettingsModule } from './modules/general'
 import { keyboardShortcutsSettingsModule } from './modules/keyboard-shortcuts'
@@ -34,6 +35,7 @@ export const settingsModules = [
   agentsSettingsModule,
   continuitySettingsModule,
   browserSettingsModule,
+  capsuleSettingsModule,
   browserAgentControlSettingsModule,
   generalSettingsModule,
   keyboardShortcutsSettingsModule,
