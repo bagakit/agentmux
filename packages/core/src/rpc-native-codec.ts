@@ -2,6 +2,7 @@ import { parseExternalConversationReceipt } from './external-conversation.js'
 import { isMoteChatMethod, parseMoteChatParams, parseMoteChatResult } from './mote-chat-codec.js'
 import { parseCapsuleInputRequest, parseCapsuleInputResult } from './capsule-input.js'
 import { isCapsuleMethod, parseCapsuleRpcParams, parseCapsuleRpcResult } from './capsule.js'
+import { isCapsuleRuntimeMethod, parseCapsuleRuntimeResult } from './capsule-runtime.js'
 import { parseFileImportParams, parseFileImportResult } from './public-rpc-file-import.js'
 import { parseBroadcastReceipt, normalizeBroadcastInput } from './agent-message-broadcast.js'
 import { parseMessageEventsPage } from './agent-message-events.js'
@@ -312,6 +313,7 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
   credentials?: AgentMuxRpcCredentials): Record<string, unknown> {
   try {
     if (method === 'capsule.input') return parseCapsuleInputResult(value, parseCapsuleInputRequest(params)) as unknown as Record<string, unknown>
+    if (isCapsuleRuntimeMethod(method)) return parseCapsuleRuntimeResult(value) as unknown as Record<string, unknown>
     if (isCapsuleMethod(method)) return parseCapsuleRpcResult(method, value, parseCapsuleRpcParams(method, params)) as unknown as Record<string, unknown>
     if (method === 'app.search') return parseAgentMuxSearchPage(value, parseAgentMuxSearchInput(params)) as unknown as Record<string, unknown>
     if (isGoalDelegationMethod(method)) return parseGoalDelegationResult(value, parseGoalDelegationParams(method, params)) as unknown as Record<string, unknown>
