@@ -160,7 +160,7 @@ export function fileOpenReferenceMatches(
 
 /** Reuse the original File, including an unplaced owner or one promoted out of its initial Tab. */
 export function findFileWorkbenchSurface(state: Pick<FileWorkbenchState, 'tabs' | 'layouts'>, workspaceId: string, path: string,
-  context?: { displayWorkspaceId?: string; space?: { spaceId: string; zoneId: string } }) {
+  context?: { displayWorkspaceId?: string; space?: { spaceId: string; zoneId: string }; selection?: { topicId: string | null } }) {
   const layout = state.layouts[context?.displayWorkspaceId ?? workspaceId]
   const ordered = [...(layout?.groups.flatMap(group => group.tabOrder) ?? []),
     ...Object.values(state.layouts).flatMap(item => item.groups.flatMap(group => group.tabOrder))]
@@ -169,6 +169,9 @@ export function findFileWorkbenchSurface(state: Pick<FileWorkbenchState, 'tabs' 
     const tab = state.tabs[id]
     if (!tab || context?.space && tab.space &&
       (tab.space.spaceId !== context.space.spaceId || tab.space.zoneId !== context.space.zoneId)) continue
+    // A retained file in another Topic keeps its original entity and shared Document.
+    // A requested display context must not borrow that unrelated occurrence.
+    if (!tab.space && tab.topicId && context?.selection?.topicId && tab.topicId !== context.selection.topicId) continue
     const surface = workbenchSurfaces(tab).find(surface => surface.kind === 'file' && surface.workspaceId === workspaceId && surface.path === path)
     if (surface) return { tab, surface }
   }
@@ -177,7 +180,7 @@ export function findFileWorkbenchSurface(state: Pick<FileWorkbenchState, 'tabs' 
 
 /** Read existing entity facts before deriving an identity for a genuinely new File. */
 export function fileWorkbenchIdentity(state: Pick<FileWorkbenchState, 'tabs' | 'layouts'>, workspaceId: string, path: string,
-  context?: { displayWorkspaceId?: string; space?: { spaceId: string; zoneId: string } }): { tabId: string; regionId: string } {
+  context?: { displayWorkspaceId?: string; space?: { spaceId: string; zoneId: string }; selection?: { topicId: string | null } }): { tabId: string; regionId: string } {
   const original = findFileWorkbenchSurface(state, workspaceId, path, context)
   if (original) return { tabId: original.tab.id, regionId: original.surface.regionId }
   return availableWorkbenchTabIdentity(state.tabs, incarnation => fileTabId(workspaceId, path, incarnation))
