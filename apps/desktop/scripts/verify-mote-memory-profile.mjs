@@ -16,7 +16,7 @@ await mkdir(output, { recursive: true })
 const evidence = await mkdtemp(join(output, 'attempt-'))
 const isolated = join(evidence, 'source'), owner = 'apps/desktop/src/renderer/src/components/MoteMemory.tsx'
 const memoryTest = 'apps/desktop/test/mote-memory-profile.test.tsx', contextTest = 'apps/desktop/test/mote-context-files.test.ts'
-const nativeSource = 'apps/desktop/native/workspace-move.c', nativeInclude = 'apps/desktop/native/workspace-file.inc'
+const nativeSource = 'apps/host/native/workspace-move.c', nativeInclude = 'apps/host/native/workspace-file.inc'
 const nativeBuilder = 'apps/desktop/scripts/build-workspace-move-helper.mjs'
 const memoryCases = 13, contextCases = 21
 const config = 'memory-gate.config.mts', sha = bytes => createHash('sha256').update(bytes).digest('hex')

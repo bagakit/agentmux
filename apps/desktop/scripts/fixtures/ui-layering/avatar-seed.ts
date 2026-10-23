@@ -17,8 +17,8 @@ export async function createAvatarLayeringSeed(root: string) {
   const sourceInputs: Record<string, string> = {}
   // The original identity owner executes this native producer outside Node's loader.
   // Bind its binary and actual repository build inputs before ensureMote can spawn it.
-  for (const file of ['apps/desktop/resources/bin/agentmux-workspace-move', 'apps/desktop/native/workspace-move.c',
-    'apps/desktop/native/workspace-file.inc', 'apps/desktop/scripts/build-workspace-move-helper.mjs'])
+  for (const file of ['apps/desktop/resources/bin/agentmux-workspace-move', 'apps/host/native/workspace-move.c',
+    'apps/host/native/workspace-file.inc', 'apps/desktop/scripts/build-workspace-move-helper.mjs'])
     sourceInputs[file] = createHash('sha256').update(await readFile(join(repository, file))).digest('hex')
   await mkdir(userRoot, { recursive: true })
   const workspace: WorkspaceRecord = { id: SCRATCH_WORKSPACE_ID, hostId: 'local', path: join(root, 'avatar-workspace'), name: 'Original private Mote', kind: 'folder' }

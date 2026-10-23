@@ -94,7 +94,7 @@ const inputs = [...tests, ...(slice === 'documents' ? [component + 'document.ts'
   adapter, component + 'ImageAnnotationEditor.tsx', component + 'AnnotationNotes.tsx', component + 'AnnotationToolbar.tsx', component + 'AnnotationOriginalMenu.tsx', component + 'view.ts', component + 'selection-geometry.ts', component + 'image-annotation.css',
   'apps/desktop/src/renderer/src/components/BrowserPane.tsx', host + 'context.ts', host + 'compose.ts',
   host + 'AnnotationFileDialog.tsx', 'apps/desktop/src/renderer/src/components/WindowOverlayHost.tsx', 'apps/desktop/test/helpers/client-ui-render.tsx',
-  'apps/desktop/src/main/workspace-files.ts', 'apps/desktop/native/workspace-move.c', 'apps/desktop/scripts/build-workspace-move-helper.mjs',
+  'apps/desktop/src/main/workspace-files.ts', 'apps/host/native/workspace-move.c', 'apps/desktop/scripts/build-workspace-move-helper.mjs',
   'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/shared/workspace-file-bytes.ts'] : [adapter, 'apps/desktop/src/renderer/src/components/BrowserPane.tsx',
   'apps/desktop/src/renderer/src/styles/browser.css', 'apps/desktop/test/helpers/client-ui-render.tsx']),
   'apps/desktop/scripts/verify-image-annotation.mjs', owningConfig, 'apps/desktop/scripts/radix-overlay-aliases.ts',
@@ -172,7 +172,7 @@ try {
       child.once('exit', code => { clearTimeout(timer); clearTimeout(escalation); expired ? reject(new Error('The exact private helper build child timed out and exited')) : done(code) })
     })
     assert.equal(built, 0, 'The actual WorkspaceFiles helper builds before physical file proof')
-    evidence.nativeHelper = { source: 'apps/desktop/native/workspace-move.c', sha256: sha(await readFile('apps/desktop/resources/bin/agentmux-workspace-move')) }
+    evidence.nativeHelper = { source: 'apps/host/native/workspace-move.c', sha256: sha(await readFile('apps/desktop/resources/bin/agentmux-workspace-move')) }
   }
   await run('source')
   if (mutations) { for (const mutation of specification.mutations) await run(mutation.label, mutation); await run('restored-source') }

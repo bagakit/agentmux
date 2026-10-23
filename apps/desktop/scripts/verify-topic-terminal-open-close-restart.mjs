@@ -28,7 +28,7 @@ const receipt = { schema: 'agentmux.topic-terminal-open-close-restart.v1', passe
 const files = async directory => (await Promise.all((await fs.readdir(directory, { withFileTypes: true })).map(entry => entry.isDirectory()
   ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
 const sourceFiles = [new URL(import.meta.url).pathname, path.join(desktop, 'scripts/probe-process.mjs'),
-  workspaceMoveBuild, path.join(desktop, 'native/workspace-move.c'), workspaceMoveHelper,
+  workspaceMoveBuild, path.join(desktop, '../host/native/workspace-move.c'), workspaceMoveHelper,
   path.join(desktop, 'scripts/fixtures/terminal-wheel/xterm-instrumented.ts'), ...await files(fixture),
   ...await files(path.join(desktop, 'src')), ...await files(path.join(root, 'packages/core/dist')),
   ...await files(path.join(root, 'packages/client-ui/src')), ...await files(path.join(root, 'packages/client-ui/dist')),

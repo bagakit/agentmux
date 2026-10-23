@@ -22,7 +22,7 @@ let helper: string
 beforeAll(async () => {
   await mkdir(join(repository, '.tmp'), { recursive: true })
   const artifacts = await mkdtemp(join(repository, '.tmp/t2-maintenance-native-')); helper = join(artifacts, 'workspace-move')
-  const source = join(repository, 'apps/desktop/native/workspace-move.c')
+  const source = join(repository, 'apps/host/native/workspace-move.c')
   execFileSync('xcrun', ['clang', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', source, '-o', helper])
   if (process.env.AGENTMUX_DIRECTORY_IDENTITY_PROOF) await appendFile(process.env.AGENTMUX_DIRECTORY_IDENTITY_PROOF, JSON.stringify({ consumer: 'actual-native-helper', file: relative(repository, source), sha256: hash(await readFile(source)), helperSha256: hash(await readFile(helper)) }) + '\n')
 })

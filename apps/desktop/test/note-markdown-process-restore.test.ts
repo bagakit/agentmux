@@ -13,7 +13,7 @@ beforeAll(async () => {
   await mkdir(output, { recursive: true })
   await symlink(resolve('packages/core/node_modules'), join(output, 'node_modules'), 'dir').catch(error => { if (error.code !== 'EEXIST') throw error })
   await mkdir(resolve('.tmp/note-markdown-restore/resources/bin'), { recursive: true })
-  if (process.platform === 'darwin') execFileSync('xcrun', ['clang', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', 'apps/desktop/native/workspace-move.c', '-o', helper])
+  if (process.platform === 'darwin') execFileSync('xcrun', ['clang', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', 'apps/host/native/workspace-move.c', '-o', helper])
   const { build } = createRequire(resolve('packages/core/package.json'))('esbuild') as typeof import('../../../packages/core/node_modules/esbuild')
   const alias: Record<string, string> = { '@agentmux/layout': resolve('packages/layout/src/index.ts') }
   for (const pkg of ['core', 'demand']) {
@@ -49,7 +49,7 @@ beforeAll(async () => {
       })
     } }] })
   const inputs = Object.fromEntries(Object.keys(compiled.metafile!.inputs).filter(path => /^(apps|packages)\//u.test(path)).map(path => [path, createHash('sha256').update(readFileSync(path)).digest('hex')]))
-  for (const path of ['apps/desktop/native/workspace-move.c', 'apps/desktop/test/note-markdown-process-restore.test.ts']) inputs[path] = createHash('sha256').update(readFileSync(path)).digest('hex')
+  for (const path of ['apps/host/native/workspace-move.c', 'apps/desktop/test/note-markdown-process-restore.test.ts']) inputs[path] = createHash('sha256').update(readFileSync(path)).digest('hex')
   await writeFile(join(output, 'compiled-inputs.json'), JSON.stringify(inputs, null, 2))
 }, 30000)
 afterEach(async () => { for (const directory of directories.splice(0)) await rm(directory, { recursive: true, force: true }) })

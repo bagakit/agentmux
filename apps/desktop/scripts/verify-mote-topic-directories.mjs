@@ -57,7 +57,7 @@ try {
   const migration = await readFile(join(repository, 'apps/desktop/scripts/migrate-topic-directories.mjs'), 'utf8')
   assert.match(migration, /'--alias-swap'/)
   receipt.callers['native alias swap'] = ['apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/package.json']
-  for (const file of [...files.map(file => relative(repository, file)), 'apps/desktop/native/workspace-move.c',
+  for (const file of [...files.map(file => relative(repository, file)), 'apps/host/native/workspace-move.c',
     'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/test/scratch-topic-directories.test.ts',
     'apps/desktop/test/space-role-soul-session.test.ts', 'apps/desktop/test/mote-conversation-identity.test.tsx',
     'apps/desktop/test/file-explorer-open-as-project.integration.test.tsx', 'apps/desktop/test/topic-directory-migration.native.test.mjs', 'apps/desktop/test/rpc-client-observations.test.ts']) {

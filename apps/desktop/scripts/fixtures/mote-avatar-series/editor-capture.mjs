@@ -131,7 +131,7 @@ try {
     for (const file of ['packages/core/src/mote-avatar-series.ts', 'packages/core/src/mote-avatar-write.ts', 'packages/core/src/public-rpc.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/rpc-native-codec.ts',
       'packages/core/src/public-rpc-client.ts', 'packages/core/src/agentmux-cli-commands.ts', 'packages/core/src/agentmux-cli-help.ts', 'packages/core/src/agentmux.ts', 'packages/core/bin/amux',
       'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/ipc-sender-trust.ts', 'apps/desktop/src/shared/contracts.ts', 'apps/desktop/src/renderer/src/components/MoteAvatarSeriesCreateDialog.tsx',
-      'apps/desktop/native/workspace-move.c', 'apps/desktop/resources/bin/agentmux-workspace-move']) receipt.source[file] = sha(await fs.readFile(path.join(root, file)))
+      'apps/host/native/workspace-move.c', 'apps/desktop/resources/bin/agentmux-workspace-move']) receipt.source[file] = sha(await fs.readFile(path.join(root, file)))
   }
   const recordResources = async folder => {
     for (const entry of await fs.readdir(folder, { withFileTypes: true })) {

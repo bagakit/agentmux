@@ -20,7 +20,7 @@ const rendererModules = ['components/HtmlFilePreview.tsx', 'components/FileSurfa
 const productionFiles = [...rendererModules.map(file => 'apps/desktop/src/renderer/src/' + file), 'apps/desktop/src/main/html-file-previews.ts',
   'apps/desktop/src/main/workspace-files.ts', 'apps/desktop/src/main/ipc.ts', 'apps/desktop/src/main/ipc-sender-trust.ts', 'apps/desktop/src/preload/index.ts', 'apps/desktop/src/shared/contracts.ts',
   'apps/desktop/src/shared/workspace-file-format.ts', 'apps/desktop/src/shared/workspace-file-bytes.ts', 'apps/desktop/src/renderer/index.html',
-  'apps/desktop/native/workspace-move.c', 'apps/desktop/resources/bin/agentmux-workspace-move']
+  'apps/host/native/workspace-move.c', 'apps/desktop/resources/bin/agentmux-workspace-move']
 async function bindings() {
   const sources = {}
   for (const file of [...productionFiles, 'docs/design/behavior/files-and-git.md', 'docs/design/presentation/files-and-git.md', 'apps/desktop/scripts/verify-inline-html-preview.mjs']) sources[file] = sha(await readFile(join(repository, file)))

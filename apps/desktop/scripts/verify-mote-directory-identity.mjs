@@ -17,7 +17,7 @@ const ipc = 'apps/desktop/src/main/ipc.ts'
 const directories = 'apps/desktop/src/main/scratch-topic-directories.ts'
 const config = 'apps/desktop/scripts/fixtures/mote-directory-identity/vitest.config.mts'
 const test = 'apps/desktop/test/mote-directory-identity.test.ts'
-const nativeSource = 'apps/desktop/native/workspace-move.c'
+const nativeSource = 'apps/host/native/workspace-move.c'
 const variants = [
   { id: 'absolute-record-returned', file: schema, from: 'return { version: 2, identityDirectoryName: name, identityPathHash: hash(original) }',
     to: 'return { version: 1, identityDirectoryPath: original }', pattern: 'new actual migrations' },
@@ -68,7 +68,7 @@ const checks = [
   { symbol: 'originalTopicAddress', definition: addresses, caller: 'apps/desktop/src/renderer/src/components/SpaceTopicsTree.tsx', anchor: 'originalTopicAddress(' }
 ]
 const files = [...new Set([schema, 'apps/desktop/src/main/scratch-directory-identity.d.mts', scratch, directories, addresses,
-  observer, ipc, test, config, 'apps/desktop/native/workspace-move.c', 'apps/desktop/test/topic-directory-migration.native.test.mjs',
+  observer, ipc, test, config, 'apps/host/native/workspace-move.c', 'apps/desktop/test/topic-directory-migration.native.test.mjs',
   'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/scripts/verify-topic-directory-migration-mutations.mjs',
   'apps/desktop/scripts/verify-mote-topic-directories-mutations.mjs', 'apps/desktop/scripts/verify-mote-directory-identity.mjs', ...checks.flatMap(check => [check.definition, check.caller])])]
 const originals = Object.fromEntries(await Promise.all(files.map(async file => [file, await readFile(join(base, file))])))
@@ -98,7 +98,7 @@ try {
   for (const path of ['apps/desktop/src/renderer/src/lib/scratch-topic-snapshots.ts', 'apps/desktop/src/preload/index.ts', test, 'apps/desktop/test/scratch-topic-directories.test.ts', 'apps/desktop/test/rpc-client-observations.test.ts',
     'apps/desktop/test/mote-avatar-assets.test.ts', 'apps/desktop/test/mote-archive-service.test.ts', 'apps/desktop/test/mote-primary-directory.test.ts',
     config, 'apps/desktop/scripts/fixtures/mote-navigation-footer/vitest.owning.config.mts', 'apps/desktop/scripts/migrate-topic-directories.mjs',
-    'apps/desktop/native/workspace-move.c', 'apps/desktop/scripts/build-workspace-move-helper.mjs', 'packages/core/package.json', 'apps/desktop/package.json', 'vitest.setup.ts', 'tsconfig.base.json']) {
+    'apps/host/native/workspace-move.c', 'apps/desktop/scripts/build-workspace-move-helper.mjs', 'packages/core/package.json', 'apps/desktop/package.json', 'vitest.setup.ts', 'tsconfig.base.json']) {
     await mkdir(dirname(join(isolated, path)), { recursive: true }); await cp(join(base, path), join(isolated, path))
   }
   for (const path of ['node_modules', 'apps/desktop/node_modules', 'packages/core/node_modules',

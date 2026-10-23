@@ -67,7 +67,7 @@ function green(row,min){assert.equal(row.code,0,row.text.slice(-6000));const cou
 async function loaded(file){const rows=(await readFile(file,'utf8')).trim().split('\n').filter(Boolean).map(x=>JSON.parse(x));assert.ok(rows.length);return rows}
 try{
  for(const path of ['apps/desktop/src','packages/core/src'])await tree(path)
- const extra=['apps/desktop/package.json','packages/core/package.json','packages/demand/package.json','packages/layout/package.json','packages/client-ui/package.json','apps/desktop/native/workspace-move.c','apps/desktop/scripts/migrate-topic-directories.mjs',...checks.flatMap(c=>[c.definition,c.caller])]
+ const extra=['apps/desktop/package.json','packages/core/package.json','packages/demand/package.json','packages/layout/package.json','packages/client-ui/package.json','apps/host/native/workspace-move.c','apps/desktop/scripts/migrate-topic-directories.mjs',...checks.flatMap(c=>[c.definition,c.caller])]
  for(const file of new Set(extra))await bind(file)
  await bind('docs/design/behavior/public-control.md');await tree('apps/desktop/scripts/fixtures/mote-directory-short-name');await bind('apps/desktop/scripts/verify-mote-directory-short-name.mjs');await bind('apps/desktop/scripts/verify-mote-directory-short-renderer.mjs')
  receipt.featureHead=execFileSync('git',['rev-parse','HEAD'],{cwd:base,encoding:'utf8'}).trim();receipt.mainObserved=execFileSync('git',['rev-parse','refs/heads/main'],{cwd:base,encoding:'utf8'}).trim()
@@ -91,7 +91,7 @@ try{
  }else{
  for(const path of ['apps/desktop/src','apps/desktop/test/fixtures','packages/core/src','packages/core/test/helpers'])await cp(join(base,path),join(isolated,path),{recursive:true})
  const tests=[test,birth,'apps/desktop/test/mote-directory-identity.test.ts','apps/desktop/test/scratch-topic-directories.test.ts','apps/desktop/test/rpc-client-observations.test.ts','apps/desktop/test/mote-avatar-assets.test.ts','apps/desktop/test/mote-archive-service.test.ts','apps/desktop/test/mote-primary-directory.test.ts','apps/desktop/test/runtime-controller.test.ts','apps/desktop/test/topic-directory-migration.native.test.mjs','packages/core/test/public-rpc-files.test.ts']
- for(const file of [...tests,'apps/desktop/scripts/migrate-topic-directories.mjs','apps/desktop/native/workspace-move.c','packages/core/package.json','apps/desktop/package.json','tsconfig.base.json','vitest.setup.ts']){await mkdir(dirname(join(isolated,file)),{recursive:true});await cp(join(base,file),join(isolated,file));await bind(file)}
+ for(const file of [...tests,'apps/desktop/scripts/migrate-topic-directories.mjs','apps/host/native/workspace-move.c','packages/core/package.json','apps/desktop/package.json','tsconfig.base.json','vitest.setup.ts']){await mkdir(dirname(join(isolated,file)),{recursive:true});await cp(join(base,file),join(isolated,file));await bind(file)}
  await cp(join(base,'apps/desktop/scripts/fixtures/mote-directory-short-name'),join(isolated,'apps/desktop/scripts/fixtures/mote-directory-short-name'),{recursive:true})
  for(const dir of ['mote-navigation-footer','mote-directory-identity'])await cp(join(base,'apps/desktop/scripts/fixtures',dir),join(isolated,'apps/desktop/scripts/fixtures',dir),{recursive:true})
  for(const path of ['node_modules','apps/desktop/node_modules','packages/core/node_modules','packages/core/vendor','packages/demand','packages/layout','packages/client-ui']){await mkdir(dirname(join(isolated,path)),{recursive:true});await symlink(join(base,path),join(isolated,path))}

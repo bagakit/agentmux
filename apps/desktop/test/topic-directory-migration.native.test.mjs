@@ -27,8 +27,8 @@ before(async () => {
   await mkdir(join(repository, '.tmp'), { recursive: true })
   artifacts = await mkdtemp(join(repository, '.tmp/topic-directory-native-'))
   helper = join(artifacts, 'workspace-move')
-  run('xcrun', ['clang', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', join(repository, 'apps/desktop/native/workspace-move.c'), '-o', helper])
-  const files = ['apps/desktop/native/workspace-move.c', 'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/test/topic-directory-migration.native.test.mjs', 'apps/desktop/src/main/scratch-directory-identity.mjs']
+  run('xcrun', ['clang', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', join(repository, 'apps/host/native/workspace-move.c'), '-o', helper])
+  const files = ['apps/host/native/workspace-move.c', 'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/test/topic-directory-migration.native.test.mjs', 'apps/desktop/src/main/scratch-directory-identity.mjs']
   await writeFile(join(artifacts, 'source-inputs.json'), JSON.stringify({ files: Object.fromEntries(await Promise.all(files.map(async file => [file, hash(await readFile(join(repository, file)))]))), helperSha256: hash(await readFile(helper)) }, null, 2))
 })
 
