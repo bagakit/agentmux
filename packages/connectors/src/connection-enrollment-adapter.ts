@@ -26,7 +26,7 @@ export type EnrollmentUnknownReceipt = {
   kind: 'unknown'
   diagnostic: ConnectionEnrollmentDiagnostic
 }
-/** Private issuer state is encrypted by the original Host, never returned by public JSON. */
+/** Issuer state stays in the original private Host credential store, never in public JSON. */
 export type EnrollmentAuthenticationReceipt =
   | {
       kind: 'authentication'
