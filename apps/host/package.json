@@ -37,6 +37,10 @@
     "./credential-encryption": {
       "types": "./dist/credential-encryption.d.ts",
       "import": "./dist/credential-encryption.js"
+    },
+    "./credential-administration": {
+      "types": "./dist/credential-administration.d.ts",
+      "import": "./dist/credential-administration.js"
     }
   }
 }

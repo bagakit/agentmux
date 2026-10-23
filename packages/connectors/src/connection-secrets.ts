@@ -25,15 +25,16 @@ export class ConnectionSecrets implements WritableSecretPort {
       return row ? { credentialRef: row.credential_ref as string } : null
     } catch { throw new AgentMuxError('The original credential operation is unconfirmed. Inspect it before replacing its identity.', 'CONNECTION_CREDENTIAL_UNCONFIRMED') }
   }
-  async store(input: { operationId: string; secret: string }): Promise<{ credentialRef: string }> {
+  async store(input: { operationId: string; secret: string }, assertCurrent?: () => void | Promise<void>): Promise<{ credentialRef: string }> {
     if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['operationId', 'secret'].includes(key)) || typeof input.operationId !== 'string' || typeof input.secret !== 'string' || !input.secret.length || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(input.operationId)) throw new AgentMuxError('Credential input or operation identity is invalid.', 'INVALID_CONNECTION_DATA')
     const { operationId, secret } = input
     await this.assertAvailable()
     try {
       const original = this.database.prepare('SELECT credential_ref, ciphertext FROM connection_credential WHERE operation_id = ?').get(operationId)
-      if (original) return await this.matchOriginal(original, secret)
+      if (original) { const result = await this.matchOriginal(original, secret); await assertCurrent?.(); return result }
       // OS authorization can remain pending. Never hold a SQLite writer across it.
       const ciphertext = await this.encryption.encryptStringAsync(secret)
+      await assertCurrent?.()
       let concurrent: Record<string, unknown> | undefined
       this.database.exec('BEGIN IMMEDIATE')
       try {
@@ -48,7 +49,7 @@ export class ConnectionSecrets implements WritableSecretPort {
         try { this.database.exec('ROLLBACK') } catch { /* Original commit may already exist. Inspect its operation. */ }
         throw error
       }
-      return await this.matchOriginal(concurrent, secret)
+      const result = await this.matchOriginal(concurrent, secret); await assertCurrent?.(); return result
     } catch (error) {
       if (error instanceof AgentMuxError) throw error
       throw new AgentMuxError('Secure credential storage could not confirm the original operation. Inspect it before retrying.', 'CONNECTION_CREDENTIAL_UNCONFIRMED')
