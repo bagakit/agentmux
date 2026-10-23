@@ -47,8 +47,6 @@ export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, sa
   useEffect(() => setMenuOpen(false), [page.noteId])
   const library = useNotebookLibrary(state => state.state), book = library?.notebooks[page.notebookId]
   const config = useAppStore(state => state.config), snapshots = useAppStore(state => state.scratchTopicSnapshots)
-  const topicNames = useMemo(() => new Map(spatialSources(config, scratchTopicsForWorkspace(snapshots,
-    config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []).spaces.map(space => [space.spaceId, space.name])), [config, snapshots])
   const originalTitle = sourceTitle ?? page.title
   const operation = useNotebookOperation(), [title, setTitle] = useState(originalTitle), [editing, setEditing] = useState(false)
   const [panel, setPanel] = useState<'move' | 'sources' | 'history' | 'followers' | 'editors' | null>(null)
@@ -74,7 +72,11 @@ export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, sa
   const cancelTitle = useRef(false)
   const sourceCreation = useRef<{ sourceId: string; prepared: SurveyBrowserPreparation | null } | null>(null)
   useEffect(() => { if (!editing && !operation.busy && !operation.issue) setTitle(originalTitle) }, [originalTitle, editing, operation.busy, operation.issue])
-  const allPages = Object.values(library?.pages ?? {}), excluded = notebookDescendants(allPages, page.noteId)
+  const moveRows = useMemo(() => {
+    if (!visible || panel !== 'move') return []
+    const pages = Object.values(library?.pages ?? {}), excluded = notebookDescendants(pages, page.noteId)
+    return notebookPageRows(pages, destination).filter(row => !excluded.has(row.page.noteId))
+  }, [visible, panel, library?.pages, page.noteId, destination])
   async function rename() {
     const value = title.trim(); if (!value) { setTitle(originalTitle); return }
     if (value === originalTitle) return
@@ -102,7 +104,15 @@ export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, sa
   }
   const archiveRoot = library ? notebookPageArchiveRoot(library.pages, page.noteId) : undefined
   const restoreLabel = archiveRoot && archiveRoot.noteId !== page.noteId ? 'Restore parent page' : 'Restore page'
-  const events = library?.trail.filter(event => event.noteId === page.noteId).slice().reverse() ?? []
+  const events = useMemo(() => {
+    if (!visible || panel !== 'history') return []
+    return library?.trail.filter(event => event.noteId === page.noteId).slice().reverse() ?? []
+  }, [visible, panel, library?.trail, page.noteId])
+  const topicNames = useMemo(() => {
+    if (!visible || panel !== 'history') return new Map<string, string>()
+    return new Map(spatialSources(config, scratchTopicsForWorkspace(snapshots,
+      config?.workspaces.find(workspace => workspace.id === SCRATCH_WORKSPACE_ID)) ?? []).spaces.map(space => [space.spaceId, space.name]))
+  }, [visible, panel, config, snapshots])
   const labels = { created: 'Created', moved: 'Moved', renamed: 'Renamed', 'source-added': 'Source added', organized: 'Added to Topic', relocated: 'File moved', archived: 'Archived', restored: 'Restored', followed: 'Followed', unfollowed: 'Unfollowed' }
   function openPanel(kind: 'move' | 'sources' | 'history') {
     if (kind === 'move') { setDestination(page.notebookId); setParentId(page.parentNoteId ?? '') }
@@ -178,7 +188,7 @@ export function NotebookPageDetails({ page, sourceTitle, sourceDirty = false, sa
       <label>Notebook<select aria-label="Destination notebook" value={destination} disabled={operation.busy || Boolean(operation.issue)} onChange={event => { setDestination(event.target.value); setParentId('') }}>
         {Object.values(library?.notebooks ?? {}).map(book => <option key={book.notebookId} value={book.notebookId}>{book.name}</option>)}</select></label>
       <label>Under page<select aria-label="Parent page" value={parentId} disabled={operation.busy || Boolean(operation.issue)} onChange={event => setParentId(event.target.value)}><option value="">Notebook root</option>
-        {notebookPageRows(allPages, destination).filter(row => !excluded.has(row.page.noteId)).map(row => <option key={row.page.noteId} value={row.page.noteId}>{'　'.repeat(row.depth)}{row.page.title}</option>)}</select></label>
+        {moveRows.map(row => <option key={row.page.noteId} value={row.page.noteId}>{'　'.repeat(row.depth)}{row.page.title}</option>)}</select></label>
       <div><button className="note-text-button" type="submit" disabled={operation.busy || Boolean(operation.issue)}><ThemeActionSaveIcon size={13} />Move page</button><button className="note-text-button" type="button" onClick={() => setPanel(null)}>Cancel</button></div>
     </form> : null}
     {panel === 'sources' ? <section className="notebook-page-panel" aria-label="Saved web sources">
