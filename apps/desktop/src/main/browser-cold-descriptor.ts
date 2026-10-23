@@ -1,5 +1,6 @@
 import type { AgentMuxBrowserTarget } from '@agentmux/core'
 import type { AgentMuxSpatialGraph } from '@agentmux/core/spatial-graph'
+import type { CapsuleInspection } from '@agentmux/core/capsule'
 import { cloneBrowserViewport, isBrowserViewport, type BrowserViewport } from '../shared/browser-viewport.js'
 
 /** Host resource metadata stays in Core; only Main interprets it as a page to acquire. */
@@ -10,6 +11,13 @@ export type BrowserColdDescriptor = {
   title: string
   mode: 'normal' | 'private'
   profileId?: string
+  /** Container provenance survives navigation; it does not grant the current document a bridge. */
+  capsuleId?: string
+  capsuleOrigin?: string
+  /** Original presentation requests associated by Main; membership is not completion evidence. */
+  capsuleOpenOperationIds?: string[]
+  /** Resolved by the original Host when acquiring this exact cold owner; never persisted here. */
+  capsule?: CapsuleInspection
   /** Older records did not save a viewport. Absence is not a confirmed responsive setting. */
   viewport?: BrowserViewport
   agent?: import('@agentmux/core').AgentMuxBrowserControl['agent']
@@ -27,6 +35,12 @@ export function browserColdDescriptor(graph: AgentMuxSpatialGraph | null, id: st
     typeof data.workspaceId !== 'string' || !data.workspaceId || typeof data.url !== 'string' || !data.url ||
     (data.mode !== undefined && data.mode !== 'normal' && data.mode !== 'private') ||
     (data.profileId !== undefined && data.profileId !== null && typeof data.profileId !== 'string') ||
+    (data.capsuleId !== undefined && (typeof data.capsuleId !== 'string' || !data.capsuleId.trim())) ||
+    (data.capsuleId !== undefined && (typeof data.capsuleOrigin !== 'string' || !isCapsuleOrigin(data.capsuleOrigin))) ||
+    (data.capsuleOrigin !== undefined && data.capsuleId === undefined) ||
+    (data.capsuleOpenOperationIds !== undefined && (data.capsuleId === undefined || !Array.isArray(data.capsuleOpenOperationIds) ||
+      data.capsuleOpenOperationIds.some(id => typeof id !== 'string' || !id.trim()) || new Set(data.capsuleOpenOperationIds).size !== data.capsuleOpenOperationIds.length)) ||
+    (data.capsuleId !== undefined && (data.mode === 'private' || data.profileId != null)) ||
     (data.viewport !== undefined && !isBrowserViewport(data.viewport))) {
     throw new Error('The original Browser resource descriptor is incomplete. Its Region is kept; restore its saved resource before retrying.')
   }
@@ -47,8 +61,15 @@ export function browserColdDescriptor(graph: AgentMuxSpatialGraph | null, id: st
   return { id, workspaceId: data.workspaceId, url: privateMode ? 'about:blank' : data.url,
     title: privateMode ? 'Private page' : typeof data.title === 'string' ? data.title : '', mode: privateMode ? 'private' : 'normal',
     ...(!privateMode && data.profileId ? { profileId: data.profileId as string } : {}),
+    ...(data.capsuleId ? { capsuleId: data.capsuleId as string, capsuleOrigin: data.capsuleOrigin as string } : {}),
+    ...(Array.isArray(data.capsuleOpenOperationIds) ? { capsuleOpenOperationIds: [...data.capsuleOpenOperationIds] as string[] } : {}),
     ...(data.viewport !== undefined ? { viewport: cloneBrowserViewport(data.viewport as BrowserViewport) } : {}),
     ...(agent === undefined ? {} : { agent }), ...(warning ? { warning } : {}) }
+}
+
+function isCapsuleOrigin(value: string): boolean {
+  try { const url = new URL(value); return url.protocol === 'http:' && url.hostname === '127.0.0.1' && url.origin === value }
+  catch { return false }
 }
 
 /** Discovery never acquires a native page and never replaces an existing Main fact. */

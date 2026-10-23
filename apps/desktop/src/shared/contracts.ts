@@ -1265,6 +1265,12 @@ export const CONTROL_RESPONSE_CHANNEL = 'control:response'
 export type BrowserSnapshot = {
   id: string
   mode: import('@agentmux/core').AgentMuxBrowserMode
+  /** Durable container provenance, independent of current document authority. */
+  capsuleId?: string
+  capsuleOrigin?: string
+  capsuleOpenOperationIds?: string[]
+  /** Native current-document observation only; never persisted or used as page IPC authorization. */
+  capsuleActive?: boolean
   /** Current document artwork reported by Chromium, fetched through this original Profile session; transient. */
   faviconDataUrl?: string | undefined
   navigationId: string
@@ -1992,7 +1998,7 @@ export type AgentMuxDesktopApi = {
     /** Forget only the answer displayed on this row; a newer answer is a conflict. */
     forgetAppLinkScheme(scheme: string, expected: AppLinkSchemeChoice): Promise<void>
     /** Ensure this Browser identity: existing owners keep their actual URL/Profile; absent owners open url. */
-    create(id: string, url: string, workspaceId: string | null, rememberedProfileId?: string, mode?: import('@agentmux/core').AgentMuxBrowserMode, viewport?: BrowserViewport): Promise<BrowserSnapshot>
+    create(id: string, url: string, workspaceId: string | null, rememberedProfileId?: string, mode?: import('@agentmux/core').AgentMuxBrowserMode, viewport?: BrowserViewport, capsuleId?: string, capsuleOpenOperationId?: string): Promise<BrowserSnapshot>
     navigate(id: string, url: string): Promise<BrowserSnapshot>
     back(id: string): Promise<BrowserSnapshot>
     forward(id: string): Promise<BrowserSnapshot>

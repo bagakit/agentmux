@@ -26,8 +26,9 @@ export default defineConfig({
     build: {
       // Sandboxed preload can load Electron, but not external workspace packages.
       externalizeDeps: false,
+      isolatedEntries: true,
       rollupOptions: {
-        input: { index: resolve(import.meta.dirname, 'src/preload/index.ts'), 'browser-popup': resolve(import.meta.dirname, 'src/preload/browser-popup.ts') },
+        input: { index: resolve(import.meta.dirname, 'src/preload/index.ts'), 'browser-popup': resolve(import.meta.dirname, 'src/preload/browser-popup.ts'), capsule: resolve(import.meta.dirname, 'src/preload/capsule.ts') },
         output: { format: 'cjs', entryFileNames: '[name].cjs' }
       }
     }

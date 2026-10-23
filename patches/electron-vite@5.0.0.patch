@@ -26,3 +26,12 @@ index fe0d0c62c9a4159f17437d44e8d128db4bea2ae4..443656bfe251f597beda80bc95a5df55
                  const indexToAppend = lastESMImport ? lastESMImport.end : 0;
                  const s = new MagicString(code);
                  s.appendRight(indexToAppend, CJSShim);
+@@ -1101,6 +1093,8 @@ function writeLine(output) {
+     }
+ }
+ function clearLine(move = 0) {
++    if (!process.stdout.isTTY)
++        return;
+     if (move < 0) {
+         process.stdout.moveCursor(0, move);
+     }
