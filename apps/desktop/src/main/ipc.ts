@@ -41,7 +41,7 @@ import { MoteConnectionSourceOwner } from './mote-connection-source.js'
 import { goalRoleInputNote } from './goal-role-input.js'
 import { GoalPatrolOwner } from './goal-patrol-owner.js'
 import { createPublicationConversationPort, createHostedIngressCorePort } from '@agentmux/connectors'
-import { createDesktopConnections } from './connector-host.js'
+import { createConnectionServices } from '@agentmux/connectors'
 import { registerConnectorIpc } from './connector-ipc.js'
 import { GoalStartResponsibilityOwner } from './goal-start-responsibility.js'
 import { GoalResponsibilityOwner } from './goal-responsibility-owner.js'
@@ -2415,7 +2415,7 @@ export async function registerIpc(args: {
     topics: args.scratchTopics, clients: () => args.runtime.rpcClients(),
     checkpoint: reference => createPublicationConversationPort(() => args.runtime.rpcClients()).checkpoint(reference, new AbortController().signal)
   })
-  const connectorServices = await createDesktopConnections({ directory: process.env.AGENTMUX_DESKTOP_USER_DATA === undefined
+  const connectorServices = await createConnectionServices({ directory: process.env.AGENTMUX_DESKTOP_USER_DATA === undefined
     ? join(homedir(), '.agentmux', 'connectors')
     : join(app.getPath('userData'), 'connectors'), encryption: safeStorage, moteChat: { agents: moteChatAgents, assertTarget: moteChatAgents.assertTarget, assertReady: moteChatAgents.assertReady },
     publication: createPublicationConversationPort(() => args.runtime.rpcClients()),
