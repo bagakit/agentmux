@@ -289,7 +289,7 @@ it('known Run exit exposes bounded draining and never reuses a stuck result stre
  await f.bytes(Buffer.from(JSON.stringify({schema:'agentmux.toolkit.result.v1',event:'result',sequence:1,payload,document:{schema:'agentmux.toolkit.result.v1',summary:'Runs',items:[],links:[],notice:''},diagnostics:{stderrBytes:0,stderr:null}})+'\n'))
  f.accept({type:'process-state',state:'exited',exitCode:9})
  expect(f.owner.current).toMatchObject({state:'unknown',sequence:1});expect(f.owner.current.reason).toContain('draining')
- await expect(f.watch()).rejects.toMatchObject({code:'CONTROL_UNAVAILABLE'})
+ const reading=await f.watch();expect(f.owner.current.state).toBe('unknown');reading.dispose()
  await vi.waitFor(()=>expect(f.owner.current.diagnostics.lastFailure?.details).toMatchObject({stage:'result-channel',exit:{code:9},error:{code:'CONTROL_TIMEOUT'}}),{timeout:4000})
  await vi.waitFor(()=>expect(f.owner.current.run).toBeNull())
  expect(f.port.stop).not.toHaveBeenCalled();expect(f.port.release).toHaveBeenCalledOnce();expect(f.port.remove).toHaveBeenCalledOnce()
