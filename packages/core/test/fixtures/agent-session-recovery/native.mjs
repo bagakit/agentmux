@@ -2,7 +2,6 @@
 // A private native protocol peer. The managed worker, Core, FileStore and Runtime are production code.
 import { appendFileSync, existsSync, renameSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { WebSocketServer } from 'ws'
 
 const args = process.argv.slice(2)
 if (args.includes('--version')) { console.log('codex-cli 0.163.0'); process.exit(0) }
@@ -12,6 +11,7 @@ if (!root) throw new Error('The private native peer requires its test-owned prot
 const nativeId = '00000000-0000-4000-8000-000000000005'
 const append = (name, value) => appendFileSync(join(root, name), JSON.stringify(value) + '\n')
 if (args.includes('app-server')) {
+  const { WebSocketServer } = await import('ws')
   const heartbeat = () => {
     writeFileSync(join(root, 'backend.json.next'), JSON.stringify({ pid: process.pid, at: Date.now() }))
     renameSync(join(root, 'backend.json.next'), join(root, 'backend.json'))
