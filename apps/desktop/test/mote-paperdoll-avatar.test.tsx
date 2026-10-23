@@ -26,16 +26,16 @@ beforeEach(async () => {
 })
 afterEach(async () => { await app.dispose(); dispose?.(); dispose = undefined; vi.unstubAllGlobals() })
 function button(label: string) {
-  if (label === 'Save avatar' && document.querySelector('[data-avatar-source=face][aria-pressed=true]')) label = 'Save face'
+  if (label === 'Save avatar' && document.querySelector('[data-avatar-source=face][aria-pressed=true]') && document.querySelector('.space-icon-picker__automatic[aria-pressed=true]') === null) label = 'Save face'
 
-  const scope = document.querySelector('.space-icon-picker[role="dialog"]') ?? document
+  const scope = document.querySelector('[role="dialog"] .space-icon-picker') ?? document.querySelector('.space-icon-picker[role="dialog"]') ?? document
   const value = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === label || node.getAttribute('aria-label') === label)
   expect(value, label).toBeDefined(); return value!
 }
 async function edit() {
   await act(async () => app.entry().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2, clientX: 10, clientY: 50 }))); await settleMoteApp()
   const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Change avatar…')
-  expect(item).toBeDefined(); await moteClick(item!); expect(document.querySelector('.space-icon-picker[role="dialog"]')).not.toBeNull()
+  expect(item).toBeDefined(); await moteClick(item!); expect(document.querySelector('[role="dialog"] .space-icon-picker, .space-icon-picker[role="dialog"]')).not.toBeNull()
   await moteClick(button('Make a face'))
 }
 function quiet(before: ReturnType<typeof useAppStore.getState>) {
@@ -74,7 +74,7 @@ it('Cancel and Escape discard actual component drafts, restoring automatic retur
   await moteClick(button('Mouth · grin')); await moteClick(button('Cancel'))
   expect(useAppStore.getState().spaceObjectIcons).toEqual({})
   await edit(); await moteClick(button('Detail · antenna'))
-  await act(async () => document.querySelector('.space-icon-picker[role="dialog"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await settleMoteApp()
+  await act(async () => document.querySelector('.space-icon-picker')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await settleMoteApp()
   expect(useAppStore.getState().spaceObjectIcons).toEqual({})
   await edit(); await moteClick(button('Save avatar'))
   expect(app.entry().querySelector('.mote-face')).not.toBeNull()
@@ -210,16 +210,50 @@ it('renders focused part glyphs, group tabs, presets, 45/24px stage chips and ke
   expect(document.querySelectorAll('.mote-avatar-alternative:not([hidden]) .mote-avatar-stage [data-silhouette-art="flat"]').length).toBe(3)
   await moteClick(button('Make a face'))
   expect(document.querySelectorAll('.mote-face--part').length).toBeGreaterThan(20)
-  const exprTab = [...document.querySelectorAll<HTMLElement>('[role="tab"]')].find(node => node.textContent === 'Expression')!
+  const exprTab = [...document.querySelectorAll<HTMLButtonElement>('.mote-face-editor__group-tab')].find(node => node.textContent === 'Expression')!
   await moteClick(exprTab)
   expect(document.querySelector<HTMLElement>('fieldset[data-mote-face-part="shape"]')!.hidden).toBe(true)
   expect(document.querySelector<HTMLElement>('fieldset[data-mote-face-part="eyes"]')!.hidden).toBe(false)
-  const preset = [...document.querySelectorAll<HTMLElement>('.mote-face-editor__preset')].find(node => node.textContent === 'Geek')!
+  const preset = [...document.querySelectorAll<HTMLButtonElement>('.mote-face-editor__preset')].find(node => node.textContent === 'Geek')!
   await moteClick(preset)
   expect(document.querySelector('.mote-face-editor__preview [data-mote-face-eyes="spark"]')).not.toBeNull()
   await moteClick(button('Restore automatic'))
   expect(document.querySelector('[data-avatar-source="face"]')!.getAttribute('aria-pressed')).toBe('true')
   expect(button('Restore automatic').getAttribute('aria-pressed')).toBe('true')
+  expect(document.querySelector('.mote-face-editor:not([hidden]) .mote-avatar-stage__source strong')?.textContent).toBe('Automatic companion')
+  expect(button('Save avatar').textContent).toBe('Save avatar')
+})
+
+it('Low-poly Dragon companion combines brand dragon horns and emerald facets with live articulated expressions', async () => {
+  vi.stubGlobal('Image', class {
+    width = 512; height = 512; onload: (() => void) | null = null; onerror: (() => void) | null = null
+    set src(_source: string) { queueMicrotask(() => this.onload?.()) }
+  })
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ clearRect: vi.fn(), drawImage: vi.fn() } as never)
+  vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,DRAGONPNG')
+  vi.spyOn(api.scratch, 'saveMoteAvatar').mockResolvedValue({ kind: 'image', fileName: 'd'.repeat(64) + '.png' })
+  vi.spyOn(api.moteAvatars, 'list').mockResolvedValue({
+    roots: [{ origin: 'builtin', path: '/builtin', state: 'available' }],
+    series: [{ origin: 'builtin', seriesId: 'lowpoly', title: 'Low poly', entries: [
+      { entryId: 'dragon', title: 'Dragon', definition: { kind: 'image', file: 'lowpoly-dragon.png' } }
+    ] }],
+    issues: []
+  })
+  vi.spyOn(api.moteAvatars, 'preview').mockResolvedValue({
+    source: { origin: 'builtin', seriesId: 'lowpoly', entryId: 'dragon', revision: 'sha256:' + 'd'.repeat(64) },
+    definition: { kind: 'image', file: 'lowpoly-dragon.png' },
+    payload: { kind: 'image', image: { width: 256, height: 256, dataUrl: 'data:image/png;base64,DRAGON' } },
+    issues: []
+  })
+  localStorage.setItem(savedMoteKey, JSON.stringify({ open: true, targetTopicId: customMoteId, targetTabId: customTab.id }))
+  await app.mount(); await settleMoteApp()
+  await act(async () => app.entry().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2, clientX: 10, clientY: 50 }))); await settleMoteApp()
+  await moteClick([...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Change avatar…')!); await settleMoteApp()
+  await moteClick(button('Dragon Mote image')); await settleMoteApp()
+  expect(document.querySelector('.mote-avatar-alternative:not([hidden]) .mote-avatar-stage__source strong')?.textContent).toBe('Dragon')
+  expect(document.querySelectorAll('.mote-avatar-alternative:not([hidden]) .mote-avatar-stage [data-silhouette-art="dragon"]').length).toBe(3)
+  await moteClick(button('Save avatar')); await settleMoteApp()
+  expect(app.entry().querySelector('[data-space-icon-source="silhouette"] [data-silhouette-art="dragon"]')).not.toBeNull()
 })
 
 it('saving a Mote silhouette preserves live articulated expressions across Footer, floating chooser, Space and reopened picker', async () => {
