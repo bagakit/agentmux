@@ -16,6 +16,8 @@
 | 内存 | [RendererMemoryInspector](../../apps/desktop/src/main/renderer-memory.ts)、[allocation sampler](../../apps/desktop/src/main/renderer-allocations.ts) 与 [heap owner](../../apps/desktop/src/main/renderer-heap-snapshot.ts) | heap／backing 点读、采样窗口内存活分配或显式对象持有关系，各有范围；计数可能重叠，不能拼成全部 RSS 分账。 |
 | 现场组合 | [PerformanceSceneOwner](../../apps/desktop/src/main/performance-scene.ts) → [安全诊断投影](../../packages/core/src/performance-scene-evidence.ts) | 串行阶段的原身份、区间、原件与失败／unknown；不是同一时刻的全系统快照。 |
 
+原采样器以同一个消费时钟独立读取 App／Main，进程树扫描保持单笔在途。扫描完成只合入本来源结果和真实时间，随后由正常发布消费；不会重读 App 或额外制造一帧。公共首帧因而可含可用 App 和仍 pending 的进程树；任何一源的迟到、失败或换代都不刷新另一源的年龄。
+
 各层沿原公共 owner 接线。分析器是无 IO 的便携纯函数，不持有 Session、进程、debugger 或历史；本机 CLI 只转换用户明确指定的导出文件，不创建另一套服务事实。[Performance 本机导入](../../apps/desktop/src/renderer/src/components/performance/PerformanceProfileImport.tsx)通过用户选择的 `File` 读取有界原字节，复用同一解析、加权分析和技术摘要；[共享视图](../../apps/desktop/src/renderer/src/components/performance/PerformanceProfileView.tsx)同时服务原现场和导入结果。文件选择与下载归 client，Core 不引入文件系统或 UI 服务。
 
 ## 函数样本的解释
