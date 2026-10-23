@@ -173,3 +173,4 @@ export * from './capsule-runtime.js'
 export * from './agent-session-recovery.js'
 
 export * from './capsule-input.js'
+export * from './agent-learning.js'
