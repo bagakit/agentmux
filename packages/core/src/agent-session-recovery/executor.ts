@@ -1,4 +1,4 @@
-import { AgentMuxError } from './errors.js'
+import { AgentMuxError } from '../errors.js'
 
 /** Original logical SDK options only; never a RunSpec, generated credential or input carrier. */
 export type AgentContinuityExecutor = { providerId: string; executorId: string } & (

@@ -1,6 +1,6 @@
 import { DEFAULT_COMPOSER_INPUT_CONFIG, resolveComposerInputConfig, type ComposerInputConfig } from '@agentmux/client-ui/composer-input-config'
 import { DEFAULT_THEME_ID } from '@agentmux/client-ui/theme'
-import { normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-continuity'
+import { normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-recovery'
 import { APP_APPEARANCE_DEFAULT, TERMINAL_FONT_SIZE_DEFAULT, PROJECT_RAIL_DENSITY_DEFAULT, MESSAGE_TOOL_INITIAL_LAYOUT_DEFAULT, MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, type AppConfig, type GoalsCommonActionsConfig } from './contracts'
 import { DEFAULT_NOTIFICATION_MODE_ID, DEFAULT_NOTIFICATION_SOUND } from './notification-presentation'
 import { DEFAULT_A2A_NOTIFICATION, resolveA2ANotifications } from './a2a-preferences'

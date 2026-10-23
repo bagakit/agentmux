@@ -9,7 +9,7 @@ import { noteShareUndoRecoveryMessage, removedSavedNoteIncludes } from './lib/no
 import { fileShareSourceOperation, parseFileHistoryResult, parseFileShareResult, parseFileShareUndoResult, type FileShareUndoParams, type FileShareUndoResult, type FileShareParams, type FileShareResult, type FileWriteParams } from '@agentmux/core/files'
 import { retainFileDocument, hasFileDocumentConsumer, type NoteFileTarget } from './lib/file-document-consumers'
 import { executorEnvironmentRevision } from '../../shared/executor-probe-context'
-import { parseAgentContinuityControlInput, parseAgentContinuityControlResult, sameAgentContinuityControlInput } from '@agentmux/core/agent-session-continuity-control'
+import { parseAgentContinuityControlInput, parseAgentContinuityControlResult, sameAgentContinuityControlInput } from '@agentmux/core/agent-session-recovery-control'
 import { continuityControlKey, continuityControlRequests, readContinuityControlIntent, terminalContinuityControlRejection, type ContinuityControlIntents } from './lib/continuity-control-intent'
 import { currentContinuitySupervision } from './lib/continuity-supervision'
 import { conversationLandmarkIntentKey, type ConversationLandmarkIntents } from './lib/conversation-landmark-intent'
@@ -687,7 +687,7 @@ export type AgentSteerQueueEntry = {
   /** Original recovery+input request, frozen before the first RPC; unknown replies never become PTY permission. */
   resumeInputIntent?: {
     control: Extract<SessionSnapshot, { kind: 'agent' }>['control']
-    input: NonNullable<import('@agentmux/core').AgentMuxAgentContinuityInput['input']>
+    input: NonNullable<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput['input']>
   }
   /** Actual Core carrier receipt; launch carriage is separate from Native consumption or terminal ACK. */
   resumeInputReceipt?: NonNullable<NonNullable<import('@agentmux/core').AgentMuxAgentSession['continuity']>['launchInput']>
@@ -1472,12 +1472,12 @@ export type AppState = {
   respondInteraction(sessionId: string, response: AgentMuxInteractionResponse, intent: import('@agentmux/core').AgentMuxInteractionOperationIntent): Promise<import('@agentmux/core').AgentMuxInteractionOperationReceipt>
   setPosture(sessionId: string, modeId: string): Promise<void>
   interrupt(sessionId: string): Promise<void>
-  controlSessionContinuity(sessionId: string, intentOperationId: string, action: 'continue' | 'cancel', additionalAttempts?: number): Promise<import('@agentmux/core').AgentMuxContinuityControlResult>
-  reconcileSessionContinuityControl(hostId: string, sessionId: string, operationId: string): Promise<import('@agentmux/core').AgentMuxContinuityControlResult>
+  controlSessionContinuity(sessionId: string, intentOperationId: string, action: 'continue' | 'cancel', additionalAttempts?: number): Promise<import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlResult>
+  reconcileSessionContinuityControl(hostId: string, sessionId: string, operationId: string): Promise<import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlResult>
   refreshSession(sessionId: string): Promise<SessionSnapshot | undefined>
   reopenRetiredSession(source: AgentSessionHistoryDescriptor, operationId?: string, observeOnly?: boolean): Promise<SessionSnapshot | undefined>
   resumeNativeSession(input: import('../../shared/contracts').AgentLaunchInput, source: import('@agentmux/core').AgentNativeSessionCandidate, capabilities: AgentCapabilities, reveal?: () => boolean, retry?: boolean): Promise<SessionSnapshot | undefined>
-  recoverSession(sessionId: string, operationId?: string, options?: { preserveView?: boolean; stillCurrent?: () => boolean; trigger?: import('@agentmux/core').AgentMuxContinuityTrigger; timingOverride?: 'startup' | 'on-open'; input?: NonNullable<import('@agentmux/core').AgentMuxAgentContinuityInput['input']>; inputControl?: Extract<SessionSnapshot, { kind: 'agent' }>['control'] }): Promise<SessionSnapshot | undefined>
+  recoverSession(sessionId: string, operationId?: string, options?: { preserveView?: boolean; stillCurrent?: () => boolean; trigger?: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityTrigger; timingOverride?: 'startup' | 'on-open'; input?: NonNullable<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput['input']>; inputControl?: Extract<SessionSnapshot, { kind: 'agent' }>['control'] }): Promise<SessionSnapshot | undefined>
   restartSession(control: AgentSessionControl, operationId: string, observeOnly?: boolean): Promise<import('../../shared/contracts').SessionRestartResult>
   stopSession(sessionId: string): Promise<void>
   canonicalizeAgentLaunch(result: AgentLaunchResult): Promise<AgentLaunchResult | null>

@@ -1,4 +1,4 @@
-import type { AgentMuxContinuityOperation } from '@agentmux/core'
+import type { AgentMuxContinuityOperation } from '@agentmux/core/agent-session-recovery'
 import type { SessionSnapshot } from '../../../shared/contracts'
 
 /** A display-only join; an older attempt cannot explain the current Run. */

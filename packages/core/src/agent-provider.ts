@@ -1,4 +1,4 @@
-import type { AgentTerminalFrontendObservation } from './agent-terminal-frontend.js'
+import type { AgentTerminalFrontendObservation, AgentTerminalFrontendRecoveryRequest } from './agent-terminal-frontend.js'
 import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from './session-history-changes.js'
 import type { AgentPromptPreparationWaitReason } from './prompt-preparation.js'
 import { AgentMuxError } from './errors.js'
@@ -121,7 +121,12 @@ export type AgentProviderPreparedPromptTransport = Readonly<{
 }>
 
 export type AgentProviderSessionStatusContext = AgentProviderPromptExecutionContext & { signal: AbortSignal }
-export type AgentProviderManagedLaunch = { plan: AgentLaunchPlan; nativeActor?: AgentPrivateNativeActor }
+export type AgentProviderManagedLaunch = {
+  plan: AgentLaunchPlan
+  nativeActor?: AgentPrivateNativeActor
+  /** This exact prepared plan carries no input; Core owns its original deferred delivery. */
+  promptDelivery?: 'post-launch'
+}
 export type AgentProviderNativeInputContext = { processId: number; nativeActor: AgentPrivateNativeActor; workspacePath: string; signal: AbortSignal }
 /** Provider resolves the actual input channel; a managed frontend actor is only one possible origin. */
 export type AgentProviderNativeInputPreparationContext = Omit<AgentProviderNativeInputContext, 'nativeActor'> & {
@@ -184,7 +189,7 @@ export type AgentProvider = {
   planQuestionReply?(record: AgentSessionHistoryItem, answers: readonly AgentSessionHistoryQuestionAnswer[]): string
   prepareNativeInput?(context: AgentProviderNativeInputPreparationContext, target: { providerId: string; nativeSessionId: string; expectedTurnId?: string; idleOnly?: true }): Promise<AgentProviderPreparedNativeInput>
   observeTerminalFrontend?(context: AgentProviderNativeInputContext & { onFrontend(observation: AgentTerminalFrontendObservation): void; onUnavailable(message: string): void }): Promise<{ dispose(): void }>
-  reconnectTerminalFrontend?(context: AgentProviderNativeInputContext, request: { operationId: string; expectedFrontendId: string; nativeSessionId: string }): Promise<AgentTerminalFrontendObservation>
+  reconnectTerminalFrontend?(context: AgentProviderNativeInputContext, request: AgentTerminalFrontendRecoveryRequest): Promise<AgentTerminalFrontendObservation>
   resolveLaunchArgv(selections: LaunchOptionSelection): string[]
   planPromptInput(prompt: string, context?: { execution?: AgentPromptExecution }): AgentPromptInputPlan
   /** Provider owns native terminal decoding; unavailable refuses only this immediate operation. */

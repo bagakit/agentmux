@@ -1,4 +1,4 @@
-import { normalizeAgentContinuityPolicy } from '@agentmux/core/agent-session-continuity'
+import { normalizeAgentContinuityPolicy } from '@agentmux/core/agent-session-recovery'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { saveContinuitySettings } from '../save-continuity-settings'
 import { ContinuitySettingsPane } from '../ContinuitySettingsPane'

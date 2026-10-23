@@ -548,6 +548,15 @@ export class AgentMuxAgentSessionRegistry {
         )
       }
       this.assertAvailable(normalized)
+      if (futureIntentId === undefined && !author && isDeepStrictEqual(previous, agentSessionMetadata(normalized))) {
+        // A read-only claim fence still checks the original Store, not this
+        // registry's cache. Author/future admissions keep their atomic CAS.
+        const canonical = await this.store.readMetadata(agentSessionId)
+        writeSignal.throwIfAborted()
+        if (!isDeepStrictEqual(canonical, previous)) throw new AgentMuxError(
+          'Agent Session changed before persistence completed.', 'STALE_AGENT_SESSION')
+        return this.get(agentSessionId)
+      }
       await this.persist(agentSessionMetadata(normalized), () => this.store.compareAndSwapMetadata(previous, agentSessionMetadata(normalized), writeSignal,
         futureIntentId === undefined ? undefined : { intentId: futureIntentId, expected: future ?? null, next: normalized.futurePromptIntents?.[futureIntentId] ?? null }, author))
       this.forget(previous)

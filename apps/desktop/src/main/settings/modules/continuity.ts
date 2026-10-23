@@ -1,4 +1,5 @@
-import { DEFAULT_AGENT_CONTINUITY_POLICY, normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core'
+import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core'
+import { normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-recovery'
 import type { AppConfig } from '../../../shared/contracts.js'
 import { booleanSetting, enumSetting, invalid, type ScalarSetting } from '../scalar-setting.js'
 

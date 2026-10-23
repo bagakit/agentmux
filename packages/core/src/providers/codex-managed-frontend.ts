@@ -4,7 +4,7 @@ import { createConnection, createServer, type Socket } from 'node:net'
 import { once } from 'node:events'
 import type { AgentProvider } from '../agent-provider.js'
 import { AgentMuxError } from '../errors.js'
-import { parseTerminalFrontendObservation, type AgentTerminalFrontendObservation } from '../agent-terminal-frontend.js'
+import { parseTerminalFrontendObservation, type AgentTerminalFrontendObservation, type AgentTerminalFrontendRecoveryRequest } from '../agent-terminal-frontend.js'
 
 export const CODEX_NATIVE_TOKEN_ENV = 'AGENTMUX_CODEX_ACTOR_TOKEN'
 export const CODEX_ACTOR_ID_ENV = 'AGENTMUX_CODEX_ACTOR_ID'
@@ -13,12 +13,15 @@ export const codexFrontendSocketPath = (token: string): string => '/tmp/amxf-' +
 const unavailable = (message = 'The original managed frontend control is unconfirmed. The Session, backend and existing input remain available.') =>
   new AgentMuxError(message, 'AGENT_TERMINAL_FRONTEND_UNCONFIRMED')
 type Identity = { actorId: string; lifecycleOperationId: string; processId: number }
-type Request = Identity & { token: string; method: 'observe' | 'reconnect'; operationId?: string; expectedFrontendId?: string; nativeSessionId?: string }
+// Keep the declared native-session wire stable for already running actors.
+// The new initialization action has its own frozen capability and target field.
+type Request = Identity & { token: string; method: 'observe' | 'reconnect'; operationId?: string;
+  expectedFrontendId?: string; nativeSessionId?: string; initializationOperationId?: string }
 
 /** Private Provider control only. Runtime remains the sole Run/PTY/byte owner. */
 export async function openCodexFrontendControl(token: string, identity: Identity, handlers: {
   current(): AgentTerminalFrontendObservation
-  reconnect(request: Required<Pick<Request, 'operationId' | 'expectedFrontendId' | 'nativeSessionId'>>): Promise<AgentTerminalFrontendObservation>
+  reconnect(request: AgentTerminalFrontendRecoveryRequest): Promise<AgentTerminalFrontendObservation>
 }) {
   const watchers = new Set<Socket>(), sockets = new Set<Socket>()
   const server = createServer(socket => {
@@ -38,8 +41,13 @@ export async function openCodexFrontendControl(token: string, identity: Identity
           if (actual.length !== expected.length || !timingSafeEqual(actual, expected) ||
             p.actorId !== identity.actorId || p.lifecycleOperationId !== identity.lifecycleOperationId || p.processId !== identity.processId) return
           if (p.method === 'observe') { watchers.add(socket); socket.write(JSON.stringify({ frontend: handlers.current() }) + '\n'); return }
-          if (p.method !== 'reconnect' || ![p.operationId, p.expectedFrontendId, p.nativeSessionId].every(v => typeof v === 'string' && v.length > 0 && v.length < 512)) return
-          const frontend = await handlers.reconnect(p as Required<Request>)
+          const id = (value: unknown) => typeof value === 'string' && value.length > 0 && value.length < 512
+          if (p.method !== 'reconnect' || !id(p.operationId) || !id(p.expectedFrontendId) ||
+            (id(p.nativeSessionId) ? p.initializationOperationId !== undefined : !id(p.initializationOperationId) || p.nativeSessionId !== undefined)) throw unavailable('The original frontend recovery target is invalid.')
+          const target: AgentTerminalFrontendRecoveryRequest['target'] = p.nativeSessionId
+            ? { kind: 'native-session', nativeSessionId: p.nativeSessionId }
+            : { kind: 'initialization', lifecycleOperationId: p.initializationOperationId! }
+          const frontend = await handlers.reconnect({ operationId: p.operationId!, expectedFrontendId: p.expectedFrontendId!, target })
           socket.end(JSON.stringify({ frontend }) + '\n')
         } catch (error) { socket.end(JSON.stringify({ error: error instanceof Error ? error.message : 'Original frontend control failed.' }) + '\n') }
         finally { if (!watchers.has(socket) && !socket.writableEnded) socket.destroy() }
@@ -91,8 +99,12 @@ async function connect(context: Parameters<NonNullable<AgentProvider['observeTer
 export const observeCodexTerminalFrontend: NonNullable<AgentProvider['observeTerminalFrontend']> = async context =>
   await connect(context, 'observe', {}, context.onFrontend, context.onUnavailable)
 export const reconnectCodexTerminalFrontend: NonNullable<AgentProvider['reconnectTerminalFrontend']> = async (context, request) => {
+  if (request.target.kind === 'initialization' && !context.nativeActor.initializationControl) throw unavailable('The original Run did not declare native initialization control. Its Session and existing channels are kept.')
   let result: AgentTerminalFrontendObservation | undefined
-  const handle = await connect({ ...context, onFrontend() {}, onUnavailable() {} }, 'reconnect', request, value => { result = value }, () => {})
+  const wire = { operationId: request.operationId, expectedFrontendId: request.expectedFrontendId,
+    ...(request.target.kind === 'native-session' ? { nativeSessionId: request.target.nativeSessionId }
+      : { initializationOperationId: request.target.lifecycleOperationId }) }
+  const handle = await connect({ ...context, onFrontend() {}, onUnavailable() {} }, 'reconnect', wire, value => { result = value }, () => {})
   handle.dispose()
   if (!result) throw unavailable()
   return result

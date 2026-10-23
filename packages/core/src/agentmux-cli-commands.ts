@@ -5,7 +5,7 @@ import { parseAgentInputContextCaptureReference } from './agent-input-context-ca
 import { parseRendererAllocationsInput } from './renderer-allocations.js'
 import { parseAgentDiscoveryFilters } from './agent-discovery.js'
 import { parseRendererSceneCaptureInput, parseRendererSceneInspectInput } from './renderer-performance-scene.js'
-import { parseAgentContinuityControlInput } from './agent-session-continuity-control.js'
+import { parseAgentContinuityControlInput } from './agent-session-recovery/control.js'
 import { parseRendererV8ProfileInput } from './renderer-v8-profile.js'
 import { parseRendererMemoryInput } from './renderer-memory.js'
 import { parseRendererHeapSnapshotInput, parseRendererHeapSnapshotInspectInput } from './renderer-heap-snapshot.js'

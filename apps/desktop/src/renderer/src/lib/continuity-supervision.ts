@@ -1,4 +1,5 @@
-import type { AgentMuxContinuityOperation, AgentNativeSessionHandle } from '@agentmux/core'
+import type { AgentNativeSessionHandle } from '@agentmux/core'
+import type { AgentMuxContinuityOperation } from '@agentmux/core/agent-session-recovery'
 import type { SessionSnapshot } from '../../../shared/contracts'
 
 type Agent = Extract<SessionSnapshot, { kind: 'agent' }>

@@ -1943,9 +1943,9 @@ export async function registerIpc(args: {
     await args.runtime.resizeSessionAttachment(event.sender.id, attachmentId, cols, rows)
   ))
   handle('sessions:observeStorage', async (session: SessionControl) => await args.runtime.observeStorage(session))
-  handle('sessions:controlContinuity', async (hostId: string, input: import('@agentmux/core').AgentMuxContinuityControlInput) => await sessionObservationResult(() => args.runtime.controlContinuity(hostId, input)))
+  handle('sessions:controlContinuity', async (hostId: string, input: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlInput) => await sessionObservationResult(() => args.runtime.controlContinuity(hostId, input)))
   handle('sessions:refresh', async (session: SessionControl) => await args.runtime.refresh(session, config))
-  handle('sessions:recover', async (session: SessionControl, workspacePath?: string, operationId?: string, request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>) => await args.runtime.recoverSession(session, config, workspacePath, operationId, request))
+  handle('sessions:recover', async (session: SessionControl, workspacePath?: string, operationId?: string, request?: Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>) => await sessionInputOperationResult(() => args.runtime.recoverSession(session, config, workspacePath, operationId, request)))
   handleWithEvent('sessions:restart', async (event, session: AgentSessionControl, operationId: string, observeOnly?: boolean) => {
     requireTrustedSender('sessions:restart', event)
     if (!observeOnly) pauseUserProgress(session, 'Paused because you restarted this Agent. Resume explicitly when ready.')

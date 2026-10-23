@@ -1,5 +1,5 @@
-import { AgentMuxError } from './errors.js'
-import type { AgentMuxAgentSession, AgentMuxRunRef } from './types.js'
+import { AgentMuxError } from '../errors.js'
+import type { AgentMuxAgentSession, AgentMuxRunRef } from '../types.js'
 
 /** Explicit interruption and native restoration, with no authored or replayed input. */
 export type AgentMuxAgentRestartIdentity = { agentSessionId: string; expectedRun: AgentMuxRunRef; operationId: string }

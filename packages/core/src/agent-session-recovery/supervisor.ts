@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
-import { matchesProviderNativeSessionTarget } from './agent-native-locator.js'
-import { AgentMuxError } from './errors.js'
-import type { AgentMuxAgentContinuityInput, AgentMuxAgentContinuityResult, AgentMuxContinuityOperation, AgentMuxContinuitySupervision } from './agent-session-continuity.js'
-import { agentContinuityRetryBaseDelay } from './agent-session-continuity.js'
-import type { AgentMuxLifecycleReservation } from './agent-session-store.js'
-import type { AgentMuxRunRef, AgentMuxStoredAgentSession } from './types.js'
-import type { CtxmuxAdapterRun } from './ctxmux-run-adapter.js'
-import type { AgentTerminalFrontend } from './agent-terminal-frontend.js'
+import { matchesProviderNativeSessionTarget } from '../agent-native-locator.js'
+import { AgentMuxError } from '../errors.js'
+import type { AgentMuxAgentContinuityInput, AgentMuxAgentContinuityResult, AgentMuxContinuityOperation, AgentMuxContinuitySupervision } from './continuity.js'
+import { agentContinuityRetryBaseDelay } from './continuity.js'
+import type { AgentMuxLifecycleReservation } from '../agent-session-store.js'
+import type { AgentMuxRunRef, AgentMuxStoredAgentSession } from '../types.js'
+import type { CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'
+import type { AgentTerminalFrontend } from '../agent-terminal-frontend.js'
 
 type Dependencies = {
   read(id: string): Promise<AgentMuxStoredAgentSession | null>
@@ -16,7 +16,7 @@ type Dependencies = {
   frontend?(session: AgentMuxStoredAgentSession): Promise<AgentTerminalFrontend | undefined>
   watch(run: CtxmuxAdapterRun, changed: (error?: AgentMuxError) => void): Promise<() => Promise<void>>
   update(session: AgentMuxStoredAgentSession, change: (current: AgentMuxStoredAgentSession) => AgentMuxStoredAgentSession): Promise<AgentMuxStoredAgentSession>
-  perform(input: AgentMuxAgentContinuityInput, intentOperationId?: string, inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource, captured?: import('./agent-input-context-capture-resolve.js').ResolvedAgentInputContextCapture): Promise<AgentMuxAgentContinuityResult>
+  perform(input: AgentMuxAgentContinuityInput, intentOperationId?: string, inputContextSource?: import('../browser-input-context.js').BrowserInputContextSource, captured?: import('../agent-input-context-capture-resolve.js').ResolvedAgentInputContextCapture): Promise<AgentMuxAgentContinuityResult>
   failed(id: string, error: unknown, run?: AgentMuxRunRef): void
 }
 const sameRun = (a: AgentMuxRunRef, b: AgentMuxRunRef) => a.runId === b.runId
@@ -66,7 +66,7 @@ export class AgentSessionContinuitySupervisor {
     finally { if (this.tails.get(id) === tail) this.tails.delete(id) }
   }
 
-  async run(input: AgentMuxAgentContinuityInput, inputContextSource?: import('./browser-input-context.js').BrowserInputContextSource, captured?: import('./agent-input-context-capture-resolve.js').ResolvedAgentInputContextCapture): Promise<AgentMuxAgentContinuityResult> {
+  async run(input: AgentMuxAgentContinuityInput, inputContextSource?: import('../browser-input-context.js').BrowserInputContextSource, captured?: import('../agent-input-context-capture-resolve.js').ResolvedAgentInputContextCapture): Promise<AgentMuxAgentContinuityResult> {
     return await this.serialize(input.agentSessionId, () => this.deps.perform(input, undefined, inputContextSource, captured))
   }
 
@@ -81,6 +81,13 @@ export class AgentSessionContinuitySupervisor {
       supervision.phase === 'settled' || root.intentOperationId || !active || active.agentSessionId !== session.agentSessionId ||
       active.operationId !== rootId && active.intentOperationId !== rootId ||
       (active.newRun ? !sameRun(active.newRun, session.run) : !sameRun(active.previousRun, session.run))) return
+    // Manual policy parked this intent before any recovery action was admitted.
+    // A fresh startup may apply its newly authored automatic policy without
+    // resetting a started, cancelled, or otherwise unresolved original action.
+    if (input.trigger === 'startup' && input.policy?.activeRecovery !== 'manual' &&
+      root.kind === 'pending' && root.reason === 'active-manual' && root.policy.activeRecovery === 'manual' &&
+      supervision.phase === 'paused' && supervision.attemptCount === 0 && active.operationId === root.operationId &&
+      !root.newRun && !root.frontendReconnect && !root.launchInput) return
     // A new application startup may retry a fully reconciled failed frontend.
     // It never resets this intent's durable counter or abandons an unknown action.
     if (input.trigger === 'startup' && supervision.phase === 'paused' && supervision.reason === 'frontend-retry-budget-exhausted' &&

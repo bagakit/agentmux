@@ -1,4 +1,4 @@
-import { agentContinuityRetryBaseDelay, DEFAULT_AGENT_CONTINUITY_POLICY, normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-continuity'
+import { agentContinuityRetryBaseDelay, DEFAULT_AGENT_CONTINUITY_POLICY, normalizeAgentContinuityPolicy, type AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-recovery'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useId, useState, type ReactNode } from 'react'
 import { SettingsSaveBar, useSettingsSave } from './SettingsSaveBar'

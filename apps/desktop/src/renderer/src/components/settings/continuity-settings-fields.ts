@@ -1,4 +1,4 @@
-import type { AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-continuity'
+import type { AgentMuxContinuityPolicy } from '@agentmux/core/agent-session-recovery'
 
 export type ExecutionSettings = Pick<AgentMuxContinuityPolicy,
   'activeRecovery' | 'activeRecoveryDelayMs' | 'confirmedIdleWindowMs' | 'resumeAfterExit' |
