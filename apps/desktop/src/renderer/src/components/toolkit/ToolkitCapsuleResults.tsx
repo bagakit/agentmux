@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { formatAmuxObjectLink } from '@agentmux/core'
+import { formatAmuxObjectLink } from '@agentmux/core/sharing'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { parseCapsuleRpcResult, type CapsuleOpenResult } from '@agentmux/core/capsule'
 import type { ToolkitCapsuleReference, ToolkitExecution } from '@agentmux/core/control'
