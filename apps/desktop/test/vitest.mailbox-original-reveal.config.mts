@@ -12,31 +12,31 @@ const view = 'packages/client-ui/src/lib/use-conversation-view.ts'
 const mutation = process.env.AGENTMUX_MAILBOX_REVEAL_MUTATION ?? ''
 const mutations: Record<string, { owner: string; edits: readonly (readonly [string, string])[] }> = {
   'omit-navigation-demand': { owner: pane, edits: [
-    ['(!!incomingReveal || !!revealRead) && observationVisible', '!!incomingReveal && observationVisible']
+    ['enabled: visible && !parked && (activityShown || activityRevealPending),', 'enabled: visible && !parked && activityShown,']
   ] },
   'omit-original-reader-wait': { owner: activity, edits: [
-    ['    const reading = readingWindow.inspect()\n    if (conversationReading && (reading.loading || reading.inFlight || reading.watch.binding || reading.held || !reading.snapshot && !reading.error)) return\n', ''],
-    ['      const current = readingWindow.inspect()\n      if (conversationReading && (current.loading || current.inFlight || current.watch.binding || current.held)) return\n', '']
+    ['    if (conversationReading && (reading.loading || reading.inFlight || reading.watch.binding || reading.held || !reading.snapshot && !reading.error)) return\n', ''],
+    ['      if (conversationReading && (current.loading || current.inFlight || current.watch.binding || current.held)) return\n', '']
   ] },
   'omit-exact-display': { owner: pane, edits: [
-    ['setRevealRequest({ generation, record: itemRef, signal: readController.signal, sourceKey, displayId, isCurrent: current, complete: (located, error) => {',
-      'setRevealRequest({ generation, record: itemRef, signal: readController.signal, sourceKey, displayId: null, isCurrent: current, complete: (located, error) => {']
+    ['setRevealRequest({ generation, record: itemRef, signal: readController.signal, sourceKey, displayId,',
+      'setRevealRequest({ generation, record: itemRef, signal: readController.signal, sourceKey, displayId: null,']
   ] },
-  'stale-reveal-error': { owner: 'apps/desktop/src/renderer/src/lib/session-user-messages.ts', edits: [
-    ['error: settled?.error ?? null', 'error: view.error']
+  'ignore-target-read-error': { owner: activity, edits: [
+    ['if (reading.error && !acceptedTargetAvailable(reading)) { revealRequest.complete(false, `读取对话失败：${reading.error.message}`); return }',
+      'if (false) { revealRequest.complete(false, `读取对话失败：${reading.error!.message}`); return }'],
+    ['if (current.error && !acceptedTargetAvailable(current)) { revealRequest.complete(false, `读取对话失败：${current.error.message}`); return }',
+      'if (false) { revealRequest.complete(false, `读取对话失败：${current.error!.message}`); return }']
   ] },
-  'observation-error-as-source-change': { owner: 'apps/desktop/src/renderer/src/lib/session-user-messages.ts', edits: [
-    ["const sourceChanged = ['AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'native-source-changed'].includes((view.error as (Error & { code?: string }) | null)?.code ?? '')",
-      "const sourceChanged = [view.error, view.observationError].some(error => ['AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'native-source-changed'].includes((error as (Error & { code?: string }) | null)?.code ?? ''))"]
-  ] },
-  'omit-summary-exact-record': { owner: 'apps/desktop/src/renderer/src/lib/session-user-messages.ts', edits: [
-    ['const pending = view.selectRecord(record, readOptions)', 'const pending = Promise.resolve()']
+  'observation-error-as-source-change': { owner: activity, edits: [
+    ["const sourceChanged = ['AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'native-source-changed'].includes(\n      (reading.error as (Error & { code?: string }) | null)?.code ?? '')",
+      "const sourceChanged = [reading.error, reading.observationError].some(error => ['AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'native-source-changed'].includes((error as (Error & { code?: string }) | null)?.code ?? ''))"]
   ] },
   'omit-activity-exact-record': { owner: activity, edits: [
-    ['void readingWindow.selectRecord(revealRequest.record, { signal: revealRequest.signal })', 'void Promise.resolve()']
+    ['void readingWindow.selectRecord(target, { signal: revealRequest.signal })', 'void Promise.resolve()']
   ] },
   'omit-activity-read-signal': { owner: activity, edits: [
-    ['void readingWindow.selectRecord(revealRequest.record, { signal: revealRequest.signal })', 'void readingWindow.selectRecord(revealRequest.record)']
+    ['void readingWindow.selectRecord(target, { signal: revealRequest.signal })', 'void readingWindow.selectRecord(target)']
   ] },
   'omit-pending-continuation': { owner: view, edits: [
     ["const continuation = kind === 'changes' || kind === 'resume' ? current.pending?.admission && current.pending : null",
