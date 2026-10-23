@@ -4,6 +4,7 @@ import { relative } from 'node:path'
 import { defineConfig } from 'vitest/config'
 import base from './renderer-hosting-continuation.config.mts'
 const variants = {
+  'collapse-service-scope': ['apps/desktop/src/renderer/src/lib/connector-service-observation.ts', 'JSON.stringify([target.hostId, target.runtimeId])', "'[]'"],
   'drop-service-owner': ['apps/desktop/src/renderer/src/components/settings/ConnectorServiceControl.tsx', "source('connection.service.configure', input, original)", "source('connection.service.configure', input)"],
   'drop-mote-owner': ['apps/desktop/src/renderer/src/components/settings/MoteIdentityCards.tsx', 'readPreferences(input, owner!)', 'readPreferences(input)'],
   'drop-mote-lifetime-scope': ['apps/desktop/src/renderer/src/components/settings/MoteIdentityCards.tsx', "identity = JSON.stringify([hostingTarget === undefined ? 'default' : hostingTarget, targets])", 'identity = JSON.stringify(targets)']
