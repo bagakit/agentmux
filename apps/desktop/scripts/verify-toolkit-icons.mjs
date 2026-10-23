@@ -8,7 +8,10 @@ import { verifyCustomizationCapture } from './fixtures/toolkit-tui/verify-custom
 const root = resolve(import.meta.dirname, '../../..'), mode = process.argv[2]
 assert.ok(mode === undefined || ['--fast', '--public'].includes(mode), 'Use --fast or --public to collect bounded evidence, or no argument to verify the joined candidate.')
 const evidence = resolve(root, '.local/toolkit-icons', mode?.slice(2) ?? 'qualification')
-if (mode) await mkdir(evidence, { recursive: true })
+if (mode) {
+  await mkdir(evidence, { recursive: true })
+  await writeFile(resolve(evidence, 'receipt.json'), '')
+}
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
 const sources = [
   'apps/desktop/src/shared/toolkit-preferences.ts',
@@ -48,6 +51,7 @@ async function suite(name, files = [], mutation) {
   const receipt = resolve(directory, 'loaded.jsonl')
   await writeFile(receipt, '')
   const resultPath = resolve(directory, 'tests.json')
+  await writeFile(resultPath, '')
   const child = spawn(process.execPath, [resolve(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config',
     mode === '--fast' ? 'apps/desktop/test/toolkit-icons.config.mts' : 'apps/desktop/test/toolkit-icons-main.config.mts',
     ...files, '--maxWorkers=1', '--reporter=json', '--outputFile=' + resultPath], {
