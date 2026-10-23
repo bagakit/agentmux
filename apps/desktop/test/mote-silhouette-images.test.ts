@@ -28,7 +28,7 @@ it('the original source owner, strict RPC and compiled CLI discover and prepare 
   const lowpoly = catalog.series.find(item => item.origin === 'builtin' && item.seriesId === 'lowpoly')
   expect(images?.entries.map(entry => entry.entryId)).toEqual(expected)
   expect(images?.entries.map(entry => entry.title)).toEqual(['Retro future', 'Low poly', 'Dada', 'Polka dot', 'Ukiyo-e', 'Cyberpunk', 'Flat', 'Neoclassical', 'Vaporwave', 'Klei', 'Ink', 'Fallout 4'])
-  expect(lowpoly?.entries.map(entry => entry.entryId)).toEqual(['wolf', 'owl', 'panther'])
+  expect(lowpoly?.entries.map(entry => entry.entryId)).toEqual(['dragon', 'wolf', 'owl', 'panther'])
   expect(images!.entries).toHaveLength(12)
   const svgHashes = new Set<string>()
   for (const id of expected) {

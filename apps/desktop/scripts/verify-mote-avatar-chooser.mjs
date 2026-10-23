@@ -87,8 +87,8 @@ const mutations = [
   {
     id: 'restore-automatic-forces-tab-jump',
     file: 'apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx',
-    from: "onClick={() => { select(null); if (editingSeries) setMode('alternative') }}",
-    to: "onClick={() => { select(null); setMode('alternative') }}",
+    from: 'onClick={() => select(null, true)}',
+    to: "onClick={() => { select(null, true); setMode('alternative') }}",
     test: 'apps/desktop/test/mote-paperdoll-avatar.test.tsx',
     pattern: 'renders focused part glyphs'
   },
@@ -103,7 +103,7 @@ const mutations = [
   {
     id: 'silhouette-drops-to-static-png',
     file: 'apps/desktop/src/renderer/src/components/SpaceObjectIcon.tsx',
-    from: 'isBuiltinMoteSilhouetteLocator(manualIcon.source)',
+    from: 'isBuiltinMoteArticulatedLocator(manualIcon.source)',
     to: 'false',
     test: 'apps/desktop/test/mote-paperdoll-avatar.test.tsx',
     pattern: 'saving a Mote silhouette preserves live articulated expressions'
