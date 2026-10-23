@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import {
   composeAgentLaunchPrompt,
+  composeAgentResumePrompt,
   composeOutboundMessage
 } from '../src/agent-outbound-message.js'
 const AGENTMUX_SELF_CONTEXT_VERB = 'whoami'
@@ -90,7 +91,8 @@ describe('唯一出站出口 composeOutboundMessage', () => {
 
 describe('启动提示路径经同一出口', () => {
   it('运行时引导进信封，用户请求原样透传且逐字节一致', () => {
-    const out = composeAgentLaunchPrompt(NASTY_USER, true).text
+    const composed = composeAgentLaunchPrompt(NASTY_USER, true)
+    const out = composed.text
     // AgentMux 的引导语被署名。
     expect(out.startsWith('<amux>\n')).toBe(true)
     expect(out).toContain('AgentMux runtime guide:')
@@ -98,6 +100,8 @@ describe('启动提示路径经同一出口', () => {
     expect(out).toContain('"$AGENTMUX_CLI" --skill')
     // 用户原文作为独立一段、逐字节保留在信封之外。
     expect(out.endsWith(`</amux>\n\n${NASTY_USER}`)).toBe(true)
+    expect(composed.systemContext?.startsWith('The user request follows.\n\nAgentMux runtime guide:')).toBe(true)
+    expect(out.split(NASTY_USER)).toHaveLength(2)
   })
 
   it('引导只指路不抄语法：绝不把完整 CLI flag 语法塞进提示', () => {
@@ -130,7 +134,7 @@ describe('启动提示路径经同一出口', () => {
   it('还没有用户请求时给出等待指示，且它属于 AgentMux 的话（进信封）', () => {
     const idle = composeAgentLaunchPrompt(undefined, true).text
     expect(idle).toContain('<amux>')
-    expect(idle).toContain('No request yet. Wait for the user.')
+    expect(idle.startsWith('<amux>\nNo request yet. Complete any read-only initialization below, then wait for the user.')).toBe(true)
     // 没有用户段时，信封是唯一内容，末尾就是闭合标签。
     expect(idle.endsWith('</amux>')).toBe(true)
   })
@@ -149,6 +153,20 @@ describe('启动定向握手：启动提示携带 whoami 指令并署名进信�
     for (const coordinate of ['exact identity', 'capabilities', 'unavailable facts']) {
       expect(out).toContain(coordinate)
     }
+  })
+
+  it('从准确 attached Region 发现 Zone 与展示绑定，邻居在任务需要时读取', () => {
+    const context = composeAgentLaunchPrompt('Inspect the related workface', true).systemContext!
+    expect(context).toContain('A Zone is a work partition containing Tabs')
+    expect(context).toContain('a Tab is a complete workface split into Regions')
+    expect(context).toContain('not a Session identity')
+    expect(context).toContain('When attached, read space --skill')
+    expect(context).toContain('actual Zone/Tab/Region and display bindings from that exact Region')
+    expect(context).toContain('inspect the whole Tab and its neighbors when the task needs them')
+    expect(context).toContain('Execution cwd and human focus do not locate your presentation')
+    expect(context).toContain('Missing or failed observations remain unknown')
+    expect(context).toContain('preserve the original Session, Run and healthy capabilities')
+    expect(context).toContain('If the task needs collaboration, choose')
   })
 
   it('握手指令是 AgentMux 的话：署名在 amux 信封内，不落进用户段', () => {
@@ -211,7 +229,7 @@ describe('agentMuxNote 是 AgentMux 的话：署名进信封，与用户段分�
   it('无请求 + 有 note 时给出等待指示，用户段为空', () => {
     const out = composeAgentLaunchPrompt(undefined, true, NOTE).text
     expect(out).toContain('Scratch Topic context:')
-    expect(out).toContain('No request yet. Wait for the user.')
+    expect(out).toContain('No request yet. Complete any read-only initialization below, then wait for the user.')
     expect(out.endsWith('</amux>')).toBe(true)
   })
 })
@@ -244,9 +262,9 @@ describe('discuss 首条消息路径经同一出口', () => {
   })
 })
 
-describe('四条路径的接线守护：真的都改成调用同一出口', () => {
-  // 纯函数断言证明出口本身正确，但不证明四条路径真的接了上去。这里读 client 源码，锁定每条路径
-  // 对出口的调用形状——把接线改回直传原文（绕过出口），下面的断言就会红。这正是本任务「收敛」的意义。
+describe('原启动、提交与无输入恢复的消费边界', () => {
+  // 保留启动与提交的既有接线守护；恢复的真实消费由 Core recovery 测试覆盖，
+  // 这里直接检查无输入组合不额外生成启动引导。
   it('createAgent 把 prompt / note 交给 composeAgentLaunchPrompt，note 走 amux 段', () => {
     const create = clientSlice('async createAgent(', 'const launchOptionArgv =')
     expect(create).toContain('composeAgentLaunchPrompt(')
@@ -272,10 +290,7 @@ describe('四条路径的接线守护：真的都改成调用同一出口', () =
     expect(submit).not.toContain('planPromptInput(content)')
   })
 
-  it('resume（resumeAgentRun）经出口产出原用户段与显式系统上下文', () => {
-    const resume = clientSlice('private async resumeAgentRun(', 'let reservation =')
-    expect(resume).toContain('composeAgentResumePrompt(input.prompt, input.agentMuxNote)')
-    expect(resume).toContain('const prompt = composed.text || undefined')
-    expect(resume).toContain('systemContext: composed.systemContext')
+  it.each([undefined, '', ' \n'])('无输入恢复不为启动说明新增一轮（prompt=%j）', prompt => {
+    expect(composeAgentResumePrompt(prompt)).toEqual({ text: '' })
   })
 })
