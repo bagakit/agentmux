@@ -1,21 +1,21 @@
-import { mintObjectId } from './object-id.js'
+import { mintObjectId } from '../object-id.js'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
-import { matchesProviderNativeSessionTarget } from './agent-native-locator.js'
-import { AgentMuxError } from './errors.js'
-import { agentPromptNotApplied } from './agent-prompt-condition.js'
-import type { AgentPromptInputKey } from './agent-prompt-condition.js'
-import type { AgentInputCallContext } from './agent-input-wait.js'
-import type { AgentMuxContinuityInputDelivery, AgentMuxContinuityOperation, AgentMuxContinuityInputRequest, AgentMuxContinuityLaunchInput } from './agent-session-continuity.js'
-import type { AgentMuxAgentPromptInput } from './client.js'
-import type { AgentMuxStoredAgentSession, AgentPromptSubmissionRecord, AgentCatalogEntry, AgentMuxRunRef } from './types.js'
-import type { AgentProviderRegistry } from './agent-provider.js'
-import type { CtxmuxAdapterRun } from './ctxmux-run-adapter.js'
-import { normalizeMessageChannel } from './message-origin.js'
-import { normalizeOperationDevice } from './operation-device.js'
-import { composeAgentPrompt, composeAgentResumePrompt } from './agent-outbound-message.js'
-import { parseBrowserInputContext, type BrowserInputContextSource } from './browser-input-context.js'
-import { observePromptInput } from './prompt-submission.js'
+import { matchesProviderNativeSessionTarget } from '../agent-native-locator.js'
+import { AgentMuxError } from '../errors.js'
+import { agentPromptNotApplied } from '../agent-prompt-condition.js'
+import type { AgentPromptInputKey } from '../agent-prompt-condition.js'
+import type { AgentInputCallContext } from '../agent-input-wait.js'
+import type { AgentMuxContinuityInputDelivery, AgentMuxContinuityOperation, AgentMuxContinuityInputRequest, AgentMuxContinuityLaunchInput } from './continuity.js'
+export type RecoveryPromptInput = { agentSessionId: string; expectedRun: import('../types.js').AgentMuxRunRef; afterSubmissionId: null; operationId: string; prompt: string; signal: AbortSignal; agentMuxNote?: string }
+import type { AgentMuxStoredAgentSession, AgentPromptSubmissionRecord, AgentCatalogEntry, AgentMuxRunRef } from '../types.js'
+import type { AgentProviderRegistry } from '../agent-provider.js'
+import type { CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'
+import { normalizeMessageChannel } from '../message-origin.js'
+import { normalizeOperationDevice } from '../operation-device.js'
+import { composeAgentPrompt, composeAgentResumePrompt } from '../agent-outbound-message.js'
+import { parseBrowserInputContext, type BrowserInputContextSource } from '../browser-input-context.js'
+import { observePromptInput } from '../prompt-submission.js'
 
 const digest = (text: string) => createHash('sha256').update(text).digest('base64url')
 const terminal = (phase: AgentMuxContinuityInputDelivery['phase']) => ['accepted', 'not-applied', 'superseded'].includes(phase)
@@ -30,7 +30,7 @@ function recoveryReminder(operation: AgentMuxContinuityOperation): string {
 /** Freeze the original text before starting. A not-yet-created Run is never named in its body. */
 export function prepareContinuityLaunchInput(operation: AgentMuxContinuityOperation, catalog: AgentCatalogEntry,
   lifecycleOperationId: string, fresh?: AgentMuxContinuityInputRequest, inputContextSource: BrowserInputContextSource = 'caller-declared',
-  captured?: import('./agent-input-context-capture-resolve.js').ResolvedAgentInputContextCapture): AgentMuxContinuityLaunchInput | undefined {
+  captured?: import('../agent-input-context-capture-resolve.js').ResolvedAgentInputContextCapture): AgentMuxContinuityLaunchInput | undefined {
   // A later attempt restores context only; omitting fresh input alone would synthesize the old automatic task again.
   if (operation.intentOperationId) return
   // Automatic continuation is admitted after the original resume commits, never as launch argv.
@@ -91,13 +91,13 @@ function recoverySystemContext(delivery: AgentMuxContinuityInputDelivery): strin
 }
 
 type Dependencies = {
-  providers: AgentProviderRegistry
+  providers: Pick<AgentProviderRegistry, 'get'>
   read(id: string): AgentMuxStoredAgentSession
   status(session: AgentMuxStoredAgentSession): Promise<CtxmuxAdapterRun>
   update(id: string, operationId: string, update: (delivery: AgentMuxContinuityInputDelivery) => void): Promise<void>
   updateOperation?(id: string, operationId: string, update: (operation: AgentMuxContinuityOperation) => void): Promise<void>
   inspect(key: AgentPromptInputKey): Promise<AgentPromptSubmissionRecord | null>
-  submit(input: AgentMuxAgentPromptInput, context: AgentInputCallContext): Promise<unknown>
+  submit(input: RecoveryPromptInput, context: AgentInputCallContext): Promise<unknown>
   failed(id: string, error: unknown): void
 }
 

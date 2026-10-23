@@ -1,6 +1,6 @@
-import { AgentMuxError } from './errors.js'
-import type { AgentMuxAgentSession, AgentMuxRunRef } from './types.js'
-import type { AgentMuxContinuitySupervision } from './agent-session-continuity.js'
+import { AgentMuxError } from '../errors.js'
+import type { AgentMuxAgentSession, AgentMuxRunRef } from '../types.js'
+import type { AgentMuxContinuitySupervision } from './continuity.js'
 
 export type AgentMuxContinuityControlInput = {
   agentSessionId: string

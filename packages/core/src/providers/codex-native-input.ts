@@ -9,7 +9,7 @@ import { AgentMuxError } from '../errors.js'
 import { runProcess } from '../process-runner.js'
 import { nativeProcessBirth, nativeProcessTcpListeners } from '../agent-native-process.js'
 import type { AgentProvider } from '../agent-provider.js'
-import type { CodexManagedResume } from './codex-managed-run.js'
+import type { CodexManagedThreadConfiguration, CodexManagedRunPlan } from './codex-managed-run.js'
 import { connectCodexNativeActor } from './codex-native-rpc.js'
 import { prepareCodexDurableQueueInput } from './codex-native-queue.js'
 
@@ -18,8 +18,9 @@ const BYPASS_PERMISSIONS = '--dangerously-bypass-approvals-and-sandbox'
 const unavailable = () => new AgentMuxError('The exact native actor input service is unconfirmed. The original Agent and ordinary terminal input remain available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
 
 /** Shared configuration for already qualified create plans. */
-function nativeServerConfig(args: readonly string[]): { serverConfig: string[]; frontendArgs: string[] } | null {
+function nativeServerConfig(args: readonly string[]): { serverConfig: string[]; frontendArgs: string[]; configuration: CodexManagedThreadConfiguration } | null {
   const result: string[] = [], frontendArgs: string[] = []
+  const configuration: CodexManagedThreadConfiguration = {}
   let bypass = false, permission = false, custom = false
   const valueFlags = new Set(['-m', '--model', '-p', '--profile', '-s', '--sandbox', '-a', '--ask-for-approval', '-C', '--cd'])
   const shared = new Set(['-c', '--config', '--enable', '--disable'])
@@ -32,6 +33,22 @@ function nativeServerConfig(args: readonly string[]): { serverConfig: string[]; 
     } else if (shared.has(arg)) { const value = args[++i]; if (value === undefined || value.startsWith('-')) return null; result.push(arg, value); custom ||= arg === '-c' || arg === '--config' }
     else if (valueFlags.has(arg)) {
       const value = args[++i]; if (value === undefined || value.startsWith('-')) return null
+      // This native version explicitly rejects --profile for app-server and
+      // rejects legacy -c profile= too. Keep the complete original CLI instead.
+      if (arg === '-p' || arg === '--profile') return null
+      if (arg === '-s' || arg === '--sandbox') {
+        if (configuration.sandbox !== undefined || !['read-only', 'workspace-write', 'danger-full-access'].includes(value)) return null
+        configuration.sandbox = value as NonNullable<CodexManagedThreadConfiguration['sandbox']>
+      } else if (arg === '-a' || arg === '--ask-for-approval') {
+        if (configuration.approvalPolicy !== undefined || !['on-request', 'never'].includes(value)) return null
+        configuration.approvalPolicy = value as NonNullable<CodexManagedThreadConfiguration['approvalPolicy']>
+      } else if (arg === '-m' || arg === '--model') {
+        if (configuration.model !== undefined) return null
+        configuration.model = value
+      } else {
+        if (configuration.cwd !== undefined) return null
+        configuration.cwd = value
+      }
       permission ||= ['-s', '--sandbox', '-a', '--ask-for-approval'].includes(arg)
       custom ||= arg === '-p' || arg === '--profile'
     }
@@ -40,31 +57,32 @@ function nativeServerConfig(args: readonly string[]): { serverConfig: string[]; 
     else frontendArgs.push(arg)
   }
   if (bypass && (permission || custom)) return null
-  return { serverConfig: result, frontendArgs }
+  if (bypass) { configuration.sandbox = 'danger-full-access'; configuration.approvalPolicy = 'never' }
+  return { serverConfig: result, frontendArgs, configuration }
 }
 
 /** Only explicit Core resume shapes: native policy is prepared before the TUI can carry its prompt. */
-function nativeResumePlan(args: readonly string[], prompt?: string): { args: string[]; serverConfig: string[]; frontendArgs: string[]; resume: CodexManagedResume } | null {
+function nativeResumePlan(args: readonly string[], prompt?: string): Pick<CodexManagedRunPlan, 'serverConfig' | 'frontendArgs'> & { resume: CodexManagedThreadConfiguration & { threadId: string } } | null {
   // Match only the exact footer produced by this Provider, never an option value or wrapper delimiter.
   const actionIndex = args.length - (prompt?.trim() ? 4 : 2)
   if (actionIndex < 0 || args[actionIndex] !== 'resume' ||
       !/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/iu.test(args[actionIndex + 1] ?? '') ||
       prompt?.trim() && (args[actionIndex + 2] !== '--' || args[actionIndex + 3] !== prompt)) return null
-  const resume: CodexManagedResume = { threadId: args[actionIndex + 1]! }, serverConfig: string[] = [], frontendArgs: string[] = [], removed = new Set<number>()
+  const resume: CodexManagedThreadConfiguration & { threadId: string } = { threadId: args[actionIndex + 1]! }, serverConfig: string[] = [], frontendArgs: string[] = []
   for (let i = 0; i < actionIndex; i++) {
     const arg = args[i]!
     if (arg === BYPASS_PERMISSIONS) {
       if (resume.sandbox !== undefined || resume.approvalPolicy !== undefined) return null
-      resume.sandbox = 'danger-full-access'; resume.approvalPolicy = 'never'; removed.add(i)
+      resume.sandbox = 'danger-full-access'; resume.approvalPolicy = 'never'
     } else if (['-s', '--sandbox', '-a', '--ask-for-approval', '-m', '--model', '-C', '--cd'].includes(arg)) {
       const valueIndex = ++i, value = args[valueIndex]
       if (!value || value.startsWith('-') || valueIndex >= actionIndex) return null
       if (arg === '-s' || arg === '--sandbox') {
         if (resume.sandbox !== undefined || !['read-only', 'workspace-write', 'danger-full-access'].includes(value)) return null
-        resume.sandbox = value as NonNullable<CodexManagedResume['sandbox']>; removed.add(i - 1); removed.add(i)
+        resume.sandbox = value as NonNullable<CodexManagedThreadConfiguration['sandbox']>
       } else if (arg === '-a' || arg === '--ask-for-approval') {
         if (resume.approvalPolicy !== undefined || !['on-request', 'never'].includes(value)) return null
-        resume.approvalPolicy = value as NonNullable<CodexManagedResume['approvalPolicy']>; removed.add(i - 1); removed.add(i)
+        resume.approvalPolicy = value as NonNullable<CodexManagedThreadConfiguration['approvalPolicy']>
       } else if (arg === '-m' || arg === '--model') {
         if (resume.model !== undefined) return null
         resume.model = value
@@ -79,23 +97,24 @@ function nativeResumePlan(args: readonly string[], prompt?: string): { args: str
     else if (!['--dangerously-bypass-hook-trust', '--no-alt-screen'].includes(arg)) return null
     else frontendArgs.push(arg)
   }
-  return { args: args.filter((_, i) => !removed.has(i)), serverConfig, frontendArgs, resume }
+  return { serverConfig, frontendArgs, resume }
 }
 
 export const prepareCodexManagedLaunch: NonNullable<AgentProvider['prepareManagedLaunch']> = async (plan, lifecycleOperationId, context) => {
   if (process.platform !== 'darwin' || context.kind === 'fork') return { plan }
   const prepared = context.kind === 'resume' ? nativeResumePlan(plan.args, context.prompt) : undefined
   if (context.kind === 'resume' && !prepared) return { plan }
-  const args = prepared?.args ?? [...plan.args]
-  const configuration = prepared ?? nativeServerConfig(context.prompt && plan.args.at(-2) === '--' && plan.args.at(-1) === context.prompt ? plan.args.slice(0, -2) : plan.args)
-  if (!configuration) return { plan }
-  const { serverConfig, frontendArgs } = configuration
+  const creation = context.kind === 'create' ? nativeServerConfig(context.prompt && plan.args.at(-2) === '--' && plan.args.at(-1) === context.prompt ? plan.args.slice(0, -2) : plan.args) : undefined
+  if (!prepared && !creation) return { plan }
+  const { serverConfig, frontendArgs } = (prepared ?? creation)!
   // The version is the native CLI's stable version command, not a terminal screen or readiness guess.
   const version = await runProcess(plan.command, ['--version'], { env: plan.env, timeoutMs: 2_000, maxOutputBytes: 4096 }).catch(() => null)
   if (!version || version.exitCode !== 0 || version.stderr || version.stdout.trim() !== 'codex-cli 0.163.0') return { plan }
-  const nativeActor = { protocolId: PROTOCOL_ID, actorId: mintObjectId(), lifecycleOperationId, token: randomBytes(32).toString('hex'), frontendControl: true as const, launch: { command: plan.command, args } }
-  return { nativeActor, plan: { command: process.execPath,
-    args: [fileURLToPath(new URL('./codex-managed-run.js', import.meta.url)), JSON.stringify({ command: plan.command, args, serverConfig, frontendArgs, ...(prepared ? { resume: prepared.resume } : {}) })],
+  const nativeActor = { protocolId: PROTOCOL_ID, actorId: mintObjectId(), lifecycleOperationId, token: randomBytes(32).toString('hex'), frontendControl: true as const, initializationControl: true as const, launch: { command: plan.command, args: [...plan.args] } }
+  const managed: CodexManagedRunPlan = { command: plan.command, serverConfig, frontendArgs,
+    ...(prepared ? { resume: prepared.resume } : { create: creation!.configuration }) }
+  return { nativeActor, promptDelivery: 'post-launch', plan: { command: process.execPath,
+    args: [fileURLToPath(new URL('./codex-managed-run.js', import.meta.url)), JSON.stringify(managed)],
     env: { ...plan.env, ELECTRON_RUN_AS_NODE: '1', [CODEX_NATIVE_TOKEN_ENV]: nativeActor.token, [CODEX_ACTOR_ID_ENV]: nativeActor.actorId, [CODEX_ACTOR_LIFECYCLE_ENV]: lifecycleOperationId } } }
 }
 

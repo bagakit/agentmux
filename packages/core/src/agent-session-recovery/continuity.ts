@@ -1,5 +1,6 @@
-import { agentInputContextCaptureProofFields, parseAgentInputContextCaptureReference } from './agent-input-context-capture.js'
-import { AMUX_CONTINUE_MARKER } from './amux-protocol-definition.js'
+import { parseTerminalFrontendObservation, type AgentTerminalFrontendObservation } from '../agent-terminal-frontend.js'
+import { agentInputContextCaptureProofFields, parseAgentInputContextCaptureReference } from '../agent-input-context-capture.js'
+import { AMUX_CONTINUE_MARKER } from '../amux-protocol-definition.js'
 import type {
   AgentCapabilitySnapshot,
   AgentCatalogEntry,
@@ -10,13 +11,13 @@ import type {
   AgentPromptMessageContent,
   AgentMessageChannel,
   AgentOperationDevice
-} from './types.js'
-import { parseAgentContinuityControlReceipts } from './agent-session-continuity-control.js'
-import type { AgentMuxContinuityControlReceipt } from './agent-session-continuity-control.js'
-import { validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
-import { isAgentActivityStatusSource } from './agent-status-freshness.js'
-import { unconfirmedExecutableObservation } from './executable-observation.js'
-import { browserInputContextFields, parseBrowserInputContext } from './browser-input-context.js'
+} from '../types.js'
+import { parseAgentContinuityControlReceipts } from './control.js'
+import type { AgentMuxContinuityControlReceipt } from './control.js'
+import { validateAgentPromptInputKey, type AgentPromptInputKey } from '../agent-prompt-condition.js'
+import { isAgentActivityStatusSource } from '../agent-status-freshness.js'
+import { unconfirmedExecutableObservation } from '../executable-observation.js'
+import { browserInputContextFields, parseBrowserInputContext } from '../browser-input-context.js'
 
 /** Host-independent policy. Callers persist only authored fields; each admitted operation freezes this complete value. */
 export type AgentMuxContinuityPolicy = {
@@ -134,8 +135,8 @@ export type AgentMuxContinuityInputDelivery = {
 /** New authored input which has not yet acquired its resumed Run binding. */
 export type AgentMuxContinuityInputRequest = {
   /** Original Host capture reference; mutually exclusive with a direct context declaration. */
-  inputContextCapture?: import('./agent-input-context-capture.js').AgentInputContextCaptureReference
-  inputContext?: import('./browser-input-context.js').BrowserInputContext
+  inputContextCapture?: import('../agent-input-context-capture.js').AgentInputContextCaptureReference
+  inputContext?: import('../browser-input-context.js').BrowserInputContext
   submissionId: string
   prompt: string
   agentMuxNote?: string
@@ -153,7 +154,7 @@ export type AgentMuxContinuityLaunchInput = {
   delivery: 'launch' | 'post-launch'
   lifecycleOperationId: string
   launchPlan?: { program: string; argsDigest: string }
-  state: 'prepared' | 'launch-carried' | 'unknown' | 'not-applied' | 'terminal-confirmed'
+  state: 'prepared' | 'launch-carried' | 'unknown' | 'not-applied' | 'terminal-confirmed' | 'native-admitted'
   key?: Extract<AgentPromptInputKey, { kind: 'prompt' }>
   receipt?: { kind: 'runtime-launch'; operationId: string; run: AgentMuxRunRef; observedAt: number }
 }
@@ -233,7 +234,10 @@ export type AgentMuxContinuityOperation = {
   launchInput?: AgentMuxContinuityLaunchInput
   recoveryDelivery?: AgentMuxContinuityInputDelivery
   /** Same-Run frontend action; exact original operation and output boundary survive lost replies. */
-  frontendReconnect?: { previousFrontendId: string; outputAfterByte: number; frontendId?: string }
+  frontendReconnect?: { previousFrontendId: string; outputAfterByte: number; frontendId?: string; operationId?: string }
+  /** Original actor bootstrap; never a request to replace its backend or repeat a native creation. */
+  initializationRecovery?: { actorId: string; lifecycleOperationId: string; run: AgentMuxRunRef; previousFrontendId: string;
+    outputAfterByte: number; observation: AgentTerminalFrontendObservation }
 }
 
 export function normalizeAgentContinuityLaunchInput(value: unknown): AgentMuxContinuityLaunchInput {
@@ -243,10 +247,10 @@ export function normalizeAgentContinuityLaunchInput(value: unknown): AgentMuxCon
       input.input.authorHuman !== undefined && typeof input.input.authorHuman !== 'boolean' ||
       typeof input.prompt !== 'string' || !input.prompt.trim() || typeof input.digest !== 'string' || !input.digest ||
       typeof input.lifecycleOperationId !== 'string' || !input.lifecycleOperationId || !input.message ||
-      !['launch', 'post-launch'].includes(input.delivery) || !['prepared', 'launch-carried', 'unknown', 'not-applied', 'terminal-confirmed'].includes(input.state) ||
+      !['launch', 'post-launch'].includes(input.delivery) || !['prepared', 'launch-carried', 'unknown', 'not-applied', 'terminal-confirmed', 'native-admitted'].includes(input.state) ||
       input.launchPlan && (typeof input.launchPlan.program !== 'string' || typeof input.launchPlan.argsDigest !== 'string') ||
       input.state === 'launch-carried' && (input.delivery !== 'launch' || !input.key || !input.receipt) ||
-      input.state === 'terminal-confirmed' && (input.delivery !== 'post-launch' || !input.key) ||
+      ['terminal-confirmed', 'native-admitted'].includes(input.state) && (input.delivery !== 'post-launch' || !input.key) ||
       input.receipt && (input.receipt.kind !== 'runtime-launch' || input.receipt.operationId !== input.lifecycleOperationId ||
         input.receipt.run?.runId !== input.key?.expectedRun.runId || !Number.isSafeInteger(input.receipt.observedAt) || input.receipt.observedAt < 0)) throw new TypeError('Invalid original continuity launch input.')
   if (input.key) {
@@ -343,7 +347,22 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
     delivery.receipt && JSON.stringify(delivery.receipt.key) !== JSON.stringify(delivery.key))) throw new TypeError('Invalid continuity input delivery.')
   if (op.frontendReconnect && (!op.frontendReconnect.previousFrontendId ||
     !Number.isSafeInteger(op.frontendReconnect.outputAfterByte) || op.frontendReconnect.outputAfterByte < 0 ||
-    op.frontendReconnect.frontendId !== undefined && !op.frontendReconnect.frontendId)) throw new TypeError('Invalid original frontend reconnect.')
+    op.frontendReconnect.frontendId !== undefined && !op.frontendReconnect.frontendId ||
+    op.frontendReconnect.operationId !== undefined && (typeof op.frontendReconnect.operationId !== 'string' || !op.frontendReconnect.operationId))) throw new TypeError('Invalid original frontend reconnect.')
+  if (op.initializationRecovery) {
+    const original = op.initializationRecovery
+    const observation = parseTerminalFrontendObservation(original.observation)
+    if (![original.actorId, original.lifecycleOperationId, original.previousFrontendId].every(value =>
+      typeof value === 'string' && value.length > 0 && value.length <= 512 && !/[\0\r\n]/u.test(value)) ||
+      !Number.isSafeInteger(original.outputAfterByte) || original.outputAfterByte < 0 ||
+      observation.initialization?.lifecycleOperationId !== original.lifecycleOperationId ||
+      original.run?.runId !== (op.newRun ?? op.previousRun).runId || op.frontendReconnect &&
+        (!op.frontendReconnect.operationId || op.frontendReconnect.operationId === op.operationId ||
+          observation.initialization?.phase !== 'ready' || observation.initialization.native.state !== 'confirmed' ||
+          observation.initialization.native.sessionId !== op.nativeTarget?.sessionId)) {
+      throw new TypeError('Invalid original initialization recovery.')
+    }
+  }
   return { ...structuredClone(op), policy: normalizeAgentContinuityPolicy(op.policy) }
 }
 

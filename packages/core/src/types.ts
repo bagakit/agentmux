@@ -1180,10 +1180,10 @@ export type AgentMuxAgentCreationInspection = AgentMuxAgentSession |
 
 export type AgentMuxAgentSession = {
   /** Read-only admissions retained through explicit retirement and reopen. */
-  continuityControlReceipts?: Record<string, import('./agent-session-continuity-control.js').AgentMuxContinuityControlReceipt>
+  continuityControlReceipts?: Record<string, import('./agent-session-recovery/control.js').AgentMuxContinuityControlReceipt>
   /** Core-owned current decision and exact original operation receipts. */
-  continuity?: import('./agent-session-continuity.js').AgentMuxContinuityOperation
-  continuityOperations?: Record<string, import('./agent-session-continuity.js').AgentMuxContinuityOperation>
+  continuity?: import('./agent-session-recovery/continuity.js').AgentMuxContinuityOperation
+  continuityOperations?: Record<string, import('./agent-session-recovery/continuity.js').AgentMuxContinuityOperation>
   kind: 'agent'
   agentSessionId: string
   providerId: AgentProviderId
@@ -1280,7 +1280,7 @@ export type AgentMuxAgentSession = {
 /** Original Session-owner record; legacy missing identity/source remains missing. */
 export type AgentPromptSubmissionRecord = {
   /** Original Runtime launch carrier; never a PTY or Provider acceptance ACK. */
-  launch?: import('./agent-session-continuity.js').AgentMuxContinuityLaunchInput
+  launch?: import('./agent-session-recovery/continuity.js').AgentMuxContinuityLaunchInput
   agentSessionId: string
   run: AgentMuxRunRef
   admission?: NonNullable<AgentMuxAgentSession['promptCompletionAdmission']>
@@ -1289,6 +1289,8 @@ export type AgentPromptSubmissionRecord = {
 
 export type AgentMuxAgentCreationFact = {
   createOperationId: string
+  /** Safe reference to the original input owner; private launch text is never projected here. */
+  initialInputKey?: Extract<import('./agent-prompt-condition.js').AgentPromptInputKey, { kind: 'prompt' }>
   /** Original authenticated creation source, distinct from initial-message author and fork ancestry. */
   createdBy?: import('./agent-spawn.js').AgentMuxSpawnCreator
   /** First actual Run of this creation; later resume never replaces this provenance. */
@@ -1465,6 +1467,8 @@ export type AgentHookIngressObservation = {
 /** This is the complete persistent semantic/control record. It deliberately has no
  * PTY, process, replay, terminal snapshot, terminal output bytes or ephemeral Hook observation. */
 export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngressObservation' | 'nativeHandlePersistence' | 'currentActivity' | 'terminalFrontend'> & {
+  /** Original creation input frozen before Start; only its key is public. */
+  initialInput?: import('./agent-session-recovery/continuity.js').AgentMuxContinuityLaunchInput
   /** Retained original-Run recovery evidence; never a live activity or input-authorization projection. */
   recoveryActivity?: AgentRecoveryActivity
   /** Private native service credential, frozen with this original lifecycle launch. Never a public capability ACK. */
@@ -1494,6 +1498,8 @@ export type AgentMuxStoredAgentSession = Omit<AgentMuxAgentSession, 'hookIngress
 export type AgentPrivateNativeActor = Readonly<{ protocolId: string; actorId: string; lifecycleOperationId: string; token: string;
   /** Frozen launch capability; native input alone does not imply a frontend control channel. */
   frontendControl?: true;
+  /** Frozen ability to reconcile this original native initialization without replaying input. */
+  initializationControl?: true;
   /** Original Provider invocation, distinct from Runtime's bootstrap plan. No bootstrap JSON decoding. */
   launch: { command: string; args: string[] } }>
 

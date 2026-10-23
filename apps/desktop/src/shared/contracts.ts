@@ -13,64 +13,8 @@ import type { BrowserOutcomeEvaluation, BrowserOutcomeFieldRunInput } from './br
 import type { ToolkitPreferences } from './toolkit-preferences'
 import type { WorkspaceFilePreviewReadOptions, WorkspaceFilePreviewResult } from './workspace-file-preview'
 import type { ContinuousProgressApi, ContinuousProgressInputRequest, ContinuousProgressInputResult } from './continuous-progress'
-import type {
-  AgentCatalogEntry,
-  AgentPromptCondition,
-  AgentPromptExecution,
-  AgentMessageChannel,
-  AgentMuxSessionQuestionReplyInput,
-  AgentSessionQuestionReplyReceipt,
-  AgentMuxAgentCreateInput,
-  AgentMuxAgentSession,
-  AgentMuxAgentCreationInspection,
-  AgentMuxNativeSessionConfirmationInput,
-  AgentMuxNativeSessionConfirmation,
-  AgentMuxAgentContinuityResult,
-  AgentMuxAgentContinuityConflictReason,
-  AgentMuxAgentContinuityUnavailableReason,
-  AgentCapabilities,
-  AgentDisplayState,
-  AgentStatus,
-  AgentExecutorConfig as CoreAgentExecutorConfig,
-  AgentExecutorId,
-  AgentProviderId,
-  LaunchOptionSelection,
-  AgentMuxClientEvent,
-  AgentMuxNativeService,
-  AgentMuxControlFailure,
-  AgentMuxEvidenceSource,
-  AgentMuxInteractionRequest,
-  AgentMuxInteractionResponse,
-  AgentMuxRunDataEvent,
-  AgentMuxRunAttachment,
-  AgentMuxRunExitReason,
-  AgentMuxRunInputData,
-  AgentMuxAgentWriteInput,
-  AgentMuxRunRef,
-  AgentMuxRunReplayGap,
-  AgentMuxRunState,
-  AgentTerminalCapabilityState,
-  AgentTerminalPromptDeliveryState,
-  AgentTerminalOutputChannelState,
-  AgentTurnUsage,
-  AgentMuxControlError,
-  AgentMuxControlErrorCode,
-  AgentMuxControlBrowserRunOutcome,
-  AgentMuxControlBrowserOperation,
-  AgentMuxControlRequest,
-  AgentMuxControlResult,
-  AgentMuxControlCrashLogFact,
-  AgentMuxExecutorProbeResult,
-  AgentTimelineItem,
-  AgentTimelineSnapshot,
-  AgentSessionHistoryPage,
-  AgentSessionHistoryResourceRequest,
-  AgentSessionHistoryResourceReadResult,
-  AgentSessionHistoryDescriptor,
-  AgentSessionHistoryPageOptions,
-  AgentSessionHistoryObservation,
-  AgentSessionHistoryObservationHandle
-} from '@agentmux/core'
+import type { AgentCatalogEntry, AgentPromptCondition, AgentPromptExecution, AgentMessageChannel, AgentMuxSessionQuestionReplyInput, AgentSessionQuestionReplyReceipt, AgentMuxAgentCreateInput, AgentMuxAgentSession, AgentMuxAgentCreationInspection, AgentMuxNativeSessionConfirmationInput, AgentMuxNativeSessionConfirmation, AgentCapabilities, AgentDisplayState, AgentStatus, AgentExecutorConfig as CoreAgentExecutorConfig, AgentExecutorId, AgentProviderId, LaunchOptionSelection, AgentMuxClientEvent, AgentMuxNativeService, AgentMuxControlFailure, AgentMuxEvidenceSource, AgentMuxInteractionRequest, AgentMuxInteractionResponse, AgentMuxRunDataEvent, AgentMuxRunAttachment, AgentMuxRunExitReason, AgentMuxRunInputData, AgentMuxAgentWriteInput, AgentMuxRunRef, AgentMuxRunReplayGap, AgentMuxRunState, AgentTerminalCapabilityState, AgentTerminalPromptDeliveryState, AgentTerminalOutputChannelState, AgentTurnUsage, AgentMuxControlError, AgentMuxControlErrorCode, AgentMuxControlBrowserRunOutcome, AgentMuxControlBrowserOperation, AgentMuxControlRequest, AgentMuxControlResult, AgentMuxControlCrashLogFact, AgentMuxExecutorProbeResult, AgentTimelineItem, AgentTimelineSnapshot, AgentSessionHistoryPage, AgentSessionHistoryResourceRequest, AgentSessionHistoryResourceReadResult, AgentSessionHistoryDescriptor, AgentSessionHistoryPageOptions, AgentSessionHistoryObservation, AgentSessionHistoryObservationHandle } from '@agentmux/core'
+import type { AgentMuxAgentContinuityResult, AgentMuxAgentContinuityConflictReason, AgentMuxAgentContinuityUnavailableReason } from '@agentmux/core/agent-session-recovery'
 export type CrashLogRevealResult = Exclude<AgentMuxControlCrashLogFact, { outcome: 'present' }> | { path: string; outcome: 'requested' }
 
 import type { BrowserActivityState, BrowserOperator, BrowserOperation, BrowserReplayPlan } from './browser-operation'
@@ -565,7 +509,7 @@ export type AppConfig = {
   notes?: import('./notes-preferences').NotesPreferences
   goals?: import('./goals-preferences').GoalsPreferences
   /** Authored continuity preferences; Core resolves defaults when a new recovery intent is admitted. */
-  continuity?: Partial<import('@agentmux/core').AgentMuxContinuityPolicy>
+  continuity?: Partial<import('@agentmux/core/agent-session-recovery').AgentMuxContinuityPolicy>
   /** New-task form defaults only; saving preferences never creates or changes a task. */
   automation?: import('./automation-preferences').AutomationPreferences
   /** Retained historical preference data. Availability observation never gates startup. */
@@ -1270,7 +1214,7 @@ export type SessionAttachResult = {
 /** Ordered retained bytes for an already-owned attachment; creates no Desktop lease. */
 export type SessionReplayResult = Pick<SessionAttachResult, 'replay' | 'gap'>
 
-export type SessionRestartResult = Omit<import('@agentmux/core').AgentMuxAgentRestartInspection, 'session'> & {
+export type SessionRestartResult = Omit<import('@agentmux/core/agent-session-recovery').AgentMuxAgentRestartInspection, 'session'> & {
   session?: SessionSnapshot
 }
 
@@ -2014,7 +1958,7 @@ export type AgentMuxDesktopApi = {
       cols: number,
       rows: number
     ): Promise<{ cols: number; rows: number } | null>
-    controlContinuity(hostId: string, input: import('@agentmux/core').AgentMuxContinuityControlInput): Promise<{ hostId: string; result: import('@agentmux/core').AgentMuxContinuityControlResult }>
+    controlContinuity(hostId: string, input: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlInput): Promise<{ hostId: string; result: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlResult }>
     refresh(session: SessionControl): Promise<SessionSnapshot>
     // Recover a session whose PTY was lost (daemon_restart / tmux_* interruption, or exit).
     // The physical PTY cannot be revived, so this mints a *fresh* Run in the same cwd:
@@ -2022,7 +1966,7 @@ export type AgentMuxDesktopApi = {
     // Transport loss remains an error and never authorizes resume.
     // Returns the Core continuity disposition; the renderer rebinds only an attached/resumed
     // Agent or a newly restarted raw Terminal.
-    recover(session: SessionControl, workspacePath?: string, operationId?: string, request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>): Promise<SessionRecoveryResult>
+    recover(session: SessionControl, workspacePath?: string, operationId?: string, request?: Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>): Promise<SessionRecoveryResult>
     stop(session: SessionControl): Promise<void>
     /** With control: this exact host/Run's terminal bytes and resize. Without: semantic/membership. */
     onEvent(listener: (event: RuntimeEvent) => void, control?: SessionControl): () => void

@@ -1,5 +1,5 @@
 import { agentInputContextCaptureProofFields } from './agent-input-context-capture.js'
-import { normalizeAgentContinuityLaunchInput } from './agent-session-continuity.js'
+import { normalizeAgentContinuityLaunchInput } from './agent-session-recovery/continuity.js'
 import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor } from './external-author.js'
 import { AgentMuxError } from './errors.js'
 import { browserInputContextFields } from './browser-input-context.js'

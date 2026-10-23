@@ -1,4 +1,4 @@
-import { parseAgentContinuityControlInput, type AgentMuxContinuityControlInput } from '@agentmux/core/agent-session-continuity-control'
+import { parseAgentContinuityControlInput, type AgentMuxContinuityControlInput } from '@agentmux/core/agent-session-recovery-control'
 
 /** User authorization awaiting its original owner, never a second Core receipt or supervisor. */
 export type ContinuityControlIntents = Record<string, Record<string, ContinuityControlIntent>>

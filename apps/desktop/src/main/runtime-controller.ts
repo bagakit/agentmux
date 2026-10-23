@@ -8,53 +8,8 @@ import { AGENT_SCHEDULE_CHECK_IN_GUIDANCE, type AgentScheduleCheckInPolicy } fro
 import { checkInHumanObservation, type CheckInObservation } from './agent-schedule-check-in.js'
 
 import { isAbsolute } from 'node:path'
-import {
-  AgentMuxError,
-  readRoutedInputMailbox,
-  createInputPerformanceRecorder, hostedCarrierPerformance,
-  parseAgentNativeResumeSource,
-  hostAgentCreationIntent,
-  type AgentMuxHostAgentCreateInput,
-  AGENTMUX_AGENT_MESSAGING_ENTRY,
-  agentPromptPredecessor,
-  agentPromptNotApplied,
-  validateAgentPromptCondition,
-  validateAgentPromptInputBinding,
-  type AgentPromptCondition,
-  type AgentPromptInputBinding,
-  type AgentInputSubmissionReceipt,
-  type AgentPromptExecution,
-  type AgentMessageChannel,
-  type AgentSessionQuestionReplyReceipt,
-  type AgentMuxRpcCallContext,
-  type AgentMuxNativeSessionConfirmationInput,
-  type AgentMuxNativeSessionConfirmation,
-  runtimeStorageUsage,
-  loadSessionHistorySources,
-  agentInteractionResponseUnavailableReason,
-  agentInteractionActiveRequest,
-  type AgentCapabilities,
-  type AgentCatalogEntry,
-  type AgentExecutorId,
-  type AgentProviderId,
-  type AgentSessionHistoryPage,
-  type AgentMuxAgentResumeInput,
-  type AgentMuxSshHostedClient,
-  type AgentSessionHistoryDescriptor,
-  type AgentSessionHistoryResourceRequest,
-  type AgentSessionHistoryResourceReadResult,
-  type AgentSessionHistoryObservation,
-  type AgentSessionHistoryObservationHandle,
-  type AgentMuxClientEvent,
-  type AgentMuxInteractionResponse,
-  type AgentMuxAgentSessionStore,
-  type AgentMuxRun,
-  type AgentMuxRunInputData,
-  type AgentMuxAgentWriteInput,
-  type AgentMuxRuntimeSubject,
-  type AgentMuxRuntimeSubjectTarget,
-  type ExecutionHost
-} from '@agentmux/core'
+import { AgentMuxError, readRoutedInputMailbox, createInputPerformanceRecorder, hostedCarrierPerformance, parseAgentNativeResumeSource, hostAgentCreationIntent, type AgentMuxHostAgentCreateInput, AGENTMUX_AGENT_MESSAGING_ENTRY, agentPromptPredecessor, agentPromptNotApplied, validateAgentPromptCondition, validateAgentPromptInputBinding, type AgentPromptCondition, type AgentPromptInputBinding, type AgentInputSubmissionReceipt, type AgentPromptExecution, type AgentMessageChannel, type AgentSessionQuestionReplyReceipt, type AgentMuxRpcCallContext, type AgentMuxNativeSessionConfirmationInput, type AgentMuxNativeSessionConfirmation, runtimeStorageUsage, loadSessionHistorySources, agentInteractionResponseUnavailableReason, agentInteractionActiveRequest, type AgentCapabilities, type AgentCatalogEntry, type AgentExecutorId, type AgentProviderId, type AgentSessionHistoryPage, type AgentMuxSshHostedClient, type AgentSessionHistoryDescriptor, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult, type AgentSessionHistoryObservation, type AgentSessionHistoryObservationHandle, type AgentMuxClientEvent, type AgentMuxInteractionResponse, type AgentMuxAgentSessionStore, type AgentMuxRun, type AgentMuxRunInputData, type AgentMuxAgentWriteInput, type AgentMuxRuntimeSubject, type AgentMuxRuntimeSubjectTarget, type ExecutionHost } from '@agentmux/core'
+import { type AgentMuxAgentResumeInput } from '@agentmux/core/agent-session-recovery'
 import { callOriginalDesktopHost } from './desktop-host.js'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
 import type { DesktopRuntimeClient as AgentMuxClient, DesktopRuntimeConnector } from './desktop-host.js'
@@ -2232,7 +2187,7 @@ export class RuntimeController {
   }
 
   /** Metadata control returns the original Core receipt even when presentation reads are unavailable. */
-  async controlContinuity(hostId: string, input: import('@agentmux/core').AgentMuxContinuityControlInput): Promise<{ hostId: string; result: import('@agentmux/core').AgentMuxContinuityControlResult }> {
+  async controlContinuity(hostId: string, input: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlInput): Promise<{ hostId: string; result: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlResult }> {
     const client = this.configuredClient(hostId)
     return { hostId, result: await client.controlAgentContinuity(input) }
   }
@@ -2249,7 +2204,7 @@ export class RuntimeController {
     config: AppConfig,
     workspacePath?: string,
     operationId: string = mintObjectId(),
-    request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>
+    request?: Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>
   ): Promise<SessionRecoveryResult> {
     return await this.trackHostLifecycleOperation(
       control.hostId,
@@ -2262,7 +2217,7 @@ export class RuntimeController {
     config: AppConfig,
     workspacePath: string | undefined,
     operationId: string,
-    request?: Pick<import('@agentmux/core').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>
+    request?: Pick<import('@agentmux/core/agent-session-recovery').AgentMuxAgentContinuityInput, 'trigger' | 'timingOverride' | 'input'>
   ): Promise<SessionRecoveryResult> {
     const client = await this.connectedClient(control.hostId, 'runtime')
     if (control.kind === 'terminal') {

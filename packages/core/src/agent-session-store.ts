@@ -1,7 +1,8 @@
 import { mintObjectId } from './object-id.js'
 import { parseAgentExternalInteractionAuthor } from './external-author.js'
-import { parseAgentContinuityControlReceipts, type AgentMuxContinuityControlReceipt } from './agent-session-continuity-control.js'
-import { normalizeAgentContinuityOperation } from './agent-session-continuity.js'
+import { parseAgentContinuityControlReceipts, type AgentMuxContinuityControlReceipt } from './agent-session-recovery/control.js'
+import { normalizeAgentContinuityOperation, normalizeAgentContinuityLaunchInput } from './agent-session-recovery/continuity.js'
+import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { MAX_STORED_TEXT_BYTES, parsePromptSubmissionRecord, normalizePromptCompletionAdmission, terminalPromptSubmission, terminalPromptReadinessSource } from './prompt-submission-record.js'
 export { parsePromptSubmissionRecord, normalizePromptCompletionAdmission } from './prompt-submission-record.js'
 import { normalizeOperationDevice } from './operation-device.js'
@@ -26,8 +27,8 @@ import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
 import { durableWriteFile, DurableWriteError } from './durable-write.js'
 import { normalizeAgentInteractionResponse } from './agent-interaction.js'
 import { canonicalHookLifecycleEvent, isAgentHookLifecycleEvent } from './agent-hook-event.js'
-import { parseAgentRestartInput, type AgentMuxAgentRestartInput } from './agent-session-restart.js'
-import { continuityExecutorEntries } from './agent-continuity-executor.js'
+import { parseAgentRestartInput, type AgentMuxAgentRestartInput } from './agent-session-recovery/restart.js'
+import { continuityExecutorEntries } from './agent-session-recovery/executor.js'
 import { isPermissionOptionKind, isPromptDeliveryDegradedReason, RISK_TIERS } from './types.js'
 import { applyNormalizedTimelineMutation } from './session-timeline-reducer.js'
 import { conversationRevision } from './conversation-stream.js'
@@ -113,7 +114,7 @@ type AgentMuxLifecycleReservationBase = {
 /** Prepared before start; no Run or input is invented for this durable creation seed. */
 export type AgentMuxPreparedCreation = Pick<AgentMuxStoredAgentSession,
   'kind' | 'agentSessionId' | 'providerId' | 'executorId' | 'hostId' | 'workspacePath' | 'hookBindingId' | 'hookToken' |
-  'capabilityHash' | 'createdAt' | 'updatedAt' | 'creation' | 'forkedFrom' | 'nativeHandle' | 'launchOptions' | 'nativeActor'>
+  'capabilityHash' | 'createdAt' | 'updatedAt' | 'creation' | 'forkedFrom' | 'nativeHandle' | 'launchOptions' | 'nativeActor' | 'initialInput'>
 
 export type AgentMuxLifecycleReservation = AgentMuxLifecycleReservationBase & (
   | { kind: 'create'; preparedCreation?: AgentMuxPreparedCreation; ownerReleased?: true; expectedRun?: never; stopOperation?: never }
@@ -270,6 +271,9 @@ function promptAdmissionRecords(session: AgentMuxStoredAgentSession | null | und
     if (launch?.delivery === 'launch' && launch.state === 'launch-carried' && launch.key) originals.push({
       agentSessionId: session.agentSessionId, run: launch.key.expectedRun, launch })
   }
+  const initial = session.initialInput
+  if (initial?.state === 'launch-carried' && initial.key) originals.push({ agentSessionId: session.agentSessionId,
+    run: initial.key.expectedRun, launch: initial })
   return structuredClone(originals)
 }
 function promptAdmissionRecord(session: AgentMuxStoredAgentSession | null | undefined): AgentPromptSubmissionRecord | null {
@@ -449,7 +453,8 @@ function lifecycleReservation(value: unknown): AgentMuxLifecycleReservation {
   if (source.kind === 'create') {
     if (source.ownerReleased !== undefined && source.ownerReleased !== true) throw new AgentMuxError('Invalid create owner release.', 'INVALID_AGENT_SESSION_STORE')
     const preparedCreation = source.preparedCreation === undefined ? undefined : normalizePreparedCreation(source.preparedCreation)
-    if (preparedCreation?.agentSessionId !== undefined && preparedCreation.agentSessionId !== base.agentSessionId) throw new AgentMuxError('Prepared creation names another Session.', 'INVALID_AGENT_SESSION_STORE')
+    if (preparedCreation?.agentSessionId !== undefined && preparedCreation.agentSessionId !== base.agentSessionId ||
+      preparedCreation?.initialInput && preparedCreation.initialInput.lifecycleOperationId !== base.operationId) throw new AgentMuxError('Prepared creation names another Session or lifecycle.', 'INVALID_AGENT_SESSION_STORE')
     return { ...base, kind: 'create', ...(preparedCreation ? { preparedCreation } : {}), ...(source.ownerReleased ? { ownerReleased: true as const } : {}) }
   }
   if (source.kind === 'resume') {
@@ -1371,6 +1376,11 @@ export function parseAgentCreationFact(value: unknown): NonNullable<AgentMuxAgen
     failure = { step: p.step as NonNullable<typeof failure>['step'], code: string(p.code, 'creation.failure.code'), message: text(p.message, 'creation.failure.message') }
   }
   return { createOperationId: string(creation.createOperationId, 'creation.createOperationId'), initialPrompt: initialPrompt as NonNullable<AgentMuxAgentSession['creation']>['initialPrompt'],
+    ...(creation.initialInputKey === undefined ? {} : { initialInputKey: (() => {
+      const key = validateAgentPromptInputKey(creation.initialInputKey)
+      if (key.kind !== 'prompt') throw new AgentMuxError('Creation requires its original prompt key.', 'INVALID_AGENT_SESSION_STORE')
+      return key
+    })() }),
     ...(creation.createdBy === undefined ? {} : { createdBy: parseAgentSpawnCreator(creation.createdBy) }),
     ...(creation.createdRun === undefined ? {} : { createdRun: runRef(creation.createdRun) }),
     ...(creation.initialMessageId === undefined ? {} : { initialMessageId: string(creation.initialMessageId, 'creation.initialMessageId') }),
@@ -1381,12 +1391,55 @@ export function parseAgentCreationFact(value: unknown): NonNullable<AgentMuxAgen
     ...(creation.persistence === undefined ? {} : { persistence: 'unconfirmed' as const }), ...(failure ? { failure } : {}) }
 }
 
+/** Only the creation owner writes this private packet; its text and author are immutable. */
+function normalizeInitialInput(value: unknown, agentSessionId: string): NonNullable<AgentMuxStoredAgentSession['initialInput']> {
+  const p = record(value, 'initialInput'), input = record(p.input, 'initialInput.input'), message = record(p.message, 'initialInput.message')
+  const body = (value: unknown) => typeof value === 'string' && value.length > 0 && Buffer.byteLength(value) <= MAX_STORED_TEXT_BYTES
+  if (Object.keys(p).some(key => !['input', 'prompt', 'message', 'digest', 'delivery', 'lifecycleOperationId', 'launchPlan', 'state', 'key', 'receipt'].includes(key)) ||
+      Object.keys(input).some(key => !['submissionId', 'prompt'].includes(key)) ||
+      Object.keys(message).some(key => !['userContent', 'systemContext', 'authorAgentSessionId'].includes(key)) ||
+      typeof input.prompt !== 'string' || Buffer.byteLength(input.prompt) > MAX_STORED_TEXT_BYTES ||
+      message.userContent !== (input.prompt.trim() ? input.prompt : undefined) ||
+      !body(p.prompt) || p.digest !== createHash('sha256').update(p.prompt as string).digest('base64url')) {
+    throw new AgentMuxError('Invalid original creation input.', 'INVALID_AGENT_SESSION_STORE')
+  }
+  string(input.submissionId, 'initialInput.submissionId')
+  string(p.lifecycleOperationId, 'initialInput.lifecycleOperationId')
+  if (p.launchPlan !== undefined) {
+    const plan = record(p.launchPlan, 'initialInput.launchPlan')
+    if (Object.keys(plan).some(key => !['program', 'argsDigest'].includes(key)) ||
+      typeof plan.argsDigest !== 'string' || !/^[a-zA-Z0-9_-]{43}$/u.test(plan.argsDigest)) throw new AgentMuxError('Invalid initial launch provenance.', 'INVALID_AGENT_SESSION_STORE')
+    string(plan.program, 'initialInput.launchPlan.program', MAX_PATH_BYTES)
+  }
+  if (p.receipt !== undefined) {
+    const receipt = record(p.receipt, 'initialInput.receipt')
+    if (Object.keys(receipt).some(key => !['kind', 'operationId', 'run', 'observedAt'].includes(key))) throw new AgentMuxError('Invalid initial launch receipt.', 'INVALID_AGENT_SESSION_STORE')
+    runRef(receipt.run)
+  }
+  for (const key of ['userContent', 'systemContext'] as const) if (message[key] !== undefined && !body(message[key])) throw new AgentMuxError('Invalid initial input message.', 'INVALID_AGENT_SESSION_STORE')
+  if (message.authorAgentSessionId !== undefined) string(message.authorAgentSessionId, 'initialInput.author')
+  const normalized = normalizeAgentContinuityLaunchInput(p)
+  if (normalized.key && normalized.key.agentSessionId !== agentSessionId ||
+      normalized.state !== 'prepared' && !normalized.key || normalized.delivery === 'launch' &&
+      !['prepared', 'launch-carried'].includes(normalized.state)) throw new AgentMuxError('Initial input changed its original target or carrier.', 'INVALID_AGENT_SESSION_STORE')
+  return normalized
+}
+
+function assertInitialInputWrite(previous: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession): void {
+  if (!previous?.initialInput) return
+  const { state: _before, ...original } = previous.initialInput
+  const { state: _after, ...updated } = next.initialInput ?? {}
+  if (!isDeepStrictEqual(original, updated)) throw new AgentMuxError('The original creation input body and identity are immutable.', 'AGENT_PROMPT_OPERATION_CONFLICT')
+}
+
 function normalizePreparedCreation(value: unknown): AgentMuxPreparedCreation {
   const p = record(value, 'prepared creation')
   if (p.kind !== 'agent' || Object.keys(p).some(key => !['kind', 'agentSessionId', 'providerId', 'executorId', 'hostId', 'workspacePath',
-    'hookBindingId', 'hookToken', 'capabilityHash', 'createdAt', 'updatedAt', 'creation', 'forkedFrom', 'nativeHandle', 'launchOptions', 'nativeActor'].includes(key))) throw new AgentMuxError('Invalid no-Run creation seed.', 'INVALID_AGENT_SESSION_STORE')
+    'hookBindingId', 'hookToken', 'capabilityHash', 'createdAt', 'updatedAt', 'creation', 'forkedFrom', 'nativeHandle', 'launchOptions', 'nativeActor', 'initialInput'].includes(key))) throw new AgentMuxError('Invalid no-Run creation seed.', 'INVALID_AGENT_SESSION_STORE')
   const creation = parseAgentCreationFact(p.creation), forkedFrom = p.forkedFrom === undefined ? undefined : parseAgentForkSource(p.forkedFrom)
-  if (!creation.intentDigest || creation.createdRun || creation.persistence || creation.failure ||
+  const initialInput = p.initialInput === undefined ? undefined : normalizeInitialInput(p.initialInput, String(p.agentSessionId))
+  if (!creation.intentDigest || creation.createdRun || creation.initialInputKey || creation.persistence || creation.failure ||
+    initialInput && (initialInput.key || initialInput.receipt || initialInput.state !== 'prepared') ||
     creation.agentMuxContext !== undefined && creation.agentMuxContext !== 'unknown' ||
     forkedFrom && forkedFrom.expectedNativeHandle.providerId !== p.providerId) throw new AgentMuxError('Prepared creation intent is incomplete.', 'INVALID_AGENT_SESSION_STORE')
   return { kind: 'agent', agentSessionId: string(p.agentSessionId, 'agentSessionId'), providerId: string(p.providerId, 'providerId'),
@@ -1395,6 +1448,7 @@ function normalizePreparedCreation(value: unknown): AgentMuxPreparedCreation {
     createdAt: timestamp(p.createdAt, 'createdAt'), updatedAt: timestamp(p.updatedAt, 'updatedAt'), creation, ...(forkedFrom ? { forkedFrom } : {}),
     ...(p.nativeHandle === undefined ? {} : { nativeHandle: nativeHandle(p.nativeHandle) }),
     ...(p.nativeActor === undefined ? {} : { nativeActor: normalizePrivateNativeActor(p.nativeActor) }),
+    ...(initialInput ? { initialInput } : {}),
     ...(p.launchOptions === undefined ? {} : { launchOptions: launchOptionSelection(p.launchOptions) }) }
 }
 
@@ -1518,6 +1572,9 @@ export function normalizeAgentSession(value: unknown): AgentMuxAgentSession {
     ...(source.turnUsage === undefined ? {} : { turnUsage: turnUsage(source.turnUsage) })
   }
   const inputKey = session.promptCompletionAdmission?.inputKey
+  const initialKey = session.creation?.initialInputKey
+  if (initialKey && (initialKey.agentSessionId !== session.agentSessionId ||
+    ![currentRun, ...priorRuns].some(run => run.runId === initialKey.expectedRun.runId))) throw new AgentMuxError('Creation input key names another original Session or Run.', 'INVALID_AGENT_SESSION_STORE')
   if (inputKey && (inputKey.agentSessionId !== session.agentSessionId ||
       (inputKey.kind === 'prompt' ? inputKey.submissionId : inputKey.messageId) !== session.promptCompletionAdmission!.submissionId ||
       inputKey.expectedRun.runId !== session.promptCompletionAdmission!.intent?.run.runId)) {
@@ -1691,18 +1748,24 @@ function recoveryActivity(value: unknown, session: AgentMuxAgentSession): AgentR
 function normalizePrivateNativeActor(value: unknown): import('./types.js').AgentPrivateNativeActor {
   const v = record(value, 'private native actor')
   const launch = record(v.launch, 'original Provider launch')
-  if (Object.keys(v).some(k => !['protocolId', 'actorId', 'lifecycleOperationId', 'token', 'launch', 'frontendControl'].includes(k)) || typeof v.token !== 'string' || !/^[a-f0-9]{64}$/u.test(v.token) ||
+  if (Object.keys(v).some(k => !['protocolId', 'actorId', 'lifecycleOperationId', 'token', 'launch', 'frontendControl', 'initializationControl'].includes(k)) || typeof v.token !== 'string' || !/^[a-f0-9]{64}$/u.test(v.token) ||
       v.frontendControl !== undefined && v.frontendControl !== true ||
+      v.initializationControl !== undefined && (v.initializationControl !== true || v.frontendControl !== true) ||
       Object.keys(launch).some(k => k !== 'command' && k !== 'args') || !Array.isArray(launch.args) || launch.args.some(arg => typeof arg !== 'string' || arg.includes('\0'))) throw new AgentMuxError('Invalid private native actor.', 'INVALID_AGENT_SESSION_STORE')
   return { protocolId: string(v.protocolId, 'native protocol'), actorId: string(v.actorId, 'native actor'), lifecycleOperationId: string(v.lifecycleOperationId, 'native lifecycle'), token: v.token,
     ...(v.frontendControl === true ? { frontendControl: true as const } : {}),
+    ...(v.initializationControl === true ? { initializationControl: true as const } : {}),
     launch: { command: string(launch.command, 'original Provider command', MAX_PATH_BYTES), args: [...launch.args] as string[] } }
 }
 
 export function normalizeStoredAgentSession(value: unknown): AgentMuxStoredAgentSession {
   const source = record(value, 'Agent Session')
   const session = normalizeAgentSession(source)
+  const initialInput = source.initialInput === undefined ? undefined : normalizeInitialInput(source.initialInput, session.agentSessionId)
+  if (initialInput && (!initialInput.key || !isDeepStrictEqual(initialInput.key, session.creation?.initialInputKey) ||
+      ![session.run, ...session.retiredRuns].some(run => run.runId === initialInput.key!.expectedRun.runId))) throw new AgentMuxError('Initial input lost its original creation Run.', 'INVALID_AGENT_SESSION_STORE')
   return { ...session,
+    ...(initialInput ? { initialInput } : {}),
     ...(source.recoveryActivity === undefined ? {} : { recoveryActivity: recoveryActivity(source.recoveryActivity, session) }),
     ...(source.nativeActor === undefined ? {} : { nativeActor: normalizePrivateNativeActor(source.nativeActor) }),
     ...(source.continuityExecutors === undefined ? {} : { continuityExecutors: structuredClone(source.continuityExecutors) }),
@@ -2136,9 +2199,15 @@ function assertLifecycleCommit(
     throw new AgentMuxError('Lifecycle commit does not match its Agent Session.', 'INVALID_AGENT_SESSION_STORE')
   }
   if (reservation.kind === 'create' && reservation.preparedCreation) {
-    const { run, retiredRuns, creation, terminalPromptReadiness, ...actual } = next
-    const { creation: intended, ...prepared } = reservation.preparedCreation
-    const { createdRun, ...creationIntent } = creation!
+    const { run, retiredRuns, creation, terminalPromptReadiness, initialInput, ...actual } = next
+    const { creation: intended, initialInput: preparedInput, ...prepared } = reservation.preparedCreation
+    const { createdRun, initialInputKey, ...creationIntent } = creation!
+    const { key: _key, receipt: _receipt, state: _state, ...boundInput } = initialInput ?? {}
+    const { state: _preparedState, ...inputIntent } = preparedInput ?? {}
+    if (Boolean(initialInput) !== Boolean(preparedInput) || initialInput &&
+      (!isDeepStrictEqual(boundInput, inputIntent) || initialInput.lifecycleOperationId !== reservation.operationId ||
+        !isDeepStrictEqual(initialInput.key, initialInputKey) || initialInput.key?.expectedRun.runId !== run.runId ||
+        initialInput.state !== (initialInput.delivery === 'launch' ? 'launch-carried' : 'prepared'))) throw new AgentMuxError('Creation input changed its prepared body or binding.', 'INVALID_AGENT_SESSION_STORE')
     // Initial composer readiness belongs to the just-started exact Run. It cannot
     // exist in a no-Run preparation; normalizeAgentSession already checks its Run.
     if (terminalPromptReadiness && terminalPromptReadiness.source !== 'initial-composer') throw new AgentMuxError('A creation cannot import another composer readiness epoch.', 'INVALID_AGENT_SESSION_STORE')
@@ -2329,6 +2398,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     if (reservation && (!next || !expected || next.run.runId !== expected.run.runId)) throw new AgentMuxError('Agent Session has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
     if (!next) { this.setSession(id, null); return }
     const normalized = normalizeStoredAgentSession(agentSessionMetadata(next))
+    assertInitialInputWrite(current, normalized)
     const values = [...this.sessions.values()].filter(session => session.agentSessionId !== id).map(agentSessionMetadata)
     const all = normalizeAgentSessions([...values, normalized])
     assertUnboundRetiredRuns(all, this.retiredRuns); assertRetiredAgentSessions(all, this.retiredRuns, this.retiredAgentSessions)
@@ -3003,7 +3073,11 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     const reservation = this.db.prepare('SELECT 1 FROM reservations WHERE id=?').get(id)
     if (reservation && (!next || !expected || next.run.runId !== expected.run.runId)) throw new AgentMuxError('Agent Session has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
     if (future && !isDeepStrictEqual(this.futureIntent(this.db, id, future.intentId), future.expected)) throw new AgentMuxError('The exact future intent changed before admission.', 'AGENT_FUTURE_INTENT_CHANGED')
-    if (next) this.saveSession(this.db, normalizeStoredAgentSession(complete ? next : agentSessionMetadata(next)), complete)
+    if (next) {
+      const normalized = normalizeStoredAgentSession(complete ? next : agentSessionMetadata(next))
+      assertInitialInputWrite(current, normalized)
+      this.saveSession(this.db, normalized, complete)
+    }
     else this.deleteSession(this.db, id)
     if (future && !isDeepStrictEqual(future.expected, future.next)) this.saveFutureIntent(this.db, id, future)
     this.dirty = true
