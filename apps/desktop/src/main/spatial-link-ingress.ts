@@ -1,5 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, parseAmuxObjectLink, agentSessionInspectCommand, type AgentMuxControlFocusRequest, type AgentMuxControlRequest, type AgentMuxControlResult } from '@agentmux/core'
+import type { CapsuleOpenResult } from '@agentmux/core/capsule'
 
 type Execute = (request: AgentMuxControlRequest, signal: AbortSignal) => Promise<AgentMuxControlResult>
 
@@ -10,6 +11,7 @@ export class SpatialLinkIngress {
   private execute: Execute | null = null
   private report: ((message: string) => void) | null = null
   private issue: string | null = null
+  private openCapsule: ((capsuleId: string, operationId: string, signal: AbortSignal) => Promise<CapsuleOpenResult>) | null = null
 
   receive(raw: string): void {
     this.execution?.abort()
@@ -19,13 +21,14 @@ export class SpatialLinkIngress {
     this.drain()
   }
 
-  ready(execute: Execute, report: (message: string) => void): void {
+  ready(execute: Execute, report: (message: string) => void, openCapsule?: (capsuleId: string, operationId: string, signal: AbortSignal) => Promise<CapsuleOpenResult>): void {
     this.execute = execute; this.report = report
+    this.openCapsule = openCapsule ?? null
     this.drain()
   }
 
   unavailable(): void {
-    this.execute = null; this.report = null
+    this.execute = null; this.report = null; this.openCapsule = null
     if (this.execution && !this.execution.signal.aborted)
       this.issue = 'Object link opening was interrupted before confirmation. Your current workface and healthy Agents are kept; retry the exact object link.'
     this.execution?.abort()
@@ -40,6 +43,15 @@ export class SpatialLinkIngress {
     const controller = new AbortController(), execute = this.execute
     this.execution = controller
     const navigate = async () => {
+      if (target.kind === 'capsule') {
+        if (!this.openCapsule) throw new Error('The original Capsule presentation owner is unavailable.')
+        const operationId = mintObjectId()
+        const result = await this.openCapsule(target.capsuleId, operationId, controller.signal)
+        if (controller.signal.aborted || this.execution !== controller) return
+        if (result.capsuleId !== target.capsuleId || result.operationId !== operationId) throw new Error('The Capsule owner returned another object or operation.')
+        if (result.rendering.status === 'unavailable') this.report?.(`Capsule opening is unconfirmed. ${result.rendering.reason} Inspect original operation ${operationId}; the page and current workface are kept.`)
+        return
+      }
       let request: AgentMuxControlFocusRequest
       const base = { schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: mintObjectId(), operation: 'focus' as const, inputPolicy: 'preserve' as const }
       if (target.kind === 'agent') {
