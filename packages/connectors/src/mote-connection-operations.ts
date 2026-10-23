@@ -9,13 +9,16 @@ import {
   type MoteConnectionSync,
   type MoteConnectionOperation,
   type MoteConnectionAdvanceInput,
-  type MoteConnectionListInput
+  type MoteConnectionListInput,
+  type MoteConnectionSource
 } from '@agentmux/core'
 import {
   moteConnectionBaseline,
   parseMotePreferencesSaveParams,
   parseMotePreferencesSaveResult,
   type MoteConnectionBaseline,
+  type MoteConnectionPreferencesReadInput,
+  type MoteConnectionPreferencesReadResult,
   type MoteConnectionPreferencesSaveParams,
   type MoteConnectionPreferencesSaveResult
 } from '@agentmux/core/mote-preferences'
@@ -30,9 +33,14 @@ import {
   type ConnectionSetupBegin,
   type ConnectionSetupAdvance
 } from '@agentmux/core/connections'
-import type { ConnectionServices } from '@agentmux/connectors'
-import type { MoteConnectionPreferences } from './mote-connection-preferences.js'
-import type { MoteConnectionSourceOwner } from './mote-connection-source.js'
+import type { ConnectionServices } from './connection-services.js'
+
+export type PreparedMoteConnectionSource = {
+  name: string
+  description: string | null
+  avatarSha256: string | null
+  pngDataUrl: string | null
+}
 
 type Input = MoteConnectionCreate | MoteConnectionSync
 type Row = {
@@ -64,9 +72,14 @@ export class MoteConnectionOperations implements MoteConnectionPort {
   private readonly active = new Map<string, Promise<MoteConnectionOperation>>()
   constructor(
     private readonly ports: {
-      connections: ConnectionServices
-      source: MoteConnectionSourceOwner
-      preferences: Pick<MoteConnectionPreferences, 'read' | 'save'>
+      connections: Pick<ConnectionServices, 'openDatabase' | 'connections'>
+      source: {
+        read(source: MoteConnectionSource, avatar: 'include-saved' | 'omit'): Promise<PreparedMoteConnectionSource>
+      }
+      preferences: {
+        read(input: MoteConnectionPreferencesReadInput): Promise<MoteConnectionPreferencesReadResult>
+        save(input: MoteConnectionPreferencesSaveParams, context?: ConnectionEnrollmentCallContext): Promise<MoteConnectionPreferencesSaveResult>
+      }
     }
   ) {}
   close(): void {

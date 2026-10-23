@@ -8,16 +8,11 @@ import {
   type MoteConnectionSource
 } from '@agentmux/core'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
+import type { PreparedMoteConnectionSource } from '@agentmux/connectors'
 import type { WorkspaceRecord } from '../shared/contracts.js'
 import { directoryIdentity, homeZoneId } from '../shared/space-addresses.js'
 import { SCRATCH_WORKSPACE_ID, topicPublicCopy, type ScratchDirectoryFact } from '../shared/scratch-topics.js'
 
-export type PreparedMoteConnectionSource = {
-  name: string
-  description: string | null
-  avatarSha256: string | null
-  pngDataUrl: string | null
-}
 const unconfirmed = () =>
   new AgentMuxError(
     'The exact saved Mote profile is unconfirmed. Its original files, conversations and robot remain available. Refresh that Mote before starting this request.',

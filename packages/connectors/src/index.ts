@@ -30,3 +30,4 @@ export * from './connection-setup.js'
 export { MoteChatHost, composeMoteChatBindings, type MoteChatAgentPort, type MoteChatCreatedAgent, type MoteChatPreparedLaunch, type MoteChatHostOptions, type MoteChatIncoming } from './mote-chat.js'
 
 export * from './connection-services.js'
+export * from './mote-connection-operations.js'
