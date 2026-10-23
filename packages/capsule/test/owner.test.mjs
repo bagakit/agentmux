@@ -147,7 +147,8 @@ test('prepared updates and config CAS retain original content, identity, port an
   const next = await owner.call('capsule.create', { operationId: 'new-defaults', sourcePath: source })
   assert.ok(next.record.contentRoot.startsWith((await realpath(nextRoot)) + '/'))
   assert.equal(next.record.mode, 'injected')
-  assert.ok(next.issues.some((x) => x.code === 'CAPSULE_INJECTION_UNAVAILABLE'))
+  assert.equal(next.issues.some((x) => x.stage === 'injection'), false,
+    'An absent optional HTTP adapter cannot declare native client capabilities unavailable')
 })
 
 test('real process death restores original IDs, bytes, operations, drafts and exact origins', async (t) => {
