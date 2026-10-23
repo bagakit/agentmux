@@ -9,7 +9,8 @@ import { api } from '../src/renderer/src/lib/api'
 import { ConnectionRequestTrace } from '../src/renderer/src/components/settings/ConnectionRequestTrace'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { diagnosisText } from './helpers/connection-diagnosis-text'
-import { confirmAndCreateMote } from './fixtures/mote-connection-owner'
+import { confirmAndCreateMote, moteConnectionOwner } from './fixtures/mote-connection-owner'
+import { join } from 'node:path'
 
 let f: Awaited<ReturnType<typeof moteBotUi>>
 const loadedPackage = { schema: 'agentmux.package-identity.v1', sourceCommit: 'loaded-original-source', sourceTree: 'loaded-original-tree', appVersion: '1', platform: 'darwin', arch: 'arm64' } as const
@@ -84,7 +85,7 @@ it('keeps the complete enrollment section when the linked setup view and trace a
 it('copies an unadmitted original ID and dispatch risk without inventing a cause or requiring a visible trace page', async () => {
   const container = document.createElement('div'); document.body.append(container); const root = createClientUiRoot(container)
   try {
-    await act(async () => root.render(<ConnectionRequestTrace source={null} diagnosisTarget={{ kind: 'mote', operationId: 'not-admitted-original', sourceTarget: f.target(), action: 'create', phase: 'may-have-dispatched' }} />))
+    await act(async () => root.render(<ConnectionRequestTrace hostingTarget={f.hostingTarget} source={null} diagnosisTarget={{ kind: 'mote', operationId: 'not-admitted-original', sourceTarget: f.target(), action: 'create', phase: 'may-have-dispatched' }} />))
     const before = f.registration.mock.calls.length, clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
     const button = [...container.querySelectorAll('button')].find(b => b.textContent === 'Copy diagnosis')!
     expect(button.disabled).toBe(false)
@@ -100,7 +101,7 @@ it('keeps unavailable loaded metadata explicit without hiding the original diagn
   vi.mocked(api.ui.readLoadedIdentity).mockRejectedValue(new Error('private identity exception'))
   const container = document.createElement('div'); document.body.append(container); const root = createClientUiRoot(container)
   try {
-    await act(async () => root.render(<ConnectionRequestTrace source={null} diagnosisTarget={{ kind: 'mote', operationId: 'original-identity-gap', sourceTarget: f.target() }} />))
+    await act(async () => root.render(<ConnectionRequestTrace hostingTarget={f.hostingTarget} source={null} diagnosisTarget={{ kind: 'mote', operationId: 'original-identity-gap', sourceTarget: f.target() }} />))
     const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
     await act(async () => container.querySelector<HTMLButtonElement>('button')!.click()); await vi.waitFor(() => expect(clipboard).toHaveBeenCalledOnce())
     expect(clipboard.mock.calls[0]![0]).toContain('package: unavailable')
@@ -148,7 +149,7 @@ it('uses the shared total report for a profile request which was not admitted by
 it('refuses a parent from another selected Mote without reading its children', async () => {
   const { parent } = await create(), container = document.createElement('div'); document.body.append(container); const root = createClientUiRoot(container)
   try {
-    await act(async () => root.render(<ConnectionRequestTrace source={null} diagnosisTarget={{ kind: 'mote', operationId: parent.operationId, sourceTarget: f.target(1) }} />))
+    await act(async () => root.render(<ConnectionRequestTrace hostingTarget={f.hostingTarget} source={null} diagnosisTarget={{ kind: 'mote', operationId: parent.operationId, sourceTarget: f.target(1) }} />))
     const before = f.connectionCalls.mock.calls.length, clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
     await act(async () => container.querySelector<HTMLButtonElement>('button')!.click()); await vi.waitFor(() => expect(clipboard).toHaveBeenCalledOnce())
     const report = diagnosisText(clipboard.mock.calls[0]![0])
@@ -157,3 +158,41 @@ it('refuses a parent from another selected Mote without reading its children', a
     expect(clipboard.mock.calls[0]![0]).not.toContain(parent.connection!.application.appId)
   } finally { await act(async () => root.unmount()); container.remove() }
 }, 30_000)
+
+
+it('the mounted diagnosis reads the original hosting journals and never substitutes the current owner for a missing locator', async () => {
+  const other = await moteConnectionOwner(join(f.root, 'other-owner'), { generic: true })
+  const container = document.createElement('div'); document.body.append(container); const root = createClientUiRoot(container)
+  try {
+    const operationId = 'same-diagnosis-operation', a = await f.input(operationId), b = await other.input(operationId)
+    const parent = await f.client.call('space.mote.connection.create', a)
+    await other.client.call('space.mote.connection.create', b)
+    const routed: unknown[] = []
+    f.parentCalls.mockImplementation(async (method, params, owner) => {
+      routed.push(owner)
+      return await (owner?.runtimeId === f.hostingTarget.runtimeId ? f.client : other.client).call(method, params)
+    })
+    f.connectionCalls.mockImplementation(async (method, params, owner) => {
+      routed.push(owner)
+      return await (owner?.runtimeId === f.hostingTarget.runtimeId ? f.client : other.client).call(method, params)
+    })
+    const clipboard = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+    const show = async (hostingTarget: typeof f.hostingTarget | null) => {
+      await act(async () => root.render(<ConnectionRequestTrace hostingTarget={hostingTarget} source={null} diagnosisTarget={{ kind: 'mote', operationId, sourceTarget: f.target() }} />))
+      await act(async () => container.querySelector<HTMLButtonElement>('button')!.click())
+    }
+    await show(f.hostingTarget)
+    await vi.waitFor(() => expect(clipboard).toHaveBeenCalledTimes(1))
+    const report = diagnosisText(clipboard.mock.calls[0]![0])
+    expect(report.observations['mote:' + operationId], 'the original SQLite parent must be read from its retained Host').toMatchObject({ status: 'recorded', enrollmentOperationId: parent.enrollmentOperationId })
+    expect(report.traces.some(trace => trace.operationId === parent.enrollmentOperationId)).toBe(true)
+    expect(routed.length).toBeGreaterThan(1); expect(routed.every(owner => JSON.stringify(owner) === JSON.stringify(f.hostingTarget))).toBe(true)
+    expect(clipboard.mock.calls[0]![0]).toContain('Hosting: ' + f.hostingTarget.hostId + ' / ' + f.hostingTarget.runtimeId)
+    routed.length = 0
+    await show(null)
+    await vi.waitFor(() => expect(clipboard).toHaveBeenCalledTimes(2))
+    const missing = diagnosisText(clipboard.mock.calls[1]![0])
+    expect(missing.observations['mote:' + operationId]).toMatchObject({ status: 'unavailable' })
+    expect(routed).toEqual([])
+  } finally { await act(async () => root.unmount()); container.remove(); await other.close() }
+})
