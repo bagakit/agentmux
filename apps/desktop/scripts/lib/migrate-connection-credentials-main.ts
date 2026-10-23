@@ -2,7 +2,7 @@ import { app, safeStorage } from 'electron'
 import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { convertConnectionCredentials } from './connection-credential-conversion'
+import { convertConnectionCredentials } from './connection-credential-conversion.js'
 
 const request = JSON.parse(readFileSync(process.argv[2]!, 'utf8'))
 const report = (stage: string, facts: Record<string, number | boolean | string> = {}) => process.stdout.write('AMUX_CREDENTIAL_TRANSFER ' + JSON.stringify({ operationId: request.operationId, stage, ...facts }) + '\n')
