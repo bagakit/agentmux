@@ -10,6 +10,7 @@ import { projectSessionInputs } from '@agentmux/core/conversation'
 import { inputMailboxItemKey } from '@agentmux/client-ui/use-agent-input-mailbox'
 import { channelMetadataFixture, actorSubject, groupSubject } from '../../../packages/connectors/test/fixtures/channel-metadata.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc'
+import type { ConnectionHostIpc } from '../src/main/connection-host-ipc'
 import { ChannelMetadataPanel } from '../src/renderer/src/components/settings/ChannelMetadataPanel'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
 import { InputMailboxRecords, inputMailboxPresentation } from '@agentmux/client-ui/components/InputMailboxRecords'
@@ -48,14 +49,29 @@ beforeEach(async () => {
   vi.stubGlobal('URL', NodeURL)
   f = await channelMetadataFixture(cleanup); calls = []; metadataReady = false; metadataInFlight = 0; metadataChanges = 0
   terminals.mounted = 0; terminals.disposed = 0
-  const release = registerConnectorIpc({ handleWithEvent: (channel, handler) => { bridge.handlers.set(channel, handler) },
-    assertTrusted: (_channel, event) => { expect(event.sender).toBe('original-renderer') }, socketPath: f.server.path, secrets: f.services.secrets,
-    metadata: { publish: change => { metadataChanges++; for (const listener of bridge.listeners.get('connections:metadataChanged') ?? []) listener({}, change) },
-      observation: state => { metadataReady = state === 'ready'; for (const listener of bridge.listeners.get('connections:metadataObservation') ?? []) listener({}, state) } } })
-  cleanup.push(release)
-  vi.spyOn(api.connections, 'call').mockImplementation(async (method: any, input: any) => {
+  // This controlled hosting port retains the fixture's actual public RPC owner.
+  const hostingTarget = { hostId: 'local', runtimeId: 'original-profile-runtime' }
+  const runtime: ConnectionHostIpc = {
+    connectionHostingTarget: async (hostId = 'local') => { expect(hostId).toBe('local'); return { ...hostingTarget } },
+    callConnectionHost: async (target, method, params) => {
+      expect(target).toEqual(hostingTarget)
+      return await f.sdk.call(method, params)
+    },
+    watchConnectionMetadata: async (target, handlers) => {
+      expect(target).toEqual(hostingTarget)
+      return await f.sdk.subscribe('connection.metadata.watch', {}, handlers)
+    }
+  }
+  const release = registerConnectorIpc({ runtime, handleWithEvent: (channel, handler) => { bridge.handlers.set(channel, handler) },
+    assertTrusted: (_channel, event) => { expect(event.sender).toBe('original-renderer') },
+    metadata: { publish: (watchId, change) => { metadataChanges++; for (const listener of bridge.listeners.get('connections:metadataChanged') ?? []) listener({}, { watchId, change }) },
+      observation: (watchId, state) => { metadataReady = state === 'ready'; for (const listener of bridge.listeners.get('connections:metadataObservation') ?? []) listener({}, { watchId, state }) } } })
+  cleanup.push(() => release.dispose())
+  vi.spyOn(api.connections, 'hostingTarget').mockImplementation((...args) => bridge.api.connections.hostingTarget(...args))
+  vi.spyOn(api.connections, 'call').mockImplementation(async (...args) => {
+    const [method, input] = args
     calls.push({ method, input }); metadataInFlight++
-    try { return await bridge.api.connections.call(method, input) } finally { metadataInFlight-- }
+    try { return await bridge.api.connections.call(...args) } finally { metadataInFlight-- }
   })
   vi.spyOn(api.connections, 'onMetadataChanged').mockImplementation((...args) => bridge.api.connections.onMetadataChanged(...args))
   await f.submit('ui-profile')
@@ -72,7 +88,11 @@ beforeEach(async () => {
   vi.spyOn(api.sessions, 'readHistory').mockImplementation((reference, input, context) => f.sdk.call('agent.history',
     { ...input, ...reference }, context?.signal ? { signal: context.signal } : {}))
 })
-afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); bridge.handlers.clear(); bridge.listeners.clear(); vi.unstubAllGlobals() })
+afterEach(async () => {
+  await dom.render(null)
+  for (const close of cleanup.splice(0).reverse()) await close()
+  bridge.handlers.clear(); bridge.listeners.clear(); vi.unstubAllGlobals()
+})
 async function click(text: string) {
   const button = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === text)
   expect(button, text).toBeDefined(); await act(async () => button!.click())
@@ -158,10 +178,10 @@ it('native sender -> original profile cache -> public RPC -> registered IPC/prel
   expect(calls.filter(call => call.method === 'connection.metadata.get' && call.input.subject.kind === 'actor')).toHaveLength(openedActorReads + 1)
   // A later display-read failure must keep the last observed name and the
   // authenticated original message, while making this read's uncertainty visible.
-  vi.mocked(api.connections.call).mockImplementation(async (method: any, input: any) => {
+  vi.mocked(api.connections.call).mockImplementation(async (method: any, input: any, target) => {
     calls.push({ method, input })
     if (method === 'connection.metadata.get' && input.subject.kind === 'actor') throw Error('Local profile read unavailable')
-    return bridge.api.connections.call(method, input)
+    return bridge.api.connections.call(method, input, target)
   })
   f.source('New cache value while the display read is unavailable', 'Renamed original group')
   await f.sdk.call('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject: actorSubject })
@@ -411,10 +431,17 @@ it('an enabled hidden Activity preparation does not read profiles and a foreign 
   await act(async () => foreign!.querySelector<HTMLButtonElement>('button[aria-label="Message details"]')!.click())
   expect(foreign!.textContent).toContain('Profile metadata is unavailable for this Host or source')
   expect(JSON.parse(foreign!.dataset.conversationAuthor!)).toEqual(external.author)
+  // The foreign reader releases its local watch. Keep an independent original
+  // local subscriber to witness the real notification without demanding profiles.
+  let controlReady = false, controlChanges = 0
+  cleanup.push(api.connections.onMetadataChanged(() => { controlChanges++ },
+    state => { controlReady = state === 'ready' }, await api.connections.hostingTarget()))
+  await vi.waitFor(() => expect(controlReady).toBe(true))
   const changed = metadataChanges
   f.source('A local cache value for the same literal actor', 'Original native group')
   await f.sdk.call('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject: actorSubject })
   await vi.waitFor(() => expect(metadataChanges).toBeGreaterThan(changed))
+  await vi.waitFor(() => expect(controlChanges).toBeGreaterThan(0))
   expect(actorReads()).toHaveLength(localReads)
   expect(foreign!.querySelector('.log-turn__sender')?.textContent).toBe(`${author.actor.userId} · ${author.actor.application.domain}`)
   expect(f.inner.kernel.input).toHaveBeenCalledOnce(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
@@ -437,11 +464,11 @@ it('a same-scope author-set change keeps represented saved profiles on read fail
   let release!: () => void
   const held = new Promise<void>(resolve => { release = resolve })
   const call = vi.mocked(api.connections.call).getMockImplementation()!
-  vi.mocked(api.connections.call).mockImplementation(async (method: any, input: any) => {
+  vi.mocked(api.connections.call).mockImplementation(async (method: any, input: any, target) => {
     if (method === 'connection.metadata.get' && input.subject.kind === 'actor') {
       calls.push({ method, input }); await held; throw Error('This exact display read is unavailable')
     }
-    return call(method, input)
+    return call(method, input, target)
   })
   const before = reads.length
   try {
@@ -463,9 +490,9 @@ it('late local profile results cannot cross source Host, route Host, visibility 
   let release!: () => void, entered = 0
   const held = new Promise<void>(resolve => { release = resolve })
   const call = vi.mocked(api.connections.call).getMockImplementation()!
-  vi.mocked(api.connections.call).mockImplementation(async (method: any, input: any) => {
+  vi.mocked(api.connections.call).mockImplementation(async (method: any, input: any, target) => {
     if (method === 'connection.metadata.get' && input.subject.kind === 'actor') { entered++; await held }
-    return call(method, input)
+    return call(method, input, target)
   })
   function Sender({ owner, visible = true, current = author }: { owner: typeof local; visible?: boolean; current?: typeof author }) {
     const profiles = useChannelActorProfiles([current], owner, visible)

@@ -16,7 +16,7 @@ const changes: Record<string, { path: string; before: string; after: string }> =
   'trust-foreign-source': { path: 'apps/desktop/src/renderer/src/lib/use-channel-actor-profiles.ts', before: 'owner?.hostId === localHostId && owner.sourceHostId === localHostId', after: 'owner?.hostId === localHostId' },
   'reset-represented-profiles': { path: 'apps/desktop/src/renderer/src/lib/use-channel-actor-profiles.ts', before: 'setRead(previous => ({ scope, profiles: retain(previous) }))', after: 'setRead(() => ({ scope, profiles: emptyProfiles }))' },
   'released-watch-state': { path: 'apps/desktop/src/renderer/src/lib/use-channel-actor-profiles.ts', before: '}, state => {\n        if (!live) return', after: '}, state => {' },
-  'disconnect-notification': { path: 'apps/desktop/src/main/connector-ipc.ts', before: 'options.metadata!.publish(event.data)', after: 'void event.data' },
+  'disconnect-notification': { path: 'apps/desktop/src/main/connector-ipc.ts', before: 'options.metadata.publish(watchId, event.data)', after: 'void event.data' },
   'omit-exact-clear': { path: 'apps/desktop/src/renderer/src/components/settings/ChannelMetadataPanel.tsx', before: "await connections.call('connection.metadata.clear', { ...input, expectedCacheRevision: entry.cacheRevision })", after: '{ entry }' }
 }
 if (mutation && !changes[mutation]) throw Error('Unknown Channel profile mutation')
