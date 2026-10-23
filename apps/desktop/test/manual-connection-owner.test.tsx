@@ -152,7 +152,7 @@ async function fixture() {
   const select = async (id: string) => { await act(async () => {
     const select = container.querySelector<HTMLSelectElement>('[aria-label="Connector hosting Host"]')!; select.value = 'host:' + id; select.dispatchEvent(new Event('change', { bubbles: true }))
   }); await vi.waitFor(async () => { await act(async () => {}); expect(container.textContent).not.toContain('Reading the original Host identity…'); expect(container.querySelector('[data-connection-hosting]')?.textContent).toContain(id) }) }
-  return { a, b, runtime, targets, config, mount, select, mainFallback, nativeCalls, loseSave: () => { lostSave = true }, loseCredential: () => { lostCredential = true }, holdMetadata: () => { heldMetadata = true }, metadataStarted: () => metadataStarted, releaseMetadata, holdList: () => { heldList = true }, listStarted: () => listStarted, releaseList, nativeName: (value: string) => { nativeName = value }, replaceAfterOwnerInspection: () => { replaceAfterOwnerInspection = true } }
+  return { a, b, runtime, sender, targets, config, mount, select, mainFallback, nativeCalls, loseSave: () => { lostSave = true }, loseCredential: () => { lostCredential = true }, holdMetadata: () => { heldMetadata = true }, metadataStarted: () => metadataStarted, releaseMetadata, holdList: () => { heldList = true }, listStarted: () => listStarted, releaseList, nativeName: (value: string) => { nativeName = value }, replaceAfterOwnerInspection: () => { replaceAfterOwnerInspection = true } }
 }
 async function click(selector: string) { await vi.waitFor(async () => { await act(async () => {}); const button = container.querySelector<HTMLButtonElement>(selector); expect(button).toBeDefined(); expect(button).not.toBeNull(); expect(button!.disabled).not.toBe(true) }); await act(async () => container.querySelector<HTMLElement>(selector)!.click()) }
 async function clickText(text: string) { await vi.waitFor(async () => { await act(async () => {}); const button = [...container.querySelectorAll('button')].find(button => button.textContent?.trim() === text); expect(button).toBeDefined(); expect(button!.disabled).not.toBe(true) }); await act(async () => [...container.querySelectorAll('button')].find(button => button.textContent?.trim() === text)!.click()) }
@@ -282,6 +282,11 @@ it('default trusted IPC and per-reader metadata borrow the background owner with
   expect(await api.connections.hostingTarget()).toEqual({ hostId: 'local', runtimeId: f.a.owner.runtimeId })
   expect((await api.connections.call('connection.ls', {})).connections.map(value => value.config.label)).toEqual(['Owner A'])
   const changesA: unknown[] = [], changesB: unknown[] = [], statesA: string[] = [], statesB: string[] = []
+  const subscriptions: AbortSignal[] = [], watch = f.runtime.watchConnectionMetadata.bind(f.runtime)
+  vi.spyOn(f.runtime, 'watchConnectionMetadata').mockImplementation((target, handlers, context) => {
+    if (handlers.signal) subscriptions.push(handlers.signal)
+    return watch(target, handlers, context)
+  })
   const releaseA = api.connections.onMetadataChanged(value => changesA.push(value), value => statesA.push(value), f.targets.a)
   const releaseB = api.connections.onMetadataChanged(value => changesB.push(value), value => statesB.push(value), f.targets.b)
   closes.push(releaseA, releaseB)
@@ -301,4 +306,17 @@ it('default trusted IPC and per-reader metadata borrow the background owner with
   expect(changesA).toHaveLength(1)
   expect((await api.connections.call('connection.ls', {})).connections[0]!.config.label).toBe('Owner A')
   expect((await api.connections.call('connection.ls', {}, f.targets.b)).connections[0]!.config.label).toBe('Owner B')
+  f.sender.emit('render-process-gone', {}, { reason: 'crashed' })
+  expect(subscriptions).toHaveLength(2)
+  expect(subscriptions.every(signal => signal.aborted), 'a Renderer failure releases every original metadata reader').toBe(true)
+  const afterReload: unknown[] = [], readyAfterReload: string[] = []
+  const releaseAfterReload = api.connections.onMetadataChanged(value => afterReload.push(value), value => readyAfterReload.push(value), f.targets.a)
+  closes.push(releaseAfterReload)
+  await vi.waitFor(() => expect(readyAfterReload).toEqual(['ready']))
+  expect(subscriptions).toHaveLength(3); expect(subscriptions[2]!.aborted).toBe(false)
+  f.nativeName('Room after Renderer recovery')
+  await api.connections.call('connection.metadata.refresh', { connectionId: 'same-connection', expectedConnectionRevision: 1, subject }, f.targets.a)
+  await vi.waitFor(() => expect(afterReload).toHaveLength(1))
+  f.sender.emit('did-start-navigation', {}, 'http://localhost/reloaded', false, true)
+  expect(subscriptions[2]!.aborted).toBe(true)
 })
