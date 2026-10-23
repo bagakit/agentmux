@@ -9,6 +9,7 @@ import * as nativeReader from '../src/renderer/src/lib/session-user-messages'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
+import type { ConversationObservation, ConversationObservationHandle } from '@agentmux/core/conversation'
 
 const closes: Array<() => unknown | Promise<unknown>> = [], dom = composerDOM()
 const panel = () => dom.container.querySelector<HTMLElement>('.composer-mailbox')!
@@ -32,7 +33,19 @@ async function fixture(composer = true) {
   const f = await nativeHistoryFixture('claude', jsonl(Array.from({ length: 145 }, (_, index) => ({ type: 'user', uuid: `original-${index}`,
     sessionId: 'native-main', message: { role: 'user', content: `Original input ${index}` } }))))
   closes.push(f.close)
-  await desktopConversationReadBridge(f, closes)
+  const bridge = await desktopConversationReadBridge(f, closes)
+  const windows = new Map<string, string>()
+  vi.mocked(api.conversation.readAgentConversation).mockImplementation(async (input, options) => {
+    const page = await bridge.readAgentConversation(input, options)
+    if (page.window.view) windows.set(page.window.view, page.window.id)
+    return page
+  })
+  const observations: Array<{ view: string | undefined; listener(value: ConversationObservation): void; handle: ConversationObservationHandle }> = []
+  vi.mocked(api.conversation.observeConversation).mockImplementation(async (reference, listener, options) => {
+    const handle = await bridge.observeConversation(reference, listener, options)
+    observations.push({ view: reference.view, listener, handle })
+    return handle
+  })
   const session = { ...composerSession(f.session.agentSessionId, 'claude'), control: { kind: 'agent' as const,
     hostId: 'local', agentSessionId: f.session.agentSessionId, run: f.session.run } }
   useAppStore.setState({ sessions: [session], timelines: {}, agentComposerHistory: {}, agentComposerHistoryNavigation: {}, agentComposerDrafts: { [session.id]: 'Unfinished original draft' } })
@@ -49,16 +62,28 @@ async function fixture(composer = true) {
   expect(api.conversation.readAgentConversation).not.toHaveBeenCalled()
   const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: 'open' })
   await act(async () => panel().dispatchEvent(event)); await dom.click('[role="tab"][id$="-user-tab"]')
-  await wait(() => { expect(rows().length).toBeGreaterThan(0); expect(api.conversation.observeConversation).toHaveBeenCalledTimes(1); expect(owner?.loading).toBe(false); expect(owner?.hasMore).toBe(true) })
+  // A current read may acquire a discovery watch before handing it to the
+  // accepted view. Count live ownership after admission, not past openings.
+  const activeObservations = () => observations.filter(observation => !observation.handle.closed.aborted)
+  const assertOriginalOwner = () => {
+    expect(owner?.loading).toBe(false)
+    const active = activeObservations()
+    expect(active, 'Exactly one native reader owns this scope after admission').toHaveLength(1)
+    expect(windows.get(active[0]!.view!), 'The live watch belongs to the accepted window').toBe(owner!.conversation.snapshot!.window.id)
+    expect(owner!.conversation.inspect().watch.windowId).toBe(owner!.conversation.snapshot!.window.id)
+    expect(observations.filter(observation => !observation.view).every(observation => observation.handle.closed.aborted),
+      'Original discovery handles release their ownership after view admission').toBe(true)
+  }
+  await wait(() => { expect(rows().length).toBeGreaterThan(0); assertOriginalOwner(); expect(owner?.hasMore).toBe(true) })
   const heads = () => vi.mocked(api.conversation.readAgentConversation).mock.calls.filter(([input]) => !input.cursor)
-  return { f, session, query, heads, owner: () => owner! }
+  return { f, session, query, heads, owner: () => owner!, assertOriginalOwner, activeObservations }
 }
 
 it('Composer and Mailbox own one native window and recover its observation by refreshing both native and query readers', async () => {
   const h = await fixture()
   expect(h.heads(), 'Mailbox must reuse the Composer window').toHaveLength(1)
   await wait(() => expect(h.query).toHaveBeenCalledTimes(2))
-  const observation = vi.mocked(api.conversation.observeConversation).mock.calls[0]![1]
+  const observation = h.activeObservations()[0]!.listener
   await act(async () => observation({ hostId: 'local', agentSessionId: h.session.id, sourceHostId: 'local',
     source: { kind: 'native', providerId: 'claude', nativeSessionId: 'native-main' }, kind: 'unavailable', message: 'Original observer temporarily unavailable' }))
   await wait(() => expect(panel().textContent).toContain('Original observer temporarily unavailable'))
@@ -67,6 +92,7 @@ it('Composer and Mailbox own one native window and recover its observation by re
   await wait(() => expect(panel().querySelector<HTMLButtonElement>('[aria-label="Refresh inputs"]')!.disabled).toBe(false))
   await click('Refresh inputs')
   await wait(() => { expect(h.heads()).toHaveLength(3); expect(h.query).toHaveBeenCalledTimes(6) })
+  await wait(h.assertOriginalOwner)
   expect(dom.draft(h.session.id)).toBe('Unfinished original draft')
   expect(h.f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
 })
@@ -83,6 +109,7 @@ it('the shared owner retains search and an opened original while its historical 
   await wait(() => expect(panel().textContent).toContain('The native source changed'))
   await click('Read latest records')
   await wait(() => expect(panel().textContent).not.toContain('The native source changed'))
+  await wait(h.assertOriginalOwner)
   expect(input.value).toBe('Original input 20')
   expect(h.query.mock.calls.slice(-2).map(([, value]) => value.query)).toEqual(['Original input 20', 'Original input 20'])
   const row = rows().find(node => node.textContent?.includes('Original input 20'))!
@@ -106,6 +133,7 @@ it('a failed canonical owner remains visible when source queries succeed and Ret
   expect(rows()).toContain(original)
   await click('Retry')
   await wait(() => { expect(h.query).toHaveBeenCalledTimes(4); expect(panel().textContent).not.toContain('Original canonical reader could not refresh') })
+  await wait(h.assertOriginalOwner)
   expect(rows()).toContain(original)
   expect(dom.draft(h.session.id)).toBe('Unfinished original draft')
   expect(h.f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
@@ -120,5 +148,6 @@ it('Mailbox without Composer keeps its own native reader and historical recovery
   await wait(() => expect(panel().textContent).toContain('The native source changed'))
   await click('Read latest records')
   await wait(() => { expect(h.heads()).toHaveLength(3); expect(panel().textContent).not.toContain('The native source changed') })
+  await wait(h.assertOriginalOwner)
   expect(h.f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
 })
