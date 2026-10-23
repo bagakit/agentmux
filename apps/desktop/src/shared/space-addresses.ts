@@ -5,16 +5,11 @@ import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicIdentityPath, scr
 import { categorySpaceFact, isKnowledgeTopic, UNCLASSIFIED_TOPIC_CATEGORY_ID } from './topic-categories'
 
 /** Durable directory identity shared by the Space tree, CLI and Project grouping. */
-export function directoryIdentity(hostId: string, path: string): string {
-  if (!hostId || !(path.startsWith('/') || /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\'))) {
-    throw new Error('Space identity requires a host and an absolute durable directory.')
-  }
-  return JSON.stringify([hostId, path])
-}
+export { directoryIdentity, homeZoneId } from '@agentmux/host/mote-model'
+import { directoryIdentity, homeZoneId } from '@agentmux/host/mote-model'
 export function workspaceZoneId(spaceId: string, workspaceId: string): string {
   return JSON.stringify([spaceId, 'workspace', workspaceId])
 }
-export function homeZoneId(spaceId: string): string { return JSON.stringify([spaceId, 'home']) }
 
 /** A failed Host read cannot replace the durable original identity with a logical-path guess. */
 export function originalTopicAddress(workspace: Pick<WorkspaceRecord, 'id' | 'hostId' | 'path'>, topic: Pick<ScratchTopicSnapshot, 'id' | 'directoryPath' | 'identityDirectoryPath' | 'readError'>, bindings: SpaceZoneBindings): { spaceId: string; zoneId: string } | null {
