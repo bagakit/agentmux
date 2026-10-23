@@ -210,6 +210,14 @@ async function checkProof() {
   assert.equal(proof.toolkit.toolkitOpen.capsuleId, content.managed.record.capsuleId)
   assert.equal(proof.toolkit.toolkitOpen.result.rendering.browserId, content.opened.rendering.browserId)
   assert.equal(proof.toolkit.toolkitAfter.latestConfirmed.executionId, proof.toolkit.toolkitResult.latestConfirmed.executionId)
+  assert.ok(proof.resizes?.length > 0 && proof.clicks?.length > 0, 'Native allocation and original input observations are required')
+  for (const resize of proof.resizes) {
+    assert.equal(resize.status, 'ready'); assert.equal(resize.samples.length, 3)
+    assert.ok(resize.samples.every(sample => sample.width === resize.actual[0] && sample.height === resize.actual[1]))
+    assert.ok(resize.samples.every(sample => JSON.stringify(sample) === JSON.stringify(resize.samples[0])))
+  }
+  for (const click of proof.clicks) { assert.equal(click.status, 'observed'); assertClickReceipt(click.receipt) }
+  assert.ok(proof.clicks.some(click => click.id === proof.toolkit.clickId), 'The Toolkit result retains its one observed original click')
   assert.equal(recovery.restoredSession.agentSessionId, original.agentSessionId)
   assert.deepEqual(recovery.restoredSession.run, original.run)
   assert.ok(proof.themeTransitions.some(value => value.theme.mode === 'light'))
@@ -470,14 +478,85 @@ async function readOriginalHttp(endpoint) {
   assert.ok(bytes.includes(Buffer.from('data-proof="capsule-native"')), 'Original generated HTML bytes')
   return { url: url.href, status: response.status, instanceId: endpoint.instanceId, bytes: bytes.length, sha256: sha(bytes) }
 }
+async function resizeNative(app, width, height, label = 'native allocation') {
+  const observation = { pid: app.child.pid, requested: [width, height], status: 'pending' }
+  facts.resizes ??= []; facts.resizes.push(observation)
+  try {
+    observation.actual = await app.main.evaluate(`__capsuleNative.resize(${width},${height})`)
+    observation.samples = await waitFor(label, async () => {
+      const samples = await app.cdp.evaluate(`new Promise(resolve=>{const samples=[];const sample=()=>{
+        samples.push({width:innerWidth,height:innerHeight,clientWidth:document.documentElement.clientWidth,clientHeight:document.documentElement.clientHeight});
+        if(samples.length===3)resolve(samples);else requestAnimationFrame(sample)};requestAnimationFrame(sample)})`)
+      observation.lastSamples = samples
+      return samples.every(sample => sample.width === observation.actual[0] && sample.height === observation.actual[1]) &&
+        samples.every(sample => JSON.stringify(sample) === JSON.stringify(samples[0])) ? samples : null
+    })
+    observation.status = 'ready'
+    return observation.actual
+  } catch (error) { observation.status = 'failed'; observation.error = error.message; throw error }
+}
+function assertClickReceipt(receipt) {
+  for (const type of ['pointerdown', 'pointerup', 'click']) {
+    const events = receipt.events.filter(event => event.type === type)
+    assert.equal(events.length, 1, 'One original input event is required: ' + type)
+    assert.equal(events[0].isTrusted, true, 'The original Chromium input must be trusted: ' + type)
+    assert.equal(events[0].targetMatched, true, 'The original target must receive the input: ' + type)
+    assert.equal(events[0].button, 0)
+  }
+}
 async function activate(cdp, expression) {
-  const point = await cdp.evaluate(`(()=>{const e=${expression};if(!e||e.disabled)throw Error('Original visible action unavailable');e.scrollIntoView({block:'center'});const r=e.getBoundingClientRect();if(!r.width||!r.height)throw Error('Original action is hidden');return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
-  await cdp.call('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', clickCount: 1, ...point })
-  await cdp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', clickCount: 1, ...point })
+  const id = randomUUID(), key = JSON.stringify(id), observation = { id, expression, status: 'preparing' }
+  facts.clicks ??= []; facts.clicks.push(observation)
+  const read = `globalThis.__capsuleClickObservers?.get(${key})?.snapshot()??null`
+  try {
+    observation.prepared = await cdp.evaluate(`(async()=>{
+      const e=${expression};if(!e||e.disabled)return{ready:false,reason:'Original visible action unavailable'};
+      e.scrollIntoView({block:'center',inline:'center',behavior:'instant'});
+      const describe=n=>n?{tag:n.tagName,id:n.id,className:String(n.className),text:n.textContent?.slice(0,160)}:null;
+      const inspect=()=>{const r=e.getBoundingClientRect(),point={x:r.x+r.width/2,y:r.y+r.height/2},hit=document.elementFromPoint(point.x,point.y);
+        return{ready:e.isConnected&&!e.disabled&&r.width>0&&r.height>0&&point.x>=0&&point.y>=0&&point.x<innerWidth&&point.y<innerHeight&&(hit===e||e.contains(hit)),
+          point,rect:{x:r.x,y:r.y,width:r.width,height:r.height},viewport:{width:innerWidth,height:innerHeight},target:describe(e),hit:describe(hit)}};
+      const samples=[];let frames=0;const stable=()=>samples.length===3&&samples.every(value=>value.ready&&JSON.stringify(value.rect)===JSON.stringify(samples.at(-1).rect)&&JSON.stringify(value.viewport)===JSON.stringify(samples.at(-1).viewport));
+      while(frames<60){await new Promise(requestAnimationFrame);frames++;samples.push(inspect());if(samples.length>3)samples.shift();if(stable())break}
+      const prepared={...samples.at(-1),frames};if(!stable())return{...prepared,ready:false,reason:'Original target allocation or hit-test is unconfirmed',samples};
+      const events=[],types=['pointerdown','pointerup','click'];
+      const listener=event=>events.push({type:event.type,isTrusted:event.isTrusted,targetMatched:event.composedPath().includes(e),button:event.button,x:event.clientX,y:event.clientY,target:describe(event.target)});
+      for(const type of types)document.addEventListener(type,listener,true);
+      globalThis.__capsuleClickObservers??=new Map();globalThis.__capsuleClickObservers.set(${key},{snapshot:()=>({...inspect(),events:[...events]}),cleanup:()=>{for(const type of types)document.removeEventListener(type,listener,true)}});
+      return prepared
+    })()`)
+    assert.equal(observation.prepared.ready, true, JSON.stringify(observation.prepared))
+    const before = await cdp.evaluate(read)
+    observation.before = before
+    assert.equal(before?.ready, true, 'The original target must still be reachable before the one click')
+    assert.deepEqual(before.rect, observation.prepared.rect, 'The original target moved before dispatch')
+    assert.deepEqual(before.viewport, observation.prepared.viewport, 'The original viewport changed before dispatch')
+    const point = observation.prepared.point
+    observation.status = 'press-requested'
+    await cdp.call('Input.dispatchMouseEvent', { type: 'mousePressed', button: 'left', buttons: 1, clickCount: 1, ...point })
+    observation.status = 'release-requested'
+    await cdp.call('Input.dispatchMouseEvent', { type: 'mouseReleased', button: 'left', buttons: 0, clickCount: 1, ...point })
+    observation.receipt = await waitFor('original trusted click observation', async () => {
+      const receipt = await cdp.evaluate(read)
+      observation.lastReceipt = receipt
+      return receipt?.events.some(event => event.type === 'click') ? receipt : null
+    }, 2000)
+    assertClickReceipt(observation.receipt)
+    // A trusted input receipt is not a business acknowledgement. The original
+    // Core operation and its consumer-specific result are still checked below.
+    observation.status = 'observed'
+    return observation
+  } catch (error) {
+    observation.status = 'failed'; observation.error = error.message
+    observation.lastReceipt = await cdp.evaluate(read).catch(failure => ({ observationError: failure.message }))
+    throw error
+  } finally {
+    await cdp.evaluate(`(()=>{const observers=globalThis.__capsuleClickObservers,observer=observers?.get(${key});observer?.cleanup();observers?.delete(${key})})()`)
+      .catch(error => { observation.observerCleanupError = error.message })
+  }
 }
 async function screenshot(app, name, width = 1440, height = 900) {
-  const size = await app.main.evaluate(`__capsuleNative.resize(${width},${height})`)
-  await waitFor(name + ' native allocation', () => app.cdp.evaluate(`innerWidth===${size[0]}&&innerHeight===${size[1]}`))
+  await resizeNative(app, width, height, name + ' native allocation')
   await delay(250)
   const captured = await app.main.evaluate('__capsuleNative.capture()')
   assert.equal(process.platform, 'darwin', 'This Native product fixture currently qualifies macOS window capture')
@@ -664,7 +743,7 @@ try {
   const normal = await screenshot(first, 'managed-question-normal')
   const narrow = await screenshot(first, 'managed-question-narrow', narrowWidth, 900)
   assert.ok(narrow.width < normal.width, 'Narrow screenshot must consume a smaller real native allocation')
-  await first.main.evaluate('__capsuleNative.resize(1440,900)')
+  await resizeNative(first, 1440, 900)
   await activate(first.cdp, `${browserRegion}.querySelector('.capsule-question__confirm')`)
   const answer = await waitFor('original Core input delivery', async () => {
     const value = await call('capsule.interaction.inspect', { capsuleId: managed.record.capsuleId, interactionId: question.interactionId })
@@ -727,7 +806,7 @@ try {
     assert.deepEqual(await isolatedDocument.evaluate('({sdk:typeof window.capsule,bg:getComputedStyle(document.body).backgroundColor,token:document.documentElement.style.getPropertyValue("--bg")})'), isolatedFacts)
     await screenshot(first, 'capsule-hitl-' + appearance + '-normal')
     await screenshot(first, 'capsule-hitl-' + appearance + '-narrow', narrowWidth, 900)
-    await first.main.evaluate('__capsuleNative.resize(1440,900)')
+    await resizeNative(first, 1440, 900)
   }
   facts.content = { managed, managedSourceRemoved: true, isolated, pathSourceObservedLive: true,
     opened, isolatedOpen, question, pending, answer, inputKey, originalInput, providerBytes, capabilities, containers }
@@ -743,12 +822,12 @@ try {
   await waitFor('real Capsule Settings owner result', () => first.cdp.evaluate('document.querySelector(".capsule-settings__pages")?.innerText.includes("Saved review")&&document.querySelector(".capsule-settings__pages")?.innerText.includes("Independent reference")'))
   await screenshot(first, 'capsule-settings-normal')
   await screenshot(first, 'capsule-settings-narrow', narrowWidth, 900)
-  await first.main.evaluate('__capsuleNative.resize(1440,900)')
+  await resizeNative(first, 1440, 900)
   await activate(first.cdp, '[...document.querySelectorAll(".capsule-settings__pages button")].find(n=>n.textContent.includes("Saved review"))')
   await activate(first.cdp, 'document.querySelector(".capsule-settings__detail details > summary")')
   await screenshot(first, 'capsule-settings-page-detail-normal')
   await screenshot(first, 'capsule-settings-page-detail-narrow', narrowWidth, 900)
-  await first.main.evaluate('__capsuleNative.resize(1440,900)')
+  await resizeNative(first, 1440, 900)
   await activate(first.cdp, 'document.querySelector("button[aria-label=\\"Close settings\\"]")')
   const toolkitId = 'capsule-proof-tool', channelModule = pathToFileURL(join(repository, 'packages/core/dist/toolkit-result-channel.js')).href
   const toolDocument = { schema: 'agentmux.toolkit.result.v1', summary: 'Saved review', items: [], links: [], notice: '', capsules: [{ label: 'Review page', capsuleId: managed.record.capsuleId }] }
@@ -761,8 +840,8 @@ try {
   await waitFor('actual Toolkit Capsule consumer', () => first.cdp.evaluate(`Boolean(document.querySelector('[data-toolkit-capsule="${managed.record.capsuleId}"]'))`))
   await screenshot(first, 'capsule-toolkit-normal')
   await screenshot(first, 'capsule-toolkit-narrow', narrowWidth, 900)
-  await first.main.evaluate('__capsuleNative.resize(1440,900)')
-  await activate(first.cdp, `document.querySelector('[data-toolkit-capsule="${managed.record.capsuleId}"] .toolkit-capsules__main button')`)
+  await resizeNative(first, 1440, 900)
+  const toolkitClick = await activate(first.cdp, `document.querySelector('[data-toolkit-capsule="${managed.record.capsuleId}"] .toolkit-capsules__main button')`)
   const toolkitOpen = await waitFor('Toolkit opens the exact original Capsule without rerunning', async () => {
     const { state } = await call('space.state', {})
     const resource = state.graph.resources['region:' + originalRegion.regionId]
@@ -776,7 +855,7 @@ try {
   assert.equal(toolkitOpen.result.rendering.browserId, opened.rendering.browserId)
   const toolkitAfter = await first.cdp.evaluate(`window.agentmux.toolkit.get(${JSON.stringify(toolkitId)})`)
   assert.equal(toolkitAfter.latestConfirmed.executionId, toolkitResult.latestConfirmed.executionId)
-  facts.toolkit = { tool, toolkitResult, toolkitOpen, toolkitAfter }
+  facts.toolkit = { tool, toolkitResult, toolkitOpen, toolkitAfter, clickId: toolkitClick.id }
   await first.cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
   await first.cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
   await phase('SIGKILL original Host and Desktop; retain ctxmux Run', async () => {
