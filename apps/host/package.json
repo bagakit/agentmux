@@ -9,12 +9,30 @@
   },
   "dependencies": {
     "@agentmux/capsule": "workspace:*",
+    "@agentmux/connectors": "workspace:*",
     "@agentmux/core": "workspace:*",
-    "@agentmux/relay": "workspace:*"
+    "@agentmux/relay": "workspace:*",
+    "@napi-rs/keyring": "2.1.2",
+    "yaml": "2.9.0",
+    "fs-native-extensions": "1.5.1"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
     "typescript": "^5.9.0",
     "esbuild": "^0.25.0"
+  },
+  "exports": {
+    "./mote-resources": {
+      "types": "./dist/mote-resources.d.ts",
+      "import": "./dist/mote-resources.js"
+    },
+    "./mote-chat-agents": {
+      "types": "./dist/mote-chat-agents.d.ts",
+      "import": "./dist/mote-chat-agents.js"
+    },
+    "./mote-model": {
+      "types": "./dist/mote-model.d.ts",
+      "import": "./dist/mote-model.js"
+    }
   }
 }
