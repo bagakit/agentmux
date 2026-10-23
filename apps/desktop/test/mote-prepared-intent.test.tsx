@@ -2,13 +2,16 @@
 import { act } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { writeFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
 import { parseMoteConnectionParams, parseMoteConnectionOperation, parseMoteConnectionResult } from '@agentmux/core/mote-connections'
 import { moteBotUi } from './fixtures/mote-bot-ui'
-import { confirmAndCreateMote } from './fixtures/mote-connection-owner'
+import { confirmAndCreateMote, moteChildDecision } from './fixtures/mote-connection-owner'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { api } from '../src/renderer/src/lib/api'
+import { MoteBotSetup } from '../src/renderer/src/components/MoteBotSetup'
+import { botTaskSelectionKey } from '../src/renderer/src/lib/bot-task-selection'
 import { useMoteBotSetup } from '../src/renderer/src/lib/use-mote-bot-setup'
 import { restoredMoteBotRequests } from '../src/renderer/src/lib/mote-bot-request'
 import { useAppStore, retainMoteBotRequest } from '../src/renderer/src/store'
@@ -20,13 +23,13 @@ async function fixture() { const f = await moteBotUi({ generic: true }); cleanup
 async function probe(f: Awaited<ReturnType<typeof fixture>>, requireProfile = true) {
   let hook!: ReturnType<typeof useMoteBotSetup>
   const node = document.createElement('div'); document.body.append(node); const view = createClientUiRoot(node)
-  function Probe() { hook = useMoteBotSetup(f.target(), f.motes[0]!.id); return null }
+  function Probe({ index = 0 }: { index?: number }) { hook = useMoteBotSetup(f.target(index), f.motes[index]!.id); return null }
   let active = true
   const unmount = async () => { if (active) { active = false; await act(async () => view.unmount()); node.remove() } }
   cleanup.push(unmount)
   await act(async () => view.render(<Probe />))
   if (requireProfile) await vi.waitFor(() => expect(hook.profile).not.toBeNull())
-  return { get current() { return hook }, unmount }
+  return { get current() { return hook }, unmount, selectTarget: async (index: number) => { await act(async () => view.render(<Probe index={index} />)) } }
 }
 function row(f: Awaited<ReturnType<typeof fixture>>, operationId: string) { return JSON.parse(String(f.connections.database!.prepare('SELECT record_json FROM mote_connection_operation WHERE operation_id=?').get(operationId)!.record_json)) }
 function replaceRow(f: Awaited<ReturnType<typeof fixture>>, operationId: string, saved: unknown) { f.connections.database!.prepare('UPDATE mote_connection_operation SET record_json=? WHERE operation_id=?').run(JSON.stringify(saved), operationId) }
@@ -123,13 +126,14 @@ it('continues an exact historical admitted row using its original frozen child w
   const f = await fixture(), input = await f.input('recorded-history')
   const accepted = await f.client.call('space.mote.connection.create', input), saved = row(f, input.operationId)
   const original = oldInput(input)
-  saved.input = original; saved.operation.source = original.source
+  saved.input = original; saved.operation.source = original.source; saved.pngDataUrl = input.desired.avatar.pngDataUrl
   replaceRow(f, input.operationId, saved)
   expect(parseMoteConnectionOperation((await f.client.call('space.mote.connection.inspect', { operationId: input.operationId })).operation).source).toEqual(original.source)
   await writeFile(join(f.motes[0]!.directory, 'topic.md'), '# Source changed\n')
   const result = await confirmAndCreateMote(f, input.operationId)
   expect(result.enrollmentOperationId).toBe(accepted.enrollmentOperationId)
   expect(row(f, input.operationId).input).toEqual(original)
+  expect(row(f, input.operationId).pngDataUrl).toBe(saved.pngDataUrl)
   expect(row(f, input.operationId).enrollmentInput).toEqual(saved.enrollmentInput)
   const dispatched = row(f, input.operationId)
   dispatched.defaultPhase = 'dispatching'; dispatched.operation.defaultSave.observedReceipt = null
@@ -165,4 +169,96 @@ it('explicit prepared provenance may be null and later appearance changes do not
   const updated = await f.client.call('space.mote.connection.sync', sync)
   expect(updated.snapshot).toEqual({ name: 'Prepared sync', description: '', avatarSha256: null })
   expect(row(f, sync.operationId).setupInput.goal.desired).not.toHaveProperty('avatar')
+})
+
+it('a sync rechecks the same original Mote target after its asynchronous connection read before freezing any new parent or child', async () => {
+  const f = await fixture(), input = await f.input('target-race-origin')
+  await f.client.call('space.mote.connection.create', input)
+  const created = await confirmAndCreateMote(f, input.operationId), original = f.connections.connections.inspect.bind(f.connections.connections)
+  let changed = false
+  vi.spyOn(f.connections.connections, 'inspect').mockImplementation(async value => {
+    const result = await original(value)
+    if (!changed && value.connectionId === created.connection!.connectionId) {
+      changed = true
+      const state = (await f.spatial.read())!
+      await f.spatial.commit({ expectedRevision: state.revision, graph: { ...state.graph, bindings: [] } })
+    }
+    return result
+  })
+  let outcome: unknown = null
+  try { await f.client.call('space.mote.connection.sync', { operationId: 'target-race-sync', source: input.source, desired: { name: 'Prepared exact target', description: '' }, connection: created.connection!, expectedConnectionRevision: 1 }) }
+  catch (error) { outcome = error }
+  const recorded = (await f.client.call('space.mote.connection.inspect', { operationId: 'target-race-sync' })).operation
+  expect(changed).toBe(true)
+  expect(recorded).toBeNull()
+  expect(outcome).toMatchObject({ code: 'MOTE_CONNECTION_SOURCE_UNCONFIRMED' })
+  expect(f.counts.begin).toBe(1)
+})
+
+it('the actual compiled CLI submits the unique prepared profile and omit-avatar sync to the original public parent', async () => {
+  if (process.env.MOTE_PREPARED_LOADED) {
+    vi.stubEnv('MANUAL_OWNER_LOADED', process.env.MOTE_PREPARED_LOADED)
+    vi.stubEnv('NODE_OPTIONS', (process.env.NODE_OPTIONS ?? '') + ' --import=' + pathToFileURL(resolve('apps/desktop/test/helpers/manual-owner-node-loader.mjs')).href)
+  }
+  const f = await fixture(), input = await f.input('compiled-prepared-profile')
+  input.source.preparedFrom = null
+  const pending = await f.cli('create', input)
+  expect(pending.source).toEqual(input.source)
+  expect(pending.snapshot.name).toBe(input.desired.name)
+  expect(row(f, input.operationId).enrollmentInput.preset).toEqual(input.desired)
+  const complete = await confirmAndCreateMote(f, input.operationId)
+  const sync = { operationId: 'compiled-prepared-sync', source: input.source, desired: { name: 'Prepared CLI profile', description: '' }, connection: complete.connection!, expectedConnectionRevision: 1 }
+  const result = await f.cli('sync', sync)
+  expect(result.snapshot).toEqual({ name: sync.desired.name, description: '', avatarSha256: null })
+  expect((await f.cli('inspect', { operationId: sync.operationId })).operation).toEqual(result)
+})
+
+it('the mounted original card never substitutes a current image for a different frozen PNG with the same preparation provenance', async () => {
+  const f = await fixture(), input = await f.input('different-frozen-image')
+  input.desired.avatar.pngDataUrl = 'data:image/png;base64,' + imagePng(256, 256, [170, 90, 60]).toString('base64')
+  await f.client.call('space.mote.connection.create', input)
+  await f.client.call('space.mote.connection.advance', await moteChildDecision(f, input.operationId, 'continue-authentication'))
+  await f.client.call('space.mote.connection.advance', await moteChildDecision(f, input.operationId, 'confirm-account'))
+  useAppStore.setState({ botTaskSelections: { [botTaskSelectionKey({ kind: 'mote', target: f.target() })]: input.operationId } })
+  const node = document.createElement('div'); document.body.append(node); const view = createClientUiRoot(node)
+  cleanup.push(async () => { await act(async () => view.unmount()); node.remove() })
+  await act(async () => view.render(<MoteBotSetup target={f.target()} topicId={f.motes[0]!.id} record={null} hasSavedBot={false} onChoose={() => {}} onCurrent={() => {}} />))
+  await vi.waitFor(() => expect(node.querySelector('[aria-label="Bot to create"]')).not.toBeNull())
+  expect(node.querySelector('[aria-label="Bot to create"] img')).toBeNull()
+  expect(node.textContent).toContain('Its preview is unavailable')
+  expect((await f.client.call('space.mote.connection.inspect', { operationId: input.operationId })).operation?.snapshot.avatarSha256).toBe(createHash('sha256').update(Buffer.from(input.desired.avatar.pngDataUrl.slice(22), 'base64')).digest('hex'))
+})
+
+it('a public Host receipt for profile A never accepts or retires the retained original client profile B with the same operation', async () => {
+  const f = await fixture(), accepted = await f.input('same-operation-different-intent')
+  await f.client.call('space.mote.connection.create', accepted)
+  const pending = { ...accepted, desired: { ...accepted.desired, name: 'Client original B' } }
+  await retainMoteBotRequest({ action: 'create', input: pending, phase: 'may-have-dispatched' })
+  useAppStore.setState({ botTaskSelections: { [botTaskSelectionKey({ kind: 'mote', target: f.target() })]: pending.operationId } })
+  const p = await probe(f)
+  await act(async () => p.current.check(pending.operationId))
+  expect(useAppStore.getState().moteBotRequests[pending.operationId]?.input).toEqual(pending)
+  expect(p.current.operation).toBeNull()
+  expect(p.current.issue).not.toContain('local saved view')
+  expect((await f.client.call('space.mote.connection.inspect', { operationId: pending.operationId })).operation?.snapshot.name).toBe(accepted.desired.name)
+  expect(f.counts.begin).toBe(1)
+})
+
+it('a late exact retirement receipt cannot populate another Mote after the original check waits on local persistence', async () => {
+  const f = await fixture(), input = await f.input('late-retirement')
+  await f.client.call('space.mote.connection.create', input)
+  await retainMoteBotRequest({ action: 'create', input, phase: 'may-have-dispatched' })
+  useAppStore.setState({ botTaskSelections: { [botTaskSelectionKey({ kind: 'mote', target: f.target() })]: input.operationId } })
+  let release!: () => void, waiting = false
+  const blocked = new Promise<void>(resolve => { release = resolve })
+  const flush = vi.spyOn(api.ui, 'requestStorageFlush').mockImplementation(async () => { waiting = true; await blocked })
+  try {
+    const p = await probe(f)
+    await vi.waitFor(() => expect(waiting).toBe(true))
+    await p.selectTarget(1)
+    release()
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 30)) })
+    expect(p.current.operations).toEqual([])
+    expect(p.current.operation).toBeNull()
+  } finally { release(); flush.mockRestore() }
 })

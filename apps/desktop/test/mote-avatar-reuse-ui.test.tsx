@@ -23,6 +23,7 @@ it.each([null, { ...DEFAULT_MOTE_FACE, palette: 'rose' }] as Array<SpaceIconChoi
   'starts the original setup for current Mote appearance %j without preparing or saving another avatar', async choice => {
     const card = await open(choice)
     await act(async () => card.querySelector<HTMLButtonElement>('[data-mote-card-action="create"]')!.click())
+    await f!.click('Sign in & continue')
     await vi.waitFor(async () => { await f!.settle(); expect(f!.beginCount).toBe(1) }, { timeout: 3500 })
     expect(document.body.textContent).not.toContain('Prepare avatar')
     expect(document.querySelector('.space-icon-picker')).toBeNull()
