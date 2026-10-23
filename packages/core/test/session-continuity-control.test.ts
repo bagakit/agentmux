@@ -336,7 +336,7 @@ it('keeps healthy raw capability while Hosted and the actual public CLI consume 
   expect(f.start).toHaveBeenCalledTimes(2); expect(f.stop).not.toHaveBeenCalled(); await f.write(f.client.agentSession(f.previous.agentSessionId))
   for (const args of [['--help'], ['agent', '--help'], ['agent', 'continuity', '--help'], ['agent', 'continuity', 'control', '--help'], ['agent', '--skill']]) {
     const help = await runCompiledObjectCli(args, objectCliEnvironment(f.root)); expect(help.code, help.stderr).toBe(0)
-    expect(help.stdout).toContain(args.includes('--skill') ? 'additionalAttempts' : 'continuity')
+    expect(help.stdout).toContain(args.length === 1 ? 'agent' : args.includes('--skill') ? 'amux agent --help' : args.includes('control') ? 'additionalAttempts' : 'continuity')
   }
   await f.client.stopAgent(f.previous.agentSessionId, cancel.expectedRun)
   const retired = await runCompiledObjectCli(['agent', 'continuity', 'control', '--input', input], objectCliEnvironment(f.root))
