@@ -20,7 +20,7 @@ async function bind(path) {
   if (inputs.has(absolute)) assert.equal(inputs.get(absolute), hash, 'Source changed during qualification: ' + path)
   inputs.set(absolute, hash)
 }
-for (const file of ['packages/core/src/client.ts', 'packages/core/src/agent-session-recovery/service.ts', 'packages/core/src/agent-session-recovery/ports.ts', 'packages/core/src/agent-session-recovery.ts', 'packages/core/src/agent-runtime-helpers.ts', 'packages/core/src/agent-session-recovery/control-contract.ts',
+for (const file of ['packages/core/src/client.ts', 'packages/core/src/agent-session-recovery/service.ts', 'packages/core/src/agent-session-recovery/continuity-attempt.ts', 'packages/core/src/agent-session-recovery/lifecycle.ts', 'packages/core/src/agent-session-recovery/reconciliation.ts', 'packages/core/src/agent-session-recovery/ports.ts', 'packages/core/src/agent-session-recovery.ts', 'packages/core/src/agent-runtime-helpers.ts', 'packages/core/src/agent-session-recovery/control-contract.ts',
   'packages/core/src/agent-session-recovery/continuity-contract.ts', 'packages/core/src/agent-session-recovery/continuity-policy.ts', 'packages/core/src/agent-session-recovery/supervisor.ts', 'packages/core/src/agent-session-store.ts',
   'packages/core/src/hosted-client-contract.ts', 'packages/core/src/hosted-client.ts', 'packages/core/src/hosted-runtime-service.ts',
   'packages/core/src/public-rpc.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/rpc-native-codec.ts',
@@ -48,7 +48,7 @@ const variants = [
   },
   {
     "name": "drop-initial-intent",
-    "path": "packages/core/src/agent-session-recovery/service.ts",
+    "path": "packages/core/src/agent-session-recovery/continuity-attempt.ts",
     "from": "if (result.kind === 'pending' && current && !receipt.intentOperationId && !receipt.supervision && !['manual', 'input'].includes(receipt.trigger))",
     "to": "if (false && current && !receipt.intentOperationId && !receipt.supervision && !['manual', 'input'].includes(receipt.trigger))",
     "target": "cancels the configured initial delay and keeps the same zero-count receipt across Core process Hosted and compiled CLI",
@@ -56,7 +56,7 @@ const variants = [
   },
   {
     "name": "count-before-admission",
-    "path": "packages/core/src/agent-session-recovery/service.ts",
+    "path": "packages/core/src/agent-session-recovery/continuity-attempt.ts",
     "from": "attemptCount: 0, attemptLimit: Math.min(Number.MAX_SAFE_INTEGER, 1 + policy.retryMaxAttempts)",
     "to": "attemptCount: 1, attemptLimit: Math.min(Number.MAX_SAFE_INTEGER, 1 + policy.retryMaxAttempts)",
     "target": "cancels the configured initial delay and keeps the same zero-count receipt across Core process Hosted and compiled CLI",

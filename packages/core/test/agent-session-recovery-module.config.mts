@@ -18,7 +18,7 @@ export default { ...base, resolve: { alias: [{ find: '@agentmux/identity/runtime
       }))
       return loaded === code ? undefined : { code: loaded, map: null }
     }
-    if (mutation === 'unknown-as-missing' && source === resolve(import.meta.dirname, '../src/agent-session-recovery/service.ts')) {
+    if (mutation === 'unknown-as-missing' && source === resolve(import.meta.dirname, '../src/agent-session-recovery/continuity-attempt.ts')) {
       const original = "if (!(error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found')) {"
       if (code.split(original).length !== 2) throw new Error('Recovery mutation must match the actual owner exactly once')
       return { code: code.replace(original, 'if (false) {'), map: null }

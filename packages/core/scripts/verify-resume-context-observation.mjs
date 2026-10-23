@@ -19,7 +19,7 @@ async function bind(path) {
   if (inputs.has(absolute)) assert.equal(inputs.get(absolute), hash, 'Source changed during qualification: ' + path)
   inputs.set(absolute, hash)
 }
-for (const path of ['packages/core/src/client.ts', 'packages/core/src/agent-session-recovery/service.ts', 'packages/core/src/agent-session-recovery/ports.ts', 'packages/core/src/agent-session-recovery.ts', 'packages/core/src/agent-runtime-helpers.ts', 'packages/core/src/hook-normalizer.ts', 'packages/core/src/types.ts', 'packages/core/src/providers/codex.ts',
+for (const path of ['packages/core/src/client.ts', 'packages/core/src/agent-session-recovery/service.ts', 'packages/core/src/agent-session-recovery/continuity-attempt.ts', 'packages/core/src/agent-session-recovery/lifecycle.ts', 'packages/core/src/agent-session-recovery/reconciliation.ts', 'packages/core/src/agent-session-recovery/ports.ts', 'packages/core/src/agent-session-recovery.ts', 'packages/core/src/agent-runtime-helpers.ts', 'packages/core/src/hook-normalizer.ts', 'packages/core/src/types.ts', 'packages/core/src/providers/codex.ts',
   'packages/core/src/agent-native-locator.ts', 'packages/core/src/agent-session-store.ts', 'packages/core/src/agent-session-recovery/supervisor.ts', 'packages/core/src/agent-session-recovery/continuity-contract.ts', 'packages/core/src/agent-session-recovery/continuity-policy.ts',
   'packages/core/test/resume-context-observation.test.ts', 'packages/core/test/resume-context-observation.config.mts',
   'packages/core/test/helpers/object-cli-rpc.ts', 'packages/core/src/hosted-client-contract.ts', 'packages/core/src/public-rpc-service.ts',
@@ -58,10 +58,10 @@ const variants = [
   { name: 'trust-conflicting-hook-main', path: 'packages/core/src/hook-normalizer.ts',
     from: 'if (context.protectedNativeTarget === true && context.nativeTargetMismatch === true)', to: 'if (false)',
     target: 'preserves a known canonical locator when its exact Native witness reports another locator: explicit', expected: 'to match object' },
-  { name: 'reject-direct-locator-enrichment', path: "packages/core/src/agent-session-recovery/service.ts",
+  { name: 'reject-direct-locator-enrichment', path: "packages/core/src/agent-session-recovery/lifecycle.ts",
     from: "!matchesProviderNativeSessionTarget(prior.nativeTarget, canonical.nativeHandle)", to: "!isDeepStrictEqual(prior.nativeTarget, canonical.nativeHandle)",
     target: 'reads the original explicit resume receipt after a verified first locator enrichment without replaying Start or input', expected: 'promise rejected' },
-  { name: 'replace-frozen-direct-request', path: "packages/core/src/agent-session-recovery/service.ts",
+  { name: 'replace-frozen-direct-request', path: "packages/core/src/agent-session-recovery/lifecycle.ts",
     from: "prior.requestDigest !== requestDigest || !matchesProviderNativeSessionTarget", to: "!matchesProviderNativeSessionTarget",
     target: 'reads the original explicit resume receipt after a verified first locator enrichment without replaying Start or input', expected: 'promise resolved' },
   { name: 'forget-native-resume-source', path: 'packages/core/src/providers/codex.ts',

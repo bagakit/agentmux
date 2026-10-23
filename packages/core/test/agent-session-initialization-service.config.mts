@@ -9,7 +9,7 @@ export default { ...base, resolve: { alias: [
   ...base.resolve.alias
 ] }, plugins: [{ name: 'actual-initialization-service-mutation', enforce: 'pre' as const,
   transform(code: string, id: string) {
-    const owner = mutation === 'trust-running' ? 'service.ts' : 'reconciliation.ts'
+    const owner = mutation === 'trust-running' ? 'continuity-attempt.ts' : 'reconciliation.ts'
     if (id.split('?')[0] !== resolve(import.meta.dirname, '../src/agent-session-recovery/' + owner)) return
     let changed = code
     if (mutation === 'old-initial-observation-order') {

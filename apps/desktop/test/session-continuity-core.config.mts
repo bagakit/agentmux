@@ -7,12 +7,12 @@ import source from '../../../packages/core/test/hook-postcommit-observation.vite
 const root = resolve(import.meta.dirname, '../../..')
 const mutations: Record<string, { file: string; before: string; after: string }> = {
   'working-gate': { file: 'packages/core/src/agent-session-recovery/continuity-policy.ts', before: "status.state === 'working'", after: "status.state === 'done'" },
-  'unknown-missing': { file: "packages/core/src/agent-session-recovery/service.ts", before: "if (!(error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found')) {", after: "if (false) {" },
-  'expected-run': { file: "packages/core/src/agent-session-recovery/service.ts", before: "if (current && !sameRun(current.run, input.expectedRun)) {", after: "if (false) {" },
+  'unknown-missing': { file: "packages/core/src/agent-session-recovery/continuity-attempt.ts", before: "if (!(error instanceof AgentMuxError && error.code === 'CTXMUX_run_not_found')) {", after: "if (false) {" },
+  'expected-run': { file: "packages/core/src/agent-session-recovery/continuity-attempt.ts", before: "if (current && !sameRun(current.run, input.expectedRun)) {", after: "if (false) {" },
   'healthy-resume': { file: 'packages/core/src/agent-session-recovery/continuity-policy.ts', before: "if (facts.run?.state === 'running') {", after: 'if (false) {' },
-  'atomic-receipt': { file: "packages/core/src/agent-session-recovery/service.ts", before: "if (continuity?.operationId === input.operationId && continuity.kind === 'starting') {", after: "if (false) {" },
-  'committed-health': { file: 'packages/core/src/agent-session-recovery/service.ts', before: "if (reservation.kind === 'resume' && continuity?.operationId === input.operationId) {", after: 'if (false) {' },
-  'parked-rejoin': { file: "packages/core/src/agent-session-recovery/service.ts", before: "['active-delay', 'operation-unconfirmed'].includes(current.continuity.reason)", after: "true" },
+  'atomic-receipt': { file: "packages/core/src/agent-session-recovery/lifecycle.ts", before: "if (continuity?.operationId === input.operationId && continuity.kind === 'starting') {", after: "if (false) {" },
+  'committed-health': { file: "packages/core/src/agent-session-recovery/lifecycle.ts", before: "if (reservation.kind === 'resume' && continuity?.operationId === input.operationId) {", after: 'if (false) {' },
+  'parked-rejoin': { file: "packages/core/src/agent-session-recovery/continuity-attempt.ts", before: "['active-delay', 'operation-unconfirmed'].includes(current.continuity.reason)", after: "true" },
   'ended-fresh-input': { file: 'apps/desktop/src/renderer/src/store.ts', before: "entry.promptCondition === null && session.processState === 'running' && !session.pendingInteraction)", after: 'entry.promptCondition === null && !session.pendingInteraction)' },
   'startup-trigger': { file: 'apps/desktop/src/renderer/src/store.ts', before: "{ stillCurrent: current, trigger: 'startup' }", after: "{ stillCurrent: current, trigger: 'manual' }" }
 }
