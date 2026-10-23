@@ -1,5 +1,7 @@
 import { inputMailboxItemKey, inputMailboxKey, useAgentInputMailbox } from '@agentmux/client-ui/use-agent-input-mailbox'
 import { InputMailboxRecords, inputMailboxPresentation } from '@agentmux/client-ui/components/InputMailboxRecords'
+import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
+import type { ClientDeliveryDiagnostics } from '@agentmux/client-ui/delivery-diagnostics'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { conversationRecordId, projectSessionInputs, type ConversationInputEntity } from '@agentmux/core/conversation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -10,6 +12,7 @@ import { ConversationMessage, speakerOfUserMessage, type ClientUiPlatform, type 
 import type { ConversationReadingProps } from '@agentmux/client-ui/components/ConversationMessage'
 import { InputHistoryList, InputHistoryOriginalRecords, type InputHistoryLocalEntry } from '@agentmux/client-ui/components/InputHistoryList'
 import { useAgentInputHistory, type InputHistoryRead } from '@agentmux/client-ui/use-agent-input-history'
+import type { PromptAttempt } from './local-drafts'
 
 const ThemeObjectMailboxIcon = semanticIconComponent('object.mailbox')
 const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
@@ -22,7 +25,7 @@ function sameOriginalReading(a: AgentSessionUserMessage, b: AgentSessionUserMess
 
 /** A client presentation of original Core messages and state, never a second mailbox owner. */
 export function MobileMailbox({ client, session, connected, messages, inputs, sourceHostId, platform, describeSpeaker, refresh, terminal,
-  historyScope, readHistory, onHistoryFill, onHistoryCopy, localEntries = [], onHistoryFillLocal, reading, visible = true }: {
+  historyScope, readHistory, onHistoryFill, onHistoryCopy, localEntries = [], onHistoryFillLocal, promptAttempts = [], diagnostics, reading, visible = true }: {
   client?: AgentMuxHostedClient | null; session: AgentMuxAgentSession | null; connected: boolean; messages: readonly AgentSessionUserMessage[]; platform: ClientUiPlatform;
   inputs?: readonly ConversationInputEntity[]; sourceHostId?: string
   describeSpeaker: DescribeSpeaker; refresh(): void; terminal?: () => void
@@ -31,6 +34,8 @@ export function MobileMailbox({ client, session, connected, messages, inputs, so
   onHistoryCopy(message: AgentSessionUserMessage, signal: AbortSignal): Promise<boolean>
   localEntries?: readonly InputHistoryLocalEntry[]
   onHistoryFillLocal?(entry: InputHistoryLocalEntry): void
+  promptAttempts?: readonly [string, PromptAttempt][]
+  diagnostics?: ClientDeliveryDiagnostics
 }) {
   // Hosted reads use the connection's local route; Session.hostId identifies the execution owner.
   const hostId = 'local'
@@ -101,7 +106,9 @@ export function MobileMailbox({ client, session, connected, messages, inputs, so
   const historyActions = { onRead: readMessage, onFill: (message: AgentSessionUserMessage) => originalAction(message, onHistoryFill),
     onCopy: (message: AgentSessionUserMessage) => originalAction(message, onHistoryCopy) }
   const recordedKeys = new Set(mailbox.items.map(item => inputMailboxItemKey(session?.hostId ?? '',item)))
+  const recordedOperationIds = new Set(mailbox.items.flatMap(item => item.key.kind === 'prompt' ? [item.key.submissionId] : []))
   const localIntents = localEntries.filter(entry => !entry.inputOrigin || !recordedKeys.has(inputMailboxKey(entry.inputOrigin.hostId,entry.inputOrigin.key)))
+  const unrecordedAttempts = promptAttempts.filter(([, attempt]) => !recordedOperationIds.has(attempt.operationId) && (attempt.inputReceipt || attempt.logId || attempt.phase !== 'confirmed'))
   const state = session?.semanticStatus?.state
   const stateLabels: Readonly<Record<string, string>> = { working: '执行中', running: '状态未确认', starting: '启动中', waiting: '等待输入', blocked: '需要处理', done: '已完成', error: '出错', exited: '已结束', disconnected: '状态未知' }
   const label = !connected ? '连接中断 · 最近状态保留' : session?.pendingInteraction ? '需要回应' : stateLabels[state ?? ''] ?? '状态未知'
@@ -112,6 +119,20 @@ export function MobileMailbox({ client, session, connected, messages, inputs, so
       <Dialog.Description id="mobile-message-tools-description">{session?.providerId ?? 'Agent'} · {label}</Dialog.Description>
       <div className="mobile-message-tools__actions"><button className="mobile-text-button" onClick={() => { refresh(); history.search(); void mailbox.refresh() }}><ThemeActionRefreshIcon size={16} />刷新消息</button>{terminal && <button className="mobile-text-button" onClick={() => { changeOpen(false); terminal() }}><ThemeObjectTerminalIcon size={16} />查看 Terminal</button>}</div>
       <section className="mobile-message-tools__records" aria-label="通信记录">
+        {unrecordedAttempts.length > 0 ? <div className="mobile-message-tools__attempts" aria-label="本机投递回执">
+          {unrecordedAttempts.map(([key, attempt]) => {
+            const waiting = attempt.inputReceipt?.control.waiting
+            const failure = waiting?.phase === 'native-environment' ? waiting.observation?.failure : waiting?.failure
+            return <div key={key} className="mobile-message-tools__attempt" data-operation-id={attempt.operationId} data-phase={attempt.phase}>
+              <MessageDeliveryFailure compact error={failure ?? diagnostics?.get(attempt.logId ?? '')?.record.error ?? attempt.message}
+                inputUnconfirmed={!attempt.inputReceipt && attempt.phase === 'unknown'}
+                logId={attempt.logId} log={attempt.logId ? diagnostics?.get(attempt.logId) : undefined}
+                inputReceipt={attempt.inputReceipt} inputStopReceipt={attempt.manualInput?.stopReceipt}
+                copyText={text => platform.copyText(text, () => {})} />
+              <small className="mobile-message-tools__attempt-meta">原操作 {attempt.operationId}{attempt.runId ? ` · 原 Run ${attempt.runId}` : ''}</small>
+            </div>
+          })}
+        </div> : null}
         <InputMailboxRecords refreshInParent mailbox={matchedMailbox} hostId={hostId} reading={reading}
           inputGroup={item => mailboxGroups.get(inputMailboxItemKey(hostId, item))}
           onCopy={text => platform.copyText(text, () => {})} renderRelated={item => {

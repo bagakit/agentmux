@@ -78,11 +78,13 @@
 .mobile-app .mobile-conversation .log-turn__content { font-size: 13px; line-height: 1.5; }
 .mobile-app .mobile-conversation .log-turn__content p { margin-block: 6px; }
 .mobile-app .mobile-conversation .log-turn__head { font-size: 11px; }
-.mobile-app .mobile-conversation .composer { border: 0; background: var(--surface-2); background-image: none; margin: 0; padding: 2px 4px; box-shadow: none; border-radius: 12px; }
-.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) { display: grid; grid-template-columns: 44px minmax(0,1fr) max-content; min-height: 44px; }
-.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer-completion-editor { grid-column: 2; grid-row: 1; }
-.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div { grid-row: 1; padding: 0; }
-.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:last-child { grid-column: 3; }
+.mobile-app .mobile-conversation .composer { border: 0; background: var(--surface-2); background-image: none; margin: 0; padding: 4px 6px 2px; box-shadow: none; border-radius: 12px; }
+.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) { display: grid; grid-template-columns: max-content minmax(0,1fr) max-content; min-height: 44px; }
+.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer-completion-editor { grid-column: 1 / -1; grid-row: 1; }
+.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div { grid-row: 2; padding: 0; }
+.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:first-child > .composer-tool { display: inline-flex; }
+.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:first-child > .composer-tool .composer-tool__label { display: none; }
+.mobile-app .mobile-conversation .composer:has(.composer-tools[data-mode='collapsed']) .composer__toolbar > div:last-child { grid-column: 2 / -1; justify-self: end; }
 .mobile-app .mobile-conversation .composer-tool { min-width: 44px; min-height: 44px; justify-content: center; padding: 0; }
 .mobile-app .mobile-conversation .md-conversation-image__retry { min-width: 44px; justify-content: center; }
 .mobile-app .mobile-conversation .composer__feedback { font-size: 11px; }
@@ -91,28 +93,38 @@
 .mobile-app .mobile-conversation .composer__editor .tiptap { font-size: 16px; line-height: 1.4; }
 .mobile-reading-action { align-self: center; padding: 4px 10px; border: 0; background: var(--surface-1); color: var(--text-muted); font-size: 11px; min-height: 44px; border-radius: 8px; }
 .mobile-reading-latest { position: sticky; top: 0; z-index: 1; }
-.mobile-send-status { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; min-width: 0; margin: 6px 6px 0; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
-.mobile-send-status__summary { display: contents; }
-.mobile-send-status__summary > span { grid-column: 1 / -1; min-width: 0; font-size: 12px; overflow-wrap: anywhere; }
-.mobile-send-status__actions { display: flex; align-items: center; gap: 20px; }
-.mobile-send-status button, .mobile-send-status summary { min-width: 44px; min-height: 44px; border: 0; padding: 0; color: inherit; background: transparent; font: inherit; cursor: pointer; }
+.mobile-send-status { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 8px; min-width: 0; margin: 3px 4px 0; color: var(--text-muted); font-size: 11px; line-height: 1.4; }
+.mobile-send-status--collapsed { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 8px; border-radius: var(--radius-sm); background: var(--surface-1); }
+.mobile-send-status__collapsed-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--text-2); }
+.mobile-send-status__summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 2px 8px; grid-column: 1 / -1; min-width: 0; }
+.mobile-send-status__summary > span { min-width: 0; font-size: 11px; overflow-wrap: anywhere; }
+.mobile-send-status__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mobile-send-status button, .mobile-send-status summary { min-width: 44px; min-height: 44px; cursor: pointer; }
+.mobile-send-status > button, .mobile-send-status__actions > button, .mobile-send-status__diagnosis > button, .mobile-send-status__diagnosis > summary { border: 0; padding: 0 4px; color: inherit; background: transparent; font: inherit; }
+.mobile-send-status .message-delivery-failure button { border: 8px solid transparent; padding: 2px 8px; background: var(--surface-2); background-clip: padding-box; border-radius: calc(var(--radius-sm, 6px) + 8px); }
+.mobile-send-status .message-delivery-failure .message-delivery-failure__dismiss { background: transparent; padding: 0; border: 0; }
 .mobile-send-status[data-phase='unknown'] { color: var(--status-warning-text); }
-.mobile-send-status p { margin: 0 0 6px; overflow-wrap: anywhere; user-select: text; }
+.mobile-send-status p { margin: 0 0 4px; overflow-wrap: anywhere; user-select: text; }
 .mobile-send-status[data-original-response] { grid-template-columns: minmax(0, 1fr); }
 .mobile-send-status[data-original-response] > button { justify-self: start; color: var(--green); font-size: 12px; }
 .agent-interaction .mobile-send-status[data-original-response] { margin: 4px 0 0; }
-.mobile-send-status__diagnosis { min-width: 0; color: var(--text-2); }
-.mobile-send-status__diagnosis[open] { grid-column: 1 / -1; max-height: min(32dvh, 240px); overflow: auto; overscroll-behavior: contain; }
-.mobile-send-status__diagnosis dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 4px 8px; margin: 0 0 8px; }
+.agent-interaction:has(.mobile-send-status[data-original-response]) .agent-interaction__actions { opacity: .45; }
+.mobile-send-status__diagnosis { grid-column: 1 / -1; min-width: 0; color: var(--text-2); }
+.mobile-send-status__diagnosis[open] { grid-column: 1 / -1; max-height: min(22dvh, 140px); padding-bottom: 6px; overflow: auto; overscroll-behavior: contain; }
+.mobile-send-status__diagnosis dl { display: grid; grid-template-columns: auto minmax(0,1fr); gap: 2px 8px; margin: 0 0 4px; }
 .mobile-send-status__diagnosis dt { color: var(--text-3); }
 .mobile-send-status__diagnosis dd { margin: 0; overflow-wrap: anywhere; user-select: text; }
-.mobile-send-status__diagnosis > pre { max-height: 160px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; user-select: text; }
+.mobile-send-status__diagnosis > pre { margin: 2px 0 4px; max-height: 72px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; user-select: text; }
 .mobile-send-status[data-manual='true'] > .message-delivery-failure,
+.mobile-send-status[data-manual='true'] > .mobile-send-status__actions,
 .mobile-send-status[data-manual='true'] > .mobile-send-status__diagnosis { grid-column: 1 / -1; }
-.mobile-retained-prompts { margin: 6px; color: var(--text-3); font-size: 11px; }
+.mobile-retained-prompts { margin: 4px 6px; color: var(--text-3); font-size: 11px; }
 .mobile-retained-prompts > summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; }
 .mobile-retained-prompts[open] { max-height: min(36dvh, 280px); overflow: auto; overscroll-behavior: contain; }
 .mobile-send-status summary { display: flex; align-items: center; gap: 8px; color: var(--text-3); }
+.mobile-message-tools__attempts { display: grid; gap: 8px; margin-bottom: 10px; }
+.mobile-message-tools__attempt { display: grid; gap: 4px; }
+.mobile-message-tools__attempt-meta { color: var(--text-3); font-size: 11px; overflow-wrap: anywhere; }
 /* Attachments stay beside the original message, with one explicit transfer action. */
 .mobile-attachments:empty { display: none; }
 .mobile-attachments { display: grid; gap: 6px; max-height: min(24dvh, 180px); overflow: auto; overscroll-behavior: contain; }

@@ -23,7 +23,7 @@ export function useMobileInteractionController({ local, client, agentSessionId, 
   const request = agentInteractionActiveRequest(pending)
   const responseUnavailableReason = pending && agentInteractionResponseUnavailableReason(pending)
   const requestRun = request?.evidence?.run ?? session?.run
-  const runtimeId = client?.runtimeOwnerIdentity()?.runtimeId
+  const runtimeId = client?.runtimeOwnerIdentity?.()?.runtimeId
   const requestKey = session && request && requestRun
     ? JSON.stringify([session.agentSessionId, session.hostId, runtimeId, requestRun.runId, request.id]) : null
   const responseOwnerMatches = (attempt: ResponseAttempt) => Boolean(attempt.original && session && runtimeId &&
@@ -43,14 +43,14 @@ export function useMobileInteractionController({ local, client, agentSessionId, 
     const originalKey = JSON.stringify([session.agentSessionId, requestRun.runId, request.id, intent.operationId])
     const original: ResponseAttempt = { phase: 'sending', message: '正在发送原请求的答复…', original: {
       input: structuredClone({ agentSessionId: session.agentSessionId, expectedRun: requestRun, response, ...intent }),
-      hostId: session.hostId, runtimeId: client.runtimeOwnerIdentity()?.runtimeId ?? null } }
+      hostId: session.hostId, runtimeId: client.runtimeOwnerIdentity?.()?.runtimeId ?? null } }
     responses.current.set(originalKey, original)
     const retained = await local.save()
     redraw(value => value + 1)
     try {
       if (!retained || responses.current.get(originalKey) !== original) throw new Error('另一页面已保全这个请求的答复；本次未重复回答。')
       const target = client.agentSession(original.original!.input.agentSessionId)
-      if (target.hostId !== original.original!.hostId || client.runtimeOwnerIdentity()?.runtimeId !== original.original!.runtimeId) throw new Error('原请求的 Host 或 Runtime 已改变；原答复保留，本次未发送。')
+      if (target.hostId !== original.original!.hostId || client.runtimeOwnerIdentity?.()?.runtimeId !== original.original!.runtimeId) throw new Error('原请求的 Host 或 Runtime 已改变；原答复保留，本次未发送。')
       const receipt = await client.respondAgentInteraction(original.original!.input)
       if (!mounted.current || responses.current.get(originalKey) !== original) return
       adoptResponseReceipt(original, receipt)
@@ -77,7 +77,7 @@ export function useMobileInteractionController({ local, client, agentSessionId, 
     const original = attempt.original
     try {
       if (client.agentSession(original.input.agentSessionId).hostId !== original.hostId ||
-          !original.runtimeId || client.runtimeOwnerIdentity()?.runtimeId !== original.runtimeId) throw new Error('当前连接不属于原答复的 Host 或 Runtime；原操作保留。')
+          !original.runtimeId || client.runtimeOwnerIdentity?.()?.runtimeId !== original.runtimeId) throw new Error('当前连接不属于原答复的 Host 或 Runtime；原操作保留。')
       const receipt = await client.inspectAgentInteractionOperation({ agentSessionId: original.input.agentSessionId, operationId: original.input.operationId })
       if (!mounted.current || responses.current.get(key) !== attempt) return receipt
       if (receipt) adoptResponseReceipt(attempt, receipt)

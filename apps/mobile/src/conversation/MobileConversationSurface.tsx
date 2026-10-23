@@ -1,6 +1,7 @@
 import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
 import type { ConversationPresentationController } from '@agentmux/client-ui/use-conversation-record-layout'
 import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
+import { presentMessageDeliveryFailure } from '@agentmux/client-ui/message-delivery-presentation'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { mobileQuestionReplyState, reconcileMobileQuestionReplies, submitMobileQuestionReply } from './question-replies'
 import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
@@ -64,12 +65,25 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const drafts = useRef(local.drafts)
   const [, redraw] = useState(0)
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
+  const [dismissed, setDismissed] = useState<Set<string>>(() => {
+    try {
+      const raw = localStorage.getItem('agentmux-mobile-dismissed-delivery-v1')
+      const parsed: unknown = raw ? JSON.parse(raw) : null
+      return Array.isArray(parsed) ? new Set(parsed.filter((item): item is string => typeof item === 'string').slice(-64)) : new Set()
+    } catch { return new Set() }
+  })
+  const updateDismissed = (mutate: (next: Set<string>) => void) => setDismissed(previous => {
+    const next = new Set(previous)
+    mutate(next)
+    try { localStorage.setItem('agentmux-mobile-dismissed-delivery-v1', JSON.stringify([...next].slice(-64))) } catch { /* Presentation preference only. */ }
+    return next
+  })
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const current = useRef({ client, agentSessionId })
   current.current = { client, agentSessionId }
   const { draftKey, draft, attempt, available, diagnostics, setDraft, submit, retryOriginalPrompt, stopManualInput,
-    historyLocalEntries, retainedAttempts, promptWasRefused } = useMobilePromptController({ local, client, agentSessionId,
+    historyLocalEntries, retainedAttempts, sessionAttempts, promptWasRefused } = useMobilePromptController({ local, client, agentSessionId,
       session: reading.session, timeline: reading.timeline, connection, disconnected: reading.disconnected, visible, refresh: reading.refresh })
   const attachmentControls = useRef<MobileAttachmentControls>(null)
   const insertion = useRef<ComposerInsertionHandle>(null)
@@ -184,33 +198,55 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const renderPromptAttempt = ([key, original]: [string, PromptAttempt]) => {
     const waiting = original.inputReceipt?.control.waiting
     const failure = waiting?.phase === 'native-environment' ? waiting.observation?.failure : waiting?.failure
+    const signature = JSON.stringify([key, original.operationId, original.phase, original.phase === 'confirmed' ? original.logId ?? null : null,
+      original.inputReceipt?.status ?? null, original.inputReceipt?.ref.waitGeneration ?? null, original.manualInput?.stopReceipt?.cancelOperationId ?? null])
+    const clearDismissedForOperation = () => updateDismissed(set => {
+      for (const item of [...set]) if (item.includes(JSON.stringify(original.operationId))) set.delete(item)
+    })
+    const controlledManual = Boolean(original.manualInput && (original.inputReceipt || original.phase === 'sending'))
+    if (original.phase !== 'sending' && dismissed.has(signature)) {
+      const summary = controlledManual
+        ? presentMessageDeliveryFailure({ error: failure ?? diagnostics.get(original.logId ?? '')?.record.error ?? original.message,
+            logId: original.logId, log: original.logId ? diagnostics.get(original.logId) : undefined,
+            inputReceipt: original.inputReceipt, inputStopReceipt: original.manualInput?.stopReceipt }).title
+        : original.phase === 'unknown' ? '发送结果未确认 · 草稿已保留' : '尚未发送 · 草稿已保留'
+      return <aside className="mobile-send-status mobile-send-status--collapsed" key={key} data-phase={original.phase}
+        data-collapsed="true" data-manual={Boolean(original.manualInput) || undefined} data-retained={key !== draftKey || undefined}
+        data-original-operation={original.operationId} aria-live="polite">
+        <span className="mobile-send-status__collapsed-title">{summary}</span>
+        <div className="mobile-send-status__actions">
+          <button type="button" aria-label="查看投递回执" onClick={() => updateDismissed(set => set.delete(signature))}>查看回执</button>
+        </div>
+      </aside>
+    }
     return <aside
           className="mobile-send-status" key={key} data-phase={original.phase} data-manual={Boolean(original.manualInput) || undefined} data-retained={key !== draftKey || undefined}
           data-original-operation={original.operationId} aria-live="polite">
-          {original.manualInput ? <>
+          {controlledManual ? <>
             {original.phase === 'sending' && !original.inputReceipt ? <p role="status">正在保存这条原消息…</p>
               : original.phase === 'confirmed' && !original.inputReceipt ? <p role="status">先前输入已确认；当前 Core 回执观察待恢复。这不代表任务完成。</p>
               : <MessageDeliveryFailure compact error={failure ?? diagnostics.get(original.logId ?? '')?.record.error ?? original.message}
               logId={original.logId} log={original.logId ? diagnostics.get(original.logId) : undefined}
-              inputReceipt={original.inputReceipt} inputStopReceipt={original.manualInput.stopReceipt}
-              onRetry={original.phase === 'confirmed' ? undefined : () => { void retryOriginalPrompt(key) }}
+              inputReceipt={original.inputReceipt} inputStopReceipt={original.manualInput!.stopReceipt}
+              onRetry={original.phase === 'confirmed' ? undefined : () => { clearDismissedForOperation(); void retryOriginalPrompt(key) }}
+              onDismiss={() => updateDismissed(set => set.add(signature))}
               copyText={text => platform.copyText(text, error => setCopyNotice(errorMessage(error)))} />}
-            {original.inputReceipt?.status === 'waiting' ? <button type="button" onClick={() => { void stopManualInput(key, original) }}>
-              {original.manualInput.stopIntent && !original.manualInput.stopReceipt ? '重试停止等待' : '停止等待'}</button> : null}
-            {original.inputReceipt?.status === 'not-applied' ? <button type="button" onClick={() => { void submit(true, original, key) }}>重新发送原正文</button> : null}
-            <details className="mobile-send-status__diagnosis"><summary>原消息与身份</summary><pre>{original.draft}</pre>
-              <button type="button" onClick={() => { void platform.copyText(original.draft, error => setCopyNotice(errorMessage(error))) }}>复制原正文</button>
-              <dl><dt>原操作</dt><dd>{original.operationId}</dd><dt>原 Run</dt><dd>{original.runId}</dd></dl>
+            {(original.inputReceipt?.status === 'waiting' || original.inputReceipt?.status === 'not-applied' || key !== draftKey || onShowTerminal) ? <div className="mobile-send-status__actions">
+              {original.inputReceipt?.status === 'waiting' ? <button type="button" onClick={() => { void stopManualInput(key, original) }}>
+                {original.manualInput!.stopIntent && !original.manualInput!.stopReceipt ? '重试停止等待' : '停止等待'}</button> : null}
+              {original.inputReceipt?.status === 'not-applied' ? <button type="button" onClick={() => { clearDismissedForOperation(); void submit(true, original, key) }}>重新发送原正文</button> : null}
+              {key !== draftKey ? <button type="button" onClick={() => { void platform.copyText(original.draft, error => setCopyNotice(errorMessage(error))) }}>复制原正文</button> : null}
               {onShowTerminal ? <button type="button" onClick={onShowTerminal}>终端</button> : null}
-            </details>
+            </div> : null}
           </> : <>
           <div className="mobile-send-status__summary">
             <span>{original.phase === 'sending' ? '正在发送…' : key !== draftKey
               ? original.phase === 'unknown' ? '先前消息结果未确认 · 原记录保留' : '先前消息未发送 · 原记录保留'
               : original.phase === 'unknown' ? '发送结果未确认 · 草稿已保留' : '尚未发送 · 草稿已保留'}</span>
             {original.phase !== 'sending' ? <div className="mobile-send-status__actions">
-              <button type="button" onClick={() => { void retryOriginalPrompt(key) }}>{promptWasRefused(original) ? '重新发送原正文' : key === draftKey ? '重试原请求' : '重试这条原请求'}</button>
+              <button type="button" onClick={() => { clearDismissedForOperation(); void retryOriginalPrompt(key) }}>{promptWasRefused(original) ? '重新发送原正文' : key === draftKey ? '重试原请求' : '重试这条原请求'}</button>
               <button type="button" onClick={() => { void reading.refresh() }}>刷新</button>
+              <button type="button" className="mobile-send-status__dismiss" aria-label="关闭操作说明" title="关闭操作说明" onClick={() => updateDismissed(set => set.add(signature))}>收起</button>
             </div> : null}
           </div>
           {original.phase !== 'sending' ? <details className="mobile-send-status__diagnosis"><summary>发送详情</summary>
@@ -328,6 +364,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           {...(reading.projection?.timeline.reference?.hostId ? { sourceHostId: reading.projection.timeline.reference.hostId } : {})}
           refresh={() => { void reading.refresh() }} historyScope={historyScope} readHistory={readInputHistory} visible={visible}
           onHistoryFill={fillHistoryMessage} onHistoryCopy={copyHistoryMessage} localEntries={historyLocalEntries}
+          promptAttempts={sessionAttempts} diagnostics={diagnostics}
           onHistoryFillLocal={entry => {
             if (currentHistory.current.scope !== historyScope || current.current.client !== client || current.current.agentSessionId !== agentSessionId)
               throw new Error('已切换 Agent，原正文和当前草稿保留。')
@@ -339,7 +376,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           onChange={setDraft} {...(attempt?.phase !== 'sending' ? { onSubmit: () => void submit(), onQueue: () => void submit(false) } : {})}
           onAttach={onAttach ?? (() => { void attachmentControls.current?.choose() })} {...(readPastedImage ? { readPastedImage } : {})}
           />
-        {attempt && (attempt.phase !== 'confirmed' || attempt.manualInput) ? renderPromptAttempt([draftKey, attempt]) : null}
+        {attempt && (attempt.phase !== 'confirmed' || Boolean(attempt.logId)) ? renderPromptAttempt([draftKey, attempt]) : null}
         {retainedAttempts.length ? <details className="mobile-retained-prompts"><summary>保留的原消息 ({retainedAttempts.length})</summary>
           {retainedAttempts.map(renderPromptAttempt)}
         </details> : null}

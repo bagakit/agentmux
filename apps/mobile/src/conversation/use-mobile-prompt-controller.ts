@@ -93,6 +93,7 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
     if (!mounted.current || attempts.current.get(key) !== original) return
     original.phase = 'confirmed'
     original.message = message
+    delete original.logId
     // A receipt belongs to its captured operation, including after navigating elsewhere.
     if (drafts.current.get(key) === original.draft) drafts.current.set(key, '')
     local.save()
@@ -190,10 +191,11 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
     if (!client || !agentSessionId || !visible || connection.state !== 'connected') return
     let live = true
     const inspect = () => {
+      if (!client.inspectAgentInput) return
       const currentRuntimeId = client.runtimeOwnerIdentity?.()?.runtimeId
       for (const [key, original] of promptAttemptsForSession(attempts.current, agentSessionId)) {
         if (!original.manualInput || original.manualInput.runtimeId !== null && currentRuntimeId && original.manualInput.runtimeId !== currentRuntimeId) continue
-        void client.inspectAgentInput({ key: manualKey(original) }).then(receipt => {
+        void Promise.resolve().then(() => client.inspectAgentInput({ key: manualKey(original) })).then(receipt => {
           if (live && receipt) observeInputReceipt(key, original, receipt)
         }).catch(error => { if (live) void retainFailure(original, manualSeed(original), error, 'input-observation', client, key, true) })
       }
@@ -243,6 +245,14 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
     originalClient: AgentMuxHostedClient | null, key: string, retry: boolean) {
     const ownerId = original.manualInput?.runtimeId ?? original.request?.runtimeId
     const owner = ownerId ? `runtime:${ownerId}` : diagnosticOwner(originalClient)
+    const settled = original.phase === 'confirmed' || original.inputReceipt?.status === 'terminal-confirmed' || original.inputReceipt?.status === 'admitted'
+    if (!settled && mounted.current && attempts.current.get(key) === original) {
+      original.phase = original.inputRequested === false ? 'rejected'
+        : retry && original.phase !== 'rejected' ? 'unknown' : deliveryOutcome(error, 'prompt')
+      original.message = errorMessage(error)
+      local.save()
+      redraw(value => value + 1)
+    }
     const log = await diagnostics.failed(seed, error, stage, owner)
     reportDiagnostics(originalClient)
     if (!mounted.current || attempts.current.get(key) !== original) return
@@ -390,13 +400,14 @@ export function useMobilePromptController({ local, client, agentSessionId, sessi
     }
   }
 
+  const allAttempts = promptAttemptsForSession(attempts.current, agentSessionId)
   // Recent device intents remain editable memory; they are never promoted to native history or a delivery receipt.
-  const historyLocalEntries = promptAttemptsForSession(attempts.current, agentSessionId)
+  const historyLocalEntries = allAttempts
     .filter(([, original]) => original.draft && session?.hostId && original.originalHostId === session.hostId)
     .map(([key, original]) => ({ id: key + ':' + original.operationId, text: original.draft,
       ...(original.manualInput && original.originalHostId ? { inputOrigin: { hostId: original.originalHostId, key: manualKey(original) } } : {}) }))
-  const retainedAttempts = promptAttemptsForSession(attempts.current, agentSessionId).filter(([key, original]) => key !== draftKey && original.phase !== 'confirmed')
+  const retainedAttempts = allAttempts.filter(([key, original]) => key !== draftKey && original.phase !== 'confirmed')
   return { draftKey, draft, attempt, available, diagnostics, setDraft, submit, retryOriginalPrompt, stopManualInput,
-    historyLocalEntries, retainedAttempts,
+    historyLocalEntries, retainedAttempts, sessionAttempts: allAttempts,
     promptWasRefused: (original: PromptAttempt) => originalPromptRefused(session, agentSessionId, original, client?.runtimeOwnerIdentity?.()?.runtimeId) }
 }
