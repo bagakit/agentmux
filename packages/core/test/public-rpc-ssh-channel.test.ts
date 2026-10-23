@@ -6,6 +6,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { connectAgentMuxRpc as SourceConnect } from '../src/public-rpc-client.js'
 import { connectSshAgentMux as SourceConnectSsh } from '../src/runtime-client.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
+import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
+import type { ConnectionPort, ChannelMetadataChange } from '../src/connections.js'
 import type { AgentMuxControlHost } from '../src/control.js'
 import { headlessFixture, until } from './helpers/headless-runtime-fixture.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
@@ -133,3 +135,62 @@ it('uses one SSH channel for typed Native input, semantic facts and independent 
   expect((await client.listRuns())[0]!.state).toBe('running')
   await client.stopTerminal({ runId: run.runId })
 }, 60_000)
+
+it('the SSH Hosted client consumes exact metadata hints and releases readers on its original shared transport', async () => {
+  const h = await rpcOwnerFixture(['original-metadata-agent']); closes.push(h.close)
+  const identity = { runtimeId: 'original-metadata-runtime', ownerInstanceId: 'original-metadata-owner', protocolVersion: 2 as const,
+    processId: process.pid, ctxmux: h.client.runtimeIdentity(), availability: 'connected' as const }
+  const hosted = new AgentMuxHostedRuntimeService(h.client, join(h.root, 'sessions.json'), () => identity)
+  closes.push(() => hosted.dispose())
+  const listeners = new Set<(change: ChannelMetadataChange) => void>(), actors: unknown[] = []
+  let released = 0
+  // Only the metadata producer leaf is controlled. The SSH child, compiled
+  // stdio forwarder, public service, Hosted bootstrap/fence and readers are real.
+  const connections = { metadata: { watch: async (changed, _ended, context) => {
+    actors.push(context?.actor); listeners.add(changed)
+    return { dispose: () => { if (listeners.delete(changed)) released++ } }
+  } } } as ConnectionPort
+  const server = new AgentMuxControlServer({ socketPath: join(h.root, 'metadata.sock'), coreClients: h.coreClients,
+    hostedRuntime: () => hosted, connections })
+  await server.start(); closes.push(() => server.stop())
+  const ssh = await sshCarrier(server.path)
+  const client = await SourceConnectSsh({ expectedRuntimeId: identity.runtimeId,
+    target: { hostId: 'original-metadata-route', hostname: ssh.endpoint.host, remoteSocketPath: server.path } })
+  closes.push(() => client.dispose())
+  const events: ChannelMetadataChange[] = [], initial = vi.fn(), ended = vi.fn()
+  const fence = { runtimeId: identity.runtimeId, ownerInstanceId: identity.ownerInstanceId }
+  const sub = client.subscribeRpc ? await client.subscribeRpc('connection.metadata.watch', {}, {
+    runtimeFence: fence, onInitial: initial, onEvent: event => { if (event.type === 'change') events.push(event.data) }, onEnd: ended
+  }) : null
+  const change: ChannelMetadataChange = { connectionId: 'original-connection', application: { domain: 'platform.example', appId: 'original-app' },
+    subject: { kind: 'conversation', externalConversationId: 'original-room' } }
+  for (const changed of listeners) changed(change)
+  if (sub) await until(() => events.length, count => count === 1, 'original metadata hint reached the SSH consumer')
+  const fact = { case: 'ssh-metadata-handoff', events, producerReaders: listeners.size, sshChildren: await ssh.count() }
+  if (process.env.SSH_METADATA_FACTS) await writeFile(process.env.SSH_METADATA_FACTS, JSON.stringify(fact) + '\n')
+  expect(events, 'the original remote metadata hint must reach the configured Hosted consumer').toEqual([change])
+  expect(initial).toHaveBeenCalledExactlyOnceWith({})
+  expect(actors).toEqual([{ kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }])
+  await expect(client.subscribeRpc!('connection.metadata.watch', {}, { runtimeFence: { ...fence, ownerInstanceId: 'foreign-owner' },
+    onInitial: () => {}, onEvent: () => {} })).rejects.toMatchObject({ code: 'RUNTIME_OWNER_CHANGED' })
+  expect(listeners.size).toBe(1)
+  await sub!.dispose()
+  await until(() => released, count => count === 1, 'first metadata reader released')
+  const abort = new AbortController()
+  const next = await client.subscribeRpc!('connection.metadata.watch', {}, { runtimeFence: fence, signal: abort.signal,
+    onInitial: () => {}, onEvent: () => {} })
+  abort.abort()
+  await until(() => released, count => count === 2, 'aborted metadata reader released')
+  await next.dispose()
+  const last = await client.subscribeRpc!('connection.metadata.watch', {}, { runtimeFence: fence, onInitial: () => {}, onEvent: () => {} })
+  client.disconnect()
+  await until(() => released, count => count === 3, 'Hosted disconnect released its original metadata reader')
+  await last.dispose()
+  expect((await client.forwardRpc!('system.endpoint', {})).connection).toBe('responded')
+  expect(await ssh.count(), 'metadata readers and ordinary public calls reuse one original SSH child').toBe(1)
+  expect(ended).not.toHaveBeenCalled()
+  expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+  await client.dispose()
+  const child = (await ssh.calls())[0] as { args: string[]; pid: number }
+  await until(() => { try { process.kill(child.pid, 0); return false } catch { return true } }, Boolean, 'original SSH child disposed')
+}, 20_000)
