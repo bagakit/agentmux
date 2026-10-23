@@ -170,3 +170,5 @@ export type * from './channel-metadata-contract.js'
 export * from './channel-metadata-codec.js'
 export * from './capsule.js'
 export * from './agent-session-recovery.js'
+
+export * from './capsule-input.js'
