@@ -1,6 +1,7 @@
 import { WebContentsView, type BrowserWindow, type NativeImage } from 'electron'
 import type { BrowserBounds } from '../shared/contracts.js'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
+import { nativeOverlayScrimScript, type NativeScrimExclusion } from './native-overlay-scrim.js'
 import { boundsOverlap, NATIVE_OVERLAY_LIMIT, NATIVE_OVERLAY_PIXEL_LIMIT, type NativeBrowserInput, type NativeOverlayReceipt, type NativeOverlayRegion } from '../shared/native-overlay.js'
 import type { BrowserViewManager, NativeBrowserOwner, NativeBrowserPageInput } from './browser-view-manager.js'
 
@@ -283,14 +284,7 @@ export class NativeOverlaySurfaces {
     }
     if (projection.region.scrim !== undefined) {
       const bounds = projection.region.bounds
-      // A single nonzero-fill path paints the union once, including overlapping pages.
-      // Renderer chrome already has its own scrim and must not be darkened a second time.
-      const path = this.browsers.visibleNativeBounds().flatMap(browser => {
-        const x = Math.max(bounds.x, browser.x), y = Math.max(bounds.y, browser.y)
-        const right = Math.min(bounds.x + bounds.width, browser.x + browser.width), bottom = Math.min(bounds.y + bounds.height, browser.y + browser.height)
-        return right > x && bottom > y ? [`M${x - bounds.x},${y - bounds.y}h${right - x}v${bottom - y}h${x - right}Z`] : []
-      }).join('')
-      const clear = [`<rect width="${bounds.width}" height="${bounds.height}" fill="white"/>`]
+      const exclusions: NativeScrimExclusion[] = []
       for (const region of this.requested) {
         if (region.id === projection.region.id) break
         const lower = this.projections.get(region.id)
@@ -298,15 +292,15 @@ export class NativeOverlaySurfaces {
         // opaque native coverage, keeping rounded corners on the Browser dimmed.
         if (lower && region.scrim === undefined && lower.interactive && this.current(lower) &&
           this.window.contentView.children.includes(lower.view)) {
-          const box = lower.view.getBounds()
-          clear.push(`<rect x="${box.x - bounds.x}" y="${box.y - bounds.y}" width="${box.width}" height="${box.height}" rx="${Math.round(region.radius)}" fill="black"/>`)
-          for (const stage of region.browserStages ?? []) {
-            const page = this.containedOwner(lower, stage)
-            if (page) clear.push(`<rect x="${page.bounds.x - bounds.x}" y="${page.bounds.y - bounds.y}" width="${page.bounds.width}" height="${page.bounds.height}" fill="white"/>`)
-          }
+          exclusions.push({ bounds: lower.view.getBounds(), radius: region.radius,
+            pages: (region.browserStages ?? []).flatMap(stage => {
+              const page = this.containedOwner(lower, stage)
+              return page ? [page.bounds] : []
+            }) })
         }
       }
-      await projection.view.webContents.executeJavaScript(`(() => { const colour=${JSON.stringify(projection.region.scrim)}; if(!CSS.supports('color',colour)) throw new Error('Invalid native scrim colour'); document.querySelector('img').style.display='none'; const svg=document.querySelector('svg'); svg.style.display='block'; svg.setAttribute('viewBox',${JSON.stringify(`0 0 ${bounds.width} ${bounds.height}`)}); const mask=svg.querySelector('mask'); mask.setAttribute('width',${JSON.stringify(String(bounds.width))}); mask.setAttribute('height',${JSON.stringify(String(bounds.height))}); mask.innerHTML=${JSON.stringify(clear.join(''))}; const path=svg.querySelector('path'); path.setAttribute('d',${JSON.stringify(path)}); path.style.fill=colour; })()`)
+      await projection.view.webContents.executeJavaScript(nativeOverlayScrimScript(
+        bounds, projection.region.scrim, this.browsers.visibleNativeBounds(), exclusions))
       if (!deferCommit) this.finishLoadedPaint(projection, revision)
       return
     }
