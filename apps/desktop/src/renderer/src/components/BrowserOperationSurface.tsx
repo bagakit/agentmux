@@ -194,9 +194,9 @@ export function BrowserOperationStatus({
         aria-label="Take control of Browser" title="Take control of Browser" onClick={() => onTakeControl()}>
         <ThemeActionPanIcon size={14} aria-hidden="true" />
       </button> : null}
-      {canCreateAgent && onCreateAgent ? <button type="button" className="browser-operation-status__trigger browser-operation-status__trigger--presence"
+      {canCreateAgent && onCreateAgent ? <button type="button" className="browser-operation-status__trigger browser-operation-status__trigger--create"
         aria-label={createAgentLabel} title={createAgentLabel} aria-busy={creatingAgent} disabled={creatingAgent} onClick={() => onCreateAgent()}>
-        <ThemeActionCreateAgentIcon size={14} aria-hidden="true" /><span className="browser-operation-status__action-label">{createAgentLabel}</span>
+        <ThemeActionCreateAgentIcon size={14} aria-hidden="true" /><span className="browser-operation-status__action-label">{creatingAgent ? '创建中' : 'Agent'}</span>
       </button> : null}
       {canReturnControl && onReturnControl ? <button type="button" className="browser-operation-status__trigger"
         aria-label="Return to Agent" title="Return to Agent" onClick={() => onReturnControl()}>
