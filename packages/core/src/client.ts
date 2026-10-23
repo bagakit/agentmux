@@ -230,6 +230,8 @@ export type AgentMuxAgentCreateInput = {
    * 与 `prompt`（用户/发起者的原话，逐字节透传）分层：调用方分开传，信封组装由 Core 的出口负责。
    */
   agentMuxNote?: string
+  /** Explicit non-human platform task; kept in generated context rather than the original request body. */
+  agentMuxTask?: string
   /** Whole optional platform sources, selected against the final launch wire budget. */
   optionalContext?: readonly AgentMuxOptionalContext[]
   args?: readonly string[]
@@ -247,7 +249,7 @@ export type AgentMuxAgentCreateInput = {
 
 /** Target-owned configuration, with a frozen revision; no source machine argv or environment. */
 export type AgentMuxHostAgentCreateInput = Pick<AgentMuxAgentCreateInput,
-  'agentSessionId' | 'createOperationId' | 'executorId' | 'workspacePath' | 'prompt' | 'agentMuxNote' | 'optionalContext' |
+  'agentSessionId' | 'createOperationId' | 'executorId' | 'workspacePath' | 'prompt' | 'agentMuxNote' | 'agentMuxTask' | 'optionalContext' |
   'launchOptions' | 'cols' | 'rows' | 'nativeResumeSource'> & {
   executorRevision: string
   /** Existing signed creation intent admission; an initial body is optional. */
@@ -627,8 +629,9 @@ export class AgentMuxClient {
   async createHostAgentWithDelivery(input: AgentMuxHostAgentCreateInput) {
     if (!this.hostExecutorOwner) throw new AgentMuxError('Target Host Executor registry is unavailable.', 'CONTROL_UNAVAILABLE')
     const allowed = ['agentSessionId', 'createOperationId', 'executorId', 'executorRevision', 'workspacePath', 'prompt',
-      'agentMuxNote', 'optionalContext', 'launchOptions', 'cols', 'rows', 'initialMessageAdmission', 'threadId', 'nativeResumeSource']
-    if (!input || Object.keys(input).some(key => !allowed.includes(key)) || !input.agentSessionId || !input.createOperationId || !input.executorRevision) {
+      'agentMuxNote', 'agentMuxTask', 'optionalContext', 'launchOptions', 'cols', 'rows', 'initialMessageAdmission', 'threadId', 'nativeResumeSource']
+    if (!input || Object.keys(input).some(key => !allowed.includes(key)) || !input.agentSessionId || !input.createOperationId || !input.executorRevision ||
+      input.agentMuxTask !== undefined && typeof input.agentMuxTask !== 'string') {
       throw new AgentMuxError('Target creation requires exact Session, operation and Executor revision, without command overrides.', 'INVALID_CONTROL_REQUEST')
     }
     const intentDigest = hostAgentCreationIntent(input)
@@ -661,6 +664,7 @@ export class AgentMuxClient {
       injectAgentMuxGuide: config.injectAgentMuxGuide, args: config.args, env: config.env, commandOverride: config.command,
       ...(input.prompt === undefined ? {} : { prompt: input.prompt }),
       ...(input.agentMuxNote === undefined ? {} : { agentMuxNote: input.agentMuxNote }),
+      ...(input.agentMuxTask === undefined ? {} : { agentMuxTask: input.agentMuxTask }),
       ...(input.optionalContext === undefined ? {} : { optionalContext: input.optionalContext }),
       ...(input.nativeResumeSource === undefined ? {} : { nativeResumeSource: input.nativeResumeSource }),
       ...(input.launchOptions === undefined ? {} : { launchOptions: input.launchOptions }),
@@ -4330,6 +4334,7 @@ export class AgentMuxClient {
     }
     if ('authorAgentSessionId' in input) throw new AgentMuxError('Agent authors must use an authenticated initial message.', 'MESSAGE_ENVELOPE_REQUIRED')
     if (input.prompt !== undefined) assertAgentPromptSize(input.prompt)
+    if (input.agentMuxTask !== undefined && typeof input.agentMuxTask !== 'string') throw new AgentMuxError('A platform task must be explicit text from its producer.', 'INVALID_AGENT_PROMPT')
     const createOperationId = input.createOperationId ?? mintObjectId()
     const agentSessionId = safeId(input.agentSessionId ?? await this.resolveAgentCreationSessionId(createOperationId), 'Agent Session id')
     const executorId = safeId(input.executorId, 'Agent Executor id')
@@ -4349,8 +4354,8 @@ export class AgentMuxClient {
       : admitted?.origin ? { agentSessionId: admitted.origin.source.agentSessionId,
         run: { runId: admitted.origin.source.runId }, owner: { kind: 'runtime', runtimeId: admitted.origin.source.runtimeId } } : undefined
     const intentDigest = admitted?.intentDigest ?? creationIntentDigest(input, agentSessionId, executorId, createOperationId, initialAuthor, creator)
-    const contextRequested = !(nativeResumeSource && !input.prompt?.trim()) &&
-      Boolean(createdBy || forkSource || input.injectAgentMuxGuide || input.agentMuxNote?.trim() || input.optionalContext?.length)
+    const contextRequested = !(nativeResumeSource && !input.prompt?.trim() && !input.agentMuxTask?.trim()) &&
+      Boolean(createdBy || forkSource || input.injectAgentMuxGuide || input.agentMuxNote?.trim() || input.agentMuxTask?.trim() || input.optionalContext?.length)
     const lifecycleOperationId = agentLifecycleOperationIdentity('create', agentSessionId, createOperationId)
     // A replay reads the original created identity and receipt before checking a now-changed parent.
     const existing = await this.readCreationSession(agentSessionId, createOperationId)
@@ -4430,9 +4435,9 @@ export class AgentMuxClient {
       // 拒绝，而运行时引导默认开、`composeAgentLaunchPrompt` 因此几乎总是非空，那等于这个
       // Provider 根本起不来。分流由 splitLaunchPromptByDelivery 唯一决定，两条生命周期路径共用；
       // 它同时交出 deferred 的那一半，下面必须真的送出去（见 deliverPostLaunchPrompt）。
-      const composed = nativeResumeSource && !originalPrompt?.trim() ? { text: '', systemContext: undefined } : composeAgentLaunchPrompt(originalPrompt, forkSource ? true : input.injectAgentMuxGuide,
+      const composed = nativeResumeSource && !originalPrompt?.trim() && !input.agentMuxTask?.trim() ? { text: '', systemContext: undefined } : composeAgentLaunchPrompt(originalPrompt, forkSource ? true : input.injectAgentMuxGuide,
         [forkSource ? agentForkIdentityReminder(agentSessionId, forkSource) : undefined,
-          createdBy ? agentSpawnContext(createdBy) : undefined, input.agentMuxNote].filter(Boolean).join('\n\n') || undefined, input.optionalContext)
+          createdBy ? agentSpawnContext(createdBy) : undefined, input.agentMuxNote].filter(Boolean).join('\n\n') || undefined, input.optionalContext, input.agentMuxTask)
       assertAgentPromptSize(composed.text)
       const { atLaunch: launchPrompt, deferred: deferredPrompt } = splitLaunchPromptByDelivery(
         provider.catalog, composed.text

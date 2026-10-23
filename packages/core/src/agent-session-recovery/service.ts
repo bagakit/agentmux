@@ -1240,22 +1240,26 @@ export class AgentSessionRecoveryService {
   }
 
   private observeInitialInput(session: AgentMuxStoredAgentSession): void {
-    if (this.reopensDisposed || !session.nativeActor?.initializationControl) return
+    if (this.reopensDisposed) return
     const input = session.initialInput
-    const retained = Object.values(session.continuityOperations ?? {}).filter(operation => operation.launchInput?.delivery === 'post-launch' &&
-      operation.launchInput.key?.expectedRun.runId === session.run.runId && !['native-admitted', 'terminal-confirmed', 'not-applied'].includes(operation.launchInput.state))
-    const initial = input?.key?.expectedRun.runId === session.run.runId && !['native-admitted', 'terminal-confirmed', 'not-applied'].includes(input.state)
+    const controlled = Boolean(session.nativeActor?.initializationControl)
+    const retained = controlled ? Object.values(session.continuityOperations ?? {}).filter(operation => operation.launchInput?.delivery === 'post-launch' &&
+      operation.launchInput.key?.expectedRun.runId === session.run.runId && !['native-admitted', 'terminal-confirmed', 'not-applied'].includes(operation.launchInput.state)) : []
+    const initial = (controlled || input?.delivery === 'post-launch') && input?.key?.expectedRun.runId === session.run.runId && !['native-admitted', 'terminal-confirmed', 'not-applied'].includes(input.state)
     if (!initial && !retained.length) return
-    const key = JSON.stringify([session.agentSessionId, session.run, session.nativeActor.actorId, initial ? input?.key : null, retained.map(value => value.operationId)])
+    const key = JSON.stringify([session.agentSessionId, session.run, session.nativeActor?.actorId ?? null, initial ? input?.key : null, retained.map(value => value.operationId)])
     if (this.initialInputContinuations.has(key)) return
     const work = (async () => {
-      await this.ports.terminal.ensureTerminalFrontendObservation(session)
-      const current = await this.ports.sessions.registry.refresh(session.agentSessionId, session.run)
-      const frontend = this.ports.terminal.terminalFrontendWatches.get(session.agentSessionId)?.frontend
-      if (this.reopensDisposed || !frontend || !sameRun(frontend.run, current.run) || frontend.initialization?.phase !== 'ready') return
+      if (controlled) await this.ports.terminal.ensureTerminalFrontendObservation(session)
+      let current = await this.ports.sessions.registry.refresh(session.agentSessionId, session.run)
+      if (this.reopensDisposed) return
       const run = await this.ports.runtime.requireCurrentAgentRun(current)
-      const bound = await this.bindInitializedNativeSession(current, run, frontend)
-      const exact = await this.exactRecoverySession(bound, undefined, true)
+      if (controlled) {
+        const frontend = this.ports.terminal.terminalFrontendWatches.get(session.agentSessionId)?.frontend
+        if (!frontend || !sameRun(frontend.run, current.run) || frontend.initialization?.phase !== 'ready') return
+        current = await this.bindInitializedNativeSession(current, run, frontend)
+      }
+      const exact = await this.exactRecoverySession(current, undefined, true)
       if (!this.reopensDisposed && exact) {
         if (initial) await this.ports.input.continueInitialInput(exact, run, () => this.assertRecoveryInputCurrent(exact, undefined, true))
         for (const operation of retained) await this.settleContinuityPostLaunchInput(this.ports.sessions.registry.get(session.agentSessionId), operation.operationId)
