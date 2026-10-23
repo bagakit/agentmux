@@ -171,7 +171,7 @@ const NoteBlockCard = memo(function NoteBlockCard({ id, data, selected }: NodePr
     onMouseLeave={() => data.onPeekBlock(null, undefined)}
     onDoubleClick={event => event.stopPropagation()}>
     <header className="note-canvas-block-drag">
-      <span className="note-canvas-block-badge"><NoteBlockIcon size={11} /><span>{data.blockId === '__summary__' ? 'Summary' : data.blockId}</span></span>
+      <span className="note-canvas-block-badge"><NoteBlockIcon size={12} /><span>{data.blockId === '__summary__' ? 'Summary' : data.blockId}</span></span>
       {data.openable && data.blockId !== '__summary__' && data.source?.blocks.has(data.blockId) ? <button type="button" className="note-canvas-block-open nodrag" aria-label={`Open block ${data.blockId}`} onClick={() => data.onOpen(data.noteId, data.blockId)}><OpenIcon size={11} /></button> : null}
     </header>
     {mountedPorts.map(blockId => <div key={blockId} className="note-canvas-row-endpoint note-canvas-endpoint" data-port-block-id={blockId} title={`Original block: ${blockId}`} style={{ visibility: activePorts.includes(blockId) ? 'visible' : 'hidden' }}><EndpointHandles kind="block" blockId={blockId} /></div>)}
@@ -998,7 +998,8 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
           setNodes(held => {
             const updated = applyNodeChanges(changes, held)
             const shifted = memberShifts.size ? updated.map(node => memberShifts.has(node.id) ? { ...node, position: memberShifts.get(node.id)! } : node) : updated
-            if (!changes.some(change => change.type === 'dimensions')) return shifted
+            const blockMoved = changes.some(change => change.type === 'position' && currentById.get(change.id)?.type === 'block')
+            if (!blockMoved && !changes.some(change => change.type === 'dimensions')) return shifted
             const blocksByNote = new Map<string, CanvasBlockNode[]>()
             for (const node of shifted) {
               if (node.type === 'block' && node.data.desired) {
