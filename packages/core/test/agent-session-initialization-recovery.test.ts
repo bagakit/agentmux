@@ -231,7 +231,7 @@ it.each(['stop', 'cancel'] as const)('checks recovery authority after native cla
   await f.inner.updateExactAgentSession(f.sid, saved.run, (current: AgentMuxStoredAgentSession) => ({ ...current,
     continuity: operation, continuityOperations: { [operationId]: operation }, updatedAt: current.updatedAt + 1 }))
   // Use the same recovery owner and authority as its passive initial-input producer.
-  const authority = () => f.inner.recovery.assertRecoveryInputCurrent(saved, undefined, true)
+  const authority = () => f.inner.recovery.reconciler.assertRecoveryInputCurrent(saved, undefined, true)
   const pending = f.advance(saved, f, authority)
   await checking.promise
   const key = created.creation.initialInputKey!

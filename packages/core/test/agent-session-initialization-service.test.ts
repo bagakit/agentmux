@@ -49,8 +49,9 @@ async function fixture(options: { resume?: boolean; missing?: boolean; detached?
 function countHistoryEnumeration(service: any, session: AgentMuxStoredAgentSession) {
   const counts = { initial: 0, supervisor: 0 }
   let scope: keyof typeof counts | undefined
-  const initial = service.observeInitialInput.bind(service)
-  vi.spyOn(service, 'observeInitialInput').mockImplementation((value: AgentMuxStoredAgentSession) => {
+  const reconciler = service.reconciler
+  const initial = reconciler.observeInitialInput.bind(reconciler)
+  vi.spyOn(reconciler, 'observeInitialInput').mockImplementation((value: AgentMuxStoredAgentSession) => {
     const previous = scope; scope = 'initial'
     try { return initial(value) } finally { scope = previous }
   })
