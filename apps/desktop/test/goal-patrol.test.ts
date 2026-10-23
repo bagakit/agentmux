@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxError, observeAgent, type AgentMuxClientEvent, type AgentMuxAgentRuntimeStatus, type AgentPromptSubmissionRecord } from '@agentmux/core'
-import { demandExecutionReferences, openDemandStore } from '@agentmux/demand'
+import { demandExecutionReferences, demandResponsibilityScope, openDemandStore } from '@agentmux/demand'
+import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import type { GoalDelegationAuthority, GoalDelegationResult } from '@agentmux/core/goal-delegation'
 import { GoalPatrolOwner } from '../src/main/goal-patrol-owner'
 const cleanup: Array<() => Promise<unknown>> = []
@@ -58,6 +59,15 @@ it('one click admits real original PMO input once; delivery alone does not chang
   expect(goal.patrols).toHaveLength(1); expect(f.submitted).toHaveLength(1)
   expect(await f.owner.observe(goal)).toMatchObject([{ state: 'delivered' }]); expect(goal.progressUpdates).toBeUndefined(); expect(goal.status).toBe('in_progress')
   expect(goal.patrols![0]!.attempts[0]!.target).toMatchObject({ hostId: 'manager-host', agentSessionId: 'manager', runId: 'manager-run' })
+  const patrol = goal.patrols![0]!, attempt = patrol.attempts[0]!, metadata = JSON.parse(attempt.agentMuxNote.split('\n')[0]!)
+  expect(metadata).toMatchObject({ schema: 'agentmux.goal-patrol.v1', goalId: 'goal', patrolOperationId: patrol.operationId,
+    inputOperationId: attempt.operationId, target: attempt.target, context: { alignmentRevision: 1, executions: [
+      { kind: 'start', operationId: 'start', hostId: 'worker-host', agentSessionId: 'worker', runId: 'worker-run' }
+    ] }, read: { method: 'goal.delegations', params: { goalId: 'goal' }, patrolOperationId: patrol.operationId } })
+  expect(metadata).not.toHaveProperty('roleGuidance')
+  expect(metadata.next).toBe('Read amux goal --skill and the retained original Goal/patrol/execution/input/evidence before inspection. Actually inspect progress, evidence, gaps and unknowns; use goal patrol report --input FILE to write back this patrol, current business status and next responsible party/action. Explicit review of an original stored worker report collects its exact authenticated reply atomically; do not collect separately before frozen-scope reporting. Delivery, acknowledgement and reminders are not inspection or acceptance. Retain original Goal/Session/Run and unknown inputs; never blindly resend. Human confirmation and acceptance remain human actions.')
+  expect(attempt.agentMuxNote).toBe(JSON.stringify(metadata) + '\n\n' + goalRoleGuidance({ role: 'manager', goalId: 'goal',
+    agentSessionId: 'manager', runId: 'manager-run', source: { kind: 'goal-patrol', operationId: patrol.operationId } }))
 })
 it('busy and occupied PMO input remain prepared, then the actual agent-input protocol event admits the same input', async () => {
   const f = await fixture(); f.state.mode = 'draft'; await f.owner.request('goal', 'patrol', {}, person); await f.settle()
@@ -74,6 +84,27 @@ it('lost input receipts, repeated clicks and a restarted observer never replay a
   f.state.runId = 'recovered-manager-run'
   await expect(restarted.continue('goal', 'patrol', 'continue', f.state.runId, {}, person)).rejects.toMatchObject({ code: 'CONTROL_REQUEST_CONFLICT' })
   expect(f.runtime.disableGoalAttention).not.toHaveBeenCalled()
+})
+it('submits a saved original patrol packet verbatim and keeps its unknown receipt across owner restart', async () => {
+  const f = await fixture(); f.state.mode = 'draft'; f.state.lost = true
+  const goal = (await f.demands.get('goal'))!, target = { hostId: 'manager-host', agentSessionId: 'manager',
+    runId: 'manager-run', providerId: 'codex', workspacePath: f.root }
+  const agentMuxNote = JSON.stringify({ schema: 'agentmux.goal-patrol.v1', goalId: 'goal', patrolOperationId: 'patrol',
+    roleGuidance: 'Saved original manager guidance\nwith an original line break', target }) + '\r\n  '
+  await f.demands.preparePatrol('goal', { operationId: 'patrol', expectedScope: demandResponsibilityScope(goal),
+    executions: demandExecutionReferences(goal), supervisorAgentSessionId: 'manager', context: 'Original retained inspection context',
+    requestedBy: person.actor, attempt: { operationId: 'original-patrol-input', actionOperationId: 'patrol', intentId: 'original-patrol-input', target, agentMuxNote } })
+  await f.settle(); expect(f.submitted).toEqual([])
+  f.state.mode = 'idle'; await f.owner.request('goal', 'patrol', {}, person); await f.settle()
+  expect(f.submitted).toEqual(['original-patrol-input'])
+  expect(f.runtime.submitPrompt).toHaveBeenCalledWith(expect.objectContaining({ agentSessionId: 'manager', run: { runId: 'manager-run' } }),
+    '', 'original-patrol-input', expect.anything(), expect.anything(), undefined, undefined, agentMuxNote, 'api')
+  const original = (await f.demands.get('goal'))!.patrols![0]!
+  expect(original.attempts[0]!.agentMuxNote).toBe(agentMuxNote)
+  f.owner.dispose(); const restarted = f.create(); await restarted.start(); await restarted.request('goal', 'patrol', {}, person); await f.settle()
+  expect(f.submitted).toEqual(['original-patrol-input'])
+  expect((await f.demands.get('goal'))!.patrols![0]).toEqual(original)
+  expect(await restarted.observe((await f.demands.get('goal'))!)).toMatchObject([{ state: 'unknown' }])
 })
 it('an unavailable original manager route can bind its first attempt; wrong authors cannot cancel pending work', async () => {
   const f = await fixture(); f.state.unavailable = true; await f.owner.request('goal', 'patrol', {}, person)
@@ -101,7 +132,7 @@ it('valid large original tasks use source references instead of copying task bod
     await f.demands.prepareDelegation('goal', task, 'manager'); await f.demands.linkDelegation('goal', id, task.sourceMessageId, 'manager') }
   await f.owner.request('goal', 'patrol', {}, person)
   const note = (await f.demands.get('goal'))!.patrols![0]!.attempts[0]!.agentMuxNote
-  expect(Buffer.byteLength(note)).toBeLessThan(64 * 1024); expect(note).not.toContain('x'.repeat(100)); expect(JSON.parse(note).read).toMatchObject({ method: 'goal.delegations', params: { goalId: 'goal' } })
+  expect(Buffer.byteLength(note)).toBeLessThan(64 * 1024); expect(note).not.toContain('x'.repeat(100)); expect(JSON.parse(note.split('\n')[0]!).read).toMatchObject({ method: 'goal.delegations', params: { goalId: 'goal' } })
 })
 
 it('retains typed original file evidence once in the frozen inspection and actual PMO input', async () => {
@@ -111,6 +142,6 @@ it('retains typed original file evidence once in the frozen inspection and actua
   await f.owner.request('goal', 'patrol', {}, person); await f.settle()
   const patrol = (await f.demands.get('goal'))!.patrols![0]!
   expect(JSON.parse(patrol.context).evidence).toEqual([evidence, 'Original citation'])
-  expect(JSON.parse(patrol.attempts[0]!.agentMuxNote).context.evidence).toEqual([evidence, 'Original citation'])
+  expect(JSON.parse(patrol.attempts[0]!.agentMuxNote.split('\n')[0]!).context.evidence).toEqual([evidence, 'Original citation'])
   expect(f.submitted).toHaveLength(1)
 })

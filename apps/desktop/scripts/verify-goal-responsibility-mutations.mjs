@@ -97,7 +97,7 @@ const costCases = [
 const delegationOracle = 'actual compiled delegation preserves the original authenticated Core source and canonical executor role through the mounted consumer'
 if (slice === 'delegation') fullOracle[delegationOracle] = delegationOracle
 const delegationCases = [{ name: 'original-delegation-producer-discards-canonical-executor-context', file: 'apps/desktop/src/main/goal-delegation-owner.ts',
-  changes: [["roleGuidance: goalRoleGuidance({ role: 'executor', goalId: input.goalId, agentSessionId: intent.workerAgentSessionId, runId: intent.workerRunId, source: { kind: 'goal-delegation', operationId: intent.operationId, sourceMessageId: intent.sourceMessageId, threadId: intent.threadId } })", "roleGuidance: ''"]],
+  changes: [["const guidance = goalRoleGuidance({ role: 'executor', goalId: input.goalId, agentSessionId: intent.workerAgentSessionId, runId: intent.workerRunId, source: { kind: 'goal-delegation', operationId: intent.operationId, sourceMessageId: intent.sourceMessageId, threadId: intent.threadId } })", "const guidance = ''"]],
   test: product, oracle: delegationOracle }]
 const cases = slice === 'delegation' ? delegationCases : slice === 'cost' ? costCases : slice === 'patrol' ? patrolCases : responsibilityCases
 assert.ok(cases.length > 0, 'A nonempty production mutation set is required')

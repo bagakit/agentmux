@@ -40,6 +40,31 @@ async function request(f: Fixture, operationId = 'original-patrol') {
   return (await f.cli('owner', ['goal', 'patrol', '--goal', 'goal', '--operation-id', operationId])).result as GoalDelegationResult
 }
 async function read(f: Fixture) { return (await f.cli('owner', ['goal', 'delegations', '--goal', 'goal'])).result as GoalDelegationResult }
+
+it('compiled patrol preserves readable manager guidance on the original Core input and mounted work', async () => {
+  const f = await fixture({ patrol: true }); await f.finite(); await f.publish()
+  await request(f, 'readable-patrol'); await f.flushPatrol()
+  const saved = (await f.demands.get('goal'))!, patrol = saved.patrols![0]!, attempt = patrol.attempts[0]!
+  expect(attempt.target).toMatchObject({ hostId: 'local', agentSessionId: 'owner', runId: 'owner-run' })
+  const admitted = await f.client.inspectAgentPromptSubmission({ kind: 'prompt', agentSessionId: 'owner',
+    expectedRun: { runId: 'owner-run' }, submissionId: attempt.operationId })
+  expect(admitted).toMatchObject({ admission: { acknowledged: true, intent: { message: { systemContext: attempt.agentMuxNote } } } })
+  expect(admitted!.admission!.intent!.message!.authorHuman).toBeUndefined()
+  const metadata = JSON.parse(attempt.agentMuxNote.split('\n')[0]!), guidance = goalRoleGuidance({
+    role: 'manager', goalId: 'goal', agentSessionId: 'owner', runId: 'owner-run',
+    source: { kind: 'goal-patrol', operationId: patrol.operationId } })
+  expect(metadata).toMatchObject({ schema: 'agentmux.goal-patrol.v1', goalId: 'goal', patrolOperationId: patrol.operationId,
+    inputOperationId: attempt.operationId, read: { method: 'goal.delegations', params: { goalId: 'goal' } } })
+  expect(metadata).not.toHaveProperty('roleGuidance')
+  expect(attempt.agentMuxNote).toBe(JSON.stringify(metadata) + '\n\n' + guidance)
+  expect(f.nativeWrites.length).toBeGreaterThan(0)
+  await f.publish(); await mount(createElement(GoalDelegationWork, { demand: current() }))
+  expect(container.querySelector('.goal-patrol__source')!.textContent).toContain(attempt.operationId)
+  expect(current().responsibility!.executions[0]).toMatchObject({ phase: 'stalled', alert: 'stalled' })
+  expect(saved.status).toBe('in_progress'); expect(patrol.report).toBeUndefined()
+  await request(f, 'readable-patrol')
+  expect(f.attempts).toHaveLength(1); expect(f.stop).not.toHaveBeenCalled()
+}, 30_000)
 async function report(f: Fixture, patrol: DemandPatrol, input?: DemandPatrolReportInput) {
   const actual = input ?? inspection((await f.demands.get('goal'))!, patrol)
   return (await f.action('owner', 'patrol report', { goalId: 'goal', patrolOperationId: patrol.operationId, report: actual })).result as GoalDelegationResult
@@ -118,10 +143,13 @@ describe('actual original PMO patrol CLI, Core Input and mounted business consum
       inputKey: { kind: 'prompt', agentSessionId: 'owner', expectedRun: { runId: 'owner-run' }, submissionId: attempt.operationId },
       intent: { message: { systemContext: attempt.agentMuxNote } } } })
     expect(admitted!.admission!.intent!.message!.authorHuman).toBeUndefined()
-    expect(JSON.parse(attempt.agentMuxNote)).toMatchObject({ schema: 'agentmux.goal-patrol.v1', goalId: 'goal', patrolOperationId: patrol.operationId,
-      inputOperationId: attempt.operationId, read: { method: 'goal.delegations', params: { goalId: 'goal' } }, roleGuidance: goalRoleGuidance({
-        role: 'manager', goalId: 'goal', agentSessionId: 'owner', runId: 'owner-run', source: { kind: 'goal-patrol', operationId: patrol.operationId } }) })
-    expect(JSON.parse(attempt.agentMuxNote).roleGuidance).toContain('Required module: ' + AGENTMUX_GOAL_SKILL_ENTRY)
+    const metadata = JSON.parse(attempt.agentMuxNote.split('\n')[0]!), guidance = goalRoleGuidance({
+      role: 'manager', goalId: 'goal', agentSessionId: 'owner', runId: 'owner-run', source: { kind: 'goal-patrol', operationId: patrol.operationId } })
+    expect(metadata).toMatchObject({ schema: 'agentmux.goal-patrol.v1', goalId: 'goal', patrolOperationId: patrol.operationId,
+      inputOperationId: attempt.operationId, read: { method: 'goal.delegations', params: { goalId: 'goal' } } })
+    expect(metadata).not.toHaveProperty('roleGuidance')
+    expect(attempt.agentMuxNote).toBe(JSON.stringify(metadata) + '\n\n' + guidance)
+    expect(guidance).toContain('Required module: ' + AGENTMUX_GOAL_SKILL_ENTRY)
     expect(f.nativeWrites.length).toBeGreaterThan(0)
     expect(saved.progressUpdates).toBeUndefined(); expect(saved.patrols![0]!.report).toBeUndefined(); expect(saved.status).toBe('in_progress')
     expect(current().responsibility!.executions[0]).toMatchObject({ phase: 'stalled', alert: 'stalled' })

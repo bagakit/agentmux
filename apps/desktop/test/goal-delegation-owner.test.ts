@@ -9,6 +9,7 @@ import { AgentMuxClient, AgentMuxControlServer, AgentMuxMemoryAgentSessionStore,
   hashAgentCapability, issueAgentCapability, type AgentMuxRpcResult } from '@agentmux/core'
 import { openDemandStore } from '@agentmux/demand'
 import { GoalDelegationOwner, type GoalDelegationCorePort } from '../src/main/goal-delegation-owner'
+import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 
 const execute = promisify(execFile), cleanup: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); vi.unstubAllEnvs() })
@@ -55,9 +56,15 @@ it('runs the actual CLI/RPC/Main prepare owner, retains frozen intent and reject
   const frozen = first.result.delegations[0]
   expect(frozen).toMatchObject({ ...intent, text: expect.stringContaining(intent.text), requestText: intent.text })
   expect(frozen.text.startsWith(intent.text + '\n\n[AgentMux delegation]\n')).toBe(true)
-  expect(JSON.parse(frozen.text.split('\n[AgentMux delegation]\n')[1])).toMatchObject({ schema: 'agentmux.goal-delegation.v1',
+  const coordination = frozen.text.split('\n[AgentMux delegation]\n')[1]!, metadata = JSON.parse(coordination.split('\n')[0]!)
+  expect(metadata).toMatchObject({ schema: 'agentmux.goal-delegation.v1',
     goalId: 'goal', operationId: intent.operationId, sourceMessageId: intent.sourceMessageId, threadId: intent.threadId,
     ownerAgentSessionId: 'owner', workerAgentSessionId: 'worker', hostId: 'local', alignmentRevision: 1, criterionIds: ['AC'] })
+  expect(metadata).not.toHaveProperty('roleGuidance')
+  expect(metadata.next).toBe('Use goal report --input FILE to return every delegated criterion with evidence, gap or unknown under this original dispatch. For a question/block, reply to the original source and record message dispatch report --kind question|escalation. A report is pending collection and human acceptance; exiting or worker_done does not complete the Goal.')
+  expect(coordination).toBe(JSON.stringify(metadata) + '\n\n' + goalRoleGuidance({ role: 'executor', goalId: 'goal',
+    agentSessionId: 'worker', runId: 'worker-run', source: { kind: 'goal-delegation', operationId: intent.operationId,
+      sourceMessageId: intent.sourceMessageId, threadId: intent.threadId } }))
   const original = await demands.snapshot()
   const repeated = await cli('owner', ['goal', 'delegation', 'prepare', '--input', inputPath])
   expect(repeated.result).toEqual(first.result)
@@ -112,6 +119,17 @@ async function retirementFixture() {
   }
   return { owner, demands, store, calls, intent, authority, retire }
 }
+
+it('reuses an original delegation packet and request verbatim without recomposing current role guidance', async () => {
+  const f = await retirementFixture(), text = f.intent.text + '\n\n[AgentMux delegation]\n' + JSON.stringify({
+    schema: 'agentmux.goal-delegation.v1', goalId: 'goal', roleGuidance: 'Saved original executor guidance\nwith an original line break'
+  }) + '\r\n  '
+  await f.demands.prepareDelegation('goal', { ...f.intent, requestText: f.intent.text, text }, 'owner')
+  const original = await f.demands.snapshot(), pending = f.owner.call('goal.delegation.prepare', { goalId: 'goal', intent: f.intent }, {}, f.authority)
+  await expect(pending).resolves.toMatchObject({ delegations: [{ requestText: f.intent.text, text }] })
+  expect(await f.demands.snapshot()).toEqual(original)
+  expect(f.calls).toEqual([])
+})
 
 it.each(['owner', 'worker'])('rejects a new delegation with a retired %s without sending or changing the Goal', async id => {
   const f = await retirementFixture(), retired = await f.retire(id), original = await f.demands.snapshot()
