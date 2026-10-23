@@ -10,7 +10,6 @@ import { createConnection, createServer, type Socket } from 'node:net'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, expect, it, vi } from 'vitest'
-import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli, type CliResult } from '../../core/test/helpers/object-cli-rpc.js'
 
 const SECRET = 'fixture-configuration-saved-secret', TOKEN = 'fixture-configuration-qr-token', FLOW = 'fixture-configuration-flow-key'
@@ -79,10 +78,10 @@ function nativeRoute(read: (subject: ConnectionSetupReadSubject, target: URL, in
   return { route, account: (index: number) => { accountIndex = index } }
 }
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), 'setup-configuration-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock'), encryption = enrollmentEncryption()
+  const root = await mkdtemp(join(tmpdir(), 'setup-configuration-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock')
   let services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
   const open = async (missingAdapter = false) => {
-    services = await createConnectionServices({ directory, encryption, ...(missingAdapter ? { adapters: [] } : {}) })
+    services = await createConnectionServices({ directory, ...(missingAdapter ? { adapters: [] } : {}) })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw new Error('Configuration cannot borrow an Agent Runtime') } })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   }
@@ -94,7 +93,7 @@ async function fixture() {
   const saved = await sdk.call('connection.configure', { operationId: 'configuration-original-save', expectedRevision: null, connection: config })
   const input: ConnectionSetupBegin = { operationId: 'configuration-original-management', connectionId: config.connectionId, expectedConnectionRevision: saved.connection.revision, goal }
   const cli = (args: string[], body?: unknown, endpoint = socketPath) => runCompiledObjectCli(['--endpoint', 'unix:' + endpoint, 'connection', ...args], objectCliEnvironment(root), body === undefined ? '' : JSON.stringify(body))
-  return { root, directory, socketPath, config, saved, input, encryption, cli, close, reopen: open, get sdk() { return sdk }, get services() { return services } }
+  return { root, directory, socketPath, config, saved, input, cli, close, reopen: open, get sdk() { return sdk }, get services() { return services } }
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>
 const readInspect = (f: Fixture, selectedStepId?: string) => f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: selectedStepId ? { selectedStepId } : {} })
@@ -581,7 +580,7 @@ it('projects original read subjects and finite effect receipts in one ordered Se
   await confirmed(f)
   const source = selected(await botRead(f)), accepted = await f.sdk.call('connection.setup.advance', action(await inspect(f), 'enable-messaging')), written = effect(accepted)
   const calls = fetch.mock.calls.length, before = changes(f), resolve = vi.spyOn(ConnectionSecrets.prototype, 'resolve'), store = vi.spyOn(ConnectionSecrets.prototype, 'store')
-  f.encryption.isEncryptionAvailable = () => false
+  const available = vi.spyOn(ConnectionSecrets.prototype, 'assertAvailable').mockRejectedValue(new Error('fixture-private-storage-unavailable'))
   const view = result(await f.cli(['setup', 'inspect', '--operation-id', f.input.operationId, '--request-trace']))
   const entries = view.requestTrace!.entries
   expect(entries.filter(entry => entry.kind === 'application-inspection').map(entry => ({ stepId: entry.stepId, action: entry.action, subject: entry.subject, effect: entry.effect, request: entry.request }))).toEqual([{ stepId: source.stepId, action: 'read-application', subject: 'bot-settings', effect: null, request: 'confirmed' }])
@@ -589,5 +588,5 @@ it('projects original read subjects and finite effect receipts in one ordered Se
   expect(entries.at(-1)!.stepId).toBe(written.stepId)
   assertPrivateFree(entries)
   expect(view.continuation).toBeUndefined(); expect(view.applicationConfiguration).toBeUndefined()
-  expect(resolve).not.toHaveBeenCalled(); expect(store).not.toHaveBeenCalled(); expect(fetch).toHaveBeenCalledTimes(calls); expect(changes(f)).toEqual(before)
+  expect(available).not.toHaveBeenCalled(); expect(resolve).not.toHaveBeenCalled(); expect(store).not.toHaveBeenCalled(); expect(fetch).toHaveBeenCalledTimes(calls); expect(changes(f)).toEqual(before)
 }, 45_000)

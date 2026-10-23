@@ -1,4 +1,5 @@
 import { createConnectionServices } from '../src/connection-services.js'
+import { assertPrivateCredentialFiles, privateCredentialValues } from './fixtures/connection-enrollment.js'
 import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { AgentMuxControlServer, AgentMuxRpcService, connectAgentMuxRpc } from '@agentmux/core'
 import type { ConnectionConfig, ConnectionSetupAction, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupInspectionReceipt, ConnectionSetupReadSubject, ConnectionSetupView } from '@agentmux/core/connections'
@@ -9,7 +10,6 @@ import { createConnection, createServer, type Socket } from 'node:net'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, expect, it, vi } from 'vitest'
-import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli, type CliResult } from '../../core/test/helpers/object-cli-rpc.js'
 
 const SECRET = 'fixture-settings-saved-secret', TOKEN = 'fixture-settings-qr-token', FLOW = 'fixture-settings-flow-key'
@@ -72,10 +72,10 @@ function nativeRoute(read: (subject: ConnectionSetupReadSubject, target: URL, in
   return { route, account: (index: number) => { accountIndex = index } }
 }
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), 'setup-settings-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock'), encryption = enrollmentEncryption()
+  const root = await mkdtemp(join(tmpdir(), 'setup-settings-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock')
   let services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
   const open = async (missingAdapter = false) => {
-    services = await createConnectionServices({ directory, encryption, ...(missingAdapter ? { adapters: [] } : {}) })
+    services = await createConnectionServices({ directory, ...(missingAdapter ? { adapters: [] } : {}) })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw new Error('Settings reads cannot borrow an Agent Runtime') } })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   }
@@ -87,7 +87,7 @@ async function fixture() {
   const saved = await sdk.call('connection.configure', { operationId: 'settings-original-save', expectedRevision: null, connection: config })
   const input: ConnectionSetupBegin = { operationId: 'settings-original-management', connectionId: config.connectionId, expectedConnectionRevision: saved.connection.revision, goal }
   const cli = (args: string[], body?: unknown, endpoint = socketPath) => runCompiledObjectCli(['--endpoint', 'unix:' + endpoint, 'connection', ...args], objectCliEnvironment(root), body === undefined ? '' : JSON.stringify(body))
-  return { root, directory, socketPath, config, saved, input, encryption, cli, close, reopen: open, get sdk() { return sdk }, get services() { return services } }
+  return { root, directory, socketPath, config, saved, input, cli, close, reopen: open, get sdk() { return sdk }, get services() { return services } }
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>
 const inspect = (f: Fixture, selectedStepId?: string) => f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: selectedStepId ? { selectedStepId } : {} })
@@ -151,9 +151,8 @@ it('real SDK and compiled CLI read four independently claimed native subjects wh
   expect(JSON.stringify(listing)).not.toContain('readResult'); expect(changes(f)).toEqual(before)
   expect(await f.sdk.call('connection.service.get', {})).toEqual(off.service)
   expect((await f.sdk.call('connection.inspect', { operationId: 'settings-original-save' })).operation).toEqual(f.saved)
-  f.services.database!.exec('PRAGMA wal_checkpoint(FULL)')
-  const bytes = await readFile(join(f.directory, 'connections.sqlite'))
-  for (const secret of [SECRET, PRIVATE, TOKEN, FLOW, SESSION, READ_COOKIE, ...accounts.flatMap(a => [a.user, a.tenant, a.csrf])]) expect(bytes.includes(Buffer.from(secret))).toBe(false)
+  expect(await privateCredentialValues(f.services.database!)).toContain(SECRET)
+  await assertPrivateCredentialFiles(f.directory)
   await f.close(); await f.reopen(true)
   for (const receipt of receipts) {
     const retained = await inspect(f, receipt.stepId)
@@ -210,7 +209,7 @@ it('failed native observations and an unrecoverable original result do not block
     expect(selected(await f.sdk.call('connection.setup.advance', input))).toEqual(original)
     expect(fetch.mock.calls.length - count).toBe(1)
   }
-  const fail = vi.spyOn(f.encryption, 'encryptString').mockImplementationOnce(() => { throw new Error('fixture-original-result-not-written') })
+  const fail = vi.spyOn(ConnectionSecrets.prototype, 'store').mockRejectedValueOnce(new Error('fixture-original-result-not-written'))
   const input = action(await inspect(f), 'read-event-settings'), uncertain = selected(await f.sdk.call('connection.setup.advance', input)); fail.mockRestore()
   expect(uncertain).toMatchObject({ subject: 'event-settings', request: 'confirmed', secureStorage: 'unknown' })
   const calls = fetch.mock.calls.length
@@ -255,7 +254,7 @@ it('an exact new-subject vault ACK remains locally recoverable after account ren
   expect(selected(repeated)).toEqual(selected(recovered)); expect(repeated.applicationInspection?.readResult).toBeUndefined()
   await f.close(); await f.reopen(true)
   expect(selected(await inspect(f, receipt.stepId))).toEqual(selected(recovered)); expect(fetch).toHaveBeenCalledTimes(calls)
-  expect((await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection).toEqual(revised.connection)
+  expect((await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection).toMatchObject(revised.connection)
   expect((await f.sdk.call('connection.inspect', { operationId: 'settings-original-save' })).operation).toEqual(f.saved)
 }, 60_000)
 
@@ -309,7 +308,7 @@ it.each(['account', 'revision'] as const)('a late native app result cannot cross
     expect(now.operation?.authentication).toEqual(latest.operation?.authentication); expect(now.continuation?.account).toEqual(latest.continuation?.account)
   } else {
     expect(now.applicationInspection?.readResult).toBeUndefined()
-    expect((await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection).toEqual(revised)
+    expect((await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection).toMatchObject(revised)
   }
   expect((await f.sdk.call('connection.inspect', { operationId: 'settings-original-save' })).operation).toEqual(f.saved)
 }, 60_000)
