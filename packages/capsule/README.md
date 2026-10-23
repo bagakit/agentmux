@@ -5,6 +5,74 @@ Browser view. Its portable entry exports domain contracts and strict wire parser
 The `@agentmux/capsule/node` entry exports `NodeCapsuleOwner` and `CapsuleError`.
 There is no Core, Electron, React, or Agent runtime dependency.
 
+The independently installed `capsule-runtime` executable owns serving. Core may
+load its fixed entry as an ordinary ctxmux Run; neither Core nor Desktop needs to
+remain connected for published HTTP pages to stay available. Capsule does not
+supervise, replace or restart its own process. The Run owner manages process
+lifecycle, including explicit stop and a later authoritative replacement.
+
+```sh
+capsule-runtime serve --state-directory "$CAPSULE_STATE" --socket "$CAPSULE_SOCKET"
+```
+
+Both paths must be explicit absolute addresses in the serving Host's namespace.
+The socket's parent must be a private real directory owned by that user, and the
+socket is mode `0600`. A live listener or unrelated filesystem object is retained;
+only an exactly observed stale socket may be removed. Remote loopback URLs and
+source paths remain remote. This entry does not expose a public network bind,
+tunnel or HTTP management channel.
+
+```ts
+import {
+  capsuleRuntimeEntrypoint,
+  connectCapsuleRuntime,
+} from '@agentmux/capsule/runtime'
+
+// Pass this installed absolute entry to the Run owner's prepared Node launch.
+const entrypoint = capsuleRuntimeEntrypoint()
+const client = await connectCapsuleRuntime({
+  socketPath: process.env.CAPSULE_SOCKET!,
+  expectedRuntimeId: process.env.CAPSULE_RUNTIME_ID!,
+})
+const identity = await client.identity()
+const pages = await client.call('capsule.ls', {})
+await client.dispose() // HTTP and the serving process remain available.
+```
+
+`runtimeId` is minted once into the original domain's `runtime.json`; an unreadable
+identity is never silently replaced. `ownerInstanceId` is fresh for each serving
+process, and `pid` is only an observation. `identity()` queries the original
+connection, and `expectedRuntimeId` is checked before any business call. Existing
+namespaces, records and content addresses are retained. An embedding that already
+owns process lifetime may also use `startCapsuleRuntime({ stateDirectory,
+socketPath })`; its explicit `close()` shuts down that service. Client `dispose()`
+only releases that client.
+
+The private versioned protocol validates every request, result and narrow adapter
+callback. Frames carry a four-byte length and UTF-8 JSON with a 16 MiB per-frame
+buffer limit. Oversized requests fail before sending or reserving an operation;
+an oversized result is an unknown observation of its original effect, never an
+invalid registry or permission to replay. Other connections and HTTP remain
+available. The frame budget is unrelated to accumulated content or draft storage.
+
+`connectCapsuleRuntime` optionally accepts `{ adapters: { presentation, replies } }`.
+Callbacks belong to the exact original socket and pending call, retaining that
+call's original context. Saved or wire `caller`/`principal` values provide
+attribution, never Human authority; a reply adapter still needs its real native
+confirmation and original Core input owner. Without an adapter, presentation or
+trusted input is unavailable while page hosting and ordinary domain reads remain
+usable. A call's `context.signal` cancels only its current observation, including
+pending callbacks. Disconnect and reconnect never automatically replay a business
+call, Browser open or input submission. Original pending effects can be inspected
+through the newly connected client's narrow observation adapters.
+An optional connection-level `signal` also cancels connect/handshake and every
+later observation, including `identity()`, when a live listener stops responding.
+Cancellation releases that connection without inferring process death or stopping
+the original service Run. Callers choose their observation deadline.
+
+The lower-level Node owner remains available for embeddings and focused domain
+tests:
+
 ```ts
 import { NodeCapsuleOwner } from '@agentmux/capsule/node'
 
@@ -89,3 +157,11 @@ the original source and build.
 
 `pnpm --filter @agentmux/capsule test:reply:mutation` replaces original-input
 inspection with submission and proves the saved-reply replay test rejects it.
+
+`pnpm --filter @agentmux/capsule test:runtime` launches the installed serving entry
+as a real independent subprocess, checks HTTP after client exit, original domain
+and page recovery after process death, concurrent callbacks, cancellation, trusted
+reply observation and strict transport boundaries. `test:runtime:mutation`
+compiles actual production source mutations in a temporary isolated package and
+proves the original-call and durable-domain identity tests reject them. Shared
+source and compiled artifacts are never replaced by those runtime mutations.
