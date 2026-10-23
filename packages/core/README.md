@@ -219,6 +219,18 @@ HTTP 默认关闭；启动服务时显式提供 `http: { host, port, token }`，
 
 JSON-RPC `id` 只匹配通信。`operationId` 记录原业务操作；没有完整回执时先查询原操作。订阅断开只释放对应 reader，保持 Agent、Run 与桌面的原观察连接。完整命令、资源与展示分离和远程参数见[公开 CLI 指南](../../docs/guides/agentmux-cli-object-control.md)。
 
+### 连接器托管归属
+
+`call('connection.owner.inspect', {})` 与 `amux connection owner inspect` 只读取当前
+endpoint 的端口注册：`local` 表示该 endpoint 持有 Connection 端口，`forwarded`
+表示它只有转发入口，`unavailable` 表示两者都未注册。这里的 `local` 不表示用户的
+本机；远程 Host 也可以是自己的连接器 owner。该读取不打开连接器数据库，也不确认
+凭据、独占租约、平台连接或消息送达，仍须分别查询相应原对象。
+
+管理调用应选择准确的托管 Host，保持其原 Runtime 与操作身份；Agent 的执行 Host
+是另一项事实。已经提供的 Runtime fence 在连接器派发或转发前验证；归属读取本身
+不创建连接器、不更换 owner，也不授予配置或成员管理权限。
+
 ### 外部建群与原操作查询
 
 `@agentmux/core/connections` 导出纯建群类型与严格解析；宿主通过原

@@ -9,6 +9,13 @@ when: "Inspect or operate an exact external communication connection"
 <!-- amux:content -->
 The connection owner holds configured adapters, bindings, grants, ingress and delivery
 receipts. Managed Agents authenticate with their original Session capability, never as a user.
+Use connection owner inspect on the exact hosting endpoint to distinguish registered ownership:
+local means this endpoint has a Connection port, forwarded means it has only a forwarding entry,
+and unavailable means neither is registered. Local does not mean the user's machine. This read
+opens no connector database and confirms no credentials, lease, platform connection or delivery.
+Choose the connector hosting Host separately from an Agent's execution Host. Keep the original
+Runtime and operation for an in-flight request; an already-provided Runtime fence is checked before
+connection dispatch or forwarding. Owner inspection grants no configuration or member authority.
 For a human-selected exact Session, use connection diagnose --host ID --session ID [--binding ID].
 This bounded local read is available with the original managed caller. It exposes service,
 transport, binding scope/grant counts and newest application/group intake with original Core
