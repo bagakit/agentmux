@@ -16,7 +16,7 @@
 | 草稿、阅读位置、选区、展开、可见性与 caret 意图 | 原客户端 owner；不是第二份对话事实 |
 | 外部受众、内容表示、待投意图及平台回执 | 原 connector Binding／Publication Store；不拥有原生或 captured 记录 |
 
-公共 Reader 的完整窗口经 [`projectConversationWindow`](../../packages/core/src/conversation.ts) 适配为共同消息行及可访问的 originals；适配保留已接受的事件、角色和原顺序，不重新关联原记录。`projectConversationReading`／`projectConversationRecords` 仍提供纯投影能力。UI 的 [`conversation-records`](../../packages/client-ui/src/lib/conversation-records.ts) 添加 speaker、来源标签及 coverage 的呈现。缺少原 source Host 时仍保留正文，不从当前焦点补一个引用。原 source namespace 与 client route 的区别见[协议](../specs/conversation-protocol.md#unified-reading-and-changes)。
+公共 Reader 的完整窗口经 [`projectConversationWindow`](../../packages/core/src/conversation.ts) 适配为共同消息行及可访问的 originals；适配保留已接受的事件、角色和原顺序，不重新关联原记录。`projectConversationReading`／`projectConversationRecords` 仍提供纯投影能力。共同 `useConversationView` 为已接受窗口生成 Core reading；Desktop、Mobile 与 Focus 复用该结果，经 UI 的 [`describeConversationWindow`](../../packages/client-ui/src/lib/conversation-records.ts) 添加 speaker、来源标签及 coverage 的呈现。提交前的候选仍经同模块 `projectConversationWindow(snapshot)` 独立投影，不使用当前保留帧。缺少原 source Host 时仍保留正文，不从当前焦点补一个引用。原 source namespace 与 client route 的区别见[协议](../specs/conversation-protocol.md#unified-reading-and-changes)。
 
 共同输入消费直接使用该投影的 `inputs` 实体列表，保留 canonical event、revision、作者与全部原贡献；原 `record.input` 仍供单来源详情使用。Desktop 的 [`useSessionUserMessages`](../../apps/desktop/src/renderer/src/lib/session-user-messages.ts) 与 Agent 卡片 Recent inputs 直接消费实体。Desktop Composer 和 Mobile 邮箱的原来源检索则以 `originalRecords` 中的 raw inputs 作为种子，与原 `agent.history` 的原记录身份对应；不把实体 ID 混入来源分页。固定预览补入原在途实体时经 Core 的纯 `retainConversationInputs` 按准确当前 coalescence 保留已显示实体及原阅读版本，不按 native 原记录 ID 再拼一次消息列表。
 
