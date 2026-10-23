@@ -1,14 +1,14 @@
-import { fixtureEpoch as _followupFixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
+import { writeFile } from 'node:fs/promises'
 import { act } from 'react'
 import { afterEach, expect, it, vi } from 'vitest'
 import { useConversationView } from '@agentmux/client-ui/use-conversation-view'
 import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
-import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
+import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
 import { createClientUiRoot } from './helpers/client-ui-render'
 import { AgentMuxError } from '../../../packages/core/src/errors'
 import { api } from '../src/renderer/src/lib/api'
-import type { AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
 const closes: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => {
   window.getSelection()?.removeAllRanges()
@@ -18,13 +18,31 @@ afterEach(async () => {
   if (failures.length) throw new AggregateError(failures, 'Private reading transaction cleanup failed')
 })
 const reference = { hostId: 'local', agentSessionId: 'original-reading-transaction' }, source = { providerId: 'claude', nativeSessionId: 'original-native' }
-const page = (body: string): AgentSessionHistoryPage => ({ agentSessionId: reference.agentSessionId, source, nextCursor: null,
-  items: [{ id: 'same-original', kind: 'assistant-message', contentParts: [{ kind: 'text', text: body }] }] })
+const transcript = (body: string) => jsonl([{ type: 'assistant', sessionId: source.nativeSessionId, uuid: 'same-original',
+  message: { role: 'assistant', content: body } }])
 const pause = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) })
 const wait = (assertion: () => void) => vi.waitFor(async () => { await pause(); assertion() }, { timeout: 7000, interval: 20 })
 async function fixture() {
   let body = 'Original selected body', hold = false
-  const f = await conversationPagePortFixture(reference, source, async () => page(body)); closes.push(f.close)
+  const native = await nativeHistoryFixture('claude', transcript(body), {
+    nativeSessionId: source.nativeSessionId, agentSessionId: reference.agentSessionId
+  })
+  closes.push(native.close)
+  for (const control of native.controls) control.mockImplementation(() => { throw new Error('A reading transaction cannot control Runtime') })
+  closes.push(() => { for (const control of native.controls) expect(control).not.toHaveBeenCalled() })
+  const originalChanges = native.client['nativeHistoryChangesPage']
+  const changesDescriptor = Object.getOwnPropertyDescriptor(native.client, 'nativeHistoryChangesPage')
+  const nativeChanges = vi.fn<typeof originalChanges>((...args) => originalChanges.call(native.client, ...args))
+  // Keep the real checkpoint and exact-record lookup. Only the non-tail changes
+  // leaf can inject the operation failure exercised below, with all arguments kept.
+  native.client['nativeHistoryChangesPage'] = (...args) => args[1].tail
+    ? originalChanges.call(native.client, ...args) : nativeChanges(...args)
+  closes.push(() => {
+    if (changesDescriptor) Object.defineProperty(native.client, 'nativeHistoryChangesPage', changesDescriptor)
+    else Reflect.deleteProperty(native.client, 'nativeHistoryChangesPage')
+  })
+  const f = { ...native, nativeChanges }
+  await desktopConversationReadBridge(f, closes)
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   const host = document.createElement('div'); document.body.append(host); const root = createClientUiRoot(host)
   closes.push(async () => { await act(async () => root.unmount()); host.remove() })
@@ -37,7 +55,8 @@ async function fixture() {
   }
   const render = (active = true) => act(async () => root.render(<Consumer active={active} />))
   await render(); await wait(() => { expect(host.textContent).toContain(body); expect(view.loading).toBe(false); expect(view.inspect().dirty).toBe(false) })
-  return { f, host, admissions, render, view: () => view, hold: (value: boolean) => { hold = value }, body: (value: string) => { body = value } }
+  return { f, host, admissions, render, view: () => view, hold: (value: boolean) => { hold = value },
+    body: async (value: string) => { await writeFile(f.path, transcript(value)); body = value } }
 }
 function anchorOf(view: ReturnType<typeof useConversationView>) {
   const record = view.snapshot!.units.flatMap(unit => unit.records)[0]!
@@ -47,7 +66,7 @@ it('a held original-anchor frame keeps displayed history and coverage together u
   const x = await fixture(), accepted = x.view().snapshot!, anchor = anchorOf(x.view())
   x.hold(true)
   await act(async () => { await x.view().reveal(anchor) })
-  expect(x.view().held).toBe(true); expect(x.view().snapshot).toBe(accepted)
+  expect(x.view().held, JSON.stringify({ state: x.view().inspect(), error: x.view().error?.message, admissions: x.admissions })).toBe(true); expect(x.view().snapshot).toBe(accepted)
   expect(x.view().historical, 'Pending navigation cannot publish historical metadata ahead of its displayed body').toBe(false)
   expect(x.view().inspect().pending!.window.anchor).toEqual(anchor)
   x.hold(false)
@@ -70,7 +89,7 @@ it('the shared real Core consumer retains a selected same-ID native body version
   const x = await fixture(), node = x.host.querySelector('.log-turn__body p')!.firstChild!, selection = window.getSelection()!, range = document.createRange()
   range.selectNodeContents(node); selection.removeAllRanges(); selection.addRange(range)
   const old = selection.toString()
-  x.body('Changed version of the same original')
+  await x.body('Changed version of the same original')
   await act(async () => { await x.view().refresh() })
   expect(x.host.textContent, 'A same-ID selected version is part of placement protection').toContain('Original selected body')
   expect(x.host.textContent).not.toContain('Changed version of the same original'); expect(node.isConnected).toBe(true); expect(selection.toString()).toBe(old)
@@ -81,7 +100,7 @@ it('the shared real Core consumer retains a selected same-ID native body version
 it('a held source failure remains an operation service error while displayed coverage stays with its accepted body', async () => {
   const x = await fixture(), accepted = x.view().snapshot!
   x.hold(true)
-  vi.mocked(x.f.client.readSessionHistoryChanges).mockRejectedValueOnce(new AgentMuxError('Exact native read temporarily unavailable.', 'AGENT_SESSION_HISTORY_UNAVAILABLE'))
+  x.f.nativeChanges.mockRejectedValueOnce(new AgentMuxError('Exact native read temporarily unavailable.', 'AGENT_SESSION_HISTORY_UNAVAILABLE'))
   await act(async () => { await x.view().changes() })
   expect(x.view().held).toBe(true); expect(x.view().snapshot).toBe(accepted)
   expect(x.view().snapshot!.coverage).toEqual(accepted.coverage)
