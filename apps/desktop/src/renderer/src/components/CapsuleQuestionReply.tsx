@@ -11,6 +11,21 @@ function definitelyNotApplied(error: unknown): boolean {
   return failure?.disposition === 'not_applied' && failure.confirmedInputBytes === 0
 }
 
+function inputObservationLabel(delivery: CapsuleInputObservation | undefined): string {
+  if (!delivery) return ''
+  if (delivery.status === 'unknown') return 'input unconfirmed'
+  if (delivery.status === 'unavailable') return 'input unavailable'
+  switch (delivery.inputStatus) {
+    case 'waiting': return 'input waiting in Core'
+    case 'stopped': return 'input stopped before dispatch'
+    case 'not-applied': return 'input not applied'
+    case 'terminal-confirmed': return 'terminal input confirmed'
+    case 'admitted': return 'input admitted by Provider'
+    case 'unknown': return 'input unconfirmed'
+    default: return 'input registered in Core'
+  }
+}
+
 /** The form holds editable bytes only. Original requests, drafts, answers and delivery stay with Capsule/Core. */
 export function CapsuleQuestionReply({ interaction, onUpdated }: {
   interaction: CapsuleInteraction; onUpdated(value: CapsuleInteraction): void
@@ -112,7 +127,15 @@ export function CapsuleQuestionReply({ interaction, onUpdated }: {
   }
 
   const delivery = current.reply?.delivery
-  const restoredUnknown = !attempt && delivery?.status === 'unknown' && current.reply
+  const settled = current.status === 'answered' && current.reply?.phase === 'observed' && delivery?.status === 'submitted' &&
+    ['stopped', 'not-applied', 'terminal-confirmed', 'admitted'].includes(delivery.inputStatus ?? '')
+  const history = useRef<HTMLDetailsElement>(null)
+  useEffect(() => {
+    // A confirmed answer becomes history. Keep keyboard focus on its reachable summary
+    // when the just-used form closes; unrelated editing keeps its original focus.
+    if (settled && history.current?.contains(document.activeElement)) history.current.querySelector('summary')?.focus()
+  }, [settled])
+  const inspectSavedReply = !attempt && current.reply
   async function inspectRestored(): Promise<void> {
     if (!current.reply || original.current) return
     const held: Attempt = { method: 'capsule.interaction.reply', pending: false, params: {
@@ -123,6 +146,9 @@ export function CapsuleQuestionReply({ interaction, onUpdated }: {
     await inspect()
   }
   return <article className="capsule-question" aria-label="Capsule question">
+    <details className="capsule-question__history" ref={history} open={settled ? undefined : true}>
+      <summary hidden={!settled}><span>Answered · {current.question}</span><span>{inputObservationLabel(delivery)}</span></summary>
+      <div className="capsule-question__body">
     <div className="capsule-question__recipient">{current.target ? <><span>Host <code>{current.target.hostId}</code></span><span>Session <code>{current.target.agentSessionId}</code></span></> : <span>No original Agent recipient is bound. The request and draft remain available.</span>}</div>
     <p className="capsule-question__question">{current.question}</p>
     <label className="capsule-question__answer">Your answer
@@ -136,14 +162,16 @@ export function CapsuleQuestionReply({ interaction, onUpdated }: {
         <button type="button" className="small-button" disabled={!dirty || Boolean(attempt)} onClick={() => void saveDraft()}>Save draft</button>
         <button type="button" className="small-button capsule-question__confirm" disabled={Boolean(attempt) || !current.target || !answer.trim()}
           onClick={() => void confirm()}>Confirm answer</button>
-      </> : <span role="status">Answer saved{delivery?.status === 'submitted' ? ' · input submitted' : delivery?.status === 'unknown' ? ' · input unconfirmed' : delivery?.status === 'unavailable' ? ' · input unavailable' : ''}</span>}
+      </> : <span role="status">Answer saved{delivery ? ` · ${inputObservationLabel(delivery)}` : ''}</span>}
       {current.status === 'answered' && current.reply?.phase === 'prepared' && (delivery?.status === 'unknown' || delivery?.status === 'unavailable') ?
         <button type="button" className="small-button capsule-question__confirm" disabled={attempt?.pending || inspecting} onClick={() => void confirm(true)}>Continue saved confirmation</button> : null}
-      {attempt && !attempt.pending ? <button type="button" className="small-button" disabled={inspecting} onClick={() => void inspect()}>{inspecting ? 'Inspecting…' : 'Inspect original operation'}</button> : restoredUnknown ?
+      {attempt && !attempt.pending ? <button type="button" className="small-button" disabled={inspecting} onClick={() => void inspect()}>{inspecting ? 'Inspecting…' : 'Inspect original operation'}</button> : inspectSavedReply ?
         <button type="button" className="small-button" disabled={inspecting} onClick={() => void inspectRestored()}>Inspect original operation</button> : null}
     </div>
     {notice ? <p className="capsule-question__notice" role="status">{notice}</p> : null}
     {delivery?.reason ? <p className="capsule-question__notice">{delivery.reason}</p> : null}
     {attempt || current.reply ? <details><summary>Original operation</summary><code>{attempt?.params.operationId ?? current.reply?.operationId}</code></details> : null}
+      </div>
+    </details>
   </article>
 }
