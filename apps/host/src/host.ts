@@ -36,7 +36,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const path = options.socketPath ?? defaultAgentMuxControlSocketPath()
   const desktopPath = options.desktopSocketPath ?? `${path}.desktop`
   const capsules = hostCapsules(options.store instanceof AgentMuxFileAgentSessionStore
-    ? join(dirname(options.store.path), 'capsules') : undefined)
+    ? join(dirname(options.store.path), 'capsules') : undefined, { connect: context => desktopClient(context ?? { transport: 'unix' }) })
   let runtime: Awaited<ReturnType<typeof startHeadlessAgentMux>> | undefined
   let authority: DeviceAuthority | undefined
   let relay: RelayTransportController | undefined
