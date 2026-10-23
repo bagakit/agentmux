@@ -391,7 +391,7 @@ export class PublicationStore {
       const target = ingress.group?.target
       if (target && target.hostId === boundary.executionHostId && target.agentSessionId === boundary.agentSessionId && target.connectionId === boundary.connectionId && target.bindingId === boundary.bindingId && target.bindingRevision === boundary.revision &&
         r?.reference?.source.kind === 'captured' && r.reference.source.recordId === item.id && item.id === externalConversationRecordId(author) && ingress.body === item.content &&
-        same(externalConversationAuthor(author), { kind: 'external', connectionId: target.connectionId, actor: ingress.actor, externalConversationId: ingress.externalConversationId, externalMessageId: ingress.externalMessageId, bindingId: target.bindingId, bindingRevision: target.bindingRevision })) {
+        same(externalConversationAuthor(author), { kind: 'external', connectionId: target.connectionId, actor: ingress.actor, externalConversationId: ingress.externalConversationId, externalMessageId: ingress.externalMessageId, bindingId: target.bindingId, bindingRevision: target.bindingRevision, ...(target.authoritySource ? { authoritySource: target.authoritySource } : {}) })) {
         return { connectionId: boundary.connectionId, externalConversationId: boundary.externalConversationId, externalMessageId: author.externalMessageId }
       }
       if (item.inputRef?.kind !== 'message') return
