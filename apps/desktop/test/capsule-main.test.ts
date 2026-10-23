@@ -45,7 +45,8 @@ import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client
 import { DurableAgentMuxMessageQueue } from '../../../packages/core/src/agent-global-message-queue'
 import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner'
-import { hostCapsules } from '../../host/src/capsules'
+import { createCapsuleDesktopAdapters } from '../../host/src/capsules'
+import { connectCapsuleRuntime, startCapsuleRuntime } from '@agentmux/capsule/runtime'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { ScratchTopics } from '../src/main/scratch-topics'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
@@ -68,10 +69,16 @@ async function fixture() {
   bridge.root = directory; bridge.options.length = 0; bridge.handlers.clear(); bridge.nativeDocument = null
   const desktopPath = join(directory, 'desktop.sock'), hostPath = join(directory, 'host.sock'), stateDirectory = join(directory, 'capsules')
   const presentation = { connect: (context?: import('@agentmux/core').AgentMuxRpcCallContext) => connectAgentMuxRpc({ endpoint: { transport: 'unix' as const, path: desktopPath }, ...(context?.caller ? { credentials: context.caller } : {}) }) }
-  let hosted = hostCapsules(stateDirectory, presentation)
-  closes.push(() => hosted.close()); await hosted.start()
+  let service = await startCapsuleRuntime({ stateDirectory, socketPath: join(directory, 'capsule.sock') })
+  const serviceIdentity = await service.identity()
+  const adapters = createCapsuleDesktopAdapters(presentation)
+  closes.push(() => service.close())
   const host = new AgentMuxControlServer({ socketPath: hostPath, coreClients: h.coreClients,
-    capsules: { call: (method, params, context, originalContext) => hosted.port.call(method, params, context, originalContext) } })
+    capsules: { call: async (method, params, context, originalContext) => {
+      const connection = await connectCapsuleRuntime({ socketPath: join(directory, 'capsule.sock'), expectedRuntimeId: serviceIdentity.runtimeId, adapters: adapters(originalContext) })
+      try { return await connection.call(method, params, context) }
+      finally { await connection.dispose() }
+    } } })
   await host.start(); closes.push(() => host.stop())
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: host.path } }); closes.push(() => rpc.dispose())
   const runtime = new RuntimeController(h.store, async () => h.client as never); closes.push(() => runtime.dispose())
@@ -112,7 +119,7 @@ async function fixture() {
   const queue = new DurableAgentMuxMessageQueue(join(h.root, 'messages.ndjson'))
   return { ...h, directory, stateDirectory, runtime, original, submit, app, page, pageSender, rpc, desktopRpc, registered, invoke, question, params, queue, spatial,
     usePresentation(port: typeof presentationPort) { presentationPort = port }, observe(value: Record<string, unknown>) { observation = value },
-    async restartCapsuleHost() { await hosted.close(); hosted = hostCapsules(stateDirectory, presentation); await hosted.start() } }
+    async restartCapsuleService() { await service.close(); service = await startCapsuleRuntime({ stateDirectory, socketPath: join(directory, 'capsule.sock') }) } }
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>
 async function terminalReceipt(h: Fixture, id: string) {
@@ -248,7 +255,7 @@ it('revokes an old native document after the original Capsule service restarts o
   expect(h.page.endpoint.status).toBe('available')
   const original = h.page.endpoint as Extract<typeof h.page.endpoint, { status: 'available' }>
   expect(original.instanceId).toMatch(/^[1-9A-HJ-NP-Za-km-z]{12}$/u)
-  await h.restartCapsuleHost()
+  await h.restartCapsuleService()
   const current = await h.rpc.call('capsule.inspect', { capsuleId: h.page.record.capsuleId })
   expect(current.endpoint.status).toBe('available')
   if (current.endpoint.status !== 'available') throw new Error('Fixture service did not recover its original origin')
@@ -361,4 +368,23 @@ it('does not retarget a retained prepared answer when the real Session registry 
   expect(h.submit).not.toHaveBeenCalled(); expect(h.inner.kernel.input).not.toHaveBeenCalled()
   const original = JSON.parse(await readFile(join(h.stateDirectory, 'interactions', h.params.capsuleId, h.params.interactionId + '.json'), 'utf8'))
   expect(original.preparedReply).toEqual(saved)
+})
+
+it('keeps each original Agent credential on its own Desktop callback across another Capsule call', async () => {
+  const h = await fixture(), observed: Array<{ operationId: string; agentSessionId?: string }> = []
+  h.usePresentation({ call: async (method, params, context) => {
+    expect(method).toBe('capsule.open')
+    const request = params as import('@agentmux/core/capsule').CapsuleParamsMap['capsule.open']
+    observed.push({ operationId: request.operationId, agentSessionId: context?.caller?.agentSessionId })
+    return { ...request, endpoint: h.page.endpoint, rendering: { status: 'unavailable', reason: 'Native presentation is controlled in this callback-authentication test.' } } as never
+  } })
+  const factory = createCapsuleDesktopAdapters({ connect: context => connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(h.directory, 'desktop.sock') },
+    ...(context?.caller ? { credentials: context.caller } : {}) }) })
+  const first = factory({ transport: 'unix', caller: h.credentials })
+  const second = factory({ transport: 'unix', caller: { agentSessionId: 'outsider', capability: h.capability } })
+  await first.presentation.open({ capsuleId: h.page.record.capsuleId, operationId: 'original-producer-open' }, undefined, h.page)
+  await second.presentation.open({ capsuleId: h.page.record.capsuleId, operationId: 'original-outsider-open' }, undefined, h.page)
+  expect(observed).toEqual([{ operationId: 'original-producer-open', agentSessionId: 'producer' },
+    { operationId: 'original-outsider-open', agentSessionId: 'outsider' }])
+  expect(h.submit).not.toHaveBeenCalled(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
 })
