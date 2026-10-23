@@ -97,6 +97,6 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
     ...(moteChat ? { moteChat: servicePort<MoteChatPort>(async () => (await services()).moteChat!) } : {}),
     async start(original: AgentMuxHeadlessRuntime) { runtime = original; await services() },
     async services() { return await services() },
-    async close() { closed = true; shutdown.abort(); moteConnections?.close(); const owner = await opened; owner?.close() }
+    async close() { closed = true; shutdown.abort(); moteConnections?.close(); const owner = await opened; await owner?.close() }
   }
 }
