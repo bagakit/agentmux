@@ -1,6 +1,7 @@
 import { afterAll, afterEach, expect, it, vi } from 'vitest'
 import { spawn } from 'node:child_process'
-import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { appendFile, chmod, mkdir, mkdtemp, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { DatabaseSync } from 'node:sqlite'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { AgentMuxFileAgentSessionStore, connectAgentMuxRpc } from '@agentmux/core'
@@ -132,4 +133,83 @@ it('compiled index refuses a different original Store argument without adopting 
   expect(outcome.kind, host.logs()).toBe('exited'); expect(outcome.code, host.logs()).not.toBe(0); expect(host.logs()).toContain('The Host Store argument and original namespace do not agree.')
   await expect(stat(join(f.root, 'control.sock'))).rejects.toMatchObject({ code: 'ENOENT' })
   facts.push({ case: 'mismatched-original-namespace', startupRefused: true, noForeignOwner: true })
+})
+
+it.each(['unsupported', 'missing', 'unavailable'] as const)('credential diagnosis exposes the original %s lookup through the actual Node owner and compiled CLI', async mode => {
+  const f = await fixture(true)
+  let host = await f.start(); await host.wait(); let rpc = await host.rpc()
+  let credentialRef = 'original-missing-reference'
+  if (mode !== 'missing') {
+    const result = await f.cli(['connection', 'credential', 'store', '--operation-id', 'diagnosis-credential', '--secret-stdin'], 'synthetic-diagnosis-secret')
+    expect(result.code, result.stdout + result.stderr).toBe(0); credentialRef = JSON.parse(result.stdout).result.credentialRef
+  }
+  if (mode === 'unavailable') await chmod(f.directory, 0o755)
+  await rpc.call('connection.configure', { operationId: 'diagnosis-configure', expectedRevision: null, connection: { ...discordConfig, credentialRef } })
+  const bound = await rpc.call('connection.bind', { operationId: 'diagnosis-bind', bindingId: 'diagnosis-binding', connectionId: discordConfig.connectionId,
+    expectedConnectionRevision: 1, executionHostId: 'local', agentSessionId: 'original-agent', externalConversationId: discordRoomId,
+    expectedSource: { providerId: 'claude', nativeSessionId: 'original-native' }, scope: { input: 'mentions-and-replies', publication: 'future-shared-conversation' } })
+  expect(bound.state).toBe('applied')
+  const outgoing = () => rpc.call('connection.delivery.ls', { connectionId: discordConfig.connectionId, bindingId: 'diagnosis-binding', bindingRevision: 1 })
+  let unknownOperation: string | undefined
+  const retainedBlob = Uint8Array.from([0x76, 0x31, 0x30, 0, 0x88, 0xaa, 0xff])
+  if (mode === 'unsupported') {
+    await vi.waitFor(() => expect(f.wire!.sessions).toHaveLength(1))
+    await vi.waitFor(async () => expect((await outgoing()).deliveries.some(value => value.state === 'confirmed')).toBe(true))
+    f.wire!.loseNextMessageResponse(false)
+    await appendFile(f.transcript, nativeLine('diagnosis-original-unknown', 'Original unknown platform effect'))
+    await vi.waitFor(async () => {
+      const delivery = (await outgoing()).deliveries.find(value => value.reference.source.kind === 'native' && value.state === 'unknown')
+      expect(delivery).toBeDefined(); unknownOperation = delivery!.operationId
+    }, { timeout: 15_000 })
+    await rpc.dispose(); await host.close()
+    // Synthetic fixture namespace only, while its sole real owner is stopped.
+    const database = new DatabaseSync(join(f.directory, 'connections.sqlite'))
+    try { expect(database.prepare('UPDATE connection_credential SET ciphertext=? WHERE credential_ref=?').run(retainedBlob, credentialRef).changes).toBe(1) }
+    finally { database.close() }
+    host = await f.start(); await host.wait(); rpc = await host.rpc()
+  }
+  const reason = mode === 'unsupported' ? 'credential-format-unsupported' : mode === 'missing' ? 'credential-missing' : 'credential-unavailable'
+  const sends = () => f.wire!.calls.filter(value => ['POST', 'PATCH', 'DELETE'].includes(value.method))
+  const before = sends().length
+  await vi.waitFor(async () => expect((await rpc.call('connection.inspect', { connectionId: discordConfig.connectionId })).connection!.observation.transport).toEqual({ state: 'unavailable', reason }))
+  expect((await rpc.call('connection.test', { connectionId: discordConfig.connectionId })).observation.authentication).toEqual({ state: 'unavailable', reason })
+  await appendFile(f.transcript, nativeLine('diagnosis-independent-final', 'Independent public final after failed lookup'))
+  await vi.waitFor(async () => expect((await outgoing()).observation).toEqual({ state: 'unavailable', reason }), { timeout: 15_000 })
+  const request = { executionHostId: 'local', agentSessionId: 'original-agent', bindingId: 'diagnosis-binding', bindingRevision: 1 }
+  const diagnosis = await rpc.call('connection.diagnose', request), group = diagnosis.groups.value!.items[0]!
+  expect(group.connection.value!.transport.reason).toBe(reason); expect(group.outgoing.value!.observation).toEqual({ state: 'unavailable', reason })
+  const cli = await f.cli(['connection', 'diagnose', '--host', 'local', '--session', 'original-agent', '--binding', 'diagnosis-binding', '--revision', '1'])
+  expect(cli.code, cli.stdout + cli.stderr).toBe(0)
+  const exported = JSON.parse(cli.stdout).result.groups.value.items[0]
+  expect(exported.connection.value.transport.reason).toBe(reason); expect(exported.outgoing.value.observation.reason).toBe(reason)
+  if (unknownOperation) {
+    expect((await outgoing()).deliveries.find(value => value.operationId === unknownOperation)).toMatchObject({ state: 'unknown', receipt: { state: 'unknown' } })
+    expect(group.outgoing.value!.effectObservation).toEqual({ state: 'unknown', reason: 'effect-unconfirmed' })
+    expect(exported.outgoing.value.effectObservation).toEqual({ state: 'unknown', reason: 'effect-unconfirmed' })
+  }
+  expect(sends()).toHaveLength(before)
+  expect((await rpc.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: 'original-agent' } })).status!.session.run).toEqual({ runId: 'original-run' })
+  const database = new DatabaseSync(join(f.directory, 'connections.sqlite'))
+  try {
+    const row = database.prepare('SELECT credential_ref,operation_id,ciphertext FROM connection_credential WHERE credential_ref=?').get(credentialRef)
+    if (mode === 'missing') expect(row).toBeUndefined()
+    else { expect(row).toMatchObject({ credential_ref: credentialRef, operation_id: 'diagnosis-credential' }); if (mode === 'unsupported') expect(new Uint8Array(row!.ciphertext as Uint8Array)).toEqual(retainedBlob) }
+  } finally { database.close() }
+  expect(JSON.stringify(diagnosis) + cli.stdout + cli.stderr + host.logs()).not.toMatch(/synthetic-diagnosis-secret|Synthetic platform detail|private Native/)
+  facts.push({ case: 'credential-diagnosis-' + mode, reason, receiver: group.connection.value!.transport, publication: group.outgoing.value!.observation,
+    originalUnknownOperation: unknownOperation ?? null, zeroNewNativeEffects: sends().length === before, originalRefRetained: true, publicSdkAndCompiledCli: true })
+  await chmod(f.directory, 0o700); await rpc.dispose(); await host.close()
+})
+
+it('credential diagnosis keeps identical structured platform errors generic after a successful original lookup', async () => {
+  const f = await fixture(true), host = await f.start({ AGENTMUX_CONNECTOR_DIRECTORY: f.directory, HOST_CREDENTIAL_PLATFORM_ERROR: '1' })
+  await host.wait(); const rpc = await host.rpc()
+  const result = await f.cli(['connection', 'credential', 'store', '--operation-id', 'platform-credential', '--secret-stdin'], 'synthetic-platform-secret')
+  expect(result.code, result.stdout + result.stderr).toBe(0)
+  await rpc.call('connection.configure', { operationId: 'platform-configure', expectedRevision: null, connection: { ...discordConfig, credentialRef: JSON.parse(result.stdout).result.credentialRef } })
+  await vi.waitFor(async () => expect((await rpc.call('connection.inspect', { connectionId: discordConfig.connectionId })).connection!.observation.transport).toEqual({ state: 'unavailable', reason: 'check-failed' }))
+  expect((await rpc.call('connection.test', { connectionId: discordConfig.connectionId })).observation.authentication.reason).toBe('check-failed')
+  expect(f.wire!.calls).toEqual([])
+  expect(host.logs()).not.toContain('Synthetic platform detail')
+  facts.push({ case: 'credential-platform-code-negative', successfulLookup: true, originalPlatformCodeNotPromoted: true, zeroNativeEffects: true })
 })
