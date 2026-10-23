@@ -1,6 +1,11 @@
 # browser targets
 
 <!-- amux:content -->
+For an unspecified Browser request, start from your own exact Tab and first consider
+this task's same-Tab neighbor Regions,
+then verify the exact typed Browser binding. Multiple candidates or an unknown task
+relationship remain explicit; do not select by title, recent use or human focus, or create
+a new page merely to resolve the reference. Respect the user's exact target/tool choice.
 First inspect the exact Tab/Region and read its typed Browser id with
 `amux space inspect --tab TAB` or `amux space inspect --region REGION`.
 Use `amux browser targets` to discover original available Browser targets and their host-owned
