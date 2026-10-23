@@ -9,7 +9,7 @@ import { AgentMuxSpatialStateStore, spatialCatalog } from '@agentmux/core/spatia
 import { moteConnectionBaseline, parseMotePreferencesReadResult, parseMotePreferencesSaveParams, parseMotePreferencesSaveResult,
   type MoteConnectionPreferencesSaveParams, type MoteConnectionValues } from '@agentmux/core/mote-preferences'
 import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
-import { MoteConnectionPreferences } from '../src/main/mote-connection-preferences'
+import { MoteConnectionPreferences } from '@agentmux/host/mote-connection-preferences'
 import { registerMotePreferencesIpc, type MotePreferencesIpcChannel } from '../src/main/mote-preferences-ipc'
 import { assertSenderTrusted, senderTrust } from '../src/main/ipc-sender-trust'
 import type { IpcMainInvokeEvent } from 'electron'
@@ -55,16 +55,18 @@ async function fixture(fault?: 'receipt' | 'occupy') {
     label: 'Saved robot', enabled: false, credentialRef: 'original-credential-reference'
   } })
   const quick = vi.fn(async () => { throw new Error('Only Quick preferences may require the original Renderer') })
-  const owner = new MoteConnectionPreferences({ files: publicFiles, catalog, connections: () => connections.connections.list(), quick })
+  const owner = new MoteConnectionPreferences({ files: publicFiles, catalog, connections: () => connections.connections.list() })
   const coreClients = vi.fn(() => { throw new Error('Preference edits cannot start or borrow an Agent') })
-  const server = new AgentMuxControlServer({ socketPath: join(root, 'public.sock'), files: publicFiles, connections: connections.connections,
+  const server = new AgentMuxControlServer({ socketPath: join(root, 'public.sock'), files: publicFiles, connections: connections.connections, motePreferences: owner,
     execute: request => {
-      if (request.operation === 'space.mote.preferences.read' || request.operation === 'space.mote.preferences.save') return owner.execute(request)
+      if ((request.operation === 'space.mote.preferences.read' || request.operation === 'space.mote.preferences.save') && request.kind === 'quick') return quick()
       throw new Error('Unrelated control operation')
     }, coreClients })
   await server.start(); clean.push(() => server.stop())
   const trusted = {}, handlers = new Map<MotePreferencesIpcChannel, (event: IpcMainInvokeEvent, params: unknown) => Promise<unknown>>()
-  registerMotePreferencesIpc({ socketPath: server.path, handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },
+  registerMotePreferencesIpc({ socketPath: server.path, runtime: { connectionHostingTarget: async () => ({ hostId: 'local', runtimeId: 'fixture-runtime' }),
+    callConnectionHost: async (_target, method, params) => client.call(method, params),
+    watchConnectionMetadata: async (_target, handlers) => client.subscribe('connection.metadata.watch', {}, handlers) }, handleWithEvent: (channel, handler) => { handlers.set(channel, handler) },
     assertTrusted: (channel, event) => assertSenderTrusted(senderTrust(channel, event.sender, trusted)) })
   const ipc = (channel: MotePreferencesIpcChannel, params: unknown, sender = trusted) => handlers.get(channel)!({ sender } as IpcMainInvokeEvent, params)
   const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); clean.push(() => client.dispose())

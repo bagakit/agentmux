@@ -5,7 +5,7 @@ import { AgentMuxSpatialStateStore, spatialCatalog } from '@agentmux/core/spatia
 import { createConnectionServices } from '../../../../packages/connectors/src/connection-services.js'
 import { MoteConnectionOperations } from '@agentmux/connectors'
 import { MoteConnectionTargetOwner } from '../../src/main/mote-connection-target.js'
-import { MoteConnectionPreferences } from '../../src/main/mote-connection-preferences.js'
+import { MoteConnectionPreferences } from '@agentmux/host/mote-connection-preferences'
 import { ScratchTopics } from '../../src/main/scratch-topics.js'
 import { FileReadOwner } from '../../src/main/file-read-owner.js'
 import { NoteFileWriter } from '../../src/main/note-file-writer.js'
@@ -221,10 +221,7 @@ export async function moteConnectionOwner(
   const preferences = new MoteConnectionPreferences({
     files: publicFiles,
     catalog,
-    connections: () => connections.connections.list(),
-    quick: async () => {
-      throw new Error('No Renderer or Agent required')
-    }
+    connections: () => connections.connections.list()
   })
   const sourcePorts: ConstructorParameters<typeof MoteConnectionTargetOwner>[0] = {
     catalog,
@@ -243,10 +240,7 @@ export async function moteConnectionOwner(
     socketPath: join(root, 'owner.sock'),
     files: publicFiles,
     moteAvatars: avatars,
-    execute: request => {
-      if (request.operation === 'space.mote.preferences.read' || request.operation === 'space.mote.preferences.save') return preferences.execute(request)
-      throw new Error('Only original Mote preference requests are routed by this fixture')
-    },
+    motePreferences: preferences,
     moteConnections: parent,
     moteChat,
     connections: connections.connections,

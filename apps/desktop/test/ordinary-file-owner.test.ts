@@ -9,7 +9,7 @@ import { FileReadOwner } from '../src/main/file-read-owner.js'
 import { WorkspaceFiles } from '../src/main/workspace-files.js'
 import { FileResourceOwner } from '@agentmux/host/file-resource'
 import { OrdinaryWorkspaceFiles } from '@agentmux/host/ordinary-files'
-import { MoteConnectionPreferences } from '../src/main/mote-connection-preferences.js'
+import { MoteConnectionPreferences } from '@agentmux/host/mote-connection-preferences'
 import { moteConnectionBaseline } from '@agentmux/core/mote-preferences'
 import { SCRATCH_WORKSPACE_ID, directoryIdentity, homeZoneId } from '@agentmux/host/mote-model'
 
@@ -80,7 +80,7 @@ it('the shared preferences owner rechecks the original actor immediately before 
   const catalog=async()=>({spaces:[{spaceId,kind:'mote' as const,name:'Original',hostId:'local',directoryPath:directory,projectId:null,topicId:'original'}],zones:[{...f.zone,kind:'home' as const}],bindings:[{spaceId,zoneId}]})
   await writeFile(join(directory,'MOTE.md'),'---\nversion: 1\n---\nOriginal body\n')
   const publicFiles=new FileResourceOwner({catalog,workspace:async id=>id===workspace.id?workspace:undefined,files:f.files})
-  const owner=new MoteConnectionPreferences({files:publicFiles,catalog,connections:async()=>({connections:[]}),quick:async()=>{throw Error('Not a Quick operation')}})
+  const owner=new MoteConnectionPreferences({files:publicFiles,catalog,connections:async()=>({connections:[]})})
   const target={spaceId,zoneId,expectedResource:{hostId:'local',workspaceId:workspace.id,workspacePath:f.root}}
   const before=await owner.read({kind:'connection',target}), baseline=moteConnectionBaseline(before)
   if(!baseline)throw Error('The original baseline must be read')
