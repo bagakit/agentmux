@@ -362,9 +362,10 @@ export function SessionPane({
     const displayId = presentation && linkOrigin.regionId ? workbenchSessionStageHostId(presentation, linkOrigin.regionId) : null
     if (presentation && !displayId) return Promise.resolve(unavailable('当前显示宿主关系未确认，无法定位。'))
     const initialMode = effectiveSessionViewMode(useAppStore.getState(), sessionId)
+    const readController = new AbortController()
     let switched = false
     const current = () => {
-      if (isIntentCurrent && !isIntentCurrent()) return false
+      if (readController.signal.aborted || isIntentCurrent && !isIntentCurrent()) return false
       const live = sessionPresentationById(useAppStore.getState().sessions).get(sessionId)
       if (live?.kind !== 'agent' || JSON.stringify([live.control.hostId, live.id, live.control.run.runId]) !== activitySourceKey) return false
       if (itemRef.source.kind === 'native' && live.providerId !== itemRef.source.providerId) {
@@ -397,6 +398,7 @@ export function SessionPane({
     const finish = (outcome: MailboxMessageNavigationResult) => {
       if (finished) return
       finished = true
+      readController.abort()
       for (const event of ['pointerdown', 'keydown', 'wheel', 'touchmove', 'focusin']) document.removeEventListener(event, changedIntent, true)
       if (navigation.current.cancel === cancel) { navigation.current.cancel = null; navigation.current.isCurrent = null }
       setRevealRead(previous => previous?.generation === generation ? null : previous)
@@ -418,20 +420,20 @@ export function SessionPane({
     setRevealRead({ generation, started: false, start: async readForReveal => {
       try {
         if (!current()) { finish({ kind: 'cancelled' }); return }
-        const read = await readForReveal(itemRef.source)
+        const read = await readForReveal(itemRef, { signal: readController.signal })
         if (!current() || read.cancelled) { finish({ kind: 'cancelled' }); return }
         if (itemRef.source.kind === 'native' && (read.sourceChanged || read.page &&
           (read.page.source.providerId !== itemRef.source.providerId || read.page.source.nativeSessionId !== itemRef.source.nativeSessionId))) {
           finish(unavailable('原生来源已变化，当前阅读窗口保留；请刷新来源后再定位。')); return
         }
         if (read.error) { finish(unavailable(`读取对话失败：${read.error.message}`)); return }
-        const present = read.records.some(record => (mailboxInputId || record.sourceHostId === itemRef.hostId) &&
+        const present = read.records.some(record => record.sourceHostId === itemRef.hostId &&
           (!mailboxInputId || record.input?.id === mailboxInputId) && conversationMessageSourceKey(record.agentSessionId, record.source) === sourceKey)
         if (!current()) { finish({ kind: 'cancelled' }); return }
         if (!present) { finish(unavailable('当前有界对话窗口中没有这条记录，无法确认位置。')); return }
         switched = true
         setHistoryOpen(false)
-        setRevealRequest({ generation, sourceKey, displayId, isCurrent: current, complete: (located, error) => {
+        setRevealRequest({ generation, record: itemRef, signal: readController.signal, sourceKey, displayId, isCurrent: current, complete: (located, error) => {
           if (!current()) { finish({ kind: 'cancelled' }); return }
           finish(located ? { kind: 'located' } : unavailable(error ? `读取对话失败：${error}` : '准确记录尚未呈现在对话中，无法确认位置。'))
         } })
@@ -450,11 +452,9 @@ export function SessionPane({
     void revealRead.start(readForReveal)
   }, [activityDemand, revealRead, readForReveal])
   // Mailbox keeps its original user-input identity contract; Focus may reveal genuine replies.
-  const revealMailboxMessage = useCallback((message: AgentSessionUserMessage, presentation?: WorkbenchViewTarget) => {
-    if (session?.kind !== 'agent') return Promise.resolve<MailboxMessageNavigationResult>({ kind: 'unavailable', message: 'Original Session is unconfirmed. Recorded text remains readable.' })
-    return revealConversationItem({ hostId: session.control.hostId, agentSessionId: message.agentSessionId,
-      source: message.source.kind === 'native' ? { ...message.source } : { kind: 'captured', recordId: message.source.submissionId }
-    }, presentation, message.id)
+  const revealMailboxMessage = useCallback((message: AgentSessionUserMessage, reference: ConversationItemRef | null, presentation?: WorkbenchViewTarget) => {
+    if (session?.kind !== 'agent' || !reference) return Promise.resolve<MailboxMessageNavigationResult>({ kind: 'unavailable', message: 'Original record reference is unconfirmed. Recorded text remains readable.' })
+    return revealConversationItem(reference, presentation, message.id, undefined, session.control.hostId)
   }, [session, revealConversationItem])
   useEffect(() => {
     if (!incomingReveal || incomingReveal.claimed || !incomingReveal.isCurrent() || readOnly) return
@@ -837,7 +837,7 @@ export function SessionPane({
       selectRegion={() => onPresentationSelected?.(target)}
       {...(projectionPolicy.allowsRecovery && session?.kind === 'agent' ? { renderComposer: (pendingLayout: PendingDeliveryLayout) => <AgentSessionComposer pendingLayout={pendingLayout} reading={mailboxReading}
         mailboxOrigin={{ ...linkOrigin, workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId }}
-        onRevealMessage={message => revealMailboxMessage(message, target)} sessionId={session.id}
+        onRevealMessage={(message, reference) => revealMailboxMessage(message, reference, target)} sessionId={session.id}
         visible={false} inputContext={sharingContext(false)} {...(tabName ? { tabName } : {})} /> } : {})} />) : null}
     {primary}
   </>
@@ -1128,7 +1128,7 @@ export function SessionPane({
       readOnly={readOnly} resourceOrigin={linkOrigin}
       {...(hasAgentComposer ? { onAnnotate: annotateMessage } : {})}
       renderFrame={renderPresentationFrame} selectRegion={() => onPresentationSelected?.(target)}
-      {...(hasAgentComposer ? { renderComposer: (pendingLayout: PendingDeliveryLayout) => <AgentSessionComposer pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={{ ...linkOrigin, workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId }} onRevealMessage={message => revealMailboxMessage(message, target)} sessionId={session.id}
+      {...(hasAgentComposer ? { renderComposer: (pendingLayout: PendingDeliveryLayout) => <AgentSessionComposer pendingLayout={pendingLayout} reading={mailboxReading} mailboxOrigin={{ ...linkOrigin, workspaceId: target.reference!.displayWorkspaceId, tabGroupId: target.reference!.groupId, tabId: target.reference!.tabId }} onRevealMessage={(message, reference) => revealMailboxMessage(message, reference, target)} sessionId={session.id}
         visible={target.visible !== false && viewMode !== 'terminal' && !pendingAgentRestore} inputContext={sharingContext(target.visible !== false && viewMode !== 'terminal' && !pendingAgentRestore)} {...(tabName ? { tabName } : {})} /> } : {})}
     />) : null}
     <section

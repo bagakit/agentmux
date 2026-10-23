@@ -1,5 +1,5 @@
 import { CapturedProcessRecord } from '@agentmux/client-ui/components/CapturedProcessRecord'
-import { conversationItemRef } from '@agentmux/core/conversation'
+import { conversationItemRef, conversationRecordId } from '@agentmux/core/conversation'
 import { ConversationCoverage } from '@agentmux/client-ui/components/ConversationCoverage'
 import type { ConversationPresentationController } from '@agentmux/client-ui/use-conversation-record-layout'
 import { type AgentConversationRecord, type ConversationItemRef } from '@agentmux/core/conversation'
@@ -198,6 +198,7 @@ export function ActivityView({
   const [showJump, setShowJump] = useState(false)
   // Position is presentation only; a layout move must not grant follow/read intent.
   const [atLoadedTail, setAtLoadedTail] = useState(true)
+  const revealReadGeneration = useRef<number | null>(null)
   const returnRef = useRef<HTMLButtonElement>(null)
   const earlierRef = useRef<HTMLDivElement>(null)
   const nativeTailRef = useRef<HTMLDivElement>(null)
@@ -209,8 +210,8 @@ export function ActivityView({
   const [rulerWindow, setRulerWindow] = useState<RulerWindow>('24h')
   const presentation = useRef<ConversationPresentationController | null>(null)
   const readingWindow = useSessionConversationWindow(conversationReading, (frame, intent, beforeRecordId) => {
-    if (intent === 'earlier' || intent === 'newer') followRef.current = { ...followRef.current, following: false }
-    const keepAnchor = intent === 'earlier' || intent === 'newer' || (intent !== 'current' && !followRef.current.following)
+    if (intent === 'earlier' || intent === 'newer' || intent === 'record') followRef.current = { ...followRef.current, following: false }
+    const keepAnchor = intent !== 'record' && (intent === 'earlier' || intent === 'newer' || (intent !== 'current' && !followRef.current.following))
     if (presentation.current?.canPresent(frame, { ...(beforeRecordId ? { beforeRecordId } : {}), preserveAnchor: keepAnchor }) === false) return false
     anchorRef.current = keepAnchor && feedEl ? captureReadingAnchor(feedEl) : null
     if (intent === 'earlier') earlierCommitPending.current = true
@@ -605,20 +606,30 @@ export function ActivityView({
   }
 
   useEffect(() => {
-    if (!readingEnabled || !revealRequest || !feedEl) return
+    if (!revealRequest) { revealReadGeneration.current = null; return }
+    if (!readingEnabled || !feedEl) return
     const reading = readingWindow.inspect()
-    if (conversationReading && (reading.loading || reading.inFlight || reading.watch.binding || !reading.snapshot && !reading.error)) return
+    if (conversationReading && (reading.loading || reading.inFlight || reading.watch.binding || reading.held || !reading.snapshot && !reading.error)) return
+    const id = conversationRecordId(revealRequest.record)
+    if (conversationReading && revealReadGeneration.current !== revealRequest.generation &&
+      !originalConversationRecords.some(record => record.records?.some(original => original.id === id))) {
+      if (!revealRequest.isCurrent()) { revealRequest.complete(false); return }
+      revealReadGeneration.current = revealRequest.generation
+      readAhead.cancel()
+      void readingWindow.selectRecord(revealRequest.record, { signal: revealRequest.signal })
+      return
+    }
     setLocatedMessageKey(revealRequest.sourceKey)
     const frame = requestAnimationFrame(() => {
       if (!revealRequest.isCurrent() || !feedEl.isConnected) { revealRequest.complete(false); return }
       const current = readingWindow.inspect()
-      if (conversationReading && (current.loading || current.inFlight || current.watch.binding)) return
+      if (conversationReading && (current.loading || current.inFlight || current.watch.binding || current.held)) return
       const located = locateLoadedRecord(revealRequest.sourceKey, revealRequest.isCurrent)
       revealRequest.complete(located, located ? undefined : readingWindow.error ?? undefined)
     })
     return () => cancelAnimationFrame(frame)
   }, [revealRequest, feedEl, unifiedItems, nativeHistoryPage, readingEnabled,
-    Boolean(conversationReading), readingWindow.snapshot, readingWindow.loading, readingWindow.error])
+    Boolean(conversationReading), readingWindow.snapshot, readingWindow.loading, readingWindow.held, readingWindow.error])
 
   // Segment elements keyed by segment key, so a resolved event index can find its host row and the
   // observer can watch each one.

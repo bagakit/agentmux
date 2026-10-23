@@ -245,7 +245,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
         if (!onRevealMessage) return
         const action = ++navigationGeneration.current
         setNavigationFeedback(null)
-        const result = await onRevealMessage(item.message)
+        const result = await onRevealMessage(item.message, item.reference)
         if (action !== navigationGeneration.current) return
         if (result.kind === 'located') popover.current?.hidePopover()
         else if (result.kind === 'unavailable') setNavigationFeedback({ scope, key, message: result.message })

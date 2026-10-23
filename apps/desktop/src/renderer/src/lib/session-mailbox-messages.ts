@@ -46,9 +46,8 @@ export function createMailboxMessagesSelector() {
       if (identity) seen.add(identity)
       const recordSource = message.source.kind === 'captured'
         ? { kind: 'captured' as const, recordId: message.source.submissionId } : message.source
-      result.push({ message, original, reference: identity ? conversationItemRef({ agentSessionId: sessionId,
-        ...(executionHostId === undefined ? {} : { executionHostId }),
-        source: recordSource }) : null })
+      result.push({ message, original, reference: message.sourceRecord?.record ?? (identity ? conversationItemRef({ agentSessionId: sessionId,
+        sourceHostId: timeline?.sourceHostId ?? null, source: recordSource }) : null) })
     }
     if (sessionId && timeline?.agentSessionId === sessionId) {
       const originals = new Map<string, AgentTimelineItem>()
