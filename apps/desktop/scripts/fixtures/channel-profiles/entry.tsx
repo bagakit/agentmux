@@ -2,6 +2,7 @@ import { createRoot } from 'react-dom/client'
 import { useMemo, useState } from 'react'
 import type { AgentSessionUserMessage, AgentTimelineSnapshot } from '@agentmux/core'
 import type { AgentInputMailboxPage } from '@agentmux/core/agent-input-mailbox'
+import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { inputMailboxItemKey } from '@agentmux/client-ui/use-agent-input-mailbox'
 import { useAgentInputHistory } from '@agentmux/client-ui/use-agent-input-history'
 import { inputMailboxPresentation } from '@agentmux/client-ui/components/InputMailboxRecords'
@@ -40,12 +41,18 @@ const mailboxData = new URLSearchParams(location.search).has('mailbox-reading') 
 const journal = mailboxData?.mailbox.items.flatMap(entry => entry.kind === 'item' ? [entry.item] : [])
   .find(item => inputMailboxPresentation(item).speaker.role === 'external')
 const historyMessage = mailboxData?.messages.find(message => message.rawId === mailboxData.selectedRecordId)
+const journalView = journal ? inputMailboxPresentation(journal) : null
+const journalReading = journalView?.contentBoundary === 'wire' && journalView.text !== null
+  ? parseAgentMuxMessagePrefix(journalView.text) : null
 if (mailboxData && (!journal || !historyMessage || historyMessage.author.kind !== 'external' ||
     mailboxData.control.agentSessionId !== mailboxData.timeline.agentSessionId || mailboxData.control.agentSessionId !== mailboxData.mailbox.agentSessionId ||
     mailboxData.control.hostId !== data.binding.executionHostId || mailboxData.mailbox.hostId !== mailboxData.control.hostId ||
     mailboxData.sourceHostId !== historyMessage.sourceRecord?.record.hostId ||
     !mailboxData.actor.entry.observation.profile?.avatarUrl)) {
   throw Error('Both original Mailbox row owners, source identity and saved avatar are required')
+}
+if (mailboxData && (!journalReading?.body.trim() || !journalReading.declaredChannelQuote)) {
+  throw Error('The original Mailbox wire must retain its readable body and channel history quote')
 }
 if (mailboxData) {
   api.sessions.inputMailbox = async (reference, input = {}) => {
@@ -65,19 +72,23 @@ if (mailboxData) {
   api.sessions.onEvent = () => () => {}
 }
 let presentMailbox: (() => void) | undefined
-const listeners = new Set<(change: ChannelMetadataChange) => void>(), proof = { ready: false, failNext: false, calls: [] as string[], errors: [] as string[], rename() {
+const listeners = new Set<(change: ChannelMetadataChange) => void>(), proof = { ready: false, failNext: false, calls: [] as string[], copies: [] as string[], errors: [] as string[], rename() {
   data.group.entry.observation.profile!.name = 'Renamed original group'
   notify(data.group)
 }, mailbox: mailboxData && journal && historyMessage ? {
   historyKey: mailboxMessageKey({ message: historyMessage }), journalKey: inputMailboxItemKey(mailboxData.control.hostId, journal),
   avatar: mailboxData.actor.entry.observation.profile!.avatarUrl, name: mailboxData.actor.entry.observation.profile!.name,
-  historyBody: historyMessage.content, journalBody: inputMailboxPresentation(journal).text,
+  historyBody: historyMessage.content, journalBody: journalView!.text,
+  journalReading: { body: journalReading!.body, quote: journalReading!.declaredChannelQuote! },
   boundary: 'Qualified original bounded read DTOs in the actual SessionMailbox. No live Core, dispatch or Runtime operation.'
 } : null, openMailbox() {
   if (!mailboxData || !presentMailbox) throw Error('The explicit original Mailbox scene is not enabled')
   data.actor = structuredClone(mailboxData.actor)
   presentMailbox()
 } }
+// The actual card and Desktop clipboard adapter write here after native Copy.
+// This private sink records the exact payload; it does not touch the user's clipboard.
+api.ui.writeClipboardText = async text => { proof.copies.push(text) }
 function notify(result: ChannelMetadataResult) { for (const listener of listeners) listener({ connectionId: result.connectionId, application: result.application, subject: result.entry.subject }) }
 api.connections.onMetadataChanged = listener => { listeners.add(listener); return () => { listeners.delete(listener) } }
 api.connections.call = (async (method: string, input: any) => {
