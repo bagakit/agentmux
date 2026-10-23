@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto'
+import { appendFile, readFile } from 'node:fs/promises'
 import { act } from 'react'
 import { flushSync } from 'react-dom'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
-import type { AgentSessionHistoryReadInput, AgentSessionHistoryReadPage, AgentSessionUserMessage } from '@agentmux/core'
+import type { AgentProvider, AgentSessionHistoryReadInput, AgentSessionHistoryReadPage, AgentSessionUserMessage } from '@agentmux/core'
 import { parseSessionHistoryResourceOptions } from '../../../packages/core/src/session-history-resource'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { createHostedHistoryFixture } from '../../../packages/core/test/helpers/session-history-query'
@@ -16,6 +17,9 @@ import { installConversationReading } from './conversation-reading-fixture'
 const connection = { state: 'connected' as const, message: '原 Host' }
 const STORAGE = 'agentmux-mobile-workface-v1'
 const closeActual: Array<() => Promise<unknown>> = []
+function ownsNativeHistoryPage(provider: AgentProvider): provider is AgentProvider & Required<Pick<AgentProvider, 'readSessionHistoryPage'>> {
+  return typeof provider.readSessionHistoryPage === 'function'
+}
 beforeEach(async () => { vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', ''); localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => {
   for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }
@@ -78,6 +82,76 @@ function textResource(id = 'session-original') {
 }
 
 describe('Mobile input history consumes the original shared reader and draft owner', () => {
+  it.each(['answers', 'range'] as const)('actual Mobile Surface copies original native wire and fills readable %s through Hosted and Core', async variant => {
+    const f = await createHostedHistoryFixture('claude', 2); closeActual.push(() => f.dispose())
+    const sid = f.session.agentSessionId, recordId = 'copy-original-wire', readable = 'Readable answer 中🙂', tail = '  Original trailing part  '
+    const wire = ' \n<send_user_message_question_reply>\n' + JSON.stringify([
+      { questionItemId: 'original-question', question: 'Keep the original question?', answer: readable }
+    ]) + '\n</send_user_message_question_reply>\n '
+    const originalText = wire + '\n' + tail, readingText = readable + '\n' + tail
+    await appendFile(f.transcript, JSON.stringify({ type: 'user', sessionId: 'original-native', uuid: recordId,
+      message: { role: 'user', content: [{ type: 'text', text: wire }, { type: 'text', text: tail }] } }) + '\n')
+    const originalBytes = await readFile(f.transcript), originalSession = await f.store.readMetadata(sid)
+    const provider = f.ownerClient.providers.get('claude')
+    if (!ownsNativeHistoryPage(provider)) throw new Error('The original typed native page owner is unavailable in this fixture')
+    const readNative = provider.readSessionHistoryPage
+    // Optional typed Provider reading metadata is this fixture's only source
+    // control. Native bytes, Core query/versioning and Unix Hosted transport are real.
+    const native = vi.spyOn(provider, 'readSessionHistoryPage').mockImplementation(async context => {
+      expect(context.agentSessionId).toBe(sid)
+      expect(context.source).toEqual({ providerId: 'claude', nativeSessionId: 'original-native' })
+      const page = await readNative.call(provider, context)
+      return { ...page, items: page.items.map(item => item.id !== recordId ? item : {
+        ...item,
+        ...(variant === 'answers' ? { questionAnswers: [{ questionId: 'original-question', prompt: 'Keep the original question?', answer: readable }] } : {}),
+        contentParts: item.contentParts.map((part, index) => variant === 'range' && index === 0 && part.kind === 'text'
+          ? { ...part, readingRange: { start: wire.indexOf(readable), end: wire.indexOf(readable) + readable.length } } : part)
+      }) }
+    })
+    vi.spyOn(f.client, 'statusAgent').mockRejectedValue(new Error('Declared unavailable Runtime activity observation'))
+    const copy = vi.fn<(text: string) => Promise<void>>().mockResolvedValue(undefined)
+    const view = await mount(<MobileConversationSurface client={f.client} agentSessionId={sid} connection={connection}
+      platform={createBrowserPlatform({ clipboard: { writeText: copy } })} />)
+    await paste(view.element, 'Original unsent draft')
+    const attempts = JSON.parse(localStorage.getItem(STORAGE)!).conversation.attempts
+    const sheet = await openHistory(view.element); await query(sheet, readable)
+    await vi.waitFor(() => expect(sheet.querySelector('[data-input-history-id]')).not.toBeNull())
+    const page = await f.client.readAgentSessionHistory({ ...f.reference, source: 'native', kind: 'user-message', query: readable, limit: 30 })
+    const message = page.userMessages!.find(item => item.rawId === recordId)!
+    expect(message).toMatchObject({ author: { kind: 'unknown' }, content: readingText,
+      source: { kind: 'native', providerId: 'claude', nativeSessionId: 'original-native', recordId } })
+    expect(message.contentParts.filter(part => part.kind === 'text').map(part => part.text)).toEqual([wire, tail])
+    if (variant === 'answers') expect(message.questionAnswers?.[0]?.answer).toBe(readable)
+    else expect(message.contentParts[0]).toMatchObject({ kind: 'text', readingRange: { start: wire.indexOf(readable), end: wire.indexOf(readable) + readable.length } })
+    const original = row(sheet, message), detail = original.querySelector<HTMLDetailsElement>(':scope > details')!
+    expect(detail).not.toBeNull()
+    await act(async () => { detail.open = true; detail.dispatchEvent(new Event('toggle')) })
+    await vi.waitFor(() => expect(detail.querySelector('.log-turn__body .log-turn__text')).not.toBeNull())
+    const body = detail.querySelector<HTMLElement>('.log-turn__body')!, text = body.querySelector('.log-turn__text')!
+    expect(text.textContent).toBe(readable)
+    expect(body.querySelector('[data-recorded-question-reply]') !== null).toBe(variant === 'answers')
+    const node = document.createTreeWalker(text, NodeFilter.SHOW_TEXT).nextNode()!, range = document.createRange()
+    range.setStart(node, 0); range.setEnd(node, 'Readable'.length)
+    window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
+    expect(window.getSelection()!.toString()).toBe('Readable')
+    await click(button(original, '复制正文'))
+    await vi.waitFor(() => expect(copy).toHaveBeenCalledTimes(1))
+    expect(copy, 'Whole history Copy must retain every original wire part').toHaveBeenCalledExactlyOnceWith(originalText)
+    expect(editor(view.element).textContent).toBe('Original unsent draft')
+    expect(detail.querySelector('.log-turn__body')).toBe(body)
+    expect(window.getSelection()!.toString()).toBe('Readable'); expect(range.startContainer).toBe(node)
+    await click(button(original, '填入草稿'))
+    expect(editor(view.element).textContent).toBe(readingText.replaceAll('\n', ''))
+    expect(JSON.parse(localStorage.getItem(STORAGE)!).conversation.attempts).toEqual(attempts)
+    await click(button(sheet, '关闭通信记录'))
+    await act(async () => { editor(view.element).focus(); editor(view.element).dispatchEvent(new KeyboardEvent('keydown', {
+      bubbles: true, cancelable: true, key: 'z', ...(navigator.platform.includes('Mac') ? { metaKey: true } : { ctrlKey: true }) })) })
+    expect(editor(view.element).textContent).toBe('Original unsent draft')
+    expect(native.mock.calls.length).toBeGreaterThan(0)
+    expect(await readFile(f.transcript)).toEqual(originalBytes); expect(await f.store.readMetadata(sid)).toEqual(originalSession)
+    for (const control of f.forbidden) expect(control).not.toHaveBeenCalled()
+  })
+
   it('includes the already-read native page while an unavailable query source preserves original reading and healthy Send', async () => {
     const f = consumer()
     f.read.mockRejectedValue(new Error('原查询源暂不可用'))
