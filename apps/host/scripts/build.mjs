@@ -1,5 +1,15 @@
+import { buildWorkspaceMoveHelper } from './build-workspace-move-helper.mjs'
 import { build } from 'esbuild'
 import { resolve } from 'node:path'
-await build({ entryPoints: [resolve(import.meta.dirname, '../src/index.ts')],
-  outfile: resolve(import.meta.dirname, '../dist/index.js'), bundle: true,
-  packages: 'external', platform: 'node', format: 'esm', target: 'node24' })
+import { copyFile, readdir } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
+const root = resolve(import.meta.dirname, '..')
+await buildWorkspaceMoveHelper()
+await build({ entryPoints: ['index', 'mote-resources', 'mote-chat-agents', 'mote-model', 'credential-encryption', 'credential-administration'].map(name => resolve(root, 'src', name + '.ts')),
+  outdir: resolve(root, 'dist'), bundle: true, packages: 'external', platform: 'node', format: 'esm', target: 'node24' })
+await new Promise((yes, no) => {
+  const child = spawn(process.execPath, [resolve(root, 'node_modules/typescript/bin/tsc'), '--emitDeclarationOnly', '-p', resolve(root, 'tsconfig.json')],
+    { stdio: 'inherit', env: { ...process.env, pnpm_config_verify_deps_before_run: 'false' } })
+  child.once('error', no); child.once('exit', code => code === 0 ? yes() : no(new Error('Host declarations did not compile.')))
+})
+for (const entry of await readdir(resolve(root, 'src'))) if (entry.endsWith('.d.mts')) await copyFile(resolve(root, 'src', entry), resolve(root, 'dist', entry))

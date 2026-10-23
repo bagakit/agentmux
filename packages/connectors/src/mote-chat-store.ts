@@ -3,7 +3,13 @@ import { parseMoteChatConfiguration, parseMoteChatGeneration, parseMoteChatPerso
 import { parseConnectionGrant, parseRoomBinding, type ConnectionActor, type ConnectionApplication, type ConnectionEnrollmentCallContext, type ConnectionGrant, type RoomBinding, type RoomBindingListInput } from '@agentmux/core/connections'
 import type { DatabaseSync } from 'node:sqlite'
 
-export type MoteChatPreparedLaunch = { executionHostId: string; input: AgentMuxAgentCreateInput }
+/** Prior frozen full launches retain their exact operation. New Host launches use its saved Executor. */
+export type MoteChatPreparedLaunch =
+  | { executionHostId: string; input: AgentMuxAgentCreateInput; executorRevision?: never }
+  | { executionHostId: string; executorRevision: string; input: Pick<AgentMuxAgentCreateInput,
+      'providerId' | 'executorId' | 'workspacePath' | 'agentMuxNote' | 'optionalContext'> & {
+      agentSessionId: string; createOperationId: string; prompt?: never; injectAgentMuxGuide?: never
+    } }
 export type MoteChatGenerationRow = {
   sequence: number
   laneKey: string
@@ -19,8 +25,21 @@ export type MoteChatGenerationRow = {
 export type MoteChatPersonRow = { key: string; spaceId: string; person: MoteChatPerson }
 export type MoteChatAdmission = { ingressId: string; application: ConnectionApplication; externalMessageId: string; actor: ConnectionActor; externalConversationId: string; generationId: string }
 const json = JSON.stringify
+function assertPrepared(value: MoteChatPreparedLaunch | null): void {
+  if (value === null) return
+  const fail = (): never => { throw new AgentMuxError('The original prepared Mote creation is unconfirmed. Retain its record and inspect the same creation.', 'MOTE_CHAT_STORAGE_UNCONFIRMED') }
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+    Object.keys(value).some(key => !['executionHostId', 'input', 'executorRevision'].includes(key)) || typeof value.executionHostId !== 'string' || !value.executionHostId.trim() ||
+    !value.input || typeof value.input !== 'object' || Array.isArray(value.input)) return fail()
+  if (value.executorRevision === undefined) {
+    if (typeof value.input.injectAgentMuxGuide !== 'boolean') return fail()
+  } else if (typeof value.executorRevision !== 'string' || !value.executorRevision.trim() ||
+    Object.keys(value.input).some(key => !['agentSessionId', 'createOperationId', 'providerId', 'executorId', 'workspacePath', 'agentMuxNote', 'optionalContext'].includes(key)) ||
+    !['agentSessionId', 'createOperationId', 'providerId', 'executorId', 'workspacePath'].every(key => typeof value.input[key as keyof typeof value.input] === 'string' && String(value.input[key as keyof typeof value.input]).trim())) return fail()
+}
 function generationRow(row: { sequence: unknown; snapshot_json: unknown }): MoteChatGenerationRow {
   const value = JSON.parse(String(row.snapshot_json)) as MoteChatGenerationRow
+  assertPrepared(value.prepared)
   return { ...value, sequence: Number(row.sequence), generation: parseMoteChatGeneration(value.generation),
     binding: value.binding === null ? null : parseRoomBinding(value.binding), grant: value.grant === null ? null : parseConnectionGrant(value.grant) }
 }
@@ -121,7 +140,7 @@ export class MoteChatStore {
     const saved = this.database.prepare('INSERT INTO mote_chat_generation(generation_id,lane_key,space_id,session_id,binding_id,grant_id,snapshot_json) VALUES(?,?,?,?,?,?,?)').run(id, row.laneKey, row.generation.target.spaceId, row.generation.agentSessionId, `mote-chat-binding:${id}`, `mote-chat-grant:${id}`, json(row))
     return { ...row, sequence: Number(saved.lastInsertRowid) }
   }
-  saveGeneration(row: MoteChatGenerationRow): void { this.database.prepare('UPDATE mote_chat_generation SET snapshot_json=? WHERE generation_id=?').run(json(row), row.generation.generationId) }
+  saveGeneration(row: MoteChatGenerationRow): void { assertPrepared(row.prepared); this.database.prepare('UPDATE mote_chat_generation SET snapshot_json=? WHERE generation_id=?').run(json(row), row.generation.generationId) }
   admission(application: ConnectionApplication, messageId: string): MoteChatAdmission | null {
     return this.safe(() => { const row = this.database.prepare('SELECT snapshot_json FROM mote_chat_admission WHERE domain=? AND app_id=? AND message_id=?').get(application.domain, application.appId, messageId); return row ? JSON.parse(String(row.snapshot_json)) : null })
   }
