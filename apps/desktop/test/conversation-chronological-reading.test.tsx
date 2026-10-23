@@ -1,3 +1,4 @@
+import { processNativeRecordIds } from './helpers/conversation-process-members'
 import { projectConversationRecords } from '@agentmux/core/conversation'
 // @vitest-environment happy-dom
 import { act } from 'react'
@@ -110,7 +111,7 @@ it('folds interleaved native and captured steps once, visits internal slots and 
   page.items = [native('process-a', _historyFixtureEpoch(0, 0, 100), 'native process a', 'activity'), native('process-b', _historyFixtureEpoch(0, 0, 300), 'native process b', 'activity'), native('reply', _historyFixtureEpoch(0, 0, 500))]
   items = [captured('step-a', _historyFixtureEpoch(0, 0, 50), 'captured step a', 'tool_call'), captured('step-b', _historyFixtureEpoch(0, 0, 200), 'captured step b', 'tool_call'), captured('input', _historyFixtureEpoch(0, 0, 400))]
   await render()
-  expect([...host.querySelectorAll('[data-native-record-ids]')].map(node => JSON.parse(node.getAttribute('data-native-record-ids')!))).toEqual([['process-a', 'process-b']])
+  expect([...host.querySelectorAll('[data-conversation-process-members]')].map(node => processNativeRecordIds(node))).toEqual([['process-a', 'process-b']])
   const group = host.querySelector<HTMLButtonElement>('.conversation-record-process .wf-head')!
   expect(group.getAttribute('aria-expanded')).toBe('false')
   expect(host.querySelectorAll('[data-observation-step-id]')).toHaveLength(0)
@@ -142,7 +143,7 @@ it('keeps an expanded native process Range mounted while a captured input would 
   expect(host.querySelector('[data-message-id="new-input"]')).toBeNull()
   await act(async () => { getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) })
   await openCapturedInputs()
-  expect(host.querySelectorAll('[data-native-record-ids]')).toHaveLength(2)
+  expect(host.querySelectorAll('[data-conversation-process-members]')).toHaveLength(2)
   expect(bodies()).toContain('new-input')
   expect(host.querySelector('[data-native-step-id="process-b"] .wf-tool-row')?.getAttribute('aria-expanded')).toBe('true')
 })

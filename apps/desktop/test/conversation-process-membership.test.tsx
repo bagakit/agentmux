@@ -134,7 +134,7 @@ it('a real ruler click reveals the exact previously unmounted and read-then-coll
   const track = x.host.querySelector<HTMLElement>('.activity-ruler__track')!
   track.getBoundingClientRect = () => bounds(0, 24, 1000)
   const scrolled: Element[] = []
-  vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function () { scrolled.push(this) })
+  vi.spyOn(Element.prototype, 'scrollIntoView').mockImplementation(function (this: Element) { scrolled.push(this) })
   const reveal = async () => {
     await act(async () => track.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: 500 })))
     await wait(() => {
