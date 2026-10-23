@@ -99,6 +99,8 @@ export type CapsuleOperationStatus = 'pending' | 'committed' | 'failed'
 export interface CapsuleOperation {
   operationId: string
   capsuleId?: string
+  /** Original reserved input identity only; never a grant to submit or attribute Human input. */
+  inputOperationId?: string
   method: CapsuleMethod
   status: CapsuleOperationStatus
   createdAt: number

@@ -461,6 +461,24 @@ export class NodeCapsuleOwner implements CapsulePort {
     if (operation.status === 'committed') await confirmDurable(this.operationPath(operationId))
     return r as unknown as SavedOperation
   }
+  private operationProjection(saved: SavedOperation): CapsuleOperation {
+    // The effect is the single durable reservation. The public projection never
+    // adds a second persisted field or accepts a copied field as authority.
+    const { inputOperationId: _copiedInputId, ...operation } = saved.operation
+    if (saved.operation.method !== 'capsule.interaction.reply' || saved.effect?.kind !== 'interaction')
+      return operation
+    const params = parseCapsuleParams('capsule.interaction.reply', saved.params)
+    if (
+      saved.effect.capsuleId !== params.capsuleId ||
+      saved.effect.interactionId !== params.interactionId ||
+      saved.operation.capsuleId !== params.capsuleId
+    )
+      throw new CapsuleError(
+        'CAPSULE_OPERATION_UNCONFIRMED',
+        'The original reply reservation target is inconsistent.',
+      )
+    return parseCapsuleOperation({ ...operation, inputOperationId: saved.effect.inputOperationId })
+  }
   private async reconcile(
     saved: SavedOperation,
     context?: CapsuleCallContext,
@@ -793,7 +811,9 @@ export class NodeCapsuleOwner implements CapsulePort {
       }
       case 'capsule.operation.inspect': {
         const saved = await this.readOperation(p.operationId)
-        result = { operation: saved ? (await this.reconcile(saved, context, true)).operation : null }
+        result = {
+          operation: saved ? this.operationProjection(await this.reconcile(saved, context, true)) : null,
+        }
         break
       }
       case 'capsule.config.inspect':
