@@ -46,6 +46,68 @@ async function fixture(options: { resume?: boolean; missing?: boolean; detached?
   return { ...h, inner, actor, watch, reconnect, requests, original }
 }
 
+function countHistoryEnumeration(service: any, session: AgentMuxStoredAgentSession) {
+  const counts = { initial: 0, supervisor: 0 }
+  let scope: keyof typeof counts | undefined
+  const initial = service.observeInitialInput.bind(service)
+  vi.spyOn(service, 'observeInitialInput').mockImplementation((value: AgentMuxStoredAgentSession) => {
+    const previous = scope; scope = 'initial'
+    try { return initial(value) } finally { scope = previous }
+  })
+  const supervisor = service.continuitySupervisor
+  const observe = supervisor.observe.bind(supervisor)
+  const supervisorObserve = vi.spyOn(supervisor, 'observe').mockImplementation((value: AgentMuxStoredAgentSession, retry?: boolean) => {
+    const previous = scope; scope = 'supervisor'
+    try { return observe(value, retry) } finally { scope = previous }
+  })
+  // Only this Session's history is counted, inside the real consumers' stacks.
+  // Its Store/Registry record remains the original plain, durable object.
+  const continuityOperations = new Proxy(session.continuityOperations!, {
+    ownKeys(target) { if (scope) counts[scope]++; return Reflect.ownKeys(target) }
+  })
+  return { counts, supervisorObserve, session: { ...session, continuityOperations } }
+}
+
+async function retainSupervisedFrontend(f: Awaited<ReturnType<typeof fixture>>) {
+  const observedAt = Date.now(), nativeTarget = f.client.agentSession('recipient').nativeHandle!
+  const operation: AgentMuxContinuityOperation = { operationId: 'original-observed-frontend', agentSessionId: 'recipient',
+    trigger: 'startup', policy: { ...DEFAULT_AGENT_CONTINUITY_POLICY }, previousRun: f.original.expectedRun, nativeTarget,
+    kind: 'reattachable', reason: 'explicit-request', admittedAt: observedAt, observedAt, rechecks: 0,
+    evidence: { kind: 'run-running', observedAt },
+    frontendReconnect: { previousFrontendId: 'old-frontend', frontendId: 'original-frontend', outputAfterByte: 0 },
+    supervision: { phase: 'observing', activeAttemptOperationId: 'original-observed-frontend', attemptCount: 1,
+      attemptLimit: 3, observedAt, reason: 'start-pending' } }
+  await f.inner.registry.update('recipient', f.original.expectedRun, (value: AgentMuxStoredAgentSession) => ({ ...value,
+    continuity: operation, continuityOperations: { [operation.operationId]: operation } }))
+  f.watch.frontend = { ...f.watch.frontend!, state: 'attached' }
+  delete f.watch.frontend.initialization
+  f.inner.kernel.observeLifecycle = vi.fn(async () => async () => {})
+  return operation
+}
+
+it('skips initial-input history enumeration for a legacy actor while its original supervisor still observes', async () => {
+  const f = await fixture({ resume: true, capability: false }), operation = await retainSupervisedFrontend(f)
+  const counted = countHistoryEnumeration(f.inner.recovery, f.inner.registry.get('recipient'))
+  f.inner.recovery.observe(counted.session)
+  expect(counted.supervisorObserve.mock.calls.some(([value]) => value === counted.session)).toBe(true)
+  await vi.waitFor(() => expect(f.inner.kernel.observeLifecycle).toHaveBeenCalledOnce())
+  await vi.waitFor(async () => expect((await f.store.readMetadata('recipient'))!.continuityOperations![operation.operationId]!.supervision)
+    .toMatchObject({ phase: 'observing', reason: 'frontend-attached', process: { run: f.original.expectedRun, state: 'running' } }))
+  expect(counted.counts.initial, 'An ineligible initial-input observer must not enumerate this Session history').toBe(0)
+  expect(f.reconnect).not.toHaveBeenCalled(); expect(f.inner.kernel.start).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+})
+
+it('skips initial-input history enumeration after dispose when a late Session observation arrives', async () => {
+  const f = await fixture({ resume: true }); await retainSupervisedFrontend(f)
+  const counted = countHistoryEnumeration(f.inner.recovery, f.inner.registry.get('recipient'))
+  await f.inner.recovery.dispose()
+  f.inner.recovery.observe(counted.session)
+  expect(counted.counts.supervisor).toBe(0)
+  expect(counted.counts.initial, 'A disposed initial-input observer must not enumerate this Session history').toBe(0)
+  expect(f.inner.kernel.observeLifecycle).not.toHaveBeenCalled(); expect(f.reconnect).not.toHaveBeenCalled()
+  expect(f.inner.kernel.start).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
+})
+
 it('treats an omitted trigger as explicit manual recovery under a manual automatic policy', async () => {
   const f = await fixture()
   const result = await f.client.ensureAgentContinuity({ ...f.original, policy: { activeRecovery: 'manual' } })
