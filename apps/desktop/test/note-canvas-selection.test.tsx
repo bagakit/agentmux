@@ -153,7 +153,7 @@ it('reports partial expiry and keeps only unchanged original occurrences instead
   const content = { schema: 'agentmux.note.v1', noteId: 'closed-source', content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'long-source' }, content: [...baseLinks, link('kept', 'target', 'target-3'), link('changed', 'target', 'target-4')] }] } }
   await writeFile(join(directory, 'closed-source.note.md'), serializeNoteDocument(content as Parameters<typeof serializeNoteDocument>[0]))
   await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} />); await ready()
-  await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-edge-label[data-target-kind="block"][data-target-attachment="summary"]')).not.toBeNull())
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-edge-label[data-target-block="target-2"]')).not.toBeNull())
   await dom.click('.note-canvas-edge-label[data-target-kind="block"][data-target-attachment="summary"]')
   await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-comparison-to')).toHaveLength(2))
   content.content.content![0]!.content[4] = link('changed', 'target', 'target-5')
