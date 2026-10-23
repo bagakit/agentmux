@@ -77,8 +77,15 @@ script, source field or HTTP request cannot self-author Human or answer a Provid
 permission/question through this module.
 
 In the App's injected Browser, window.capsule exposes capabilities(), theme(), request(),
-read(), saveDraft(), inspectOperation(), createOperationId() and onThemeChanged(). Keep an
-operation ID before issuing a mutation. The SDK derives its page and target from the exact
+read(), saveDraft(), inspectOperation(), createOperationId() and onThemeChanged(). Before
+each mutation, retain an ID from createOperationId() and pass it explicitly to
+request(question, draft, operationId) or
+saveDraft(interactionId, expectedRevision, draft, operationId). Use undefined for an absent
+initial draft. Persist the ID first when recovery must survive a page reload. Missing IDs
+are rejected before dispatch; the preload never creates an implicit replacement ID.
+After an unknown result, query inspectOperation(originalId). Error properties and text
+are not a transport for original identity across ContextBridge.
+The SDK derives its page and target from the exact
 native document; do not supply a principal or recipient. It has no reply/approval method.
 The person reviews the original question and answer in the App's Questions control and
 explicitly confirms there. Host/Core's capsule.input is a narrow adapter protocol; it has
