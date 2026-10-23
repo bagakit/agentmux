@@ -8,20 +8,29 @@ import { pathToFileURL } from 'node:url'
 import { candidateAlias, candidateModule, candidateResolve } from './candidate-package-resolve.mjs'
 
 const root = path.resolve(import.meta.dirname, '../../..')
-test('current Core and connector exports resolve from their original checkout manifests', async () => {
+test('current Core, Host and connector exports resolve from their original checkout manifests', async () => {
   for (const [specifier, target] of [
     ['@agentmux/core/observation-read', 'packages/core/src/observation-read.ts'],
+    ['@agentmux/host/mote-resources', 'apps/host/src/mote-resources.ts'],
+    ['@agentmux/host/mote-chat-agents', 'apps/host/src/mote-chat-agents.ts'],
+    ['@agentmux/host/mote-model', 'apps/host/src/mote-model.ts'],
+    ['@agentmux/host/credential-administration', 'apps/host/src/credential-administration.ts'],
     ['@agentmux/diagnostic-evidence', 'packages/diagnostic-evidence/src/index.ts'],
     ['@agentmux/connectors', 'packages/connectors/src/index.ts'],
     ['@agentmux/connectors/adapters/feishu', 'packages/connectors/src/adapters/feishu/index.ts'],
     ['@agentmux/connectors/adapters/discord', 'packages/connectors/src/adapters/discord/index.ts']
   ]) {
-    let manifest
+    const manifests = new Map()
     const file = candidateResolve(root, specifier, { browser: true, source: true,
-      onManifest: (file, bytes) => { manifest = { file, bytes } } })
+      onManifest: (file, bytes) => manifests.set(file, bytes) })
     assert.equal(file, await realpath(path.join(root, target)))
-    assert.deepEqual(manifest.bytes, await readFile(manifest.file))
-    assert.ok(manifest.file.startsWith(root + path.sep))
+    const manifest = await realpath(path.join(root, target.split('/src/')[0], 'package.json'))
+    assert.deepEqual(manifests.get(manifest), await readFile(manifest))
+    assert.deepEqual(manifests.get(path.join(root, 'pnpm-workspace.yaml')), await readFile(path.join(root, 'pnpm-workspace.yaml')))
+    for (const [file, bytes] of manifests) {
+      assert.deepEqual(bytes, await readFile(file))
+      assert.ok(file.startsWith(root + path.sep))
+    }
   }
 })
 
@@ -30,6 +39,7 @@ async function fixture(run) {
   try {
     const root = path.join(directory, 'candidate'), pkg = path.join(root, 'packages', 'new-owner')
     await mkdir(path.join(pkg, 'src/nested'), { recursive: true })
+    await writeFile(path.join(root, 'pnpm-workspace.yaml'), 'packages:\n  - packages/*\n  - apps/*\n')
     await mkdir(path.join(pkg, 'src/styles'), { recursive: true })
     await mkdir(path.join(pkg, 'dist/nested'), { recursive: true })
     await writeFile(path.join(pkg, 'package.json'), JSON.stringify({ name: '@agentmux/new-owner', exports: {
@@ -52,6 +62,29 @@ test('an unlisted package preserves exact, wildcard and browser export meaning',
   assert.equal(candidateResolve(root, '@agentmux/new-owner/nested/capability', { browser: true }), path.join(pkg, 'src/nested/capability.ts'))
   assert.equal(candidateResolve(root, '@agentmux/new-owner/exact', { browser: true, source: true }), path.join(pkg, 'src/chosen.js'))
   assert.throws(() => candidateResolve(root, '@agentmux/new-owner'), /Missing declared candidate export/u)
+}))
+
+test('workspace membership and manifest names select app packages independently of directory names', async () => fixture(async ({ root, pkg }) => {
+  const app = path.join(root, 'apps', 'different-directory')
+  await mkdir(app, { recursive: true })
+  const manifestPath = path.join(app, 'package.json')
+  await writeFile(manifestPath, JSON.stringify({ name: '@agentmux/app-owner', exports: { './capability': './capability.js' } }))
+  await writeFile(path.join(app, 'capability.js'), 'export const original = true\n')
+  const observed = new Map()
+  assert.equal(candidateResolve(root, '@agentmux/app-owner/capability', {
+    onManifest: (file, bytes) => observed.set(file, bytes)
+  }), path.join(app, 'capability.js'))
+  assert.deepEqual([...observed.keys()].sort(), [path.join(root, 'pnpm-workspace.yaml'), path.join(pkg, 'package.json'), manifestPath].sort())
+  for (const [file, bytes] of observed) assert.deepEqual(bytes, await readFile(file))
+  await writeFile(path.join(root, 'pnpm-workspace.yaml'), "packages:\n  - packages/*\n  - apps/*\n  - '!apps/different-directory'\n")
+  assert.throws(() => candidateResolve(root, '@agentmux/app-owner/capability'), /Expected one declared candidate package/u)
+}))
+
+test('duplicate manifest identities are rejected rather than selected by directory order', async () => fixture(async ({ root, pkg }) => {
+  const duplicate = path.join(root, 'apps', 'another-directory')
+  await mkdir(duplicate, { recursive: true })
+  await writeFile(path.join(duplicate, 'package.json'), await readFile(path.join(pkg, 'package.json')))
+  assert.throws(() => candidateResolve(root, '@agentmux/new-owner/capability'), /Expected one declared candidate package/u)
 }))
 
 test('type resolution consumes the original declaration export rather than the runtime entry', async () => fixture(async ({ root, pkg }) => {
@@ -122,7 +155,7 @@ for (const name of ['exact', 'wildcard']) test('Vite CSS imports consume candida
       })
     } }] } }, build: { outDir: path.join(directory, 'compiled'), write: false, minify: false, reportCompressedSize: false } })
   assert.deepEqual([...inputs], [path.join(pkg, 'src/styles', name + '.css')])
-  assert.equal(manifests.size, 1)
+  assert.deepEqual([...manifests.keys()].sort(), [path.join(candidate, 'pnpm-workspace.yaml'), path.join(pkg, 'package.json')].sort())
   for (const [file, bytes] of manifests) assert.deepEqual(bytes, await readFile(file))
   const emitted = built.output.find(file => file.fileName.endsWith('.css'))
   assert.ok(emitted && emitted.source.includes('.candidate-' + name))
