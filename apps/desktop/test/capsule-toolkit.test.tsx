@@ -6,12 +6,12 @@ import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi, type Mock, type MockInstance } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc, type AgentMuxClientEvent, type AgentMuxRun, type AgentMuxRunAttachment } from '@agentmux/core'
 import { NodeCapsuleOwner } from '@agentmux/capsule/node'
 import { parseToolkitResultDocument, type ToolkitResultDocument } from '@agentmux/core/toolkit-result-document'
 import { parseToolkitSnapshot, type ToolkitConfirmedResult, type ToolkitScriptSnapshot, type ToolkitToolDefinition } from '@agentmux/core/control'
-import type { CapsuleInspection, CapsulePort } from '@agentmux/core/capsule'
+import type { CapsuleInspection, CapsuleMethod, CapsuleParamsMap, CapsulePort, CapsulePresentationPort } from '@agentmux/core/capsule'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
 import { ConfigOwner } from '../src/main/config-owner'
 import { DEFAULT_CONFIG } from '../src/main/config-store'
@@ -27,7 +27,7 @@ vi.mock('electron', () => ({ app: { getPath: () => process.cwd(), getAppPath: ()
 let directory: string, sourcePath: string, capsuleOwner: NodeCapsuleOwner, service: AgentMuxRpcService
 let container: HTMLDivElement, root: Root, first: CapsuleInspection, second: CapsuleInspection
 let capsuleTransport: CapsulePort['call'], flights: Set<Promise<unknown>>
-let presentation: ReturnType<typeof vi.fn>, toolRun: ReturnType<typeof vi.spyOn>, toolAction: ReturnType<typeof vi.spyOn>
+let presentation: Mock<CapsulePresentationPort['open']>, toolRun: MockInstance<typeof api.toolkit.run>, toolAction: MockInstance<typeof api.toolkit.action>
 const principal = { transport: 'unix' as const, principal: { kind: 'user' as const, id: 'toolkit-capsule-user' } }
 const definition = (): ToolkitToolDefinition => ({ id: 'original-capsule-tool', revision: 'captured-revision', name: 'Original page generator', icon: 'terminal', enabled: true,
   statusBar: 'icon', workspacePath: sourcePath, script: 'originalScript()', args: [], actions: [{ id: 'rerun', label: 'Generate again', script: 'actionScript()', args: [] }] })
@@ -45,13 +45,13 @@ beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   directory = await mkdtemp('/tmp/capsule-toolkit-'); sourcePath = join(directory, 'build')
   await mkdir(sourcePath); await writeFile(join(sourcePath, 'index.html'), '<!doctype html><title>Published report</title>Original content')
-  presentation = vi.fn(async (params: { capsuleId: string; operationId: string }, _context, resolved: { endpoint: unknown }) => ({ ...params, endpoint: resolved.endpoint,
+  presentation = vi.fn<CapsulePresentationPort['open']>(async (params, _context, resolved) => ({ ...params, endpoint: resolved.endpoint,
     rendering: { status: 'available', browserId: 'original-browser', tabId: 'original-tab', regionId: 'original-region' } }))
   capsuleOwner = await NodeCapsuleOwner.open({ stateDirectory: join(directory, 'capsules'), presentation: { open: presentation } })
   first = await capsuleOwner.call('capsule.create', { operationId: 'first-published-page', sourcePath, title: 'First page', source: { toolId: 'untrusted-declared-tool', executionId: 'untrusted-declared-execution' } })
   second = await capsuleOwner.call('capsule.create', { operationId: 'second-published-page', sourcePath, title: 'Second page' })
   service = new AgentMuxRpcService({ coreClients: () => [], capsules: capsuleOwner })
-  capsuleTransport = (method, params) => service.call(method, params, principal) as ReturnType<CapsulePort['call']>
+  capsuleTransport = ((method: CapsuleMethod, params: CapsuleParamsMap[CapsuleMethod]) => service.call<CapsuleMethod>(method, params, principal)) as CapsulePort['call']
   flights = new Set()
   vi.spyOn(api.capsules, 'call').mockImplementation(((method, params) => {
     const promise = capsuleTransport(method, params); flights.add(promise)
@@ -67,7 +67,7 @@ async function mount(initial: ToolkitScriptSnapshot, extra = {}) {
   let current = parseToolkitSnapshot(initial), publish!: (value: ToolkitScriptSnapshot) => void
   vi.spyOn(api.toolkit, 'observe').mockImplementation((_id, read) => { publish = read; read(current); return { dispose() {} } })
   vi.spyOn(api.toolkit, 'get').mockImplementation(async () => current)
-  await act(async () => root.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {} }}><UserToolkitResult definition={initial.definition} active close={() => {}} {...extra} /></SettingsNavigation.Provider>))
+  await act(async () => root.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {}, openChannel() {}, channelPresentation: () => null, openMoteLark() {}, chooseAgent() {} }}><UserToolkitResult definition={initial.definition} active close={() => {}} {...extra} /></SettingsNavigation.Provider>))
   return async (next: ToolkitScriptSnapshot) => { current = parseToolkitSnapshot(next); await act(async () => publish(current as ToolkitScriptSnapshot)) }
 }
 function row(id = first.record.capsuleId) { return container.querySelector<HTMLElement>(`[data-toolkit-capsule="${id}"]`)! }
@@ -97,7 +97,7 @@ it('copies and opens the exact Capsule without rerunning its tool or borrowing d
   expect(api.capsules.call).not.toHaveBeenCalled()
   await click('Open page', row())
   expect(presentation).toHaveBeenCalledOnce()
-  expect(presentation.mock.calls[0][0]).toMatchObject({ capsuleId: first.record.capsuleId })
+  expect(presentation.mock.calls[0]![0]).toMatchObject({ capsuleId: first.record.capsuleId })
   expect(row().textContent).toContain('Opened in the original Browser workface.')
   expect(toolRun).not.toHaveBeenCalled(); expect(toolAction).not.toHaveBeenCalled()
 })
@@ -112,7 +112,7 @@ it('keeps a retained display Capsule attached to its own original execution and 
   await mount(current)
   expect(row().textContent).toContain('retained-display-execution'); expect(row().textContent).toContain('captured-revision')
   expect(row().textContent).not.toContain('newest-ordinary-execution'); expect(row().textContent).not.toContain('newest-revision')
-  await click('Open page', row()); expect(presentation.mock.calls[0][0].capsuleId).toBe(first.record.capsuleId)
+  await click('Open page', row()); expect(presentation.mock.calls[0]![0].capsuleId).toBe(first.record.capsuleId)
   expect(toolRun).not.toHaveBeenCalled(); expect(toolAction).not.toHaveBeenCalled()
 })
 
@@ -149,7 +149,7 @@ it('keeps an unobserved open unknown while another referenced Capsule remains us
   await click('Open page', row()); await click('Check original open', row())
   expect(row().textContent).toContain('still unconfirmed'); expect(button('Open page', row()).disabled).toBe(true)
   await click('Copy Capsule link', row()); await click('Open page', row(second.record.capsuleId))
-  expect(presentation).toHaveBeenCalledOnce(); expect(presentation.mock.calls[0][0].capsuleId).toBe(second.record.capsuleId)
+  expect(presentation).toHaveBeenCalledOnce(); expect(presentation.mock.calls[0]![0].capsuleId).toBe(second.record.capsuleId)
   expect(toolRun).not.toHaveBeenCalled(); expect(toolAction).not.toHaveBeenCalled()
 })
 
@@ -168,6 +168,8 @@ function processPort() {
   const attached = (run: ProcessRun, after: number): AgentMuxRunAttachment => ({ run: facts(run), gap: null, resizeRevision: 0, terminal: { type: 'not-requested' }, replay: run.bytes.length > after
     ? [{ runId: run.id, type: 'data', startByte: after, endByte: run.bytes.length, dataBytes: run.bytes.subarray(after), data: '' }] : [] })
   const port: ToolkitRunPort = { observe: () => () => {},
+    async prepare() { throw new Error('The finite producer fixture does not admit TUI Runs; the dedicated TUI case uses actual ctxmux.') },
+    async createPrepared() { throw new Error('The finite producer fixture does not admit prepared TUI Runs.') },
     async create(input, listener) {
       launches.push(input.createOperationId!)
       const env = { ...process.env, ...input.env }
@@ -176,7 +178,7 @@ function processPort() {
       const run: ProcessRun = { id: 'toolkit-process-' + input.createOperationId, child, bytes: Buffer.alloc(0), state: 'running', exitCode: null, listener }; runs.set(run.id, run)
       const output = (bytes: Buffer) => { const startByte = run.bytes.length; run.bytes = Buffer.concat([run.bytes, bytes]); run.listener({ type: 'terminal-output', run: { runId: run.id }, data: '', dataBytes: bytes, evidence: { source: 'terminal-output', observedAt: 1, outputByteRange: { startByte, endByte: run.bytes.length } } }) }
       child.stdout!.on('data', output); child.stderr!.on('data', output)
-      child.once('close', code => { run.state = 'exited'; run.exitCode = code; run.listener({ type: 'process-state', run: { runId: run.id }, state: 'exited', exitCode: code, evidence: { source: 'run-process', observedAt: 1 } }) })
+      child.once('close', code => { run.state = 'exited'; run.exitCode = code; run.listener({ type: 'process-state', run: { runId: run.id }, pid: child.pid ?? null, state: 'exited', ...(code === null ? {} : { exitCode: code }), evidence: { source: 'run-process', observedAt: 1 } }) })
       await once(child, 'spawn'); return facts(run)
     },
     async attach(ref, after, listener) { const run = runs.get(ref.runId)!; if (listener) run.listener = listener; return attached(run, after) },
@@ -209,7 +211,7 @@ await new Promise((yes,no)=>{channel.once('close',yes);channel.once('error',no)}
     await rpc.call('toolkit.run', { toolId: definition().id })
     let current!: ToolkitScriptSnapshot
     await vi.waitFor(async () => { current = (await rpc.call('toolkit.inspect', { toolId: definition().id })).snapshot as ToolkitScriptSnapshot; expect(current.latestConfirmed?.state, current.reason ?? '').toBe('succeeded'); expect(current.admission).toBeNull() }, { timeout: 10000 })
-    const execution = current.latestConfirmed!, id = execution.document!.capsules![0].capsuleId
+    const execution = current.latestConfirmed!, id = execution.document!.capsules![0]!.capsuleId
     expect(execution.text).toBe('Diagnostic text is separate\n'); expect(execution.run!.runId).toContain('toolkit-process-')
     const persisted = JSON.parse(await readFile(receipts, 'utf8')); expect(persisted.tools[current.toolId].latestConfirmed.document).toEqual(execution.document)
     const env = { ...globalThis.process.env }
@@ -218,10 +220,10 @@ await new Promise((yes,no)=>{channel.once('close',yes);channel.once('error',no)}
     const cliResult = JSON.parse(cliRead.stdout)
     expect(cliResult.ok).toBe(true); expect(cliResult.result.snapshot.latestConfirmed.document).toEqual(execution.document)
     await mount(current)
-    capsuleTransport = (method, params) => rpc.call(method, params) as ReturnType<CapsulePort['call']>
+    capsuleTransport = ((method: CapsuleMethod, params: CapsuleParamsMap[CapsuleMethod]) => rpc.call<CapsuleMethod>(method, params)) as CapsulePort['call']
     expect(row(id).textContent).toContain(execution.executionId); expect(row(id).textContent).not.toContain('untrusted-declared')
     await click('Open page', row(id)); await click('Copy Capsule link', row(id))
-    expect(presentation).toHaveBeenCalledOnce(); expect(presentation.mock.calls[0][0].capsuleId).toBe(id)
+    expect(presentation).toHaveBeenCalledOnce(); expect(presentation.mock.calls[0]![0].capsuleId).toBe(id)
     expect(api.ui.writeClipboardText).toHaveBeenCalledWith('amux://capsule/' + id)
     expect(process.launches).toHaveLength(1); expect(toolRun).not.toHaveBeenCalled(); expect(toolAction).not.toHaveBeenCalled()
   } finally { await rpc.dispose(); await server.stop(); await toolkit.dispose(); await process.close() }

@@ -1,6 +1,6 @@
 import { lstat, mkdir, mkdtemp, realpath, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, URL as NodeURL } from 'node:url'
 import { supportedCtxmuxArtifactPlatform } from '@agentmux/core'
 import { activateRuntime } from '../../../../packages/core/node_modules/@ctxmux/sdk/dist/index.js'
 import { fixturePath } from '../../scripts/lib/fixture-values.mjs'
@@ -16,12 +16,17 @@ export interface ToolkitRuntimeCleanup {
 // The SDK owns the spawned ChildProcess and its exit receipt. This fixture owns
 // only the directory it created; successful shutdown does not transfer ownership
 // of a replacement socket or directory to the fixture.
-export async function toolkitRuntime() {
+export async function toolkitRuntime(): Promise<{
+  directory: string
+  activation: Awaited<ReturnType<typeof activateRuntime>>
+  executable: string
+  cleanup(options?: { retainNamespace?: boolean }): Promise<ToolkitRuntimeCleanup>
+}> {
   const directory = await realpath(await mkdtemp(fixturePath('tmp/amx-tk-')))
   const originalDirectory = await lstat(directory)
   const platform = supportedCtxmuxArtifactPlatform()
   if (platform === null) throw new Error('No qualified Toolkit Native artifact for this platform')
-  const executable = fileURLToPath(new URL(`../../../../packages/core/vendor/ctxmux/${platform}/bin/ctxmuxd`, import.meta.url))
+  const executable = fileURLToPath(new NodeURL(`../../../../packages/core/vendor/ctxmux/${platform}/bin/ctxmuxd`, import.meta.url))
   const stateDir = join(directory, 'state', 'ctxmux')
   await mkdir(stateDir, { recursive: true, mode: 0o700 })
   const activation = await activateRuntime({ executable, socketPath: join(directory, 'ctxmux.sock'), stateDir,
