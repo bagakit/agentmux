@@ -3,7 +3,7 @@ import { validateAgentPromptAdmissionIntent } from './agent-prompt-condition.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseConnectionActor, parseConnectionApplication } from './room-binding-codec.js'
-import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor } from './external-author.js'
+import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor, parseAgentExternalAuthoritySource } from './external-author.js'
 import { parseAgentInputSubmissionReceipt } from './agent-input-receipt-codec.js'
 import { channelActorKey, parseChannelActorProfileObservation } from './channel-profile.js'
 import { parseChannelTranscriptQuote } from './channel-quote.js'
@@ -29,7 +29,7 @@ export function parseConnectionQuestionAnswerSubmissions(value: unknown): import
       ...(answer.optionIds === undefined ? {} : { optionIds: (answer.optionIds as unknown[]).map(text) }) }
   })
 }
-export const CONNECTION_INGRESS_AUTHORITY_CODES = ['INGRESS_SERVICE_DISABLED', 'INGRESS_SERVICE_UNCONFIRMED', 'INGRESS_CLAIM_UNAVAILABLE', 'INGRESS_CONNECTION_UNAVAILABLE', 'INGRESS_BINDING_UNAVAILABLE', 'INGRESS_ACTOR_NOT_AUTHORIZED', 'INGRESS_INPUT_OUTSIDE_SCOPE', 'INGRESS_ADDRESSING_UNCONFIRMED', 'INGRESS_AUTHORITY_REVISED', 'INGRESS_STORAGE_UNCONFIRMED'] as const satisfies readonly import('./ingress-contract.js').ConnectionIngressAuthorityCode[]
+export const CONNECTION_INGRESS_AUTHORITY_CODES = ['INGRESS_SERVICE_DISABLED', 'INGRESS_SERVICE_UNCONFIRMED', 'INGRESS_CLAIM_UNAVAILABLE', 'INGRESS_CONNECTION_UNAVAILABLE', 'INGRESS_BINDING_UNAVAILABLE', 'INGRESS_ACTOR_NOT_AUTHORIZED', 'INGRESS_INPUT_OUTSIDE_SCOPE', 'INGRESS_ADDRESSING_UNCONFIRMED', 'INGRESS_AUTHORITY_REVISED', 'INGRESS_TARGET_UNCONFIRMED', 'INGRESS_STORAGE_UNCONFIRMED'] as const satisfies readonly import('./ingress-contract.js').ConnectionIngressAuthorityCode[]
 function addressing(value: unknown): ConnectionIngressAddressing {
   const p = object(value, ['replyToMessageId', 'state', 'selection', 'reason']), replyToMessageId = text(p.replyToMessageId)
   if (p.state === 'confirmed' && (p.selection === 'reply' || p.selection === 'message') && p.reason === undefined) return { replyToMessageId, state: 'confirmed', selection: p.selection }
@@ -71,10 +71,10 @@ export function parseConnectionIngressRecord(value: unknown): ConnectionIngressR
     if (g.recording !== undefined) { const r = object(g.recording, ['state', 'code']); if (!['unavailable', 'refused'].includes(String(r.state))) fail(); recording = { state: r.state as 'unavailable' | 'refused', code: text(r.code) } }
     if (g.target === null) { if (g.recorded !== undefined) fail(); group = { target: null } }
     else {
-      const t = object(g.target, ['hostId', 'agentSessionId', 'connectionId', 'bindingId', 'bindingRevision'])
+      const t = object(g.target, ['hostId', 'agentSessionId', 'connectionId', 'bindingId', 'bindingRevision', 'authoritySource'])
       if (!Number.isSafeInteger(t.bindingRevision) || Number(t.bindingRevision) < 1) fail()
-      const target = { hostId: text(t.hostId), agentSessionId: text(t.agentSessionId), connectionId: text(t.connectionId), bindingId: text(t.bindingId), bindingRevision: t.bindingRevision as number }
-      group = { target, ...(recording ? { recording } : {}), ...(g.recorded === undefined ? {} : { recorded: parseExternalConversationReceipt(g.recorded, { agentSessionId: target.agentSessionId, ingressId: base.ingressId }) }) }
+      const target = { hostId: text(t.hostId), agentSessionId: text(t.agentSessionId), connectionId: text(t.connectionId), bindingId: text(t.bindingId), bindingRevision: t.bindingRevision as number, ...(t.authoritySource === undefined ? {} : { authoritySource: parseAgentExternalAuthoritySource(t.authoritySource) }) }
+      group = { target, ...(recording ? { recording } : {}), ...(g.recorded === undefined ? {} : { recorded: parseExternalConversationReceipt(g.recorded, { agentSessionId: target.agentSessionId, ingressId: base.ingressId, ...(target.authoritySource ? { authoritySource: target.authoritySource } : {}) }) }) }
     }
   }
   const projected = { ...base, ...(group === undefined ? {} : { group }) }
@@ -92,6 +92,7 @@ export function parseConnectionIngressRecord(value: unknown): ConnectionIngressR
   const admissionIntent = input.admissionIntent === undefined ? undefined : validateAgentPromptAdmissionIntent(input.admissionIntent)
   if (admissionIntent && (admissionIntent.kind === 'exact-condition' || admissionIntent.expectedRun.runId !== run.runId)) fail()
   const author = parseAgentExternalMessageAuthor(input.author), operationId = text(input.operationId), messageId = text(input.messageId)
+  if (group?.target && !equal(author.authoritySource, group.target.authoritySource)) fail()
   // Intake retains its receiver alias; the author names the independently authorized Binding connection.
   if (operationId === messageId || !equal(author.actor, actor) || author.externalMessageId !== base.externalMessageId || author.externalConversationId !== base.externalConversationId) fail()
   return { ...projected, state: 'claimed', input: { hostId: text(input.hostId), agentSessionId: text(input.agentSessionId), expectedRun: { runId: text(run.runId) }, operationId, messageId, author, ...(channelProfile ? { channelProfile } : {}), ...(channelQuote ? { channelQuote } : {}), ...(contextSource ? { contextSource } : {}), ...(input.contextObservation ? { contextObservation: 'known-publications-unavailable' as const } : {}), ...(admissionIntent === undefined ? {} : { admissionIntent: admissionIntent as Exclude<typeof admissionIntent, { kind: 'exact-condition' }> }) } }

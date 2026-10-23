@@ -1,6 +1,7 @@
 import { parseMoteChatParams } from './mote-chat-codec.js'
 import { parseAgentLearningParams } from './agent-learning.js'
 import { mintObjectId } from './object-id.js'
+import { parseAgentExternalAuthoritySource } from './external-author.js'
 import { parseFileImportParams } from './public-rpc-file-import.js'
 import { parseAgentInputContextCaptureReference } from './agent-input-context-capture.js'
 import { parseRendererAllocationsInput } from './renderer-allocations.js'
@@ -99,6 +100,10 @@ function id(f: Flags, name: string, exact = false): string {
   if (!result.length) invalid(`${name} must not be empty.`)
   if (exact && result === 'self') invalid(`${name} requires an exact ID, not self.`)
   return result
+}
+function authoritySource(f: Flags) {
+  if (!f.values.has('--hosting-runtime') && !f.values.has('--execution-runtime')) return {}
+  return { authoritySource: parseAgentExternalAuthoritySource({ hostingRuntimeId: id(f, '--hosting-runtime', true), executionRuntimeId: id(f, '--execution-runtime', true) }) }
 }
 function one(f: Flags, names: readonly string[], label: string): string {
   const selected = names.filter(name => f.values.has(name))
@@ -312,8 +317,8 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     { '--host': 'data', '--session': 'data' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true) })),
   command('agent.conversation.changes', '--input FILE|-', 'Resume bounded original changes from a saved source checkpoint.',
     { '--input': 'data' }, async f => ({ ...parseConversationChangesInput(await readControlJsonInput(value(f, '--input', true)!, 'Conversation changes')) }), 'JSON requires hostId, agentSessionId, the original route-scoped checkpoint envelope (including its unchanged source frontier) and optional limit/maxBytes/cursor/view. view resumes the original backend accepted window; each complete window replaces the displayed snapshot. Complete fragments before consuming units; retain the old checkpoint until the frozen batch finishes. Keep the returned checkpoint with the effects derived from its records. A source Gap retains the original boundary and requires explicit sharing review.'),
-  command('agent.conversation.record', '--host ID --session ID --ingress ID', 'Record one authenticated original group message without submitting Agent input.',
-    { '--host': 'data', '--session': 'data', '--ingress': 'data' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true), ingressId: id(f, '--ingress', true) }),
+  command('agent.conversation.record', '--host ID --session ID --ingress ID [--hosting-runtime ID --execution-runtime ID]', 'Record one authenticated original group message without submitting Agent input.',
+    { '--host': 'data', '--session': 'data', '--ingress': 'data', '--hosting-runtime': 'data', '--execution-runtime': 'data' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true), ingressId: id(f, '--ingress', true), ...authoritySource(f) }),
     'The original ingress owner supplies the frozen target, body and platform author; caller text cannot authenticate a message. Repeating the same original reference converges on one captured record. Recording never wakes the Agent or grants input permission. Read the returned record with agent conversation inspect; native adoption is a separate receipt.'),
   command('agent.conversation.release', '--host ID --session ID --view VIEW', 'Release one original temporary reading window without changing records, checkpoints or Runs.',
     { '--host': 'data', '--session': 'data', '--view': 'data' }, f => ({ hostId: id(f, '--host', true), agentSessionId: id(f, '--session', true), view: id(f, '--view', true) })),
@@ -782,7 +787,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
   command('connection.ingress.inspect', '--ingress ID', 'Read original external intake and Core input facts without retrying delivery.', { '--ingress': 'data' }, f => parseConnectionParams('connection.ingress.inspect', { ingressId: value(f, '--ingress', true) })),
   command('connection.ingress.authority', '--operation-id ID', 'Read the original intake claim and current authority without entering Core or retrying input.', { '--operation-id': 'data' }, f => parseConnectionParams('connection.ingress.authority', { operationId: value(f, '--operation-id', true) })),
   command('connection.ingress.ls', '--connection ID [--binding ID] [--after-ingress ID] [--limit N]', 'Discover a bounded page of original external intakes on the exact connection.', { '--connection': 'data', '--binding': 'data', '--after-ingress': 'data', '--limit': 'value' }, f => parseConnectionParams('connection.ingress.ls', { ...fields(f, { '--connection': 'connectionId', '--binding': 'bindingId', '--after-ingress': 'afterIngressId' }), ...numbers(f, { '--limit': 'limit' }) })),
-  command('connection.ingress.record-authority', '--session ID --ingress ID', 'Read original group-record authority without dispatching input.', { '--session': 'data', '--ingress': 'data' }, f => ({ agentSessionId: id(f, '--session', true), ingressId: id(f, '--ingress', true) })),
+  command('connection.ingress.record-authority', '--session ID --ingress ID [--hosting-runtime ID --execution-runtime ID]', 'Read original group-record authority without dispatching input.', { '--session': 'data', '--ingress': 'data', '--hosting-runtime': 'data', '--execution-runtime': 'data' }, f => ({ agentSessionId: id(f, '--session', true), ingressId: id(f, '--ingress', true), ...authoritySource(f) })),
   empty('connection.metadata.watch', 'Observe this exact Host’s metadata change hints as its authenticated person/device; managed Agents cannot watch all connections. No native lookup, snapshot, body or credential. Cancel releases only this reader; read exact profiles through get. Reconnect and reread profiles after a lost observation.'),
   command('connection.metadata.get', '--input FILE|-', 'Read one exact locally cached actor or conversation profile; no network request.', { '--input': 'data' }, async f => parseConnectionParams('connection.metadata.get', await readControlJsonInput(value(f, '--input', true)!, 'Channel metadata')), 'Input requires connectionId and subject {kind:actor,actor:{application,idType,userId}} or {kind:conversation,externalConversationId}. Metadata never grants input, answer, permission or sharing.'),
   command('connection.metadata.refresh', '--input FILE|-', 'Explicitly refresh one exact native profile using expectedConnectionRevision; retain prior observations on failure.', { '--input': 'data' }, async f => parseConnectionParams('connection.metadata.refresh', await readControlJsonInput(value(f, '--input', true)!, 'Channel metadata'))),

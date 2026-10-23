@@ -14,6 +14,8 @@ export type RoomBindingTarget = { executionHostId: string; agentSessionId: strin
 export type RoomBindingInputTarget = Omit<Extract<import('./agent-prompt-condition.js').AgentDirectedPromptTarget, { kind: 'native-conversation' }>, 'expectedTurnId'>
 /** An immutable authorized audience snapshot. A Region is navigation, never an execution route. */
 export type RoomBinding = Omit<RoomBindingTarget, 'regionAnchor'> & {
+  /** Confirmed by the original target owner at this revision, never caller-supplied. */
+  executionRuntimeId?: string
   /** Optional original presentation; background conversations do not require a Region. */
   regionAnchor?: RoomBindingTarget['regionAnchor']
   bindingId: string
