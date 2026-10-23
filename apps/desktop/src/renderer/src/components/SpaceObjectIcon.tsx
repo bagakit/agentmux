@@ -11,7 +11,7 @@ import { projectMonogram } from '../lib/project-monogram'
 import { MoteIcon } from './MoteIcon'
 import { ProjectIcon } from './ProjectIcon'
 import { MoteFace, type MoteExpression } from './MoteFace'
-import { MoteSilhouetteArt, isBuiltinMoteSilhouetteLocator } from './MoteSilhouetteArt'
+import { MoteSilhouetteArt, isBuiltinMoteArticulatedLocator } from './MoteSilhouetteArt'
 import { MoteIdentityMotion, type MoteIdentityMotionProps } from './MoteIdentityMotion'
 import { moteExpression } from '../lib/mote-expression'
 
@@ -92,7 +92,7 @@ function SpaceObjectIconContents({ kind, name, manualIcon, workspaceId, folderId
     {kind === 'mote' ? <MoteFace face={manualIcon} expression={expression} /> : <FallbackIcon size={14} />}
   </span>
   if (manualIcon && typeof manualIcon === 'object') {
-    if (kind === 'mote' && manualIcon.kind === 'series' && isBuiltinMoteSilhouetteLocator(manualIcon.source)) {
+    if (kind === 'mote' && manualIcon.kind === 'series' && isBuiltinMoteArticulatedLocator(manualIcon.source)) {
       return <span className="project-rail-row__icon space-object-icon" data-space-icon-kind={kind} data-space-icon-source="silhouette"
         data-space-silhouette={manualIcon.source.entryId} title="Mote avatar" aria-hidden="true">
         <MoteSilhouetteArt id={manualIcon.source.entryId} expression={expression}

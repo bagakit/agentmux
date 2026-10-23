@@ -63,7 +63,7 @@ function createMotionOwner() {
     const nodes = direct ? [direct] : host?.querySelectorAll('.mote-identity-motion') ?? []
     for (const node of nodes) {
       const identity = identities.get(node)
-      if (identity && rigs.has(identity) && node.querySelector('.mote-companion')) {
+      if (identity && rigs.has(identity) && node.querySelector('.mote-companion, .mote-silhouette-art[data-mote-silhouette-interactive]')) {
         pressed.set(identity, event.pointerId); identity.node.dataset.motePress = 'on'
       }
     }
@@ -74,7 +74,7 @@ function createMotionOwner() {
     if (!point) return
     // The set contains only native-visible avatar rigs. Hidden instances are never laid out on pointer input.
     const measured = Array.from(rigs, identity => ({ identity,
-      rect: identity.node.querySelector('.mote-face, .mote-image-follow, .mote-companion')?.getBoundingClientRect() }))
+      rect: identity.node.querySelector('.mote-face, .mote-image-follow, .mote-companion, .mote-silhouette-art[data-mote-silhouette-interactive]')?.getBoundingClientRect() }))
     // Read every active rig before any style/dataset write can invalidate the next rig's layout.
     for (const { identity, rect } of measured) {
       if (!rect || rect.width <= 0 || rect.height <= 0) { reset(identity); continue }
@@ -117,7 +117,7 @@ function createMotionOwner() {
     if (animated) {
       if (!spontaneous.has(identity)) { identity.nextAt = Date.now() + 1800 + Math.random() * 2700; spontaneous.add(identity) }
     } else { spontaneous.delete(identity); clearGesture(identity) }
-    if (enabled && identity.node.querySelector('.mote-face, .mote-image-follow, .mote-companion')) rigs.add(identity)
+    if (enabled && identity.node.querySelector('.mote-face, .mote-image-follow, .mote-companion, .mote-silhouette-art[data-mote-silhouette-interactive]')) rigs.add(identity)
     else { reset(identity); releasePress(identity); rigs.delete(identity) }
   }
   const syncAll = () => { for (const identity of identities.values()) sync(identity); syncPointer(); schedule() }

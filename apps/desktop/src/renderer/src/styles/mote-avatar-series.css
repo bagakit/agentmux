@@ -10,12 +10,12 @@
 .mote-series__selector-row .mote-series__select { flex: 1; min-width: 0; }
 .mote-series__add { width: 34px; height: 34px; flex: none; padding: 0; }
 .mote-series__selector-row .mote-series__refresh { flex: none; min-height: 34px; }
-.mote-series__entries { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); max-height: 148px; overflow-y: auto; overscroll-behavior: contain; padding: 2px; }
+.mote-series__entries { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); max-height: 148px; overflow-y: auto; overscroll-behavior: contain; padding: var(--sp-1); }
 .mote-series__entry { position: relative; display: flex; align-items: center; gap: var(--sp-2); min-width: 0; min-height: 64px; padding: var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius); background: transparent; color: var(--text); text-align: left; cursor: pointer; }
 .mote-series__entry:hover:not(:disabled) { background: var(--surface-2); }
 .mote-series__entry[aria-pressed=true] { border-color: var(--green); background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--green); }
 .mote-series__entry:disabled { cursor: default; opacity: .65; }
-.mote-series__entry > span:not(.mote-series__thumbnail) { display: grid; min-width: 0; gap: 2px; }
+.mote-series__entry > span:not(.mote-series__thumbnail) { display: grid; min-width: 0; gap: var(--sp-1); }
 .mote-series__entry strong { font-weight: 500; font-size: var(--fs-meta); line-height: 1.3; overflow-wrap: anywhere; }
 .mote-series__entry small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.3; }
 .mote-series__check { position: absolute; right: 5px; top: 5px; color: var(--green); }
@@ -42,7 +42,7 @@
 .mote-series__controls label { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
 .mote-series__controls label input[type=range] { flex: 1; min-width: 48px; width: 112px; height: 22px; accent-color: var(--green); cursor: pointer; }
 .mote-series__controls label select { width: 116px; text-transform: capitalize; }
-.mote-series__controls input[type=color] { width: 46px; height: 28px; padding: 2px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); cursor: pointer; }
+.mote-series__controls input[type=color] { width: 46px; height: 28px; padding: var(--sp-1); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); cursor: pointer; }
 .mote-series__controls fieldset { min-width: 0; margin: 0; padding: 0; border: 0; }
 .mote-series__controls legend { margin-bottom: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
 .mote-series__materials { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2); }
@@ -63,7 +63,7 @@
 .mote-series-create__title { margin: 0; font-size: var(--fs-title); line-height: 1.4; font-weight: 620; letter-spacing: -.015em; }
 .mote-series-create__description { margin: var(--sp-2) 0 0; color: var(--text-2); font-size: var(--fs-body); line-height: 1.6; }
 .mote-series-create__steps { list-style: none; counter-reset: series-step; margin: 0; padding: 0; display: grid; gap: var(--sp-4); }
-.mote-series-create__steps li { position: relative; padding-left: 32px; display: grid; gap: var(--sp-1); counter-increment: series-step; }
+.mote-series-create__steps li { position: relative; padding-left: var(--sp-8); display: grid; gap: var(--sp-1); counter-increment: series-step; }
 .mote-series-create__steps li::before { content: counter(series-step); position: absolute; inset: 1px auto auto 0; width: 22px; height: 22px; display: grid; place-items: center; border-radius: 50%; background: var(--surface-3); color: var(--text-2); font-size: var(--fs-meta); }
 .mote-series-create strong { font-size: var(--fs-body); font-weight: 560; }
 .mote-series-create__steps span, .mote-series-create__ready span { font-size: var(--fs-meta); line-height: 1.6; color: var(--text-2); }

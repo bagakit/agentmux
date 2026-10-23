@@ -3,6 +3,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { MOTE_FACE_PARTS, type MoteFace as MoteFaceChoice } from '../../../shared/mote-avatars'
 import { MoteFace } from './MoteFace'
 import { MoteIdentityMotion } from './MoteIdentityMotion'
+import { SpaceObjectIcon } from './SpaceObjectIcon'
 
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 
@@ -26,10 +27,12 @@ const presets: ReadonlyArray<{ id: string; label: string; face: MoteFaceChoice }
 
 function MoteFacePartGlyph({ part, value }: { part: PartKey; value: string }) {
   if (part === 'shape') {
-    return <svg className="mote-face mote-face--part" viewBox="8 12 48 52" aria-hidden="true">
-      {value === 'slim' ? <ellipse cx="32" cy="37" rx="17" ry="21" fill="none" stroke="currentColor" strokeWidth="2.4" />
-        : value === 'diamond' ? <path d="M32 15Q46 15 51 29L48 44Q40 55 32 59Q24 55 16 44L13 29Q18 15 32 15Z" fill="none" stroke="currentColor" strokeWidth="2.4" />
-          : <rect x="12" y="18" width="40" height="36" rx={value === 'round' ? 18 : value === 'soft' ? 13 : 8} fill="none" stroke="currentColor" strokeWidth="2.4" />}
+    return <svg className="mote-face mote-face--part" viewBox="6 6 52 54" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinejoin="round">
+      {value === 'slim' ? <path d="M18 10C22 10.6 25.5 13 28 15.5C30 15 33 14.8 35.5 15C45 15.5 50 23.5 50 35C50 47 42.5 55 32 55C21.5 55 14 47.2 14 35.5C14 30 15.2 25.5 17 22L18 10Z" />
+        : value === 'diamond' ? <path d="M16 10L27.5 15L36 14.2L48 21L52.5 34.5L47.5 47.5L32 56L16.5 47.5L11.5 34.5L15 22Z" />
+          : value === 'square' ? <path d="M14.5 10L26.5 15.5H44C49 15.5 53 19.5 53 24.5V44.5C53 49.8 48.8 54 43.5 54H20.5C15.2 54 11 49.8 11 44.5V24L13.5 19.5Z" />
+            : value === 'round' ? <path d="M15.5 10.2C21 11 25.5 13.2 28.8 16C31 15.4 33.5 15 36 15.2C46.5 15.5 54 23.5 54 34.8C54 46.2 45.2 54 32 54C19 54 10 46.5 10 35.2C10 30 11.4 25.5 13.8 22Z" />
+              : <path d="M14.5 9.8C20.2 10.5 25 13 28.4 16C31.2 15 34.2 14.6 37.5 14.8C48.2 15.2 54 23 54 34.2C54 46 45.2 54 31.8 54C18.5 54 10 46.2 10 35C10 30 11.5 25.5 13.6 22Z" />}
     </svg>
   }
   if (part === 'eyes') {
@@ -93,10 +96,11 @@ function MoteFacePartGlyph({ part, value }: { part: PartKey; value: string }) {
   </svg>
 }
 
-export function MoteFaceEditor({ face, disabled, onChange, visible = true }: { face: MoteFaceChoice; visible?: boolean; disabled: boolean; onChange(face: MoteFaceChoice): void }) {
+export function MoteFaceEditor({ face, automatic = false, disabled, onChange, visible = true }: {
+  face: MoteFaceChoice; automatic?: boolean | undefined; visible?: boolean; disabled: boolean; onChange(face: MoteFaceChoice): void
+}) {
   const [group, setGroup] = useState<PartGroup>('all')
   const shuffle = () => {
-    if (disabled) return
     const pick = <T extends string>(items: readonly T[]): T => items[Math.floor(Math.random() * items.length)]!
     onChange({
       kind: 'face',
@@ -112,35 +116,44 @@ export function MoteFaceEditor({ face, disabled, onChange, visible = true }: { f
   }
   return <div className="mote-face-editor" hidden={!visible}>
     <div className="mote-avatar-stage">
-      <div className="mote-face-editor__preview" role="img" aria-label="Your Mote face preview"><MoteIdentityMotion visible={visible}>{expression => <MoteFace face={face} expression={expression} />}</MoteIdentityMotion></div>
+      {automatic ? <div className="mote-avatar-preview" role="img" aria-label="Your Mote automatic avatar preview">
+        <SpaceObjectIcon kind="mote" name="Mote" manualIcon={null} visible={visible} />
+      </div> : <div className="mote-face-editor__preview" role="img" aria-label="Your Mote face preview">
+        <MoteIdentityMotion visible={visible}>{expression => <MoteFace face={face} expression={expression} />}</MoteIdentityMotion>
+      </div>}
       <div className="mote-avatar-stage__aside">
         <div className="mote-avatar-stage__header">
-          <span className="mote-avatar-stage__source"><strong>{`Face · ${face.palette}`}</strong><small>2D Face</small></span>
-          <span role="button" tabIndex={disabled ? -1 : 0} aria-disabled={disabled} aria-label="Shuffle face" className="small-button mote-avatar-stage__shuffle"
-            onClick={shuffle} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); shuffle() } }}>Shuffle</span>
+          <span className="mote-avatar-stage__source">
+            <strong>{automatic ? 'Automatic companion' : `Face · ${face.palette}`}</strong>
+            <small>{automatic ? 'Default Mote' : '2D Face'}</small>
+          </span>
+          <button type="button" disabled={disabled} aria-label="Shuffle face" className="small-button mote-avatar-stage__shuffle" onClick={shuffle}>Shuffle</button>
         </div>
         <div className="mote-avatar-stage__sizes" aria-label="Actual face sizes">
           <div className="mote-avatar-stage__chip">
-            <span className="mote-avatar-stage__slot mote-avatar-stage__slot--45" aria-hidden="true"><MoteFace face={face} rendering="static" /></span>
+            <span className="mote-avatar-stage__slot mote-avatar-stage__slot--45" aria-hidden="true">
+              {automatic ? <SpaceObjectIcon kind="mote" name="Mote" manualIcon={null} visible={false} /> : <MoteFace face={face} rendering="static" />}
+            </span>
             <span className="mote-avatar-stage__chip-meta"><strong>45 px</strong><small>Directory</small></span>
           </div>
           <div className="mote-avatar-stage__chip">
-            <span className="mote-avatar-stage__slot mote-avatar-stage__slot--24" aria-hidden="true"><MoteFace face={face} rendering="static" /></span>
+            <span className="mote-avatar-stage__slot mote-avatar-stage__slot--24" aria-hidden="true">
+              {automatic ? <SpaceObjectIcon kind="mote" name="Mote" manualIcon={null} visible={false} /> : <MoteFace face={face} rendering="static" />}
+            </span>
             <span className="mote-avatar-stage__chip-meta"><strong>24 px</strong><small>Chat</small></span>
           </div>
         </div>
-        <div className="mote-avatar-stage__hint"><span>Move pointer to preview gaze · Articulated 2D rig</span></div>
+        <div className="mote-avatar-stage__hint"><span>{automatic ? 'Automatic default staged · Pick any part to customize' : 'Move pointer to preview gaze · Articulated 2D rig'}</span></div>
       </div>
     </div>
     <div className="mote-face-editor__toolbar">
-      <div className="mote-face-editor__groups" role="tablist" aria-label="Face part groups">
-        {groupTabs.map(tab => <span key={tab.id} role="tab" tabIndex={0} aria-selected={group === tab.id} className="mote-face-editor__group-tab"
-          onClick={() => setGroup(tab.id)} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); setGroup(tab.id) } }}>{tab.label}</span>)}
+      <div className="mote-face-editor__groups" role="group" aria-label="Face part groups">
+        {groupTabs.map(tab => <button key={tab.id} type="button" disabled={disabled} aria-pressed={group === tab.id} className="mote-face-editor__group-tab"
+          onClick={() => setGroup(tab.id)}>{tab.label}</button>)}
       </div>
       <div className="mote-face-editor__presets" role="group" aria-label="Face presets">
-        {presets.map(preset => <span key={preset.id} role="button" tabIndex={disabled ? -1 : 0} aria-disabled={disabled} className="mote-face-editor__preset"
-          onClick={() => { if (!disabled) onChange({ ...preset.face }) }}
-          onKeyDown={event => { if (!disabled && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); onChange({ ...preset.face }) } }}>{preset.label}</span>)}
+        {presets.map(preset => <button key={preset.id} type="button" disabled={disabled} className="mote-face-editor__preset"
+          onClick={() => onChange({ ...preset.face })}>{preset.label}</button>)}
       </div>
     </div>
     {(Object.keys(MOTE_FACE_PARTS) as PartKey[]).map(part => <fieldset key={part} data-mote-face-part={part} hidden={group !== 'all' && partGroups[part] !== group}>
