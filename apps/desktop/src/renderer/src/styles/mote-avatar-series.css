@@ -1,4 +1,4 @@
-.space-icon-picker.space-icon-picker--series { width: min(700px, calc(100vw - 24px)); }
+.space-icon-picker.space-icon-picker--series { width: min(560px, calc(100vw - 24px)); }
 .space-icon-picker .mote-avatar-source--series { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .mote-series[hidden] { display: none; }
 .mote-series { display: grid; gap: var(--sp-4); min-width: 0; container-type: inline-size; }

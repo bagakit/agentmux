@@ -30,7 +30,6 @@ function freezeSeriesSave(request: MoteAvatarSave): MoteAvatarSave {
 }
 
 const ThemeObjectProfileIcon = semanticIconComponent('object.profile')
-const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeObjectShapesIcon = semanticIconComponent('object.shapes')
 const ThemeActionAddImageIcon = semanticIconComponent('action.add-image')
 const ThemeActionRestoreDefaultsIcon = semanticIconComponent('action.restore-defaults')
@@ -86,7 +85,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
     const unresolved = target?.avatarTarget ? retainedSeriesRequest(target) : null
     setSeriesAttempt(unresolved ? { request: unresolved, state: 'unknown', issue: 'The original save is still unconfirmed.' } : null)
     if (unresolved) { setSeriesSeed(unresolved); setSeriesImage(unresolved.pngDataUrl) }
-    setMode(unresolved || target?.avatarTarget && series ? 'series' : target?.avatarTarget && (isMoteFace(saved) || saved === null) ? 'face' : 'alternative')
+    setMode(unresolved || target?.avatarTarget && series ? 'series' : target?.avatarTarget && isMoteFace(saved) ? 'face' : 'alternative')
     setPreview(null); setPreviewReady(false); setPreparing(false); setBusy(false); setError(null)
     if (target?.avatarTarget) void readAvatarBaseline(target)
     return () => { editor.current = {}; inputRequest.current = {}; avatarReadRequest.current = {} }
@@ -132,7 +131,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
           const choice = value.choice as SpaceIconChoice | null
           const face = isMoteFace(choice) ? choice : { ...DEFAULT_MOTE_FACE }
           setDraft(choice); setFaceDraft(face); setAlternativeDraft(isMoteFace(choice) || series ? null : choice)
-          setMode(series ? 'series' : isMoteFace(choice) || choice === null ? 'face' : 'alternative')
+          setMode(series ? 'series' : isMoteFace(choice) ? 'face' : 'alternative')
         }
       }
       if (submitted && value.operation?.phase === 'published' && value.operation.durability === 'confirmed') {
@@ -264,6 +263,15 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
       : editingSeries && seriesAttempt?.state === 'unsent' ? 'Save not sent'
         : editingSeries && seriesStorageIssue ? 'Request unconfirmed'
           : error && errorStep === 'save' ? 'Retry saving' : supportsImages ? editingFace ? 'Save face' : 'Save avatar' : 'Save icon'
+  const stageSourceTitle = preview ? 'Image crop' : alternativeDraft === null ? 'Automatic companion'
+    : typeof alternativeDraft === 'string' && alternativeDraft in SPACE_ICON_CATALOG ? SPACE_ICON_CATALOG[alternativeDraft].label : 'Saved image'
+  const stageSourceTag = preview ? 'PNG · 256 px' : alternativeDraft === null ? 'Default Mote'
+    : typeof alternativeDraft === 'string' ? 'Symbol icon' : 'Mote avatar'
+  const uploadControl = supportsImages && target ? <label className="small-button mote-avatar-file"><ThemeActionAddImageIcon size={14} />Upload image
+    <input aria-label={target.avatarTarget ? 'Choose Mote image' : `Choose image for ${target.name}`} type="file" accept="image/png,image/jpeg" disabled={busy}
+      onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void prepare(file) }} />
+    <span>PNG or JPG · up to 8 MB</span>
+  </label> : null
   return <Dialog.Root recoveryCloseDisabled={busy} open={target !== null} onOpenChange={open => { if (!open && !busy) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}>
       <Dialog.Overlay className="space-icon-picker__overlay dialog-scrim" />
@@ -283,41 +291,60 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
         {supportsImages && target ? <>
           {target.avatarTarget ? <><div className="mote-avatar-source mote-avatar-source--series" role="group" aria-label="Mote avatar style">
             <LiquidSelectionSurface selected={mode} active={target !== null} targetAttribute="data-avatar-source" />
-            <button type="button" data-avatar-source="face" aria-pressed={editingFace} disabled={busy} onClick={() => source('face')}><ThemeObjectProfileIcon size={15} />Make a face<ThemeStatusSelectedIcon size={12} className="mote-avatar-selection-mark" aria-hidden="true" /></button>
-            <button type="button" data-avatar-source="alternative" aria-pressed={mode === 'alternative'} disabled={busy} onClick={() => source('alternative')}><ThemeObjectShapesIcon size={15} />Icon or image<ThemeStatusSelectedIcon size={12} className="mote-avatar-selection-mark" aria-hidden="true" /></button>
-            <button type="button" data-avatar-source="series" aria-pressed={editingSeries} disabled={busy} onClick={() => source('series')}><ThemeObjectLibraryIcon size={15} />Series<ThemeStatusSelectedIcon size={12} className="mote-avatar-selection-mark" aria-hidden="true" /></button>
+            <button type="button" data-avatar-source="alternative" aria-pressed={mode === 'alternative'} disabled={busy} onClick={() => source('alternative')}><ThemeObjectShapesIcon size={15} />Icon or image</button>
+            <button type="button" data-avatar-source="face" aria-pressed={editingFace} disabled={busy} onClick={() => source('face')}><ThemeObjectProfileIcon size={15} />Make a face</button>
+            <button type="button" data-avatar-source="series" aria-pressed={editingSeries} disabled={busy} onClick={() => source('series')}><ThemeObjectLibraryIcon size={15} />Series</button>
           </div>
           <MoteFaceEditor face={faceDraft} visible={editingFace} disabled={busy} onChange={select} />
           </> : null}
           {target.avatarTarget && seriesSeedReady ? <MoteAvatarSeriesEditor key={targetIdentity} targetKey={target.key} visible={editingSeries} disabled={busy}
             initialChoice={seriesSeed} initialImage={seriesImage} savedImageConfirmed={seriesImageConfirmed} onDraft={setSeriesDraft} onPreparing={setSeriesPreparing} /> : null}
           <div className="mote-avatar-alternative" hidden={mode !== 'alternative'}>
-            {preview ? <MoteAvatarCrop key={preview.revision} source={preview.dataUrl} canvasRef={canvas} disabled={busy || preparing}
-              onReady={() => setPreviewReady(true)} onError={cause => { setErrorStep('prepare'); setError(cause) }} /> : <div className="mote-avatar-preview" role="img" aria-label={`Your ${target.kind} avatar preview`}>
-              <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={alternativeDraft} imageTarget={target.imageTarget} avatarWorkspaceId={target.avatarTarget?.workspaceId}
-                avatarTopicId={target.avatarTarget?.topicId} avatarObjectKey={target.key} />
-            </div>}
+            <div className="mote-avatar-stage">
+              {preview ? <MoteAvatarCrop key={preview.revision} source={preview.dataUrl} canvasRef={canvas} disabled={busy || preparing}
+                onReady={() => setPreviewReady(true)} onError={cause => { setErrorStep('prepare'); setError(cause) }} /> : <div className="mote-avatar-preview" role="img" aria-label={`Your ${target.kind} avatar preview`}>
+                <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={alternativeDraft} imageTarget={target.imageTarget} avatarWorkspaceId={target.avatarTarget?.workspaceId}
+                  avatarTopicId={target.avatarTarget?.topicId} avatarObjectKey={target.key} />
+              </div>}
+              {target.avatarTarget ? <div className="mote-avatar-stage__aside">
+                <div className="mote-avatar-stage__header">
+                  <span className="mote-avatar-stage__source"><strong>{stageSourceTitle}</strong><small>{stageSourceTag}</small></span>
+                </div>
+                <div className="mote-avatar-stage__sizes" aria-label="Actual avatar sizes">
+                  <div className="mote-avatar-stage__chip">
+                    <span className="mote-avatar-stage__slot mote-avatar-stage__slot--45" aria-hidden="true">
+                      <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={alternativeDraft} avatarWorkspaceId={target.avatarTarget.workspaceId}
+                        avatarTopicId={target.avatarTarget.topicId} avatarObjectKey={target.key} visible={false} />
+                    </span>
+                    <span className="mote-avatar-stage__chip-meta"><strong>45 px</strong><small>Directory</small></span>
+                  </div>
+                  <div className="mote-avatar-stage__chip">
+                    <span className="mote-avatar-stage__slot mote-avatar-stage__slot--24" aria-hidden="true">
+                      <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={alternativeDraft} avatarWorkspaceId={target.avatarTarget.workspaceId}
+                        avatarTopicId={target.avatarTarget.topicId} avatarObjectKey={target.key} visible={false} />
+                    </span>
+                    <span className="mote-avatar-stage__chip-meta"><strong>24 px</strong><small>Chat</small></span>
+                  </div>
+                </div>
+              </div> : null}
+            </div>
             {target.avatarTarget ? <MoteAvatarImageGallery key={targetIdentity} visible={mode === 'alternative'} disabled={busy}
-              selectedImage={preview?.dataUrl ?? null} onChoose={dataUrl => {
+              selectedImage={preview?.dataUrl ?? null} uploadAction={uploadControl} onChoose={dataUrl => {
                 localIntent.current = true; inputRequest.current = {}; setPreparing(false); setError(null); setPreviewReady(false)
                 setPreview(previous => ({ dataUrl, revision: (previous?.revision ?? 0) + 1 }))
-              }} /> : null}
-            <label className="small-button mote-avatar-file"><ThemeActionAddImageIcon size={15} />Upload image
-              <input aria-label={target.avatarTarget ? 'Choose Mote image' : `Choose image for ${target.name}`}  type="file" accept="image/png,image/jpeg" disabled={busy}
-                onChange={event => { const file = event.currentTarget.files?.[0]; event.currentTarget.value = ''; if (file) void prepare(file) }} />
-              <span>PNG or JPG · up to 8 MB</span>
-            </label>
+              }} /> : uploadControl}
             {preparing ? <p className="space-icon-picker__description" role="status">Preparing image…</p> : null}
           </div>
         </> : null}
-        {mode === 'alternative' ? <div className="space-icon-picker__choices" role="group" aria-label="Icon choices">
-          {(Object.entries(SPACE_ICON_CATALOG) as Array<[SpaceIconId, typeof SPACE_ICON_CATALOG[SpaceIconId]]>).map(([id, { Icon, label }]) =>
-            <button key={id} type="button" className="space-icon-picker__choice" aria-label={`${label} icon`}
-              title={label} aria-pressed={!preview && draft === id} data-space-icon-choice={id} disabled={busy}
-              onClick={() => select(id)}><Icon size={18} /></button>)}
+        {mode === 'alternative' ? <div className="space-icon-picker__symbols">
+          {supportsImages ? <span className="space-icon-picker__description">Symbol icons</span> : null}
+          <div className="space-icon-picker__choices" role="group" aria-label="Icon choices">
+            {(Object.entries(SPACE_ICON_CATALOG) as Array<[SpaceIconId, typeof SPACE_ICON_CATALOG[SpaceIconId]]>).map(([id, { Icon, label }]) =>
+              <button key={id} type="button" className="space-icon-picker__choice" aria-label={`${label} icon`}
+                title={label} aria-pressed={!preview && draft === id} data-space-icon-choice={id} disabled={busy}
+                onClick={() => select(id)}><Icon size={18} /></button>)}
+          </div>
         </div> : null}
-        <button type="button" className="small-button space-icon-picker__automatic" aria-pressed={mode === 'alternative' && !preview && draft === null}
-          disabled={busy} onClick={() => { select(null); setMode('alternative') }}><ThemeActionRestoreDefaultsIcon size={13} />Restore automatic</button>
         {error ? <p className="space-icon-picker__error" role="alert">{errorStep === 'save' ? 'Saving is unconfirmed. Your choice is kept; review the current avatar before saving again.' : 'Image preparation failed. Your current avatar is unchanged; choose image again.'} {error}</p> : null}
         {target?.avatarTarget && avatarReading ? <p className="space-icon-picker__description" role="status">Reading current avatar…</p> : null}
         {target?.avatarTarget && (avatarReadIssue || seriesAttempt || seriesStorageIssue) ? <div className="mote-series__notice" role="status" data-avatar-save-notice>
@@ -332,6 +359,8 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
           </div>
         </div> : null}
         <footer>
+          <button type="button" className="small-button space-icon-picker__automatic" aria-pressed={!editingSeries && !preview && draft === null}
+            disabled={busy} onClick={() => { select(null); if (editingSeries) setMode('alternative') }}><ThemeActionRestoreDefaultsIcon size={13} />Restore automatic</button>
           <button type="button" className="small-button" disabled={busy} onClick={onClose}>{seriesAttempt || seriesStorageIssue || error && errorStep === 'save' ? 'Close' : 'Cancel'}</button>
           <button type="button" className={`${supportsImages ? 'primary-button' : 'small-button'} space-icon-picker__save`} aria-label={saveButtonLabel} disabled={busy || preparing || seriesPreparing || Boolean(seriesAttempt && seriesAttempt.state !== 'saved' && (editingSeries || seriesAttempt.state !== 'unsent')) || Boolean(editingSeries && (!avatarBaseline || avatarReading || !seriesDraft || seriesStorageIssue)) || Boolean(!editingFace && preview && !previewReady)} onClick={() => void save()}>
             {saveButtonLabel}
