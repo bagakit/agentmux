@@ -27,7 +27,7 @@ if (costPairs) { assert.equal(anchorAttempts, 0); assert.deepEqual(scenes, ['den
 const evidence = path.resolve(args.find(value => !value.startsWith('--')) ?? path.join(root, '.tmp/conversation-progressive-reading-' + crypto.randomUUID()))
 const require = createRequire(path.join(root, 'apps/desktop/package.json')), { build } = await import(pathToFileURL(require.resolve('vite')).href)
 const electron = process.env.AGENTMUX_PROOF_ELECTRON_PATH ?? require('electron')
-const privateRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'amux-r-'))
+const privateRoot = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'amux-r-')))
 const hash = value => createHash('sha256').update(value).digest('hex')
 const files = async directory => (await Promise.all((await fs.readdir(directory, { withFileTypes: true })).map(entry => entry.isDirectory() ? files(path.join(directory, entry.name)) : [path.join(directory, entry.name)]))).flat()
 const inputPaths = [...await files(fixture), path.join(import.meta.dirname, 'verify-conversation-progressive-reading.mjs'),
