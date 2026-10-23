@@ -6,6 +6,8 @@ import { URL as NodeURL } from 'node:url'
 import type { AgentSessionUserMessage, AgentTimelineItem } from '@agentmux/core'
 import type { AgentMuxClient } from '../../../packages/core/src/client'
 import { projectSessionUserMessages } from '@agentmux/core'
+import { projectSessionInputs } from '@agentmux/core/conversation'
+import { inputMailboxItemKey } from '@agentmux/client-ui/use-agent-input-mailbox'
 import { channelMetadataFixture, actorSubject, groupSubject } from '../../../packages/connectors/test/fixtures/channel-metadata.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc'
 import { ChannelMetadataPanel } from '../src/renderer/src/components/settings/ChannelMetadataPanel'
@@ -22,6 +24,7 @@ import { desktopConversationReadBridge } from './helpers/conversation-read-bridg
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { activityReadingProps } from './helpers/activity-reading-props'
 import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
+import { projectMailboxInputs } from '../src/renderer/src/lib/mailbox-input-projection'
 
 const bridge = vi.hoisted(() => ({ api: null as any, handlers: new Map<string, (...args: any[]) => Promise<any>>(), listeners: new Map<string, Set<(...args: any[]) => void>>() }))
 // This reader/metadata test retains the real Terminal slot. Chromium/xterm paint
@@ -58,7 +61,12 @@ beforeEach(async () => {
   await f.submit('ui-profile')
   await vi.waitFor(async () => expect((await f.get()).entry.observation.profile?.name).toBe('Original native person'))
   await desktopConversationReadBridge(f, cleanup, () => [...f.coreClients(), { hostId: 'other-host', client: f.client }])
-  vi.spyOn(api.sessions, 'inputMailbox').mockImplementation((reference, input = {}) => f.sdk.call('agent.input.ls', { ...input, ...reference }))
+  vi.spyOn(api.sessions, 'inputMailbox').mockImplementation(async (reference, input = {}) => {
+    // RuntimeController validates the public route and returns the inner UI page.
+    const { hostId, ...page } = await f.sdk.call('agent.input.ls', { ...input, ...reference })
+    expect(hostId).toBe(reference.hostId)
+    return page
+  })
   vi.spyOn(api.sessions, 'listMessages').mockImplementation((reference, input) => f.sdk.call('message.ls',
     { ...input, hostId: reference.hostId, participantSessionId: reference.agentSessionId }))
   vi.spyOn(api.sessions, 'readHistory').mockImplementation((reference, input, context) => f.sdk.call('agent.history',
@@ -225,6 +233,21 @@ it('Terminal Mailbox reads its visible original authors and the Desktop history 
     createdAt: original.recordedAt! + 1, updatedAt: original.recordedAt! + 1 }
   await publishOriginal(record)
   const session = originalSession('terminal')
+  const originalMailbox = await f.sdk.call('agent.input.ls', { hostId: session.control.hostId, agentSessionId: session.id, limit: 25, maxBytes: 128 * 1024 })
+  expect(originalMailbox.hostId).toBe(session.control.hostId)
+  expect(originalMailbox.budgetBytes).toBe(128 * 1024)
+  const originalInputs = originalMailbox.items.flatMap(entry => entry.kind === 'item' ? [entry.item] : [])
+  expect(originalInputs.length).toBe(originalMailbox.items.length)
+  const sourceHostId = original.sourceRecord?.record.hostId
+  expect(sourceHostId, 'The original record supplies its source Host independently of the SDK route').toBeDefined()
+  if (!sourceHostId) throw Error('The original external source Host is required')
+  const groups = projectSessionInputs({ hostId: session.control.hostId, sourceHostId,
+    agentSessionId: session.id, messages: await originalMessages(), mailbox: originalInputs })
+  const journal = projectMailboxInputs({ hostId: session.control.hostId, sourceHostId,
+    groups, queued: [] }).journalRows.find(row => row.group.messages.some(message => message.rawId === original.rawId))
+  expect(journal, 'The original external input has its actual journal group').toBeDefined()
+  expect(journal!.group.author).toEqual(original.author)
+  expect(journal!.key).toBe(inputMailboxItemKey(session.control.hostId, journal!.item))
   const frame = (visible: boolean) => <SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible={visible}
     linkOrigin={{ workspaceId: 'workspace', tabGroupId: 'test-group', tabId: 'tab', regionId: 'original-region' }} />
   await dom.render(frame(true))
@@ -234,6 +257,13 @@ it('Terminal Mailbox reads its visible original authors and the Desktop history 
   expect(inspectConversationConsumers(session.control).consumers).toHaveLength(0)
   expect(actorReads()).toHaveLength(0)
   const panel = await openInputs()
+  await vi.waitFor(() => {
+    const journalRow = [...panel.querySelectorAll<HTMLButtonElement>('.composer-mailbox__row')].find(node => node.dataset.recordKey === journal!.key)
+    expect(journalRow, 'The real Mailbox must accept the journal page, not only its captured history').toBeDefined()
+    expect(journalRow!.querySelector('strong')?.textContent).toBe('Original native person')
+    expect(journalRow!.querySelector('img')?.getAttribute('src')).toBe('https://cdn.example/person.png')
+    expect(journalRow!.querySelector('img')?.getAttribute('width')).toBe('18')
+  })
   let row: HTMLButtonElement | null = null
   await vi.waitFor(() => {
     row = panel.querySelector<HTMLButtonElement>(`.composer-mailbox__row[data-record-key="timeline:${record.id}"]`)
@@ -275,7 +305,7 @@ it('Terminal Mailbox reads its visible original authors and the Desktop history 
   await writeFile('.local/channel-protocol/T-005/public-mailbox-scene.json', JSON.stringify({
     control: session.control, sourceHostId: timeline.sourceHostId, timeline,
     messages: projectSessionUserMessages({ agentSessionId: session.id, timeline }),
-    mailbox: await f.sdk.call('agent.input.ls', { hostId: session.control.hostId, agentSessionId: session.id }),
+    mailbox: await f.sdk.call('agent.input.ls', { hostId: session.control.hostId, agentSessionId: session.id, limit: 25, maxBytes: 128 * 1024 }),
     actor: await f.get(), selectedRecordId: record.id
   }, null, 2))
 })
