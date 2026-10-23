@@ -1,10 +1,9 @@
+import { AgentSessionRecoveryReconciler } from './reconciliation.js'
 import { assertAgentPromptSize } from '../agent-runtime-helpers.js'
-import { parseTerminalFrontendObservation, type AgentTerminalFrontendObservation, type AgentTerminalFrontendRecoveryRequest } from '../agent-terminal-frontend.js'
-import { observePromptInput } from '../prompt-submission.js'
+import { parseTerminalFrontendObservation } from '../agent-terminal-frontend.js'
 import { parseAgentRestartInput, type AgentMuxAgentRestartIdentity, type AgentMuxAgentRestartInput, type AgentMuxAgentRestartInspection } from './restart-contract.js'
 import { AgentSessionContinuitySupervisor } from './supervisor.js'
 import { inspectAgentSessionInterruption } from './interruption.js'
-import { observeResumedTurnInterruption } from './resumed-interruption.js'
 import { AgentSessionContinuityInputs, createContinuityInputDelivery, prepareContinuityLaunchInput, bindContinuityLaunchInput } from './input.js'
 import { executorUnavailableError } from '../executable-probe.js'
 import { unconfirmedExecutableObservation } from '../executable-observation.js'
@@ -57,31 +56,9 @@ export class AgentSessionRecoveryService {
   private readonly executingReopens = new Set<string>()
   private readonly reopenSettlements = new Map<string, Promise<void>>()
   private readonly continuitySupervisor: AgentSessionContinuitySupervisor
-  private readonly resumedInterruptionReads = new Map<string, Promise<AgentMuxStoredAgentSession>>()
-  private readonly providerReads = new Set<AbortController>()
-  private readonly initialInputContinuations = new Map<string, Promise<void>>()
-  private reopensDisposed = false
+  private readonly lifetime = new AbortController()
+  private readonly reconciler: AgentSessionRecoveryReconciler
   constructor(private readonly ports: AgentSessionRecoveryPorts) {
-    this.continuitySupervisor = new AgentSessionContinuitySupervisor({
-      read: async id => { const session = await this.ports.sessions.store.readMetadata(id); return session ? await this.observeResumedInterruption(session) : null },
-      lifecycle: id => this.ports.sessions.store.readLifecycleReservation(id),
-      // This Session came from the original Store's unique Run binding, not this observer's cache.
-      status: async session => { const run = await this.ports.runtime.kernel.status(session.run.runId); this.ports.runtime.assertAgentRun(session, run, [session]); return run },
-      watch: (run, changed) => this.ports.runtime.kernel.observeLifecycle(run, changed),
-      frontend: async session => {
-        await this.ports.terminal.ensureTerminalFrontendObservation(session)
-        return this.ports.terminal.readFrontendObservation(session.agentSessionId)
-      },
-      update: async (session, change) => {
-        const updated = await this.ports.sessions.updateExactAgentSession(session.agentSessionId, session.run, change)
-        this.ports.events.publishSession(updated); return updated
-      },
-      perform: (input, intentOperationId, inputContextSource, captured) => this.performAgentContinuity(input, intentOperationId, inputContextSource, captured),
-      failed: (agentSessionId, error, run) => this.ports.events.publisher.publish({ type: 'agent-error', agentSessionId,
-        code: 'AGENT_CONTINUITY_OBSERVATION_UNCONFIRMED', message: `Original recovery observation is unconfirmed. The Session, Run and input are retained. ${error instanceof Error ? error.message : String(error)}`,
-        evidence: { source: 'agentmux', observedAt: Date.now(), ...(run ? { run } : {}) } })
-    })
-
     this.continuityInputs = new AgentSessionContinuityInputs({ providers: this.ports.providers.providers,
       read: id => this.ports.sessions.registry.get(id),
       status: async session => { const run = await this.ports.runtime.kernel.status(session.run.runId); this.ports.runtime.assertAgentRun(session, run); return run },
@@ -115,6 +92,26 @@ export class AgentSessionRecoveryService {
       failed: (id, error) => this.ports.events.publisher.publish({ type: 'agent-error', agentSessionId: id, code: 'CONTINUITY_INPUT_UNCONFIRMED',
         message: `Recovery input observation is unconfirmed. The original plan and healthy Agent remain available. Inspect or recover the same Session to rejoin. ${error instanceof Error ? error.message : String(error)}`,
         evidence: { source: 'agentmux', observedAt: Date.now() } })
+    })
+    this.reconciler = new AgentSessionRecoveryReconciler(this.ports, this.continuityInputs, this.lifetime.signal)
+    this.continuitySupervisor = new AgentSessionContinuitySupervisor({
+      read: async id => { const session = await this.ports.sessions.store.readMetadata(id); return session ? await this.reconciler.observeResumedInterruption(session) : null },
+      lifecycle: id => this.ports.sessions.store.readLifecycleReservation(id),
+      // This Session came from the original Store's unique Run binding, not this observer's cache.
+      status: async session => { const run = await this.ports.runtime.kernel.status(session.run.runId); this.ports.runtime.assertAgentRun(session, run, [session]); return run },
+      watch: (run, changed) => this.ports.runtime.kernel.observeLifecycle(run, changed),
+      frontend: async session => {
+        await this.ports.terminal.ensureTerminalFrontendObservation(session)
+        return this.ports.terminal.readFrontendObservation(session.agentSessionId)
+      },
+      update: async (session, change) => {
+        const updated = await this.ports.sessions.updateExactAgentSession(session.agentSessionId, session.run, change)
+        this.ports.events.publishSession(updated); return updated
+      },
+      perform: (input, intentOperationId, inputContextSource, captured) => this.performAgentContinuity(input, intentOperationId, inputContextSource, captured),
+      failed: (agentSessionId, error, run) => this.ports.events.publisher.publish({ type: 'agent-error', agentSessionId,
+        code: 'AGENT_CONTINUITY_OBSERVATION_UNCONFIRMED', message: `Original recovery observation is unconfirmed. The Session, Run and input are retained. ${error instanceof Error ? error.message : String(error)}`,
+        evidence: { source: 'agentmux', observedAt: Date.now(), ...(run ? { run } : {}) } })
     })
     this.continuityInputsUnsubscribe = this.ports.events.publisher.onStatusEvent(event => {
       if (event.type === 'agent-session') this.continuityInputs.observe(this.ports.sessions.registry.get(event.session.agentSessionId))
@@ -286,7 +283,7 @@ export class AgentSessionRecoveryService {
 
   async restartAgent(value: AgentMuxAgentRestartInput): Promise<AgentMuxAgentSession> {
     const input = parseAgentRestartInput(value)
-    if (this.reopensDisposed) throw new AgentMuxError('This restart owner has been disposed. Use the current Core owner and the original operation.', 'AGENT_RESTART_OWNER_DISPOSED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+    if (this.lifetime.signal.aborted) throw new AgentMuxError('This restart owner has been disposed. Use the current Core owner and the original operation.', 'AGENT_RESTART_OWNER_DISPOSED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
     this.ports.connection.requireConnected()
     const operation = agentLifecycleOperationIdentity('restart', input.agentSessionId, input.operationId)
     let digest = agentCreationIntentDigest({ ...input, action: 'restart' })
@@ -419,7 +416,7 @@ export class AgentSessionRecoveryService {
         if (prior.newRun && sameRun(prior.newRun, canonical.run) && prior.kind === 'resumed') {
           await this.ports.sessions.registry.refresh(input.agentSessionId)
           const restored = prior.launchInput?.delivery === 'post-launch'
-            ? await this.settleContinuityPostLaunchInput(this.ports.sessions.registry.get(input.agentSessionId), input.operationId) : this.ports.sessions.registry.get(input.agentSessionId)
+            ? await this.reconciler.settleContinuityPostLaunchInput(this.ports.sessions.registry.get(input.agentSessionId), input.operationId) : this.ports.sessions.registry.get(input.agentSessionId)
           return this.ports.events.projectSession(restored)
         }
         if (reservation?.preparedSession && sameRun(reservation.expectedRun, canonical.run)) {
@@ -435,7 +432,7 @@ export class AgentSessionRecoveryService {
   }
 
   async reopenAgent(input: AgentMuxAgentReopenInput): Promise<AgentMuxAgentSession> {
-    if (this.reopensDisposed) throw new AgentMuxError('This continue owner has been disposed. Use the current Core client.', 'AGENT_REOPEN_OWNER_DISPOSED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+    if (this.lifetime.signal.aborted) throw new AgentMuxError('This continue owner has been disposed. Use the current Core client.', 'AGENT_REOPEN_OWNER_DISPOSED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
     const fields = ['agentSessionId', 'expectedRetiredAt', 'operationId', 'args', 'env', 'commandOverride', 'launchOptions', 'cols', 'rows']
     if (!input || typeof input !== 'object' || Object.keys(input).some(key => !fields.includes(key)) ||
       !Number.isSafeInteger(input.expectedRetiredAt) || input.expectedRetiredAt < 0 ||
@@ -461,7 +458,7 @@ export class AgentSessionRecoveryService {
   }
 
   async reconcileAgentReopen(input: Pick<AgentMuxAgentReopenInput, 'agentSessionId' | 'expectedRetiredAt' | 'operationId'>): Promise<AgentMuxAgentSession> {
-    if (this.reopensDisposed) throw this.reopenUnconfirmed('This continue owner has been disposed. Confirm the original operation through the current Core client.')
+    if (this.lifetime.signal.aborted) throw this.reopenUnconfirmed('This continue owner has been disposed. Confirm the original operation through the current Core client.')
     this.ports.connection.requireConnected()
     if (!input || typeof input !== 'object' || Object.keys(input).some(key => !['agentSessionId', 'expectedRetiredAt', 'operationId'].includes(key)) ||
       typeof input.agentSessionId !== 'string' || !input.agentSessionId || !Number.isSafeInteger(input.expectedRetiredAt) || input.expectedRetiredAt < 0) {
@@ -737,7 +734,7 @@ export class AgentSessionRecoveryService {
         reservation = await this.ports.sessions.registry.prepareReopen(reservation, preparedSession)
         this.ports.hooks.retainBinding(lifecycleOperationId, hookBinding)
       }
-      if (reopening && this.reopensDisposed) throw new AgentMuxError('Continue owner was disposed before dispatch.', 'AGENT_REOPEN_OWNER_DISPOSED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
+      if (reopening && this.lifetime.signal.aborted) throw new AgentMuxError('Continue owner was disposed before dispatch.', 'AGENT_REOPEN_OWNER_DISPOSED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
       // The Provider's old turn belongs to the Run that just ended, even when its
       // transcript has no native completion/abort. Freeze it before the new writer
       // starts; an unknown observation never prevents healthy native restoration.
@@ -999,7 +996,7 @@ export class AgentSessionRecoveryService {
       // available when input confirmation fails; the retained history must not claim it was sent.
       let promptConfirmed = false
       if (continuity?.launchInput?.delivery === 'post-launch') {
-        readySession = await this.settleContinuityPostLaunchInput(readySession, input.operationId)
+        readySession = await this.reconciler.settleContinuityPostLaunchInput(readySession, input.operationId)
         promptConfirmed = ['terminal-confirmed', 'native-admitted'].includes(readySession.continuityOperations?.[input.operationId]?.launchInput?.state ?? '')
       } else promptConfirmed = await this.ports.input.deliverPostLaunchPrompt(
         provider, readySession, run, lifecycleOperationId, deferredResumePrompt, continuity?.launchInput?.message ?? message,
@@ -1098,171 +1095,13 @@ export class AgentSessionRecoveryService {
       throw error
     }
     const carried = prepared.continuity && restored.continuityOperations?.[prepared.continuity.operationId]?.launchInput
-    if (carried?.delivery === 'post-launch' && prepared.continuity) return await this.settleContinuityPostLaunchInput(restored, prepared.continuity.operationId)
+    if (carried?.delivery === 'post-launch' && prepared.continuity) return await this.reconciler.settleContinuityPostLaunchInput(restored, prepared.continuity.operationId)
     if (carried?.delivery === 'launch' && carried.state === 'launch-carried') {
       // The exact original Start is now known, so its frozen history can be
       // recorded under the same input ID without dispatching any input again.
       await this.ports.input.recordPromptMessageAfterSideEffect(restored, carried.input.submissionId, 'Resume prompt', carried.message)
     }
     return restored
-  }
-
-  async observeResumedInterruption(session: AgentMuxStoredAgentSession): Promise<AgentMuxStoredAgentSession> {
-    const active = Object.values(session.continuityOperations ?? {}).find(op => op.kind === 'resumed' && op.newRun?.runId === session.run.runId)
-    if (!active || active.recoveryDelivery || active.resumedInterruption || this.reopensDisposed) return session
-    const key = JSON.stringify([session.agentSessionId, session.run.runId, active.operationId])
-    const existing = this.resumedInterruptionReads.get(key)
-    if (existing) return await existing
-    const controller = new AbortController(), epoch = this.ports.connection.connectionEpoch
-    this.providerReads.add(controller)
-    const unregisterRead = this.ports.observations.registerProviderRead(controller)
-    const pending = observeResumedTurnInterruption(session, {
-      provider: this.ports.providers.providers.get(session.providerId), signal: controller.signal,
-      status: async () => { const run = await this.ports.runtime.kernel.status(session.run.runId); this.ports.runtime.assertAgentRun(session, run, [session]); return run },
-      save: async change => {
-        if (controller.signal.aborted || epoch !== this.ports.connection.connectionEpoch || this.reopensDisposed) return session
-        const updated = await this.ports.sessions.updateExactAgentSession(session.agentSessionId, session.run, change)
-        if (!isDeepStrictEqual(updated.continuityOperations, session.continuityOperations)) {
-          this.ports.events.publishSession(updated); this.continuityInputs.track(updated)
-        }
-        return updated
-      }
-    }).catch(error => {
-      if (!controller.signal.aborted && epoch === this.ports.connection.connectionEpoch && !this.reopensDisposed) this.ports.events.publisher.publish({
-        type: 'agent-error', agentSessionId: session.agentSessionId, code: 'AGENT_CONTINUITY_OBSERVATION_UNCONFIRMED',
-        message: `The original recovered turn is unconfirmed. Its Session, healthy Run and ordinary input remain available. ${error instanceof Error ? error.message : String(error)}`,
-        evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
-      return session
-    }).finally(() => { this.providerReads.delete(controller); unregisterRead(); if (this.resumedInterruptionReads.get(key) === pending) this.resumedInterruptionReads.delete(key) })
-    this.resumedInterruptionReads.set(key, pending)
-    return await pending
-  }
-
-  private async exactRecoverySession(session: AgentMuxStoredAgentSession, operationId?: string, automatic = false): Promise<AgentMuxStoredAgentSession | null> {
-    const canonical = await this.ports.sessions.store.readMetadata(session.agentSessionId)
-    if (!canonical || !sameRun(canonical.run, session.run) || canonical.hostId !== session.hostId ||
-      canonical.providerId !== session.providerId || canonical.executorId !== session.executorId || canonical.workspacePath !== session.workspacePath ||
-      canonical.capabilityHash !== session.capabilityHash || !isDeepStrictEqual(canonical.nativeActor, session.nativeActor)) throw new AgentMuxError(
-      'The original recovery Run or actor changed. Existing identities and input are retained.', 'AGENT_CONTINUITY_SUPERSEDED')
-    const lifecycle = await this.ports.sessions.store.readLifecycleReservation(canonical.agentSessionId)
-    if (lifecycle?.kind === 'stop' && sameRun(lifecycle.expectedRun, canonical.run)) return null
-    const active = operationId ? canonical.continuityOperations?.[operationId] : canonical.continuity
-    if (operationId && !active) throw new AgentMuxError('The original recovery operation is unconfirmed.', 'AGENT_CONTINUITY_RECEIPT_UNCONFIRMED')
-    const root = active?.intentOperationId ? canonical.continuityOperations?.[active.intentOperationId] : active
-    if (root?.supervision?.phase === 'cancelled' && (!active?.initializationRecovery ||
-      active.initializationRecovery.actorId === canonical.nativeActor?.actorId && sameRun(active.initializationRecovery.run, canonical.run))) return null
-    if (automatic && root?.supervision?.phase === 'paused' && active?.initializationRecovery &&
-      active.initializationRecovery.actorId === canonical.nativeActor?.actorId && sameRun(active.initializationRecovery.run, canonical.run) &&
-      ['retry-budget-exhausted', 'frontend-retry-budget-exhausted'].includes(root.supervision.reason)) return null
-    return canonical
-  }
-
-  private async recoverOriginalFrontend(session: AgentMuxStoredAgentSession, run: CtxmuxAdapterRun,
-    request: AgentTerminalFrontendRecoveryRequest, ownerOperationId = request.operationId): Promise<AgentTerminalFrontendObservation> {
-    const controller = new AbortController()
-    this.providerReads.add(controller); const unregisterRead = this.ports.observations.registerProviderRead(controller)
-    try {
-      const assertRequest = async (): Promise<void> => {
-        const exact = !this.reopensDisposed && await this.exactRecoverySession(session, ownerOperationId)
-        if (!exact) throw new AgentMuxError('The original recovery was cancelled. Its backend and input are retained.', 'AGENT_CONTINUITY_SUPERSEDED')
-        const operation = exact.continuityOperations?.[ownerOperationId]
-        const sameTarget = request.target.kind === 'initialization'
-          ? operation?.initializationRecovery?.lifecycleOperationId === request.target.lifecycleOperationId &&
-            operation.initializationRecovery.previousFrontendId === request.expectedFrontendId && request.operationId === ownerOperationId
-          : operation?.frontendReconnect?.previousFrontendId === request.expectedFrontendId &&
-            (operation.frontendReconnect.operationId ?? ownerOperationId) === request.operationId &&
-            operation.nativeTarget?.sessionId === request.target.nativeSessionId && exact.nativeHandle?.sessionId === request.target.nativeSessionId
-        if (!sameTarget) throw new AgentMuxError('The original recovery action target changed. Its prior receipts are retained.', 'AGENT_CONTINUITY_SUPERSEDED')
-      }
-      await assertRequest()
-      const provider = this.ports.providers.providers.get(session.providerId)
-      const observed = await observePromptInput(controller.signal, () => provider.reconnectTerminalFrontend!({
-        processId: run.pid!, nativeActor: session.nativeActor!, workspacePath: session.workspacePath, signal: controller.signal
-      }, request))
-      await assertRequest()
-      return parseTerminalFrontendObservation(observed)
-    } finally { this.providerReads.delete(controller); unregisterRead() }
-  }
-
-  private async assertRecoveryInputCurrent(session: AgentMuxStoredAgentSession, operationId?: string, automatic = false): Promise<void> {
-    if (this.reopensDisposed || !await this.exactRecoverySession(session, operationId, automatic)) throw new AgentMuxError(
-      'The original recovery input was cancelled before dispatch. Its key and retained input remain available.', 'AGENT_CONTINUITY_SUPERSEDED')
-  }
-
-  private async bindInitializedNativeSession(session: AgentMuxStoredAgentSession, run: CtxmuxAdapterRun,
-    frontend: AgentTerminalFrontendObservation): Promise<AgentMuxStoredAgentSession> {
-    const actor = session.nativeActor, initialization = frontend.initialization
-    if (!actor?.initializationControl || initialization?.phase !== 'ready' || initialization.native.state !== 'confirmed' ||
-      initialization.lifecycleOperationId !== actor.lifecycleOperationId || run.state.type !== 'running' || run.runId !== session.run.runId) {
-      throw new AgentMuxError('The original actor initialization is not confirmed. Its Session and input are retained.', 'AGENT_TERMINAL_FRONTEND_UNCONFIRMED')
-    }
-    const target = { kind: 'provider' as const, providerId: session.providerId, sessionId: initialization.native.sessionId }
-    const current = await this.ports.sessions.updateExactAgentSession(session.agentSessionId, session.run, value => {
-      if (!isDeepStrictEqual(value.nativeActor, actor) || value.capabilityHash !== session.capabilityHash ||
-        value.nativeHandle && !matchesProviderNativeSessionTarget(target, value.nativeHandle) ||
-        value.observedNativeHandle && !matchesProviderNativeSessionTarget(target, value.observedNativeHandle)) throw new AgentMuxError(
-        'The original initialization target changed. Existing identities and input are retained.', 'AGENT_TERMINAL_FRONTEND_UNCONFIRMED')
-      // An initialization identity does not attest a record locator or clear a
-      // later source observation. Keep the richer original binding untouched.
-      if (value.nativeHandle) return value
-      return { ...value, nativeHandle: target, updatedAt: Math.max(value.updatedAt + 1, Date.now()) }
-    })
-    this.ports.events.publishSession(current)
-    // The protocol confirms the original identity before a native record may be
-    // available. Let its existing Provider discovery enrich that same identity;
-    // a known SID must not suppress status/history observation of its own record.
-    this.ports.terminal.queueNativeIdentityCapture(current)
-    return current
-  }
-
-  private async acceptRecoveredFrontend(session: AgentMuxStoredAgentSession, run: CtxmuxAdapterRun,
-    frontend: AgentTerminalFrontendObservation, outputAfterByte: number): Promise<AgentMuxStoredAgentSession> {
-    const provider = this.ports.providers.providers.get(session.providerId)
-    const current = await this.ports.sessions.updateExactAgentSession(session.agentSessionId, session.run, value => {
-      if (value.terminalHandshake?.frontendId === frontend.frontendId) return value
-      const updated = { ...value }; delete updated.terminalHandshake; delete updated.terminalCapability; delete updated.terminalPromptReadiness
-      if (provider.terminalHandshake && provider.terminalPromptRender) updated.terminalPromptReadiness = {
-        source: 'initial-composer', run: { ...value.run }, outputCursorBytes: outputAfterByte,
-        id: terminalInitialPromptReadinessIdentity(value, terminalHandshakeOperationIdentity(value.providerId, value.run.runId, provider.terminalHandshake, frontend.frontendId))
-      }
-      return updated
-    })
-    this.ports.terminal.screenEvidence.discard(current.agentSessionId)
-    await this.ports.terminal.ensureTerminalHandshakeOrDegrade(current, run)
-    return this.ports.sessions.registry.get(current.agentSessionId)
-  }
-
-  private observeInitialInput(session: AgentMuxStoredAgentSession): void {
-    if (this.reopensDisposed) return
-    const input = session.initialInput
-    const controlled = Boolean(session.nativeActor?.initializationControl)
-    const retained = controlled ? Object.values(session.continuityOperations ?? {}).filter(operation => operation.launchInput?.delivery === 'post-launch' &&
-      operation.launchInput.key?.expectedRun.runId === session.run.runId && !['native-admitted', 'terminal-confirmed', 'not-applied'].includes(operation.launchInput.state)) : []
-    const initial = (controlled || input?.delivery === 'post-launch') && input?.key?.expectedRun.runId === session.run.runId && !['native-admitted', 'terminal-confirmed', 'not-applied'].includes(input.state)
-    if (!initial && !retained.length) return
-    const key = JSON.stringify([session.agentSessionId, session.run, session.nativeActor?.actorId ?? null, initial ? input?.key : null, retained.map(value => value.operationId)])
-    if (this.initialInputContinuations.has(key)) return
-    const work = (async () => {
-      if (controlled) await this.ports.terminal.ensureTerminalFrontendObservation(session)
-      let current = await this.ports.sessions.registry.refresh(session.agentSessionId, session.run)
-      if (this.reopensDisposed) return
-      const run = await this.ports.runtime.requireCurrentAgentRun(current)
-      if (controlled) {
-        const frontend = this.ports.terminal.readFrontendObservation(session.agentSessionId)
-        if (!frontend || !sameRun(frontend.run, current.run) || frontend.initialization?.phase !== 'ready') return
-        current = await this.bindInitializedNativeSession(current, run, frontend)
-      }
-      const exact = await this.exactRecoverySession(current, undefined, true)
-      if (!this.reopensDisposed && exact) {
-        if (initial) await this.ports.input.continueInitialInput(exact, run, () => this.assertRecoveryInputCurrent(exact, undefined, true))
-        for (const operation of retained) await this.settleContinuityPostLaunchInput(this.ports.sessions.registry.get(session.agentSessionId), operation.operationId)
-      }
-    })().catch(error => {
-      if (!this.reopensDisposed) this.ports.events.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
-        code: 'AGENT_INITIAL_INPUT_UNCONFIRMED', message: `The original initialization input is retained. ${error instanceof Error ? error.message : String(error)}`,
-        evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
-    }).finally(() => { if (this.initialInputContinuations.get(key) === work) this.initialInputContinuations.delete(key) })
-    this.initialInputContinuations.set(key, work)
   }
 
   private async performAgentContinuity(input: AgentMuxAgentContinuityInput, intentOperationId?: string, inputContextSource?: import('../browser-input-context.js').BrowserInputContextSource, captured?: ResolvedAgentInputContextCapture): Promise<AgentMuxAgentContinuityResult> {
@@ -1462,7 +1301,7 @@ export class AgentSessionRecoveryService {
     if (current && !sameRun(current.run, input.expectedRun)) {
       if (prior?.newRun && sameRun(prior.newRun, current.run) && prior.kind === 'resumed') {
         if (prior.launchInput?.delivery === 'post-launch' && !['terminal-confirmed', 'native-admitted'].includes(prior.launchInput.state)) {
-          current = await this.settleContinuityPostLaunchInput(current, input.operationId)
+          current = await this.reconciler.settleContinuityPostLaunchInput(current, input.operationId)
         }
         return record({ kind: 'resumed', session: this.ports.events.projectSession(current), previousRun: { ...input.expectedRun }, run: { ...current.run },
           evidence: { kind: 'provider-native', providerId: current.providerId,
@@ -1602,7 +1441,7 @@ export class AgentSessionRecoveryService {
             original && (original.actorId !== actor.actorId || original.lifecycleOperationId !== actor.lifecycleOperationId || !sameRun(original.run, current.run)) ||
             initialization && initialization.lifecycleOperationId !== actor.lifecycleOperationId) throw new AgentMuxError(
             'The original initialization control or lifecycle is unconfirmed. The backend and input are retained.', 'AGENT_TERMINAL_FRONTEND_UNCONFIRMED')
-          const exact = await this.exactRecoverySession(current)
+          const exact = await this.reconciler.exactRecoverySession(current)
           if (!exact) return pending('intent-cancelled', evidence)
           current = exact
           if (!original && (!frontend || !initialization)) return pending('provider-unverified', evidence)
@@ -1622,7 +1461,7 @@ export class AgentSessionRecoveryService {
             if (admitted.kind === 'pending' && admitted.reason === 'intent-cancelled') return admitted
             const runtime = await this.ports.runtime.requireCurrentAgentRun(current)
             if (runtime.state.type !== 'running' || !runtime.pid) return pending('runtime-unverified', evidence)
-            next = await this.recoverOriginalFrontend(current, runtime, { operationId: receipt.operationId,
+            next = await this.reconciler.recoverOriginalFrontend(current, runtime, { operationId: receipt.operationId,
               expectedFrontendId: receipt.initializationRecovery.previousFrontendId,
               target: { kind: 'initialization', lifecycleOperationId: receipt.initializationRecovery.lifecycleOperationId } })
             if (next.initialization?.lifecycleOperationId !== actor.lifecycleOperationId) throw new AgentMuxError(
@@ -1641,17 +1480,17 @@ export class AgentSessionRecoveryService {
           const observed = await pending('operation-unconfirmed', evidence)
           if (observed.kind === 'pending' && observed.reason === 'intent-cancelled') return observed
           const runtime = await this.ports.runtime.requireCurrentAgentRun(current)
-          const exactReady = await this.exactRecoverySession(current, receipt.operationId)
+          const exactReady = await this.reconciler.exactRecoverySession(current, receipt.operationId)
           if (!exactReady) return pending('intent-cancelled', evidence)
-          current = await this.bindInitializedNativeSession(exactReady, runtime, next)
+          current = await this.reconciler.bindInitializedNativeSession(exactReady, runtime, next)
           receipt.nativeTarget = structuredClone(current.nativeHandle as NonNullable<AgentMuxContinuityOperation['nativeTarget']>)
-          const dispatch = await this.exactRecoverySession(current, receipt.operationId)
+          const dispatch = await this.reconciler.exactRecoverySession(current, receipt.operationId)
           if (!dispatch) return pending('intent-cancelled', evidence)
-          current = await this.ports.input.continueInitialInput(dispatch, runtime, () => this.assertRecoveryInputCurrent(dispatch, receipt.operationId))
+          current = await this.ports.input.continueInitialInput(dispatch, runtime, () => this.reconciler.assertRecoveryInputCurrent(dispatch, receipt.operationId))
           for (const operation of Object.values(current.continuityOperations ?? {})) if (operation.launchInput?.key?.expectedRun.runId === current.run.runId &&
-            operation.launchInput.delivery === 'post-launch') current = await this.settleContinuityPostLaunchInput(current, operation.operationId)
+            operation.launchInput.delivery === 'post-launch') current = await this.reconciler.settleContinuityPostLaunchInput(current, operation.operationId)
           if (next.state === 'attached') {
-            current = await this.acceptRecoveredFrontend(current, runtime, next, receipt.initializationRecovery.outputAfterByte)
+            current = await this.reconciler.acceptRecoveredFrontend(current, runtime, next, receipt.initializationRecovery.outputAfterByte)
             delete receipt.error; delete receipt.errorCode
             return record({ ...decision, session: this.ports.events.projectSession(current) }, 'initialization-ready')
           }
@@ -1695,13 +1534,13 @@ export class AgentSessionRecoveryService {
           receipt.frontendReconnect ??= { previousFrontendId: frontend!.frontendId, outputAfterByte: run.latestOutputBytes }
           // Persist original operation/target/boundary before the frontend side effect.
           await pending('operation-unconfirmed', evidence)
-          const observed = await this.recoverOriginalFrontend(current, await this.ports.runtime.requireCurrentAgentRun(current), {
+          const observed = await this.reconciler.recoverOriginalFrontend(current, await this.ports.runtime.requireCurrentAgentRun(current), {
             operationId: receipt.frontendReconnect.operationId ?? input.operationId,
             expectedFrontendId: receipt.frontendReconnect.previousFrontendId, target: { kind: 'native-session', nativeSessionId: target.sessionId } }, receipt.operationId)
           const next = parseTerminalFrontendObservation(observed)
           receipt.frontendReconnect.frontendId = next.frontendId
           await pending('operation-unconfirmed', evidence)
-          current = await this.acceptRecoveredFrontend(current, await this.ports.runtime.requireCurrentAgentRun(current), next, receipt.frontendReconnect.outputAfterByte)
+          current = await this.reconciler.acceptRecoveredFrontend(current, await this.ports.runtime.requireCurrentAgentRun(current), next, receipt.frontendReconnect.outputAfterByte)
           return record({ ...decision, session: this.ports.events.projectSession(current) }, 'frontend-reconnected')
         } catch (error) {
           receipt.error = error instanceof Error ? error.message : String(error)
@@ -1714,7 +1553,7 @@ export class AgentSessionRecoveryService {
     if (decision.kind === 'reattachable' && current && input.env !== undefined) {
       void this.ports.hooks.ensureManagedHooks(this.ports.providers.providers.get(current.providerId), current.workspacePath, current.agentSessionId,
         input.env, this.ports.hooks.activeBinding(current.run.runId)?.endpoint).catch(error => {
-        if (epoch !== this.ports.connection.connectionEpoch || this.reopensDisposed) return
+        if (epoch !== this.ports.connection.connectionEpoch || this.lifetime.signal.aborted) return
         receipt.error = `Managed Hook restoration is unconfirmed. The original running Agent remains available. ${error instanceof Error ? error.message : String(error)}`
         this.ports.events.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId, code: 'AGENT_CONTINUITY_HOOK_UNCONFIRMED',
           message: receipt.error, evidence: { source: 'agentmux', run: input.expectedRun, observedAt: now } })
@@ -1753,7 +1592,7 @@ export class AgentSessionRecoveryService {
         ...(receipt.launchInput ? { prompt: receipt.launchInput.input.prompt,
           ...(receipt.launchInput.input.agentMuxNote === undefined ? {} : { agentMuxNote: receipt.launchInput.input.agentMuxNote }) } : {})
       }, input.expectedRun, capability && capabilityContext ? { snapshot: capability, context: capabilityContext } : undefined)
-      current = await this.observeResumedInterruption(this.ports.sessions.registry.get(input.agentSessionId))
+      current = await this.reconciler.observeResumedInterruption(this.ports.sessions.registry.get(input.agentSessionId))
       // Re-read the accepted attempt so record cannot overwrite its separately observed evidence.
       const completed = current.continuityOperations?.[receipt.operationId]
       if (completed) Object.assign(receipt, structuredClone(completed))
@@ -1782,66 +1621,20 @@ export class AgentSessionRecoveryService {
       return pending('operation-unconfirmed', evidence, policy.recheckMaxAttempts > 0 ? now + policy.recheckIntervalMs : undefined)
     }
   }
-
-  private async settleContinuityPostLaunchInput(session: AgentMuxStoredAgentSession, operationId: string): Promise<AgentMuxStoredAgentSession> {
-    const input = session.continuityOperations?.[operationId]?.launchInput
-    if (!input?.key || input.delivery !== 'post-launch' || ['terminal-confirmed', 'native-admitted', 'not-applied'].includes(input.state)) return session
-    const run = await this.ports.runtime.requireCurrentAgentRun(session)
-    let nativeSource: { providerId: string; nativeSessionId: string } | undefined
-    if (session.nativeActor?.initializationControl) {
-      await this.ports.terminal.ensureTerminalFrontendObservation(session)
-      const frontend = this.ports.terminal.readFrontendObservation(session.agentSessionId), initialization = frontend?.initialization
-      if (!frontend || !sameRun(frontend.run, session.run) || initialization?.phase !== 'ready' || initialization.native.state !== 'confirmed' ||
-        initialization.lifecycleOperationId !== input.lifecycleOperationId || session.nativeHandle?.kind !== 'provider' ||
-        session.nativeHandle.providerId !== session.providerId || session.nativeHandle.sessionId !== initialization.native.sessionId) return session
-      nativeSource = { providerId: session.providerId, nativeSessionId: initialization.native.sessionId }
-    }
-    const exact = await this.exactRecoverySession(session, operationId)
-    if (!exact) return session
-    let original = await this.ports.input.inspectAgentPromptSubmission(input.key)
-    if (!original && input.state === 'prepared' && run.state.type === 'running') {
-      await this.ports.input.deliverPostLaunchPrompt(this.ports.providers.providers.get(session.providerId),
-        exact, run, input.lifecycleOperationId, input.prompt, input.message, input.input.submissionId, nativeSource,
-        () => this.assertRecoveryInputCurrent(exact, operationId))
-      original = await this.ports.input.inspectAgentPromptSubmission(input.key)
-    }
-    // No claim is no dispatch evidence. An old unknown plan never creates one.
-    if (!original) return session
-    let state: 'terminal-confirmed' | 'native-admitted' | 'not-applied' | 'unknown' = 'unknown'
-    const claim = original.admission
-    if (claim?.intent && isDeepStrictEqual(claim.inputKey, input.key) &&
-        sameRun(original.run, input.key.expectedRun) && claim.intent.prompt === input.prompt && isDeepStrictEqual(claim.intent.message, input.message)) {
-        if (claim.acknowledged && claim.transport === 'native' && claim.native.outcome === 'admitted') state = 'native-admitted'
-        else if (claim.acknowledged && claim.transport !== 'native') state = 'terminal-confirmed'
-        else if (agentPromptNotApplied({ run: original.run, promptCompletionAdmission: claim,
-          ...(original.terminalPromptSubmission ? { terminalPromptSubmission: original.terminalPromptSubmission } : {}) })) state = 'not-applied'
-    }
-    const settled = await this.ports.sessions.updateExactAgentSession(session.agentSessionId, session.run, value => {
-      const operation = value.continuityOperations?.[operationId]
-      if (!operation?.launchInput || ['terminal-confirmed', 'native-admitted', 'not-applied'].includes(operation.launchInput.state)) return value
-      const next = { ...operation, launchInput: { ...operation.launchInput, state } }
-      return { ...value, ...(value.continuity?.operationId === operationId ? { continuity: next } : {}),
-        continuityOperations: { ...value.continuityOperations, [operationId]: next }, updatedAt: Math.max(value.updatedAt, Date.now()) }
-    })
-    this.ports.events.publishSession(settled)
-    if (['terminal-confirmed', 'native-admitted'].includes(state)) await this.ports.input.recordPromptMessageAfterSideEffect(settled, input.input.submissionId, 'Resume prompt', input.message)
-    return settled
-  }
   restore(sessions: readonly AgentMuxStoredAgentSession[]): void {
     this.continuityInputs.restore(sessions); this.continuitySupervisor.restore(sessions)
-    for (const session of sessions) this.observeInitialInput(session)
+    for (const session of sessions) this.reconciler.observeInitialInput(session)
   }
-  observe(session: AgentMuxStoredAgentSession, retry = false): void { this.continuitySupervisor.observe(session, retry); this.observeInitialInput(session) }
+  observe(session: AgentMuxStoredAgentSession, retry = false): void { this.continuitySupervisor.observe(session, retry); this.reconciler.observeInitialInput(session) }
   wake(id: string): void { this.continuitySupervisor.wake(id) }
   userInput(id: string, runId: string): Promise<void> { return this.continuityInputs.userInput(id, runId) }
   protocolAccepted(id: string, runId: string, operationId: string, range: {startByte: number; endByte: number}): Promise<void> { return this.continuityInputs.protocolAccepted(id, runId, operationId, range) }
   async dispose(): Promise<void> {
-    this.reopensDisposed = true
-    for (const controller of this.providerReads) controller.abort()
-    this.initialInputContinuations.clear()
+    this.lifetime.abort()
+    const reconciliation = this.reconciler.dispose()
     await this.continuityInputs.dispose()
     this.continuityInputsUnsubscribe()
     await this.continuitySupervisor.dispose()
-    await Promise.allSettled([...this.resumedInterruptionReads.values(), ...this.reopenSettlements.values(), ...this.restartSettlements.values()])
+    await Promise.allSettled([reconciliation, ...this.reopenSettlements.values(), ...this.restartSettlements.values()])
   }
 }
