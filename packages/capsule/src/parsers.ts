@@ -87,6 +87,79 @@ function source(v: unknown, p: string): void {
   const r = obj(v, ['toolId', 'executionId', 'agentSessionId'], p)
   for (const k of Object.keys(r)) str(r[k], `${p}.${k}`)
 }
+function run(v: unknown, p: string): void {
+  const r = obj(v, ['runId'], p)
+  str(r.runId, `${p}.runId`)
+}
+function principal(v: unknown, p: string): void {
+  const r = obj(v, ['kind', 'id'], p)
+  en(r.kind, ['user', 'device'], `${p}.kind`)
+  str(r.id, `${p}.id`)
+}
+function json(v: unknown, p: string, seen = new Set<object>()): void {
+  if (v === null || typeof v === 'boolean' || typeof v === 'string') return
+  if (typeof v === 'number' && Number.isFinite(v)) return
+  if (!v || typeof v !== 'object' || seen.has(v)) fail(p)
+  seen.add(v)
+  if (Array.isArray(v)) v.forEach((x, i) => json(x, `${p}[${i}]`, seen))
+  else {
+    if (![Object.prototype, null].includes(Object.getPrototypeOf(v))) fail(p)
+    for (const [key, value] of Object.entries(v)) json(value, `${p}.${key}`, seen)
+  }
+  seen.delete(v)
+}
+export function parseCapsulePreparedReply(v: unknown): import('./types.js').CapsulePreparedReply {
+  const p = 'preparedReply'
+  const r = obj(
+    v,
+    [
+      'version',
+      'operationId',
+      'capsuleId',
+      'interactionId',
+      'inputOperationId',
+      'target',
+      'expectedRun',
+      'principal',
+      'prompt',
+      'adapterData',
+    ],
+    p,
+  )
+  if (r.version !== 1) fail(`${p}.version`)
+  str(r.operationId, `${p}.operationId`)
+  id(r.capsuleId, `${p}.capsuleId`)
+  id(r.interactionId, `${p}.interactionId`)
+  str(r.inputOperationId, `${p}.inputOperationId`)
+  target(r.target, `${p}.target`)
+  run(r.expectedRun, `${p}.expectedRun`)
+  principal(r.principal, `${p}.principal`)
+  str(r.prompt, `${p}.prompt`)
+  opt(r, 'adapterData', json, p)
+  return structuredClone(r) as unknown as import('./types.js').CapsulePreparedReply
+}
+export function parseCapsuleInputObservation(v: unknown): import('./types.js').CapsuleInputObservation {
+  const p = 'inputObservation'
+  const r = obj(v, ['status', 'inputOperationId', 'expectedRun', 'inputStatus', 'reason', 'receipt'], p)
+  en(r.status, ['unavailable', 'submitted', 'unknown'], `${p}.status`)
+  str(r.inputOperationId, `${p}.inputOperationId`)
+  run(r.expectedRun, `${p}.expectedRun`)
+  opt(
+    r,
+    'inputStatus',
+    (x, at) => en(x, ['waiting', 'stopped', 'terminal-confirmed', 'admitted', 'not-applied', 'unknown'], at),
+    p,
+  )
+  opt(r, 'reason', str, p)
+  opt(r, 'receipt', json, p)
+  return structuredClone(r) as unknown as import('./types.js').CapsuleInputObservation
+}
+function replyState(v: unknown, p: string): void {
+  const r = obj(v, ['operationId', 'phase', 'delivery'], p)
+  str(r.operationId, `${p}.operationId`)
+  en(r.phase, ['prepared', 'dispatch-started', 'observed'], `${p}.phase`)
+  parseCapsuleInputObservation(r.delivery)
+}
 function changes(v: unknown, p: string, config = false): void {
   const r = obj(
     v,
@@ -332,6 +405,7 @@ export function parseCapsuleInteraction(v: unknown): import('./types.js').Capsul
         'target',
         'status',
         'answer',
+        'reply',
       ],
       p,
     )
@@ -346,27 +420,34 @@ export function parseCapsuleInteraction(v: unknown): import('./types.js').Capsul
   opt(r, 'target', target, p)
   en(r.status, ['pending', 'answered'], `${p}.status`)
   opt(r, 'answer', (v, p) => str(v, p, true), p)
+  opt(r, 'reply', replyState, p)
   if (r.status === 'answered' && !Object.hasOwn(r, 'answer')) fail(`${p}.answer`)
   return structuredClone(r) as unknown as import('./types.js').CapsuleInteraction
 }
 export function parseCapsuleOperation(v: unknown): import('./types.js').CapsuleOperation {
   const r = obj(
     v,
-    ['operationId', 'method', 'status', 'createdAt', 'updatedAt', 'result', 'issue'],
+    ['operationId', 'capsuleId', 'method', 'status', 'createdAt', 'updatedAt', 'result', 'issue'],
     'operation',
   )
   str(r.operationId, 'operation.operationId')
+  opt(r, 'capsuleId', id, 'operation')
   if (!isCapsuleMethod(r.method)) fail('operation.method')
   en(r.status, ['pending', 'committed', 'failed'], 'operation.status')
   num(r.createdAt, 'operation.createdAt')
   num(r.updatedAt, 'operation.updatedAt')
   opt(r, 'issue', issue, 'operation')
-  if (r.status === 'committed') {
+  if (r.status === 'committed' || Object.hasOwn(r, 'result')) {
     if (r.method === 'capsule.operation.inspect') fail('operation.method')
     parseCapsuleResult(r.method, r.result)
     const result = r.result as Obj
     if (result.operationId !== undefined && result.operationId !== r.operationId)
       fail('operation.result.operationId')
+    const record = result.record as Obj | undefined
+    const interaction = result.interaction as Obj | undefined
+    const capsuleId = record?.capsuleId ?? interaction?.capsuleId ?? result.capsuleId
+    if (r.capsuleId !== undefined && capsuleId !== undefined && r.capsuleId !== capsuleId)
+      fail('operation.result.capsuleId')
   }
   return structuredClone(r) as unknown as import('./types.js').CapsuleOperation
 }
@@ -457,10 +538,15 @@ export function parseCapsuleResult<M extends CapsuleMethod>(
       r = obj(v, ['operationId', 'interaction', 'delivery'], 'result')
       str(r.operationId, 'result.operationId')
       parseCapsuleInteraction(r.interaction)
-      const x = obj(r.delivery, ['status', 'inputOperationId', 'reason'], 'result.delivery')
-      en(x.status, ['unavailable', 'submitted', 'unknown'], 'result.delivery.status')
-      opt(x, 'inputOperationId', str, 'result.delivery')
-      opt(x, 'reason', str, 'result.delivery')
+      const delivery = parseCapsuleInputObservation(r.delivery)
+      const interaction = parseCapsuleInteraction(r.interaction)
+      if (
+        interaction.reply &&
+        (interaction.reply.operationId !== r.operationId ||
+          interaction.reply.delivery.inputOperationId !== delivery.inputOperationId ||
+          interaction.reply.delivery.expectedRun.runId !== delivery.expectedRun.runId)
+      )
+        fail('result.delivery')
       break
     }
   }
