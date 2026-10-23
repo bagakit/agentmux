@@ -4636,7 +4636,7 @@ function gitNavigationTarget(state: AppState) {
     surface.file ? [surface.file.path, surface.file.origPath] : null]) : null
 }
 
-async function openGoalPmo(demandId: string, prompt?: string, userRequest?: string, options?: { creationOperationId?: string | undefined; onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }): Promise<string> {
+async function openGoalPmo(demandId: string, prompt?: string, userRequest?: string, options?: { creationOperationId?: string | undefined; onReceipt?: ((receipt: GoalPmoReceipt) => void) | undefined }, promptGoal?: DemandRecord): Promise<string> {
   const get = useAppStore.getState
   const set = useAppStore.setState
   const state = get()
@@ -4664,7 +4664,8 @@ async function openGoalPmo(demandId: string, prompt?: string, userRequest?: stri
       prompt?.trim(),
       projectContext,
       executionContext,
-      ...(fresh ? [`This is a fresh dedicated PMO context for Demand ${demand.id}.`, `Title: ${demand.title}`, `Description: ${demand.description || '(empty)'}`] : [])
+      ...(fresh ? [`This is a fresh dedicated PMO context for Demand ${demand.id}.`,
+        ...(promptGoal === demand ? [] : [`Title: ${demand.title}`, `Description: ${demand.description || '(empty)'}`])] : [])
     ].filter(Boolean).join('\n\n')
   const focusPmoTabSession = (tabId: string): void => {
     const current = get()
@@ -7859,7 +7860,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       `"$AGENTMUX_CLI" goal inspect --goal ${quote(demand.id)}`,
       `"$AGENTMUX_CLI" goal update --goal ${quote(demand.id)} --${mode === 'grill' ? 'alignment' : 'grounding'} ${quote(JSON.stringify(proposal))}`
     ].join('\n\n')
-    return openGoalPmo(demandId, prompt, mode === 'grill' ? demand.alignment ? 'Discuss changes' : 'Clarify goal' : demand.grounding ? 'Ask agent to check again' : 'Ask agent to check work', options)
+    return openGoalPmo(demandId, prompt, mode === 'grill' ? demand.alignment ? 'Discuss changes' : 'Clarify goal' : demand.grounding ? 'Ask agent to check again' : 'Ask agent to check work', options, demand)
   },
   async createDemand(input, controlRequestId) {
     const presentation = get()
