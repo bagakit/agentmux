@@ -1,18 +1,20 @@
 @import '@agentmux/client-ui/styles/mote-identity.css';
 .space-object-icon { flex-shrink: 0; }
 .space-object-icon[data-space-icon-kind="mote"][data-space-icon-source="automatic"] { color: var(--text-2); }
+.space-icon-picker__overlay { z-index: var(--layer-dialog); }
 .space-icon-picker { position: fixed; z-index: var(--layer-dialog); top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(320px, calc(100vw - 24px)); box-sizing: border-box; padding: var(--sp-5); display: grid; gap: var(--sp-4); overflow-y: auto; max-height: calc(100vh - 24px); }
 .space-icon-picker__title { margin: 0; color: var(--text); font-size: var(--fs-body); font-weight: 620; overflow-wrap: anywhere; }
 .space-icon-picker__description { margin: 0; font-size: var(--fs-meta); line-height: 1.5; }
+.space-icon-picker__symbols { display: grid; gap: var(--sp-2); }
 .space-icon-picker__choices { display: grid; grid-template-columns: repeat(auto-fit, minmax(32px, 1fr)); gap: var(--sp-2); }
 .space-icon-picker__choice { width: 100%; min-height: 32px; display: inline-flex; align-items: center; justify-content: center; padding: var(--sp-3); background: transparent; color: var(--text-2); border: 1px solid transparent; border-radius: var(--radius-sm); cursor: pointer; }
 .space-icon-picker__choice:hover { background: var(--surface-3); color: var(--text); }
 .space-icon-picker__choice[aria-pressed="true"], .space-icon-picker__automatic[aria-pressed="true"] { background: var(--surface-3); color: var(--text); border-color: var(--line); }
 .space-icon-picker__choice:focus-visible { outline: 2px solid color-mix(in srgb, var(--green) 55%, transparent); outline-offset: 2px; }
 .space-icon-picker__choice:disabled { cursor: default; opacity: .6; }
-.space-icon-picker__automatic { justify-self: start; }
+.space-icon-picker__automatic { margin-right: auto; }
 .space-icon-picker__error { margin: 0; font-size: var(--fs-meta); line-height: 1.5; color: var(--text); overflow-wrap: anywhere; }
-.space-icon-picker footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--sp-3); }
+.space-icon-picker footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: var(--sp-3); }
 .space-icon-picker__save:not(.primary-button) { color: var(--text); background: var(--surface-3); }
 .space-icon-picker__save.primary-button { padding: var(--sp-2) var(--sp-4); }
 
@@ -20,9 +22,9 @@
 .mote-avatar-file { position: relative; justify-self: start; cursor: pointer; }
 .mote-avatar-file input { position: absolute; inset: 0; width: 100%; opacity: 0; cursor: pointer; }
 .mote-avatar-file:focus-within { outline: 2px solid var(--green); outline-offset: 2px; }
-.mote-avatar-crop { display: grid; justify-items: center; gap: var(--sp-3); }
-.mote-avatar-crop__preview { width: 128px; height: 128px; border-radius: 50%; touch-action: none; cursor: grab; background: var(--surface-3); }
-.mote-avatar-crop__zoom { width: 100%; display: flex; align-items: center; gap: var(--sp-3); font-size: var(--fs-meta); }
+.mote-avatar-crop { display: grid; justify-items: center; gap: var(--sp-2); }
+.mote-avatar-crop__preview { width: 104px; height: 104px; border-radius: 50%; touch-action: none; cursor: grab; background: var(--surface-3); }
+.mote-avatar-crop__zoom { width: 100%; display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-meta); }
 .mote-avatar-crop__zoom input { min-width: 0; flex: 1; accent-color: var(--green); }
 .pmo-teams-topic-compact-launcher__surface > .space-object-icon { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; }
 .pmo-teams-topic-compact-launcher__surface > .space-object-icon > svg { width: 22px; height: 22px; }
@@ -31,6 +33,7 @@
 .mote-chooser__name .space-object-icon__avatar { width: 24px; height: 24px; }
 
 .mote-face { display: block; width: 100%; height: 100%; overflow: visible; }
+.mote-face--part { width: 100%; height: 100%; }
 .space-object-icon > .mote-face { width: 20px; height: 20px; }
 .mote-chooser__name .space-object-icon > .mote-face { width: 26px; height: 26px; }
 .mote-avatar-source { display: flex; gap: var(--sp-3); }
@@ -39,74 +42,115 @@
 .mote-avatar-source button[aria-pressed="true"] > .mote-avatar-selection-mark,
 .mote-face-editor button[aria-pressed="true"] > .mote-avatar-selection-mark { visibility: visible; }
 .mote-face-editor { display: grid; gap: var(--sp-3); }
-.mote-face-editor__preview { justify-self: center; width: 100px; height: 100px; margin-block: var(--sp-2); }
 .mote-face-editor fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.mote-face-editor fieldset[hidden] { display: none; }
 .mote-face-editor legend { font-size: var(--fs-meta); color: var(--text-2); margin-bottom: var(--sp-2); }
 .mote-face-editor fieldset > div { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
 .mote-face-editor button { text-transform: capitalize; min-height: 28px; }
-.mote-face-editor__color { width: 8px; height: 8px; border-radius: 50%; background: #b9e3cb; }
-.mote-face-editor__color[data-palette="peach"] { background: #f1cbb5; }
-.mote-face-editor__color[data-palette="lavender"] { background: #d6ccec; }
-.mote-face-editor__color[data-palette="sky"] { background: #c0d9ea; }
-.mote-face-editor__color[data-palette="cocoa"] { background: #b77f5a; }
-.mote-face-editor__color[data-palette="sand"] { background: #ead6a3; }
-.mote-face-editor__color[data-palette="rose"] { background: #edb5ca; }
-.mote-face-editor__color[data-palette="slate"] { background: #bcc9d1; }
+.mote-face-editor__color { width: 18px; height: 18px; border-radius: 50%; background: color-mix(in srgb, var(--green) 78%, #ffffff); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 80%, #000000); flex-shrink: 0; }
+.mote-face-editor__color[data-palette="peach"] { background: color-mix(in srgb, var(--amber) 58%, #ffffff); }
+.mote-face-editor__color[data-palette="lavender"] { background: color-mix(in srgb, var(--text-2) 65%, #ffffff); }
+.mote-face-editor__color[data-palette="sky"] { background: color-mix(in srgb, var(--green) 45%, #ffffff); }
+.mote-face-editor__color[data-palette="cocoa"] { background: color-mix(in srgb, var(--amber) 62%, #000000); }
+.mote-face-editor__color[data-palette="sand"] { background: color-mix(in srgb, var(--amber) 72%, #ffffff); }
+.mote-face-editor__color[data-palette="rose"] { background: color-mix(in srgb, var(--red) 58%, #ffffff); }
+.mote-face-editor__color[data-palette="slate"] { background: color-mix(in srgb, var(--text-2) 78%, #ffffff); }
 
 .mote-identity-motion.project-rail-row__icon > .space-object-icon > svg:not(.mote-face) { width: 100%; height: 100%; }
 .pmo-teams-topic-compact-launcher__surface > .mote-identity-motion .space-object-icon__avatar { width: 26px; height: 26px; }
 .pmo-teams-topic-compact-launcher__surface > .mote-identity-motion svg { width: 26px; height: 26px; }
 
-
-.space-icon-picker--avatar { width: min(480px, calc(100vw - 24px)); padding: var(--sp-6); gap: var(--sp-4); }
-.space-icon-picker__header { display: grid; gap: var(--sp-1); }
+.space-icon-picker--avatar { width: min(464px, calc(100vw - 24px)); padding: var(--sp-6); gap: var(--sp-4); }
+.space-icon-picker__header { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); }
 .space-icon-picker--avatar .space-icon-picker__title { font-size: var(--fs-title); letter-spacing: -.025em; }
 .space-icon-picker--avatar .space-icon-picker__description { color: var(--text-2); }
-.mote-avatar-source { position: relative; isolation: isolate; display: grid; grid-template-columns: 1fr 1fr; padding: 3px; gap: 3px; border-radius: var(--radius); border: 1px solid var(--line-soft); background: var(--material-control-surface); }
-.mote-avatar-source > button { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-3); min-height: 34px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-body); cursor: pointer; }
-.mote-avatar-source > button[aria-pressed="true"] { color: var(--text); }
+.mote-avatar-source { position: relative; isolation: isolate; display: grid; grid-template-columns: 1fr 1fr; padding: var(--sp-1); gap: var(--sp-1); border-radius: var(--radius); border: 1px solid var(--line-soft); background: var(--material-control-surface); }
+.mote-avatar-source > button { position: relative; z-index: 1; display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); min-height: 32px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-body); cursor: pointer; }
+.mote-avatar-source > button[aria-pressed="true"] { color: var(--text); font-weight: 560; }
 .mote-avatar-source > button:hover { color: var(--text); }
 .mote-avatar-source .mote-avatar-selection-mark { top: 2px; right: 2px; background: transparent; }
 .mote-avatar-source > button:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 1px; }
-.mote-face-editor { gap: var(--sp-3); }
-.mote-face-editor__preview, .mote-avatar-preview { justify-self: center; display: grid; place-items: center; width: 142px; height: 142px; margin: var(--sp-2) 0 var(--sp-3); }
-.mote-face-editor__preview > .mote-identity-motion { width: 136px; height: 136px; }
-.mote-face-editor__preview .space-object-icon > .mote-face { width: 136px; height: 136px; }
-.mote-avatar-preview > .space-object-icon { display: grid; place-items: center; width: 132px; height: 132px; border: 1px solid var(--line-soft); border-radius: 50%; background: var(--surface-2); }
-.mote-avatar-preview svg, .mote-avatar-preview .space-object-icon__avatar { width: 100px; height: 100px; }
+
+/* Unified center character stage + actual size preview chips */
+.mote-avatar-stage { display: grid; grid-template-columns: 112px minmax(0, 1fr); align-items: center; gap: var(--sp-4); padding: var(--sp-4); border-radius: var(--radius-lg); border: 1px solid var(--line-soft); background: radial-gradient(ellipse at 30% 35%, var(--surface-3), var(--surface-2)); }
+.mote-face-editor__preview, .mote-avatar-preview { justify-self: center; display: grid; place-items: center; width: 104px; height: 104px; margin: 0; }
+.mote-face-editor__preview > .mote-identity-motion { width: 100px; height: 100px; }
+.mote-face-editor__preview .space-object-icon > .mote-face { width: 100px; height: 100px; }
+.mote-avatar-preview > .space-object-icon { display: grid; place-items: center; width: 100px; height: 100px; border: 1px solid var(--line-soft); border-radius: 50%; background: var(--surface-1); overflow: hidden; }
+.mote-avatar-preview svg { width: 64px; height: 64px; }
+.mote-avatar-preview .space-object-icon__avatar { width: 100px; height: 100px; }
+.mote-avatar-stage__aside { min-width: 0; display: grid; gap: var(--sp-3); }
+.mote-avatar-stage__header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.mote-avatar-stage__source { display: inline-flex; align-items: center; gap: var(--sp-2); min-width: 0; font-size: var(--fs-body); color: var(--text); }
+.mote-avatar-stage__source strong { font-weight: 580; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mote-avatar-stage__source small { padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); background: var(--surface-1); border: 1px solid var(--line-soft); color: var(--text-3); font-size: var(--fs-micro); }
+.mote-avatar-stage__shuffle { padding: var(--sp-1) var(--sp-3); min-height: 26px; font-size: var(--fs-meta); cursor: pointer; }
+.mote-avatar-stage__sizes { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-2) var(--sp-3); border-radius: var(--radius); background: var(--surface-1); border: 1px solid var(--line-soft); }
+.mote-avatar-stage__chip { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; }
+.mote-avatar-stage__slot { display: grid; place-items: center; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--line-soft); overflow: hidden; flex-shrink: 0; }
+.mote-avatar-stage__slot--45 { width: 45px; height: 45px; }
+.mote-avatar-stage__slot--45 svg { width: 30px; height: 30px; }
+.mote-avatar-stage__slot--45 .mote-face, .mote-avatar-stage__slot--45 .space-object-icon__avatar { width: 45px; height: 45px; }
+.mote-avatar-stage__slot--24 { width: 24px; height: 24px; }
+.mote-avatar-stage__slot--24 svg { width: 16px; height: 16px; }
+.mote-avatar-stage__slot--24 .mote-face, .mote-avatar-stage__slot--24 .space-object-icon__avatar { width: 24px; height: 24px; }
+.mote-avatar-stage__chip-meta { display: grid; gap: var(--sp-1); min-width: 0; }
+.mote-avatar-stage__chip-meta strong { font-size: var(--fs-meta); font-weight: 560; color: var(--text); font-variant-numeric: tabular-nums; }
+.mote-avatar-stage__chip-meta small { font-size: var(--fs-micro); color: var(--text-3); }
+
+/* Face editor toolbar & part glyphs */
+.mote-face-editor__toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); padding-bottom: var(--sp-2); border-bottom: 1px solid var(--line-soft); }
+.mote-face-editor__groups { display: inline-flex; flex-wrap: wrap; gap: var(--sp-1); }
+.mote-face-editor__group-tab { padding: var(--sp-1) var(--sp-3); border-radius: var(--radius-sm); font-size: var(--fs-meta); color: var(--text-2); cursor: pointer; }
+.mote-face-editor__group-tab:hover { color: var(--text); background: var(--wash-1); }
+.mote-face-editor__group-tab[aria-selected="true"] { color: var(--text); background: var(--surface-3); font-weight: 560; }
+.mote-face-editor__presets { display: inline-flex; flex-wrap: wrap; gap: var(--sp-1); }
+.mote-face-editor__preset { padding: var(--sp-1) var(--sp-2); border-radius: var(--radius-sm); border: 1px solid var(--line-soft); background: var(--surface-2); font-size: var(--fs-micro); color: var(--text-2); cursor: pointer; }
+.mote-face-editor__preset:hover { color: var(--text); border-color: var(--line); }
 .mote-face-editor fieldset { display: grid; grid-template-columns: 48px 1fr; align-items: center; column-gap: var(--sp-3); }
 .mote-face-editor legend { display: contents; font-size: var(--fs-meta); color: var(--text-2); }
 .mote-face-editor fieldset > div { display: grid; grid-template-columns: repeat(auto-fit, minmax(36px, 1fr)); gap: var(--sp-2); }
-.mote-face-editor button { display: flex; align-items: center; justify-content: center; gap: var(--sp-2); min-height: 40px; padding: var(--sp-2); background: transparent; border: 1px solid var(--line-soft); color: var(--text-2); }
+.mote-face-editor button { display: flex; align-items: center; justify-content: center; gap: var(--sp-2); min-height: 36px; padding: var(--sp-2); background: var(--wash-1); border: 1px solid var(--line-soft); color: var(--text-2); }
 .mote-face-editor button.small-button--active, .mote-face-editor button.small-button--active:hover:not(:disabled) { color: var(--text); background: var(--surface-3); box-shadow: inset 0 0 0 1px var(--green); }
-.mote-face-editor__sample { display: block; width: 28px; height: 28px; flex-shrink: 0; }
-.mote-face-editor__color { width: 18px; height: 18px; box-shadow: inset 0 0 0 1px #0001; flex-shrink: 0; }
-.space-icon-picker--avatar .mote-avatar-file { justify-self: stretch; display: flex; justify-content: center; align-items: center; gap: var(--sp-2); min-height: 42px; padding: var(--sp-3); border: 1px dashed var(--line); background: transparent; }
-.mote-avatar-file > span { color: var(--text-3); font-size: var(--fs-meta); }
-.space-icon-picker--avatar .space-icon-picker__choices { grid-template-columns: repeat(auto-fit, minmax(44px, 1fr)); gap: var(--sp-2); }
-.space-icon-picker--avatar .space-icon-picker__choice { min-height: 42px; border-color: var(--line-soft); }
+.mote-face-editor__sample { display: block; width: 26px; height: 22px; flex-shrink: 0; }
+
+/* Inline upload action & 7x3 symbol icon grid */
+.space-icon-picker--avatar .mote-avatar-file { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: 28px; padding: var(--sp-1) var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-2); font-size: var(--fs-meta); }
+.mote-avatar-file > span { color: var(--text-3); font-size: var(--fs-micro); }
+.space-icon-picker--avatar .space-icon-picker__choices { grid-template-columns: repeat(7, minmax(0, 1fr)); gap: var(--sp-2); }
+.space-icon-picker--avatar .space-icon-picker__choice { min-height: 38px; border-color: var(--line-soft); background: var(--wash-1); }
 .space-icon-picker--avatar .space-icon-picker__choice[aria-pressed="true"] { border-color: var(--green); box-shadow: inset 0 0 0 1px var(--green); }
 .space-icon-picker--avatar .space-icon-picker__automatic { color: var(--text-2); font-size: var(--fs-meta); background: transparent; box-shadow: none; }
 .space-icon-picker--avatar footer { position: sticky; bottom: calc(-1 * var(--sp-6)); padding-top: var(--sp-3); padding-bottom: var(--sp-2); background: var(--surface-1); border-top: 1px solid var(--line-soft); z-index: 2; }
 @media (max-width: 420px) {
   .space-icon-picker--avatar { padding: var(--sp-4); }
+  .mote-avatar-stage { grid-template-columns: 1fr; justify-items: center; }
   .mote-face-editor fieldset { grid-template-columns: 40px 1fr; column-gap: var(--sp-2); }
   .mote-face-editor button { flex-direction: column; gap: 0; padding-inline: var(--sp-1); }
-  .mote-face-editor__sample { width: 24px; height: 24px; }
+  .mote-face-editor__sample { width: 24px; height: 20px; }
   .mote-face-editor fieldset[data-mote-face-part="palette"] > div { grid-template-columns: repeat(4, minmax(0, 1fr)); }
   .mote-face-editor fieldset[data-mote-face-part="accessory"] > div { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .mote-avatar-file { flex-wrap: wrap; }
+  .space-icon-picker--avatar .space-icon-picker__choices { grid-template-columns: repeat(5, minmax(0, 1fr)); }
   .space-icon-picker--avatar footer { bottom: calc(-1 * var(--sp-4)); }
 }
 .mote-face-editor[hidden], .mote-avatar-alternative[hidden] { display: none; }
-.mote-avatar-alternative { display: grid; gap: var(--sp-3); }
+.mote-avatar-alternative { display: grid; gap: var(--sp-4); }
 
+/* 4x3 Circular Silhouette Gallery + 3-col Low-poly Companions */
 .mote-avatar-gallery { display: grid; gap: var(--sp-2); }
-.mote-avatar-gallery__choices { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
-.mote-avatar-gallery__choice { display: grid; justify-items: center; align-content: start; gap: var(--sp-1); min-width: 0; padding: var(--sp-2); border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--text-2); font-size: var(--fs-meta); line-height: 1.3; cursor: pointer; }
-.mote-avatar-gallery__choice img, .mote-avatar-gallery__placeholder { width: 40px; height: 40px; object-fit: contain; }
+.mote-avatar-gallery__header, .mote-avatar-gallery__subheader { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.mote-avatar-gallery__subheader { margin-top: var(--sp-2); }
+.mote-avatar-gallery__choices { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--sp-2); }
+.mote-avatar-gallery__choice { display: grid; justify-items: center; align-content: start; gap: var(--sp-1); min-width: 0; padding: var(--sp-2) var(--sp-1); border: 1px solid transparent; border-radius: var(--radius); background: var(--wash-1); color: var(--text-2); font-size: var(--fs-meta); line-height: 1.3; cursor: pointer; }
+.mote-avatar-gallery__thumb { width: 42px; height: 42px; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--line-soft); display: grid; place-items: center; overflow: hidden; }
+.mote-avatar-gallery__thumb img, .mote-avatar-gallery__placeholder { width: 36px; height: 36px; object-fit: cover; border-radius: 50%; }
 .mote-avatar-gallery__placeholder { display: grid; place-items: center; color: var(--text-3); }
-.mote-avatar-gallery__choice:hover { background: var(--wash-1); color: var(--text); }
-.mote-avatar-gallery__choice[aria-pressed="true"] { background: var(--wash-2); color: var(--text); border-color: var(--green); }
-.mote-avatar-gallery__choice:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 1px; }
-.mote-avatar-gallery__choice:disabled { cursor: default; opacity: .6; }
+.mote-avatar-gallery__companions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--sp-2); }
+.mote-avatar-gallery__companion { display: flex; align-items: center; gap: var(--sp-2); min-width: 0; padding: var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--wash-1); color: var(--text-2); font-size: var(--fs-meta); text-align: left; cursor: pointer; }
+.mote-avatar-gallery__companion .mote-avatar-gallery__thumb { width: 34px; height: 34px; flex-shrink: 0; }
+.mote-avatar-gallery__companion .mote-avatar-gallery__thumb img { width: 34px; height: 34px; }
+.mote-avatar-gallery__choice:hover, .mote-avatar-gallery__companion:hover { background: var(--surface-2); color: var(--text); }
+.mote-avatar-gallery__choice[aria-pressed="true"], .mote-avatar-gallery__companion[aria-pressed="true"] { background: var(--surface-3); color: var(--text); border-color: var(--green); box-shadow: inset 0 0 0 1px var(--green); }
+.mote-avatar-gallery__choice:focus-visible, .mote-avatar-gallery__companion:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 1px; }
+.mote-avatar-gallery__choice:disabled, .mote-avatar-gallery__companion:disabled { cursor: default; opacity: .6; }
