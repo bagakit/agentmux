@@ -1,6 +1,7 @@
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createServer } from 'node:http'
 import { afterEach, expect, it, vi } from 'vitest'
 import { NodeCapsuleOwner } from '../../../packages/capsule/src/node'
 import type { CapsuleInspection, CapsuleMode } from '@agentmux/core/capsule'
@@ -14,12 +15,43 @@ import { browserColdDescriptor } from '../src/main/browser-cold-descriptor'
 const native = await vi.hoisted(async () => {
   const ports = (await import('./helpers/browser-resource-directory-ports')).directoryNativePorts()
   class View extends ports.View {
+    lastLoad = Promise.resolve()
+    request: ((details: any, callback: (value: unknown) => void) => void) | null = null
+    response: ((details: any) => void) | null = null
+    responseOverride: ((details: any) => void) | null = null
+    requestId = 0
     constructor(readonly options: { webPreferences: Record<string, unknown> }) {
       super()
       Object.assign(this.webContents.mainFrame, { isDestroyed: () => this.webContents.dead })
       Object.assign(this.webContents, { prependListener(event: string, listener: (...args: any[]) => void) {
         const listeners = new Set([listener, ...(this.listeners.get(event) ?? [])]); this.listeners.set(event, listeners); return this
       } })
+      Object.assign(this.webContents.session, { webRequest: {
+        onBeforeRequest: (listener: typeof this.request) => { this.request = listener },
+        onResponseStarted: (listener: typeof this.response) => { this.response = listener }
+      } })
+      this.webContents.loadURL = url => {
+        const contents = this.webContents
+        this.lastLoad = (async () => {
+          contents.loads.push(url)
+          contents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url, frame: contents.mainFrame })
+          const details = { id: ++this.requestId, url, resourceType: 'mainFrame', webContents: contents, frame: contents.mainFrame,
+            statusCode: 200, responseHeaders: {} as Record<string, string[]> }
+          this.request?.(details, () => {})
+          if (url.startsWith('http://127.0.0.1:')) {
+            const actual = await fetch(url, { headers: { Accept: 'text/html' } })
+            details.statusCode = actual.status
+            details.responseHeaders = Object.fromEntries([...actual.headers].map(([key, value]) => [key, [value]]))
+            await actual.arrayBuffer()
+          }
+          if (this.responseOverride) this.responseOverride(details)
+          else this.response?.(details)
+          contents.url = url; contents.mainFrame.url = url
+          contents.emit('did-navigate', {}, url)
+          contents.emit('did-finish-load'); contents.emit('did-stop-loading')
+        })()
+        return this.lastLoad
+      }
     }
   }
   return { ...ports, View }
@@ -44,7 +76,7 @@ async function fixture() {
   const views: InstanceType<typeof native.View>[] = []
   const window = { webContents: new native.Contents(), isDestroyed: () => false,
     getContentBounds: () => ({ x: 0, y: 0, width: 1200, height: 800 }), contentView: {
-      addChildView(view: InstanceType<typeof native.View>) { views.push(view) },
+      addChildView(view: InstanceType<typeof native.View>) { const index = views.indexOf(view); if (index !== -1) views.splice(index, 1); views.push(view) },
       removeChildView(view: InstanceType<typeof native.View>) { const index = views.indexOf(view); if (index !== -1) views.splice(index, 1) }
     } }
   const profiles = { defaultProfileId: vi.fn(() => 'default-profile'), resolvePartition: vi.fn(profile => `persist:${profile}`) }
@@ -53,9 +85,12 @@ async function fixture() {
   cleanups.push(() => manager.dispose())
   const create = async (id: string, capsule: CapsuleInspection, url?: string) => {
     expect(capsule.endpoint.status).toBe('available')
-    return manager.create(id, url ?? (capsule.endpoint as { url: string }).url, 'workspace', undefined, 'normal', 'responsive', { capsule })
+    const target = url ?? (capsule.endpoint as { url: string }).url
+    await manager.create(id, target, 'workspace', undefined, 'normal', 'responsive', { capsule })
+    await views.at(-1)!.lastLoad
+    return manager.create(id, target, 'workspace')
   }
-  return { owner, manager, page, create, views, profiles }
+  return { root, owner, manager, page, create, views, profiles }
 }
 
 it('keeps Capsule storage independent from user Profiles and installs SDK only for injected containers', async () => {
@@ -92,12 +127,19 @@ it('admits only the exact live committed nonloading Capsule main document and re
   expect(admit()).toMatchObject({ navigationId: snapshot.navigationId })
   expect(unrelated).not.toHaveBeenCalled(); unrelated.mockRestore()
   expect(manager.capsuleDocument(contents as never, { ...frame, parent: frame } as never)).toBeNull()
+  ;(contents as any).mainFrame = { ...frame }
+  expect(manager.capsuleDocument(contents as never, frame as never)).toBeNull()
+  ;(contents as any).mainFrame = frame
   const popup = new native.View({ webPreferences: {} }).webContents
   popup.url = contents.url; popup.mainFrame.url = contents.url
   expect(manager.capsuleDocument(popup as never, popup.mainFrame as never)).toBeNull()
   const loading = vi.spyOn(contents, 'isLoadingMainFrame').mockReturnValue(true)
   expect(admit()).toBeNull(); loading.mockRestore()
   contents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false, url: contents.url })
+  expect(admit()).toBeNull()
+  const details = { id: ++views[0]!.requestId, url: contents.url, resourceType: 'mainFrame', webContents: contents, frame,
+    statusCode: 200, responseHeaders: { 'X-AgentMux-Capsule-Instance': [(capsule.endpoint as { instanceId: string }).instanceId] } }
+  views[0]!.request?.(details, () => {}); views[0]!.response?.(details)
   expect(admit()).toBeNull()
   contents.emit('did-navigate', {}, contents.url)
   expect(admit()).not.toBeNull()
@@ -164,4 +206,112 @@ it('rejects incomplete or conflicting cold Capsule descriptors without replacing
   expect(() => browserColdDescriptor(graph, opened.id)).toThrow('incomplete')
   await expect(manager.create('invalid', opened.url, 'workspace', 'user-profile', 'normal', 'responsive', { capsule })).rejects.toThrow('own persistent container')
   expect((await manager.create(opened.id, 'https://unrelated.invalid', 'workspace')).url).toBe(opened.url)
+})
+
+it('requires the exact main-document response and preserves same-document provenance without granting stale or foreign responses', async () => {
+  const { manager, page, create, views } = await fixture()
+  const capsule = await page('injected'), opened = await create('browser', capsule)
+  const view = views[0]!, contents = view.webContents
+  const original = manager.capsuleDocument(contents as never, contents.mainFrame as never)!
+  expect(original.instanceId).toBe((capsule.endpoint as { instanceId: string }).instanceId)
+  const path = opened.url + '#selection'
+  contents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: true, url: path })
+  contents.url = path; contents.mainFrame.url = path; contents.emit('did-navigate-in-page', {}, path, true)
+  expect(manager.capsuleDocument(contents as never, contents.mainFrame as never)).toMatchObject({ instanceId: original.instanceId })
+  await manager.navigate(opened.id, opened.url); await view.lastLoad
+  for (const change of [
+    (details: any) => ({ ...details, id: details.id - 1 }),
+    (details: any) => ({ ...details, statusCode: 404 }),
+    (details: any) => ({ ...details, resourceType: 'subFrame' }),
+    (details: any) => ({ ...details, frame: { ...details.frame, parent: details.frame } }),
+    (details: any) => ({ ...details, webContents: new native.Contents() }),
+    (details: any) => ({ ...details, responseHeaders: {} })
+  ]) {
+    view.responseOverride = details => view.response?.(change(details))
+    await manager.reload(opened.id); await view.lastLoad
+    expect(manager.capsuleDocument(contents as never, contents.mainFrame as never)).toBeNull()
+    expect(contents.getURL()).toBe(opened.url)
+    expect(contents.isDestroyed()).toBe(false)
+  }
+  view.responseOverride = details => view.response?.({ ...details, responseHeaders: { 'X-AgentMux-Capsule-Instance': ['23456789ABCD'] } })
+  await manager.reload(opened.id); await view.lastLoad
+  expect(manager.capsuleDocument(contents as never, contents.mainFrame as never)?.instanceId).toBe('23456789ABCD')
+  view.responseOverride = null
+  await manager.reload(opened.id); await view.lastLoad
+  expect(manager.capsuleDocument(contents as never, contents.mainFrame as never)?.instanceId).toBe(original.instanceId)
+})
+
+it('does not let a foreign page loaded on a reused port regain SDK provenance after the original Host returns', async () => {
+  const { root, manager, page, create, views, owner } = await fixture()
+  const capsule = await page('injected'), opened = await create('browser', capsule), view = views[0]!
+  const endpoint = capsule.endpoint as { url: string; port: number; instanceId: string }
+  await owner.close()
+  const other = createServer((_request, response) => response.writeHead(200, { 'Content-Type': 'text/html',
+    'X-AgentMux-Capsule-Instance': endpoint.instanceId }).end('<title>Foreign content</title>'))
+  await new Promise<void>((yes, no) => { other.once('error', no); other.listen(endpoint.port, '127.0.0.1', yes) })
+  const closeOther = async () => { other.closeAllConnections(); await new Promise<void>(yes => other.close(() => yes())) }
+  cleanups.push(async () => { if (other.listening) await closeOther() })
+  await manager.reload(opened.id); await view.lastLoad
+  const foreign = manager.capsuleDocument(view.webContents as never, view.webContents.mainFrame as never)!
+  expect(foreign.instanceId).toBe(endpoint.instanceId)
+  await closeOther()
+  const restoredOwner = await NodeCapsuleOwner.open({ stateDirectory: join(root, 'state') }); cleanups.push(() => restoredOwner.close())
+  const restored = await restoredOwner.call('capsule.inspect', { capsuleId: capsule.record.capsuleId })
+  expect(restored.endpoint.status).toBe('available')
+  expect((restored.endpoint as { instanceId: string }).instanceId).not.toBe(foreign.instanceId)
+  // Main compares this fresh original-owner instance with the loaded document before each SDK call.
+  expect(manager.capsuleDocument(view.webContents as never, view.webContents.mainFrame as never)?.instanceId).toBe(foreign.instanceId)
+  await manager.reloadCapsule(opened.id, restored); await view.lastLoad
+  expect(manager.capsuleDocument(view.webContents as never, view.webContents.mainFrame as never)?.instanceId).toBe((restored.endpoint as { instanceId: string }).instanceId)
+})
+
+it('refreshes Capsule mode in the same Browser and partition, preserves external routes, and retains a beforeunload veto', async () => {
+  const { manager, owner, page, create, views } = await fixture()
+  const capsule = await page('isolated'), opened = await create('browser', capsule)
+  const first = views[0]!, partition = first.options.webPreferences.partition
+  manager.setBounds(opened.id, { x: 0, y: 0, width: 800, height: 600 })
+  expect((await manager.release(opened.id, opened.navigationId)).status).toBe('retained')
+  const injected = await owner.call('capsule.update', { capsuleId: capsule.record.capsuleId, expectedRevision: capsule.record.revision,
+    operationId: 'inject-mode', changes: { mode: 'injected' } })
+  const updated = await manager.reloadCapsule(opened.id, injected)
+  const second = views[0]!; await second.lastLoad
+  expect(updated).toMatchObject({ id: opened.id, capsuleId: capsule.record.capsuleId, profileId: null })
+  expect(first.webContents.dead).toBe(true); expect(second).not.toBe(first)
+  expect(second.options.webPreferences).toMatchObject({ partition, preload: expect.stringMatching(/capsule\.cjs$/u) })
+  expect(manager.capsuleDocument(second.webContents as never, second.webContents.mainFrame as never)).not.toBeNull()
+  await manager.navigate(opened.id, 'https://outside.invalid/retained-route'); await second.lastLoad
+  const isolated = await owner.call('capsule.update', { capsuleId: capsule.record.capsuleId, expectedRevision: injected.record.revision,
+    operationId: 'isolate-mode', changes: { mode: 'isolated' } })
+  const external = await manager.reloadCapsule(opened.id, isolated)
+  const third = views[0]!; await third.lastLoad
+  expect(external).toMatchObject({ id: opened.id, url: 'https://outside.invalid/retained-route' })
+  expect(third.options.webPreferences).toMatchObject({ partition })
+  expect(third.options.webPreferences).not.toHaveProperty('preload')
+  expect(manager.capsuleDocument(third.webContents as never, third.webContents.mainFrame as never)).toBeNull()
+  const reinjected = await owner.call('capsule.update', { capsuleId: capsule.record.capsuleId, expectedRevision: isolated.record.revision,
+    operationId: 'reinject-mode', changes: { mode: 'injected' } })
+  third.webContents.close.mockImplementation(() => { third.webContents.emit('will-prevent-unload', {}) })
+  const retained = await manager.reloadCapsule(opened.id, reinjected)
+  expect(retained).toMatchObject({ id: opened.id, url: 'https://outside.invalid/retained-route' })
+  expect(retained.activity?.warning).toContain('retained')
+  expect(third.webContents.dead).toBe(false); expect(views[0]).toBe(third)
+})
+
+it('does not repeat an unknown native close or discard an active operation while refreshing Capsule policy', async () => {
+  const { manager, owner, page, create, views } = await fixture()
+  const capsule = await page('isolated'), opened = await create('browser', capsule), view = views[0]!
+  const injected = await owner.call('capsule.update', { capsuleId: capsule.record.capsuleId, expectedRevision: capsule.record.revision,
+    operationId: 'inject-original', changes: { mode: 'injected' } })
+  const entry = (manager as any).entries.get(opened.id)
+  entry.runInFlight = true
+  const busy = await manager.reloadCapsule(opened.id, injected)
+  expect(busy.activity?.warning).toContain('operation'); expect(view.webContents.close).not.toHaveBeenCalled()
+  entry.runInFlight = false
+  view.webContents.close.mockImplementation(() => { throw new Error('Native close receipt unavailable') })
+  const unknown = await manager.reloadCapsule(opened.id, injected)
+  expect(unknown.activity?.warning).toContain('unknown'); expect(view.webContents.close).toHaveBeenCalledOnce()
+  await manager.reloadCapsule(opened.id, injected)
+  expect(view.webContents.close).toHaveBeenCalledOnce(); expect(views).toEqual([view])
+  expect(view.webContents.dead).toBe(false); expect(view.webContents.getURL()).toBe(opened.url)
+  view.webContents.close.mockImplementation(() => { view.webContents.dead = true; view.webContents.emit('destroyed') })
 })
