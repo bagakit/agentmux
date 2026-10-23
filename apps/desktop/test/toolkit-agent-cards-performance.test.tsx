@@ -28,8 +28,8 @@ afterEach(async () => {await act(async () => root.unmount()); container.remove()
 const node = <T extends Element = HTMLElement>(selector: string) => {const value = document.querySelector<T>(selector); expect(value,selector).not.toBeNull(); expect(value!.isConnected).toBe(true); return value!}
 const click = async (selector: string) => act(async () => node<HTMLElement>(selector).click())
 const render = async (paused=false) => act(async () => root.render(<PerformanceOverview snapshot={sample} close={()=>{}} onConfigure={()=>{}} onViewScript={()=>{}} paused={paused} />))
-const runs = async () => {await render(); await click('[data-settings-target="runs"]')}
-it('actual Performance consumes the public card and source total before row peaks, top five and selection', async () => {
+const runs = async () => {await render(); await click('[data-performance-section-tab="resources"]'); await click('[data-settings-target="runs"]')}
+it('actual Performance resolves Run identities and consumes source totals before row peaks, top five and selection', async () => {
   await runs()
   const totals = node('[data-run-total-values]'); expect(totals.textContent).toContain('90.0%'); expect(totals.textContent).toContain('0.90 cores'); expect(totals.textContent).toContain('4.0 GiB')
   expect(node('[data-run-totals]').textContent).toContain('8 / 8 roots observed')
@@ -44,23 +44,26 @@ it('actual Performance consumes the public card and source total before row peak
   expect(node('[data-run-total-values]').textContent).toBe(totals.textContent)
   expect(container.textContent).toContain('row peaks can occur at different times')
 })
-it('field configuration is from the same public result; missing document cannot privately manufacture a standard card', async () => {
+it('local Run identity stays readable independently of optional public card fields and omitted documents', async () => {
   await runs(); expect(node('[data-toolkit-agent-card]').textContent).toContain('Review the exact Toolkit contract')
   sample = structuredClone(sample); sample.document!.agentCards!.fields = ['runId']; await render()
   const card = node('[data-run-id="preparation-run-1"] [data-toolkit-agent-card]')
-  expect(card.querySelector('[data-card-field="name"]')).toBeNull(); expect(card.querySelector('[data-card-field="avatar"]')).toBeNull()
-  expect(card.textContent).toContain('preparation-run-1')
+  expect(card.querySelector('[data-card-field="name"]')).not.toBeNull(); expect(card.querySelector('[data-card-field="avatar"]')).not.toBeNull()
+  expect(card.textContent).toContain('Review the exact Toolkit contract')
   sample = structuredClone(sample); sample.document = null; await render()
-  expect(container.querySelector('[data-toolkit-agent-card]')).toBeNull(); expect(container.textContent).toContain('Agent card unavailable')
+  expect(node('[data-run-id="preparation-run-1"] [data-toolkit-agent-card]').getAttribute('data-agent-card-state')).toBe('resolved')
   expect(node('[data-run-total-values]').textContent).toContain('90.0%')
 })
-it('duplicate card references never last-win; omitted cards preserve all rows and full totals', async () => {
+it('duplicate public cards do not affect exact local identity; ambiguous local mappings preserve readings', async () => {
   sample.document!.agentCards!.items.push(structuredClone(sample.document!.agentCards!.items[0]!))
   await runs()
   const first = node('[data-run-id="preparation-run-1"]')
-  expect(first.textContent).toContain('Agent card ambiguous'); expect(first.querySelector('[data-toolkit-agent-card]')).toBeNull()
+  expect(first.querySelector('[data-toolkit-agent-card]')?.getAttribute('data-agent-card-state')).toBe('resolved')
   sample = structuredClone(sample); sample.document!.agentCards!.items = []; sample.document!.agentCards!.omittedItems = 8; await render()
-  expect(container.textContent).toContain('8 Agent cards omitted'); expect(node('[data-run-total-values]').textContent).toContain('90.0%')
+  expect(container.textContent).toContain('8 public result cards omitted'); expect(node('[data-run-total-values]').textContent).toContain('90.0%')
+  await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, { ...state.sessions[0]!, id: 'duplicate-client' }] })))
+  expect(first.textContent).toContain('Agent identity is ambiguous'); expect(first.textContent).toContain('90.0%')
+  expect(first.querySelector('[data-performance-open-run]')).toBeNull()
   await click('.performance-show-all'); expect(container.querySelectorAll('.performance-contributor')).toHaveLength(8)
 })
 it('partial, unavailable, stale and paused readings preserve coverage and source age without false zero totals', async () => {
@@ -87,7 +90,7 @@ it('actual App Toolkit stream supplies the public card and totals; pause release
   const run=vi.spyOn(api.toolkit,'run'),stop=vi.spyOn(api.toolkit,'stop')
   useAppStore.setState({...useAppStore.getState(),loading:false,initialize:async()=>()=>{},detectExecutors:vi.fn(async()=>{}),checkHost:vi.fn(async()=>{}),
     config:{...composerConfig,toolkit:{performance:{enabled:true,statusBar:'label'}}},providerCatalog:await api.providers.list(),mainSurface:'workbench',toolsOpen:false,tabs:{},layouts:{}},true)
-  await act(async()=>root.render(<App />)); await click('.performance-trigger');await click('[data-settings-target="runs"]')
+  await act(async()=>root.render(<App />)); await click('.performance-trigger');await click('[data-performance-section-tab="resources"]');await click('[data-settings-target="runs"]')
   expect(node('[data-toolkit-agent-card]').textContent).toContain('Review the exact Toolkit contract');expect(node('[data-run-total-values]').textContent).toContain('90.0%')
   await act(async()=>{sample=structuredClone(sample);sample.observation!.runTotals!.cpuPercent=55;publish(sample)})
   expect(node('[data-run-total-values]').textContent).toContain('55.0%')

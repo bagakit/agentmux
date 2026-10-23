@@ -12,6 +12,7 @@ import { UserToolkitResult } from '../src/renderer/src/components/toolkit/UserTo
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
+import { resolveToolkitAgentCardSession } from '../src/renderer/src/lib/toolkit-agent-card-facts'
 import { composerConfig, composerDOM, composerSession } from './helpers/composer-dom-fixture'
 
 const cost = vi.hoisted(() => ({ cardRenders: 0, storeHooks: 0, sessionVisits: 0 }))
@@ -30,6 +31,7 @@ vi.mock('../src/renderer/src/store', async importOriginal => {
 })
 
 const dom = composerDOM()
+const settingsNavigation = { open() {}, openToolkit() {}, openHost() {}, openChannel() {}, channelPresentation: () => null, openMoteLark() {}, chooseAgent() {} }
 beforeEach(() => { cost.cardRenders = 0; cost.storeHooks = 0; cost.sessionVisits = 0 })
 function agent(id: string, hostId = 'local', sid = id, runId = `run-${id}`) {
   const value = composerSession(id)
@@ -50,6 +52,88 @@ async function show(value: NonNullable<ToolkitResultDocument['agentCards']>, act
 function node() { const result = dom.container.querySelector<HTMLElement>('[data-toolkit-agent-card]'); expect(result).not.toBeNull(); return result! }
 function renderedFields() { return [...node().querySelectorAll('[data-card-field]')].map(field => field.getAttribute('data-card-field')) }
 
+it('uses the established Agent name chain and updates only the represented original records', async () => {
+  const original = agent('client-id', 'local', 'canonical-id', 'exact-run')
+  const firstPrompt = { agentSessionId: original.id, revision: 1, items: [{ id: 'first-input', agentSessionId: original.id,
+    kind: 'user_message' as const, title: 'Input', status: 'complete' as const, source: 'native-hook' as const,
+    content: 'Investigate   the exact resource owner\nSecond line', createdAt: 1, updatedAt: 1 }] }
+  useAppStore.setState({ sessions: [original], agentNames: { [original.id]: 'Launch supplied name' }, timelines: { [original.id]: firstPrompt } })
+  await show(cards([card('exact-run', 'run')], ['name']))
+  expect(node().querySelector('[data-card-field="name"]')?.textContent).toBe('Launch supplied name')
+  await act(async () => useAppStore.setState({ agentNames: { [original.id]: 'User renamed Agent' } }))
+  expect(node().querySelector('[data-card-field="name"]')?.textContent).toBe('User renamed Agent')
+  await act(async () => useAppStore.setState({ agentNames: {} }))
+  expect(node().querySelector('[data-card-field="name"]')?.textContent).toBe('Investigate the exact resource owner')
+  const count = cost.cardRenders
+  await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, unrelated: { ...firstPrompt, agentSessionId: 'unrelated', revision: 999 } }, agentNames: { unrelated: 'Other task' } })))
+  expect(cost.cardRenders).toBe(count)
+  await act(async () => useAppStore.setState({ timelines: {} }))
+  expect(node().querySelector('[data-card-field="name"]')?.textContent).toBe(original.label)
+})
+
+it('resolves the exact Project owner and applies current local path preferences to label and tooltip', async () => {
+  const home = _hygiene_fixturePath('card-home'), repo = home + '/repo', worktree = repo + '/.worktrees/topic'
+  const original = { ...agent('project-agent'), workspacePath: worktree }
+  useAppStore.setState({ sessions: [original], localHome: home, config: { ...composerConfig, workspaces: [
+    { id: 'worktree', name: 'Branch label', hostId: 'local', path: worktree, kind: 'worktree', repoPath: repo, branch: 'topic' },
+    { id: 'root', name: 'Actual Project', hostId: 'local', path: repo, kind: 'folder' }
+  ] } })
+  await show(cards([card('project-agent')], ['workspace']))
+  const field = () => node().querySelector('[data-card-field="workspace"]')!
+  expect(field().querySelector('[data-card-project]')?.textContent).toBe('Actual Project')
+  expect(field().textContent).toContain('~/repo/.worktrees/topic'); expect(field().getAttribute('title')).toBe('~/repo/.worktrees/topic')
+  await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, copyPathsAsAbsolute: true } })))
+  expect(field().textContent).toContain(worktree); expect(field().getAttribute('title')).toBe(worktree)
+  await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: state.config!.workspaces.map(workspace => workspace.id === 'root' ? { ...workspace, name: 'Renamed Project' } : workspace) } })))
+  expect(field().querySelector('[data-card-project]')?.textContent).toBe('Renamed Project')
+  await act(async () => useAppStore.setState({ sessions: [{ ...original, workspacePath: worktree + '/unregistered-child' }] }))
+  expect(field().querySelector('[data-card-project]')?.textContent).toBe('Project unavailable')
+})
+
+it('never applies the local home to a remote path, even with the same directory text', async () => {
+  const home = _hygiene_fixturePath('card-home'), path = home + '/repo'
+  const original = { ...agent('remote-agent', 'remote'), workspacePath: path }
+  useAppStore.setState({ sessions: [original], localHome: home, config: { ...composerConfig, copyPathsAsAbsolute: false,
+    hosts: [...composerConfig.hosts, { id: 'remote', kind: 'ssh', label: 'Remote', hostname: 'fixture.invalid' }],
+    workspaces: [{ id: 'remote-project', name: 'Remote Project', hostId: 'remote', path, kind: 'folder' }] } })
+  await show(cards([card('remote-agent', 'session', 'remote')], ['workspace']))
+  const field = node().querySelector('[data-card-field="workspace"]')!
+  expect(field.textContent).toContain(path); expect(field.getAttribute('title')).toBe(path); expect(field.textContent).not.toContain('~/')
+})
+
+it('revalidates exact current Run references using the shared index and returns the client presentation identity', async () => {
+  const original = agent('client-presentation', 'local', 'canonical-agent', 'exact-run')
+  const sessions = countingSessions([original, agent('other-host', 'other', 'canonical-agent', 'exact-run')])
+  useAppStore.setState({ sessions })
+  await show(cards([card('exact-run', 'run')], ['name']))
+  cost.sessionVisits = 0
+  const reference = { kind: 'run' as const, hostId: 'local', runId: 'exact-run' }
+  expect(resolveToolkitAgentCardSession(useAppStore.getState().sessions, reference)).toEqual({ state: 'resolved', clientSessionId: original.id })
+  expect(cost.sessionVisits).toBe(0)
+  expect(resolveToolkitAgentCardSession([{ ...original, control: { ...original.control, run: { runId: 'replacement-run' } } }], reference)).toMatchObject({ state: 'unavailable', reason: expect.any(String) })
+  expect(resolveToolkitAgentCardSession([original, agent('duplicate', 'local', 'other-canonical', 'exact-run')], reference)).toMatchObject({ state: 'ambiguous', reason: expect.any(String) })
+  expect(resolveToolkitAgentCardSession([{ ...original, control: { ...original.control, hostId: 'different-host' } }], reference)).toMatchObject({ state: 'unavailable', reason: 'Agent host identity is inconsistent' })
+})
+
+it('retains the first-prompt selector for each visible identity without rescanning unrelated or unchanged history', async () => {
+  const original = agent('visible-prompt'), items = new Proxy(Array.from({ length: 500 }, (_, index) => ({ id: `assistant-${index}`, agentSessionId: original.id,
+    kind: 'assistant_message' as const, title: 'Reply', status: 'complete' as const, source: 'native-hook' as const, content: 'Output', createdAt: index + 1, updatedAt: index + 1 })),
+  { get(target, key, receiver) { if (typeof key === 'string' && /^\d+$/u.test(key)) cost.sessionVisits++; return Reflect.get(target, key, receiver) } })
+  const timeline = { agentSessionId: original.id, revision: 1, items }
+  useAppStore.setState({ sessions: [original], timelines: { [original.id]: timeline } })
+  await show(cards([card(original.id)], ['name']))
+  expect(cost.sessionVisits).toBe(500); cost.sessionVisits = 0
+  const rendered = cost.cardRenders
+  await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, unrelated: { ...timeline, revision: 2 } }, error: 'Unrelated observer state' })))
+  expect(cost.sessionVisits).toBe(0); expect(cost.cardRenders).toBe(rendered)
+  await act(async () => { timeline.revision++; useAppStore.setState({ timelines: { [original.id]: timeline } }) })
+  expect(cost.sessionVisits).toBe(500); expect(cost.cardRenders).toBe(rendered)
+  cost.sessionVisits = 0
+  await act(async () => useAppStore.setState({ agentNames: { [original.id]: 'Explicit visible identity' } }))
+  await act(async () => { timeline.revision++; useAppStore.setState({ timelines: { [original.id]: timeline } }) })
+  expect(cost.sessionVisits).toBe(0); expect(node().querySelector('[data-card-field="name"]')?.textContent).toBe('Explicit visible identity')
+})
+
 it('ordinary Custom result consumes the public document and shared standard face without executing anything', async () => {
   const original = agent('display-id', 'local', 'canonical-sid', 'original-run')
   useAppStore.setState({ sessions: [original], config: { ...composerConfig, executors: { codex: { ...composerConfig.executors.codex!, avatar: { badge: 'spark', tint: '#41bd98' } } } } })
@@ -59,7 +143,7 @@ it('ordinary Custom result consumes the public document and shared standard face
     latestConfirmed: { executionId: 'captured-result', invocationId: 'original-invocation', definition, expectedLatestExecutionId: null, target: { workspacePath: _hygiene_fixturePath("repo") }, run: { hostId: 'local', runId: 'tool-run' }, startedAt: _newTailFixtureEpoch(0, 0, 1), endedAt: _newTailFixtureEpoch(0, 0, 2), state: 'succeeded', reason: null, exitCode: 0, document, text: 'Native diagnostic\n' + JSON.stringify(document) } }
   const release = vi.fn(), run = vi.spyOn(api.toolkit, 'run'), stop = vi.spyOn(api.toolkit, 'stop'), action = vi.spyOn(api.toolkit, 'action')
   vi.spyOn(api.toolkit, 'observe').mockImplementation((_id, read) => { read(snapshot); return { dispose: release } })
-  await dom.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {} }}><UserToolkitResult definition={definition} active close={() => {}} /></SettingsNavigation.Provider>)
+  await dom.render(<SettingsNavigation.Provider value={settingsNavigation}><UserToolkitResult definition={definition} active close={() => {}} /></SettingsNavigation.Provider>)
   expect(dom.container.querySelector('.toolkit-result__document h3')?.textContent).toBe('Ordinary script result')
   expect(renderedFields()).toEqual([...TOOLKIT_AGENT_CARD_FIELDS])
   expect(node().textContent).toContain('Named display-id'); expect(node().textContent).toContain('canonical-sid'); expect(node().textContent).toContain('original-run')
@@ -208,7 +292,7 @@ it('malformed optional document preserves exact confirmed raw output and the hea
   const malformed = JSON.stringify({ ...documentFor(cards([card('one')])), agentCards: { fields: ['avatar'], omittedItems: 0, items: [{ ...card('one'), reference: { kind: 'session', hostId: 'local', sessionId: 'one', provider: 'made-up' } }] } })
   const snapshot: ToolkitScriptSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'script', toolId: definition.id, definition, state: 'succeeded', reason: null, admission: null, latestConfirmed: { executionId: 'original', invocationId: 'invocation', definition, expectedLatestExecutionId: null, target: { workspacePath: _hygiene_fixturePath("repo") }, run: { hostId: 'local', runId: 'original-tool-run' }, startedAt: _newTailFixtureEpoch(0, 0, 1), endedAt: _newTailFixtureEpoch(0, 0, 2), exitCode: 0, state: 'succeeded', reason: 'Machine document validation failed', document: null, text: malformed }, consumerCount: 1, sequence: 1 }
   vi.spyOn(api.toolkit, 'observe').mockImplementation((_id, read) => { read(snapshot); return { dispose() {} } })
-  await dom.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {}, openHost() {} }}><UserToolkitResult definition={definition} active close={() => {}} /></SettingsNavigation.Provider>)
+  await dom.render(<SettingsNavigation.Provider value={settingsNavigation}><UserToolkitResult definition={definition} active close={() => {}} /></SettingsNavigation.Provider>)
   expect(dom.container.querySelector('[data-toolkit-output]')?.textContent).toBe(malformed)
   expect(dom.container.querySelector('[data-toolkit-agent-card]')).toBeNull(); expect(useAppStore.getState().sessions[0]).toBe(original)
 })
@@ -221,7 +305,7 @@ it.each(['missing', 'unavailable'] as const)('keeps JSON-looking ordinary termin
     startedAt: _newTailFixtureEpoch(0, 0, 1), endedAt: _newTailFixtureEpoch(0, 0, 2), exitCode: 0, state: 'succeeded' as const, reason: null, text, ...(kind === 'unavailable' ? { document: null } : {}) }
   const snapshot: ToolkitScriptSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'script', toolId: definition.id, definition, state: 'succeeded', reason: null, admission: null, latestConfirmed, consumerCount: 1, sequence: 1 }
   vi.spyOn(api.toolkit, 'observe').mockImplementation((_id, read) => { read(snapshot); return { dispose() {} } })
-  await dom.render(<SettingsNavigation.Provider value={{ open() {}, openToolkit() {} }}><UserToolkitResult definition={definition} active close={() => {}} /></SettingsNavigation.Provider>)
+  await dom.render(<SettingsNavigation.Provider value={settingsNavigation}><UserToolkitResult definition={definition} active close={() => {}} /></SettingsNavigation.Provider>)
   expect(dom.container.querySelector('[data-toolkit-output]')?.textContent).toBe(text)
   expect(dom.container.querySelector('.toolkit-result__document')).toBeNull()
   expect(dom.container.querySelector('[data-toolkit-agent-card]')).toBeNull()
