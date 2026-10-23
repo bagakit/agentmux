@@ -181,3 +181,59 @@
 
 .performance-run-identity { display:flex; align-items:center; gap:var(--sp-2); min-width:0; }
 .performance-run-identity > .toolkit-agent-card { flex:1; min-width:0; }
+
+/* One Tool, with a compact overview and room for deliberate analysis. */
+.performance-popover[data-performance-expanded=true] { width:min(960px,var(--toolkit-available-width,calc(100vw - 24px))); height:min(740px,var(--toolkit-available-height,calc(100vh - 48px))); max-height:calc(100vh - 48px); }
+.performance-popover:has(.performance-workbench) { container-type:inline-size; }
+.performance-workbench { display:flex; flex-direction:column; min-height:0; flex:1; }
+.performance-workbench [role=tabpanel][hidden] { display:none; }
+.performance-navigation { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); flex:none; gap:var(--sp-1); padding:var(--sp-2) var(--sp-4) var(--sp-3); border-bottom:1px solid var(--line-soft); }
+.performance-navigation > button { min-width:0; border:0; border-radius:var(--radius-sm); padding:var(--sp-3) var(--sp-2); color:var(--text-3); background:transparent; text-align:center; cursor:pointer; }
+.performance-navigation strong { font-size:var(--fs-meta); font-weight:550; }
+.performance-navigation small { display:none; }
+.performance-navigation > button:hover { color:var(--text); background:var(--wash-2); }
+.performance-navigation > button[aria-selected=true] { color:var(--text); background:var(--wash-3); box-shadow:inset 0 0 0 1px var(--line-soft); }
+.performance-navigation > button:focus-visible { outline:1px solid var(--focus-line); outline-offset:1px; }
+.performance-workbench .performance-body { flex:1; }
+.performance-workbench .performance-scopes { margin:var(--sp-4) 0; }
+.performance-host { border-bottom:1px solid var(--line-soft); padding-bottom:var(--sp-3); }
+.performance-host-row { display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:var(--sp-4); padding:var(--sp-3) 0; font-variant-numeric:tabular-nums; }
+.performance-host-row > div { display:grid; gap:var(--sp-1); min-width:0; }
+.performance-host-row > div:last-child { text-align:right; }
+.performance-host-row strong { font-size:var(--fs-body); font-weight:550; }
+.performance-host-row small,.performance-overview-load small,.performance-overview-runs small { display:block; color:var(--text-3); font-size:var(--fs-meta); font-weight:400; line-height:1.45; }
+.performance-overview-load { display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-6); padding:var(--sp-2) 0 var(--sp-5); }
+.performance-overview-load > div { display:grid; align-content:start; gap:var(--sp-2); min-width:0; }
+.performance-overview-load strong { font-size:var(--fs-title); font-weight:580; font-variant-numeric:tabular-nums; letter-spacing:-.015em; }
+.performance-overview-runs { display:flex; justify-content:space-between; gap:var(--sp-4); border-top:1px solid var(--line-soft); padding:var(--sp-4) 0; }
+.performance-overview-runs > strong { font-size:var(--fs-body); font-weight:550; text-align:right; font-variant-numeric:tabular-nums; }
+.performance-next-actions { display:grid; gap:var(--sp-2); margin:var(--sp-4) 0; }
+.performance-next-actions > button { display:grid; gap:var(--sp-2); text-align:left; border:1px solid var(--line-soft); border-radius:var(--radius-sm); background:transparent; color:var(--text-2); padding:var(--sp-4); cursor:pointer; }
+.performance-next-actions > button:hover { background:var(--wash-2); color:var(--text); }
+.performance-next-actions strong { font-size:var(--fs-meta); font-weight:550; }
+.performance-next-actions small { font-size:var(--fs-meta); color:var(--text-3); }
+.performance-page-heading { padding:var(--sp-3) 0; }
+.performance-page-heading h3 { margin:var(--sp-2) 0; font-size:var(--fs-body); font-weight:600; }
+.performance-page-heading p { margin:var(--sp-2) 0; font-size:var(--fs-meta); color:var(--text-3); line-height:1.5; }
+@container (min-width:650px) {
+  .performance-workbench[data-expanded=true] { display:grid; grid-template-columns:148px minmax(0,1fr); }
+  .performance-workbench[data-expanded=true] > .performance-navigation { display:flex; flex-direction:column; align-items:stretch; gap:var(--sp-2); padding:var(--sp-4) var(--sp-3); border-bottom:0; border-right:1px solid var(--line-soft); }
+  .performance-workbench[data-expanded=true] > .performance-navigation > button { display:grid; gap:var(--sp-2); text-align:left; padding:var(--sp-4) var(--sp-3); }
+  .performance-workbench[data-expanded=true] .performance-navigation small { display:block; font-size:var(--fs-micro); font-weight:400; line-height:1.45; }
+  .performance-workbench[data-expanded=true] > .performance-body { padding:0 var(--sp-6) var(--sp-4); }
+  .performance-workbench[data-expanded=true] .performance-next-actions { grid-template-columns:1fr 1fr; }
+}
+.performance-host-load,.performance-network-rates { display:grid; grid-template-columns:1fr 1fr; gap:var(--sp-5); padding:var(--sp-2) 0 var(--sp-3); }
+.performance-host-load > div,.performance-network-rates > div { display:grid; gap:var(--sp-1); min-width:0; font-variant-numeric:tabular-nums; }
+.performance-host-load small,.performance-network-rates small { color:var(--text-3); font-size:var(--fs-meta); }
+.performance-host-load strong { font-size:var(--fs-title); font-weight:550; letter-spacing:-.015em; }
+.performance-host-row [data-memory-pressure=warning] { color:var(--amber-text); }
+.performance-host-row [data-memory-pressure=critical] { color:var(--red-text); }
+.performance-network > summary > span { white-space:normal; text-align:right; overflow-wrap:anywhere; }
+.performance-network > label { display:flex; align-items:center; justify-content:space-between; gap:var(--sp-4); font-size:var(--fs-meta); color:var(--text-3); padding:var(--sp-2) 0 var(--sp-4); }
+.performance-network select { min-width:0; max-width:72%; padding:var(--sp-2); border:1px solid var(--line-soft); border-radius:var(--radius-sm); background:var(--surface-1); color:var(--text); font:inherit; }
+.performance-network-rates strong { font-size:var(--fs-body); font-weight:550; }
+.performance-host-sources { margin:0; display:grid; gap:var(--sp-3); font-size:var(--fs-meta); }
+.performance-host-sources > div { display:grid; grid-template-columns:100px minmax(0,1fr); gap:var(--sp-3); }
+.performance-host-sources dt { color:var(--text-3); }
+.performance-host-sources dd { margin:0; overflow-wrap:anywhere; line-height:1.5; }
