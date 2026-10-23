@@ -7,6 +7,7 @@ import { expect, vi } from 'vitest'
 import { AgentProviderRegistry } from '../../../packages/core/src/agent-provider'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentMuxClientEvent, AgentSessionHistoryObservation, AgentSessionHistoryPage, AgentTimelineSnapshot } from '@agentmux/core'
+import { installConversationReading } from './conversation-reading-fixture'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 export const evidence = { source: 'native-hook' as const, observedAt: _reshape_fixtureEpoch(0, 0, 1), run: { runId: 'run-original' } }
@@ -50,12 +51,17 @@ export function fixture() {
     sessionHistoryPage: readHistory, sessionTimeline: readTimeline, submitAgentPrompt: submit, respondAgentInteraction: respond,
     inspectAgentInput: inspectInput, rejoinAgentInputWaiting: rejoinInput, stopAgentInputWaiting: stopInput
   } as unknown as AgentMuxHostedClient
-  return { client, sessions, submit, respond, readHistory, readTimeline, disposeHistory, unsubscribe, inspectInput, rejoinInput, stopInput,
+  const result = { client, sessions, submit, respond, readHistory, readTimeline, disposeHistory, unsubscribe, inspectInput, rejoinInput, stopInput,
     setPage(value: AgentSessionHistoryPage) { page = value },
     setTimeline(value: AgentTimelineSnapshot) { timeline = value },
-    emit(event: AgentMuxClientEvent) { for (const listener of listeners) listener(event) },
+    emit(event: AgentMuxClientEvent) {
+      if (event.type === 'agent-session') sessions.set(event.session.agentSessionId, event.session)
+      for (const listener of listeners) listener(event)
+    },
     observe(observation: AgentSessionHistoryObservation) { for (const listener of observers) listener(observation) }
   }
+  installConversationReading(result)
+  return result
 }
 
 /** Controlled SDK receipt port, not a real Runtime/Provider or Native acceptance. */

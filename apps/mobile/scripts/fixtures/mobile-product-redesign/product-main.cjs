@@ -52,13 +52,11 @@ app.whenReady().then(async () => {
   const openMote = async () => {
     await button('Mote', '.mobile-navigation')
     await until('!![...document.querySelectorAll(".mobile-spatial-panel button")].find(n=>n.textContent.includes("我的 Mote"))')
-    await button('我的 Mote', '.mobile-spatial-panel')
+    if (await read('document.querySelector(\'[data-space-id="mote-original"] > .mobile-space-row\')?.getAttribute("aria-expanded") !== "true"')) {
+      await button('我的 Mote', '.mobile-spatial-panel')
+    }
     if (!await visible('.mobile-conversation-panel')) {
-      if (mode !== 'input-history') {
-        gap('Mote did not open the configured original main conversation; only a directory appeared.')
-        await capture('mote-directory-baseline')
-      }
-      // Folder disclosure is not Session navigation. This scoped history journey enters the original Tab explicitly.
+      // Folder disclosure is not Session navigation. Enter the original Tab explicitly.
       await button('日常协作', '.mobile-spatial-panel')
     }
     await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
@@ -176,10 +174,10 @@ app.whenReady().then(async () => {
       assert.ok(profile.minActionHeight >= 44, 'Profile actions preserve touch targets')
     }
     result.operations.push({ action: 'profile-material', ...profile })
-    await read('document.documentElement.dataset.appearance="light"')
+    await read('mobileProductScene.setAppearance("light")')
     await capture('mote-profile-light-narrow')
     if (!baseline) assert.equal(await read('getComputedStyle(document.querySelector(".mobile-sheet")).backgroundColor'), 'rgb(238, 241, 239)', 'Profile reads the same light appearance role')
-    await read('document.documentElement.dataset.appearance="dark"')
+    await read('mobileProductScene.setAppearance("dark")')
     await button('合作方式 · BEHAVIOR.md')
     await until('document.querySelector(".mobile-mote-source").textContent.includes("我们围绕你的原始目标")')
     await capture('mote-original-source-narrow')
@@ -239,6 +237,13 @@ app.whenReady().then(async () => {
   await until('!!document.querySelector(".mobile-spatial-panel")')
   await button('实验建议', '.mobile-spatial-panel')
   await capture('focus-result-conversation-narrow')
+  await tap('.mobile-conversation-panel [contenteditable=true]', 'Focus result Composer')
+  win.webContents.insertText('好，先按方案 A 准备第一轮实验。')
+  await button('Send')
+  await until('document.querySelector("[contenteditable=true]").textContent===""')
+  assert.equal(await visible('.message-delivery-failure'), false, 'Normal explicit Send converges quietly without a failure card')
+  assert.equal(await visible('.mobile-send-status'), false, 'Normal explicit Send does not leave a persistent diagnostic banner')
+  await capture('focus-confirmed-send-narrow')
   await openMote()
   assert.equal(await read('document.querySelector("[contenteditable=true]").textContent'), '先比较两种方案，保留原来的依据。')
   assert.equal(await read('document.querySelector("[contenteditable=true]")===window.originalCaptureEditor'), true)
@@ -247,8 +252,14 @@ app.whenReady().then(async () => {
   await pause(120)
   assert.equal(await visible('.mobile-send-status[data-phase=unknown]'), true, 'Unknown delivery remains independently visible')
   await tap('.mobile-conversation-panel [contenteditable=true]', 'Continue later draft')
+  await read('(()=>{const e=document.querySelector(".mobile-conversation-panel [contenteditable=true]"),s=window.getSelection(),r=document.createRange();r.selectNodeContents(e);r.collapse(false);s.removeAllRanges();s.addRange(r)})()')
   win.webContents.insertText(' 后来补充的文字也保留。')
   await capture('unknown-receipt-narrow')
+  await button('关闭操作说明', '.mobile-send-status')
+  await until('!!document.querySelector(".mobile-send-status--collapsed")')
+  await capture('unknown-collapsed-narrow')
+  await button('查看投递回执', '.mobile-send-status')
+  await until('!document.querySelector(".mobile-send-status--collapsed")&&!!document.querySelector(".mobile-send-status[data-phase=unknown]")')
   await resize(390, 480); await capture('unknown-short-viewport')
   await tap('.mobile-send-status__diagnosis > summary', '发送详情')
   await capture('unknown-details-short-viewport')
@@ -271,7 +282,7 @@ app.whenReady().then(async () => {
   await resize(390, 844)
   await capture('reconnected-original-draft-phone')
   const calls = await read('mobileProductScene.facts().calls')
-  assert.equal(calls.filter(call => call.method === 'sdk.submitAgentPrompt').length, 1, 'Unknown input is never automatically replayed')
+  assert.equal(calls.filter(call => call.method === 'sdk.submitAgentPrompt').length, 2, 'One normal explicit Send + one unknown Send without automatic replay')
   assert.equal(calls.filter(call => call.method === 'sdk.respondAgentInteraction').length, 1)
   result.passed = true
  } catch (error) {

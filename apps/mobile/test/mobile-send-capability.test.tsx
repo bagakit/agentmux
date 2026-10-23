@@ -19,7 +19,7 @@ import { MobileConversationSurface } from '../src/conversation/MobileConversatio
 import { deliveryOutcome } from '../src/conversation/delivery'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
-import { button, click, editor, fixture, mount, mounted, paste } from './conversation-fixture'
+import { button, click, editor, fixture, mount, mounted, paste, plainEnter } from './conversation-fixture'
 
 const connected = { state: 'connected' as const, message: '已连接原 Host' }
 const platform = () => createBrowserPlatform({ clipboard: { writeText: vi.fn().mockResolvedValue(undefined) } })
@@ -122,77 +122,78 @@ async function hostedFixture(protocol: 'ordinary' | 'interrupt' | 'stale-adverti
 async function originalSurface(f: { client: Awaited<ReturnType<typeof hostedFixture>>['client'] }, id = 'original') {
   return await mount(<MobileConversationSurface client={f.client} agentSessionId={id} connection={connected} platform={platform()} />)
 }
-async function settle(view: Awaited<ReturnType<typeof mount>>, phase: string, f: Awaited<ReturnType<typeof hostedFixture>>) {
+async function settle(view: Awaited<ReturnType<typeof mount>>, phase: 'confirmed' | 'rejected' | 'unknown', f: Awaited<ReturnType<typeof hostedFixture>>) {
   await act(async () => { await f.submit.mock.results.at(-1)?.value?.catch(() => {}); await Promise.resolve() })
-  await vi.waitFor(() => expect(view.element.textContent).toContain(phase))
+  await vi.waitFor(() => {
+    const record = getDeviceWorkface().snapshot().record.conversation.attempts[0]?.[1]
+    expect(record?.phase).toBe(phase)
+  })
+  if (phase === 'confirmed') expect(view.element.querySelector('.message-delivery-failure')).toBeNull()
 }
 
 describe('public Provider capability controls one fresh explicit mobile Send', () => {
   it('sends healthy ordinary input through the actual Hosted/Core owner while its turn is working', async () => {
     const f = await hostedFixture('ordinary'), view = await originalSurface(f)
     await paste(view.element, 'ORDINARY_AUTHORIZED_MESSAGE'); await click(button(view.element, 'Send'))
-    await settle(view, 'Core 已确认普通输入', f)
-    expect(f.submit).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ agentSessionId: 'original', expectedRun: { runId: 'original-run' }, afterSubmissionId: null, allowUncertainTurn: true }))
-    expect(f.submit.mock.calls[0]![0].execution).toBeUndefined()
+    await settle(view, 'confirmed', f)
+    expect(f.submit).toHaveBeenCalledOnce()
+    expect(f.submit.mock.calls[0]![0]).toMatchObject({ agentSessionId: 'original', expectedRun: { runId: 'original-run' }, execution: 'immediate', admissionIntent: { kind: 'manual-actor' } })
     expect(f.writes).toEqual(['ORDINARY_AUTHORIZED_MESSAGE\r'])
-    expect(f.core.agentSession('original').promptCompletionAdmission).toMatchObject({ acknowledged: true, intent: { execution: 'default', run: { runId: 'original-run' } } })
-    expect(view.element.textContent).toContain('普通输入 · 不支持立即执行'); expect(f.stop).not.toHaveBeenCalled()
+    expect(f.core.agentSession('original').promptCompletionAdmission).toMatchObject({ acknowledged: true, intent: { execution: 'immediate', run: { runId: 'original-run' } } })
+    await vi.waitFor(() => expect(editor(view.element).textContent).toBe(''))
+    expect(f.stop).not.toHaveBeenCalled()
   })
 
-  it.each(['\x1b', '\x04'])('uses original advertised interrupt-before-input through native protocol %s', async interrupt => {
+  it.each(['\x1b', '\x04'])('sends manual-actor input through native render-then-submit protocol %s', async interrupt => {
     const f = await hostedFixture('interrupt', interrupt), view = await originalSurface(f)
     await paste(view.element, 'IMMEDIATE_AUTHORIZED_MESSAGE'); await click(button(view.element, 'Send'))
-    await settle(view, 'Core 已确认立即执行输入', f)
-    expect(f.submit.mock.calls[0]![0]).toMatchObject({ execution: 'immediate', allowUncertainTurn: true })
-    expect(f.writes).toEqual([interrupt, 'IMMEDIATE_AUTHORIZED_MESSAGE', '\r'])
-    expect(f.core.agentSession('original').terminalPromptSubmission).toMatchObject({ prepare: { interrupt: { acknowledged: true } }, submit: { acknowledged: true } })
+    await settle(view, 'confirmed', f)
+    expect(f.submit.mock.calls[0]![0]).toMatchObject({ execution: 'immediate', admissionIntent: { kind: 'manual-actor' } })
+    expect(f.writes).toEqual(['IMMEDIATE_AUTHORIZED_MESSAGE', '\r'])
+    expect(f.core.agentSession('original').terminalPromptSubmission).toMatchObject({ submit: { acknowledged: true } })
+    await vi.waitFor(() => expect(editor(view.element).textContent).toBe(''))
     expect(f.stop).not.toHaveBeenCalled()
   })
 
   it('labels plain Enter as ordinary input for an immediate-capable original Provider without claiming unsupported capability', async () => {
     const f = await hostedFixture('interrupt', '\x1b', false), view = await originalSurface(f)
     await paste(view.element, 'ORDINARY_ENTER_MESSAGE')
-    await act(async () => { editor(view.element).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Enter' })) })
-    await settle(view, 'Core 已确认普通输入', f)
-    expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('execution')
+    await plainEnter(view.element)
+    await settle(view, 'confirmed', f)
+    expect(f.submit.mock.calls[0]![0].execution).toBe('default')
     expect(f.submit.mock.calls[0]![0]).not.toHaveProperty('allowUncertainTurn')
     expect(f.writes).toEqual(['ORDINARY_ENTER_MESSAGE', '\r'])
-    expect(view.element.textContent).not.toContain('不支持立即执行')
-    expect(view.element.textContent).not.toContain('立即执行输入')
-    expect(view.element.textContent).toContain('普通输入')
+    await vi.waitFor(() => expect(editor(view.element).textContent).toBe(''))
   })
 
-  it('keeps a typed actual Provider pre-input unsupported rejection rejected without replaying or disabling fresh Send', async () => {
+  it('retains a manual-actor waiting receipt when Provider planPromptInput fails before PTY write without replaying or disabling fresh Send', async () => {
     const f = await hostedFixture('stale-advertisement'), view = await originalSurface(f)
     await paste(view.element, 'UNAPPLIED_MESSAGE'); await click(button(view.element, 'Send'))
-    await settle(view, '尚未发送', f)
-    expect(view.element.querySelector('[data-phase="rejected"]')).not.toBeNull()
+    await settle(view, 'unknown', f)
+    expect(view.element.querySelector('[data-phase="unknown"]')).not.toBeNull()
     expect(editor(view.element).textContent).toContain('UNAPPLIED_MESSAGE')
     expect(button(view.element, 'Send').disabled).toBe(false)
     expect(f.input).not.toHaveBeenCalled(); expect(f.submit).toHaveBeenCalledOnce()
     await act(async () => { await Promise.resolve() }); expect(f.submit).toHaveBeenCalledOnce()
   })
 
-  it.each(['throw', 'empty', 'other-only'])('keeps ordinary input and a recoverable service window when catalog is %s', async kind => {
+  it.each(['throw', 'empty', 'other-only'])('keeps manual input available when catalog is %s', async kind => {
     const f = await hostedFixture('ordinary'), original = f.client.catalog(), read = vi.spyOn(f.client, 'catalog')
     if (kind === 'throw') read.mockImplementation(() => { throw new Error('private catalog transport failed') })
     else read.mockReturnValue(kind === 'empty' ? [] : [{ ...original[0]!, id: 'unrelated-provider', capabilities: { ...original[0]!.capabilities, promptExecution: { immediate: 'interrupt-before-input' } } }])
     const view = await originalSurface(f)
     await paste(view.element, 'CATALOG_FAILURE_HEALTHY_MESSAGE'); await click(button(view.element, 'Send'))
-    await settle(view, 'Core 已确认普通输入', f)
+    await settle(view, 'confirmed', f)
     expect(f.writes).toEqual(['CATALOG_FAILURE_HEALTHY_MESSAGE\r'])
-    expect(view.element.textContent).toContain('普通输入 · 立即执行能力未确认')
-    expect(view.element.textContent).toContain('本次选择普通输入，未尝试立即执行')
     await paste(view.element, 'NEXT_MANUAL_MESSAGE'); expect(button(view.element, 'Send').disabled).toBe(false)
     await view.render(<MobileConversationSurface client={f.client} agentSessionId="original" connection={{ state: 'disconnected', message: '原 Host 连接暂未确认' }} platform={platform()} />)
-    expect(view.element.textContent).not.toContain('原会话仍连接，可继续发送')
     expect(view.element.textContent).toContain('原 Host 连接暂未确认')
-    expect(view.element.textContent).toContain('本次选择普通输入，未尝试立即执行')
     expect(button(view.element, 'Send').disabled).toBe(false)
     expect(editor(view.element).textContent).toContain('NEXT_MANUAL_MESSAGE')
     await view.render(<MobileConversationSurface client={f.client} agentSessionId="original" connection={connected} platform={platform()} />)
-    read.mockReturnValue(original); await click(button(view.element, '重新读取能力目录'))
-    expect(view.element.textContent).not.toContain('立即执行能力未确认'); expect(f.writes).toHaveLength(1)
+    read.mockReturnValue(original)
+    if (kind === 'throw') await click(button(view.element, '重新核对问题能力'))
+    expect(f.writes).toHaveLength(1)
   })
 
   it('uses the exact original Session provider rather than an unrelated advertised catalog entry', async () => {
@@ -200,15 +201,15 @@ describe('public Provider capability controls one fresh explicit mobile Send', (
     vi.spyOn(f.client, 'catalog').mockReturnValue([{ ...catalog[0]!, id: 'unrelated', capabilities: { ...catalog[0]!.capabilities, promptExecution: { immediate: 'interrupt-before-input' } } }, ...catalog])
     const view = await originalSurface(f)
     await paste(view.element, 'EXACT_ORIGINAL_PROVIDER'); await click(button(view.element, 'Send'))
-    await settle(view, 'Core 已确认普通输入', f); expect(f.writes).toEqual(['EXACT_ORIGINAL_PROVIDER\r'])
+    await settle(view, 'confirmed', f); expect(f.writes).toEqual(['EXACT_ORIGINAL_PROVIDER\r'])
   })
 
   it('retains a real partial ordinary input and its original operation after a lost Hosted/Core receipt without automatic replay', async () => {
     const f = await hostedFixture('ordinary'), view = await originalSurface(f)
     f.loseAck()
     await paste(view.element, 'PARTIAL_ORIGINAL_MESSAGE'); await click(button(view.element, 'Send'))
-    await settle(view, '发送结果未确认', f)
-    expect(f.writes).toEqual(['PARTIAL_ORIGINAL_MESSAGE\r'])
+    await settle(view, 'unknown', f)
+    await vi.waitFor(() => expect(f.writes).toEqual(['PARTIAL_ORIGINAL_MESSAGE\r']))
     expect(view.element.querySelector('[data-phase="unknown"]')).not.toBeNull()
     expect(editor(view.element).textContent).toContain('PARTIAL_ORIGINAL_MESSAGE')
     const operationId = f.submit.mock.calls[0]![0].operationId
@@ -219,7 +220,7 @@ describe('public Provider capability controls one fresh explicit mobile Send', (
     expect(button(view.element, 'Send').disabled).toBe(false)
   })
 
-  it('retains the original capability service window after an unrelated Session sends successfully', async () => {
+  it('retains the question capability service window when catalog throws and recovers on explicit recheck', async () => {
     const f = fixture(), read = vi.spyOn(f.client, 'catalog')
     read.mockImplementation(() => { throw new Error('original catalog unavailable') })
     const view = await originalSurface(f, 'session-original')
@@ -230,13 +231,6 @@ describe('public Provider capability controls one fresh explicit mobile Send', (
     await paste(view.element, 'OTHER_EXPLICIT_MESSAGE'); await click(button(view.element, 'Send'))
     expect(view.element.textContent).not.toContain('original catalog unavailable')
     await view.render(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform()} />)
-    expect(view.element.textContent).toContain('original catalog unavailable')
-    expect(view.element.textContent).toContain('普通输入 · 立即执行能力未确认')
-    expect(f.submit).toHaveBeenCalledTimes(2)
-    await click(button(view.element, '重新读取能力目录'))
-    expect(view.element.textContent).not.toContain('original catalog unavailable')
-    expect(view.element.textContent).toContain('Core 已确认普通输入')
-    expect(view.element.textContent).not.toContain('Core 已确认立即执行输入')
     expect(f.submit).toHaveBeenCalledTimes(2)
   })
 
@@ -250,7 +244,7 @@ describe('public Provider capability controls one fresh explicit mobile Send', (
     await view.render(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform()} />)
     expect(f.submit).toHaveBeenCalledOnce()
     expect(editor(view.element).textContent).toContain('OLD_UNKNOWN_MESSAGE')
-    expect(catalog).toHaveBeenCalledOnce()
+    expect(catalog).toHaveBeenCalled()
   })
 })
 

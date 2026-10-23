@@ -8,6 +8,8 @@ export function installConversationReading(f: ReturnType<typeof fixture>) {
   const read: AgentMuxHostedClient['readAgentConversation'] = async input => {
     const sourceHostId = f.sessions.get(input.agentSessionId)!.hostId
     const [historyPage, captured] = await Promise.all([f.readHistory(input.agentSessionId), f.readTimeline(input.agentSessionId)])
+    if (historyPage.agentSessionId !== input.agentSessionId) throw new Error('History page belongs to another Session')
+    if (captured.agentSessionId !== input.agentSessionId) throw new Error('Timeline belongs to another Session')
     const digest = conversationRevision({ historyPage, captured }), previous = versions.get(input.agentSessionId)
     const revision = previous?.digest === digest ? previous.revision : (previous?.revision ?? 0) + 1
     versions.set(input.agentSessionId, { digest, revision })
@@ -30,8 +32,9 @@ export function installConversationReading(f: ReturnType<typeof fixture>) {
     readConversationChanges: async (input: Parameters<AgentMuxHostedClient['readConversationChanges']>[0]) => ({ ...await read(input), checkpoint: input.checkpoint, more: false }),
     observeConversation: async (input: Parameters<AgentMuxHostedClient['observeConversation']>[0]) => {
       const frame = await read(input)
+      const handle = 'view' in input && input.view ? await f.client.observeSessionHistory(input.agentSessionId, () => {}, {}) : null
       return { hostId: frame.hostId, sourceHostId: frame.sourceHostId, agentSessionId: frame.agentSessionId,
-        scope: frame.scope, coverage: frame.coverage, closed: new AbortController().signal, dispose() {} }
+        scope: frame.scope, coverage: frame.coverage, closed: new AbortController().signal, dispose() { handle?.dispose() } }
     },
     releaseConversationView: async () => ({})
   })

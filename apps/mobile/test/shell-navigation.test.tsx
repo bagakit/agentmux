@@ -12,6 +12,7 @@ const unavailable = { state: 'unavailable' as const, message: '设备未授权�
 const connected = { state: 'connected' as const, message: '已连接原 Host' }
 function clientFixture() {
   const f = fixture()
+  f.client.subscribeRpc = vi.fn().mockResolvedValue({ subscriptionId: 'fixture-appearance', dispose: async () => {} })
   f.client.forwardRpc = vi.fn().mockImplementation(async method => {
     if (method === 'space.ls') return { catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [],
       agentPresentation: [{ agentSessionId: 'session-original', name: '原 Agent', project: '原项目', group: 'working', state: 'working', detail: '执行中', providerId: 'codex' }] } }
