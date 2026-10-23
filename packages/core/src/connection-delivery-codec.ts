@@ -1,3 +1,4 @@
+import { connectionDiagnosisSourceCodes, type ConnectionDeliverySourceObservation } from './connection-diagnosis-source.js'
 import { parseExternalConversationAuthor } from './external-conversation.js'
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
@@ -134,6 +135,16 @@ export function parseConnectionDeliveryObservation(value: unknown): ConnectionDe
   if (!['unknown', 'ready', 'unavailable', 'disabled'].includes(p.state as string) || p.reason !== undefined && !['not-started', 'source-unconfirmed', 'source-gap', 'content-unconfirmed', 'storage-unconfirmed', 'adapter-unavailable', 'credential-missing', 'effect-unconfirmed'].includes(p.reason as string)) fail()
   return { state: p.state as ConnectionDeliveryObservation['state'], ...(p.reason === undefined ? {} : { reason: p.reason as NonNullable<ConnectionDeliveryObservation['reason']> }) }
 }
+/** Finite source evidence; a successful read does not resolve earlier durable gaps or effects. */
+export function parseConnectionDeliverySourceObservation(value: unknown): ConnectionDeliverySourceObservation {
+  const p = object(value, ['state', 'reason', 'code', 'codeRecorded', 'checkpointKey'])
+  if (!['ready', 'unavailable'].includes(String(p.state)) || typeof p.codeRecorded !== 'boolean' ||
+    p.code !== null && (!connectionDiagnosisSourceCodes.includes(p.code as never) || !p.codeRecorded) ||
+    p.reason !== undefined && !['source-unconfirmed', 'source-gap', 'storage-unconfirmed'].includes(String(p.reason)) ||
+    p.state === 'ready' && (p.reason !== undefined || p.code !== null || p.codeRecorded) || p.state === 'unavailable' && p.reason === undefined) fail()
+  return { state: p.state as ConnectionDeliverySourceObservation['state'], ...(p.reason === undefined ? {} : { reason: p.reason as NonNullable<ConnectionDeliverySourceObservation['reason']> }),
+    code: p.code as ConnectionDeliverySourceObservation['code'], codeRecorded: p.codeRecorded as boolean, checkpointKey: p.checkpointKey === null ? null : version(p.checkpointKey) }
+}
 export function parseConnectionDeliveryParams<M extends ConnectionDeliveryMethod>(method: M, value: unknown): ConnectionDeliveryParamsMap[M] {
   if (method !== 'connection.delivery.ls') { const p = object(value, ['operationId']); return { operationId: text(p.operationId) } as ConnectionDeliveryParamsMap[M] }
   const p = object(value, ['connectionId', 'bindingId', 'bindingRevision', 'after', 'afterContent', 'limit'])
@@ -142,13 +153,13 @@ export function parseConnectionDeliveryParams<M extends ConnectionDeliveryMethod
 }
 export function parseConnectionDeliveryResult<M extends ConnectionDeliveryMethod>(method: M, value: unknown, input: ConnectionDeliveryParamsMap[M]): ConnectionDeliveryResultMap[M] {
   if (method === 'connection.delivery.ls') {
-    const p = object(value, ['deliveries', 'next', 'observation', 'coverage']), expected = input as ConnectionDeliveryParamsMap['connection.delivery.ls']
+    const p = object(value, ['deliveries', 'next', 'observation', 'sourceObservation', 'effectObservation', 'coverage']), expected = input as ConnectionDeliveryParamsMap['connection.delivery.ls']
     if (!Array.isArray(p.deliveries) || p.deliveries.length > (expected.limit ?? 30)) fail()
     const deliveries = (p.deliveries as unknown[]).map(parseConnectionDelivery), next = p.next === null ? null : text(p.next)
     if (new Set(deliveries.map(d => d.operationId)).size !== deliveries.length || deliveries.some(d => d.target.connectionId !== expected.connectionId || d.bindingId !== expected.bindingId || d.bindingRevision !== expected.bindingRevision || d.operationId === expected.after) || next !== null && next !== deliveries.at(-1)?.operationId) fail()
     const coverage = p.coverage === undefined ? undefined : parseConnectionDeliveryCoverage(p.coverage)
     if (coverage?.origins.some(o => o.origin.connectionId !== expected.connectionId)) fail()
-    return { deliveries, next, ...(p.observation === undefined ? {} : { observation: parseConnectionDeliveryObservation(p.observation) }), ...(coverage ? { coverage } : {}) } as ConnectionDeliveryResultMap[M]
+    return { deliveries, next, ...(p.observation === undefined ? {} : { observation: parseConnectionDeliveryObservation(p.observation) }), ...(p.sourceObservation === undefined ? {} : { sourceObservation: parseConnectionDeliverySourceObservation(p.sourceObservation) }), ...(p.effectObservation === undefined ? {} : { effectObservation: parseConnectionDeliveryObservation(p.effectObservation) }), ...(coverage ? { coverage } : {}) } as ConnectionDeliveryResultMap[M]
   }
   const p = object(value, ['delivery']), expected = input as ConnectionDeliveryParamsMap['connection.delivery.inspect']
   const delivery = p.delivery === null && method === 'connection.delivery.inspect' ? null : parseConnectionDelivery(p.delivery)

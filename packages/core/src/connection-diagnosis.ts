@@ -1,3 +1,6 @@
+import { connectionDiagnosisEventKey, connectionDiagnosisRecordKey, connectionDiagnosisSourceKey, connectionDiagnosisPartKey } from './connection-diagnosis-source.js'
+import type { ConversationItemRef, ConversationRef } from './conversation.js'
+import type { ConnectionDeliveryGap } from './connection-delivery-contract.js'
 import type { ConnectionDelivery } from './connection-delivery-contract.js'
 import type { ConnectionIngressRecord } from './ingress-contract.js'
 import type { RoomBinding } from './room-binding-contract.js'
@@ -23,10 +26,24 @@ export function deliveryMatches(delivery: ConnectionDelivery, target: GroupTarge
 }
 export function deliveryFacts(delivery: ConnectionDelivery) {
   const kind = delivery.reference.source.kind === 'binding-operation' ? 'binding-notice' as const : delivery.reference.source.kind === 'interaction' ? 'permission' as const : 'conversation' as const
-  return { kind, operationId: delivery.operationId, state: delivery.state, receipt: delivery.receipt?.state ?? null,
+  const record = delivery.reference.source.kind === 'native' || delivery.reference.source.kind === 'captured' ? delivery.reference as ConversationItemRef : undefined
+  return { kind, association: association(delivery.reference, { ...(record ? { record } : {}), ...(delivery.event ? { event: delivery.event } : {}) }), operationId: delivery.operationId, state: delivery.state, receipt: delivery.receipt?.state ?? null,
     platformMessageId: delivery.receipt?.state === 'confirmed' ? delivery.receipt.mapping.messageId : null,
     reason: delivery.receipt && delivery.receipt.state !== 'confirmed' ? delivery.receipt.reason : delivery.reason ?? null,
     resourceUpload: delivery.resourceUpload?.state ?? null }
+}
+function association(reference: ConversationRef, value: Pick<ConnectionDeliveryGap, 'record' | 'source' | 'event' | 'part'>) {
+  const record = value.record ?? value.part?.record
+  return { sourceKey: value.source || record ? connectionDiagnosisSourceKey(reference, value.source ?? record!.source) : null,
+    recordKey: record ? connectionDiagnosisRecordKey(record) : null,
+    eventKey: value.event && record ? connectionDiagnosisEventKey(record, value.event) : null,
+    partKey: value.part ? connectionDiagnosisPartKey(value.part) : null }
+}
+function recordMatches(record: { hostId: string; agentSessionId: string }, target: GroupTarget, sourceHostId?: string): boolean {
+  return record.agentSessionId === target.agentSessionId && record.hostId === (sourceHostId ?? target.executionHostId)
+}
+function gapMatches(gap: ConnectionDeliveryGap, target: GroupTarget, sourceHostId?: string): boolean {
+  return [gap.record, gap.part?.record, gap.anchor?.record].every(record => !record || recordMatches(record, target, sourceHostId))
 }
 const ingressMatches = (ingress: ConnectionIngressRecord, target: GroupTarget) => ingress.externalConversationId === target.externalConversationId && applicationMatches(ingress.application, target)
 // Original owner codes only. Arbitrary error text, body and exception properties are never diagnosis inputs.
@@ -70,7 +87,7 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
       nativeAdoption: interaction?.nativeAdoption ?? null,
       ...(valid && current && inspected.value?.context ? { context: inspected.value.context } : {}) }
   }))
-  const scopedOutgoing = outgoing.value && outgoing.value.deliveries.every(delivery => deliveryMatches(delivery, target))
+  const scopedOutgoing = outgoing.value && outgoing.value.deliveries.every(delivery => deliveryMatches(delivery, target) && recordMatches(delivery.reference, target, ['native', 'captured'].includes(delivery.reference.source.kind) ? b?.sourceFrontier?.sourceHostId : target.executionHostId)) && (outgoing.value.coverage?.gaps.every(gap => gapMatches(gap, target, b?.sourceFrontier?.sourceHostId)) ?? true)
   return { target: { ...target }, window: { ...(window.after ? { after: window.after } : {}), ...(window.afterContent ? { afterContent: window.afterContent } : {}), ...(window.beforeIngressId ? { beforeIngressId: window.beforeIngressId } : {}) }, limit: groupWindowLimit,
     connection: { value: sameConnection ? { revision: c.revision, enabled: c.config.enabled,
       authentication: { state: c.observation.authentication.state, ...(c.observation.authentication.reason ? { reason: c.observation.authentication.reason } : {}) },
@@ -86,8 +103,9 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
       issue: binding.issue ?? (sameBinding ? null : 'target-unconfirmed' as const) },
     outgoing: { value: scopedOutgoing ? { after: window.after ?? null, afterContent: window.afterContent ?? null, next: outgoing.value!.next,
       deliveries: outgoing.value!.deliveries.map(deliveryFacts), observation: outgoing.value!.observation ? { state: outgoing.value!.observation.state, ...(outgoing.value!.observation.reason ? { reason: outgoing.value!.observation.reason } : {}) } : null,
+      sourceObservation: outgoing.value!.sourceObservation ?? null, effectObservation: outgoing.value!.effectObservation ?? null,
       coverage: outgoing.value!.coverage ? { state: outgoing.value!.coverage.state, nextContent: outgoing.value!.coverage.nextContent,
-        gaps: outgoing.value!.coverage.gaps.slice(0, groupWindowLimit).map(gap => ({ gapId: gap.gapId, reason: gap.reason, code: connectionDiagnosisSourceCodes.find(code => code === gap.code) ?? null, codeRecorded: gap.code !== undefined, sourceKind: gap.source?.kind ?? null })), originCount: outgoing.value!.coverage.origins.length, omittedGapCount: Math.max(0, outgoing.value!.coverage.gaps.length - groupWindowLimit) } : null } : null,
+        gaps: outgoing.value!.coverage.gaps.slice(0, groupWindowLimit).map(gap => ({ gapId: gap.gapId, reason: gap.reason, association: association({ hostId: b?.sourceFrontier?.sourceHostId ?? target.executionHostId, agentSessionId: target.agentSessionId }, gap), code: connectionDiagnosisSourceCodes.find(code => code === gap.code) ?? null, codeRecorded: gap.code !== undefined, sourceKind: gap.source?.kind ?? null })), originCount: outgoing.value!.coverage.origins.length, omittedGapCount: Math.max(0, outgoing.value!.coverage.gaps.length - groupWindowLimit) } : null } : null,
       issue: outgoing.issue ?? (scopedOutgoing ? null : 'target-unconfirmed' as const) },
     incoming: { value: incoming.value && incoming.value.ingresses.every(row => ingressMatches(row, target)) ? { beforeIngressId: window.beforeIngressId ?? null, next: incoming.value.nextBeforeIngressId, rows: intake } : null, issue: incoming.issue ?? (incoming.value?.ingresses.every(row => ingressMatches(row, target)) ? null : 'target-unconfirmed' as const) }
   }
@@ -130,12 +148,14 @@ export function formatGroupDiagnosis(report: GroupDiagnosis) {
   if (binding.value) lines.push(`Binding state: ${binding.value.state} · current revision ${binding.value.currentRevision ?? 'unconfirmed'} · scope ${binding.value.scope.input} / ${binding.value.scope.publication} · active grants input ${binding.value.activeInputGrants} / answer ${binding.value.activeAnswerGrants} / permission ${binding.value.activePermissionGrants}`)
   const out = outgoing.value
   if (out) {
-    lines.push(`Source observation: ${out.observation?.state ?? 'unrecorded'} · ${out.observation?.reason ?? 'no recorded reason'} (not platform readiness)`, `Delivery window after: ${out.after ?? 'start'} · content after: ${out.afterContent ?? 'start'}`, `Delivery has next: ${out.next !== null} · content has next: ${out.coverage?.nextContent !== null && out.coverage?.nextContent !== undefined}`)
+    lines.push(`Lane observation: ${out.observation?.state ?? 'unrecorded'} · ${out.observation?.reason ?? 'no recorded reason'} (not platform readiness)`, `Delivery window after: ${out.after ?? 'start'} · content after: ${out.afterContent ?? 'start'}`, `Delivery has next: ${out.next !== null} · content has next: ${out.coverage?.nextContent !== null && out.coverage?.nextContent !== undefined}`)
+    lines.push(`Source read: ${out.sourceObservation?.state ?? 'unrecorded'} · ${out.sourceObservation?.reason ?? 'no recorded reason'} · code ${out.sourceObservation?.code ?? (out.sourceObservation?.codeRecorded ? 'recorded code withheld' : 'unrecorded')} · checkpoint key ${out.sourceObservation?.checkpointKey ?? 'unrecorded'}`, `Unresolved effects: ${out.effectObservation?.state ?? 'unrecorded'} · ${out.effectObservation?.reason ?? 'no recorded reason'} (not complete-delivery proof)` )
     if (!out.deliveries.length) lines.push('No delivery in this reading window; this is not an empty-history or platform-availability claim.')
-    for (const d of out.deliveries) lines.push(`Outgoing ${d.operationId}: ${d.kind} · queue ${d.state} · platform receipt ${d.receipt ?? 'unrecorded'} · message ${d.platformMessageId ?? 'unrecorded'} · reason ${d.reason ?? 'unrecorded'} · resource upload ${d.resourceUpload ?? 'unrecorded'}`)
+    const related = (a: import('./connection-diagnosis-contract.js').ConnectionDiagnosisAssociation) => `source key ${a.sourceKey ?? 'unrecorded'} · record key ${a.recordKey ?? 'unrecorded'} · event key ${a.eventKey ?? 'unrecorded'} · part key ${a.partKey ?? 'unrecorded'}`
+    for (const d of out.deliveries) lines.push(`Outgoing ${d.operationId}: ${d.kind} · queue ${d.state} · platform receipt ${d.receipt ?? 'unrecorded'} · message ${d.platformMessageId ?? 'unrecorded'} · reason ${d.reason ?? 'unrecorded'} · resource upload ${d.resourceUpload ?? 'unrecorded'} · ${related(d.association)}`)
     lines.push(`Content coverage: ${out.coverage?.state ?? 'unrecorded'} · observed origins ${out.coverage?.originCount ?? 'unrecorded'}`)
     if (out.coverage?.omittedGapCount) lines.push(`Additional gaps in this owner page: ${out.coverage.omittedGapCount}`)
-    for (const gap of out.coverage?.gaps ?? []) lines.push(`Content gap ${gap.gapId}: ${gap.reason} · source ${gap.sourceKind ?? 'unrecorded'} · code ${gap.code ?? (gap.codeRecorded ? 'recorded code withheld' : 'unrecorded')}`)
+    for (const gap of out.coverage?.gaps ?? []) lines.push(`Content gap ${gap.gapId}: ${gap.reason} · source ${gap.sourceKind ?? 'unrecorded'} · code ${gap.code ?? (gap.codeRecorded ? 'recorded code withheld' : 'unrecorded')} · ${related(gap.association)}`)
   }
   const input = incoming.value
   if (input) {
