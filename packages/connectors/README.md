@@ -20,13 +20,24 @@ The database uses WAL and full synchronous commits. Each owner keeps its own
 named tables; Core Agent history, input, permissions and runtime state remain with
 their original owners.
 
-`SecretPort.resolve` returns a credential only to the executing adapter. A
-headless embedding must supply its own secure resolver. Public configuration,
-operation results and diagnostics contain only an opaque `credentialRef`.
+`SecretPort.resolve` returns a credential only to the executing adapter.
+`ConnectionSecrets` reuses the original SQLite table, operation IDs, opaque
+references and transactions. New values have an explicit format marker followed
+by UTF-8 in the private Host database: permission-protected plaintext, with a
+current-user 0700 directory and 0600 database/SQLite sidecars. No OS key service,
+key file, alternate store or fallback is required. Unsupported original ciphertext
+is retained unchanged; inspection reads its reference, while resolution or a
+same-operation write refuses that exact unsupported value without conversion.
+
+Public configuration, operation results and diagnostics contain only an opaque
+`credentialRef`. The dedicated `connection.credential.store` transient input is
+restricted to the original authenticated person/device, exact Runtime fence and
+protected Unix/SSH-to-Unix/end-to-end relay transport. CLI entry uses stdin alone.
+`connection.credential.inspect` returns the original reference, including after an
+unknown commit acknowledgement. Managed Agents cannot administer credentials.
 Adapter exceptions are reduced to safe stage reasons because raw platform errors
-can contain credentials. Desktop uses the operating system encryption service and
-stores only encrypted credential bytes. Unavailable encryption, including a
-plaintext storage backend, does not write a credential.
+can contain credentials. See [Host credential storage](../../apps/host/credential-storage.md)
+for the exact entry, permission and original-operation contract.
 
 ## Connector service policy
 
@@ -844,7 +855,7 @@ current saved Connection revision. An existing bot has
 `{ "connectionRevision": 1, "capabilities": ["management-authentication"] }`
 when its registered adapter supports that application's domain; an unsupported
 bot has an empty capability array, and an absent Connection has `support: null`.
-This read does not load the native adapter, inspect the Vault or contact the
+This read does not load the native adapter, resolve private credentials or contact the
 platform. Pausing a bot or automatic traffic preserves management discovery.
 Support never confirms login, application authority, grants, publication or a
 live connection. Clients match the revision before offering a new scan and keep
@@ -862,8 +873,8 @@ The begin input is:
 ```
 
 The native Feishu leaf issues one raw QR authentication challenge. Its payload,
-flow key, cookies, console CSRF and account/enterprise identity are encrypted
-through the original secret port. Safe durable records and list summaries contain
+flow key, cookies, console CSRF and account/enterprise identity remain private
+through the original credential port and permission-protected SQLite owner. Safe durable records and list summaries contain
 only request, authentication-stage and secure-handoff facts; local support is
 reported separately. Begin and inspect
 reveal active confirmation material only to the original transport-approved actor.
@@ -896,15 +907,15 @@ For an ordinary management request, a returned `confirm-account` action uses
 saved-application management permission or tenant membership.
 
 A repeated advance reads its original receipt or finishes only its original local
-encrypted handoff. It never repeats the claimed native request, including after
+private-storage handoff. It never repeats the claimed native request, including after
 an executing-owner process restart. Explicit `renew` abandons the current
 authentication and requests a new challenge inside the same intent. The old init,
-step receipts and encrypted snapshots remain retained; renewal never creates an
+step receipts and original private snapshots remain retained; renewal never creates an
 application. Private cookies are selected anew by a mature CookieJar for each
 qualified HTTPS destination. The Console redirect chain admits the exact
 `accounts.larkoffice.com` and `login.feishu.cn` HTTPS issuers in addition to the
 original account, landing and Console hosts. Their scoped cookies and previous
-hop remain available when the original encrypted snapshot is reopened. These
+hop remain available when the original private snapshot is reopened. These
 issuers are transit sources only: account bootstrap is accepted only at
 `https://open.feishu.cn` or `https://open.larkoffice.com`; the initial cross-login
 entry hosts remain unchanged. The supported console encodings are direct literal
@@ -993,7 +1004,7 @@ Copy only the trace projection when sharing it for diagnosis.
 
 Trace selection performs no platform requests, credential resolution,
 checkpoint repair or write replay, including when the original operation is
-unknown, encryption is unavailable or its adapter is absent after restart.
+unknown, private credential storage is unavailable or its adapter is absent after restart.
 It is an independent local observation and cannot approve or repair creation,
 permissions, publication, current application state or message delivery.
 
@@ -1040,7 +1051,7 @@ Pass this input to `advance --input FILE|-`. An explicit `confirm-account`
 confirms only the displayed stable account and enterprise. A separate offered
 `create` decision authorizes a finite sequence: upload the frozen PNG, create
 one ordinary application, read that exact application's credential, then save
-the original Vault/Connection result. Each HTTP has its own durable claim and
+the original credential/Connection result. Each HTTP has its own durable claim and
 saved receipt before the next request. There is no template, capability switch,
 event/callback, permission scope, visibility, version or publication operation.
 Only `continue-authentication` may drive an offered login observation; it cannot
@@ -1052,7 +1063,7 @@ decision reference; historical decision receipts are read by exact action ID,
 separately from the original HTTP-attempt journal. The exact created app ID is
 retained before credential handoff. If its credential read fails, a new explicit
 `read-credential` can continue that same app; it never re-creates or selects an
-application by name. Local Vault/configure ACK recovery runs before current
+application by name. Local credential/configure ACK recovery runs before current
 adapter or login eligibility, including after owner process loss. A failed local
 save cannot erase an already confirmed receipt or a different owner's recovery.
 
@@ -1198,7 +1209,7 @@ The default Feishu adapter observes exact human contact and chat SDK resources a
 ACK. Original `im.chat.updated_v1` events refresh only their exact group through the same owner;
 the receiver does not change platform subscriptions or permissions. A native read failure retains
 confirmed metadata as stale and can recover on subsequent relevant intake or explicit refresh.
-`DesktopConnectionServices.onChannelMetadataChanged` carries the exact changed subject for local
+`ConnectionServices.onChannelMetadataChanged` carries the exact changed subject for local
 clients to reread the same owner; it does not rewrite a previously frozen input profile or an author.
 Missing cache, credentials or display observations cannot block native ACK, authenticated input,
 publication or another healthy Agent. Controlled SDK consumer tests do not qualify a live app's
