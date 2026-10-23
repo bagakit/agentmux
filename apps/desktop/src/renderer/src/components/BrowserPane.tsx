@@ -1,5 +1,6 @@
 import { mintObjectId } from '@agentmux/core/object-id'
 import { BrowserOutcomeCriteria } from './BrowserOutcomeCriteria'
+import { CapsuleInteractionChrome } from './CapsuleInteractionChrome'
 import type { SplitDirection } from '@agentmux/layout'
 import { WORKBENCH_TAB_SPLIT_ACTIONS } from '../lib/workbench-tab-actions'
 import { WorkbenchLayoutMenuRows } from './WorkbenchLayoutMenuRows'
@@ -337,6 +338,7 @@ function BrowserPaneContent({
     finally { setCreatingAgent(false) }
   }
   const [menuOpen, setMenuOpen] = useState(false)
+  const [capsuleToolbarHost, setCapsuleToolbarHost] = useState<HTMLSpanElement | null>(null)
   const [customViewport, setCustomViewport] = useState<string | null>(null)
   const [managementOpen, setManagementOpen] = useState(false)
   const [managementVisited, setManagementVisited] = useState(false)
@@ -1283,6 +1285,7 @@ function BrowserPaneContent({
             <ThemeFileCodeIcon size={14} />
           </button>
         ) : null}
+        {tab.capsuleId ? <span className="capsule-toolbar" ref={setCapsuleToolbarHost} /> : null}
           <DropdownMenu.Root modal={false} onOpenChange={setMenuOpen}>
             <DropdownMenu.Trigger asChild>
               <button type="button" className={toolbar?.more || regionSplitItems ? undefined : 'browser-toolbar__more--optional'} aria-label="More browser tools" title="More browser tools"><ThemeActionMoreIcon size={14} /></button>
@@ -1348,6 +1351,7 @@ function BrowserPaneContent({
           </DropdownMenu.Root>
         {regionCloseButton}
       </form>
+      {tab.capsuleId ? <CapsuleInteractionChrome key={tab.capsuleId} capsuleId={tab.capsuleId} active={tab.capsuleActive === true} visible={visible} toolbarHost={capsuleToolbarHost} /> : null}
       {bookmarkSaving ? <p className="browser-bookmark-result" role="status">
         <ThemeStatusLoadingIcon size={12} animation="spin" aria-hidden="true" /><span>Saving bookmark…</span>
       </p> : null}
