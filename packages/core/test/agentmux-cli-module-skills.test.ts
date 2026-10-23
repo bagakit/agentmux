@@ -317,7 +317,7 @@ describe('local progressive AgentMux module skills', () => {
     const line = guidance.split('\n').find(value => value.startsWith('Known original context: '))!
     expect(JSON.parse(line.slice('Known original context: '.length))).toEqual({ goalId: context.goalId,
       agentSessionId: context.agentSessionId, runId: context.runId, source: context.source })
-    expect(guidance).toContain(`Required module: ${AGENTMUX_GOAL_SKILL_ENTRY}`)
+    expect(guidance.split(AGENTMUX_GOAL_SKILL_ENTRY)).toHaveLength(2)
     expect(agentMuxPmoPlaybook().document).toContain(goalRoleGuidance({ role: 'manager' }))
     expect(agentMuxModuleSkill('goal')).toContain(goalRoleGuidanceContract())
     expect(goalRoleGuidance({ role: 'executor' })).toContain('Return delivery evidence for every delegated criterion')
