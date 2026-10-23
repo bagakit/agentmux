@@ -3,7 +3,7 @@ import { parseChannelMetadataParams, parseChannelMetadataResult, type ChannelMet
 import type { ConnectionHost, SecretPort } from './connection-host.js'
 
 /** Typed metadata management over adapter-owned keys. It cannot enumerate or clear retained effect resources. */
-export function createChannelMetadata(connections: Pick<ConnectionHost, 'readConfiguration' | 'registeredAdapter' | 'channelStorage'>, secrets: SecretPort, signal: AbortSignal, changed: (change: ChannelMetadataChange) => void): ChannelMetadataPort {
+export function createChannelMetadata(connections: Pick<ConnectionHost, 'readConfiguration' | 'registeredAdapter' | 'channelStorage' | 'onChannelMetadataChanged'>, secrets: SecretPort, signal: AbortSignal, changed: (change: ChannelMetadataChange) => void): ChannelMetadataPort {
   function target(input: { connectionId: string; expectedConnectionRevision?: number; subject?: ChannelMetadataSubject }) {
     const current = connections.readConfiguration(input.connectionId)
     if (!current || signal.aborted) throw new AgentMuxError('The original Channel metadata owner is unavailable. Existing input remains available.', 'CHANNEL_METADATA_UNAVAILABLE')
@@ -22,6 +22,23 @@ export function createChannelMetadata(connections: Pick<ConnectionHost, 'readCon
     if (current) changed({ connectionId: input.connectionId, application: current.config.application, subject: input.subject })
   }
   return {
+    watch: async (listener, ended, context) => {
+      await context?.assertCurrent?.()
+      context?.signal?.throwIfAborted(); signal.throwIfAborted()
+      let closed = false
+      const release = connections.onChannelMetadataChanged(change => { if (!closed) listener(change) })
+      const dispose = () => {
+        if (closed) return
+        closed = true; release()
+        signal.removeEventListener('abort', ownerClosed)
+        context?.signal?.removeEventListener('abort', dispose)
+      }
+      const ownerClosed = () => { dispose(); ended(new AgentMuxError('The original Channel metadata owner closed. Saved profiles and Agents are retained.', 'CHANNEL_METADATA_UNAVAILABLE')) }
+      signal.addEventListener('abort', ownerClosed, { once: true })
+      context?.signal?.addEventListener('abort', dispose, { once: true })
+      if (signal.aborted || context?.signal?.aborted) dispose()
+      return { dispose }
+    },
     get: async (value, context) => {
       const input = parseChannelMetadataParams('connection.metadata.get', value)
       await context?.assertCurrent?.()
