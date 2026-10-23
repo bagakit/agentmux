@@ -17,9 +17,11 @@ const cases = [
   ['forget-default-shell-ui', ['apps/desktop/test/toolkit-presentation-ui.test.tsx']]
 ]
 if (process.argv.includes('--fast')) {
+  await writeFile(resolve(evidence, 'fast.json'), '')
   const results = []
   for (const [name, files] of cases) {
     const output = resolve(evidence, name + '.json'), loaded = resolve(evidence, name + '-loaded.jsonl')
+    await writeFile(output, '')
     await writeFile(loaded, '')
     const child = spawn(process.execPath, [resolve(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config, ...files, '--reporter=default', '--reporter=json', '--outputFile=' + output],
       { cwd: root, env: { ...process.env, AGENTMUX_TOOLKIT_PRESENTATION_MUTATION: name === 'baseline' ? '' : name, AGENTMUX_TOOLKIT_PRESENTATION_LOADED: loaded }, stdio: ['ignore', 'pipe', 'pipe'] })
