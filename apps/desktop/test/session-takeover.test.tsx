@@ -120,6 +120,21 @@ it('the real Agent Region exposes Take over and opening/cancelling keeps its dra
   expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
 })
 
+it('the original Agent Region opens experience review without extracting, delivering or stopping work', async () => {
+  const launch = launchBoundary(), stop = vi.spyOn(api.sessions, 'stop')
+  const read = vi.spyOn(api.agentLearning, 'call').mockRejectedValue(new Error('Original learning owner is temporarily unavailable'))
+  await act(async () => root.render(<SessionPane sessionId={original.id} surfaceKind="agent" visible parked interactiveResize={false} linkOrigin={source.origin} />))
+  const trigger = document.querySelector<HTMLButtonElement>('.agent-region-header__more')!
+  await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
+  await act(async () => { await vi.waitFor(() => expect(document.querySelector('.agent-region-menu')).not.toBeNull()) })
+  const entry = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Pass on experience')
+  expect(entry).toBeDefined(); await act(async () => entry!.click())
+  expect(document.querySelector('.session-learning')).not.toBeNull()
+  expect(read.mock.calls.map(([method]) => method)).toEqual(['agent.learning.ls'])
+  expect(launch).not.toHaveBeenCalled(); expect(stop).not.toHaveBeenCalled()
+  expect(useAppStore.getState().agentComposerDrafts.original).toBe('Unsent draft stays with the original.')
+})
+
 it('the shared Launcher picker retains unknown choices and has no warm-terminal side effect in takeover', async () => {
   const prewarm = vi.spyOn(useAppStore.getState(), 'prewarmTerminal'), launch = launchBoundary()
   const tab = createWorkbenchTab('launcher-tab', { regionId: 'launcher-region', kind: 'launcher', workspaceId: 'repo' })
