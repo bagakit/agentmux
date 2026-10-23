@@ -9,13 +9,19 @@ import { restoredMoteBotRequests } from '../../../src/renderer/src/lib/mote-bot-
 import { parseMoteConnectionOperation, type MoteConnectionCreate } from '@agentmux/core/mote-connections'
 import { mountThemeRuntime } from '@agentmux/client-ui/theme'
 import '../../../src/renderer/src/styles/index.css'
+import '../../../src/renderer/src/styles/mote-connection-identity.css'
 declare const __MOTE_PREPARED_IMAGE__: { dataUrl: string; sha256: string }
 const target = { spaceId: 'preview-mote', zoneId: 'preview-home', expectedResource: { hostId: 'preview-host', workspaceId: 'preview-workspace', workspacePath: (new URL('file:///').pathname + "preview/mote") } }, revision = 'sha256:' + 'a'.repeat(64)
 const source = { target, preparedFrom: { topicRevision: revision, avatarRevision: revision } }, name = 'Research companion', description = 'Public notes and useful findings for our shared work.'
 const input: MoteConnectionCreate = { operationId: 'prepared-admission', source, desired: { name, description, avatar: { pngDataUrl: __MOTE_PREPARED_IMAGE__.dataUrl } }, adapterId: 'preview', domain: 'preview.example' }
 const enrollment = { operationId: 'prepared-child', connectionId: 'prepared-connection', adapterId: input.adapterId, domain: input.domain, label: name, preset: { name, description, avatarSha256: __MOTE_PREPARED_IMAGE__.sha256, width: 256, height: 256 }, revision: 3, authorization: 'not-started', credential: 'not-started', configuration: 'not-started', application: null, authentication: { attemptId: 'prepared-account', stage: 'confirmed' }, creation: { upload: 'not-started', create: 'not-started' }, configured: null }
 const operation = parseMoteConnectionOperation({ operationId: input.operationId, action: 'create', source, snapshot: { name, description, avatarSha256: __MOTE_PREPARED_IMAGE__.sha256 }, connection: null, enrollmentOperationId: enrollment.operationId, profileOperationId: null, defaultSave: null, enrollment, profile: null, defaultLink: { state: 'pending', current: null }, issue: null })
-const config = await api.config.get(); useAppStore.setState({ config, sessions: [] }); mountThemeRuntime(window, config.appearance)
+const config = { ...await api.config.get(), hosts: [], workspaces: [], startup: { skipAgentAvailabilityCheckWait: true } }
+api.config.get = async () => config
+api.sessions.snapshot = async () => ({ sessions: [], timelines: {}, recoveryCandidates: [] })
+await useAppStore.persist.rehydrate()
+const stop = await useAppStore.getState().initialize(); stop()
+useAppStore.setState({ config, sessions: [] }); mountThemeRuntime(window, config.appearance)
 let mode: 'legacy' | 'prepared' = 'legacy'
 const legacy = { operationId: 'original-unknown', source: { target, expectedTopicRevision: revision, expectedAvatarRevision: revision }, adapterId: input.adapterId, domain: input.domain, avatar: 'include-saved' }
 function select(value: typeof mode) { mode = value; const request = value === 'legacy' ? legacy : input; useAppStore.setState({ moteBotRequests: restoredMoteBotRequests({ [request.operationId]: { action: 'create', input: request, phase: 'may-have-dispatched' } }), botTaskSelections: { [botTaskSelectionKey({ kind: 'mote', target })]: request.operationId } }) }
@@ -34,5 +40,5 @@ api.connections.call = async (method, params) => {
 const proof = { ready: false, errors: [] as string[], select: (_value: typeof mode) => {} }; Object.assign(window, { motePreparedProof: proof })
 window.addEventListener('error', event => proof.errors.push(event.message)); window.addEventListener('unhandledrejection', event => proof.errors.push(String(event.reason)))
 select('legacy')
-function Preview() { const [scene, setScene] = useState(mode); proof.select = value => { select(value); setScene(value) }; return <DesktopClientUiProvider><main style={{ width: 'min(100%, 760px)', padding: 24, margin: '0 auto', boxSizing: 'border-box' }}><MoteBotSetup key={scene} target={target} topicId="preview-topic" record={null} hasSavedBot={false} onChoose={() => {}} onCurrent={() => {}} /></main></DesktopClientUiProvider> }
+function Preview() { const [scene, setScene] = useState(mode); proof.select = value => { select(value); setScene(value) }; return <DesktopClientUiProvider><main className="mote-connection-dialog"><div className="mote-connection-dialog__body" style={{ paddingTop: 20 }}><MoteBotSetup key={scene} target={target} topicId="preview-topic" record={null} hasSavedBot={false} onChoose={() => {}} onCurrent={() => {}} /></div></main></DesktopClientUiProvider> }
 createRoot(document.getElementById('root')!).render(<Preview />); proof.ready = true
