@@ -4,7 +4,7 @@ import { sessionUserMessageText } from '@agentmux/core/session-user-messages'
 
 /** Read the original text parts, never a list preview/title or inferred terminal input. */
 export async function inputHistoryText(message: AgentSessionUserMessage, read?: SessionHistoryResourceReader,
-  signal?: AbortSignal): Promise<{ text: string; attachments: boolean }> {
+  signal?: AbortSignal): Promise<{ text: string; originalText: string; attachments: boolean }> {
   const parts: AgentSessionHistoryContentPart[] = []
   let attachments = false
   for (const [index, original] of message.contentParts.entries()) {
@@ -22,5 +22,6 @@ export async function inputHistoryText(message: AgentSessionUserMessage, read?: 
   signal?.throwIfAborted()
   const text = sessionUserMessageText(parts, message.questionAnswers)
   if (!text.trim()) throw new Error('这条记录没有可回填的正文。附件仍可在原记录中查看。')
-  return { text, attachments }
+  const originalText = parts.flatMap(part => part.kind === 'text' ? [part.text] : []).join('\n')
+  return { text, originalText, attachments }
 }
