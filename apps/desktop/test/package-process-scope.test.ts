@@ -1,6 +1,6 @@
 import { fixtureCivil as _hygiene_fixtureCivil, fixturePath as _hygiene_fixturePath, fixturePsBirth as _hygiene_fixturePsBirth } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
-import { classifyApplicationProcesses, snapshotApplicationProcesses, observeApplicationProcesses, assertApplicationActivationOwnership } from '../scripts/package-process-scope.mjs'
+import { classifyApplicationProcesses, snapshotApplicationProcesses, observeApplicationProcesses, assertApplicationActivationOwnership, applicationQuitOwnershipDiagnostic } from '../scripts/package-process-scope.mjs'
 
 /**
  * 打包安装脚本用 `processIdsForApplication` 回答三个问题：退出旧实例前「还有没有在服务这份包的进程」、
@@ -480,6 +480,39 @@ describe('typed admissions retain original evidence without promoting unknown to
       initial: { classification: 'unknown', source: 'mode-unconfirmed' } })
     expect(failure.ownershipDiagnostic.ancestry.termination).toBe('missing-parent')
     expect(JSON.stringify(failure.ownershipDiagnostic)).not.toContain('private-argument')
+  })
+
+  it('explains the exact first quit survivor with original and current admissions, not unrelated commands', async () => {
+    const initial = await observe(ps(main, row(800, 91, `${EXECUTABLE} --private-argument`)), [mainMode])
+    const current = await observe(ps(row(800, 91, `${EXECUTABLE} --private-argument`), row(801, 90)), [mode(800, 91)], initial.admissions)
+    const diagnostic = applicationQuitOwnershipDiagnostic(current, initial.admissions)!
+    expect(diagnostic).toMatchObject({ stage: 'graceful-quit', mainPid: null, loadedMain: null, remainingCount: 2,
+      affected: { identity: { uid, pid: 800, ppid: 91, birth }, mode: { status: 'bound' },
+        admission: { classification: 'unknown', source: 'ancestry-unconfirmed' },
+        previousAdmission: { classification: 'unknown', source: 'mode-unconfirmed' } },
+      ancestry: { path: [{ uid, pid: 800, ppid: 91, birth }], termination: 'missing-parent', missingPid: 91 } })
+    expect(diagnostic.affected.previousAdmission).toEqual(initial.admissions.find(row => row.pid === 800))
+    expect(diagnostic.affected.admission).toEqual(current.admissions.find(row => row.pid === 800))
+    expect(diagnostic.affected.admission.initial).toEqual(diagnostic.affected.previousAdmission.initial)
+    expect(JSON.stringify(diagnostic)).not.toMatch(/private-argument|"(?:command|argv|environment)"/)
+    expect(diagnostic.ancestry.path.some(row => row.pid === 801 || row.pid === 700)).toBe(false)
+  })
+
+  it('explains a retained GUI quit survivor after reparenting with both original and current ancestry', async () => {
+    const initial = await observe(ps(main, row(701, 700)), [mainMode, mode(701, 700)])
+    const current = await observe(ps(row(701, 1)), [mode(701, 1)], initial.admissions)
+    const diagnostic = applicationQuitOwnershipDiagnostic(current, initial.admissions)!
+    expect(diagnostic).toMatchObject({ remainingCount: 1, affected: { identity: { pid: 701, ppid: 1 },
+      admission: { classification: 'gui', source: 'retained-gui', confirmedGui: { source: 'gui-ancestry', ppid: 700 } },
+      previousAdmission: { classification: 'gui', source: 'gui-ancestry', ppid: 700 } } })
+    expect(diagnostic.affected.admission.initial.ancestry.path.map(row => row.pid)).toEqual([701, 700])
+    expect(diagnostic.ancestry.path.map(row => row.pid)).toEqual([701, 1])
+    expect(diagnostic.ancestry.termination).toBe('system-root')
+  })
+
+  it('does not fabricate a quit survivor diagnostic when the current live set is empty', async () => {
+    const current = await observe(ps(), [])
+    expect(applicationQuitOwnershipDiagnostic(current, [])).toBeNull()
   })
 
   it('rejects untyped previous rows rather than treating missing admission facts as GUI confirmation', () => {
