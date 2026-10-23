@@ -55,7 +55,7 @@ it('does not create space without the retained row or on a viewport that has no 
 
 it('anchors the selected native original before a stale visible leading-group candidate', () => {
   const viewport = document.createElement('div'), group = document.createElement('div'), card = document.createElement('div'), head = document.createElement('button'), row = document.createElement('div')
-  group.dataset.nativeRecordIds = '["leading"]'; card.className = 'wf-card--observation'; card.dataset.observationId = 'stable-leading'
+  group.dataset.conversationProcessKey = 'leading'; card.className = 'wf-card--observation'; card.dataset.observationId = 'stable-leading'
   head.className = 'wf-head'; head.setAttribute('aria-expanded', 'false'); card.append(head); group.append(card)
   row.dataset.nativeRecordId = 'selected'; row.textContent = 'Original selected body'; viewport.append(group, row); document.body.append(viewport); surfaces.push(viewport)
   let added = 0
@@ -72,7 +72,7 @@ it('anchors the selected native original before a stale visible leading-group ca
 
 it('uses only existing visible leaves when both selected Range endpoints are offscreen', () => {
   const viewport = document.createElement('div'), start = document.createElement('div'), group = document.createElement('div'), visible = document.createElement('div'), end = document.createElement('div')
-  start.dataset.nativeRecordId = 'start'; visible.dataset.nativeRecordId = 'visible'; end.dataset.nativeRecordId = 'end'; group.dataset.nativeRecordIds = '["group"]'
+  start.dataset.nativeRecordId = 'start'; visible.dataset.nativeRecordId = 'visible'; end.dataset.nativeRecordId = 'end'; group.dataset.conversationProcessKey = 'group'
   for (const row of [start, group, visible, end]) row.textContent = 'Original body'
   viewport.append(start, group, visible, end); document.body.append(viewport); surfaces.push(viewport)
   viewport.getBoundingClientRect = () => new DOMRect(0, 0, 600, 400)
@@ -86,7 +86,7 @@ it('uses only existing visible leaves when both selected Range endpoints are off
 
 it('uses a selected original leaf when Range boundaries are offsets on its process container', () => {
   const viewport = document.createElement('div'), group = document.createElement('div'), card = document.createElement('div'), head = document.createElement('button'), row = document.createElement('div')
-  group.dataset.nativeRecordIds = '["selected"]'; card.className = 'wf-card--observation'; card.dataset.observationId = 'stable-parent'
+  group.dataset.conversationProcessKey = 'selected'; card.className = 'wf-card--observation'; card.dataset.observationId = 'stable-parent'
   head.className = 'wf-head'; head.setAttribute('aria-expanded', 'false'); card.append(head, row); group.append(card)
   row.dataset.nativeRecordId = 'selected'; row.textContent = 'Original selected body'; viewport.append(group); document.body.append(viewport); surfaces.push(viewport)
   let added = 0
