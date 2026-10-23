@@ -45,18 +45,27 @@ export function createCapsuleDesktopAdapters(desktop: {
     }
     const presentation: CapsulePresentationPort = {
       open: async (params, context, resolved) => {
-        if (originalContext?.principal?.kind === 'device') return {
+        const unavailable = (reason: string): CapsuleOpenResult => ({
           operationId: params.operationId, capsuleId: params.capsuleId, endpoint: resolved.endpoint,
-          rendering: { status: 'unavailable', reason: 'This Desktop bridge cannot preserve the original device identity. Page content and the original operation are retained; open it from the local App.' }
-        }
+          rendering: { status: 'unavailable', reason }
+        })
+        if (originalContext?.principal?.kind === 'device') return unavailable(
+          'This Desktop bridge cannot preserve the original device identity. Page content and the original operation are retained; open it from the local App.')
         let client: Awaited<ReturnType<typeof connectAgentMuxRpc>>
         try { client = await desktop.connect(originalContext) }
         catch {
           // Connection failed before any presentation call crossed the boundary.
-          return { operationId: params.operationId, capsuleId: params.capsuleId, endpoint: resolved.endpoint,
-            rendering: { status: 'unavailable', reason: 'The original Desktop is not connected. Page content and its stable link are retained; open the App to display it.' } }
+          return unavailable('The original Desktop is not connected. Page content and its stable link are retained; open the App to display it.')
         }
         try { return await client.call('capsule.open', params, context?.signal ? { signal: context.signal } : {}) }
+        catch (error) {
+          const failure = error as { code?: unknown; controlFailure?: { disposition?: unknown } } | null
+          // RPC connects lazily. Only the transport's original unsent receipt can
+          // establish that this presentation never reached the Desktop owner.
+          if (failure?.controlFailure?.disposition !== 'not_applied' ||
+            !['CONTROL_UNAVAILABLE', 'CONTROL_CONNECTION_FAILED'].includes(String(failure.code))) throw error
+          return unavailable('The original Desktop could not receive this presentation. Page content, its stable link and operation are retained; open the App to display it.')
+        }
         finally { await client.dispose() }
       },
       inspect: async (params, context): Promise<CapsuleOpenResult | null> => await desktopCall(async client => {
