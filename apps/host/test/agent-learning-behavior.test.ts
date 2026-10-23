@@ -34,7 +34,7 @@ it('keeps original Scratch resource mapping, concurrent edits and unknown save d
     expect(observed.result.document.content).toBe(attempted)
     expect(uncertain.result.status).toBe('unknown') // Current bytes do not retroactively certify a lost receipt.
     expect(await readFile(join(f.catalog.spaces[0]!.directoryPath!, 'MEMORY.md'), 'utf8')).toBe(attempted)
-    const foreign = { ...input, zoneId: f.targets[1]!.zoneId, spaceId: f.targets[1]!.spaceId }
+    const foreign = { ...input, zoneId: f.targets[1]!.zoneId }
     const writer = vi.spyOn(f.files, 'write')
     const rejected = await f.behaviorClient.call('file.write', { ...foreign, expectedResource: { ...read.resource, zoneId: foreign.zoneId }, expectedRevision: observed.result.document.revision, content: 'wrong target' }).catch(error => error)
     expect(writer, 'A wrong original resource must be refused before native file-save dispatch.').not.toHaveBeenCalled()
