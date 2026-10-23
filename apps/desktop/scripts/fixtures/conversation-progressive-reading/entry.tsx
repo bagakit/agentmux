@@ -12,7 +12,7 @@ import { projectPersistedWorkbench } from '../../../src/renderer/src/lib/workben
 import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spatial-state'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { draft, surfacePending, sceneRows, appendRow } from './scene.mjs'
-import { acceptedEarlierWindow } from './earlier-frame.mjs'
+import { acceptedEarlierWindow, earlierRequestWindow } from './earlier-frame.mjs'
 import { observeReadingTasks } from './task-observation.mjs'
 import { mailboxMessageKey } from '../../../src/renderer/src/lib/session-mailbox-messages'
 import { conversationMessageSourceKey } from '@agentmux/client-ui/conversation-message-location'
@@ -67,8 +67,9 @@ for (const type of ['wheel', 'scroll', 'selectionchange']) document.addEventList
     mark(type, event instanceof WheelEvent ? { deltaY: event.deltaY, trusted: event.isTrusted } : undefined)
 }, { capture: true, passive: true })
 let nativeCut: string | undefined
-let released: { cursor: string; returned?: { id: string; revision: number } } | undefined
-let held: { cursor: string; received: boolean; release?: () => void } | undefined
+let released: { pending: object; returned?: { id: string; revision: number } } | undefined
+let held: { hostId: string; agentSessionId: string; consumerId: string; id: string; revision: number;
+  pending?: object; received: boolean; release?: () => void } | undefined
 const reads: unknown[] = [], reader = createConversationReadApi(boundary.conversation)
 const pendingCalls = new Set<{ method: string; input: unknown; started: number }>()
 Object.assign(api.conversation, reader)
@@ -77,17 +78,24 @@ for (const method of ['readAgentConversation', 'readConversationChanges'] as con
     const started = performance.now()
     const pending = { method, input, started }; pendingCalls.add(pending)
     mark('read-start', { method, input })
+    const hold = held && !held.pending ? held : undefined
+    const requestWindow = hold && earlierRequestWindow(reads, hold, method, input)
+    if (hold && requestWindow) hold.pending = pending
     try {
       const result = await (reader[method] as any)(input, options)
-      if (held && held.cursor === input.cursor) {
-        const hold = held; hold.received = true
-        mark('held-earlier-response', { cursor: input.cursor, window: { id: result.window.id, revision: result.window.revision } })
+      if (hold && requestWindow) {
+        if (held !== hold || hold.pending !== pending || readingConsumer()?.consumerId !== hold.consumerId ||
+          result.window.id !== requestWindow.id || result.window.revision < requestWindow.revision)
+          throw new Error('The delayed earlier response left its original reading consumer')
+        hold.received = true
+        mark('held-earlier-response', { consumerId: hold.consumerId, started, cursor: input.cursor,
+          window: { id: result.window.id, revision: result.window.revision } })
         await new Promise<void>(resolve => { hold.release = resolve })
       }
       const native = result.window?.checkpoint?.frontier?.cuts?.find((cut: any) => cut.kind === 'native')
       if (native) nativeCut = native.checkpoint.cursor
       mark('read-end', { method, input, window: result.window })
-      if (released && released.cursor === input.cursor) released.returned = { id: result.window.id, revision: result.window.revision }
+      if (released?.pending === pending) released.returned = { id: result.window.id, revision: result.window.revision }
       reads.push({ method, started, ended: performance.now(), input, window: result.window, records: result.items?.length })
       return result
     } finally { pendingCalls.delete(pending) }
@@ -200,12 +208,13 @@ const readingConsumer = () => inspectConversationConsumers({ hostId: 'local', ag
   },
   holdEarlier() {
     const consumer = readingConsumer(), window = acceptedEarlierWindow(reads, consumer?.accepted)
-    held = { cursor: window.navigation.older, received: false }
+    held = { hostId: 'local', agentSessionId: ids.sessionId, consumerId: consumer!.consumerId,
+      id: window.id, revision: window.revision, received: false }
     mark('hold-earlier-installed', { consumerId: consumer!.consumerId,
-      accepted: { id: window.id, revision: window.revision }, cursor: held.cursor })
+      accepted: { id: window.id, revision: window.revision }, publishedOlderCursor: window.navigation.older })
   },
   heldEarlier() { return held?.received === true },
-  releaseEarlier() { if (!held?.release) throw new Error('No original response to release'); released = { cursor: held.cursor }; mark('release-earlier-response'); held.release(); held = undefined },
+  releaseEarlier() { if (!held?.release || !held.pending) throw new Error('No original response to release'); released = { pending: held.pending }; mark('release-earlier-response'); held.release(); held = undefined },
   releasedEarlier() {
     if (!released?.returned) return null
     const result = inspectConversationConsumers({ hostId: 'local', agentSessionId: ids.sessionId, expectedRunId: ids.runId })
