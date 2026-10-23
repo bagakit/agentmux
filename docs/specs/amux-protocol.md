@@ -199,7 +199,7 @@ Browser 使用同样定界，将首行的 `File` 换成 `Browser`。准确拼接
 
 ## 对象链接
 
-形式固定为 `amux://KIND/ID`。`KIND` 区分大小写，只取 `agent`、`region`、`tab`、`space`、`zone`；`ID` 是该类型的一个非空原身份，以 `encodeURIComponent` 编为单个 path segment。没有 query、fragment、父对象路径或自动执行参数，不能从名字、Run 或当前位置替换原 ID。
+形式固定为 `amux://KIND/ID`。`KIND` 区分大小写，只取 `agent`、`region`、`tab`、`space`、`zone`、`capsule`；`ID` 是该类型的一个非空原身份，以 `encodeURIComponent` 编为单个 path segment。`capsule` 引用原持久页面，而非 Browser、端口或展示位置。没有 query、fragment、父对象路径或自动执行参数，不能从名字、Run 或当前位置替换原 ID。
 
 解析必须将 segment 准确解码，并通过同一 formatter 编码为完全相同的原链接；非 canonical 转义、额外路径或尾斜杠不接受。不进行 URL 路径归一化；编码后的斜杠可以属于 ID，不能因此拆成对象层级。原 ID 的分配规则和耐久身份保全仍归[空间身份 owner](../design/behavior/spaces-and-layout.md#产品实体-id-分配)。
 
