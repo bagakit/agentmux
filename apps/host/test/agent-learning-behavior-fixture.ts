@@ -51,7 +51,7 @@ export async function learningBehaviorFixture(evidenceDirectory?: string) {
     spatialState: state, files: observedFiles, topics: observedTopics as never, coreClients: f.coreClients })
   await server.start()
   const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
-  const resource = (index: number, path: string) => ({ zoneId: f.targets[index]!.zoneId, spaceId: f.targets[index]!.spaceId,
+  const resource = (index: number, path: string) => ({ zoneId: f.targets[index]!.zoneId,
     path, expectedResource: f.targets[index]!.expectedResource })
   const cli = (argv: string[], stdin = '', credentials?: { agentSessionId: string; capability: string }) =>
     runCompiledObjectCli(argv, objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path,
