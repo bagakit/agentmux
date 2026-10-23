@@ -5,7 +5,8 @@ These Markdown files are the source of the system instructions read by people an
 
 - [Start here](index.md): identity, progressive discovery and the module directory.
 - [Agent Sessions](modules/agent.md), [A2A messages](modules/message.md),
-  [spaces](modules/space.md), [Browser](modules/browser.md), [Goals](modules/goal.md)
+  [spaces](modules/space.md), [Browser](modules/browser.md), [Goals](modules/goal.md),
+  [Capsule pages](modules/capsule.md)
   and the other files in [modules/](modules/) are exposed by `amux MODULE --skill`.
 - [actions/](actions/) contains longer instructions attached to the relevant help or manual,
   including [Browser programs](actions/browser-run.md), [Agent opening](actions/agent-open.md)
