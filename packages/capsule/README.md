@@ -31,6 +31,13 @@ existing records retain their identities, roots, modes and origins. Static asset
 and explicit SPA navigation fallback are supported. Arbitrary backend execution
 is outside this module.
 
+Each available endpoint also identifies its current HTTP owner lifetime with
+`instanceId`; successful HTTP responses carry that same value in
+`X-AgentMux-Capsule-Instance`. The value changes after owner replacement and is
+neither a durable page ID nor an authority token. Browser adapters must correlate
+the actual navigation response with the original owner observation rather than
+infer loaded-document provenance from a reused origin.
+
 Each page retains its original loopback port after owner or process restart. A
 port conflict remains visible on that exact page until the original port becomes
 available. Resolving retries the same port; it never silently changes the origin.
