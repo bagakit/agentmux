@@ -145,7 +145,10 @@ import('./main.mjs').catch(error=>{console.error(error);require('electron').app.
   for (const loaded of nodeLoads) { const file = relative(repository, loaded.file); assert.equal(sha(await readFile(loaded.file)), loaded.sha256, 'External runtime loader input unchanged: ' + file); await observe(loaded.file) }
   await writeFile(join(directory, 'inputs.json'), JSON.stringify({ consumed, dependencies, compiled, changed, nodeLoads }, null, 2))
   const runtimeNpm = nodeLoads.filter(entry => entry.file.includes('/node_modules/'))
-  if (selected === 'input' && runtimeNpm.length) assert.ok(runtimeNpm.every(entry => dependencies[relative(repository, entry.file)] === entry.sha256), 'Every actual runtime NPM loader input must be indexed independently of the launcher')
+  if (selected === 'input') {
+    assert.ok(runtimeNpm.length > 0, 'Observe nonempty actual runtime NPM loader inputs')
+    assert.ok(runtimeNpm.every(entry => dependencies[relative(repository, entry.file)] === entry.sha256), 'Every actual runtime NPM loader input must be indexed independently of the launcher')
+  }
   assert.ok(actual.cases.length > 0, 'The actual case must reach a nonempty independent oracle')
   if (mutation) { assert.equal(processReceipt.exitCode, 1); assert.equal(actual.passed, false); assert.match(actual.failure?.message ?? '', mutation.expected) }
   else { assert.equal(processReceipt.exitCode, 0, actual.failure?.message); assert.equal(actual.passed, true) }
