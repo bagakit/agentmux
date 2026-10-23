@@ -140,6 +140,7 @@ const api: AgentMuxPreloadApi = {
         heap: null, unavailable: 'Renderer V8 heap observation is unavailable.' } }
     }
   },
+  capsules: { call: async (method, params) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('capsules:call', method, params)) },
   notesStorage: {
     inspect: operationId => ipcRenderer.invoke('notesStorage:inspect', operationId),
     change: input => ipcRenderer.invoke('notesStorage:change', input),

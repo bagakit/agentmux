@@ -31,6 +31,7 @@ import { CONTROL_RESPONSE_CHANNEL } from '../shared/contracts.js'
 export const PRIVILEGED_SENDER_LABELS = {
   'ui:readLoadedIdentity': 'loaded application identity',
   'applications:call': 'application access administration',
+  'capsules:call': 'Capsule page management',
   'ui:inspectDefaultBrowser': 'default-browser inspection',
   'ui:openDefaultBrowserSettings': 'default-browser settings',
   'connections:call': 'external connection administration',
