@@ -13,6 +13,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { toolkitDraftDirty, type ToolkitDraft, type useToolkitDrafts } from './use-toolkit-drafts'
 import { ToolkitWorkingDirectoryField, useToolkitWorkingDirectory } from './ToolkitWorkingDirectoryField'
 import { ToolkitTerminalAppearance } from './ToolkitTerminalAppearance'
+import type { ToolkitPaletteDraft } from './use-toolkit-palette-drafts'
 import './settings-toolkit-editor.css'
 
 const ThemeNavigationBackIcon = semanticIconComponent('navigation.back')
@@ -27,9 +28,10 @@ const ThemeActionRemoveArgumentIcon = semanticIconComponent('action.remove-argum
 
 const ScriptEditor = lazy(() => import('./ToolkitScriptEditor'))
 
-export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, onSave, onRemove, onRun, onBack }: {
+export function ToolkitToolEditor({ id, entry, active, nameInput, save, palette, onEdit, onSave, onRemove, onRun, onBack }: {
   id: string; entry: ToolkitDraft<ToolkitToolFields, ToolkitInlineToolConfiguration>; active: boolean; nameInput: RefObject<HTMLInputElement | null>
   save: ReturnType<ReturnType<typeof useToolkitDrafts>['saveFor']>
+  palette?: ToolkitPaletteDraft
   onEdit(patch: Partial<ToolkitToolFields>): void; onSave(): void; onBack(): void
   onRemove(): Promise<boolean>; onRun(definition: ToolkitToolDefinition): Promise<string>
 }) {
@@ -45,7 +47,10 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
   const [displayOpen, setDisplayOpen] = useState(false)
   const actionLabel = useRef<HTMLInputElement>(null)
   const focusAction = useRef(false)
-  const dirty = toolkitDraftDirty(entry)
+  const dirty = toolkitDraftDirty(entry) || Boolean(palette?.dirty)
+  const saving = save.saving || palette?.state === 'saving'
+  const feedback = { ...save, saving, error: save.error || palette?.error || '',
+    state: palette?.state === 'saved' && !dirty ? 'saved' as const : save.state }
   const tool = entry.value
   const directory = useToolkitWorkingDirectory(tool.workspacePath)
   const directorySaveError = save.errorField === 'workspacePath' ? save.error : ''
@@ -103,7 +108,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
   return <section className="toolkit-editor" data-tool-editor={id} aria-label={`Edit ${tool.name.trim() || 'new tool'}`}>
     <header className="toolkit-editor__heading">
       <button type="button" className="small-button toolkit-editor__back" onClick={onBack}><ThemeNavigationBackIcon size={13} /> Back to tools</button>
-      <span className="toolkit-editor__metadata"><span>Custom tool · {tui ? 'TUI' : 'JavaScript ESM'}</span><span className="toolkit-editor__status" data-dirty={dirty}>{entry.saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}</span></span>
+      <span className="toolkit-editor__metadata"><span>Custom tool · {tui ? 'TUI' : 'JavaScript ESM'}</span><span className="toolkit-editor__status" data-dirty={dirty}>{saving ? 'Saving…' : dirty ? 'Unsaved' : 'Saved'}</span></span>
       {!tui ? <button type="button" className="small-button toolkit-editor__run" disabled={dirty || entry.saving || !entry.expected || !tool.enabled || executing || entry.missing} onClick={() => void run()}><ThemeActionStartIcon size={13} /> {executing ? 'Starting…' : actionId === null ? 'Run' : 'Run main script'}</button> : null}
     </header>
     {entry.missing ? <p className="settings-inline-error" role="status">The saved tool is no longer available. Your draft is kept.</p> : null}
@@ -124,7 +129,7 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
       {active && (displayOpen ? Boolean(tool.display) : actionId === null || action) ? <Suspense fallback={<p className="settings-hint">Opening script editor…</p>}><ScriptEditor key={JSON.stringify([id, displayOpen, actionId])} id={id} actionId={actionId} display={displayOpen} mode={tool.mode ?? 'script'} value={displayOpen ? tool.display!.script : actionId === null ? tool.script : action!.script} onChange={script => editScript({ script })} /></Suspense> : null}
     </section>
     <p className="settings-hint">{tui ? 'Leave blank to open the Host’s default interactive shell. Starts when the enabled tool is loaded. Closing its panel keeps it running. Saving changes does not restart the current terminal.' : displayOpen ? 'Save to enable evaluation when displayed. This script runs as your local user with the same file and network access as the main script.' : actionId === null ? `${dirty ? 'Save before running. ' : ''}Runs as your local user. Saving and hovering do not run the main script.` : 'Save the tool to publish this action. Run it from a confirmed result in the status bar.'}</p>
-    {tui ? <ToolkitTerminalAppearance toolId={id} /> : null}
+    {tui && palette ? <ToolkitTerminalAppearance toolId={id} draft={palette} /> : null}
     {!tui ? <details className="toolkit-editor__result-actions">
       <summary>Result actions <span>· {actions.length || 'optional'}</span></summary>
       <p className="settings-hint">Buttons shown with a confirmed result. Each action runs its saved script in this tool’s fixed directory.</p>
@@ -161,8 +166,8 @@ export function ToolkitToolEditor({ id, entry, active, nameInput, save, onEdit, 
     {operationError ? <p className="settings-inline-error" role="alert">{operationError}</p> : null}
     <footer className="toolkit-editor__footer">
       {invalid ? <p className="toolkit-editor__save-requirements" role="status">To save this tool, add {new Intl.ListFormat('en', { style: 'long', type: 'conjunction' }).format(missingFields)}.</p> : null}
-      <button type="button" className="small-button" disabled={entry.saving || removing} onClick={() => entry.expected ? setConfirmDelete(true) : void remove()}>{entry.expected ? <><ThemeActionRemoveIcon size={13} /> Delete tool</> : <><ThemeActionCancelIcon size={13} /> Cancel new tool</>}</button>
-      <SettingsSaveBar save={directorySaveError ? { ...save, error: '' } : save} dirty={dirty} disabled={invalid || directory.invalid || entry.missing} label="Save tool" onSave={onSave} />
+      <button type="button" className="small-button" disabled={saving || removing} onClick={() => entry.expected ? setConfirmDelete(true) : void remove()}>{entry.expected ? <><ThemeActionRemoveIcon size={13} /> Delete tool</> : <><ThemeActionCancelIcon size={13} /> Cancel new tool</>}</button>
+      <SettingsSaveBar save={directorySaveError ? { ...feedback, error: palette?.error ?? '' } : feedback} dirty={dirty} disabled={invalid || directory.invalid || entry.missing} label="Save tool" onSave={onSave} />
     </footer>
     <ConfirmationDialog open={active && confirmTui} title="Switch this tool to TUI?" subject={tool.name} description="The main script is kept. Result actions and the display script will be removed from this draft. Update the command for the shell before saving." confirmLabel="Switch to TUI" onCancel={() => setConfirmTui(false)} onConfirm={() => applyMode('tui')} />
     <ConfirmationDialog open={active && confirmDelete} title="Delete this tool?" subject={tool.name} description="Remove the saved tool and its status bar entry. A running or unconfirmed execution prevents deletion." confirmLabel="Delete tool" busy={removing} onCancel={() => setConfirmDelete(false)} onConfirm={() => void remove()} />

@@ -1148,11 +1148,12 @@ export type AppState = {
   clearReadNotificationEvents(): void
   /** UI projection of the latest save request failure, never a persistence or Agent health owner. */
   workbenchSaveWarning: string | null
+  workbenchSaveWarningOwner: 'local-storage' | 'workbench' | null
   nameSaveUnconfirmed: { operationId: string; target: AgentMuxNameTarget; message: string } | null
   nameEditFailure: { operationId: string; target: AgentMuxNameTarget; message: string } | null
   confirmNameSave(): Promise<void>
   reviewNameEdit(): Promise<void>
-  reportWorkbenchSaveFailure(error: unknown): void
+  reportWorkbenchSaveFailure(error: unknown, owner?: 'local-storage' | 'workbench'): void
   retryWorkbenchSave(): Promise<void>
   initialize(): Promise<() => void>
   selectWorkspace(id: string): Promise<void>
@@ -4185,16 +4186,23 @@ async function handoffSpaceIcons(config: AppConfig): Promise<{ config: AppConfig
   } catch (cause) { return { config, warning: 'Avatar preservation is unconfirmed. Original local choices are retained; reopen avatar settings after restoring configuration access. ' + presentError(cause) } }
 }
 let workbenchSaveRequest = 0
-async function requestWorkbenchStorageFlush(): Promise<void> {
-  const request = ++workbenchSaveRequest
+let workbenchSaveFailureRevision = 0
+let spatialSaveRequest = 0
+let localSaveRequest = 0
+async function requestWorkbenchStorageFlush(includeSpatial = true): Promise<void> {
+  ++workbenchSaveRequest
+  const failureRevision = workbenchSaveFailureRevision
+  const request = includeSpatial ? ++spatialSaveRequest : ++localSaveRequest
+  const current = () => request === (includeSpatial ? spatialSaveRequest : localSaveRequest)
   try {
-    await coreSpatialPersistence?.flush()
+    if (includeSpatial) await coreSpatialPersistence?.flush()
     await api.ui.requestStorageFlush()
-    if (request === workbenchSaveRequest && useAppStore.getState().workbenchSaveWarning !== null) {
-      useAppStore.setState({ workbenchSaveWarning: null })
+    if (current() && failureRevision === workbenchSaveFailureRevision &&
+        (includeSpatial || useAppStore.getState().workbenchSaveWarningOwner === 'local-storage')) {
+      useAppStore.setState({ workbenchSaveWarning: null, workbenchSaveWarningOwner: null })
     }
   } catch (error) {
-    if (request === workbenchSaveRequest) useAppStore.getState().reportWorkbenchSaveFailure(error)
+    if (current()) useAppStore.getState().reportWorkbenchSaveFailure(error, includeSpatial ? 'workbench' : 'local-storage')
     throw error
   }
 }
@@ -4208,6 +4216,23 @@ async function saveWorkbenchSelection(layoutApplied: boolean): Promise<AgentMuxS
     storageFlushRequested = true
   } catch (error) { reason = presentError(error); useAppStore.getState().reportWorkbenchSaveFailure(error) }
   return { layoutApplied, localStorageWritten, storageFlushRequested, diskDurability: storageFlushRequested && coreSpatialPersistence?.ready ? 'confirmed' : 'unconfirmed', reason }
+}
+
+/** Explicit per-tool palette save; command configuration and Run identity are untouched. */
+export async function saveToolkitPalette(toolId: string, theme: import('../../shared/contracts').TerminalThemeId | null,
+  expected: import('../../shared/contracts').TerminalThemeId | null): Promise<void> {
+  const current = useAppStore.getState().toolkitPresentation[toolId]?.theme ?? null
+  if (current !== expected && current !== theme) throw new Error('This tool’s saved palette changed elsewhere. Restore the current choice before saving again.')
+  useAppStore.setState(state => ({ toolkitPresentation: updateToolkitPresentation(state.toolkitPresentation, toolId, { theme }) }))
+  try {
+    if (!workbenchWriteFence.isOpen()) throw new Error('The saved Workbench is still being restored. Your palette choice is kept.')
+    const before = workbenchSaveRequest
+    persistentWorkbenchStorage.flush()
+    // A local preference does not write Core topology. Await the exact platform
+    // commit already requested by the original local writer; retry if no bytes changed.
+    await (workbenchSaveRequest === before ? requestWorkbenchStorageFlush(false) : workbenchStorageCommit)
+  } catch (cause) { useAppStore.getState().reportWorkbenchSaveFailure(cause, 'local-storage'); throw cause }
+  if ((useAppStore.getState().toolkitPresentation[toolId]?.theme ?? null) !== theme) throw new Error('This tool’s palette changed while saving. Your newer choice is kept.')
 }
 
 /** Save only this review's user input. A durable request reference never authorizes dispatch. */
@@ -4444,8 +4469,10 @@ export async function clearGoalAgentCreationDraft(goalId: string, role: 'assigne
 function agentDisplayOverride(names: Record<string, string>, sessionId: string): string | null {
   return Object.hasOwn(names, sessionId) ? names[sessionId] ?? null : null
 }
+let workbenchStorageCommit: Promise<void> = Promise.resolve()
 function requestWorkbenchStorageCommit(): void {
-  void requestWorkbenchStorageFlush().catch(() => {})
+  workbenchStorageCommit = requestWorkbenchStorageFlush(false)
+  void workbenchStorageCommit.catch(() => {})
 }
 /** A failed preference save leaves the current view usable and the original writer pending. */
 async function flushWorkbenchPresentation(): Promise<void> {
@@ -5147,6 +5174,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         ? { errorDismissed: true } : {}) }))
   },
   workbenchSaveWarning: null,
+  workbenchSaveWarningOwner: null,
   nameSaveUnconfirmed: null,
   nameEditFailure: null,
   async confirmNameSave() {
@@ -5175,11 +5203,16 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         message: `The current name could not be read: ${presentError(error)}. Restore storage access and review it again; the original work remains available.` } })
     }
   },
-  reportWorkbenchSaveFailure(error) {
+  reportWorkbenchSaveFailure(error, owner = 'workbench') {
     // A timed-out quit request must not later clear its warning without a new retry result.
     ++workbenchSaveRequest
+    ++workbenchSaveFailureRevision
+    if (owner === 'workbench') ++spatialSaveRequest
+    else ++localSaveRequest
+    // A local preference cannot replace an unresolved workbench/space failure.
+    if (owner === 'local-storage' && get().workbenchSaveWarningOwner === 'workbench' && get().workbenchSaveWarning) return
     const warning = presentError(error)
-    if (get().workbenchSaveWarning !== warning) set({ workbenchSaveWarning: warning })
+    if (get().workbenchSaveWarning !== warning || get().workbenchSaveWarningOwner !== owner) set({ workbenchSaveWarning: warning, workbenchSaveWarningOwner: owner })
   },
   async retryWorkbenchSave() {
     try { await prepareRendererUpdate() }
