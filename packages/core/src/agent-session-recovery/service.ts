@@ -1240,11 +1240,12 @@ export class AgentSessionRecoveryService {
   }
 
   private observeInitialInput(session: AgentMuxStoredAgentSession): void {
+    if (this.reopensDisposed || !session.nativeActor?.initializationControl) return
     const input = session.initialInput
     const retained = Object.values(session.continuityOperations ?? {}).filter(operation => operation.launchInput?.delivery === 'post-launch' &&
       operation.launchInput.key?.expectedRun.runId === session.run.runId && !['native-admitted', 'terminal-confirmed', 'not-applied'].includes(operation.launchInput.state))
     const initial = input?.key?.expectedRun.runId === session.run.runId && !['native-admitted', 'terminal-confirmed', 'not-applied'].includes(input.state)
-    if (this.reopensDisposed || !session.nativeActor?.initializationControl || !initial && !retained.length) return
+    if (!initial && !retained.length) return
     const key = JSON.stringify([session.agentSessionId, session.run, session.nativeActor.actorId, initial ? input?.key : null, retained.map(value => value.operationId)])
     if (this.initialInputContinuations.has(key)) return
     const work = (async () => {
