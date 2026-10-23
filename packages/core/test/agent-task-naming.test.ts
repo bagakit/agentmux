@@ -70,7 +70,7 @@ it('launch bootstrap reveals early self-naming without swallowing the original u
   expect(launch.text.endsWith('</amux>\n\n' + request)).toBe(true)
   expect(launch.systemContext).not.toContain(request)
   expect(composeAgentLaunchPrompt(request, false)).toEqual({ text: request })
-  expect(composeAgentLaunchPrompt(undefined, true).systemContext).toContain('No request yet. Wait for the user.')
+  expect(composeAgentLaunchPrompt(undefined, true).systemContext).toContain('No request yet. Complete any read-only initialization below, then wait for the user.')
 })
 
 it('name discovery owns early task guidance and points to the actual existing derived naming arguments', async () => {

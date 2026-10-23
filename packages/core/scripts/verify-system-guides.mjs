@@ -82,6 +82,7 @@ async function capture(directory) {
   assert(catalog.length > 1, 'Module coverage cannot be empty')
   assert.equal(catalog.length, new Set(commands.AGENTMUX_CLI_COMMANDS.map(x => x.method.split('.')[0])).size)
   const generated = await load('generated/agentmux-guides-index')
+  const documents = await load('generated/agentmux-guides')
   assert.deepEqual(Object.keys(generated.MODULE_GUIDES).sort(), catalog.map(x => x.root).sort(),
     'Unregistered or missing module guide differs from actual command registration')
   for (const entry of catalog) for (const name of ['root', 'summary', 'roles', 'when', 'readCommand'])
@@ -106,6 +107,7 @@ async function capture(directory) {
     resume: outbound.composeAgentResumePrompt('baseline resume', 'baseline note'),
     messaging: { ...strings(messaging), rules: messaging.AGENTMUX_AGENT_MESSAGING_RULES },
     goal: { entry: goal.AGENTMUX_GOAL_SKILL_ENTRY, contract: goal.goalRoleGuidanceContract(),
+      executorGuide: documents.guideSharedGoalExecutor.text,
       manager: goal.goalRoleGuidance({ role: 'manager', ...identity }),
       executor: goal.goalRoleGuidance({ role: 'executor', ...identity }),
       managerEmpty: goal.goalRoleGuidance({ role: 'manager' }), executorEmpty: goal.goalRoleGuidance({ role: 'executor' }) },
@@ -464,7 +466,7 @@ async function mutationProof(root, original) {
     { label: 'goal-executor-contract-disconnected', file: 'guides/shared/goal/contract.md',
       directive: '../goal/executor.md "amux:include"',
       read: output => output.goal.contract, cli: ['goal', '--skill'],
-      expected: original.goal.executorEmpty.split('\n\n').at(-1) },
+      expected: original.goal.executorGuide },
     { label: 'browser-registry-directory-disconnected', file: 'guides/actions/browser-run.md',
       directiveTitle: 'amux:generated browser-capability-directory',
       read: output => output.commandHelp['browser.run'], cli: ['--help', 'browser', 'run'] },
@@ -501,7 +503,64 @@ async function mutationProof(root, original) {
     cases.push({ label: item.label, killed: true, kind: 'successful-generation-consumer-output',
       cliExecuted: !!item.cli, sourceSha256: await sourceDigest(destination), originalSha256: sha(before), mutatedSha256: sha(actual) })
   }
-  assert.equal(cases.length, guardCases.length + consumerCases.length + checkedCases.length + 1)
+  const startupCases = [
+    { label: 'startup-phase-after-rules', file: 'src/agent-outbound-message.ts',
+      before: 'parts.unshift(userRequest ? USER_REQUEST_FOLLOWS : AWAIT_USER_REQUEST)',
+      after: 'parts.push(userRequest ? USER_REQUEST_FOLLOWS : AWAIT_USER_REQUEST)',
+      read: output => output.launch.withRequest.systemContext,
+      verify: text => assert(text.startsWith('The user request follows.\n\nAgentMux runtime guide:'),
+        'The current request phase must precede the runtime rules') },
+    { label: 'startup-wait-before-initialization', file: 'src/agent-outbound-message.ts',
+      before: 'No request yet. Complete any read-only initialization below, then wait for the user.',
+      after: 'No request yet. Wait for the user.',
+      read: output => output.launch.awaitRequest.systemContext,
+      verify: text => assert(text.startsWith('No request yet. Complete any read-only initialization below, then wait for the user.'),
+        'Business waiting must not postpone read-only initialization') },
+    { label: 'startup-spatial-route-removed', file: 'guides/shared/runtime.md',
+      before: 'When attached, read space --skill', after: 'When attached, read file --skill',
+      read: output => output.launch.withRequest.systemContext,
+      verify: text => assert(text.includes('When attached, read space --skill to establish your actual Zone/Tab/Region'),
+        'Startup must route attached spatial discovery to its original module') },
+    { label: 'startup-zone-confused-with-cwd', file: 'guides/shared/runtime.md',
+      before: 'A Zone is a work partition containing Tabs;', after: 'A Zone is the execution cwd;',
+      read: output => output.launch.withRequest.systemContext,
+      verify: text => assert(text.includes('A Zone is a work partition containing Tabs;') &&
+        text.includes('a Tab is a complete workface split into Regions') && text.includes('not a Session identity'),
+        'Startup must distinguish the spatial work partition, Tab, Region and execution identity') },
+    { label: 'whoami-invents-zone', file: 'guides/modules/whoami.md',
+      before: 'whoami does not supply a Zone or all display bindings.',
+      after: 'whoami supplies the Zone and all display bindings.',
+      read: output => output.modules.whoami, cli: ['whoami', '--skill'],
+      verify: text => assert(text.includes('whoami does not supply a Zone or all display bindings.'),
+        'whoami must preserve its actual scope and route Zone discovery to space') },
+    { label: 'startup-unconditional-collaboration', file: 'guides/shared/messaging/entry.md',
+      before: 'If the task needs collaboration, choose', after: 'Choose',
+      read: output => output.launch.withRequest.systemContext,
+      verify: text => assert(text.includes('If the task needs collaboration, choose'),
+        'A startup capability entry must not prescribe collaboration for every task') }
+  ]
+  for (const item of startupCases) {
+    item.verify(item.read(original))
+    const destination = await fixture(item.label), path = join(destination, item.file)
+    await writeFile(path, replaceOnce(await readFile(path, 'utf8'), item.before, item.after))
+    const generated = await generate(destination)
+    assert.equal(generated.code, 0, `${item.label} must generate successfully: ${generated.diagnostics}`)
+    assert.equal((await generate(destination, true)).code, 0, 'Mutated output must be internally current')
+    const compiled = await transpileCore(join(destination, 'consumer'), destination)
+    const actual = item.read(await capture(compiled))
+    assert.equal(typeof actual, 'string')
+    if (item.cli) {
+      const result = await exec(process.execPath, [join(compiled, 'agentmux.js'), '--endpoint',
+        `unix:${join(destination, 'never-started.sock')}`, ...item.cli], { cwd: destination, env: ambientFree, maxBuffer: 8 * 1024 * 1024 })
+      assert.equal(result.stderr, '')
+      assert(result.stdout.includes(actual.trim()), 'Compiled CLI did not consume the altered module')
+    }
+    assert.throws(() => item.verify(actual), { code: 'ERR_ASSERTION' },
+      `${item.label} must fail its semantic oracle after successful source consumption`)
+    cases.push({ label: item.label, killed: true, kind: 'source-semantic-output',
+      cliExecuted: !!item.cli, sourceSha256: await sourceDigest(destination) })
+  }
+  assert.equal(cases.length, guardCases.length + consumerCases.length + checkedCases.length + startupCases.length + 1)
   return { passed: true, count: cases.length, cases }
 }
 

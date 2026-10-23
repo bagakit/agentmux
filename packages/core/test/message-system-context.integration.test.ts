@@ -103,7 +103,7 @@ async function launch(prompt?: string, options: { guide?: boolean; note?: string
 }
 async function timeline(): Promise<AgentTimelineSnapshot> {
   const reloaded = await new AgentMuxFileAgentSessionStore(join(root, 'sessions.json')).loadTimeline(sessionId)
-  expect(await client.sessionTimeline(sessionId)).toEqual(reloaded)
+  expect(await client.sessionTimeline(sessionId)).toEqual({ ...reloaded, sourceHostId: 'local' })
   return reloaded
 }
 function expectedSystemId(): string { return `system-context:${start.mock.calls[0]![0].operationKey}` }
@@ -130,11 +130,17 @@ describe('Core-owned system context has one durable source, separate from user a
   it('guide-only launch is durably a System message, without inventing a user request', async () => {
     const result = await launch()
     const composed = composeAgentLaunchPrompt(undefined, true)
+    expect(composed.systemContext?.startsWith('No request yet. Complete any read-only initialization below, then wait for the user.')).toBe(true)
     expect(start.mock.calls[0]![0].args).toContain(composed.text)
     expect((await timeline()).items.map(i => [i.id, i.kind, i.source, i.content, i.status])).toEqual([
       [expectedSystemId(), 'system_message', 'agentmux', composed.systemContext, 'complete']
     ])
-    expect(result.creation).toEqual({createOperationId:requestId,initialPrompt:'not-requested'})
+    expect(result.creation).toEqual({
+      createOperationId: requestId, initialPrompt: 'not-requested', agentMuxContext: 'confirmed',
+      intentDigest: expect.stringMatching(/^[a-f0-9]{64}$/u),
+      initialInputKey: { kind: 'prompt', agentSessionId: sessionId, expectedRun: { runId },
+        submissionId: `launch-prompt:${start.mock.calls[0]![0].operationKey}` }
+    })
     expect((await stored()).creation).toEqual(result.creation)
     expect(projectSessionUserMessages({agentSessionId:sessionId,timeline:await timeline()})).toEqual([])
     expect(input).not.toHaveBeenCalled(); healthyOneCreation()
@@ -147,6 +153,7 @@ describe('Core-owned system context has one durable source, separate from user a
     const records = (await timeline()).items
     expect(records).toHaveLength(2)
     expect(records[0]!.content).toContain('AgentMux runtime guide:')
+    expect(records[0]!.content.startsWith('The user request follows.\n\n')).toBe(true)
     expect(records[0]!.content).toContain(note)
     expect(records[0]!.content).not.toContain(user)
     expect(records.map(i => [i.id,i.kind,i.source,i.content])).toEqual([
@@ -180,7 +187,7 @@ describe('Core-owned system context has one durable source, separate from user a
     const note='  A host-supplied Topic note.  '
     await launch('User request', {guide:false,note})
     expect((await timeline()).items.map(i=>[i.kind,i.content])).toEqual([
-      ['system_message',`${note}\n\nThe user request follows.`],['user_message','User request']
+      ['system_message',`The user request follows.\n\n${note}`],['user_message','User request']
     ])
     healthyOneCreation()
   })

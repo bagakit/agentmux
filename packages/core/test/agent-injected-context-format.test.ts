@@ -19,13 +19,13 @@ function readPlatform(composed: ReturnType<typeof composeAgentLaunchPrompt>, exp
   expect(parsed!.declaredAgentSessionId).toBeNull()
   expect(parsed!.declaredContexts).toHaveLength(1)
   const raw = parsed!.declaredContexts![0]!.raw
-  expect(raw.startsWith('<amux from="amux">\n')).toBe(true)
+  expect(raw.startsWith('<amux>\n')).toBe(true)
   expect(composed.text).toBe(raw + expectedBody)
   expect(parsed!.body).toBe(expectedBody)
   expect(Buffer.from(parsed!.body)).toEqual(Buffer.from(expectedBody))
   const document = new DOMParser({ onError: onWarningStopParsing }).parseFromString(raw, 'text/xml')
   const root = document.documentElement!
-  expect(Array.from(root.attributes).map(attribute => [attribute.name, attribute.value])).toEqual([['from', 'amux']])
+  expect(Array.from(root.attributes)).toEqual([])
   expect(root.childNodes.length).toBeGreaterThan(0)
   expect(Array.from(root.childNodes).map(node => node.nodeType)).toEqual([3])
   expect(root.textContent).toBe(`\n${composed.systemContext}\n`)
@@ -33,11 +33,12 @@ function readPlatform(composed: ReturnType<typeof composeAgentLaunchPrompt>, exp
 }
 
 describe('actual injected context producer and shared reader agree', () => {
-  it('reads the real runtime guide with its canonical Session placeholder, leaving the entire original tail intact', () => {
+  it('reads the real runtime guide and phase, leaving the entire original tail intact', () => {
     const composed = composeAgentLaunchPrompt(user, true)
-    expect(composed.systemContext).toContain('[Message from Agent <canonical Session ID>]')
+    expect(composed.systemContext?.startsWith('The user request follows.\n\nAgentMux runtime guide:')).toBe(true)
+    expect(composed.systemContext).toContain('"$AGENTMUX_CLI" whoami')
     const raw = readPlatform(composed, '\n\n' + user)
-    expect(raw).toContain('&lt;canonical Session ID&gt;')
+    expect(raw).toContain('AgentMux runtime guide:')
     expect(composed.text.endsWith(user)).toBe(true)
   })
 
@@ -54,7 +55,7 @@ describe('actual injected context producer and shared reader agree', () => {
 
   it('reads an independent guide without inventing a user tail, and leaves a plain request completely unchanged', () => {
     const composed = composeAgentLaunchPrompt(undefined, true)
-    expect(composed.systemContext).toContain('No request yet. Wait for the user.')
+    expect(composed.systemContext).toContain('No request yet. Complete any read-only initialization below, then wait for the user.')
     readPlatform(composed, '')
     expect(composeAgentLaunchPrompt(user, false)).toEqual({ text: user })
   })

@@ -39,7 +39,7 @@ it('no-prompt creation freezes the authenticated creator and discloses it throug
   expect((await childRpc.call('whoami', {})).session.creation?.createdBy).toEqual(creator)
   const wire = h.launches[0]!.args.join('\n')
   expect(wire).toContain('created by AgentMux Session creator, Run run-creator')
-  expect(wire).toContain('No request yet. Wait for the user.')
+  expect(wire).toContain('No request yet. Complete any read-only initialization below, then wait for the user.')
   expect(wire).not.toContain(h.capability)
   expect(await h.store.loadCreationSessionId('original-spawn')).toBe('child')
   expect(await h.client.resolveAgentCreationSessionId('original-spawn')).toBe('child')
