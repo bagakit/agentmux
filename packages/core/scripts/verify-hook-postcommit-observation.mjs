@@ -10,7 +10,7 @@ const root = resolve(import.meta.dirname, '../../..')
 const { build } = createRequire(new URL('../package.json', import.meta.url))('esbuild')
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 const read = path => readFile(resolve(root, path), 'utf8')
-const owned = ['packages/core/src/client.ts', 'packages/core/src/agent-session-recovery/service.ts', 'packages/core/src/agent-session-recovery/ports.ts', 'packages/core/src/agent-session-recovery.ts', 'packages/core/src/agent-runtime-helpers.ts', 'packages/core/test/hook-postcommit-observation.test.ts',
+const owned = ['packages/core/src/client.ts', 'packages/core/src/agent-session-recovery/service.ts', 'packages/core/src/agent-session-recovery/continuity-attempt.ts', 'packages/core/src/agent-session-recovery/lifecycle.ts', 'packages/core/src/agent-session-recovery/reconciliation.ts', 'packages/core/src/agent-session-recovery/ports.ts', 'packages/core/src/agent-session-recovery.ts', 'packages/core/src/agent-runtime-helpers.ts', 'packages/core/test/hook-postcommit-observation.test.ts',
   'packages/core/test/hook-postcommit-observation.vitest.config.mts', 'packages/core/scripts/verify-hook-postcommit-observation.mjs',
   'docs/design/behavior/session-recovery.md']
 const inputs = new Map()
