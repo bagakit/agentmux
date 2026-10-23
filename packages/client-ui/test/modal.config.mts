@@ -13,7 +13,9 @@ const mutations: Record<string, [string, string]> = {
   'reuse-attempt': ['const id = `amux-modal-${identity}-${attempt.generation}`', 'const id = `amux-modal-${identity}`'],
   'stale-retained-order': ['if (scope && visible && placed) moveModalScopeToFront(scope)', 'if (false) moveModalScopeToFront(scope!)'],
   'suppress-business-close': ['if (close && (latest.current.failure != null || latest.current.id !== attemptId || latest.current.document !== behaviorDocument))', 'if (close)'],
-  'drop-attachment-owner': ['return active ? <DismissableLayer asChild onEscapeKeyDown={onEscapeKeyDown}>', 'return false ? <DismissableLayer asChild onEscapeKeyDown={onEscapeKeyDown}>'],
+  'drop-attachment-owner': ['return active ? <DismissableLayer asChild onEscapeKeyDown={event => handleModalEscape(event, onEscapeKeyDown)}>', 'return false ? <DismissableLayer asChild onEscapeKeyDown={event => handleModalEscape(event, onEscapeKeyDown)}>'],
+  'drop-modal-ime-boundary': ['if (isImeOwnedKeyboardEvent(event)) { event.preventDefault(); return }', 'if (false) { event.preventDefault(); return }'],
+  'drop-boundary-semantics': ['data-overlay-modal-boundary="" {...semantics}', 'data-overlay-modal-boundary=""'],
   'drop-retained-host': ['container={host}', 'container={windowContainer}'],
   'retain-retired-placement': ['host.remove(); setPlacement(null); return', 'host.remove(); return']
 }
