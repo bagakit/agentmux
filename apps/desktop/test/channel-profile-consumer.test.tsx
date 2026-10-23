@@ -1,14 +1,16 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, useEffect } from 'react'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { URL as NodeURL } from 'node:url'
-import type { AgentSessionUserMessage } from '@agentmux/core'
+import type { AgentSessionUserMessage, AgentTimelineItem } from '@agentmux/core'
+import type { AgentMuxClient } from '../../../packages/core/src/client'
 import { projectSessionUserMessages } from '@agentmux/core'
 import { channelMetadataFixture, actorSubject, groupSubject } from '../../../packages/connectors/test/fixtures/channel-metadata.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc'
 import { ChannelMetadataPanel } from '../src/renderer/src/components/settings/ChannelMetadataPanel'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
+import { InputMailboxRecords, inputMailboxPresentation } from '@agentmux/client-ui/components/InputMailboxRecords'
 import { createSpeakerResolver, speakerOfUserMessage } from '@agentmux/client-ui/conversation-speaker'
 import { channelProfileKey, useChannelActorProfiles } from '../src/renderer/src/lib/use-channel-actor-profiles'
 import { useConnectorRoomName } from '../src/renderer/src/lib/use-connector-room-name'
@@ -16,8 +18,19 @@ import { api } from '../src/renderer/src/lib/api'
 import { composerDOM, composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
 import { useAppStore } from '../src/renderer/src/store'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
+import { ActivityView } from '../src/renderer/src/components/ActivityView'
+import { activityReadingProps } from './helpers/activity-reading-props'
+import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 
 const bridge = vi.hoisted(() => ({ api: null as any, handlers: new Map<string, (...args: any[]) => Promise<any>>(), listeners: new Map<string, Set<(...args: any[]) => void>>() }))
+// This reader/metadata test retains the real Terminal slot. Chromium/xterm paint
+// is the same controlled leaf as the original mailbox navigation consumers.
+const terminals = vi.hoisted(() => ({ mounted: 0, disposed: 0 }))
+vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ({ visible, autoFocus }: { visible: boolean; autoFocus: boolean }) => {
+  useEffect(() => { ++terminals.mounted; return () => { ++terminals.disposed } }, [])
+  return <div data-terminal-witness data-visible={visible} data-auto-focus={autoFocus} />
+} }))
 vi.mock('electron', () => ({ contextBridge: { exposeInMainWorld: (_name: string, value: unknown) => { bridge.api = value } },
   webFrame: { getZoomFactor: () => 1 }, ipcRenderer: {
     invoke: (channel: string, ...args: unknown[]) => bridge.handlers.get(channel)!({ sender: 'original-renderer' }, ...args),
@@ -27,22 +40,66 @@ vi.mock('electron', () => ({ contextBridge: { exposeInMainWorld: (_name: string,
 import '../src/preload/index'
 const dom = composerDOM(), cleanup: Array<() => void | Promise<void>> = []
 let f: Awaited<ReturnType<typeof channelMetadataFixture>>, calls: Array<{ method: string; input: any }> = []
+let metadataReady = false, metadataInFlight = 0, metadataChanges = 0
 beforeEach(async () => {
   vi.stubGlobal('URL', NodeURL)
-  f = await channelMetadataFixture(cleanup); calls = []
+  f = await channelMetadataFixture(cleanup); calls = []; metadataReady = false; metadataInFlight = 0; metadataChanges = 0
+  terminals.mounted = 0; terminals.disposed = 0
   const release = registerConnectorIpc({ handleWithEvent: (channel, handler) => { bridge.handlers.set(channel, handler) },
     assertTrusted: (_channel, event) => { expect(event.sender).toBe('original-renderer') }, socketPath: f.server.path, secrets: f.services.secrets,
-    metadata: { subscribe: f.services.onChannelMetadataChanged, publish: change => { for (const listener of bridge.listeners.get('connections:metadataChanged') ?? []) listener({}, change) } } })
+    metadata: { publish: change => { metadataChanges++; for (const listener of bridge.listeners.get('connections:metadataChanged') ?? []) listener({}, change) },
+      observation: state => { metadataReady = state === 'ready'; for (const listener of bridge.listeners.get('connections:metadataObservation') ?? []) listener({}, state) } } })
   cleanup.push(release)
-  vi.spyOn(api.connections, 'call').mockImplementation(async (method: any, input: any) => { calls.push({ method, input }); return bridge.api.connections.call(method, input) })
-  vi.spyOn(api.connections, 'onMetadataChanged').mockImplementation(listener => bridge.api.connections.onMetadataChanged(listener))
+  vi.spyOn(api.connections, 'call').mockImplementation(async (method: any, input: any) => {
+    calls.push({ method, input }); metadataInFlight++
+    try { return await bridge.api.connections.call(method, input) } finally { metadataInFlight-- }
+  })
+  vi.spyOn(api.connections, 'onMetadataChanged').mockImplementation((...args) => bridge.api.connections.onMetadataChanged(...args))
   await f.submit('ui-profile')
   await vi.waitFor(async () => expect((await f.get()).entry.observation.profile?.name).toBe('Original native person'))
+  await desktopConversationReadBridge(f, cleanup, () => [...f.coreClients(), { hostId: 'other-host', client: f.client }])
+  vi.spyOn(api.sessions, 'inputMailbox').mockImplementation((reference, input = {}) => f.sdk.call('agent.input.ls', { ...input, ...reference }))
+  vi.spyOn(api.sessions, 'listMessages').mockImplementation((reference, input) => f.sdk.call('message.ls',
+    { ...input, hostId: reference.hostId, participantSessionId: reference.agentSessionId }))
+  vi.spyOn(api.sessions, 'readHistory').mockImplementation((reference, input, context) => f.sdk.call('agent.history',
+    { ...input, ...reference }, context?.signal ? { signal: context.signal } : {}))
 })
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); bridge.handlers.clear(); bridge.listeners.clear(); vi.unstubAllGlobals() })
 async function click(text: string) {
   const button = [...dom.container.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === text)
   expect(button, text).toBeDefined(); await act(async () => button!.click())
+}
+const actorReads = () => calls.filter(call => call.method === 'connection.metadata.get' && call.input.subject.kind === 'actor')
+const submittedRecord = (id: string) => [...dom.container.querySelectorAll<HTMLElement>('[data-submission-id]')].find(node => node.dataset.submissionId === id) ?? null
+async function originalMessages() {
+  let messages: AgentSessionUserMessage[] = []
+  await vi.waitFor(async () => {
+    messages = projectSessionUserMessages({ agentSessionId: 'original-agent', timeline: await f.client.sessionTimeline('original-agent') })
+    expect(messages.some(message => message.author.kind === 'external' && message.sourceRecord?.record.hostId === 'local')).toBe(true)
+  })
+  return messages
+}
+function originalSession(mode: 'terminal' | 'activity') {
+  const original = f.client.agentSession('original-agent')
+  const session = { ...composerSession('original-agent', 'claude'), workspacePath: f.root, ...(original.nativeHandle ? { nativeHandle: original.nativeHandle } : {}),
+    control: { kind: 'agent' as const, hostId: 'local', agentSessionId: 'original-agent', run: original.run } }
+  useAppStore.setState({ loading: false, config: { ...composerConfig,
+    executors: { claude: { ...composerConfig.executors.codex!, providerId: 'claude', command: 'claude' } },
+    workspaces: [{ ...composerConfig.workspaces[0]!, path: f.root }] }, sessions: [session], viewModes: { 'original-agent': mode }, timelines: {} })
+  return session
+}
+async function publishOriginal(item: AgentTimelineItem) {
+  const client = f.client as unknown as AgentMuxClient
+  await client['persistAndPublishTimeline']({ type: 'upsert', agentSessionId: item.agentSessionId, item },
+    { source: 'agentmux', observedAt: item.updatedAt }, f.input.executionHostId)
+}
+async function openInputs() {
+  const panel = dom.container.querySelector<HTMLElement>('.composer-mailbox')!
+  expect(panel).not.toBeNull()
+  const event = new Event('toggle'); Object.defineProperty(event, 'newState', { value: 'open' })
+  await act(async () => panel.dispatchEvent(event))
+  await dom.click('[role="tab"][id$="-user-tab"]')
+  return panel
 }
 it('native sender -> original profile cache -> public RPC -> registered IPC/preload -> mounted SessionPane original-record reader and exact renamed group', async () => {
   await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
@@ -52,13 +109,16 @@ it('native sender -> original profile cache -> public RPC -> registered IPC/prel
   await writeFile('.local/channel-protocol/T-005/public-scene.json', JSON.stringify({ messages, connection: (await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection, binding: (await f.sdk.call('connection.binding.ls', { executionHostId: 'local', agentSessionId: 'original-agent' })).bindings[0], actor: await f.get(), group: await f.get(groupSubject) }, null, 2))
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   const original = f.client.agentSession('original-agent')
-  const session = { ...composerSession('original-agent', 'claude'), workspacePath: f.root, nativeHandle: original.nativeHandle, control: { kind: 'agent' as const, hostId: 'local', agentSessionId: 'original-agent', run: original.run } }
+  const session = { ...composerSession('original-agent', 'claude'), workspacePath: f.root, ...(original.nativeHandle ? { nativeHandle: original.nativeHandle } : {}), control: { kind: 'agent' as const, hostId: 'local', agentSessionId: 'original-agent', run: original.run } }
   useAppStore.setState({ loading: false, config: { ...composerConfig, executors: { claude: { ...composerConfig.executors.codex!, providerId: 'claude', command: 'claude' } }, workspaces: [{ ...composerConfig.workspaces[0]!, path: f.root }] }, sessions: [session], viewModes: { 'original-agent': 'activity' }, timelines: { 'original-agent': await f.client.sessionTimeline('original-agent') } })
   const reads: Array<{ method: string; input: unknown; result?: any; error?: string }> = []
-  for (const method of ['readAgentConversation', 'readConversationChanges', 'observeConversation', 'releaseConversationView'] as const) vi.spyOn(api.conversation, method).mockImplementation(async (...args: any[]) => {
-    try { const result = await (f.client[method] as any)(...args); if (method !== 'observeConversation') reads.push({ method, input: args[0], result }); return result }
-    catch (error) { reads.push({ method, input: args[0], error: String(error) }); throw error }
-  })
+  for (const method of ['readAgentConversation', 'readConversationChanges', 'observeConversation', 'releaseConversationView'] as const) {
+    const originalRead = vi.mocked(api.conversation[method]).getMockImplementation()!
+    vi.mocked(api.conversation[method]).mockImplementation(async (...args: any[]) => {
+      try { const result = await (originalRead as any)(...args); if (method !== 'observeConversation') reads.push({ method, input: args[0], result }); return result }
+      catch (error) { reads.push({ method, input: args[0], error: String(error) }); throw error }
+    })
+  }
   function OriginalGroup() { const name = useConnectorRoomName({ ...f.input, application: f.config.application, revision: 1 } as any); return <h2 data-group-name>{name.label}</h2> }
   const frame = (visible: boolean) => <><OriginalGroup /><SessionPane sessionId="original-agent" surfaceKind="agent" interactiveResize={false} visible={visible} linkOrigin={{ workspaceId: 'workspace', tabGroupId: 'test-group', tabId: 'tab', regionId: 'original-region' }} /></>
   await dom.render(frame(true))
@@ -78,12 +138,16 @@ it('native sender -> original profile cache -> public RPC -> registered IPC/prel
   await act(async () => originalRecord!.querySelector('summary')!.click())
   await vi.waitFor(() => { expect(dom.container.querySelector('[data-speaker-role=external] .log-turn__sender')?.textContent).toBe('Original native person'); expect(dom.container.querySelector('[data-group-name]')?.textContent).toBe('Original native group') })
   expect(dom.container.querySelector('[data-speaker-role=external] .log-turn__node img')?.getAttribute('src')).toBe('https://cdn.example/person.png')
+  await vi.waitFor(() => { expect(metadataReady).toBe(true); expect(metadataInFlight).toBe(0) })
+  const openedActorReads = calls.filter(call => call.method === 'connection.metadata.get' && call.input.subject.kind === 'actor').length
+  expect(openedActorReads).toBeGreaterThan(0)
   f.source('Renamed person', 'Renamed original group')
   await f.sdk.call('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject: actorSubject })
+  if (groupSubject.kind !== 'conversation') throw Error('The original native group subject is required')
   await f.transport.receive({ schema: '2.0', header: { event_id: 'ui-native-rename', event_type: 'im.chat.updated_v1', app_id: f.config.application.appId }, event: { chat_id: groupSubject.externalConversationId } })
   expect(f.transport.ack().at(-1)).toEqual({ code: 200 })
   await vi.waitFor(() => { expect(dom.container.querySelector('[data-speaker-role=external] .log-turn__sender')?.textContent).toBe('Renamed person'); expect(dom.container.querySelector('[data-group-name]')?.textContent).toBe('Renamed original group') })
-  expect(calls.filter(call => call.method === 'connection.metadata.get' && call.input.subject.kind === 'actor')).toHaveLength(2)
+  expect(calls.filter(call => call.method === 'connection.metadata.get' && call.input.subject.kind === 'actor')).toHaveLength(openedActorReads + 1)
   // A later display-read failure must keep the last observed name and the
   // authenticated original message, while making this read's uncertainty visible.
   vi.mocked(api.connections.call).mockImplementation(async (method: any, input: any) => {
@@ -93,7 +157,7 @@ it('native sender -> original profile cache -> public RPC -> registered IPC/prel
   })
   f.source('New cache value while the display read is unavailable', 'Renamed original group')
   await f.sdk.call('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject: actorSubject })
-  await vi.waitFor(() => expect(calls.filter(call => call.method === 'connection.metadata.get' && call.input.subject.kind === 'actor')).toHaveLength(3))
+  await vi.waitFor(() => expect(calls.filter(call => call.method === 'connection.metadata.get' && call.input.subject.kind === 'actor')).toHaveLength(openedActorReads + 2))
   const detail = dom.container.querySelector<HTMLButtonElement>('[data-speaker-role=external] button[aria-label="Message details"]')!
   await act(async () => detail.click())
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Saved · current read unconfirmed'))
@@ -101,10 +165,336 @@ it('native sender -> original profile cache -> public RPC -> registered IPC/prel
   expect(JSON.parse(originalRecord!.dataset.conversationAuthor!)).toEqual(external.author)
   await dom.render(frame(false))
   const hiddenReads = calls.filter(call => call.method === 'connection.metadata.get' && call.input.subject.kind === 'actor').length
+  const previousChanges = metadataChanges
   await f.sdk.call('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject: actorSubject })
+  await vi.waitFor(() => expect(metadataChanges).toBeGreaterThan(previousChanges))
   expect(calls.filter(call => call.method === 'connection.metadata.get' && call.input.subject.kind === 'actor')).toHaveLength(hiddenReads)
   expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
+it('the shared input row and its original detail use the same observed channel avatar and keep identity when images fail', async () => {
+  let messages: AgentSessionUserMessage[] = []
+  await vi.waitFor(async () => {
+    messages = projectSessionUserMessages({ agentSessionId: 'original-agent', timeline: await f.client.sessionTimeline('original-agent') })
+    expect(messages.some(message => message.author.kind === 'external')).toBe(true)
+  })
+  const page = await f.client.readAgentInputMailbox({ agentSessionId: 'original-agent' })
+  const item = page.items.flatMap(entry => entry.kind === 'item' ? [entry.item] : [])
+    .find(item => inputMailboxPresentation(item).speaker.role === 'external')
+  expect(item, 'The original Core journal must contain the external input').toBeDefined()
+  const refresh = vi.fn(async () => {}), loadEarlier = vi.fn(async () => {})
+  const mailbox = { scope: page.queueId, items: [item!], failures: [], page, loading: false, error: null,
+    refresh, loadEarlier, hasMore: false }
+  function OriginalInput() {
+    const profiles = useChannelActorProfiles(messages.flatMap(message => message.author.kind === 'external' ? [message.author] : []),
+      { hostId: f.input.executionHostId, sourceHostId: messages.find(message => message.author.kind === 'external')!.sourceRecord!.record.hostId }, true)
+    return <InputMailboxRecords mailbox={mailbox} hostId="local" compact reading={{
+      describeSpeaker: createSpeakerResolver({ lookupExternal: author => profiles.get(channelProfileKey(author)) })
+    }} />
+  }
+  await dom.render(<OriginalInput />)
+  const row = dom.container.querySelector<HTMLButtonElement>('.composer-mailbox__row')!
+  expect(row).not.toBeNull()
+  await vi.waitFor(() => expect(row.querySelector('img')?.getAttribute('src')).toBe('https://cdn.example/person.png'))
+  expect(row.querySelector('img')?.getAttribute('width')).toBe('18')
+  await act(async () => row.click())
+  const turn = dom.container.querySelector<HTMLElement>('[data-speaker-role="external"]')!
+  expect(turn).not.toBeNull()
+  expect(turn.querySelector('.log-turn__node img')?.getAttribute('src')).toBe(row.querySelector('img')!.getAttribute('src'))
+  expect(turn.querySelector('.log-turn__node img')?.getAttribute('width')).toBe('20')
+  await act(async () => row.querySelector('img')!.dispatchEvent(new Event('error')))
+  expect(row.querySelector('img')).toBeNull()
+  expect(row.querySelector('strong')?.textContent).toBe('Original native person')
+  expect(turn.querySelector('.log-turn__node img')).not.toBeNull()
+  await act(async () => turn.querySelector('.log-turn__node img')!.dispatchEvent(new Event('error')))
+  expect(turn.querySelector('.log-turn__node img')).toBeNull()
+  expect(turn.querySelector('.log-turn__sender')?.textContent).toBe('Original native person')
+  expect(refresh).not.toHaveBeenCalled(); expect(loadEarlier).not.toHaveBeenCalled()
+  expect(calls.some(call => call.method === 'connection.metadata.refresh')).toBe(false)
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('Terminal Mailbox reads its visible original authors and the Desktop history row and detail share the saved avatar without opening Activity', async () => {
+  const original = (await originalMessages()).find(message => message.author.kind === 'external')!
+  const originalCaptured = (await f.client.sessionTimeline('original-agent')).items.find(item => item.id === original.rawId)!
+  const authorExternal = originalCaptured.authorExternal
+  expect(authorExternal, 'The actual original captured record retains its external author').toBeDefined()
+  if (!authorExternal) throw Error('The original captured external author is required')
+  const record: AgentTimelineItem = { id: 'original-external-history', agentSessionId: 'original-agent', kind: 'user_message',
+    source: 'user', title: 'Original external history', status: 'complete', publicContent: 'confirmed',
+    content: 'Original recorded external history\nEvery original line is retained.', authorExternal,
+    createdAt: original.recordedAt! + 1, updatedAt: original.recordedAt! + 1 }
+  await publishOriginal(record)
+  const session = originalSession('terminal')
+  const frame = (visible: boolean) => <SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible={visible}
+    linkOrigin={{ workspaceId: 'workspace', tabGroupId: 'test-group', tabId: 'tab', regionId: 'original-region' }} />
+  await dom.render(frame(true))
+  expect(useAppStore.getState().viewModes[session.id]).toBe('terminal')
+  expect(dom.container.querySelector('[data-terminal-witness]')?.getAttribute('data-visible')).toBe('true')
+  expect([terminals.mounted, terminals.disposed]).toEqual([1, 0])
+  expect(inspectConversationConsumers(session.control).consumers).toHaveLength(0)
+  expect(actorReads()).toHaveLength(0)
+  const panel = await openInputs()
+  let row: HTMLButtonElement | null = null
+  await vi.waitFor(() => {
+    row = panel.querySelector<HTMLButtonElement>(`.composer-mailbox__row[data-record-key="timeline:${record.id}"]`)
+    expect(row, 'The real Desktop MessageHistory branch must contain this unjournaled original').not.toBeNull()
+    expect(row!.querySelector('strong')?.textContent).toBe('Original native person')
+    expect(row!.querySelector('img')?.getAttribute('src')).toBe('https://cdn.example/person.png')
+  })
+  expect(row!.querySelector('img')!.getAttribute('width')).toBe('18')
+  await act(async () => row!.click())
+  const detail = panel.querySelector<HTMLElement>('.composer-mailbox__detail .log-turn')!
+  expect(detail, 'The ordinary row selection opens its original Desktop detail').not.toBeNull()
+  expect(detail.querySelector('.log-turn__body')?.textContent).toBe(record.content)
+  expect(detail.querySelector('.log-turn__node img')?.getAttribute('src')).toBe('https://cdn.example/person.png')
+  expect(detail.querySelector('.log-turn__node img')?.getAttribute('width')).toBe('20')
+  expect(JSON.parse(detail.dataset.conversationItemRef!)).toEqual({ hostId: 'local', agentSessionId: session.id,
+    source: { kind: 'captured', recordId: record.id } })
+  const text = detail.querySelector('p')!.firstChild!, range = document.createRange()
+  range.setStart(text, 0); range.setEnd(text, 8); window.getSelection()!.removeAllRanges(); window.getSelection()!.addRange(range)
+  await act(async () => detail.querySelector('.log-turn__node img')!.dispatchEvent(new Event('error')))
+  expect(detail.querySelector('.log-turn__node img')).toBeNull()
+  expect(detail.querySelector('.log-turn__sender')?.textContent).toBe('Original native person')
+  expect(window.getSelection()!.toString()).toBe('Original')
+  expect(useAppStore.getState().viewModes[session.id]).toBe('terminal')
+  expect(inspectConversationConsumers(session.control).consumers).toHaveLength(0)
+  const persisted = (await f.client.sessionTimeline(session.id)).items.find(item => item.id === record.id)!
+  expect(persisted.authorExternal).toEqual(originalCaptured.authorExternal); expect(persisted.content).toBe(record.content)
+  await dom.render(frame(false))
+  const hidden = actorReads().length, changed = metadataChanges
+  await f.sdk.call('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject: actorSubject })
+  await vi.waitFor(() => expect(metadataChanges).toBeGreaterThan(changed))
+  expect(actorReads()).toHaveLength(hidden)
+  expect([terminals.mounted, terminals.disposed]).toEqual([1, 0])
+  expect(f.inner.kernel.input).toHaveBeenCalledOnce(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  window.getSelection()!.removeAllRanges()
+  // The private native visual harness reuses these actual bounded read results;
+  // this DTO is not a new reader and is not its test/visual acceptance receipt.
+  const timeline = await f.client.sessionTimeline(session.id)
+  await mkdir('.local/channel-protocol/T-005', { recursive: true })
+  await writeFile('.local/channel-protocol/T-005/public-mailbox-scene.json', JSON.stringify({
+    control: session.control, sourceHostId: timeline.sourceHostId, timeline,
+    messages: projectSessionUserMessages({ agentSessionId: session.id, timeline }),
+    mailbox: await f.sdk.call('agent.input.ls', { hostId: session.control.hostId, agentSessionId: session.id }),
+    actor: await f.get(), selectedRecordId: record.id
+  }, null, 2))
+})
+
+it('Activity demands channel profiles only when Earlier admits the original actor beyond the first input summary window', async () => {
+  const external = (await originalMessages()).find(message => message.author.kind === 'external')!
+  for (let index = 0; index < 350; index++) await publishOriginal({ id: `later-original-step-${index}`, agentSessionId: 'original-agent',
+    kind: 'lifecycle', source: 'native-hook', status: 'complete', title: 'Later original step', content: `Later original step ${index}`,
+    createdAt: external.recordedAt! + index + 1, updatedAt: external.recordedAt! + index + 1 })
+  const firstSummary = await f.sdk.call('agent.conversation.inspect', { hostId: 'local', agentSessionId: 'original-agent', limit: 100 })
+  expect(firstSummary.items.length).toBeGreaterThan(0)
+  expect(firstSummary.items.flatMap(entry => entry.kind === 'item' ? entry.item.records : []).some(record => record.original.item.id === external.rawId)).toBe(false)
+  const session = originalSession('activity')
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
+  await dom.render(<SessionPane sessionId={session.id} surfaceKind="agent" interactiveResize={false} visible
+    linkOrigin={{ workspaceId: 'workspace', tabGroupId: 'test-group', tabId: 'tab', regionId: 'original-region' }} />)
+  await vi.waitFor(() => {
+    const consumers = inspectConversationConsumers(session.control).consumers
+    expect(consumers).toHaveLength(1)
+    expect(consumers[0]!.accepted?.recordCount).toBeGreaterThan(0)
+    expect(consumers[0]!.loading || consumers[0]!.inFlight || consumers[0]!.watch.binding).toBe(false)
+    expect(submittedRecord(external.rawId)).toBeNull()
+  })
+  expect(actorReads()).toHaveLength(0)
+  // Unknown native timestamps legitimately stop automatic time coverage. Follow
+  // the ordinary bounded Earlier pages rather than assuming three auto pages ran.
+  for (let page = 0; page < 4 && !submittedRecord(external.rawId); page++) {
+    const prior = inspectConversationConsumers(session.control).consumers[0]!.accepted!
+    let earlier: HTMLButtonElement | undefined
+    await vi.waitFor(() => {
+      earlier = [...dom.container.querySelectorAll<HTMLButtonElement>('.activity-feed__reading-entry button')].find(button => button.textContent === 'Earlier')
+      expect(earlier, 'The original reader exposes its ordinary Earlier control').toBeDefined()
+      expect(earlier!.disabled).toBe(false)
+    })
+    await act(async () => earlier!.click())
+    await vi.waitFor(() => {
+      const current = inspectConversationConsumers(session.control).consumers[0]!
+      expect(current.loading || current.inFlight || current.watch.binding).toBe(false)
+      expect([current.accepted?.id, current.accepted?.revision]).not.toEqual([prior.id, prior.revision])
+    })
+  }
+  let originalRecord: HTMLElement | null = null
+  await vi.waitFor(() => {
+    originalRecord = submittedRecord(external.rawId)
+    expect(originalRecord).not.toBeNull()
+    expect(JSON.parse(originalRecord!.dataset.conversationAuthor!)).toEqual(external.author)
+  })
+  await act(async () => originalRecord!.querySelector('summary')!.click())
+  await vi.waitFor(() => {
+    expect(originalRecord!.querySelector('.log-turn__sender')?.textContent).toBe('Original native person')
+    expect(originalRecord!.querySelector('.log-turn__node img')?.getAttribute('src')).toBe('https://cdn.example/person.png')
+  })
+  expect(actorReads().length).toBeGreaterThan(0)
+  expect(actorReads().every(read => read.input.connectionId === f.config.connectionId && JSON.stringify(read.input.subject) === JSON.stringify(actorSubject))).toBe(true)
+  expect(f.inner.kernel.input).toHaveBeenCalledOnce(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('an enabled hidden Activity preparation does not read profiles and a foreign route with literal local source cannot borrow local names', async () => {
+  const external = (await originalMessages()).find(message => message.author.kind === 'external')!
+  if (external.author.kind !== 'external') throw Error('The original external author is required')
+  const author = external.author
+  const session = originalSession('terminal')
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
+  const frame = (hostId: string, shown: boolean) => {
+    const props = activityReadingProps({ control: { ...session.control, hostId } })
+    return <ActivityView {...props} conversationReading={{ ...props.conversationReading!, enabled: true,
+      consumer: { visible: true, activityShown: shown, viewMode: shown ? 'activity' : 'terminal', runId: session.control.run.runId } }} />
+  }
+  await dom.render(frame('local', false))
+  await vi.waitFor(() => {
+    const consumer = inspectConversationConsumers(session.control).consumers[0]
+    expect(consumer?.accepted?.recordCount).toBeGreaterThan(0)
+    expect(consumer?.loading || consumer?.inFlight || consumer?.watch.binding).toBe(false)
+    expect(consumer?.gates.activityShown).toBe(false)
+  })
+  expect(actorReads()).toHaveLength(0)
+  await dom.render(frame('local', true))
+  const original = submittedRecord(external.rawId)!
+  expect(original).not.toBeNull()
+  await act(async () => original.querySelector('summary')!.click())
+  await vi.waitFor(() => {
+    expect(original.querySelector('.log-turn__sender')?.textContent).toBe('Original native person')
+    expect(metadataReady).toBe(true); expect(metadataInFlight).toBe(0)
+  })
+  const localReads = actorReads().length
+  expect(localReads).toBeGreaterThan(0)
+  await dom.render(frame('other-host', true))
+  let foreign: HTMLElement | null = null
+  await vi.waitFor(() => {
+    const consumer = inspectConversationConsumers({ hostId: 'other-host', agentSessionId: session.id }).consumers[0]
+    expect(consumer?.reference.hostId).toBe('other-host')
+    expect(consumer?.accepted?.sourceHostId).toBe('local')
+    expect(consumer?.loading || consumer?.inFlight || consumer?.watch.binding).toBe(false)
+    foreign = submittedRecord(external.rawId)
+    expect(foreign).not.toBeNull()
+  })
+  const disclosure = foreign!.querySelector<HTMLDetailsElement>('details')!
+  if (!disclosure.open) await act(async () => disclosure.querySelector('summary')!.click())
+  expect(foreign!.querySelector('.log-turn__sender')?.textContent).toBe(`${author.actor.userId} · ${author.actor.application.domain}`)
+  expect(foreign!.querySelector('.log-turn__node img')).toBeNull()
+  await act(async () => foreign!.querySelector<HTMLButtonElement>('button[aria-label="Message details"]')!.click())
+  expect(foreign!.textContent).toContain('Profile metadata is unavailable for this Host or source')
+  expect(JSON.parse(foreign!.dataset.conversationAuthor!)).toEqual(external.author)
+  const changed = metadataChanges
+  f.source('A local cache value for the same literal actor', 'Original native group')
+  await f.sdk.call('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject: actorSubject })
+  await vi.waitFor(() => expect(metadataChanges).toBeGreaterThan(changed))
+  expect(actorReads()).toHaveLength(localReads)
+  expect(foreign!.querySelector('.log-turn__sender')?.textContent).toBe(`${author.actor.userId} · ${author.actor.application.domain}`)
+  expect(f.inner.kernel.input).toHaveBeenCalledOnce(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('a same-scope author-set change keeps represented saved profiles on read failure and prunes authors that leave the reading', async () => {
+  const original = (await originalMessages()).find(message => message.author.kind === 'external')!
+  if (original.author.kind !== 'external') throw Error('The original external author is required')
+  const author = original.author, second = { ...author, actor: { ...author.actor, userId: 'second-original-person' } }
+  const owner = { hostId: f.input.executionHostId, sourceHostId: original.sourceRecord!.record.hostId }
+  const reads: Array<ReadonlyMap<string, { observation?: unknown; issue?: string }>> = []
+  function Profiles({ authors }: { authors: readonly typeof author[] }) {
+    const profiles = useChannelActorProfiles(authors, owner, true)
+    reads.push(profiles)
+    return <output>{profiles.get(channelProfileKey(author))?.observation?.profile?.name ?? author.actor.userId}
+      {' | '}{profiles.get(channelProfileKey(author))?.issue ?? ''}</output>
+  }
+  await dom.render(<Profiles authors={[author]} />)
+  await vi.waitFor(() => { expect(dom.container.textContent).toBe('Original native person | '); expect(metadataReady).toBe(true); expect(metadataInFlight).toBe(0) })
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  const call = vi.mocked(api.connections.call).getMockImplementation()!
+  vi.mocked(api.connections.call).mockImplementation(async (method: any, input: any) => {
+    if (method === 'connection.metadata.get' && input.subject.kind === 'actor') {
+      calls.push({ method, input }); await held; throw Error('This exact display read is unavailable')
+    }
+    return call(method, input)
+  })
+  const before = reads.length
+  try {
+    await dom.render(<Profiles authors={[author, second]} />)
+    expect(dom.container.textContent).toBe('Original native person | ')
+    expect(reads.slice(before).every(profiles => profiles.get(channelProfileKey(author))?.observation !== undefined)).toBe(true)
+  } finally { await act(async () => release()) }
+  await vi.waitFor(() => expect(dom.container.textContent).toContain('Original native person | This exact display read is unavailable'))
+  await dom.render(<Profiles authors={[second]} />)
+  expect(reads.at(-1)!.has(channelProfileKey(author))).toBe(false)
+  expect(f.inner.kernel.input).toHaveBeenCalledOnce(); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('late local profile results cannot cross source Host, route Host, visibility or connection identity', async () => {
+  const original = (await originalMessages()).find(message => message.author.kind === 'external')!
+  if (original.author.kind !== 'external') throw Error('The original external author is required')
+  const author = original.author, second = { ...author, connectionId: 'different-original-connection' }
+  const local = { hostId: f.input.executionHostId, sourceHostId: original.sourceRecord!.record.hostId }
+  let release!: () => void, entered = 0
+  const held = new Promise<void>(resolve => { release = resolve })
+  const call = vi.mocked(api.connections.call).getMockImplementation()!
+  vi.mocked(api.connections.call).mockImplementation(async (method: any, input: any) => {
+    if (method === 'connection.metadata.get' && input.subject.kind === 'actor') { entered++; await held }
+    return call(method, input)
+  })
+  function Sender({ owner, visible = true, current = author }: { owner: typeof local; visible?: boolean; current?: typeof author }) {
+    const profiles = useChannelActorProfiles([current], owner, visible)
+    return <ConversationMessage messageId={original.id} content={original.content} speaker={speakerOfUserMessage({ author: current })}
+      inputSource={original.source} recordedIdentity describeSpeaker={createSpeakerResolver({ lookupExternal: value => profiles.get(channelProfileKey(value)) })} />
+  }
+  try {
+    await dom.render(<Sender owner={local} />)
+    await vi.waitFor(() => expect(entered).toBeGreaterThan(0))
+    await dom.render(<Sender owner={{ ...local, sourceHostId: 'another-source-host' }} />)
+    const sourceReads = entered
+    await act(async () => release())
+    await vi.waitFor(() => expect(metadataInFlight).toBe(0))
+    expect(dom.container.querySelector('.log-turn__sender')?.textContent).toBe(`${author.actor.userId} · ${author.actor.application.domain}`)
+    expect(dom.container.querySelector('.log-turn__node img')).toBeNull(); expect(entered).toBe(sourceReads)
+    await dom.render(<Sender owner={{ ...local, hostId: 'other-host' }} />)
+    expect(dom.container.querySelector('.log-turn__node img')).toBeNull(); expect(entered).toBe(sourceReads)
+    await dom.render(<Sender owner={local} visible={false} />)
+    expect(entered).toBe(sourceReads)
+    await dom.render(<Sender owner={local} current={second} />)
+    await vi.waitFor(() => expect(entered).toBeGreaterThan(sourceReads))
+    await vi.waitFor(() => expect(metadataInFlight).toBe(0))
+    expect(dom.container.querySelector('.log-turn__sender')?.textContent).toBe(`${author.actor.userId} · ${author.actor.application.domain}`)
+    expect(dom.container.querySelector('.log-turn__node img')).toBeNull()
+    expect(actorReads().at(-1)!.input.connectionId).toBe(second.connectionId)
+    expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  } finally { release() }
+})
+
+it('released profile watch callbacks cannot start hidden reads or overwrite the current scope', async () => {
+  const original = (await originalMessages()).find(message => message.author.kind === 'external')!
+  if (original.author.kind !== 'external') throw Error('The original external author is required')
+  const author = original.author, owner = { hostId: f.input.executionHostId, sourceHostId: original.sourceRecord!.record.hostId }
+  const observers: Array<Parameters<typeof api.connections.onMetadataChanged>> = []
+  const subscribe = vi.mocked(api.connections.onMetadataChanged).getMockImplementation()!
+  vi.mocked(api.connections.onMetadataChanged).mockImplementation((...args) => { observers.push(args); return subscribe(...args) })
+  function Profile({ visible }: { visible: boolean }) {
+    const profiles = useChannelActorProfiles([author], owner, visible), profile = profiles.get(channelProfileKey(author))
+    return <output>{profile?.observation?.profile?.name ?? author.actor.userId}{' | '}{profile?.issue ?? ''}</output>
+  }
+  await dom.render(<Profile visible />)
+  await vi.waitFor(() => { expect(dom.container.textContent).toBe('Original native person | '); expect(metadataReady).toBe(true); expect(metadataInFlight).toBe(0) })
+  expect(observers).toHaveLength(1)
+  const previous = observers[0]!
+  await dom.render(<Profile visible={false} />)
+  const hiddenReads = actorReads().length
+  await act(async () => {
+    previous[0]({ connectionId: author.connectionId, application: author.actor.application, subject: { kind: 'actor', actor: author.actor } })
+    previous[1]!('unavailable')
+  })
+  expect(actorReads()).toHaveLength(hiddenReads)
+  expect(dom.container.textContent).toBe('Original native person | ')
+  await dom.render(<Profile visible />)
+  await vi.waitFor(() => { expect(observers).toHaveLength(2); expect(metadataInFlight).toBe(0) })
+  await act(async () => previous[1]!('unavailable'))
+  expect(dom.container.textContent).toBe('Original native person | ')
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
 it('mounted cache management refreshes and clears exact metadata through IPC while preserving original records and bindings', async () => {
   const connection = (await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection!
   await dom.render(<ChannelMetadataPanel connection={connection} active />)
@@ -135,7 +525,8 @@ it('unavailable display notifications preserve the actual recorded sender and re
   const original = messages.find(message => message.author.kind === 'external')!
   vi.mocked(api.connections.onMetadataChanged).mockImplementation(() => { throw Error('Notification port unavailable') })
   function OriginalSender() {
-    const profiles = useChannelActorProfiles(messages, true)
+    const profiles = useChannelActorProfiles(messages.flatMap(message => message.author.kind === 'external' ? [message.author] : []),
+      { hostId: f.input.executionHostId, sourceHostId: original.sourceRecord!.record.hostId }, true)
     return <ConversationMessage messageId={original.id} content={original.content} speaker={speakerOfUserMessage(original)}
       inputSource={original.source} recordedIdentity describeSpeaker={createSpeakerResolver({ lookupExternal: author => profiles.get(channelProfileKey(author)) })} />
   }
