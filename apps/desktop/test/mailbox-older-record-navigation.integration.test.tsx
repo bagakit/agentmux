@@ -453,7 +453,12 @@ it('old-record navigation and Current keep the original summary receiving later 
   expect(action).not.toBeNull()
   await act(async () => { action.focus(); action.click() })
   const key = conversationMessageSourceKey(reference.agentSessionId, target)
-  await vi.waitFor(() => expect(dom.container.querySelector(`.activity-feed [data-message-source-key='${key}'][data-message-located]`)).not.toBeNull(), { timeout: 8000 })
+  await vi.waitFor(() => {
+    const located = dom.container.querySelector(`.activity-feed [data-message-source-key='${key}'][data-message-located]`)
+    expect(located).not.toBeNull(); expect(located!.textContent).toContain('Original recorded input 0')
+    expect(document.activeElement).toBe(located)
+    expect(panel.dataset.state).toBe('closed')
+  }, { timeout: 8000 })
   let summaryConsumerId: string | undefined
   await vi.waitFor(() => {
     const introduced = scopeRecords().filter(record => !existingConsumers.has(record.scope.consumerId))
@@ -464,7 +469,6 @@ it('old-record navigation and Current keep the original summary receiving later 
   }, { timeout: 8000 })
   expect(summaryConsumerId).toBeTypeOf('string')
   expect(summaryConsumerId).not.toBe('')
-  expect(panel.dataset.state).toBe('closed')
   const current = dom.container.querySelector<HTMLButtonElement>('[data-conversation-current-entry] button')!
   // Explicit pre-focus/keyboard activation; pointerdown intentionally preserves focus.
   expect(current).not.toBeNull(); await act(async () => { current.focus(); current.click() })
