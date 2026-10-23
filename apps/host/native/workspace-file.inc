@@ -91,24 +91,24 @@ static int workspace_regular(const char *name) {
 }
 
 static void workspace_digest(const unsigned char *bytes, size_t length, char *revision) {
-  unsigned char digest[CC_SHA256_DIGEST_LENGTH];
-  CC_SHA256_CTX context;
-  CC_SHA256_Init(&context);
+  unsigned char digest[NATIVE_SHA256_BYTES];
+  native_sha256_context context;
+  native_sha256_init(&context);
   for (size_t offset = 0; offset < length;) {
     const size_t block = length - offset > 65536 ? 65536 : length - offset;
-    CC_SHA256_Update(&context, bytes + offset, (CC_LONG)block); offset += block;
+    native_sha256_update(&context, bytes + offset, (size_t)block); offset += block;
   }
-  CC_SHA256_Final(digest, &context);
+  native_sha256_final(digest, &context);
   strcpy(revision, "sha256:");
   for (size_t index = 0; index < sizeof(digest); index++) snprintf(revision + 7 + index * 2, 3, "%02x", digest[index]);
 }
 
 static long long workspace_ctime(const struct stat *info) {
-  return (long long)info->st_ctimespec.tv_sec * 1000000000LL + info->st_ctimespec.tv_nsec;
+  return (long long)native_ctime_seconds(info) * 1000000000LL + native_ctime_nanoseconds(info);
 }
 
 static long long workspace_mtime(const struct stat *info) {
-  return (long long)info->st_mtimespec.tv_sec * 1000000000LL + info->st_mtimespec.tv_nsec;
+  return (long long)native_mtime_seconds(info) * 1000000000LL + native_mtime_nanoseconds(info);
 }
 
 static int workspace_same_file(const struct stat *a, const struct stat *b) {
@@ -121,15 +121,15 @@ static int workspace_fd_revision(int fd, char *revision, struct stat *info, off_
   struct stat after;
   if (fstat(fd, info) || lseek(fd, 0, SEEK_SET) < 0) workspace_errno();
   if (expected_size < 0 || info->st_size != expected_size) return 0;
-  CC_SHA256_CTX context; CC_SHA256_Init(&context);
-  unsigned char block[65536], digest[CC_SHA256_DIGEST_LENGTH];
+  native_sha256_context context; native_sha256_init(&context);
+  unsigned char block[65536], digest[NATIVE_SHA256_BYTES];
   uint64_t length = 0;
   while (length < (uint64_t)expected_size) {
     const size_t wanted = (uint64_t)expected_size - length > sizeof(block) ? sizeof(block) : (size_t)((uint64_t)expected_size - length);
     const ssize_t count = read(fd, block, wanted);
     if (count < 0) { if (errno == EINTR) continue; workspace_errno(); }
     if (!count) return 0;
-    CC_SHA256_Update(&context, block, (CC_LONG)count);
+    native_sha256_update(&context, block, (size_t)count);
     length += (uint64_t)count;
   }
   ssize_t extra;
@@ -138,7 +138,7 @@ static int workspace_fd_revision(int fd, char *revision, struct stat *info, off_
   if (extra) return 0;
   if (fstat(fd, &after)) workspace_errno();
   if (!workspace_same_file(info, &after)) return 0;
-  CC_SHA256_Final(digest, &context); strcpy(revision, "sha256:");
+  native_sha256_final(digest, &context); strcpy(revision, "sha256:");
   for (size_t i = 0; i < sizeof(digest); i++) snprintf(revision + 7 + i * 2, 3, "%02x", digest[i]);
   return 1;
 }
@@ -161,26 +161,25 @@ static void workspace_byte_range(const char *name, size_t offset, size_t max_byt
   const size_t total = (size_t)before.st_size;
   if (offset > total) workspace_error("WORKSPACE_FILE_INVALID_REQUEST", "Byte offset exceeds the Workspace file length");
   const size_t length = max_bytes < total - offset ? max_bytes : total - offset;
-  unsigned char *bytes = malloc(length ? length : 1), block[65536], digest[CC_SHA256_DIGEST_LENGTH];
+  unsigned char *bytes = malloc(length ? length : 1), block[65536], digest[NATIVE_SHA256_BYTES];
   if (!bytes) workspace_errno();
-  CC_SHA256_CTX context; CC_SHA256_Init(&context);
+  native_sha256_context context; native_sha256_init(&context);
   for (size_t position = 0; position < total;) {
     const size_t wanted = total - position < sizeof(block) ? total - position : sizeof(block);
     const ssize_t count = read(fd, block, wanted);
     if (count < 0) { if (errno == EINTR) continue; workspace_errno(); }
     if (!count) workspace_error("WORKSPACE_FILE_CHANGED_WHILE_READING", "Workspace file changed while reading its bytes");
-    CC_SHA256_Update(&context, block, (CC_LONG)count);
+    native_sha256_update(&context, block, (size_t)count);
     const size_t start = position > offset ? position : offset;
     const size_t stop = position + (size_t)count < offset + length ? position + (size_t)count : offset + length;
     if (stop > start) memcpy(bytes + start - offset, block + start - position, stop - start);
     position += (size_t)count; workspace_read_cost = (long long)position;
   }
-  if (fstat(fd, &after)) workspace_errno(); close(fd);
-  if (before.st_size != after.st_size || before.st_mtimespec.tv_sec != after.st_mtimespec.tv_sec ||
-      before.st_mtimespec.tv_nsec != after.st_mtimespec.tv_nsec || before.st_ctimespec.tv_sec != after.st_ctimespec.tv_sec ||
-      before.st_ctimespec.tv_nsec != after.st_ctimespec.tv_nsec)
+  if (fstat(fd, &after)) workspace_errno();
+  close(fd);
+  if (before.st_size != after.st_size || workspace_mtime(&before) != workspace_mtime(&after) || workspace_ctime(&before) != workspace_ctime(&after))
     workspace_error("WORKSPACE_FILE_CHANGED_WHILE_READING", "Workspace file changed while reading its bytes");
-  CC_SHA256_Final(digest, &context);
+  native_sha256_final(digest, &context);
   char revision[72]; strcpy(revision, "sha256:");
   for (size_t index = 0; index < sizeof(digest); index++) snprintf(revision + 7 + index * 2, 3, "%02x", digest[index]);
   if (strcmp(expected, "null") && strcmp(revision, expected))
@@ -259,7 +258,7 @@ static void workspace_write(const char *name, const char *expected, int exclusiv
   const int exists = workspace_current(name, revision, &mode, &binary);
   if (text_only && binary) workspace_error("WORKSPACE_BINARY_FILE_NOT_EDITABLE", "The current file contains binary bytes. The original file and text draft were kept.");
   if (!workspace_expect(exists, revision, expected)) { workspace_conflict(exists, revision); return; }
-  char token[33]; unsigned char entropy[16]; arc4random_buf(entropy, sizeof(entropy));
+  char token[33]; unsigned char entropy[16]; native_random(entropy, sizeof(entropy));
   for (size_t i = 0; i < sizeof(entropy); i++) snprintf(token + i * 2, 3, "%02x", entropy[i]);
   char *temporary = malloc(strlen(name) + 64);
   if (!temporary) workspace_errno();
@@ -303,7 +302,8 @@ static void workspace_write(const char *name, const char *expected, int exclusiv
   if (exclusive) {
     char observed[72];
     const int parent = open(".", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (parent < 0 || fsync(parent)) workspace_errno(); close(parent);
+    if (parent < 0 || fsync(parent)) workspace_errno();
+    close(parent);
     if (!workspace_fd_revision(fd, observed, &published_info, (off_t)length) || strcmp(observed, revision) ||
         fstatat(AT_FDCWD, name, &visible, AT_SYMLINK_NOFOLLOW) || !workspace_same_file(&published_info, &visible))
       workspace_error("WORKSPACE_FILE_PUBLISHED_CHANGED", "The newly published file changed before its receipt was confirmed");
@@ -314,6 +314,7 @@ static void workspace_write(const char *name, const char *expected, int exclusiv
   printf("}");
 }
 
+#if defined(__APPLE__)
 static void workspace_delete_refused(const char *code, const char *message) {
   printf("{\"status\":\"conflict\",\"code\":"); workspace_json_string(stdout, code);
   printf(",\"message\":"); workspace_json_string(stdout, message); printf("}");
@@ -524,16 +525,24 @@ static void workspace_list(void) {
   printf("]"); free(names); free(ignored); closedir(directory);
 }
 
+#endif
+
 static int workspace_file_operation(int argc, char **argv) {
   if (argc < 2 || strcmp(argv[1], "--workspace-file")) return 0;
   if (argc != 13) workspace_error("WORKSPACE_FILE_INVALID_REQUEST", "Invalid local file helper arguments");
   const char *action = argv[2], *root = argv[3], *name = argv[4];
+#if !defined(__APPLE__)
+  if (strcmp(action, "read") && strcmp(action, "read-bytes") && strcmp(action, "write"))
+    workspace_error("WORKSPACE_FILE_UNSUPPORTED_OPERATION", "This platform supports file read, read-bytes and write only");
+#endif
   if (strcmp(action, "list") && !( !strcmp(action, "reveal") && !*name) &&
       (!*name || strchr(name, '/') || !strcmp(name, ".") || !strcmp(name, "..")))
     workspace_error("WORKSPACE_FILE_INVALID_REQUEST", "Invalid local file basename");
   char cwd[PATH_MAX], original_cwd[PATH_MAX]; workspace_cwd(root, cwd); strcpy(original_cwd, cwd);
+#if defined(__APPLE__)
   struct stat original_parent, original_root;
   if (!strcmp(action, "delete-exact") && (stat(".", &original_parent) || lstat(root, &original_root))) workspace_errno();
+#endif
   fprintf(stderr, "AGENTMUX_WORKSPACE_READY\n"); fflush(stderr);
   size_t length; unsigned char *input = workspace_input(STDIN_FILENO, &length);
   workspace_cwd(root, cwd);
@@ -553,6 +562,7 @@ static int workspace_file_operation(int argc, char **argv) {
       (size_t)parse_identity(argv[10], "byte length"), (size_t)parse_identity(argv[11], "file byte limit"), argv[12]);
   } else if (!strcmp(action, "write")) {
     workspace_write(name, argv[5], !strcmp(argv[6], "1"), !strcmp(argv[7], "1"), argv[8], input, length);
+  #if defined(__APPLE__)
   } else if (!strcmp(action, "delete-exact")) {
     workspace_delete_exact(root, name, original_cwd, &original_parent, &original_root, argv);
   } else if (!strcmp(action, "list")) {
@@ -571,6 +581,7 @@ static int workspace_file_operation(int argc, char **argv) {
     }
   } else if (!strcmp(action, "delete")) {
     workspace_delete(AT_FDCWD, name);
+  #endif
   } else workspace_error("WORKSPACE_FILE_INVALID_REQUEST", "Unknown local file helper action");
   free(input); return 1;
 }
