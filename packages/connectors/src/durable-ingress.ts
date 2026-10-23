@@ -52,7 +52,7 @@ export type DurableIngressOptions = {
   /** Borrow original confirmed publication identities; never a second history or authority owner. */
   contextPublications?: Pick<import('./publication-store.js').PublicationStore, 'knownContextMessages'>
   /** Return the original executing Host's client; Region occupants and focus are not routes. */
-  core(hostId: string): DurableIngressCore | undefined
+  core(hostId: string, executionRuntimeId?: string): DurableIngressCore | undefined
   /** Existing confirmed configured-owner metadata only; never performs I/O before native ACK. */
   authoritySource?(hostId: string, executionRuntimeId?: string): AgentExternalAuthoritySource | undefined
 }
@@ -222,7 +222,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
   private async recordGroup(record: ConnectionIngressMessage): Promise<ConnectionIngressMessage> {
     const target = record.group?.target
     if (!target) return record
-    const client = this.options.core(target.hostId)
+    const client = this.options.core(target.hostId, target.authoritySource?.executionRuntimeId)
     if (!client) fail('INGRESS_CORE_UNAVAILABLE')
     if (this.options.authoritySource && target.hostId !== 'local' && !target.authoritySource) fail('INGRESS_TARGET_UNCONFIRMED')
     if (target.authoritySource && !isDeepStrictEqual(target.authoritySource, this.options.authoritySource?.(target.hostId, target.authoritySource.executionRuntimeId))) fail('INGRESS_TARGET_UNCONFIRMED')
@@ -409,7 +409,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       this.transaction(() => { const current = this.read(ingressId)!; if (current.kind !== 'action' && current.state === 'received') this.write({ ...current, state: 'refused', code: error.code }) })
       return await this.inspect({ ingressId })
     }
-    const client = this.options.core(original.binding.executionHostId)
+    const client = this.options.core(original.binding.executionHostId, original.author.authoritySource?.executionRuntimeId)
     if (!client) fail('INGRESS_CORE_UNAVAILABLE')
     const exact = await client.readAgentSession(original.binding.agentSessionId, original.author.authoritySource?.executionRuntimeId)
     if (!exact || exact.agentSessionId !== original.binding.agentSessionId || exact.hostId !== original.binding.executionHostId) fail('INGRESS_TARGET_UNCONFIRMED')
@@ -523,7 +523,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     }
 
     try {
-      const client = this.options.core(ingress.input.hostId)
+      const client = this.options.core(ingress.input.hostId, ingress.input.author.authoritySource?.executionRuntimeId)
       if (!client) return { ingress, inputReceipt: null, observation: 'unavailable' }
       const inputReceipt = await client.inspectAgentInput({ kind: 'message-control', originalControlOperationId: ingress.input.operationId })
       const context = this.inspectContext(ingress, inputReceipt)
@@ -553,7 +553,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
   async rejoin(ingressId: string): Promise<ConnectionIngressInspection> {
     const original = await this.inspect({ ingressId })
     if (original.ingress?.kind !== 'action' && original.ingress?.input && original.inputReceipt?.control.state === 'enabled') {
-      const client = this.options.core(original.ingress.input.hostId)
+      const client = this.options.core(original.ingress.input.hostId, original.ingress.input.author.authoritySource?.executionRuntimeId)
       if (!client) fail('INGRESS_CORE_UNAVAILABLE')
       await client.rejoinAgentInputWaiting({ ref: original.inputReceipt.ref }, this.context(original.ingress))
     }

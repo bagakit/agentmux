@@ -73,7 +73,7 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
       }, publication,
       // Local calls retain the original in-process authority callback, including rejoin.
       // Remote clients preserve the existing public endpoint admission contract.
-      ingress: { core: hostId => hostId === 'local' ? runtime!.client : remoteIngress(hostId), authoritySource }
+      ingress: { core: (hostId, executionRuntimeId) => hostId === 'local' ? runtime!.client : remoteIngress(hostId, executionRuntimeId), authoritySource }
     }).then(owner => {
       owner.connections.credential = createCredentialAdministration({ target, secrets: owner.secrets })
       return owner
