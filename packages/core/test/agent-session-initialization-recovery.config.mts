@@ -11,7 +11,10 @@ const mutations: Record<string, { file: string; before: string; after: string }>
   'leak-private-input': { file: 'agent-session-identity.ts', before: 'const { initialInput: _initialInput, nativeActor:', after: 'const { nativeActor:' },
   'drop-original-authority': { file: 'client.ts', before: '...(assertCurrent ? { authority: { assertCurrent } } : {})', after: '...{}' },
   'drop-create-authority': { file: 'client.ts', before: 'this.continueInitialInput(readySession, run, () => this.assertCreationInputCurrent(session, run))',
-    after: 'this.continueInitialInput(readySession, run)' }
+    after: 'this.continueInitialInput(readySession, run)' },
+  'drop-native-dispatch-authority': { file: 'prompt-submission.ts',
+    before: '// Provider/Runtime reads can yield to an accepted recovery cancellation.\n          await control?.authority?.assertCurrent()',
+    after: '// Mutation: omit the final original recovery authority.' }
 }
 export default { ...base, plugins: [{ name: 'original-initial-input-mutation', enforce: 'pre' as const,
   transform(code: string, id: string) {

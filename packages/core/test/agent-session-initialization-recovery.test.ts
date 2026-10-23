@@ -21,7 +21,7 @@ const cleanups: Array<() => Promise<void>> = []
 afterEach(async () => { for (const close of cleanups.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
 /** Actual Core create, Runtime and durable submission owner. Only Provider native protocol leaves are controlled. */
-async function fixture(options: { unknownInput?: boolean; preparation?: Promise<void>; preparing?(): void; explicitContinuation?: boolean; readyAtCreation?: boolean } = {}) {
+async function fixture(options: { unknownInput?: boolean; preparation?: Promise<void>; preparing?(): void; asserting?(check: number): Promise<void>; explicitContinuation?: boolean; readyAtCreation?: boolean } = {}) {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amux-initial-input-')))
   for (const key of Object.keys(process.env)) if (/^(AGENTMUX_|CTXMUX_)/u.test(key)) vi.stubEnv(key, undefined)
   const runtime = join(root, 'r'), state = join(root, 's')
@@ -66,10 +66,15 @@ async function fixture(options: { unknownInput?: boolean; preparation?: Promise<
   }
   provider.prepareNativeInput = async (context, target) => {
     options.preparing?.(); await options.preparation
+    let assertions = 0
     return {
       plan: { kind: 'native-rpc', protocolId: 'controlled-native', sourceId: nativeInputSourceId(target), actorId: context.nativeActor!.actorId,
         threadId: target.nativeSessionId, operation: 'start-or-steer' },
-      async assertCurrent() { context.signal.throwIfAborted() }, dispose() {},
+      async assertCurrent() {
+        context.signal.throwIfAborted()
+        if (options.asserting) await options.asserting(++assertions)
+        context.signal.throwIfAborted()
+      }, dispose() {},
       async send(text, frozen) {
         sends.push({ text, correlation: frozen.clientCorrelation!, threadId: frozen.threadId })
         if (options.unknownInput) throw new Error('Original native input response lost')
@@ -209,6 +214,46 @@ it.each(['stop', 'cancel'] as const)('checks the original authority after native
   expect((await f.inner.kernel.status(saved.run.runId)).state.type).toBe('running')
   await f.client.writeAgent({ agentSessionId: f.sid, expectedRun: saved.run, source: 'user', data: 'ordinary-input-still-available' })
   await vi.waitFor(async () => expect((await f.client.readRunReplay(saved.run)).replay.map(chunk => chunk.data).join('')).toContain('INPUT:ordinary-input-still-available'))
+  expect(f.bytes).toHaveBeenCalledTimes(1)
+})
+
+it.each(['stop', 'cancel'] as const)('checks recovery authority after native claim: accepted %s during the final Provider check prevents send', async action => {
+  const checking = Promise.withResolvers<void>(), release = Promise.withResolvers<void>()
+  const f = await fixture({ explicitContinuation: true, asserting: async check => {
+    if (check === 2) { checking.resolve(); await release.promise }
+  } })
+  const created = await f.create(), saved = await f.ready(), run = await f.inner.kernel.status(saved.run.runId)
+  const operationId = 'claimed-input-recovery', now = Date.now()
+  const operation: AgentMuxContinuityOperation = { operationId, agentSessionId: f.sid, trigger: 'startup', policy: normalizeAgentContinuityPolicy(),
+    previousRun: saved.run, admittedAt: now, observedAt: now, rechecks: 0, kind: 'pending', reason: 'provider-unverified',
+    evidence: { kind: 'run-running', observedAt: now }, supervision: { phase: 'observing', activeAttemptOperationId: operationId,
+      attemptCount: 0, attemptLimit: 2, observedAt: now, reason: 'initialization-pending' } }
+  await f.inner.updateExactAgentSession(f.sid, saved.run, (current: AgentMuxStoredAgentSession) => ({ ...current,
+    continuity: operation, continuityOperations: { [operationId]: operation }, updatedAt: current.updatedAt + 1 }))
+  // Use the same recovery owner and authority as its passive initial-input producer.
+  const authority = () => f.inner.recovery.assertRecoveryInputCurrent(saved, undefined, true)
+  const pending = f.advance(saved, f, authority)
+  await checking.promise
+  const key = created.creation.initialInputKey!
+  let original: Awaited<ReturnType<typeof f.client.inspectAgentPromptSubmission>> = null
+  try {
+    original = await f.client.inspectAgentPromptSubmission(key)
+    expect(original?.admission).toMatchObject({ inputKey: key, transport: 'native', native: { outcome: 'claimed' }, acknowledged: false })
+    if (action === 'stop') await f.inner.prepareAgentStop(f.sid, saved.run)
+    else expect((await f.client.controlAgentContinuity({ agentSessionId: f.sid, expectedRun: saved.run, intentOperationId: operationId,
+      operationId: 'cancel-claimed-input-recovery', action: 'cancel' })).receipt.outcome).toBe('cancelled')
+  } finally { release.resolve() }
+  expect((await pending).initialInput?.state).toBe('not-applied')
+  expect(f.sends).toHaveLength(0)
+  const retained = await f.client.inspectAgentPromptSubmission(key)
+  expect(retained?.admission).toMatchObject({ inputKey: key, transport: 'native', acknowledged: false, notApplied: true,
+    native: { outcome: 'not-applied', plan: original!.admission!.transport === 'native' ? original!.admission!.native.plan : undefined } })
+  expect((await f.advance(await f.read(), f, authority)).initialInput?.state).toBe('not-applied')
+  expect(f.sends).toHaveLength(0); expect(f.start).toHaveBeenCalledTimes(1)
+  const current = await f.inner.kernel.status(saved.run.runId)
+  expect(current.state.type).toBe('running'); expect(current.pid).toBe(run.pid)
+  await f.client.writeAgent({ agentSessionId: f.sid, expectedRun: saved.run, source: 'user', data: 'ordinary-input-after-claimed-cancel' })
+  await vi.waitFor(async () => expect((await f.client.readRunReplay(saved.run)).replay.map(chunk => chunk.data).join('')).toContain('INPUT:ordinary-input-after-claimed-cancel'))
   expect(f.bytes).toHaveBeenCalledTimes(1)
 })
 
