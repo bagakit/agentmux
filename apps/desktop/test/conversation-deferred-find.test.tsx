@@ -199,6 +199,7 @@ it('budgets explicitly opened traces independently of a short visible answer', a
   await click(button('Find in loaded conversation')); await query('hidden reasoning needle'); expect(count()).toBe('0 / 0')
   const record = host.querySelector('[data-native-record-id="short"]')!
   const details = record.querySelector<HTMLDetailsElement>('.log-turn__trace')!
+  expect(details, 'A short visible answer keeps its collapsed trace control mounted').not.toBeNull()
   await act(async () => { details.open = true; details.dispatchEvent(new Event('toggle')) }); await tick()
   expect(record.querySelector('.log-turn__text')?.textContent).toBe('修改完成')
   expect(count()).toBe('1 / 200')
