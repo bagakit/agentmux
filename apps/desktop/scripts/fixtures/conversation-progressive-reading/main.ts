@@ -198,8 +198,8 @@ app.whenReady().then(async () => {
             tabs:panel?[...panel.querySelectorAll('[role="tab"]')].map(n=>({id:n.id,selected:n.getAttribute('aria-selected'),control:n.getAttribute('aria-controls')})):[]};
         };
         const observe=event=>{const value={type:event.type,trusted:event.isTrusted,target:describe(event.target),contains:node.contains(event.target),pathIncludesTarget:event.composedPath().includes(node),button:event.button,buttons:event.buttons,x:event.clientX,y:event.clientY};events.push(value);readingProof.mark('native-click-input',value)};
-        for(const type of ['mousedown','mouseup','click'])document.addEventListener(type,observe,{capture:true,passive:true});
-        window.readingClick={facts,reveal(){readingProof.mark('native-click-reveal',{target:describe(node),rect:node.getBoundingClientRect().toJSON()});node.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'})},finish(){for(const type of ['mousedown','mouseup','click'])document.removeEventListener(type,observe,true);delete window.readingClick;return {events,after:facts()}}};
+        for(const type of ['pointerdown','pointerup','click'])document.addEventListener(type,observe,{capture:true,passive:true});
+        window.readingClick={facts,reveal(){readingProof.mark('native-click-reveal',{target:describe(node),rect:node.getBoundingClientRect().toJSON()});node.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'})},finish(){for(const type of ['pointerdown','pointerup','click'])document.removeEventListener(type,observe,true);delete window.readingClick;return {events,after:facts()}}};
       })()`)
       const point = () => until(async () => {
         const before = await read('readingClick.facts()')
@@ -222,7 +222,7 @@ app.whenReady().then(async () => {
       action.receipt = await read('window.readingClick?.finish()').catch(error => { action.observationError = String(error); return null })
     }
     assert.ok(action.receipt, 'The original native click observation is retained')
-    assert.deepEqual(action.receipt.events.map((event: any) => event.type), ['mousedown', 'mouseup', 'click'])
+    assert.deepEqual(action.receipt.events.map((event: any) => event.type), ['pointerdown', 'pointerup', 'click'])
     assert.ok(action.receipt.events.every((event: any) => event.trusted && event.contains && event.pathIncludesTarget && event.button === 0),
       'One complete trusted native click reaches the exact original target')
   }
