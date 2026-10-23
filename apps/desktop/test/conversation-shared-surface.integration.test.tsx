@@ -89,7 +89,7 @@ beforeEach(() => {
   vi.spyOn(Range.prototype, 'getClientRects').mockImplementation(() => {
     const rect = new DOMRect(20, 80, 160, 18)
     return { 0: rect, length: 1, item: index => index === 0 ? rect : null,
-      [Symbol.iterator]: function* () { yield rect } }
+      [Symbol.iterator]: function* () { yield rect; return undefined } }
   })
 })
 

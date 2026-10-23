@@ -47,7 +47,7 @@ function Scene() {
     <header><strong>Conversation</strong><span>Read-only protocol sample</span></header>
     <div className="message-wrapper-preview__reading">
       {mode === 'mobile' ? <MobileConversationSurface client={client} agentSessionId="reader" connection={{ state: 'connected', message: 'Private Core reading sample' }} platform={mobilePlatform} />
-        : <DesktopClientUiProvider><ActivityView sessionId="reader" executionHostId="local" items={[]} capability="complete-events"
+        : <DesktopClientUiProvider><ActivityView sessionId="reader" executionHostId="local" capability="complete-events"
           conversationReading={{ reference: { hostId: 'local', agentSessionId: 'reader' }, identity: 'original-reading', enabled: true, opened: true }} />
           <section className="message-wrapper-preview__resource"><h2>Complete original resource</h2>
             <ConversationMessage messageId={data.resource.recordId} conversationSessionId="reader" content={[data.resource.part]}

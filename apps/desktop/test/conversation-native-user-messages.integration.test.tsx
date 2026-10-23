@@ -238,7 +238,8 @@ describe('全来源 user 回合与共享作者的真实公共 Reader 消费', ()
       agentSessionId: reference.agentSessionId,
       source: { kind: 'native', recordId: input.id },
     })
-    const page = await vi.mocked(api.conversation.readAgentConversation).mock.results.at(-1)!.value
+    const page: Awaited<ReturnType<typeof api.conversation.readAgentConversation>> =
+      await vi.mocked(api.conversation.readAgentConversation).mock.results.at(-1)!.value
     expect(
       page.items
         .flatMap((entry) => (entry.kind === 'item' ? entry.item.records : []))
