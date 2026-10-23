@@ -29,7 +29,7 @@ const captureEnvironment = Object.fromEntries(Object.entries(process.env).filter
 const output = resolve(values.output ?? join(repository, '.bagakit/capsule/native-run-proof'))
 if (!values['check-proof']) {
   await mkdir(output, { recursive: true, mode: 0o700 })
-  await writeFile(join(output, 'facts.json'), JSON.stringify({ schema: 'agentmux.capsule.native-proof.v2', result: 'starting' }) + '\n', { mode: 0o600 })
+  await writeFile(join(output, 'facts.json'), JSON.stringify({ schema: 'agentmux.capsule.native-proof.v3', result: 'starting' }) + '\n', { mode: 0o600 })
 }
 const build = await realpath(resolve(values['build-root'] ?? join(repository, '.tmp/capsule-native-build/out')))
 for (const name of ['main/index.js', 'main/agentmux-host.js', 'preload/index.cjs', 'preload/browser-popup.cjs', 'preload/capsule.cjs', 'renderer/index.html'])
@@ -72,17 +72,55 @@ const configuration = { version: 9, hosts: [{ id: 'local', kind: 'local', label:
   appearance: { appAppearance: 'dark', terminalTheme: 'graphite' },
   browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
 await writeFile(join(userData, 'agentmux.config.json'), JSON.stringify(configuration), { mode: 0o600 })
-// The manifest supplies only the real product resources. It neither imports a
-// semantic owner nor implements an IPC handler or an alternative Renderer.
+// The manifest supplies the real product resources. Its private bootstrap observes
+// the original IPC registration; it never substitutes a business owner or Renderer.
 for (const name of ['resources', 'browser-extension']) await symlink(join(desktop, name), join(appRoot, name), 'dir')
 const desktopPackage = JSON.parse(await readFile(join(desktop, 'package.json'), 'utf8'))
 await writeFile(join(appRoot, 'package.json'), JSON.stringify({ name: 'agentmux-capsule-private-proof',
   version: desktopPackage.version, main: 'bootstrap.cjs' }))
 const paths = { home: env.HOME, appData: join(root, 'app-data'), userData, sessionData: join(root, 'session-data') }
-await writeFile(join(appRoot, 'bootstrap.cjs'), `const {app,BrowserWindow,webContents,session}=require('electron');
+// Serialized into the private bootstrap before production Main registers its handler.
+// Only one exact acknowledgment may be lost, after the actual handler returns success.
+function nativeSdkReceiptLoss(ipcMain) {
+  const register = ipcMain.handle.bind(ipcMain), calls = [], faults = []
+  const copy = value => JSON.parse(JSON.stringify(value))
+  let armed = null
+  ipcMain.handle = (channel, handler) => {
+    if (channel !== 'capsule:document') return register(channel, handler)
+    return register(channel, async (event, action, params) => {
+      const call = { sequence: calls.length + 1, action, params: copy(params), senderId: event.sender.id,
+        mainFrame: event.senderFrame === event.sender.mainFrame, phase: 'entered' }
+      calls.push(call)
+      const selected = armed && action === armed.action && params?.operationId === armed.operationId && event.sender.id === armed.senderId
+      if (selected) armed = null
+      const original = await handler(event, action, params)
+      call.phase = 'returned'; call.result = copy(original)
+      if (!selected) return original
+      if (original?.ok !== true) throw new Error('The original armed Capsule handler did not confirm an effect; no receipt-loss proof is possible.')
+      const returned = { ok: false, error: { code: 'CAPSULE_OPERATION_UNKNOWN',
+        message: 'The private proof discarded one acknowledgment after the original Capsule handler returned. Inspect the page-held original operation.' } }
+      faults.push({ sequence: call.sequence, action, operationId: params.operationId, senderId: event.sender.id,
+        mainFrame: call.mainFrame, phase: 'post-effect', original: copy(original), returned: copy(returned) })
+      return returned
+    })
+  }
+  return {
+    arm(value) {
+      if (armed || faults.length || !['request', 'saveDraft'].includes(value?.action) ||
+        typeof value.operationId !== 'string' || !value.operationId || !Number.isSafeInteger(value.senderId) || value.senderId < 1)
+        throw new Error('Arm one exact original Capsule mutation on its native document.')
+      armed = copy(value)
+      return copy(armed)
+    },
+    snapshot() { return copy({ armed, calls, faults }) }
+  }
+}
+await writeFile(join(appRoot, 'bootstrap.cjs'), `const {app,BrowserWindow,webContents,session,ipcMain}=require('electron');
 const fs=require('node:fs');const paths=${JSON.stringify(paths)};
 for(const [name,value]of Object.entries(paths)){app.setPath(name,value);if(app.getPath(name)!==value)throw Error('Private Electron path mismatch: '+name)}
+const sdkReceipts=(${nativeSdkReceiptLoss.toString()})(ipcMain);
 globalThis.__capsuleNative={paths:()=>Object.fromEntries(Object.keys(paths).map(k=>[k,app.getPath(k)])),
+armReceiptLoss:value=>sdkReceipts.arm(value),documentReceipts:()=>sdkReceipts.snapshot(),
 documents(){const seen=[];return webContents.getAllWebContents().map(w=>{let index=seen.indexOf(w.session);if(index<0){index=seen.length;seen.push(w.session)}return{id:w.id,url:w.getURL(),sessionClass:index,defaultSession:w.session===session.defaultSession}})},
 minimum(){const w=BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith('file:'));if(!w)throw Error('Original App window unavailable');return w.getMinimumSize()},
 capture(){const w=BrowserWindow.getAllWindows().find(w=>w.webContents.getURL().startsWith('file:'));if(!w)throw Error('Original App window unavailable');return{mediaSourceId:w.getMediaSourceId(),size:w.getContentSize(),url:w.webContents.getURL()}},
@@ -90,7 +128,7 @@ resize(width,height){const w=BrowserWindow.getAllWindows().find(w=>w.webContents
 import(${JSON.stringify(pathToFileURL(join(build, 'main/index.js')).href)}).catch(e=>{process.stderr.write(e.stack+'\\n');app.exit(1)});
 `, { mode: 0o600 })
 
-const facts = { schema: 'agentmux.capsule.native-proof.v2', build, privateRoot: root,
+const facts = { schema: 'agentmux.capsule.native-proof.v3', build, privateRoot: root,
   boundary: 'Actual compiled Desktop/Main/preload/Renderer, detached product Core Host, independent ctxmux Capsule service Run and private HTTP, native Browser documents and authenticated synthetic Provider. No model acceptance claim.',
   visual: { captureOnly: true, aestheticReview: 'not-performed',
     states: ['managed and configured path documents', 'pending draft', 'confirmed answer',
@@ -163,7 +201,7 @@ async function verifyBuildReceipt(record) {
 async function checkProof() {
   const receipt = await verifyBuildReceipt()
   const proof = JSON.parse(await readFile(join(output, 'facts.json'), 'utf8'))
-  assert.equal(proof.schema, 'agentmux.capsule.native-proof.v2')
+  assert.equal(proof.schema, 'agentmux.capsule.native-proof.v3')
   assert.equal(proof.result, 'passed', 'The original Native scenario did not complete: ' + (proof.error?.message ?? 'unknown stage'))
   assert.equal(proof.error, undefined)
   assert.deepEqual(proof.buildReceipt, receipt, 'The Native proof consumed this exact candidate')
@@ -265,6 +303,7 @@ async function checkProof() {
     assert.equal(bytes.readUInt32BE(16), image.width); assert.equal(bytes.readUInt32BE(20), image.height)
     assert.equal(image.width, selected.width * image.scale); assert.equal(image.height, selected.height * image.scale)
   }
+  assertSdkOperationRecovery(proof)
   assertServiceContinuity(proof)
   assert.equal(proof.cleanup.originalRunStopped, true)
   assert.equal(proof.cleanup.serviceRunStopped, true)
@@ -279,6 +318,72 @@ async function checkProof() {
   assert.equal(dirname(proof.privateRoot), privateBase)
   assert.ok(proof.privateRoot.slice(privateBase.length + 1).startsWith('amx-cap-'))
   assert.deepEqual(await listProbeProcesses(undefined, proof.privateRoot), [], 'No private original process remains')
+}
+function assertSdkOperationRecovery(proof) {
+  const value = proof.sdkOperationRecovery
+  assert.equal(value?.schema, 'agentmux.capsule.sdk-operation-recovery.v1', 'Actual ContextBridge lost-receipt evidence is required')
+  assert.equal(value.action, 'request')
+  assert.ok(typeof value.operationId === 'string' && value.operationId.length > 0)
+  assert.equal(value.before.operationId, value.operationId, 'The page holds the ID before crossing the bridge')
+  assert.equal(value.before.mutationCount, 0)
+  assert.equal(value.after.operationId, value.operationId)
+  assert.equal(value.after.status, 'unknown', 'The actual bridged mutation must reject after the effect')
+  assert.equal(value.after.action, 'request')
+  assert.equal(value.missingIdentity.page.request.rejected, true)
+  assert.equal(value.missingIdentity.page.saveDraft.rejected, true)
+  assert.deepEqual(value.missingIdentity.after, value.missingIdentity.before, 'Missing IDs fail before either mutator reaches the original IPC handler')
+  assert.ok(typeof value.clickId === 'string' && proof.clicks.some(click => click.id === value.clickId), 'The mutation follows its one original native click')
+  assert.equal(value.receipts.armed, null)
+  assert.equal(value.receipts.faults.length, 1, 'Only one post-effect acknowledgment is lost')
+  const fault = value.receipts.faults[0]
+  assert.equal(fault.phase, 'post-effect')
+  assert.equal(fault.action, value.action)
+  assert.equal(fault.operationId, value.operationId)
+  assert.equal(fault.senderId, value.senderId)
+  assert.equal(fault.mainFrame, true)
+  assert.equal(fault.original.ok, true)
+  assert.equal(fault.returned.ok, false)
+  assert.equal(fault.returned.error.code, 'CAPSULE_OPERATION_UNKNOWN')
+  const mutations = value.receipts.calls.filter(call => ['request', 'saveDraft'].includes(call.action))
+  const original = mutations.filter(call => call.params.operationId === value.operationId)
+  assert.equal(original.length, 1, 'A lost receipt must not repeat the original mutation')
+  assert.equal(original[0].phase, 'returned')
+  assert.equal(original[0].sequence, fault.sequence)
+  assert.equal(original[0].senderId, value.senderId)
+  assert.equal(original[0].mainFrame, true)
+  assert.deepEqual(original[0].result, fault.original)
+  assert.equal(value.operation.operationId, value.operationId)
+  assert.equal(value.operation.capsuleId, proof.content.managed.record.capsuleId)
+  assert.equal(value.operation.method, 'capsule.interaction.request')
+  assert.equal(value.operation.status, 'committed')
+  assert.equal(value.operation.result.operationId, value.operationId)
+  assert.deepEqual(value.operation.result.interaction, fault.original.value)
+  assert.deepEqual(value.publicOperation.operation, value.operation, 'The page SDK and original Core inspect agree')
+  assert.equal(value.operation.result.interaction.interactionId, proof.content.question.interactionId)
+  assert.deepEqual(value.operation.result.interaction.target, proof.content.question.target)
+  assert.deepEqual(value.after.params, { question: value.operation.result.interaction.question, draft: value.operation.result.interaction.draft })
+  assert.equal(value.interactions.filter(item => item.operationId === value.operationId).length, 1)
+  assert.equal(value.interactions.find(item => item.operationId === value.operationId).interactionId, proof.content.question.interactionId)
+  assert.ok(value.receipts.calls.some(call => call.action === 'inspectOperation' && call.params.operationId === value.operationId && call.sequence > fault.sequence),
+    'Recovery crosses the real page SDK using only the retained original ID')
+  assert.deepEqual(proof.recovery.sdkOriginalOperation.operation, value.operation, 'The original effect survives Core/App death without another request')
+  for (const [action, saved, interaction] of [
+    ['saveDraft', value.draft, proof.content.draft], ['request', value.pending, proof.content.pending]
+  ]) {
+    assert.ok(typeof saved.operationId === 'string' && saved.operationId.length > 0)
+    assert.notEqual(saved.operationId, value.operationId)
+    const calls = mutations.filter(call => call.action === action && call.params.operationId === saved.operationId)
+    assert.equal(calls.length, 1, 'Each explicit SDK mutation crosses once: ' + action)
+    assert.equal(calls[0].senderId, value.senderId)
+    assert.equal(calls[0].result.ok, true)
+    assert.deepEqual(calls[0].result.value, interaction)
+    assert.equal(saved.operation.operationId, saved.operationId)
+    assert.equal(saved.operation.status, 'committed')
+    assert.equal(saved.operation.result.operationId, saved.operationId)
+    assert.deepEqual(saved.operation.result.interaction, interaction)
+  }
+  assert.notEqual(value.draft.operationId, value.pending.operationId)
+  assert.equal(mutations.length, 3, 'The original document has exactly the three intended SDK mutations')
 }
 function assertServiceContinuity(proof) {
   const { before, after, httpBefore, whileCoreDetached, httpAfter } = proof.service
@@ -618,7 +723,7 @@ async function writePage(source, mode) {
   await writeFile(join(source, 'index.html'), `<!doctype html><html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Capsule review</title><style>
 *{box-sizing:border-box}body{margin:0;background:var(--bg,#f4f3ed);color:var(--text,#203329);font:16px/1.6 system-ui}main{max-width:820px;margin:auto;padding:48px 32px}header{border-bottom:1px solid #95a697;padding-bottom:24px}.eyebrow{font-size:11px;letter-spacing:.14em;text-transform:uppercase}h1{font-size:42px;line-height:1.15;font-weight:550;letter-spacing:-.04em}p{max-width:58ch}.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin:28px 0}.card{border:1px solid #8da491;border-radius:12px;padding:20px}.card strong{display:block;font-size:20px}button{border:0;border-radius:8px;background:#315b43;color:#fff;padding:11px 18px;font:inherit;cursor:pointer}output{display:block;margin-top:18px;overflow-wrap:anywhere}code{font-size:12px}@media(max-width:600px){main{padding:28px 20px}h1{font-size:32px}}
 </style><main><header><div class="eyebrow">Saved workspace · ${mode}</div><h1 data-proof="capsule-native">A page with a place to return to.</h1><p>The original page, its questions and the Agent recipient remain together across an App restart.</p></header><section class="cards"><div class="card"><strong>Durable identity</strong>Same page and workface.</div><div class="card"><strong>${mode === 'injected' ? 'App connection' : 'Independent container'}</strong>${mode === 'injected' ? 'Explicit theme and request capabilities.' : 'Original styling and website storage.'}</div></section><button id="request">Review this result</button><output id="status">Ready for review.</output></main><script>
-globalThis.proof={themes:[],requests:[]};document.querySelector('#request').onclick=async()=>{try{if(!window.capsule)throw Error('No App channel in isolated mode');const q=await capsule.request('Keep this result?', 'Draft from the generated page');proof.requests.push(q);document.querySelector('#status').textContent='Saved question '+q.interactionId}catch(e){proof.error=String(e);document.querySelector('#status').textContent=String(e)}};if(window.capsule){capsule.onThemeChanged(t=>proof.themes.push(t));capsule.theme().then(t=>proof.initialTheme=t).catch(e=>proof.themeError=String(e))}
+globalThis.proof={themes:[],requests:[],mutations:[],nextRequestOperationId:null};document.querySelector('#request').onclick=async()=>{if(!window.capsule){document.querySelector('#status').textContent='No App channel in isolated mode';return}const operationId=proof.nextRequestOperationId??capsule.createOperationId();proof.nextRequestOperationId=null;const attempt={action:'request',operationId,params:{question:'Keep this result?',draft:'Draft from the generated page'},status:'prepared'};proof.mutations.push(attempt);try{const q=await capsule.request(attempt.params.question,attempt.params.draft,operationId);attempt.status='returned';proof.requests.push(q);document.querySelector('#status').textContent='Saved question '+q.interactionId}catch(e){attempt.status='unknown';attempt.error=String(e);document.querySelector('#status').textContent='Question result unconfirmed; inspect the original operation.'}};if(window.capsule){capsule.onThemeChanged(t=>proof.themes.push(t));capsule.theme().then(t=>proof.initialTheme=t).catch(e=>proof.themeError=String(e))}
 </script></html>`)
 }
 async function stop(child, signal = 'SIGKILL') {
@@ -732,10 +837,40 @@ try {
   assert.equal(nativeIsolated.defaultSession, false)
   assert.equal(nativeInjected.defaultSession, false)
   assert.equal(await document.evaluate('localStorage.getItem("capsule-proof-isolation")'), null)
-  await activate(document, 'document.querySelector("#request")')
-  const question = await waitFor('page SDK original request', () => document.evaluate('proof.requests[0]'))
+  const requestBefore = await document.evaluate('(()=>{proof.nextRequestOperationId=capsule.createOperationId();return{operationId:proof.nextRequestOperationId,mutationCount:proof.mutations.length}})()')
+  const requestOperationId = requestBefore.operationId
+  facts.sdkOperationRecovery = { schema: 'agentmux.capsule.sdk-operation-recovery.v1', action: 'request',
+    operationId: requestOperationId, senderId: nativeInjected.id, before: requestBefore }
+  await first.main.evaluate(`__capsuleNative.armReceiptLoss(${JSON.stringify({ action: 'request', operationId: requestOperationId, senderId: nativeInjected.id })})`)
+  const requestClick = await activate(document, 'document.querySelector("#request")')
+  facts.sdkOperationRecovery.clickId = requestClick.id
+  const requestAfter = await waitFor('actual ContextBridge loses one original post-effect receipt', () => document.evaluate('proof.mutations[0]?.status==="unknown"?proof.mutations[0]:null'))
+  facts.sdkOperationRecovery.after = requestAfter
+  facts.sdkOperationRecovery.receipts = await first.main.evaluate('__capsuleNative.documentReceipts()')
+  assert.equal(requestAfter.operationId, requestOperationId, 'The page keeps the same ID without reading Error properties')
+  assert.equal(await document.evaluate('proof.requests.length'), 0, 'The real bridge did not return a successful mutation result')
+  const requestObserved = await document.evaluate('(async()=>{const operation=await capsule.inspectOperation(proof.mutations[0].operationId);if(operation?.status==="committed"){proof.requests.push(operation.result.interaction);document.querySelector("#status").textContent="Recovered saved question "+operation.result.interaction.interactionId}return operation})()')
+  assert.equal(requestObserved.status, 'committed')
+  assert.equal(requestObserved.operationId, requestOperationId)
+  const question = requestObserved.result.interaction
   assert.deepEqual(question.target, target)
-  const draft = await document.evaluate(`capsule.saveDraft(${JSON.stringify(question.interactionId)},${question.revision},'Preserved page draft')`)
+  Object.assign(facts.sdkOperationRecovery, { operation: requestObserved,
+    publicOperation: await call('capsule.operation.inspect', { operationId: requestOperationId }),
+    interactions: (await call('capsule.interaction.ls', { capsuleId: managed.record.capsuleId })).interactions })
+  const missingIdentityBefore = await first.main.evaluate('__capsuleNative.documentReceipts().calls.filter(call=>["request","saveDraft"].includes(call.action))')
+  const missingIdentityPage = await document.evaluate(`(async()=>{const observed={};for(const [action,invoke]of [
+    ['request',()=>capsule.request('Missing original ID','Never applied')],
+    ['saveDraft',()=>capsule.saveDraft(${JSON.stringify(question.interactionId)},${question.revision},'Never applied')]
+  ]){try{await invoke();observed[action]={rejected:false}}catch(error){observed[action]={rejected:true,error:String(error)}}}return observed})()`)
+  const missingIdentityAfter = await first.main.evaluate('__capsuleNative.documentReceipts().calls.filter(call=>["request","saveDraft"].includes(call.action))')
+  facts.sdkOperationRecovery.missingIdentity = { before: missingIdentityBefore, page: missingIdentityPage, after: missingIdentityAfter }
+  assert.equal(missingIdentityPage.request.rejected, true)
+  assert.equal(missingIdentityPage.saveDraft.rejected, true)
+  assert.deepEqual(missingIdentityAfter, missingIdentityBefore, 'Missing operation IDs never reach the original Main handler')
+  const draftAttempt = await document.evaluate(`(async()=>{const operationId=capsule.createOperationId();proof.draftOperationId=operationId;const interaction=await capsule.saveDraft(${JSON.stringify(question.interactionId)},${question.revision},'Preserved page draft',operationId);return{operationId,interaction}})()`)
+  const draft = draftAttempt.interaction
+  facts.sdkOperationRecovery.draft = { operationId: draftAttempt.operationId,
+    operation: await document.evaluate(`capsule.inspectOperation(${JSON.stringify(draftAttempt.operationId)})`) }
   assert.equal(draft.draft, 'Preserved page draft')
   assert.equal((await document.evaluate(`capsule.inspectOperation(${JSON.stringify(question.operationId)})`)).capsuleId, managed.record.capsuleId)
   await activate(first.cdp, `${browserRegion}.querySelector('[aria-label="Page questions"]')`)
@@ -785,7 +920,10 @@ try {
   assert.equal(answerOperation.operation.result.delivery.inputOperationId, inputKey.submissionId)
   facts.chromeReceipt = { operation: answerOperation, view: answerView }
   // A second pending request supplies a distinct unsent durable draft across death.
-  const pending = await document.evaluate('capsule.request("Continue after restart?","Unsent draft retained")')
+  const pendingAttempt = await document.evaluate('(async()=>{const operationId=capsule.createOperationId();proof.pendingOperationId=operationId;const interaction=await capsule.request("Continue after restart?","Unsent draft retained",operationId);return{operationId,interaction}})()')
+  const pending = pendingAttempt.interaction
+  facts.sdkOperationRecovery.pending = { operationId: pendingAttempt.operationId,
+    operation: await document.evaluate(`capsule.inspectOperation(${JSON.stringify(pendingAttempt.operationId)})`) }
   await activate(first.cdp, `${browserRegion}.querySelector('.capsule-chrome__heading button')`)
   await waitFor('App chrome preserves the second pending question', () => first.cdp.evaluate(`[...${browserRegion}.querySelectorAll('.capsule-question textarea')].some(n=>n.value===${JSON.stringify(pending.draft)})`))
   facts.themeTransitions = []
@@ -809,7 +947,7 @@ try {
     await resizeNative(first, 1440, 900)
   }
   facts.content = { managed, managedSourceRemoved: true, isolated, pathSourceObservedLive: true,
-    opened, isolatedOpen, question, pending, answer, inputKey, originalInput, providerBytes, capabilities, containers }
+    opened, isolatedOpen, question, draft, pending, answer, inputKey, originalInput, providerBytes, capabilities, containers }
   const beforeGraph = await call('space.state', {})
   const originalRegion = beforeGraph.state.graph.regions.find(region => region.regionId === opened.rendering.regionId)
   assert.equal(originalRegion.browserId, opened.rendering.browserId)
@@ -856,6 +994,7 @@ try {
   const toolkitAfter = await first.cdp.evaluate(`window.agentmux.toolkit.get(${JSON.stringify(toolkitId)})`)
   assert.equal(toolkitAfter.latestConfirmed.executionId, toolkitResult.latestConfirmed.executionId)
   facts.toolkit = { tool, toolkitResult, toolkitOpen, toolkitAfter, clickId: toolkitClick.id }
+  facts.sdkOperationRecovery.receipts = await first.main.evaluate('__capsuleNative.documentReceipts()')
   await first.cdp.call('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
   await first.cdp.call('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
   await phase('SIGKILL original Host and Desktop; retain ctxmux Run', async () => {
@@ -917,7 +1056,8 @@ try {
   await waitFor('restored original unsent draft in App chrome', () => second.cdp.evaluate(`[...${browserRegion}.querySelectorAll('.capsule-question textarea')].some(n=>n.value===${JSON.stringify(pending.draft)})`))
   await screenshot(second, 'capsule-restored-normal')
   await screenshot(second, 'capsule-restored-narrow', narrowWidth, 900)
-  facts.recovery = { recovered, graph, recoveredPending, recoveredAnswer, originalOpen, originalRun, restoredSession }
+  const sdkOriginalOperation = await call('capsule.operation.inspect', { operationId: requestOperationId })
+  facts.recovery = { recovered, graph, recoveredPending, recoveredAnswer, originalOpen, originalRun, restoredSession, sdkOriginalOperation }
   assert.deepEqual(await productHashes(), facts.product, 'The consumed compiled product remained unchanged')
   assert.deepEqual(await verifyBuildReceipt(), facts.buildReceipt, 'The full consumed source, dependency and compiler receipt stayed unchanged')
   for (const [path, expected] of Object.entries(facts.harnessSourceFiles))
@@ -925,6 +1065,7 @@ try {
   facts.phases.push({ name: 'original Native workface restored', result: { capsuleId: recovered.record.capsuleId,
     browserId: opened.rendering.browserId, regionId: opened.rendering.regionId,
     interactionId: pending.interactionId, run: session.run, originalOpenOperationId: openParams.operationId } })
+  assertSdkOperationRecovery(facts)
   assertServiceContinuity(facts)
   facts.result = 'passed'
 } catch (error) {
