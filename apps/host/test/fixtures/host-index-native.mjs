@@ -24,15 +24,30 @@ registerHooks({ load(url, context, next) {
     if (!mutation || original.split(mutation[0]).length !== 2) throw Error('Compiled index mutation must match its unique original owner expression')
     served = original.replace(mutation[0], mutation[1])
   }
+  const credentialVariant = process.env.HOST_CREDENTIAL_MUTANT
+  const credentialMutations = {
+    'receiver-lookup-collapsed': ['packages/connectors/dist/connection-receivers.js', "lane.failed = credentialLookupFailure(error) ?? 'check-failed'", "lane.failed = 'check-failed'"],
+    'publication-lookup-collapsed': ['packages/connectors/dist/publication-host.js', "reason: credentialLookupFailure(error) ?? 'storage-unconfirmed'", "reason: 'credential-missing'"]
+  }
+  if (credentialVariant && relative(root, path) === credentialMutations[credentialVariant]?.[0]) {
+    const mutation = credentialMutations[credentialVariant]
+    if (original.split(mutation[1]).length !== 2) throw Error('Credential diagnosis mutation must match one original lookup boundary')
+    served = original.replace(mutation[1], mutation[2])
+  }
   if (process.env.HOST_INDEX_TRACE) {
-    const receipt = { path: relative(root, path), pid: process.pid, originalSHA: sha(original), servedSHA: sha(served), ...(served !== original ? { mutation: variant } : {}) }
+    const receipt = { path: relative(root, path), pid: process.pid, originalSHA: sha(original), servedSHA: sha(served), ...(served !== original ? { mutation: variant ?? credentialVariant } : {}) }
     const witness = "import { appendFileSync as __indexLoad } from 'node:fs'; __indexLoad(" + JSON.stringify(process.env.HOST_INDEX_TRACE) + ', ' + JSON.stringify(JSON.stringify(receipt) + '\n') + ');\n'
     const offset = served.startsWith('#!') ? served.indexOf('\n') + 1 : 0
     served = served.slice(0, offset) + witness + served.slice(offset)
   }
   return { ...result, source: served }
 } })
-const { AgentMuxClient } = await import('../../../../packages/core/dist/index.js')
+const { AgentMuxClient, AgentMuxError } = await import('../../../../packages/core/dist/index.js')
+if (process.env.HOST_CREDENTIAL_PLATFORM_ERROR) {
+  const { DiscordAdapter } = await import('../../../../packages/connectors/dist/adapters/discord/index.js')
+  // A platform failure with an identical structured code is not a private resolver fact.
+  for (const name of ['test', 'startReceiver']) DiscordAdapter.prototype[name] = async () => { throw new AgentMuxError('Synthetic platform detail must stay private', 'CONNECTION_CREDENTIAL_FORMAT_UNSUPPORTED') }
+}
 const factsPath = process.env.HOST_INDEX_NATIVE_FACTS
 const facts = existsSync(factsPath) ? JSON.parse(readFileSync(factsPath, 'utf8')) : { cursors: {}, writes: {}, effects: [], lifecycle: [] }
 const save = () => writeFileSync(factsPath, JSON.stringify(facts))
