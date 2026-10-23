@@ -2,6 +2,7 @@ import type { PendingDeliveryLayout } from '../lib/pending-delivery-layout'
 import { api } from '../lib/api'
 import { inputMailboxItemKey, useAgentInputMailbox } from '@agentmux/client-ui/use-agent-input-mailbox'
 import { InputMailboxRecord, InputMailboxFrame, inputMailboxPresentation } from '@agentmux/client-ui/components/InputMailboxRecords'
+import { ChannelProfileAvatar } from '@agentmux/client-ui/components/ChannelProfileAvatar'
 import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
@@ -95,8 +96,10 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
       const name = described?.name || (author.kind === 'agent' ? `Agent ${author.agentSessionId.slice(0, 8)}`
         : author.kind === 'external' ? `${author.actor.userId} · ${author.actor.application.domain}`
         : author.kind === 'human' ? 'Human' : 'Author unknown')
-      result.set(key, { speaker, name, avatar: described?.avatar ?? <ConversationMessageAvatar speaker={speaker} name={name}
-        size={18} providerId={described?.providerId} project={described?.project} /> })
+      result.set(key, { speaker, name, avatar: <ChannelProfileAvatar url={described?.channelProfile?.profile?.avatarUrl} size={18}>
+        {described?.avatar ?? <ConversationMessageAvatar speaker={speaker} name={name}
+          size={18} providerId={described?.providerId} project={described?.project} />}
+      </ChannelProfileAvatar> })
     }
     return result
   }, [recent, reading?.describeSpeaker])
