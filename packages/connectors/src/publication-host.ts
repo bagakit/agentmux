@@ -2,6 +2,7 @@ import { AgentMuxError, parseProviderSessionHistoryResourceReadResult, readSessi
 import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPage, parseConversationReadPage, parseConversationUnit, conversationRecordId, conversationSourceKey, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationRef } from '@agentmux/core/conversation'
 import { connectionDiagnosisCheckpointKey, connectionDiagnosisSourceCode, type ConnectionDeliverySourceObservation, parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
+import { credentialLookupFailure } from './credential-observation.js'
 import { parsePreparedPublication } from './publication-wire.js'
 import type { PublicationAdapter } from './publication-adapter.js'
 import { publicationEffectContext, publicationImage, publicationFile, type ResourceUploadReceipt, type ResolvedPublicationPart } from './publication-resource.js'
@@ -350,7 +351,8 @@ export class PublicationHost implements ConnectionDeliveryPort {
       let original = this.store.next(binding, projectionId)
       if (!original) return this.effectObservation(binding, projectionId)
       let credential: string | null
-      try { credential = await this.options.connections.resolveCredential(binding.connectionId) } catch { credential = null }
+      try { credential = await this.options.connections.resolveCredential(binding.connectionId) }
+      catch (error) { return { state: 'unavailable', reason: credentialLookupFailure(error) ?? 'storage-unconfirmed' } }
       if (!credential) return { state: 'unavailable', reason: 'credential-missing' }
       if (signal.aborted || !authorized()) return
       const frozen = JSON.stringify([original.projectionId, original.sourceRevision])

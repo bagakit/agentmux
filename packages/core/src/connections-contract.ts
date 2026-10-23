@@ -10,7 +10,7 @@ export type ConnectionConfig = {
   credentialRef: string
 }
 export type ConnectionStageState = 'unknown' | 'ready' | 'unavailable' | 'disabled'
-export type ConnectionStage = { state: ConnectionStageState; reason?: 'not-tested' | 'credential-missing' | 'adapter-unavailable' | 'check-failed' | 'not-started' }
+export type ConnectionStage = { state: ConnectionStageState; reason?: 'not-tested' | 'credential-missing' | 'credential-format-unsupported' | 'credential-unavailable' | 'adapter-unavailable' | 'check-failed' | 'not-started' }
 export type ConnectionObservation = {
   authentication: ConnectionStage
   transport: ConnectionStage
