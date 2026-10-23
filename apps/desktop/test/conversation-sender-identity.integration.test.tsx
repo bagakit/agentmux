@@ -1,3 +1,6 @@
+import { activityReadingProps } from './helpers/activity-reading-props'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
+import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { mkdir, writeFile } from 'node:fs/promises'
@@ -15,7 +18,7 @@ import { ConversationMessageAvatar } from '../src/renderer/src/components/Conver
 import { agentSessionIdsOfUserMessages } from '@agentmux/client-ui/conversation-speaker'
 import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
 import * as senderDetails from '../src/renderer/src/lib/conversation-sender-details'
-import { DECLARED_ID, RAW_IDS, RECIPIENT_ID, TRUSTED_ID, publicNativeInputs } from '../scripts/fixtures/conversation-sender-context/public-inputs.fixture'
+import { DECLARED_ID, RAW_IDS, RECIPIENT_ID, TRUSTED_ID, messageWire, publicNativeInputs } from '../scripts/fixtures/conversation-sender-context/public-inputs.fixture'
 
 // Only expensive terminal paint and unrelated leaf surfaces are isolated. The Pane, Store, hook,
 // Activity, History, common message/details/resolver and ProjectIcon are the actual product modules.
@@ -29,22 +32,29 @@ import { SessionPane } from '../src/renderer/src/components/SessionPane'
 
 let host: HTMLDivElement, root: Root
 const fixtures: Awaited<ReturnType<typeof publicNativeInputs>>[] = []
+const closes: Array<() => unknown | Promise<unknown>> = []
 const kernelControls: { name: string; calls: () => number; restore: () => void }[] = []
 const initial = useAppStore.getState()
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
-  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} })
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
   localStorage.clear(); host = document.createElement('div'); document.body.append(host); root = createRoot(host)
 })
 afterEach(async () => {
   await act(async () => root.unmount()); host.remove(); window.getSelection()?.removeAllRanges()
-  expect(kernelControls.length).toBeGreaterThan(0)
-  expect(kernelControls.map(({ name, calls }) => [name, calls()])).toEqual(kernelControls.map(({ name }) => [name, 0]))
-  console.log('SENDER_CONTEXT_KERNEL_CONTROLS', JSON.stringify(kernelControls.map(({ name, calls }) => [name, calls()])))
-  kernelControls.splice(0).forEach(({ restore }) => restore()); vi.restoreAllMocks(); vi.unstubAllGlobals(); useAppStore.setState(initial, true); localStorage.clear()
-  for (const fixture of fixtures.splice(0)) { expect(await fixture.unchanged()).toEqual({ store: true, transcript: true }); await fixture.dispose() }
+  try {
+    expect(kernelControls.length).toBeGreaterThan(0)
+    expect(kernelControls.map(({ name, calls }) => [name, calls()])).toEqual(kernelControls.map(({ name }) => [name, 0]))
+    for (const fixture of fixtures) expect(await fixture.unchanged()).toEqual({ store: true, transcript: true })
+  } finally {
+    for (const close of closes.splice(0).reverse()) await close()
+    kernelControls.splice(0).forEach(({ restore }) => restore())
+    for (const fixture of fixtures.splice(0).reverse()) await fixture.dispose()
+    vi.restoreAllMocks(); vi.unstubAllGlobals(); useAppStore.setState(initial, true); localStorage.clear()
+  }
 })
+
 function observeKernel(client: AgentMuxClient) {
   const kernel: object = Reflect.get(client, 'kernel'), names = new Set<string>()
   for (let proto = kernel; proto && proto !== Object.prototype; proto = Object.getPrototypeOf(proto)) {
@@ -60,10 +70,20 @@ async function fixture(wire?: string, includeTrace = false) {
   const f = await publicNativeInputs(observeKernel, wire, includeTrace); fixtures.push(f)
   useAppStore.setState({ config: f.config, sessions: f.sessions, demands: f.demands, pendingAgentLaunches: {}, recoveryCandidates: [], runtimeOwnershipWarnings: [],
     viewModes: { [RECIPIENT_ID]: 'activity' }, timelines: { [RECIPIENT_ID]: f.timeline }, agentNames: {}, agentComposerDrafts: { [RECIPIENT_ID]: 'Keep the original unsent reply draft.' }, agentSteerQueues: {} })
-  const history = vi.spyOn(api.sessions, 'historyPage').mockImplementation(async control => { expect(control).toEqual(f.control); return f.page() })
+  const history = f.nativeHistory
+  await desktopConversationReadBridge({ root: f.workspacePath, client: f.client }, closes)
   return { ...f, history }
 }
 async function settle() { await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve() }) }
+async function readingReady(f: Awaited<ReturnType<typeof fixture>>) {
+  await vi.waitFor(async () => {
+    await act(async () => { await Promise.resolve() })
+    const consumers = inspectConversationConsumers(f.control).consumers
+    expect(consumers.length).toBeGreaterThan(0)
+    expect(consumers.every(value => value.accepted && !value.loading && !value.inFlight && !value.dirty && !value.pending && !value.watch.binding && (!value.gates.enabled || value.watch.bound))).toBe(true)
+    expect([...host.querySelectorAll<HTMLElement>('.activity-feed [data-native-record-id]')].map(row => row.dataset.nativeRecordId)).toEqual([...RAW_IDS])
+  })
+}
 function resolver() {
   return createSpeakerResolver({ lookupAgent: id => {
     const sender = useAppStore.getState().sessions.find(session => session.kind === 'agent' && session.id === id)
@@ -75,17 +95,25 @@ function resolver() {
   } })
 }
 function message(id: string) { const found = [...host.querySelectorAll<HTMLElement>('.log-turn')].find(turn => turn.dataset.messageId === id); expect(found).toBeDefined(); return found! }
+async function capturedMessage(id: string) {
+  const submission = host.querySelector<HTMLElement>(`[data-submission-id="${id}"]`); expect(submission).not.toBeNull()
+  const disclosure = submission!.querySelector<HTMLDetailsElement>('.message-disclosure'); expect(disclosure).not.toBeNull()
+  if (!disclosure!.open) await act(async () => { disclosure!.open = true; disclosure!.dispatchEvent(new Event('toggle')) })
+  const turn = message(`captured:${id}`); expect(submission!.contains(turn)).toBe(true)
+  return turn
+}
 function button(turn: HTMLElement) { const found = turn.querySelector<HTMLButtonElement>('button.conversation-input-details__toggle'); expect(found?.getAttribute('aria-label')).toBe('Message details'); expect(found?.querySelector('svg')).not.toBeNull(); return found! }
 function details(turn: HTMLElement) { const found = turn.querySelector<HTMLElement>('section[aria-label="Message details"]'); expect(found).not.toBeNull(); return found! }
 function value(turn: HTMLElement, label: string) { const found = [...details(turn).querySelectorAll('dt')].find(dt => dt.textContent === label); expect(found).toBeDefined(); return found!.nextElementSibling?.textContent }
 async function toggle(turn: HTMLElement) { await act(async () => button(turn).click()); await settle() }
 async function drawActivity(f: Awaited<ReturnType<typeof fixture>>, describeSpeaker = resolver()) {
-  await act(async () => root.render(<ActivityView sessionId={RECIPIENT_ID} capability="complete-events" displayState="done" items={[]} userMessages={f.messages} describeSpeaker={describeSpeaker} />)); await settle()
+  await act(async () => root.render(<ActivityView {...activityReadingProps({ control: f.control, visible: true, describeSpeaker })} />)); await readingReady(f)
+  await act(async () => { for (const card of host.querySelectorAll<HTMLDetailsElement>('.message-disclosure')) { card.open = true; card.dispatchEvent(new Event('toggle')) } })
 }
 async function drawPane(f: Awaited<ReturnType<typeof fixture>>) {
   await act(async () => root.render(<SessionPane sessionId={RECIPIENT_ID} surfaceKind="agent" interactiveResize={false} visible linkOrigin={{ workspaceId: 'recipient-project', tabGroupId: 'private-group', tabId: 'private-tab', regionId: 'private-region' }} />)); await settle()
+  await readingReady(f)
   expect(f.history.mock.results.length).toBeGreaterThan(0)
-  await act(async () => { await Promise.all(f.history.mock.results.filter(result => result.type === 'return').map(result => result.value)) }); await settle()
 }
 
 function identity(turn: HTMLElement) { return { name: turn.querySelector('.log-turn__who')?.textContent, id: turn.querySelector('.log-turn__sender-id code')?.textContent } }
@@ -106,7 +134,7 @@ it('public native input displays current declared Agent name, avatar and exact v
   if (process.env.AGENTMUX_IDENTITY_SCENE_OUTPUT) await writeFile(process.env.AGENTMUX_IDENTITY_SCENE_OUTPUT, JSON.stringify({ config: f.config, sessions: f.sessions, demands: f.demands, timeline: f.timeline, page: f.firstPage, messages: f.messages, control: f.control, provenance: 'Actual public Core/FileStore/Claude native reader over controlled on-disk records; no vendor writer or Runtime' }, null, 2))
 })
 it('trusted author wins over a conflicting header and executing Agent retains its supplied name', async () => {
-  const f = await fixture(); await drawPane(f); const turn = message('captured:captured-trusted')
+  const f = await fixture(); await drawPane(f); const turn = await capturedMessage('captured-trusted')
   expect(identity(turn)).toEqual({ name: 'Current trusted sender', id: TRUSTED_ID }); expect(turn.querySelector('.log-turn__declared-source')?.textContent).toContain('conflicting-declaration')
   await act(async () => root.render(<ConversationMessage speaker={{ role: 'agent', id: RECIPIENT_ID }} conversationSessionId={RECIPIENT_ID} name="Execution Agent" providerId="codex" content="Actual reply" messageId="reply" />))
   expect(identity(message('reply'))).toEqual({ name: 'Execution Agent', id: RECIPIENT_ID }); expect(message('reply').querySelector('[data-agent-provider="codex"]')).not.toBeNull()
@@ -124,7 +152,8 @@ it('related rename updates same body and Range; unrelated Store changes cause ze
   const f = await fixture(); vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'directory', icon: null })
   const metadata = vi.spyOn(senderDetails, 'currentConversationSpeakerMetadata'), detailRead = vi.spyOn(senderDetails, 'currentConversationSenderDetails'); await drawPane(f)
   const turn = message(f.messages[0]!.id), body = turn.querySelector('.log-turn__text')!, text = body.querySelector('strong')!.firstChild!, range = document.createRange()
-  range.selectNodeContents(text); window.getSelection()!.addRange(range); const feed = host.querySelector<HTMLElement>('.activity-feed')!; feed.scrollTop = 219
+  const feed = host.querySelector<HTMLElement>('.activity-feed')!
+  await act(async () => { range.selectNodeContents(text); window.getSelection()!.addRange(range); feed.scrollTop = 219 }); await settle()
   metadata.mockClear(); const historyCalls = f.history.mock.calls.length
   await act(async () => useAppStore.setState(state => ({ agentNames: { ...state.agentNames, 'unrelated-agent': 'Unrelated rename' }, sessions: state.sessions.map(session => session.id === 'unrelated-agent' ? { ...session, updatedAt: 9999, latestOutputBytes: 199 } : session), demands: { ...state.demands } }))); await settle()
   expect(metadata.mock.calls).toHaveLength(0); expect(detailRead).not.toHaveBeenCalled(); expect(f.history.mock.calls).toHaveLength(historyCalls)
@@ -153,9 +182,9 @@ it('false and thrown Clipboard outcomes remain failures; explicit retry sends on
   expect(clipboard.mock.calls.map(([text]) => text)).toEqual([TRUSTED_ID, TRUSTED_ID, TRUSTED_ID]); expect(turn.querySelector('.log-turn__sender-id')?.getAttribute('data-copy-state')).toBe('copied')
 })
 it('missing declarations invent no metadata; name-only has no ID and known human text does not claim Agent identity', async () => {
-  await fixture(); await act(async () => root.render(<><ConversationMessage speaker={{ role: 'unknown', id: 'unknown' }} content={'[Message from Agent missing-sender]\nReadable unknown'} messageId="missing" describeSpeaker={resolver()} />
+  await fixture(); await act(async () => root.render(<><ConversationMessage speaker={{ role: 'unknown', id: 'unknown' }} content={messageWire('missing-sender', 'Readable unknown')} messageId="missing" describeSpeaker={resolver()} />
     <ConversationMessage speaker={{ role: 'unknown', id: 'unknown' }} content={'[Message from Agent]\nReadable name-only'} messageId="name-only" />
-    <ConversationMessage speaker={{ role: 'human', id: 'human' }} content={`[Message from Agent ${DECLARED_ID}]\nHuman text`} messageId="human" /></>))
+    <ConversationMessage speaker={{ role: 'human', id: 'human' }} content={messageWire(DECLARED_ID, 'Human text')} messageId="human" /></>))
   expect(identity(message('missing'))).toEqual({ name: 'Agent', id: 'missing-sender' }); expect(message('missing').querySelector('.conversation-avatar--human')).toBeNull()
   expect(identity(message('name-only')).id).toBeUndefined(); expect(identity(message('human')).id).toBeUndefined(); expect(message('human').dataset.speakerRole).toBe('human')
 })
