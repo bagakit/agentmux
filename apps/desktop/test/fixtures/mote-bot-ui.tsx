@@ -90,7 +90,7 @@ export async function moteBotUi(options: NonNullable<Parameters<typeof moteConne
     return { topic: { ...topic, title: 'Display title is not the public source', summary: 'DO-NOT-PUBLISH-DISPLAY' }, workspace: owner.workspace, rootPath: topic.directoryPath } satisfies MoteWorkfaceScope
   }))
   const render = async (index = 0, settings = false, navigationRequest?: SettingsNavigationRequest) => {
-    await act(async () => view.render(<SettingsNavigation.Provider value={navigation}>{settings ? <ExternalConnectionsSettings active navigationRequest={navigationRequest} /> : <MoteConnectionIdentity key={index} scope={scopes[index]!} active />}</SettingsNavigation.Provider>)); mounted = true
+    await act(async () => view.render(<SettingsNavigation.Provider value={navigation}>{settings ? <ExternalConnectionsSettings active hostingTarget={hostingTarget} navigationRequest={navigationRequest} /> : <MoteConnectionIdentity key={index} scope={scopes[index]!} active />}</SettingsNavigation.Provider>)); mounted = true
   }
   async function click(text: string) {
     let node!: HTMLElement

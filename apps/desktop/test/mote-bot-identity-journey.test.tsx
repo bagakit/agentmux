@@ -73,7 +73,7 @@ it('continues an original creation without publication intent into the same setu
   expect(parent.enrollment?.configured).not.toBeNull()
   await f.click('Continue bot setup')
   expect(f.navigation.openMoteLark).toHaveBeenCalledWith({
-    target: f.target(), topicId: f.motes[0]!.id, moteName: f.scopes[0]!.topic.title,
+    target: f.target(), topicId: f.motes[0]!.id, moteName: f.scopes[0]!.topic.title, hostingTarget: f.hostingTarget,
     setup: { connectionId: parent.enrollment!.configured!.connection.config.connectionId,
       source: { kind: 'enrollment', operationId: parent.enrollment!.operationId, expectedRevision: parent.enrollment!.revision } }
   })
