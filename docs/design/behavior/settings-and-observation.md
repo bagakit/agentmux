@@ -73,6 +73,12 @@ Focus 入口与注意力明细使用共享状态语汇、对象数量和可访�
 
 ## Status Bar CPU/Memory 资源面板
 
+Performance 按总览、资源归因、诊断分析与现场原件组织。App、Runs、Runtime 是资源归属范围，不再承担所有分析的主导航；总览区分所在 Host 的环境资源和应用／Run 成本，不能把不同来源、分母或时窗相加。右下角保留快速查看，可在同一 Tool 扩展阅读；切换分析区或显示尺寸不丢弃已取得的现场、独立导入或未知回执，不新建窗口、持久工作面或第二套指标 owner。
+
+磁盘容量标明实际观察卷、普通用户可用字节与源时间；当前 home 所在卷不冒充项目所在卷或全部磁盘。整机 CPU 以全逻辑核容量为分母，与应用的单逻辑核口径分开。系统物理内存、空闲量、压缩、Swap 与压力各消费平台原事实，未支持项明确缺测，不用剩余量猜压力。网络上下行来自准确网卡累计字节的有效区间差分；第一帧、计数重置或接口换代不补零，物理／虚拟／loopback 不直接求和，也不当作应用或某个 Agent 的流量。所有新增观察沿原消费者驱动、共享采样与局部失败边界，不随页面切换另起轮询或自动清理。
+
+Runs 列表由准确 Host／Run 引用关联原 Session，展示既有 Agent 名称和所属 Project；不因公共结果卡片省略而丢失可解析身份。路径文字与提示遵循 Settings 的显示偏好，远端路径不代入本机 home。显式跳转复核原引用与 client Session 身份后沿原空间导航，不创建、重启或输入 Agent；映射不明、歧义或已改变时保留原资源读数和分析面，并说明本次跳转无法确认的原因。
+
 独立的对象持有调查由用户显式请求 native heap snapshot，绑定同一准确 Renderer 五字段目标，与普通 metrics／scene 分开。原生快照会暂停 Renderer、可能触发引擎 GC，并可能占用显著内存与磁盘；对象字符串、URL 与秘密可能进入私有文件，不自动采集、上传或写入错误日志。Main 直接生成原生文件，公共 `system metrics heap capture`／`inspect` 与 Performance 消费同一 captureId、Host 归属、文件引用和原完成事实，不把整个 heap 经普通 RPC／Renderer 复制，也不接受调用方任意服务器写路径。GUI 提供原文件另存、显示位置与显式打开原 DevTools；通过 Memory Load／Retainers 分析单份对象持有关系，不自建 heap 图算法。它不代表 worker／native／GPU 或全部 RSS，也不自动判定泄漏；两文件 Comparison 另需证明 isolate／object-ID 连续性，不能只凭 PID 相同。
 
 原 attempt 仍在 latest／pending 保留窗口内时，同一 heap captureId 不重新启动 native；每次新的采集意图由调用方通过统一 ID 组件提供全新 captureId；原 captureId 与旧 UUID 保留，接收端按 1–128 位 ASCII 字母、数字、下划线或连字符的有界路径安全标识校验。已替换的旧 ID 应先 inspect，不再保留时报告 mismatch（没有保留快照时为 absent）；这份有界保留不提供永久历史幂等。取消或观察超时只结束该读者，不能冒称 V8 已停止，仍在途的原生操作占用原诊断槽，原 Agent／输入／普通 metrics 不受影响。一个最新文件与一个在途／发布未确认的候选有界保留，候选原 ID／目标在 native 前写入固定私有 pending 索引；Main 重建时缺少的原请求／完成观察保持 unknown，文件完整性不能补造 native ACK。新的明确采集会替换已发布文件，保留基线须先另存。已确认替换前保存失败且原材料完整时，显式同 ID 请求只重试小回执发布；替换后 unknown 先按原 ID 检查实际 manifest／文件，不自动重写、回滚或重采，也不以当前可读倒签原耐久 ACK。旧材料合同不可读时保留原字节并说明局部未知；显式另存原文件或无文件时的小回执后，可准确释放该 pending 候选，保留不兼容的旧 latest 字节，不依赖杀 Run／重启恢复。不得无限累积新候选或影响健康工作。

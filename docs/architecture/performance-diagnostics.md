@@ -9,6 +9,7 @@
 | 层 | 当前 owner 与消费者 | 能回答的问题与边界 |
 | --- | --- | --- |
 | 进程资源 | [ProcessResourceSampler](../../apps/desktop/src/main/process-resource-sampler.ts) → [metrics port](../../apps/desktop/src/main/resource-usage-control.ts) → Performance／公共 metrics | 准确进程的区间 CPU、RSS 与身份；组的 reading peak 不是区间平均，RSS 不证明持有者或泄漏。 |
+| Host 环境 | [HostResourceObserver](../../apps/desktop/src/main/host-resource-observer.ts) → 原共享 sampler／diagnostics → metrics／Performance 总览 | 全 Host 容量口径的区间 CPU、物理内存、平台 Swap／压力与准确接口吞吐；不相加物理／VPN 流量，不归因给 App／Run，不从空闲内存猜压力。卷容量仍来自原 Main home 卷观察。 |
 | Renderer 业务活动 | [renderer-performance](../../apps/desktop/src/renderer/src/lib/renderer-performance.ts) → 原 metrics Renderer source | 状态检查、提交、写入、交互与观测成本；检查次数不是 CPU，parser callback wall time 不是纯解析成本。 |
 | V8 函数样本 | [RendererV8Profiler](../../apps/desktop/src/main/renderer-v8-profile.ts) → 原 metrics capture → [共享分析器](../../packages/core/src/v8-profile-analysis.ts) → [Performance](../../apps/desktop/src/renderer/src/components/performance/PerformanceCapture.tsx)／[本机分析](../../packages/core/src/v8-profile-analysis-cli.ts) | 原生成脚本的 self／inclusive 权重、行列和调用者；不保证原 TS 模块、全部 native 或 worker CPU。 |
 | 浏览器管线 | [RendererTimelineTracer](../../apps/desktop/src/main/renderer-trace.ts) → 原压缩 trace | 原线程上的脚本、Style／Layout、Paint 与合成事件。按实际 PID／线程和区间去重；没有调度 CPU 数据时，事件 wall time 不能代替线程 CPU。 |
