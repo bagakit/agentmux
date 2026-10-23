@@ -25,6 +25,15 @@ const wait = (assertion: () => void) => vi.waitFor(async () => { await pause(); 
 async function fixture() {
   const f = await nativeHistoryFixture('claude', jsonl([row('first-original'), row('last-original')]))
   closes.push(f.close)
+  const originalChanges = f.client['nativeHistoryChangesPage']
+  const changesDescriptor = Object.getOwnPropertyDescriptor(f.client, 'nativeHistoryChangesPage')
+  const nativeCheckpoint = vi.fn<typeof originalChanges>((...args) => originalChanges.call(f.client, ...args))
+  f.client['nativeHistoryChangesPage'] = (...args) => args[1].tail
+    ? nativeCheckpoint(...args) : originalChanges.call(f.client, ...args)
+  closes.push(() => {
+    if (changesDescriptor) Object.defineProperty(f.client, 'nativeHistoryChangesPage', changesDescriptor)
+    else Reflect.deleteProperty(f.client, 'nativeHistoryChangesPage')
+  })
   const native = f.client.observeSessionHistory.bind(f.client)
   const streams: Array<{ end(): void; closed: AbortSignal }> = [], order: string[] = []
   let rejectNext = false, closeNext = false
@@ -62,7 +71,7 @@ async function fixture() {
   }
   await act(async () => root.render(<Consumer />))
   await wait(() => { expect(view.snapshot).toBeTruthy(); expect(view.loading).toBe(false); expect(view.inspect().dirty).toBe(false); expect(host.textContent).toContain('last-original') })
-  return { f, host, order, streams, callbacks, closeNext: () => { closeNext = true }, view: () => view, rejectNext: () => { rejectNext = true } }
+  return { f, host, order, streams, callbacks, nativeCheckpoint, closeNext: () => { closeNext = true }, view: () => view, rejectNext: () => { rejectNext = true } }
 }
 async function captured(x: Awaited<ReturnType<typeof fixture>>, id: string) {
   await Reflect.get(x.f.client, 'persistAndPublishTimeline').call(x.f.client,
@@ -140,7 +149,7 @@ it('checkpoint coverage cannot revoke a successfully recovered observer and disp
   const x = await fixture(), old = x.callbacks.at(-1)!, snapshot = x.view().snapshot!, source = snapshot.scope.sources.find(source => source.kind === 'native')!
   await act(async () => x.streams.at(-1)!.end())
   await wait(() => expect(x.view().observationError).toBeTruthy())
-  vi.spyOn(x.f.client, 'sessionHistoryCheckpoint').mockRejectedValueOnce(new AgentMuxError('Original checkpoint temporarily unavailable.', 'AGENT_SESSION_HISTORY_UNAVAILABLE'))
+  x.nativeCheckpoint.mockRejectedValueOnce(new AgentMuxError('Original checkpoint temporarily unavailable.', 'AGENT_SESSION_HISTORY_UNAVAILABLE'))
   await act(async () => { await x.view().retry() })
   await wait(() => expect(x.view().observationError).toBeNull())
   const count = x.streams.length
@@ -153,7 +162,7 @@ it('checkpoint coverage cannot revoke a successfully recovered observer and disp
 
 it('the opening retains checkpoint failure together with the current native observation failure', async () => {
   const x = await fixture()
-  vi.spyOn(x.f.client, 'sessionHistoryCheckpoint').mockRejectedValueOnce(new AgentMuxError('Exact checkpoint failure.', 'AGENT_SESSION_HISTORY_UNAVAILABLE'))
+  x.nativeCheckpoint.mockRejectedValueOnce(new AgentMuxError('Exact checkpoint failure.', 'AGENT_SESSION_HISTORY_UNAVAILABLE'))
   x.rejectNext()
   const handle = await api.conversation.observeConversation({ hostId: 'local', agentSessionId: x.f.session.agentSessionId, view: x.view().snapshot!.window.view! }, () => {})
   closes.push(() => handle.dispose())
