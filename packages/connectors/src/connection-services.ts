@@ -49,8 +49,8 @@ export async function createConnectionServices(options: { directory: string | un
         await chmod(directory, 0o700)
         if (options.ingress || options.publication) {
           const fd = openSync(join(directory, 'connections.owner.lock'), 'a+', 0o600)
-          const native = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
           try {
+            const native = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
             if (!native.tryLock(fd)) throw new AgentMuxError('The original connection database has another live receive/publication owner. Its records and healthy Agents are retained.', 'CONNECTION_OWNER_BUSY')
             lease = fd
           } catch (error) { closeSync(fd); throw error }
