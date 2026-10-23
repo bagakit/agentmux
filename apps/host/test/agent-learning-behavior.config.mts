@@ -2,6 +2,7 @@ import { defineConfig } from 'vitest/config'
 import original from './agent-learning.config.mts'
 import { resolve } from 'node:path'
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 
 // Native Files prerequisite on the supported Darwin host:
 //   node apps/desktop/scripts/build-workspace-move-helper.mjs
@@ -10,18 +11,21 @@ import { createHash } from 'node:crypto'
 // then pass its absolute artifact as AGENT_LEARNING_BEHAVIOR_HELPER. Missing artifacts fail;
 // they are not a reason to skip original-resource/CAS assertions.
 const hash = (value: string) => createHash('sha256').update(value).digest('hex')
+const host = JSON.parse(readFileSync(resolve(import.meta.dirname, '../package.json'), 'utf8'))
 if (process.env.AGENT_LEARNING_TRACE || process.env.AGENT_LEARNING_MUTANT)
   throw Error('Use only the behavior trace/mutation variables for this isolated configuration.')
 
 export default defineConfig({ ...original,
   plugins: [...original.plugins!, { name: 'behavior-original-host-resource', enforce: 'pre', resolveId(source: string) {
-    if (source === '@agentmux/host/mote-resources') return resolve(import.meta.dirname, '../src/mote-resources.ts')
-    if (source === '@agentmux/host/mote-model') return resolve(import.meta.dirname, '../src/mote-model.ts')
+    if (!source.startsWith('@agentmux/host/')) return
+    const entry = host.exports['./' + source.slice('@agentmux/host/'.length)]?.import
+    if (typeof entry === 'string' && entry.startsWith('./dist/'))
+      return resolve(import.meta.dirname, '../src', entry.slice(7).replace(/\.js$/u, '.ts'))
   }, transform(source: string, id: string) {
     let served = source
     const mutation = process.env.AGENT_LEARNING_BEHAVIOR_MUTANT
     if (mutation && !['resource-boundary', 'topic-original-identity'].includes(mutation)) throw Error('Unknown behavior mutation.')
-    if (mutation === 'resource-boundary' && id.endsWith('/src/main/file-read-owner.ts')) {
+    if (mutation === 'resource-boundary' && id.endsWith('/apps/host/src/file-resource.ts')) {
       const expression = "if (['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'].some(key => resource[key as keyof FileReadResource] !== params.expectedResource[key as keyof FileReadResource])) throw new AgentMuxError('The original File mapping changed. Read that exact file before deciding another save.', 'FILE_RESOURCE_MISMATCH')"
       if (source.split(expression).length !== 2) throw Error('Original file-write boundary changed.')
       served = source.replace(expression, '/* mutation: omit exact original write resource comparison */')
@@ -37,7 +41,7 @@ export default defineConfig({ ...original,
       served = source.replace(expression, 'const WORKSPACE_MOVE_HELPER = ' + JSON.stringify(resolve(process.env.AGENT_LEARNING_BEHAVIOR_HELPER)))
     }
     if (process.env.AGENT_LEARNING_BEHAVIOR_TRACE && /\/(?:apps\/(?:host|desktop)|packages\/core)\/src\//u.test(id) && /\.[cm]?[jt]sx?$/u.test(id.split('?')[0]!)) {
-      const row = JSON.stringify({ path: id.split('?')[0], originalSHA256: hash(source), servedSHA256: hash(served), helperBindingChanged: id.endsWith('/src/main/workspace-files.ts') && served !== source, mutation: ['/src/main/file-read-owner.ts', '/src/main/scratch-topics.ts'].some(path => id.endsWith(path)) && served !== source ? mutation : undefined }) + '\n'
+      const row = JSON.stringify({ path: id.split('?')[0], originalSHA256: hash(source), servedSHA256: hash(served), helperBindingChanged: id.endsWith('/src/main/workspace-files.ts') && served !== source, mutation: ['/apps/host/src/file-resource.ts', '/src/main/scratch-topics.ts'].some(path => id.endsWith(path)) && served !== source ? mutation : undefined }) + '\n'
       const prefix = "import { appendFileSync as __behaviorLoad } from 'node:fs'; __behaviorLoad(" + JSON.stringify(process.env.AGENT_LEARNING_BEHAVIOR_TRACE) + ',' + JSON.stringify(row) + ');\n'
       const shebang = served.startsWith('#!') ? served.indexOf('\n') + 1 : 0
       return { code: served.slice(0, shebang) + prefix + served.slice(shebang), map: null }
