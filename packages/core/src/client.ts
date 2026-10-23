@@ -959,14 +959,60 @@ export class AgentMuxClient {
     const owner = this
     this.recovery = new AgentSessionRecoveryService({
       sessions: { store: this.store, registry: this.registry, resolveRawAgentSession: (...args) => this.resolveRawAgentSession(...args), currentStoredAgentSession: (...args) => this.currentStoredAgentSession(...args), updateExactAgentSession: (...args) => this.updateExactAgentSession(...args), requireAgentSession: (...args) => this.requireAgentSession(...args), retainUnconfirmedLifecycle: (...args) => this.retainUnconfirmedLifecycle(...args) },
-      runtime: { kernel: this.kernel, assertAgentRun: (...args) => this.assertAgentRun(...args), requireCurrentAgentRun: (...args) => this.requireCurrentAgentRun(...args), retireUncommittedRun: (...args) => this.retireUncommittedRun(...args), runPids: this.runPids, stopRequestedRuns: this.stopRequestedRuns },
+      runtime: {
+        kernel: this.kernel,
+        assertAgentRun: (...args) => this.assertAgentRun(...args),
+        requireCurrentAgentRun: (...args) => this.requireCurrentAgentRun(...args),
+        retireUncommittedRun: (...args) => this.retireUncommittedRun(...args),
+        recordRunTransition: (previous, run) => {
+          if (previous) this.runPids.delete(previous.runId)
+          this.runPids.set(run.runId, run.pid)
+        },
+        requestStop: async operation => {
+          this.stopRequestedRuns.add(operation.runId)
+          await this.kernel.stop(operation)
+        }
+      },
       providers: { providers: this.providers, probeAgent: (...args) => this.probeAgent(...args), providerLaunch: (...args) => this.providerLaunch(...args) },
       executors: { hostExecutorOwner: this.hostExecutorOwner, sessionExecutorOptions: (...args) => this.sessionExecutorOptions(...args) },
-      hooks: { hookServer: this.hookServer, hookBindings: this.hookBindings, pendingLifecycleBindings: this.pendingLifecycleBindings, ensureManagedHooks: (...args) => this.ensureManagedHooks(...args), requireHookIngressOwner: (...args) => this.requireHookIngressOwner(...args), settleHookRestore: (...args) => this.settleHookRestore(...args), observeHookRestoreFailure: (...args) => this.observeHookRestoreFailure(...args), agentEnvironment: (...args) => this.agentEnvironment(...args) },
+      hooks: {
+        hookServer: this.hookServer,
+        hasActiveBinding: runId => this.hookBindings.has(runId),
+        activeBinding: runId => this.hookBindings.get(runId),
+        pendingBinding: operationId => this.pendingLifecycleBindings.get(operationId),
+        retainBinding: (operationId, binding) => { this.pendingLifecycleBindings.set(operationId, binding) },
+        activateBinding: (runId, binding, operationId) => {
+          this.hookBindings.set(runId, binding)
+          if (operationId !== undefined) this.pendingLifecycleBindings.delete(operationId)
+        },
+        closeRunBinding: async (runId, binding = this.hookBindings.get(runId)) => {
+          await binding?.close()
+          if (this.hookBindings.get(runId) === binding) this.hookBindings.delete(runId)
+        },
+        releaseUnusedBinding: async (binding, operationId, retainPending) => {
+          if (![...this.hookBindings.values()].includes(binding) &&
+            !(retainPending && this.pendingLifecycleBindings.get(operationId) === binding)) await binding.close()
+        },
+        forgetPendingBinding: operationId => { this.pendingLifecycleBindings.delete(operationId) },
+        ensureManagedHooks: (...args) => this.ensureManagedHooks(...args),
+        requireHookIngressOwner: (...args) => this.requireHookIngressOwner(...args),
+        settleHookRestore: (...args) => this.settleHookRestore(...args),
+        observeHookRestoreFailure: (...args) => this.observeHookRestoreFailure(...args),
+        agentEnvironment: (...args) => this.agentEnvironment(...args)
+      },
       input: { continueInitialInput: (...args) => this.continueInitialInput(...args), inspectAgentPromptSubmission: (...args) => this.inspectAgentPromptSubmission(...args), submitAgentPrompt: (...args) => this.submitAgentPrompt(...args), deliverPostLaunchPrompt: (...args) => this.deliverPostLaunchPrompt(...args), recordAcceptedInput: (...args) => this.recordAcceptedInput(...args), recordPromptMessageAfterSideEffect: (...args) => this.recordPromptMessageAfterSideEffect(...args), readCapturedPromptProducer: (...args) => this.readCapturedPromptProducer(...args), resolveMessageAuthor: (...args) => this.resolveMessageAuthor(...args) },
-      terminal: { ensureTerminalFrontendObservation: (...args) => this.ensureTerminalFrontendObservation(...args), terminalFrontendWatches: this.terminalFrontendWatches, ensureTerminalHandshakeOrDegrade: (...args) => this.ensureTerminalHandshakeOrDegrade(...args), screenEvidence: this.screenEvidence, queueNativeIdentityCapture: (...args) => this.queueNativeIdentityCapture(...args) },
+      terminal: {
+        ensureTerminalFrontendObservation: (...args) => this.ensureTerminalFrontendObservation(...args),
+        readFrontendObservation: agentSessionId => this.terminalFrontendWatches.get(agentSessionId)?.frontend,
+        ensureTerminalHandshakeOrDegrade: (...args) => this.ensureTerminalHandshakeOrDegrade(...args),
+        screenEvidence: this.screenEvidence,
+        queueNativeIdentityCapture: (...args) => this.queueNativeIdentityCapture(...args)
+      },
       events: { publisher: this.publisher, publishSession: (...args) => this.publishSession(...args), publishCurrentRunState: (...args) => this.publishCurrentRunState(...args), projectSession: (...args) => this.projectSession(...args), projectRun: (...args) => this.projectRun(...args), publishExecutableCheckFailure: (...args) => this.publishExecutableCheckFailure(...args) },
-      observations: { providerReads: this.providerReads },
+      observations: { registerProviderRead: controller => {
+        this.providerReads.add(controller)
+        return () => { this.providerReads.delete(controller) }
+      } },
       connection: { get connectionEpoch() { return owner.connectionEpoch }, requireConnected: (...args) => this.requireConnected(...args), assertConnectionEpoch: (...args) => this.assertConnectionEpoch(...args) }
     })
     this.messageNotifications = new AgentMuxMessageNotifications({ queue: this.messageQueue,
