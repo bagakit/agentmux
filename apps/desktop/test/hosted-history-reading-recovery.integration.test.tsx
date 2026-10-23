@@ -1,28 +1,20 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
-// @vitest-environment happy-dom
-import { act } from 'react'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import { connectHostedAgentMux } from '../../../packages/core/src/hosted-client.js'
 import { AgentMuxHostedRuntimeService } from '../../../packages/core/src/hosted-runtime-service.js'
+import { hostedTestOwner } from '../../../packages/core/test/helpers/hosted-runtime-port.js'
 import type { AgentMuxClient } from '../../../packages/core/src/client.js'
-import type { AgentMuxHostedRpcPort, AgentMuxHostedStreamInitial, AgentMuxHostedStreamMethod, AgentMuxRuntimeOwnerIdentity } from '../../../packages/core/src/hosted-client-contract.js'
+import type { AgentMuxHostedRpcPort, AgentMuxHostedStreamInitial, AgentMuxHostedStreamMethod } from '../../../packages/core/src/hosted-client-contract.js'
 import type { AgentMuxClientEvent, AgentSessionHistoryObservation, AgentSessionHistoryPage } from '@agentmux/core'
-import type { AgentMuxPreloadApi } from '../src/shared/contracts'
 
-vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', false); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true) })
-vi.setConfig({ testTimeout: 20_000 }) // Includes loading the actual Desktop presentation and its dependency graph.
+vi.setConfig({ testTimeout: 20_000 })
 const control = { hostId: 'local', agentSessionId: 'private-history-session', kind: 'agent' as const, run: { runId: 'private-run' } }
 const source = { providerId: 'codex' as const, nativeSessionId: 'private-native-source' }
 const invalidated: AgentSessionHistoryObservation = { kind: 'invalidated', agentSessionId: control.agentSessionId, source }
 const unavailable: Extract<AgentSessionHistoryObservation, { kind: 'unavailable' }> = { kind: 'unavailable', agentSessionId: control.agentSessionId, source,
   code: 'AGENT_SESSION_HISTORY_OBSERVATION_UNAVAILABLE', message: 'Private SQLite writer is mid-commit; original watch remains valid.' }
 
-beforeEach(() => {
-  vi.resetModules()
-  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
-  vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
-})
-afterEach(() => { delete window.agentmux; vi.useRealTimers(); vi.restoreAllMocks() })
+afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks() })
 
 async function fixture(options: { unavailableDuringAdmission?: boolean; sourceChangedDuringAdmission?: boolean } = {}) {
   let page: AgentSessionHistoryPage = { agentSessionId: control.agentSessionId, source,
@@ -30,11 +22,12 @@ async function fixture(options: { unavailableDuringAdmission?: boolean; sourceCh
   let nativeSource = source
   const callbacks: Array<(value: AgentSessionHistoryObservation) => void> = [], releases: Array<ReturnType<typeof vi.fn>> = []
   const identity = { hostId: 'local', instanceId: 'private-daemon', buildIdentity: 'private-fixture', protocolVersion: 1, processId: 123, ownership: 'owned' as const }
-  const owner: AgentMuxRuntimeOwnerIdentity = { runtimeId: 'private-runtime', ownerInstanceId: 'private-owner', protocolVersion: 1, processId: 123, availability: 'connected', ctxmux: identity }
+  const owner = hostedTestOwner({ runtimeIdentity: () => identity })
   const core = {
     connect: vi.fn(async () => {}), connectRuntime: vi.fn(async () => {}),
     onEvent: vi.fn((_listener: (event: AgentMuxClientEvent) => void) => () => {}),
-    runtimeIdentity: () => identity, catalog: () => [], agentSessions: () => [], agentMessageQueuePath: () => _hygiene_fixturePath("private/messages.ndjson"),
+    runtimeIdentity: () => identity, catalog: () => [], agentSessions: () => [], async readAgentSessions() { return this.agentSessions() },
+    metadata: { pendingIds: () => [], read: async () => {}, retainObservation: () => null }, agentMessageQueuePath: () => _hygiene_fixturePath("private/messages.ndjson"),
     runtimeProjection: vi.fn(async () => ({ hostId: 'local', subjects: [] })),
     sessionHistoryPage: vi.fn(async () => page),
     observeSessionHistory: vi.fn(async (_id: string, listener: (value: AgentSessionHistoryObservation) => void) => {
@@ -70,124 +63,63 @@ async function fixture(options: { unavailableDuringAdmission?: boolean; sourceCh
     }
   } as AgentMuxHostedRpcPort
   const client = await connectHostedAgentMux({ rpc })
-  // Control only the isolated preload port; the production Desktop API, observation
-  // adapter, shared reader, ActivityView, Hosted service, SDK and codec are real.
-  const observe = vi.fn<AgentMuxPreloadApi['sessions']['observeHistory']>(async (reference, listener, config) => {
-    const controller = new AbortController(), remove = config?.onAbort?.(() => controller.abort())
-    const handle = await client.observeSessionHistory(reference.agentSessionId, listener, { signal: controller.signal })
-    return { source: handle.source, dispose: () => { remove?.(); handle.dispose() } }
-  })
-  window.agentmux = { control: {}, sessions: { observeHistory: observe,
-    historyPage: async (reference: Parameters<AgentMuxPreloadApi['sessions']['historyPage']>[0]) => client.sessionHistoryPage(reference.agentSessionId), onEvent: () => () => {} } } as unknown as AgentMuxPreloadApi
-  const { useSessionUserMessages } = await import('../src/renderer/src/lib/session-user-messages')
-  const { ActivityView } = await import('../src/renderer/src/components/ActivityView')
-  const { createClientUiRoot } = await import('./helpers/client-ui-render')
-  let reading!: ReturnType<typeof useSessionUserMessages>
-  function Reader() {
-    reading = useSessionUserMessages(control)
-    return <><span data-observation-error>{reading.observationError?.message}</span>
-      <ActivityView sessionId={control.agentSessionId} items={[]} userMessages={reading.messages}
-        nativeHistoryPage={reading.nativeHistoryPage} capability="complete-events" displayState="done" /></>
-  }
-  const host = document.createElement('div'); document.body.append(host); const root = createClientUiRoot(host)
-  await act(async () => root.render(<Reader />))
-  let mounted = true
-  const unmount = async () => { if (!mounted) return; mounted = false; await act(async () => root.unmount()); host.remove() }
-  return { core, client, service, callbacks, releases, leases, observe, host,
-    reading: () => reading, attempts: () => historyAttempts, fail: () => { failHistory = true },
-    recover: () => { failHistory = false }, changeSource: () => { nativeSource = { ...source, nativeSessionId: 'another-source' }; page = { ...page, source: nativeSource } },
+  return { core, client, service, callbacks, releases, leases,
+    attempts: () => historyAttempts, fail: () => { failHistory = true }, recover: () => { failHistory = false },
     append: () => { page = { ...page, items: [...page.items, { id: 'later', kind: 'user-message', contentParts: [{ kind: 'text', text: 'Later native input arrives on the same source.' }] }] } },
-    unmount,
-    close: async () => { await unmount(); await client.dispose(); await service.dispose() }
+    close: async () => {
+      await client.dispose(); await service.dispose()
+      expect(core.submitAgentPrompt).not.toHaveBeenCalled(); expect(core.writeAgentInput).not.toHaveBeenCalled(); expect(core.stopTerminal).not.toHaveBeenCalled()
+    }
   }
 }
 
-it.each([false, true])('keeps the original mounted reader through transient unavailable (during admission=%s) and clears only its recovered notice', async duringAdmission => {
-  const f = await fixture({ unavailableDuringAdmission: duringAdmission })
+// The public raw history-watch protocol keeps its own admission and reconnect
+// contract. Current Conversation readers instead use runtime.conversation-watch;
+// their retained DOM, Range and recovery are tested by its actual consumers.
+it.each([false, true])('the public Hosted history watch retains its original lease through unavailable during admission=%s', async duringAdmission => {
+  const f = await fixture({ unavailableDuringAdmission: duringAdmission }), events: AgentSessionHistoryObservation[] = []
   try {
-    const original = f.host.querySelector('[data-native-record-id="original"]')!
-    const range = document.createRange(); range.selectNodeContents(original)
-    const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range)
-    if (!duringAdmission) await act(async () => { f.callbacks[0]!(unavailable) })
-    expect(f.reading().observationError?.message).toContain('mid-commit')
+    const handle = await f.client.observeSessionHistory(control.agentSessionId, event => events.push(event))
+    const original = await f.client.sessionHistoryPage(control.agentSessionId)
+    expect(handle.source).toEqual(source); expect(original.items.map(item => item.id)).toEqual(['original'])
+    if (!duringAdmission) f.callbacks[0]!(unavailable)
+    await vi.waitFor(() => expect(events).toContainEqual(unavailable))
     expect(f.releases[0]).not.toHaveBeenCalled()
-    expect(f.host.querySelector('[data-native-record-id="original"]')).toBe(original)
-    f.append()
-    await act(async () => { f.callbacks[0]!(invalidated); await new Promise(resolve => setTimeout(resolve, 100)) })
-    expect(f.reading().observationError).toBeNull()
-    expect(f.host.querySelector('[data-native-record-id="later"]')?.textContent).toContain('Later native input')
-    expect(f.host.querySelector('[data-native-record-id="original"]')).toBe(original)
-    expect(range.startContainer).toBe(original)
-    expect(f.observe).toHaveBeenCalledTimes(1)
-    expect(f.core.observeSessionHistory).toHaveBeenCalledTimes(1)
-    expect(f.core.submitAgentPrompt).not.toHaveBeenCalled(); expect(f.core.writeAgentInput).not.toHaveBeenCalled()
+    f.append(); f.callbacks[0]!(invalidated)
+    await vi.waitFor(() => expect(events.at(-1)).toEqual(invalidated))
+    const current = await f.client.sessionHistoryPage(control.agentSessionId)
+    expect(current.source).toEqual(source); expect(current.items.map(item => item.id)).toEqual(['original', 'later'])
+    expect(original.items.map(item => item.id)).toEqual(['original'])
+    expect(f.core.observeSessionHistory).toHaveBeenCalledOnce(); expect(f.attempts()).toBe(1)
+    handle.dispose(); await vi.waitFor(() => expect(f.releases[0]).toHaveBeenCalledOnce())
   } finally { await f.close() }
 })
-
-it('retains a confirmed source change reported before watch admission instead of overwriting it with cancellation', async () => {
-  const f = await fixture({ sourceChangedDuringAdmission: true })
+it('a source change before raw history admission remains an authoritative observation rather than a substituted cancellation', async () => {
+  const f = await fixture({ sourceChangedDuringAdmission: true }), events: AgentSessionHistoryObservation[] = []
   try {
-    expect(f.reading().sourceChanged).toBe(true)
-    expect(f.reading().observationError?.message).toContain('source changed during admission')
-    expect(f.releases[0]).toHaveBeenCalledTimes(1)
-    expect(f.host.querySelector('[data-native-record-id="original"]')?.textContent).toContain('Original native reply')
-    expect(f.core.submitAgentPrompt).not.toHaveBeenCalled(); expect(f.core.writeAgentInput).not.toHaveBeenCalled()
+    await expect(f.client.observeSessionHistory(control.agentSessionId, event => events.push(event))).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_CANCELLED' })
+    expect(events).toEqual([{ ...unavailable, code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED', message: 'The original source changed during admission.' }])
+    expect(f.releases[0]).toHaveBeenCalledOnce(); expect(f.attempts()).toBe(1)
+    f.callbacks[0]!(invalidated)
+    expect(events).toHaveLength(1)
+    expect((await f.client.sessionHistoryPage(control.agentSessionId)).items.map(item => item.id)).toEqual(['original'])
   } finally { await f.close() }
 })
-
-it('continues the same reader after eight failed history-only reconnects and releases a pending slow retry when its Consumer leaves', async () => {
-  const f = await fixture()
+it('the raw Hosted history observer survives eight failed reconnects and cancels its pending retry when released', async () => {
+  const f = await fixture(), events: AgentSessionHistoryObservation[] = []
+  const handle = await f.client.observeSessionHistory(control.agentSessionId, event => events.push(event))
   vi.useFakeTimers()
   try {
-    const original = f.host.querySelector('[data-native-record-id="original"]')
-    f.fail()
-    await act(async () => { await f.leases.find(value => value.method === 'runtime.history-watch')!.close() })
-    for (const delay of [100, 200, 400, 800, 1600, 3200, 6400, 12800]) await act(async () => { await vi.advanceTimersByTimeAsync(delay) })
+    f.fail(); await f.leases.find(value => value.method === 'runtime.history-watch')!.close()
+    for (const delay of [100, 200, 400, 800, 1600, 3200, 6400, 12800]) await vi.advanceTimersByTimeAsync(delay)
     expect(f.attempts()).toBe(9)
-    expect(f.reading().observationError).not.toBeNull()
-    f.recover(); f.append()
-    await act(async () => { await vi.advanceTimersByTimeAsync(25600); await vi.advanceTimersByTimeAsync(50) })
-    expect(f.attempts()).toBe(10)
-    expect(f.reading().observationError).toBeNull()
-    expect(f.host.querySelector('[data-native-record-id="later"]')?.textContent).toContain('Later native input')
-    expect(f.host.querySelector('[data-native-record-id="original"]')).toBe(original)
-    expect(f.observe).toHaveBeenCalledTimes(1)
+    expect(events.at(-1)).toMatchObject({ kind: 'unavailable', source, code: 'AGENT_SESSION_HISTORY_CONNECTION_UNCONFIRMED' })
+    f.recover(); f.append(); await vi.advanceTimersByTimeAsync(25600); await vi.advanceTimersByTimeAsync(50)
+    expect(f.attempts()).toBe(10); expect(events.at(-1)).toEqual(invalidated)
     expect(f.core.observeSessionHistory).toHaveBeenCalledTimes(2)
-    f.fail()
-    await act(async () => { await f.leases.filter(value => value.method === 'runtime.history-watch').at(-1)!.close() })
-    const attempts = f.attempts()
-    await f.unmount()
-    await vi.advanceTimersByTimeAsync(120_000)
-    expect(f.attempts()).toBe(attempts)
-    expect(f.core.submitAgentPrompt).not.toHaveBeenCalled(); expect(f.core.stopTerminal).not.toHaveBeenCalled()
-  } finally { await f.close() }
-})
-
-it.each(['native-event', 'reconnect'])('retains the original window and requires explicit refresh after confirmed source change via %s', async shape => {
-  const f = await fixture()
-  try {
-    const original = f.host.querySelector('[data-native-record-id="original"]')
-    if (shape === 'native-event') await act(async () => { f.changeSource(); f.callbacks[0]!({ ...unavailable, code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED', message: 'The original source changed.' }) })
-    else {
-      vi.useFakeTimers(); f.changeSource()
-      await act(async () => { await f.leases.find(value => value.method === 'runtime.history-watch')!.close(); await vi.advanceTimersByTimeAsync(100) })
-    }
-    expect(f.reading().sourceChanged).toBe(true)
-    expect(f.releases.every(release => release.mock.calls.length === 1)).toBe(true)
-    const reads = f.core.sessionHistoryPage.mock.calls.length, attempts = f.attempts()
-    f.append()
-    await act(async () => { f.callbacks[0]!(invalidated) })
-    if (shape === 'reconnect') await vi.advanceTimersByTimeAsync(120_000)
-    else await new Promise(resolve => setTimeout(resolve, 100))
-    expect(f.attempts()).toBe(attempts)
-    expect(f.core.sessionHistoryPage).toHaveBeenCalledTimes(reads)
-    expect(f.host.querySelector('[data-native-record-id="original"]')).toBe(original)
-    expect(f.host.querySelector('[data-native-record-id="later"]')).toBeNull()
-    expect(f.core.submitAgentPrompt).not.toHaveBeenCalled()
-    await act(async () => { await f.reading().refresh() })
-    expect(f.reading().sourceChanged).toBe(false)
-    expect(f.reading().nativeHistoryPage?.source.nativeSessionId).toBe('another-source')
-    expect(f.host.querySelector('[data-native-record-id="later"]')?.textContent).toContain('Later native input')
-    expect(f.observe).toHaveBeenCalledTimes(2)
+    expect((await f.client.sessionHistoryPage(control.agentSessionId)).items.map(item => item.id)).toEqual(['original', 'later'])
+    f.fail(); await f.leases.filter(value => value.method === 'runtime.history-watch').at(-1)!.close()
+    const before = f.attempts(); handle.dispose(); await vi.advanceTimersByTimeAsync(120_000)
+    expect(f.attempts()).toBe(before)
   } finally { await f.close() }
 })
