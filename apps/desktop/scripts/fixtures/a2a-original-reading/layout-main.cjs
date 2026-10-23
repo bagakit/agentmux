@@ -17,10 +17,15 @@ async function scenario(variant, width) {
   win.setContentSize(width, 980)
   await read(`messageLayout.select(${JSON.stringify(variant)})`)
   if (variant === 'system') await click('[data-layout-nested] .log-turn__system-toggle')
+  if (variant === 'collaboration') {
+    assert.equal(await read(`document.querySelector('[data-layout-nested] .log-turn__collaboration-toggle').getAttribute('aria-expanded')`), 'false')
+    await click('[data-layout-nested] .log-turn__collaboration-toggle')
+  }
   await until(`!!document.querySelector(${JSON.stringify(original)})`); await painted()
   const measured = await read(`(()=>{
     const rect=n=>{const r=n.getBoundingClientRect();return {left:r.left,top:r.top,right:r.right,bottom:r.bottom,width:r.width,height:r.height}},style=n=>{if(!n)return null;const s=getComputedStyle(n);return {column:s.gridColumn,row:s.gridRow,fontSize:s.fontSize,color:s.color,padding:s.padding,background:s.backgroundColor,border:s.borderInlineStartWidth,opacity:s.opacity,gap:s.columnGap}};
-    const card=n=>{const head=n.querySelector(':scope > .log-turn__head'),body=n.querySelector(':scope > .log-turn__body, :scope > .message-disclosure > .message-disclosure__body > .log-turn__body, :scope > .log-turn__system-body > .log-turn__body, :scope > .log-turn__collaboration-content > .log-turn__body'),avatar=n.querySelector(':scope > .log-turn__node');return {box:rect(n),style:style(n),head:{box:rect(head),style:style(head)},body:{box:rect(body),style:style(body),text:body.textContent},avatar:{box:rect(avatar),style:style(avatar)},nameStyle:style(head.querySelector('.log-turn__who')),timeStyle:style(head.querySelector('.log-turn__time')),copy:!!head.querySelector('[aria-label="Copy message"]'),details:!!head.querySelector('[aria-label="Message details"]')}};
+    const name=n=>{if(!n)return null;const range=document.createRange();range.selectNodeContents(n);return {box:rect(n),lines:new Set([...range.getClientRects()].map(r=>r.top)).size}};
+    const card=n=>{const head=n.querySelector(':scope > .log-turn__head'),body=n.querySelector(':scope > .log-turn__body, :scope > .message-disclosure > .message-disclosure__body > .log-turn__body, :scope > .log-turn__system-body > .log-turn__body, :scope > .log-turn__collaboration-content > .log-turn__body'),avatar=n.querySelector(':scope > .log-turn__node');return {box:rect(n),style:style(n),head:{box:rect(head),style:style(head)},body:{box:rect(body),style:style(body),text:body.textContent},avatar:{box:rect(avatar),style:style(avatar)},name:name(head.querySelector('.log-turn__who')),nameStyle:style(head.querySelector('.log-turn__who')),timeStyle:style(head.querySelector('.log-turn__time')),copy:!!head.querySelector('[aria-label="Copy message"]'),details:!!head.querySelector('[aria-label="Message details"]')}};
     return {outer:card(document.querySelector('[data-layout-nested] > .log-turn')),nested:card(document.querySelector(${JSON.stringify(original)})),standalone:card(document.querySelector('[data-layout-standalone] > .log-turn')),plain:card(document.querySelector('[data-layout-plain] > .log-turn')),calls:structuredClone(messageLayout.calls),source:{body:messageLayout.body,plain:messageLayout.plain,hostId:messageLayout.hostId,recipientSessionId:messageLayout.recipientSessionId,senderSessionId:messageLayout.senderSessionId,messageId:messageLayout.messageId}};
   })()`)
   receipt.current = { variant, width, measured }
@@ -43,6 +48,8 @@ async function scenario(variant, width) {
   }
   if (variant === 'system') assert.equal(outer.body.style.border, '1px', 'Opened system context keeps its own quiet reading border')
   assert.ok(nested.copy && nested.details)
+  assert.ok(nested.name.lines <= standalone.name.lines, 'Nested identity keeps its readable name width')
+  assert.ok(nested.name.box.right <= nested.head.box.right + 1, 'Nested name stays inside its own header')
   assert.equal(plain.body.style.column, '1'); assert.equal(plain.avatar.style.column, '2')
   assert.equal(plain.body.text, source.plain); assert.ok(plain.body.box.width > plain.avatar.box.width)
   await click(original + ' [aria-label="Copy message"]')
@@ -51,11 +58,28 @@ async function scenario(variant, width) {
   const identityLines = await read(`(()=>{const code=document.querySelector(${JSON.stringify(original + ' .log-turn__sender-id code')}),text=code.firstChild,lines=[];for(let i=0;i<text.length;i++){const range=document.createRange();range.setStart(text,i);range.setEnd(text,i+1);const top=range.getBoundingClientRect().top;let line=lines.find(line=>line.top===top);if(!line){line={top,text:''};lines.push(line)}line.text+=text.textContent[i]}return lines})()`)
   assert.equal(identityLines.map(line => line.text).join(''), source.senderSessionId, 'The complete original ID stays readable after Copy feedback')
   assert.ok(identityLines.every(line => line.text.trim() !== '-'), 'An ID copy control must not squeeze a hyphen onto its own line')
+  const copiedNameLines = await read(`(()=>{const range=document.createRange();range.selectNodeContents(document.querySelector(${JSON.stringify(original + ' .log-turn__who')}));return new Set([...range.getClientRects()].map(r=>r.top)).size})()`)
+  assert.ok(copiedNameLines <= standalone.name.lines, 'Copy feedback preserves the original name width')
   await click(original + ' .log-turn__id-copy')
   await until('messageLayout.copies.length===2')
   assert.equal(await read('messageLayout.copies[1]'), source.senderSessionId, 'The original identity copy remains independently reachable')
   receipt.scenarios.push({ variant, width, ...measured, identityLines, originalCopy: true, identityCopy: true })
-  if (['human', 'other-agent', 'compact', 'progress', 'system'].includes(variant)) {
+  if (variant === 'collaboration') {
+    await read(`messageLayout.originalNode=document.querySelector(${JSON.stringify(original)})`)
+    await click('[data-layout-nested] .log-turn__collaboration-toggle')
+    assert.equal(await read('messageLayout.originalNode.isConnected && !!messageLayout.originalNode.closest("[hidden]")'), true)
+    await click('[data-layout-nested] .log-turn__collaboration-toggle')
+    assert.equal(await read(`document.querySelector(${JSON.stringify(original)})===messageLayout.originalNode && !messageLayout.originalNode.closest('[hidden]')`), true)
+    await click('[data-layout-nested] > .log-turn > .log-turn__head > .conversation-input-details > .conversation-input-details__toggle')
+    const details = await read(`(()=>{const card=document.querySelector('[data-layout-nested] > .log-turn'),head=card.querySelector(':scope > .log-turn__head').getBoundingClientRect(),body=card.querySelector(':scope > .log-turn__head > .conversation-input-details > .conversation-input-details__body').getBoundingClientRect();return {head:{left:head.left,right:head.right},body:{left:body.left,right:body.right}}})()`)
+    assert.ok(Math.abs(details.head.left-details.body.left)<=1 && Math.abs(details.head.right-details.body.right)<=1, 'Subagent Info retains the full header width')
+    await click('[data-layout-nested] > .log-turn > .log-turn__head > .conversation-input-details > .conversation-input-details__toggle')
+    await click('[data-layout-nested] > .log-turn > .log-turn__head > .log-turn__actions > .log-turn__action')
+    await until('messageLayout.copies.length===3')
+    assert.equal(await read('messageLayout.copies[2]===messageLayout.wire'), true, 'Subagent Copy retains its complete original body')
+    receipt.scenarios.at(-1).collaboration = { retainedNode: true, fullWidthInfo: true, originalCopy: true }
+  }
+  if (['human', 'other-agent', 'compact', 'progress', 'system', 'collaboration'].includes(variant)) {
     await read(`document.querySelector('[data-layout-nested]').scrollIntoView({block:'start'})`); await painted()
     const file = variant + '-' + width + '.png', png = (await win.webContents.capturePage()).toPNG()
     await fs.writeFile(path.join(evidence, file), png); receipt.frames.push({ file, sha256: crypto.createHash('sha256').update(png).digest('hex'), bytes: png.length })
@@ -82,7 +106,7 @@ app.whenReady().then(async () => { try {
   win.webContents.debugger.attach('1.3'); await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
   await until('!!window.messageLayout && !!document.querySelector("[data-layout-case]")')
   for (const width of [1280, 332]) for (const variant of await read('messageLayout.variants')) await scenario(variant, width)
-  assert.equal(receipt.scenarios.length, 10); assert.equal(receipt.frames.length, 11); assert.deepEqual(receipt.consoleErrors, [])
+  assert.equal(receipt.scenarios.length, 12); assert.equal(receipt.frames.length, 13); assert.deepEqual(receipt.consoleErrors, [])
   receipt.passed = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack } }
 finally { await fs.writeFile(path.join(evidence, 'render.json'), JSON.stringify(receipt, null, 2)); win?.destroy(); app.exit(receipt.passed ? 0 : 1) } })
