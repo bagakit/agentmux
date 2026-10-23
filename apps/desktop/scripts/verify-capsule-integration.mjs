@@ -22,6 +22,10 @@ if (values.help) {
 const desktop = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const repository = resolve(desktop, '../..'), require = createRequire(join(desktop, 'package.json'))
 const executeFile = promisify(execFile)
+// The capture helper belongs to the original authorized desktop runtime. Its
+// environment must not inherit the private Core/Electron home or Agent secrets.
+const captureEnvironment = Object.fromEntries(Object.entries(process.env).filter(([name]) =>
+  ['HOME', 'PATH', 'LANG', 'TZ', 'TMPDIR'].includes(name) || name.startsWith('LC_') || name.startsWith('XDG_') || name.startsWith('ORCA_')))
 const output = resolve(values.output ?? join(repository, '.bagakit/capsule/native-run-proof'))
 if (!values['check-proof']) {
   await mkdir(output, { recursive: true, mode: 0o700 })
@@ -472,8 +476,19 @@ async function screenshot(app, name, width = 1440, height = 900) {
   assert.ok(Number.isSafeInteger(Number(match[1])) && Number(match[1]) > 0, 'The private native window has a concrete OS identity')
   const pid = app.child.pid, windowId = Number(match[1]), appSelector = 'pid:' + pid
   const computer = async args => {
-    const { stdout } = await executeFile('orca', ['computer', ...args, '--json'], { timeout: 15_000, maxBuffer: 8 * 1024 * 1024 })
-    const result = JSON.parse(stdout); assert.equal(result.ok, true, stdout); return result
+    let stdout, stderr, response
+    try {
+      ({ stdout, stderr } = await executeFile('orca', ['computer', ...args, '--json'],
+        { env: captureEnvironment, timeout: 15_000, maxBuffer: 8 * 1024 * 1024 }))
+      response = JSON.parse(stdout); assert.equal(response.ok, true, stdout); return response
+    } catch (error) {
+      const diagnostic = { frame: name, pid, nativeWindowId: match[1], command: ['orca', 'computer', ...args, '--json'],
+        error: { name: error.name, message: error.message, code: error.code, signal: error.signal },
+        stdout: error.stdout ?? stdout, stderr: error.stderr ?? stderr }
+      try { diagnostic.response = response ?? JSON.parse(diagnostic.stdout); diagnostic.operationId = diagnostic.response.id } catch {}
+      facts.captureFailures ??= []; facts.captureFailures.push(diagnostic)
+      throw error
+    }
   }
   const listed = await computer(['list-windows', '--app', appSelector])
   const selected = listed.result.windows.find(window => window.app.pid === pid && window.id === windowId)
