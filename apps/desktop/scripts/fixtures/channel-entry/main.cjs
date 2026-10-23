@@ -12,13 +12,13 @@ app.whenReady().then(async () => {
     win = new BrowserWindow({ width: 1380, height: 980, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
     await win.loadFile(html)
     const { read, until, settle, click } = nativeRendererInput(win, result.interactions, '')
-    await until('window.channelEntryProof?.ready && document.querySelector(".agent-region-header__connector")')
+    await until('window.channelEntryProof?.ready && document.querySelector("[data-channel-entry=discord]")')
     await read('window.__connectionsTrustedEvents=[];for(const type of ["click","keydown","input"])document.addEventListener(type,event=>window.__connectionsTrustedEvents.push({type,trusted:event.isTrusted,key:event.key}),true)')
     win.showInactive(); win.focus(); win.webContents.focus(); await until('document.hasFocus()')
     const node = selector => 'document.querySelector(' + JSON.stringify(selector) + ')'
     const text = (label, selector = '[role="dialog"] button') => 'js:[...document.querySelectorAll(' + JSON.stringify(selector) + ')].find(node=>node.textContent.trim()===' + JSON.stringify(label) + ')'
     async function capture(name) { await settle(); const file = name + '.png'; fs.writeFileSync(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.frames.push(file) }
-    await click('.agent-region-header__connector'); await until('document.querySelector(".connector-header-menu")')
+    await click('[data-channel-entry=discord]'); await until('document.querySelector(".connector-header-menu")')
     await capture('channel-unbound-menu-wide')
     await click(text('Connect a conversation', '.connector-header-menu [role="menuitem"]'))
     await until(node('[aria-label="Existing group"]') + ' && ' + node('[aria-label="New group"]') + '?.disabled')
@@ -32,11 +32,11 @@ app.whenReady().then(async () => {
     await until(node('[aria-label="Group connection status"]'))
     await click('[aria-label="Close group setup"]')
     win.setContentSize(1380, 980); await until('innerWidth===1380')
-    await until('document.querySelector(".agent-region-header__connector")?.title.includes("Discord")')
-    await click('.agent-region-header__connector'); await until('document.querySelector(".connector-header-menu__item")')
+    await until('document.querySelector("[data-channel-entry=discord]")?.getAttribute("aria-label").includes("Discord") && document.querySelector("[data-channel-entry=discord]")?.dataset.channelState!=="unbound"')
+    await click('[data-channel-entry=discord]'); await until('document.querySelector(".connector-header-menu__item")')
     await capture('channel-bound-menu-wide')
     win.setContentSize(520, 980); await until('innerWidth===520');
-    if (!await read('document.querySelector(".connector-header-menu__item")')) await click('.agent-region-header__connector')
+    if (!await read('document.querySelector(".connector-header-menu__item")')) await click('[data-channel-entry=discord]')
     await until('document.querySelector(".connector-header-menu__item")'); await capture('channel-bound-menu-narrow')
     await click('.connector-header-menu__item')
     await until(node('[aria-label="Group connection status"]'))
