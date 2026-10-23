@@ -1,11 +1,12 @@
+import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { createContext } from 'react'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { ConnectionApplication, ConnectionConfig, ConnectionSetupEnrollmentSource } from '@agentmux/core/connections'
 import type { ChannelPresentation } from './settings/settings-catalog'
 import type { SettingsPageId } from './SettingsPanel'
 
-export type ChannelSettingsOrigin = { sessionId: string; hostId: string; agentSessionId: string; connection: Pick<ConnectionConfig, 'connectionId' | 'adapterId' | 'application'> }
-export type MoteLarkSettingsOrigin = { target: MotePreferencesTarget | null; topicId: string; moteName: string; setup?: { connectionId: string; source: ConnectionSetupEnrollmentSource } | undefined }
+export type ChannelSettingsOrigin = { hostingTarget?: ConnectionHostingTarget | null; sessionId: string; hostId: string; agentSessionId: string; connection: Pick<ConnectionConfig, 'connectionId' | 'adapterId' | 'application'> }
+export type MoteLarkSettingsOrigin = { hostingTarget?: ConnectionHostingTarget | null; target: MotePreferencesTarget | null; topicId: string; moteName: string; setup?: { connectionId: string; source: ConnectionSetupEnrollmentSource } | undefined }
 export type SettingsNavigationRequest = { section: SettingsPageId; executorId?: string | undefined; toolId?: string | undefined; hostId?: string | undefined; channelOrigin?: ChannelSettingsOrigin | undefined; moteLarkOrigin?: MoteLarkSettingsOrigin | undefined }
 
 /** App owns the route; deep controls only request the existing settings surface. */
