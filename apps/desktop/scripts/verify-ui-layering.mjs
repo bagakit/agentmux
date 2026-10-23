@@ -108,7 +108,7 @@ registerHooks({ load(url, context, nextLoad) {
   const loaded = nextLoad(url, context);
   if (url.startsWith('file:')) {
     const file = fileURLToPath(url);
-    if (file.startsWith(${JSON.stringify(repository + '/')}) && !file.startsWith(${JSON.stringify(directory + '/')})) {
+    if ((file.startsWith(${JSON.stringify(repository + '/')}) || file.includes('/node_modules/')) && !file.startsWith(${JSON.stringify(directory + '/')})) {
       const bytes = loaded.source ?? readFileSync(file);
       appendFileSync(${JSON.stringify(join(directory, 'node-loads.ndjson'))}, JSON.stringify({ file, sha256: createHash('sha256').update(bytes).digest('hex') }) + '\\n');
     }
