@@ -56,7 +56,10 @@ it.each([[12, 0], [12, 32], [1198, 32]] as const)('a %i-record public window wit
       (value.source === 'native' || value.source === 'captured') && !('original' in value)) cost.locatorRecords += result.length
     return result
   })
-  const pageRead = vi.spyOn(f.client, 'sessionHistoryPage'), changes = vi.spyOn(f.client, 'readSessionHistoryChanges'), capturedRead = vi.spyOn(f.store, 'readCapturedHistory'), targets = vi.spyOn(f.store, 'readHistorySource'), all = vi.spyOn(f.store, 'load')
+  // Count actual Provider reads; Core may retain an exact native source without
+  // traversing the public convenience methods for an unqualified current source.
+  const provider = f.client.providers.get('claude')
+  const pageRead = vi.spyOn(provider, 'readSessionHistoryPage'), changes = vi.spyOn(provider, 'readConversationChanges'), capturedRead = vi.spyOn(f.store, 'readCapturedHistory'), targets = vi.spyOn(f.store, 'readHistorySource'), all = vi.spyOn(f.store, 'load')
   await appendFile(f.path, jsonl([native('related-native-delta', 'Original delta body '.repeat(6000))]))
   const started = performance.now(); let assembly: ConversationWindowAssembly | undefined, cursor: string | undefined, accepted: ConversationWindowSnapshot | undefined, bytes = 0, pages = 0
   for (let fragment = 0; fragment < 200; fragment++) {
