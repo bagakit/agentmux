@@ -48,6 +48,7 @@ const persistenceOptions = useAppStore.persist.getOptions()
 const records: unknown[] = []
 
 beforeEach(async () => {
+  bridge.invoke.mockClear()
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   vi.stubGlobal('OffscreenCanvas', undefined)
@@ -200,7 +201,8 @@ it('consumes a nonempty incomplete Main catalogue without removing original work
     setItem: (_name, value) => writeFileSync(savedPath, JSON.stringify(value)), removeItem: () => {}
   } })
   disposeUi = await useAppStore.getState().initialize()
-  expect(useAppStore.getState().sessions.map(session => session.id)).toContain(agent.id)
+  await until(() => useAppStore.getState().sessions.some(session => session.id === agent.id), Boolean,
+    'original Agent appears through the asynchronous startup membership read')
   await mount(agent)
   const savedTab = addWorkbenchRegion(addWorkbenchRegion(useAppStore.getState().tabs[origin.tabId]!, origin.regionId, 'right', {
     regionId: 'saved-terminal-region', kind: 'terminal', phase: 'attached', workspaceId: 'private', sessionId: terminal!.id
@@ -257,6 +259,8 @@ it('consumes a nonempty incomplete Main catalogue without removing original work
   expect(useAppStore.getState().layouts.private).toEqual(originalLayout)
   expect(useAppStore.getState().agentFocus).toEqual(focus)
   expect(useAppStore.getState().agentComposerDrafts[agent.id]).toBe('original draft survives')
+  await until(() => useAppStore.getState().sessions.some(session => session.id === agent.id), Boolean,
+    'original Agent reconnects through the asynchronous startup membership read')
   const reattached = useAppStore.getState().sessions.find(session => session.id === agent.id)!
   expect(reattached.control).toEqual(agent.control)
   const xterm = await mount(reattached)

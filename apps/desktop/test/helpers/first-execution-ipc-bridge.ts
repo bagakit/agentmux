@@ -20,7 +20,7 @@ const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
   listeners: new Map<string, Set<(...args: unknown[]) => void>>() }))
 export { bridge }
 vi.mock('node:os', async importOriginal => ({ ...await importOriginal<typeof import('node:os')>(), homedir: () => bridge.directory }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   safeStorage: { isAsyncEncryptionAvailable: async () => false,
     encryptStringAsync: async () => { throw new Error('Credential encryption is outside this input fixture') },
     decryptStringAsync: async () => { throw new Error('Credential decryption is outside this input fixture') } },
