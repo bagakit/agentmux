@@ -6,6 +6,7 @@ import { defineConfig } from 'vitest/config'
 
 const root = resolve(import.meta.dirname, '../../..'), mutant = process.env.FEISHU_REPLY_MUTANT
 const mutations: Record<string, { path: string; before: string; after: string }> = {
+  work: { path: 'packages/connectors/src/adapters/feishu/reply-card.ts', before: 'previous = low', after: 'previous = 0' },
   markdown: { path: 'packages/connectors/src/adapters/feishu/reply-card.ts', before: "tag: 'markdown', content: markdown(text, root.children.filter(child => child.position!.start.offset! >= cursor), cursor)", after: "tag: 'div', text: { tag: 'plain_text', content: after }" },
   table: { path: 'packages/connectors/src/adapters/feishu/reply-card.ts', before: 'elements.push(table(text, node));', after: "elements.push({ tag: 'markdown', content: source(text, node) });" },
   wiring: { path: 'packages/connectors/src/publication-host.ts', before: '...(adapter.fragmentText ? { fragmentText: payload => adapter.fragmentText!(payload, binding) } : {}),', after: '' },

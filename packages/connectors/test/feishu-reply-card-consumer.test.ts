@@ -14,6 +14,7 @@ import { permissionActionsFixture } from './fixtures/permission-actions.js'
 import type { ConnectionHost } from '../src/connection-host.js'
 
 import { FeishuAdapter } from '../src/adapters/feishu/index.js'
+import { fragmentFeishuReply } from '../src/adapters/feishu/reply-card.js'
 import type { PublicationOperation } from '../src/publication-store.js'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { unified } from 'unified'
@@ -133,6 +134,26 @@ it('does not add a continuation card when the actual single-card request fits', 
   const adapter = new FeishuAdapter().publication, text = 'A'.repeat(30205), operation = original(text)
   expect(Buffer.byteLength(adapter.prepare(operation).request.body!)).toBeLessThanOrEqual(30 * 1024)
   expect(adapter.fragmentText!(operation.payload as never, operation.target)).toEqual([{ text }])
+})
+
+it('bounds native render work for long text while adapting to different encoded character sizes', () => {
+  const adapter = new FeishuAdapter().publication, text = 'R'.repeat(512 * 1024) + '中文😀'.repeat(6000), operation = original(text)
+  let renders = 0
+  const parts = fragmentFeishuReply(text, part => {
+    renders++
+    if (Buffer.byteLength(part.text) > 30 * 1024) return false
+    try {
+      return Buffer.byteLength(adapter.prepare({ ...operation, fragment: { ordinal: text.length - 1, count: text.length },
+        payload: { kind: 'speech', phase: 'final', ...part } }).request.body!) <= 30 * 1024
+    } catch (error) {
+      if (error instanceof core.AgentMuxError && error.code === 'FEISHU_PUBLICATION_REQUEST_TOO_LARGE') return false
+      throw error
+    }
+  })
+  expect(parts.map(part => part.text).join('')).toBe(text)
+  expect(renders).toBeLessThan(parts.length * 4 + 48)
+  parts.forEach((part, ordinal) => expect(Buffer.byteLength(adapter.prepare({ ...operation,
+    fragment: { ordinal, count: parts.length }, payload: { kind: 'speech', phase: 'final', ...part } }).request.body!)).toBeLessThanOrEqual(30 * 1024))
 })
 
 it('reads an original frozen prior-version card without rewriting it into Markdown', async () => {
