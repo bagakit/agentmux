@@ -146,8 +146,10 @@ it('native unavailable keeps submitted original and Retry without implying nativ
   let error: Error | null = null
   try { await f.client.sessionHistoryPage('private-agent') } catch (cause) { error = cause as Error }
   expect(error).not.toBeNull()
-  const nativeRead = vi.spyOn(f.client, 'sessionHistoryPage')
-  await mount(f, async node => {
+  const originalOwner = f.client['readSessionHistoryPage']
+  const nativeRead = vi.fn(originalOwner.bind(f.client))
+  f.client['readSessionHistoryPage'] = nativeRead
+  try { await mount(f, async node => {
     expect(node.textContent).toContain(error!.message)
     expect(disclosure(node)).toBeNull()
     expect(visibleInputs(node)).toHaveLength(1)
@@ -159,7 +161,7 @@ it('native unavailable keeps submitted original and Retry without implying nativ
     await act(async () => button.click())
     await vi.waitFor(async () => { await act(async () => { await Promise.resolve() }); expect(nativeRead.mock.calls.length).toBeGreaterThan(before) })
     f.controls.forEach(c => expect(c).not.toHaveBeenCalled())
-  })
+  }) } finally { f.client['readSessionHistoryPage'] = originalOwner }
 })
 
 it('visible captured images read immediately and hidden late bytes are discarded without hiding body', async () => {
@@ -219,13 +221,13 @@ it('exact captured reveal and ruler target the visible body, preserving original
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, width: 400, height: 100, top: 0, bottom: 100, left: 0, right: 400, toJSON() {} })
     const complete = vi.fn()
     try {
-      await update({ revealRequest: { generation: 1, sourceKey: target.dataset.messageSourceKey!, isCurrent: () => true, complete } })
+      await update({ revealRequest: { generation: 1, signal: new AbortController().signal, record: { hostId: f.timeline.sourceHostId!, agentSessionId: f.timeline.agentSessionId, source: { kind: 'captured', recordId: 'capture' } }, sourceKey: target.dataset.messageSourceKey!, isCurrent: () => true, complete } })
       await act(async () => {
         const callbacks = [...frames.values()]; frames.clear()
         callbacks.forEach(callback => callback(1))
       })
       expect(disclosure(node)).toBeNull()
-      expect(complete).toHaveBeenCalledWith(true)
+      expect(complete).toHaveBeenCalledWith(true, undefined)
       expect(document.activeElement).toBe(target.querySelector('.log-turn'))
       expect(node.querySelector('[data-message-id="native:claude:native-main:native"]')).toBe(native)
       expect(native.querySelector('.log-turn__body')).toBe(body)
