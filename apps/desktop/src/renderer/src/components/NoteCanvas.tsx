@@ -98,6 +98,7 @@ type NoteNodeData = {
 type BlockNodeData = {
   noteId: string
   blockId: string
+  topBlockIndex?: number | undefined
   coveredBlockIds: readonly string[]
   portBlockIds: readonly string[]
   desired: boolean
@@ -141,7 +142,7 @@ const NoteBlockCard = memo(function NoteBlockCard({ id, data, selected }: NodePr
   ]).sort()))
   const draftTarget = useMemo(() => ({ ...data.resource, noteId: data.noteId }), [data.resource, data.noteId])
   const draftIncludes = useNoteCanvasDraftIncludes(data.active && data.draftView, draftTarget, data.readable.content)
-  const readerBlockIds = useMemo(() => data.blockId === '__summary__' ? undefined : [data.blockId], [data.blockId])
+  const readerBlockIds = useMemo(() => data.topBlockIndex !== undefined || data.blockId === '__summary__' ? undefined : [data.blockId], [data.blockId, data.topBlockIndex])
   const [selectedBlock, setSelectedBlock] = useState<string | undefined>()
   const activePorts = data.active && data.desired && !overview && !data.draftView ? data.portBlockIds : NO_BLOCK_IDS
   const activePortsKey = JSON.stringify(activePorts)
@@ -182,7 +183,7 @@ const NoteBlockCard = memo(function NoteBlockCard({ id, data, selected }: NodePr
         data.onFocusBlock(data.noteId, block.dataset.blockId)
       }
     }}>
-      <NoteReader key={data.draftView ? 'draft' : 'saved'} resource={data.resource} agentNames={agentNames} noteProvenance={data.readable.noteProvenance} content={data.readable.content} path={data.resource.path} workspaceId={data.resource.workspaceId} revision={data.readable.revision} documents={data.documents} graph={data.snapshot.graph} draftIncludes={data.draftView ? draftIncludes : undefined} onOpenDraftSource={target => data.onOpen(target.noteId, target.blockId, target.resource)} readInclude={target => data.onRead(target.noteId)} blockIds={readerBlockIds} previewBlockCount={data.previewBlockCount} compactIncludes highlightBlockIds={data.draftView ? NO_BLOCK_IDS : data.highlightedBlockIds} readReference={target => data.onRead(target.noteId)} onOpenLink={data.onOpenLink} />
+      <NoteReader key={data.draftView ? 'draft' : 'saved'} resource={data.resource} agentNames={agentNames} noteProvenance={data.readable.noteProvenance} content={data.readable.content} path={data.resource.path} workspaceId={data.resource.workspaceId} revision={data.readable.revision} documents={data.documents} graph={data.snapshot.graph} draftIncludes={data.draftView ? draftIncludes : undefined} onOpenDraftSource={target => data.onOpen(target.noteId, target.blockId, target.resource)} readInclude={target => data.onRead(target.noteId)} blockIds={readerBlockIds} topBlockIndex={data.topBlockIndex} previewBlockCount={data.previewBlockCount} compactIncludes highlightBlockIds={data.draftView ? NO_BLOCK_IDS : data.highlightedBlockIds} readReference={target => data.onRead(target.noteId)} onOpenLink={data.onOpenLink} />
     </div>
     {selectedBlock && data.source?.blocks.has(selectedBlock) && data.openable ? <button type="button" className="note-canvas-open-block nodrag" onClick={() => data.onOpen(data.noteId, selectedBlock)}><OpenIcon size={12} />Open selected block</button> : null}
   </section>
@@ -512,14 +513,14 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
       bodyStatus: NoteAreaBodyStatus | null
       sharedReadable?: NoteFileDocument | null
       sharedResource?: NoteResource
-      blocks: { blockNodeId: string; blockId: string; coveredBlockIds: string[]; portBlockIds: string[]; readingMode: 'document' | 'summary' | 'related'; previewBlockCount?: number; draftView: boolean; resource: NoteResource; readable: NoteFileDocument; source?: NoteSource; openable: boolean }[]
+      blocks: { blockNodeId: string; blockId: string; topBlockIndex?: number; coveredBlockIds: string[]; portBlockIds: string[]; readingMode: 'document' | 'summary' | 'related'; previewBlockCount?: number; draftView: boolean; resource: NoteResource; readable: NoteFileDocument; source?: NoteSource; openable: boolean }[]
       desiredPortBlockIds: Set<string>
     }>()
     const result = new Map<string, {
       bodyStatus: NoteAreaBodyStatus | null
       sharedReadable?: NoteFileDocument | null
       sharedResource?: NoteResource
-      blocks: { blockNodeId: string; blockId: string; coveredBlockIds: string[]; portBlockIds: string[]; readingMode: 'document' | 'summary' | 'related'; previewBlockCount?: number; draftView: boolean; resource: NoteResource; readable: NoteFileDocument; source?: NoteSource; openable: boolean }[]
+      blocks: { blockNodeId: string; blockId: string; topBlockIndex?: number; coveredBlockIds: string[]; portBlockIds: string[]; readingMode: 'document' | 'summary' | 'related'; previewBlockCount?: number; draftView: boolean; resource: NoteResource; readable: NoteFileDocument; source?: NoteSource; openable: boolean }[]
       desiredPortBlockIds: Set<string>
     }>()
     for (const item of projection.notes) {
@@ -612,31 +613,99 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
         remainingCount: remaining.length,
         onShowAll: () => setExpandedAllBlocks(prev => ({ ...prev, [item.id]: true })),
       }
-      const blocks: { blockNodeId: string; blockId: string; coveredBlockIds: string[]; portBlockIds: string[]; readingMode: 'document' | 'summary' | 'related'; previewBlockCount?: number; draftView: boolean; resource: NoteResource; readable: NoteFileDocument; source?: NoteSource; openable: boolean }[] = []
+      const blocks: { blockNodeId: string; blockId: string; topBlockIndex?: number; coveredBlockIds: string[]; portBlockIds: string[]; readingMode: 'document' | 'summary' | 'related'; previewBlockCount?: number; draftView: boolean; resource: NoteResource; readable: NoteFileDocument; source?: NoteSource; openable: boolean }[] = []
       const desiredPortBlockIds = new Set<string>()
       let unanchoredReadable: NoteFileDocument | null = null
       if (item.kind !== 'shared-block' && readableDoc && resource && !empty) {
         const allRootIds = readingSource ? projectNoteBlocks(readingSource, [...readingSource.blocks.keys()]).rootBlockIds : []
-        if (allRootIds.length === 0) {
+        if (!dirty && allRootIds.length === 0) {
           unanchoredReadable = readableDoc
         } else if (readingSource) {
-          const targetRoots = whole ? allRootIds : summary ? allRootIds.slice(0, 3) : projectNoteBlocks(readingSource, shown).rootBlockIds
-          for (const rootId of targetRoots) {
-            const covered = projectNoteBlocks(readingSource, [rootId]).shownBlockIds
-            const ports = !draftView && confirmed ? itemBlockIds.filter(id => covered.includes(id)) : []
-            ports.forEach(id => desiredPortBlockIds.add(id))
-            blocks.push({
-              blockNodeId: noteCanvasBlockNodeId(item.id, rootId),
-              blockId: rootId,
-              coveredBlockIds: covered,
-              portBlockIds: ports,
-              readingMode,
-              draftView,
-              resource,
-              readable: readableDoc,
-              source: readingSource,
-              openable,
-            })
+          if (!whole && !summary) {
+            const targetRoots = projectNoteBlocks(readingSource, shown).rootBlockIds
+            for (const rootId of targetRoots) {
+              const covered = projectNoteBlocks(readingSource, [rootId]).shownBlockIds
+              const ports = !draftView && confirmed ? itemBlockIds.filter(id => covered.includes(id)) : []
+              ports.forEach(id => desiredPortBlockIds.add(id))
+              blocks.push({
+                blockNodeId: noteCanvasBlockNodeId(item.id, rootId),
+                blockId: rootId,
+                coveredBlockIds: covered,
+                portBlockIds: ports,
+                readingMode,
+                draftView,
+                resource,
+                readable: readableDoc,
+                source: readingSource,
+                openable,
+              })
+            }
+          } else {
+            const topNodes = readingSource.note.content.content ?? []
+            const limit = whole ? topNodes.length : 3
+            const collectIds = (node: typeof topNodes[number]): string[] => {
+              const id = typeof node.attrs?.blockId === 'string' ? [node.attrs.blockId] : []
+              return [...id, ...(node.content ?? []).flatMap(collectIds)]
+            }
+            for (const [topIndex, topNode] of topNodes.entries()) {
+              const alwaysShow = topNode.type === 'noteInclude' || topNode.type === 'blockReference'
+              if (topIndex >= limit && !alwaysShow) continue
+              const directId = typeof topNode.attrs?.blockId === 'string' ? topNode.attrs.blockId : undefined
+              const subRoots = allRootIds.filter(id => collectIds(topNode).includes(id))
+              if (directId && readingSource.blocks.has(directId)) {
+                const covered = projectNoteBlocks(readingSource, [directId]).shownBlockIds
+                const ports = !draftView && confirmed ? itemBlockIds.filter(id => covered.includes(id)) : []
+                ports.forEach(id => desiredPortBlockIds.add(id))
+                blocks.push({
+                  blockNodeId: noteCanvasBlockNodeId(item.id, directId),
+                  blockId: directId,
+                  coveredBlockIds: covered,
+                  portBlockIds: ports,
+                  readingMode,
+                  draftView,
+                  resource,
+                  readable: readableDoc,
+                  source: readingSource,
+                  openable,
+                })
+              } else if (subRoots.length > 0 && ['bulletList', 'orderedList', 'taskList'].includes(topNode.type ?? '') && (topNode.content ?? []).every(itemNode => typeof itemNode.attrs?.blockId === 'string')) {
+                for (const rootId of subRoots) {
+                  const covered = projectNoteBlocks(readingSource, [rootId]).shownBlockIds
+                  const ports = !draftView && confirmed ? itemBlockIds.filter(id => covered.includes(id)) : []
+                  ports.forEach(id => desiredPortBlockIds.add(id))
+                  blocks.push({
+                    blockNodeId: noteCanvasBlockNodeId(item.id, rootId),
+                    blockId: rootId,
+                    coveredBlockIds: covered,
+                    portBlockIds: ports,
+                    readingMode,
+                    draftView,
+                    resource,
+                    readable: readableDoc,
+                    source: readingSource,
+                    openable,
+                  })
+                }
+              } else {
+                const syntheticId = `block-${topIndex + 1}`
+                const covered = collectIds(topNode)
+                const ports = !draftView && confirmed ? itemBlockIds.filter(id => covered.includes(id)) : []
+                ports.forEach(id => desiredPortBlockIds.add(id))
+                blocks.push({
+                  blockNodeId: noteCanvasBlockNodeId(item.id, syntheticId),
+                  blockId: syntheticId,
+                  topBlockIndex: topIndex,
+                  coveredBlockIds: covered,
+                  portBlockIds: ports,
+                  readingMode,
+                  draftView,
+                  resource,
+                  readable: readableDoc,
+                  source: readingSource,
+                  openable,
+                })
+              }
+            }
           }
         }
       } else if (item.kind === 'shared-block' && confirmedDoc && savedSource && resource && !empty) {
@@ -739,6 +808,7 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
             data: {
               noteId: item.id,
               blockId: spec.blockId,
+              ...(spec.topBlockIndex !== undefined ? { topBlockIndex: spec.topBlockIndex } : {}),
               coveredBlockIds: spec.coveredBlockIds,
               portBlockIds: spec.portBlockIds,
               desired: true,

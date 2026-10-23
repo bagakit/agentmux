@@ -216,6 +216,8 @@ export type NoteReaderProps = { resource?: NoteResource | undefined; agentNames?
   readReference?: ((target: NoteBlockTarget) => void) | undefined
   /** Only the reading projection changes; content remains the complete original Note. */
   blockIds?: readonly string[] | undefined
+  /** Project a single top-level block by index when an unsaved draft block has no persisted blockId yet. */
+  topBlockIndex?: number | undefined
   highlightBlockIds?: readonly string[] | undefined
   clipBlocks?: boolean | undefined
   /** Read-only opening summary. Knowledge and original bytes remain complete. */
@@ -228,7 +230,7 @@ export type NoteReaderProps = { resource?: NoteResource | undefined; agentNames?
 }
 const EMPTY_IDS: readonly string[] = []
 const EMPTY_DOCUMENTS: NonNullable<NoteReaderProps['documents']> = []
-export function NoteReader({ resource, agentNames, content, path, workspaceId, revision, noteProvenance, documents = EMPTY_DOCUMENTS, graph, draftIncludes, onOpenDraftSource, readInclude, blockIds, highlightBlockIds = EMPTY_IDS, clipBlocks = true, previewBlockCount, compactIncludes, readReference, editing, target, onOpenLink }: NoteReaderProps) {
+export function NoteReader({ resource, agentNames, content, path, workspaceId, revision, noteProvenance, documents = EMPTY_DOCUMENTS, graph, draftIncludes, onOpenDraftSource, readInclude, blockIds, topBlockIndex, highlightBlockIds = EMPTY_IDS, clipBlocks = true, previewBlockCount, compactIncludes, readReference, editing, target, onOpenLink }: NoteReaderProps) {
   const parentResource = useNoteFileResource()
   const originalResource = resource ?? resolveNoteSourceResource(parentResource, { workspaceId, path }, graph)
   const observed = useMemo(() => ({ path, content, revision: revision ?? '', ...noteProvenance ? { noteProvenance } : {} }), [path, content, revision, noteProvenance])
@@ -244,12 +246,12 @@ export function NoteReader({ resource, agentNames, content, path, workspaceId, r
   const knowledge = useMemo(() => noteKnowledge([{ location: { workspaceId, path }, document: { ...original, content: workingContent } }, ...documents], 'partial', graph?.observations.flatMap(item => item.status === 'read' && item.kind === 'shared-block' && item.fileIdentity === 'confirmed' && !graph.duplicateNoteIds.includes(item.noteId) ? [{ noteId: item.noteId, workspaceId: item.resource.workspaceId, path: item.resource.path, revision: item.revision }] : []) ?? []), [workingContent, path, workspaceId, original, documents, graph])
   const excerpt = useMemo(() => {
     const source = knowledge.sources.find(source => source.location.workspaceId === workspaceId && source.location.path === path)
-    return blockIds && source ? projectNoteBlocks(source, blockIds, highlightBlockIds) : null
-  }, [knowledge, blockIds, highlightBlockIds, workspaceId, path])
+    return topBlockIndex === undefined && blockIds && source ? projectNoteBlocks(source, blockIds, highlightBlockIds) : null
+  }, [knowledge, blockIds, topBlockIndex, highlightBlockIds, workspaceId, path])
   const block = target ? resolveNoteBlock(knowledge, target) : null
   // A different read-only projection is not a revision of the same editing draft.
   const readingScope = JSON.stringify([workspaceId, path, parsed.status === 'valid' ? parsed.note.noteId : null,
-    blockIds ? [...new Set(blockIds)].sort() : null, blockIds ? clipBlocks : null, previewBlockCount ?? null, Boolean(compactIncludes)])
+    blockIds ? [...new Set(blockIds)].sort() : null, topBlockIndex ?? null, blockIds || topBlockIndex !== undefined ? clipBlocks : null, previewBlockCount ?? null, Boolean(compactIncludes)])
   useEffect(() => {
     if (!target || block?.status !== 'resolved') return
     const element = [...body.current?.querySelectorAll<HTMLElement>('[data-block-id]') ?? []].find(element => element.dataset.blockId === target.blockId)
@@ -260,7 +262,7 @@ export function NoteReader({ resource, agentNames, content, path, workspaceId, r
     {target && <section aria-label="原块定位" data-block-target-status={block?.status}>
       {block?.status === 'resolved' ? <><strong>引用的原块</strong><p>{block.block.text}</p></> : <p role="status">原块未确认：{block?.message} 原引用保留，仍可阅读完整笔记。</p>}
     </section>}
-    {editing && original.revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={original.content} revision={original.revision} original={original} onWritten={document => setWritten({ source: observed, document })} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent key={readingScope} highlightBlockIds={highlightBlockIds} content={excerpt ? { type: 'doc', content: clipBlocks ? excerpt.content.content?.map(node => readingExcerpt(node, highlightBlockIds)) ?? [] : (excerpt.content.content ?? []) } : previewBlockCount === undefined ? parsed.note.content : { ...parsed.note.content, content: parsed.note.content.content?.slice(0, previewBlockCount).map(node => readingExcerpt(node, highlightBlockIds)) ?? [] }} />}
+    {editing && original.revision ? <EditableNote key={parsed.note.noteId} note={parsed.note} content={original.content} revision={original.revision} original={original} onWritten={document => setWritten({ source: observed, document })} editing={{ ...editing, subscribe: editing.subscribe ? listener => editing.subscribe!(state => { setWorking({ noteId: state.noteId, content: state.draft }); listener(state) }) : undefined, onDraft: state => { setWorking({ noteId: state.noteId, content: state.draft }); editing.onDraft(state) } }} /> : <RichContent key={readingScope} highlightBlockIds={highlightBlockIds} content={topBlockIndex !== undefined ? { type: 'doc', content: parsed.note.content.content?.[topBlockIndex] ? [clipBlocks ? readingExcerpt(parsed.note.content.content[topBlockIndex]!, highlightBlockIds) : parsed.note.content.content[topBlockIndex]!] : [] } : excerpt ? { type: 'doc', content: clipBlocks ? excerpt.content.content?.map(node => readingExcerpt(node, highlightBlockIds)) ?? [] : (excerpt.content.content ?? []) } : previewBlockCount === undefined ? parsed.note.content : { ...parsed.note.content, content: parsed.note.content.content?.slice(0, previewBlockCount).map(node => readingExcerpt(node, highlightBlockIds)) ?? [] }} />}
   </div></Scope.Provider></NoteFileContext.Provider> : <><p role="status">原笔记读取问题：{parsed.message}</p><pre>{content}</pre></>
 }
 function EditableNote({ note, content, revision, editing, original, onWritten }: { note: NoteDocument; content: string; revision: string; editing: NoteEditing; original: NoteFileDocument; onWritten(document: NoteFileDocument): void }) {
