@@ -8,7 +8,7 @@ const mutation = process.env.CHANNEL_OWNER_MUTANT
 const variants: Record<string, { path: string; before: string; after: string }> = {
   'duplicate-owner': { path: 'packages/connectors/src/connection-services.ts', before: 'if (!native.tryLock(fd))', after: 'if (false)' },
   'no-recovery': { path: 'packages/connectors/src/connection-services.ts', before: 'if (!closed && !live) void ensure()', after: 'if (false) void ensure()' },
-  'no-release': { path: 'packages/connectors/src/connection-services.ts', before: 'if (live?.lease !== undefined) closeSync(live.lease)', after: 'if (false && live?.lease !== undefined) closeSync(live.lease)' },
+  'no-release': { path: 'packages/connectors/src/connection-services.ts', before: 'if (owner?.lease !== undefined) closeSync(owner.lease)', after: 'if (false && owner?.lease !== undefined) closeSync(owner.lease)' },
   'drop-administration-authority': { path: 'packages/connectors/src/connection-services.ts', before: '.secrets.store(input, assertCurrent)', after: '.secrets.store(input)' }
 }
 if (mutation && !variants[mutation]) throw Error('Unknown Host owner mutation')
