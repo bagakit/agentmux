@@ -1,5 +1,5 @@
 import { act } from 'react'
-import { mkdir } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterAll, afterEach, expect, it, vi } from 'vitest'
 import type { BrowserWindow } from 'electron'
@@ -43,6 +43,8 @@ import { composerConfig } from './helpers/composer-dom-fixture'
 import { createClientUiRoot } from './helpers/client-ui-render'
 
 const closes: Array<() => void | Promise<void>> = [], initial = useAppStore.getState()
+const facts: unknown[] = []
+afterAll(async () => { if (process.env.MANUAL_OWNER_FACTS) await writeFile(process.env.MANUAL_OWNER_FACTS, JSON.stringify({ scope: 'Synthetic same-Runtime instance replacement through public bootstrap and original configure/inspect.', facts }, null, 2) + '\n') })
 afterAll(async () => { const { rm } = await import('node:fs/promises'); await bridge.window.happyDOM.abort(); await rm(bridge.directory, { recursive: true, force: true }) })
 let root: ReturnType<typeof createClientUiRoot> | undefined, container: HTMLDivElement
 afterEach(async () => {
@@ -91,7 +93,11 @@ async function fixture() {
       forwardRpc: async (method, params, context = {}) => {
         const result = await rpc.call(method, params, { ...(context.signal ? { signal: context.signal } : {}), ...(context.runtimeFence ? { runtimeFence: context.runtimeFence } : {}) })
         if (host.id === 'owner-a' && method === 'connection.owner.inspect' && replaceAfterOwnerInspection) {
-          replaceAfterOwnerInspection = false; await a.restart(false, b.socketPath); await client.readAgentSessions()
+          replaceAfterOwnerInspection = false; await a.restart(false, b.socketPath)
+          client.disconnect(); await client.connect()
+          const current = client.runtimeOwnerIdentity(), native = (await a.rpc.call('runtime.owner.identity', {})).owner
+          expect(current?.runtimeId).toBe(a.owner.runtimeId); expect(current?.ownerInstanceId).toBe(native.ownerInstanceId)
+          expect(current?.ownerInstanceId).not.toBe(a.owner.ownerInstanceId)
         }
         return result
       } })
@@ -254,13 +260,17 @@ it('an already provided foreign Runtime fence refuses before a write; registered
 
 it('the exact destination instance fences dispatch when the same Runtime restarts from local connections to a forwarded bridge', async () => {
   const f = await fixture(); f.replaceAfterOwnerInspection()
-  await expect(api.connections.call('connection.configure', { operationId: 'original-instance-save', expectedRevision: null, connection: {
+  const outcome = await api.connections.call('connection.configure', { operationId: 'original-instance-save', expectedRevision: null, connection: {
     connectionId: 'original-instance-connection', adapterId: 'feishu', application: { domain: 'open.feishu.cn', appId: 'synthetic-app' }, label: 'Retain original owner', enabled: false, credentialRef: 'unresolved' }
-  }, f.targets.a)).rejects.toMatchObject({ code: 'RUNTIME_OWNER_CHANGED' })
+  }, f.targets.a).then(result => ({ state: 'confirmed' as const, operationId: result.operationId }), error => ({ state: 'refused' as const, code: error.code }))
+  const witness = (await f.b.rpc.call('connection.inspect', { operationId: 'original-instance-save' })).operation
   const { owner } = await f.a.rpc.call('runtime.owner.identity', {})
+  facts.push({ case: 'destination-instance', outcome, operationRecorded: witness !== null, recordedOperationId: witness?.operationId ?? null,
+    recordedConnectionId: witness?.connection.config.connectionId ?? null, previousOwner: { runtimeId: f.a.owner.runtimeId, ownerInstanceId: f.a.owner.ownerInstanceId }, currentOwner: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } })
+  expect(witness).toBeNull()
+  expect(outcome).toEqual({ state: 'refused', code: 'RUNTIME_OWNER_CHANGED' })
   expect(owner.runtimeId).toBe(f.a.owner.runtimeId); expect(owner.ownerInstanceId).not.toBe(f.a.owner.ownerInstanceId)
   expect(await f.a.rpc.call('connection.owner.inspect', {})).toEqual({ ownership: 'forwarded' })
-  expect((await f.b.rpc.call('connection.inspect', { operationId: 'original-instance-save' })).operation).toBeNull()
   await expect(api.connections.call('connection.ls', {}, f.targets.a)).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
   expect(f.mainFallback).not.toHaveBeenCalled()
 })
