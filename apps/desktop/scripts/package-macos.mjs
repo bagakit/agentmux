@@ -26,9 +26,9 @@ import { isDeepStrictEqual } from 'node:util'
 import { homedir, tmpdir } from 'node:os'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import process from 'node:process'
-import { observeApplicationProcesses, assertApplicationActivationOwnership } from './package-process-scope.mjs'
+import { observeApplicationProcesses, assertApplicationActivationOwnership, applicationQuitOwnershipDiagnostic } from './package-process-scope.mjs'
 import { closeRuntimeUpgrade, finishRuntimeUpgrade, prepareRuntimeUpgrade, prepareUiRuntime, confirmUiRuntime, assertUiRuntimeObservation, observeUiClient, requireOutgoingWorkbenchStorage, createPrivateRuntimeScope } from './package-runtime-upgrade.mjs'
-import { prepareSemanticHostReload, inspectSemanticHostForInstall, stopSemanticHostForInstall, confirmSemanticHostReload, semanticHostProcessIds } from './package-semantic-host.mjs'
+import { prepareSemanticHostReload, inspectSemanticHostForInstall, stopSemanticHostForInstall, confirmSemanticHostReload } from './package-semantic-host.mjs'
 import {
   assertPackageIdentity,
   canonicalInstallPath,
@@ -492,14 +492,14 @@ async function verifyPackagedRuntime(appPath, verificationRoot, source, signedWo
   assert(agentmux.stdout.trim() === `amux ${coreVersion}`, 'Packaged AgentMux CLI cannot use the embedded runtime.')
 }
 
-async function scopedProcesses(appPath, previousOwners = []) {
+async function scopedProcesses(appPath, previousOwners = [], independentOwners = []) {
   const canonicalAppPath = await realpath(appPath).catch(error => {
     if (error.code === 'ENOENT') return resolve(appPath)
     throw error
   })
   const executable = join(canonicalAppPath, 'Contents', 'MacOS', PRODUCT_NAME)
   const helperRoot = join(canonicalAppPath, 'Contents', 'Frameworks') + sep
-  return observeApplicationProcesses({ executable, helperRoot }, previousOwners)
+  return observeApplicationProcesses({ executable, helperRoot }, previousOwners, { independentOwners })
 }
 
 // The bundle's *serving* processes: main + renderer/GPU/utility helpers. A
@@ -777,27 +777,30 @@ async function verifyDmg(dmgPath, temporaryRoot, source, signedWorkspaceMoveHelp
 async function quitInstalledApplication(appPath, originalOwners = [], semanticHost = null) {
   if (semanticHost) assert(semanticHost.currentApp === appPath, 'The prepared Semantic Host belongs to another application; its processes are retained.')
   const semanticOwner = semanticHost ? (await inspectSemanticHostForInstall(semanticHost)).row : null
-  // Only this positively identified namespace has a separate shutdown owner.
-  // Other Main workers and unreadable modes retain their ordinary birth pins.
-  const guiOwners = scope => {
-    const semantic = semanticOwner ? semanticHostProcessIds(appPath, semanticOwner, scope) : new Set()
-    return scope.serving.filter(pid => !semantic.has(pid))
-  }
-  const scope = await scopedProcesses(appPath, originalOwners)
-  const running = guiOwners(scope), { crashReporter, processes } = scope
-  const previousOwners = processes.filter(row => running.includes(row.pid))
+  // Independent execution ownership ends GUI ancestry, including branches
+  // through Native. Semantic shutdown retains its separate narrow Node scope.
+  const independentOwners = semanticOwner ? [semanticOwner] : []
+  const scope = await scopedProcesses(appPath, originalOwners, independentOwners)
+  const running = scope.serving, { crashReporter } = scope
+  let previousOwners = scope.admissions, lastScope = scope
   if (crashReporter.length > 0) {
     process.stdout.write(`ignored_detached_crash_reporter=${crashReporter.join(',')} (orphaned Electron crash handler; serves no bundle, left for the OS to reap)\n`)
   }
-  if (running.length === 0) return { wasRunning: false, pids: [] }
+  if (running.length === 0) return { wasRunning: false, pids: [], admissions: previousOwners }
   const bundleId = await plistValue(join(appPath, 'Contents/Info.plist'), 'CFBundleIdentifier')
   assert(/^[a-zA-Z0-9.-]+$/.test(bundleId), 'Application bundle identity is invalid; no quit was requested.')
   await run('osascript', ['-e', `quit app id "${bundleId}"`], { capture: true, timeoutMs: 15_000 })
     .catch(() => undefined)
-  const remaining = await waitForProcessExit(async () => guiOwners(await scopedProcesses(appPath, previousOwners)), 20_000)
-  assert(remaining.length === 0,
-    `Application has not exited gracefully (pids ${remaining.join(', ')}). Installation stopped; no processes were force-killed. Finish or save current work before retrying.`)
-  return { wasRunning: true, pids: running }
+  const remaining = await waitForProcessExit(async () => {
+    const current = await scopedProcesses(appPath, previousOwners, independentOwners)
+    lastScope = current
+    previousOwners = current.admissions
+    return current.serving
+  }, 20_000)
+  if (remaining.length > 0) throw Object.assign(new Error(
+    `Application has not exited gracefully (pids ${remaining.join(', ')}). Installation stopped; no processes were force-killed. Finish or save current work before retrying.`),
+  { ownershipDiagnostic: applicationQuitOwnershipDiagnostic(lastScope, originalOwners) })
+  return { wasRunning: true, pids: running, admissions: previousOwners }
 }
 
 /**
@@ -940,15 +943,15 @@ export async function installApplication(appPath, { intent = installIntent, home
   await run('codesign', ['--verify', '--deep', '--strict', next], { capture: true })
   let runtimeUpgrade = null, uiRuntime = null, before = null, semanticHost = null
   let native = { status: 'unchanged' }
-  const previousScope = await scopedProcesses(currentPath)
+  let previousScope = await scopedProcesses(currentPath)
   let running = previousScope.serving
   try {
     if (previouslyInstalled) {
       semanticHost = await prepareSemanticHostReload(currentPath, next)
-      // A semantic worker may still be parented by the GUI. Its explicit
-      // namespace owner above, rather than general Node classification, owns exit.
-      const semantic = semanticHost ? semanticHostProcessIds(currentPath, semanticHost.owner, previousScope) : new Set()
-      running = running.filter(pid => !semantic.has(pid))
+      // Admit original GUI owners only after independent namespace facts are
+      // available. A preliminary observation is not permanent ownership.
+      previousScope = await scopedProcesses(currentPath, [], semanticHost ? [semanticHost.owner] : [])
+      running = previousScope.serving
     }
     if (running.length > 0) before = await qualifyUi(currentPath, null, { outgoing: true })
     if (intent === 'ui-only' || before && !runtimeChanged) uiRuntime = await prepareUiRuntime(previouslyInstalled ? currentPath : null, next, before)
@@ -965,8 +968,8 @@ export async function installApplication(appPath, { intent = installIntent, home
     // 换目录之前先请旧实例退出。放在 ditto/codesign 之后，是为了让候选包先被证明可用——候选不合格时
     // 不该白关掉用户正在用的窗口。
     const quitOutcome = previouslyInstalled && running.length > 0
-      ? await quit(destination, previousScope.processes.filter(row => running.includes(row.pid)), semanticHost)
-      : { wasRunning: false, pids: [] }
+      ? await quit(destination, previousScope.admissions, semanticHost)
+      : { wasRunning: false, pids: [], admissions: previousScope.admissions }
     try {
       if (!semanticHost && previouslyInstalled) {
         semanticHost = await prepareSemanticHostReload(currentPath, next)
@@ -1067,7 +1070,7 @@ export async function installApplication(appPath, { intent = installIntent, home
     process.stdout.write(`relaunched_pids=${relaunched.join(',')}\n`)
     const activatedScope = await scopedProcesses(destination)
     const activatedOwners = confirmApplicationActivation({
-      previous: previousScope.processes.filter(row => running.includes(row.pid)),
+      previous: quitOutcome.admissions,
       beforeLaunch: launchBaseline.processes, scope: activatedScope,
       main: observed.main, intent, native, path: destination
     })
@@ -1077,6 +1080,7 @@ export async function installApplication(appPath, { intent = installIntent, home
     return { intent, ui: { status: 'committed', main: observed.main, path: destination, observation: observed }, native }
   } catch (error) {
     if (!error.transaction) error.transaction = { intent, ui: { status: 'unknown', error: error.message }, native }
+    if (error.ownershipDiagnostic) error.transaction.ui.ownership = error.ownershipDiagnostic
     if (error.uiContinuity) error.transaction.ui.continuity = error.uiContinuity
     throw error
   } finally {
