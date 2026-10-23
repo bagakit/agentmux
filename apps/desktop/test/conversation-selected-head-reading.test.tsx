@@ -1,3 +1,4 @@
+import { processNativeRecordIds } from './helpers/conversation-process-members'
 // @vitest-environment happy-dom
 import { fixtureEpoch as _newTailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { act } from 'react'
@@ -21,7 +22,7 @@ const source = { providerId: 'codex', nativeSessionId: 'selected-head-native' }
 const activity = (id: string): AgentSessionHistoryItem => ({ id, kind: 'activity', contentParts: [{ kind: 'text', text: id }] })
 const user = (id: string): AgentSessionHistoryItem => ({ id, kind: 'user-message', contentParts: [{ kind: 'text', text: id }] })
 const page = (items: AgentSessionHistoryItem[], nextCursor: string | null = null): AgentSessionHistoryPage => ({
-  agentSessionId: reference.agentSessionId, source, items, nextCursor
+  agentSessionId: reference.agentSessionId, sourceHostId: reference.hostId, source, items, nextCursor
 })
 const closes:Array<()=>Promise<void>>=[]
 let host: HTMLDivElement, root: Root
@@ -32,8 +33,14 @@ beforeEach(() => {
   host = document.createElement('div'); document.body.append(host); root = createClientUiRoot(host)
 })
 afterEach(async () => {
-  await act(async () => root.unmount()); host.remove(); window.getSelection()?.removeAllRanges()
-  for(const close of closes.splice(0).reverse())await close();vi.restoreAllMocks(); vi.unstubAllGlobals()
+  const failures: unknown[] = []
+  try { await act(async () => root.unmount()) } catch (error) { failures.push(error) }
+  host.remove(); window.getSelection()?.removeAllRanges()
+  for (const close of closes.splice(0).reverse()) {
+    try { await close() } catch (error) { failures.push(error) }
+  }
+  vi.restoreAllMocks(); vi.unstubAllGlobals()
+  if (failures.length) throw new AggregateError(failures, 'Original selected-head fixture cleanup failed')
 })
 const bounds = (top: number, height: number) => ({ x: 0, y: top, top, bottom: top + height, left: 0, right: 500, width: 500, height, toJSON() {} })
 async function render(next: AgentSessionHistoryPage, beforeRecordId?: string) {
@@ -48,7 +55,7 @@ function selectHead(viewport: HTMLElement = host, count = false) {
   const text = head.querySelector(count ? '.log-fold__steps' : '.wf-observation__recorded')!.firstChild!
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, text.textContent!.length)
   const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range)
-  return { head, text, selection, originalText: selection.toString(), group: head.closest<HTMLElement>('[data-native-record-ids]')! }
+  return { head, text, selection, originalText: selection.toString(), group: head.closest<HTMLElement>('[data-conversation-process-members]')! }
 }
 function expectRetained(selected: ReturnType<typeof selectHead>) {
   expect(selected.head.isConnected).toBe(true)
@@ -66,7 +73,7 @@ it('selected process head permits user-separated earlier records and retains its
   expect(!controller.current!.canPresent(candidate(next))).toBe(false)
   await render(next)
   expectRetained(selected)
-  expect(selected.group.dataset.nativeRecordIds).toBe(JSON.stringify(current.items.map(item => item.id)))
+  expect(processNativeRecordIds(selected.group)).toEqual(current.items.map(item => item.id))
 })
 
 it('selected process head protects a contiguous merge that would change its selected count while retaining every raw ID', async () => {
@@ -77,7 +84,7 @@ it('selected process head protects a contiguous merge that would change its sele
   expect(!controller.current!.canPresent(candidate(next))).toBe(true)
   expectRetained(selected)
   expect(selected.head.querySelector('.log-fold__steps')?.textContent).toBe('2 条已加载记录')
-  expect(selected.group.dataset.nativeRecordIds).toBe(JSON.stringify(current.items.map(item => item.id)))
+  expect(processNativeRecordIds(selected.group)).toEqual(current.items.map(item => item.id))
 })
 
 it('selected process head uses the next actual record boundary to preserve a separate mounted process card', async () => {
@@ -114,7 +121,7 @@ it('actual Activity earlier read keeps a selected unchanged head and commits its
   const viewport = host.querySelector<HTMLElement>('.activity-feed')!, selected = selectHead(viewport)
   await act(async () => [...host.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Earlier')!.click())
   await vi.waitFor(async()=>{await act(async()=>{});expect(host.textContent).toContain('earlier-user')});expect(read).toHaveBeenCalledTimes(2)
-  expect(read.mock.calls.at(-1)).toMatchObject([reference.agentSessionId, { limit: 100, cursor: 'original-earlier-cursor' }])
+  expect(read.mock.calls.at(-1)).toEqual([reference.agentSessionId, expect.objectContaining({ limit: 100, cursor: 'original-earlier-cursor' }), source])
   expect(raw).not.toHaveBeenCalled();expect(f.controls.map(control=>control.mock.calls.length)).toEqual([0,0,0,0,0,0])
   expect(host.textContent).toContain('earlier-user')
   expect(host.textContent).not.toContain('Move your reading position or clear the selection')
