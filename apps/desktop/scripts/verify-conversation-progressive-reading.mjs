@@ -185,7 +185,10 @@ try {
       else assert.ok(actual.delayedPageSelection && actual.reads?.length, 'An anchor attempt must reach the original earlier-page commit')
       const seed = receipt.phases.find(item => item.scene === scene && item.phase === 'seed').actual
       if (phase === 'restore') { assert.notEqual(actual.pid, seed.pid); assert.deepEqual(actual.runs, seed.runs, 'Exact original Run/PID survives the separate App process'); assert.deepEqual(actual.unrelatedRuns, seed.unrelatedRuns) }
-      for (const name of scene === 'surfaces' ? ['current', 'system', 'collaboration', 'captured-diff', 'captured-original', 'compact-mailbox', 'compact-mailbox-narrow', 'pending-terminal', 'narrow'] : ['current', 'earlier', 'selected', 'narrow']) receipt.visualPaths.push({ path: path.relative(root, path.join(runEvidence, `${scene}-${phase}-${name}.png`)), sha256: hash(await fs.readFile(path.join(runEvidence, `${scene}-${phase}-${name}.png`))) })
+      const images = scene === 'surfaces' ? ['current', 'system', 'collaboration', 'captured-diff', 'captured-original', 'compact-mailbox', 'compact-mailbox-narrow', 'pending-terminal', 'narrow']
+        : scene === 'integrity' ? ['current', 'find-loaded', 'find-code', 'ruler-captured', 'ruler-reopened', 'find-captured', 'narrow']
+          : ['current', 'earlier', 'selected', 'narrow']
+      for (const name of images) receipt.visualPaths.push({ path: path.relative(root, path.join(runEvidence, `${scene}-${phase}-${name}.png`)), sha256: hash(await fs.readFile(path.join(runEvidence, `${scene}-${phase}-${name}.png`))) })
     }
     process.env.AGENTMUX_RUNTIME_DIRECTORY = path.join(sceneRoot, 'runtime'); process.env.AGENTMUX_STATE_DIRECTORY = path.join(sceneRoot, 'runtime/state'); process.env.AGENTMUX_MESSAGE_QUEUE_PATH = path.join(sceneRoot, 'messages.ndjson')
     client = await Core.connectLocalAgentMux({ store: new Core.AgentMuxFileAgentSessionStore(path.join(sceneRoot, 'agent-sessions.json')) })

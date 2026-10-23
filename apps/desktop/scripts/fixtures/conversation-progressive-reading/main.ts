@@ -15,6 +15,7 @@ import type { AppConfig } from '../../../src/shared/contracts'
 import { sceneRows, appendRow, draft } from './scene.mjs'
 import { surfaceRows, surfaceCaptured, exerciseSurfaces } from './surfaces.mjs'
 import { exerciseIsolation } from './isolation.mjs'
+import { integrityCaptured, exerciseIntegrity } from './integrity.mjs'
 
 const [html, privateRoot, phase, preload, evidence, nodeExecutable, scene, mobileExercise, mobilePreload, proofMode] = process.argv.slice(2)
 app.on('window-all-closed', () => {})
@@ -116,6 +117,8 @@ ipcMain.handle('reading-proof:request', async (event, operation, ...args) => {
           result.preparation = { kind: 'records-appended-without-turn-end', elapsedMs: performance.now() - preparationStarted,
             original: value, turnId: null, rows: seeded.length, boundary: 'No seeded native terminal turn; no completion or semantic convergence is claimed.' }
         }
+        if (scene === 'integrity') await store.applyTimelineMutation({ type: 'append', agentSessionId: session.id,
+          item: integrityCaptured(session.id, Date.now()) })
         return value
       }
       case 'attach': return await runtime.attachSession(event.sender.id, args[0], args[1] ?? 0, config)
@@ -251,7 +254,7 @@ app.whenReady().then(async () => {
     ...await read('({at:performance.now(),ui:readingProof.inspect(),reads:readingProof.reads.length,metrics:readingProof.snapshotMetrics()})'),
     taskMetrics: await taskMetrics() })
   const runMobileOnce = async () => {
-    if (scene === 'surfaces' || !mobileExercise || !result.mobileSetup || result.mobileAttempted) return
+    if (scene === 'surfaces' || scene === 'integrity' || !mobileExercise || !result.mobileSetup || result.mobileAttempted) return
     result.mobileAttempted = true
     const { runMobile } = await import(pathToFileURL(mobileExercise).href)
     result.mobile = await runMobile({ BrowserWindow, setup: { mobile: result.mobileSetup }, evidence, scene, phase, preload: mobilePreload,
@@ -333,6 +336,8 @@ app.whenReady().then(async () => {
     await sample('first-readable'); await shot('current')
     if (scene === 'surfaces') result.surfaces = await exerciseSurfaces({ read, click, shot, until, copies,
       resize: async (width: number) => { win.setContentSize(width, win.getContentSize()[1]); await ready(`innerWidth === ${width}`) } })
+    else if (scene === 'integrity') result.integrity = await exerciseIntegrity({ read, click, shot, until, append, appendRow, phase,
+      native: (method: string, parameters: Record<string, unknown>) => win.webContents.debugger.sendCommand(method, parameters) })
     else {
     for (let n = 0; n < 8; n++) {
       const point = await read('(() => { const r=document.querySelector(".activity-feed").getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2} })()')
@@ -430,8 +435,8 @@ app.whenReady().then(async () => {
     result.unrelatedRuns = running.filter(run => run.runId === result.isolation?.unrelated.runId)
     assert.deepEqual(result.runs.map((run: any) => run.runId), [result.ids.runId])
     assert.equal(running.length, 1 + (result.isolation ? 1 : 0), 'Only the exact original and explicitly controlled unrelated Run exist')
-    if (scene !== 'surfaces') assert.equal(result.inflightSelection.passed, true, 'The selected original anchor survives any in-flight earlier page')
-    if (scene !== 'surfaces') assert.equal(result.delayedPageSelection.passed, true, 'An actual delayed earlier page cannot move the selected original record')
+    if (scene === 'dense' || scene === 'longbody') assert.equal(result.inflightSelection.passed, true, 'The selected original anchor survives any in-flight earlier page')
+    if (scene === 'dense' || scene === 'longbody') assert.equal(result.delayedPageSelection.passed, true, 'An actual delayed earlier page cannot move the selected original record')
     result.passed = true
   } catch (error: any) {
     result.failure = { name: error.name, message: error.message, stack: error.stack, ...(error.details ? { details: error.details } : {}) }
