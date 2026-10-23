@@ -49,12 +49,12 @@
  * 全局剥掉会把家族 emoji 拆散——那正好是上面那条要守的东西。
  */
 const LEADING_IGNORABLE = /^\p{Default_Ignorable_Code_Point}+/u
+const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
 
 function firstGrapheme(value: string): string {
   const trimmed = value.replace(LEADING_IGNORABLE, '').trim()
   if (!trimmed) return ''
-  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' })
-  return [...segmenter.segment(trimmed)][0]?.segment ?? ''
+  return segmenter.segment(trimmed)[Symbol.iterator]().next().value?.segment ?? ''
 }
 
 /**
