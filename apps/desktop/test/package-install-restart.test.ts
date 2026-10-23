@@ -146,7 +146,7 @@ describe('installing must hand over a process running the new bundle', () => {
     const bindings = Object.fromEntries(argument.properties.flatMap(property => ts.isPropertyAssignment(property)
       ? [[property.name.getText(), property.initializer.getText()]]
       : ts.isShorthandPropertyAssignment(property) ? [[property.name.getText(), property.name.getText()]] : []))
-    expect(bindings).toEqual({ previous: 'previousScope.processes.filter(row => running.includes(row.pid))',
+    expect(bindings).toEqual({ previous: 'quitOutcome.admissions',
       beforeLaunch: 'launchBaseline.processes', scope: 'activatedScope', main: 'observed.main',
       intent: 'intent', native: 'native', path: 'destination' })
     const wrapper = functionBody(SOURCE, 'confirmApplicationActivation')
@@ -185,13 +185,13 @@ describe('installing must hand over a process running the new bundle', () => {
     expect(Number.isFinite(firstSignal)).toBe(false)
     expect(text).not.toMatch(/SIGTERM|SIGKILL/)
     // 没退干净就不许继续：留一个活着的旧实例，等于交付了一个跑旧包的窗口。
-    expect(text).toMatch(/assert\(\s*\n?\s*remaining\.length === 0/)
+    expect(text).toMatch(/if \(remaining\.length > 0\) throw/)
   })
 
   it('detects the whole restart flow being reduced to a disk swap, so the checks cannot go vacuously green', () => {
     // 自检：把两次调用删掉——这**就是**这次事故的源码形状（只换磁盘，不管进程）。
     const mutated = SOURCE
-      .replace(/const quitOutcome = previouslyInstalled[\s\S]*?: \{ wasRunning: false, pids: \[\] \}/, 'const quitOutcome = { wasRunning: false, pids: [] }')
+      .replace(/const quitOutcome = previouslyInstalled[\s\S]*?: \{ wasRunning: false, pids: \[\], admissions: previousScope.admissions \}/, 'const quitOutcome = { wasRunning: false, pids: [], admissions: [] }')
       .replace(/await relaunchInstalledApplication\(destination\)/g, '[] /* restart removed */')
     expect(mutated, '注入必须真的改动了源码').not.toBe(SOURCE)
     const body = functionBody(mutated, 'installApplication')
