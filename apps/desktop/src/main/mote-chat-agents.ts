@@ -1,4 +1,4 @@
-import { AgentMuxError, type AgentMuxClient } from '@agentmux/core'
+import { AgentMuxError } from '@agentmux/core'
 import { createMoteChatAgents as createHostMoteChatAgents } from '@agentmux/host/mote-chat-agents'
 import { createMoteChatResources } from '@agentmux/host/mote-resources'
 import { profileAgentContext } from '../shared/user-profile.js'
@@ -6,11 +6,12 @@ import type { AppConfig } from '../shared/contracts.js'
 import type { ScratchTopics } from './scratch-topics.js'
 import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import type { ConversationCheckpointPage, ConversationRef } from '@agentmux/core/conversation'
+import type { DesktopRuntimeClient } from './desktop-host.js'
 export type MoteChatAgentOptions = {
   config(): AppConfig
   catalog(): Promise<AgentMuxSpaceCatalog | null>
   topics: Pick<ScratchTopics, 'readForDirectory' | 'read' | 'prepareAgent'>
-  clients(): readonly { hostId: string; client: AgentMuxClient }[]
+  clients(): readonly { hostId: string; client: DesktopRuntimeClient }[]
   checkpoint(reference: ConversationRef): Promise<ConversationCheckpointPage>
 }
 export type DesktopMoteChatAgents = ReturnType<typeof createHostMoteChatAgents>
