@@ -1,6 +1,6 @@
 import { fixtureEpoch as _reshape_fixtureEpoch } from "../../../test/fixture-values.mjs"
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { AppConfig, SessionSnapshot } from '../src/shared/contracts.js'
 import { createWorkspaceLayout, regionIds } from '@agentmux/layout'
 import {
@@ -113,6 +113,37 @@ describe('durable Workbench presentation', () => {
 
     expect(restored.tabs).toEqual({})
     expect(restored.layouts.workspace?.groups[0]?.tabOrder).toEqual([])
+  })
+
+  it('restores only saved display layouts when configured and referenced resources have none', () => {
+    const bound = splitView()
+    const unbound = createWorkbenchTab('unbound-tab', {
+      kind: 'agent', phase: 'attached', regionId: 'unbound-region',
+      workspaceId: 'unconfigured-resource', sessionId: 'unbound'
+    })
+    const tabs = { [bound.id]: bound, [unbound.id]: unbound }
+    const layouts = {
+      'foreign-display': createWorkspaceLayout('original-foreign-group', [bound.id]),
+      'saved-empty-display': createWorkspaceLayout('original-empty-group')
+    }
+    const createTabGroupId = vi.fn(() => 'unwanted-resource-group')
+    let state: PersistedWorkbench = { tabs, layouts }
+    for (let index = 0; index < 2; index++) {
+      const persisted = projectPersistedWorkbench(state)
+      const restored = restorePersistedWorkbench({
+        config: { ...config, workspaces: [...config.workspaces, {
+          id: 'unused-configured-resource', name: 'Unused resource', hostId: 'local',
+          path: _hygiene_fixturePath('unused-resource'), kind: 'folder'
+        }] },
+        sessions: ['left', 'right-top', 'right-bottom', 'unbound'].map(session),
+        persisted, createTabGroupId
+      })
+      expect(Object.keys(restored.layouts)).toEqual(Object.keys(layouts))
+      expect(restored.layouts).toEqual(layouts)
+      expect(restored.tabs).toEqual(tabs)
+      expect(createTabGroupId).not.toHaveBeenCalled()
+      state = restored
+    }
   })
 
   it('restores one split View instead of exploding its Sessions into Tabs', () => {
