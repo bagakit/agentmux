@@ -50,6 +50,30 @@ it('reads newest-first bounded records and keeps older pages fixed across append
   expect(await readFile(path)).toEqual(expectedBytes)
 })
 
+it('inspects one original changes predecessor without moving history paging, repetition or the forward cut', async () => {
+  const { context } = await fixture(lines('one', 'two', 'three'))
+  const reader = await open(context)
+  expect((await reader.readPrevious())?.value.id).toBe('three')
+  const older = await reader.nextCursor('two')
+  expect((await reader.readNext())?.value.id).toBe('one')
+  const middle = await reader.changesCursor()
+  expect((await reader.readBeforeChanges())?.value.id).toBe('one')
+  expect(await reader.changesCursor()).toBe(middle)
+  expect(await reader.nextCursor('two')).toBe(older)
+  reader.repeatNext()
+  expect((await reader.readNext())?.value.id).toBe('one')
+  expect((await reader.readNext())?.value.id).toBe('two')
+  await reader.seekChanges(undefined, true)
+  const cut = await reader.changesCursor()
+  expect((await reader.readBeforeChanges())?.value.id).toBe('three')
+  expect(await reader.nextCursor('two')).toBe(older)
+  expect(await reader.changesCursor()).toBe(cut)
+  expect(await reader.readNext()).toBeNull()
+  reader.repeatPrevious()
+  expect((await reader.readPrevious())?.value.id).toBe('three')
+  expect((await reader.readPrevious())?.value.id).toBe('two')
+})
+
 it('repeats the complete record at its true end after partial UTF8 exclusion and valid append', async () => {
   const prefix = lines('older')
   const batch = { messages: [
