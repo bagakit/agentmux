@@ -2,6 +2,7 @@ import type { AgentSessionUserMessage } from './types.js'
 import type { AgentInputMailboxItem } from './agent-input-mailbox.js'
 import type { ConversationInputEntity } from './conversation.js'
 import { recordedConversationAuthor } from './conversation-author.js'
+import { externalConversationAuthor } from './external-conversation.js'
 import {
   conversationInputAdoptionEdges, conversationInputIdentity, conversationInputKey, conversationRecordAnchors,
   conversationRecordAuthor, conversationRecordId, conversationSameEventTarget, conversationValuesEqual,
@@ -130,7 +131,10 @@ export function projectSessionInputs(input: {
   return [...groups.values()].map(value => {
     const authors: ConversationAuthor[] = []
     for (const author of value.authors) {
-      if (author.kind !== 'unknown' && !authors.some(known => conversationValuesEqual(author, known))) authors.push(author)
+      if (author.kind !== 'unknown' && !authors.some(known => conversationValuesEqual(
+        author.kind === 'external' ? externalConversationAuthor(author) : author,
+        known.kind === 'external' ? externalConversationAuthor(known) : known
+      ))) authors.push(author)
       if (authors.length > 1) break
     }
     return { id: value.id, primary: value.messages.find(message => message.source.kind === 'native') ?? value.messages[0] ?? null,
