@@ -1,7 +1,7 @@
 import { isDeepStrictEqual } from 'node:util'
 import { matchesProviderNativeSessionTarget } from '../agent-native-locator.js'
 import { createContinuityInputDelivery } from './input.js'
-import { DEFAULT_AGENT_CONTINUITY_CONTINUATION, type AgentMuxContinuityOperation } from './continuity.js'
+import { DEFAULT_AGENT_CONTINUITY_CONTINUATION, type AgentMuxContinuityOperation } from './continuity-contract.js'
 import type { AgentProvider } from '../agent-provider.js'
 import type { AgentMuxStoredAgentSession } from '../types.js'
 import type { CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'

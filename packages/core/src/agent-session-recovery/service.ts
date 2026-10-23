@@ -1,7 +1,7 @@
 import { assertAgentPromptSize } from '../agent-runtime-helpers.js'
 import { parseTerminalFrontendObservation, type AgentTerminalFrontendObservation, type AgentTerminalFrontendRecoveryRequest } from '../agent-terminal-frontend.js'
 import { observePromptInput } from '../prompt-submission.js'
-import { parseAgentRestartInput, type AgentMuxAgentRestartIdentity, type AgentMuxAgentRestartInput, type AgentMuxAgentRestartInspection } from './restart.js'
+import { parseAgentRestartInput, type AgentMuxAgentRestartIdentity, type AgentMuxAgentRestartInput, type AgentMuxAgentRestartInspection } from './restart-contract.js'
 import { AgentSessionContinuitySupervisor } from './supervisor.js'
 import { inspectAgentSessionInterruption } from './interruption.js'
 import { observeResumedTurnInterruption } from './resumed-interruption.js'
@@ -25,12 +25,13 @@ import { sameRun } from '../agent-session-identity.js'
 import { type CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'
 import { AgentMuxError } from '../errors.js'
 import { agentLifecycleOperationIdentity, type AgentMuxLifecycleReservation } from '../agent-session-store.js'
-import { decideAgentSessionContinuity, agentContinuityAdmission, normalizeAgentContinuityPolicy, DEFAULT_AGENT_CONTINUITY_CONTINUATION, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity.js'
-import { parseAgentContinuityControlInput, sameAgentContinuityControlInput, type AgentMuxContinuityControlInput, type AgentMuxContinuityControlReceipt, type AgentMuxContinuityControlResult } from './control.js'
+import { normalizeAgentContinuityPolicy, DEFAULT_AGENT_CONTINUITY_CONTINUATION, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
+import { decideAgentSessionContinuity, agentContinuityAdmission } from './continuity-policy.js'
+import { parseAgentContinuityControlInput, sameAgentContinuityControlInput, type AgentMuxContinuityControlInput, type AgentMuxContinuityControlReceipt, type AgentMuxContinuityControlResult } from './control-contract.js'
 import { type AgentHookBinding } from '../hook-server.js'
 import type { AgentCapabilitySnapshot, AgentMuxAgentSession, AgentPromptMessageContent, AgentMuxRun, AgentMuxRunRef, AgentMuxStoredAgentSession } from '../types.js'
 import { agentCreationIntentDigest } from '../agent-creation-authority.js'
-import type { AgentMuxAgentResumeInput, AgentMuxAgentReopenInput, AgentMuxAgentResumeOperationInput } from './contracts.js'
+import type { AgentMuxAgentResumeInput, AgentMuxAgentReopenInput, AgentMuxAgentResumeOperationInput } from './resume-contract.js'
 import { runRef, safeId, hookBindingIdentity, terminalHandshakeOperationIdentity, terminalInitialPromptReadinessIdentity, terminalEnvironment } from '../agent-runtime-helpers.js'
 import type { AgentSessionRecoveryPorts } from './ports.js'
 
@@ -1293,7 +1294,7 @@ export class AgentSessionRecoveryService {
         ...(retained.timingOverride ? { timingOverride: retained.timingOverride } : {}) }, retained.intentOperationId)
       this.continuitySupervisor.observe(current)
       let run: AgentMuxRun | null = null
-      let evidence: import('./continuity.js').AgentMuxAgentContinuityRunEvidence = { kind: 'run-unknown', observedAt: Date.now(), message: 'Original recovery observation is pending.' }
+      let evidence: import('./continuity-contract.js').AgentMuxAgentContinuityRunEvidence = { kind: 'run-unknown', observedAt: Date.now(), message: 'Original recovery observation is pending.' }
       try {
         const observed = await this.ports.runtime.kernel.status(current.run.runId); this.ports.runtime.assertAgentRun(current, observed); run = this.ports.events.projectRun(observed, current)
         evidence = run.state === 'running' ? { kind: 'run-running', observedAt: run.observedAt }
@@ -1460,10 +1461,10 @@ export class AgentSessionRecoveryService {
       receipt.error = error instanceof Error ? error.message : String(error)
       return await record({ kind: 'resumed', session: this.ports.events.projectSession(canonical), previousRun: receipt.previousRun, run: known.newRun,
         evidence: { kind: 'provider-native', providerId: canonical.providerId, nativeSessionId: canonical.nativeHandle!.sessionId,
-          previousRun: receipt.evidence as import('./continuity.js').AgentMuxAgentContinuityRunEvidence } }, receipt.reason)
+          previousRun: receipt.evidence as import('./continuity-contract.js').AgentMuxAgentContinuityRunEvidence } }, receipt.reason)
     }
-    const pending = (reason: import('./continuity.js').AgentMuxContinuityPendingReason,
-      evidence: import('./continuity.js').AgentMuxAgentContinuityRunEvidence, nextActionAt?: number) => record({
+    const pending = (reason: import('./continuity-contract.js').AgentMuxContinuityPendingReason,
+      evidence: import('./continuity-contract.js').AgentMuxAgentContinuityRunEvidence, nextActionAt?: number) => record({
         kind: 'pending', agentSessionId: input.agentSessionId, previousRun: { ...input.expectedRun }, reason, evidence,
         ...(nextActionAt === undefined ? {} : { nextActionAt }) })
     if (current && !sameRun(current.run, input.expectedRun)) {
@@ -1473,7 +1474,7 @@ export class AgentSessionRecoveryService {
         }
         return record({ kind: 'resumed', session: this.ports.events.projectSession(current), previousRun: { ...input.expectedRun }, run: { ...current.run },
           evidence: { kind: 'provider-native', providerId: current.providerId,
-            nativeSessionId: current.nativeHandle?.sessionId ?? '', previousRun: prior.evidence as import('./continuity.js').AgentMuxAgentContinuityRunEvidence } }, prior.reason)
+            nativeSessionId: current.nativeHandle?.sessionId ?? '', previousRun: prior.evidence as import('./continuity-contract.js').AgentMuxAgentContinuityRunEvidence } }, prior.reason)
       }
       return record({ kind: 'conflict', agentSessionId: input.agentSessionId, previousRun: { ...input.expectedRun },
         currentRun: { ...current.run }, reason: 'session-run-changed', evidence: { kind: 'agent-session-store' } })
