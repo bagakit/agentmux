@@ -11,6 +11,7 @@ const variants = {
   , 'destination-fence-lost': ['packages/core/src/hosted-client.ts', 'runtimeFence: expectedOwner ?? fence()', 'runtimeFence: fence()']
   , 'default-owner-lost': ['apps/desktop/src/main/connection-host-ipc.ts', 'runtime.connectionHostingTarget()', "runtime.connectionHostingTarget('owner-b')"]
   , 'metadata-reader-scope-lost': ['apps/desktop/src/preload/index.ts', 'if (live && value?.watchId === watchId) listener(value.change)', 'if (live) listener(value.change)']
+  , 'metadata-renderer-lifetime-lost': ['apps/desktop/src/main/ipc.ts', 'controlBridge.dispose(); releaseHtmlPreviews(); channelMetadata?.releaseReaders()', 'controlBridge.dispose(); releaseHtmlPreviews()']
 } as const
 const mutation = process.env.MANUAL_OWNER_MUTANT as keyof typeof variants | undefined
 if (mutation && !variants[mutation]) throw Error('Unknown manual-owner mutation')
