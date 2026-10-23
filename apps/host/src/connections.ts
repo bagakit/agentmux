@@ -1,0 +1,79 @@
+import { AgentMuxError, AgentMuxSpatialStateStore, type AgentMuxHeadlessRuntime, type AgentMuxClient } from '@agentmux/core'
+import { createConnectionServices, createPublicationConversationPort, createHostedIngressCorePort, type ConnectionServices } from '@agentmux/connectors'
+import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
+import type { ConnectionPort } from '@agentmux/core/connections'
+import type { MoteChatPort } from '@agentmux/core/mote-chat'
+import { createConnectionExternalInputAuthority } from './external-input-authority.js'
+import { createHostMoteChat } from './mote-chat.js'
+
+type ExecutionClient = AgentMuxClient | AgentMuxHostedClient
+export type HostConnectionOptions = Pick<Parameters<typeof createConnectionServices>[0], 'directory' | 'encryption' | 'adapters' | 'moteChat'> & {
+  spatial?: AgentMuxSpatialStateStore
+  /** Original profile/workspace configuration; read on demand, never a copied Host snapshot. */
+  moteConfigurationPath?: string
+  /** Original remote execution clients, owned by this Host rather than a GUI window. */
+  clients?(): readonly { hostId: string; client: ExecutionClient }[]
+}
+
+/** The service is registered before Core starts; its original owner is opened only after Core's lease. */
+function servicePort<T extends object>(owner: () => Promise<T>, path: PropertyKey[] = []): T {
+  return new Proxy(function () {}, {
+    get: (_target, key) => key === 'then' ? undefined : servicePort(owner, [...path, key]),
+    apply: async (_target, _this, args) => {
+      let target: any = await owner()
+      for (const key of path.slice(0, -1)) target = target?.[key]
+      const method = target?.[path.at(-1)!]
+      if (typeof method !== 'function') throw new AgentMuxError('The original Host connection capability is unavailable. Existing Agents and records are retained.', 'CONTROL_UNAVAILABLE')
+      return await method.apply(target, args)
+    }
+  }) as unknown as T
+}
+
+/** One database, ingress authority and publication owner under the original semantic Host. */
+export function createHostConnectionOwner(options: HostConnectionOptions) {
+  let runtime: AgentMuxHeadlessRuntime | undefined, opened: Promise<ConnectionServices> | undefined, closed = false
+  const shutdown = new AbortController()
+  const spatial = options.spatial ?? new AgentMuxSpatialStateStore()
+  const clients = () => [...(runtime ? [{ hostId: 'local', client: runtime.client }] : []), ...(options.clients?.() ?? [])]
+  const publication = createPublicationConversationPort(clients)
+  const remoteIngress = createHostedIngressCorePort(clients)
+  const moteChat = options.moteChat ?? (options.moteConfigurationPath ? createHostMoteChat({
+    configurationPath: options.moteConfigurationPath, spatial, publication, signal: shutdown.signal,
+    runtime: () => {
+      if (!runtime || closed) throw new AgentMuxError('The original Mote Host is unavailable. Existing conversations and saved resources are retained.', 'MOTE_CHAT_HOST_UNAVAILABLE')
+      return runtime
+    }
+  }) : undefined)
+  const services = async () => {
+    if (closed || !runtime) throw new AgentMuxError('The original Host connection owner is not available. Original records and healthy Agents are retained.', 'CONTROL_UNAVAILABLE')
+    return await (opened ??= createConnectionServices({ ...options, ...(moteChat ? { moteChat } : {}),
+      bindings: {
+        spatial,
+        checkpoint: reference => publication.checkpoint(reference, shutdown.signal),
+        session: async reference => {
+          const matches = clients().filter(entry => entry.hostId === reference.hostId)
+          if (matches.length !== 1) return null
+          const session = await matches[0]!.client.readAgentSession(reference.agentSessionId)
+          return session && session.agentSessionId === reference.agentSessionId && (session.hostId === 'local' || session.hostId === reference.hostId)
+            ? { hostId: reference.hostId, agentSessionId: session.agentSessionId } : null
+        }
+      }, publication,
+      // Local calls retain the original in-process authority callback, including rejoin.
+      // Remote clients preserve the existing public endpoint admission contract.
+      ingress: { core: hostId => hostId === 'local' ? runtime!.client : remoteIngress(hostId) }
+    }))
+  }
+  const connections = servicePort<ConnectionPort>(async () => (await services()).connections)
+  const authority = createConnectionExternalInputAuthority({ executionHostId: 'local', ingress: async () => {
+    const ingress = (await services()).connections.ingress
+    if (!ingress) throw new AgentMuxError('The original Host ingress owner is unavailable. Original inputs are retained.', 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED')
+    return ingress
+  } })
+  return {
+    connections, authority,
+    ...(moteChat ? { moteChat: servicePort<MoteChatPort>(async () => (await services()).moteChat!) } : {}),
+    async start(original: AgentMuxHeadlessRuntime) { runtime = original; await services() },
+    async services() { return await services() },
+    async close() { closed = true; shutdown.abort(); const owner = await opened; owner?.close() }
+  }
+}

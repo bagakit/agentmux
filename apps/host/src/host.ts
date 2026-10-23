@@ -20,11 +20,13 @@ import { loadMobileAssets } from './mobile-assets.js'
 import { createDeviceAdministration } from './device-administration.js'
 import { createDesktopExternalInputAuthority } from './external-input-authority.js'
 import { createCapsuleDesktopAdapters } from './capsules.js'
+import { createHostConnectionOwner, type HostConnectionOptions } from './connections.js'
 export type AgentMuxHostOptions = {
   store: AgentMuxAgentSessionStore
   providers?: readonly AgentProvider[]
   socketPath?: string
   desktopSocketPath?: string
+  connections?: HostConnectionOptions
   mobileBuildDirectory?: string
   mobilePort?: number
   inputContextCaptureReader?: import('@agentmux/core').AgentInputContextCaptureReader
@@ -35,10 +37,20 @@ export type AgentMuxHostOptions = {
 export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const path = options.socketPath ?? defaultAgentMuxControlSocketPath()
   const desktopPath = options.desktopSocketPath ?? `${path}.desktop`
+  const connectionOwner = options.connections ? createHostConnectionOwner(options.connections) : undefined
   let runtime: Awaited<ReturnType<typeof startHeadlessAgentMux>> | undefined
   let authority: DeviceAuthority | undefined
   let relay: RelayTransportController | undefined
   let local: Awaited<ReturnType<typeof startLocalRelay>> | undefined
+  const closeResources = async () => {
+    const errors: unknown[] = []
+    for (const close of [() => relay?.stop(), () => local?.stop(), () => authority?.flush(),
+      () => connectionOwner?.close(), () => runtime?.stop()]) {
+      try { await close() } catch (error) { errors.push(error) }
+    }
+    if (errors.length === 1) throw errors[0]
+    if (errors.length) throw new AggregateError(errors, 'Host shutdown has unconfirmed resource releases. Original Agent Runs are retained.')
+  }
   let mobileState: AgentMuxRpcMobileAccessState = { state: 'starting', message: '正在启动手机连接' }
   let offerUrl: (() => string) | undefined
   let resolveAuthority!: (value: DeviceAuthority) => void, rejectAuthority!: (error: unknown) => void
@@ -53,6 +65,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     catch { return { ...mobileState, state: 'unavailable', message: '当前没有可用的局域网地址；连接记录和 Agent 会话保留。' } }
   }
   const service = {
+    ...(connectionOwner ? { connections: connectionOwner.connections, ...(connectionOwner.moteChat ? { moteChat: connectionOwner.moteChat } : {}) } : {}),
     operationSource: (context: AgentMuxRpcCallContext) => context.caller ? undefined : authority?.operationSource(context.principal),
     recordDeviceOperation: async (source: import('@agentmux/core').AgentOperationDevice, method: string, args: unknown[], result: 'confirmed' | 'failed' | 'unknown', operationId: string) => {
       if (authority) {
@@ -148,7 +161,8 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       ...(options.providers ? { providers: options.providers } : {}), service,
       capsuleAdapters: createCapsuleDesktopAdapters({ connect: context => desktopClient(context ?? { transport: 'unix' }) }),
       inputContextCaptureReader: options.inputContextCaptureReader ?? createDesktopInputContextCaptureReader({ desktopSocketPath: desktopPath, captureHostId: 'local', executionHostId: 'local' }),
-      externalInputAuthority: options.externalInputAuthority ?? createDesktopExternalInputAuthority({ desktopSocketPath: desktopPath, executionHostId: 'local' }) })
+      externalInputAuthority: options.externalInputAuthority ?? connectionOwner?.authority ?? createDesktopExternalInputAuthority({ desktopSocketPath: desktopPath, executionHostId: 'local' }) })
+    await connectionOwner?.start(runtime)
     if (options.store instanceof AgentMuxFileAgentSessionStore) {
       try {
         authority = await DeviceAuthority.open(join(dirname(options.store.path), 'agentmux-devices.json'))
@@ -165,7 +179,8 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
 
   } catch (error) {
     rejectAuthority(error)
-    await runtime?.stop()
+    try { await closeResources() }
+    catch (cleanupError) { throw new AggregateError([error, cleanupError], 'Host startup failed and some resource releases are unconfirmed. Original Agent Runs are retained.') }
     throw error
   }
   let disposed = false
@@ -174,8 +189,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
 
   return { client: runtime.client, hosted: runtime.hosted, server: runtime.server, mobileAccessState, deviceAuthority: () => authorityReady, async dispose() {
     if (disposed) return; disposed = true; clearInterval(retryMobile)
-    await relay?.stop(); await local?.stop(); await authority?.flush()
-    await runtime!.stop()
+    await closeResources()
   } }
 }
 
