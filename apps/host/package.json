@@ -33,6 +33,10 @@
     "./mote-model": {
       "types": "./dist/mote-model.d.ts",
       "import": "./dist/mote-model.js"
+    },
+    "./credential-encryption": {
+      "types": "./dist/credential-encryption.d.ts",
+      "import": "./dist/credential-encryption.js"
     }
   }
 }
