@@ -47,7 +47,8 @@ export async function buildCapsuleProof(output = join(repository, '.tmp/capsule-
   }
   const sourcePaths = [join(repository, 'pnpm-lock.yaml'), join(repository, 'package.json'), join(desktop, 'package.json'),
     fileURLToPath(import.meta.url), join(desktop, 'scripts/build-workspace-move-helper.mjs'),
-    ...await files(join(desktop, 'native')),
+    join(repository, 'apps/host/scripts/build.mjs'), join(repository, 'apps/host/scripts/build-workspace-move-helper.mjs'),
+    ...await files(join(repository, 'apps/host/native')),
     join(repository, 'apps/host/package.json'), join(desktop, 'electron.vite.config.ts'),
     ...await files(join(desktop, 'src')), ...await files(join(repository, 'apps/host/src')),
     ...(await Promise.all(assets.map(name => files(join(desktop, name))))).flat(),
@@ -81,6 +82,13 @@ export async function buildCapsuleProof(output = join(repository, '.tmp/capsule-
       assert.equal(sha(await readFile(path)), sourceFiles[key], `Dependency source changed during compilation: ${key}`)
       receipt.dependencySourceFiles[key] = sourceFiles[key]
     }
+  }
+  const host = join(repository, 'apps/host')
+  await command('Host public modules', process.execPath, [join(host, 'scripts/build.mjs')])
+  for (const path of await files(join(host, 'src'))) {
+    const key = relative(repository, path)
+    assert.equal(sha(await readFile(path)), sourceFiles[key], `Host source changed during compilation: ${key}`)
+    receipt.dependencySourceFiles[key] = sourceFiles[key]
   }
   const { resolveConfig } = await import(require.resolve('electron-vite'))
   const { build } = await import(require.resolve('vite'))
@@ -119,6 +127,7 @@ export async function buildCapsuleProof(output = join(repository, '.tmp/capsule-
   Object.assign(receipt.compiledFiles, await hashes([join(output, 'package.json')], output))
   const dependencyPaths = []
   for (const name of packages) dependencyPaths.push(join(repository, 'packages', name, 'package.json'), ...await files(join(repository, 'packages', name, 'dist')))
+  dependencyPaths.push(join(host, 'package.json'), ...await files(join(host, 'dist')))
   receipt.dependencyFiles = await hashes(dependencyPaths)
   assert.deepEqual(await hashes([...new Set(sourcePaths)]), sourceFiles, 'Product source changed while building this candidate')
   for (const name of ['main/index.js', 'main/agentmux-host.js', 'preload/index.cjs', 'preload/browser-popup.cjs', 'preload/capsule.cjs', 'renderer/index.html'])
