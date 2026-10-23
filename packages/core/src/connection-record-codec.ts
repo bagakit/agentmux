@@ -21,7 +21,7 @@ export function parseConnectionObservation(value: unknown): ConnectionObservatio
   const p = object(value, ['authentication', 'transport', 'intake', 'delivery'])
   const stage = (value: unknown) => {
     const s = object(value, ['state', 'reason'])
-    if (!['unknown', 'ready', 'unavailable', 'disabled'].includes(s.state as string) || s.reason !== undefined && !['not-tested', 'credential-missing', 'adapter-unavailable', 'check-failed', 'not-started'].includes(s.reason as string)) fail()
+    if (!['unknown', 'ready', 'unavailable', 'disabled'].includes(s.state as string) || s.reason !== undefined && !['not-tested', 'credential-missing', 'credential-format-unsupported', 'credential-unavailable', 'adapter-unavailable', 'check-failed', 'not-started'].includes(s.reason as string)) fail()
     return { state: s.state, ...(s.reason === undefined ? {} : { reason: s.reason }) } as ConnectionObservation['authentication']
   }
   return { authentication: stage(p.authentication), transport: stage(p.transport), intake: stage(p.intake), delivery: stage(p.delivery) }

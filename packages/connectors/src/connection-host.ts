@@ -11,6 +11,7 @@ import type { ChannelProfileAdapter } from './channel-profile-adapter.js'
 import type { ChannelActorProfileObservation, ChannelProfileReason, ConnectionActor } from '@agentmux/core/connections'
 import type { ChannelMetadataChange, ChannelMetadataPort } from '@agentmux/core/connections'
 import { createChannelMetadata } from './channel-metadata.js'
+import { credentialLookupFailure } from './credential-observation.js'
 import { AgentMuxError } from '@agentmux/core'
 import { parseConnectionConfig, parseConnectionObservation, parseConnectionParams, parseConnectionRecord, parseConnectionResult, parseConnectionServiceParams, parseConnectionServiceResult, parseConnectionServiceState, type ConnectionConfig, type ConnectionConfigureInput, type ConnectionInspectInput, type ConnectionInspectResult, type ConnectionObservation, type ConnectionOperation, type ConnectionPort, type ConnectionRecord, type ConnectionServiceState, type ConnectionServicePort, type ConnectionServiceConfigure, type ConnectionServiceOperation } from '@agentmux/core/connections'
 
@@ -39,7 +40,7 @@ export interface ConnectionAdapter {
 export type ConnectionHostOptions = { databasePath?: string; database?: DatabaseSync; secrets: SecretPort; adapters?: readonly ConnectionAdapter[] }
 const unknown = (): ConnectionObservation => ({ authentication: { state: 'unknown', reason: 'not-tested' }, transport: { state: 'unknown', reason: 'not-tested' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } })
 function disabled(): ConnectionObservation { return { authentication: { state: 'disabled' }, transport: { state: 'disabled' }, intake: { state: 'disabled' }, delivery: { state: 'disabled' } } }
-function unavailable(reason: 'credential-missing' | 'adapter-unavailable' | 'check-failed'): ConnectionObservation {
+function unavailable(reason: 'credential-missing' | 'credential-format-unsupported' | 'credential-unavailable' | 'adapter-unavailable' | 'check-failed'): ConnectionObservation {
   return { ...unknown(), authentication: { state: reason === 'adapter-unavailable' || reason === 'check-failed' ? 'unknown' : 'unavailable', reason }, transport: { state: reason === 'check-failed' ? 'unknown' : 'unavailable', reason } }
 }
 /** Optional original Host owner. Configuration and its operation receipt commit in one SQLite transaction. */
@@ -276,13 +277,17 @@ export class ConnectionHost implements ConnectionPort {
     if (!record) throw new AgentMuxError('The exact connection is unknown.', 'UNKNOWN_CONNECTION')
     if (!record.config.enabled) return record
     const adapter = this.adapters.get(record.config.adapterId)
-    let observation: ConnectionObservation
+    let observation: ConnectionObservation = unavailable('check-failed')
     if (!adapter) observation = unavailable('adapter-unavailable')
     else {
-      try {
-        const credential = await this.options.secrets.resolve(record.config.credentialRef)
-        observation = credential ? parseConnectionObservation(await adapter.test(record.config, credential)) : unavailable('credential-missing')
-      } catch { observation = unavailable('check-failed') } // Adapter exceptions may contain credentials or raw platform payloads.
+      let credential: string | null | undefined
+      try { credential = await this.options.secrets.resolve(record.config.credentialRef) }
+      catch (error) { observation = unavailable(credentialLookupFailure(error) ?? 'check-failed') }
+      if (credential !== undefined) {
+        if (!credential) observation = unavailable('credential-missing')
+        else try { observation = parseConnectionObservation(await adapter.test(record.config, credential)) }
+        catch { observation = unavailable('check-failed') } // Platform exceptions cannot impersonate the original credential resolver.
+      }
     }
     // A late check cannot certify a newer application credential/configuration.
     const current = this.safe(() => this.read(input.connectionId))

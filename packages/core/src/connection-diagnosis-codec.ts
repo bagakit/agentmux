@@ -1,4 +1,5 @@
-import { parseConnectionDeliverySourceObservation } from './connection-delivery-codec.js'
+import { parseConnectionDeliveryObservation, parseConnectionDeliverySourceObservation } from './connection-delivery-codec.js'
+import { parseConnectionObservation } from './connection-record-codec.js'
 import { AgentMuxError } from './errors.js'
 import { parseIngressContextObservation } from './ingress-codec.js'
 import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisSourceCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosis, type ConnectionDiagnosisInput, type ConnectionDiagnosisReading, type ConnectionGroupDiagnosis } from './connection-diagnosis-contract.js'
@@ -31,11 +32,6 @@ export function parseConnectionDiagnosisInput(value: unknown): ConnectionDiagnos
   if (!result.bindingId && ['bindingRevision', 'after', 'afterContent', 'beforeIngressId'].some(key => p[key] !== undefined) || result.bindingId && result.afterBindingId) return fail()
   return result
 }
-const stageStates = ['unknown', 'ready', 'unavailable', 'disabled'] as const
-function stage(value: unknown) {
-  const p = object(value, ['state', 'reason'])
-  return { state: member(p.state, stageStates), ...(p.reason === undefined ? {} : { reason: member(p.reason, ['not-tested', 'credential-missing', 'adapter-unavailable', 'check-failed', 'not-started'] as const) }) }
-}
 function scope(value: unknown) {
   const p = object(value, ['input', 'publication'])
   return { input: member(p.input, ['mentions-and-replies', 'all-messages'] as const), publication: member(p.publication, ['future-native-user-facing', 'future-shared-conversation'] as const) }
@@ -61,7 +57,7 @@ function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGro
   if (['after', 'afterContent', 'beforeIngressId'].some(key => window[key] !== request[key as keyof ConnectionDiagnosisInput])) return fail()
   const connection = reading(p.connection, value => {
     const c = object(value, ['revision', 'enabled', 'authentication', 'transport', 'intake', 'delivery'])
-    return { revision: count(c.revision, 1), enabled: bool(c.enabled), authentication: stage(c.authentication), transport: stage(c.transport), intake: stage(c.intake), delivery: stage(c.delivery) }
+    return { revision: count(c.revision, 1), enabled: bool(c.enabled), ...parseConnectionObservation({ authentication: c.authentication, transport: c.transport, intake: c.intake, delivery: c.delivery }) }
   })
   const binding = reading(p.binding, value => {
     const b = object(value, ['state', 'currentRevision', 'scope', 'activeInputGrants', 'activeAnswerGrants', 'activePermissionGrants'])
@@ -75,9 +71,7 @@ function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGro
       const receipt = nullable(d.receipt, value => member(value, ['confirmed', 'unknown', 'not-applied'] as const))
       if (receipt !== 'confirmed' && d.platformMessageId !== null) return fail()
       return { association: association(d.association), kind: member(d.kind, ['conversation', 'permission', 'binding-notice'] as const), operationId: id(d.operationId), state: member(d.state, ['pending', 'dispatching', 'unknown', 'confirmed', 'not-applied', 'cancelled', 'superseded'] as const), receipt, platformMessageId: nullable(d.platformMessageId, text), reason: nullable(d.reason, value => member(value, deliveryReasons)), resourceUpload: nullable(d.resourceUpload, value => member(value, ['pending', 'dispatching', 'unknown', 'confirmed'] as const)) }
-    }), observation: nullable(o.observation, value => {
-      const s = object(value, ['state', 'reason']); return { state: member(s.state, stageStates), ...(s.reason === undefined ? {} : { reason: member(s.reason, ['not-started', 'source-unconfirmed', 'source-gap', 'content-unconfirmed', 'storage-unconfirmed', 'adapter-unavailable', 'credential-missing', 'effect-unconfirmed'] as const) }) }
-    }), sourceObservation: nullable(o.sourceObservation, parseConnectionDeliverySourceObservation), effectObservation: nullable(o.effectObservation, value => {
+    }), observation: nullable(o.observation, parseConnectionDeliveryObservation), sourceObservation: nullable(o.sourceObservation, parseConnectionDeliverySourceObservation), effectObservation: nullable(o.effectObservation, value => {
       const s = object(value, ['state', 'reason']); return { state: member(s.state, ['unknown', 'unavailable'] as const), reason: member(s.reason, ['effect-unconfirmed'] as const) }
     }), coverage: nullable(o.coverage, value => {
       const c = object(value, ['state', 'nextContent', 'gaps', 'originCount', 'omittedGapCount'])

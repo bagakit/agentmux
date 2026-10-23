@@ -1,6 +1,7 @@
 import { AgentMuxError } from '@agentmux/core'
 import { parseConnectionObservation, type ConnectionConfig, type ConnectionObservation, type ConnectionRecord } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
+import { credentialLookupFailure } from './credential-observation.js'
 import type { DurableIngressHost } from './durable-ingress.js'
 import type { ChannelStoragePort } from './channel-storage.js'
 import type { ChannelMetadataSubject } from '@agentmux/core/connections'
@@ -19,7 +20,7 @@ export interface ConnectionIngressTransport {
     receive(input: ConnectionTransportEvent, acknowledge: () => void | Promise<void>): ReturnType<DurableIngressHost['receive']>
   }): Promise<ConnectionIngressReceiver>
 }
-type Lane = { record: ConnectionRecord; abort: AbortController; receiver?: ConnectionIngressReceiver; opening: boolean; failed?: 'credential-missing' | 'check-failed'; recoveryFailed?: boolean; dispatchFailures: Set<string>; rechecks?: Iterator<string>; after?: string }
+type Lane = { record: ConnectionRecord; abort: AbortController; receiver?: ConnectionIngressReceiver; opening: boolean; failed?: 'credential-missing' | 'credential-format-unsupported' | 'credential-unavailable' | 'check-failed'; recoveryFailed?: boolean; dispatchFailures: Set<string>; rechecks?: Iterator<string>; after?: string }
 type ReceiverObservation = Pick<ConnectionObservation, 'authentication' | 'transport' | 'intake'>
 const RECOVERY_BATCH = 25
 
@@ -94,7 +95,9 @@ export class ConnectionReceivers {
   private async start(lane: Lane, transport: ConnectionIngressTransport): Promise<void> {
     lane.opening = true
     try {
-      const credential = await this.connections.resolveCredential(lane.record.config.connectionId)
+      let credential: string | null
+      try { credential = await this.connections.resolveCredential(lane.record.config.connectionId) }
+      catch (error) { lane.failed = credentialLookupFailure(error) ?? 'check-failed'; return }
       if (!credential) { lane.failed = 'credential-missing'; return }
       if (!this.current(lane)) return
       const receiver = await transport.start({ config: structuredClone(lane.record.config), credential,
@@ -137,7 +140,7 @@ export class ConnectionReceivers {
   observation(connectionId: string, revision: number): ReceiverObservation | null {
     const lane = this.lanes.get(connectionId)
     if (!lane || lane.record.revision !== revision) return null
-    if (!lane.receiver) return { authentication: { state: 'unknown', reason: 'not-tested' }, transport: lane.failed ? { state: 'unavailable', reason: lane.failed } : { state: 'unknown', reason: 'not-started' }, intake: { state: 'unknown', reason: 'not-started' } }
+    if (!lane.receiver) return { authentication: lane.failed && lane.failed !== 'check-failed' ? { state: 'unavailable', reason: lane.failed } : { state: 'unknown', reason: 'not-tested' }, transport: lane.failed ? { state: 'unavailable', reason: lane.failed } : { state: 'unknown', reason: 'not-started' }, intake: { state: 'unknown', reason: 'not-started' } }
     try {
       const { authentication, transport, intake } = parseConnectionObservation(lane.receiver.observation())
       return { authentication, transport, intake: lane.recoveryFailed || lane.dispatchFailures.size ? { state: 'unknown', reason: 'check-failed' } : intake }
