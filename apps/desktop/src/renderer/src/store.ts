@@ -4333,7 +4333,7 @@ export async function retireMoteBotRequest(request: MoteBotRequest, operation: i
   return await saveWorkbenchSelection(false)
 }
 /** Remember only which original task to read; selection never dispatches its input. */
-export function setBotTaskSelection(scope: BotTaskScope, selection: string | BotTaskLocator | null): void {
+export function setBotTaskSelection(scope: BotTaskScope, selection: string | BotTaskLocator | null): Promise<AgentMuxSpatialSave> | undefined {
   const key = botTaskSelectionKey(scope), current = useAppStore.getState().botTaskSelections
   if (selection !== null && !restoredBotTaskSelections({ [key]: selection })[key]) throw new Error('The original bot task locator is invalid.')
   const previous = readBotTaskLocator(current[key]), next = readBotTaskLocator(selection)
@@ -4345,7 +4345,11 @@ export function setBotTaskSelection(scope: BotTaskScope, selection: string | Bot
   else selections[key] = structuredClone(selection)
   if (scope.kind === 'management' && selection !== null) selections.management = key
   useAppStore.setState({ botTaskSelections: selections })
-  void saveWorkbenchSelection(false)
+  return saveWorkbenchSelection(false)
+}
+/** An explicit effect intent awaits this original writer, including a retry of an unchanged locator. */
+export async function retainBotTaskSelection(scope: BotTaskScope, selection: string | BotTaskLocator): Promise<AgentMuxSpatialSave> {
+  return await (setBotTaskSelection(scope, selection) ?? saveWorkbenchSelection(false))
 }
 /** UI owner selection only; each pending request keeps its own independent frozen target. */
 export function selectManualConnectionOwner(channel: ManualConnectionIntent['channel'], target: ManualConnectionIntent['target']): void {
