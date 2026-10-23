@@ -1,66 +1,67 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import type { AgentMuxDesktopApi, ConnectionHostingTarget } from '../../../../shared/contracts'
-import { configValuesEqual } from '../../../../shared/config-edit'
+import type { ConnectionHostingTarget } from '../../../../shared/contracts'
 import type { SettingsNavigationRequest } from '../SettingsNavigation'
 import { selectManualConnectionOwner, useAppStore } from '../../store'
 import { api } from '../../lib/api'
+import { connectionSettingsPort } from '../../lib/connection-settings-port'
+import { botTaskSelectionKey, readBotTaskLocator, restoredManagementTask } from '../../lib/bot-task-selection'
 import { ConnectorServiceControl } from './ConnectorServiceControl'
 import { ExternalConnectionsSettings } from './ExternalConnectionsSettings'
 
-export type ConnectionSettingsPort = Pick<AgentMuxDesktopApi['connections'], 'call' | 'storeCredential' | 'inspectCredential'>
-export function connectionSettingsPort(target: ConnectionHostingTarget | null): ConnectionSettingsPort {
-  if (!target) return api.connections
-  const original = { ...target }
-  return {
-    call: (method, params) => api.connections.call(method, params, original),
-    storeCredential: input => api.connections.storeCredential(input, original),
-    inspectCredential: operationId => api.connections.inspectCredential(operationId, original)
-  }
-}
 /** An explicit route on the existing configured Hosts, separate from Agent execution. */
 export function ConnectionHostingSettings(props: { active: boolean; channel?: 'lark' | 'discord'; onClose?: (() => void) | undefined; navigationRequest?: SettingsNavigationRequest | undefined }) {
   const channel = props.channel ?? 'lark', hosts = useAppStore(state => state.config?.hosts)
   const intents = useAppStore(state => state.manualConnectionIntents)
-  const [target, setTarget] = useState<ConnectionHostingTarget | null>(() => props.navigationRequest ? null : useAppStore.getState().manualConnectionSelections[channel] ?? null)
-  const [reading, setReading] = useState(''), [issue, setIssue] = useState('')
-  const [request, setRequest] = useState<string | null>(null)
+  const origin = props.navigationRequest?.channelOrigin ?? props.navigationRequest?.moteLarkOrigin
+  const [target, setTarget] = useState<ConnectionHostingTarget | null | undefined>(() => {
+    if (origin) return origin.hostingTarget ?? null
+    const state = useAppStore.getState(), retained = channel === 'lark' ? restoredManagementTask(state.botTaskSelections) ?? readBotTaskLocator(state.botTaskSelections[botTaskSelectionKey({ kind: 'enrollment' })]) : null
+    return retained ? retained.hostingTarget : Object.hasOwn(state.manualConnectionSelections, channel) ? state.manualConnectionSelections[channel] : undefined
+  })
+  const navigation = useRef(props.navigationRequest)
   useEffect(() => {
-    if (request === null) return
-    const host = hosts?.find(host => host.id === request), abort = new AbortController()
-    if (!host) { setIssue('This configured Host is unavailable. The original draft and save are kept.'); setRequest(null); return }
-    setReading(host.id); setIssue('')
-    void api.hosts.inspect(host, { signal: abort.signal }).then(observation => {
+    if (navigation.current === props.navigationRequest) return
+    navigation.current = props.navigationRequest
+    if (origin) { setRequest(null); setTarget(origin.hostingTarget ?? null); setIssue('') }
+  }, [props.navigationRequest])
+  const [reading, setReading] = useState(''), [issue, setIssue] = useState('')
+  const [request, setRequest] = useState<string | null>(() => target === undefined ? 'local' : null)
+  useEffect(() => {
+    if (!props.active || request === null) return
+    const abort = new AbortController()
+    setReading(request); setIssue('')
+    void api.connections.hostingTarget(request).then(original => {
       if (abort.signal.aborted) return
-      if (observation.routeHostId !== host.id || !configValuesEqual(observation.configuration, host) || observation.owner.state !== 'available') throw new Error('The original Host identity is not confirmed. Read this Host again.')
-      const target = { hostId: host.id, runtimeId: observation.owner.value.runtimeId }
-      selectManualConnectionOwner(channel, target); setTarget(target)
+      selectManualConnectionOwner(channel, original); setTarget(original)
     }).catch(error => { if (!abort.signal.aborted) setIssue(presentError(error)) })
       .finally(() => { if (!abort.signal.aborted) { setReading(''); setRequest(null) } })
     return () => abort.abort()
-  }, [request, hosts])
-  const key = JSON.stringify([channel, target]), connections = useMemo(() => connectionSettingsPort(target), [key])
+  }, [request, props.active])
+  const key = JSON.stringify([channel, target]), connections = useMemo(() => connectionSettingsPort(target ?? null), [key])
   if (!props.active) return null
   return <div className="settings-pane-stack">
     <section className="connector-setup" data-connection-hosting>
       <div className="connector-setup__fields"><label className="settings-field connector-platform"><span>Bot hosting</span>
-        <select aria-label="Connector hosting Host" value={target ? 'original' : 'desktop'} onChange={event => {
-          if (event.target.value === 'desktop') { setRequest(null); selectManualConnectionOwner(channel, null); setTarget(null); setIssue('') }
+        <select aria-label="Connector hosting Host" value={target ? 'original' : target === null ? 'unconfirmed' : 'local'} onChange={event => {
+          if (event.target.value === 'local') setRequest('local')
           else if (event.target.value.startsWith('host:')) setRequest(event.target.value.slice(5))
         }}>
-          <option value="desktop">This App</option>
-          {target ? <option value="original">{hosts?.find(host => host.id === target.hostId)?.label ?? target.hostId}</option> : null}
-          {hosts?.map(host => <option key={host.id} value={'host:' + host.id}>{host.label}</option>)}
+          <option value="local">Background Host on this device</option>
+          {target === null ? <option value="unconfirmed">Original Host not recorded</option> : null}
+          {target ? <option value="original">{target.hostId === 'local' ? 'Background Host on this device' : hosts?.find(host => host.id === target.hostId)?.label ?? target.hostId}</option> : null}
+          {hosts?.filter(host => host.id !== 'local').map(host => <option key={host.id} value={'host:' + host.id}>{host.label}</option>)}
         </select>
       </label></div>
       <p className="settings-group-note">Bots, credentials and profiles stay here. Your Agents can run on another Host.</p>
       {Object.values(intents).filter(item => item.channel === channel && item.pending && JSON.stringify(item.target) !== JSON.stringify(target)).map(item => <button key={item.pending!.operationId + JSON.stringify(item.target)} className="small-button" onClick={() => {
         setRequest(null); selectManualConnectionOwner(channel, item.target); setTarget(item.target); setIssue('')
-      }}>Resume original save · {item.target ? hosts?.find(host => host.id === item.target!.hostId)?.label ?? item.target.hostId : 'This App'}</button>)}
+      }}>{item.target ? 'Resume original save' : 'Review original save'} · {item.target ? hosts?.find(host => host.id === item.target!.hostId)?.label ?? item.target.hostId : 'Host not recorded'}</button>)}
       {target ? <details className="connector-diagnostics"><summary>Hosting identity</summary><p><code>{target.hostId}</code> · <code>{target.runtimeId}</code></p></details> : null}
-      {reading ? <p role="status">Reading the original Host identity…</p> : issue ? <p role="status" className="connector-issue">{issue}</p> : null}
+      {reading ? <p role="status" aria-busy="true">Reading the original Host identity…</p> : issue ? <p role="status" className="connector-issue">{issue}</p> : null}
+      {target === undefined && !reading ? <button type="button" className="small-button" onClick={() => setRequest('local')}>Read background Host</button> : null}
     </section>
-    {!target ? <ConnectorServiceControl active={props.active} /> : null}
-    <ExternalConnectionsSettings key={key} {...props} connections={connections} hostingTarget={target} />
+    {target !== undefined ? <><ConnectorServiceControl active={props.active} hostingTarget={target} />
+    <ExternalConnectionsSettings key={key} {...props} connections={connections} hostingTarget={target} onOpenOriginalHost={original => { setRequest(null); selectManualConnectionOwner(channel, original); setTarget(original); setIssue('') }} /></> : null}
   </div>
 }

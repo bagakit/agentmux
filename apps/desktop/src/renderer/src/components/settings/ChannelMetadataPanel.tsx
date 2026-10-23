@@ -4,7 +4,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { ChannelProfileAvatar } from '@agentmux/client-ui/components/ChannelProfileAvatar'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../../lib/api'
-import type { ConnectionSettingsPort } from './ConnectionHostingSettings'
+import type { ConnectionSettingsPort } from '../../lib/connection-settings-port'
 import '../../styles/channel-metadata.css'
 
 const LoadingIcon = semanticIconComponent('status.loading'), RefreshIcon = semanticIconComponent('action.refresh'), PersonIcon = semanticIconComponent('object.user'), GroupIcon = semanticIconComponent('object.team')
