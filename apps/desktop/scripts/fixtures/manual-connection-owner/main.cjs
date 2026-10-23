@@ -29,7 +29,18 @@ app.whenReady().then(async () => {
     await click('[data-settings-pane=lark] .channel-metadata summary'); await capture('manual-owner-saved-wide')
     const facts = await read('({errors:window.manualOwnerProof.errors,selection:document.querySelector("[data-connection-hosting] select")?.value,text:document.querySelector("[data-settings-pane=lark]").textContent})')
     assert.deepEqual(facts.errors, []); assert.equal(facts.text.includes('preview-masked-secret'), false); assert.equal(facts.selection, 'original')
-    result.facts = facts; result.passed = true
+    result.facts = facts
+    await read('window.manualOwnerProof.showDefault()')
+    await until('document.querySelector("[data-connection-hosting]")?.textContent.includes("original-local-runtime") && document.querySelector("[data-enrollment-new]")')
+    await capture('background-host-default-wide')
+    await read('window.manualOwnerProof.showOwnerless()')
+    await until('Array.from(document.querySelectorAll("[data-connection-hosting] button")).some(button=>button.textContent.includes("Review original save"))')
+    await click('[data-connection-hosting] button')
+    await until('document.querySelector("[data-owner-unconfirmed]")?.textContent.includes("original-save-unconfirmed")')
+    win.setContentSize(520, 980); await until('innerWidth===520'); await capture('background-host-ownerless-narrow')
+    assert.equal(await read('Boolean(document.querySelector("[data-connection-save]"))'), false)
+    assert.deepEqual(await read('window.manualOwnerProof.errors'), [])
+    result.passed = true
   } catch (error) { result.failure = { name: error.name, message: error.message, stack: error.stack }; if (win && !win.isDestroyed()) fs.writeFileSync(path.join(evidence, 'failure.png'), (await win.webContents.capturePage()).toPNG()) }
   finally { fs.writeFileSync(path.join(evidence, 'render.json'), JSON.stringify(result, null, 2)); win?.destroy(); app.exit(result.passed ? 0 : 1) }
 })
