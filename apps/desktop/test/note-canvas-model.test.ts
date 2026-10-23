@@ -2,7 +2,7 @@ import { fixtureEpoch as _tailRefreshFixtureEpoch, fixturePath as _tailRefreshFi
 import { expect, it } from 'vitest'
 import { emptyNotebookState } from '@agentmux/core/notebook-catalog'
 import type { NotebookGraphSnapshot } from '../src/shared/notebook-observation'
-import { projectNoteCanvas, canvasSharedObservation, initialCanvasPositions, attachNoteCanvasRelationships } from '../src/renderer/src/lib/note-canvas-model'
+import { projectNoteCanvas, canvasSharedObservation, initialCanvasPositions, attachNoteCanvasRelationships, noteCanvasFocusNeighborhood } from '../src/renderer/src/lib/note-canvas-model'
 import { arrangeNoteCanvas } from '../src/renderer/src/lib/note-canvas-layout-engine'
 
 function fixture(): NotebookGraphSnapshot {
@@ -113,4 +113,33 @@ it('shows directly embedded shared originals even in a restored collapsed graph 
   snapshot.graph.observations[0]!.fileIdentity = 'unknown'
   expect(projectNoteCanvas(snapshot, scope, []).notes.map(note => note.id)).toEqual(['root'])
   expect(projectNoteCanvas(snapshot, { kind: 'notebook', notebookId: 'default' }, [], []).notes).toEqual([])
+})
+
+it('assigns single-host shared blocks to their host Note area and multi-host shared blocks as independent bridge nodes', () => {
+  const snapshot = fixture(), resource = snapshot.catalog.pages.root!.resource
+  delete snapshot.catalog.pages.shared
+  snapshot.graph.observations.push(
+    { noteId: 'shared-single', resource: { ...resource, path: 'single.note.md' }, status: 'read', actualNoteId: 'shared-single', kind: 'shared-block', fileIdentity: 'confirmed', revision: 'r1', blockIds: ['b1'] },
+    { noteId: 'shared-bridge', resource: { ...resource, path: 'bridge.note.md' }, status: 'read', actualNoteId: 'shared-bridge', kind: 'shared-block', fileIdentity: 'confirmed', revision: 'r2', blockIds: ['b2'] },
+  )
+  const embed = (from: string, to: string) => ({ source: { noteId: from, blockId: from + '-' + to }, sourceResource: resource, target: { kind: 'page' as const, noteId: to }, occurrence: { kind: 'stored' as const, referenceId: from + '-' + to }, mode: 'embed' as const, resolution: 'resolved' as const })
+  snapshot.graph.references.push(embed('root', 'shared-single'), embed('root', 'shared-bridge'), embed('right', 'shared-bridge'))
+  const projected = projectNoteCanvas(snapshot, { kind: 'note', noteId: 'root' }, ['root'])
+  const single = projected.notes.find(note => note.id === 'shared-single')!
+  const bridge = projected.notes.find(note => note.id === 'shared-bridge')!
+  expect(single).toMatchObject({ kind: 'shared-block', hostNoteIds: ['root'], hostNoteId: 'root', sharedPlacement: 'area-member' })
+  expect(bridge).toMatchObject({ kind: 'shared-block', hostNoteIds: ['root', 'right'], sharedPlacement: 'bridge' })
+  expect(bridge.hostNoteId).toBeUndefined()
+})
+
+it('computes 1-hop focus neighborhoods for Note areas, Block nodes and Relationship edges', () => {
+  const snapshot = fixture(), projection = projectNoteCanvas(snapshot, { kind: 'note', noteId: 'root' }, ['root'])
+  const attached = attachNoteCanvasRelationships(projection.relationships, new Map([['root', new Set(['root', 'rootsecond'])], ['right', new Set(['right'])]]))
+  const byBlock = noteCanvasFocusNeighborhood(projection, attached, { kind: 'block', noteId: 'root', blockId: 'rootsecond' })
+  expect(byBlock.active).toBe(true)
+  expect([...byBlock.noteIds].sort()).toEqual(['right', 'root'])
+  expect([...(byBlock.blockIdsByNote.get('root') ?? [])]).toEqual(['rootsecond'])
+  expect([...(byBlock.blockIdsByNote.get('right') ?? [])]).toEqual(['rightsecond'])
+  const byNote = noteCanvasFocusNeighborhood(projection, attached, { kind: 'note', noteId: 'left' })
+  expect([...byNote.noteIds].sort()).toEqual(['left', 'root', 'shared'])
 })
