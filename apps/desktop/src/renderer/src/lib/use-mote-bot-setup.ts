@@ -88,7 +88,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
   const [checkingId, setChecking] = useState<string | null>(selectedId)
   const [profile, setProfile] = useState<SavedMoteBotProfile | null>(null),
     [capabilities, setCapabilities] = useState<ConnectionEnrollmentCapability[]>([])
-  const [message, setMessage] = useState<{ kind: 'issue' | 'notice'; text: string }>({ kind: 'issue', text: '' })
+  const [message, setMessage] = useState<{ kind: 'issue' | 'notice' | 'owner-unconfirmed'; text: string }>({ kind: 'issue', text: '' })
   const setIssue = (text: string) => setMessage({ kind: 'issue', text })
   const [busy, setBusy] = useState<string[]>([]),
     [next, setNext] = useState<string | null>(null)
@@ -232,8 +232,12 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
   async function send(input: MoteBotRequest) {
     const request = structuredClone(input)
     const id = request.input.operationId
-    if (request.inspectOnly || !request.hostingTarget) {
-      setIssue('This request is retained without sending it. Its original bot hosting owner or prepared input is unconfirmed; start an explicit new action for a new request.')
+    if (!request.hostingTarget) {
+      setMessage({ kind: 'owner-unconfirmed', text: 'The original bot hosting owner is unconfirmed. The original request is kept without contacting another Host.' })
+      return
+    }
+    if (request.inspectOnly) {
+      setIssue('This historical request is retained for checking only. Start an explicit new action to publish prepared profile data.')
       return
     }
     if (writing.current.has(id)) return
@@ -360,7 +364,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     const hostingTarget = ownerFor(id)
     if (!hostingTarget) {
       setChecking(current => current === id ? null : current)
-      setIssue('The original bot hosting owner is unconfirmed. The original task and request are kept without contacting another Host.')
+      setMessage({ kind: 'owner-unconfirmed', text: 'The original bot hosting owner is unconfirmed. The original task and request are kept without contacting another Host.' })
       return
     }
     const token = lifetime.current,
