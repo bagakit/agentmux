@@ -30,6 +30,7 @@ let container: HTMLDivElement, toolbarHost: HTMLDivElement, root: Root, calls: A
 let nativeConfirm: ReturnType<typeof vi.fn<(params: CapsuleParamsMap['capsule.interaction.reply']) => Promise<CapsuleReplyResult>>>
 let transport: CapsulePort['call'], inFlight: Set<Promise<unknown>>, submissions: CapsulePreparedReply[]
 let inputStatus: CapsuleInputObservation['status']
+let coreInputStatus: CapsuleInputObservation['inputStatus']
 const principal = { kind: 'user' as const, id: 'original-local-user' }
 const caller = { transport: 'unix' as const, principal }
 const question = 'Review <section> & confirm the original build?'
@@ -39,13 +40,13 @@ function track<T>(promise: Promise<T>): Promise<T> {
 }
 const observation = (prepared: CapsulePreparedReply): CapsuleInputObservation => ({ status: inputStatus,
   inputOperationId: prepared.inputOperationId, expectedRun: prepared.expectedRun,
-  ...(inputStatus === 'submitted' ? { inputStatus: 'admitted' as const } : { reason: 'Original input observation is unavailable.' }) })
+  ...(inputStatus === 'submitted' ? { ...(coreInputStatus ? { inputStatus: coreInputStatus } : {}) } : { reason: 'Original input observation is unavailable.' }) })
 
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   directory = await mkdtemp(join(tmpdir(), 'capsule-chrome-'))
   const sourcePath = join(directory, 'page'); await mkdir(sourcePath); await writeFile(join(sourcePath, 'index.html'), '<title>Original review</title>')
-  submissions = []; inputStatus = 'submitted'; fault.dispatchSave = false
+  submissions = []; inputStatus = 'submitted'; coreInputStatus = 'admitted'; fault.dispatchSave = false
   owner = await NodeCapsuleOwner.open({ stateDirectory: join(directory, 'state'), replies: {
     prepare: async ({ interaction: original, answer, inputOperationId, operationId }, context) => ({
       version: 1, operationId, capsuleId: original.capsuleId, interactionId: original.interactionId, inputOperationId,
@@ -105,11 +106,12 @@ it('reads original requests through public RPC, retains draft bytes, and confirm
   expect(nativeConfirm).toHaveBeenCalledOnce(); expect(mutations('capsule.interaction.reply')).toHaveLength(0)
   expect(submissions).toHaveLength(1); expect(submissions[0]).toMatchObject({ capsuleId, interactionId: interaction.interactionId,
     target: { hostId: 'local', agentSessionId: 'original-recipient-session' }, expectedRun: { runId: 'original-run' }, prompt: 'Use the original build.', principal })
-  expect(container.textContent).toContain('input submitted'); expect(editor().readOnly).toBe(true)
+  expect(container.textContent).toContain('input admitted by Provider'); expect(editor().readOnly).toBe(true)
 })
 
 it('preserves uncertain confirmation identity across inspection and reopening without submitting again', async () => {
   inputStatus = 'unknown'; await mount(); await change('Original uncertain answer'); await click('Confirm answer')
+  expect(container.querySelector<HTMLDetailsElement>('.capsule-question__history')!.open).toBe(true)
   expect(nativeConfirm).toHaveBeenCalledOnce(); expect(submissions).toHaveLength(1)
   const original = structuredClone(nativeConfirm.mock.calls[0]![0])
   expect(container.textContent).toContain(original.operationId); expect(container.textContent).toContain('input unconfirmed')
@@ -120,7 +122,7 @@ it('preserves uncertain confirmation identity across inspection and reopening wi
   await act(async () => root.unmount()); root = createClientUiRoot(container); await mount()
   expect(editor().value).toBe('Original uncertain answer'); expect(container.textContent).toContain(original.operationId)
   inputStatus = 'submitted'; await click('Inspect original operation')
-  expect(container.textContent).toContain('input submitted'); expect(nativeConfirm).toHaveBeenCalledOnce(); expect(submissions).toHaveLength(1)
+  expect(container.textContent).toContain('input admitted by Provider'); expect(nativeConfirm).toHaveBeenCalledOnce(); expect(submissions).toHaveLength(1)
 })
 
 it('continues only a durably prepared confirmation with its saved operation, answer, revision and input identity', async () => {
@@ -134,7 +136,7 @@ it('continues only a durably prepared confirmation with its saved operation, ans
   await click('Continue saved confirmation')
   expect(nativeConfirm).toHaveBeenCalledTimes(2); expect(nativeConfirm.mock.calls[1]![0]).toEqual(original)
   expect(submissions).toHaveLength(1); expect(submissions[0]!.inputOperationId).toBe(saved.preparedReply.inputOperationId)
-  expect(container.textContent).toContain('input submitted')
+  expect(container.textContent).toContain('input admitted by Provider')
 })
 
 it('keeps unknown draft saves locked to their original operation while preserving later editable text', async () => {
@@ -191,4 +193,84 @@ it('retains current editor text across a late request refresh and keeps the nati
   expect(panel.hidden).toBe(false); expect(panel.querySelector('webview, iframe')).toBeNull(); expect(container.querySelector('.capsule-chrome__bar')).toBeNull(); expect(toolbarHost.querySelector('[aria-label="Page questions"]')).not.toBeNull()
   await act(async () => toolbarHost.querySelector<HTMLButtonElement>('[aria-label="Page questions"]')!.click())
   expect(panel.hidden).toBe(true); expect(editor().value).toBe('Keep my later text')
+})
+
+
+it.each([
+  ['waiting', 'input waiting in Core'],
+  ['stopped', 'input stopped before dispatch'],
+  ['not-applied', 'input not applied'],
+  ['terminal-confirmed', 'terminal input confirmed'],
+  ['admitted', 'input admitted by Provider']
+] as const)('distinguishes Core input %s without certifying Agent completion', async (status, label) => {
+  coreInputStatus = status
+  await mount(); await change('The exact registered answer'); await click('Confirm answer')
+  expect(container.textContent).toContain(label)
+  expect(container.textContent).not.toContain('input submitted')
+  expect(button('Inspect original operation').disabled).toBe(false)
+  expect(container.textContent).not.toContain('Continue saved confirmation')
+  expect([...container.querySelectorAll('button')].some(node => node.textContent === 'Confirm answer')).toBe(false)
+  const original = nativeConfirm.mock.calls[0]![0]
+  await click('Inspect original operation')
+  expect(mutations('capsule.operation.inspect').at(-1)!.params).toEqual({ operationId: original.operationId })
+  expect(nativeConfirm).toHaveBeenCalledOnce(); expect(submissions).toHaveLength(1)
+})
+
+it.each([
+  ['terminal-confirmed', 'terminal input confirmed'],
+  ['not-applied', 'input not applied']
+] as const)('reopens a waiting answer and reads its original %s receipt without another confirmation', async (status, label) => {
+  coreInputStatus = 'waiting'
+  await mount(); await change('The exact waiting answer'); await click('Confirm answer')
+  const original = structuredClone(nativeConfirm.mock.calls[0]![0]), input = structuredClone(submissions[0]!)
+  await act(async () => root.unmount()); root = createClientUiRoot(container); await mount()
+  expect(container.textContent).toContain('input waiting in Core')
+  coreInputStatus = status; await click('Inspect original operation')
+  expect(container.textContent).toContain(label)
+  expect(nativeConfirm).toHaveBeenCalledOnce(); expect(submissions).toEqual([input])
+  expect(mutations('capsule.operation.inspect').at(-1)!.params).toEqual({ operationId: original.operationId })
+  expect(editor().value).toBe(original.answer)
+})
+
+it('does not invent a delivery stage when a registered input has no protocol status', async () => {
+  coreInputStatus = undefined
+  await mount(); await change('Original registered answer'); await click('Confirm answer')
+  expect(container.textContent).toContain('input registered in Core')
+  expect(container.textContent).not.toContain('input submitted')
+  expect(container.textContent).not.toContain('input admitted')
+  expect(button('Inspect original operation')).toBeDefined()
+})
+
+it('keeps waiting answers prominent and folds confirmed history without losing its original inspection path', async () => {
+  coreInputStatus = 'waiting'
+  await mount(); await change('Keep the original answer observable'); await click('Confirm answer')
+  const original = structuredClone(nativeConfirm.mock.calls[0]![0])
+  const history = container.querySelector<HTMLDetailsElement>('.capsule-question__history')!
+  expect(history.open).toBe(true); expect(history.querySelector('summary')!.hidden).toBe(true)
+  coreInputStatus = 'terminal-confirmed'; await click('Inspect original operation')
+  expect(history.open).toBe(false)
+  const summary = history.querySelector<HTMLElement>('summary')!
+  expect(summary.hidden).toBe(false); expect(summary.textContent).toContain(question)
+  expect(summary.textContent).toContain('terminal input confirmed')
+  await act(async () => summary.click())
+  expect(history.open).toBe(true)
+  await click('Inspect original operation'); await click('Refresh')
+  expect(history.open).toBe(true); expect(editor().value).toBe(original.answer)
+  expect(mutations('capsule.operation.inspect').at(-1)!.params).toEqual({ operationId: original.operationId })
+  expect(nativeConfirm).toHaveBeenCalledOnce(); expect(submissions).toHaveLength(1)
+})
+
+it('reopens saved terminal answers as compact history with a reachable original operation', async () => {
+  await mount(); await change('Original settled history'); await click('Confirm answer')
+  const operationId = nativeConfirm.mock.calls[0]![0].operationId
+  await act(async () => root.unmount()); root = createClientUiRoot(container); await mount()
+  const history = container.querySelector<HTMLDetailsElement>('.capsule-question__history')!
+  expect(history.open).toBe(false)
+  await act(async () => history.querySelector<HTMLElement>('summary')!.click())
+  expect(history.open).toBe(true); expect(editor().value).toBe('Original settled history')
+  await click('Inspect original operation')
+  expect(history.open).toBe(true); expect(history.querySelector('summary')!.hidden).toBe(false)
+  expect(container.textContent).toContain('input admitted by Provider')
+  expect(mutations('capsule.operation.inspect').at(-1)!.params).toEqual({ operationId })
+  expect(nativeConfirm).toHaveBeenCalledOnce(); expect(submissions).toHaveLength(1)
 })
