@@ -33,7 +33,7 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, session: {}
 }))
 // Reuse the original IPC bootstrap substrate without opening the user's control endpoint.
-// The captured port is the real createDesktopConnections/SQLite owner created by registerIpc.
+// The captured port is the real createConnectionServices/SQLite owner created by registerIpc.
 vi.mock('@agentmux/core', async actual => ({ ...await actual<typeof import('@agentmux/core')>(), AgentMuxControlServer: class {
   constructor(options: { connections: ConnectionPort }) { fixture.connections = options.connections }
   async start() {} async stop() {}
@@ -42,7 +42,7 @@ vi.mock('@agentmux/demand', () => ({ openDemandStore: () => ({ list: async () =>
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 
 import { AgentMuxMemoryAgentSessionStore, LocalExecutionHost } from '@agentmux/core'
-import { createDesktopConnections } from '../src/main/connector-host.js'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { registerIpc } from '../src/main/ipc.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
@@ -63,7 +63,7 @@ function directory(root: string, profile: 'default' | 'a' | 'b') {
 const secret = 'owned-profile-credential'
 const operation = (profile: string) => 'profile-policy-' + profile
 async function seed(root: string, profile: 'default' | 'a' | 'b') {
-  const services = await createDesktopConnections({ directory: directory(root, profile), encryption: encryption() })
+  const services = await createConnectionServices({ directory: directory(root, profile), encryption: encryption() })
   try {
     const saved = await services.secrets.store({ operationId: 'credential-' + profile, secret })
     await services.connections.configure({ operationId: 'connection-operation-' + profile, expectedRevision: null,

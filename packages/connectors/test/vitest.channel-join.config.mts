@@ -13,7 +13,7 @@ if (mutation && !(mutation in mutations)) throw Error('Unknown cross-channel joi
 export default defineConfig({ root, cacheDir: resolve(root, '.cache/channel-native-join'), plugins: [{ name: 'actual-cross-channel-owner', enforce: 'pre',
   transform(original, id) {
     const path = relative(root, id.split('?')[0]!), selected = mutations[mutation as keyof typeof mutations]
-    if (!/^packages\/(?:core|connectors)\/src\/.+\.ts$/u.test(path) && path !== 'apps/desktop/src/main/connector-host.ts') return
+    if (!/^packages\/(?:core|connectors)\/src\/.+\.ts$/u.test(path) && path !== 'packages/connectors/src/connection-services.ts') return
     let code = original
     if (selected?.[0] === path) {
       if (code.split(selected[1]).length !== 2) throw Error('Cross-channel join mutation anchor missing or ambiguous')

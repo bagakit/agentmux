@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { vi } from 'vitest'
 import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
-import { createDesktopConnections } from '../../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../../src/connection-services.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../core/test/helpers/object-cli-rpc.js'
 import { feishuConfig } from './feishu.js'
 
@@ -16,7 +16,7 @@ export type RoomReadWire = { url?: string; method?: string; params?: Record<stri
 export async function roomDiscoveryFixture(effect?: (request: RoomReadWire) => Promise<unknown>) {
   const root = await mkdtemp(join(tmpdir(), 'rd-')), calls: RoomReadWire[] = []
   let server: AgentMuxControlServer | undefined
-  let services: Awaited<ReturnType<typeof createDesktopConnections>>
+  let services: Awaited<ReturnType<typeof createConnectionServices>>
   let sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
   const directory = join(root, 'original-connections'), socketPath = join(root, 'rooms.sock')
   const native = async (request: RoomReadWire) => {
@@ -32,7 +32,7 @@ export async function roomDiscoveryFixture(effect?: (request: RoomReadWire) => P
   vi.spyOn(defaultHttpInstance, 'request').mockImplementation(native as typeof defaultHttpInstance.request)
   const open = async () => {
     // No adapters, spatial state, Binding or Runtime injected: use production default registration.
-    services = await createDesktopConnections({ directory, encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) } })
+    services = await createConnectionServices({ directory, encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) } })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => [] })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   }

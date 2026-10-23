@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
 import * as core from '../../../core/dist/index.js'
 import type { ChannelMetadataChange, ChannelMetadataSubject } from '@agentmux/core/connections'
-import { createDesktopConnections } from '../../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../../src/connection-services.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../core/test/helpers/object-cli-rpc.js'
 import { ingressFixture } from './ingress.js'
 import { feishuConfig, feishuPayload, feishuSdkTransport } from './feishu.js'
@@ -31,7 +31,7 @@ export async function channelMetadataFixture(cleanup: Array<() => void | Promise
   const directory = join(f.root, 'desktop-metadata'), changes: ChannelMetadataChange[] = []
   const open = async () => {
     // Default registry, original private Connection owner and actual receiver lifecycle.
-    const services = await createDesktopConnections({ directory, encryption, bindings: { spatial: f.spatial, checkpoint: ref => f.client.conversationCheckpoint(ref) }, ingress: { core: hostId => hostId === 'local' ? f.client : undefined } })
+    const services = await createConnectionServices({ directory, encryption, bindings: { spatial: f.spatial, checkpoint: ref => f.client.conversationCheckpoint(ref) }, ingress: { core: hostId => hostId === 'local' ? f.client : undefined } })
     cleanup.push(() => services.close())
     services.onChannelMetadataChanged(change => changes.push(change))
     const server = new core.AgentMuxControlServer({ socketPath: join(f.root, 'metadata.sock'), connections: services.connections, spatialState: f.spatial, coreClients: f.coreClients })

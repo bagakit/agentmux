@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto'
 import { afterEach, beforeEach, expect, vi } from 'vitest'
 import { createWorkspaceLayout } from '@agentmux/layout'
 import { roomProvisioningFixture, config, core } from '../../../../packages/connectors/test/fixtures/room-provisioning.js'
-import { createDesktopConnections } from '../../src/main/connector-host.js'
+import { createConnectionServices } from '../../../../packages/connectors/src/connection-services.js'
 import { registerConnectorIpc } from '../../src/main/connector-ipc.js'
 import { api } from '../../src/renderer/src/lib/api'
 import { unwrapSessionInputOperationResult } from '../../src/shared/session-input-result'
@@ -27,7 +27,7 @@ import { defaultHttpInstance, type RoomReadWire } from '../../../../packages/con
 /** Production Renderer, IPC, public Core and Desktop Host; only encryption/adapter/terminal leaves are controlled. */
 export function connectorJourneyFixture(options: { platform?: (request: RoomReadWire) => Promise<unknown>; publication?: boolean; ingress?: boolean; connection?: ConnectionConfig; adapter?(): ConnectionAdapter } = {}) {
   const dom = composerDOM(), settings = vi.fn()
-  let original: Awaited<ReturnType<typeof roomProvisioningFixture>>, services: Awaited<ReturnType<typeof createDesktopConnections>>
+  let original: Awaited<ReturnType<typeof roomProvisioningFixture>>, services: Awaited<ReturnType<typeof createConnectionServices>>
   let server: InstanceType<typeof core.AgentMuxControlServer>, calls: { method: ConnectionMethod; input: unknown; result?: unknown }[]
   let forward: <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]) => Promise<ConnectionResultMap[M]>
   let platformCalls: RoomReadWire[], connectionConfig = config
@@ -61,7 +61,7 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
       return await options.platform!(input as RoomReadWire)
     })
     vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
-    services = await createDesktopConnections({ directory: join(original.root, 'ui-connections'), ...(options.platform ? {} : { adapters: [options.adapter?.() ?? original.adapter] }), bindings: { spatial: original.spatial, checkpoint: original.checkpoint },
+    services = await createConnectionServices({ directory: join(original.root, 'ui-connections'), ...(options.platform ? {} : { adapters: [options.adapter?.() ?? original.adapter] }), bindings: { spatial: original.spatial, checkpoint: original.checkpoint },
       encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
       ...(options.ingress ? { ingress: { core: hostId => hostId === 'local' ? original.client : undefined } } : {}),
       ...(options.publication ? { publication: createPublicationConversationPort(() => [{ hostId: 'local', client: original.client }]) } : {}) })

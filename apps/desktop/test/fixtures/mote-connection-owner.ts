@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { AgentMuxControlServer, connectAgentMuxRpc, type MoteConnectionCreate } from '@agentmux/core'
 import { AgentMuxSpatialStateStore, spatialCatalog } from '@agentmux/core/spatial-state'
-import { createDesktopConnections } from '../../src/main/connector-host.js'
+import { createConnectionServices } from '../../../../packages/connectors/src/connection-services.js'
 import { MoteConnectionOperations } from '../../src/main/mote-connection-operations.js'
 import { MoteConnectionSourceOwner } from '../../src/main/mote-connection-source.js'
 import { MoteConnectionPreferences } from '../../src/main/mote-connection-preferences.js'
@@ -225,7 +225,7 @@ export async function moteConnectionOwner(
   const adapters = options.generic ? [adapter] : createBuiltinConnectionAdapters()
   const chatAgentCalls = { prepare: 0, create: 0, inspect: 0, activity: 0 }
   const unavailableChatAgent = (kind: keyof typeof chatAgentCalls) => async () => { chatAgentCalls[kind]++; throw new Error('Profile metadata and settings must not create or borrow a Runtime') }
-  const connections = await createDesktopConnections({
+  const connections = await createConnectionServices({
     directory: join(root, 'connections'),
     encryption,
     adapters,

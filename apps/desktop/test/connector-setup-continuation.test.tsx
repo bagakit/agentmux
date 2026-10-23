@@ -7,7 +7,7 @@ import iconUrl from '../resources/icon-512.png'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '@agentmux/core'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionRecord, ConnectionResultMap } from '@agentmux/core/connections'
-import { createDesktopConnections } from '../src/main/connector-host.js'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
@@ -18,7 +18,7 @@ import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures
 
 const dom = composerDOM(), privateCode = 'private-setup-sign-in-code', credential = 'private-setup-credential'
 let original: Awaited<ReturnType<typeof ingressFixture>>
-let services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer
+let services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer
 let sdk: ReturnType<typeof defaultFeishuSdkTransport>, reopen: () => void
 let forward: typeof api.connections.call
 let calls: Array<{ method: ConnectionMethod; input: unknown; result: unknown }>
@@ -26,7 +26,7 @@ let platformCalls: string[]
 let trusted: ReturnType<typeof vi.fn>
 
 async function openOwner(receiver = true) {
-  services = await createDesktopConnections({ directory: join(original.root, 'setup-continuation'), encryption: enrollmentEncryption(),
+  services = await createConnectionServices({ directory: join(original.root, 'setup-continuation'), encryption: enrollmentEncryption(),
     bindings: { spatial: original.spatial, checkpoint: async ref => await original.client.conversationCheckpoint(ref) },
     ...(receiver ? { ingress: { core: (hostId: string) => hostId === 'local' ? original.client : undefined } } : {}) })
   server = new AgentMuxControlServer({ socketPath: join(original.root, 'setup-continuation.sock'), connections: services.connections, coreClients: original.coreClients })

@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import { connectionSetupDecisionForAction, type ConnectionSetupAction, type ConnectionSetupAdvance, type ConnectionSetupScalarEffect, type ConnectionSetupView } from '@agentmux/core/connections'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 
@@ -23,7 +23,7 @@ function action(view: ConnectionSetupView, kind: ConnectionSetupAction['kind']):
 }
 async function fixture(initialMode = 1) {
   const root = await mkdtemp(join(tmpdir(), 'card-actions-')), socketPath = join(root, 'owner.sock')
-  const services = await createDesktopConnections({ directory: join(root, 'connections'), encryption: enrollmentEncryption() })
+  const services = await createConnectionServices({ directory: join(root, 'connections'), encryption: enrollmentEncryption() })
   clean.push(() => rm(root, { recursive: true, force: true }), () => services.close())
   const server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw Error('Setup cannot borrow an Agent Runtime') } })
   await server.start(); clean.push(() => server.stop())

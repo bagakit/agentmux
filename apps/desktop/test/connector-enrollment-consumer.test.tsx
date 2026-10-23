@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '@agentmux/core'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
-import { createDesktopConnections } from '../src/main/connector-host.js'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
@@ -18,7 +18,7 @@ import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures
 const dom = composerDOM(), privateDevice = 'private-mount-device-material', secret = 'private-mount-application-credential'
 const clean: Array<() => void | Promise<void>> = []
 let original: Awaited<ReturnType<typeof ingressFixture>>
-let services: Awaited<ReturnType<typeof createDesktopConnections>>
+let services: Awaited<ReturnType<typeof createConnectionServices>>
 let server: AgentMuxControlServer
 let sdk: ReturnType<typeof defaultFeishuSdkTransport>
 let calls: Array<{ method: ConnectionMethod; input: unknown; result: unknown }>
@@ -48,7 +48,7 @@ beforeEach(async () => {
   }))
   const directory = join(original.root, 'mounted-enrollment'), encryption = enrollmentEncryption()
   openOwner = async () => {
-    services = await createDesktopConnections({ directory, encryption,
+    services = await createConnectionServices({ directory, encryption,
       bindings: { spatial: original.spatial, checkpoint: async ref => await original.client.conversationCheckpoint(ref) },
       ingress: { core: hostId => hostId === 'local' ? original.client : undefined } })
     server = new AgentMuxControlServer({ socketPath: join(original.root, 'mounted-enrollment.sock'), connections: services.connections, coreClients: original.coreClients })

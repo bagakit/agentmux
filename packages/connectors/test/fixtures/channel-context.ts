@@ -10,7 +10,7 @@ import { rpcOwnerFixture } from '../../../core/test/helpers/public-rpc-owner.js'
 import { hostedTestOwner } from '../../../core/test/helpers/hosted-runtime-port.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../core/test/helpers/object-cli-rpc.js'
 import { createWorkspaceLayout } from '../../../core/src/spatial-layout.js'
-import { createDesktopConnections } from '../../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../../src/connection-services.js'
 import { createDesktopExternalInputAuthority } from '../../../../apps/host/src/external-input-authority.js'
 import { createHostedIngressCorePort } from '../../src/core-ingress-port.js'
 import { createPublicationConversationPort } from '../../src/core-conversation-port.js'
@@ -73,9 +73,9 @@ export async function channelContextFixture(cleanup: Array<() => void | Promise<
     })
   }
   vi.spyOn(defaultHttpInstance, 'request').mockImplementation(input => transport.request(input))
-  let services: Awaited<ReturnType<typeof createDesktopConnections>>, desktop: core.AgentMuxControlServer, rpc: Awaited<ReturnType<typeof core.connectAgentMuxRpc>>
+  let services: Awaited<ReturnType<typeof createConnectionServices>>, desktop: core.AgentMuxControlServer, rpc: Awaited<ReturnType<typeof core.connectAgentMuxRpc>>
   async function open() {
-    services = await createDesktopConnections({ directory: join(f.root, 'connectors'),
+    services = await createConnectionServices({ directory: join(f.root, 'connectors'),
       encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async bytes => ({ result: bytes.toString(), shouldReEncrypt: false }) },
       bindings: { spatial, checkpoint: ref => hosted.conversationCheckpoint(ref) }, ingress: { core: createHostedIngressCorePort(clients) }, ...(publish ? { publication: createPublicationConversationPort(clients) } : {}) })
     desktop = new core.AgentMuxControlServer({ socketPath: desktopPath, connections: services.connections, spatialState: spatial, coreClients: clients })

@@ -1,4 +1,4 @@
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { AgentMuxControlServer, AgentMuxError, AgentMuxRpcService, connectAgentMuxRpc } from '@agentmux/core'
 import type { ConnectionEnrollmentActionKind, ConnectionEnrollmentAdvanceInput, ConnectionEnrollmentBeginInput, ConnectionEnrollmentView } from '@agentmux/core/connections'
@@ -33,9 +33,9 @@ function action(view: ConnectionEnrollmentView, kind: ConnectionEnrollmentAction
 const delay = (milliseconds: number) => new Promise<void>(resolve => setTimeout(resolve, milliseconds))
 async function fixture() {
   const root = await mkdtemp(join(tmpdir(), 'enrollment-web-')), directory = join(root, 'connections'), socketPath = join(root, 'public.sock'), encryption = enrollmentEncryption()
-  let services: Awaited<ReturnType<typeof createDesktopConnections>> | undefined, server: AgentMuxControlServer | undefined, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
+  let services: Awaited<ReturnType<typeof createConnectionServices>> | undefined, server: AgentMuxControlServer | undefined, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>> | undefined
   const open = async (withoutAdapter = false) => {
-    services = await createDesktopConnections({ directory, encryption, ...(withoutAdapter ? { adapters: [] } : {}) })
+    services = await createConnectionServices({ directory, encryption, ...(withoutAdapter ? { adapters: [] } : {}) })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw new Error('Application creation cannot borrow an Agent Runtime') } })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   }

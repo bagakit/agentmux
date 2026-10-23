@@ -17,10 +17,10 @@ const mutations: Record<string, { path: string; changes: Array<[string, string]>
   'observed-activity-gate': { path: owner, changes: [["row.generation.phase === 'ready' && elapsed >", "row.generation.phase === 'ready' && activity !== null && elapsed >"]] },
   'skip-allocation-revalidation': { path: owner, changes: [["    await context.assertCurrent?.()\n    const intent = encode({ method: 'allocate', input, actor: context.actor })", "    const intent = encode({ method: 'allocate', input, actor: context.actor })"]] },
   'borrow-paused-private-audience': { path: owner, changes: [['findActiveAudience: input => chat.knowsAudience(input) ? chat.findActiveAudience(input) : groups.findActiveAudience(input)', 'findActiveAudience: input => chat.findActiveAudience(input) ?? groups.findActiveAudience(input)']] },
-  'skip-mote-preparation': { path: 'apps/desktop/src/main/connector-host.ts', changes: [["if (record.conversationKind === 'direct')", 'if (false)']] },
+  'skip-mote-preparation': { path: 'packages/connectors/src/connection-services.ts', changes: [["if (record.conversationKind === 'direct')", 'if (false)']] },
   'retarget-frozen-authority': { path: 'packages/connectors/src/durable-ingress.ts', changes: [['const binding = expected ? this.options.bindings.readExact(expected.author.bindingId, expected.author.bindingRevision) : this.binding(record)', 'const binding = this.binding(record)']] },
   'require-native-rpc-input': { path: owner, changes: [['sourceCheckpoints: native.map(cut => cut.checkpoint),', "inputTarget: { kind: 'native-conversation', source: native[0]!.checkpoint.source }, sourceCheckpoints: native.map(cut => cut.checkpoint),"]] },
-  'skip-new-binding-publication': { path: 'apps/desktop/src/main/connector-host.ts', changes: [['if (binding) publication?.refresh()', 'if (false && binding) publication?.refresh()']] }
+  'skip-new-binding-publication': { path: 'packages/connectors/src/connection-services.ts', changes: [['if (binding) publication?.refresh()', 'if (false && binding) publication?.refresh()']] }
 }
 const mutation = process.env.AGENTMUX_MOTE_CHAT_MUTANT
 if (mutation && !mutations[mutation]) throw new Error('Unknown Mote chat mutation')
@@ -33,7 +33,7 @@ export default defineConfig({ ...original, root,
   plugins: [{ name: 'mote-chat-original-consumer-mutation', enforce: 'pre', transform(code, id) {
     const servedPath = relative(root, id.split('?')[0]!)
     const sourcePath = servedPath.startsWith('packages/connectors/dist/') ? servedPath.replace('/dist/', '/src/').replace(/\.js$/u, '.ts') : servedPath
-    if (![owner, 'packages/connectors/src/durable-ingress.ts', 'apps/desktop/src/main/connector-host.ts'].includes(sourcePath)) return
+    if (![owner, 'packages/connectors/src/durable-ingress.ts', 'packages/connectors/src/connection-services.ts'].includes(sourcePath)) return
     const compiled = sourcePath !== servedPath
     const source = compiled ? readFileSync(resolve(root, sourcePath), 'utf8') : code
     let candidate = source

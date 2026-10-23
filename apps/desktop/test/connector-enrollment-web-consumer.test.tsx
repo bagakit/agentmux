@@ -8,7 +8,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import type { ConnectionEnrollmentView, ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
-import { createDesktopConnections } from '../src/main/connector-host.js'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
@@ -20,7 +20,7 @@ import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures
 const dom = composerDOM()
 const APP = { domain: 'open.feishu.cn', appId: 'cli_settings_web_bot' }
 const QR = 'settings-private-sign-in-code', COOKIE = 'settings-private-cookie', CSRF = 'settings-private-csrf'
-let root: string, services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer
+let root: string, services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer
 let closeSettings: () => void, reopenSettings: () => void
 let failList: boolean, loseCreate: boolean, loseCredential: boolean, asset: Buffer
 let lastBegin: ConnectionEnrollmentView | null
@@ -75,7 +75,7 @@ beforeEach(async () => {
     if (target.pathname === '/developers/v1/secret/' + APP.appId) return Response.json({ code: 0, data: loseCredential ? {} : { secret: 'settings-private-app-secret' } })
     throw new Error('Unexpected settings Web request')
   }))
-  services = await createDesktopConnections({ directory: join(root, 'connections'), encryption: enrollmentEncryption() })
+  services = await createConnectionServices({ directory: join(root, 'connections'), encryption: enrollmentEncryption() })
   const list = services.connections.list.bind(services.connections)
   server = new AgentMuxControlServer({ socketPath: join(root, 'public.sock'), connections: { ...services.connections, list: async () => { if (failList) throw new Error('Controlled saved-bot list gap'); return list() } }, coreClients: () => { throw new Error('Creating a bot must not borrow an Agent Runtime') } })
   await server.start()

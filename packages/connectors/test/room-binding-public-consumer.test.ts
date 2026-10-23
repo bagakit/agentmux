@@ -5,7 +5,7 @@ import { AgentMuxControlServer } from '../../core/src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../../core/src/public-rpc-client.js'
 import { AgentMuxRpcService } from '../../core/src/public-rpc-service.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { config, roomBindingFixture } from './fixtures/room-binding.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
@@ -19,7 +19,7 @@ afterEach(async () => {
 async function fixture() {
   const f = await roomBindingFixture(); cleanup.push(() => f.close())
   // The original Desktop Host composition shares its one database, spatial owner and exact Core client.
-  const services = await createDesktopConnections({ directory: join(f.root, 'desktop-connections'), encryption: { isAsyncEncryptionAvailable: async () => false, encryptStringAsync: async () => { throw new Error('No credential entry in this test') }, decryptStringAsync: async () => { throw new Error('No credential resolution in binding') } }, bindings: { spatial: f.spatial, checkpoint: f.checkpoint } })
+  const services = await createConnectionServices({ directory: join(f.root, 'desktop-connections'), encryption: { isAsyncEncryptionAvailable: async () => false, encryptStringAsync: async () => { throw new Error('No credential entry in this test') }, decryptStringAsync: async () => { throw new Error('No credential resolution in binding') } }, bindings: { spatial: f.spatial, checkpoint: f.checkpoint } })
   cleanup.push(() => services.close())
   const socketPath = join(f.root, 'public.sock'), server = new AgentMuxControlServer({ socketPath, connections: services.connections, spatialState: f.spatial, coreClients: () => [{ hostId: 'local', client: f.client }] })
   await server.start(); cleanup.push(() => server.stop())

@@ -9,7 +9,7 @@ import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
 import * as core from '../../core/dist/index.js'
 import { parseConnectionIngressRecord, parseIngressResult } from '../../core/dist/connections.js'
 import { ConnectionHost, DurableIngressHost } from '../dist/index.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { ingressFixture } from './fixtures/ingress.js'
 import { feishuConfig, feishuSdkTransport } from './fixtures/feishu.js'
 import { config } from './fixtures/room-binding.js'
@@ -30,7 +30,7 @@ it('default Desktop receives original SDK actions before ACK and exposes unsuppo
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   const sdk = feishuSdkTransport()
   vi.spyOn(defaultHttpInstance, 'request').mockImplementation(sdk.http.request)
-  const services = await createDesktopConnections({ directory: join(f.root, 'desktop-actions'),
+  const services = await createConnectionServices({ directory: join(f.root, 'desktop-actions'),
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) },
     bindings: { spatial: f.spatial, checkpoint: async ref => await f.client.conversationCheckpoint(ref) },
     ingress: { core: hostId => hostId === 'local' ? f.client : undefined } })

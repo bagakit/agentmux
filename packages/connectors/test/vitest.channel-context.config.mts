@@ -27,7 +27,7 @@ export default defineConfig({ ...native, plugins: [...native.plugins!, { name: '
     if (code.split(before).length !== 2) throw Error('Exact context mutant must load once: ' + mutant)
     code = code.replace(before, after)
   }
-  if (process.env.CHANNEL_CONTEXT_LOADED && (/^packages\/(core|connectors)\/src\//u.test(path) || ['apps/desktop/src/main/connector-host.ts', 'apps/host/src/external-input-authority.ts'].includes(path))) {
+  if (process.env.CHANNEL_CONTEXT_LOADED && (/^packages\/(core|connectors)\/src\//u.test(path) || ['packages/connectors/src/connection-services.ts', 'apps/host/src/external-input-authority.ts'].includes(path))) {
     const hash = (value: string) => createHash('sha256').update(value).digest('hex')
     appendFileSync(process.env.CHANNEL_CONTEXT_LOADED, JSON.stringify({ path, originalSHA256: hash(original), loadedSHA256: hash(code), ...(selected?.path === path ? { mutation: mutant } : {}) }) + '\n')
   }

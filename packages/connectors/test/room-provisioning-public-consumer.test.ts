@@ -2,7 +2,7 @@ import { expectConnectionAllocations } from './helpers/unified-identifiers.js'
 import { join } from 'node:path'
 import { mkdir, writeFile } from 'node:fs/promises'
 import { afterEach, expect, it, vi } from 'vitest'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import { roomProvisioningFixture, config, core } from './fixtures/room-provisioning.js'
 
@@ -10,7 +10,7 @@ const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks() })
 async function fixture() {
   const f = await roomProvisioningFixture({ managedCaller: true }); cleanup.push(() => f.close())
-  const services = await createDesktopConnections({ directory: join(f.root, 'desktop-rooms'), adapters: [f.adapter], bindings: { spatial: f.spatial, checkpoint: f.checkpoint },
+  const services = await createConnectionServices({ directory: join(f.root, 'desktop-rooms'), adapters: [f.adapter], bindings: { spatial: f.spatial, checkpoint: f.checkpoint },
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) } })
   cleanup.push(() => services.close())
   const secret = await services.secrets.store({ operationId: 'public-room-credential', secret: 'private-fixture-credential' })

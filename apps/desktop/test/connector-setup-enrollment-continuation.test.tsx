@@ -7,7 +7,7 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '@agentmux/core'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap, ConnectionSetupBegin, ConnectionSetupView, ConnectionEnrollmentView, ConnectionEnrollmentAdvanceInput } from '@agentmux/core/connections'
-import { createDesktopConnections } from '../src/main/connector-host.js'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
@@ -17,7 +17,7 @@ import { composerDOM } from './helpers/composer-dom-fixture'
 import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
 
 const dom = composerDOM(), APP = 'cli_settings_continuation', USER = 'settings-continuation-user', TENANT = 'settings-continuation-enterprise'
-let root: string, services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer
+let root: string, services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer
 let closeSettings: () => void, reopen: () => void, native: string[], calls: Array<{ method: ConnectionMethod; input: unknown; result: unknown }>
 let afterCall: ((method: ConnectionMethod, result: unknown) => Promise<void>) | undefined, forward: typeof api.connections.call
 let pendingPolls: number[]
@@ -58,7 +58,7 @@ beforeEach(async () => {
     }
     throw new Error('Unexpected Settings continuation request')
   }))
-  services = await createDesktopConnections({ directory: join(root, 'connections'), encryption: enrollmentEncryption() })
+  services = await createConnectionServices({ directory: join(root, 'connections'), encryption: enrollmentEncryption() })
   server = new AgentMuxControlServer({ socketPath: join(root, 'owner.sock'), connections: services.connections, coreClients: () => { throw new Error('Saved login continuation cannot borrow an Agent Runtime') } })
   await server.start()
   const handlers = new Map<string, (...args: any[]) => Promise<unknown>>(), sender = { ownedRenderer: true }

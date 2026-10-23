@@ -42,7 +42,7 @@ vi.mock('../src/main/browser-operation-journal', () => ({ BROWSER_OPERATION_JOUR
 vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: class {} }))
 vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} dispose() {} } }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ notify: () => ({ status: 'shown' }), dispose() {} }) }))
-vi.mock('../src/main/connector-host', () => ({ createDesktopConnections: async () => ({ connections: { list: async () => [] }, secrets: {}, close: async () => {} }) }))
+vi.mock('../src/main/connector-host', () => ({ createConnectionServices: async () => ({ connections: { list: async () => [] }, secrets: {}, close: async () => {} }) }))
 
 import '../src/preload/index'
 import { LocalExecutionHost } from '@agentmux/core'

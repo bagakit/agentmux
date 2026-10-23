@@ -6,7 +6,7 @@ import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '../../core/dist/public-rpc-server.js'
 import { createPublicationConversationPort } from '../src/core-conversation-port.js'
-import { createDesktopConnections, type DesktopConnectionServices } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices, type ConnectionServices } from '../src/connection-services.js'
 import { roomBindingFixture } from './fixtures/room-binding.js'
 import { publicationPage } from './fixtures/publication-page.js'
 import { feishuConfig } from './fixtures/feishu.js'
@@ -27,7 +27,7 @@ async function fixture() {
   cleanup.push(() => remote.close()); vi.spyOn(defaultHttpInstance, 'request').mockImplementation(remote.http.request)
   const originalStore = await readFile(f.storePath), originalTranscript = await readFile(f.transcript)
   const directory = join(f.root, 'lifecycle'), socketPath = join(f.root, 'lifecycle.sock')
-  const open = () => createDesktopConnections({ directory,
+  const open = () => createConnectionServices({ directory,
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
     bindings: { spatial: f.spatial, checkpoint: f.checkpoint }, publication: createPublicationConversationPort(() => [{ hostId: 'local', client: f.client }]) })
   let services = await open(), server = new AgentMuxControlServer({ socketPath, connections: services.connections, spatialState: f.spatial, coreClients: () => [{ hostId: 'local', client: f.client }] })
@@ -49,7 +49,7 @@ async function fixture() {
     }, { timeout: 5_000 })
     return operation.notices!
   }
-  return { ...f, cli, notices, settled, remote, originalStore, originalTranscript, get services(): DesktopConnectionServices { return services }, reject(value: boolean) { rejectNotice = value }, uncertain(value: boolean) { unknownNotice = value },
+  return { ...f, cli, notices, settled, remote, originalStore, originalTranscript, get services(): ConnectionServices { return services }, reject(value: boolean) { rejectNotice = value }, uncertain(value: boolean) { unknownNotice = value },
     async reopen(operationId?: string) {
       await server.stop(); services.close()
       let restored: unknown

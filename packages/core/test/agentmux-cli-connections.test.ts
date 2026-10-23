@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ConnectionSecrets } from '../../connectors/src/connection-secrets.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../../connectors/src/connection-services.js'
 import { enrollmentAvatar, enrollmentEncryption } from '../../connectors/test/fixtures/connection-enrollment.js'
 import type { ConnectionAdapter } from '../../connectors/src/connection-host.js'
 import type { ConnectionEnrollmentAdvanceInput, ConnectionEnrollmentView } from '../src/connections.js'
@@ -53,10 +53,10 @@ async function fixture() {
       advance: async input => ({ kind: 'progress', stage: 'account', account: { userId: 'native-user', tenantId: 'native-tenant' }, challenge: null, privateState: input.privateState })
     }
   }
-  let services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer
+  let services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer
   const socketPath = join(root, 'owner.sock')
   const open = async () => {
-    services = await createDesktopConnections({ directory: join(root, 'connections'), encryption: enrollmentEncryption(), adapters: [adapter] })
+    services = await createConnectionServices({ directory: join(root, 'connections'), encryption: enrollmentEncryption(), adapters: [adapter] })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: core.clients }); await server.start()
   }
   await open(); cleanup.push(async () => { await server.stop(); services.close() })

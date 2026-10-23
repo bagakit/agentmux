@@ -8,7 +8,7 @@ import { defaultHttpInstance, type HttpInstance } from '@larksuiteoapi/node-sdk'
 import * as core from '../../core/dist/index.js'
 import { parseConnectionDelivery } from '../../core/dist/connections.js'
 import { createPublicationConversationPort } from '../dist/index.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { ingressFixture } from './fixtures/ingress.js'
 import { feishuConfig } from './fixtures/feishu.js'
 import { context } from './fixtures/room-binding.js'
@@ -76,7 +76,7 @@ async function platform() {
 async function fixture(scope: 'future-shared-conversation' | 'future-native-user-facing' = 'future-shared-conversation') {
   const original = await ingressFixture(false, feishuConfig, undefined, { publication: 'future-shared-conversation' }); closes.push(original.close)
   const remote = await platform(), port = createPublicationConversationPort(original.coreClients)
-  const openServices = () => createDesktopConnections({ directory: join(original.root, 'image-host'),
+  const openServices = () => createConnectionServices({ directory: join(original.root, 'image-host'),
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async bytes => ({ result: (bytes.toString()), shouldReEncrypt: false }) },
     bindings: { spatial: original.spatial, checkpoint: ref => original.client.conversationCheckpoint(ref) }, publication: port })
   let services = await openServices()

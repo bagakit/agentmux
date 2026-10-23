@@ -8,7 +8,7 @@ import { consumeConversationWindowPage } from '../../core/src/conversation-chang
 import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
 import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { createPublicationConversationPort } from '../dist/index.js'
 import { botOpenId, feishuConfig, feishuPayload, feishuSdkTransport } from './fixtures/feishu.js'
 import { feishuPublicationHttp } from './fixtures/feishu-publication.js'
@@ -55,7 +55,7 @@ async function fixture() {
     if (params !== undefined && (params === null || typeof params !== 'object')) throw new Error('Expected original SDK query parameters')
     return remote.http.request({ ...request, ...(params === undefined ? {} : { params }) })
   })
-  const services = await createDesktopConnections({ directory: join(h.root, 'post-host'),
+  const services = await createConnectionServices({ directory: join(h.root, 'post-host'),
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) },
     bindings: { spatial, checkpoint: reference => h.client.conversationCheckpoint(reference) },
     publication: createPublicationConversationPort(h.coreClients), ingress: { core: hostId => hostId === 'local' ? h.client : undefined } })

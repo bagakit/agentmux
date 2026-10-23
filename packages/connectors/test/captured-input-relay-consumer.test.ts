@@ -5,7 +5,7 @@ import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
 import { connectAgentMuxRpc } from '@agentmux/core'
 import { parseConnectionDeliveryResult } from '@agentmux/core/connections'
 import type { ConnectionDeliveryReference } from '@agentmux/core/connections'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { createPublicationConversationPort } from '../dist/index.js'
 import { agentPromptCondition } from '../../core/src/agent-prompt-condition.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
@@ -35,7 +35,7 @@ async function fixture(unknownCreate = false) {
   vi.spyOn(defaultHttpInstance, 'request').mockImplementation(remote.http.request)
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   const directory = join(original.root, 'relay-host')
-  const open = () => createDesktopConnections({ directory,
+  const open = () => createConnectionServices({ directory,
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) },
     bindings: { spatial: original.spatial, checkpoint: ref => original.client.conversationCheckpoint(ref) },
     publication: createPublicationConversationPort(original.coreClients) })

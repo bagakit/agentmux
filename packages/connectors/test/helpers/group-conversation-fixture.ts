@@ -9,7 +9,7 @@ import { rpcOwnerFixture } from '../../../core/test/helpers/public-rpc-owner.js'
 import { hostedTestOwner } from '../../../core/test/helpers/hosted-runtime-port.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../core/test/helpers/object-cli-rpc.js'
 import { createWorkspaceLayout } from '../../../core/src/spatial-layout.js'
-import { createDesktopConnections } from '../../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../../src/connection-services.js'
 import { createDesktopExternalInputAuthority } from '../../../../apps/host/src/external-input-authority.js'
 import { createHostedIngressCorePort, createPublicationConversationPort, type ConnectionAdapter } from '@agentmux/connectors'
 import { signedRoomAdapter, type SignedRoomMessage } from '../fixtures/signed-room-adapter.js'
@@ -69,9 +69,9 @@ export async function groupConversationFixture(running = false, updatePublicatio
     }
   }
   const adapter: ConnectionAdapter = { ...wire.adapter, ingress: { ...wire.adapter.ingress!, verify: async (...args) => ({ ...await verify(...args), conversationKind: 'group' }) } }
-  let services: Awaited<ReturnType<typeof createDesktopConnections>>, desktop: core.AgentMuxControlServer, rpc: Awaited<ReturnType<typeof core.connectAgentMuxRpc>>
+  let services: Awaited<ReturnType<typeof createConnectionServices>>, desktop: core.AgentMuxControlServer, rpc: Awaited<ReturnType<typeof core.connectAgentMuxRpc>>
   async function open() {
-    services = await createDesktopConnections({ directory: join(f.root, 'connectors'), adapters: [adapter],
+    services = await createConnectionServices({ directory: join(f.root, 'connectors'), adapters: [adapter],
       encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
       bindings: { spatial, checkpoint: ref => hosted.conversationCheckpoint(ref) }, publication: createPublicationConversationPort(clients), ingress: { core: createHostedIngressCorePort(clients) } })
     desktop = new core.AgentMuxControlServer({ socketPath: desktopPath, connections: services.connections, spatialState: spatial, coreClients: clients })

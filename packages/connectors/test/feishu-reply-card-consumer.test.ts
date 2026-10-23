@@ -5,7 +5,7 @@ import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
 import * as core from '../../core/src/index.js'
 import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
 import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { createPublicationConversationPort } from '../src/core-conversation-port.js'
 import { feishuConfig } from './fixtures/feishu.js'
 import { feishuPublicationHttp } from './fixtures/feishu-publication.js'
@@ -43,11 +43,11 @@ async function host() {
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'region' }, activeRegionId: 'region' } }, resources: {}
   } })
   const conversation = createPublicationConversationPort(f.coreClients)
-  const options: Parameters<typeof createDesktopConnections>[0] = { directory: join(f.root, 'connectors'), encryption: {
+  const options: Parameters<typeof createConnectionServices>[0] = { directory: join(f.root, 'connectors'), encryption: {
     isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text),
     decryptStringAsync: async bytes => ({ result: bytes.toString(), shouldReEncrypt: false })
   }, bindings: { spatial, checkpoint: input => f.client.conversationCheckpoint(input) }, publication: conversation }
-  const services = await createDesktopConnections(options); cleanup.push(() => services.close())
+  const services = await createConnectionServices(options); cleanup.push(() => services.close())
   const credential = await services.secrets.store({ operationId: 'fixture-credential', secret: 'fixture-credential' })
   await services.connections.configure({ operationId: 'fixture-configure', expectedRevision: null, connection: { ...feishuConfig, credentialRef: credential.credentialRef } })
   const bound = await services.connections.bindings!.bind({ operationId: 'fixture-bind', bindingId: 'fixture-binding', connectionId: feishuConfig.connectionId,

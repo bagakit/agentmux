@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
 import * as core from '../../core/dist/index.js'
 import { createPublicationConversationPort } from '../dist/index.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { connectorScopeSettings } from '../../../apps/desktop/test/helpers/connector-scope-settings.js'
 import { externalIngressMailbox } from '../../../apps/desktop/test/helpers/external-ingress-mailbox.js'
 import { ingressFixture } from './fixtures/ingress.js'
@@ -23,7 +23,7 @@ async function fixture(override?: (call: FeishuHttpCall) => FeishuHttpResponse |
   const remote = await feishuPublicationHttp(override); cleanup.push(() => remote.close())
   const sdk = feishuSdkTransport()
   vi.spyOn(defaultHttpInstance, 'request').mockImplementation(remote.http.request)
-  const services = await createDesktopConnections({ directory: join(original.root, 'feishu-bidirectional'),
+  const services = await createConnectionServices({ directory: join(original.root, 'feishu-bidirectional'),
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) },
     bindings: { spatial: original.spatial, checkpoint: async ref => await original.client.conversationCheckpoint(ref) },
     publication: createPublicationConversationPort(original.coreClients), ingress: { core: hostId => hostId === 'local' ? original.client : undefined } })

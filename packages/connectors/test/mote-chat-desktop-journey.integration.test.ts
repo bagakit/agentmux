@@ -7,7 +7,7 @@ import { spatialCatalog } from '@agentmux/core/spatial-state'
 import { createPublicationConversationPort, PublicationHost, type ConnectionAdapter, type MoteChatAgentPort } from '@agentmux/connectors'
 import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { createMoteChatAgents } from '../../../apps/desktop/src/main/mote-chat-agents.js'
 import { ScratchTopics } from '../../../apps/desktop/src/main/scratch-topics.js'
 import { directoryIdentity, homeZoneId } from '../../../apps/desktop/src/shared/space-addresses.js'
@@ -85,7 +85,7 @@ async function fixture(strangerMessageLimit = 1, conversationIdleMs = 60_000) {
     } },
     profile: { get: async () => ({ connectionId: 'original-bot', connectionRevision: 1, application, language: null, state: 'observed', profile: null,
       metadata: null, creator: { idType: creator.idType, userId: creator.userId }, botId: null, onlineVersionId: null, reviewingVersionId: null, version: null }) } }
-  let services: Awaited<ReturnType<typeof createDesktopConnections>>, server: core.AgentMuxControlServer, sdk: Awaited<ReturnType<typeof core.connectAgentMuxRpc>>
+  let services: Awaited<ReturnType<typeof createConnectionServices>>, server: core.AgentMuxControlServer, sdk: Awaited<ReturnType<typeof core.connectAgentMuxRpc>>
   const prepare = vi.fn<MoteChatAgentPort['prepare']>(async input => {
     wire.trace.push('prepare')
     const retained = (await services.ingress!.list({ connectionId: 'original-bot' })).ingresses
@@ -94,7 +94,7 @@ async function fixture(strangerMessageLimit = 1, conversationIdleMs = 60_000) {
   })
   const agents = { ...desktopAgents, prepare }
   async function open() {
-    services = await createDesktopConnections({ directory: join(original.root, 'connectors'), adapters: [adapter],
+    services = await createConnectionServices({ directory: join(original.root, 'connectors'), adapters: [adapter],
       encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
       bindings: { spatial, checkpoint }, moteChat: { agents, assertTarget: desktopAgents.assertTarget, assertReady: desktopAgents.assertReady },
       publication: createPublicationConversationPort(clients), ingress: { core: host => host === 'local' ? original.client : undefined } })

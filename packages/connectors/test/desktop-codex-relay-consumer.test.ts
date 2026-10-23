@@ -7,7 +7,7 @@ import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
 import * as core from '../../../packages/core/dist/index.js'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
 import { createPublicationConversationPort } from '../../../packages/connectors/dist/index.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
 import { agentPromptCondition } from '../../../packages/core/src/agent-prompt-condition.js'
 import { DEFAULT_CONFIG } from '../../../apps/desktop/src/main/config-store'
@@ -40,7 +40,7 @@ it('actual preload, trusted prompt IPC and the original Core writer share manual
     bindings: [{ zoneId: 'zone', spaceId: 'space' }], layouts: { resource: createWorkspaceLayout('group', ['tab']) },
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'original-region' }, activeRegionId: 'original-region' } }, resources: {}
   } })
-  const services = await createDesktopConnections({ directory: join(f.root, 'connector-host'),
+  const services = await createConnectionServices({ directory: join(f.root, 'connector-host'),
     encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
     bindings: { spatial, checkpoint: ref => f.client.conversationCheckpoint(ref) }, publication: createPublicationConversationPort(f.coreClients) }); cleanup.push(() => services.close())
   const credential = await services.secrets.store({ operationId: 'credential-entry', secret: 'private-credential' })

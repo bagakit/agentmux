@@ -7,7 +7,7 @@ import type { RoomBinding } from '@agentmux/core/connections'
 import * as core from '../../core/src/index.js'
 import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
 import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
-import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
+import { createConnectionServices } from '../src/connection-services.js'
 import { createPublicationConversationPort } from '../src/core-conversation-port.js'
 import { ChannelStorage } from '../src/channel-storage.js'
 import { context } from './fixtures/room-binding.js'
@@ -41,7 +41,7 @@ it('one original session broadcasts public human and Agent speech to Feishu and 
     bindings: [{ zoneId: 'zone', spaceId: 'space' }], layouts: { resource: createWorkspaceLayout('group', ['tab']) },
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'region' }, activeRegionId: 'region' } }, resources: {}
   } })
-  const services = await createDesktopConnections({ directory: join(f.root, 'connections'), encryption: {
+  const services = await createConnectionServices({ directory: join(f.root, 'connections'), encryption: {
     isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value),
     decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false })
   }, bindings: { spatial, checkpoint: input => f.client.conversationCheckpoint(input) },

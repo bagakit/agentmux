@@ -8,7 +8,7 @@ import { afterAll, afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '@agentmux/core'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap, ConnectionSetupView } from '@agentmux/core/connections'
 import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
-import { createDesktopConnections } from '../src/main/connector-host.js'
+import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
@@ -16,13 +16,13 @@ import { composerDOM } from './helpers/composer-dom-fixture'
 import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
 
 const dom = composerDOM(), APP = 'cli_settings_publication', VERSION = 'original-selected-version'
-let directory: string, services: Awaited<ReturnType<typeof createDesktopConnections>>, server: AgentMuxControlServer
+let directory: string, services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer
 let failObservation: boolean, accept: boolean, native: Array<{ path: string; body: unknown }>, calls: Array<{ method: ConnectionMethod; input: unknown; result: unknown }>
 beforeEach(async () => {
   failObservation = false; accept = true; native = []; calls = []
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   directory = await mkdtemp(join(tmpdir(), 'settings-publication-transport-'))
-  services = await createDesktopConnections({ directory: join(directory, 'connections'), encryption: enrollmentEncryption() })
+  services = await createConnectionServices({ directory: join(directory, 'connections'), encryption: enrollmentEncryption() })
   server = new AgentMuxControlServer({ socketPath: join(directory, 'owner.sock'), connections: services.connections, coreClients: () => { throw new Error('Publication settings cannot borrow an Agent Runtime') } })
   await server.start()
   const handlers = new Map<string, (...args: any[]) => Promise<unknown>>(), sender = { ownedRenderer: true }

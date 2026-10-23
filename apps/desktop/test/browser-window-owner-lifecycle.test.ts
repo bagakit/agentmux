@@ -17,7 +17,7 @@ vi.mock('electron', () => ({
 vi.mock('@agentmux/core', async original => ({ ...await original<typeof import('@agentmux/core')>(),
   AgentMuxControlServer: class { async start() {} async stop() {} }
 }))
-vi.mock('../src/main/connector-host.js', () => ({ createDesktopConnections: async () => ({
+vi.mock('../../../packages/connectors/src/connection-services.js', () => ({ createConnectionServices: async () => ({
   connections: { list: async () => [] }, secrets: {}, close: async () => {}
 }) }))
 vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
