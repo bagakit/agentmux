@@ -1,3 +1,4 @@
+import { createRendererSessionRecovery } from './session-recovery-api'
 import { createConversationReadApi } from './conversation-read-api'
 import { unwrapSessionObservationResult } from '../../../shared/session-observation-result'
 import { createToolkitConfigurationApi } from './toolkit-configuration-api'
@@ -1570,6 +1571,7 @@ function requireDesktopApi(): AgentMuxDesktopApi {
     search: { query: createRendererSearchRead((input, context) => preload.search.query(input, context)) },
     sessions: {
       ...preload.sessions,
+      recover: createRendererSessionRecovery(preload.sessions.recover),
       attach: (...args) => preload.sessions.attach(...args).then(unwrapSessionObservationResult),
       refreshAttachment: (...args) => preload.sessions.refreshAttachment(...args).then(unwrapSessionObservationResult),
       replay: (...args) => preload.sessions.replay(...args).then(unwrapSessionObservationResult),

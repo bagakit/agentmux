@@ -264,6 +264,16 @@ function streamEvent(method: AgentMuxRpcStreamMethod, value: unknown, initial: u
   throw new AgentMuxError('Reader received an event from another domain.', 'CONTROL_PROTOCOL_ERROR')
 }
 type RpcRoute = { endpoint: AgentMuxRpcEndpoint; ssh?: AgentMuxRpcSshTransport }
+// Local transport provenance is intentionally not accepted from wire error fields.
+// It grants only original-operation reconciliation, never authority to replay input.
+const unconfirmedReplies = new WeakSet<object>()
+export function isAgentMuxRpcReplyUnconfirmed(error: unknown): boolean {
+  return typeof error === 'object' && error !== null && unconfirmedReplies.has(error)
+}
+function retainUnconfirmedReply(error: unknown): void {
+  if (typeof error === 'object' && error !== null) unconfirmedReplies.add(error)
+}
+
 class RpcClient implements AgentMuxRpcClient {
   private readonly readers = new Set<Reader>()
   private route: RpcRoute
@@ -394,7 +404,7 @@ class RpcClient implements AgentMuxRpcClient {
     let response: JSONRPCResponse
     try { response = await rpc.requestAdvanced(request, undefined)
       const error = rpcResponseError(response); if (error) throw unavailableTransport ?? error
-    } catch (error) { end(transportError(error)); throw error }
+    } catch (error) { end(transportError(error)); if (!responseDelivered) retainUnconfirmedReply(error); throw error }
     return { response, reader: finalReader!, ...(subscriptionId === undefined ? {} : { subscriptionId }) }
   }
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, options: AgentMuxRpcCallOptions = {}): Promise<AgentMuxRpcResult<M>> {
@@ -403,7 +413,9 @@ class RpcClient implements AgentMuxRpcClient {
     }
     if (isAgentMuxRpcStream(method, rpcRecord(params))) throw new AgentMuxError('This method returns a subscription; use subscribe().', 'INVALID_CONTROL_REQUEST')
     const exchange = await this.exchange(method, params, undefined, options.signal, options)
-    try { return resultBody(method, exchange.response.result, params, options.credentials ?? this.credentials) as AgentMuxRpcResult<M> } finally { await exchange.reader.dispose(); this.readers.delete(exchange.reader) }
+    try { return resultBody(method, exchange.response.result, params, options.credentials ?? this.credentials) as AgentMuxRpcResult<M> }
+    catch (error) { retainUnconfirmedReply(error); throw error }
+    finally { await exchange.reader.dispose(); this.readers.delete(exchange.reader) }
   }
   async subscribe<M extends AgentMuxRpcStreamMethod>(method: M, params: AgentMuxRpcStreamParams<M>, handlers: AgentMuxRpcSubscriptionOptions<M>): Promise<AgentMuxRpcSubscription> {
     const exchange = await this.exchange(method, params, handlers as AgentMuxRpcSubscriptionOptions<AgentMuxRpcStreamMethod>, handlers.signal, handlers.runtimeFence === undefined ? {} : { runtimeFence: handlers.runtimeFence })

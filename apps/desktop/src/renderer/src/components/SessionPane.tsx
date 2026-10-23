@@ -315,9 +315,9 @@ export function SessionPane({
   }, [historyReturnContext, selectOwnRegion])
   const pendingAgentRestore = session?.kind === 'agent' && session.processState !== 'running'
   const frontendNotice = sessionFrontendPresentation(session)
-  const detachedFrontendNotice = frontendNotice?.kind === 'detached' ? frontendNotice : null
-  const failedFrontend = frontendNotice?.phase === 'failed'
-  const needsSessionSurface = pendingAgentRestore || failedFrontend
+  const recoverableFrontendNotice = frontendNotice && frontendNotice.kind !== 'unknown' ? frontendNotice : null
+  const frontendSurface = frontendNotice?.fullPage === true
+  const needsSessionSurface = pendingAgentRestore || frontendSurface
   const [retainedOutputKey, setRetainedOutputKey] = useState<string | null>(null)
   const readingRetainedOutput = needsSessionSurface && retainedOutputKey === activitySourceKey
   const terminalLifetime = useRef({ sourceKey: activitySourceKey, opened: false })
@@ -687,14 +687,14 @@ export function SessionPane({
     if (recovering) return
     setRecovering(true)
     try {
-      if (detachedFrontendNotice && session?.kind === 'agent') {
+      if (recoverableFrontendNotice && session?.kind === 'agent') {
         const scope = JSON.stringify([session.control.hostId, session.id, session.control.run.runId, session.terminalFrontend?.frontendId])
         if (frontendRecoveryIntent.current?.scope !== scope) frontendRecoveryIntent.current = { scope, operationId: originalFrontendRecovery(session)?.operationId ?? mintObjectId() }
         await recoverSession(sessionId, frontendRecoveryIntent.current.operationId)
       } else await recoverSession(sessionId)
     } catch (error) {
       useAppStore.getState().reportError(error, session?.kind === 'agent' ? { kind: 'indeterminate', subject: session.control,
-        ...(failedFrontend ? { lifecycle: { step: 'resume', subject: session.control, lastProcessState: session.processState } as const } : {}) } : undefined)
+        ...(frontendSurface ? { lifecycle: { step: 'resume', subject: session.control, lastProcessState: session.processState } as const } : {}) } : undefined)
     } finally { setRecovering(false) }
   }
 
@@ -942,7 +942,7 @@ export function SessionPane({
   const gaveUpReconnecting =
     disconnected && session.status.detail === CONNECTION_UNRECOVERABLE_DETAIL
   const exitNotice = sessionExitPresentation(session)
-  const recoveryTitle = exitNotice?.title ?? detachedFrontendNotice?.title ?? (continuityNotice
+  const recoveryTitle = exitNotice?.title ?? recoverableFrontendNotice?.title ?? (continuityNotice
       ? continuityNotice.title
       : gaveUpReconnecting
         ? `Can’t reach this host`
@@ -951,7 +951,7 @@ export function SessionPane({
           : exited
             ? `${noun} process exited`
             : `${noun} session unavailable`)
-  const recoveryDetail = exitNotice?.detail ?? detachedFrontendNotice?.detail ?? continuityNotice?.reason ??
+  const recoveryDetail = exitNotice?.detail ?? recoverableFrontendNotice?.detail ?? continuityNotice?.reason ??
     humanizeDetail(session.interruptionReason, session.status.detail, exited || missing, session.status.exitReason)
 
   async function refreshOriginal(): Promise<void> {
@@ -978,9 +978,9 @@ export function SessionPane({
   // The history notice and the underlying Session share one Core-reasoned action.
   const agentRecoveryControlsAt = (origin = mailboxOrigin, displayId: string | null = null) => !projectionPolicy.allowsRecovery ? (
     <span>Open this Session in its Project to restore it.</span>
-  ) : detachedFrontendNotice ? (
+  ) : recoverableFrontendNotice ? (
     <button type="button" className="small-button" disabled={recovering || refreshing} onClick={() => void recover()}>
-      <ThemeActionResumeSessionIcon size={12} /> {recovering ? 'Reconnecting…' : 'Resume'}
+      <ThemeActionResumeSessionIcon size={12} /> {recovering ? 'Checking…' : frontendNotice?.kind === 'initialization' ? frontendNotice.phase === 'parked' ? 'Check original request' : frontendNotice.phase === 'recovering' ? 'Check progress' : 'Resume' : 'Resume'}
     </button>
   ) : recoveryActionSource ? <SessionRecoveryActions source={recoveryActionSource} onTakeOver={takeOverAt(origin, displayId)} restoring={recovering || refreshing}
     workingLabel={refreshing ? 'Re-reading…' : 'Restoring…'}
@@ -996,7 +996,7 @@ export function SessionPane({
     step: 'Original Session recheck failed', mode: originalReadError.message,
     restore: 'Re-read original to check again. Your Session and draft are kept.'
   } }} /> : null
-  const identityNotice = (exitNotice || failedFrontend) && continuityNotice ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
+  const identityNotice = (exitNotice || frontendSurface) && continuityNotice ? <ServiceWindowNotice notice={{ kind: 'indeterminate', notice: {
     step: continuityNotice.title, mode: continuityNotice.reason,
     restore: continuityNotice.remedy.kind === 'refresh' ? 'Re-read original checks again without restarting the Agent or resending messages.' : 'Recovery remains a separate explicit action.'
   } }} /> : null
@@ -1020,7 +1020,7 @@ export function SessionPane({
   </button> : null}</>
   const agentRecoveryAction = agentRecoveryActionAt()
   const coreRestorePresentation = session.kind === 'agent' ? agentContinuityPresentation(session) : null
-  const frontendOperation = session.kind === 'agent' && failedFrontend
+  const frontendOperation = session.kind === 'agent' && frontendSurface
     ? session.continuityOperations?.[frontendRecoveryIntent.current?.operationId ?? ''] ?? session.continuity : undefined
   const frontendRecovery = frontendOperation?.agentSessionId === session.id &&
     (frontendOperation.newRun ?? frontendOperation.previousRun).runId === session.control.run.runId ? frontendOperation : undefined
@@ -1052,8 +1052,8 @@ export function SessionPane({
     sessionId: session.id, nativeHistoryPage, nativeContextItems,
     ...(session.kind === 'agent' ? { executionHostId: session.control.hostId, ...(conversationReading ? { conversationReading } : {}) } : {}),
     ...(restorePresentation ? { readingNotice: <div className="activity-feed__read-notice" role="status"><strong>{restorePresentation.title}</strong><span>{restorePresentation.detail}</span></div> } : {}),
-    ...(!restorePresentation && detachedFrontendNotice ? { readingNotice: <div className="activity-feed__read-notice" role="status"><strong>{detachedFrontendNotice.title}</strong><span>{detachedFrontendNotice.detail}</span></div> } : {}),
-    ...(pendingAgentRestore || detachedFrontendNotice ? { readingAction: agentRecoveryAction } : {}),
+    ...(!restorePresentation && recoverableFrontendNotice ? { readingNotice: <div className="activity-feed__read-notice" role="status"><strong>{recoverableFrontendNotice.title}</strong><span>{recoverableFrontendNotice.detail}</span></div> } : {}),
+    ...(pendingAgentRestore || recoverableFrontendNotice ? { readingAction: agentRecoveryAction } : {}),
     capability: session.kind === 'agent' ? session.capabilities.timeline : 'unavailable',
     displayState: session.status.state, activitySemantic: session.kind === 'agent' ? observeAgentSession(session, Date.now()).semantic : 'unsupported',
     workspaceRoot: fileContext.workspaceRoot, homeDir: fileContext.homeDir,
@@ -1088,22 +1088,26 @@ export function SessionPane({
   const resultReview = session.kind === 'agent'
     ? <SessionResultReview sessionId={session.id} items={timeline} origin={linkOrigin} visible={visible} surfaceAnchor={resultSurfaceAnchor} />
     : null
-  const frontendDiagnostic = failedFrontend ? <div className="session-frontend-diagnostic">
-    <span>Terminal diagnostic</span><pre>{frontendNotice.diagnostic}</pre>
+  const frontendDiagnostic = frontendSurface && frontendNotice.diagnostic ? <div className="session-frontend-diagnostic">
+    <span>{frontendNotice.kind === 'initialization' ? 'Startup diagnostic' : 'Terminal diagnostic'}</span><pre>{frontendNotice.diagnostic}</pre>
   </div> : null
 
-  const restoreSurface = <FullPageLoadingSurface scope="region" phase={failedFrontend ? 'failed' : restorePresentation?.phase ?? 'parked'} eyebrow="Session retained"
-                title={failedFrontend ? frontendNotice.title : restorePresentation?.title ?? 'Session state unconfirmed'}
-                detail={failedFrontend ? frontendNotice.detail : restorePresentation?.detail ?? 'The saved Session is retained. Its process state is not yet confirmed.'}
+  const restoreSurface = <FullPageLoadingSurface scope="region" phase={frontendSurface ? frontendNotice.phase ?? 'parked' : restorePresentation?.phase ?? 'parked'} eyebrow="Session retained"
+                title={frontendSurface ? frontendNotice.title : restorePresentation?.title ?? 'Session state unconfirmed'}
+                detail={frontendSurface ? frontendNotice.detail : restorePresentation?.detail ?? 'The saved Session is retained. Its process state is not yet confirmed.'}
                 actions={!historyOpen ? agentRecoveryAction : null}
-                supplement={<>{frontendDiagnostic}{identityNotice}{originalReadNotice}{session.kind === 'agent' && !failedFrontend ? <SessionRecap session={session.control} visible={visible && !parked && !historyOpen} context /> : null}</>}
-                details={{ summary: failedFrontend ? 'Session and failure details' : 'Retained session', content: <dl>
+                supplement={<>{frontendDiagnostic}{identityNotice}{originalReadNotice}{session.kind === 'agent' && !frontendSurface ? <SessionRecap session={session.control} visible={visible && !parked && !historyOpen} context /> : null}</>}
+                details={{ summary: frontendSurface ? frontendNotice.kind === 'initialization' ? 'Session and startup details' : 'Session and failure details' : 'Retained session', content: <dl>
                   <dt>Session</dt><dd>{session.label}</dd>
                   <dt>Session ID</dt><dd>{session.id}</dd>
                   <dt>Retained Run</dt><dd>{session.control.run.runId}</dd>
-                  {failedFrontend && session.kind === 'agent' ? <><dt>Terminal exit code</dt><dd>{session.terminalFrontend?.exitCode}</dd>
+                  {frontendSurface && session.kind === 'agent' ? <>{session.terminalFrontend?.exitCode !== undefined ? <><dt>Terminal exit code</dt><dd>{session.terminalFrontend.exitCode}</dd></> : null}
+                    {session.terminalFrontend?.initialization ? <><dt>Initialization</dt><dd>{session.terminalFrontend.initialization.phase}</dd>
+                    <dt>Startup operation</dt><dd>{session.terminalFrontend.initialization.lifecycleOperationId}</dd>
+                    {session.terminalFrontend.initialization.failure ? <><dt>Failed step</dt><dd>{session.terminalFrontend.initialization.failure.step}</dd>
+                      {session.terminalFrontend.initialization.failure.code !== undefined ? <><dt>Error code</dt><dd>{session.terminalFrontend.initialization.failure.code}</dd></> : null}</> : null}</> : null}
                     <dt>Backend state</dt><dd>{session.terminalFrontend?.backendState}</dd>
-                    <dt>Native conversation</dt><dd>{session.nativeHandle?.kind === 'provider' ? session.nativeHandle.sessionId : 'Unconfirmed'}</dd></> : null}
+                    <dt>Native conversation</dt><dd>{session.terminalFrontend?.initialization?.native.state === 'not-created' ? 'Not created' : session.terminalFrontend?.initialization?.native.state === 'confirmed' ? session.terminalFrontend.initialization.native.sessionId : session.nativeHandle?.kind === 'provider' ? session.nativeHandle.sessionId : 'Unknown'}</dd></> : null}
                   {recoveryOperation ? <><dt>Recovery operation</dt><dd>{recoveryOperation.operationId}</dd>
                     <dt>Recovery status</dt><dd>{recoveryOperation.kind} · {recoveryOperation.reason}</dd>
                     {recoverySupervision ? <><dt>Recovery phase</dt><dd>{recoverySupervision.phase}</dd>
@@ -1151,9 +1155,9 @@ export function SessionPane({
         <div className="agent-terminal-stage">
           {session.kind === 'terminal' || viewMode === 'terminal' || needsSessionSurface || terminalLifetime.current.opened ? (
             <div hidden={session.kind === 'agent' && (historyOpen || inlineHistory || viewMode !== 'terminal' && !pendingAgentRestore)}
-              ref={element => { if (element && !pendingAgentRestore && (!failedFrontend || readingRetainedOutput) && !parked && (session.kind === 'terminal' || viewMode === 'terminal')) terminalLifetime.current.opened = true }}
+              ref={element => { if (element && !pendingAgentRestore && (!frontendSurface || readingRetainedOutput) && !parked && (session.kind === 'terminal' || viewMode === 'terminal')) terminalLifetime.current.opened = true }}
               inert={historyOpen || session.kind === 'agent' && viewMode !== 'terminal' && !pendingAgentRestore} style={{ height: '100%' }}>
-            {failedFrontend && !readingRetainedOutput ? restoreSurface : null}
+            {frontendSurface && !readingRetainedOutput ? restoreSurface : null}
             {pendingAgentRestore && !readingRetainedOutput ? (inlineHistory ? null :
               restoreSurface
             ) : parked ? (
@@ -1161,15 +1165,15 @@ export function SessionPane({
                 title="Terminal parked"
                 detail="Switch back to this tab to restore its terminal view." />
             ) : (
-              <div hidden={failedFrontend && !readingRetainedOutput} style={{ height: '100%' }}>
-              {!failedFrontend || readingRetainedOutput || terminalLifetime.current.opened ? <TerminalView
+              <div hidden={frontendSurface && !readingRetainedOutput} style={{ height: '100%' }}>
+              {!frontendSurface || readingRetainedOutput || terminalLifetime.current.opened ? <TerminalView
                 session={session}
-                autoFocus={!failedFrontend && !readingRetainedOutput && autoFocus && visible && !historyOpen && viewMode === 'terminal'}
+                autoFocus={!frontendSurface && !readingRetainedOutput && autoFocus && visible && !historyOpen && viewMode === 'terminal'}
                 themeId={terminalThemeId}
                 fontSize={terminalFontSize}
                 interactiveResize={!readingRetainedOutput && projectionPolicy.interactiveResize && interactiveResize}
-                visible={visible && !historyOpen && viewMode === 'terminal' && (!failedFrontend || readingRetainedOutput)}
-                readOnly={failedFrontend || readingRetainedOutput || !projectionPolicy.acceptsInput}
+                visible={visible && !historyOpen && viewMode === 'terminal' && (!frontendSurface || readingRetainedOutput)}
+                readOnly={frontendSurface || readingRetainedOutput || !projectionPolicy.acceptsInput}
                 linkOrigin={linkOrigin}
                 onObservationRefresh={bindObservationRefresh}
               /> : null}
@@ -1177,7 +1181,7 @@ export function SessionPane({
             )
             }</div>
           ) : null}
-          {(disconnected || missing || exited || detachedFrontendNotice) && (!needsSessionSurface || readingRetainedOutput) ? (
+          {(disconnected || missing || exited || recoverableFrontendNotice) && (!needsSessionSurface || readingRetainedOutput) ? (
             <div className={sessionRecoveryClassName(sessionRecoveryState({ disconnected: disconnected || Boolean(frontendNotice), exited, failed: !frontendNotice && session.status.state === 'error' }))} role="status" aria-live="polite">
               <span className="terminal-recovery__icon">
                 {refreshing || recovering ? <ThemeStatusLoadingIcon animation="spin" size={16} /> : !frontendNotice && session.status.state === 'error' ? <ThemeStatusWarningIcon size={16} /> : disconnected || missing || frontendNotice ? <ThemeStatusHostUnavailableIcon size={16} /> : <ThemeActionStopIcon size={16} />}
