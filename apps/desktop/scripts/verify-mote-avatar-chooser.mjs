@@ -1,11 +1,23 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
-import { readFile, writeFile } from 'node:fs/promises'
+import { readFileSync, writeFileSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '../../..')
 const sha = bytes => createHash('sha256').update(bytes).digest('hex')
+
+let activeRestore = null
+for (const sig of ['SIGINT', 'SIGTERM', 'exit']) {
+  process.on(sig, () => {
+    if (activeRestore) {
+      const { path, content } = activeRestore
+      activeRestore = null
+      writeFileSync(path, content)
+    }
+  })
+}
 
 function run(argv) {
   return new Promise((resolvePromise, rejectPromise) => {
@@ -37,13 +49,14 @@ for (const match of cleanCss.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
   assert.doesNotMatch(scrubbed, /#[0-9a-fA-F]{3,8}\b|\brgba?\(/i, `Color literal forbidden in ${selector}`)
 }
 
-const definedClasses = new Set([...cleanCss.matchAll(/\.(-?[A-Za-z_][\w-]*)/g)].map(m => m[1]), )
-for (const baseClass of ['dialog-scrim', 'dialog-surface', 'small-button', 'primary-button', 'icon-button', 'project-rail-row__icon']) definedClasses.add(baseClass)
+const definedClasses = new Set([...cleanCss.matchAll(/\.(-?[A-Za-z_][\w-]*)/g)].map(m => m[1]))
+for (const baseClass of ['dialog-scrim', 'dialog-surface', 'small-button', 'primary-button', 'icon-button', 'project-rail-row__icon', 'mote-companion']) definedClasses.add(baseClass)
 for (const rel of [
   'apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx',
   'apps/desktop/src/renderer/src/components/MoteFaceEditor.tsx',
   'apps/desktop/src/renderer/src/components/MoteAvatarImageGallery.tsx',
-  'apps/desktop/src/renderer/src/components/MoteAvatarCrop.tsx'
+  'apps/desktop/src/renderer/src/components/MoteAvatarCrop.tsx',
+  'apps/desktop/src/renderer/src/components/MoteSilhouetteArt.tsx'
 ]) {
   const src = (await readFile(resolve(root, rel), 'utf8')).replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1')
   for (const m of src.matchAll(/className\s*=\s*(?:"([^"]*)"|'([^']*)'|\{`([^`]*)`\})/g)) {
@@ -68,39 +81,52 @@ const mutations = [
     file: 'apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx',
     from: "setMode(unresolved || target?.avatarTarget && series ? 'series' : target?.avatarTarget && isMoteFace(saved) ? 'face' : 'alternative')",
     to: "setMode('face')",
-    test: 'apps/desktop/test/space-object-avatar-picker-durable.test.tsx'
+    test: 'apps/desktop/test/space-object-avatar-picker-durable.test.tsx',
+    pattern: 'reopens saved automatic'
   },
   {
     id: 'restore-automatic-forces-tab-jump',
     file: 'apps/desktop/src/renderer/src/components/SpaceIconPicker.tsx',
     from: "onClick={() => { select(null); if (editingSeries) setMode('alternative') }}",
     to: "onClick={() => { select(null); setMode('alternative') }}",
-    test: 'apps/desktop/test/mote-paperdoll-avatar.test.tsx'
+    test: 'apps/desktop/test/mote-paperdoll-avatar.test.tsx',
+    pattern: 'renders focused part glyphs'
   },
   {
     id: 'part-glyph-disconnected',
     file: 'apps/desktop/src/renderer/src/components/MoteFaceEditor.tsx',
     from: "face[part] ?? 'none') === value ? ' small-button--active' : ''",
     to: "false ? ' small-button--active' : ''",
-    test: 'apps/desktop/test/mote-paperdoll-avatar.test.tsx'
+    test: 'apps/desktop/test/mote-paperdoll-avatar.test.tsx',
+    pattern: 'the actual face editor paints'
+  },
+  {
+    id: 'silhouette-drops-to-static-png',
+    file: 'apps/desktop/src/renderer/src/components/SpaceObjectIcon.tsx',
+    from: 'isBuiltinMoteSilhouetteLocator(manualIcon.source)',
+    to: 'false',
+    test: 'apps/desktop/test/mote-paperdoll-avatar.test.tsx',
+    pattern: 'saving a Mote silhouette preserves live articulated expressions'
   }
 ]
 
 for (const mutant of mutations) {
   const fullPath = resolve(root, mutant.file)
-  const original = await readFile(fullPath, 'utf8')
+  const original = readFileSync(fullPath, 'utf8')
   const originalSha = sha(original)
   assert.ok(original.includes(mutant.from), `Mutation anchor missing for ${mutant.id}`)
   const mutated = original.replace(mutant.from, mutant.to)
   assert.notEqual(mutated, original)
+  activeRestore = { path: fullPath, content: original }
   try {
-    await writeFile(fullPath, mutated)
-    const red = await run(['node_modules/vitest/vitest.mjs', 'run', mutant.test])
+    writeFileSync(fullPath, mutated)
+    const red = await run(['node_modules/vitest/vitest.mjs', 'run', mutant.test, '-t', mutant.pattern])
     assert.notEqual(red.code, 0, `Mutant ${mutant.id} must fail`)
   } finally {
-    await writeFile(fullPath, original)
+    writeFileSync(fullPath, original)
+    activeRestore = null
   }
-  assert.equal(sha(await readFile(fullPath, 'utf8')), originalSha, `Source restored for ${mutant.id}`)
+  assert.equal(sha(readFileSync(fullPath, 'utf8')), originalSha, `Source restored for ${mutant.id}`)
 }
 
 const restored = await run(vitestCmd)
