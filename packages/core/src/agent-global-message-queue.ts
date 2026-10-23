@@ -33,7 +33,7 @@ import { agentInputJournalKey, validateAgentInputControlId, validateAgentInputWa
   type AgentInputWaitStopReceipt, type AgentInputDispatchLink } from './agent-input-wait.js'
 import { validateAgentPromptInputKey, type AgentPromptInputKey } from './agent-prompt-condition.js'
 import { parseAgentInputMailboxRead, type AgentInputMailboxRead } from './agent-input-mailbox.js'
-import { renderAgentMuxMessageReferences } from './agent-message-render.js'
+import { parseAgentMuxMessagePrefix, renderAgentMuxMessageReferences } from './agent-message-render.js'
 import { MAX_A2A_NOTIFICATION_BYTES, validateMessageNotification, type AgentMuxMessageNotification, type AgentMuxMessageNotificationStatus } from './agent-message-notification.js'
 import { messageNotificationJournalSchema, initializeMessageNotificationReferenceIndex } from './agent-message-journal.js'
 
@@ -384,7 +384,13 @@ export class DurableAgentMuxMessageQueue {
           'The original Inbox reference is already assigned or belongs to another recipient.', 'A2A_NOTIFICATION_CONFLICT')
         return { senderSessionId: String(original.sender_id), messageId }
       })
-      if (notice.wire !== renderAgentMuxMessageReferences(references)) throw new AgentMuxError('Notification wire must contain exactly its original references.', 'INVALID_A2A_NOTIFICATION')
+      // The journal owns the references; retained reading wire need not match today's formatter.
+      const reading = parseAgentMuxMessagePrefix(notice.wire)
+      if (reading?.kind !== 'references' || reading.declaredContexts?.length ||
+          reading.references.length !== references.length ||
+          reading.references.some((reference, index) => reference.declaredAgentSessionId !== references[index]!.senderSessionId ||
+            reference.declaredMessageId !== references[index]!.messageId)) throw new AgentMuxError(
+        'Notification wire must contain exactly its original references.', 'INVALID_A2A_NOTIFICATION')
       this.db.prepare('INSERT INTO a2a_notifications (notification_id, recipient_id, run_id, original_sequence, active) VALUES (?, ?, ?, ?, ?)')
         .run(notice.notificationId, notice.key.agentSessionId, notice.key.expectedRun.runId, record.sequence, notice.mode === 'idle' ? 1 : 0)
       const link = this.db.prepare('INSERT OR IGNORE INTO a2a_unresolved_notification_references VALUES (?, ?, ?)')
