@@ -40,12 +40,21 @@ settings again before a separate --application-configuration add-card-actions co
 These two finite effects have separate receipts; event delivery does not configure callbacks. A binding/room creation
 must name that same Agent Session, never another Agent. Global service/configuration, external
 actor grants and existing human/device bot operations require their original trusted operator.
-For saved Mote identity use space mote connection create/sync/advance/inspect/ls through the same
-owner; exact Mote sources stay on the authenticated Agent Host and Workspace. Create --input
-accepts optional name to freeze an explicit bot name; omit name to use the exact saved Mote name.
-Retain that complete input: changing name on the same operationId conflicts. Neither choice edits
-the saved Mote source. Sync still uses the saved Mote name and does not accept name. Saved identity,
-application creation, profile write and Mote default save retain separate original receipts.
+For Mote identity use space mote connection create/sync/advance/inspect/ls through the same owner.
+Create/sync --input carries source {target,preparedFrom} and one desired {name,description,avatar?}
+public profile. Create requires the actual PNG avatar; sync omits avatar to leave it unchanged.
+The client prepares saved Mote copy and its real static image before submitting. preparedFrom
+contains the topicRevision and nullable avatarRevision actually read during preparation, or null
+when an explicit profile has no such observation. It is declared preparation provenance, never
+Host-current appearance verification, input authority or the default file's CAS baseline.
+The exact target stays within the authenticated Host and Workspace. The original owner validates
+the target, actor, connection revision and actual PNG, then freezes the profile and child operations.
+Retain that complete input: changing the profile, source or target on the same operationId conflicts.
+Neither action edits the saved Mote copy. Historical source-only operations retain their original
+source preconditions and frozen children for inspect/advance; old source-only bodies are not new
+create/sync inputs. Keep an unconfirmed old request and inspect its original operation, without
+filling it with new profile data or resending it. Application creation, profile write and Mote
+default save retain separate receipts; missing original File acknowledgement remains unknown.
 For private Mote chat use space mote chat configure/inspect/history/audience/allocate --input FILE|-.
 A person or device controls chat policy and per-person total allowances. A chat Agent may read only
 its own retained lane with space mote chat history; copy the original target from its first context.
