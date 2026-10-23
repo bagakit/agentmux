@@ -5,13 +5,15 @@ import { appendFile, readFile, writeFile, mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
+import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentMuxClient } from '@agentmux/core'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import * as senderDetails from '../src/renderer/src/lib/conversation-sender-details'
 import { speakerColorHue } from '../src/renderer/src/lib/conversation-avatar-color'
-import { DECLARED_ID, RAW_IDS, RECIPIENT_ID, TRUSTED_ID, NATIVE_SESSION_ID, publicNativeInputs } from '../scripts/fixtures/conversation-sender-context/public-inputs.fixture'
+import { DECLARED_ID, RAW_IDS, RECIPIENT_ID, TRUSTED_ID, NATIVE_SESSION_ID, messageWire, publicNativeInputs } from '../scripts/fixtures/conversation-sender-context/public-inputs.fixture'
 
 // The Store, public reader, shared hook, Pane, Activity, History, Message, Details,
 // resolver and ProjectIcon remain production callers. Only unrelated leaf paint is isolated.
@@ -29,30 +31,35 @@ const DRAFT = 'Keep the original unsent reply draft.'
 const CURRENT_NAME = 'Current implementation renamed by the user'
 const PEER_NAME = 'Peer review renamed by the user'
 const ANSWER_ID = 'compact-native-answer'
-const COPY_WIRE = ("[Message from Agent " + (DECLARED_ID) + ("]\n<bagakit-msg type=\"agent-v1\" name=\"Declared review name\" time=\"" + _hygiene_fixtureIso(23817600000, "zone-second", 480) + "\">    Keep packet indentation and line-end spaces  \n\n**One original passage** &amp; context\n<cite from=\"User\" ref=\"original-message-7\">Keep the original reference.</cite>\nContinue reading here.\n</bagakit-msg>"))
+const COPY_WIRE = messageWire(DECLARED_ID, '<bagakit-msg type="agent-v1" name="Declared review name" time="' + _hygiene_fixtureIso(23817600000, 'zone-second', 480) + '">    Keep packet indentation and line-end spaces  \n\n**One original passage** &amp; context\n<cite from="User" ref="original-message-7">Keep the original reference.</cite>\nContinue reading here.\n</bagakit-msg>')
 const initial = useAppStore.getState()
 let host: HTMLDivElement, root: Root
 let f: Awaited<ReturnType<typeof fixture>>
 const controls: { name: string; calls: () => number; restore: () => void }[] = []
+const closes: Array<() => unknown | Promise<unknown>> = []
 
 beforeEach(() => {
   f = undefined!
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  vi.stubGlobal('ResizeObserver', class { observe() {} disconnect() {} })
-  vi.stubGlobal('IntersectionObserver', class { observe() {} disconnect() {} })
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
   localStorage.clear(); host = document.createElement('div'); document.body.append(host); root = createRoot(host)
 })
 afterEach(async () => {
   await act(async () => root.unmount()); host.remove(); window.getSelection()?.removeAllRanges()
-  expect(controls.length).toBeGreaterThan(0)
-  expect(controls.map(({ name, calls }) => [name, calls()])).toEqual(controls.map(({ name }) => [name, 0]))
-  if (f) {
-    expect(await readFile(resolve(f.workspacePath, 'native.jsonl'))).toEqual(f.nativeBefore)
-    expect(await readFile(resolve(f.workspacePath, 'sessions.json'))).toEqual(f.storeBefore)
-    expect(f.writes.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0])
+  try {
+    expect(controls.length).toBeGreaterThan(0)
+    expect(controls.map(({ name, calls }) => [name, calls()])).toEqual(controls.map(({ name }) => [name, 0]))
+    if (f) {
+      expect(await readFile(resolve(f.workspacePath, 'native.jsonl'))).toEqual(f.nativeBefore)
+      expect(await readFile(resolve(f.workspacePath, 'sessions.json'))).toEqual(f.storeBefore)
+      expect(f.writes.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0])
+    }
+  } finally {
+    for (const close of closes.splice(0).reverse()) await close()
+    controls.splice(0).forEach(({ restore }) => restore()); if (f) await f.dispose()
+    vi.restoreAllMocks(); vi.unstubAllGlobals(); useAppStore.setState(initial, true); localStorage.clear()
   }
-  controls.splice(0).forEach(({ restore }) => restore()); vi.restoreAllMocks(); vi.unstubAllGlobals()
-  useAppStore.setState(initial, true); localStorage.clear(); if (f) await f.dispose()
 })
 function forbidRunControl(client: AgentMuxClient) {
   const kernel: object = Reflect.get(client, 'kernel'), names = new Set<string>()
@@ -81,8 +88,9 @@ async function fixture(wire?: string) {
     viewModes: { [RECIPIENT_ID]: 'activity' }, timelines: { [RECIPIENT_ID]: source.timeline },
     agentNames: { [RECIPIENT_ID]: CURRENT_NAME, [TRUSTED_ID]: PEER_NAME }, agentComposerDrafts: { [RECIPIENT_ID]: DRAFT }, agentSteerQueues: {} })
   goalReads = 0
-  const history = vi.spyOn(api.sessions, 'historyPage').mockImplementation((control, options) => { expect(control).toEqual(source.control); return source.client.sessionHistoryPage(control.agentSessionId, options) })
-  const observer = vi.spyOn(api.sessions, 'observeHistory').mockImplementation((control, listener, options) => source.client.observeSessionHistory(control.agentSessionId, listener, options))
+  const history = source.nativeHistory; history.mockClear()
+  const observer = vi.spyOn(source.client, 'observeSessionHistory')
+  await desktopConversationReadBridge({ root: source.workspacePath, client: source.client }, closes)
   const read = vi.spyOn(senderDetails, 'currentConversationSenderDetails')
   const metadata = vi.spyOn(senderDetails, 'currentConversationSpeakerMetadata')
   const appearance = vi.spyOn(api.workspaces, 'appearance').mockImplementation(async workspaceId => ({ kind: 'directory', icon: workspaceId === 'sender-project' ? 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg"/>' : null }))
@@ -94,9 +102,21 @@ function pane(visible = true) { return <SessionPane sessionId={RECIPIENT_ID} sur
 async function settle() { await act(async () => { for (let i = 0; i < 12; i++) await Promise.resolve() }) }
 async function draw(visible = true) {
   await act(async () => root.render(pane(visible)))
-  await vi.waitFor(async () => { await settle(); expect(host.querySelectorAll('.activity-feed [data-native-record-id]')).toHaveLength(3) }, { timeout: 3000 })
+  if (visible) await vi.waitFor(async () => {
+    await settle(); expect(host.querySelectorAll('.activity-feed [data-native-record-id]')).toHaveLength(3)
+    const consumers = inspectConversationConsumers(f.control).consumers
+    expect(consumers.length).toBeGreaterThan(0)
+    expect(consumers.every(value => value.accepted && !value.loading && !value.inFlight && !value.dirty && !value.pending && !value.watch.binding && (!value.gates.enabled || value.watch.bound))).toBe(true)
+  }, { timeout: 3000 })
 }
-function turn(id: string) { const found = [...host.querySelectorAll<HTMLElement>('.log-turn')].find(row => row.dataset.messageId === id); expect(found).toBeDefined(); return found! }
+async function capturedTurn(id: string) {
+  const submission = host.querySelector<HTMLElement>(`[data-submission-id="${id}"]`); expect(submission).not.toBeNull()
+  const disclosure = submission!.querySelector<HTMLDetailsElement>('.message-disclosure'); expect(disclosure).not.toBeNull()
+  if (!disclosure!.open) await act(async () => { disclosure!.open = true; disclosure!.dispatchEvent(new Event('toggle')) })
+  const found = submission!.querySelector<HTMLElement>('.log-turn'); expect(found).not.toBeNull()
+  expect(found!.dataset.messageId).toBe(`captured:${id}`)
+  return found!
+}
 function nativeTurn(id: string) { const found = host.querySelector<HTMLElement>(`[data-native-record-id="${id}"] .log-turn`); expect(found).not.toBeNull(); return found! }
 function name(row: HTMLElement) { return row.querySelector('.log-turn__who')?.textContent }
 function detailsButton(row: HTMLElement) {
@@ -123,7 +143,7 @@ it('actual Pane presents renamed current and same-provider peer identities over 
   f.appearance.mockImplementation(workspaceId => workspaceId === 'sender-project' ? pendingAppearance : Promise.resolve({ kind: 'directory', icon: null }))
   await draw()
   expect([...host.querySelectorAll<HTMLElement>('.activity-feed [data-native-record-id]')].map(row => row.dataset.nativeRecordId)).toEqual([...RAW_IDS, ANSWER_ID])
-  const current = nativeTurn(ANSWER_ID), peer = turn('captured:captured-trusted'), user = nativeTurn(RAW_IDS[0])
+  const current = nativeTurn(ANSWER_ID), peer = await capturedTurn('captured-trusted'), user = nativeTurn(RAW_IDS[0])
   expect([name(current), name(peer)]).toEqual([CURRENT_NAME, PEER_NAME])
   expect([current.dataset.messageDirection, peer.dataset.messageDirection, user.dataset.messageDirection]).toEqual(['outgoing', 'incoming', 'incoming'])
   expect(current.dataset.speakerRelation).toBeUndefined(); expect(peer.dataset.speakerRelation).toBe('other-agent')
@@ -136,9 +156,13 @@ it('actual Pane presents renamed current and same-provider peer identities over 
   await act(async () => image.dispatchEvent(new Event('error')))
   expect(projectIcon.hasAttribute('data-monogram')).toBe(true); expect(projectIcon.querySelector('img')).toBeNull(); expect(f.appearance.mock.calls.length).toBe(appearanceCount)
   expect(peer.querySelector('.log-turn__declared-source')?.textContent).toBe('Message header: Agent conflicting-declaration')
-  expect(user.querySelector('.conversation-avatar--human')).not.toBeNull(); expect(user.querySelector('.conversation-message-avatar')).toBeNull()
+  projectAvatar(user, 'sender-project', DECLARED_ID, 'Current declared sender')
+  expect(user.querySelector('.conversation-avatar--human')).toBeNull()
+  expect(f.messages[0]!.author).toEqual({ kind: 'unknown' })
   expect(f.metadata.mock.calls.length).toBeGreaterThan(0); expect(f.appearance.mock.calls.length).toBeGreaterThan(0)
-  expect(f.read.mock.calls).toEqual([]); expect(f.goalReads()).toBe(0); expect(f.history).toHaveBeenCalledOnce(); expect(f.observer).toHaveBeenCalledOnce(); healthy()
+  expect(f.read.mock.calls).toEqual([]); expect(f.goalReads()).toBe(0)
+  expect(f.history.mock.calls.length).toBeGreaterThan(0); expect(f.history.mock.calls.every(([sid]) => sid === RECIPIENT_ID)).toBe(true)
+  expect(f.observer.mock.calls.length).toBeGreaterThan(0); expect(f.observer.mock.calls.every(([sid]) => sid === RECIPIENT_ID)).toBe(true); healthy()
   if (process.env.AGENTMUX_COMPACT_IDENTITY_SCENE_OUTPUT) {
     const output = resolve(process.env.AGENTMUX_COMPACT_IDENTITY_SCENE_OUTPUT); await mkdir(resolve(output, '..'), { recursive: true })
     await writeFile(output, JSON.stringify({ schema: 'agentmux.conversation-compact-public-scene.v1', config: f.config, sessions: f.sessions, demands: f.demands,
@@ -149,7 +173,7 @@ it('actual Pane presents renamed current and same-provider peer identities over 
 
 it('updates current and peer user names while retaining original record/body/Range, expanded native traces, scroll and draft', async () => {
   f = await fixture(); await draw()
-  const current = nativeTurn(ANSWER_ID), peer = turn('captured:captured-trusted'), user = nativeTurn(RAW_IDS[0]), body = user.querySelector('.log-turn__text')!
+  const current = nativeTurn(ANSWER_ID), peer = await capturedTurn('captured-trusted'), user = nativeTurn(RAW_IDS[0]), body = user.querySelector('.log-turn__text')!
   const text = body.querySelector('strong')!.firstChild!, range = document.createRange(); range.selectNodeContents(text); window.getSelection()!.addRange(range)
   const tool = user.querySelector<HTMLButtonElement>('.conversation-tool-trace__row')!; expect(tool).not.toBeNull(); await act(async () => tool.click())
   const reasoning = current.querySelector<HTMLDetailsElement>('details')!; expect(reasoning).not.toBeNull(); await act(async () => { reasoning.open = true; reasoning.dispatchEvent(new Event('toggle')) })
@@ -168,7 +192,7 @@ it('maps an exact peer worktree to its own project and leaves absent or wrong-ho
   f = await fixture(); const senderPath = f.config.workspaces.find(workspace => workspace.id === 'sender-project')!.path, worktreePath = resolve(senderPath, '.worktrees/review')
   await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.map(session => session.id === TRUSTED_ID ? { ...session, workspacePath: worktreePath } : session),
     config: { ...state.config!, workspaces: [...state.config!.workspaces, { id: 'peer-worktree', hostId: 'local', path: worktreePath, repoPath: senderPath, kind: 'worktree', branch: 'review/native-reading', name: 'Quiet worktree auxiliary title' }] } })))
-  await draw(); const peer = turn('captured:captured-trusted'); projectAvatar(peer, 'sender-project', TRUSTED_ID, PEER_NAME)
+  await draw(); const peer = await capturedTurn('captured-trusted'); projectAvatar(peer, 'sender-project', TRUSTED_ID, PEER_NAME)
   await toggle(peer); expect(value(peer, 'Session')).toBe(TRUSTED_ID); expect(details(peer).textContent).toContain('review/native-reading'); await toggle(peer)
   await act(async () => useAppStore.setState(state => ({ config: { ...state.config!, workspaces: state.config!.workspaces.map(workspace => workspace.id === 'peer-worktree' ? { ...workspace, hostId: 'different-host' } : workspace) } }))); await settle()
   expect(name(peer)).toBe(PEER_NAME); expect(peer.querySelector('.conversation-message-avatar')).toBeNull(); expect(peer.querySelector('.conversation-avatar--agent')?.getAttribute('aria-label')).toBe(PEER_NAME)
@@ -179,29 +203,32 @@ it('maps an exact peer worktree to its own project and leaves absent or wrong-ho
 })
 
 it('keeps icon details accessible and reads only the exact recorded peer and explicitly linked goals on opening', async () => {
-  f = await fixture(); await draw(); const peer = turn('captured:captured-trusted'), button = detailsButton(peer)
+  f = await fixture(); await draw(); const peer = await capturedTurn('captured-trusted'), button = detailsButton(peer)
   const focus = vi.spyOn(useAppStore.getState(), 'focusRegion'), workbench = useAppStore.getState()
   expect(button.getAttribute('aria-expanded')).toBe('false'); expect(button.getAttribute('aria-controls')).toBeTruthy(); expect(peer.querySelector('section[aria-label="Message details"]')).toBeNull()
   expect(f.read.mock.calls).toEqual([]); expect(f.goalReads()).toBe(0)
   button.focus(); expect(document.activeElement).toBe(button); await toggle(peer)
   expect(button.getAttribute('aria-expanded')).toBe('true'); expect(details(peer).id).toBe(button.getAttribute('aria-controls'))
-  expect(value(peer, 'Source')).toBe('AgentMux submitted record'); expect(value(peer, 'Submission')).toBe('captured-trusted'); expect(value(peer, 'Session')).toBe(TRUSTED_ID)
+  expect(value(peer, 'Source')).toBe('AgentMux recorded message'); expect(value(peer, 'Record')).toBe('captured-trusted'); expect(value(peer, 'Session')).toBe(TRUSTED_ID)
   expect(details(peer).querySelector('strong')?.textContent).toBe(PEER_NAME); expect([...details(peer).querySelectorAll('li')].map(row => row.textContent)).toEqual(['Explicit sender goal'])
   expect(details(peer).textContent).not.toContain(CURRENT_NAME); expect(details(peer).textContent).not.toContain('Current declared sender'); expect(f.read.mock.calls.map(([id]) => id)).toEqual([TRUSTED_ID]); expect(f.goalReads()).toBe(1)
   expect(details(peer).querySelector('a')).toBeNull(); await toggle(peer); expect(button.getAttribute('aria-expanded')).toBe('false'); expect(peer.querySelector('section[aria-label="Message details"]')).toBeNull(); expect(f.goalReads()).toBe(1)
-  expect(focus.mock.calls).toEqual([]); expect(f.history).toHaveBeenCalledOnce(); expect(useAppStore.getState().activeWorkspaceId).toBe(workbench.activeWorkspaceId); expect(useAppStore.getState().tabs).toBe(workbench.tabs); expect(useAppStore.getState().layouts).toBe(workbench.layouts); healthy()
+  expect(focus.mock.calls).toEqual([]); expect(f.history.mock.calls.length).toBeGreaterThan(0); expect(useAppStore.getState().activeWorkspaceId).toBe(workbench.activeWorkspaceId); expect(useAppStore.getState().tabs).toBe(workbench.tabs); expect(useAppStore.getState().layouts).toBe(workbench.layouts); healthy()
 })
 
 it('preserves unverified declarations, full raw protocol Copy and readable failure feedback through the actual native caller', async () => {
   f = await fixture(COPY_WIRE); const copy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined); await draw(); const user = nativeTurn(RAW_IDS[0])
-  expect(user.dataset.speakerRole).toBe('human'); expect(user.dataset.speakerRelation).toBeUndefined(); expect(user.querySelector('.conversation-message-avatar')).toBeNull()
+  expect(user.dataset.speakerRole).toBe('human'); expect(user.dataset.speakerRelation).toBeUndefined()
+  projectAvatar(user, 'sender-project', DECLARED_ID, 'Current declared sender')
   expect(user.querySelector('.log-turn__text')?.textContent).toContain('One original passage & context'); expect(user.querySelector('.log-turn__citation-ref')?.textContent).toBe('original-message-7')
   expect(user.querySelector('.log-turn__packet-text pre code')?.textContent).toBe('Keep packet indentation and line-end spaces  ')
   expect(f.messages.slice(0, 2).map(message => message.author)).toEqual([{ kind: 'unknown' }, { kind: 'unknown' }])
   await toggle(user); expect(f.read.mock.calls.map(([id]) => id)).toEqual([DECLARED_ID]); expect(details(user).textContent).toContain('This lookup does not authenticate its author.'); await toggle(user)
   const copyButton = user.querySelector<HTMLButtonElement>('[title="Copy message"]')!; expect(copyButton).not.toBeNull(); await act(async () => copyButton.click())
   expect(copy.mock.calls).toEqual([[COPY_WIRE + '\nTool result\nOriginal native tool result survives details.']])
-  copy.mockRejectedValueOnce(new Error('Controlled clipboard failure')); await act(async () => copyButton.click()); expect(user.querySelector('[role="alert"]')?.textContent).toBe('Copy failed'); healthy()
+  copy.mockRejectedValueOnce(new Error('Controlled clipboard failure')); await act(async () => copyButton.click())
+  expect(user.querySelector('[role="alert"]')?.textContent).toBe('Controlled clipboard failure')
+  expect(user.querySelector('.log-turn__actions')?.getAttribute('data-copy-state')).toBe('failed'); expect(copyButton.textContent).toContain('Retry'); healthy()
   if (process.env.AGENTMUX_COMPACT_IDENTITY_SCENE_OUTPUT) {
     const output = resolve(process.env.AGENTMUX_COMPACT_IDENTITY_SCENE_OUTPUT, '..', 'public-packet-scene.final.json')
     await writeFile(output, JSON.stringify({ schema: 'agentmux.conversation-compact-public-scene.v1', config: f.config, sessions: f.sessions, demands: f.demands,
