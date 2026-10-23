@@ -1,4 +1,4 @@
-import { connectionDiagnosisEventKey, connectionDiagnosisRecordKey, connectionDiagnosisSourceKey, connectionDiagnosisPartKey } from './connection-diagnosis-source.js'
+import { connectionDiagnosisGapKey, connectionDiagnosisEventKey, connectionDiagnosisRecordKey, connectionDiagnosisSourceKey, connectionDiagnosisPartKey } from './connection-diagnosis-source.js'
 import type { ConversationItemRef, ConversationRef } from './conversation.js'
 import type { ConnectionDeliveryGap } from './connection-delivery-contract.js'
 import type { ConnectionDelivery } from './connection-delivery-contract.js'
@@ -105,7 +105,7 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
       deliveries: outgoing.value!.deliveries.map(deliveryFacts), observation: outgoing.value!.observation ? { state: outgoing.value!.observation.state, ...(outgoing.value!.observation.reason ? { reason: outgoing.value!.observation.reason } : {}) } : null,
       sourceObservation: outgoing.value!.sourceObservation ?? null, effectObservation: outgoing.value!.effectObservation ?? null,
       coverage: outgoing.value!.coverage ? { state: outgoing.value!.coverage.state, nextContent: outgoing.value!.coverage.nextContent,
-        gaps: outgoing.value!.coverage.gaps.slice(0, groupWindowLimit).map(gap => ({ gapId: gap.gapId, reason: gap.reason, association: association({ hostId: b?.sourceFrontier?.sourceHostId ?? target.executionHostId, agentSessionId: target.agentSessionId }, gap), code: connectionDiagnosisSourceCodes.find(code => code === gap.code) ?? null, codeRecorded: gap.code !== undefined, sourceKind: gap.source?.kind ?? null })), originCount: outgoing.value!.coverage.origins.length, omittedGapCount: Math.max(0, outgoing.value!.coverage.gaps.length - groupWindowLimit) } : null } : null,
+        gaps: outgoing.value!.coverage.gaps.slice(0, groupWindowLimit).map(gap => ({ gapKey: connectionDiagnosisGapKey(target, gap.gapId), reason: gap.reason, association: association({ hostId: b?.sourceFrontier?.sourceHostId ?? target.executionHostId, agentSessionId: target.agentSessionId }, gap), code: connectionDiagnosisSourceCodes.find(code => code === gap.code) ?? null, codeRecorded: gap.code !== undefined, sourceKind: gap.source?.kind ?? null })), originCount: outgoing.value!.coverage.origins.length, omittedGapCount: Math.max(0, outgoing.value!.coverage.gaps.length - groupWindowLimit) } : null } : null,
       issue: outgoing.issue ?? (scopedOutgoing ? null : 'target-unconfirmed' as const) },
     incoming: { value: incoming.value && incoming.value.ingresses.every(row => ingressMatches(row, target)) ? { beforeIngressId: window.beforeIngressId ?? null, next: incoming.value.nextBeforeIngressId, rows: intake } : null, issue: incoming.issue ?? (incoming.value?.ingresses.every(row => ingressMatches(row, target)) ? null : 'target-unconfirmed' as const) }
   }
@@ -155,7 +155,7 @@ export function formatGroupDiagnosis(report: GroupDiagnosis) {
     for (const d of out.deliveries) lines.push(`Outgoing ${d.operationId}: ${d.kind} · queue ${d.state} · platform receipt ${d.receipt ?? 'unrecorded'} · message ${d.platformMessageId ?? 'unrecorded'} · reason ${d.reason ?? 'unrecorded'} · resource upload ${d.resourceUpload ?? 'unrecorded'} · ${related(d.association)}`)
     lines.push(`Content coverage: ${out.coverage?.state ?? 'unrecorded'} · observed origins ${out.coverage?.originCount ?? 'unrecorded'}`)
     if (out.coverage?.omittedGapCount) lines.push(`Additional gaps in this owner page: ${out.coverage.omittedGapCount}`)
-    for (const gap of out.coverage?.gaps ?? []) lines.push(`Content gap ${gap.gapId}: ${gap.reason} · source ${gap.sourceKind ?? 'unrecorded'} · code ${gap.code ?? (gap.codeRecorded ? 'recorded code withheld' : 'unrecorded')} · ${related(gap.association)}`)
+    for (const gap of out.coverage?.gaps ?? []) lines.push(`Content gap ${gap.gapKey}: ${gap.reason} · source ${gap.sourceKind ?? 'unrecorded'} · code ${gap.code ?? (gap.codeRecorded ? 'recorded code withheld' : 'unrecorded')} · ${related(gap.association)}`)
   }
   const input = incoming.value
   if (input) {

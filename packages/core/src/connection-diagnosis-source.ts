@@ -1,3 +1,4 @@
+import type { ConnectionDiagnosisTarget } from './connection-diagnosis-contract.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import type { ConversationCheckpoint } from './conversation-changes.js'
 import type { ConversationItemRef, ConversationRef } from './conversation.js'
@@ -33,8 +34,14 @@ export function connectionDiagnosisCheckpointKey(checkpoint: ConversationCheckpo
 export function connectionDiagnosisEventKey(record: ConversationItemRef, event: { id: string; revision: string }): string {
   return hash(['event', connectionDiagnosisRecordKey(record), event.id, event.revision])
 }
+export function connectionDiagnosisGapKey(target: ConnectionDiagnosisTarget, originalGapId: string): string {
+  return hash(['gap', [target.executionHostId, target.agentSessionId, target.bindingId, target.bindingRevision,
+    target.connectionId, target.domain, target.appId, target.externalConversationId], originalGapId])
+}
 function hash(value: unknown): string {
-  return Array.from(sha256(new TextEncoder().encode(JSON.stringify(['connection-diagnosis-v1', value]))), byte => byte.toString(16).padStart(2, '0')).join('')
+  const encoded = JSON.stringify(['connection-diagnosis-v1', value], (_key, item: unknown) => item && typeof item === 'object' && !Array.isArray(item)
+    ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)) : item)
+  return Array.from(sha256(new TextEncoder().encode(encoded)), byte => byte.toString(16).padStart(2, '0')).join('')
 }
 export function connectionDiagnosisRecordKey(record: ConversationItemRef): string { return hash(['record', conversationRecordId(record)]) }
 export function connectionDiagnosisSourceKey(reference: ConversationRef, source: ConversationSourceRef | ConversationItemRef['source']): string {
