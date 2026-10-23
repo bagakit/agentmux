@@ -91,13 +91,13 @@ export class GoalDelegationOwner implements GoalDelegationsOwner {
         if (original?.requestText !== undefined && !request.materials?.length && original.requestText === intent.text)
           intent = { ...intent, requestText: original.requestText, text: original.text }
         else if (!original && !existingSource) {
+          const guidance = goalRoleGuidance({ role: 'executor', goalId: input.goalId, agentSessionId: intent.workerAgentSessionId, runId: intent.workerRunId, source: { kind: 'goal-delegation', operationId: intent.operationId, sourceMessageId: intent.sourceMessageId, threadId: intent.threadId } })
           const coordination = JSON.stringify({ schema: 'agentmux.goal-delegation.v1', goalId: input.goalId,
             operationId: intent.operationId, sourceMessageId: intent.sourceMessageId, threadId: intent.threadId,
             ownerAgentSessionId: intent.ownerAgentSessionId, workerAgentSessionId: intent.workerAgentSessionId,
             hostId: intent.hostId, alignmentRevision: intent.alignmentRevision, criterionIds: intent.criterionIds,
-            roleGuidance: goalRoleGuidance({ role: 'executor', goalId: input.goalId, agentSessionId: intent.workerAgentSessionId, runId: intent.workerRunId, source: { kind: 'goal-delegation', operationId: intent.operationId, sourceMessageId: intent.sourceMessageId, threadId: intent.threadId } }),
             next: 'Use goal report --input FILE to return every delegated criterion with evidence, gap or unknown under this original dispatch. For a question/block, reply to the original source and record message dispatch report --kind question|escalation. A report is pending collection and human acceptance; exiting or worker_done does not complete the Goal.' })
-          intent = { ...intent, requestText: request.intent.text, text: intent.text + '\n\n[AgentMux delegation]\n' + coordination }
+          intent = { ...intent, requestText: request.intent.text, text: intent.text + '\n\n[AgentMux delegation]\n' + coordination + '\n\n' + guidance }
         }
       }
       if (!original && !existingSource) {
