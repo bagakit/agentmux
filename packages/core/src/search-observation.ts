@@ -12,6 +12,8 @@ export type AgentMuxSearchObservationPorts<C extends AgentMuxSearchReadContext =
   catalog(context: C): Promise<AgentMuxSpaceCatalog>
   snapshot(context: C): Promise<Partial<AgentMuxRpcSnapshot>>
   projects(context: C): Promise<AgentMuxRpcSnapshot['projects']>
+  /** Original page owner metadata only; no Browser acquisition or page-body reads. */
+  capsules?: { hostId: string; read(context: C): Promise<import('@agentmux/capsule').CapsuleResultMap['capsule.ls']> }
   history: AgentMuxSearchOwner<C>['history']
 }
 const issue = (source: string, error: unknown, hostId?: string): AgentMuxSearchIssue => ({ source, ...(hostId ? { hostId } : {}),
@@ -135,6 +137,14 @@ export function createAgentMuxSearchObservationOwner<C extends AgentMuxSearchRea
       for (const workspace of workspaces) add({ kind: 'workspace', hostId: workspace.hostId, workspaceId: workspace.workspaceId }, workspace.name, [workspace.projectId], [workspace.path, workspace.repoPath, workspace.branch])
       for (const topic of [...snapshot?.topics ?? [], ...snapshot?.motes ?? []]) add({ kind: topic.kind === 'mote' ? 'mote' : 'topic', hostId: topic.hostId, topicId: topic.topicId }, topic.title,
         [topic.workspaceId, topic.spaceId], [topic.summary, topic.path, topic.directoryPath])
+      if (ports.capsules && (!input.hostId || input.hostId === ports.capsules.hostId)) {
+        try {
+          const { hostId } = ports.capsules, page = await observeRead(ports.capsules.read(context), context.signal)
+          for (const { record } of page.capsules) add({ kind: 'capsule', capsuleId: record.capsuleId, hostId }, record.title,
+            [record.capsuleId], [record.sourcePath, record.storageMode, record.mode])
+          issues.push(...page.issues.map(value => ({ source: 'capsules', hostId, code: value.code, message: value.message, recovery: value.recovery })))
+        } catch (error) { context.signal?.throwIfAborted(); issues.push(issue('capsules', error, ports.capsules.hostId)) }
+      }
       // Use exact original Workspace metadata, never path prefix or current cwd.
       const workspacesByPath = new Map<string, typeof workspaces>()
       for (const workspace of workspaces) { const key = JSON.stringify([workspace.hostId, workspace.path]), rows = workspacesByPath.get(key) ?? []; rows.push(workspace); workspacesByPath.set(key, rows) }
