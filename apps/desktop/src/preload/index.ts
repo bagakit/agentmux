@@ -209,12 +209,21 @@ const api: AgentMuxPreloadApi = {
     call: (method, params) => ipcRenderer.invoke('applications:call', method, params)
   },
   connections: {
-    onMetadataChanged: (listener, observation) => {
-      const receive = (_event: unknown, change: import('@agentmux/core/connections').ChannelMetadataChange) => listener(change)
-      const observed = (_event: unknown, state: unknown) => { if (state === 'ready' || state === 'unavailable') observation?.(state) }
+    hostingTarget: hostId => ipcRenderer.invoke('connections:hostingTarget', hostId),
+    onMetadataChanged: (listener, observation, target) => {
+      const watchId = mintObjectId()
+      let live = true
+      const receive = (_event: unknown, value: { watchId: string; change: import('@agentmux/core/connections').ChannelMetadataChange }) => { if (live && value?.watchId === watchId) listener(value.change) }
+      const observed = (_event: unknown, value: { watchId: string; state: unknown }) => { if (live && value?.watchId === watchId && (value.state === 'ready' || value.state === 'unavailable')) observation?.(value.state) }
       ipcRenderer.on(CONNECTION_METADATA_CHANGED_CHANNEL, receive)
       ipcRenderer.on(CONNECTION_METADATA_OBSERVATION_CHANNEL, observed)
-      return () => { ipcRenderer.removeListener(CONNECTION_METADATA_CHANGED_CHANNEL, receive); ipcRenderer.removeListener(CONNECTION_METADATA_OBSERVATION_CHANNEL, observed) }
+      void ipcRenderer.invoke('connections:metadataStart', watchId, target).catch(() => { if (live) observation?.('unavailable') })
+      return () => {
+        live = false
+        ipcRenderer.removeListener(CONNECTION_METADATA_CHANGED_CHANNEL, receive)
+        ipcRenderer.removeListener(CONNECTION_METADATA_OBSERVATION_CHANNEL, observed)
+        void ipcRenderer.invoke('connections:metadataStop', watchId).catch(() => {})
+      }
     },
     call: async (method, params, target) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('connections:call', method, params, ...(target === undefined ? [] : [target]))),
     storeCredential: (input, target) => ipcRenderer.invoke('connections:storeCredential', input, ...(target === undefined ? [] : [target])),
@@ -321,11 +330,11 @@ const api: AgentMuxPreloadApi = {
     openSystem: (workspaceId: string, path: string) => ipcRenderer.invoke('files:openSystem', workspaceId, path),
     reveal: (workspaceId: string, path: string) => ipcRenderer.invoke('files:reveal', workspaceId, path)
   },
-  moteChat: { call: async (method, params) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('moteChat:call', method, params)) },
-  moteConnections: { call: (method, params) => ipcRenderer.invoke('moteConnections:call', method, params) },
+  moteChat: { call: async (method, params, target) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('moteChat:call', method, params, ...(target === undefined ? [] : [target]))) },
+  moteConnections: { call: (method, params, target) => ipcRenderer.invoke('moteConnections:call', method, params, ...(target === undefined ? [] : [target])) },
   motePreferences: {
-    read: params => ipcRenderer.invoke('motePreferences:read', params),
-    save: params => ipcRenderer.invoke('motePreferences:save', params)
+    read: (params, target) => ipcRenderer.invoke('motePreferences:read', params, ...(target === undefined ? [] : [target])),
+    save: (params, target) => ipcRenderer.invoke('motePreferences:save', params, ...(target === undefined ? [] : [target]))
   },
   moteAvatars: {
     list: () => ipcRenderer.invoke('moteAvatars:list'),

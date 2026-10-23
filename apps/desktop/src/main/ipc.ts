@@ -1,5 +1,4 @@
 import { sessionRecoveryOperationResult } from './session-recovery-operation'
-import { createMoteChatAgents } from './mote-chat-agents.js'
 import { registerMoteChatIpc } from './mote-chat-ipc.js'
 import { callCapsuleFromApp } from './capsule-ipc.js'
 import { capsulePresentation, resolveCapsuleColdDocument } from './capsule-presentation.js'
@@ -38,12 +37,8 @@ import { registerMoteConnectionIpc } from './mote-connection-ipc.js'
 import { NativeOverlayWindows } from './native-overlay-windows.js'
 import type { WorkbenchWindows } from './workbench-windows.js'
 import { WORKBENCH_WINDOW_RESPONSE } from '../shared/workbench-windows.js'
-import { MoteConnectionOperations } from '@agentmux/connectors'
-import { MoteConnectionTargetOwner } from './mote-connection-target.js'
 import { goalRoleInputNote } from './goal-role-input.js'
 import { GoalPatrolOwner } from './goal-patrol-owner.js'
-import { createPublicationConversationPort, createHostedIngressCorePort } from '@agentmux/connectors'
-import { createConnectionServices } from '@agentmux/connectors'
 import { registerConnectorIpc } from './connector-ipc.js'
 import { GoalStartResponsibilityOwner } from './goal-start-responsibility.js'
 import { GoalResponsibilityOwner } from './goal-responsibility-owner.js'
@@ -77,7 +72,6 @@ import { NoteTitleFileWriter } from './note-title-file-writer.js'
 import { createNotebookObservationServices } from './notebook-observation-requests.js'
 import { FileReadOwner } from './file-read-owner.js'
 import { parseFileHistoryParams, parseFileHistoryResult, parseFileRestoreParams, parseFileRestoreResult, parseFileUndoParams, parseFileUndoResult } from '@agentmux/core/files'
-import { MoteConnectionPreferences } from './mote-connection-preferences.js'
 import { registerMotePreferencesIpc } from './mote-preferences-ipc.js'
 import { HtmlFilePreviews } from './html-file-previews.js'
 import { FilePreviewResources } from './file-preview-resources.js'
@@ -621,7 +615,10 @@ export async function registerIpc(args: {
   ): Promise<AgentMuxControlResult> => {
     if (request.operation === 'browser.release') return { operation: request.operation,
       receipt: await browsers.release(request.browserId, request.navigationId) }
-    if (request.operation === 'space.mote.preferences.read' || request.operation === 'space.mote.preferences.save') return moteConnectionPreferences.execute(request, signal)
+    if (request.operation === 'space.mote.preferences.read' || request.operation === 'space.mote.preferences.save') {
+      if (request.kind === 'quick') return controlBridge.execute(request, signal)
+      throw new AgentMuxError('Connection preferences belong to their original background Host. Use that Host endpoint; the Mote files and Agents are retained.', 'CONTROL_UNAVAILABLE')
+    }
     if(request.operation==='space.ls' || request.operation==='space.inspect') {
       if(!request.presentation && !('requestId' in request.target)) {
         const state=await spatialState.read()
@@ -1038,9 +1035,6 @@ export async function registerIpc(args: {
     const params = parseFileShareInspectParams(input)
     return parseFileShareInspectResult(await publicFiles.inspectShare(params, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }), params)
   })
-  const moteConnectionPreferences = new MoteConnectionPreferences({ files: publicFiles,
-    catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
-    connections: () => connectorServices.connections.list(), quick: (request, signal) => controlBridge.execute(request, signal) })
   handleWithEvent('files:importPublic', async (event, input: import('@agentmux/core/files').FileImportParams) => { requireTrustedSender('files:importPublic', event); return publicFiles.import(input) })
   handleWithEvent('files:createPublic', async (event, input: import('@agentmux/core').FileCreateParams) => { requireTrustedSender('files:createPublic', event); return publicFiles.create(input, { actor: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'local') } }) })
   handleWithEvent('files:readPublic', async (event, input: import('@agentmux/core').FileReadParams) => {
@@ -2413,36 +2407,12 @@ export async function registerIpc(args: {
   })
   const detach = args.runtime.attach(contents)
   const rpcHttp = agentMuxRpcHttpOptions()
-  const moteChatAgents = createMoteChatAgents({ config: () => config,
-    catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
-    topics: args.scratchTopics, clients: () => args.runtime.rpcClients(),
-    checkpoint: reference => createPublicationConversationPort(() => args.runtime.rpcClients()).checkpoint(reference, new AbortController().signal)
-  })
-  const connectorServices = await createConnectionServices({ directory: process.env.AGENTMUX_DESKTOP_USER_DATA === undefined
-    ? join(homedir(), '.agentmux', 'connectors')
-    : join(app.getPath('userData'), 'connectors'), moteChat: { agents: moteChatAgents, assertTarget: moteChatAgents.assertTarget, assertReady: moteChatAgents.assertReady },
-    publication: createPublicationConversationPort(() => args.runtime.rpcClients()),
-    ingress: { core: createHostedIngressCorePort(() => args.runtime.rpcClients()) },
-    bindings: { spatial: spatialState, checkpoint: async (reference: import("@agentmux/core/conversation").ConversationRef) => {
-      const original = args.runtime.rpcClients().filter(entry => entry.hostId === reference.hostId)
-      if (original.length !== 1) throw new AgentMuxError('The exact execution Host is unavailable. No binding was rerouted.', 'CONTROL_UNAVAILABLE')
-      return await createPublicationConversationPort(() => original).checkpoint(reference, new AbortController().signal)
-    } }
-  })
-  const moteConnectionTargets = new MoteConnectionTargetOwner({
-    catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
-    workspace: id => config.workspaces.find(item => item.id === id),
-    topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory)
-  })
-  const moteConnections = new MoteConnectionOperations({ connections: connectorServices, preferences: moteConnectionPreferences,
-    assertTarget: target => moteConnectionTargets.assertTarget(target) })
-  const disposeChannelMetadata = registerConnectorIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), secrets: connectorServices.secrets,
-    callHost: (target, method, params) => args.runtime.callConnectionHost(target, method, params),
-    metadata: { publish: change => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send(CONNECTION_METADATA_CHANGED_CHANNEL, change) },
-      observation: state => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send(CONNECTION_METADATA_OBSERVATION_CHANNEL, state) } } })
-  registerMoteChatIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
-  registerMoteConnectionIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
-  registerMotePreferencesIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath() })
+  const disposeChannelMetadata = registerConnectorIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime,
+    metadata: { publish: (watchId, change) => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send(CONNECTION_METADATA_CHANGED_CHANNEL, { watchId, change }) },
+      observation: (watchId, state) => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send(CONNECTION_METADATA_OBSERVATION_CHANNEL, { watchId, state }) } } })
+  registerMoteChatIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime })
+  registerMoteConnectionIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime })
+  registerMotePreferencesIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), runtime: args.runtime })
   const control = new AgentMuxControlServer({
     capsules: capsulePresentation({ inspect: id => capsuleClient.call('capsule.inspect', { capsuleId: id }),
       graph: async () => (await spatialState.read())?.graph ?? null,
@@ -2459,9 +2429,6 @@ export async function registerIpc(args: {
     agentLearning: agentLearningAuthority,
     inputContextCaptures,
     windows: args.workbenchWindows,
-    connections: connectorServices.connections,
-    moteConnections,
-    ...(connectorServices.moteChat ? { moteChat: connectorServices.moteChat } : {}),
     deliveryAttempts,
     ...(args.clientIncidents ? { clientIncidents: args.clientIncidents } : {}),
     clientNotifications: clientNotificationsPort(deliveryAttempts.hostId, (request, signal) => executeControl(request, undefined, signal)),
@@ -2553,9 +2520,7 @@ export async function registerIpc(args: {
       { owner: 'progress-changes', dispose: () => disposeProgressChanges() },
       { owner: 'control-bridge', dispose: () => controlBridge.dispose() },
       { owner: 'control-server', dispose: () => control.stop() },
-      { owner: 'mote-connections', dispose: () => moteConnections.close() },
       { owner: 'channel-metadata', dispose: disposeChannelMetadata },
-      { owner: 'connections', dispose: () => connectorServices.close() },
       { owner: 'runtime-attachment', dispose: () => detach() },
       { owner: 'history-observations', dispose: () => historyObservations.dispose() },
       { owner: 'host-runtime-reads', dispose: () => hostRuntimeReads.dispose() },

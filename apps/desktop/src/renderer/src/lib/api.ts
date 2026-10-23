@@ -487,6 +487,7 @@ const mockApi: AgentMuxDesktopApi = {
     call: async () => { throw new Error('Application access requires the original desktop service and configured application connectors. This preview cannot read or transfer authorization.') }
   },
   connections: {
+    hostingTarget: async () => { throw new Error('The original connection Host requires the native application transport.') },
     onMetadataChanged: () => { throw new Error('Channel metadata observation requires the executing Desktop Host.') },
     call: async () => { throw new Error('External connection administration requires the executing Desktop Host.') },
     storeCredential: async () => { throw new Error('Secure credential storage requires the executing Desktop Host.') },
