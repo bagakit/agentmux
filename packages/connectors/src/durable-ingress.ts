@@ -1,4 +1,4 @@
-import { parseExternalConversationReference, type AgentExternalConversationAuthority, type AgentExternalConversationReference } from '@agentmux/core'
+import { parseExternalConversationReference, type AgentExternalAuthoritySource, type AgentExternalConversationAuthority, type AgentExternalConversationReference } from '@agentmux/core'
 import { isDeepStrictEqual } from 'node:util'
 import { ConversationActions, externalActionIntentDigest } from './conversation-actions.js'
 import { parseConnectionQuestionAnswerSubmissions } from '@agentmux/core/connections'
@@ -39,7 +39,10 @@ export interface IngressAuthenticator {
   /** Native history is quoted data, never another authenticated input or grant. */
   readHistory?(config: ConnectionConfig, input: { externalConversationId: string; range: ChannelQuoteRange; knownThreadIds?: string[]; assertCurrent?(): void }, credential: string, signal: AbortSignal): Promise<ChannelTranscriptQuote>
 }
-export type DurableIngressCore = Pick<AgentMuxClient, 'recordExternalConversationMessage' | 'readAgentSession' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting'> & Partial<Pick<AgentMuxClient, 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation' | 'replySessionQuestion' | 'inspectAgentPromptSubmission'>> & { providers?: { get(id: string): { catalog: import('@agentmux/core').AgentCatalogEntry } } }
+export type DurableIngressCore = Pick<AgentMuxClient, 'recordExternalConversationMessage' | 'submitAgentMessage' | 'inspectAgentInput' | 'rejoinAgentInputWaiting'> & Partial<Pick<AgentMuxClient, 'agentSession' | 'onEvent' | 'respondAgentInteraction' | 'inspectAgentInteractionOperation' | 'replySessionQuestion' | 'inspectAgentPromptSubmission'>> & {
+  readAgentSession(id: string, expectedRuntimeId?: string): ReturnType<AgentMuxClient['readAgentSession']>
+  providers?: { get(id: string): { catalog: import('@agentmux/core').AgentCatalogEntry } }
+}
 export type DurableIngressOptions = {
   connections: ConnectionHost
   bindings: RoomBindingReadPort
@@ -50,6 +53,8 @@ export type DurableIngressOptions = {
   contextPublications?: Pick<import('./publication-store.js').PublicationStore, 'knownContextMessages'>
   /** Return the original executing Host's client; Region occupants and focus are not routes. */
   core(hostId: string): DurableIngressCore | undefined
+  /** Existing confirmed configured-owner metadata only; never performs I/O before native ACK. */
+  authoritySource?(hostId: string, executionRuntimeId?: string): AgentExternalAuthoritySource | undefined
 }
 const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const intakeRows = 'SELECT sequence,connection_id,ingress_id,record_json FROM connection_ingress_message UNION ALL SELECT intake_sequence AS sequence,connection_id,ingress_id,record_json FROM connection_ingress_event WHERE record_json IS NOT NULL'
@@ -185,7 +190,9 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
   }
   private freezeGroup(application: ConnectionConfig['application'], externalConversationId: string): NonNullable<ConnectionIngressMessage['group']>['target'] {
     const binding = this.options.bindings.findActiveAudience({ application, externalConversationId })
-    return binding ? { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId, connectionId: binding.connectionId, bindingId: binding.bindingId, bindingRevision: binding.revision } : null
+    const source = binding && (binding.executionHostId === 'local' || binding.executionRuntimeId)
+      ? this.options.authoritySource?.(binding.executionHostId, binding.executionRuntimeId) : undefined
+    return binding ? { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId, connectionId: binding.connectionId, bindingId: binding.bindingId, bindingRevision: binding.revision, ...(source ? { authoritySource: source } : {}) } : null
   }
   /** The original source owner resolves attribution; callers supply only its immutable ingress reference. */
   async recordAuthority(value: AgentExternalConversationReference): Promise<AgentExternalConversationAuthority> {
@@ -195,14 +202,15 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       return this.safe(() => {
         const record = this.read(input.ingressId), target = record?.kind !== 'action' ? record?.group?.target : undefined
         if (!record || record.kind === 'action' || !target || target.agentSessionId !== input.agentSessionId || record.code === 'INGRESS_CONTENT_UNSUPPORTED') return { message, authority: 'refused', code: 'INGRESS_BINDING_UNAVAILABLE' }
-        message = { ...input, hostId: target.hostId, body: record.body,
+        if (!isDeepStrictEqual(input.authoritySource, target.authoritySource)) fail('INGRESS_AUTHORITY_REVISED')
+        message = { agentSessionId: target.agentSessionId, ingressId: record.ingressId, ...(target.authoritySource ? { authoritySource: target.authoritySource } : {}), hostId: target.hostId, body: record.body,
           inputMetadata: { ingressId: record.ingressId, state: record.state, ...(record.code && connectionDiagnosisIntakeCodes.includes(record.code as never) ? { code: record.code as typeof connectionDiagnosisIntakeCodes[number] } : {}) }, author: {
-          kind: 'external', connectionId: target.connectionId, actor: record.actor, externalConversationId: record.externalConversationId, externalMessageId: record.externalMessageId, bindingId: target.bindingId, bindingRevision: target.bindingRevision
+          kind: 'external', connectionId: target.connectionId, actor: record.actor, externalConversationId: record.externalConversationId, externalMessageId: record.externalMessageId, bindingId: target.bindingId, bindingRevision: target.bindingRevision, ...(target.authoritySource ? { authoritySource: target.authoritySource } : {})
         } }
         this.assertService()
         const binding = this.binding(record), current = binding && this.options.bindings.readCurrent(binding.bindingId)
         const connection = this.options.connections.readConfiguration(target.connectionId), receiver = this.options.connections.readConfiguration(record.connectionId)
-        if (!binding || !current || current.state !== 'active' || current.revision !== binding.revision || binding.agentSessionId !== target.agentSessionId || binding.executionHostId !== target.hostId || binding.connectionId !== target.connectionId) fail('INGRESS_BINDING_UNAVAILABLE')
+        if (!binding || !current || current.state !== 'active' || current.revision !== binding.revision || binding.agentSessionId !== target.agentSessionId || binding.executionHostId !== target.hostId || binding.connectionId !== target.connectionId || binding.executionRuntimeId && binding.executionRuntimeId !== target.authoritySource?.executionRuntimeId) fail('INGRESS_BINDING_UNAVAILABLE')
         if (!connection?.config.enabled || !receiver?.config.enabled || !equal(connection.config.application, record.application) || !equal(receiver.config.application, record.application)) fail('INGRESS_CONNECTION_UNAVAILABLE')
         return { message, authority: 'current' }
       })
@@ -216,7 +224,9 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     if (!target) return record
     const client = this.options.core(target.hostId)
     if (!client) fail('INGRESS_CORE_UNAVAILABLE')
-    const receipt = await client.recordExternalConversationMessage({ agentSessionId: target.agentSessionId, ingressId: record.ingressId })
+    if (this.options.authoritySource && target.hostId !== 'local' && !target.authoritySource) fail('INGRESS_TARGET_UNCONFIRMED')
+    if (target.authoritySource && !isDeepStrictEqual(target.authoritySource, this.options.authoritySource?.(target.hostId, target.authoritySource.executionRuntimeId))) fail('INGRESS_TARGET_UNCONFIRMED')
+    const receipt = await client.recordExternalConversationMessage({ agentSessionId: target.agentSessionId, ingressId: record.ingressId, ...(target.authoritySource ? { authoritySource: target.authoritySource } : {}) })
     return this.transaction(() => {
       const current = this.read(record.ingressId)
       if (!current || current.kind === 'action' || !current.group || !equal(current.group.target, target)) fail('INGRESS_AUTHORITY_REVISED')
@@ -250,7 +260,11 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       if (!event.replyToMessageId || record.addressing?.state === 'confirmed') fail('INGRESS_INPUT_OUTSIDE_SCOPE')
       if (!allowPendingReply) fail('INGRESS_ADDRESSING_UNCONFIRMED')
     }
-    const author = parseAgentExternalMessageAuthor({ kind: 'external', connectionId: binding.connectionId, actor: record.actor, externalConversationId: record.externalConversationId, externalMessageId: record.externalMessageId, bindingId: binding.bindingId, bindingRevision: binding.revision, grantId: grant.grantId, grantRevision: grant.revision })
+    const source = expected ? expected.author.authoritySource : record.group ? record.group.target?.authoritySource
+      : binding.executionHostId === 'local' || binding.executionRuntimeId ? this.options.authoritySource?.(binding.executionHostId, binding.executionRuntimeId) : undefined
+    if (this.options.authoritySource && binding.executionHostId !== 'local' && !source) fail('INGRESS_TARGET_UNCONFIRMED')
+    if (source && !isDeepStrictEqual(source, this.options.authoritySource?.(binding.executionHostId, binding.executionRuntimeId))) fail('INGRESS_TARGET_UNCONFIRMED')
+    const author = parseAgentExternalMessageAuthor({ kind: 'external', connectionId: binding.connectionId, actor: record.actor, externalConversationId: record.externalConversationId, externalMessageId: record.externalMessageId, bindingId: binding.bindingId, bindingRevision: binding.revision, grantId: grant.grantId, grantRevision: grant.revision, ...(source ? { authoritySource: source } : {}) })
     if (expected?.admissionIntent) { const { expectedRun: _run, ...target } = expected.admissionIntent; if (!isDeepStrictEqual(target, binding.inputTarget ?? { kind: 'manual-actor' })) fail('INGRESS_AUTHORITY_REVISED') }
     if (expected && (expected.hostId !== binding.executionHostId || expected.agentSessionId !== binding.agentSessionId || !equal(expected.author, author))) fail('INGRESS_AUTHORITY_REVISED')
     return { binding, author, event }
@@ -397,7 +411,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     }
     const client = this.options.core(original.binding.executionHostId)
     if (!client) fail('INGRESS_CORE_UNAVAILABLE')
-    const exact = await client.readAgentSession(original.binding.agentSessionId)
+    const exact = await client.readAgentSession(original.binding.agentSessionId, original.author.authoritySource?.executionRuntimeId)
     if (!exact || exact.agentSessionId !== original.binding.agentSessionId || exact.hostId !== original.binding.executionHostId) fail('INGRESS_TARGET_UNCONFIRMED')
     const expectedRun = { ...exact.run }
     const contextSource = this.nativeContextSource(original.binding, exact)
@@ -412,7 +426,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       } catch { contextObservation = 'known-publications-unavailable' }
     }
     if (this.historyAbort.signal.aborted || receiverSignal?.aborted) return await this.inspect({ ingressId })
-    const currentTarget = channelQuote ? await client.readAgentSession(original.binding.agentSessionId) : exact
+    const currentTarget = channelQuote ? await client.readAgentSession(original.binding.agentSessionId, original.author.authoritySource?.executionRuntimeId) : exact
     if (!currentTarget || !isDeepStrictEqual(currentTarget.run, expectedRun) || !isDeepStrictEqual(this.nativeContextSource(original.binding, currentTarget), contextSource)) fail('INGRESS_TARGET_UNCONFIRMED')
     const claimed = this.transaction(() => {
       const current = this.read(ingressId)!
