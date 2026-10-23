@@ -19,6 +19,7 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '@agentmux/core'
 import type { KnowledgeTopic, TopicKnowledgeWrite, TopicMethod, TopicParams, TopicResult } from '@agentmux/core/control'
 import type { BrowserSnapshot } from '../src/shared/contracts'
+import { workspaceFileFormat } from '../src/shared/workspace-file-format'
 import type { SurfaceMemoryCollectionInput } from '../src/renderer/src/lib/surface-memory-budget-candidates'
 import type { TerminalParkingCollectionInput } from '../src/renderer/src/lib/terminal-cold-parking-coordinator'
 
@@ -30,7 +31,7 @@ vi.mock('react-resizable-panels', async () => {
 })
 // Native calls are instrumented; the real App, Store, Workbench, Region portal and BrowserPane run.
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: (props: { session: { id: string }; visible?: boolean }) => <div data-terminal-probe={props.session.id} data-visible={props.visible}><textarea defaultValue="Original terminal input" /></div> }))
-vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: (props: { surface: { path: string }; preview?: import('react').ReactNode }) => props.surface.path.endsWith('.note.json') && props.preview ? props.preview : <textarea data-file-probe defaultValue="Original file input" /> }))
+vi.mock('../src/renderer/src/components/EditorPane', () => ({ EditorPane: (props: { surface: { path: string }; preview?: import('react').ReactNode }) => workspaceFileFormat(props.surface.path).sourcePreview === 'note' && props.preview ? props.preview : <textarea data-file-probe defaultValue="Original file input" /> }))
 const observation = vi.hoisted(() => ({
   catalogUnavailable: false,
   recall: [] as Parameters<typeof import('../src/renderer/src/components/GlobalRecallSurface').GlobalRecallSurface>[0][],
@@ -682,9 +683,9 @@ it('organizes a real Notebook wiki tree through rename, subpage creation, search
   expect(final.pages[parent.noteId]!.resource).toEqual(original.resource); expect(files.get(parent.resource.path)).toBe(before)
   expect(files.size).toBe(2); expect(new Set([parent.resource.path, child.resource.path]).size).toBe(2); expect(api.files.write).toHaveBeenCalledTimes(3)
   expect(final.trail.filter(event => event.action === 'moved')).toHaveLength(2)
-  await choosePageOption('Page history')
-  expect(dom.container.querySelector('[aria-label="Note history"]')?.textContent).toContain('Research wiki / Root → 随手记 / Root')
-  expect(dom.container.querySelector('[aria-label="Note history"]')?.textContent).toContain('actual-ui-user')
+  await choosePageOption('Page activity')
+  expect(dom.container.querySelector('[aria-label="Page activity"]')?.textContent).toContain('Research wiki / Root → 随手记 / Root')
+  expect(dom.container.querySelector('[aria-label="Page activity"]')?.textContent).toContain('actual-ui-user')
   healthy()
 })
 
@@ -819,8 +820,8 @@ it('deletes the selected Notebook only after confirmation and retains the origin
   expect(dom.container.querySelector('[aria-label="Archived pages"]')?.getAttribute('aria-pressed')).toBe('true')
   expect(dom.container.querySelector('.survey-notebook-page')?.textContent).toBe(child.title)
   expect(final.trail.filter(event => event.operationId === final.trail.at(-1)!.operationId)).toHaveLength(2)
-  await choosePageOption('Page history')
-  expect(dom.container.querySelector('[aria-label="Note history"]')?.textContent).toContain('Research notebook / Original question → 随手记 / Original question')
+  await choosePageOption('Page activity')
+  expect(dom.container.querySelector('[aria-label="Page activity"]')?.textContent).toContain('Research notebook / Original question → 随手记 / Original question')
   expect(api.browser.close).not.toHaveBeenCalled(); healthy()
 })
 
