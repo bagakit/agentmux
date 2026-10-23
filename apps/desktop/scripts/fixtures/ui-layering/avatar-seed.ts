@@ -36,7 +36,7 @@ export async function createAvatarLayeringSeed(root: string) {
   const control = new MoteAvatarControl(sources, createMoteAvatarWriter(configOwner, sources, topics, store))
   const baseline = await control.call('space.mote.avatar.read', { target }), catalog = await control.call('space.mote.avatar.list', {})
   const geometry = catalog.series.find(series => series.origin === 'builtin' && series.seriesId === 'geometry')
-  assert.ok(geometry?.entries.some(entry => entry.definition.kind === 'glb'), 'The original declared geometry source must contain a real GLB')
+  assert.ok(geometry && geometry.entries.some(entry => entry.definition.kind === 'glb'), 'The original declared geometry source must contain a real GLB')
   const prepared = await Promise.all(geometry.entries.map(entry => control.call('space.mote.avatar.preview', {
     source: { origin: geometry.origin, seriesId: geometry.seriesId, entryId: entry.entryId } })))
   for (const entry of await readdir(builtinRoot, { recursive: true, withFileTypes: true })) if (entry.isFile()) {

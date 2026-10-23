@@ -480,7 +480,7 @@ async function verifyAvatar() {
     const rect = await read(`(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})()`)
     const zoom = window.webContents.getZoomFactor(), p = { x: (rect.x + rect.width * from) * zoom, y: (rect.y + rect.height / 2) * zoom }
     const view = topAt(p); assert.ok(view && view !== page, 'The original Avatar control must be owned by native modal content above the Browser')
-    const modalId = (await avatar()).modalId, declaration = receipt.publications.at(-1)?.regions.find((region: NativeOverlayRegion) => region.modal?.id === modalId && region.modal.part === 'content')
+    const modalId = (await avatar()).modalId, declaration = receipt.publications.at(-1)?.regions.find((region: NativeOverlayRegion) => region.modal?.id === modalId && region.modal?.part === 'content')
     assert.equal(view, projections().get(declaration?.id)?.view, 'The original Avatar gesture belongs to its exact current content View')
     const bounds = view.getBounds()
     for (const [type, fraction] of [['mouseMove', from], ['mouseDown', from], ['mouseMove', to], ['mouseUp', to]] as const)
