@@ -1,0 +1,23 @@
+{
+  "name": "@agentmux/capsule",
+  "version": "0.1.0",
+  "description": "Portable durable local page identities and Node hosting owner",
+  "license": "UNLICENSED",
+  "type": "module",
+  "engines": { "node": ">=24.0.0" },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
+    "./node": { "types": "./dist/node.d.ts", "import": "./dist/node.js" }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -b tsconfig.build.json --force",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "pnpm build && node --test test/*.test.mjs",
+    "test:mutation": "node scripts/mutation.mjs"
+  },
+  "dependencies": { "@agentmux/identity": "workspace:*", "fs-native-extensions": "1.5.1" },
+  "devDependencies": { "@types/node": "^24.0.0", "typescript": "^5.9.0" }
+}
