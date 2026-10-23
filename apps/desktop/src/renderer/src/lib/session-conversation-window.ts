@@ -60,11 +60,11 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
       const currentIntent = replayingHeldIntent ? admissionIntent.current
         : operation === 'changes' || operation === 'reopen' || operation === 'resume' ? 'live' : intent.current
       admissionIntent.current = currentIntent
-      // The accepted current page is the first page of this explicit batch.
-      if (!replayingHeldIntent && operation === 'latest') coverageDemand.current.remaining = snapshot.window.anchor ? 0 : 2
       if (!beforeCommit(next, currentIntent, boundary.current ?? undefined)) {
         protectionReason.current = 'native-reading-protection'; return false
       }
+      // The accepted current page is the first page of this explicit batch.
+      if (operation === 'latest') coverageDemand.current.remaining = snapshot.window.anchor ? 0 : 2
       if (operation === 'latest') presentationIntent.current++
       acceptedBinding.current = { key, bindingKey }
       return true
