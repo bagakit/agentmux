@@ -429,12 +429,18 @@ export function parseCapsuleInteraction(v: unknown): import('./types.js').Capsul
 export function parseCapsuleOperation(v: unknown): import('./types.js').CapsuleOperation {
   const r = obj(
     v,
-    ['operationId', 'capsuleId', 'method', 'status', 'createdAt', 'updatedAt', 'result', 'issue'],
+    [
+      'operationId', 'capsuleId', 'inputOperationId', 'method', 'status',
+      'createdAt', 'updatedAt', 'result', 'issue',
+    ],
     'operation',
   )
   str(r.operationId, 'operation.operationId')
   opt(r, 'capsuleId', id, 'operation')
+  opt(r, 'inputOperationId', id, 'operation')
   if (!isCapsuleMethod(r.method)) fail('operation.method')
+  if (r.inputOperationId !== undefined && r.method !== 'capsule.interaction.reply')
+    fail('operation.inputOperationId')
   en(r.status, ['pending', 'committed', 'failed'], 'operation.status')
   num(r.createdAt, 'operation.createdAt')
   num(r.updatedAt, 'operation.updatedAt')
@@ -447,6 +453,11 @@ export function parseCapsuleOperation(v: unknown): import('./types.js').CapsuleO
       fail('operation.result.operationId')
     const record = result.record as Obj | undefined
     const interaction = result.interaction as Obj | undefined
+    if (
+      r.inputOperationId !== undefined &&
+      r.inputOperationId !== (result.delivery as Obj | undefined)?.inputOperationId
+    )
+      fail('operation.result.inputOperationId')
     const capsuleId = record?.capsuleId ?? interaction?.capsuleId ?? result.capsuleId
     if (r.capsuleId !== undefined && capsuleId !== undefined && r.capsuleId !== capsuleId)
       fail('operation.result.capsuleId')
