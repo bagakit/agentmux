@@ -65,8 +65,11 @@ presentation port owns actual Browser and space identities; a headless owner
 reports rendering unavailable while continuing to serve content. An injection
 port is trusted Host code and must bind any App bridge to the exact Browser and
 document. It must not expose generic RPC, Node or Electron authority. Without an
-adapter, injected-mode records remain readable and report unavailable App
-capabilities. Durable page requests and drafts cannot authenticate Human replies. A Host may
+HTML adapter, injected-mode records remain readable without changing their bytes.
+The HTTP owner does not infer whether a client provides a native document adapter;
+actual App capabilities are discovered in that exact client document. A supplied
+HTML adapter's failure remains an observable injection issue.
+Durable page requests and drafts cannot authenticate Human replies. A Host may
 compose the narrow reply port with its actual native confirmation and original
 Core input owner. Preparation freezes the original request, answer, recipient,
 Run and input ID before submission. The owner saves a dispatch boundary before
