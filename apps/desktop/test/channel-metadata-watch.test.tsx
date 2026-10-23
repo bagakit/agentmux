@@ -33,20 +33,23 @@ import '../src/preload/index.js'
 import { api } from '../src/renderer/src/lib/api.js'
 import { useConnectorRoomName } from '../src/renderer/src/lib/use-connector-room-name.js'
 import { channelProfileKey, useChannelActorProfiles } from '../src/renderer/src/lib/use-channel-actor-profiles.js'
+import { useAppStore } from '../src/renderer/src/store.js'
+import { composerConfig } from './helpers/composer-dom-fixture.js'
 
 const close: Array<() => void | Promise<void>> = []
-afterEach(async () => { for (const release of close.splice(0).reverse()) await release(); bridge.events.removeAllListeners(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
+const originalConfig = useAppStore.getState().config
+afterEach(async () => { for (const release of close.splice(0).reverse()) await release(); useAppStore.setState({ config: originalConfig }); bridge.events.removeAllListeners(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
 const application = { domain: 'open.feishu.cn', appId: 'cli_0123456789abcdef' }
 const binding = { connectionId: 'original-connection', application, externalConversationId: 'original-room' } as RoomBinding
 const author = { kind: 'external', connectionId: binding.connectionId, actor: { application, idType: 'open_id', userId: 'original-person' } } as Extract<AgentSessionUserMessage['author'], { kind: 'external' }>
-const messages = [{ author }] as AgentSessionUserMessage[]
 function Profiles() {
-  const room = useConnectorRoomName(binding), profiles = useChannelActorProfiles(messages, true), person = profiles.get(channelProfileKey(author))
+  const room = useConnectorRoomName(binding), profiles = useChannelActorProfiles([author], { hostId: 'local', sourceHostId: 'local' }, true), person = profiles.get(channelProfileKey(author))
   return <><output data-room>{room.label} | {room.issue}</output><output data-person>{person?.observation?.profile?.name ?? 'unknown'} | {person?.issue ?? ''}</output></>
 }
 
 /** Real default Host/Core, SQLite and public transport. Only Runtime and native SDK I/O are controlled. */
 async function fixture() {
+  useAppStore.setState({ config: composerConfig })
   const original = await rpcOwnerFixture(['metadata-agent'], core); close.push(original.close)
   const directory = join(original.root, 'connections'); await mkdir(directory, { mode: 0o700 })
   const path = join(directory, 'connections.sqlite'), database = new DatabaseSync(path); await chmod(path, 0o600)
