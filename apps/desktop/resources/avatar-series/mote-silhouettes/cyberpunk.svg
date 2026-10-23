@@ -1,1 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 24 24"><defs></defs><path d="M5 3H14L21 7V10L22 11V15L18 20H14L13 21H8L3 16V7ZM9 7H14L16 9V12L13 15V18L8 15L7 11V9Z" fill="#253c40" fill-rule="evenodd" stroke="none"/><path d="M5 3H14L16.9 4.7L14 7H9L7 9V11L4 12.4L3 11V7Z" fill="#91b9ad" fill-rule="evenodd" stroke="none"/><path d="M21 7V10L22 11V15L18 20L16 18L18.5 14.4V10.5L16 9L14 7L16.9 4.7Z" fill="#385e69" fill-rule="evenodd" stroke="none"/><path d="M3 11L4 12.4L7 11L8 15L13 18L14 20L13 21H8L3 16Z" fill="#ca728a" fill-rule="evenodd" stroke="none"/><path d="M18 20L16 18L18.5 14.4L22 13.4V15Z" fill="#82d1b9" fill-rule="evenodd" stroke="none"/><path d="M21 10V11L18.5 12V10.5L16 9L17 8Z" fill="#e2e1b3" fill-rule="evenodd" stroke="none"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 24 24">
+  <title>Mote — cyberpunk companion</title>
+  <path d="M4.7 2.8L10.4 5.3L14.5 4.8L20.2 8.2L21.3 12.8L19.1 18.4L14.8 21H9.2L4.2 18.2L2.8 13.2L4.2 7.8ZM7.1 10.6V13.8H9.8V10.6ZM14.1 10.1V13.6H17.1V10.1Z" fill="#253c40" fill-rule="evenodd"/>
+  <path d="M4.7 2.8L10.4 5.3L14.5 4.8L16.8 6.2L11.8 7.4L6.2 8.8L4.2 7.8Z" fill="#91b9ad"/>
+  <path d="M20.2 8.2L21.3 12.8L19.1 18.4L17.2 16.8L19.2 12.6L18.2 9.2Z" fill="#385e69"/>
+  <path d="M2.8 13.2L5.6 14.4L8.8 18.4L14.8 21H9.2L4.2 18.2Z" fill="#ca728a"/>
+  <path d="M14.8 21L19.1 18.4L17.2 16.8L13.4 19.2Z" fill="#82d1b9"/>
+  <path d="M6.4 9.6H10.4M13.6 9.1H17.8" stroke="#e2e1b3" stroke-width=".65" stroke-linecap="round"/>
+</svg>
