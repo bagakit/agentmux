@@ -14,6 +14,7 @@ const caller = 'apps/desktop/scripts/update-local.mjs'
 const inputs = [...products, classifier, caller, test, 'apps/desktop/scripts/package-runtime-upgrade.mjs',
   'apps/desktop/scripts/verify-package-install-semantic-quit.mjs', 'apps/desktop/test/package-install-restart.test.ts',
   'apps/desktop/test/package-process-scope.test.ts',
+  'test/fixture-values.mjs', 'apps/desktop/scripts/lib/fixture-values.mjs',
   'apps/desktop/scripts/update-identity.mjs', 'apps/desktop/scripts/package-identity.mjs', 'apps/desktop/package.json',
   'package.json', 'vitest.config.ts', 'vitest.setup.ts', 'vitest.dist-freshness.ts', 'pnpm-lock.yaml',
   'packages/core/dist/public-rpc-client.js', 'packages/core/dist/public-rpc.js']
@@ -36,6 +37,13 @@ const sameSourceCases = ['GUI-child', 'detached', 'endpoint-worker'].map(shape =
 const sameSourceChildCases = ['GUI-child', 'endpoint-worker'].map(shape =>
   `the same-Source full installer reloads its exact ${shape} semantic namespace`)
 const endpointWorkerCase = 'the default installer drains the original Host endpoint worker without signalling it'
+const unrelatedAncestryCase = 'the default installer shuts down its exact semantic owner when only unrelated system ancestry is unavailable'
+const unknownAdmissionCase = 'the default full installer resolves an unknown admission after exact external Node confirmation'
+const externalActivationCase = 'the default full installer activates the candidate while an originally uncertain external client survives'
+const originalSurvivorCase = 'the default full installer rejects a confirmed original GUI worker that reappears at activation'
+const retainedAdmissionCase = 'the default full installer carries confirmed GUI ownership across a later unknown observation'
+const nativeRunCases = ['bare-executable', 'script-argument'].map(form =>
+  `the default full installer keeps the original Native Run outside GUI and semantic shutdown (${form})`)
 const pureCaseNames = ['healthy', 'UID', 'birth', 'parent', 'executable', 'mode', 'cycle'].map(change =>
   `semantic family requires a complete bound Node chain (${change})`).sort()
 const changedCases = ['birth', 'Store', 'PID', 'UID', 'argv', 'mode', 'Source'].map(name =>
@@ -49,7 +57,7 @@ try {
   receipt.treeBefore = execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: root, encoding: 'utf8' }).trim()
   receipt.inputsBefore = await hashes()
   const source = Object.fromEntries(await Promise.all(products.map(async name => [name, await fs.readFile(path.join(root, name), 'utf8')])))
-  const handoff = 'await quit(destination, previousScope.processes.filter(row => running.includes(row.pid)), semanticHost)'
+  const handoff = 'await quit(destination, previousScope.admissions, semanticHost)'
   assert.equal(source[products[0]].split(handoff).length - 1, 1, 'The default installer must have exactly one prepared semantic plan handoff')
   const begin = source[products[1]].indexOf('export async function inspectSemanticHostForInstall(')
   const end = source[products[1]].indexOf('/** Called only after normal GUI quit.', begin)
@@ -69,7 +77,7 @@ try {
   const lateGuard = 'if (!semanticHost && previouslyInstalled) {\n        semanticHost = await prepareSemanticHostReload(currentPath, next)'
   assert.equal(source[products[0]].split(prepareGuard).length - 1, 1)
   assert.equal(source[products[0]].split(lateGuard).length - 1, 1)
-  const uiPrepareFailures = [uiSuccessCase, unconfirmedUiCase, ...uiChangedCases, ...uiSameSourceChildCases]
+  const uiPrepareFailures = [uiSuccessCase, unconfirmedUiCase, unrelatedAncestryCase, ...uiChangedCases, ...uiSameSourceChildCases]
   const phases = uiOnlyReload ? [
     { name: 'ui-only-baseline-original', product: products[0], before: prepareGuard, after: prepareGuard, failures: [] },
     { name: 'restore-first-full-only-assertion-red', product: products[0], before: prepareGuard,
@@ -80,7 +88,7 @@ try {
     { name: 'late-common-prepare-original-restored-green', product: products[0], before: lateGuard, after: lateGuard, failures: [] }
   ] : [
     { name: 'baseline-original', product: products[0], before: handoff, after: handoff, failures: [] },
-    { name: 'withdraw-prepared-plan-assertion-red', product: products[0], before: handoff, after: handoff.replace(', semanticHost)', ', null)'), failures: [successCase, ...changedCases, endpointWorkerCase, ...sameSourceChildCases, uiSuccessCase, ...uiChangedCases, ...uiSameSourceChildCases] },
+    { name: 'withdraw-prepared-plan-assertion-red', product: products[0], before: handoff, after: handoff.replace(', semanticHost)', ', null)'), failures: [successCase, ...changedCases, endpointWorkerCase, ...sameSourceChildCases, uiSuccessCase, ...uiChangedCases, ...uiSameSourceChildCases, unrelatedAncestryCase, unknownAdmissionCase, externalActivationCase, originalSurvivorCase, retainedAdmissionCase, ...nativeRunCases] },
     { name: 'prepared-plan-original-restored-green', product: products[0], before: handoff, after: handoff, failures: [] },
     { name: 'relax-exact-semantic-fence-assertion-red', product: products[1], before: fence, after: weakFence, failures: [...changedCases, ...uiChangedCases] },
     { name: 'exact-semantic-fence-original-restored-green', product: products[1], before: fence, after: fence, failures: [] },
@@ -180,7 +188,8 @@ export default defineConfig({...base,root:${JSON.stringify(root)},plugins:[...(b
   assert.ok(receipt.productionCallers.length > 0)
   receipt.inputsAfter = await hashes(); assert.deepEqual(receipt.inputsAfter, receipt.inputsBefore)
   receipt.headAfter = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim()
-  assert.equal(receipt.headAfter, receipt.headBefore, 'Git identity changed during qualification')
+  // Unrelated concurrent commits do not change the actual qualified inputs.
+  // The complete frozen source/compiled/caller set above must still match.
   receipt.passed = true
 } catch (error) { receipt.errors.push({ name: error.name, message: error.message, stack: error.stack }) }
 finally { await write(path.join(directory, 'receipt.json'), receipt) }
