@@ -65,17 +65,28 @@ async function seedCaptured(items: AgentTimelineItem[]) {
 // supplies layout in HappyDOM, where border boxes otherwise report zero.
 function measuredTimeline(initialWidth: number) {
   let width = initialWidth
-  const observers = new Set<{ callback: ResizeObserverCallback; value: ResizeObserver }>()
+  type Measurement = { callback: ResizeObserverCallback; value: ResizeObserver; targets: Set<Element> }
+  const observers = new Set<Measurement>()
+  const deliver = (entry: Measurement) => entry.callback([...entry.targets].map(target => {
+    const box = target.getBoundingClientRect()
+    const size = { inlineSize: box.width, blockSize: box.height }
+    return { target, contentRect: box, borderBoxSize: [size], contentBoxSize: [size], devicePixelContentBoxSize: [size] }
+  }), entry.value)
   const originalBounds = HTMLElement.prototype.getBoundingClientRect
   vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
     return this.classList.contains('recent-focus__time-scale') ? new DOMRect(0, 0, width, 18) : originalBounds.call(this)
   })
   vi.stubGlobal('ResizeObserver', class {
-    private entry: { callback: ResizeObserverCallback; value: ResizeObserver }
-    constructor(callback: ResizeObserverCallback) { this.entry = { callback, value: this as unknown as ResizeObserver }; observers.add(this.entry) }
-    observe() {} disconnect() { observers.delete(this.entry) }
+    private entry: Measurement
+    constructor(callback: ResizeObserverCallback) { this.entry = { callback, value: this, targets: new Set() }; observers.add(this.entry) }
+    observe(target: Element) {
+      this.entry.targets.add(target)
+      queueMicrotask(() => { if (observers.has(this.entry)) deliver(this.entry) })
+    }
+    unobserve(target: Element) { this.entry.targets.delete(target) }
+    disconnect() { observers.delete(this.entry) }
   })
-  return async (next: number) => { width = next; await act(async () => { for (const observer of [...observers]) observer.callback([], observer.value) }) }
+  return async (next: number) => { width = next; await act(async () => { for (const observer of [...observers]) deliver(observer) }) }
 }
 
 function healthy() { expect(useAppStore.getState().agentComposerDrafts[ID]).toBe(DRAFT); expect(useAppStore.getState().sessions[0]!.control).toEqual({ kind: 'agent', hostId: 'local', agentSessionId: ID, run: { runId: 'unchanged-private-run' } }) }
@@ -91,17 +102,39 @@ beforeEach(async () => {
   vi.spyOn(api.scratch, 'listTopics').mockResolvedValue([])
   vi.spyOn(api.workspaces, 'listBranches').mockResolvedValue({ kind: 'not-a-git-repository', hostId: 'local', workspacePath: fixture.root })
   vi.spyOn(api.workspaces, 'appearance').mockResolvedValue({ kind: 'directory', icon: null })
-  const readNative=fixture.client.sessionHistoryPage.bind(fixture.client)
-  vi.spyOn(fixture.client,'sessionHistoryPage').mockImplementation(async(id,options)=>{expect(id).toBe(ID);const page=await readNative(id,options);pages.push(page);return page})
+  const readNative = fixture.client['readSessionHistoryPage']
+  const descriptor = Object.getOwnPropertyDescriptor(fixture.client, 'readSessionHistoryPage')
+  fixture.client['readSessionHistoryPage'] = async (...args) => {
+    expect(args[0]).toBe(ID)
+    if (args[2]) expect(args[2]).toEqual({ providerId: 'claude', nativeSessionId: 'native-main' })
+    const page = await readNative.call(fixture.client, ...args); pages.push(page); return page
+  }
+  bridgeCloses.push(() => {
+    if (descriptor) Object.defineProperty(fixture.client, 'readSessionHistoryPage', descriptor)
+    else Reflect.deleteProperty(fixture.client, 'readSessionHistoryPage')
+  })
   await desktopConversationReadBridge(fixture, bridgeCloses, ()=>[{hostId:'local',client:fixture.client},...extraFixtures.map(other=>({hostId:'other',client:other.client}))])
   reads=vi.spyOn(api.conversation,'readAgentConversation')
   controls = ['submitPrompt', 'write', 'resume', 'recover', 'stop'].map(name => vi.spyOn(api.sessions, name as 'stop'))
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
 })
 afterEach(async () => {
-  await act(async () => root.unmount()); host.remove()
-  expect(fixture.controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0]); expect(controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0])
-  for(const close of bridgeCloses.splice(0).reverse())await close();await fixture.close(); for (const extra of extraFixtures.splice(0)) { expect(extra.controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0]); await extra.close() } useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); localStorage.clear(); document.getElementById('agentmux-window-overlay-host')?.remove()
+  const failures: unknown[] = []
+  try { await act(async () => root.unmount()) } catch (error) { failures.push(error) }
+  host.remove(); window.getSelection()?.removeAllRanges()
+  const actions: Array<() => unknown | Promise<unknown>> = [
+    () => expect(fixture.controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0]),
+    () => expect(controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0]),
+    ...bridgeCloses.splice(0).reverse(), () => fixture.close(),
+    ...extraFixtures.splice(0).flatMap(extra => [
+      () => expect(extra.controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0]), () => extra.close()]),
+    () => useAppStore.setState(initial, true), () => vi.restoreAllMocks(), () => vi.unstubAllGlobals(),
+    () => vi.useRealTimers(), () => localStorage.clear(), () => document.getElementById('agentmux-window-overlay-host')?.remove()
+  ]
+  for (const action of actions) {
+    try { await action() } catch (error) { failures.push(error) }
+  }
+  if (failures.length) throw new AggregateError(failures, 'Original Focus fixture cleanup failed')
 })
 
 it('neighboring inputs and replies use the actual ruler width, keep original order and read each record with truthful seconds', async () => {
@@ -201,7 +234,7 @@ it('newly observed other-Agent input is visible before the slow UI now clock tic
 })
 
 it('an already-read source without a current Context admits its new input using the same current-time boundary', async () => {
-  vi.spyOn(api.sessions, 'historySources').mockImplementation(() => fixture.client.sessionHistorySources())
+  vi.spyOn(api.sessions, 'historySources').mockImplementation(async () => ({ sources: await fixture.client.sessionHistorySources(), warnings: [] }))
   await render(); await wait(() => expect(rawIds()).toEqual(['u', 'a']))
   await writeFile(fixture.path, '')
   vi.setSystemTime(NOW + 1000)
@@ -296,7 +329,10 @@ it('the actual current Global page and shared ConversationView both retain user 
   expect(markers()).toHaveLength(2);expect(recordCount()).toBe(2)
   await records()
   expect([...overlay().querySelectorAll<HTMLElement>('[data-conversation-record-id]')].map(node => [node.dataset.recordRawId, node.dataset.recordKind])).toEqual([['u', 'user-message'], ['a', 'assistant-message']])
-  expect([...overlay().querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Refresh source')?.disabled).toBe(false)
+  await wait(() => {
+    const refresh = [...overlay().querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Refresh source')
+    expect(refresh).toBeDefined(); expect(refresh!.disabled).toBe(false)
+  })
   await plotRecord('a')
   expect(overlay().querySelector('.recent-focus__message-body')!.textContent).toContain('Reasoning')
   healthy()
