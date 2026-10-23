@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { parseConnectionParams, parseConnectionResult } from '../src/connections-codec.js'
-import { parseChannelConversationProfileObservation } from '../src/channel-metadata-codec.js'
+import { parseChannelConversationProfileObservation, parseChannelMetadataChange } from '../src/channel-metadata-codec.js'
 
 const application = { domain: 'chat.example', appId: 'original-app' }
 const actor = { application, idType: 'native-user', userId: 'original-user' }
@@ -48,4 +48,15 @@ it('conversation rename observations retain one original conversation and a prio
   expect(parseChannelConversationProfileObservation(stale)).toEqual(stale)
   const target = { connectionId: result.connectionId, subject: { kind: 'conversation' as const, externalConversationId: original.externalConversationId } }
   expect(() => parseConnectionResult('connection.metadata.get', { ...result, entry: { subject: target.subject, observation: { ...original, externalConversationId: 'other-room' }, cacheRevision: null } }, target)).toThrow()
+})
+
+
+it('watch hints accept only the original safe metadata shape and never an arbitrary scope or private field', () => {
+  expect(parseConnectionParams('connection.metadata.watch', {})).toEqual({})
+  expect(parseConnectionResult('connection.metadata.watch', {}, {})).toEqual({})
+  expect(() => parseConnectionParams('connection.metadata.watch', { connectionId: 'selected-connection' })).toThrow()
+  const change = { connectionId: result.connectionId, application, subject }
+  expect(parseChannelMetadataChange(change)).toEqual(change)
+  expect(() => parseChannelMetadataChange({ ...change, secret: 'private-value' })).toThrow()
+  expect(() => parseChannelMetadataChange({ ...change, application: { ...application, appId: 'foreign-app' } })).toThrow()
 })

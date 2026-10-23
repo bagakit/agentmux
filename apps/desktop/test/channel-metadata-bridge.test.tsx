@@ -34,7 +34,7 @@ const bridge = await vi.hoisted(async () => {
 })
 vi.mock('node:os', async load => ({ ...await load<typeof import('node:os')>(), homedir: () => join(bridge.directory, 'home') }))
 vi.mock('electron', () => ({
-  nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
+  nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   app: { getPath: () => bridge.profile, getAppPath: () => bridge.profile },
   safeStorage: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async (value: string) => Buffer.from(value),
     decryptStringAsync: async (value: Buffer) => ({ result: value.toString(), shouldReEncrypt: false }) },
@@ -60,10 +60,10 @@ vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ 
 vi.mock('../../../packages/connectors/src/connection-services.js', async load => {
   const actual = await load<typeof import('../../../packages/connectors/src/connection-services.js')>()
   return { ...actual, createConnectionServices: async (options: Parameters<typeof actual.createConnectionServices>[0]) => {
-    const owner = await actual.createConnectionServices(options), subscribe = owner.onChannelMetadataChanged
-    owner.onChannelMetadataChanged = listener => {
-      const release = subscribe(listener)
-      return () => { bridge.releaseMetadata(); release() }
+    const owner = await actual.createConnectionServices(options), watch = owner.connections.metadata!.watch
+    owner.connections.metadata!.watch = async (...args) => {
+      const subscription = await watch(...args)
+      return { dispose() { bridge.releaseMetadata(); subscription.dispose() } }
     }
     return owner
   } }
@@ -149,7 +149,7 @@ it('delivers original Host metadata through Main, preload and the mounted reader
     await act(async () => root.unmount()); unmounted = true
     expect(bridge.events.listenerCount(CONNECTION_METADATA_CHANGED_CHANNEL)).toBe(1)
     const before = gets()
-    await refresh(); expect(surviving).toHaveBeenCalledExactlyOnceWith(change); expect(gets()).toBe(before)
+    await refresh(); await vi.waitFor(() => expect(surviving).toHaveBeenCalledExactlyOnceWith(change)); expect(gets()).toBe(before)
     releaseSurviving(); expect(bridge.events.listenerCount(CONNECTION_METADATA_CHANGED_CHANNEL)).toBe(0)
     const delivered = send.mock.calls.length
     windowDestroyed = true; await refresh(); expect(send).toHaveBeenCalledTimes(delivered)
@@ -157,7 +157,7 @@ it('delivers original Host metadata through Main, preload and the mounted reader
     contentsDestroyed = false
     await bridge.invoke('notesStorage:inspect')
     await rpc.dispose(); await dispose(); released = true
-    expect(bridge.releaseMetadata).toHaveBeenCalledOnce()
+    await vi.waitFor(() => expect(bridge.releaseMetadata).toHaveBeenCalledOnce())
     expect(bridge.handlers.size).toBe(0)
   } finally {
     releaseSnapshot()
