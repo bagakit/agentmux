@@ -1,7 +1,7 @@
 const { fixturePath: _reshape_fixturePath } = await vi.hoisted(async () => await import("../../../test/fixture-values.mjs"))
 const { fixturePath: _hygiene_fixturePath, fixturePsBirth: _hygiene_fixturePsBirth, fixtureTime: _hygiene_fixtureTime } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 import { EventEmitter } from 'node:events'
-import { access, appendFile, cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
+import { access, appendFile, cp, lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { PassThrough } from 'node:stream'
@@ -11,11 +11,14 @@ type Row = { uid: number; pid: number; ppid: number; birth: string; command: str
 type Scope = {
   root: string; home: string; app: string; candidate: string; store: string
   gui: Row | null; host: Row | null; worker: Row | null
+  nativeChild?: boolean; run?: Row
   hostMode: string; workerMode?: string; retainNamespaceWorker?: boolean; publicPid: number; publicStore: string
   omitSystemAncestor?: boolean
   events: string[]; signals: [number, string][]; cutover: boolean
   beforeQuit?: () => Promise<void>
   afterGuiQuit?: () => void
+  completeActivation?: boolean
+  afterLaunch?: () => void
 }
 const boundary = vi.hoisted(() => ({ scope: undefined as Scope | undefined }))
 const roots: string[] = []
@@ -29,8 +32,8 @@ vi.mock('node:child_process', async importOriginal => {
     const f = boundary.scope
     if (!f) throw new Error('No owned installer OS scope')
     const system: Row = { uid: process.getuid!(), pid: 1, ppid: 0, birth: _hygiene_fixturePsBirth(24019200000), command: '/sbin/launchd' }
-    const daemon: Row = { ...system, pid: 999, ppid: 1, command: `${f.app}/Contents/Resources/app/vendor/ctxmuxd --socket ${f.root}/native.sock` }
-    const rows = [f.omitSystemAncestor ? null : system, f.gui, f.host, f.worker, daemon].filter((row): row is Row => row !== null)
+    const daemon: Row = { ...system, pid: 999, ppid: f.nativeChild && f.host ? f.host.pid : 1, command: `${f.app}/Contents/Resources/app/vendor/ctxmuxd --socket ${f.root}/native.sock` }
+    const rows = [f.omitSystemAncestor ? null : system, f.gui, f.host, f.worker, f.run ?? null, daemon].filter((row): row is Row => row !== null)
     if (command === process.execPath && args[1] === '--bootstrap') {
       expect(args[0]).toMatch(/package-semantic-host\.mjs$/)
       f.events.push('public-owner')
@@ -48,6 +51,11 @@ vi.mock('node:child_process', async importOriginal => {
       const selected = args[0] === '-p' ? rows.filter(row => row.pid === Number(args[1])) : rows
       if (!selected.length) throw Object.assign(new Error('Owned process exited'), { code: 1 })
       return { stdout: selected.map(row => `${row.uid} ${row.pid} ${row.ppid} ${row.birth} ${row.command}`).join('\n') + '\n', stderr: '' }
+    }
+    if (command === '/usr/sbin/lsof' && f.completeActivation && f.host?.pid === 311) {
+      expect(args).toContain('311')
+      const file = join(f.app, 'Contents/MacOS/AgentMux'), stat = await lstat(file, { bigint: true })
+      return { stdout: `ftxt\nD0x${stat.dev.toString(16)}\ni${stat.ino}\nn${file}\n`, stderr: '' }
     }
     throw new Error(`Unowned OS read refused: ${command}`)
   }
@@ -74,6 +82,12 @@ vi.mock('node:child_process', async importOriginal => {
           if (f.host) f.host.ppid = 1
           if (f.worker?.ppid === 201) f.worker.ppid = 1
           f.afterGuiQuit?.()
+        } else if (command === 'open' && f.completeActivation) {
+          expect(args).toEqual(['-a', f.app])
+          const executable = join(f.app, 'Contents/MacOS/AgentMux'), uid = process.getuid!(), birth = _hygiene_fixturePsBirth(24024800000)
+          f.gui = { uid, pid: 301, ppid: 1, birth, command: executable }
+          f.host = { uid, pid: 311, ppid: 301, birth, command: `${executable} ${f.app}/Contents/Resources/app/out/main/agentmux-host.js --store ${f.store}` }
+          f.publicPid = 311; f.events.push('candidate-launched'); f.afterLaunch?.()
         } else throw new Error(`Unowned installer command refused: ${command}`)
         child.stdout.end(output); child.stderr.end(); child.emit('exit', 0, null)
       } catch (error) { child.emit('error', error) }
@@ -86,9 +100,13 @@ vi.mock('node:fs/promises', async importOriginal => {
   const actual = await importOriginal<typeof import('node:fs/promises')>()
   return { ...actual, rename: async (from: string, to: string) => {
     const f = boundary.scope
-    if (!f || from !== f.app || !to.startsWith(join(f.home, '.Trash/AgentMux-'))) throw new Error('Unowned directory cutover refused')
-    f.cutover = true; f.events.push('cutover')
-    throw new Error('OWNED_CUTOVER_BOUNDARY')
+    if (f && from === f.app && to.startsWith(join(f.home, '.Trash/AgentMux-'))) {
+      f.cutover = true; f.events.push('cutover')
+      if (f.completeActivation) return await actual.rename(from, to)
+      throw new Error('OWNED_CUTOVER_BOUNDARY')
+    }
+    if (f?.completeActivation && from === join(f.home, `Applications/.AgentMux.install-${process.pid}.app`) && to === f.app) return await actual.rename(from, to)
+    throw new Error('Unowned directory cutover refused')
   } }
 })
 
@@ -97,12 +115,13 @@ vi.mock('../scripts/package-runtime-upgrade.mjs', async importOriginal => {
   return { ...actual,
     observeUiClient: async () => {
       const f = boundary.scope!
-      return { main: { package: JSON.parse(await readFile(join(f.app, 'Contents/Resources/app/package-identity.json'), 'utf8')),
-        renderer: { identity: { shell: 'original-shell', ctxmux: 'original-native' } } }, workbench: { loading: false } }
+      return { main: { pid: f.gui?.pid, package: JSON.parse(await readFile(join(f.app, 'Contents/Resources/app/package-identity.json'), 'utf8')),
+        renderer: { identity: { shell: 'original-shell', ctxmux: 'original-native' } } }, workbench: { loading: false, tabs: [] } }
     },
     requireOutgoingWorkbenchStorage: () => {},
     prepareUiRuntime: async () => { await boundary.scope?.beforeQuit?.(); return { privateObservation: true } },
-    confirmUiRuntime: async () => {}, closeRuntimeUpgrade: async () => {}
+    confirmUiRuntime: async () => {}, closeRuntimeUpgrade: async () => {},
+    assertUiRuntimeObservation: (before: unknown) => { expect(before).toBeTruthy() }
   }
 })
 
@@ -160,8 +179,9 @@ async function install(f: Scope, intent = 'full') {
   const { installApplication } = await import('../scripts/package-macos.mjs')
   // Deliberately omit quit and launch overrides: this is the default production IO.
   return await installApplication(f.candidate, { intent, homeDirectory: f.home }).then(
-    () => ({ error: null, native: undefined }), (error: unknown) => ({
+    result => ({ error: null, native: result.native, result }), (error: unknown) => ({
       error: error instanceof Error ? error.message : String(error),
+      ownership: (error as { transaction?: { ui?: { ownership?: unknown } } }).transaction?.ui?.ownership,
       native: (error as { transaction?: { native?: { status: string } } }).transaction?.native }))
 }
 
@@ -187,6 +207,67 @@ it('the default full installer protects another original worker after GUI repare
   expect(outcome.error, 'A different original worker must still block application cutover').toContain('has not exited gracefully')
   expect(f.worker?.ppid).toBe(1); expect(f.signals).toEqual([]); expect(f.cutover).toBe(false)
 })
+
+it('the default full installer resolves an unknown admission after exact external Node confirmation', async () => {
+  const f = await fixture({ worker: true })
+  f.worker!.ppid = 1; f.workerMode = 'unknown'
+  f.afterGuiQuit = () => { f.workerMode = 'node' }
+  const outcome = await install(f)
+  expect(outcome.error).toBe('OWNED_CUTOVER_BOUNDARY')
+  expect(f.signals).toEqual([[211, 'SIGTERM']]); expect(f.cutover).toBe(true)
+  expect(f.worker?.pid).toBe(212)
+})
+
+it('the default full installer carries confirmed GUI ownership across a later unknown observation', async () => {
+  const f = await fixture({ worker: true })
+  f.beforeQuit = async () => { f.workerMode = 'unknown' }
+  f.afterGuiQuit = () => { f.workerMode = 'node' }
+  const outcome = await install(f)
+  expect(outcome.error, 'A later observation gap cannot erase the original GUI ownership admission').toContain('has not exited gracefully')
+  expect(f.signals).toEqual([]); expect(f.cutover).toBe(false)
+  expect(outcome.ownership, 'The original refusal must explain the same original and current ownership facts').toMatchObject({
+    stage: 'graceful-quit', mainPid: null, remainingCount: 1,
+    affected: { identity: { pid: 212 }, admission: { classification: 'gui', confirmedGui: { source: 'gui-ancestry' }, initial: { ppid: 201 } },
+      previousAdmission: { classification: 'gui', initial: { ppid: 201 } } }
+  })
+  expect(JSON.stringify(outcome.ownership)).not.toContain('file-worker.js')
+})
+
+it('the default full installer activates the candidate while an originally uncertain external client survives', async () => {
+  const f = await fixture({ worker: true })
+  f.completeActivation = true; f.worker!.ppid = 1; f.workerMode = 'unknown'
+  f.afterGuiQuit = () => { f.workerMode = 'node' }
+  const outcome = await install(f)
+  expect(outcome.error, 'An original uncertain candidate settled by bound external facts cannot block the actual activation consumer').toBeNull()
+  expect(outcome.result?.ui.status).toBe('committed')
+  expect(outcome.result?.ui.main.pid).toBe(301)
+  expect(f.signals).toEqual([[211, 'SIGTERM']]); expect(f.worker?.pid).toBe(212)
+  expect(f.events).toContain('candidate-launched')
+})
+
+it('the default full installer rejects a confirmed original GUI worker that reappears at activation', async () => {
+  const f = await fixture({ worker: true }), original = { ...f.worker!, ppid: 1 }
+  f.completeActivation = true
+  f.afterGuiQuit = () => { f.worker = null }
+  f.afterLaunch = () => { f.worker = original }
+  const outcome = await install(f)
+  expect(f.events).toContain('candidate-launched')
+  expect(outcome.error, 'A surviving confirmed GUI owner must refuse activation').not.toBeNull()
+  expect(outcome.error, 'The final product consumer must retain the original GUI admission even after an intermediate absence').toContain('previous application owner is still running')
+  expect(f.signals).toEqual([[211, 'SIGTERM']]); expect(f.worker).toEqual(original)
+})
+
+it.each(['bare-executable', 'script-argument'] as const)(
+  'the default full installer keeps the original Native Run outside GUI and semantic shutdown (%s)', async form => {
+    const f = await fixture(), executable = `${f.app}/Contents/MacOS/AgentMux`
+    f.nativeChild = true
+    f.run = { uid: process.getuid!(), pid: 213, ppid: 999, birth: _hygiene_fixturePsBirth(24022800000),
+      command: form === 'bare-executable' ? executable : `${executable} ${_hygiene_fixturePath('work/original-request.js')}` }
+    const outcome = await install(f)
+    expect(outcome.error).toBe('OWNED_CUTOVER_BOUNDARY')
+    expect(f.signals).toEqual([[211, 'SIGTERM']]); expect(f.cutover).toBe(true)
+    expect(f.run.pid).toBe(213); expect(f.run.ppid).toBe(999)
+  })
 
 it('the default quit retains a prepared owner whose Node mode becomes unknown during GUI exit', async () => {
   const f = await fixture()
