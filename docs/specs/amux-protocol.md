@@ -177,7 +177,7 @@ Core 可在引用列表后、关闭容器前附一个完整 `<reminder>…</remi
 
 `<amux:continue />` 是原 continuity owner 使用的默认接续文本。它没有新增属性或控制参数；具体发送条件仍由原恢复合同定义。只有原恢复流程和真实用户意图决定是否提交，阅读这个文本不触发恢复，也不替代原 Session、Run、operation 或 completion 条件。
 
-当前常量为 [`DEFAULT_AGENT_CONTINUITY_CONTINUATION`](../../packages/core/src/agent-session-continuity.ts)。共享可读信封 reader 不以该标记派发恢复操作。
+当前常量为 [`DEFAULT_AGENT_CONTINUITY_CONTINUATION`](../../packages/core/src/agent-session-recovery/continuity.ts)。共享可读信封 reader 不以该标记派发恢复操作。
 
 ### reaction
 

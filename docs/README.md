@@ -39,6 +39,7 @@
 | Dialog、菜单、tooltip 与原生 Browser 的层级接线 | [UI 弹层实现归属](architecture/ui-layering.md) · [共享层级呈现](design/presentation/shared-rules.md#弹层作用域与层级) |
 | 开发复用或扩展图标、打开当前目录工作台 | [语义图标开发指南](guides/semantic-icons.md) |
 | 终端复制、粘贴、键盘、IME、链接的机制判别 | [终端交互分层](design/agentmux-terminal-interaction-layers.md) |
+| Agent Session 启动、恢复阶段与唯一恢复 owner | [Session 恢复行为](design/behavior/session-recovery.md) · [恢复模块](architecture/agent-session-recovery.md) |
 | 字节到画面、Attachment 与 viewport 链路 | [Terminal Runtime 架构](architecture/terminal-runtime.md) |
 | Renderer 更新、应用安装与 Native 保全 | [Desktop 更新架构](architecture/desktop-updates.md) |
 | 防止流程失败阻断健康能力 | [红线判定](../RED-LINES.md) |

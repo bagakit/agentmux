@@ -186,6 +186,10 @@ console.log(session.agentSessionId, creation.initialPrompt)
 
 `createAgent` 仍返回同一次创建的 Session；`createAgentWithDelivery` 同时返回 `promptConfirmed` 和 `creation`。`creation.createOperationId` 是关联标识，不能据此盲重试创建。`initialPrompt` 分别表达 `not-requested/confirmed/unconfirmed/unknown`，不证明任务被接受或执行。Agent 已启动而保存投递事实失败时，当前调用返回实际回执、发出明确提醒并保留健康 Run；后续持久查询仍如实保留 unknown，不能据此自动重发。
 
+启动与恢复的类型、政策和解析器从 `@agentmux/core/agent-session-recovery` 导入。Core 公共创建、恢复及 continuity 方法仍使用原 Session 与 operation；模块边界见[Agent Session Recovery](../../docs/architecture/agent-session-recovery.md)。
+
+声明初始化控制的受管启动先确认原生对象，再连接终端；初始输入在启动前耐久保存，并通过原输入 owner 提交。`terminalFrontend.initialization` 分别报告准备、创建、已就绪、失败和未知；后台仍运行不等于这些步骤成功。`creation.initialInputKey` 是原初始输入的安全引用，可交给 `inspectAgentPromptSubmission(key)` 核对原回执。原始正文保留在私有 Store，不随 Session 投影输出；未知投递不自动重发。
+
 空间命令从 `@agentmux/core/control` 消费类型化请求和报告。`agent open` 创建 Agent 或增加既有 Session 的投影，`space mv` 只移动确切 Region。Space/Zone/Tab/Region 的稳定身份与持久布局由 Core 的 Spatial owner 持有，client 持有可见表面与焦点；实际执行 cwd、AgentSession 和 Run identity 由各自原 owner 保持。
 
 Agent 生命周期通过公开 Core API 和 `amux agent` 对象命令操作。Provider-native Resume 保留 `agentSessionId`，创建新的 CtxMux RunId；旧 Run 的退役事实与原恢复身份继续保留，不能因累计数量裁剪，也不能把旧 Run 再操作或投影成 Raw Terminal。
