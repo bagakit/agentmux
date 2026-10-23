@@ -707,7 +707,7 @@ export async function readMoteConfiguredExecutor(path: string, executorId: strin
     args: [...input.args] as string[], env: { ...input.env } as Record<string, string>, injectAgentMuxGuide: input.injectAgentMuxGuide }
 }
 /** Fresh projection of the original file, not a second configuration or a cached AppConfig mirror. */
-export async function readMoteResourceConfiguration(path: string, resource: import('@agentmux/core/mote-chat').MoteChatTarget['expectedResource']): Promise<MoteResourceConfiguration> {
+export async function readMoteResourceConfiguration(path: string, resource: Pick<import('@agentmux/core/mote-chat').MoteChatTarget['expectedResource'], 'workspaceId'>): Promise<MoteResourceConfiguration> {
   const fail = (): never => { throw new AgentMuxError('The original Mote resource configuration is unconfirmed. Retain its files and conversations; restore the original configuration.', 'MOTE_CHAT_TARGET_UNCONFIRMED') }
   let raw: Record<string, unknown>
   try { raw = await readOriginalMoteConfiguration(path) as Record<string, unknown> } catch { return fail() }

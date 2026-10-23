@@ -6,6 +6,7 @@ import type { MoteChatPort } from '@agentmux/core/mote-chat'
 import { createConnectionExternalInputAuthority } from './external-input-authority.js'
 import { createHostMoteChat } from './mote-chat.js'
 import { createCredentialAdministration } from './credential-administration.js'
+import { createHostMoteConnections } from './mote-connections.js'
 
 type ExecutionClient = AgentMuxClient | AgentMuxHostedClient
 export type HostConnectionOptions = Pick<Parameters<typeof createConnectionServices>[0], 'directory' | 'adapters' | 'moteChat'> & {
@@ -80,6 +81,10 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
     }))
   }
   const connections = servicePort<ConnectionPort>(async () => (await services()).connections)
+  const moteConnections = options.moteConfigurationPath === undefined ? undefined : createHostMoteConnections({
+    configurationPath: options.moteConfigurationPath, spatial,
+    connections: servicePort<Pick<ConnectionServices, 'openDatabase' | 'connections'>>(services)
+  })
   const authority = createConnectionExternalInputAuthority({ executionHostId: 'local', runtimeId: () => runtime?.ownerIdentity().runtimeId,
     signal: shutdown.signal, clients: () => (options.clients?.() ?? []).flatMap(entry => 'runtimeOwnerIdentity' in entry.client ? [{ hostId: entry.hostId, client: entry.client }] : []), ingress: async () => {
     const ingress = (await services()).connections.ingress
@@ -87,10 +92,11 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
     return ingress
   } })
   return {
-    connections, authority,
+    connections, authority, spatial,
+    ...(moteConnections ? { moteConnections: moteConnections.moteConnections, motePreferences: moteConnections.motePreferences } : {}),
     ...(moteChat ? { moteChat: servicePort<MoteChatPort>(async () => (await services()).moteChat!) } : {}),
     async start(original: AgentMuxHeadlessRuntime) { runtime = original; await services() },
     async services() { return await services() },
-    async close() { closed = true; shutdown.abort(); const owner = await opened; owner?.close() }
+    async close() { closed = true; shutdown.abort(); moteConnections?.close(); const owner = await opened; owner?.close() }
   }
 }
