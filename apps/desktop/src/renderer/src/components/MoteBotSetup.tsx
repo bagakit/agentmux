@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { ConnectionRecord, ConnectionEnrollmentActionKind } from '@agentmux/core/connections'
+import { connectionProfileAvatarDigest, type ConnectionRecord, type ConnectionEnrollmentActionKind } from '@agentmux/core/connections'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
 import type { MoteConnectionOperation } from '@agentmux/core/mote-connections'
 import { useMoteBotSetup } from '../lib/use-mote-bot-setup'
@@ -141,9 +141,8 @@ export function MoteBotSetup({
     : ''
   const savedConnection = enrollment?.configured?.connection
   const profileTask = selected ? operation?.action === 'sync' || raw?.action === 'sync' : !!record && !replacing
-  const originalImage = raw && !raw.inspectOnly ? raw.input.desired.avatar?.pngDataUrl ?? null
-    : operation && 'preparedFrom' in operation.source && operation.source.preparedFrom !== null &&
-      JSON.stringify(setup.profile?.source.preparedFrom) === JSON.stringify(operation.source.preparedFrom) ? setup.profile?.image : null
+  const candidateImage = raw && !raw.inspectOnly ? raw.input.desired.avatar?.pngDataUrl : setup.profile?.image
+  const originalImage = candidateImage && connectionProfileAvatarDigest(candidateImage) === operation?.snapshot.avatarSha256 ? candidateImage : null
   const hasCurrentAction = !!primaryEnrollmentAction || !!savedConnection && !enrollment?.initialPublication && !!onContinue
   const guideStage: BotSetupGuideStage = !selected ? 'prepare'
     : savedConnection ? enrollment?.initialPublication && initialProgress?.state !== 'complete' ? initialProgress?.state === 'attention' ? 'attention' : 'connect' : operation?.defaultLink.state === 'saved' ? 'ready' : 'bind'
