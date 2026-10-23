@@ -17,6 +17,8 @@ export default { ...base, resolve: { alias: [
   include: [
     'packages/core/test/agent-session-recovery.integration.test.ts',
     'packages/core/test/agent-session-initialization-service.test.ts',
+    'packages/core/test/agent-session-initialization-recovery.test.ts',
+    'packages/core/test/agent-session-restart.test.ts',
     'packages/core/test/session-continuity-supervision.test.ts',
     'packages/core/test/frontend-continuity-supervision.test.ts',
     'packages/core/test/session-continuity-control.test.ts',
@@ -28,6 +30,7 @@ export default { ...base, resolve: { alias: [
   environment: 'node', env: {
     AGENTMUX_TEST_CONTINUITY_SUPERVISION_ENTRY: compiledOwner,
     AGENTMUX_TEST_INITIAL_CONTINUITY_ENTRY: compiledOwner,
+    AGENTMUX_TEST_RESTART_ENTRY: compiledOwner,
     AGENTMUX_TEST_OBJECT_CLI: resolve(import.meta.dirname, '../bin/amux')
   }, fileParallelism: false, maxWorkers: 1, passWithNoTests: false,
   testTimeout: 60_000, hookTimeout: 40_000

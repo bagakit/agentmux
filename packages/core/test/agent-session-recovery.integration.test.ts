@@ -88,6 +88,13 @@ async function fixture(mode: 'preflight' | 'late-create', caseId: 'preflight-own
     }
     const unstable = [...sources].filter(([, hashes]) => hashes.size !== 1).map(([path]) => path)
     const loadedSources = [...sources].map(([path, hashes]) => ({ path, sha256: [...hashes][0] })).sort((a, b) => a.path.localeCompare(b.path))
+    const loadedPaths = new Set(loadedSources.map(source => source.path))
+    const missingRecoveryOwners = [
+      'packages/core/src/agent-session-recovery/service.ts',
+      'packages/core/src/agent-session-recovery/continuity-attempt.ts',
+      'packages/core/src/agent-session-recovery/lifecycle.ts',
+      'packages/core/src/agent-session-recovery/reconciliation.ts'
+    ].filter(path => !loadedPaths.has(path))
     const changed = []
     for (const source of loadedSources) {
       const bytes = await read(source.path, () => readFile(join(sourceRoot, source.path)))
@@ -104,8 +111,8 @@ async function fixture(mode: 'preflight' | 'late-create', caseId: 'preflight-own
     const publicRuns = reader ? await read('public Runs', () => reader.listRuns()) : null
     const originalInput = initialInputKey && reader ? await read('original input receipt', () => reader.inspectAgentPromptSubmission(initialInputKey)) : null
     const receipt = { schema: 'agentmux.agent-session-recovery.integration.v1', case: caseId, runStamp,
-      passed: Boolean(proof) && !testFailed && !unstable.length && !changed.length && !harnessChanged && !observationErrors.length && loadedSources.length > 0,
-      sourceRoot, loadedSources, sourceLoads, unstable, changed, harnessChanged, observationErrors, harnessSources: harnessBefore,
+      passed: Boolean(proof) && !testFailed && !unstable.length && !changed.length && !harnessChanged && !observationErrors.length && loadedSources.length > 0 && !missingRecoveryOwners.length,
+      sourceRoot, loadedSources, missingRecoveryOwners, sourceLoads, unstable, changed, harnessChanged, observationErrors, harnessSources: harnessBefore,
       proof, privateRuntime: { originalStore: scope.env.AGENTMUX_AGENT_SESSION_STORE, owners: ownerReceipts,
         nativeProcessId: scope.nativeProcessId, runs: publicRuns }, session, originalInput,
       counts: { nativeCreates: nativeCalls.filter(row => row.method === 'thread/start').length,
@@ -118,6 +125,7 @@ async function fixture(mode: 'preflight' | 'late-create', caseId: 'preflight-own
     expect(changed, 'The qualified loaded source differs from the candidate after the run.').toEqual([])
     expect(harnessChanged, 'The test harness changed during qualification.').toBe(false)
     expect(loadedSources.length, 'The real source owner must publish a nonempty source manifest.').toBeGreaterThan(0)
+    expect(missingRecoveryOwners, 'Each private chain must load every split recovery owner.').toEqual([])
   })
   const original = await sdk.createAgent(create)
   const storePath = await realpath(scope.env.AGENTMUX_AGENT_SESSION_STORE!)
