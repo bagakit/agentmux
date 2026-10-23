@@ -611,6 +611,7 @@ export class AgentMuxRpcService {
       const caller = await this.authenticated(context)
       if (!caller && (!context.principal || !['user','device'].includes(context.principal.kind))) throw new AgentMuxError('Mote bot operations require an authenticated original actor.', 'CONTROL_PERMISSION_DENIED')
       const input = parseMoteConnectionParams(method, params), owner = this.ports.moteConnections
+      await this.assertRuntimeFence(context)
       if (!owner) {
         if (this.ports.forwardControl) {
           context.signal?.throwIfAborted(); await context.assertCurrent?.()
@@ -620,7 +621,7 @@ export class AgentMuxRpcService {
       }
       context.signal?.throwIfAborted(); await context.assertCurrent?.()
       const actor = caller ? { kind: 'agent' as const, id: caller.agentSessionId } : { kind: context.principal!.kind as 'user'|'device', id: context.principal!.id }
-      const administration = { actor, ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (caller) await this.authenticated(context) } }
+      const administration = { actor, ...(context.signal ? { signal: context.signal } : {}), assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.(); await this.assertRuntimeFence(context); if (caller) await this.authenticated(context) } }
       if (caller) {
         const original = method === 'space.mote.connection.advance' || method === 'space.mote.connection.inspect' ? (await owner.inspect({ operationId: (input as { operationId: string }).operationId }, administration)).operation : undefined
         const target = 'source' in input ? input.source.target : 'target' in input ? input.target : original?.source.target
