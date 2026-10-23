@@ -25,7 +25,7 @@ import { sameRun } from '../agent-session-identity.js'
 import { type CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'
 import { AgentMuxError } from '../errors.js'
 import { agentLifecycleOperationIdentity, type AgentMuxLifecycleReservation } from '../agent-session-store.js'
-import { normalizeAgentContinuityPolicy, DEFAULT_AGENT_CONTINUITY_CONTINUATION, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
+import { normalizeAgentContinuityPolicy, parseAgentContinuityTrigger, DEFAULT_AGENT_CONTINUITY_CONTINUATION, type AgentMuxContinuityOperation, type AgentMuxAgentContinuityInput, type AgentMuxAgentContinuityResult } from './continuity-contract.js'
 import { decideAgentSessionContinuity, agentContinuityAdmission } from './continuity-policy.js'
 import { parseAgentContinuityControlInput, sameAgentContinuityControlInput, type AgentMuxContinuityControlInput, type AgentMuxContinuityControlReceipt, type AgentMuxContinuityControlResult } from './control-contract.js'
 import { type AgentHookBinding } from '../hook-server.js'
@@ -128,7 +128,7 @@ export class AgentSessionRecoveryService {
     if ('inputContextSource' in input || 'inputContextCaptureProof' in input || input.input &&
         ('inputContextSource' in input.input || 'inputContextCaptureProof' in input.input || 'promptWire' in input.input)) throw new AgentMuxError('Recovery producer facts are supplied only by the original Host.', 'INVALID_INPUT_CONTEXT_CAPTURE')
     if (input.input?.inputContextCapture !== undefined && input.input.inputContext !== undefined) throw new AgentMuxError('A recovery input retains one original capture reference.', 'INVALID_INPUT_CONTEXT_CAPTURE')
-    input = { ...input, trigger: input.trigger ?? 'manual', expectedRun: { ...input.expectedRun }, ...(input.input ? { input: { ...input.input,
+    input = { ...input, trigger: input.trigger === undefined ? 'manual' : parseAgentContinuityTrigger(input.trigger), expectedRun: { ...input.expectedRun }, ...(input.input ? { input: { ...input.input,
       ...(input.input.inputContextCapture === undefined ? {} : { inputContextCapture: parseAgentInputContextCaptureReference(input.input.inputContextCapture) }),
       ...(input.input.inputContext === undefined ? {} : { inputContext: parseBrowserInputContext(input.input.inputContext) }) } } : {}) }
     this.ports.connection.requireConnected()
