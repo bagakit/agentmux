@@ -34,5 +34,5 @@ export function goalRoleGuidanceContract(): string {
 /** Application-authored context; callers retain the original user text separately. */
 export function goalRoleGuidance(context: GoalRoleGuidanceContext): string {
   const { role, ...identity } = context
-  return `Goal role: ${role}\nKnown original context: ${JSON.stringify(identity)}\nRequired module: ${AGENTMUX_GOAL_SKILL_ENTRY}\n\n${shared}\n\n${role === 'manager' ? manager : executor}`
+  return `Goal role: ${role}\nKnown original context: ${JSON.stringify(identity)}\n\n${role === 'manager' ? manager : executor}\n\n${shared}`
 }
