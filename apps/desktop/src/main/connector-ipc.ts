@@ -17,7 +17,7 @@ export function registerConnectorIpc(options: {
     publish(watchId: string, change: ChannelMetadataChange): void
     observation(watchId: string, state: 'ready' | 'unavailable'): void
   }
-}): () => void {
+}): { releaseReaders(): void; dispose(): void } {
   const readers = new Map<string, AbortController>()
   let closed = false
   options.handleWithEvent('connections:hostingTarget', async (event, hostId?: string) => {
@@ -65,5 +65,6 @@ export function registerConnectorIpc(options: {
     readers.delete(watchId)
     reader?.abort()
   })
-  return () => { closed = true; for (const reader of readers.values()) reader.abort(); readers.clear() }
+  const releaseReaders = () => { for (const reader of readers.values()) reader.abort(); readers.clear() }
+  return { releaseReaders, dispose: () => { closed = true; releaseReaders() } }
 }

@@ -393,10 +393,11 @@ export async function registerIpc(args: {
   const diagramPreviews = new FileDiagramRenderer()
   const builds = fileBuilds = new FileBuilds(id => args.runtime.executionHost(id), id => config.workspaces.find(item => item.id === id), files)
   const releaseHtmlPreviews = () => { htmlPreviews.releaseAll(); previewResources.cancelAll(); diagramPreviews.cancelAll(); void builds.releaseAll() }
-  const releaseRendererResources = () => { controlBridge.dispose(); releaseHtmlPreviews() }
+  let channelMetadata: ReturnType<typeof registerConnectorIpc> | undefined
+  const releaseRendererResources = () => { controlBridge.dispose(); releaseHtmlPreviews(); channelMetadata?.releaseReaders() }
   const releaseNavigatedHtmlPreviews = (_event: unknown, _url: string, inPlace: boolean, mainFrame: boolean) => {
     if (mainFrame) {
-      if (!inPlace) controlBridge.dispose()
+      if (!inPlace) { controlBridge.dispose(); channelMetadata?.releaseReaders() }
       releaseHtmlPreviews()
     }
   }
@@ -2407,7 +2408,7 @@ export async function registerIpc(args: {
   })
   const detach = args.runtime.attach(contents)
   const rpcHttp = agentMuxRpcHttpOptions()
-  const disposeChannelMetadata = registerConnectorIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime,
+  channelMetadata = registerConnectorIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime,
     metadata: { publish: (watchId, change) => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send(CONNECTION_METADATA_CHANGED_CHANNEL, { watchId, change }) },
       observation: (watchId, state) => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send(CONNECTION_METADATA_OBSERVATION_CHANNEL, { watchId, state }) } } })
   registerMoteChatIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime })
@@ -2520,7 +2521,7 @@ export async function registerIpc(args: {
       { owner: 'progress-changes', dispose: () => disposeProgressChanges() },
       { owner: 'control-bridge', dispose: () => controlBridge.dispose() },
       { owner: 'control-server', dispose: () => control.stop() },
-      { owner: 'channel-metadata', dispose: disposeChannelMetadata },
+      { owner: 'channel-metadata', dispose: () => channelMetadata?.dispose() },
       { owner: 'runtime-attachment', dispose: () => detach() },
       { owner: 'history-observations', dispose: () => historyObservations.dispose() },
       { owner: 'host-runtime-reads', dispose: () => hostRuntimeReads.dispose() },
