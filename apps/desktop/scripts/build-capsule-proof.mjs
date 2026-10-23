@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { spawn, execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { readFile, readdir, mkdir, writeFile } from 'node:fs/promises'
+import { readFile, readdir, mkdir, writeFile, realpath, symlink } from 'node:fs/promises'
 import { createRequire } from 'node:module'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -28,12 +28,25 @@ async function command(name, executable, args, cwd = repository) {
 }
 
 /** Build actual product consumers; the sole overlay keeps this private window from taking focus. */
-export async function buildCapsuleProof(output = join(repository, '.tmp/capsule-native-build')) {
+export async function buildCapsuleProof(output = join(repository, '.tmp/capsule-native-build/out')) {
   output = resolve(output)
   await mkdir(output, { recursive: true })
   await writeFile(join(output, 'package.json'), JSON.stringify({ type: 'module' }) + '\n')
-  const sourcePaths = [join(repository, 'pnpm-lock.yaml'), join(repository, 'package.json'), join(desktop, 'electron.vite.config.ts'),
+  const dependencyRoot = join(desktop, 'node_modules')
+  try { await symlink(dependencyRoot, join(output, 'node_modules'), 'dir') }
+  catch (error) { if (error.code !== 'EEXIST') throw error }
+  assert.equal(await realpath(join(output, 'node_modules')), await realpath(dependencyRoot), 'Original Desktop dependency layout')
+  const assets = ['resources', 'browser-extension']
+  for (const name of assets) {
+    const target = join(desktop, name), link = join(dirname(output), name)
+    try { await symlink(target, link, 'dir') }
+    catch (error) { if (error.code !== 'EEXIST') throw error }
+    assert.equal(await realpath(link), await realpath(target), 'Original App-relative resource layout: ' + name)
+  }
+  const sourcePaths = [join(repository, 'pnpm-lock.yaml'), join(repository, 'package.json'), join(desktop, 'package.json'),
+    join(repository, 'apps/host/package.json'), join(desktop, 'electron.vite.config.ts'),
     ...await files(join(desktop, 'src')), ...await files(join(repository, 'apps/host/src')),
+    ...(await Promise.all(assets.map(name => files(join(desktop, name))))).flat(),
     ...await files(join(desktop, 'scripts')).then(paths => paths.filter(path => /(?:assets|aliases|update-identity|renderer-release)/u.test(path)))]
   for (const name of [...packages, 'layout']) {
     sourcePaths.push(join(repository, 'packages', name, 'package.json'), ...await files(join(repository, 'packages', name, 'src')))
@@ -43,7 +56,9 @@ export async function buildCapsuleProof(output = join(repository, '.tmp/capsule-
     commit: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repository, encoding: 'utf8' }).trim(),
     tree: execFileSync('git', ['rev-parse', 'HEAD^{tree}'], { cwd: repository, encoding: 'utf8' }).trim(),
     diffHash: sha(execFileSync('git', ['diff', '--binary', 'HEAD'], { cwd: repository, maxBuffer: 32 * 1024 * 1024 })),
-    sourceFiles, loadedSourceFiles: {}, compilerInputFiles: {}, dependencySourceFiles: {}, dependencyFiles: {}, compiledFiles: {}, overlays: [] }
+    sourceFiles, loadedSourceFiles: {}, compilerInputFiles: {}, dependencySourceFiles: {}, dependencyFiles: {}, compiledFiles: {},
+    dependencyLayout: { nodeModules: relative(repository, await realpath(dependencyRoot)),
+      assets: Object.fromEntries(await Promise.all(assets.map(async name => [name, relative(repository, await realpath(join(desktop, name)))]))) }, overlays: [] }
   const publish = () => writeFile(join(output, 'build-receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
   await publish()
   const tsc = require.resolve('typescript/bin/tsc')
