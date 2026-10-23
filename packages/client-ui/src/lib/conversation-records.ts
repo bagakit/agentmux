@@ -15,7 +15,11 @@ export function projectConversationReading(input: ConversationProjectionInput) {
 }
 
 export function projectConversationWindow(snapshot: ConversationWindowSnapshot) {
-  const reading = projectCoreWindow(snapshot)
+  return describeConversationWindow(projectCoreWindow(snapshot))
+}
+
+/** Add client presentation to the exact Core reading already accepted by its owner. */
+export function describeConversationWindow(reading: ReturnType<typeof projectCoreWindow>) {
   return { ...reading, ...describeReading(reading) }
 }
 
