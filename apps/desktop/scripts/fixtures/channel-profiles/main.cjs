@@ -57,6 +57,7 @@ app.whenReady().then(async () => {
       await click('.composer-mailbox [role="tab"][id$="-user-tab"]')
       const original = await read('window.channelProfilesProof.mailbox')
       assert.ok(original.historyKey && original.journalKey && original.avatar && original.name)
+      assert.ok(original.historyBody && original.journalBody && original.journalReading.body && original.journalReading.quote.raw)
       const rowSelector = key => `.composer-mailbox__row[data-record-key=${JSON.stringify(key)}]`
       const avatarOf = selector => `(()=>{const n=document.querySelector(${JSON.stringify(selector)}),i=n?.querySelector('img');if(!n||!i)return null;const r=n.getBoundingClientRect();return {key:n.dataset.recordKey,url:i.getAttribute('src'),width:i.getAttribute('width'),loaded:i.complete&&i.naturalWidth>0,visible:r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight,name:n.querySelector('strong')?.textContent}})()`
       for (const key of [original.historyKey, original.journalKey]) await until(`(${avatarOf(rowSelector(key))})?.loaded`)
@@ -71,16 +72,44 @@ app.whenReady().then(async () => {
         await click(rowSelector(key))
         const selector = `.composer-mailbox__detail[data-record-key=${JSON.stringify(key)}] .log-turn`
         await until(`(()=>{const n=document.querySelector(${JSON.stringify(selector)}),i=n?.querySelector('.log-turn__node img');return i?.complete&&i.naturalWidth>0})()`)
-        const detail = await read(`(()=>{const n=document.querySelector(${JSON.stringify(selector)}),i=n.querySelector('.log-turn__node img'),r=n.getBoundingClientRect();return {key:${JSON.stringify(key)},messageId:n.dataset.messageId,url:i.getAttribute('src'),width:i.getAttribute('width'),loaded:i.complete&&i.naturalWidth>0,name:n.querySelector('.log-turn__sender')?.textContent,body:n.querySelector('.log-turn__body')?.textContent,visible:r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight}})()`)
+        const detail = await read(`(()=>{const n=document.querySelector(${JSON.stringify(selector)}),i=n.querySelector('.log-turn__node img'),r=n.getBoundingClientRect(),b=n.querySelector('.log-turn__body'),reading=b.cloneNode(true);reading.querySelectorAll('.conversation-protocol').forEach(n=>n.remove());return {key:${JSON.stringify(key)},messageId:n.dataset.messageId,url:i.getAttribute('src'),width:i.getAttribute('width'),loaded:i.complete&&i.naturalWidth>0,name:n.querySelector('.log-turn__sender')?.textContent,body:b.textContent,readingBody:reading.textContent,visibleBody:b.innerText,bodyVisible:b.checkVisibility(),visible:r.width>0&&r.height>0&&r.top>=0&&r.bottom<=innerHeight}})()`)
         assert.equal(detail.url, original.avatar); assert.equal(detail.width, '20'); assert.equal(detail.name, original.name)
-        assert.equal(detail.body, body); assert.equal(detail.loaded, true); assert.equal(detail.visible, true)
-        details.push({ kind, ...detail }); await capture('profiles-mailbox-' + kind)
+        assert.equal(detail.loaded, true); assert.equal(detail.visible, true); assert.equal(detail.bodyVisible, true)
+        let protocol = null
+        if (kind === 'history') assert.equal(detail.body, body)
+        else {
+          // Read the body independently of its protocol card. Full wire is
+          // checked through the actual Copy action below, never reconstructed.
+          assert.equal(detail.readingBody, original.journalReading.body)
+          assert.ok(detail.visibleBody.endsWith(original.journalReading.body), 'The complete original body is visible outside the protocol card')
+          const quoteSelector = selector + ' .conversation-protocol[data-protocol-kind="channel-quote"]'
+          protocol = await read(`(()=>{const nodes=document.querySelectorAll(${JSON.stringify(quoteSelector)}),n=nodes[0],d=n?.querySelector('details[data-channel-quote]');return {count:nodes.length,title:n?.querySelector('.conversation-protocol__title')?.textContent,tag:n?.querySelector('.conversation-protocol__header code')?.textContent,coverage:d?.dataset.channelQuote,summary:d?.querySelector('summary')?.textContent,visible:n?.checkVisibility(),originalSummary:n?.querySelector('.conversation-protocol__original summary')?.textContent}})()`)
+          assert.equal(protocol.count, 1); assert.equal(protocol.visible, true)
+          assert.equal(protocol.title, 'Quoted channel history'); assert.equal(protocol.tag, 'amux:quote')
+          const quote = original.journalReading.quote.quote
+          assert.equal(protocol.coverage, quote.coverage)
+          assert.equal(protocol.summary, `${quote.records.length} earlier messages · ${quote.coverage === 'complete' ? 'Observed interval complete' : 'History has gaps'}`)
+          assert.equal(protocol.originalSummary, 'Original protocol')
+          const originalSelector = quoteSelector + ' .conversation-protocol__original'
+          await click(originalSelector + ' > summary')
+          await until(`document.querySelector(${JSON.stringify(originalSelector)})?.open`)
+          protocol.original = await read(`(()=>{const n=document.querySelector(${JSON.stringify(originalSelector + ' > pre')});return {text:n?.textContent,visible:n?.checkVisibility()}})()`)
+          assert.equal(protocol.original.text, original.journalReading.quote.raw); assert.equal(protocol.original.visible, true)
+          await click(originalSelector + ' > summary')
+          await until(`!document.querySelector(${JSON.stringify(originalSelector)})?.open`)
+        }
+        const copyIndex = await read('window.channelProfilesProof.copies.length')
+        await click(selector + ' .log-turn__action[title="Copy message"]')
+        await until(`window.channelProfilesProof.copies.length===${copyIndex + 1}&&document.querySelector(${JSON.stringify(selector + ' .log-turn__actions')})?.dataset.copyState==='copied'`)
+        const copied = await read(`window.channelProfilesProof.copies[${copyIndex}]`)
+        assert.equal(copied, body, 'Native whole-message Copy retains the complete original wire')
+        details.push({ kind, ...detail, protocol, copied }); await capture('profiles-mailbox-' + kind)
         await click('[aria-label="Back to Inputs"]')
         await until(`(${avatarOf(rowSelector(original.historyKey))})?.loaded&&(${avatarOf(rowSelector(original.journalKey))})?.loaded`)
       }
       await click('[aria-label="Close mailbox"]')
       result.mailbox = { passed: true, original, rows, details,
-        boundary: 'Native selection in actual SessionMailbox; list and detail are mutually exclusive product states. The three images retain their real transitions, not a composite. Core/RPC correctness belongs to the bound original consumer proof.' }
+        boundary: 'Native selection, protocol disclosure and whole-message Copy in actual SessionMailbox; the private clipboard sink records the original wire without touching the user clipboard. List and detail are mutually exclusive product states. The three images retain their real transitions, not a composite. Core/RPC correctness belongs to the bound original consumer proof.' }
     }
     result.facts = await read('({calls:window.channelProfilesProof.calls,errors:window.channelProfilesProof.errors})'); assert.deepEqual(result.facts.errors, [])
     result.passed = true
