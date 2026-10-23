@@ -18,6 +18,11 @@ const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-perfor
 const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
 try {
   for (const path of ['apps/desktop/scripts/capture-channel-entry.mjs', ...['entry.tsx', main, 'index.html', 'scenario.md'].map(name => 'apps/desktop/scripts/fixtures/channel-entry/' + name)]) receipt.inputs[path] = sha(await readFile(resolve(root, path)))
+  // PostCSS follows index.css @imports internally, outside Vite's transform hook.
+  if (headerStatus) {
+    const path = 'apps/desktop/src/renderer/src/styles/agent-region-header.css'
+    receipt.inputs[path] = sha(await readFile(resolve(root, path)))
+  }
   const { build } = await import(pathToFileURL(desktopRequire.resolve('vite')).href), compiled = resolve(temporary, 'compiled')
   await build({ configFile: false, root: fixture, base: './', logLevel: 'error', worker: { format: 'es' }, resolve: { alias: aliases }, define: { __AGENTMUX_WEB_PREVIEW__: 'true', 'process.env.NODE_ENV': '"production"' },
     plugins: [{ name: 'bind-channel-entry-renderer', enforce: 'pre', resolveId: browserInstalledDependency, transform(code, id) { const file = id.split('?')[0]; if (file.startsWith(root + '/') && !file.includes('/node_modules/')) receipt.inputs[relative(root, file)] = sha(code) } }], build: { target: 'esnext', outDir: compiled, emptyOutDir: true } })
