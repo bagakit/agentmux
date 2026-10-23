@@ -19,7 +19,8 @@ const operation: BrowserOperation = {
 }
 
 const currentControl = (owner: AgentMuxBrowserControl['owner'], activeOperationId: string | null = null): AgentMuxBrowserControl => ({
-  owner, activeOperationId, revision: 3, inputIsolation: owner === 'agent' ? 'isolated' : owner === 'human' ? 'inactive' : 'unconfirmed'
+  owner, activeOperationId, revision: 3, inputIsolation: owner === 'agent' ? 'isolated' : owner === 'human' ? 'inactive' : 'unconfirmed',
+  agent: { hostId: 'local', agentSessionId: operation.operator.id }
 })
 type StatusProps = Parameters<typeof BrowserOperationStatus>[0]
 type Handlers = Pick<StatusProps, 'onStop' | 'onTakeControl' | 'onReturnControl' | 'onOpenTimeline'>
