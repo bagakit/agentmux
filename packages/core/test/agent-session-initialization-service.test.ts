@@ -20,6 +20,7 @@ async function fixture(options: { resume?: boolean; missing?: boolean; detached?
   })
   inner.kernel.status = vi.fn(async (id: string) => ({ ...h.run(id), pid: 123 }))
   inner.kernel.start = vi.fn()
+  inner.queueNativeIdentityCapture = vi.fn()
   inner.ensureTerminalFrontendObservation = vi.fn(async () => true)
   inner.ensureTerminalHandshakeOrDegrade = vi.fn(async (value: AgentMuxStoredAgentSession) => value)
   const watch: { frontend?: AgentTerminalFrontend; controller: AbortController; key: string; pending: Promise<boolean>; ready: Set<() => void> } = {
@@ -52,6 +53,7 @@ it('treats an omitted trigger as explicit manual recovery under a manual automat
   expect(f.requests).toEqual([{ operationId: f.original.operationId, expectedFrontendId: 'original-frontend',
     target: { kind: 'initialization', lifecycleOperationId: f.actor.lifecycleOperationId } }])
   expect(f.client.agentSession('recipient').nativeHandle?.sessionId).toBe('original-native')
+  expect(f.inner.queueNativeIdentityCapture).toHaveBeenCalledWith(expect.objectContaining({ nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'original-native' } }))
   expect(f.inner.kernel.start).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
 
@@ -139,4 +141,20 @@ it('records native admission on the original managed resume key without inventin
     .toMatchObject({ inputKey: operation.launchInput.key, transport: 'native', acknowledged: true, native: { outcome: 'admitted' } })
   await f.client.ensureAgentContinuity(request)
   expect(send).toHaveBeenCalledOnce(); expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.inner.kernel.start).not.toHaveBeenCalled()
+})
+
+
+it.each(['same', 'foreign'] as const)('keeps a %s rich native binding when initialization only attests its protocol ID', async identity => {
+  const f = await fixture({ resume: true })
+  const handle = { kind: 'provider' as const, providerId: 'codex', sessionId: identity === 'same' ? 'original-native' : 'other-native',
+    transcriptPath: f.root + '/original-native.jsonl' }
+  const source = { state: 'unknown' as const, run: f.original.expectedRun, observedAt: Date.now(), reason: 'retained-record-observation' }
+  await f.inner.registry.update('recipient', f.original.expectedRun, (value: AgentMuxStoredAgentSession) => ({ ...value,
+    nativeHandle: handle, nativeSourceObservation: source, updatedAt: Math.max(value.updatedAt + 1, source.observedAt) }))
+  const result = await f.client.ensureAgentContinuity(f.original)
+  expect(result.kind).toBe(identity === 'same' ? 'reattachable' : 'pending')
+  const saved = await f.store.readMetadata('recipient')
+  expect(saved!.nativeHandle).toEqual(handle)
+  expect(saved!.nativeSourceObservation).toEqual(source)
+  expect(f.inner.kernel.start).not.toHaveBeenCalled(); expect(f.inner.kernel.input).not.toHaveBeenCalled()
 })
