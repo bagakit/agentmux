@@ -182,6 +182,7 @@ it('actual Host public rejoin checks the same in-process authority with Desktop 
       }
     }, { timeout: 10_000 })
     expect(f.original.inner.kernel.input).not.toHaveBeenCalled()
+    runtimeFacts.push({ case: 'original-waiting-authority-witness', originalRefs: receipts.map(receipt => receipt.ref), originalKeys: receipts.map(receipt => receipt.key), ingress: await f.inspect(), inputWrites: 0 })
     await rpc.call('connection.service.configure', { operationId: 'wait-off', expectedRevision: 0, service: { enabled: false } })
     f.runtimeAvailable(true)
     for (const receipt of receipts) await expect(rpc.call('agent.input.rejoin', { ref: receipt.ref })).rejects.toMatchObject({ code: 'INGRESS_SERVICE_DISABLED' })
