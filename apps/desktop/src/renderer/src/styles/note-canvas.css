@@ -198,6 +198,57 @@
 .note-canvas-versions { display: flex; gap: 3px; margin-bottom: 8px; }
 .note-canvas-versions button { border: 0; border-radius: var(--radius-sm); padding: 4px 7px; background: transparent; color: var(--text-3); font-size: var(--fs-micro); }
 .note-canvas-versions button[aria-pressed="true"] { background: var(--wash-2); color: var(--text); }
+
+/* Note Area envelope, independent Block cards, Shared bridges, 1-hop Focus, and Overview LOD */
+.note-canvas-card[data-canvas-role="note-area"] {
+  background: color-mix(in srgb, var(--surface-2) 64%, var(--surface-1));
+  border-color: color-mix(in srgb, var(--line) 82%, var(--blue));
+  border-radius: 12px;
+}
+.note-canvas-area__envelope {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.note-canvas-area__envelope rect {
+  fill: none;
+  stroke: color-mix(in srgb, var(--line) 65%, transparent);
+  stroke-dasharray: 4 3;
+}
+.note-canvas-card[data-canvas-role="note-area"] .note-canvas-reader .mobile-note-body > :is(.note-reader-excerpt, [data-block-id]) {
+  padding: 9px 11px;
+  margin-block: 0 8px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-2);
+  box-shadow: 0 2px 6px #0000000a;
+}
+.note-canvas-card[data-canvas-role="shared-bridge"] {
+  border-width: 1.5px;
+  border-color: color-mix(in srgb, var(--green) 52%, var(--line));
+  box-shadow: 0 4px 16px color-mix(in srgb, var(--green) 10%, #00000012);
+}
+.note-canvas-card[data-canvas-role="shared-member"] {
+  border-style: dashed;
+  border-color: color-mix(in srgb, var(--green) 42%, var(--line));
+}
+.note-canvas-card[data-emphasis="muted"] {
+  opacity: 0.38;
+  transition: opacity 140ms ease;
+}
+.note-canvas-card[data-emphasis="related"] {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 22%, transparent), 0 4px 14px #00000014;
+}
+.note-canvas-overview-meta {
+  padding: 0 15px 10px;
+  color: var(--text-3);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .note-canvas-versions button:hover { color: var(--text); }
 .note-canvas-body[data-body-version="draft"] { max-height: 470px; }
 .note-canvas-reader .note-include--pending > button { padding: 3px 0; border: 0; background: transparent; color: var(--blue); font-size: 11px; line-height: 1.6; text-align: left; }

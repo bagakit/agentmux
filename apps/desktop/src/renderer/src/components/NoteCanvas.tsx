@@ -10,7 +10,7 @@ import { noteKnowledge, parseNoteFile, projectNoteBlocks, type NoteSource } from
 import { useNoteCanvasDraftIncludes } from '../lib/use-note-canvas-draft-includes'
 import { useNoteCanvasContent, type CanvasContent } from '../lib/use-note-canvas-content'
 import { noteContentMatchesGraph, type NotebookGraphSnapshot } from '../../../shared/notebook-observation'
-import { projectNoteCanvas, canvasSharedObservation, canvasNoteTitle, initialCanvasPositions, attachNoteCanvasRelationships, noteCanvasBlockHandle, type CanvasNote, type CanvasAttachedRelationship, type CanvasReference } from '../lib/note-canvas-model'
+import { projectNoteCanvas, canvasSharedObservation, canvasNoteTitle, initialCanvasPositions, attachNoteCanvasRelationships, noteCanvasBlockHandle, noteCanvasFocusNeighborhood, type CanvasNote, type CanvasAttachedRelationship, type CanvasReference, type CanvasFocusTarget } from '../lib/note-canvas-model'
 import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { api } from '../lib/api'
 import { fileNavigationSelection, useAppStore } from '../store'
@@ -37,12 +37,14 @@ const OpenIcon = semanticIconComponent('action.open-external'), CloseIcon = sema
 type OpenNote = (page: NotebookPage, blockId?: string) => void
 type OpenOriginal = (noteId: string, blockId?: string, resource?: NoteResource) => void
 export type CanvasFileTarget = Pick<NotebookPage, 'noteId' | 'resource'>
-type NoteNodeData = { selectedBlockIds: readonly string[]; pageSelected: boolean; content?: CanvasContent | undefined; documents: Parameters<typeof NoteReader>[0]['documents']; source?: NoteSource | undefined; onRead(id: string): void; onVisible(id: string, visible: boolean): void; item: CanvasNote; snapshot: NotebookGraphSnapshot; active: boolean; expanded: boolean; preview: boolean; blockIds: readonly string[]; onPorts(noteId: string, snapshot: NotebookGraphSnapshot, blockIds: readonly string[]): void; onOpen: OpenOriginal; onOpenLink(link: NoteLinkOpenRequest): void; onNeighbors(id: string): void; onPreview(id: string): void; onUnbound(id: string): void; refresh(): void }
+export const NOTE_CANVAS_OVERVIEW_ZOOM = 0.45
+type CanvasEmphasis = 'normal' | 'related' | 'muted'
+type NoteNodeData = { selectedBlockIds: readonly string[]; focusedBlockIds: readonly string[]; pageSelected: boolean; emphasis: CanvasEmphasis; content?: CanvasContent | undefined; documents: Parameters<typeof NoteReader>[0]['documents']; source?: NoteSource | undefined; onRead(id: string): void; onVisible(id: string, visible: boolean): void; item: CanvasNote; snapshot: NotebookGraphSnapshot; active: boolean; expanded: boolean; preview: boolean; blockIds: readonly string[]; onPorts(noteId: string, snapshot: NotebookGraphSnapshot, blockIds: readonly string[]): void; onOpen: OpenOriginal; onOpenLink(link: NoteLinkOpenRequest): void; onNeighbors(id: string): void; onPreview(id: string): void; onUnbound(id: string): void; onFocusBlock(noteId: string, blockId: string | undefined): void; onPeekNote(noteId: string | null): void; refresh(): void }
 type CanvasNode = Node<NoteNodeData, 'note'>
-type CanvasEdge = Edge<{ selected: boolean; focused: boolean; relationship: CanvasAttachedRelationship; inspect(relationship: CanvasAttachedRelationship): void; offset: number; labelBaseline: number; sourceTitle: string; targetTitle: string; targetShared: boolean }, 'relationship'>
+type CanvasEdge = Edge<{ selected: boolean; focused: boolean; emphasis: CanvasEmphasis; relationship: CanvasAttachedRelationship; inspect(relationship: CanvasAttachedRelationship): void; offset: number; labelBaseline: number; sourceTitle: string; targetTitle: string; targetShared: boolean }, 'relationship'>
 const NO_BLOCK_IDS: readonly string[] = [], NO_PORTS: NoteCanvasBlockPort[] = []
 
-function NoteBody({ item, snapshot, active, blockIds, source, content: result, documents, selectedBlockIds, pageSelected, preview, onRead, onPorts, onOpen, onOpenLink, refresh }: Pick<NoteNodeData, 'item' | 'snapshot' | 'active' | 'blockIds' | 'source' | 'content' | 'documents' | 'selectedBlockIds' | 'pageSelected' | 'preview' | 'onRead' | 'onOpen' | 'onOpenLink' | 'refresh'> & { onPorts(ports: NoteCanvasBlockPort[]): void }) {
+function NoteBody({ item, snapshot, active, blockIds, source, content: result, documents, selectedBlockIds, focusedBlockIds, pageSelected, preview, onRead, onPorts, onOpen, onOpenLink, onFocusBlock, refresh }: Pick<NoteNodeData, 'item' | 'snapshot' | 'active' | 'blockIds' | 'source' | 'content' | 'documents' | 'selectedBlockIds' | 'focusedBlockIds' | 'pageSelected' | 'preview' | 'onRead' | 'onOpen' | 'onOpenLink' | 'onFocusBlock' | 'refresh'> & { onPorts(ports: NoteCanvasBlockPort[]): void }) {
   const body = useRef<HTMLDivElement>(null)
   const agentNames = useAppStore(state => state.agentNames)
   const resource = item.page?.resource ?? (item.observation?.status === 'read' ? item.observation.resource : undefined)
@@ -83,6 +85,7 @@ function NoteBody({ item, snapshot, active, blockIds, source, content: result, d
   const summary = draftView || !whole && selectedBlockIds.length === 0 && (blockIds.length === 0 || Boolean(source) && blockIds.every(id => source!.blocks.get(id)?.content.type === 'noteInclude'))
   const related = useMemo(() => source ? projectNoteBlocks(source, blockIds).rootBlockIds : NO_BLOCK_IDS, [source, blockIds])
   const shown = useMemo(() => [...new Set([...(all ? related : related.slice(0, 3)), ...selectedBlockIds])], [related, all, selectedBlockIds])
+  const highlightedIds = useMemo(() => selectedBlockIds.length ? selectedBlockIds : focusedBlockIds, [selectedBlockIds, focusedBlockIds])
   const displayedIds = useMemo(() => source ? projectNoteBlocks(source, shown).shownBlockIds : NO_BLOCK_IDS, [source, shown])
   const remaining = useMemo(() => related.filter(id => !displayedIds.includes(id)), [related, displayedIds])
   const confirmedIds = useMemo(() => {
@@ -100,8 +103,11 @@ function NoteBody({ item, snapshot, active, blockIds, source, content: result, d
     {readable ? <><div className="note-canvas-saved-heading"><span>{draftView ? whole ? 'Full note' : 'Summary' : whole ? item.kind === 'shared-block' ? 'Saved original' : 'Full saved note' : summary ? 'Summary' : `${related.length} related block${related.length === 1 ? '' : 's'}`}</span>{item.kind !== 'shared-block' && <span>{draftView ? 'Not saved' : 'Saved original'}</span>}</div>
       {empty ? <p className="note-canvas-empty-body">{draftView ? 'No content in current draft.' : 'No saved content yet.'}</p> : <div className="note-canvas-reader" data-selected-block={selected} onClick={event => {
         const block = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-block-id]') : null
-        if (block && block.closest('.mobile-note-body') === event.currentTarget.querySelector('.mobile-note-body')) setSelected(block.dataset.blockId)
-      }}><NoteReader key={draftView ? 'draft' : 'saved'} resource={resource!} agentNames={agentNames} noteProvenance={readable.noteProvenance} content={readable.content} path={resource!.path} workspaceId={resource!.workspaceId} revision={readable.revision} documents={documents} graph={snapshot.graph} draftIncludes={draftView ? draftIncludes : undefined} onOpenDraftSource={target => onOpen(target.noteId, target.blockId, target.resource)} readInclude={target => onRead(target.noteId)} blockIds={whole || summary ? undefined : shown} previewBlockCount={!whole && summary ? 3 : undefined} compactIncludes highlightBlockIds={draftView ? NO_BLOCK_IDS : selectedBlockIds} readReference={target => onRead(target.noteId)} onOpenLink={onOpenLink} /></div>}
+        if (block && block.closest('.mobile-note-body') === event.currentTarget.querySelector('.mobile-note-body')) {
+          setSelected(block.dataset.blockId)
+          onFocusBlock(item.id, block.dataset.blockId)
+        }
+      }}><NoteReader key={draftView ? 'draft' : 'saved'} resource={resource!} agentNames={agentNames} noteProvenance={readable.noteProvenance} content={readable.content} path={resource!.path} workspaceId={resource!.workspaceId} revision={readable.revision} documents={documents} graph={snapshot.graph} draftIncludes={draftView ? draftIncludes : undefined} onOpenDraftSource={target => onOpen(target.noteId, target.blockId, target.resource)} readInclude={target => onRead(target.noteId)} blockIds={whole || summary ? undefined : shown} previewBlockCount={!whole && summary ? 3 : undefined} compactIncludes highlightBlockIds={draftView ? NO_BLOCK_IDS : highlightedIds} readReference={target => onRead(target.noteId)} onOpenLink={onOpenLink} /></div>}
       {selected && readingSource?.blocks.has(selected) && (item.page || item.kind === 'shared-block') ? <button type="button" className="note-canvas-open-block" onClick={() => onOpen(item.id, selected)}><OpenIcon size={12} />Open selected block</button> : null}</>
       : <div className="note-canvas-body-state" role="status">{draftView ? draft?.issue ?? 'Current draft is unavailable. Open the original to inspect its retained input.' : ambiguous ? 'Multiple original files share this Note identity. Open the registered original or refresh to confirm the source.' : item.kind === 'shared-block' && !canvasSharedObservation(snapshot, item.id) ? 'The shared file identity is unconfirmed. Refresh the graph to confirm its original.' : ready?.pending ? 'Reading saved original…' : !ready ? 'This original is outside the automatic reading window for the current view. Read it to continue.' : content?.status === 'read' ? 'Saved snapshot changed. Refresh the graph to read the current original.' : ready.issue ?? (content && 'message' in content ? content.message : 'Original body is unconfirmed.')}
         {draftView ? <button type="button" onClick={() => onOpen(item.id)}>Open original</button> : !ready?.pending && <button type="button" onClick={content?.status === 'read' ? refresh : () => onRead(item.id)}>{content?.status === 'read' ? 'Refresh graph' : blockIds.length ? 'Read related blocks' : 'Read original'}</button>}
@@ -117,16 +123,18 @@ function EndpointHandles({ kind, blockId }: { kind: 'page' | 'block'; blockId?: 
 const NoteCard = memo(function NoteCard({ data, selected }: NodeProps<CanvasNode>) {
   const { item } = data
   const title = canvasNoteTitle(item, data.source), readable = Boolean(item.page || item.kind === 'shared-block'), openable = Boolean(item.page || canvasSharedObservation(data.snapshot, item.id))
+  const canvasRole = item.kind === 'shared-block' ? (item.sharedPlacement === 'area-member' ? 'shared-member' : 'shared-bridge') : 'note-area'
   const updateInternals = useUpdateNodeInternals()
   const [portState, setPortState] = useState<{ snapshot: NotebookGraphSnapshot; ports: NoteCanvasBlockPort[] } | null>(null)
+  const overview = useStore(state => state.transform[2] < NOTE_CANVAS_OVERVIEW_ZOOM)
   const inView = useStore(state => {
     const node = state.nodeLookup.get(item.id), [x, y, zoom] = state.transform
     if (!node || !state.width || !state.height) return false
     const point = node.internals.positionAbsolute, left = point.x * zoom + x, top = point.y * zoom + y
     return left < state.width && top < state.height && left + (node.measured.width ?? 288) * zoom > 0 && top + (node.measured.height ?? 180) * zoom > 0
   })
-  useEffect(() => { data.onVisible(item.id, data.active && inView); return () => data.onVisible(item.id, false) }, [item.id, data.active, inView, data.onVisible])
-  const ports = data.active && portState?.snapshot === data.snapshot ? portState.ports : NO_PORTS
+  useEffect(() => { data.onVisible(item.id, data.active && inView && !overview); return () => data.onVisible(item.id, false) }, [item.id, data.active, inView, overview, data.onVisible])
+  const ports = data.active && !overview && portState?.snapshot === data.snapshot ? portState.ports : NO_PORTS
   const [mountedPorts, setMountedPorts] = useState<NoteCanvasBlockPort[]>([])
   const bounds = useStore(state => state.nodeLookup.get(item.id)?.internals.handleBounds)
   const usedHandles = useStore(state => JSON.stringify(state.edges.flatMap(edge => [
@@ -153,13 +161,17 @@ const NoteCard = memo(function NoteCard({ data, selected }: NodeProps<CanvasNode
     data.onPorts(item.id, data.snapshot, available.map(port => port.blockId))
   }, [ports, bounds, item.id, data.snapshot, data.onPorts])
   useLayoutEffect(() => () => data.onPorts(item.id, data.snapshot, NO_BLOCK_IDS), [item.id, data.snapshot, data.onPorts])
-  return <article className="note-canvas-card" data-kind={item.kind ?? 'note'} data-root={item.root} data-context={item.context} data-selected={selected} data-page-selected={data.pageSelected} data-relationship-selected={data.pageSelected || data.selectedBlockIds.length > 0} data-preview={data.preview}>
-    <header className="note-canvas-drag note-canvas-endpoint" data-endpoint-kind="page"><EndpointHandles kind="page" /><span className="note-canvas-book">{item.page ? <NotebookIcon size={12} /> : <NoteIcon size={12} />}<span title={item.notebook}>{item.notebook}</span>{item.context && <em>Related</em>}{item.unbound.length > 0 && <button type="button" className="note-canvas-unbound nodrag" aria-label={`Inspect ${item.unbound.length} unbound links in ${item.title}`} onClick={() => data.onUnbound(item.id)}>{item.unbound.length} unbound</button>}</span>
+  const hostCount = item.hostNoteIds?.length ?? 0
+  return <article className="note-canvas-card" data-kind={item.kind ?? 'note'} data-canvas-role={canvasRole} data-host-note-id={item.hostNoteId} data-shared-placement={item.sharedPlacement} data-canvas-lod={overview ? 'overview' : 'reading'} data-emphasis={data.emphasis} data-root={item.root} data-context={item.context} data-selected={selected} data-page-selected={data.pageSelected} data-relationship-selected={data.pageSelected || data.selectedBlockIds.length > 0} data-preview={data.preview}
+    onMouseEnter={() => data.onPeekNote(item.id)} onMouseLeave={() => data.onPeekNote(null)}>
+    {canvasRole === 'note-area' ? <svg className="note-canvas-area__envelope" aria-hidden="true"><rect x="2" y="2" width="calc(100% - 4px)" height="calc(100% - 4px)" rx="12" ry="12" /></svg> : null}
+    <header className="note-canvas-drag note-canvas-endpoint" data-endpoint-kind="page"><EndpointHandles kind="page" /><span className="note-canvas-book">{item.page ? <NotebookIcon size={12} /> : <NoteIcon size={12} />}<span title={item.notebook}>{item.kind === 'shared-block' && hostCount > 1 ? `Shared bridge · ${hostCount} notes` : item.notebook}</span>{item.context && <em>Related</em>}{item.unbound.length > 0 && <button type="button" className="note-canvas-unbound nodrag" aria-label={`Inspect ${item.unbound.length} unbound links in ${item.title}`} onClick={() => data.onUnbound(item.id)}>{item.unbound.length} unbound</button>}</span>
       {openable ? <button type="button" className="note-canvas-title nodrag" data-note-id={item.id} title={title} onClick={() => data.onOpen(item.id)}><span>{title}</span><OpenIcon size={12} /></button>
         : <strong className="note-canvas-title" title={item.id}>{title}</strong>}
       {!openable || item.observation?.status !== 'read' ? <span className="note-canvas-note-state" title={item.observation && 'message' in item.observation ? item.observation.message : item.id}>{item.observation?.status ?? 'Target not observed'}</span> : null}
     </header>
-    {readable ? <NoteBody {...data} active={data.active && inView} onPorts={reportPorts} /> : <p className="note-canvas-page-target">Original file identity unconfirmed</p>}
+    {overview ? <div className="note-canvas-overview-meta" role="status"><span>{item.kind === 'shared-block' ? 'Shared block' : `${data.blockIds.length} linked ${data.blockIds.length === 1 ? 'block' : 'blocks'}`}</span></div>
+      : readable ? <NoteBody {...data} active={data.active && inView} onPorts={reportPorts} /> : <p className="note-canvas-page-target">Original file identity unconfirmed</p>}
     {mountedPorts.map(port => <div key={port.blockId} className="note-canvas-row-endpoint note-canvas-endpoint" data-port-block-id={port.blockId} title={`Original block: ${port.blockId}`} style={{ top: port.top, visibility: ports.some(visible => visible.blockId === port.blockId) ? 'visible' : 'hidden' }}><EndpointHandles kind="block" blockId={port.blockId} /></div>)}
     <div className="note-canvas-block-summary note-canvas-endpoint" data-empty={data.blockIds.length === 0} aria-hidden={data.blockIds.length === 0} data-endpoint-kind="block" title="Some relationships attach here until their exact passage is visible. Inspect a relationship to read its original content."><EndpointHandles kind="block" /><span>Referenced passages</span><span>{data.blockIds.length}</span></div>
     <div className="note-canvas-degrees" aria-label={`${item.incoming} incoming, ${item.outgoing} outgoing occurrences in the saved graph`} title="Saved links and references, including notes outside this view. Unmatched links count only as outgoing."><span><SemanticIcon name="note.reference-incoming" size={10} /> {item.incoming} incoming</span><span><SemanticIcon name="note.reference-outgoing" size={10} /> {item.outgoing} outgoing</span></div>
@@ -171,6 +183,14 @@ const NoteCard = memo(function NoteCard({ data, selected }: NodeProps<CanvasNode
 
 const RelationshipEdge = memo(function RelationshipEdge(props: EdgeProps<CanvasEdge>) {
   const { sourceX, sourceY, targetX, targetY, id, markerEnd, data } = props
+  const inViewport = useStore(state => {
+    const [x, y, zoom] = state.transform
+    if (!state.width || !state.height) return true
+    const margin = 1200
+    const left = Math.min(sourceX, targetX) * zoom + x, right = Math.max(sourceX, targetX) * zoom + x
+    const top = Math.min(sourceY, targetY, data?.labelBaseline ?? sourceY) * zoom + y, bottom = Math.max(sourceY, targetY, data?.labelBaseline ?? targetY) * zoom + y
+    return right >= -margin && left <= state.width + margin && bottom >= -margin && top <= state.height + margin
+  })
   if (!data) return null
   const self = props.source === props.target, { relationship, offset } = data, loopOffset = Math.abs(offset)
   // One baseline per Note pair prevents different page/block handle heights from cancelling lane spacing.
@@ -181,9 +201,10 @@ const RelationshipEdge = memo(function RelationshipEdge(props: EdgeProps<CanvasE
   const linked = relationship.kind !== 'hierarchy', count = relationship.references.length, noun = relationship.kind === 'embed' ? 'embed' : relationship.kind === 'link' ? 'link' : 'reference'
   const label = relationship.kind === 'hierarchy' ? 'Subpage' : relationship.kind === 'embed' ? data.targetShared ? 'Uses shared content' : 'Includes content' : relationship.kind === 'link' ? relationship.targetKind === 'block' ? 'Links to passage' : 'Links to note' : 'References passage'
   const endpoints = `${relationship.sourceKind === 'block' ? 'Block' : 'Page'} → ${relationship.targetKind === 'page' && data.targetShared ? 'shared block' : relationship.targetKind}`
-  return <><BaseEdge id={id} path={path} {...(markerEnd ? { markerEnd } : {})} className={`note-canvas-edge-${relationship.kind}${data.focused && !data.selected ? ' is-muted' : ''}${data.selected ? ' is-selected' : ''}`} interactionWidth={20} />
-    <EdgeLabelRenderer><button type="button" data-edge-id={id} data-source-note={relationship.source} data-target-note={relationship.target} data-source-kind={relationship.sourceKind} data-target-kind={relationship.targetKind} data-source-block={relationship.sourceBlockId} data-target-block={relationship.targetBlockId} data-source-attachment={relationship.sourceKind === 'page' ? 'page' : relationship.sourceBlockId ? 'block' : 'summary'} data-target-attachment={relationship.targetKind === 'page' ? 'page' : relationship.targetBlockId ? 'block' : 'summary'} data-source-handle={props.sourceHandleId} data-target-handle={props.targetHandleId} data-relationship-kind={relationship.kind} data-lane={offset} title={`${data.sourceTitle} → ${data.targetTitle} · ${endpoints}${relationship.sourceBlockId ? ` · From ${relationship.sourceBlockId}` : ''}${relationship.targetBlockId ? ` · To ${relationship.targetBlockId}` : ''}`} className={`note-canvas-edge-label nodrag nopan is-${relationship.kind}`} data-selected={data.selected} data-muted={data.focused && !data.selected} style={{ transform: `translate(-50%, -50%) translate(${midX}px,${labelY}px)` }}
-      aria-label={linked ? `Inspect ${count} ${noun}${count === 1 ? '' : 's'}: ${endpoints}` : 'Inspect parent and subpage relationship: Page → page'} onClick={() => data.inspect(relationship)}><span>{label}</span>{count > 1 && <small>{count} places</small>}</button></EdgeLabelRenderer>
+  const muted = data.emphasis === 'muted' || (data.focused && !data.selected)
+  return <><BaseEdge id={id} path={path} {...(markerEnd ? { markerEnd } : {})} className={`note-canvas-edge-${relationship.kind}${muted ? ' is-muted' : ''}${data.selected ? ' is-selected' : ''}`} interactionWidth={20} />
+    {inViewport ? <EdgeLabelRenderer><button type="button" data-edge-id={id} data-source-note={relationship.source} data-target-note={relationship.target} data-source-kind={relationship.sourceKind} data-target-kind={relationship.targetKind} data-source-block={relationship.sourceBlockId} data-target-block={relationship.targetBlockId} data-source-attachment={relationship.sourceKind === 'page' ? 'page' : relationship.sourceBlockId ? 'block' : 'summary'} data-target-attachment={relationship.targetKind === 'page' ? 'page' : relationship.targetBlockId ? 'block' : 'summary'} data-source-handle={props.sourceHandleId} data-target-handle={props.targetHandleId} data-relationship-kind={relationship.kind} data-lane={offset} data-emphasis={data.emphasis} title={`${data.sourceTitle} → ${data.targetTitle} · ${endpoints}${relationship.sourceBlockId ? ` · From ${relationship.sourceBlockId}` : ''}${relationship.targetBlockId ? ` · To ${relationship.targetBlockId}` : ''}`} className={`note-canvas-edge-label nodrag nopan is-${relationship.kind}`} data-selected={data.selected} data-muted={muted} style={{ transform: `translate(-50%, -50%) translate(${midX}px,${labelY}px)` }}
+      aria-label={linked ? `Inspect ${count} ${noun}${count === 1 ? '' : 's'}: ${endpoints}` : 'Inspect parent and subpage relationship: Page → page'} onClick={() => data.inspect(relationship)}><span>{label}</span>{count > 1 && <small>{count} places</small>}</button></EdgeLabelRenderer> : null}
   </>
 })
 const nodeTypes = { note: NoteCard }, edgeTypes = { relationship: RelationshipEdge }
@@ -218,7 +239,7 @@ function ReferenceDetails({ references, notes, snapshot, bodies, onOpen, refresh
       return <section className="note-canvas-comparison-to" key={key}><h4><span>To</span>{destination?.title ?? (target.kind === 'unbound' ? 'Unconfirmed destination' : 'Outside this directory')}<small>{items.length > 1 ? `${items.length} occurrences · ` : ''}{noteGraphReferenceLabel(item)}</small></h4>
         <div className="note-canvas-inspector-actions">{destination?.openable && target.kind !== 'unbound' ? <button type="button" onClick={() => onOpen(target.noteId, item.resolution === 'resolved' && target.kind === 'block' ? target.blockId : undefined)}>{item.resolution === 'resolved' ? target.kind === 'page' ? destination.shared ? 'Open shared original' : 'Open target page' : 'Open target block' : 'Inspect registered original'}</button> : null}</div>
         {target.kind === 'block' && item.resolution === 'resolved' ? <EndpointContent noteId={target.noteId} blockId={target.blockId} snapshot={snapshot} bodies={bodies} refresh={refresh} onOpenLink={onOpenLink} />
-          : target.kind === 'page' && item.resolution === 'resolved' ? <EndpointContent noteId={target.noteId} snapshot={snapshot} bodies={bodies} refresh={refresh} onOpenLink={onOpenLink} />
+          : target.kind === 'page' && item.resolution === 'resolved' ? destination?.shared ? <EndpointContent noteId={target.noteId} snapshot={snapshot} bodies={bodies} refresh={refresh} onOpenLink={onOpenLink} /> : <p className="note-canvas-whole-page">Whole page · no specific block</p>
             : <p className="note-canvas-reference-issue">{target.kind === 'unbound' ? 'This written link has no confirmed target' : 'Target ' + item.resolution + '.'} The original reference is kept; inspect the registered source to confirm its destination.</p>}
         {item.query !== undefined ? <p className="note-canvas-reference-query"><strong>[[{item.query}]]</strong><span>{item.resolution === 'resolved' ? 'Matched in this snapshot. Open the source note to confirm a permanent target.' : 'Saved query kept. Choose an exact target in the source Note.'}</span></p> : null}
       </section>
@@ -245,6 +266,14 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
   const linkNavigation = useNoteLinkNavigation(onOpen, snapshot?.catalog, active)
   const [nodes, setNodes] = useState<CanvasNode[]>([]), [flow, setFlow] = useState<ReactFlowInstance<CanvasNode, CanvasEdge> | null>(null)
   const [inspected, inspect] = useState<{ kind: 'relationship'; id: string; occurrences: readonly string[] } | { kind: 'unbound'; noteId: string; occurrences: readonly string[] } | null>(null), [layoutIssue, setLayoutIssue] = useState<string | null>(null), [arranging, setArranging] = useState(false), [arrangeAttempt, arrange] = useState(0)
+  const [focusedTarget, setFocusedTarget] = useState<CanvasFocusTarget | null>(null)
+  const [peekedTarget, setPeekedTarget] = useState<CanvasFocusTarget | null>(null)
+  const focusBlock = useCallback((noteId: string, blockId: string | undefined) => {
+    setFocusedTarget(blockId ? { kind: 'block', noteId, blockId } : { kind: 'note', noteId })
+  }, [])
+  const peekNote = useCallback((noteId: string | null) => {
+    setPeekedTarget(noteId ? { kind: 'note', noteId } : null)
+  }, [])
   const inspectRelationship = useCallback((relationship: CanvasAttachedRelationship) => inspect({ kind: 'relationship', id: relationship.aggregateId, occurrences: relationship.references.map(noteGraphReferenceSelectionKey) }), [])
   const inspectUnbound = useCallback((noteId: string) => inspect({ kind: 'unbound', noteId, occurrences: (projection.notes.find(note => note.id === noteId)?.unbound ?? []).map(noteGraphReferenceSelectionKey) }), [projection.notes])
   const cancelArrangement = useRef<(() => void) | null>(null)
@@ -331,14 +360,25 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
   const attachedRelationships = useMemo(() => attachNoteCanvasRelationships(projection.relationships, new Map(Object.entries(visibleBlocks)
     .filter(([id, value]) => active && value.snapshot === snapshot && !snapshot?.graph.duplicateNoteIds.includes(id))
     .map(([id, value]) => [id, new Set(value.ids)]))), [projection.relationships, visibleBlocks, active, previews, snapshot])
+  const effectiveFocusTarget = useMemo<CanvasFocusTarget | null>(() => {
+    if (inspected?.kind === 'relationship' && (inspectedReferences.length > 0 || relationship?.kind === 'hierarchy')) {
+      return { kind: 'relationship', relationshipId: inspected.id, occurrences: inspected.occurrences }
+    }
+    return focusedTarget ?? peekedTarget
+  }, [inspected, inspectedReferences.length, relationship?.kind, focusedTarget, peekedTarget])
+  const neighborhood = useMemo(() => noteCanvasFocusNeighborhood(projection, attachedRelationships, effectiveFocusTarget), [projection, attachedRelationships, effectiveFocusTarget])
   useEffect(() => {
     if (!snapshot) return
     setNodes(held => {
       const byId = new Map(held.map(node => [node.id, node])), positions = initialCanvasPositions(projection.notes.map(item => item.id), refs.current.layout.positions)
-      return projection.notes.map(item => ({ ...byId.get(item.id), id: item.id, type: 'note', position: byId.get(item.id)?.position ?? positions[item.id]!, dragHandle: '.note-canvas-drag',
-        data: { item, snapshot, active, selectedBlockIds: selectedBlocks.get(item.id) ?? NO_BLOCK_IDS, pageSelected: selectedPages.has(item.id), content: bodies.results[item.id], source: bodies.knowledge.sources.find(source => source.note.noteId === item.id), documents: bodies.documents, onRead: bodies.request, onVisible: reportVisibility, expanded: expanded.has(item.id), preview: previews.has(item.id), blockIds: requestedBlocks.get(item.id) ?? NO_BLOCK_IDS, onPorts: recordPorts, onOpen: openOriginal, onOpenLink, onNeighbors: toggleNeighbors, onPreview: togglePreview, onUnbound: inspectUnbound, refresh } }))
+      return projection.notes.map(item => {
+        const emphasis: CanvasEmphasis = !neighborhood.active ? 'normal' : neighborhood.noteIds.has(item.id) ? 'related' : 'muted'
+        const focusedBlockIds = neighborhood.blockIdsByNote.get(item.id) ? [...neighborhood.blockIdsByNote.get(item.id)!] : NO_BLOCK_IDS
+        return { ...byId.get(item.id), id: item.id, type: 'note', position: byId.get(item.id)?.position ?? positions[item.id]!, dragHandle: '.note-canvas-drag',
+          data: { item, snapshot, active, selectedBlockIds: selectedBlocks.get(item.id) ?? NO_BLOCK_IDS, focusedBlockIds, pageSelected: selectedPages.has(item.id), emphasis, content: bodies.results[item.id], source: bodies.knowledge.sources.find(source => source.note.noteId === item.id), documents: bodies.documents, onRead: bodies.request, onVisible: reportVisibility, expanded: expanded.has(item.id), preview: previews.has(item.id), blockIds: requestedBlocks.get(item.id) ?? NO_BLOCK_IDS, onPorts: recordPorts, onOpen: openOriginal, onOpenLink, onNeighbors: toggleNeighbors, onPreview: togglePreview, onUnbound: inspectUnbound, onFocusBlock: focusBlock, onPeekNote: peekNote, refresh } }
+      })
     })
-  }, [projection, snapshot, active, expanded, previews, requestedBlocks, recordPorts, openOriginal, onOpenLink, inspectUnbound, toggleNeighbors, togglePreview, refresh, bodies.results, bodies.knowledge, bodies.documents, bodies.request, reportVisibility, selectedBlocks, selectedPages])
+  }, [projection, snapshot, active, expanded, previews, requestedBlocks, recordPorts, openOriginal, onOpenLink, inspectUnbound, focusBlock, peekNote, toggleNeighbors, togglePreview, refresh, bodies.results, bodies.knowledge, bodies.documents, bodies.request, reportVisibility, selectedBlocks, selectedPages, neighborhood])
   const edges = useMemo<CanvasEdge[]>(() => {
     const pairs = new Map<string, CanvasAttachedRelationship[]>(), pairKey = (source: string, target: string) => JSON.stringify([source, target].sort())
     for (const relationship of attachedRelationships) {
@@ -355,13 +395,16 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
       const source = byId.get(relationship.source), target = byId.get(relationship.target)
       const labelBaseline = relationship.source === relationship.target ? (source?.position.y ?? 0) - 50
         : ((source?.position.y ?? 0) + (source?.measured?.height ?? 154) / 2 + (target?.position.y ?? 0) + (target?.measured?.height ?? 154) / 2) / 2
+      const selected = relationship.references.some(reference => inspectedReferences.some(selected => noteGraphReferenceSelectionKey(reference) === noteGraphReferenceSelectionKey(selected)))
+        || (inspected?.kind === 'relationship' && inspected.id === relationship.aggregateId && relationship.kind === 'hierarchy')
+      const emphasis: CanvasEmphasis = !neighborhood.active ? 'normal' : selected || neighborhood.relationshipIds.has(relationship.id) ? 'related' : 'muted'
       return { id: relationship.id, source: relationship.source, target: relationship.target, type: 'relationship',
         sourceHandle: relationship.sourceBlockId ? noteCanvasBlockHandle(relationship.sourceBlockId, 'out', rightward ? 'right' : 'left') : `${relationship.sourceKind}-out-${rightward ? 'right' : 'left'}`,
         targetHandle: relationship.targetBlockId ? noteCanvasBlockHandle(relationship.targetBlockId, 'in', rightward ? 'left' : 'right') : `${relationship.targetKind}-in-${rightward ? 'left' : 'right'}`,
         markerEnd: { type: MarkerType.ArrowClosed, width: 14, height: 14, color: relationship.kind === 'hierarchy' ? 'var(--text-3)' : relationship.kind === 'embed' ? 'var(--green)' : 'var(--blue)' },
-        data: { selected: relationship.references.some(reference => inspectedReferences.some(selected => noteGraphReferenceSelectionKey(reference) === noteGraphReferenceSelectionKey(selected))), focused: inspectedReferences.length > 0, relationship, inspect: inspectRelationship, offset, labelBaseline, sourceTitle: source ? canvasNoteTitle(source.data.item, source.data.source) : 'Uncatalogued note', targetTitle: target ? canvasNoteTitle(target.data.item, target.data.source) : 'Uncatalogued note', targetShared: target?.data.item.kind === 'shared-block' }, selectable: false, deletable: false }
+        data: { selected, focused: inspectedReferences.length > 0, emphasis, relationship, inspect: inspectRelationship, offset, labelBaseline, sourceTitle: source ? canvasNoteTitle(source.data.item, source.data.source) : 'Uncatalogued note', targetTitle: target ? canvasNoteTitle(target.data.item, target.data.source) : 'Uncatalogued note', targetShared: target?.data.item.kind === 'shared-block' }, selectable: false, deletable: false }
     })
-  }, [attachedRelationships, nodes, snapshot, inspectRelationship, inspectedReferences])
+  }, [attachedRelationships, nodes, snapshot, inspectRelationship, inspected, inspectedReferences, neighborhood])
   const topology = JSON.stringify([projection.notes.map(item => item.id), projection.relationships.map(edge => edge.id)])
   const stage = useRef<HTMLDivElement>(null)
   const arranged = useRef(0), initialized = useRef(false), hadViewport = useRef(Boolean(layout.viewport)), viewportTouched = useRef(false)
@@ -408,7 +451,7 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
     catch { setLayoutIssue('Automatic layout could not start. You can still move Notes; retry Arrange.'); frameInitial(); return }
     const id = mintObjectId(), input: CanvasLayoutInput = { nodes: projection.notes.map(note => {
       const node = refs.current.nodes.find(node => node.id === note.id)
-      return { id: note.id, width: node?.measured?.width ?? 320, height: node?.measured?.height ?? 480 }
+      return { id: note.id, width: node?.measured?.width ?? 320, height: node?.measured?.height ?? 480, ...(note.hostNoteId ? { areaId: note.hostNoteId } : {}) }
     }), edges: projection.relationships }
     let current = true
     const cancel = () => { current = false; worker.terminate(); setArranging(false) }
@@ -452,12 +495,47 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
       {issue || stale ? <button type="button" onClick={refresh}>Refresh graph</button> : null}{storageIssue && <button type="button" onClick={retry}>Retry saving layout</button>}{layoutIssue && <button type="button" onClick={() => arrange(value => value + 1)}>Retry Arrange</button>}</div> : null}
     <NotebookDirectoryContextMenu pages={visiblePages} onTalk={onTalk}><div className="note-canvas-stage" ref={stage}>
       <ReactFlow<CanvasNode, CanvasEdge> nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onInit={setFlow} onEdgeClick={(_event, edge) => { if (edge.data) inspectRelationship(edge.data.relationship) }}
+        onPaneClick={() => setFocusedTarget(null)}
         onNodesChange={(changes: NodeChange<CanvasNode>[]) => {
           // A newer manual gesture supersedes even a queued worker reply from an explicit Arrange.
           if (changes.some(change => change.type === 'position' && change.position)) { cancelArrangement.current?.(); cancelArrangement.current = null; arranged.current = arrangeAttempt }
-          setNodes(held => applyNodeChanges(changes, held))
+          const selectedChange = changes.find((change): change is Extract<NodeChange<CanvasNode>, { type: 'select' }> => change.type === 'select' && change.selected)
+          if (selectedChange) setFocusedTarget({ kind: 'note', noteId: selectedChange.id })
+          const currentById = new Map(refs.current.nodes.map(node => [node.id, node]))
+          const movingIds = new Set(changes.flatMap(change => change.type === 'position' && change.position ? [change.id] : []))
+          const memberShifts = new Map<string, { x: number; y: number }>()
+          for (const change of changes) {
+            if (change.type !== 'position' || !change.position) continue
+            const previous = currentById.get(change.id)
+            if (!previous) continue
+            const dx = change.position.x - previous.position.x, dy = change.position.y - previous.position.y
+            if (!dx && !dy) continue
+            for (const item of refs.current.projection.notes) {
+              if (item.hostNoteId === change.id && !movingIds.has(item.id)) {
+                const member = currentById.get(item.id)
+                if (member) memberShifts.set(item.id, { x: member.position.x + dx, y: member.position.y + dy })
+              }
+            }
+          }
+          setNodes(held => {
+            const updated = applyNodeChanges(changes, held)
+            return memberShifts.size ? updated.map(node => memberShifts.has(node.id) ? { ...node, position: memberShifts.get(node.id)! } : node) : updated
+          })
           const completed = changes.filter(change => change.type === 'position' && change.position && change.dragging === false)
-          if (completed.length) { const positions = { ...refs.current.layout.positions }; for (const change of completed) if (change.type === 'position' && change.position) positions[change.id] = change.position; save({ positions }) }
+          if (completed.length) {
+            const positions = { ...refs.current.layout.positions }
+            for (const change of completed) {
+              if (change.type !== 'position' || !change.position) continue
+              positions[change.id] = change.position
+              for (const item of refs.current.projection.notes) {
+                if (item.hostNoteId === change.id) {
+                  const memberPos = memberShifts.get(item.id) ?? currentById.get(item.id)?.position
+                  if (memberPos) positions[item.id] = memberPos
+                }
+              }
+            }
+            save({ positions })
+          }
         }}
         onMoveStart={event => { if (event) viewportTouched.current = true }}
         onMoveEnd={(event: globalThis.MouseEvent | TouchEvent | null, viewport: Viewport) => { if (event) { viewportTouched.current = true; save({ viewport }) } }} defaultViewport={layout.viewport ?? { x: 32, y: 40, zoom: 1 }}
