@@ -159,6 +159,7 @@ export function objectCliSeed(method: string, input: string): string[] {
   }
   const found = fixed[method]
   if (found) return found
+  if (method.startsWith('capsule.')) return method === 'capsule.ls' || method === 'capsule.config.inspect' ? [] : ['--input', '-']
   if (method.startsWith('settings.executors.') || method.startsWith('settings.prompts.')) {
     const action = method.split('.').at(-1)
     return action === 'ls' ? [] : ['ID', ...(['create', 'update'].includes(action!) ? ['--input', input] : [])]
