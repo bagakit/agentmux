@@ -57,14 +57,23 @@ export async function exerciseIntegrity({ read, click, shot, until, native, appe
     await read(`document.querySelector('.reading-find__content').focus({preventScroll:true});window.integrityOpener=document.activeElement`)
     await key('f', 'KeyF', 70, 4)
     await ready(`document.activeElement===document.querySelector('.reading-find__tools input')`, 'Native Meta+F opens and focuses this loaded conversation')
-    // Let only the already visible scheduled work settle before measuring query demand.
-    await read(`new Promise((resolve,reject)=>{let prior=-1,stable=0,frames=0;function tick(){const count=readingProof.metrics.heavyMounts.length;stable=count===prior?stable+1:0;prior=count;if(stable===12)return resolve(true);if(++frames>180)return reject(Error('Visible scheduled bodies did not settle'));requestAnimationFrame(tick)}requestAnimationFrame(tick)})`)
-    const before = await read(`(()=>{const rows=[...document.querySelectorAll('.conversation-native-thread__record[data-native-record-id^="integrity-answer-"]')];return {records:rows.map(n=>n.dataset.nativeRecordId),deferred:rows.filter(n=>n.querySelector('[data-conversation-body-presented="false"]')).map(n=>n.dataset.nativeRecordId),mounted:rows.filter(n=>n.querySelector('[data-conversation-body-presented="true"]')).map(n=>n.dataset.nativeRecordId),reads:readingProof.reads.length}})()`)
+    // Finish the existing observer's work before attributing demand to Query.
+    // Capture the baseline in the same stable-frame callback, without resetting counters.
+    const before = await read(`new Promise((resolve,reject)=>{let prior=-1,stable=0,frames=0;function tick(){
+      const count=readingProof.metrics.heavyMounts.length,c=readingProof.consumer(),pending=readingProof.inFlightCalls();
+      const idle=pending.length===0&&c?.dirty===false&&!c.loading&&!c.inFlight&&!c.held&&!c.watch.binding&&c.watch.bound&&c.watch.closed===false;
+      stable=count===prior&&idle?stable+1:0;prior=count;
+      if(stable===12){const rows=[...document.querySelectorAll('.conversation-native-thread__record[data-native-record-id^="integrity-answer-"]')];
+        return resolve({records:rows.map(n=>n.dataset.nativeRecordId),deferred:rows.filter(n=>n.querySelector('[data-conversation-body-presented="false"]')).map(n=>n.dataset.nativeRecordId),
+          mounted:rows.filter(n=>n.querySelector('[data-conversation-body-presented="true"]')).map(n=>n.dataset.nativeRecordId),
+          reads:readingProof.reads.length,readStarts:readingProof.events.filter(e=>e.type==='read-start').length,pending,consumer:c});}
+      if(++frames>180)return reject(Error('Original observer and visible scheduled bodies did not settle'));requestAnimationFrame(tick)}requestAnimationFrame(tick)})`)
     assert.ok(before.records.length > 1 && before.deferred.length > 1, 'The original loaded frame includes multiple unmounted fenced answers')
     const count = await query(integrityCode)
     assert.equal(count.total, before.records.length, 'Find includes each original loaded fenced answer, including deferred bodies')
-    const after = await read(`(()=>{const rows=[...document.querySelectorAll('.conversation-native-thread__record[data-native-record-id^="integrity-answer-"]')];return {mounted:rows.filter(n=>n.querySelector('[data-conversation-body-presented="true"]')).map(n=>n.dataset.nativeRecordId),deferred:rows.filter(n=>n.querySelector('[data-conversation-body-presented="false"]')).map(n=>n.dataset.nativeRecordId),reads:readingProof.reads.length}})()`)
+    const after = await read(`(()=>{const rows=[...document.querySelectorAll('.conversation-native-thread__record[data-native-record-id^="integrity-answer-"]')];return {mounted:rows.filter(n=>n.querySelector('[data-conversation-body-presented="true"]')).map(n=>n.dataset.nativeRecordId),deferred:rows.filter(n=>n.querySelector('[data-conversation-body-presented="false"]')).map(n=>n.dataset.nativeRecordId),reads:readingProof.reads.length,readStarts:readingProof.events.filter(e=>e.type==='read-start').length}})()`)
     assert.deepEqual(after.mounted, before.mounted, 'Query does not mount every loaded heavy body')
+    assert.equal(after.readStarts, before.readStarts, 'Query starts no history, resource or other Session request')
     assert.equal(after.reads, before.reads, 'Query does not read hidden history, resources or another Session')
     result.query = { before, count, after }
     await shot('find-loaded')
