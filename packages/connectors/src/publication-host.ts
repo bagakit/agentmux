@@ -1,6 +1,6 @@
 import { AgentMuxError, parseProviderSessionHistoryResourceReadResult, readSessionHistoryTextResource, type AgentSessionHistoryContentPart, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
 import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPage, parseConversationReadPage, parseConversationUnit, conversationRecordId, conversationSourceKey, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationRef } from '@agentmux/core/conversation'
-import { parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
+import { connectionDiagnosisCheckpointKey, connectionDiagnosisSourceCode, type ConnectionDeliverySourceObservation, parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { parsePreparedPublication } from './publication-wire.js'
 import type { PublicationAdapter } from './publication-adapter.js'
@@ -24,7 +24,7 @@ export interface PublicationPermissionsPort {
   authorized(operation: PublicationOperation): boolean
 }
 export type PublicationObservation = ConnectionDeliveryObservation
-type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; inspectionAfter?: string; watch?: ConversationObservationHandle | undefined; watchViewId?: string | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
+type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; inspectionAfter?: string; watch?: ConversationObservationHandle | undefined; watchViewId?: string | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceObservation?: ConnectionDeliverySourceObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
 export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore }
 
 
@@ -146,20 +146,25 @@ export class PublicationHost implements ConnectionDeliveryPort {
       // COMMIT may have succeeded before its acknowledgment was lost. Reload
       // the retained cut before retrying, without inventing another operation.
       lane.read = undefined; lane.view = undefined; lane.viewId = undefined
-      if (!signal.aborted) lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }
+      if (!signal.aborted) {
+        lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }
+        lane.sourceObservation = { state: 'unavailable', reason: 'storage-unconfirmed', code: null, codeRecorded: false, checkpointKey: lane.sourceObservation?.checkpointKey ?? null }
+      }
     }
     if (!signal.aborted && this.authorized(binding)) {
       let effectObservation: PublicationObservation | undefined
       try { effectObservation = await this.drain(lane, adapter) }
       catch (error) { effectObservation = { state: 'unavailable', reason: error instanceof AgentMuxError && ['PUBLICATION_ADAPTER_UNAVAILABLE', 'PUBLICATION_PREPARATION_UNCONFIRMED'].includes(error.code) ? 'adapter-unavailable' : 'storage-unconfirmed' } }
       // Original effects may still settle or dispatch; their observation cannot hide an unresolved content gap.
-      if (effectObservation && lane.observation.reason !== 'content-unconfirmed') lane.observation = effectObservation
+      if (effectObservation && lane.observation.state === 'ready') lane.observation = effectObservation
     }
     if (permissionsUnavailable && lane.observation.state === 'ready') lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' }
   }
   private async catchUp(lane: Lane, adapter: PublicationAdapter): Promise<void> {
     const binding = lane.binding, signal = lane.abort.signal, reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
-    const sourceHostId = binding.sourceFrontier?.sourceHostId ?? (await this.options.conversation.checkpoint(reference, signal)).sourceHostId
+    let sourceHostId: string
+    try { sourceHostId = binding.sourceFrontier?.sourceHostId ?? (await this.options.conversation.checkpoint(reference, signal)).sourceHostId }
+    catch (error) { this.sourceUnavailable(lane, 'source-unconfirmed', error); return }
     let after = this.store.checkpoint(binding, sourceHostId)
     if (!lane.watch || lane.watch.closed.aborted || lane.watchViewId !== lane.viewId) {
       lane.watch?.dispose(); lane.watch = undefined
@@ -185,7 +190,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const state = lane.read, input = { ...reference, checkpoint: state.after, limit: 100, ...(state.cursor ? { cursor: state.cursor } : {}), ...(lane.view ? { view: lane.view } : {}) }
       let page: ConversationChangesPage
       try { page = parseConversationChangesPage(await this.options.conversation.changes(input, signal), input) }
-      catch { lane.read = undefined; lane.view = undefined; lane.viewId = undefined; lane.observation = { state: 'unavailable', reason: 'source-gap' }; return }
+      catch (error) { lane.read = undefined; lane.view = undefined; lane.viewId = undefined; this.sourceUnavailable(lane, 'source-gap', error, connectionDiagnosisCheckpointKey(state.after)); return }
       const consumed = consumeConversationWindowPage(page, state.pending)
       if (consumed.kind === 'pending') {
         state.pending = consumed.pending
@@ -203,9 +208,15 @@ export class PublicationHost implements ConnectionDeliveryPort {
       if (!page.more) { lane.read = undefined; break }
       if (reads === 7) lane.dirty = true
     }
+    lane.sourceObservation = { state: 'ready', code: null, codeRecorded: false, checkpointKey: connectionDiagnosisCheckpointKey(after) }
     await this.recoverContent(lane, adapter)
     lane.observation = this.store.coverage(binding).state === 'incomplete' ? { state: 'unavailable', reason: 'content-unconfirmed' }
       : lane.watch ? { state: 'ready' } : { state: 'unavailable', reason: 'source-unconfirmed' }
+  }
+  private sourceUnavailable(lane: Lane, reason: 'source-unconfirmed' | 'source-gap', error: unknown, checkpointKey = lane.sourceObservation?.checkpointKey ?? null): void {
+    const code = error instanceof AgentMuxError ? error.code : undefined
+    lane.observation = { state: 'unavailable', reason }
+    lane.sourceObservation = { state: 'unavailable', reason, code: connectionDiagnosisSourceCode(code), codeRecorded: code !== undefined, checkpointKey }
   }
   private async resolve(reference: ConversationRef, units: readonly ConversationUnit[], signal: AbortSignal, binding: RoomBinding, adapter: PublicationAdapter): Promise<Map<string, ResolvedPublicationPart>> {
     const result = new Map<string, ResolvedPublicationPart>()
@@ -449,7 +460,9 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const input = parseConnectionDeliveryParams('connection.delivery.ls', value), binding = this.options.bindings.readExact(input.bindingId, input.bindingRevision)
     if (!binding || binding.connectionId !== input.connectionId) throw new AgentMuxError('The delivery audience does not match this exact Binding.', 'PUBLICATION_SOURCE_CONFLICT')
     const deliveries = this.store.list(binding, input.limit ?? 30, input.after).map(publicDelivery)
-    return { deliveries, next: deliveries.length === (input.limit ?? 30) ? deliveries.at(-1)!.operationId : null, observation: this.observation(binding.bindingId, binding.revision), coverage: this.store.coverage(binding, input.limit ?? 30, input.afterContent) }
+    const lane = this.lanes.get(binding.bindingId), sourceObservation = lane?.binding.revision === binding.revision ? lane.sourceObservation : undefined
+    const effectObservation = this.effectObservation(binding)
+    return { ...(sourceObservation ? { sourceObservation: { ...sourceObservation } } : {}), ...(effectObservation ? { effectObservation } : {}), deliveries, next: deliveries.length === (input.limit ?? 30) ? deliveries.at(-1)!.operationId : null, observation: this.observation(binding.bindingId, binding.revision), coverage: this.store.coverage(binding, input.limit ?? 30, input.afterContent) }
   }
   async retry(value: ConnectionDeliveryOperationInput, context: RoomBindingCallContext) {
     if (this.closed) throw new AgentMuxError('The original publication owner is closed. Inspect the retained operation through its current Host.', 'PUBLICATION_OWNER_UNAVAILABLE')
