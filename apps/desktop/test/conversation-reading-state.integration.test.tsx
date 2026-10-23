@@ -1,223 +1,340 @@
-const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
+import { fixturePath } from '../scripts/lib/fixture-values.mjs'
 import { act, useEffect } from 'react'
-import { type Root } from 'react-dom/client'
-import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
+import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
-import type { AgentSessionHistoryContentPart, AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
-import { AgentMuxClient, AgentMuxFileAgentSessionStore } from '@agentmux/core'
-import { createHash } from 'node:crypto'
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import type { AgentSessionControl, SessionSnapshot } from '../src/shared/contracts'
-import { SessionHistoryView } from '../src/renderer/src/components/SessionHistoryView'
-import { ActivityView } from '../src/renderer/src/components/ActivityView'
+import type { AgentSessionHistoryContentPart, AgentSessionHistoryItem, AgentSessionHistoryPage } from '@agentmux/core'
+import { consumeConversationWindowPage, type ConversationWindowAssembly } from '@agentmux/core/conversation'
+import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
+import { projectConversationWindow } from '@agentmux/client-ui/conversation-records'
 import { ConversationMessage } from '@agentmux/client-ui/components/ConversationMessage'
+import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { SessionPane } from '../src/renderer/src/components/SessionPane'
-import { agentHistoryMenuEntry, openAgentHistory } from './helpers/agent-history-menu'
-import { useAppStore } from '../src/renderer/src/store'
+import type { AgentSessionControl, SessionSnapshot } from '../src/shared/contracts'
 import { api } from '../src/renderer/src/lib/api'
+import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
+import { useAppStore } from '../src/renderer/src/store'
+import { agentHistoryMenuEntry, openAgentHistory } from './helpers/agent-history-menu'
+import { activityReadingProps } from './helpers/activity-reading-props'
+import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
+import { composerConfig, composerSession } from './helpers/composer-dom-fixture'
 import { ConversationAnnotationOwner } from './helpers/conversation-annotation-owner'
-import * as markdown from '../src/renderer/src/lib/agent-markdown'
+import { nativeHistoryFixture, jsonl } from '../../../packages/core/test/fixtures/native-history-session'
+import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
+import * as markdown from '../../../packages/client-ui/src/lib/agent-markdown'
 
 const observation = vi.hoisted(() => ({ enabled: false, refresh: vi.fn<() => Promise<void>>() }))
 vi.mock('../src/renderer/src/components/TerminalView', () => ({
-  TerminalView: ({ visible = true, onObservationRefresh }: {
-    visible?: boolean; onObservationRefresh?: (refresh: (() => Promise<void>) | null) => void
+  TerminalView: ({
+    visible = true,
+    onObservationRefresh,
+  }: {
+    visible?: boolean
+    onObservationRefresh?: (refresh: (() => Promise<void>) | null) => void
   }) => {
     useEffect(() => {
-      if (!observation.enabled) return
-      onObservationRefresh?.(observation.refresh)
-      return () => onObservationRefresh?.(null)
+      if (observation.enabled) {
+        onObservationRefresh?.(observation.refresh)
+        return () => onObservationRefresh?.(null)
+      }
     }, [onObservationRefresh])
-    return <div className="terminal-view" data-visible={visible}>Retained terminal surface</div>
-  }
+    return (
+      <div className="terminal-view" data-visible={visible}>
+        Retained terminal surface
+      </div>
+    )
+  },
 }))
-
+const controlA: AgentSessionControl = {
+  kind: 'agent',
+  hostId: 'local',
+  agentSessionId: 'session-reading-a',
+  run: { runId: 'run-a' },
+}
+const controlB: AgentSessionControl = {
+  kind: 'agent',
+  hostId: 'local',
+  agentSessionId: 'session-reading-b',
+  run: { runId: 'run-b' },
+}
+const initial = useAppStore.getState()
+const nativeSource = { providerId: 'codex', nativeSessionId: 'native-reading-source' }
+let host: HTMLDivElement, root: Root, closes: Array<() => unknown | Promise<unknown>>
+let intersections: Array<{ targets: Set<Element>; deliver(entries: IntersectionObserverEntry[]): void }>
+let historyPageSpy: MockInstance<typeof api.sessions.historyPage>
+const wait = (assertion: () => void) =>
+  vi.waitFor(
+    async () => {
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      })
+      assertion()
+    },
+    { timeout: 8000, interval: 10 },
+  )
 type TraceElement = HTMLDetailsElement | HTMLButtonElement
 const TRACE_SELECTOR = 'details.log-turn__trace[data-trace-kind="reasoning"], button.conversation-tool-trace__row'
+const traces = (scope: ParentNode = host) => [...scope.querySelectorAll<TraceElement>(TRACE_SELECTOR)]
 function isTraceOpen(el: TraceElement): boolean {
   return el.tagName === 'DETAILS' ? (el as HTMLDetailsElement).open : el.getAttribute('aria-expanded') === 'true'
 }
 function openTrace(el: TraceElement): void {
   if (el.tagName === 'DETAILS') {
-    expect(el.dataset.traceKind).toBe('reasoning')
     ;(el as HTMLDetailsElement).open = true
     el.dispatchEvent(new Event('toggle'))
   } else {
-    expect(el.classList.contains('conversation-tool-trace__row')).toBe(true)
     expect(el.getAttribute('aria-expanded')).toBe('false')
     el.click()
   }
 }
-
-const controlA: AgentSessionControl = {
-  kind: 'agent',
-  hostId: 'local',
-  agentSessionId: 'session-reading-a',
-  run: { runId: 'run-a' }
-}
-
-const controlB: AgentSessionControl = {
-  kind: 'agent',
-  hostId: 'local',
-  agentSessionId: 'session-reading-b',
-  run: { runId: 'run-b' }
-}
-
-function makePage(
+const native = (
   id: string,
-  nextCursor: string | null = null,
-  sessionId = controlA.agentSessionId,
-  parts?: AgentSessionHistoryContentPart[]
-): AgentSessionHistoryPage {
-  return {
-    agentSessionId: sessionId,
-    source: { providerId: 'codex', nativeSessionId: `native-${sessionId}` },
-    items: [
-      {
-        id,
-        kind: 'assistant-message',
-        contentParts: parts ?? [{ kind: 'text', text: `Message body for ${id}` }]
-      }
-    ],
-    nextCursor
-  }
+  parts: AgentSessionHistoryContentPart[] = [{ kind: 'text', text: `Message body for ${id}` }],
+): AgentSessionHistoryItem => ({ id, kind: 'assistant-message', contentParts: parts })
+const call = (callId: string, input = callId): AgentSessionHistoryContentPart => ({
+  kind: 'tool-call',
+  name: 'shell',
+  callId,
+  input,
+})
+const body = (text: string): AgentSessionHistoryContentPart => ({ kind: 'text', text })
+const nativeIds = () =>
+  [...host.querySelectorAll<HTMLElement>('.conversation-native-thread > [data-native-record-id]')].map(
+    (row) => row.dataset.nativeRecordId!,
+  )
+const turn = (id: string, scope: ParentNode = host) => {
+  const row = [...scope.querySelectorAll<HTMLElement>('[data-native-record-id]')].find(
+    (row) => row.dataset.nativeRecordId === id,
+  )
+  expect(row, id).toBeDefined()
+  return row!
 }
-
-function makeTimelineItem(id: string, sessionId = controlA.agentSessionId, text = 'Live message'): AgentTimelineItem {
-  return {
-    id,
-    agentSessionId: sessionId,
-    kind: 'assistant_message',
-    status: 'complete',
-    source: 'native-hook',
-    createdAt: 1000,
-    updatedAt: 1000,
-    title: 'Assistant',
-    content: text
-  }
+function sample(control = controlA) {
+  return inspectConversationConsumers(control).consumers[0]!
 }
-
-// A controlled producer file goes through the public FileStore/Provider reader. IPC delegates
-// that real promise; it never fabricates native pages or controls a live Run.
-async function withPublicNativeHistory(
-  ids: readonly string[],
-  verify: (fixture: { pages: AgentSessionHistoryPage[]; replaceRecords(ids: readonly string[]): Promise<void>; workspacePath: string; flush(): Promise<void> }) => Promise<void>
-): Promise<void> {
-  const workspacePath = await mkdtemp(join(tmpdir(), 't028-owned-native-'))
-  const nativePath = join(workspacePath, 'native.jsonl')
-  const storePath = join(workspacePath, 'agent-sessions.json')
-  const nativeSessionId = 'private-reading-quality-native'
-  const digest = (bytes: Buffer) => createHash('sha256').update(bytes).digest('hex')
-  let expectedNative = ''
-  async function replaceRecords(recordIds: readonly string[]): Promise<void> {
-    await writeFile(nativePath, recordIds.map(uuid => JSON.stringify({
-      sessionId: nativeSessionId, uuid, type: 'assistant',
-      message: { role: 'assistant', content: [
-        { type: 'tool_use', id: ids.indexOf(uuid) === 0 ? 'x:tool-call:y' : 'y', name: 'sh', input: { command: `private native ${uuid}` } },
-        { type: 'text', text: `Selectable native body ${uuid}` }
-      ] }
-    })).join('\n') + '\n')
-    expectedNative = digest(await readFile(nativePath))
-  }
-  await replaceRecords(ids)
-  const store = new AgentMuxFileAgentSessionStore(storePath)
-  await store.compareAndSwap(null, {
-    kind: 'agent', agentSessionId: controlA.agentSessionId, providerId: 'claude', executorId: 'claude', hostId: controlA.hostId,
-    workspacePath, run: controlA.run, retiredRuns: [], createdAt: 1, updatedAt: 1,
-    hookBindingId: 'private-reading-binding', hookToken: 'private-reading-token',
-    nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: nativeSessionId, transcriptPath: nativePath }
+function action(label: string) {
+  const button = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent?.trim() === label,
+  )
+  expect(button, label).toBeDefined()
+  return button!
+}
+async function click(label: string) {
+  await act(async () => action(label).click())
+}
+async function earlierReady() {
+  await wait(() => {
+    expect(nativeIds()).toHaveLength(100)
+    expect(sample()).toMatchObject({ loading: false, inFlight: false, dirty: false, error: null })
+    expect(action('Earlier').disabled).toBe(false)
   })
-  const expectedStore = digest(await readFile(storePath))
-  const client = new AgentMuxClient({ store })
-  // Only observe the actual private adapter for zero-control assertions; no product debug API.
-  const kernel = Reflect.get(client, 'kernel')
-  const monitored = ['start', 'input', 'resize', 'stop', 'attach', 'status'] as const
-  const controls = monitored.map(name => vi.spyOn(kernel, name).mockImplementation(() => { throw new Error(`History must not control private fixture Run: ${name}`) }))
-  const pages: AgentSessionHistoryPage[] = []
-  const pending: Promise<AgentSessionHistoryPage>[] = []
-  historyPageSpy.mockImplementation(async (control: AgentSessionControl, options) => {
-    expect(control).toEqual(controlA)
-    const read = client.sessionHistoryPage(control.agentSessionId, options)
-    pending.push(read)
-    const page = await read
-    expect(page.agentSessionId).toBe(controlA.agentSessionId)
-    expect(page.source).toEqual({ providerId: 'claude', nativeSessionId })
-    expect(page.items.length).toBeGreaterThan(0)
-    pages.push(page)
+}
+async function headerObservationAction(scope: ParentNode, label: string) {
+  await agentHistoryMenuEntry(scope)
+  const more = scope.querySelector<HTMLButtonElement>('.agent-region-header__more')!
+  const menu = document.getElementById(more.getAttribute('aria-controls')!)!
+  const details = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+    (item) => item.textContent?.trim() === 'Session details',
+  )!
+  expect(details, 'original Session details menu').toBeDefined()
+  await act(async () => {
+    details.focus()
+    details.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
+  })
+  let item: HTMLElement | undefined
+  await wait(() => {
+    const submenu = document.getElementById(details.getAttribute('aria-controls')!)
+    expect(submenu, 'original Session details submenu').not.toBeNull()
+    item = [...submenu!.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(
+      (entry) => entry.textContent?.trim() === label,
+    )
+    expect(item, label).toBeDefined()
+  })
+  return item!
+}
+function nativeParentSession(workspacePath: string, control = controlA): Extract<SessionSnapshot, { kind: 'agent' }> {
+  return {
+    ...composerSession(control.agentSessionId, 'codex'),
+    control,
+    hostId: control.hostId,
+    workspacePath,
+    label: 'Private native parent',
+    status: { state: 'done', source: 'native-hook', observedAt: 1 },
+  }
+}
+async function fixture(items: AgentSessionHistoryItem[], control = controlA) {
+  let originals = items
+  const f = await conversationPagePortFixture(control, nativeSource, async (_sid, options = {}) => {
+    const end = options.cursor ? Number(options.cursor.slice('original:'.length)) : originals.length
+    const start = Math.max(0, end - (options.limit ?? 100))
+    return {
+      agentSessionId: control.agentSessionId,
+      source: nativeSource,
+      items: originals.slice(start, end),
+      nextCursor: start ? `original:${start}` : null,
+    }
+  })
+  closes.push(f.close)
+  closes.push(() => expect(f.controls.map((spy) => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0]))
+  const stored = await f.client.readAgentSession(control.agentSessionId)
+  if (!stored) throw new Error('The original fixture Session metadata was not found')
+  expect(stored).toMatchObject({ kind: 'agent', hostId: control.hostId, agentSessionId: control.agentSessionId })
+  const actualControl: AgentSessionControl = { ...control, run: stored.run }
+  const render = (enabled = true, identity = control.run.runId) =>
+    act(async () =>
+      root.render(
+        <ActivityView {...activityReadingProps({ control: actualControl, visible: enabled, readingKey: identity })} />,
+      ),
+    )
+  const current = async () => {
+    let cursor: string | undefined, pending: ConversationWindowAssembly | undefined
+    for (let index = 0; index < 20; index++) {
+      const page = await api.conversation.readAgentConversation({
+        hostId: control.hostId,
+        agentSessionId: control.agentSessionId,
+        limit: 100,
+        ...(cursor ? { cursor } : {}),
+      })
+      const frame = consumeConversationWindowPage(page, pending)
+      if (frame.kind === 'complete') return frame.snapshot
+      pending = frame.pending
+      cursor = page.nextCursor!
+      expect(cursor).toBeTruthy()
+    }
+    throw new Error('The real public current frame did not complete')
+  }
+  const draw = async () => {
+    const reading = projectConversationWindow(await current())
+    await act(async () =>
+      root.render(
+        <ConversationView
+          sessionId={control.agentSessionId}
+          executionHostId={control.hostId}
+          page={reading.historyPage ?? null}
+          timeline={reading.captured}
+          records={reading.records}
+          originalRecords={reading.originalRecords}
+          coverage={reading.timeline.coverage}
+        />,
+      ),
+    )
+  }
+  return {
+    ...f,
+    actualControl,
+    workspacePath: stored.workspacePath,
+    render,
+    current,
+    draw,
+    replace: (next: AgentSessionHistoryItem[]) => {
+      originals = next
+    },
+  }
+}
+function holdNextRead(
+  predicate: (input: Parameters<typeof api.conversation.readAgentConversation>[0]) => boolean = () => true,
+) {
+  const original = vi.mocked(api.conversation.readAgentConversation).getMockImplementation()!
+  let entered = false,
+    returned = false,
+    release!: () => void
+  vi.mocked(api.conversation.readAgentConversation).mockImplementation(async (...args) => {
+    const hold = !entered && predicate(args[0])
+    if (hold) entered = true
+    const page = await original(...args)
+    if (hold) {
+      await new Promise<void>((resolve) => {
+        release = resolve
+      })
+      returned = true
+    }
     return page
   })
-  try {
-    await verify({ pages, replaceRecords, workspacePath, flush: async () => { await Promise.all(pending) } })
-    expect(pages.length).toBeGreaterThan(0)
-    expect(monitored).toEqual(['start', 'input', 'resize', 'stop', 'attach', 'status'])
-    expect(controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
-    expect(digest(await readFile(nativePath))).toBe(expectedNative)
-    expect(digest(await readFile(storePath))).toBe(expectedStore)
-  } finally {
-    await act(async () => root.unmount())
-    root = createRoot(host)
-    for (const spy of controls) spy.mockRestore()
-    await client.dispose()
-  }
+  closes.push(() => release?.())
+  return { entered: () => entered && typeof release === 'function', returned: () => returned, release: () => release() }
 }
-
-function nativeParentSession(workspacePath: string): SessionSnapshot {
-  return {
-    kind: 'agent', id: controlA.agentSessionId, hostId: controlA.hostId, control: controlA,
-    label: 'Private native parent', providerId: 'claude', executorId: 'claude', workspacePath,
-    createdAt: 1, updatedAt: 1, agentSessionUpdatedAt: 1, latestOutputBytes: 0, processState: 'running',
-    status: { state: 'done', source: 'native-hook', observedAt: 1 },
-    capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' }
-  }
-}
-
-async function mountNativeParent(workspacePath: string): Promise<void> {
-  useAppStore.setState({ sessions: [nativeParentSession(workspacePath)],
-    config: { appearance: { terminalTheme: 'graphite', terminalFontSize: 12 }, workspaces: [], executors: {} } as any,
-    viewModes: { [controlA.agentSessionId]: 'terminal' }
+function geometry() {
+  const feed = host.querySelector<HTMLElement>('.activity-feed')!
+  expect(feed).not.toBeNull()
+  Object.defineProperties(feed, {
+    scrollHeight: { configurable: true, value: 1000 },
+    clientHeight: { configurable: true, value: 400 },
   })
-  await act(async () => root.render(<SessionPane sessionId={controlA.agentSessionId} surfaceKind="agent" interactiveResize={false}
-    visible={true} readOnly={true} linkOrigin={{ workspaceId: 'w', tabGroupId: 'g', tabId: 't', regionId: 'native-quality-region' }} />))
-  expect(historyPageSpy).toHaveBeenCalledTimes(0)
-  await openAgentHistory(host)
+  const tail = feed.querySelector<HTMLElement>('[data-conversation-reading-tail]')!
+  expect(tail).not.toBeNull()
+  feed.getBoundingClientRect = () => new DOMRect(0, 0, 500, 400)
+  tail.getBoundingClientRect = () => new DOMRect(0, 1000 - feed.scrollTop, 500, 0)
+  return {
+    feed,
+    scroll: async (top: number) => {
+      feed.scrollTop = top
+      await act(async () => feed.dispatchEvent(new Event('scroll')))
+    },
+  }
 }
-
-let host: HTMLDivElement
-let root: Root
-let historyPageSpy: MockInstance<typeof api.sessions.historyPage>
-let clipboardSpy: MockInstance<typeof api.ui.writeClipboardText>
-
 beforeEach(() => {
-  vi.clearAllMocks()
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  vi.stubGlobal(
+    'ResizeObserver',
+    class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    },
+  )
+  intersections = []
+  vi.stubGlobal(
+    'IntersectionObserver',
+    class {
+      targets = new Set<Element>()
+      constructor(callback: IntersectionObserverCallback) {
+        intersections.push({
+          targets: this.targets,
+          deliver: (entries) => callback(entries, this as unknown as IntersectionObserver),
+        })
+      }
+      observe(node: Element) {
+        this.targets.add(node)
+      }
+      unobserve(node: Element) {
+        this.targets.delete(node)
+      }
+      disconnect() {
+        this.targets.clear()
+      }
+    },
+  )
+  Element.prototype.scrollIntoView = vi.fn()
   observation.enabled = false
   observation.refresh.mockReset()
-  useAppStore.setState({ error: null, lastError: null, errorNoticeContext: null, errorDismissed: false })
-  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  vi.stubGlobal('ResizeObserver', class {
-    observe() {}
-    disconnect() {}
+  closes = []
+  useAppStore.setState({
+    config: composerConfig,
+    sessions: [],
+    error: null,
+    lastError: null,
+    errorNoticeContext: null,
+    errorDismissed: false,
   })
   host = document.createElement('div')
   document.body.append(host)
   root = createRoot(host)
   historyPageSpy = vi.spyOn(api.sessions, 'historyPage')
-  clipboardSpy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
+  vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
 })
-
 afterEach(async () => {
-  await act(async () => root.unmount())
-  host.remove()
-  window.getSelection()?.removeAllRanges()
-  vi.useRealTimers()
-  vi.unstubAllGlobals()
-  historyPageSpy.mockRestore()
-  clipboardSpy.mockRestore()
+  const failures: unknown[] = []
+  try { await act(async () => root.unmount()) } catch (error) { failures.push(error) }
+  host.remove(); getSelection()?.removeAllRanges()
+  for (const close of closes.splice(0).reverse()) {
+    try { await close() } catch (error) { failures.push(error) }
+  }
+  useAppStore.setState(initial, true); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  if (failures.length) throw new AggregateError(failures, 'Original reading-state fixture cleanup failed')
 })
 
-describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
+describe('Conversation reading state through current Core and presentation owners', () => {
   it('preserves the actual Header Portal and Header/Lifecycle observation refresh ownership and busy state across read-only presentation', async () => {
     observation.enabled = true
     const originalRefresh = useAppStore.getState().refreshSession
@@ -225,46 +342,65 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
     const refreshSession = vi.fn().mockResolvedValue(undefined)
     const recoverSession = vi.fn().mockResolvedValue(undefined)
     let release!: () => void
-    observation.refresh.mockImplementation(() => new Promise<void>(done => { release = done }))
-    const portal = document.createElement('div'); portal.id = 'private-t028-header-portal'; document.body.append(portal)
-    useAppStore.setState({ sessions: [nativeParentSession(_hygiene_fixturePath("private-observation"))],
-      config: { appearance: { terminalTheme: 'graphite', terminalFontSize: 12 }, workspaces: [], executors: {} } as any,
-      viewModes: { [controlA.agentSessionId]: 'terminal' }, refreshSession, recoverSession,
-      error: 'Private retained observation failure', errorNoticeContext: { kind: 'indeterminate',
-        lifecycle: { step: 'resume', subject: controlA, lastProcessState: 'running' } }
+    observation.refresh.mockImplementation(
+      () =>
+        new Promise<void>((done) => {
+          release = done
+        }),
+    )
+    const portal = document.createElement('div')
+    portal.id = 'private-t028-header-portal'
+    document.body.append(portal)
+    useAppStore.setState({
+      sessions: [nativeParentSession(fixturePath('private-observation'))],
+      config: composerConfig,
+      viewModes: { [controlA.agentSessionId]: 'terminal' },
+      refreshSession,
+      recoverSession,
     })
-    const render = (readOnly: boolean) => root.render(<SessionPane sessionId={controlA.agentSessionId} surfaceKind="agent"
-      interactiveResize={false} visible readOnly={readOnly} headerPortalTargetId={portal.id}
-      linkOrigin={{ workspaceId: 'w', tabGroupId: 'g', tabId: 't', regionId: 'private-observation-region' }} />)
+    useAppStore.getState().reportError(new Error('Private retained observation failure'), {
+      kind: 'indeterminate',
+      lifecycle: { step: 'resume', subject: controlA, lastProcessState: 'running' },
+    })
+    const render = (readOnly: boolean) =>
+      root.render(
+        <SessionPane
+          sessionId={controlA.agentSessionId}
+          surfaceKind="agent"
+          interactiveResize={false}
+          visible
+          readOnly={readOnly}
+          headerPortalTargetId={portal.id}
+          linkOrigin={{ workspaceId: 'w', tabGroupId: 'g', tabId: 't', regionId: 'private-observation-region' }}
+        />,
+      )
     try {
       await act(async () => render(false))
       expect(portal.querySelectorAll('.agent-region-header')).toHaveLength(1)
       expect(host.querySelectorAll('.agent-region-header')).toHaveLength(0)
-      await agentHistoryMenuEntry(portal)
-      const headerRefresh = [...document.querySelectorAll<HTMLElement>('.agent-region-menu [role="menuitem"]')]
-        .find(item => item.textContent?.trim() === 'Refresh observation')
-      expect(headerRefresh).toBeDefined()
-      await act(async () => headerRefresh!.click())
+      const headerRefresh = await headerObservationAction(portal, 'Refresh observation')
+      await act(async () => headerRefresh.click())
       // Radix returns focus on the next browser task after selection. Finish that task
       // before simulating a second keyboard gesture in the same happy-dom turn.
-      await act(async () => { await new Promise<void>(done => setTimeout(done, 0)) })
+      await act(async () => {
+        await new Promise<void>((done) => setTimeout(done, 0))
+      })
       expect(observation.refresh).toHaveBeenCalledTimes(1)
-      const lifecycleButtons = [...host.querySelectorAll<HTMLButtonElement>('.agent-launch-notice button')]
-        .filter(button => button.textContent === 'Refresh observation' || button.textContent === 'Retry Resume')
-      expect(lifecycleButtons.map(button => button.textContent)).toEqual(['Refresh observation', 'Retry Resume'])
-      expect(lifecycleButtons.map(button => button.disabled)).toEqual([true, true])
-      await agentHistoryMenuEntry(portal)
-      const busyRefresh = [...document.querySelectorAll<HTMLElement>('.agent-region-menu [role="menuitem"]')]
-        .find(item => item.textContent?.trim() === 'Refreshing observation…')
-      expect(busyRefresh).toBeDefined()
-      expect(busyRefresh!.getAttribute('aria-disabled')).toBe('true')
+      const lifecycleButtons = [...host.querySelectorAll<HTMLButtonElement>('.agent-launch-notice button')].filter(
+        (button) => button.textContent === 'Refresh observation' || button.textContent === 'Retry Resume',
+      )
+      expect(lifecycleButtons.map((button) => button.textContent)).toEqual(['Refresh observation', 'Retry Resume'])
+      expect(lifecycleButtons.map((button) => button.disabled)).toEqual([true, true])
+      const busyRefresh = await headerObservationAction(portal, 'Refreshing observation…')
+      expect(busyRefresh.getAttribute('aria-disabled')).toBe('true')
       await act(async () => release())
-      expect(lifecycleButtons.map(button => button.disabled)).toEqual([false, false])
+      expect(lifecycleButtons.map((button) => button.disabled)).toEqual([false, false])
       await act(async () => render(true))
       expect(portal.querySelectorAll('.agent-region-header')).toHaveLength(0)
       expect(host.querySelectorAll('.agent-region-header')).toHaveLength(1)
-      const lifecycleRefresh = [...host.querySelectorAll<HTMLButtonElement>('.agent-launch-notice button')]
-        .find(button => button.textContent === 'Refresh observation')
+      const lifecycleRefresh = [...host.querySelectorAll<HTMLButtonElement>('.agent-launch-notice button')].find(
+        (button) => button.textContent === 'Refresh observation',
+      )
       expect(lifecycleRefresh).toBeDefined()
       await act(async () => lifecycleRefresh!.click())
       expect(observation.refresh).toHaveBeenCalledTimes(2)
@@ -275,1431 +411,640 @@ describe('T028 Conversation Reading State and Pagination Lifecycle', () => {
       expect(recoverSession).toHaveBeenCalledTimes(0)
       expect(historyPageSpy).toHaveBeenCalledTimes(0)
     } finally {
-      await act(async () => root.unmount()); root = createRoot(host)
-      portal.remove(); useAppStore.setState({ refreshSession: originalRefresh, recoverSession: originalRecover })
-    }
-  })
-
-  it('public native quoted and backslashed record IDs preserve selection when a fourth page cannot evict the newest reading page', async () => {
-    const opaque = 'native:quoted"record\\tail'
-    const ids = Array.from({ length: 121 }, (_, i) => i === 120 ? opaque : `native:opaque-page-${i}`)
-    await withPublicNativeHistory(ids, async ({ pages, workspacePath, flush }) => {
-      await mountNativeParent(workspacePath)
-      await act(async () => await flush())
-      const rows = () => [...host.querySelectorAll<HTMLElement>('[data-history-item-id]')]
-      const loadEarlier = () => [...host.querySelectorAll<HTMLButtonElement>('.session-history__boundary button')]
-        .find(button => button.textContent === 'Load earlier records')
-      for (let i = 0; i < 2; i += 1) {
-        expect(loadEarlier()).toBeDefined()
-        await act(async () => { loadEarlier()!.click(); await flush() })
-      }
-      expect(rows()).toHaveLength(90)
-      expect(pages.map(page => page.items.length)).toEqual([30, 30, 30])
-      expect(pages[0]!.items.map(item => item.id)).toContain(opaque)
-      const selectedRow = rows().find(row => row.dataset.historyItemId === opaque)
-      expect(selectedRow).toBeDefined()
-      const text = selectedRow!.querySelector('.log-turn__body p')!.firstChild!
-      const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 'Selectable'.length)
-      window.getSelection()!.addRange(range)
-      const before = rows().map(row => row.dataset.historyItemId)
-      expect(loadEarlier()).toBeDefined()
-      await act(async () => { loadEarlier()!.click(); await flush() })
-      expect(pages.map(page => page.items.length)).toEqual([30, 30, 30, 30])
-      expect(rows().map(row => row.dataset.historyItemId)).toEqual(before)
-      expect(host.textContent).toContain('Scroll toward the beginning before loading more history to preserve your reading position.')
-      expect(host.textContent).not.toContain('not a valid selector')
-      expect(text.isConnected).toBe(true)
-      expect(window.getSelection()!.toString()).toBe('Selectable')
-      expect(historyPageSpy).toHaveBeenCalledTimes(4)
-    })
-  })
-
-  it('discards in-flight responses when SessionHistoryView is hidden, avoiding window pollution or stale errors', async () => {
-    let resolveFirst!: (page: AgentSessionHistoryPage) => void
-    historyPageSpy.mockImplementationOnce(
-      () =>
-        new Promise<AgentSessionHistoryPage>((done) => {
-          resolveFirst = done
-        })
-    )
-
-    // Mount initially visible
-    await act(async () =>
-      root.render(
-        <SessionHistoryView
-          control={controlA}
-          label="Agent"
-          visible={true}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
-      )
-    )
-    expect(historyPageSpy).toHaveBeenCalledTimes(1)
-
-    // Now hide the view while read is pending
-    await act(async () =>
-      root.render(
-        <SessionHistoryView
-          control={controlA}
-          label="Agent"
-          visible={false}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
-      )
-    )
-
-    // The in-flight read resolves while view is hidden
-    await act(async () => resolveFirst(makePage('hidden-stale-page')))
-
-    // The hidden view should not have retained this stale page into state
-    expect(host.textContent).not.toContain('Message body for hidden-stale-page')
-  })
-
-  it('allows Latest to supersede a pending slow older-page read without getting stuck', async () => {
-    // 1. Mount with latest page
-    historyPageSpy.mockResolvedValueOnce(makePage('page-latest', 'cursor-older-1'))
-    await act(async () =>
-      root.render(
-        <SessionHistoryView
-          control={controlA}
-          label="Agent"
-          visible={true}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
-      )
-    )
-    expect(host.textContent).toContain('Message body for page-latest')
-
-    // 2. Start a pending older page read
-    let resolveOlder!: (page: AgentSessionHistoryPage) => void
-    historyPageSpy.mockImplementationOnce(
-      () =>
-        new Promise<AgentSessionHistoryPage>((done) => {
-          resolveOlder = done
-        })
-    )
-    const loadEarlierBtn = host.querySelector<HTMLButtonElement>('.session-history__boundary button')
-    expect(loadEarlierBtn).not.toBeNull()
-    await act(async () => loadEarlierBtn!.click())
-    expect(historyPageSpy).toHaveBeenCalledTimes(2)
-
-    // 3. While older read is pending, user clicks Latest button
-    historyPageSpy.mockResolvedValueOnce(makePage('page-fresh-latest', null))
-    const latestBtn = [...host.querySelectorAll<HTMLButtonElement>('.session-history__toolbar button')].find(
-      (btn) => btn.textContent?.includes('Latest')
-    )
-    expect(latestBtn).toBeDefined()
-    await act(async () => latestBtn!.click())
-
-    // Latest read must have been sent to API, superseding older
-    expect(historyPageSpy).toHaveBeenCalledTimes(3)
-    expect(host.textContent).toContain('Message body for page-fresh-latest')
-
-    // Now the older read resolves late
-    await act(async () => resolveOlder(makePage('page-late-older', null)))
-
-    // Late older page must NOT be prepended to the fresh latest window
-    expect(host.textContent).not.toContain('Message body for page-late-older')
-    expect(host.textContent).toContain('Message body for page-fresh-latest')
-  })
-
-  it('bounds the nearby window without throwing UI errors when loading older pages past capacity', async () => {
-    historyPageSpy.mockResolvedValueOnce(makePage('p-latest', 'c-1'))
-    await act(async () =>
-      root.render(
-        <SessionHistoryView
-          control={controlA}
-          label="Agent"
-          visible={true}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
-      )
-    )
-
-    // Load page 2
-    historyPageSpy.mockResolvedValueOnce(makePage('p-2', 'c-2'))
-    const viewport = host.querySelector<HTMLDivElement>('.session-history__viewport')!
-    viewport.scrollTop = 0
-    await act(async () => viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
-
-    // Load page 3
-    historyPageSpy.mockResolvedValueOnce(makePage('p-3', 'c-3'))
-    await act(async () => viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
-
-    // Load page 4 (exceeding 3 pages capacity)
-    historyPageSpy.mockResolvedValueOnce(makePage('p-4', 'c-4'))
-    await act(async () => viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
-
-    // Must NOT throw UI error banner
-    expect(host.querySelector('.session-history__notice')?.textContent ?? '').not.toContain('Scroll toward the beginning')
-    expect(host.textContent).toContain('Newer records are outside this three-page reading window')
-    const itemIds = Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), (r) => r.dataset.historyItemId)
-    expect(itemIds).toEqual(['p-4', 'p-3', 'p-2'])
-  })
-
-  it('fourth page eviction protects currently read latest item and active text selection', async () => {
-    historyPageSpy.mockResolvedValueOnce(makePage('p0', 'c1'))
-    await act(async () =>
-      root.render(
-        <SessionHistoryView
-          control={controlA}
-          label="Agent"
-          visible={true}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
-      )
-    )
-
-    // Load page 1
-    historyPageSpy.mockResolvedValueOnce(makePage('p1', 'c2'))
-    const viewport = host.querySelector<HTMLDivElement>('.session-history__viewport')!
-    viewport.scrollTop = 0
-    await act(async () => viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
-
-    // Load page 2
-    historyPageSpy.mockResolvedValueOnce(makePage('p2', 'c3'))
-    await act(async () => viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
-
-    const rowsBefore = Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), (r) => r.dataset.historyItemId)
-    expect(rowsBefore).toEqual(['p2', 'p1', 'p0'])
-
-    // Now start loading page 4 (p3)
-    let resolveFourth!: (page: AgentSessionHistoryPage) => void
-    historyPageSpy.mockImplementationOnce(() => new Promise<AgentSessionHistoryPage>((done) => { resolveFourth = done }))
-    await act(async () => {
-      viewport.scrollTop = 0
-      viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }))
-    })
-
-    // User scrolls down to read and select text in p0 while fourth page is in flight
-    viewport.scrollTop = 250
-    await act(async () => viewport.dispatchEvent(new Event('scroll', { bubbles: true })))
-
-    const p0 = host.querySelector<HTMLElement>('[data-history-item-id="p0"]')!
-    const textNode = p0.querySelector('.log-turn__body p')?.firstChild!
-    const range = document.createRange()
-    range.setStart(textNode, 0)
-    range.setEnd(textNode, 10)
-    const sel = window.getSelection()!
-    sel.removeAllRanges()
-    sel.addRange(range)
-
-    // Fourth page resolves
-    await act(async () => resolveFourth(makePage('p3', 'c4')))
-
-    // p0 must remain connected, text node connected, selection intact, and reading constraint shown
-    expect(p0.isConnected).toBe(true)
-    expect(textNode.isConnected).toBe(true)
-    expect(sel.toString()).toBe('Message bo')
-    expect(host.querySelector('.session-history__notice')?.textContent ?? '').toContain('Scroll toward the beginning')
-  })
-
-  it('preserves reading anchor through older-page loading even when user interacted with pointer or selection', async () => {
-    historyPageSpy.mockResolvedValueOnce(makePage('initial-item', 'c-1'))
-    await act(async () =>
-      root.render(
-        <SessionHistoryView
-          control={controlA}
-          label="Agent"
-          visible={true}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
-      )
-    )
-
-    const viewport = host.querySelector<HTMLDivElement>('.session-history__viewport')!
-    const bounds = (top: number, bottom: number) => ({
-      top, bottom, left: 0, right: 500, width: 500, height: bottom - top, x: 0, y: top, toJSON() {}
-    })
-    vi.spyOn(viewport, 'getBoundingClientRect').mockImplementation(() => bounds(10, 210))
-    const initialItem = host.querySelector<HTMLElement>('[data-history-item-id="initial-item"]')!
-    let prependedHeight = 0
-    vi.spyOn(initialItem, 'getBoundingClientRect').mockImplementation(() =>
-      bounds(30 + prependedHeight - viewport.scrollTop, 70 + prependedHeight - viewport.scrollTop)
-    )
-
-    // Simulate user selecting text or clicking inside viewport
-    viewport.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))
-
-    // Load older page
-    let resolveOlder!: (p: AgentSessionHistoryPage) => void
-    historyPageSpy.mockImplementationOnce(() => new Promise<AgentSessionHistoryPage>((done) => { resolveOlder = done }))
-    await act(async () => {
-      viewport.scrollTop = 0
-      viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }))
-    })
-
-    // Older page prepends 100px above initial-item when React renders the new items
-    let captured = false
-    vi.mocked(initialItem.getBoundingClientRect).mockImplementation(() => {
-      const growth = captured ? 100 : 0
-      captured = true
-      return bounds(30 + growth - viewport.scrollTop, 70 + growth - viewport.scrollTop)
-    })
-    await act(async () => resolveOlder(makePage('prepended-item', null)))
-
-    const items = Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), (r) => r.dataset.historyItemId)
-    expect(items).toEqual(['prepended-item', 'initial-item'])
-    // Viewport scrollTop must have adjusted to 100px so initialItem remains at exact same pixel offset (20px from viewport top)
-    expect(viewport.scrollTop).toBe(100)
-    expect(initialItem.getBoundingClientRect().top - viewport.getBoundingClientRect().top).toBe(20)
-  })
-
-  it('preserves existing loaded history and allows retry in the original direction on read failure', async () => {
-    historyPageSpy.mockResolvedValueOnce(makePage('stable-first-page', 'cursor-1'))
-    await act(async () =>
-      root.render(
-        <SessionHistoryView
-          control={controlA}
-          label="Agent"
-          visible={true}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
-      )
-    )
-    expect(host.textContent).toContain('Message body for stable-first-page')
-
-    // Older page read fails
-    historyPageSpy.mockRejectedValueOnce(new Error('Network timeout loading older page'))
-    const viewport = host.querySelector<HTMLDivElement>('.session-history__viewport')!
-    await act(async () => {
-      viewport.scrollTop = 0
-      viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }))
-    })
-
-    // Existing content must be kept
-    expect(host.textContent).toContain('Message body for stable-first-page')
-    expect(host.textContent).toContain('History read failed: Network timeout loading older page')
-
-    // Retry repeats older direction
-    historyPageSpy.mockResolvedValueOnce(makePage('older-page-on-retry', null))
-    const retryBtn = [...host.querySelectorAll<HTMLButtonElement>('.session-history__notice button')].find(
-      (btn) => btn.textContent?.includes('Retry')
-    )
-    expect(retryBtn).toBeDefined()
-    await act(async () => retryBtn!.click())
-
-    expect(historyPageSpy).toHaveBeenLastCalledWith(controlA, { cursor: 'cursor-1' })
-    expect(host.textContent).toContain('Message body for older-page-on-retry')
-    expect(host.textContent).toContain('Message body for stable-first-page')
-  })
-
-  it('ActivityView: reading old messages does not scroll to bottom on new message append, explicit jump restores follow', async () => {
-    const items = [
-      makeTimelineItem('m-1', controlA.agentSessionId, 'First message'),
-      makeTimelineItem('m-2', controlA.agentSessionId, 'Second message')
-    ]
-
-    await act(async () =>
-      root.render(
-        <ActivityView
-          sessionId={controlA.agentSessionId}
-          items={items}
-          capability="complete-events"
-          displayState="done"
-          workspaceRoot={_hygiene_fixturePath("test")}
-        />
-      )
-    )
-
-    const feed = host.querySelector<HTMLDivElement>('.activity-feed')!
-    expect(feed).not.toBeNull()
-
-    // Simulate initial bottom position
-    Object.defineProperty(feed, 'scrollTop', { value: 600, writable: true })
-    Object.defineProperty(feed, 'scrollHeight', { value: 1000, writable: true })
-    Object.defineProperty(feed, 'clientHeight', { value: 400, writable: true })
-    await act(async () => feed.dispatchEvent(new Event('scroll')))
-
-    // User scrolls up to read older messages (scrollTop drops from 600 to 10)
-    feed.scrollTop = 10
-    await act(async () => feed.dispatchEvent(new Event('scroll')))
-
-    // Jump to latest button must be shown
-    const jumpBtnBefore = host.querySelector<HTMLButtonElement>('.activity-feed__jump')
-    expect(jumpBtnBefore).not.toBeNull()
-
-    // Append new item while detached
-    const updatedItems = [
-      ...items,
-      makeTimelineItem('m-3', controlA.agentSessionId, 'Third appended message')
-    ]
-    await act(async () =>
-      root.render(
-        <ActivityView
-          sessionId={controlA.agentSessionId}
-          items={updatedItems}
-          capability="complete-events"
-          displayState="done"
-          workspaceRoot={_hygiene_fixturePath("test")}
-        />
-      )
-    )
-
-    // Viewport should NOT have been pinned to bottom (scrollTop was 10, not 1000)
-    expect(feed.scrollTop).toBe(10)
-    expect(host.querySelector('.activity-feed__jump')).not.toBeNull()
-
-    // Clicking Jump to latest pins to bottom and hides button
-    const jumpBtn = host.querySelector<HTMLButtonElement>('.activity-feed__jump')!
-    await act(async () => jumpBtn.click())
-    expect(host.querySelector('.activity-feed__jump')).toBeNull()
-  })
-
-  it('ActivityView: switching session resets detached follow state and pins to bottom', async () => {
-    const itemsA = [
-      makeTimelineItem('a-1', controlA.agentSessionId, 'Session A item 1'),
-      makeTimelineItem('a-2', controlA.agentSessionId, 'Session A item 2')
-    ]
-
-    await act(async () =>
-      root.render(
-        <ActivityView
-          sessionId={controlA.agentSessionId}
-          items={itemsA}
-          capability="complete-events"
-          displayState="done"
-          workspaceRoot={_hygiene_fixturePath("test")}
-        />
-      )
-    )
-
-    const feed = host.querySelector<HTMLDivElement>('.activity-feed')!
-    // Simulate initial bottom position then user scrolling up in Session A
-    Object.defineProperty(feed, 'scrollTop', { value: 600, writable: true })
-    Object.defineProperty(feed, 'scrollHeight', { value: 1000, writable: true })
-    Object.defineProperty(feed, 'clientHeight', { value: 400, writable: true })
-    await act(async () => feed.dispatchEvent(new Event('scroll')))
-    feed.scrollTop = 20
-    await act(async () => feed.dispatchEvent(new Event('scroll')))
-    expect(host.querySelector('.activity-feed__jump')).not.toBeNull()
-
-    // Switch to Session B items
-    const itemsB = [
-      makeTimelineItem('b-1', controlB.agentSessionId, 'Session B item 1')
-    ]
-    await act(async () =>
-      root.render(
-        <ActivityView
-          sessionId={controlB.agentSessionId}
-          items={itemsB}
-          capability="complete-events"
-          displayState="done"
-          workspaceRoot={_hygiene_fixturePath("test")}
-        />
-      )
-    )
-
-    // Session B must NOT inherit Session A's detached state or jump button
-    expect(host.querySelector('.activity-feed__jump')).toBeNull()
-  })
-
-  it('ActivityView: initial empty feed gains real content and then respects upward reading on append', async () => {
-    // Initial empty items
-    await act(async () =>
-      root.render(
-        <ActivityView
-          sessionId={controlA.agentSessionId}
-          items={[]}
-          capability="complete-events"
-          displayState="working"
-          workspaceRoot={_hygiene_fixturePath("test")}
-        />
-      )
-    )
-    expect(host.textContent).toContain('Working')
-
-    // Initial items arrive
-    const items = [
-      makeTimelineItem('first', controlA.agentSessionId, 'First message'),
-      makeTimelineItem('second', controlA.agentSessionId, 'Second message')
-    ]
-    await act(async () =>
-      root.render(
-        <ActivityView
-          sessionId={controlA.agentSessionId}
-          items={items}
-          capability="complete-events"
-          displayState="done"
-          workspaceRoot={_hygiene_fixturePath("test")}
-        />
-      )
-    )
-
-    const feed = host.querySelector<HTMLDivElement>('.activity-feed')!
-    Object.defineProperty(feed, 'scrollHeight', { value: 1000, writable: true })
-    Object.defineProperty(feed, 'clientHeight', { value: 400, writable: true })
-    Object.defineProperty(feed, 'scrollTop', { value: 600, writable: true })
-    await act(async () => feed.dispatchEvent(new Event('scroll')))
-
-    // User scrolls up to 20
-    feed.scrollTop = 20
-    await act(async () => feed.dispatchEvent(new Event('scroll')))
-    expect(host.querySelector('.activity-feed__jump')).not.toBeNull()
-
-    // Third item appended
-    const updated = [
-      ...items,
-      makeTimelineItem('third', controlA.agentSessionId, 'Third message')
-    ]
-    await act(async () =>
-      root.render(
-        <ActivityView
-          sessionId={controlA.agentSessionId}
-          items={updated}
-          capability="complete-events"
-          displayState="done"
-          workspaceRoot={_hygiene_fixturePath("test")}
-        />
-      )
-    )
-
-    expect(host.querySelectorAll('.log-turn')).toHaveLength(3)
-    // ScrollTop must stay at 20, not yanked to bottom
-    expect(feed.scrollTop).toBe(20)
-    expect(host.querySelector('.activity-feed__jump')).not.toBeNull()
-  })
-
-  it('preserves text selection and expanded disclosure state across non-interfering message updates', async () => {
-    const partA: AgentSessionHistoryContentPart = {
-      kind: 'tool-call',
-      name: 'shell',
-      input: 'echo "hello"',
-      callId: 'call-1'
-    }
-    const partB: AgentSessionHistoryContentPart = {
-      kind: 'text',
-      text: 'Original paragraph with selectable text.'
-    }
-
-    historyPageSpy.mockResolvedValueOnce(makePage('msg-1', 'cursor-older-1', controlA.agentSessionId, [partA, partB]))
-    await act(async () =>
-      root.render(
-        <SessionHistoryView
-          control={controlA}
-          label="Agent"
-          visible={true}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
-      )
-    )
-
-    const trace = host.querySelector<TraceElement>(TRACE_SELECTOR)!
-    expect(trace).not.toBeNull()
-    await act(async () => {
-      openTrace(trace)
-    })
-    expect(isTraceOpen(trace)).toBe(true)
-
-    // Select text inside paragraph
-    const p = host.querySelector('.log-turn__body p')!
-    const textNode = p.firstChild!
-    const range = document.createRange()
-    range.setStart(textNode, 0)
-    range.setEnd(textNode, 8)
-    const sel = window.getSelection()!
-    sel.removeAllRanges()
-    sel.addRange(range)
-    expect(sel.toString()).toBe('Original')
-
-    // Append an older page
-    const olderPart: AgentSessionHistoryContentPart = { kind: 'text', text: 'Older message' }
-    historyPageSpy.mockResolvedValueOnce(makePage('msg-older', null, controlA.agentSessionId, [olderPart]))
-
-    // Trigger load of older page
-    const viewport = host.querySelector<HTMLDivElement>('.session-history__viewport')!
-    viewport.scrollTop = 0
-    await act(async () => viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
-
-    expect(historyPageSpy).toHaveBeenCalledTimes(2)
-    const items = Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), (r) => r.dataset.historyItemId)
-    expect(items).toEqual(['msg-older', 'msg-1'])
-    // Trace control must remain expanded
-    expect(isTraceOpen(trace)).toBe(true)
-    // Selected text node must still be connected to DOM
-    expect(textNode.isConnected).toBe(true)
-    expect(sel.toString()).toBe('Original')
-  })
-
-  it('renders duplicate part references and duplicate callId without React key collisions', async () => {
-    const dupPart: AgentSessionHistoryContentPart = { kind: 'reasoning', text: 'duplicate reasoning' }
-    const call1: AgentSessionHistoryContentPart = { kind: 'tool-call', name: 'sh', input: '1', callId: 'shared-id' }
-    const call2: AgentSessionHistoryContentPart = { kind: 'tool-call', name: 'sh', input: '2', callId: 'shared-id' }
-
-    const errors: unknown[][] = []
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation((...args) => {
-      errors.push(args)
-    })
-
-    historyPageSpy.mockResolvedValueOnce(
-      makePage('msg-dup', null, controlA.agentSessionId, [dupPart, dupPart, call1, call2])
-    )
-
-    await act(async () =>
-      root.render(
-        <SessionHistoryView
-          control={controlA}
-          label="Agent"
-          visible={true}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
-      )
-    )
-
-    const keyWarnings = errors.filter(
-      (args) => String(args[0]).includes('same key') || String(args[0]).includes('unique "key"')
-    )
-    expect(keyWarnings).toHaveLength(0)
-    errorSpy.mockRestore()
-  })
-
-  it('does not re-parse Markdown during local copy or selection note keystrokes', async () => {
-    const parser = vi.spyOn(markdown, 'parseAgentMarkdown')
-    const content = '**body text** ' + 'prose '.repeat(50)
-
-    await act(async () =>
-      root.render(
-        <ConversationAnnotationOwner onAnnotate={vi.fn()}>{onSelectAnnotation => <ConversationMessage
-          messageId="msg-memo-test"
-          content={content}
-          onSelectAnnotation={onSelectAnnotation}
-        />}</ConversationAnnotationOwner>
-      )
-    )
-
-    const initialParses = parser.mock.calls.length
-    expect(initialParses).toBeGreaterThan(0)
-
-    // Copy message
-    const copyBtn = host.querySelector<HTMLButtonElement>('[title="Copy message"]')!
-    await act(async () => copyBtn.click())
-    expect(parser.mock.calls.length).toBe(initialParses)
-
-    // Select text
-    const textNode = host.querySelector('strong')!.firstChild!
-    const range = document.createRange()
-    range.setStart(textNode, 0)
-    range.setEnd(textNode, 4)
-    window.getSelection()!.addRange(range)
-    await act(async () => host.querySelector('.log-turn__body')!.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })))
-    expect(parser.mock.calls.length).toBe(initialParses)
-
-    // Type in note textarea
-    const textarea = host.querySelector<HTMLTextAreaElement>('.log-turn__annotation textarea')
-    if (textarea) {
-      for (const char of ['a', 'b', 'c']) {
-        await act(async () => {
-          Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, char)
-          textarea.dispatchEvent(new Event('input', { bubbles: true }))
-        })
-      }
-    }
-    expect(parser.mock.calls.length).toBe(initialParses)
-    parser.mockRestore()
-  })
-
-  it('same SessionPane owner preserves public native disclosure, selection, and pages through close/reopen for plain and opaque IDs', async () => {
-    for (const id of ['plain-normal-record', 'native:normal-record']) {
-      historyPageSpy.mockClear()
-      await withPublicNativeHistory([id], async ({ pages, workspacePath, flush }) => {
-        await mountNativeParent(workspacePath)
-        await act(async () => await flush())
-        expect(pages.map(page => page.items.map(item => item.id))).toEqual([[id]])
-        const trace = host.querySelector<TraceElement>(TRACE_SELECTOR)!
-        expect(trace).not.toBeNull()
-        await act(async () => { openTrace(trace) })
-        const text = host.querySelector('.log-turn__body p')!.firstChild!
-        const range = document.createRange()
-        range.setStart(text, 0); range.setEnd(text, 'Selectable'.length)
-        window.getSelection()!.addRange(range)
-        expect(window.getSelection()!.toString()).toBe('Selectable')
-        const section = host.querySelector<HTMLElement>('.session-history')!
-        const returnButton = section.querySelector<HTMLButtonElement>('.session-history__toolbar button')!
-        expect(returnButton.textContent?.trim()).toBe('Terminal')
-        await act(async () => returnButton.click())
-        expect(section.hidden).toBe(true)
-        expect(historyPageSpy).toHaveBeenCalledTimes(1)
-        await openAgentHistory(host)
-        expect(section.hidden).toBe(false)
-        expect(host.querySelector(TRACE_SELECTOR)).toBe(trace)
-        expect(isTraceOpen(trace)).toBe(true)
-        expect(text.isConnected).toBe(true)
-        expect(window.getSelection()!.toString()).toBe('Selectable')
-        expect(historyPageSpy).toHaveBeenCalledTimes(1)
-        expect(pages.map(page => page.items.map(item => item.id))).toEqual([[id]])
-        window.getSelection()!.removeAllRanges()
-      })
-    }
-  })
-
-  it('same native record with unchanged reasoning survives an explicit Latest public page re-read', async () => {
-    const parts: AgentSessionHistoryContentPart[] = [
-      { kind: 'reasoning', text: 'private unchanged reasoning body' },
-      { kind: 'tool-call', callId: 'stable-positive-tool', name: 'sh', input: 'private unchanged tool' }
-    ]
-    historyPageSpy.mockResolvedValueOnce(makePage('stable-record', null, controlA.agentSessionId, parts))
-    await act(async () =>
-      root.render(
-        <SessionHistoryView
-          control={controlA}
-          label="Agent"
-          visible={true}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
-      )
-    )
-
-    const traces = host.querySelectorAll<TraceElement>(TRACE_SELECTOR)
-    expect(traces).toHaveLength(2)
-    await act(async () => {
-      openTrace(traces[0]!)
-      openTrace(traces[1]!)
-    })
-
-    // Re-fetch on Latest with structuredClone (deserialized new objects)
-    historyPageSpy.mockResolvedValueOnce(makePage('stable-record', null, controlA.agentSessionId, structuredClone(parts)))
-    const latestBtn = [...host.querySelectorAll<HTMLButtonElement>('.session-history__toolbar button')].find(
-      (btn) => btn.textContent?.includes('Latest')
-    )!
-    await act(async () => latestBtn.click())
-
-    const updatedTraces = host.querySelectorAll<TraceElement>(TRACE_SELECTOR)
-    expect(updatedTraces).toHaveLength(2)
-    expect(isTraceOpen(updatedTraces[0]!)).toBe(true)
-    expect(isTraceOpen(updatedTraces[1]!)).toBe(true)
-  })
-
-  it('hidden/reopen with pending older or latest releases loading and restores usable read control', async () => {
-    for (const direction of ['older', 'latest'] as const) {
-      historyPageSpy.mockResolvedValueOnce(makePage('kept-item', direction === 'older' ? 'c1' : null))
-      await act(async () =>
-        root.render(
-          <SessionHistoryView
-            control={controlA}
-            label="Agent"
-            visible={true}
-            themeId="graphite"
-            fontSize={12}
-            workspaceRoot={_hygiene_fixturePath("test")}
-            openWorkspaceFile={vi.fn()}
-            openHttpLink={vi.fn()}
-          />
-        )
-      )
-
-      let resolvePending!: (page: AgentSessionHistoryPage) => void
-      historyPageSpy.mockImplementationOnce(() => new Promise<AgentSessionHistoryPage>((done) => { resolvePending = done }))
-
-      if (direction === 'older') {
-        const loadEarlierBtn = host.querySelector<HTMLButtonElement>('.session-history__boundary button')!
-        await act(async () => loadEarlierBtn.click())
-      } else {
-        const latestBtn = [...host.querySelectorAll<HTMLButtonElement>('.session-history__toolbar button')].find(
-          (btn) => btn.textContent?.includes('Latest')
-        )!
-        await act(async () => latestBtn.click())
-      }
-
-      expect(host.textContent).toContain('Reading history…')
-
-      // Hide view while request is pending
-      await act(async () =>
-        root.render(
-          <SessionHistoryView
-            control={controlA}
-            label="Agent"
-            visible={false}
-            themeId="graphite"
-            fontSize={12}
-            workspaceRoot={_hygiene_fixturePath("test")}
-            openWorkspaceFile={vi.fn()}
-            openHttpLink={vi.fn()}
-          />
-        )
-      )
-
-      // Old request resolves while hidden
-      await act(async () => resolvePending(makePage('stale-page', null)))
-
-      // Re-show view
-      await act(async () =>
-        root.render(
-          <SessionHistoryView
-            control={controlA}
-            label="Agent"
-            visible={true}
-            themeId="graphite"
-            fontSize={12}
-            workspaceRoot={_hygiene_fixturePath("test")}
-            openWorkspaceFile={vi.fn()}
-            openHttpLink={vi.fn()}
-          />
-        )
-      )
-
-      // Loading must be cleared, not stuck
-      expect(host.textContent).not.toContain('Reading history…')
-      const latestButton = [...host.querySelectorAll<HTMLButtonElement>('.session-history__toolbar button')].find(
-        (btn) => btn.textContent?.includes('Latest')
-      )!
-      expect(latestButton.disabled).toBe(false)
-      const rows = Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), (r) => r.dataset.historyItemId)
-      expect(rows).toEqual(['kept-item'])
-
       await act(async () => root.unmount())
       root = createRoot(host)
+      portal.remove()
+      useAppStore.setState({ refreshSession: originalRefresh, recoverSession: originalRecover })
     }
   })
 
-  it('stable trace block identity: tool-call and tool-result sharing callId do not cross-expand, nor across rows or hosts', async () => {
-    const call1: AgentSessionHistoryContentPart = {
-      kind: 'tool-call',
-      name: 'shell',
-      input: 'command 1',
-      callId: 'shared-call-id'
-    }
-    const result1: AgentSessionHistoryContentPart = {
-      kind: 'tool-result',
-      name: 'shell',
-      output: 'output 1',
-      callId: 'shared-call-id'
-    }
-    const msg1 = makePage('msg-with-shared-id', null, controlA.agentSessionId, [call1, result1])
-    const call2: AgentSessionHistoryContentPart = {
-      kind: 'tool-call',
-      name: 'shell',
-      input: 'command 2',
-      callId: 'shared-call-id'
-    }
-    const msg2 = makePage('msg-2-shared-id', null, controlA.agentSessionId, [call2])
-    const pageData: AgentSessionHistoryPage = {
-      ...msg1,
-      items: [...msg1.items, ...msg2.items]
-    }
-    historyPageSpy.mockResolvedValueOnce(pageData)
-
-    await act(async () =>
-      root.render(
-        <SessionHistoryView
-          control={controlA}
-          label="Agent"
-          visible={true}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
+  it.each(['plain-normal-record', 'native:quoted"record\\tail'])(
+    'the actual SessionPane preserves native %s disclosure, original TextNode and Range through close/reopen and mode roundtrip',
+    async (id) => {
+      const f = await nativeHistoryFixture(
+        'claude',
+        jsonl([
+          {
+            uuid: id,
+            type: 'assistant',
+            sessionId: 'native-main',
+            message: {
+              role: 'assistant',
+              content: [
+                { type: 'tool_use', id: 'x:tool-call:y', name: 'shell', input: { command: 'original command' } },
+                { type: 'text', text: 'Selectable native body' },
+              ],
+            },
+          },
+        ]),
+        { agentSessionId: controlA.agentSessionId },
       )
-    )
-
-    const traces = host.querySelectorAll<TraceElement>(TRACE_SELECTOR)
-    expect(traces).toHaveLength(3) // call1, result1 in msg1, and call2 in msg2
-    // User expands only call1
-    await act(async () => {
-      openTrace(traces[0]!)
-    })
-
-    // Trigger re-render by changing label prop
-    await act(async () =>
-      root.render(
-        <SessionHistoryView
-          control={controlA}
-          label="Updated Agent Name"
-          visible={true}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
-      )
-    )
-
-    const updatedTraces = host.querySelectorAll<TraceElement>(TRACE_SELECTOR)
-    // call1 must be open, but result1 and call2 in msg2 must NOT be open!
-    expect(isTraceOpen(updatedTraces[0]!)).toBe(true)
-    expect(isTraceOpen(updatedTraces[1]!)).toBe(false)
-    expect(isTraceOpen(updatedTraces[2]!)).toBe(false)
-
-    // Also check different host: Host B must not inherit disclosure
-    const controlRemote = { ...controlA, hostId: 'remote' }
-    historyPageSpy.mockResolvedValueOnce({
-      ...pageData,
-      source: { providerId: 'codex', nativeSessionId: 'remote-sess' }
-    })
-    await act(async () =>
-      root.render(
-        <SessionHistoryView
-          control={controlRemote}
-          label="Remote Agent"
-          visible={true}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
-      )
-    )
-    const remoteTraces = host.querySelectorAll<TraceElement>(TRACE_SELECTOR)
-    expect(isTraceOpen(remoteTraces[0]!)).toBe(false)
-  })
-
-  it('unambiguous tuple encoding: opaque message IDs with colons and overlapping prefix callIds do not collide', async () => {
-    // Record 1: id 'native:record', tool callId 'x:tool-call:y'
-    // Record 2: id 'native:record:tool-call:x', tool callId 'y'
-    // With naive colon concatenation, both would produce 'native:record:tool-call:x:tool-call:y'
-    const part0: AgentSessionHistoryContentPart = {
-      kind: 'tool-call',
-      name: 'sh',
-      input: '{"command":"private 0"}',
-      callId: 'x:tool-call:y'
-    }
-    const part1: AgentSessionHistoryContentPart = {
-      kind: 'tool-call',
-      name: 'sh',
-      input: '{"command":"private 1"}',
-      callId: 'y'
-    }
-
-    const collisionPage: AgentSessionHistoryPage = {
-      agentSessionId: controlA.agentSessionId,
-      source: { providerId: 'claude', nativeSessionId: 'private-native-main' },
-      items: [
-        {
-          id: 'native:record',
-          kind: 'assistant-message',
-          contentParts: [part0, { kind: 'text', text: 'body 0' }]
-        },
-        {
-          id: 'native:record:tool-call:x',
-          kind: 'assistant-message',
-          contentParts: [part1, { kind: 'text', text: 'body 1' }]
-        }
-      ],
-      nextCursor: null
-    }
-
-    historyPageSpy.mockResolvedValueOnce(collisionPage)
-
-    await act(async () =>
-      root.render(
-        <SessionHistoryView
-          control={controlA}
-          label="Agent"
-          visible={true}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
-      )
-    )
-
-    const details = host.querySelectorAll<TraceElement>(TRACE_SELECTOR)
-    expect(details).toHaveLength(2)
-    // The two traceIds must be distinct non-empty values
-    expect(details[0]!.dataset.traceId).toBeTruthy()
-    expect(details[1]!.dataset.traceId).toBeTruthy()
-    expect(details[0]!.dataset.traceId).not.toBe(details[1]!.dataset.traceId)
-
-    // Open first trace only
-    await act(async () => {
-      openTrace(details[0]!)
-    })
-
-    expect(isTraceOpen(details[0]!)).toBe(true)
-    expect(isTraceOpen(details[1]!)).toBe(false)
-
-    // Re-render view with same control
-    await act(async () =>
-      root.render(
-        <SessionHistoryView
-          control={controlA}
-          label="Updated Agent Label"
-          visible={true}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
-      )
-    )
-
-    const detailsAfter = host.querySelectorAll<TraceElement>(TRACE_SELECTOR)
-    expect(isTraceOpen(detailsAfter[0]!)).toBe(true)
-    expect(isTraceOpen(detailsAfter[1]!)).toBe(false)
-  })
-
-  it('cross-row range covering older and newest page protects newest page from eviction and keeps selection intact', async () => {
-    historyPageSpy.mockResolvedValueOnce(makePage('p0', 'c1'))
-    await act(async () =>
-      root.render(
-        <SessionHistoryView
-          control={controlA}
-          label="Agent"
-          visible={true}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
-      )
-    )
-
-    // Load page 1
-    historyPageSpy.mockResolvedValueOnce(makePage('p1', 'c2'))
-    const viewport = host.querySelector<HTMLDivElement>('.session-history__viewport')!
-    viewport.scrollTop = 0
-    await act(async () => viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
-
-    // Load page 2
-    historyPageSpy.mockResolvedValueOnce(makePage('p2', 'c3'))
-    await act(async () => viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
-
-    const rowsBefore = Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), (r) => r.dataset.historyItemId)
-    expect(rowsBefore).toEqual(['p2', 'p1', 'p0'])
-
-    // Now start loading page 4 (p3)
-    let resolveFourth!: (page: AgentSessionHistoryPage) => void
-    historyPageSpy.mockImplementationOnce(() => new Promise<AgentSessionHistoryPage>((done) => { resolveFourth = done }))
-    await act(async () => {
-      viewport.scrollTop = 0
-      viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true }))
-    })
-
-    // User creates a selection starting in p1 and ending in p0!
-    const p1 = host.querySelector<HTMLElement>('[data-history-item-id="p1"]')!
-    const p0 = host.querySelector<HTMLElement>('[data-history-item-id="p0"]')!
-    const p1Text = p1.querySelector('.log-turn__body p')?.firstChild!
-    const p0Text = p0.querySelector('.log-turn__body p')?.firstChild!
-
-    const range = document.createRange()
-    range.setStart(p1Text, 2)
-    range.setEnd(p0Text, 8)
-    const sel = window.getSelection()!
-    sel.removeAllRanges()
-    sel.addRange(range)
-    // Anchor is in p1, focus/end is in p0!
-
-    // Fourth page resolves
-    await act(async () => resolveFourth(makePage('p3', 'c4')))
-
-    // p0 must remain connected, p0Text must remain connected, range endContainer must remain connected!
-    expect(p0.isConnected).toBe(true)
-    expect(p0Text.isConnected).toBe(true)
-    expect(range.endContainer.isConnected).toBe(true)
-    expect(host.querySelector('.session-history__notice')?.textContent ?? '').toContain('Scroll toward the beginning')
-  })
-
-  it('SessionPane mode roundtrip (terminal -> activity -> terminal) preserves history pages, selection, and does not re-read', async () => {
-    const sessionObj: SessionSnapshot = {
-      id: controlA.agentSessionId,
-      hostId: 'local',
-      workspacePath: _hygiene_fixturePath("test"),
-      label: 'Test Agent',
-      createdAt: 1000,
-      updatedAt: 1000,
-      agentSessionUpdatedAt: 1000,
-      processState: 'running',
-      status: { state: 'running', source: 'run-process', observedAt: 1000 },
-      latestOutputBytes: 0,
-      kind: 'agent',
-      providerId: 'codex',
-      executorId: 'codex',
-      control: controlA,
-      capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' }
-    }
-    useAppStore.setState({
-      sessions: [sessionObj],
-      config: { appearance: { terminalTheme: 'graphite', terminalFontSize: 12 }, workspaces: [], executors: {} } as any,
-      viewModes: { [controlA.agentSessionId]: 'terminal' }
-    })
-
-    // Mount page 1 on history open
-    historyPageSpy.mockResolvedValueOnce(makePage('p-latest', 'c-1'))
-    await act(async () =>
-      root.render(
-        <SessionPane
-          sessionId={controlA.agentSessionId}
-          surfaceKind="agent"
-          interactiveResize={false}
-          visible={true}
-          linkOrigin={{ workspaceId: 'w', tabGroupId: 'g', tabId: 't', regionId: 'r' }}
-        />
-      )
-    )
-
-    // Open history
-    await openAgentHistory(host)
-    expect(historyPageSpy).toHaveBeenCalledTimes(1)
-    expect(host.textContent).toContain('Message body for p-latest')
-
-    // Load page 2 (older)
-    historyPageSpy.mockResolvedValueOnce(makePage('p-older', null))
-    const viewport = host.querySelector<HTMLDivElement>('.session-history__viewport')!
-    viewport.scrollTop = 0
-    await act(async () => viewport.dispatchEvent(new WheelEvent('wheel', { deltaY: -100, bubbles: true })))
-    expect(historyPageSpy).toHaveBeenCalledTimes(2)
-    const rowsBefore = Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), (r) => r.dataset.historyItemId)
-    expect(rowsBefore).toEqual(['p-older', 'p-latest'])
-
-    // Select text in p-latest
-    const pLatest = host.querySelector<HTMLElement>('[data-history-item-id="p-latest"]')!
-    const textNode = pLatest.querySelector('.log-turn__body p')?.firstChild!
-    const range = document.createRange()
-    range.setStart(textNode, 0)
-    range.setEnd(textNode, 7)
-    const sel = window.getSelection()!
-    sel.removeAllRanges()
-    sel.addRange(range)
-    expect(sel.toString()).toBe('Message')
-
-    // The Activity projection makes one independent, typed bounded read.
-    historyPageSpy.mockResolvedValueOnce(makePage('activity-native-window', null))
-    // Switch viewMode to 'activity'
-    await act(async () => {
-      useAppStore.setState({
-        viewModes: { [controlA.agentSessionId]: 'activity' }
+      closes.push(f.close)
+      await f.store.readCapturedHistory(controlA.agentSessionId)
+      const before = await f.bytes(), originalRead = f.client['readSessionHistoryPage']
+      const readDescriptor = Object.getOwnPropertyDescriptor(f.client, 'readSessionHistoryPage')
+      const nativeRead = vi.fn<typeof originalRead>((...args) => originalRead.call(f.client, ...args))
+      f.client['readSessionHistoryPage'] = nativeRead
+      closes.push(() => {
+        if (readDescriptor) Object.defineProperty(f.client, 'readSessionHistoryPage', readDescriptor)
+        else Reflect.deleteProperty(f.client, 'readSessionHistoryPage')
       })
-    })
-
-    // Activity has its own bounded native-input read; the retained History pages never reread.
-    expect(historyPageSpy.mock.calls).toEqual([
-      [controlA, undefined], [controlA, { cursor: 'c-1' }], [controlA, { limit: 30 }]
-    ])
-
-    // Switch viewMode back to 'terminal'
-    await act(async () => {
-      useAppStore.setState({
-        viewModes: { [controlA.agentSessionId]: 'terminal' }
+      closes.push(async () => {
+        expect(await f.bytes()).toEqual(before)
+        expect(f.controls.map((spy) => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
       })
-    })
-
-    // Open history again (or history is still open/preserved)
-    if (!host.querySelector('.session-history__viewport')) {
-      await openAgentHistory(host)
-    }
-
-    // Must still have 2 pages!
-    const rowsAfter = Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), (r) => r.dataset.historyItemId)
-    expect(rowsAfter).toEqual(['p-older', 'p-latest'])
-    // Text node must still be connected!
-    expect(textNode.isConnected).toBe(true)
-    expect(sel.toString()).toBe('Message')
-    // No additional History or Activity reads after the exact three observed requests.
-    expect(historyPageSpy.mock.calls).toEqual([
-      [controlA, undefined], [controlA, { cursor: 'c-1' }], [controlA, { limit: 30 }]
-    ])
-  })
-
-  it('two SessionPane Regions for same control own independent trace disclosure', async () => {
-    const sessionObj: SessionSnapshot = {
-      id: controlA.agentSessionId,
-      hostId: 'local',
-      workspacePath: _hygiene_fixturePath("test"),
-      label: 'Parent Agent',
-      createdAt: 1000,
-      updatedAt: 1000,
-      agentSessionUpdatedAt: 1000,
-      processState: 'running',
-      status: { state: 'done', source: 'native-hook', observedAt: 1000 },
-      latestOutputBytes: 0,
-      kind: 'agent',
-      providerId: 'codex',
-      executorId: 'codex',
-      control: controlA,
-      capabilities: { terminal: true, timeline: 'complete-events', permission: 'observe', providerResume: true, replyCorrelation: 'none' }
-    }
-    useAppStore.setState({
-      sessions: [sessionObj],
-      config: { appearance: { terminalTheme: 'graphite', terminalFontSize: 12 }, workspaces: [], executors: {} } as any,
-      viewModes: { [controlA.agentSessionId]: 'terminal' }
-    })
-
-    const part: AgentSessionHistoryContentPart = { kind: 'tool-call', callId: 'call-multi', name: 'sh', input: 'echo test' }
-    historyPageSpy.mockResolvedValue(makePage('multi-region-record', null, controlA.agentSessionId, [part]))
-
-    const props = (regionId: string) => ({
-      sessionId: controlA.agentSessionId,
-      surfaceKind: 'agent' as const,
-      interactiveResize: false,
-      visible: true,
-      readOnly: true,
-      linkOrigin: { workspaceId: 'w', tabGroupId: 'g', tabId: 't', regionId }
-    })
-
-    await act(async () =>
-      root.render(
-        <div>
-          <section data-region="left"><SessionPane {...props('left-reg')} /></section>
-          <section data-region="right"><SessionPane {...props('right-reg')} /></section>
-        </div>
-      )
-    )
-
-    await openAgentHistory(host.querySelector('[data-region="left"]')!)
-    await openAgentHistory(host.querySelector('[data-region="right"]')!)
-
-    const left = host.querySelector<TraceElement>('[data-region="left"]')!.querySelector<TraceElement>(TRACE_SELECTOR)!
-    const right = host.querySelector<TraceElement>('[data-region="right"]')!.querySelector<TraceElement>(TRACE_SELECTOR)!
-    expect(left).not.toBeNull()
-    expect(right).not.toBeNull()
-    expect(isTraceOpen(left)).toBe(false)
-    expect(isTraceOpen(right)).toBe(false)
-
-    // Open trace on left only
-    await act(async () => {
-      openTrace(left)
-    })
-    expect(isTraceOpen(left)).toBe(true)
-    expect(isTraceOpen(right)).toBe(false)
-
-    // Trigger parent label re-render
-    await act(async () => {
+      await desktopConversationReadBridge(f, closes)
+      const control = { ...controlA, run: f.session.run }
       useAppStore.setState({
-        sessions: [{ ...sessionObj, label: 'Renamed Parent' }]
+        sessions: [{ ...nativeParentSession(f.root, control), providerId: 'claude', executorId: 'claude' }],
+        viewModes: { [control.agentSessionId]: 'terminal' },
       })
-    })
-
-    const leftAfter = host.querySelector<TraceElement>('[data-region="left"]')!.querySelector<TraceElement>(TRACE_SELECTOR)!
-    const rightAfter = host.querySelector<TraceElement>('[data-region="right"]')!.querySelector<TraceElement>(TRACE_SELECTOR)!
-    expect(isTraceOpen(leftAfter)).toBe(true)
-    expect(isTraceOpen(rightAfter)).toBe(false)
-  })
-
-  it('three native tool parts with callIds x/x/x:0 retain distinct disclosure identity without key collisions', async () => {
-    const callIds = ['x', 'x', 'x:0']
-    const parts: AgentSessionHistoryContentPart[] = [
-      ...callIds.map((id, index) => ({
-        kind: 'tool-call' as const,
-        name: 'sh',
-        input: `{"command":"private inner ${index}"}`,
-        callId: id
-      })),
-      { kind: 'text' as const, text: 'Selectable true native body' }
-    ]
-
-    const testPage: AgentSessionHistoryPage = {
-      agentSessionId: controlA.agentSessionId,
-      source: { providerId: 'claude', nativeSessionId: 'private-native-main' },
-      items: [
-        {
-          id: 'native:inner-record',
-          kind: 'assistant-message',
-          contentParts: parts
-        }
-      ],
-      nextCursor: null
-    }
-
-    historyPageSpy.mockResolvedValueOnce(testPage)
-
-    const consoleErrors: string[] = []
-    const errorSpy = vi.spyOn(console, 'error').mockImplementation((...args) => {
-      consoleErrors.push(args.map(String).join(' '))
-    })
-
-    try {
       await act(async () =>
         root.render(
-          <SessionHistoryView
-            control={controlA}
-            label="Agent"
-            visible={true}
-            themeId="graphite"
-            fontSize={12}
-            workspaceRoot={_hygiene_fixturePath("test")}
-            openWorkspaceFile={vi.fn()}
-            openHttpLink={vi.fn()}
-          />
-        )
+          <SessionPane
+            sessionId={control.agentSessionId}
+            surfaceKind="agent"
+            interactiveResize={false}
+            visible
+            readOnly
+            linkOrigin={{ workspaceId: 'w', tabGroupId: 'g', tabId: 't', regionId: 'native-region' }}
+          />,
+        ),
       )
-
-      const details = host.querySelectorAll<TraceElement>(TRACE_SELECTOR)
-      expect(details).toHaveLength(3)
-      expect(details[0]!.dataset.traceId).toBeTruthy()
-      expect(details[1]!.dataset.traceId).toBeTruthy()
-      expect(details[2]!.dataset.traceId).toBeTruthy()
-      // All 3 trace IDs must be pairwise distinct!
-      expect(details[0]!.dataset.traceId).not.toBe(details[1]!.dataset.traceId)
-      expect(details[0]!.dataset.traceId).not.toBe(details[2]!.dataset.traceId)
-      expect(details[1]!.dataset.traceId).not.toBe(details[2]!.dataset.traceId)
-
-      // Open first trace only
-      await act(async () => {
-        openTrace(details[0]!)
+      expect(nativeRead).not.toHaveBeenCalled()
+      await openAgentHistory(host)
+      await wait(() => {
+        expect(nativeIds()).toEqual([id])
+        expect(sample(control).loading).toBe(false)
       })
+      const trace = traces()[0]!
+      expect(trace).toBeDefined()
+      await act(async () => openTrace(trace))
+      const text = turn(id).querySelector('.log-turn__body p')!.firstChild!,
+        range = document.createRange()
+      range.setStart(text, 0)
+      range.setEnd(text, 10)
+      getSelection()!.addRange(range)
+      const feed = host.querySelector('.activity-feed')!,
+        count = nativeRead.mock.calls.length
+      const back = host.querySelector<HTMLButtonElement>('[aria-label="Return to Terminal"]')!
+      expect(back).not.toBeNull()
+      await act(async () => back.click())
+      expect(feed.closest('[hidden]')).not.toBeNull()
+      expect(text.isConnected).toBe(true)
+      await openAgentHistory(host)
+      await wait(() => expect(sample(control).loading).toBe(false))
+      expect(feed.closest('[hidden]')).toBeNull()
+      expect(traces()[0]).toBe(trace)
+      expect(isTraceOpen(trace)).toBe(true)
+      expect(getSelection()!.getRangeAt(0)).toBe(range)
+      expect(range.startContainer).toBe(text)
+      expect(getSelection()!.toString()).toBe('Selectable')
+      await act(async () => useAppStore.setState({ viewModes: { [control.agentSessionId]: 'activity' } }))
+      await wait(() => expect(sample(control).loading).toBe(false))
+      await act(async () => useAppStore.setState({ viewModes: { [control.agentSessionId]: 'terminal' } }))
+      await openAgentHistory(host)
+      await wait(() => expect(sample(control).loading).toBe(false))
+      expect(text.isConnected).toBe(true)
+      expect(traces()[0]).toBe(trace)
+      expect(isTraceOpen(trace)).toBe(true)
+      expect(getSelection()!.getRangeAt(0)).toBe(range)
+      expect(nativeRead).toHaveBeenCalledTimes(count)
+      expect(historyPageSpy).not.toHaveBeenCalled()
+    },
+  )
 
-      expect(isTraceOpen(details[0]!)).toBe(true)
-      expect(isTraceOpen(details[1]!)).toBe(false)
-      expect(isTraceOpen(details[2]!)).toBe(false)
-
-      const duplicateKeyWarnings = consoleErrors.filter(msg => msg.includes('same key') || msg.includes('unique "key"'))
-      expect(duplicateKeyWarnings).toHaveLength(0)
-    } finally {
-      errorSpy.mockRestore()
-    }
+  it('hiding an in-flight initial actual Activity read rejects its late frame and reopens the original source', async () => {
+    const f = await fixture([native('hidden-stale-page')]),
+      held = holdNextRead()
+    await f.render()
+    await wait(() => expect(held.entered()).toBe(true))
+    await f.render(false)
+    await act(async () => held.release())
+    await wait(() => expect(held.returned()).toBe(true))
+    expect(host.textContent).not.toContain('Message body for hidden-stale-page')
+    await f.render()
+    await wait(() => {
+      expect(nativeIds()).toEqual(['hidden-stale-page'])
+      expect(sample().loading).toBe(false)
+    })
+  })
+  it('a new original reading generation supersedes pending Earlier without accepting its late frame or getting stuck', async () => {
+    const f = await fixture(Array.from({ length: 150 }, (_, index) => native('original-' + index)))
+    await f.render()
+    await earlierReady()
+    const held = holdNextRead((input) => Boolean(input.cursor))
+    await click('Earlier')
+    await wait(() => expect(held.entered()).toBe(true))
+    await f.render(true, 'new-reading-generation')
+    await wait(() => {
+      expect(sample().loading).toBe(false)
+      expect(sample().readingIdentity).toBe('new-reading-generation')
+    })
+    const accepted = sample().accepted!,
+      ids = nativeIds()
+    await act(async () => held.release())
+    await wait(() => expect(held.returned()).toBe(true))
+    expect(nativeIds()).toEqual(ids)
+    expect(sample().accepted!.id).toBe(accepted.id)
+    await wait(() => expect(sample()).toMatchObject({ loading: false, inFlight: false, dirty: false, error: null }))
+    expect(nativeIds()).toEqual(ids)
+    expect(sample().accepted!.id).toBe(accepted.id)
+  })
+  it.each(['single-row', 'cross-row'] as const)(
+    'non-destructive Earlier preserves the actual %s Range and original newest body',
+    async (shape) => {
+      const f = await fixture(Array.from({ length: 250 }, (_, index) => native('original-' + index)))
+      await f.render()
+      await earlierReady()
+      const newest = turn('original-249'),
+        lastText = newest.querySelector('.log-turn__body p')!.firstChild!
+      const firstText =
+        shape === 'cross-row' ? turn('original-248').querySelector('.log-turn__body p')!.firstChild! : lastText
+      const range = document.createRange()
+      range.setStart(firstText, 2)
+      range.setEnd(lastText, 8)
+      getSelection()!.addRange(range)
+      const originalText = getSelection()!.toString(),
+        held = holdNextRead((input) => Boolean(input.cursor))
+      const token = vi.mocked(api.conversation.readAgentConversation).mock.calls.at(-1)![0]
+      expect(token.cursor).toBeUndefined()
+      await click('Earlier')
+      await wait(() => expect(held.entered()).toBe(true))
+      await act(async () => held.release())
+      await wait(() => {
+        expect(nativeIds()).toHaveLength(200)
+        expect(sample().loading).toBe(false)
+      })
+      expect(turn('original-249')).toBe(newest)
+      expect(firstText.isConnected).toBe(true)
+      expect(lastText.isConnected).toBe(true)
+      expect(getSelection()!.getRangeAt(0)).toBe(range)
+      expect(range.startContainer).toBe(firstText)
+      expect(range.endContainer).toBe(lastText)
+      expect(getSelection()!.toString()).toBe(originalText)
+    },
+  )
+  it('a cross-row Range whose end is in a removed newest record holds that exact original body until selection clears', async () => {
+    const older = native('p1'),
+      newest = native('p0'),
+      f = await fixture([older, newest])
+    await f.draw()
+    const first = turn('p1').querySelector('.log-turn__body p')!.firstChild!,
+      last = turn('p0').querySelector('.log-turn__body p')!.firstChild!,
+      card = turn('p0')
+    const range = document.createRange()
+    range.setStart(first, 2)
+    range.setEnd(last, 8)
+    getSelection()!.addRange(range)
+    const quote = getSelection()!.toString()
+    f.replace([older])
+    await f.draw()
+    expect(nativeIds()).toEqual(['p1', 'p0'])
+    expect(card.isConnected).toBe(true)
+    expect(last.isConnected).toBe(true)
+    expect(getSelection()!.getRangeAt(0)).toBe(range)
+    expect(range.startContainer).toBe(first)
+    expect(range.endContainer).toBe(last)
+    expect(getSelection()!.toString()).toBe(quote)
+    await act(async () => {
+      getSelection()!.removeAllRanges()
+      document.dispatchEvent(new Event('selectionchange'))
+    })
+    await f.draw()
+    expect(nativeIds()).toEqual(['p1'])
+  })
+  it('a pointer-targeted actual Earlier read restores the original body at its exact 20px viewport offset', async () => {
+    const f = await fixture(Array.from({ length: 150 }, (_, index) => native('original-' + index)))
+    await f.render()
+    await earlierReady()
+    const view = geometry(),
+      { feed } = view,
+      original = turn('original-149'),
+      held = holdNextRead((input) => Boolean(input.cursor))
+    const addedHeight = () => (turnLoaded('original-0') ? 100 : 0)
+    Object.defineProperty(feed, 'scrollHeight', { configurable: true, get: () => 1000 + addedHeight() })
+    feed.getBoundingClientRect = () => new DOMRect(0, 10, 500, 400)
+    feed.querySelector<HTMLElement>('[data-conversation-reading-tail]')!.getBoundingClientRect = () =>
+      new DOMRect(0, 10 + 1000 + addedHeight() - feed.scrollTop, 500, 0)
+    original.getBoundingClientRect = () =>
+      new DOMRect(0, 30 + addedHeight() - feed.scrollTop, 500, 40)
+    await view.scroll(600)
+    await view.scroll(0)
+    await act(async () => {
+      for (const observer of intersections)
+        if (observer.targets.has(original))
+          observer.deliver([
+            {
+              target: original,
+              isIntersecting: true,
+              intersectionRatio: 1,
+              time: 0,
+              rootBounds: feed.getBoundingClientRect(),
+              boundingClientRect: original.getBoundingClientRect(),
+              intersectionRect: original.getBoundingClientRect(),
+            },
+          ])
+    })
+    await act(async () => original.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
+    await act(async () => original.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -100 })))
+    await wait(() => expect(held.entered()).toBe(true))
+    expect(feed.scrollTop).toBe(0)
+    expect(original.getBoundingClientRect().top - feed.getBoundingClientRect().top).toBe(20)
+    await act(async () => held.release())
+    await wait(() => {
+      expect(nativeIds()).toHaveLength(150)
+      expect(sample().loading).toBe(false)
+    })
+    expect(feed.scrollTop).toBe(100)
+    expect(original.getBoundingClientRect().top - feed.getBoundingClientRect().top).toBe(20)
+  })
+  it('a real Earlier failure preserves its accepted frame and Retry repeats the original navigation token', async () => {
+    const f = await fixture(Array.from({ length: 150 }, (_, index) => native('original-' + index)))
+    await f.render()
+    await earlierReady()
+    const read = vi.mocked(api.conversation.readAgentConversation),
+      original = read.getMockImplementation()!,
+      before = sample().accepted!,
+      newest = turn('original-149')
+    let failedCursor: string | undefined,
+      fail = true
+    read.mockImplementation((input, options) => {
+      if (input.cursor && fail) {
+        failedCursor = input.cursor
+        return Promise.reject(new Error('Network timeout loading older page'))
+      }
+      return original(input, options)
+    })
+    await click('Earlier')
+    await wait(() => expect(host.textContent).toContain('Network timeout loading older page'))
+    expect(sample().accepted).toMatchObject({ id: before.id, revision: before.revision })
+    expect(turn('original-149')).toBe(newest)
+    expect(failedCursor).toBeTruthy()
+    fail = false
+    const count = read.mock.calls.length
+    const retries = host.querySelectorAll<HTMLButtonElement>('[aria-label="Retry reading"]')
+    expect(retries).toHaveLength(1)
+    await act(async () => retries[0]!.click())
+    await wait(() => {
+      expect(nativeIds()).toHaveLength(150)
+      expect(sample().loading).toBe(false)
+    })
+    expect(read.mock.calls.slice(count).some(([input]) => input.cursor === failedCursor)).toBe(true)
+    expect(f.nativeRead.mock.calls.at(-1)![1]!.cursor).toBe('original:50')
+  })
+  it('actual captured append respects upward reading, and explicit loaded-tail navigation restores follow', async () => {
+    const f = await fixture([])
+    await f.publishCaptured([
+      {
+        id: 'first',
+        agentSessionId: controlA.agentSessionId,
+        kind: 'user_message',
+        source: 'user',
+        status: 'complete',
+        title: 'First',
+        content: 'First message',
+        createdAt: 1000,
+        updatedAt: 1000,
+      },
+    ])
+    await f.render()
+    await wait(() => expect(sample().accepted?.recordCount).toBe(1))
+    const view = geometry()
+    await view.scroll(600)
+    await view.scroll(10)
+    const stream = await f.publishCaptured([
+      {
+        id: 'second',
+        agentSessionId: controlA.agentSessionId,
+        kind: 'user_message',
+        source: 'user',
+        status: 'complete',
+        title: 'Second',
+        content: 'Second message',
+        createdAt: 2000,
+        updatedAt: 2000,
+      },
+    ])
+    await wait(() => expect(f.acceptedCaptured(stream)).toBe(true))
+    expect(view.feed.scrollTop).toBe(10)
+    expect(host.querySelector('[data-message-tool-control="jump-to-latest"]')).not.toBeNull()
+    const nativeReads = f.nativeRead.mock.calls.length
+    await click('滚动到最新')
+    expect(view.feed.scrollTop).toBe(600)
+    expect(host.querySelector('[data-message-tool-control="jump-to-latest"]')).toBeNull()
+    expect(f.nativeRead).toHaveBeenCalledTimes(nativeReads)
+  })
+  it('switching original Session resets detached follow and does not attribute the old window to the new Session', async () => {
+    const a = await fixture([native('a-1')])
+    await a.render()
+    await wait(() => expect(nativeIds()).toEqual(['a-1']))
+    const view = geometry()
+    await view.scroll(600)
+    await view.scroll(20)
+    expect(host.querySelector('[data-message-tool-control="jump-to-latest"]')).not.toBeNull()
+    const b = await fixture([native('b-1')], controlB)
+    await b.render()
+    await wait(() => {
+      expect(nativeIds()).toEqual(['b-1'])
+      expect(sample(controlB).loading).toBe(false)
+    })
+    expect(host.querySelector('[data-message-tool-control="jump-to-latest"]')).toBeNull()
+    expect(sample(controlB).accepted!.scope.sources).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: 'native', nativeSessionId: nativeSource.nativeSessionId }),
+      ]),
+    )
+    expect(host.textContent).not.toContain('Message body for a-1')
+  })
+  it('an actual empty accepted frame gains captured content without losing later upward intent', async () => {
+    const f = await fixture([])
+    await f.render()
+    await wait(() => expect(sample().accepted?.recordCount).toBe(0))
+    const append = async (id: string, at: number) =>
+      f.publishCaptured([
+        {
+          id,
+          agentSessionId: controlA.agentSessionId,
+          kind: 'user_message',
+          source: 'user',
+          status: 'complete',
+          title: id,
+          content: id,
+          createdAt: at,
+          updatedAt: at,
+        },
+      ])
+    const first = await append('First message', 1000)
+    await wait(() => expect(f.acceptedCaptured(first)).toBe(true))
+    const view = geometry()
+    await view.scroll(600)
+    await view.scroll(20)
+    const second = await append('Second message', 2000)
+    await wait(() => expect(f.acceptedCaptured(second)).toBe(true))
+    expect(view.feed.scrollTop).toBe(20)
+    expect(sample().accepted?.recordCount).toBe(2)
+    expect(host.querySelector('[data-message-tool-control="jump-to-latest"]')).not.toBeNull()
   })
 
-  it('adding a later same-callId part preserves unchanged first-part disclosure and keeps new part closed on Latest', async () => {
-    const part0: AgentSessionHistoryContentPart = {
-      kind: 'tool-call',
-      name: 'sh',
-      input: '{"command":"initial"}',
-      callId: 'x'
-    }
-
-    const initialPage: AgentSessionHistoryPage = {
-      agentSessionId: controlA.agentSessionId,
-      source: { providerId: 'claude', nativeSessionId: 'private-native-main' },
-      items: [
-        {
-          id: 'native:append-record',
-          kind: 'assistant-message',
-          contentParts: [part0, { kind: 'text', text: 'body initial' }]
-        }
-      ],
-      nextCursor: null
-    }
-
-    historyPageSpy.mockResolvedValueOnce(initialPage)
-
+  it('actual public frames preserve an original selection and expanded trace when an older contribution is prepended', async () => {
+    const original = native('msg-1', [call('call-1', 'echo hello'), body('Original paragraph with selectable text.')]),
+      f = await fixture([original])
+    await f.draw()
+    const trace = traces()[0]!
+    expect(trace).toBeDefined()
+    await act(async () => openTrace(trace))
+    const text = turn('msg-1').querySelector('.log-turn__body p')!.firstChild!,
+      range = document.createRange()
+    range.setStart(text, 0)
+    range.setEnd(text, 8)
+    getSelection()!.addRange(range)
+    f.replace([native('msg-older'), original])
+    await f.draw()
+    expect(nativeIds()).toEqual(['msg-older', 'msg-1'])
+    expect(traces().at(-1)).toBe(trace)
+    expect(isTraceOpen(trace)).toBe(true)
+    expect(text.isConnected).toBe(true)
+    expect(getSelection()!.getRangeAt(0)).toBe(range)
+    expect(getSelection()!.toString()).toBe('Original')
+  })
+  it('duplicate part references and call IDs render through real public frames without React key collisions', async () => {
+    const duplicate: AgentSessionHistoryContentPart = { kind: 'reasoning', text: 'duplicate reasoning' },
+      errors: unknown[][] = []
+    vi.spyOn(console, 'error').mockImplementation((...args) => errors.push(args))
+    const f = await fixture([
+      native('msg-dup', [duplicate, duplicate, call('shared-id', '1'), call('shared-id', '2'), body('Original body')]),
+    ])
+    await f.draw()
+    expect(traces()).toHaveLength(4)
+    expect(errors.filter((args) => /same key|unique "key"/u.test(String(args[0])))).toHaveLength(0)
+  })
+  it('does not re-parse Markdown during actual copy, selection and annotation-editor keystrokes', async () => {
+    const blocks = vi.spyOn(markdown, 'parseAgentMarkdown'),
+      documentParser = vi.spyOn(markdown, 'parseAgentMarkdownDocument')
+    const parses = () => blocks.mock.calls.length + documentParser.mock.calls.length
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 800, 600))
+    const selectionRect = new DOMRect(20, 80, 120, 18)
+    vi.spyOn(Range.prototype, 'getBoundingClientRect').mockReturnValue(selectionRect)
+    vi.spyOn(Range.prototype, 'getClientRects').mockImplementation(() =>
+      Object.assign([selectionRect], { item: (index: number) => (index === 0 ? selectionRect : null) }),
+    )
+    const content = '**body text** ' + 'prose '.repeat(50)
     await act(async () =>
       root.render(
-        <SessionHistoryView
-          control={controlA}
-          label="Agent"
-          visible={true}
-          themeId="graphite"
-          fontSize={12}
-          workspaceRoot={_hygiene_fixturePath("test")}
-          openWorkspaceFile={vi.fn()}
-          openHttpLink={vi.fn()}
-        />
-      )
+        <ConversationAnnotationOwner onAnnotate={vi.fn()}>
+          {(onSelectAnnotation) => (
+            <ConversationMessage messageId="msg-memo-test" content={content} onSelectAnnotation={onSelectAnnotation} />
+          )}
+        </ConversationAnnotationOwner>,
+      ),
     )
-
-    const details = host.querySelectorAll<TraceElement>(TRACE_SELECTOR)
-    expect(details).toHaveLength(1)
-    expect(isTraceOpen(details[0]!)).toBe(false)
-
-    // Open first part
-    await act(async () => {
-      openTrace(details[0]!)
-    })
-    expect(isTraceOpen(details[0]!)).toBe(true)
-
-    // Now page is updated by adding another tool-call with same callId 'x'
-    const part1: AgentSessionHistoryContentPart = {
-      kind: 'tool-call',
-      name: 'sh',
-      input: '{"command":"appended duplicate"}',
-      callId: 'x'
-    }
-    const updatedPage: AgentSessionHistoryPage = {
-      agentSessionId: controlA.agentSessionId,
-      source: { providerId: 'claude', nativeSessionId: 'private-native-main' },
-      items: [
-        {
-          id: 'native:append-record',
-          kind: 'assistant-message',
-          contentParts: [part0, part1, { kind: 'text', text: 'body initial' }]
-        }
-      ],
-      nextCursor: null
-    }
-
-    historyPageSpy.mockResolvedValueOnce(updatedPage)
-    const latestBtn = [...host.querySelectorAll<HTMLButtonElement>('.session-history__toolbar button')].find(
-      (btn) => btn.textContent?.includes('Latest')
+    const initialParses = parses()
+    expect(initialParses).toBeGreaterThan(0)
+    const copy = host.querySelector<HTMLButtonElement>('[title="Copy message"]')!
+    expect(copy).not.toBeNull()
+    await act(async () => copy.click())
+    expect(parses()).toBe(initialParses)
+    const text = host.querySelector('strong')!.firstChild!,
+      range = document.createRange()
+    range.setStart(text, 0)
+    range.setEnd(text, 4)
+    getSelection()!.addRange(range)
+    await act(async () =>
+      host.querySelector('.log-turn__text')!.dispatchEvent(new MouseEvent('mouseup', { bubbles: true })),
+    )
+    await wait(() => expect(document.querySelector('[role="toolbar"]')).not.toBeNull())
+    expect(parses()).toBe(initialParses)
+    const annotate = [...document.querySelectorAll<HTMLButtonElement>('[role="toolbar"] button')].find(
+      (button) => button.textContent?.trim() === '批注',
     )!
-    await act(async () => latestBtn.click())
-
-    const afterDetails = host.querySelectorAll<TraceElement>(TRACE_SELECTOR)
-    expect(afterDetails).toHaveLength(2)
-    // First part must remain open, and new second part must be closed!
-    expect(isTraceOpen(afterDetails[0]!)).toBe(true)
-    expect(isTraceOpen(afterDetails[1]!)).toBe(false)
+    expect(annotate).toBeDefined()
+    await act(async () => annotate.click())
+    await wait(() => expect(document.querySelector('.log-turn__annotation textarea')).not.toBeNull())
+    const textarea = document.querySelector<HTMLTextAreaElement>('.log-turn__annotation textarea')!
+    for (const value of ['a', 'ab', 'abc']) {
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, value)
+        textarea.dispatchEvent(new Event('input', { bubbles: true }))
+      })
+      expect(parses()).toBe(initialParses)
+    }
+    expect(textarea.value).toBe('abc')
+    expect(text.isConnected).toBe(true)
+    expect(range.startContainer).toBe(text)
   })
-  it('public native Latest prunes only absent opaque records and preserves overlapping-prefix disclosure and selection in the same parent', async () => {
-    const ids = ['native:record', 'native:record:tool-call:x']
-    await withPublicNativeHistory(ids, async ({ pages, replaceRecords, workspacePath, flush }) => {
-      await mountNativeParent(workspacePath)
-      await act(async () => await flush())
-      const rows = () => Array.from(host.querySelectorAll<HTMLElement>('[data-history-item-id]'), row => row.dataset.historyItemId)
-      expect(rows()).toEqual(ids)
-      const details = Array.from(host.querySelectorAll<TraceElement>(TRACE_SELECTOR))
-      expect(details).toHaveLength(2)
-      await act(async () => { for (const el of details) { openTrace(el) } })
-      expect(details.map(el => isTraceOpen(el))).toEqual([true, true])
-      const retainedText = host.querySelectorAll('.log-turn__body p')[1]!.firstChild!
-      const range = document.createRange(); range.setStart(retainedText, 0); range.setEnd(retainedText, 'Selectable'.length)
-      window.getSelection()!.addRange(range)
-      const latest = host.querySelectorAll<HTMLButtonElement>('.session-history__toolbar button')[1]!
-      expect(latest.textContent).toContain('Latest')
-      await replaceRecords([ids[1]!])
-      await act(async () => { latest.click(); await flush() })
-      expect(rows()).toEqual([ids[1]])
-      const retained = host.querySelector<TraceElement>(TRACE_SELECTOR)!
-      expect(isTraceOpen(retained)).toBe(true)
-      expect(retainedText.isConnected).toBe(true)
-      expect(window.getSelection()!.toString()).toBe('Selectable')
-      await replaceRecords(ids)
-      await act(async () => { latest.click(); await flush() })
-      expect(rows()).toEqual(ids)
-      const reread = Array.from(host.querySelectorAll<TraceElement>(TRACE_SELECTOR))
-      expect(reread).toHaveLength(2)
-      expect(reread.map(el => isTraceOpen(el))).toEqual([false, true])
-      expect(retainedText.isConnected).toBe(true)
-      expect(window.getSelection()!.toString()).toBe('Selectable')
-      expect(historyPageSpy).toHaveBeenCalledTimes(3)
-      expect(pages.map(page => page.items.map(item => item.id))).toEqual([ids, [ids[1]], ids])
+
+  it('deserialized current public frames retain unchanged reasoning and tool disclosure', async () => {
+    const parts: AgentSessionHistoryContentPart[] = [
+      { kind: 'reasoning', text: 'private unchanged reasoning' },
+      call('stable-positive-tool'),
+      body('Same body'),
+    ]
+    const f = await fixture([native('stable-record', parts)])
+    await f.draw()
+    const before = traces()
+    expect(before).toHaveLength(2)
+    await act(async () => before.forEach(openTrace))
+    f.replace([native('stable-record', structuredClone(parts))])
+    await f.draw()
+    expect(traces()).toEqual(before)
+    expect(traces().map(isTraceOpen)).toEqual([true, true])
+  })
+  it.each(['older', 'latest'] as const)(
+    'hidden/reopen after pending %s clears loading and retains usable original controls',
+    async (direction) => {
+      const f = await fixture(Array.from({ length: 150 }, (_, index) => native('kept-' + index)))
+      await f.render()
+      await earlierReady()
+      const before = nativeIds(),
+        held = holdNextRead(
+          direction === 'older' ? (input) => Boolean(input.cursor) : (input) => !input.cursor && !input.view,
+        )
+      if (direction === 'older') await click('Earlier')
+      else await f.render(true, 'explicit-generation')
+      await wait(() => expect(held.entered()).toBe(true))
+      await f.render(false, direction === 'older' ? controlA.run.runId : 'explicit-generation')
+      await act(async () => held.release())
+      await wait(() => expect(held.returned()).toBe(true))
+      expect(nativeIds()).toEqual(before)
+      await f.render(true, direction === 'older' ? controlA.run.runId : 'explicit-generation')
+      await wait(() => expect(sample().loading).toBe(false))
+      expect(action('Earlier').disabled).toBe(false)
+      expect(sample().error).toBeNull()
+    },
+  )
+  it('tool call/result sharing callId never cross-expand across original rows or original Hosts', async () => {
+    const items = [
+      native('msg-with-shared-id', [
+        call('shared-call-id', 'command 1'),
+        { kind: 'tool-result', name: 'shell', callId: 'shared-call-id', output: 'output 1' },
+        body('row one'),
+      ]),
+      native('msg-2-shared-id', [call('shared-call-id', 'command 2'), body('row two')]),
+    ]
+    const local = await fixture(items)
+    await local.draw()
+    expect(traces()).toHaveLength(3)
+    await act(async () => openTrace(traces()[0]!))
+    await local.draw()
+    expect(traces().map(isTraceOpen)).toEqual([true, false, false])
+    const remote = await fixture(items, { ...controlA, hostId: 'remote' })
+    await remote.draw()
+    expect(traces().map(isTraceOpen)).toEqual([false, false, false])
+  })
+  it.each([
+    { ids: ['native:record', 'native:record:tool-call:x'], calls: ['x:tool-call:y', 'y'] },
+    { ids: ['native:inner-record'], calls: ['x', 'x', 'x:0'] },
+  ])(
+    'opaque tuple and repeated call IDs keep independent disclosure and no key collisions: $calls',
+    async ({ ids, calls }) => {
+      const errors: unknown[][] = []
+      vi.spyOn(console, 'error').mockImplementation((...args) => errors.push(args))
+      const items =
+        ids.length === 1
+          ? [native(ids[0]!, [...calls.map((id, index) => call(id, String(index))), body('Original body')])]
+          : ids.map((id, index) => native(id, [call(calls[index]!, String(index)), body('Original body ' + index)]))
+      const f = await fixture(items)
+      await f.draw()
+      const before = traces()
+      expect(before).toHaveLength(calls.length)
+      const traceIds = before.map((trace) => trace.dataset.traceId)
+      expect(traceIds.every(Boolean)).toBe(true)
+      expect(new Set(traceIds).size).toBe(calls.length)
+      await act(async () => openTrace(before[0]!))
+      await f.draw()
+      expect(traces().map(isTraceOpen)).toEqual(calls.map((_, index) => index === 0))
+      expect(errors.filter((args) => /same key|unique "key"/u.test(String(args[0])))).toHaveLength(0)
+    },
+  )
+  it('two real SessionPane Regions for the same original control own independent trace disclosure', async () => {
+    const f = await fixture([native('native:inner-record', [call('call-one'), body('Selectable true native body')])])
+    const session = nativeParentSession(f.workspacePath, f.actualControl)
+    useAppStore.setState({ sessions: [session], viewModes: { [controlA.agentSessionId]: 'activity' } })
+    const draw = () =>
+      root.render(
+        <>
+          <div data-region="left">
+            <SessionPane
+              sessionId={controlA.agentSessionId}
+              surfaceKind="agent"
+              interactiveResize={false}
+              visible
+              readOnly
+              linkOrigin={{ workspaceId: 'w', tabGroupId: 'g', tabId: 'left-tab', regionId: 'left' }}
+            />
+          </div>
+          <div data-region="right">
+            <SessionPane
+              sessionId={controlA.agentSessionId}
+              surfaceKind="agent"
+              interactiveResize={false}
+              visible
+              readOnly
+              linkOrigin={{ workspaceId: 'w', tabGroupId: 'g', tabId: 'right-tab', regionId: 'right' }}
+            />
+          </div>
+        </>,
+      )
+    await act(async () => draw())
+    await wait(() => {
+      expect(traces(host.querySelector('[data-region="left"]')!)).toHaveLength(1)
+      expect(traces(host.querySelector('[data-region="right"]')!)).toHaveLength(1)
     })
+    const left = traces(host.querySelector('[data-region="left"]')!)[0]!,
+      right = traces(host.querySelector('[data-region="right"]')!)[0]!
+    await act(async () => openTrace(left))
+    expect(isTraceOpen(left)).toBe(true)
+    expect(isTraceOpen(right)).toBe(false)
+    await act(async () => useAppStore.setState({ sessions: [{ ...session, label: 'Renamed Parent' }] }))
+    expect(traces(host.querySelector('[data-region="left"]')!)[0]).toBe(left)
+    expect(isTraceOpen(left)).toBe(true)
+    expect(isTraceOpen(right)).toBe(false)
   })
-
+  it('adding a later same-callId part retains the unchanged original trace and starts only the new trace closed', async () => {
+    const part = call('x', 'initial'),
+      f = await fixture([native('native:append-record', [part, body('body initial')])])
+    await f.draw()
+    const first = traces()[0]!
+    await act(async () => openTrace(first))
+    f.replace([native('native:append-record', [part, call('x', 'appended duplicate'), body('body initial')])])
+    await f.draw()
+    expect(traces()).toHaveLength(2)
+    expect(traces()[0]).toBe(first)
+    expect(traces().map(isTraceOpen)).toEqual([true, false])
+  })
+  it('a real public current frame prunes only absent opaque records and preserves overlapping-prefix disclosure and selected original bytes', async () => {
+    const ids = ['native:record', 'native:record:tool-call:x'],
+      items = ids.map((id, index) =>
+        native(id, [call(index ? 'y' : 'x:tool-call:y'), body('Selectable original body ' + index)]),
+      )
+    const f = await fixture(items)
+    await f.draw()
+    await act(async () => traces().forEach(openTrace))
+    const retained = traces()[1]!,
+      text = turn(ids[1]!).querySelector('.log-turn__body p')!.firstChild!,
+      range = document.createRange()
+    range.setStart(text, 0)
+    range.setEnd(text, 10)
+    getSelection()!.addRange(range)
+    f.replace([items[1]!])
+    await f.draw()
+    expect(nativeIds()).toEqual([ids[1]])
+    expect(traces()[0]).toBe(retained)
+    expect(isTraceOpen(retained)).toBe(true)
+    expect(text.isConnected).toBe(true)
+    expect(getSelection()!.getRangeAt(0)).toBe(range)
+    expect(getSelection()!.toString()).toBe('Selectable')
+    f.replace(items)
+    await f.draw()
+    expect(nativeIds()).toEqual(ids)
+    expect(traces().map(isTraceOpen)).toEqual([false, true])
+    expect(text.isConnected).toBe(true)
+    expect(range.startContainer).toBe(text)
+  })
 })
+function turnLoaded(id: string) {
+  return [...host.querySelectorAll<HTMLElement>('[data-native-record-id]')].some(
+    (row) => row.dataset.nativeRecordId === id,
+  )
+}
