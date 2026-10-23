@@ -44,6 +44,6 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }
     }
     return served !== original ? { code: served, map: null } : undefined
   }
-}], test: { include: ['apps/host/test/agent-learning*.test.ts', 'apps/host/test/agent-learning*.test.tsx', 'packages/core/test/agent-platform-task.test.ts', 'packages/core/test/agent-learning-codec.test.ts',
+}], test: { include: ['apps/host/test/agent-learning-platform-task.test.ts', 'apps/host/test/agent-learning-public.test.ts', 'apps/host/test/agent-learning-ui.test.tsx', 'packages/core/test/agent-platform-task.test.ts', 'packages/core/test/agent-learning-codec.test.ts',
   'apps/desktop/test/session-takeover.test.tsx'], environment: 'node', fileParallelism: false,
   passWithNoTests: false, testTimeout: 30_000, hookTimeout: 15_000 } })
