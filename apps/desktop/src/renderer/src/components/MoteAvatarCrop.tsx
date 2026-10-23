@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react'
 import { MOTE_AVATAR_EDGE } from '../../../shared/mote-avatars'
-import { MoteSilhouetteArt } from './MoteAvatarImageGallery'
+import { MoteSilhouetteArt } from './MoteSilhouetteArt'
 
 export type MoteAvatarCropFrame = { zoom: number; offsetX: number; offsetY: number }
 
@@ -55,7 +55,7 @@ export function MoteAvatarCrop({ source, silhouetteId, canvasRef, disabled, onRe
           }} onPointerUp={() => { drag.current = null }} onPointerCancel={() => { drag.current = null }} />
         {silhouetteId ? <div className="mote-avatar-crop__live" aria-hidden="true"
           style={{ transform: `translate(${clampedX.toFixed(2)}%, ${clampedY.toFixed(2)}%) scale(${zoom})` }}>
-          <MoteSilhouetteArt id={silhouetteId} />
+          <MoteSilhouetteArt id={silhouetteId} interactive={false} />
         </div> : null}
       </div>
     </div>
