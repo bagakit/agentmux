@@ -6,6 +6,7 @@ import { projectSessionUserMessages } from '../src/session-user-messages.js'
 import { conversationNativeInputWitness, conversationRevision } from '../src/conversation-stream.js'
 import { parseAgentSessionHistoryReadPage } from '../src/session-history-read-codec.js'
 import { createNativeInputCorrelation } from '../src/native-input-correlation.js'
+import { externalConversationAuthor } from '../src/external-conversation.js'
 import { paginatedFixture, user, source, turn, jsonl } from './helpers/codex-paginated.js'
 import { createHistoryQueryFixture } from './helpers/session-history-query.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
@@ -75,6 +76,34 @@ it('compares original authors structurally when query and canonical fields arriv
   const groups = projectSessionInputs({ ...ref, messages: [message], inputs: f.inputs })
   expect(groups).toHaveLength(1); expect(groups[0]!.author).toEqual({ kind: 'agent', agentSessionId: 'peer' })
   expect(groups[0]!.primary).toBe(message)
+})
+
+it('joins public captured attribution with its original full journal sender without changing either object', () => {
+  const inputKey = { kind: 'message', agentSessionId: ref.agentSessionId, expectedRun: key.expectedRun, messageId: 'message' } as const
+  const publicAuthor = externalConversationAuthor(external)
+  const f = reading([], [{ ...captured, inputRef: inputKey, authorHuman: undefined, authorExternal: publicAuthor }])
+  const item = { kind: 'controlled', recordedAt: 1, sequence: 1, receipt: null, message: envelope(external),
+    intent: { key: inputKey, admissionIntent: { kind: 'manual-actor', expectedRun: key.expectedRun }, execution: 'immediate',
+      source: { kind: 'message', messageId: 'message', originalControlOperationId: 'operation-message' } } } satisfies AgentInputMailboxItem
+  const before = structuredClone({ f, item })
+  const groups = projectSessionInputs({ ...ref, ...f, mailbox: [item] })
+  expect(groups).toHaveLength(1)
+  expect(groups[0]!.author).toBe(f.messages[0]!.author)
+  expect(groups[0]!.author).toEqual(publicAuthor)
+  expect(groups[0]!.messages[0]).toBe(f.messages[0]); expect(groups[0]!.mailbox[0]).toBe(item)
+  expect(item.message.sender).toBe(external); expect(sessionInputMailboxAuthor(item)).toBe(external)
+  expect({ f, item }).toEqual(before)
+  for (const changed of [
+    { ...external, connectionId: 'other-connection' },
+    { ...external, actor: { ...external.actor, userId: 'other-user' } },
+    { ...external, actor: { ...external.actor, application: { ...external.actor.application, appId: 'other-app' } } },
+    { ...external, externalConversationId: 'other-room' }, { ...external, externalMessageId: 'other-message' },
+    { ...external, bindingId: 'other-binding' }, { ...external, bindingRevision: 2 }
+  ]) {
+    const conflict = projectSessionInputs({ ...ref, ...f, mailbox: [{ ...item, message: envelope(changed) }] })
+    expect(conflict).toHaveLength(1); expect(conflict[0]!.author).toEqual({ kind: 'unknown' })
+    expect(conflict[0]!.messages[0]).toBe(f.messages[0])
+  }
 })
 
 it('preserves journal-only human, agent, external, platform and unknown authors and keeps conflicts unknown', () => {
