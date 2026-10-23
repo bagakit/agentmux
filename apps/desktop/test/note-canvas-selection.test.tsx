@@ -23,9 +23,8 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
-import { installNoteCanvasBlockRows } from './helpers/note-canvas-block-dom'
 
-const dom = composerDOM(), scope = { kind: 'note', noteId: 'target' } as const
+const dom = composerDOM(), scope = { kind: 'notebook', notebookId: 'default' } as const
 let directory: string, store: AgentMuxNotebookStore
 const body = (id: string, text: string, references = false) => serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: id, content: { type: 'doc', content: [
   { type: 'paragraph', attrs: { blockId: id + '-block', provenance: { created: { actor: { kind: 'agent', id: 'ExactResearchSession' }, at: _tailRefreshFixtureEpoch(0, 1) }, lastEdited: { actor: { kind: 'agent', id: 'ExactResearchSession' }, at: _tailRefreshFixtureEpoch(0, 1) } } }, content: [{ type: 'text', text }] },
@@ -78,27 +77,25 @@ async function selectedFixture() {
   ] }] } }))
 }
 const targetCard = () => dom.container.querySelector('.react-flow__node[data-id="target"]')!
-const sourceCard = () => dom.container.querySelector('.react-flow__node[data-id="closed-source"]')!
+const targetBlockNodes = () => [...dom.container.querySelectorAll<HTMLElement>('.note-canvas-block-node[data-note-id="target"]')]
+const sourceBlockNodes = () => [...dom.container.querySelectorAll<HTMLElement>('.note-canvas-block-node[data-note-id="closed-source"]')]
 
 it('selects only the three original default-outside occurrences, compares each target with one shared source, and opens exact originals without more IO or layout changes', async () => {
   await selectedFixture()
-  const geometry = installNoteCanvasBlockRows()
-  Object.assign(geometry.rows, { 'long-source': 130, ...Object.fromEntries(Array.from({ length: 6 }, (_, i) => ['target-' + i, 120 + i * 30])) })
   const open = vi.fn()
   const draft = { path: 'closed-source.note.md', revision: 'unsaved', content: body('closed-source', 'My unsaved editor must remain') }
   useAppStore.setState({ documents: { 'notes\0closed-source.note.md': draft }, dirtyDocuments: { 'notes\0closed-source.note.md': true } })
-  await dom.render(<NoteCanvas scope={scope} onOpen={open} />); await ready()
-  await vi.waitFor(() => expect(targetCard().querySelector('[data-block-id="target-2"]')).not.toBeNull())
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={open} />); await ready()
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-block-node[data-note-id="target"][data-block-node-id="target-2"]')).not.toBeNull())
   await vi.waitFor(() => expect(api.notebooks.content).toHaveBeenCalledTimes(2))
-  expect(targetCard().querySelector('[data-block-id="target-5"]')).toBeNull()
+  expect(dom.container.querySelector('.note-canvas-block-node[data-note-id="target"][data-block-node-id="target-5"]')).toBeNull()
   const summary = () => dom.container.querySelector<HTMLButtonElement>('.note-canvas-edge-label[data-target-kind="block"][data-target-attachment="summary"]')
   await vi.waitFor(() => { expect(summary()).not.toBeNull(); expect(summary()!.getAttribute('aria-label')).toContain('3 links') })
   const layout = structuredClone(useAppStore.getState().noteCanvasLayouts[noteCanvasScopeKey(scope)])
   await act(async () => summary()!.click())
-  await vi.waitFor(() => expect(targetCard().querySelectorAll('[data-note-selected-block]')).toHaveLength(3))
-  expect([...targetCard().querySelectorAll<HTMLElement>('[data-note-selected-block]')].map(node => node.dataset.noteSelectedBlock)).toEqual(['target-3', 'target-4', 'target-5'])
-  expect(targetCard().querySelector('.mobile-note-body [data-block-id]')?.getAttribute('data-block-id')).toBe('target-3')
-  await vi.waitFor(() => expect(sourceCard().querySelector('[data-note-selected-block="long-source"]')).not.toBeNull())
+  await vi.waitFor(() => expect(targetBlockNodes().flatMap(node => [...node.querySelectorAll<HTMLElement>('[data-note-selected-block]')])).toHaveLength(3))
+  expect(targetBlockNodes().flatMap(node => [...node.querySelectorAll<HTMLElement>('[data-note-selected-block]')]).map(node => node.dataset.noteSelectedBlock)).toEqual(['target-3', 'target-4', 'target-5'])
+  await vi.waitFor(() => expect(sourceBlockNodes().some(node => node.querySelector('[data-note-selected-block="long-source"]'))).toBe(true))
   const inspector = dom.container.querySelector('.note-canvas-inspector')!
   await vi.waitFor(() => expect(inspector.querySelectorAll('.note-canvas-comparison-to')).toHaveLength(3))
   expect(inspector.querySelectorAll('.note-canvas-comparison-from')).toHaveLength(1)
@@ -121,13 +118,13 @@ it('selects only the three original default-outside occurrences, compares each t
 
 it('keeps page targets whole and highlights their header without selecting an arbitrary original first block', async () => {
   await selectedFixture()
-  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
-  await vi.waitFor(() => expect(targetCard().querySelector('.note-canvas-reader')).not.toBeNull())
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} />); await ready()
+  await vi.waitFor(() => expect(targetBlockNodes().length).toBeGreaterThan(0))
   const page = dom.container.querySelector<HTMLButtonElement>('.note-canvas-edge-label[data-target-kind="page"]')!
   await act(async () => page.click())
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-whole-page')?.textContent).toContain('Whole page · no specific block'))
   expect(targetCard().querySelector('article')?.getAttribute('data-page-selected')).toBe('true')
-  expect(targetCard().querySelector('[data-note-selected-block]')).toBeNull()
+  expect(targetBlockNodes().flatMap(node => [...node.querySelectorAll('[data-note-selected-block]')])).toHaveLength(0)
   expect(dom.container.querySelector('.note-canvas-comparison-to .note-canvas-reader')).toBeNull()
   expect(api.notebooks.content).toHaveBeenCalledTimes(2)
 })
@@ -137,7 +134,7 @@ it('does not silently rebind a selected stored occurrence when its original refe
   const original = noteFromMarkdown(await readFile(join(directory, 'closed-source.note.md'), 'utf8'))
   original.content.content![0]!.content = [link('same-reference', 'target', 'target-3')]
   await writeFile(join(directory, 'closed-source.note.md'), serializeNoteDocument(original))
-  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} />); await ready()
   await dom.click('.note-canvas-edge-label[data-target-kind="block"]')
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-comparison-to')?.textContent).toContain('Exact target content 3'))
   original.content.content![0]!.content = [link('same-reference', 'target', 'target-4')]
@@ -145,19 +142,21 @@ it('does not silently rebind a selected stored occurrence when its original refe
   await dom.click('[aria-label="Refresh saved graph"]')
   await vi.waitFor(() => { const status = dom.container.querySelector('.note-canvas-inspector [role="status"]'); expect(status).not.toBeNull(); expect(status!.textContent).toContain('selected original occurrence is no longer') })
   expect(dom.container.querySelector('.note-canvas-inspector ol')).toBeNull()
-  expect(targetCard().querySelector('[data-note-selected-block]')).toBeNull()
+  expect(targetBlockNodes().flatMap(node => [...node.querySelectorAll('[data-note-selected-block]')])).toHaveLength(0)
   await dom.click('.note-canvas-edge-label[data-target-kind="block"]')
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-comparison-to')?.textContent).toContain('Exact target content 4'))
 })
 
 it('reports partial expiry and keeps only unchanged original occurrences instead of selecting another aggregate candidate', async () => {
   await selectedFixture()
-  const content = { schema: 'agentmux.note.v1', noteId: 'closed-source', content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'long-source' }, content: [link('kept', 'target', 'target-3'), link('changed', 'target', 'target-4')] }] } }
+  const baseLinks = [0, 1, 2].map(i => link('base-' + i, 'target', 'target-' + i))
+  const content = { schema: 'agentmux.note.v1', noteId: 'closed-source', content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'long-source' }, content: [...baseLinks, link('kept', 'target', 'target-3'), link('changed', 'target', 'target-4')] }] } }
   await writeFile(join(directory, 'closed-source.note.md'), serializeNoteDocument(content as Parameters<typeof serializeNoteDocument>[0]))
-  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
-  await dom.click('.note-canvas-edge-label[data-target-kind="block"]')
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} />); await ready()
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-edge-label[data-target-kind="block"][data-target-attachment="summary"]')).not.toBeNull())
+  await dom.click('.note-canvas-edge-label[data-target-kind="block"][data-target-attachment="summary"]')
   await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-comparison-to')).toHaveLength(2))
-  content.content.content![0]!.content[1] = link('changed', 'target', 'target-5')
+  content.content.content![0]!.content[4] = link('changed', 'target', 'target-5')
   await writeFile(join(directory, 'closed-source.note.md'), serializeNoteDocument(content as Parameters<typeof serializeNoteDocument>[0]))
   await dom.click('[aria-label="Refresh saved graph"]')
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-inspector [role="status"]')?.textContent).toContain('1 selected occurrence changed or disappeared. 1 unchanged occurrence remain selected.'))
@@ -172,18 +171,16 @@ it('keeps More for uncovered original roots when selection is a descendant alrea
     { type: 'orderedList', attrs: { start: 4 }, content: [parent] }, ...Array.from({ length: 3 }, (_, i) => paragraph('other-' + i, 'Other root ' + i)),
   ] } }))
   await writeFile(join(directory, 'closed-source.note.md'), serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'closed-source', content: { type: 'doc', content: ['selected-child', 'parent-item', 'other-0', 'other-1', 'other-2'].map((id, i) => ({ type: 'paragraph', attrs: { blockId: 'source-' + i }, content: [link('link-' + i, 'target', id)] })) } }))
-  const geometry = installNoteCanvasBlockRows()
-  Object.assign(geometry.rows, { 'selected-child': 150, 'parent-item': 140, 'other-0': 200, 'other-1': 230, 'other-2': 260, 'source-0': 130, 'source-1': 180, 'source-2': 230 })
-  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} />); await ready()
   await vi.waitFor(() => expect(targetCard().querySelector('.note-canvas-more')?.textContent).toBe('More 1 related blocks'))
   const exact = () => dom.container.querySelector<HTMLButtonElement>('.note-canvas-edge-label[data-target-block="selected-child"]')
   await vi.waitFor(() => expect(exact()).not.toBeNull())
   await act(async () => exact()!.click())
-  await vi.waitFor(() => expect(targetCard().querySelector('[data-note-selected-block="selected-child"]')).not.toBeNull())
+  await vi.waitFor(() => expect(targetBlockNodes().some(node => node.querySelector('[data-note-selected-block="selected-child"]'))).toBe(true))
   expect(targetCard().querySelector('.note-canvas-more')?.textContent).toBe('More 1 related blocks')
-  expect(targetCard().querySelector('[data-block-id="other-2"]')).toBeNull()
+  expect(dom.container.querySelector('.note-canvas-block-node[data-note-id="target"][data-block-node-id="other-2"]')).toBeNull()
   await act(async () => targetCard().querySelector<HTMLButtonElement>('.note-canvas-more')!.click())
-  await vi.waitFor(() => expect(targetCard().querySelector('[data-block-id="other-2"]')).not.toBeNull())
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-block-node[data-note-id="target"][data-block-node-id="other-2"]')).not.toBeNull())
   expect(api.notebooks.content).toHaveBeenCalledTimes(2)
 })
 

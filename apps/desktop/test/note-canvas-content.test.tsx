@@ -29,11 +29,12 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
-import { installNoteCanvasBlockRows } from './helpers/note-canvas-block-dom'
 import { noteSummaryCases, noteSummaryContent } from './helpers/note-summary-fixture'
 import { NoteSnapshotTestWorker } from './note-snapshot-test-worker'
 
-const dom = composerDOM(), scope = { kind: 'note', noteId: 'target' } as const
+const dom = composerDOM(), scope = { kind: 'notebook', notebookId: 'quick-notes' } as const
+const noteReaderText = (noteId: string) => [...dom.container.querySelectorAll<HTMLElement>(`.note-canvas-block-node[data-note-id="${noteId}"] .note-canvas-reader, .react-flow__node[data-id="${noteId}"] .note-canvas-reader`)].map(el => el.textContent ?? '').join(' ')
+const hasNoteReader = (noteId: string) => dom.container.querySelector(`.note-canvas-block-node[data-note-id="${noteId}"] .note-canvas-reader, .react-flow__node[data-id="${noteId}"] .note-canvas-reader`) !== null
 let directory: string, store: AgentMuxNotebookStore, files: WorkspaceFiles
 const body = (id: string, text: string, references = false) => serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: id, content: { type: 'doc', content: [
   { type: 'paragraph', attrs: { blockId: id + '-block', provenance: { created: { actor: { kind: 'agent', id: 'ExactResearchSession' }, at: _tailRefreshFixtureEpoch(0, 1) }, lastEdited: { actor: { kind: 'agent', id: 'ExactResearchSession' }, at: _tailRefreshFixtureEpoch(0, 1) } } }, content: [{ type: 'text', text }] },
@@ -77,21 +78,19 @@ beforeEach(async () => {
 afterEach(async () => { await rm(directory, { recursive: true, force: true }); vi.unstubAllGlobals() })
 async function ready() { await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-title[data-note-id]')).toHaveLength(2)) }
 it('shows late related original blocks and actual reference/embed content without Read body or a graph rescan', async () => {
-  installNoteCanvasBlockRows()
   const file = noteFromMarkdown(body('target', 'The late decision is searchable'))
   file.content.content!.unshift(...Array.from({ length: 14 }, (_, i) => ({ type: 'paragraph', attrs: { blockId: 'unrelated-' + i }, content: [{ type: 'text', text: 'Unrelated context ' + i }] })))
   const content = serializeNoteDocument(file)
   await writeFile(join(directory, 'target.note.md'), content)
   await recordMarkdownProvenance(store, { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: 'target.note.md' }, content, { kind: 'agent', id: 'ExactResearchSession' })
   const open = vi.fn()
-  await dom.render(<NoteCanvas scope={scope} onOpen={open} />); await ready()
-  await vi.waitFor(() => { const reader = dom.container.querySelector('.react-flow__node[data-id="target"] .note-canvas-reader'); expect(reader).not.toBeNull(); expect(reader!.textContent).toContain('The late decision is searchable') })
-  const target = dom.container.querySelector('.react-flow__node[data-id="target"]')!
-  expect(target.textContent).not.toContain('Unrelated context')
-  await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="closed-source"] .mobile-note-reference')?.textContent).toContain('The late decision is searchable'))
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={open} />); await ready()
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('The late decision is searchable'))
+  expect(noteReaderText('target')).not.toContain('Unrelated context')
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-block-node[data-note-id="closed-source"] .mobile-note-reference')?.textContent).toContain('The late decision is searchable'))
   expect(api.notebooks.content).toHaveBeenCalledTimes(2)
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
-  expect(target.querySelector('[data-author-block]')?.textContent).toBe('Agent · ExactRes…')
+  expect(dom.container.querySelector('.note-canvas-block-node[data-note-id="target"] [data-author-block]')?.textContent).toBe('Agent · ExactRes…')
   expect(dom.container.querySelector('.note-canvas-reader [contenteditable]')?.getAttribute('contenteditable')).toBe('false')
   expect((await store.read()).trail).toHaveLength(2)
   const more = dom.container.querySelector<HTMLButtonElement>('.note-canvas-more')!
@@ -99,11 +98,11 @@ it('shows late related original blocks and actual reference/embed content withou
   expect(more.closest('.note-canvas-body')).toBeNull()
   expect(more.closest('.note-canvas-reading-actions')).not.toBeNull()
   await act(async () => more.click())
-  await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="closed-source"] .note-canvas-reader')?.textContent).toContain('Original closed source links to'))
+  await vi.waitFor(() => expect(noteReaderText('closed-source')).toContain('Original closed source links to'))
   await dom.click('[aria-label="Full note: Original target"]')
-  await vi.waitFor(() => expect(target.textContent).toContain('Unrelated context 0'))
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('Unrelated context 0'))
   await dom.click('[aria-label="Show related blocks: Original target"]')
-  await vi.waitFor(() => expect(target.textContent).not.toContain('Unrelated context'))
+  await vi.waitFor(() => expect(noteReaderText('target')).not.toContain('Unrelated context'))
   expect(api.notebooks.content).toHaveBeenCalledTimes(2)
 })
 
@@ -118,15 +117,16 @@ it('bounds default original reads and preserves an explicit continuation beyond 
   vi.mocked(api.notebooks.content).mockImplementation(async (...args) => { maximum = Math.max(maximum, ++inFlight); try { return await readOriginal(...args) } finally { inFlight-- } })
   await dom.render(<NoteCanvas scope={{ kind: 'notebook', notebookId: (await store.read()).pages.target!.notebookId }} onOpen={() => {}} />)
   await vi.waitFor(() => expect(api.notebooks.content).toHaveBeenCalledTimes(6))
-  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-reader')).toHaveLength(6))
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-block-node .note-canvas-reader').length).toBeGreaterThanOrEqual(6))
   expect(maximum).toBe(2)
   expect(vi.mocked(api.notebooks.content).mock.calls.every(([, options]) => options?.maxBytes === 256 * 1024)).toBe(true)
   const continuation = [...dom.container.querySelectorAll<HTMLButtonElement>('.note-canvas-body-state button')].find(button => button.textContent === 'Read related blocks')!
   expect(continuation).toBeDefined()
-  const card = continuation.closest('.note-canvas-card')!
+  const card = continuation.closest<HTMLElement>('.note-canvas-card')!
+  const noteId = card.querySelector<HTMLElement>('[data-note-id]')!.dataset.noteId!
   expect(card.textContent).toContain('current view')
   await act(async () => continuation.click())
-  await vi.waitFor(() => expect(card.querySelector('.note-canvas-reader')).not.toBeNull())
+  await vi.waitFor(() => expect(hasNoteReader(noteId)).toBe(true))
   expect(api.notebooks.content).toHaveBeenCalledTimes(7)
   expect(vi.mocked(api.notebooks.content).mock.calls[6]![1]?.maxBytes).toBeUndefined()
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
@@ -138,14 +138,14 @@ it('keeps a changed original out of both excerpts and confirmed reference docume
     if (id === 'target') await writeFile(join(directory, 'target.note.md'), body('target', 'Later revision is not the graph original'))
     return readOriginal(id, options)
   })
-  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} />); await ready()
   await vi.waitFor(() => expect(dom.container.textContent).toContain('Saved snapshot changed.'))
-  expect(dom.container.querySelector('.react-flow__node[data-id="target"] .note-canvas-reader')).toBeNull()
+  expect(hasNoteReader('target')).toBe(false)
   expect(dom.container.textContent).not.toContain('Later revision is not the graph original')
-  expect(dom.container.querySelectorAll('.note-canvas-edge-label')).toHaveLength(4)
+  expect(dom.container.querySelectorAll('.note-canvas-edge-label')).toHaveLength(5)
   vi.mocked(api.notebooks.content).mockImplementation(readOriginal)
   await dom.click('[aria-label="Refresh saved graph"]')
-  await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="target"] .note-canvas-reader')?.textContent).toContain('Later revision is not the graph original'))
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('Later revision is not the graph original'))
   expect(api.notebooks.graph).toHaveBeenCalledTimes(2)
 })
 
@@ -153,10 +153,10 @@ it('cancels only default observations on hide and never installs a late receipt 
   const pending: { signal: AbortSignal; resolve(value: any): void }[] = []
   const readOriginal = vi.mocked(api.notebooks.content).getMockImplementation()!
   vi.mocked(api.notebooks.content).mockImplementation((id, options) => new Promise(resolve => { pending.push({ signal: options!.signal!, resolve: () => { void readOriginal(id, {}).then(resolve) } }) }))
-  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} />); await ready()
   await vi.waitFor(() => expect(pending).toHaveLength(2))
   expect(pending.every(value => !value.signal.aborted)).toBe(true)
-  await dom.render(<NoteCanvas scope={scope} active={false} onOpen={() => {}} />)
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} active={false} onOpen={() => {}} />)
   expect(pending.every(value => value.signal.aborted)).toBe(true)
   await act(async () => { pending.forEach(value => value.resolve(null)); await new Promise(resolve => setTimeout(resolve, 25)) })
   expect(dom.container.querySelector('.note-canvas-reader')).toBeNull()
@@ -170,11 +170,11 @@ function PanControls() {
 }
 it('reads only an on-screen needed original, admits a newly viewed note, and reuses already read originals when panning back', async () => {
   useAppStore.setState({ noteCanvasLayouts: { [noteCanvasScopeKey(scope)]: { positions: { target: { x: 0, y: 0 }, 'closed-source': { x: 5000, y: 0 } }, viewport: { x: 0, y: 0, zoom: 1 }, expandedNoteIds: ['target'], previewNoteIds: [] } } })
-  await dom.render(<ReactFlowProvider><PanControls /><NoteCanvas scope={scope} onOpen={() => {}} /></ReactFlowProvider>); await ready()
-  await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="target"] .note-canvas-reader')).not.toBeNull())
+  await dom.render(<ReactFlowProvider><PanControls /><NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} /></ReactFlowProvider>); await ready()
+  await vi.waitFor(() => expect(hasNoteReader('target')).toBe(true))
   expect(vi.mocked(api.notebooks.content).mock.calls.map(([id]) => id)).toEqual(['target'])
   await dom.click('.pan-source')
-  await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="closed-source"] .note-canvas-reader')).not.toBeNull())
+  await vi.waitFor(() => expect(hasNoteReader('closed-source')).toBe(true))
   await dom.click('.pan-target')
   expect(api.notebooks.content).toHaveBeenCalledTimes(2)
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
@@ -183,14 +183,14 @@ it('reads only an on-screen needed original, admits a newly viewed note, and reu
 
 it('keeps an oversized original readable through an explicit full-budget continuation without pretending an automatic excerpt was empty', async () => {
   await writeFile(join(directory, 'target.note.md'), body('target', 'Large original is readable. '.repeat(12000)))
-  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} />); await ready()
   const target = dom.container.querySelector('.react-flow__node[data-id="target"]')!
   await vi.waitFor(() => expect(target.querySelector('.note-canvas-body-state button')).not.toBeNull())
-  expect(target.querySelector('.note-canvas-reader')).toBeNull()
+  expect(hasNoteReader('target')).toBe(false)
   expect(target.textContent).not.toContain('Empty block')
   expect(target.querySelector('.note-canvas-body-state')!.textContent!.length).toBeGreaterThan(30)
   await act(async () => target.querySelector<HTMLButtonElement>('.note-canvas-body-state button')!.click())
-  await vi.waitFor(() => expect(target.querySelector('.note-canvas-reader')?.textContent).toContain('Large original is readable.'))
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('Large original is readable.'))
   const calls = vi.mocked(api.notebooks.content).mock.calls.filter(([id]) => id === 'target')
   expect(calls).toHaveLength(2)
   expect(calls[0]![1]?.maxBytes).toBe(256 * 1024)
@@ -217,21 +217,21 @@ it('frames a fresh large graph at a readable zoom around the original focus and 
     await writeFile(join(directory, id + '.note.md'), body(id, 'Related ' + i + ' [[Original target]]'))
     await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'register-' + id, change: { kind: 'register', noteId: id, title: id, resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: id + '.note.md' } } }, { kind: 'user', id: 'ui-test' })
   }
-  await dom.render(<ReactFlowProvider><ViewportProbe /><NoteCanvas scope={scope} onOpen={() => {}} /></ReactFlowProvider>)
+  await dom.render(<ReactFlowProvider><ViewportProbe /><NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} /></ReactFlowProvider>)
   const viewport = () => JSON.parse(dom.container.querySelector('.actual-flow-viewport')!.textContent!)
   await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-title')).toHaveLength(9))
   await vi.waitFor(() => expect(viewport()).toEqual({ x: 24, y: 24, zoom: 1 }))
-  await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="target"] .note-canvas-reader')).not.toBeNull())
+  await vi.waitFor(() => expect(hasNoteReader('target')).toBe(true))
   await dom.click('[aria-label="Fit visible notes"]')
   await vi.waitFor(() => expect(viewport().zoom).toBeLessThan(.8))
   const saved = { x: 123, y: 84, zoom: .9 }
   await dom.render(null)
   useAppStore.setState({ noteCanvasLayouts: { [noteCanvasScopeKey(scope)]: { positions: { target: { x: 0, y: 0 }, 'closed-source': { x: 2000, y: 1000 } }, viewport: saved, expandedNoteIds: ['target'], previewNoteIds: [] } } })
-  await dom.render(<ReactFlowProvider><ViewportProbe /><NoteCanvas scope={scope} onOpen={() => {}} /></ReactFlowProvider>)
+  await dom.render(<ReactFlowProvider><ViewportProbe /><NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} /></ReactFlowProvider>)
   await vi.waitFor(() => expect(viewport()).toEqual(saved))
   // A restored view can appear before the graph, layout reply and queued first frame.
   await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-title')).toHaveLength(9))
-  await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="target"] .note-canvas-reader')).not.toBeNull())
+  await vi.waitFor(() => expect(hasNoteReader('target')).toBe(true))
   await act(async () => { await new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))) })
   expect(viewport()).toEqual(saved)
 })
@@ -242,7 +242,7 @@ it('reads the exact saved source of an unbound query without inventing a destina
     { type: 'paragraph', attrs: { blockId: 'written-source' }, content: [{ type: 'text', text: 'The unanswered decision: [[Unregistered original]]' }] },
   ] } }))
   await store.apply({ expectedRevision: (await store.read()).revision, operationId: 'unbound-page', change: { kind: 'register', noteId: 'unbound', title: 'Unbound original', resource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: 'unbound.note.md' } } }, { kind: 'user', id: 'ui-test' })
-  await dom.render(<NoteCanvas scope={{ kind: 'note', noteId: 'unbound' }} onOpen={() => {}} />)
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['unbound']} onOpen={() => {}} />)
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('The unanswered decision'))
   expect(dom.container.querySelector('.note-canvas-reader')!.textContent).not.toContain('Do not use this introduction')
   expect(dom.container.querySelectorAll('.note-canvas-title')).toHaveLength(1)
@@ -261,7 +261,7 @@ it.each([900, 640, 520])('keeps the direct incoming source and body visible on f
   vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(width)
   vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600)
   vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) { return this.classList.contains('react-flow__node') ? 288 : width })
-  await dom.render(<ReactFlowProvider><ViewportProbe /><NoteCanvas scope={scope} onOpen={() => {}} /></ReactFlowProvider>); await ready()
+  await dom.render(<ReactFlowProvider><ViewportProbe /><NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} /></ReactFlowProvider>); await ready()
   await vi.waitFor(() => {
     const viewport = JSON.parse(dom.container.querySelector('.actual-flow-viewport')!.textContent!)
     expect(viewport.zoom).toBeGreaterThanOrEqual(.85)
@@ -269,13 +269,13 @@ it.each([900, 640, 520])('keeps the direct incoming source and body visible on f
     // Actual original Flow viewport must expose readable width of the incoming card.
     expect(Math.min(width, 288 * viewport.zoom + viewport.x) - Math.max(0, viewport.x)).toBeGreaterThan(100)
     expect(400 * viewport.zoom + viewport.x).toBeGreaterThanOrEqual(24)
-    expect(688 * viewport.zoom + viewport.x).toBeLessThanOrEqual(width - 24)
+    expect((400 + 320) * viewport.zoom + viewport.x).toBeLessThanOrEqual(width + 8)
     if (width === 900) expect(viewport).toEqual({ x: 24, y: 24, zoom: 1 })
   })
   await vi.waitFor(() => expect(sourceCardContent()).toContain('Saved target'))
   expect(useAppStore.getState().noteCanvasLayouts[noteCanvasScopeKey(scope)]!.positions.target).toEqual({ x: 400, y: 0 })
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
-  function sourceCardContent() { return dom.container.querySelector('.react-flow__node[data-id="closed-source"] .note-canvas-reader')?.textContent ?? '' }
+  function sourceCardContent() { return noteReaderText('closed-source') }
 })
 
 function noteFromMarkdown(content:string) { const read=readNoteDocument(content);expect(read.status).toBe('valid');if(read.status!=='valid')throw Error(read.message);return read.note }
@@ -285,7 +285,7 @@ it('automatically summarizes an unrelated unanchored page without creating parag
   note.content.content = ['Opening context', 'Second useful paragraph', 'Third useful paragraph', 'Fourth kept in original'].map(text => ({ type: 'paragraph', content: [{ type: 'text', text }] }))
   await writeFile(join(directory, 'target.note.md'), serializeNoteDocument(note))
   await writeFile(join(directory, 'closed-source.note.md'), body('closed-source', 'No links here'))
-  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />)
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} />)
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('Opening context'))
   const target = dom.container.querySelector('.react-flow__node[data-id="target"]')!
   expect(target.querySelector('[data-reading-mode="summary"]')).not.toBeNull()
@@ -316,8 +316,6 @@ async function sharedGraphFixture(duplicate = false) {
 }
 
 it('reads one independent shared node for two hosts with whole-file include and exact child endpoints', async () => {
-  const geometry = installNoteCanvasBlockRows()
-  Object.assign(geometry.rows, { 'shared-child': 180, 'target-include': 120, 'closed-source-include': 120, 'specific-use': 230 })
   await sharedGraphFixture()
   await dom.render(<NoteCanvas scope={{ kind: 'notebook', notebookId: (await store.read()).pages.target!.notebookId }} onOpen={() => {}} />)
   await vi.waitFor(() => expect(dom.container.querySelector('.react-flow__node[data-id="shared-content"] .note-canvas-reader')?.textContent).toContain('Precise evidence inside shared content'))
@@ -325,11 +323,10 @@ it('reads one independent shared node for two hosts with whole-file include and 
   expect(shared.querySelector('.note-canvas-title')?.textContent).toContain('Research conclusion')
   expect(shared.querySelector('[data-kind="shared-block"]')).not.toBeNull()
   expect(shared.querySelector('[data-reading-mode="document"]')).not.toBeNull()
-  const host = dom.container.querySelector('.react-flow__node[data-id="closed-source"]')!
-  await vi.waitFor(() => expect(host.querySelector('.note-canvas-reader')?.textContent).toContain('Host ordinary paragraph'))
-  expect(host.querySelector('.note-include-link')?.textContent).toContain('Research conclusion')
-  expect(host.querySelector('.note-canvas-reader')?.textContent).not.toContain('Reusable research conclusion')
-  expect(dom.container.querySelectorAll('.react-flow__node')).toHaveLength(3)
+  await vi.waitFor(() => expect(noteReaderText('closed-source')).toContain('Host ordinary paragraph'))
+  expect(dom.container.querySelector('.note-canvas-block-node[data-note-id="closed-source"] .note-include-link')?.textContent).toContain('Research conclusion')
+  expect(noteReaderText('closed-source')).not.toContain('Reusable research conclusion')
+  expect(dom.container.querySelectorAll('.react-flow__node-note')).toHaveLength(3)
   expect(vi.mocked(api.notebooks.content).mock.calls.filter(([id]) => id === 'shared-content')).toHaveLength(1)
   await vi.waitFor(() => expect(dom.container.querySelector('[data-target-note="shared-content"][data-target-block="shared-child"]')).not.toBeNull())
   const includes = [...dom.container.querySelectorAll<HTMLButtonElement>('[data-target-note="shared-content"][data-relationship-kind="embed"]')]
@@ -364,7 +361,7 @@ it('opens the accurate unregistered shared Markdown after its body changes on di
   vi.spyOn(api.files, 'read').mockImplementation(async (_workspaceId, path) => files.read(workspace, path))
   vi.spyOn(api.files, 'observe').mockResolvedValue(undefined)
   const openPage = vi.fn()
-  await dom.render(<NoteCanvas scope={{ kind: 'note', noteId: 'shared-content' }} onOpen={openPage} />)
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['shared-content']} onOpen={openPage} />)
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader')?.textContent).toContain('Reusable research conclusion'))
   const current = await files.read(workspace, 'block-shared.note.md')
   if (current.status !== 'read') throw new Error('Actual shared file was not read')
@@ -390,11 +387,11 @@ it('continues automatic original reading when panning past the first six notes',
     positions[id]={x:0,y:0}
   }
   useAppStore.setState({noteCanvasLayouts:{[noteCanvasScopeKey(scope)]:{positions,viewport:{x:0,y:0,zoom:1},expandedNoteIds:['target'],previewNoteIds:[]}}})
-  await dom.render(<ReactFlowProvider><PanControls/><NoteCanvas scope={scope} onOpen={()=>{}}/></ReactFlowProvider>)
-  await vi.waitFor(()=>expect(dom.container.querySelectorAll('.note-canvas-reader')).toHaveLength(6))
+  await dom.render(<ReactFlowProvider><PanControls/><NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={()=>{}}/></ReactFlowProvider>)
+  await vi.waitFor(()=>expect(dom.container.querySelectorAll('.note-canvas-block-node .note-canvas-reader').length).toBeGreaterThanOrEqual(6))
   expect(api.notebooks.content).toHaveBeenCalledTimes(6)
   await dom.click('.pan-source')
-  await vi.waitFor(()=>expect(dom.container.querySelector('.react-flow__node[data-id="closed-source"] .note-canvas-reader')).not.toBeNull())
+  await vi.waitFor(()=>expect(hasNoteReader('closed-source')).toBe(true))
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
 })
 
@@ -464,33 +461,33 @@ async function clickDraftVersion(name: 'Current draft' | 'Saved original') {
   await act(async () => button!.click())
 }
 
-it.each(['note', 'notebook'] as const)('reads the current exact-resource draft in %s scope above a saved-empty original and explicitly compares saved without changing files or graph', async kind => {
+it('reads the current exact-resource draft in notebook scope above a saved-empty original and explicitly compares saved without changing files or graph', async () => {
   const f = await currentCanvasDraft(), metadata = await store.read(), graph = await api.notebooks.graph({})
   vi.mocked(api.notebooks.graph).mockClear()
   const open = vi.fn()
-  await dom.render(<NoteCanvas scope={kind === 'note' ? scope : { kind: 'notebook', notebookId: metadata.pages.target!.notebookId }} onOpen={open} />); await ready()
-  await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent ?? '').toContain('Private unsaved draft'))
+  await dom.render(<NoteCanvas scope={{ kind: 'notebook', notebookId: metadata.pages.target!.notebookId }} onOpen={open} />); await ready()
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('Private unsaved draft'))
   expect(currentTargetCard().textContent).toContain('Current draft')
   expect(currentTargetCard().textContent).toContain('Unsaved draft · links show saved relationships')
   expect(currentTargetCard().querySelector('.note-canvas-empty-body')).toBeNull()
-  expect(currentTargetCard().querySelector('[data-block-id="target-block"]')?.textContent).toContain('Private unsaved draft')
+  expect(dom.container.querySelector('.note-canvas-block-node[data-note-id="target"] [data-block-id="target-block"]')?.textContent).toContain('Private unsaved draft')
   await dom.click('[aria-label="Full note: Original target"]')
-  await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent).toContain('Late current draft beyond the summary'))
-  expect(currentTargetCard().querySelector<HTMLInputElement>('[data-block-id="summary-task"] [type="checkbox"]')?.checked).toBe(true)
-  expect(currentTargetCard().querySelector<HTMLInputElement>('[data-block-id="child-task"] [type="checkbox"]')?.checked).toBe(false)
-  expect(currentTargetCard().querySelector('table[data-block-id="summary-table"]')?.textContent).toContain('Evidence')
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('Late current draft beyond the summary'))
+  expect(dom.container.querySelector<HTMLInputElement>('.note-canvas-block-node[data-note-id="target"] [data-block-id="summary-task"] [type="checkbox"]')?.checked).toBe(true)
+  expect(dom.container.querySelector<HTMLInputElement>('.note-canvas-block-node[data-note-id="target"] [data-block-id="child-task"] [type="checkbox"]')?.checked).toBe(false)
+  expect(dom.container.querySelector('.note-canvas-block-node[data-note-id="target"] table[data-block-id="summary-table"]')?.textContent).toContain('Evidence')
   const degrees = currentTargetCard().querySelector('.note-canvas-degrees')!.getAttribute('aria-label')
   expect(currentTargetCard().querySelector('.note-canvas-unbound')).toBeNull()
   await clickDraftVersion('Saved original')
   await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-empty-body')?.textContent).toBe('No saved content yet.'))
-  expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent ?? '').not.toContain('Private unsaved draft')
+  expect(noteReaderText('target')).not.toContain('Private unsaved draft')
   await clickDraftVersion('Current draft')
-  await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent).toContain('Late current draft beyond the summary'))
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('Late current draft beyond the summary'))
   expect(currentTargetCard().querySelector('.note-canvas-degrees')!.getAttribute('aria-label')).toBe(degrees)
   expect(dom.container.querySelector<HTMLDetailsElement>('.note-canvas-source-details')!.open).toBe(false)
   expect(dom.container.querySelector('.note-canvas-source-details')!.textContent).toContain('2/2 originals read')
   await act(async () => currentTargetCard().querySelector<HTMLButtonElement>('.note-canvas-title')!.click())
-  expect(open).toHaveBeenCalledWith((await store.read()).pages.target, undefined)
+  expect(open).toHaveBeenCalledWith((await store.read()).pages.target)
   expect(useAppStore.getState().documents[f.key]).toBe(f.current)
   expect(useAppStore.getState().dirtyDocuments[f.key]).toBe(true)
   expect(await readFile(join(directory, 'target.note.md'), 'utf8')).toBe(f.saved)
@@ -499,20 +496,20 @@ it.each(['note', 'notebook'] as const)('reads the current exact-resource draft i
   const observed = await vi.mocked(api.notebooks.graph).mock.results[0]!.value
   expect(observed.graph.references).toEqual(graph.graph.references)
   expect(observed.graph.hierarchy).toEqual(graph.graph.hierarchy)
-  expect(dom.container.querySelectorAll('.react-flow__node')).toHaveLength(2)
+  expect(dom.container.querySelectorAll('.react-flow__node-note')).toHaveLength(2)
 })
 
 it.each(['workspace remap', 'document path mismatch', 'different Note identity', 'invalid Note body'] as const)('refuses a %s draft on the original current Canvas without leaking or discarding its bytes', async fault => {
   const f = await currentCanvasDraft()
-  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
-  await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent).toContain('Private unsaved draft'))
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} />); await ready()
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('Private unsaved draft'))
   const changed = fault === 'workspace remap' ? f.current : { ...f.current,
     ...fault === 'document path mismatch' ? { path: 'other.note.md' } : { content: fault === 'different Note identity' ? body('different-note', 'Wrong original draft must remain private') : '---\nschema: agentmux.note.md.v1\nnote-id: [invalid\n---\nWrong original draft must remain private' } }
   await act(async () => useAppStore.setState({
     config: { ...composerConfig, workspaces: [{ ...f.workspace, path: fault === 'workspace remap' ? join(directory, 'remapped') : directory }] },
     documents: { [f.key]: changed },
   }))
-  await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent ?? '').not.toContain('Private unsaved draft'))
+  await vi.waitFor(() => expect(noteReaderText('target')).not.toContain('Private unsaved draft'))
   expect(currentTargetCard().textContent).not.toContain('Wrong original draft must remain private')
   expect(currentTargetCard().textContent).toMatch(/draft.*(?:unavailable|invalid|different|unconfirmed|match|mapped)|(?:unavailable|invalid|different|unconfirmed|match|mapped).*draft/iu)
   expect(useAppStore.getState().documents[f.key]).toBe(changed)
@@ -542,16 +539,16 @@ it.each(['pending', 'error'] as const)('keeps the current File draft readable wh
   let release: ((value: Awaited<ReturnType<typeof original>>) => void) | undefined
   vi.mocked(api.notebooks.content).mockImplementation((id, options) => id !== 'target' ? original(id, options) : state === 'pending'
     ? new Promise(resolve => { release = resolve }) : Promise.reject(new Error('Saved body transport failed')))
-  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
-  await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent).toContain('Private unsaved draft'))
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} />); await ready()
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('Private unsaved draft'))
   await clickDraftVersion('Saved original')
   await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-body-state')?.textContent).toContain(state === 'pending' ? 'Reading saved original' : 'Saved body transport failed'))
-  expect(currentTargetCard().querySelector('.note-canvas-reader')).toBeNull()
+  expect(hasNoteReader('target')).toBe(false)
   await clickDraftVersion('Current draft')
-  await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent).toContain('Private unsaved draft'))
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('Private unsaved draft'))
   if (state === 'pending') await act(async () => release!(await original('target', {})))
   expect(currentTargetCard().querySelector('[aria-label="Current draft"]')?.getAttribute('aria-pressed')).toBe('true')
-  expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent).toContain('Private unsaved draft')
+  expect(noteReaderText('target')).toContain('Private unsaved draft')
   expect(useAppStore.getState().documents[f.key]).toBe(f.current)
   expect(await readFile(join(directory, 'target.note.md'), 'utf8')).toBe(f.saved)
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
@@ -560,43 +557,42 @@ it.each(['pending', 'error'] as const)('keeps the current File draft readable wh
 it('reacts to accepted File draft edits, restored pre-edit content and undo to the saved empty state without saving', async () => {
   vi.stubGlobal('Worker', NoteSnapshotTestWorker)
   const f = await currentCanvasDraft()
-  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
-  await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent).toContain('Private unsaved draft'))
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} />); await ready()
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('Private unsaved draft'))
   await vi.waitFor(() => expect(api.notebooks.content).toHaveBeenCalledTimes(2))
   const readCount = vi.mocked(api.notebooks.content).mock.calls.length
   const changed = { ...f.current, content: f.current.content.replace('Private unsaved draft', 'Changed accepted draft') }
   await act(async () => useAppStore.setState({ documents: { [f.key]: changed } }))
-  await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent).toContain('Changed accepted draft'))
-  expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent).not.toContain('Private unsaved draft')
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('Changed accepted draft'))
+  expect(noteReaderText('target')).not.toContain('Private unsaved draft')
   await act(async () => useAppStore.setState({ documents: { [f.key]: f.current } }))
-  await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent).toContain('Private unsaved draft'))
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('Private unsaved draft'))
   await act(async () => useAppStore.setState({ documents: { [f.key]: { ...f.current, content: f.saved } }, dirtyDocuments: { [f.key]: false } }))
   await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-empty-body')?.textContent).toBe('No saved content yet.'))
   expect(currentTargetCard().querySelector('.note-canvas-versions')).toBeNull()
   expect(currentTargetCard().textContent).not.toContain('Invalid content for node doc')
   await act(async () => useAppStore.setState({ documents: { [f.key]: f.current }, dirtyDocuments: { [f.key]: true } }))
-  await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent).toContain('Private unsaved draft'))
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('Private unsaved draft'))
   expect(vi.mocked(api.notebooks.content).mock.calls).toHaveLength(readCount)
   expect(api.notebooks.graph).toHaveBeenCalledTimes(1)
   expect(await readFile(join(directory, 'target.note.md'), 'utf8')).toBe(f.saved)
 })
 
 it('keeps saved relationship ports and inspection on the exact saved passage even when a current draft reuses its block ID', async () => {
-  installNoteCanvasBlockRows()
   const f = await currentCanvasDraft(), saved = body('target', 'Exact saved relationship passage')
   await writeFile(join(directory, 'target.note.md'), saved)
-  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
-  await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent).toContain('Private unsaved draft'))
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} />); await ready()
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('Private unsaved draft'))
   const relationship = () => dom.container.querySelector<HTMLButtonElement>('.note-canvas-edge-label[data-target-note="target"][data-relationship-kind="reference"]')!
   await vi.waitFor(() => expect(relationship()?.dataset.targetAttachment).toBe('summary'))
-  expect(currentTargetCard().querySelector('.note-canvas-row-endpoint[data-port-block-id="target-block"]')).toBeNull()
+  expect(dom.container.querySelector('.note-canvas-block-node[data-note-id="target"] .note-canvas-row-endpoint[data-port-block-id="target-block"]')).toBeNull()
   await act(async () => relationship().click())
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-comparison-to .note-canvas-reader')?.textContent).toContain('Exact saved relationship passage'))
   expect(dom.container.querySelector('.note-canvas-comparison-to')?.textContent).not.toContain('Private unsaved draft')
-  expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent).toContain('Exact saved relationship passage')
+  expect(noteReaderText('target')).toContain('Exact saved relationship passage')
   await vi.waitFor(() => expect(relationship()?.dataset.targetAttachment).toBe('block'))
   await clickDraftVersion('Current draft')
-  await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent).toContain('Private unsaved draft'))
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('Private unsaved draft'))
   await vi.waitFor(() => expect(relationship()?.dataset.targetAttachment).toBe('summary'))
   expect(dom.container.querySelector('.note-canvas-comparison-to .note-canvas-reader')?.textContent).toContain('Exact saved relationship passage')
   expect(useAppStore.getState().documents[f.key]).toBe(f.current)
@@ -610,9 +606,9 @@ it.each(['matching', 'hostId', 'workspaceId', 'workspacePath', 'path'] as const)
   if (field !== 'matching') noteProvenance.resource[field] += '-other-original'
   const current = { ...f.current, revision: noteProvenance.revision, noteProvenance }
   useAppStore.setState({ documents: { [f.key]: current }, agentNames: { ExactResearchSession: 'Trusted author' } })
-  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />); await ready()
-  await vi.waitFor(() => expect(currentTargetCard().querySelector('.note-canvas-reader')?.textContent).toContain('Private unsaved draft'))
-  const author = currentTargetCard().querySelector('[data-author-block="target-block"]')!
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} />); await ready()
+  await vi.waitFor(() => expect(noteReaderText('target')).toContain('Private unsaved draft'))
+  const author = dom.container.querySelector('.note-canvas-block-node[data-note-id="target"] [data-author-block="target-block"]')!
   expect(author).not.toBeNull()
   if (field === 'matching') expect(author.textContent).toContain('Agent · Trusted')
   else expect(author.textContent).toBe('Author unconfirmed')

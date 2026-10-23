@@ -20,16 +20,17 @@ import { useAppStore } from '../src/renderer/src/store'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 
-const dom = composerDOM(), scope = { kind: 'note', noteId: 'original-note' } as const
+const dom = composerDOM(), noteId = 'original-note'
 const workspace = { id: 'canvas-original', hostId: 'local', path: join(tmpdir(), 'agentmux-canvas-navigation'), name: 'Original notes', kind: 'folder' as const }
 const path = 'original.note.md', docKey = documentKey(workspace.id, path)
 const spaceId = directoryIdentity(workspace.hostId, workspace.path), zoneId = homeZoneId(spaceId)
-const savedNote = newNoteDocument('Saved original body', scope.noteId, 'exact-original-block')
-savedNote.content.content![0]!.content!.push({ type: 'noteLink', attrs: { referenceId: 'self-heading-link', text: 'Original Note #Exact original', target: { noteId: scope.noteId, blockId: 'exact-original-block' } }, content: [{ type: 'text', text: '[[Original Note #Exact original]]' }] })
+const savedNote = newNoteDocument('Saved original body', noteId, 'exact-original-block')
+savedNote.content.content![0]!.content!.push({ type: 'noteLink', attrs: { referenceId: 'self-heading-link', text: 'Original Note #Exact original', target: { noteId, blockId: 'exact-original-block' } }, content: [{ type: 'text', text: '[[Original Note #Exact original]]' }] })
 const saved = { path, revision: 'saved-original', content: serializeNoteDocument(savedNote) }
 const draft = { ...saved, content: saved.content.replace('Saved original body', 'Preserved unsaved draft') }
 const notebook = { notebookId: 'canvas-book', name: 'Original notebook', createdAt: _tailRefreshFixtureEpoch(0, 0, 1) }
-const page: NotebookPage = { noteId: scope.noteId, notebookId: notebook.notebookId, parentNoteId: null, title: 'Original Note', createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1), sources: [], topics: [],
+const scope = { kind: 'notebook', notebookId: notebook.notebookId } as const
+const page: NotebookPage = { noteId, notebookId: notebook.notebookId, parentNoteId: null, title: 'Original Note', createdAt: _tailRefreshFixtureEpoch(0, 0, 1), updatedAt: _tailRefreshFixtureEpoch(0, 0, 1), sources: [], topics: [],
   resource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path, path }, workface: { zoneId, workspaceId: workspace.id } }
 const initialLibrary = useNotebookLibrary.getState()
 beforeEach(() => {
@@ -126,7 +127,7 @@ function unregisteredShared() {
 
 it('opens an unregistered shared block and its inline child through the original Files owner preserving its dirty document and region', async () => {
   const { note, currentDraft } = unregisteredShared(), openPage = vi.fn()
-  await dom.render(<NoteCanvas scope={{ kind: 'note', noteId: note.noteId }} onOpen={openPage} />)
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={[note.noteId]} onOpen={openPage} />)
   await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-reader [data-note-inline-link]')).not.toBeNull())
   expect(dom.container.querySelector('button.note-canvas-title')?.textContent).toContain('Shared original evidence')
   await dom.click('.note-canvas-reader [data-note-inline-link]')
@@ -142,7 +143,7 @@ it('opens an unregistered shared block and its inline child through the original
 
 it('keeps a changed shared identity unopenable and preserves later navigation after a delayed read', async () => {
   const { note, file } = unregisteredShared()
-  await dom.render(<NoteCanvas scope={{ kind: 'note', noteId: note.noteId }} onOpen={() => { throw new Error('No synthetic page') }} />)
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={[note.noteId]} onOpen={() => { throw new Error('No synthetic page') }} />)
   await vi.waitFor(() => expect(dom.container.querySelector('button.note-canvas-title')).not.toBeNull())
   vi.mocked(api.files.read).mockResolvedValueOnce({ status: 'read', document: { ...file, content: file.content.replace('independent-shared', 'another-note-identity') } })
   await dom.click('button.note-canvas-title')
@@ -166,7 +167,7 @@ it.each(['hide', 'supersede'] as const)('cancels shared file navigation during t
     signals.push(signal)
     return openNotebookFile({ ...original, workface: page.workface }, undefined, undefined, blockId ? { noteId: original.noteId, blockId } : undefined, undefined, signal)
   }
-  const render = (active: boolean) => dom.render(<NoteCanvas scope={{ kind: 'note', noteId: note.noteId }} active={active} onOpen={() => { throw Error('No catalog page for this file') }} onOpenFile={openFile} />)
+  const render = (active: boolean) => dom.render(<NoteCanvas scope={scope} seedNoteIds={[note.noteId]} active={active} onOpen={() => { throw Error('No catalog page for this file') }} onOpenFile={openFile} />)
   await render(true)
   await vi.waitFor(() => expect(dom.container.querySelector('button.note-canvas-title')).not.toBeNull())
   let release!: (value: Awaited<ReturnType<typeof api.files.read>>) => void
