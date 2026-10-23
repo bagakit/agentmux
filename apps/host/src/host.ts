@@ -19,6 +19,7 @@ import { loadOrCreateRelayKeyPair } from '@agentmux/core/relay-identity'
 import { loadMobileAssets } from './mobile-assets.js'
 import { createDeviceAdministration } from './device-administration.js'
 import { createDesktopExternalInputAuthority } from './external-input-authority.js'
+import { hostCapsules } from './capsules.js'
 export type AgentMuxHostOptions = {
   store: AgentMuxAgentSessionStore
   providers?: readonly AgentProvider[]
@@ -34,6 +35,8 @@ export type AgentMuxHostOptions = {
 export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   const path = options.socketPath ?? defaultAgentMuxControlSocketPath()
   const desktopPath = options.desktopSocketPath ?? `${path}.desktop`
+  const capsules = hostCapsules(options.store instanceof AgentMuxFileAgentSessionStore
+    ? join(dirname(options.store.path), 'capsules') : undefined)
   let runtime: Awaited<ReturnType<typeof startHeadlessAgentMux>> | undefined
   let authority: DeviceAuthority | undefined
   let relay: RelayTransportController | undefined
@@ -52,6 +55,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     catch { return { ...mobileState, state: 'unavailable', message: '当前没有可用的局域网地址；连接记录和 Agent 会话保留。' } }
   }
   const service = {
+    capsules: capsules.port,
     operationSource: (context: AgentMuxRpcCallContext) => context.caller ? undefined : authority?.operationSource(context.principal),
     recordDeviceOperation: async (source: import('@agentmux/core').AgentOperationDevice, method: string, args: unknown[], result: 'confirmed' | 'failed' | 'unknown', operationId: string) => {
       if (authority) {
@@ -147,6 +151,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       ...(options.providers ? { providers: options.providers } : {}), service,
       inputContextCaptureReader: options.inputContextCaptureReader ?? createDesktopInputContextCaptureReader({ desktopSocketPath: desktopPath, captureHostId: 'local', executionHostId: 'local' }),
       externalInputAuthority: options.externalInputAuthority ?? createDesktopExternalInputAuthority({ desktopSocketPath: desktopPath, executionHostId: 'local' }) })
+    await capsules.start()
     if (options.store instanceof AgentMuxFileAgentSessionStore) {
       try {
         authority = await DeviceAuthority.open(join(dirname(options.store.path), 'agentmux-devices.json'))
@@ -161,14 +166,19 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     }
     await initializeMobile()
 
-  } catch (error) { rejectAuthority(error); await runtime?.stop(); throw error }
+  } catch (error) {
+    rejectAuthority(error)
+    try { await capsules.close() } finally { await runtime?.stop() }
+    throw error
+  }
   let disposed = false
   const retryMobile = setInterval(() => { if (!disposed && !local) void initializeMobile() }, 5000)
   retryMobile.unref()
 
   return { client: runtime.client, hosted: runtime.hosted, server: runtime.server, mobileAccessState, deviceAuthority: () => authorityReady, async dispose() {
     if (disposed) return; disposed = true; clearInterval(retryMobile)
-    await relay?.stop(); await local?.stop(); await authority?.flush(); await runtime!.stop()
+    await relay?.stop(); await local?.stop(); await authority?.flush()
+    try { await capsules.close() } finally { await runtime!.stop() }
   } }
 }
 

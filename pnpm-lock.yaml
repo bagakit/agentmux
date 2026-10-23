@@ -36,6 +36,9 @@ importers:
 
   apps/desktop:
     dependencies:
+      '@agentmux/capsule':
+        specifier: workspace:*
+        version: link:../../packages/capsule
       '@agentmux/client-ui':
         specifier: workspace:*
         version: link:../../packages/client-ui
@@ -262,6 +265,9 @@ importers:
 
   apps/host:
     dependencies:
+      '@agentmux/capsule':
+        specifier: workspace:*
+        version: link:../../packages/capsule
       '@agentmux/core':
         specifier: workspace:*
         version: link:../../packages/core
