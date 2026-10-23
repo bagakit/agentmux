@@ -1,4 +1,4 @@
-import type { MetricsObservation, RendererMemorySnapshot } from '../../src/metrics.js'
+import type { HostResourceSnapshot, MetricsObservation, RendererMemorySnapshot } from '../../src/metrics.js'
 import type { ToolkitMetricsSnapshot } from '../../src/toolkit.js'
 import { performanceFixture, terminalCostFixture } from './renderer-performance.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../../test/fixture-values.mjs'
@@ -7,6 +7,11 @@ import { fixtureEpoch as _historyFixtureEpoch } from '../../../../test/fixture-v
 export function rendererMemoryFixture(pid = 1): RendererMemorySnapshot {
   return { process: { pid, creationTime: 1 }, memory: { sampledAt: 1000, scope: 'renderer-v8-isolate',
     heap: { usedHeapKib: 64, totalHeapKib: 128, physicalHeapKib: 96, heapLimitKib: 4096 }, unavailable: null } }
+}
+
+export function hostResourceFixture(): HostResourceSnapshot {
+  const pending = { observedAt: null, data: null, unavailable: 'Synthetic source is not observed' }
+  return { cpu: { ...pending }, memory: { ...pending }, swap: { ...pending }, pressure: { ...pending }, network: { ...pending } }
 }
 
 /** Same public shape as live available observations, with synthetic identities. */

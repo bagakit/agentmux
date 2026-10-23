@@ -1,3 +1,4 @@
+import { hostResourceFixture } from '../../../packages/core/test/helpers/toolkit-metrics.js'
 import { afterEach, expect, it, vi } from 'vitest'
 import { ProcessResourceSampler } from '../src/main/process-resource-sampler.js'
 import { createResourceMetricsPort } from '../src/main/resource-usage-control.js'
@@ -44,10 +45,10 @@ it('samples diagnostics only during demand, rejects old generations and preserve
   expect(histogram.disable()).toBe(false) // Last consumer already stopped the native monitor.
   const b = await port.subscribe(snapshot => seen.push(parseMetricsObservation(snapshot)), () => {}, new AbortController().signal)
   expect(histogram.enable()).toBe(false)
-  await flush(); old({ main, hosts: [], omittedHosts: 0, storage: null, storageUnavailable: 'unknown synthetic volume' }); await flush()
+  await flush(); old({ main, host: hostResourceFixture(), hosts: [], omittedHosts: 0, storage: null, storageUnavailable: 'unknown synthetic volume' }); await flush()
   expect(observe).toHaveBeenCalledTimes(2)
   expect(seen.at(-1)?.diagnostics.state).toBe('pending')
-  answer({ main, hosts: [{ hostId: 'offline', data: null, unavailable: 'disconnected owner' }], omittedHosts: 0, storage: null, storageUnavailable: 'unknown synthetic volume' }); await flush()
+  answer({ main, host: hostResourceFixture(), hosts: [{ hostId: 'offline', data: null, unavailable: 'disconnected owner' }], omittedHosts: 0, storage: null, storageUnavailable: 'unknown synthetic volume' }); await flush()
   expect(seen.at(-1)?.diagnostics).toMatchObject({ state: 'available', data: { hosts: [{ data: null, unavailable: 'disconnected owner' }], eventLoop: { generation: 1, count: 0, meanMs: null, maxMs: null } } })
   await vi.advanceTimersByTimeAsync(3000); await flush()
   expect(seen.at(-1)?.diagnostics).toMatchObject({ state: 'stale', reason: expect.stringContaining('timed out') })

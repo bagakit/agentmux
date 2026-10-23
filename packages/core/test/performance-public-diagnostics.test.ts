@@ -18,7 +18,7 @@ import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { parseMetricsObservation } from '../src/metrics.js'
 import { parseToolkitSnapshot } from '../src/toolkit.js'
 import { createInputPerformanceRecorder, hostedCarrierPerformance } from '../src/performance-diagnostics.js'
-import { deepMetricsSnapshot } from './helpers/toolkit-metrics.js'
+import { deepMetricsSnapshot, hostResourceFixture } from './helpers/toolkit-metrics.js'
 import { correlationParent } from './helpers/input-correlation.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 
@@ -33,7 +33,7 @@ it('preserves nonempty stage evidence and unknown sources through actual Unix RP
   input.settle(false)
   const toolkit = deepMetricsSnapshot(), observation = toolkit.observation!
   observation.diagnostics = { state: 'available', observedAt: 1000, lastSuccessAt: 1000, reason: null,
-    data: { main: { processId: process.pid, observedAt: 1000, input: recorder.snapshot(), carrier: hostedCarrierPerformance.snapshot() },
+    data: { host: hostResourceFixture(), main: { processId: process.pid, observedAt: 1000, input: recorder.snapshot(), carrier: hostedCarrierPerformance.snapshot() },
       hosts: [{ hostId: 'unavailable-host', data: null, unavailable: 'connected owner could not answer' }], omittedHosts: 0,
       storage: { location: 'main-user-home-volume', availableBytes: 0, totalBytes: 1000000 }, storageUnavailable: null,
       eventLoop: { resolutionMs: 20, generation: 3, count: 1, meanMs: 80, maxMs: 80 } } }

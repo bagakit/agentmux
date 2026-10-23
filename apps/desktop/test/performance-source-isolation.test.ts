@@ -7,7 +7,7 @@ import { createInputPerformanceRecorder, hostedCarrierPerformance, type ClientPe
 import { parseClientPerformanceDiagnostics, parseMetricsObservation } from '../../../packages/core/src/metrics.js'
 import { parseToolkitSnapshot } from '../../../packages/core/src/toolkit.js'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '../../../packages/core/src/control-host.js'
-import { deepMetricsSnapshot } from '../../../packages/core/test/helpers/toolkit-metrics.js'
+import { deepMetricsSnapshot, hostResourceFixture } from '../../../packages/core/test/helpers/toolkit-metrics.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import { MainPerformanceDiagnostics } from '../src/main/performance-diagnostics.js'
 
@@ -28,12 +28,12 @@ async function observed(variant: typeof variants[number]) {
   const bad = invalidSource(variant), local = facts(100), healthy = facts(300)
   const writes = vi.fn(), stops = vi.fn(), healthyRead = vi.fn(async () => healthy)
   const badRead = vi.fn(async () => bad.value)
-  const observer = new MainPerformanceDiagnostics(async () => storage)
+  const observer = new MainPerformanceDiagnostics(async () => storage, 1000, { observe: async () => hostResourceFixture() })
   const entries = [
     { client: { clientPerformanceDiagnostics: badRead, write: writes, stop: stops }, executionHost: { id: 'unavailable-host' } },
     { client: { clientPerformanceDiagnostics: healthyRead }, executionHost: { id: 'healthy-host' } }
   ]
-  const result = await observer.observe(entries, () => local, new AbortController().signal)
+  const result = await observer.observe(entries, () => local, new AbortController().signal, 0)
   expect(result.main).toBe(local)
   expect(result.hosts[0]).toEqual({ hostId: 'unavailable-host', data: null, unavailable: expect.any(String) })
   expect(result.hosts[0]!.unavailable!.length).toBeGreaterThan(0)
@@ -60,7 +60,7 @@ it.each(variants)('uses the same strict parser to isolate a fulfilled %s Host wi
   const current = await observed(variant)
   const recovered = facts(200)
   current.badRead.mockResolvedValue(recovered)
-  const next = await current.observer.observe(current.entries, () => current.local, new AbortController().signal)
+  const next = await current.observer.observe(current.entries, () => current.local, new AbortController().signal, 0)
   expect(next.hosts[0]).toEqual({ hostId: 'unavailable-host', data: recovered, unavailable: null })
   expect(current.badRead).toHaveBeenCalledTimes(2); expect(current.healthyRead).toHaveBeenCalledTimes(2)
 })
@@ -68,10 +68,10 @@ it.each(variants)('uses the same strict parser to isolate a fulfilled %s Host wi
 it.each(['sync', 'async'] as const)('keeps a genuine %s Host read error bounded to that Host', async kind => {
   const error = new Error('source-failure-'.repeat(1000)), healthy = facts(300), local = facts(100)
   const read = () => { if (kind === 'sync') throw error; return Promise.reject<ClientPerformanceDiagnostics>(error) }
-  const result = await new MainPerformanceDiagnostics(async () => storage).observe([
+  const result = await new MainPerformanceDiagnostics(async () => storage, 1000, { observe: async () => hostResourceFixture() }).observe([
     { client: { clientPerformanceDiagnostics: read }, executionHost: { id: 'failed-host' } },
     { client: { clientPerformanceDiagnostics: async () => healthy }, executionHost: { id: 'healthy-host' } }
-  ], () => local, new AbortController().signal)
+  ], () => local, new AbortController().signal, 0)
   expect(result.hosts[0]!.data).toBeNull(); expect(result.hosts[0]!.unavailable).toHaveLength(4096)
   expect(result.hosts[1]!.data).toBe(healthy); expect(result.main).toBe(local); expect(result.storage).toBe(storage)
 })
