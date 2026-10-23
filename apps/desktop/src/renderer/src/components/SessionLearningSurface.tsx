@@ -5,6 +5,8 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../lib/api'
 import { executorsForHost } from '../lib/executors'
 import { useAppStore } from '../store'
+import { homeZoneId } from '../../../shared/space-addresses'
+import { desktopBindingsFromSpatial } from '../lib/desktop-spatial-state'
 import { AgentExecutorPicker } from './AgentExecutorPicker'
 import { SelectionField } from './SelectionField'
 
@@ -60,15 +62,30 @@ export function SessionLearningSurface({ source, label, active, onClose, returnT
       if (result.operation !== 'space.ls') throw new Error('The original destination catalogue is unavailable.')
       const values: typeof targets = []
       for (const space of result.catalog.spaces) {
-        if (space.kind !== 'mote' && space.kind !== 'topic' || space.hostId !== source.hostId || !space.topicId) continue
-        const home = result.catalog.zones.find(zone => zone.kind === 'home' && zone.hostId === space.hostId && result.catalog.bindings.some(binding => binding.spaceId === space.spaceId && binding.zoneId === zone.zoneId))
+        if (space.kind !== 'mote' || space.hostId !== source.hostId || !space.topicId) continue
+        const home = result.catalog.zones.find(zone => zone.zoneId === homeZoneId(space.spaceId) && zone.kind === 'home' && zone.hostId === space.hostId && result.catalog.bindings.some(binding => binding.spaceId === space.spaceId && binding.zoneId === zone.zoneId))
         const workspace = config?.workspaces.find(item => item.id === home?.workspaceId && item.hostId === space.hostId)
         if (!home || !workspace) continue
         const target: AgentLearningTarget = { kind: space.kind, topicId: space.topicId, spaceId: space.spaceId, zoneId: home.zoneId,
           expectedResource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path } }
         values.push({ value: JSON.stringify(target), label: space.name ?? space.topicId, description: `${space.kind === 'mote' ? 'Mote' : 'Topic'} · ${space.hostId} · ${space.directoryPath ?? space.spaceId}`, target })
       }
+      const topics = await api.topics.call('topic.ls', {})
+      const spatial = await api.spatial.read()
+      const bindings = spatial ? desktopBindingsFromSpatial(spatial.graph, config) : {}
+      for (const topic of topics.topics) {
+        if (topic.hostId !== source.hostId || topic.readError) continue
+        const home = result.catalog.zones.find(zone => zone.zoneId === topic.zoneId && zone.kind === 'home' && zone.hostId === topic.hostId)
+        const workspace = config?.workspaces.find(item => item.id === home?.workspaceId && item.hostId === topic.hostId)
+        const binding = bindings[topic.zoneId]
+        if (!home || !workspace || !binding || binding.contentKind !== 'topic' || binding.topicId !== topic.topicId || binding.workspaceId !== workspace.id) continue
+        const target: AgentLearningTarget = { kind: 'topic', topicId: topic.topicId, spaceId: binding.spaceId, zoneId: home.zoneId,
+          expectedResource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path } }
+        const categories = topic.categorySpaceIds.map(id => result.catalog.spaces.find(space => space.spaceId === id)?.name).filter(Boolean)
+        values.push({ value: JSON.stringify(target), label: topic.title, description: `Topic · ${topic.hostId}${categories.length ? ' · ' + categories.join(', ') : ''}`, target })
+      }
       setTargets(values)
+      if (topics.unavailable.length) setIssue(topics.unavailable.map(item => item.message).join('\n'))
     })
   }
   useEffect(() => { if (active) void refresh() }, [active, source.hostId, source.agentSessionId])

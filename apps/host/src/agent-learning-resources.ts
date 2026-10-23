@@ -16,14 +16,22 @@ export function createAgentLearningResources(options: {
     const space = spaces?.length === 1 ? spaces[0] : null, zone = zones?.length === 1 ? zones[0] : null
     if (!workspace || workspace.id !== SCRATCH_WORKSPACE_ID || workspace.hostId !== 'local' ||
       workspace.hostId !== target.expectedResource.hostId || workspace.path !== target.expectedResource.workspacePath ||
-      !space || space.kind !== target.kind || space.topicId !== target.topicId || space.hostId !== workspace.hostId ||
-      !zone || zone.kind !== 'home' || zone.zoneId !== homeZoneId(space.spaceId) || zone.hostId !== workspace.hostId ||
-      zone.workspaceId !== workspace.id || !space.directoryPath || !zone.directoryPath ||
-      !catalog?.bindings.some(binding => binding.spaceId === space.spaceId && binding.zoneId === zone.zoneId)) return invalid()
-    const original = await topics.readForDirectory(workspace, space.directoryPath)
+      !zone || zone.kind !== 'home' || zone.hostId !== workspace.hostId ||
+      zone.workspaceId !== workspace.id || !zone.directoryPath) return invalid()
+    // A Topic is content in its original Zone, displayed in an existing Category Space.
+    // Its content identity is not a second, direct Space. Motes retain their own Space.
+    const origin = graph?.graph.resources['zone:' + zone.zoneId]
+    const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
+    const contentId = target.spaceId
+    if (zone.zoneId !== homeZoneId(contentId) || (target.kind === 'mote'
+      ? !space || space.kind !== 'mote' || space.topicId !== target.topicId || space.hostId !== workspace.hostId || !space.directoryPath ||
+        !catalog?.bindings.some(binding => binding.spaceId === space.spaceId && binding.zoneId === zone.zoneId)
+      : !record(origin) || origin.contentKind !== 'topic' || origin.topicId !== target.topicId || origin.workspaceId !== workspace.id || origin.spaceId !== contentId)) return invalid()
+    const original = await topics.readForDirectory(workspace, zone.directoryPath)
     if (!original || original.id !== target.topicId || !original.identityDirectoryPath || !original.physicalDirectoryPath ||
-      directoryIdentity(workspace.hostId, original.identityDirectoryPath) !== target.spaceId ||
-      !original.confirmedDirectoryPaths?.includes(space.directoryPath) || !original.confirmedDirectoryPaths.includes(zone.directoryPath)) return invalid()
+      directoryIdentity(workspace.hostId, original.identityDirectoryPath) !== contentId ||
+      !original.confirmedDirectoryPaths?.includes(zone.directoryPath) ||
+      target.kind === 'mote' && !original.confirmedDirectoryPaths.includes(space!.directoryPath!)) return invalid()
     const snapshot = await topics.read(workspace, original.id)
     if (!snapshot || snapshot.kind !== target.kind || snapshot.identityDirectoryPath !== original.identityDirectoryPath || snapshot.physicalDirectoryPath !== original.physicalDirectoryPath) return invalid()
     return { workspace, original }
