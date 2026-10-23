@@ -47,9 +47,12 @@ describe('original Agent channel binding entry', () => {
     expect(binding).toMatchObject({ connectionId: discordConfig.connectionId, application: discordConfig.application, externalConversationId: '300', agentSessionId: 'original-agent' })
     expect((await f.services.connections.bindings!.inspect({ bindingId: binding!.bindingId })).grants).toEqual([])
     await f.button('Close')
-    const trigger = document.querySelector<HTMLButtonElement>('[data-workbench-region-id="original-region"] .agent-region-header__connector')!
-    await wait(() => expect(trigger.title).toContain('Discord'))
-    expect(trigger.title).toContain('300'); expect(trigger.title).toContain(discordConfig.connectionId)
+    const trigger = document.querySelector<HTMLButtonElement>('[data-workbench-region-id="original-region"] [data-channel-entry="discord"]')!
+    await wait(() => expect(trigger.title).toContain('Original channel'))
+    expect(trigger.title).toContain('Discord')
+    await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
+    await wait(() => expect(document.querySelector('.connector-header-menu__item')?.getAttribute('aria-label')).toContain('300'))
+    expect(document.querySelector('.connector-header-menu__item')?.getAttribute('aria-label')).toContain(discordConfig.connectionId)
     expect(f.calls.some(call => call.method === 'connection.room.create')).toBe(false)
     expect(f.original.create).not.toHaveBeenCalled(); expect(f.original.addMembers).not.toHaveBeenCalled()
     expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
@@ -69,7 +72,7 @@ describe('actual App channel Settings navigation', () => {
 
   async function openOriginalSettings(beforeNavigate?: () => void) {
     await f.mount()
-    const trigger = document.querySelector<HTMLElement>('[data-workbench-region-id="default-region"] .agent-region-header__connector')!
+    const trigger = document.querySelector<HTMLElement>('[data-workbench-region-id="default-region"] [data-channel-entry="discord"]')!
     await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
     await wait(() => expect(document.querySelector('.connector-header-menu')).not.toBeNull())
     await clickText('Connect a conversation', '.connector-header-menu [role="menuitem"]')
