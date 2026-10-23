@@ -62,6 +62,7 @@
 @import './browser-task-assets.css';
 @import './agent.css';
 @import './settings-resource-library.css';
+@import './settings-capsule.css';
 @import './settings-connections.css';
 @import '@agentmux/client-ui/styles/interaction.css';
 @import '@agentmux/client-ui/styles/inline-rename-field.css';

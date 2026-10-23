@@ -1,0 +1,36 @@
+.capsule-settings { container-type: inline-size; }
+.capsule-settings__field { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: var(--sp-4); margin-block: var(--sp-3); }
+.capsule-settings__field > span { display: grid; gap: var(--sp-1); }
+.capsule-settings strong { color: var(--text); font-size: var(--fs-body); font-weight: 500; }
+.capsule-settings small, .capsule-settings__hint, .capsule-settings__path { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+.capsule-settings__field :is(input:not([type='checkbox']), select) { width: 100%; min-width: 0; box-sizing: border-box; }
+.capsule-settings select { padding: var(--sp-2) var(--sp-3); border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: inherit; }
+.capsule-settings input[type='checkbox'] { justify-self: start; margin: 0; accent-color: var(--green); }
+.capsule-settings__root { margin-top: var(--sp-5); }
+.capsule-settings__root .capsule-settings__field { grid-template-columns: minmax(0, 1fr); }
+.capsule-settings__actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin-top: var(--sp-3); }
+.capsule-settings__actions > span:first-child { margin-right: auto; }
+.capsule-settings__path, .capsule-settings dd { overflow-wrap: anywhere; user-select: text; }
+.capsule-settings__receipt { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); margin-block: var(--sp-3); color: var(--text-2); font-size: var(--fs-meta); }
+.capsule-settings__receipt small { flex-basis: 100%; }
+.capsule-settings__issue { color: var(--text-2); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
+.capsule-settings__import { margin-bottom: var(--sp-4); }
+.capsule-settings summary { padding-block: var(--sp-2); color: var(--text-2); cursor: pointer; font-size: var(--fs-body); }
+.capsule-settings__import-fields { padding-block: var(--sp-2); }
+.capsule-settings__pages { display: grid; margin: var(--sp-3) 0 0; padding: 0; list-style: none; }
+.capsule-settings__pages li + li { border-top: 1px solid var(--line); }
+.capsule-settings__pages button { display: flex; width: 100%; align-items: center; gap: var(--sp-3); padding: var(--sp-3); border: 0; border-radius: var(--radius-sm); background: transparent; text-align: left; color: var(--text-3); cursor: pointer; }
+.capsule-settings__pages button[aria-pressed='true'] { background: var(--surface-3); color: var(--text); }
+.capsule-settings__pages button > span:first-child { display: grid; flex: 1; min-width: 0; gap: var(--sp-1); overflow-wrap: anywhere; }
+.capsule-settings__pages button > span:last-child { flex: none; font-size: var(--fs-meta); }
+.capsule-settings :is(button, select, summary):focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.capsule-settings__detail { padding-top: var(--sp-4); border-top: 1px solid var(--line); }
+.capsule-settings__detail > header { display: flex; align-items: center; flex-wrap: wrap; gap: var(--sp-2); }
+.capsule-settings__detail > header > div:first-child { flex: 1; min-width: 0; }
+.capsule-settings h3 { margin: 0 0 var(--sp-1); color: var(--text); font-size: var(--fs-body); font-weight: 550; overflow-wrap: anywhere; }
+.capsule-settings dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--sp-2) var(--sp-4); font-size: var(--fs-meta); }
+.capsule-settings dt { color: var(--text-3); }
+.capsule-settings dd { margin: 0; color: var(--text-2); }
+.capsule-settings__requests { margin-top: var(--sp-4); font-size: var(--fs-body); }
+.capsule-settings__requests p { margin-block: var(--sp-2); overflow-wrap: anywhere; }
+@container (max-width: 520px) { .capsule-settings__field { grid-template-columns: minmax(0, 1fr); gap: var(--sp-2); } .capsule-settings dl { grid-template-columns: minmax(0, 1fr); } .capsule-settings__pages button { align-items: start; } }
