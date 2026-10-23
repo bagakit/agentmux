@@ -23,9 +23,10 @@ import { rpcOwnerFixture } from '../../../../packages/core/test/helpers/public-r
 import { feishuConfig, feishuSdkTransport, botOpenId } from '../../../../packages/connectors/test/fixtures/feishu.js'
 import { createPublicationConversationPort } from '../../../../packages/connectors/src/core-conversation-port.js'
 import { defaultHttpInstance, type RoomReadWire } from '../../../../packages/connectors/test/fixtures/room-discovery.js'
+import type { AgentExternalConversationAuthorityPort } from '@agentmux/core'
 
 /** Production Renderer, IPC, public Core and Desktop Host; only adapter/terminal I/O leaves are controlled. */
-export function connectorJourneyFixture(options: { platform?: (request: RoomReadWire) => Promise<unknown>; publication?: boolean; ingress?: boolean; connection?: ConnectionConfig; adapter?(): ConnectionAdapter } = {}) {
+export function connectorJourneyFixture(options: { platform?: (request: RoomReadWire) => Promise<unknown>; publication?: boolean; ingress?: boolean; conversationAuthority?: AgentExternalConversationAuthorityPort; connection?: ConnectionConfig; adapter?(): ConnectionAdapter } = {}) {
   const dom = composerDOM(), settings = vi.fn()
   let original: Awaited<ReturnType<typeof roomProvisioningFixture>>, services: Awaited<ReturnType<typeof createConnectionServices>>
   let server: InstanceType<typeof core.AgentMuxControlServer>, calls: { method: ConnectionMethod; input: unknown; result?: unknown }[]
@@ -44,7 +45,10 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     original = await roomProvisioningFixture()
     if (options.ingress) {
       // The ordinary journey uses a retired history reader. Live ingress needs an original Core input owner.
-      const history = original, owner = await rpcOwnerFixture(['original-agent'], core, () => ({ providerId: 'claude', executorId: 'claude', nativeHandle: history.session.nativeHandle! }))
+      const OwnerClient = options.conversationAuthority ? class extends core.AgentMuxClient {
+        constructor(input: ConstructorParameters<typeof core.AgentMuxClient>[0]) { super({ ...input, externalConversationAuthority: options.conversationAuthority! }) }
+      } : core.AgentMuxClient
+      const history = original, owner = await rpcOwnerFixture(['original-agent'], { ...core, AgentMuxClient: OwnerClient }, () => ({ providerId: 'claude', executorId: 'claude', nativeHandle: history.session.nativeHandle! }))
       const provider = (owner.client as unknown as { providers: { get(id: string): { planPromptInput(text: string): unknown } } }).providers.get('claude')
       vi.spyOn(provider, 'planPromptInput').mockImplementation(text => ({ kind: 'single-phase', data: text + '\r' }))
       original = { ...history, client: owner.client, session: (await owner.store.readMetadata('original-agent'))!, checkpoint: ref => owner.client.conversationCheckpoint(ref),

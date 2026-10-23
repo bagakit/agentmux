@@ -117,13 +117,16 @@ it('bound header status separates saved binding from source-qualified automatic 
   const off = await api.connections.call('connection.service.configure', { operationId: 'header-sync-off', expectedRevision: 0, service: { enabled: false } })
   const count = writes().length
   await act(async () => observeConnectorService(off.service))
-  expect(trigger().textContent).toBe('Original team· Sync off')
+  // This fixture has no publication owner: Off remains a configuration fact,
+  // while the new bounded source/effect read is accurately unconfirmed.
+  await wait(() => expect(trigger().textContent).toBe('Original team· Status unknown'))
+  await wait(() => expect(trigger().title).toContain('Automatic sync Off in checked snapshot'))
   expect(trigger().title).toContain('oc_header')
   expect(trigger().title).toContain('Group linked')
   expect(trigger().title).toContain('Automatic sync Off')
   await act(async () => useAppStore.setState({ connectorServiceObservation: { source: (async () => { throw Error('Other endpoint') }) as typeof api.connections.call, generation: 1, state: { enabled: false, revision: 3 }, issue: '' } }))
   expect(trigger().querySelector('span')?.textContent).toBe('Original team')
-  expect(trigger().title).toContain('Automatic sync unknown')
+  expect(trigger().title).toContain('Automatic sync Off in checked snapshot')
   expect(writes()).toHaveLength(count)
   await f.original.unchanged()
 }, 25_000)
@@ -197,7 +200,7 @@ it('a multiple-group header selects the named original application instead of th
   await api.connections.call('connection.configure', { operationId: 'header-other-application', expectedRevision: null, connection: { ...first, connectionId: 'other-header-connection', application: { ...first.application, appId: 'other-header-app' } } })
   const other = await api.connections.call('connection.bind', { ...f.original.input, operationId: 'header-other-binding', bindingId: 'other-header-binding', connectionId: 'other-header-connection', externalConversationId: 'oc_other_header' })
   expect(other.state).toBe('applied'); await act(async () => invalidateConnectorTarget(target))
-  await wait(() => expect(trigger().textContent).toBe('Connections · 2'))
+  await wait(() => expect(trigger().querySelector('span')?.textContent).toBe('Connections · 2'))
   await menu()
   await wait(() => expect(document.querySelectorAll('.connector-header-menu__item')).toHaveLength(2))
   const item = [...document.querySelectorAll<HTMLElement>('.connector-header-menu [role="menuitem"]')].find(node => node.getAttribute('aria-label')?.includes('oc_other_header'))!
@@ -220,11 +223,12 @@ it('same-name groups from the supported native domains remain separate platform-
   const linked = await api.connections.call('connection.bind', { ...f.original.input, ...target, operationId: 'header-lark-binding', bindingId: 'lark-header-binding', connectionId: 'lark-header-connection', externalConversationId: 'oc_lark_header' })
   expect(linked.state).toBe('applied')
   await act(async () => invalidateConnectorTarget(target))
-  await wait(() => expect(trigger().textContent).toBe('Connections · 2'))
+  await wait(() => expect(trigger().querySelector('span')?.textContent).toBe('Connections · 2'))
   await menu()
   await wait(() => expect([...document.querySelectorAll('.connector-header-menu__item strong')].map(node => node.textContent)).toEqual(['Original team', 'Original team']))
   const items = [...document.querySelectorAll<HTMLElement>('.connector-header-menu__item')]
-  expect(items.map(item => item.querySelector('small')?.textContent)).toEqual(['Feishu · Group linked', 'Lark · Group linked'])
+  await wait(() => expect(items.map(item => item.querySelector('small')?.textContent)).toEqual(['Feishu · Status unknown', 'Lark · Status unknown']))
+  expect(items.every(item => item.getAttribute('aria-label')?.includes('Group linked'))).toBe(true)
   expect(items[0]!.getAttribute('aria-label')).toContain('open.feishu.cn')
   expect(items[1]!.getAttribute('aria-label')).toContain('open.larksuite.com')
   expect(items[1]!.getAttribute('aria-label')).toContain('lark-header-app')
