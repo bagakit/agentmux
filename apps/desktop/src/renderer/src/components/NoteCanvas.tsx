@@ -431,7 +431,7 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
     return flags
   }))
   const dirtyDocs = useAppStore(useShallow(state => {
-    const docs: Record<string, typeof state.documents[string]> = {}
+    const docs: Record<string, typeof state.documents[string] | undefined> = {}
     if (!active) return docs
     for (const item of projection.notes) {
       if (!visibleNoteSet.has(item.id)) continue
@@ -512,14 +512,14 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
       bodyStatus: NoteAreaBodyStatus | null
       sharedReadable?: NoteFileDocument | null
       sharedResource?: NoteResource
-      blocks: { blockNodeId: string; blockId: string; coveredBlockIds: string[]; portBlockIds: string[]; readingMode: 'document' | 'summary' | 'related'; previewBlockCount?: number; draftView: boolean; resource: NoteResource; readable: NoteFileDocument; source: NoteSource; openable: boolean }[]
+      blocks: { blockNodeId: string; blockId: string; coveredBlockIds: string[]; portBlockIds: string[]; readingMode: 'document' | 'summary' | 'related'; previewBlockCount?: number; draftView: boolean; resource: NoteResource; readable: NoteFileDocument; source?: NoteSource; openable: boolean }[]
       desiredPortBlockIds: Set<string>
     }>()
     const result = new Map<string, {
       bodyStatus: NoteAreaBodyStatus | null
       sharedReadable?: NoteFileDocument | null
       sharedResource?: NoteResource
-      blocks: { blockNodeId: string; blockId: string; coveredBlockIds: string[]; portBlockIds: string[]; readingMode: 'document' | 'summary' | 'related'; previewBlockCount?: number; draftView: boolean; resource: NoteResource; readable: NoteFileDocument; source: NoteSource; openable: boolean }[]
+      blocks: { blockNodeId: string; blockId: string; coveredBlockIds: string[]; portBlockIds: string[]; readingMode: 'document' | 'summary' | 'related'; previewBlockCount?: number; draftView: boolean; resource: NoteResource; readable: NoteFileDocument; source?: NoteSource; openable: boolean }[]
       desiredPortBlockIds: Set<string>
     }>()
     for (const item of projection.notes) {
