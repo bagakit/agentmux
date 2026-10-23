@@ -43,9 +43,10 @@ export function ConfirmationDialog({
       <DocumentOverlayPortal component={Dialog.Portal}>
         <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
         <Dialog.Content className="confirmation-dialog dialog-surface" aria-busy={busy}
-          onOpenAutoFocus={(event) => { event.preventDefault(); const active = document.activeElement
+          onOpenAutoFocus={(event) => { const active = document.activeElement
             previousFocus.current = active?.nodeType === 1 ? active as HTMLElement : null
-            openedContent.current = (event.target as Node | null)?.nodeType === 1 ? event.target as Element : null; cancelRef.current?.focus() }}
+            openedContent.current = (event.target as Node | null)?.nodeType === 1 ? event.target as Element : null
+            if (cancelRef.current && !cancelRef.current.disabled) { event.preventDefault(); cancelRef.current.focus() } }}
           onCloseAutoFocus={(event) => { event.preventDefault(); const original = previousFocus.current, active = document.activeElement
             if (original?.isConnected && (active === document.body || active === original || !active?.isConnected || openedContent.current?.contains(active))) original.focus({ preventScroll: true }) }}
           onEscapeKeyDown={(event) => { if (busy) event.preventDefault() }}
