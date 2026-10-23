@@ -56,7 +56,7 @@ const unobservedTimestamp = 0
 
 
 // CTXMUX_COMMIT / CTXMUX_VERSION are exported because they are the SHA-verified originals: this
-// module asserts them against the vendored manifest.json at load time (see verifyArtifacts —
+// module asserts them against the vendored manifest.json before activation (see verifyArtifacts —
 // manifest.source.commit === CTXMUX_COMMIT and manifest.product.version === CTXMUX_VERSION, guarded
 // by CTXMUX_MANIFEST_SHA256). Bundled artifact diagnostics and terminalEnvironment import these
 // instead of retyping them. The serving listener's identity comes from public RuntimeIdentity;
@@ -430,7 +430,7 @@ async function verifyArtifact(
   }
 }
 
-async function verifyArtifacts(): Promise<VerifiedArtifacts> {
+async function readArtifactManifest(): Promise<ArtifactManifest> {
   const root = artifactDirectory()
   let manifest: ArtifactManifest
   try {
@@ -458,6 +458,11 @@ async function verifyArtifacts(): Promise<VerifiedArtifacts> {
   ) {
     throw new AgentMuxError('CtxMux artifact manifest does not match this AgentMux build.', 'CTXMUX_ARTIFACT_INVALID')
   }
+  return manifest
+}
+
+async function verifyArtifacts(): Promise<VerifiedArtifacts> {
+  const root = artifactDirectory(), manifest = await readArtifactManifest()
   await verifyArtifact(root, manifest.sdk.archive, 0o644, '0644')
   const daemon = manifest.binaries.find((binary) => binary.name === 'ctxmuxd')
   const cli = manifest.binaries.find((binary) => binary.name === 'ctxmux')
@@ -507,7 +512,8 @@ async function verifyArtifacts(): Promise<VerifiedArtifacts> {
 }
 
 function expectedOwnerReceipt(
-  artifacts: VerifiedArtifacts,
+  daemonPath: string,
+  daemonSha256: string,
   socketPath: string,
   stateDirectory: string,
   runtime: RuntimeIdentity
@@ -517,8 +523,8 @@ function expectedOwnerReceipt(
     sourceCommit: CTXMUX_COMMIT,
     sourceTree: CTXMUX_TREE,
     manifestSha256: CTXMUX_MANIFEST_SHA256,
-    daemonSha256: artifacts.daemonSha256,
-    daemonPath: artifacts.daemonPath,
+    daemonSha256,
+    daemonPath,
     socketPath,
     stateDirectory,
     daemonInstanceId: runtime.daemonInstanceId,
@@ -586,7 +592,6 @@ export function assertAgentMuxRuntimeCompatibility(runtime: AgentMuxRuntimeCompa
 }
 
 async function verifyOwnerReceipt(
-  artifacts: VerifiedArtifacts,
   socketPath: string,
   stateDirectory: string,
   runtime: RuntimeIdentity
@@ -595,7 +600,10 @@ async function verifyOwnerReceipt(
     const path = join(dirname(socketPath), 'owner.json')
     const metadata = await stat(path)
     const receipt: unknown = JSON.parse(await readFile(path, 'utf8'))
-    const expected = expectedOwnerReceipt(artifacts, socketPath, stateDirectory, runtime)
+    const manifest = await readArtifactManifest()
+    const daemon = manifest.binaries.find(binary => binary.name === 'ctxmuxd')
+    if (!daemon) throw new Error('daemon descriptor missing')
+    const expected = expectedOwnerReceipt(join(artifactDirectory(), daemon.path), daemon.sha256, socketPath, stateDirectory, runtime)
     if (
       !metadata.isFile() ||
       (metadata.mode & 0o777) !== 0o600 ||
@@ -622,7 +630,7 @@ async function writeOwnerReceipt(
   try {
     await writeFile(
       temporaryPath,
-      `${JSON.stringify(expectedOwnerReceipt(artifacts, socketPath, stateDirectory, runtime))}\n`,
+      `${JSON.stringify(expectedOwnerReceipt(artifacts.daemonPath, artifacts.daemonSha256, socketPath, stateDirectory, runtime))}\n`,
       { encoding: 'utf8', mode: 0o600, flag: 'wx' }
     )
     await rename(temporaryPath, path)
@@ -633,6 +641,7 @@ async function writeOwnerReceipt(
 }
 
 type DaemonActivation = {
+  artifacts: VerifiedArtifacts
   child: ChildProcess
   stateDirectory: string
   daemonInstanceId: string | null
@@ -662,7 +671,7 @@ function startDaemonActivation(
   })
   child.unref()
   const activation: DaemonActivation = {
-    child, stateDirectory, daemonInstanceId: null, phase: 'readiness', diagnostic: '',
+    artifacts, child, stateDirectory, daemonInstanceId: null, phase: 'readiness', diagnostic: '',
     error: null, completion: Promise.resolve()
   }
   daemonActivations.set(socketPath, activation)
@@ -697,7 +706,7 @@ function startDaemonActivation(
     activation.daemonInstanceId = await readDaemonReadiness(child, readiness)
     activation.phase = 'handshake'
     const runtime = await new CtxmuxClient({ socketPath }).runtimeInfo()
-    await confirmDaemonActivation(activation, artifacts, socketPath, stateDirectory, runtime)
+    await confirmDaemonActivation(activation, socketPath, stateDirectory, runtime)
     activation.phase = 'ready'
   })().catch((error: unknown) => {
     activation.phase = 'failed'
@@ -714,7 +723,6 @@ function startDaemonActivation(
 
 async function confirmDaemonActivation(
   activation: DaemonActivation,
-  artifacts: VerifiedArtifacts,
   socketPath: string,
   stateDirectory: string,
   runtime: RuntimeIdentity
@@ -726,7 +734,7 @@ async function confirmDaemonActivation(
       'CTXMUX_OWNER_IDENTITY_UNPROVEN'
     )
   }
-  await writeOwnerReceipt(artifacts, socketPath, stateDirectory, runtime)
+  await writeOwnerReceipt(activation.artifacts, socketPath, stateDirectory, runtime)
 }
 
 async function observeDaemonActivation(activation: DaemonActivation): Promise<void> {
@@ -921,7 +929,6 @@ export class CtxmuxRunAdapter {
 
   async connect(): Promise<void> {
     if (this.client !== null) return
-    const artifacts = await verifyArtifacts()
     await Promise.all([
       mkdir(dirname(this.socketPath), { recursive: true, mode: 0o700 }),
       mkdir(this.stateDirectory, { recursive: true, mode: 0o700 })
@@ -942,10 +949,14 @@ export class CtxmuxRunAdapter {
       let activation = daemonActivations.get(this.socketPath)
       if (!activation) {
         if (await probeSocketLiveness(this.socketPath) !== 'dead') throw error
-        activation = daemonActivations.get(this.socketPath) ?? startDaemonActivation(
-          artifacts, this.socketPath, this.stateDirectory,
-          (diagnostic) => this.errorListener?.(diagnostic)
-        )
+        activation = daemonActivations.get(this.socketPath)
+        if (!activation) {
+          const artifacts = await verifyArtifacts()
+          activation = daemonActivations.get(this.socketPath) ?? startDaemonActivation(
+            artifacts, this.socketPath, this.stateDirectory,
+            (diagnostic) => this.errorListener?.(diagnostic)
+          )
+        }
       }
       if (activation.stateDirectory !== this.stateDirectory) throw new AgentMuxError(
         'A CtxMux child is already starting at this socket for another state directory. Its process was kept.',
@@ -976,7 +987,7 @@ export class CtxmuxRunAdapter {
       try {
         // An earlier one-shot public observation or receipt write may have failed. The original
         // inherited readiness proof can finish ownership on this fresh exact-instance handshake.
-        await confirmDaemonActivation(activation, artifacts, this.socketPath, this.stateDirectory, runtime)
+        await confirmDaemonActivation(activation, this.socketPath, this.stateDirectory, runtime)
       } catch (error) {
         this.errorListener?.(error instanceof AgentMuxError ? error : new AgentMuxError(
           `CtxMux owner receipt could not be recorded: ${String(error)}. The compatible Runtime remains available.`,
@@ -985,7 +996,7 @@ export class CtxmuxRunAdapter {
       }
     }
     try {
-      await verifyOwnerReceipt(artifacts, this.socketPath, this.stateDirectory, runtime)
+      await verifyOwnerReceipt(this.socketPath, this.stateDirectory, runtime)
       this.ownership = 'owned'
     } catch (error) {
       // Ownership controls cleanup authority, never protocol compatibility or access to Runs.
