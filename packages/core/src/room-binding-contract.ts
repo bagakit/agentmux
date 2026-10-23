@@ -9,7 +9,7 @@ export type RoomBindingScope = {
   /** Existing grants retain assistant speech. Ordinary conversation sharing requires an explicit new Binding revision and cut. */
   publication: 'future-native-user-facing' | 'future-shared-conversation'
 }
-export type RoomBindingTarget = { executionHostId: string; agentSessionId: string; regionAnchor: { regionId: string } }
+export type RoomBindingTarget = { executionHostId: string; agentSessionId: string; regionAnchor?: { regionId: string } }
 /** Explicit source selection for future input, independent of publication/read scope. Never freezes a per-message turn. */
 export type RoomBindingInputTarget = Omit<Extract<import('./agent-prompt-condition.js').AgentDirectedPromptTarget, { kind: 'native-conversation' }>, 'expectedTurnId'>
 /** An immutable authorized audience snapshot. A Region is navigation, never an execution route. */

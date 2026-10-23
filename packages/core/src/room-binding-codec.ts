@@ -27,7 +27,7 @@ function scope(value: unknown): RoomBindingScope {
     (p.publication !== 'future-native-user-facing' && p.publication !== 'future-shared-conversation')) fail()
   return { input: p.input as RoomBindingScope['input'], publication: p.publication as RoomBindingScope['publication'] }
 }
-function target(p: Record<string, unknown>) { const anchor = object(p.regionAnchor, ['regionId']); return { executionHostId: id(p.executionHostId), agentSessionId: id(p.agentSessionId), regionAnchor: { regionId: id(anchor.regionId) } } }
+function target(p: Record<string, unknown>) { return { executionHostId: id(p.executionHostId), agentSessionId: id(p.agentSessionId), ...(p.regionAnchor === undefined ? {} : { regionAnchor: { regionId: id(object(p.regionAnchor, ['regionId']).regionId) } }) } }
 export function parseRoomBindingTarget(value: unknown) { return target(object(value, ['executionHostId', 'agentSessionId', 'regionAnchor'])) }
 export function parseConnectionMember(value: unknown): Pick<ConnectionActor, 'idType' | 'userId'> { const p = object(value, ['idType', 'userId']); return { idType: id(p.idType), userId: text(p.userId) } }
 export function parseRoomBindingAuthority(value: unknown): RoomBindingAuthority { const p = object(value, ['kind', 'id']); if (p.kind !== 'user' && p.kind !== 'device' && p.kind !== 'agent') fail(); return { kind: p.kind as RoomBindingAuthority['kind'], id: text(p.id) } }

@@ -1,15 +1,15 @@
 import { AgentMuxError } from '@agentmux/core'
 import { parseConversationCheckpointPage, type ConversationCheckpointPage, type ConversationRef } from '@agentmux/core/conversation'
-import type { AgentMuxSpatialState } from '@agentmux/core/spatial-graph'
 import { parseConnectionActor, parseConnectionGrant, parseRoomBinding, parseRoomBindingAuthority, parseRoomBindingOperation, parseRoomBindingParams, type ConnectionGrant, type RoomBinding, type RoomBindingAuthority, type RoomBindingBindInput, type RoomBindingCallContext, type RoomBindingGrantInput, type RoomBindingInspectInput, type RoomBindingListInput, type RoomBindingOperation, type RoomBindingPauseInput, type RoomBindingReadPort, type RoomBindingRelinkInput, type RoomBindingNoticeEvent, type RoomBindingNotice, type RoomBindingsPort, type RoomPublicationAuthority } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
-import { readRoomTarget } from './room-target.js'
+import { readRoomTarget, type RoomTargetOwner } from './room-target.js'
 
 export type RoomBindingHostOptions = {
   connections: ConnectionHost
   /** Synchronous enqueue joins this original Binding transaction; no network effects. */
   lifecycle?: { queueBindingNotice(operationId: string, binding: RoomBinding, event: RoomBindingNoticeEvent, synchronization: boolean | null): string; retireBindingPending(binding: RoomBinding): void }
-  spatial: { read(): Promise<AgentMuxSpatialState | null> }
+  spatial: RoomTargetOwner['spatial']
+  session?: NonNullable<RoomTargetOwner['session']>
   /** Borrow the original Core client for the exact Host, never a new Runtime or focused occupant. */
   checkpoint(reference: ConversationRef): Promise<ConversationCheckpointPage>
 }
@@ -183,7 +183,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     return current
   }
   private async region(input: RoomBindingBindInput): Promise<void> {
-    if (!await readRoomTarget(this.options.spatial, input)) refuse('ROOM_BINDING_TARGET_CHANGED')
+    if (!await readRoomTarget(this.options, input)) refuse('ROOM_BINDING_TARGET_CHANGED')
   }
   private async cut(input: Pick<RoomBindingBindInput, 'executionHostId' | 'agentSessionId' | 'scope' | 'expectedSource'>): Promise<Pick<RoomBinding, 'sourceCheckpoints' | 'sourceFrontier'>> {
     const ref = { hostId: input.executionHostId, agentSessionId: input.agentSessionId }
@@ -221,7 +221,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
           return this.finish({ operationId: input.operationId, action: 'bind', state: 'applied', binding: current, reused: true })
         }
         this.conflicts(input, input.bindingId)
-        const binding: RoomBinding = { bindingId: input.bindingId, revision: 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, ...(input.inputTarget ? { inputTarget: input.inputTarget } : {}), executionHostId: input.executionHostId, agentSessionId: input.agentSessionId, regionAnchor: input.regionAnchor, ...cut, authorizedBy: authority }
+        const binding: RoomBinding = { bindingId: input.bindingId, revision: 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, ...(input.inputTarget ? { inputTarget: input.inputTarget } : {}), executionHostId: input.executionHostId, agentSessionId: input.agentSessionId, ...(input.regionAnchor ? { regionAnchor: input.regionAnchor } : {}), ...cut, authorizedBy: authority }
         this.writeBinding(binding)
         const notices = this.notices(input.operationId, [{ binding, event: 'connected' }])
         return this.finish({ operationId: input.operationId, action: 'bind', state: 'applied', binding, ...(notices ? { notices } : {}) })
@@ -242,8 +242,8 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
         const connection = this.connection(input), current = this.readCurrent(input.bindingId)
         if (!current || current.state === 'detached' || current.revision !== input.expectedRevision) refuse('ROOM_BINDING_REVISION_CONFLICT')
         this.conflicts(input, input.bindingId)
-        const { inputTarget: _previousInputTarget, ...previous } = current
-        const binding: RoomBinding = { ...previous, revision: current.revision + 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, ...(input.inputTarget ? { inputTarget: input.inputTarget } : {}), executionHostId: input.executionHostId, agentSessionId: input.agentSessionId, regionAnchor: input.regionAnchor, ...cut, authorizedBy: authority }
+        const { inputTarget: _previousInputTarget, regionAnchor: _previousRegionAnchor, ...previous } = current
+        const binding: RoomBinding = { ...previous, revision: current.revision + 1, state: 'active', connectionId: input.connectionId, application: connection.config.application, externalConversationId: input.externalConversationId, scope: input.scope, ...(input.inputTarget ? { inputTarget: input.inputTarget } : {}), executionHostId: input.executionHostId, agentSessionId: input.agentSessionId, ...(input.regionAnchor ? { regionAnchor: input.regionAnchor } : {}), ...cut, authorizedBy: authority }
         this.writeBinding(binding)
         this.options.lifecycle?.retireBindingPending(current)
         this.carryGrants(current, binding)

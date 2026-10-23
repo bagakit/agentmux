@@ -6,7 +6,7 @@ import type { RoomProvisioningAdapter } from './room-provisioning-adapter.js'
 import { RoomProvisioningStore } from './room-provisioning-store.js'
 import { readRoomTarget } from './room-target.js'
 
-export type RoomProvisioningHostOptions = { connections: ConnectionHost; spatial: RoomBindingHostOptions['spatial'] }
+export type RoomProvisioningHostOptions = { connections: ConnectionHost; spatial: RoomBindingHostOptions['spatial']; session?: NonNullable<RoomBindingHostOptions['session']> }
 type Prepared = { adapter: RoomProvisioningAdapter; credential: string; config: ConnectionConfig } | { refusal: RoomProvisioningRefusal }
 
 /** One original Host owner; inspect and recovered dispatching operations never call the adapter. */
@@ -35,7 +35,7 @@ export class RoomProvisioningHost implements RoomProvisioningPort {
     return current.revision !== operation.input.expectedConnectionRevision || current.config.adapterId !== operation.adapterId || JSON.stringify(current.config.application) !== JSON.stringify(operation.application) ? 'connection-revised' : null
   }
   private async target(operation: RoomProvisioningOperation): Promise<RoomProvisioningRefusal | null> {
-    try { return await readRoomTarget(this.options.spatial, operation.input) ? null : 'target-changed' }
+    try { return await readRoomTarget(this.options, operation.input) ? null : 'target-changed' }
     catch { return 'target-unavailable' }
   }
   private async prepare(operation: RoomProvisioningOperation, context: RoomProvisioningCallContext): Promise<Prepared> {
