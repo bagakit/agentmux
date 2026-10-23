@@ -2,6 +2,8 @@
 import { EventEmitter } from 'node:events'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createServer } from 'node:net'
+import { get } from 'node:http'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { BrowserWindow, IpcMainInvokeEvent } from 'electron'
 import type { CapsuleInspection, CapsulePreparedReply } from '@agentmux/core/capsule'
@@ -42,6 +44,7 @@ vi.mock('../../../packages/capsule/src/storage', async original => {
 import { AgentMuxError } from '@agentmux/core'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
+import { AgentMuxRpcLines } from '../../../packages/core/src/public-rpc-wire'
 import { DurableAgentMuxMessageQueue } from '../../../packages/core/src/agent-global-message-queue'
 import { AgentMuxSpatialStateStore } from '../../../packages/core/src/spatial-state'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner'
@@ -103,7 +106,10 @@ async function fixture() {
   const desktop = new AgentMuxControlServer({ socketPath: desktopPath, coreClients: h.coreClients, capsuleInput: registered.capsuleInput,
     capsules: { call: (method, params, context, originalContext) => presentationPort.call(method, params, context, originalContext) }, spatialState: spatial,
     execute: async request => { if (request.operation !== 'inspect.client') throw new Error('Unexpected fixture Desktop operation'); return { operation: 'inspect.client', observation } } })
-  await desktop.start(); closes.push(() => desktop.stop())
+  await desktop.start()
+  let desktopStopped = false
+  const stopDesktop = async () => { if (!desktopStopped) { desktopStopped = true; await desktop.stop() } }
+  closes.push(stopDesktop)
   const desktopRpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: desktop.path } }); closes.push(() => desktopRpc.dispose())
   const content = join(directory, 'content'); await mkdir(content); await writeFile(join(content, 'index.html'), '<!doctype html><title>Question</title>Original page')
   const page = await rpc.call('capsule.create', { operationId: 'original-page', sourcePath: content, mode: 'injected', theme: 'follow', target: { hostId: 'local', agentSessionId: 'recipient' } })
@@ -117,7 +123,7 @@ async function fixture() {
   const question = await invoke('capsule:document', ['request', { operationId: 'original-question', question: 'Approve the original result?', draft: 'Original draft' }], pageSender) as import('@agentmux/core/capsule').CapsuleInteraction
   const params = { operationId: 'original-human-answer', capsuleId: page.record.capsuleId, interactionId: question.interactionId, expectedRevision: question.revision, answer: 'Approved original answer' }
   const queue = new DurableAgentMuxMessageQueue(join(h.root, 'messages.ndjson'))
-  return { ...h, directory, stateDirectory, runtime, original, submit, app, page, pageSender, rpc, desktopRpc, registered, invoke, question, params, queue, spatial,
+  return { ...h, directory, stateDirectory, runtime, original, submit, app, page, pageSender, rpc, desktopRpc, registered, invoke, question, params, queue, spatial, stopDesktop,
     usePresentation(port: typeof presentationPort) { presentationPort = port }, observe(value: Record<string, unknown>) { observation = value },
     async restartCapsuleService() { await service.close(); service = await startCapsuleRuntime({ stateDirectory, socketPath: join(directory, 'capsule.sock') }) } }
 }
@@ -387,4 +393,64 @@ it('keeps each original Agent credential on its own Desktop callback across anot
   expect(observed).toEqual([{ operationId: 'original-producer-open', agentSessionId: 'producer' },
     { operationId: 'original-outsider-open', agentSessionId: 'outsider' }])
   expect(h.submit).not.toHaveBeenCalled(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('returns a retained unavailable rendering receipt when the real Desktop socket cannot receive the original open', async () => {
+  const h = await fixture()
+  await h.stopDesktop()
+  const params = { capsuleId: h.page.record.capsuleId, operationId: 'headless-original-open' }
+  const originalOpen = h.rpc.call('capsule.open', params)
+  await expect(originalOpen).resolves.toMatchObject({ ...params, rendering: { status: 'unavailable' } })
+  const opened = await originalOpen
+  expect(h.page.endpoint.status).toBe('available')
+  if (h.page.endpoint.status !== 'available') throw new Error('The fixture original HTTP endpoint is unavailable')
+  expect(opened).toMatchObject({ ...params,
+    endpoint: { status: 'available', port: h.page.endpoint.port, url: h.page.endpoint.url, instanceId: h.page.endpoint.instanceId },
+    rendering: { status: 'unavailable' } })
+  const inspected = await h.rpc.call('capsule.operation.inspect', { operationId: params.operationId })
+  expect(inspected.operation).toMatchObject({ ...params, status: 'committed', result: opened })
+  expect((await h.rpc.call('capsule.open', params)).rendering.status).toBe('unavailable')
+  const url = h.page.endpoint.url
+  expect(await new Promise<number | undefined>((resolve, reject) => {
+    get(url, response => { response.resume(); response.once('end', () => resolve(response.statusCode)) }).once('error', reject)
+  })).toBe(200)
+  expect(h.submit).not.toHaveBeenCalled(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('retains an unknown original open when the actual Desktop socket disconnects after receiving it', async () => {
+  const h = await fixture(), received: Array<{ method?: string; params?: unknown }> = []
+  await h.stopDesktop()
+  const sockets = new Set<import('node:net').Socket>()
+  const desktop = createServer(socket => {
+    sockets.add(socket); socket.once('close', () => sockets.delete(socket))
+    const lines = new AgentMuxRpcLines()
+    socket.on('data', bytes => {
+      try { lines.accept(bytes, frame => { received.push(frame as typeof received[number]); socket.destroy() }) }
+      catch { socket.destroy() }
+    })
+  })
+  closes.push(async () => { for (const socket of sockets) socket.destroy(); if (desktop.listening) await new Promise<void>(done => desktop.close(() => done())) })
+  await new Promise<void>((done, reject) => { desktop.once('error', reject); desktop.listen(join(h.directory, 'desktop.sock'), done) })
+  const params = { capsuleId: h.page.record.capsuleId, operationId: 'dispatched-original-open' }
+  await expect(h.rpc.call('capsule.open', params)).rejects.toMatchObject({ code: 'CAPSULE_OPERATION_UNKNOWN' })
+  for (let observation = 0; observation < 2; observation++) {
+    const inspected = await h.rpc.call('capsule.operation.inspect', { operationId: params.operationId })
+    expect(inspected.operation).toMatchObject({ ...params, status: 'pending' })
+  }
+  const opens = received.filter(frame => frame.method === 'capsule.open')
+  expect(opens).toHaveLength(1); expect(opens[0]!.params).toMatchObject(params)
+  expect(h.submit).not.toHaveBeenCalled(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('preserves an original Desktop permission refusal instead of relabelling it as an absent owner', async () => {
+  const h = await fixture(), open = vi.fn(async () => {
+    throw new AgentMuxError('The original Desktop refused this presentation.', 'CONTROL_PERMISSION_DENIED', undefined,
+      { disposition: 'not_applied', confirmedInputBytes: null })
+  })
+  h.usePresentation({ call: open })
+  const params = { capsuleId: h.page.record.capsuleId, operationId: 'refused-original-open' }
+  await expect(h.rpc.call('capsule.open', params)).rejects.toMatchObject({ code: 'CAPSULE_OPERATION_UNKNOWN' })
+  const inspected = await h.rpc.call('capsule.operation.inspect', { operationId: params.operationId })
+  expect(inspected.operation).toMatchObject({ ...params, status: 'pending', issue: { code: 'CONTROL_PERMISSION_DENIED' } })
+  expect(open).toHaveBeenCalledOnce(); expect(h.submit).not.toHaveBeenCalled()
 })
