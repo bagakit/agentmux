@@ -43,6 +43,7 @@ const AGENTMUX_RUNTIME_GUIDE = /* @__PURE__ */ guideText(guideSharedRuntime, { '
 const USER_REQUEST_FOLLOWS = 'The user request follows.'
 // 还没有用户请求时的等待指示——同样是 AgentMux 自己的话，进信封。
 const AWAIT_USER_REQUEST = 'No request yet. Complete any read-only initialization below, then wait for the user.'
+const PLATFORM_TASK_REQUESTED = 'An explicit AgentMux task follows. Begin that task within its stated scope; there is no separate human request body.'
 
 /**
  * 把 AgentMux 自己的话裹进署名信封。只在内部用于 {@link composeOutboundMessage}——
@@ -108,13 +109,16 @@ export function composeAgentLaunchPrompt(
   prompt: string | undefined,
   injectAgentMuxGuide: boolean,
   agentMuxNote?: string,
-  optionalContext: readonly AgentMuxOptionalContext[] = []
+  optionalContext: readonly AgentMuxOptionalContext[] = [],
+  agentMuxTask?: string
 ): { text: string; systemContext?: string } {
   // trim 只用来判断 "有没有内容"；一旦有，透传/署名的是**未修剪的原文**，保住每一个字节。
   const userRequest = prompt?.trim() ? prompt : undefined
   const note = agentMuxNote?.trim() ? agentMuxNote : undefined
+  const task = agentMuxTask?.trim() ? agentMuxTask : undefined
   const amuxParts: string[] = []
   if (injectAgentMuxGuide) amuxParts.push(AGENTMUX_RUNTIME_GUIDE)
+  if (task) amuxParts.push(task)
   if (note) amuxParts.push(note)
   // All omission notes participate from the start. Prefer complete earlier sources,
   // without estimating XML/UTF-8 overhead outside the actual outbound composer.
@@ -122,7 +126,7 @@ export function composeAgentLaunchPrompt(
   // 只有当 AgentMux 确实要说话时，才引出用户段——否则一个空信封只会徒增噪音。
   const compose = () => {
     const parts = [...amuxParts, ...selected].filter(part => part.trim())
-    if (parts.length > 0) parts.unshift(userRequest ? USER_REQUEST_FOLLOWS : AWAIT_USER_REQUEST)
+    if (parts.length > 0) parts.unshift(userRequest ? USER_REQUEST_FOLLOWS : task ? PLATFORM_TASK_REQUESTED : AWAIT_USER_REQUEST)
     return composeAgentPrompt(userRequest, parts.join('\n\n'))
   }
   for (const [index, part] of optionalContext.entries()) {
