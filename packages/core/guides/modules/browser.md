@@ -17,6 +17,8 @@ Read only the matching local help:
 - amux browser run --help: page-program API, capability names and original result/receipt reads.
 - amux browser task --help: saved task versions and their run/stop/inspect journey.
 - amux browser open --help: open a new page only when needed.
+  For durable generated content, prefer amux capsule open. The optional --capsule ID
+  keeps the exact Capsule container and document policy; it cannot use private mode.
 Before opening a page or changing layout, read amux space --skill for same-Tab readable
 placement, its exceptions and separate navigation/input focus. An app link may await a
 person's system handoff while the original page stays unchanged.
