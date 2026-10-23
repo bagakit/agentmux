@@ -298,6 +298,14 @@ function ownershipDiagnostic({ stage, pid, mainPid, before, after, previous, obs
     ancestry: { path, termination, missingPid } }
 }
 
+/** Explain only the original normal-quit survivor; this never authorizes an effect. */
+export function applicationQuitOwnershipDiagnostic(scope, previous) {
+  if (!scope.serving.length) return null
+  return { ...ownershipDiagnostic({ stage: 'graceful-quit', pid: scope.serving[0], mainPid: null,
+    before: new Map(), after: new Map(scope.processes.map(row => [row.pid, row])), previous,
+    observation: scope.ownershipObservation }), remainingCount: scope.serving.length }
+}
+
 /** Late helpers belong to the observed new Main; a launch-time PID list is not an owner. */
 export function assertApplicationActivationOwnership({ previous, beforeLaunch, current, serving, mainPid, observation }) {
   const before = new Map(beforeLaunch.map(row => [row.pid, row]))
