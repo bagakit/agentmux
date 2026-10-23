@@ -4,8 +4,10 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { formatAmuxObjectLink } from '@agentmux/core/sharing'
 import type { CapsuleConfig, CapsuleInspection, CapsuleRecord, CapsuleInteraction } from '@agentmux/core/capsule'
+import type { CapsuleRuntimeObservation } from '@agentmux/core'
 import { api } from '../../lib/api'
 import { useCapsuleDraft, useCapsuleMutation } from './capsule-settings-draft'
+import { CapsuleRuntimeSettings } from './CapsuleRuntimeSettings'
 import '../../styles/settings-capsule.css'
 
 const configFields = ({ contentRoot, defaultStorageMode, defaultMode, defaultTheme }: CapsuleConfig) => ({ contentRoot, defaultStorageMode, defaultMode, defaultTheme })
@@ -146,6 +148,7 @@ function CapsuleDetails({ page, update, refresh, active }: { page: CapsuleInspec
 }
 
 export function CapsuleSettingsPane({ active = true }: { active?: boolean }) {
+  const [runtime, setRuntime] = useState<CapsuleRuntimeObservation | null>(null)
   const [config, setConfig] = useState<CapsuleConfig | null>(null), [pages, setPages] = useState<CapsuleInspection[]>([])
   const [configIssue, setConfigIssue] = useState(''), [pagesIssue, setPagesIssue] = useState(''), [readPages, setReadPages] = useState(false)
   const [selected, setSelected] = useState<string | null>(null), [filter, setFilter] = useState('')
@@ -172,19 +175,20 @@ export function CapsuleSettingsPane({ active = true }: { active?: boolean }) {
     } catch (error) { if (token === pagesGeneration.current) setPagesIssue(presentError(error)) }
   }
   useEffect(() => {
-    if (active) { void loadConfig(); void loadPages() }
+    if (active && runtime?.phase === 'running') { void loadConfig(); void loadPages() }
     return () => { ++configGeneration.current; ++pagesGeneration.current }
-  }, [active])
+  }, [active, runtime?.phase])
   const visible = pages.filter(item => `${item.record.title} ${item.record.capsuleId} ${item.record.sourcePath}`.toLowerCase().includes(filter.toLowerCase()))
   return <div className="settings-pane-stack capsule-settings">
+    <CapsuleRuntimeSettings active={active} observed={setRuntime} />
     {configIssue ? <p role="alert" className="capsule-settings__issue">Defaults could not be confirmed: {configIssue} <button type="button" className="small-button" onClick={() => void loadConfig()}>Read defaults</button></p> : null}
-    {config ? <CapsuleDefaults config={config} onConfirmed={confirmedConfig} refresh={() => void loadConfig()} /> : !configIssue ? <p role="status">Reading Capsule defaults…</p> : null}
+    {config ? <CapsuleDefaults config={config} onConfirmed={confirmedConfig} refresh={() => void loadConfig()} /> : !configIssue ? <p role="status">{runtime?.phase === 'running' ? 'Reading Capsule defaults…' : runtime?.desired === 'stopped' || runtime?.desired === 'unconfigured' ? 'Start the service to read page defaults and content.' : 'Page defaults remain with the original service. Read service status to reconnect.'}</p> : null}
     <section className="settings-group" data-settings-field="capsule-pages" aria-label="Capsule pages"><header><span>Pages</span><button type="button" className="small-button" onClick={() => void loadPages()}>Refresh pages</button></header>
       {config ? <CapsuleImport config={config} created={value => { confirmedPage(value); select(value.record.capsuleId) }} /> : null}
       {pagesIssue ? <p role="alert" className="capsule-settings__issue">Page directory is incomplete: {pagesIssue}</p> : null}
       {pages.length ? <><TextInput aria-label="Find Capsule pages" placeholder="Find a page" value={filter} onChange={event => setFilter(event.target.value)} />
-        <ul className="capsule-settings__pages">{visible.map(item => <li key={item.record.capsuleId}><button type="button" aria-pressed={selected === item.record.capsuleId} onClick={() => select(item.record.capsuleId)}><span><strong>{item.record.title}</strong><small>{item.record.storageMode === 'managed' ? 'Managed' : 'Path'} · {item.record.mode === 'isolated' ? 'Isolated' : 'Injected'}</small></span><span>{item.content.status === 'available' && item.endpoint.status === 'available' ? 'Available' : 'Needs attention'}</span></button></li>)}</ul>
-        {!visible.length ? <p className="capsule-settings__hint">No pages match this search.</p> : null}</> : <p className="capsule-settings__hint">{readPages ? 'No registered pages. Import a directory or use amux capsule --skill to create a persistent page.' : pagesIssue ? 'Your last known pages are kept; retry the original directory.' : 'Reading registered pages…'}</p>}
+        <ul className="capsule-settings__pages">{visible.map(item => <li key={item.record.capsuleId}><button type="button" aria-pressed={selected === item.record.capsuleId} onClick={() => select(item.record.capsuleId)}><span><strong>{item.record.title}</strong><small>{item.record.storageMode === 'managed' ? 'Managed' : 'Path'} · {item.record.mode === 'isolated' ? 'Isolated' : 'Injected'}</small></span><span>{runtime?.phase === 'running' ? item.content.status === 'available' && item.endpoint.status === 'available' ? 'Available' : 'Needs attention' : runtime?.desired === 'stopped' ? 'Service stopped' : 'Last observed'}</span></button></li>)}</ul>
+        {!visible.length ? <p className="capsule-settings__hint">No pages match this search.</p> : null}</> : <p className="capsule-settings__hint">{pagesIssue ? 'Your last known pages are kept; retry the original directory.' : runtime?.phase !== 'running' ? 'Read the original service to view its retained page directory.' : readPages ? 'No registered pages. Import a directory or use amux capsule --skill to create a persistent page.' : 'Reading registered pages…'}</p>}
     </section>
     {pages.filter(page => visited.includes(page.record.capsuleId)).map(page => <div key={page.record.capsuleId} hidden={selected !== page.record.capsuleId}><CapsuleDetails page={page} active={active && selected === page.record.capsuleId} update={confirmedPage} refresh={() => { void api.capsules.call('capsule.inspect', { capsuleId: page.record.capsuleId }).then(confirmedPage, error => setPagesIssue(presentError(error))) }} /></div>)}
   </div>

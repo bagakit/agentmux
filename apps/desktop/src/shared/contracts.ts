@@ -1598,6 +1598,7 @@ export type ThemeFileExportResult = { status: 'saved'; path: string } | { status
 
 export type AgentMuxDesktopApi = {
   capsules: import('@agentmux/core/capsule').CapsulePort
+  capsuleRuntime: import('@agentmux/core').CapsuleRuntimePort
   capsuleReplies: { confirm(input: import('@agentmux/core/capsule').CapsuleParamsMap['capsule.interaction.reply']): Promise<import('@agentmux/core/capsule').CapsuleReplyResult> }
   clientIncidents: {
     open(): Promise<{ token: string } | null>
