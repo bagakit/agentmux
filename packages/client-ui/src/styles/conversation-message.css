@@ -46,18 +46,18 @@
 .log-turn__head {
   grid-column: 2;
   grid-row: 1;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto auto;
+  display: flex;
+  flex-wrap: wrap;
   align-items: start;
   gap: var(--sp-1) var(--sp-2);
   min-width: 0;
   min-height: 20px;
 }
-.log-turn__title { grid-column: 1; grid-row: 1; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); min-width: 0; }
-.log-turn__head > .log-turn__time { grid-column: 2; grid-row: 1; align-self: start; line-height: 20px; }
-.log-turn__head > .log-turn__actions { grid-column: 3; grid-row: 1; }
-.log-turn__head > .conversation-input-details > .conversation-input-details__toggle { grid-column: 4; grid-row: 1; }
-.log-turn__head > .conversation-input-details > .conversation-input-details__body { grid-column: 1 / -1; grid-row: 2; }
+.log-turn__title { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); min-width: 0; }
+.log-turn__head > .log-turn__time { flex: none; align-self: start; line-height: 20px; }
+.log-turn__head > .log-turn__actions,
+.log-turn__head > .conversation-input-details > .conversation-input-details__toggle { flex: none; }
+.log-turn__head > .conversation-input-details > .conversation-input-details__body { flex: 1 0 100%; min-width: 0; }
 .log-turn__meta { grid-column: 2; grid-row: 2; display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-1) var(--sp-2); min-width: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
 .log-turn__meta > * { max-width: 100%; }
 .conversation-input-details__body > .log-turn__meta { grid-column: 1 / -1; grid-row: auto; }
@@ -199,7 +199,7 @@
 /* Explicit compact records share the conversation body, without the ordinary bubble lane. */
 .log-turn[data-compact='true'] { grid-template-columns: 32px minmax(0, 1fr); margin: 0; padding: 0; border: 0; border-radius: 0; background: transparent; column-gap: var(--sp-3); }
 .log-turn[data-compact='true'] > .log-turn__node { grid-column: 1; width: 32px; height: 32px; background: transparent; }
-.log-turn[data-compact='true'] > .log-turn__head > .log-turn__title > .log-turn__sender > .log-turn__who { flex: 1 1 100px; min-width: 0; font-size: var(--fs-body); }
+.log-turn[data-compact='true'] > .log-turn__head > .log-turn__title > .log-turn__sender > .log-turn__who { flex: 0 1 auto; min-width: 0; font-size: var(--fs-body); }
 .log-turn[data-compact='true'] > .log-turn__head > .log-turn__title > .log-turn__sender-kind { flex-shrink: 1; max-width: 100%; overflow-wrap: anywhere; }
 .log-turn[data-compact='true'] > .log-turn__body > .log-turn__text > .md .md-paragraph,
 .log-turn[data-compact='true'] > .log-turn__body > .log-turn__text > .conversation-progressive-body > .md .md-paragraph,
@@ -398,7 +398,7 @@
 .log-turn__reply-detail > pre { padding: var(--sp-3); border-inline-start: 1px solid var(--line-soft); font: var(--fs-micro)/1.5 var(--font-mono); }
 
 /* The exact address stays beside the readable name, separate from full-message Copy. */
-.log-turn__sender { display: flex; flex: 1 1 auto; flex-wrap: wrap; align-items: baseline; gap: 2px var(--sp-2); min-width: 0; }
+.log-turn__sender { display: contents; }
 .log-turn__sender .log-turn__who { flex: 0 1 auto; min-width: 0; }
 .log-turn__sender-id { position: relative; display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; max-width: 100%; color: var(--text-3); }
 .log-turn__sender-id code { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; white-space: normal; font: var(--fs-micro)/1.5 var(--font-mono); user-select: text; }
