@@ -9,13 +9,9 @@ if (process.isMainFrame) {
   const call = async <T>(action: CapsuleDocumentAction, params: Record<string, unknown> = {}): Promise<T> =>
     unwrapSessionInputOperationResult(await ipcRenderer.invoke('capsule:document', action, params))
   const mutate = async <T>(action: CapsuleDocumentAction, params: Record<string, unknown>, operationId: string): Promise<T> => {
-    try { return await call<T>(action, { ...params, operationId }) }
-    catch (error) {
-      // Explicit callers already retain this machine ID. ContextBridge need not preserve custom
-      // Error properties, so consumers must not derive reconciliation facts from error text.
-      if (error instanceof Error) Object.assign(error, { operationId })
-      throw error
-    }
+    if (typeof operationId !== 'string' || !operationId.trim())
+      throw new Error('Retain an ID from createOperationId() before calling a Capsule mutation.')
+    return await call<T>(action, { ...params, operationId })
   }
   const listeners = new Set<(theme: CapsulePageTheme | null) => void>()
   const projected = new Map<string, { before: string; after: string }>()
@@ -53,9 +49,9 @@ if (process.isMainFrame) {
       return theme
     },
     onThemeChanged(listener) { listeners.add(listener); return () => { listeners.delete(listener) } },
-    request: (question, draft, operationId = mintObjectId()) => mutate('request', { question, ...(draft === undefined ? {} : { draft }) }, operationId),
+    request: (question, draft, operationId) => mutate('request', { question, ...(draft === undefined ? {} : { draft }) }, operationId),
     read: interactionId => call('read', { interactionId }),
-    saveDraft: (interactionId, expectedRevision, draft, operationId = mintObjectId()) =>
+    saveDraft: (interactionId, expectedRevision, draft, operationId) =>
       mutate('saveDraft', { interactionId, expectedRevision, draft }, operationId),
     inspectOperation: operationId => call('inspectOperation', { operationId })
   }
