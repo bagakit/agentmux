@@ -81,9 +81,20 @@ function layout() {
   browsers.setBounds(pageId, pageBounds)
   window.webContents.send('layering:visibility', visibility())
 }
-async function nativeReady(count?: number) {
-  await wait(() => publishing === 0 && last && (count === undefined ? last.projected >= 2 : last.projected === count) && positive().length === last.projected,
+async function nativeReady() {
+  await wait(() => publishing === 0 && last && last.projected >= 2 && positive().length === last.projected,
     'The matching original modal publication must finish native paint')
+}
+async function nativeModalClosed() {
+  const registry = () => (overlays as unknown as { projections: Map<string, { region: NativeOverlayRegion }> }).projections
+  await wait(async () => {
+    const publication = receipt.publications.at(-1)
+    if (publishing !== 0 || !last || !publication || positive().length !== last.projected ||
+      publication.regions.some((region: NativeOverlayRegion) => region.modal) || [...registry().values()].some(projection => projection.region.modal)) return false
+    return await read(`!document.querySelector('[data-overlay-modal-scope]:not([hidden]) [data-overlay-modal-part="content"][data-state="open"]')`)
+  }, 'The original modal DOM and exact native scrim/content projections must retire while unrelated Chrome remains available')
+  receipt.modalClosures ??= []
+  receipt.modalClosures.push({ publication: receipt.publications.length - 1, last, remainingOwners: owners(), remainingDOM: (await facts()).nodes })
 }
 async function point(selector: string, text?: string) {
   const target = await read(`(()=>{const nodes=[...document.querySelectorAll(${JSON.stringify(selector)})],node=nodes.find(node=>${text === undefined ? 'true' : `node.textContent.trim()===${JSON.stringify(text)}`});if(node){const r=node.getBoundingClientRect();return{point:{x:r.x+r.width/2,y:r.y+r.height/2}}}const describe=node=>{const r=node.getBoundingClientRect(),s=getComputedStyle(node);return{tag:node.tagName,id:node.id,role:node.getAttribute('role'),state:node.getAttribute('data-state'),text:node.textContent,innerText:node.innerText,ariaLabel:node.getAttribute('aria-label'),bounds:{x:r.x,y:r.y,width:r.width,height:r.height},display:s.display,visibility:s.visibility,html:node.outerHTML.slice(0,2400)}};return{point:null,candidates:nodes.map(describe),menus:[...document.querySelectorAll('[role="menu"]')].map(describe),invokers:[...document.querySelectorAll('[data-pmo-teams-topic-launcher] button')].map(describe)}})()`)
@@ -294,7 +305,7 @@ async function verifySystemFullscreen() {
     await retained(); await nativeTab(); await nativeTab(true); await retained(); await frame('system-fullscreen-restored')
     proof.status = 'complete'; proof.after = { bounds: window.getBounds(), contentBounds: window.getContentBounds(), zoom: window.webContents.getZoomFactor(), owners: owners() }
     receipt.cases.push({ label: 'system-fullscreen-preserves-original-input-and-draft', proof })
-    await key('Escape', 27); await nativeReady(0)
+    await key('Escape', 27); await nativeModalClosed()
   } catch (error: any) {
     proof.status = 'unconfirmed'; proof.failure = { message: error.message, fullscreen: window.isFullScreen(), simpleFullscreen: window.isSimpleFullScreen(), bounds: window.getBounds() }
     throw error
@@ -424,7 +435,7 @@ async function verifyCrossDocumentWorkbench() {
       if (!primaryFailed) throw new Error('Cross-document fixture cleanup failed: ' + JSON.stringify(receipt.crossDocumentCleanupFailures))
     }
   }
-  await nativeReady(0)
+  await nativeModalClosed()
 }
 async function verifyMobile() {
   await setNativePageVisible(false); await overlays.update([])
@@ -595,7 +606,7 @@ async function verifyAvatar() {
       assert.notDeepEqual((await avatar()).controls[control], previous.state.controls[control], 'Native input must change the original Avatar control value')
       await painted(); await nativeReady(); previous = await sample(label, previous)
     }
-    await click('.space-icon-picker footer button', 'Cancel', true); await nativeReady(0)
+    await click('.space-icon-picker footer button', 'Cancel', true); await nativeModalClosed()
     const cancelled = await avatar(); assert.equal(cancelled.modalId, undefined); assert.equal(cancelled.activeInvoker, true, 'Avatar Cancel returns focus to its exact original Mote entry')
     assert.equal(await read('document.activeElement?.matches("[data-ui-layering-avatar-invoker]")'), true, 'Avatar Cancel focuses the exact target-bound original invoker')
     assert.ok(cancelled.calls.every((call: any) => !['save', 'config.save'].includes(call.method)), 'Avatar Cancel never invokes a saved-avatar/configuration write')
@@ -605,7 +616,7 @@ async function verifyAvatar() {
     receipt.cases.push({ label: 'mote-avatar-series-native-layer-and-continuous-paint', samples, cancelled: brief(cancelled), savedAvatarUnchanged: true })
   } catch (error) { primaryFailed = true; receipt.avatarFailureState = brief(await avatar().catch(() => ({}))); throw error }
   finally {
-    try { await read('layeringProbe.avatar.dispose()'); window.setContentSize(originalBounds.width, originalBounds.height); layout(); await painted(); await nativeReady(0) }
+    try { await read('layeringProbe.avatar.dispose()'); window.setContentSize(originalBounds.width, originalBounds.height); layout(); await painted(); await nativeModalClosed() }
     catch (error) { receipt.avatarCleanupFailure = failureDetails(error); if (!primaryFailed) throw error }
   }
 }
@@ -664,12 +675,12 @@ async function run() {
   if (qaScope === 'system-fullscreen-only') { await verifySystemFullscreen(); finishAvailableChecks(); return }
   await openStop(); await assertModal('normal-stop-original-caller'); await frame('normal-stop')
   const original = (await facts()).workbench
-  await key('Enter', 13); await nativeReady(0)
+  await key('Enter', 13); await nativeModalClosed()
   assert.equal(await read('!!document.querySelector(".confirmation-dialog")'), false, 'Initial Enter cancels the destructive action')
   assert.deepEqual((await facts()).workbench.stops, original.stops, 'Cancel never stops a Run')
   receipt.cases.push({ label: 'initial-enter-cancels', originalRetained: true })
 
-  await openStop(); await nativeReady(); await click('.confirmation-dialog button', 'Keep Session & Close', true); await nativeReady(0)
+  await openStop(); await nativeReady(); await click('.confirmation-dialog button', 'Keep Session & Close', true); await nativeModalClosed()
   const kept = (await facts()).workbench
   assert.deepEqual(kept.stops, original.stops, 'Keep leaves the original Agent running')
   for (const field of ['drafts', 'sessions']) assert.deepEqual(kept[field], original[field], 'Keep preserves original ' + field)
@@ -685,7 +696,7 @@ async function run() {
   const during = (await facts()).workbench
   assert.equal(during.stops.length, original.stops.length + 1, 'Busy Stop reaches its original owner exactly once')
   assert.equal(await read('!!document.querySelector(".confirmation-dialog")'), true, 'Busy Escape preserves the same pending action')
-  await frame('normal-stop-busy'); await read('dialogCraft.busy(false)'); await nativeReady(0)
+  await frame('normal-stop-busy'); await read('dialogCraft.busy(false)'); await nativeModalClosed()
   assert.ok((await facts()).events.some((event: any) => event.type === 'click' && event.trusted && event.label?.includes('Stop & Close')), 'Native projection input must reach the original trusted DOM handler')
   receipt.cases.push({ label: 'native-stop-busy-exactly-once', busyControls, during })
 
@@ -695,7 +706,7 @@ async function run() {
     window.setContentSize(width, height); window.webContents.setZoomFactor(zoom); layout()
     await painted(); await assertModal(label); await frame(label)
     assert.equal(await read('document.querySelector("[data-overlay-modal-scope]").id'), identity, 'Window resize and zoom retain the original modal identity and request')
-    await key('Escape', 27); await nativeReady(0)
+    await key('Escape', 27); await nativeModalClosed()
   }
   window.setContentSize(1180, 740); window.webContents.setZoomFactor(1); layout()
 
@@ -706,12 +717,12 @@ async function run() {
   await wait(() => { const content = receipt.publications.at(-1)?.regions.find((region: NativeOverlayRegion) => region.modal?.part === 'content'); return content && Math.abs(content.bounds.x - beforeShift - 24) < 1 && publishing === 0 }, 'Pure CSSOM layout displacement must update the original native content bounds')
   await assertModal('pure-layout-displacement'); await frame('pure-layout-displacement')
   assert.equal(await read('document.querySelector("[data-overlay-modal-scope]").id'), shiftedModalId)
-  await read('layeringProbe.shiftModal(0)'); await painted(); await key('Escape', 27); await nativeReady(0)
+  await read('layeringProbe.shiftModal(0)'); await painted(); await key('Escape', 27); await nativeModalClosed()
 
   for (let iteration = 0; iteration < 2; iteration++) {
     await read('layeringProbe.foreignPopover(true)'); await openStop(); await assertModal('repeated-top-layer-' + iteration)
     assert.equal(await read('document.getElementById("fixture-foreign-popover")?.matches(":popover-open")'), true, 'Opening a newer modal preserves the already open native HTML popover')
-    await key('Escape', 27); await read('layeringProbe.foreignPopover(false)'); await nativeReady(0)
+    await key('Escape', 27); await read('layeringProbe.foreignPopover(false)'); await nativeModalClosed()
   }
 
   if (process.platform === 'darwin') {
@@ -723,7 +734,7 @@ async function run() {
     await wait(() => !window.isSimpleFullScreen(), 'The isolated native window must restore from fullscreen')
     await assertModal('simple-fullscreen-restored')
     assert.equal(await read('document.querySelector("[data-overlay-modal-scope]").id'), originalModal, 'Fullscreen and restore retain the same original modal request')
-    await key('Escape', 27); await nativeReady(0)
+    await key('Escape', 27); await nativeModalClosed()
     if (!withoutSystemFullscreen) await verifySystemFullscreen()
   }
 
@@ -776,7 +787,7 @@ async function run() {
   for (const type of ['mousePressed', 'mouseReleased']) await page.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...p, button: 'left', clickCount: 1 })
   assert.equal(await page.webContents.executeJavaScript('clicks'), backgroundBefore + 1, 'Modal preparation preserves the original Browser CDP action')
   page.webContents.debugger.detach()
-  release?.(); release = undefined; await nativeReady(); await assertModal('atomic-pair-preparation'); await key('Escape', 27); await nativeReady(0)
+  release?.(); release = undefined; await nativeReady(); await assertModal('atomic-pair-preparation'); await key('Escape', 27); await nativeModalClosed()
   receipt.cases.push({ label: 'atomic-preparation-background-input-guard', backgroundBefore, captureFaults })
 
   fault = 'content'; await openStop()
@@ -791,7 +802,7 @@ async function run() {
   assert.equal(failed.workbench.stops.length, during.stops.length, 'Presentation failure never authorizes Stop')
   assert.equal(await page.webContents.executeJavaScript('document.querySelector("input").value'), 'Original Browser draft stays here')
   await frame('content-failure-retry'); await click('.modal-presentation-note button', 'Retry', true); await assertModal('same-request-retry'); await frame('same-request-retry')
-  await key('Escape', 27); await nativeReady(0)
+  await key('Escape', 27); await nativeModalClosed()
   receipt.cases.push({ label: 'required-content-failure-retry-retains-request', failed })
 
   await read('layeringProbe.nested()'); await nativeReady()
@@ -827,7 +838,7 @@ async function run() {
   await click('#nested-menu-trigger', undefined, true); await wait(() => read('!!document.querySelector("[role=menu]")'), 'Original nested menu can reopen in the same parent')
   await nativeReady(); await key('Escape', 27)
   assert.equal(await read('!!document.querySelector(".confirmation-dialog")'), true, 'One Escape dismisses only the child menu')
-  await key('Escape', 27); await nativeReady(0)
+  await key('Escape', 27); await nativeModalClosed()
   receipt.cases.push({ label: 'nested-menu-tooltip-scope-and-one-escape', nested })
 
   await read('layeringProbe.completion()'); await nativeReady()
@@ -879,7 +890,7 @@ async function run() {
   await click('.modal-presentation-note button', 'Retry', true); await nativeReady()
   assert.equal(await read('document.querySelector(".confirmation-dialog [role=textbox]") === window.retainedCompletionEditor'), true, 'Retry resumes the original maintained editor instance')
   assert.equal(await read('window.retainedCompletionEditor.textContent'), '/inspect ')
-  await frame('modal-retained-draft-retry'); await click('.confirmation-dialog__cancel', undefined, true); await nativeReady(0)
+  await frame('modal-retained-draft-retry'); await click('.confirmation-dialog__cancel', undefined, true); await nativeModalClosed()
   receipt.cases.push({ label: 'focusable-completion-and-editor-retained-through-retry', actions: await read('layeringProbe.actions()') })
 
   await verifyAvatar()
