@@ -84,6 +84,7 @@
 @import '@agentmux/client-ui/styles/message-delivery-failure.css';
 @import './launcher.css';
 @import './session-takeover.css';
+@import './session-learning.css';
 @import './resume.css';
 @import './activity.css';
 @import '@agentmux/client-ui/styles/conversation-message.css';

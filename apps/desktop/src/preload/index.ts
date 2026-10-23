@@ -143,6 +143,10 @@ const api: AgentMuxPreloadApi = {
   capsules: { call: async (method, params) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('capsules:call', method, params)) },
   capsuleRuntime: { call: async (method, params) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('capsules:call', method, params)) },
   capsuleReplies: { confirm: async input => unwrapSessionInputOperationResult(await ipcRenderer.invoke('capsules:reply', input)) },
+  agentLearning: {
+    call: async (method, input) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('agentLearning:call', method, input)),
+    confirm: async input => unwrapSessionInputOperationResult(await ipcRenderer.invoke('agentLearning:confirm', input))
+  },
   notesStorage: {
     inspect: operationId => ipcRenderer.invoke('notesStorage:inspect', operationId),
     change: input => ipcRenderer.invoke('notesStorage:change', input),

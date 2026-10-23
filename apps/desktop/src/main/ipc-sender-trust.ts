@@ -32,6 +32,8 @@ export const PRIVILEGED_SENDER_LABELS = {
   'ui:readLoadedIdentity': 'loaded application identity',
   'applications:call': 'application access administration',
   'capsules:reply': 'Capsule human answer confirmation',
+  'agentLearning:call': 'Agent experience review',
+  'agentLearning:confirm': 'Agent learning human confirmation',
   'capsules:call': 'Capsule page management',
   'ui:inspectDefaultBrowser': 'default-browser inspection',
   'ui:openDefaultBrowserSettings': 'default-browser settings',

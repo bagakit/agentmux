@@ -12,10 +12,11 @@ const InformationIcon = semanticIconComponent('status.info')
 
 /** One live SessionPane menu body for Header More and the same Region's context menu. */
 export function AgentRegionMenuContent({ name, executorLabel, sessionId, sessionKind, executionHost, readOnly,
-  onTakeOver, onHistory, onRefreshObservation, refreshing, nativeSourceActions, currentConversationActions, entries, contextualActions }: {
+  onTakeOver, onLearn, onHistory, onRefreshObservation, refreshing, nativeSourceActions, currentConversationActions, entries, contextualActions }: {
   name: string; executorLabel: string; sessionId: string; sessionKind: 'agent' | 'terminal'
   executionHost: RegionExecutionHost; readOnly: boolean
   onTakeOver: (() => void) | undefined; onHistory: (() => void) | undefined
+  onLearn?: (() => void) | undefined
   onRefreshObservation: (() => void) | undefined; refreshing: boolean
   nativeSourceActions: ReactNode; currentConversationActions: ReactNode; entries: readonly RegionMenuEntry[]
   contextualActions?: ReactNode
@@ -31,7 +32,7 @@ export function AgentRegionMenuContent({ name, executorLabel, sessionId, session
       <strong title={name}>{name}</strong>
       <span>{executorLabel} · {executionHost.label}{executionHost.configured ? '' : executionHost.id ? ' · Not configured' : ''}{readOnly ? ' · Read-only' : ''}</span>
     </Menu.Label>
-    <AgentRegionMenuActions entries={entries} controls={takeOver || currentConversationActions ? <>{takeOver}{currentConversationActions}</> : null} conversation={<>
+    <AgentRegionMenuActions entries={entries} controls={takeOver || onLearn || currentConversationActions ? <>{takeOver}{onLearn && !readOnly && sessionKind === 'agent' ? <Menu.Item className="tab-context-menu__item" onSelect={onLearn}><ForwardIcon size={14} /><span>Pass on experience</span></Menu.Item> : null}{currentConversationActions}</> : null} conversation={<>
       {onHistory ? <Menu.Item className="tab-context-menu__item" onSelect={onHistory}>
         <HistoryIcon size={14} /><span>Conversation history</span>
       </Menu.Item> : null}
