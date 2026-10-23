@@ -3881,7 +3881,7 @@ export class BrowserViewManager {
   private retainClosedInputShield(entry: BrowserEntry): void {
     if (!entry.inputShield && !this.inputSurfaceCleanup.has(entry.id)) return
     this.releasedEntries.set(entry.id, { id: entry.id, workspaceId: entry.workspaceId, storage: entry.storage,
-      requestedUrl: entry.requestedUrl, viewport: entry.viewport, agent: entry.agent, agentWarning: entry.agentWarning, inputShield: entry.inputShield, cleanupOnly: true })
+      requestedUrl: entry.requestedUrl, viewport: entry.viewport, agent: entry.agent, agentWarning: entry.agentWarning, ...(entry.inputShield ? { inputShield: entry.inputShield } : {}), cleanupOnly: true })
     entry.inputShield = undefined
   }
 
