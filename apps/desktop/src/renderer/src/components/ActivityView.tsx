@@ -266,7 +266,7 @@ export function ActivityView({
   const documentVisible = useWorkbenchDocumentVisibility(consumerDocument)
   const readAhead = useConversationReadAhead({
     identity: JSON.stringify([sessionId, conversationReading?.identity, conversationReading?.reference.hostId, nativeHistoryPage?.source]),
-    active: conversationReading?.enabled === true && documentVisible && conversationReading.consumer?.visible !== false,
+    active: conversationReading?.enabled === true && documentVisible && conversationReading.consumer?.visible !== false && conversationReading.consumer?.activityShown !== false,
     stopped: Boolean(readingWindow.held || readingWindow.error || readingWindow.automaticReadError || readingWindow.previousSource),
     loading: readingWindow.loading,
     frame: readingWindow.snapshot,
@@ -582,7 +582,9 @@ export function ActivityView({
       .filter(node => node.dataset.messageSourceKey === sourceKey && (node.matches('.conversation-reply-observation') || !node.closest('.conversation-reply-observation')))
     const owners = matches.filter(node => !matches.some(parent => parent !== node && parent.contains(node)))
     if (owners.length !== 1) return false
-    const node = owners[0]!, head = node.matches('.conversation-reply-observation')
+    const node = owners[0]!
+    if (node.closest('[hidden], [inert], [aria-hidden="true"]')) return false
+    const head = node.matches('.conversation-reply-observation')
       ? node.querySelector<HTMLElement>('[data-observation-step-id]') ?? node
       : node.querySelector<HTMLElement>('.log-turn__head, .wf-tool-row') ?? node
     followRef.current = { ...followRef.current, following: false }
@@ -608,15 +610,45 @@ export function ActivityView({
   useEffect(() => {
     if (!revealRequest) { revealReadGeneration.current = null; return }
     if (!readingEnabled || !feedEl) return
+    if (!revealRequest.isCurrent()) { revealRequest.complete(false); return }
     const reading = readingWindow.inspect()
     if (conversationReading && (reading.loading || reading.inFlight || reading.watch.binding || reading.held || !reading.snapshot && !reading.error)) return
-    const id = conversationRecordId(revealRequest.record)
-    if (conversationReading && revealReadGeneration.current !== revealRequest.generation &&
-      !originalConversationRecords.some(record => record.records?.some(original => original.id === id))) {
-      if (!revealRequest.isCurrent()) { revealRequest.complete(false); return }
+    const target = revealRequest.record, source = target.source
+    const sourceChanged = ['AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'native-source-changed'].includes(
+      (reading.error as (Error & { code?: string }) | null)?.code ?? '')
+    if (source.kind === 'native' && (sourceChanged || nativeHistoryPage &&
+      (nativeHistoryPage.source.providerId !== source.providerId || nativeHistoryPage.source.nativeSessionId !== source.nativeSessionId))) {
+      revealRequest.complete(false, '原生来源已变化，当前阅读窗口保留；请刷新来源后再定位。'); return
+    }
+    const snapshot = reading.snapshot
+    const present = originalConversationRecords.some(record => record.sourceHostId === target.hostId &&
+      (!revealRequest.inputId || record.input?.id === revealRequest.inputId) &&
+      conversationMessageSourceKey(record.agentSessionId, record.source) === revealRequest.sourceKey)
+    const targetCoverage = snapshot?.coverage.filter(coverage => coverage.source.kind === source.kind &&
+      (source.kind === 'captured' || coverage.source.kind === 'native' &&
+        coverage.source.providerId === source.providerId && coverage.source.nativeSessionId === source.nativeSessionId)) ?? []
+    // Another source's service failure cannot take away an accepted healthy target.
+    // An actual read failure, unknown coverage or changed target still refuses this request.
+    const acceptedTargetAvailable = (current: typeof reading) => current.snapshot === snapshot &&
+      current.error === current.sourceError && current.errorOperation === null && present &&
+      snapshot !== null && snapshot.hostId === executionHostId && snapshot.agentSessionId === target.agentSessionId && snapshot.sourceHostId === target.hostId &&
+      targetCoverage.length === 1 && targetCoverage[0]!.current === 'complete-through-cut'
+    if (reading.error && !acceptedTargetAvailable(reading)) { revealRequest.complete(false, `读取对话失败：${reading.error.message}`); return }
+    if (!snapshot || snapshot.hostId !== executionHostId || snapshot.agentSessionId !== target.agentSessionId ||
+      snapshot.sourceHostId !== target.hostId) {
+      revealRequest.complete(false, '记录关系未确认，无法定位。'); return
+    }
+    const id = conversationRecordId(target)
+    const loaded = originalConversationRecords.some(record => record.records?.some(original => original.id === id))
+    if (conversationReading && revealReadGeneration.current !== revealRequest.generation && !loaded) {
       revealReadGeneration.current = revealRequest.generation
       readAhead.cancel()
-      void readingWindow.selectRecord(revealRequest.record, { signal: revealRequest.signal })
+      void readingWindow.selectRecord(target, { signal: revealRequest.signal })
+      return
+    }
+    if (!present) { revealRequest.complete(false, '当前有界对话窗口中没有这条记录，无法确认位置。'); return }
+    if (conversationReading?.consumer?.activityShown === false) {
+      if (!revealRequest.present()) revealRequest.complete(false)
       return
     }
     setLocatedMessageKey(revealRequest.sourceKey)
@@ -624,12 +656,15 @@ export function ActivityView({
       if (!revealRequest.isCurrent() || !feedEl.isConnected) { revealRequest.complete(false); return }
       const current = readingWindow.inspect()
       if (conversationReading && (current.loading || current.inFlight || current.watch.binding || current.held)) return
+      if (current.snapshot !== snapshot) return
+      if (current.error && !acceptedTargetAvailable(current)) { revealRequest.complete(false, `读取对话失败：${current.error.message}`); return }
       const located = locateLoadedRecord(revealRequest.sourceKey, revealRequest.isCurrent)
-      revealRequest.complete(located, located ? undefined : readingWindow.error ?? undefined)
+      revealRequest.complete(located, located ? undefined : current.error ? `读取对话失败：${current.error.message}` : undefined)
     })
     return () => cancelAnimationFrame(frame)
-  }, [revealRequest, feedEl, unifiedItems, nativeHistoryPage, readingEnabled,
-    Boolean(conversationReading), readingWindow.snapshot, readingWindow.loading, readingWindow.held, readingWindow.error])
+  }, [revealRequest, feedEl, originalConversationRecords, nativeHistoryPage, readingEnabled, executionHostId,
+    Boolean(conversationReading), conversationReading?.consumer?.activityShown,
+    readingWindow.snapshot, readingWindow.loading, readingWindow.held, readingWindow.error])
 
   // Segment elements keyed by segment key, so a resolved event index can find its host row and the
   // observer can watch each one.
