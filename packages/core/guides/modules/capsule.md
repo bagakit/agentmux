@@ -28,6 +28,13 @@ ordinary page reads and keepalive cannot undo it. A timeout leaves the original 
 and Run unconfirmed: inspect them, do not resubmit Start/Stop or mint a replacement ID.
 Native process readiness, runtime handshake, page HTTP and Browser display are distinct.
 
+Only an explicit first capsule create or runtime start establishes running intent. Other
+page, configuration and interaction operations, including original-operation queries, on
+an unconfigured namespace return CAPSULE_RUNTIME_UNCONFIGURED with an explicit Start
+recovery; they create no binding or service Run. Runtime stop may persist stopped intent
+even before a first Start. Existing saved running intent still permits original-Run
+recovery and keepalive.
+
 On a remote Core, paths and 127.0.0.1 refer to that execution Host. The existing authorized
 Core transport can manage the service; it does not create a tunnel or authorize a public
 listener. Without a confirmed presentation route the page remains saved and serving on
