@@ -7,6 +7,7 @@ import { execFile, execFileSync } from 'node:child_process'
 import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
 import { runProbeProcess, stopProbeProcesses, listProbeProcesses } from './probe-process.mjs'
+import { assertWorkspaceDistBuiltFromCurrentSource } from '../../../vitest.dist-freshness.ts'
 import { privatePackageSmokeEnvironment } from './package-smoke-context.mjs'
 
 const repository = resolve(import.meta.dirname, '../../..'), desktop = join(repository, 'apps/desktop')
@@ -14,7 +15,7 @@ const require = createRequire(join(desktop, 'package.json')), esbuild = createRe
 const args = process.argv.slice(2), caseIndex = args.indexOf('--case'), outputIndex = args.indexOf('--output')
 const selected = args[caseIndex + 1]
 const workerLabel = process.env.AGENTMUX_MODAL_PRIVATE_WORKER
-assert.ok(caseIndex >= 0 && ['scrim'].includes(selected), 'Use --case scrim [--mutations] [--output DIRECTORY]')
+assert.ok(caseIndex >= 0 && ['scrim', 'input'].includes(selected), 'Use --case scrim|input [--mutations] [--output DIRECTORY]')
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--case' || args[i] === '--output') { assert.ok(args[++i], 'Option requires a value'); continue }
   assert.equal(args[i], '--mutations', 'Unknown option')
@@ -30,9 +31,14 @@ const receipt = { schema: 'agentmux.modal-boundaries.v1', case: selected, passed
   aestheticReview: 'independent-review-pending' }
 const mutations = {
   scrim: [{ label: 'mask-default-origin', path: 'apps/desktop/src/main/native-overlay-scrim.ts',
-    before: "mask.setAttribute('x','0'); mask.setAttribute('y','0');", after: '', expected: /scrim.*pixel/i }]
+    before: "mask.setAttribute('x','0'); mask.setAttribute('y','0');", after: '', expected: /scrim.*pixel/i }],
+  input: [{ label: 'page-protocol-interception', path: 'apps/desktop/src/main/browser-view-manager.ts',
+    before: 'surface.presentations.set(token, failed)',
+    after: "surface.presentations.set(token, failed); owner.view.webContents.on('before-mouse-event', event => event.preventDefault())",
+    expected: /input CDP must still perform/ }]
 }
 async function run(label, mutation) {
+  if (selected !== 'scrim') await assertWorkspaceDistBuiltFromCurrentSource(repository)
   const directory = join(output, label); await mkdir(directory)
   const consumed = {}, changed = []
   const observe = async (file, source) => {
@@ -50,14 +56,14 @@ async function run(label, mutation) {
     return loaded
   }
   const plugin = { name: 'modal-boundary-source-identity', setup(builder) {
-
+    builder.onResolve({ filter: /^@agentmux\/core(?:\/|$)/ }, entry => ({ path: fileURLToPath(import.meta.resolve(entry.path)), external: true }))
     builder.onLoad({ filter: /\.[cm]?[jt]sx?$/ }, async entry => {
       const source = await readFile(entry.path, 'utf8'), loaded = await observe(entry.path, source)
       return { contents: loaded, loader: /\.tsx$/.test(entry.path) ? 'tsx' : /\.ts$/.test(entry.path) ? 'ts' : 'js' }
     })
   } }
   for (const file of ['pnpm-lock.yaml', 'apps/desktop/scripts/verify-modal-boundaries.mjs', 'apps/desktop/scripts/probe-process.mjs',
-    'apps/desktop/scripts/package-smoke-context.mjs']) await observe(join(repository, file))
+    'apps/desktop/scripts/package-smoke-context.mjs', 'vitest.dist-freshness.ts']) await observe(join(repository, file))
   await esbuild.build({ absWorkingDir: repository, entryPoints: [join(fixture, selected + '.ts')], outfile: join(directory, 'main.mjs'),
     bundle: true, platform: 'node', format: 'esm', external: ['electron'], logLevel: 'silent', plugins: [plugin],
     banner: { js: "import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);" } })
@@ -92,6 +98,7 @@ import('./main.mjs').catch(error=>{console.error(error);require('electron').app.
   assert.equal(processReceipt.exitConfirmed, true)
   const actual = JSON.parse(await readFile(join(directory, 'result.json'), 'utf8'))
   const nodeLoads = (await readFile(join(directory, 'node-loads.ndjson'), 'utf8').catch(() => '')).trim().split('\n').filter(Boolean).map(line => JSON.parse(line))
+  if (selected === 'input') assert.ok(nodeLoads.some(entry => entry.file.endsWith('/packages/core/dist/index.js')), 'Observe the actual external product Core loader input')
   for (const loaded of nodeLoads) { const file = relative(repository, loaded.file); assert.equal(sha(await readFile(loaded.file)), loaded.sha256, 'External runtime loader input unchanged: ' + file); await observe(loaded.file) }
   await writeFile(join(directory, 'inputs.json'), JSON.stringify({ consumed, compiled, changed, nodeLoads }, null, 2))
   assert.ok(actual.cases.length > 0, 'The actual case must reach a nonempty independent oracle')
