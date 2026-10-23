@@ -15,17 +15,11 @@ const fixture = await vi.hoisted(async () => {
   vi.stubEnv('AGENTMUX_DESKTOP_USER_DATA', join(root, 'profile'))
   vi.stubEnv('AGENTMUX_RPC_HTTP_BIND', undefined); vi.stubEnv('AGENTMUX_RPC_HTTP_TOKEN', undefined)
   return { root, profile: join(root, 'profile'), socket: join(root, 'business.sock'),
-    handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: any[]) => any>(),
-    secure: undefined as import('../src/main/connector-secrets.js').CredentialEncryption | undefined,
-    sync: vi.fn((): never => { throw Error('Synchronous OS access is forbidden') }) }
+    handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: any[]) => any>() }
 })
 vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => join(fixture.root, 'home') }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   app: { getPath: () => fixture.profile, getAppPath: () => fixture.profile },
-  safeStorage: { isAsyncEncryptionAvailable: () => fixture.secure!.isAsyncEncryptionAvailable(),
-    encryptStringAsync: (value: string) => fixture.secure!.encryptStringAsync(value),
-    decryptStringAsync: (value: Buffer) => fixture.secure!.decryptStringAsync(value),
-    isEncryptionAvailable: fixture.sync, encryptString: fixture.sync, decryptString: fixture.sync },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: any[]) => any) => fixture.handlers.set(channel, handler),
     removeHandler: (channel: string) => fixture.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, session: {} }))
@@ -46,28 +40,30 @@ import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { registerIpc } from '../src/main/ipc.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { WorkspaceFiles } from '../src/main/workspace-files.js'
-import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
+import { AgentMuxError } from '@agentmux/core'
+import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 
 afterAll(async () => { vi.unstubAllEnvs(); await rm(fixture.root, { recursive: true }) })
-function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(accept => { resolve = accept }); return { promise, resolve } }
+function deferred<T>() { let resolve!: (value: T) => void, reject!: (error: unknown) => void; const promise = new Promise<T>((accept, refuse) => { resolve = accept; reject = refuse }); return { promise, resolve, reject } }
 
-it.each(['availability', 'decryption'] as const)('publishes the real Main owner while original receiver %s remains pending', async phase => {
+it.each(['availability', 'read'] as const)('publishes the real Main owner while original private receiver %s remains pending', async phase => {
   fixture.profile = join(fixture.root, phase)
   vi.stubEnv('AGENTMUX_DESKTOP_USER_DATA', fixture.profile)
   vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(fixture.profile, 'state'))
   vi.stubEnv('AGENTMUX_SPATIAL_STATE_STORE', join(fixture.profile, 'state', 'spatial-state.json'))
-  // Configure the existing built-in receiver with real persisted credentials; no network starts before decryption completes.
-  const original = enrollmentEncryption(), seed = await createConnectionServices({ directory: join(fixture.profile, 'connectors'), encryption: original })
+  // Configure the original receiver with synthetic private credentials; native requests wait for its exact secret read.
+  const seed = await createConnectionServices({ directory: join(fixture.profile, 'connectors') })
   const operationId = 'credential-' + phase, connectionId = 'connection-' + phase
   const receipt = await seed.secrets.store({ operationId, secret: 'owned-fixture-credential' })
   await seed.connections.configure({ operationId: 'configure-' + phase, expectedRevision: null,
     connection: { connectionId, adapterId: 'feishu', application: { domain: 'open.feishu.cn', appId: 'owned-fixture-app' }, label: 'Owned receiver', enabled: true, credentialRef: receipt.credentialRef } })
   await seed.connections.service!.configure({ operationId: 'enable-' + phase, expectedRevision: 0, service: { enabled: true } })
   seed.close()
-  const availability = deferred<boolean>(), decrypt = deferred<{ result: string; shouldReEncrypt: boolean }>()
-  const secure = { isAsyncEncryptionAvailable: vi.fn(() => phase === 'availability' ? availability.promise : Promise.resolve(true)),
-    encryptStringAsync: vi.fn(original.encryptStringAsync), decryptStringAsync: vi.fn(() => decrypt.promise) }
-  fixture.secure = secure; fixture.sync.mockClear(); fixture.handlers.clear()
+  const pending = deferred<any>()
+  const observed = phase === 'availability'
+    ? vi.spyOn(ConnectionSecrets.prototype, 'assertAvailable').mockImplementation(() => pending.promise)
+    : vi.spyOn(ConnectionSecrets.prototype, 'resolve').mockImplementation(() => pending.promise)
+  fixture.handlers.clear()
   let config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'resource', name: 'Owned', hostId: 'local', path: fixture.profile, kind: 'folder' as const }] }
   const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], hostSignatures: new Map(), reservedHostIds: [] })
@@ -83,20 +79,19 @@ it.each(['availability', 'decryption'] as const)('publishes the real Main owner 
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: fixture.socket } })
   const invoke = (channel: string, value?: unknown) => fixture.handlers.get(channel)!({ sender, senderFrame: sender.mainFrame } as unknown as IpcMainInvokeEvent, value)
   try {
-    await vi.waitFor(() => expect(phase === 'availability' ? secure.isAsyncEncryptionAvailable : secure.decryptStringAsync).toHaveBeenCalled())
+    await vi.waitFor(() => expect(observed).toHaveBeenCalled())
     expect(await rpc.call('connection.service.get', {})).toMatchObject({ enabled: true })
     expect((await rpc.call('connection.ls', {})).connections.map(row => row.config.connectionId)).toContain(connectionId)
     const discovery = await rpc.call('system.diagnostics.inspect', {})
     expect(discovery.capabilities.some(capability => capability.domain === 'client.incident')).toBe(true)
     expect(await invoke('connections:inspectCredential', operationId)).toEqual(receipt)
-    expect(secure.encryptStringAsync).not.toHaveBeenCalled(); expect(fixture.sync).not.toHaveBeenCalled()
-    // An unavailable OS result must also stay local after Main's original endpoint has been published.
-    availability.resolve(false); decrypt.resolve({ result: '', shouldReEncrypt: false })
+    // An unavailable private credential read must also stay local after Main's original endpoint has been published.
+    phase === 'availability' ? pending.reject(new AgentMuxError('Original private storage unavailable.', 'CONNECTION_CREDENTIAL_UNAVAILABLE')) : pending.resolve(null)
     await new Promise<void>(resolve => setImmediate(resolve))
     expect(await rpc.call('connection.service.get', {})).toMatchObject({ enabled: true })
     expect((await rpc.call('system.diagnostics.inspect', {})).capabilities).toEqual(discovery.capabilities)
   } finally {
-    availability.resolve(false); decrypt.resolve({ result: '', shouldReEncrypt: false })
+    phase === 'availability' ? pending.reject(new AgentMuxError('Original private storage unavailable.', 'CONNECTION_CREDENTIAL_UNAVAILABLE')) : pending.resolve(null)
     await invoke('notesStorage:inspect')
     await rpc.dispose(); await dispose(); await incidents.flush(); vi.restoreAllMocks()
   }
