@@ -1637,7 +1637,8 @@ export type AgentMuxDesktopApi = {
     upgradeInspect(host: HostConfig, operationId: string): Promise<import('@agentmux/core').RemoteCoreUpgradeReceipt | null>
   }
   connections: {
-    onMetadataChanged(listener: (change: import('@agentmux/core/connections').ChannelMetadataChange) => void, observation?: (state: 'ready' | 'unavailable') => void): () => void
+    hostingTarget(hostId?: string): Promise<ConnectionHostingTarget>
+    onMetadataChanged(listener: (change: import('@agentmux/core/connections').ChannelMetadataChange) => void, observation?: (state: 'ready' | 'unavailable') => void, target?: ConnectionHostingTarget): () => void
     call<M extends import('@agentmux/core/connections').ConnectionMethod>(method: M, params: import('@agentmux/core/connections').ConnectionParamsMap[M], target?: ConnectionHostingTarget): Promise<import('@agentmux/core/connections').ConnectionResultMap[M]>
     storeCredential(input: { operationId: string; secret: string }, target?: ConnectionHostingTarget): Promise<{ credentialRef: string }>
     inspectCredential(operationId: string, target?: ConnectionHostingTarget): Promise<{ credentialRef: string } | null>
@@ -1715,14 +1716,14 @@ export type AgentMuxDesktopApi = {
     reveal(workspaceId: string, path: string): Promise<void>
   }
   moteChat: {
-    call<M extends import('@agentmux/core/mote-chat').MoteChatMethod>(method: M, params: import('@agentmux/core/mote-chat').MoteChatParamsMap[M]): Promise<import('@agentmux/core/mote-chat').MoteChatResultMap[M]>
+    call<M extends import('@agentmux/core/mote-chat').MoteChatMethod>(method: M, params: import('@agentmux/core/mote-chat').MoteChatParamsMap[M], target?: ConnectionHostingTarget): Promise<import('@agentmux/core/mote-chat').MoteChatResultMap[M]>
   }
   moteConnections: {
-    call<M extends import('@agentmux/core').MoteConnectionMethod>(method: M, params: import('@agentmux/core').MoteConnectionParamsMap[M]): Promise<import('@agentmux/core').MoteConnectionResultMap[M]>
+    call<M extends import('@agentmux/core').MoteConnectionMethod>(method: M, params: import('@agentmux/core').MoteConnectionParamsMap[M], target?: ConnectionHostingTarget): Promise<import('@agentmux/core').MoteConnectionResultMap[M]>
   }
   motePreferences: {
-    read(params: import('@agentmux/core/mote-preferences').MotePreferencesReadInput): Promise<import('@agentmux/core/mote-preferences').MotePreferencesReadResult>
-    save(params: import('@agentmux/core/mote-preferences').MotePreferencesSaveParams): Promise<import('@agentmux/core/mote-preferences').MotePreferencesSaveResult>
+    read(params: import('@agentmux/core/mote-preferences').MotePreferencesReadInput, target?: ConnectionHostingTarget): Promise<import('@agentmux/core/mote-preferences').MotePreferencesReadResult>
+    save(params: import('@agentmux/core/mote-preferences').MotePreferencesSaveParams, target?: ConnectionHostingTarget): Promise<import('@agentmux/core/mote-preferences').MotePreferencesSaveResult>
   }
   moteAvatars: {
     list(): Promise<import('@agentmux/core/mote-avatar-series').MoteAvatarSeriesCatalog>
