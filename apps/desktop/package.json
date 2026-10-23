@@ -20,7 +20,7 @@
     "report:package": "node scripts/report-desktop-package.mjs",
     "audit:features": "node scripts/audit-feature-history.mjs",
     "capture:visual": "node scripts/verify-agent-region-identity-menu.mjs --visual-only",
-    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && node scripts/typecheck-activity-tests.mjs",
     "typecheck:test": "tsc --noEmit -p tsconfig.test.json",
     "measure:desktop": "pnpm build && node scripts/measure-desktop-resources.mjs",
     "icons:dev": "node scripts/icon-review/dev.mjs",
