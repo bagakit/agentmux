@@ -15,7 +15,7 @@ export type AgentMuxSearchTarget =
   | { kind: 'workspace'; hostId: string; workspaceId: string }
   | { kind: 'topic' | 'mote'; hostId: string; topicId: string }
 export const agentMuxSearchTargetKey = (target: AgentMuxSearchTarget) => JSON.stringify([target.kind, target.hostId ?? null,
-  target.kind === 'agent' ? target.agentSessionId : target.kind === 'terminal' ? target.terminalId : target.kind === 'project' ? target.projectId : target.kind === 'workspace' ? target.workspaceId : target.kind === 'topic' || target.kind === 'mote' ? target.topicId : target.kind === 'space' ? target.spaceId : target.kind === 'zone' ? target.zoneId : target.kind === 'tab' ? target.tabId : target.kind === 'region' ? target.regionId : target.topicId])
+  target.kind === 'agent' ? target.agentSessionId : target.kind === 'terminal' ? target.terminalId : target.kind === 'project' ? target.projectId : target.kind === 'workspace' ? target.workspaceId : target.kind === 'topic' || target.kind === 'mote' ? target.topicId : target.kind === 'space' ? target.spaceId : target.kind === 'zone' ? target.zoneId : target.kind === 'tab' ? target.tabId : target.kind === 'region' ? target.regionId : target.kind === 'capsule' ? target.capsuleId : target.topicId])
 export type AgentMuxSearchObjectHit = { kind: 'object'; target: AgentMuxSearchTarget; name: string; locations: AgentMuxSearchLocation[] }
 export type AgentMuxSearchHistoryReference = { hostId: string; sourceHostId: string; agentSessionId: string; source: 'captured' | 'native' }
 export type AgentMuxSearchHistoryHit = { kind: 'history'; reference: AgentMuxSearchHistoryReference; page: AgentSessionHistoryReadPage }

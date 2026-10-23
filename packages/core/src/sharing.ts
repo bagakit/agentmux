@@ -30,28 +30,31 @@ export type AmuxObjectLinkTarget =
   | { kind: 'tab'; tabId: string }
   | { kind: 'space'; spaceId: string }
   | { kind: 'zone'; zoneId: string }
+  | { kind: 'capsule'; capsuleId: string }
 
 export function formatAmuxObjectLink(target: AmuxObjectLinkTarget): string {
   const id = target.kind === 'agent' ? target.agentSessionId
     : target.kind === 'region' ? target.regionId
     : target.kind === 'tab' ? target.tabId
     : target.kind === 'space' ? target.spaceId
-    : target.kind === 'zone' ? target.zoneId : undefined
-  if (typeof id !== 'string' || !id) throw new TypeError('An exact original Agent, Region, Tab, Space or Zone identity is required.')
+    : target.kind === 'zone' ? target.zoneId
+    : target.kind === 'capsule' ? target.capsuleId : undefined
+  if (typeof id !== 'string' || !id) throw new TypeError('An exact original Agent, Region, Tab, Space, Zone or Capsule identity is required.')
   return `${AMUX_PROTOCOL_DEFINITIONS.link.tag}${target.kind}/${encodeURIComponent(id)}`
 }
 
 /** Canonical links carry one original identity, without executable parameters or location guesses. */
 export function parseAmuxObjectLink(raw: string): AmuxObjectLinkTarget {
   if (typeof raw !== 'string') throw new TypeError('An object link must be text.')
-  const match = /^amux:\/\/(agent|region|tab|space|zone)\/([^/?#]+)$/u.exec(raw)
-  if (!match) throw new TypeError('Choose an amux Agent, Region, Tab, Space or Zone link with one exact identity.')
+  const match = /^amux:\/\/(agent|region|tab|space|zone|capsule)\/([^/?#]+)$/u.exec(raw)
+  if (!match) throw new TypeError('Choose an amux Agent, Region, Tab, Space, Zone or Capsule link with one exact identity.')
   const id = decodeURIComponent(match[2]!)
   const target: AmuxObjectLinkTarget = match[1] === 'agent' ? { kind: 'agent', agentSessionId: id }
     : match[1] === 'region' ? { kind: 'region', regionId: id }
     : match[1] === 'tab' ? { kind: 'tab', tabId: id }
     : match[1] === 'space' ? { kind: 'space', spaceId: id }
-    : { kind: 'zone', zoneId: id }
+    : match[1] === 'zone' ? { kind: 'zone', zoneId: id }
+    : { kind: 'capsule', capsuleId: id }
   if (formatAmuxObjectLink(target) !== raw) throw new TypeError('The object link encoding is not an exact original identity.')
   return target
 }
@@ -70,4 +73,7 @@ export function formatSpaceAddress(target: { spaceId: string }): string {
 }
 export function formatZoneAddress(target: { zoneId: string }): string {
   return formatAmuxObjectLink({ kind: 'zone', zoneId: target.zoneId })
+}
+export function formatCapsuleAddress(capsuleId: string): string {
+  return formatAmuxObjectLink({ kind: 'capsule', capsuleId })
 }

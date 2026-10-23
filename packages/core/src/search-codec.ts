@@ -34,7 +34,7 @@ function target(value: unknown): AgentMuxSearchTarget {
   const fields: Record<string, readonly string[]> = {
     agent: ['agentSessionId', 'hostId', 'sourceHostId'], terminal: ['terminalId', 'hostId'],
     project: ['projectId', 'hostId'], workspace: ['workspaceId', 'hostId'], topic: ['topicId', 'hostId'], mote: ['topicId', 'hostId'],
-    space: ['spaceId', 'hostId'], zone: ['zoneId', 'hostId'], tab: ['tabId', 'hostId'], region: ['regionId', 'hostId']
+    space: ['spaceId', 'hostId'], zone: ['zoneId', 'hostId'], tab: ['tabId', 'hostId'], region: ['regionId', 'hostId'], capsule: ['capsuleId', 'hostId']
   }
   const allowed = fields[String(t.kind)]
   if (typeof t.kind !== 'string' || !allowed || Object.keys(t).some(key => key !== 'kind' && !allowed.includes(key)) || !id(t[allowed[0]!]) ||

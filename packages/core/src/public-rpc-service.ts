@@ -1202,6 +1202,8 @@ export class AgentMuxRpcService {
       const input = parseAgentMuxSearchInput(params)
       this.search ??= createAgentMuxSearchReader<SearchCallContext>(createAgentMuxSearchObservationOwner<SearchCallContext>({
         clients: () => this.clients(),
+        ...(this.ports.capsules || this.ports.forwardControl ? { capsules: { hostId: 'local',
+          read: (readContext: SearchCallContext) => this.call('capsule.ls', {}, readContext.rpc) } } : {}),
         catalog: async () => {
           const result = await this.execute(this.request('space.ls', { target: {} }))
           if (result.operation !== 'space.ls') throw new AgentMuxError('The original spatial catalog returned another operation.', 'CONTROL_PROTOCOL_ERROR')
