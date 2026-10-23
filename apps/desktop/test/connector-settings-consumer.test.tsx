@@ -1,16 +1,15 @@
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { unwrapSessionInputOperationResult } from '../src/shared/session-input-result.js'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server.js'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import { ConnectionHost } from '../../../packages/connectors/src/connection-host.js'
-import { ConnectionSecrets, type CredentialEncryption } from '../../../packages/connectors/src/connection-secrets.js'
+import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { larkSettingsModule } from '../src/renderer/src/components/settings/modules/lark'
@@ -18,18 +17,13 @@ import { settingsNavGroups } from '../src/renderer/src/components/settings/setti
 import { api } from '../src/renderer/src/lib/api'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 
-const dom = composerDOM(), secret = 'credential-value-held-only-by-host', key = randomBytes(32)
-const encryption: CredentialEncryption = {
-  isAsyncEncryptionAvailable: async () => true,
-  encryptStringAsync: async value => { const nonce = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, nonce); return Buffer.concat([nonce, cipher.update(value, 'utf8'), cipher.final(), cipher.getAuthTag()]) },
-  decryptStringAsync: async value => { const decipher = createDecipheriv('aes-256-gcm', key, value.subarray(0, 12)); decipher.setAuthTag(value.subarray(-16)); return { result: Buffer.concat([decipher.update(value.subarray(12, -16)), decipher.final()]).toString('utf8'), shouldReEncrypt: false } }
-}
+const dom = composerDOM(), secret = 'credential-value-held-only-by-host'
 let directory: string, database: DatabaseSync, owner: ConnectionHost, secrets: ConnectionSecrets, server: AgentMuxControlServer
 let completedLists = 0, completedChecks = 0
 let handlers: Map<string, (...args: any[]) => Promise<any>>, trusted: ReturnType<typeof vi.fn>, originalCall: typeof api.connections.call
 beforeEach(async () => {
   directory = await mkdtemp(join(tmpdir(), 'connector-settings-'))
-  database = new DatabaseSync(join(directory, 'connections.sqlite')); secrets = new ConnectionSecrets(database, encryption)
+  database = new DatabaseSync(join(directory, 'connections.sqlite')); secrets = new ConnectionSecrets(database)
   owner = new ConnectionHost({ database, secrets }); server = new AgentMuxControlServer({ socketPath: join(directory, 'public.sock'), connections: owner, coreClients: () => [] }); await server.start()
   handlers = new Map(); trusted = vi.fn()
   registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: trusted, socketPath: join(directory, 'public.sock'), secrets })
@@ -245,24 +239,26 @@ describe('Settings uses the original connection owner through public service', (
 })
 
 describe('Host credential and availability boundary', () => {
-  it('rejects plaintext fallback, preserves original credential operations and redacts encryption exceptions', async () => {
-    const unavailable = new ConnectionSecrets(database, { ...encryption, isAsyncEncryptionAvailable: async () => false })
-    await expect(unavailable.store({ operationId: 'unavailable', secret })).rejects.toMatchObject({ code: 'CONNECTION_CREDENTIAL_UNAVAILABLE' })
-    const basicText = new ConnectionSecrets(database, { ...encryption, getSelectedStorageBackend: () => 'basic_text' })
-    await expect(basicText.store({ operationId: 'basic-text', secret })).rejects.toMatchObject({ code: 'CONNECTION_CREDENTIAL_UNAVAILABLE' })
+  it('retains original private credential operations, refuses exposed storage and redacts uncertain write errors', async () => {
+    await chmod(directory, 0o755)
+    await expect(secrets.store({ operationId: 'private-storage-unavailable', secret })).rejects.toMatchObject({ code: 'CONNECTION_CREDENTIAL_UNAVAILABLE' })
     expect(database.prepare('SELECT COUNT(*) AS count FROM connection_credential').get()?.count).toBe(0)
+    await chmod(directory, 0o700)
     const saved = await secrets.store({ operationId: 'credential-store', secret })
     expect(await secrets.store({ operationId: 'credential-store', secret })).toEqual(saved)
     expect(await secrets.inspect('credential-store')).toEqual(saved)
     await expect(secrets.store({ operationId: 'credential-store', secret: 'different' })).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
-    const faulty = new ConnectionSecrets(database, { ...encryption, encryptStringAsync: async () => { throw new Error(secret) } })
-    const error = await faulty.store({ operationId: 'encryption-failure', secret }).catch(error => error)
+    const exec = database.exec.bind(database); let uncertain = true
+    vi.spyOn(database, 'exec').mockImplementation(sql => { const value = exec(sql); if (sql === 'COMMIT' && uncertain) { uncertain = false; throw Error(secret) }; return value })
+    const error = await secrets.store({ operationId: 'private-write-uncertain', secret }).catch(error => error)
     expect(error.code).toBe('CONNECTION_CREDENTIAL_UNCONFIRMED'); expect(JSON.stringify(error)).not.toContain(secret); expect(error.message).not.toContain(secret)
+    const receipt = await secrets.inspect('private-write-uncertain'); expect(receipt).not.toBeNull()
+    expect(await secrets.store({ operationId: 'private-write-uncertain', secret })).toEqual(receipt)
     expect(await secrets.resolve(saved.credentialRef)).toBe(secret)
   })
   it('reports optional connection storage failure without rejecting Host initialization', async () => {
     const file = join(directory, 'occupied'); await writeFile(file, 'keep-original')
-    const services = await createConnectionServices({ directory: join(file, 'child'), encryption })
+    const services = await createConnectionServices({ directory: join(file, 'child') })
     expect(services.database).toBeNull()
     await expect(services.connections.list()).rejects.toMatchObject({ code: 'CONNECTION_STORAGE_UNAVAILABLE' })
     expect(await readFile(file, 'utf8')).toBe('keep-original')
