@@ -1,7 +1,9 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { readFile } from 'node:fs/promises'
-import { join } from 'node:path'
+import { mkdir, readFile } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { spawn } from 'node:child_process'
 import { learningBehaviorFixture } from './agent-learning-behavior-fixture.js'
+import { writeBehaviorTools } from './agent-learning-behavior-tools.mjs'
 
 vi.mock('electron', () => ({ nativeImage: {} }))
 afterEach(() => vi.restoreAllMocks())
@@ -40,5 +42,41 @@ it('keeps original Scratch resource mapping, concurrent edits and unknown save d
     const untouched = await f.behaviorClient.call('file.read', f.resource(1, 'topic.md'))
     expect(untouched.result.status).toBe('read')
     expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  } finally { await f.closeBehavior() }
+})
+
+it('forwards the original file-write stdin bytes through the delegated shipping CLI while identity reads need no stdin', async () => {
+  const f = await learningBehaviorFixture()
+  try {
+    const directory = join(f.root, 'private-tool-proof'); await mkdir(directory)
+    const tools = await writeBehaviorTools({ directory, cliPath: resolve('packages/core/bin/amux'), endpoint: 'unix:' + join(f.root, 'behavior.sock'),
+      caller: f.sourceCredentials.agentSessionId, capability: f.sourceCredentials.capability, operationId: 'tool-stdin-proof', production: 'Declared synthetic tool transport test.' })
+    const call = (args: string[], body = '', keepStdinOpen = false) => new Promise<{ code: number | null; stdout: string; stderr: string }>((accept, reject) => {
+      const child = spawn(process.execPath, [tools.executable, ...args], { stdio: ['pipe', 'pipe', 'pipe'] })
+      let stdout = '', stderr = ''
+      child.stdout.on('data', value => { stdout += String(value) }); child.stderr.on('data', value => { stderr += String(value) })
+      child.once('error', reject); child.once('close', code => accept({ code, stdout, stderr })); if (!keepStdinOpen) child.stdin.end(body)
+    })
+    const identity = await call(['whoami'])
+    expect(identity.code, identity.stderr).toBe(0)
+    expect(JSON.parse(identity.stdout).result.session.agentSessionId).toBe(f.sourceCredentials.agentSessionId)
+    const help = await call(['file', 'write', '--help'], '', true)
+    expect(help.code, help.stderr).toBe(0)
+    const original = await f.behaviorClient.call('file.read', f.resource(0, 'MEMORY.md'))
+    if (original.result.status !== 'read' || !original.resource) throw Error('Original memory unavailable.')
+    const body = original.result.document.content + '\nLiteral proposed text: 中文 $HOME `shell text` $(not-a-command).\n\n'
+    const saved = await call(['file', 'write', '--zone', f.targets[0]!.zoneId, '--path', 'MEMORY.md', '--resource', JSON.stringify(original.resource),
+      '--expected-revision', original.result.document.revision], body)
+    expect(saved.code, saved.stderr + saved.stdout).toBe(0)
+    expect(JSON.parse(saved.stdout).result.result.status).toBe('written')
+    const readback = await f.behaviorClient.call('file.read', f.resource(0, 'MEMORY.md'))
+    expect(readback.result.status).toBe('read')
+    if (readback.result.status === 'read') expect(readback.result.document.content).toBe(body)
+    const query = JSON.stringify({ hostId: 'local', agentSessionId: 'source' })
+    const listed = await call(['agent', 'learning', 'ls', '--input', '-'], query)
+    expect(listed.code, listed.stderr).toBe(0)
+    expect(JSON.parse(listed.stdout).result.operations).toEqual([])
+    const actions = (await readFile(join(directory, 'cli-actions.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
+    expect(actions.map(row => row.stdin)).toEqual(['', '', body, query])
   } finally { await f.closeBehavior() }
 })
