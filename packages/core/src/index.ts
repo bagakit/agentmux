@@ -170,3 +170,4 @@ export * from './external-conversation.js'
 
 export type * from './channel-metadata-contract.js'
 export * from './channel-metadata-codec.js'
+export * from './capsule.js'

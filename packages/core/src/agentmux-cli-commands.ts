@@ -38,6 +38,7 @@ import { parseConversationConsumerQuery } from './conversation-consumer-query.js
 import { parseAgentInputSubmit } from './agent-input-submit.js'
 
 import { AGENTMUX_SCHEDULE_CLI_COMMANDS } from './schedule-cli.js'
+import { AGENTMUX_CAPSULE_CLI_COMMANDS } from './capsule-cli.js'
 import { parseFileHistoryParams, parseFileRestoreParams, parseFileUndoParams, parseFileListParams, parseFileUploadIdentity, parseFileUploadParams } from './public-rpc-files.js'
 import { parseToolkitCommand } from './toolkit-cli.js'
 import { isSplitDirection, SPLIT_FLAG_DIRECTIONS } from './split-direction-ssot.js'
@@ -190,6 +191,7 @@ function goal(method: string, usage: string, summary: string, specs: FlagSpec, b
 
 /** Actual executable registration. Help, skill and playbooks enumerate this same source. */
 export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
+  ...AGENTMUX_CAPSULE_CLI_COMMANDS,
   ...Object.values(AGENTMUX_SCHEDULE_CLI_COMMANDS),
   command('runtime.network.inspect', '--runtime ID --owner ID', 'Read the exact semantic Runtime owner process network interfaces without connecting Native or recovering Sessions. Interface addresses are not connected peers or public egress.',
     { '--runtime': 'data', '--owner': 'data' }, f => ({ fence: { runtimeId: id(f, '--runtime', true), ownerInstanceId: id(f, '--owner', true) } })),
