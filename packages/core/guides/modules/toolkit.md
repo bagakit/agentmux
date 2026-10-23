@@ -26,5 +26,38 @@ Open uses the original Capsule owner and Copy uses its `amux://capsule/<ID>` obj
 Reading or copying a result never reruns the tool. Keep uncertain original opens and query
 their retained operation instead of opening a replacement.
 
+A Custom TUI can wrap the same Capsule management CLI. Keep it a client: the tool's
+`toolId`, `executionId` and terminal Run differ from Capsule's independent service Run.
+Closing or stopping the tool does not stop that service. Core owns the service's saved
+run intent and keepalive; a shell loop or a second HTTP owner in the tool does not.
+
+For a one-shot status query, save an ordinary disabled Custom TUI with this shape, replacing
+the workspace, installed CLI executable and endpoint with exact discovered values:
+
+```json
+{
+  "name": "Capsule status",
+  "icon": "terminal",
+  "enabled": false,
+  "statusBar": "icon",
+  "mode": "tui",
+  "workspacePath": "/absolute/tool/workspace",
+  "script": "exec \"$1\" --endpoint \"$2\" capsule runtime inspect",
+  "args": ["/absolute/installed/amux", "unix:/absolute/core/control.sock"]
+}
+```
+
+Use `amux toolkit create <TOOL_ID> --input FILE` for that saved definition, then explicitly
+enable it when the saved command should run under the original Toolkit authorization.
+The example queries once and exits, retaining its terminal result; it does not install a
+built-in tool or an interactive menu.
+`capsule runtime inspect` needs no input. Explicit runtime start accepts
+`{operationId,expectedRevision}` and stop also binds `expectedRun:{runId}|null`;
+pass that JSON through `--input FILE|-` and read the actual leaf help before a mutation.
+Preserve the original management operation after unknown results; inspect the runtime and
+match its `operationId`. An absent or different operation does not confirm the original
+action. Do not create a replacement Run. A remote endpoint is the original execution environment:
+its loopback address is not a browser URL on this computer and grants no network access.
+
 Read amux toolkit --help for the configuration/execution journey and the exact action's help
 before running or changing a tool. Preserve the original operation after unknown results.
