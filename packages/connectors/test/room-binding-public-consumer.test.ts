@@ -16,10 +16,10 @@ afterEach(async () => {
   } finally { try { vi.restoreAllMocks() } catch (error) { failures.push(error) } }
   if (failures.length) throw new AggregateError(failures, 'Public room binding test cleanup failed')
 })
-async function fixture() {
-  const f = await roomBindingFixture(); cleanup.push(() => f.close())
+async function fixture(retired = true) {
+  const f = await roomBindingFixture(true, { retired }); cleanup.push(() => f.close())
   // The original Desktop Host composition shares its one database, spatial owner and exact Core client.
-  const services = await createConnectionServices({ directory: join(f.root, 'desktop-connections'), encryption: { isAsyncEncryptionAvailable: async () => false, encryptStringAsync: async () => { throw new Error('No credential entry in this test') }, decryptStringAsync: async () => { throw new Error('No credential resolution in binding') } }, bindings: { spatial: f.spatial, checkpoint: f.checkpoint } })
+  const services = await createConnectionServices({ directory: join(f.root, 'desktop-connections'), encryption: { isAsyncEncryptionAvailable: async () => false, encryptStringAsync: async () => { throw new Error('No credential entry in this test') }, decryptStringAsync: async () => { throw new Error('No credential resolution in binding') } }, bindings: { spatial: f.spatial, checkpoint: f.checkpoint, session: async ref => ref.hostId === 'local' ? await f.client.readAgentSession(ref.agentSessionId) : null } })
   cleanup.push(() => services.close())
   const socketPath = join(f.root, 'public.sock'), server = new AgentMuxControlServer({ socketPath, connections: services.connections, spatialState: f.spatial, coreClients: () => [{ hostId: 'local', client: f.client }] })
   await server.start(); cleanup.push(() => server.stop())
@@ -32,6 +32,26 @@ async function fixture() {
 function result(output: { code: number; stdout: string; stderr: string }) { expect(output.code, output.stdout + output.stderr).toBe(0); return JSON.parse(output.stdout).result }
 
 describe('room binding real public consumers', () => {
+  it('binds and relinks an exact durable Session without a Region through the public CLI', async () => {
+    const f = await fixture(false), { regionAnchor: _presentation, ...input } = f.input
+    const read = vi.spyOn(f.spatial, 'read').mockRejectedValue(new Error('No GUI graph is available'))
+    const saved = result(await f.cli(['bind', '--input', '-'], input))
+    expect(saved, JSON.stringify(saved)).toMatchObject({ state: 'applied', binding: { agentSessionId: input.agentSessionId, executionHostId: 'local', revision: 1 } })
+    expect(saved.binding).not.toHaveProperty('regionAnchor')
+    expect(saved.binding.sourceCheckpoints).toEqual([await f.client.sessionHistoryCheckpoint(input.agentSessionId)])
+    const linked = result(await f.cli(['binding', 'relink', '--input', '-'], { ...input, operationId: 'headless-relink', expectedRevision: 1, externalConversationId: 'next-exact-group' }))
+    expect(linked).toMatchObject({ state: 'applied', binding: { revision: 2, externalConversationId: 'next-exact-group' } })
+    expect(linked.binding).not.toHaveProperty('regionAnchor')
+    const wrong = result(await f.cli(['binding', 'relink', '--input', '-'], { ...input, operationId: 'headless-foreign-host', expectedRevision: 2, executionHostId: 'foreign-host' }))
+    expect(wrong).toEqual({ operationId: 'headless-foreign-host', action: 'relink', state: 'refused', code: 'ROOM_BINDING_TARGET_CHANGED' })
+    const missing = result(await f.cli(['binding', 'relink', '--input', '-'], { ...input, operationId: 'headless-missing-session', expectedRevision: 2, agentSessionId: 'missing-session' }))
+    expect(missing).toEqual({ operationId: 'headless-missing-session', action: 'relink', state: 'refused', code: 'ROOM_BINDING_TARGET_CHANGED' })
+    const source = result(await f.cli(['binding', 'relink', '--input', '-'], { ...input, operationId: 'headless-foreign-source', expectedRevision: 2, expectedSource: { ...input.expectedSource, nativeSessionId: 'foreign-source' } }))
+    expect(source).toEqual({ operationId: 'headless-foreign-source', action: 'relink', state: 'refused', code: 'ROOM_BINDING_SOURCE_CHANGED' })
+    expect(result(await f.cli(['binding', 'inspect', '--binding', input.bindingId])).binding).toEqual(linked.binding)
+    expect(read).not.toHaveBeenCalled()
+    read.mockRestore(); await f.unchanged()
+  }, 20_000)
   it('binds through compiled CLI and original Desktop Host ports, then SDK inspects and CLI pauses and explicitly relinks', async () => {
     const f = await fixture(); f.input.externalConversationId = 'room/project-alpha'
     const saved = result(await f.cli(['bind', '--input', '-'], f.input))
@@ -81,7 +101,7 @@ describe('room binding real public consumers', () => {
         reached = true; await held; return cut
       })
       const work = call()
-      try { await vi.waitFor(() => expect(reached).toBe(true)); await f.change(change) }
+      try { await vi.waitFor(() => expect(reached).toBe(true), { timeout: 5_000 }); await f.change(change) }
       finally { release(); await work.catch(() => {}) }
       return await work
     }
