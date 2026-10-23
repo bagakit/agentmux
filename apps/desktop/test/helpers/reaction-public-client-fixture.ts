@@ -1,7 +1,8 @@
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { AgentMuxClient, AgentMuxFileAgentSessionStore } from '@agentmux/core'
+import { AgentMuxClient } from '../../../../packages/core/src/client'
+import { AgentMuxFileAgentSessionStore } from '../../../../packages/core/src/agent-session-store'
 
 /** The public Client and durable FileStore are real; only PTY transport is a deterministic adapter. */
 export async function reactionPublicClientFixture(id: string, runId: string) {
