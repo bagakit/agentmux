@@ -10,20 +10,21 @@ const root = fileURLToPath(new URL('../../../', import.meta.url))
 const sourceMode = process.argv.includes('--source')
 const manager = 'apps/desktop/src/main/browser-view-manager.ts', preload = 'apps/desktop/src/preload/capsule.ts'
 const tests = ['apps/desktop/test/capsule-browser.test.ts', 'apps/desktop/test/capsule-page-preload.test.ts',
-  'packages/core/test/capsule-browser-open.test.ts', 'apps/desktop/test/capsule-browser-open-consumer.test.ts']
+  'packages/core/test/capsule-browser-open.test.ts', 'apps/desktop/test/capsule-browser-open-consumer.test.ts',
+  'apps/desktop/test/capsule-browser-recovery.test.tsx', 'apps/desktop/test/spatial-link-ingress.test.ts']
 const mutations = [
   { id: 'container-isolation-lost', file: manager,
     from: 'partition: `persist:agentmux-capsule:${saved.capsule.record.capsuleId}`', to: "partition: 'persist:default-profile'",
     assertion: 'keeps Capsule storage independent from user Profiles' },
   { id: 'isolated-sdk-exposed', file: manager,
-    from: "this.createView(storage.partition, 'capsule' in storage && storage.capsule.record.mode === 'injected')",
-    to: "this.createView(storage.partition, 'capsule' in storage)", assertion: 'keeps Capsule storage independent from user Profiles' },
+    from: "capsule?.mode === 'injected' ? { preload:",
+    to: "capsule ? { preload:", assertion: 'keeps Capsule storage independent from user Profiles' },
   { id: 'exact-main-frame-guard-lost', file: manager,
     from: 'frame !== entry.view.webContents.mainFrame || entry.committedNavigationId !== entry.navigationId ||',
     to: 'entry.committedNavigationId !== entry.navigationId ||', assertion: 'admits only the exact live committed' },
   { id: 'sdk-unrelated-pages-scan', file: manager,
-    from: 'const entry = this.entriesByContents.get(sender)',
-    to: 'const entry = [...this.entries.values()].find(candidate => candidate.view.webContents === sender)',
+    from: '    const entry = this.entriesByContents.get(sender)\n    if (!entry',
+    to: '    const entry = [...this.entries.values()].find(candidate => candidate.view.webContents === sender)\n    if (!entry',
     assertion: 'admits only the exact live committed' },
   { id: 'native-commit-guard-lost', file: manager,
     from: 'frame !== entry.view.webContents.mainFrame || entry.committedNavigationId !== entry.navigationId ||',
@@ -34,6 +35,32 @@ const mutations = [
   { id: 'original-open-binding-lost', file: manager,
     from: 'capsuleOpenOperationIds: [...entry.storage.capsuleOpenOperationIds],',
     to: 'capsuleOpenOperationIds: [],', assertion: 'retains the original container through external navigation' },
+  { id: 'response-request-identity-lost', file: manager,
+    from: 'request.id !== details.id || request.navigationId !== entry.navigationId ||',
+    to: 'request.navigationId !== entry.navigationId ||', assertion: 'requires the exact main-document response' },
+  { id: 'loaded-instance-provenance-lost', file: manager,
+    from: 'instanceId: values[0], navigationId: entry.navigationId, frame: details.frame!',
+    to: "instanceId: entry.storage.capsule.endpoint.instanceId, navigationId: entry.navigationId, frame: details.frame!",
+    assertion: 'requires the exact main-document response' },
+  { id: 'same-document-provenance-lost', file: manager,
+    from: 'if (details.isSameDocument && entry.capsuleResponse?.navigationId === previousNavigationId)',
+    to: 'if (false && entry.capsuleResponse?.navigationId === previousNavigationId)', assertion: 'requires the exact main-document response' },
+  { id: 'mode-policy-refresh-lost', file: manager,
+    from: 'if (storage.capsule.record.mode === inspection.record.mode)',
+    to: 'if (true)', assertion: 'refreshes Capsule mode in the same Browser and partition' },
+  { id: 'active-operation-reload-protection-lost', file: manager,
+    from: "!['visible', 'presentation', 'document-used'].includes(reason)",
+    to: "!['visible', 'presentation', 'document-used', 'operation'].includes(reason)",
+    assertion: 'does not repeat an unknown native close' },
+  { id: 'capsule-retry-container-lost', file: 'apps/desktop/src/renderer/src/components/BrowserPane.tsx',
+    from: 'if (tab.capsuleId) return api.browser.reload(tab.browserId)', to: 'if (false) return api.browser.reload(tab.browserId)',
+    assertion: 'retries the exact Capsule Browser through restore-aware reload' },
+  { id: 'link-original-receipt-validation-lost', file: 'apps/desktop/src/main/spatial-link-ingress.ts',
+    from: "if (result.capsuleId !== target.capsuleId || result.operationId !== operationId) throw new Error('The Capsule owner returned another object or operation.')",
+    to: '', assertion: 'rejects another Capsule owner' },
+  { id: 'link-original-operation-notice-lost', file: 'apps/desktop/src/main/spatial-link-ingress.ts',
+    from: "if (result.rendering.status === 'unavailable') this.report?.(`Capsule opening is unconfirmed. ${result.rendering.reason} Inspect original operation ${operationId}; the page and current workface are kept.`)",
+    to: '', assertion: 'reports the original Capsule operation when its actual rendering receipt is unavailable without reopening' },
   { id: 'child-frame-sdk-exposed', file: preload,
     from: 'if (process.isMainFrame) {', to: 'if (true) {', assertion: 'keeps child frames outside the SDK exposure boundary' },
   { id: 'explicit-operation-identity-lost', file: preload,
@@ -86,6 +113,8 @@ async function run(name, mutation) {
   catch { throw new Error(`${name}: preparation failure is not semantic RED. ${result.output.slice(-4000)}`) }
   const assertions = data.testResults.flatMap(suite => suite.assertionResults)
   assert.ok(assertions.length > 0, 'Empty test coverage cannot prove this task. ' + result.output.slice(-4000))
+  for (const file of tests) assert.ok(data.testResults.some(suite => suite.name.endsWith(file) && suite.assertionResults.length > 0),
+    'Every declared consumer suite must be collected: ' + file)
   assert.equal(data.numRuntimeErrorTestSuites ?? 0, 0, result.output.slice(-4000))
   const failures = assertions.filter(item => item.status === 'failed')
   if (mutation) {
@@ -101,10 +130,18 @@ try {
     'apps/desktop/src/shared/capsule-document.ts', 'apps/desktop/src/shared/contracts.ts',
     'apps/desktop/src/renderer/src/lib/workbench-persistence.ts', 'apps/desktop/src/preload/index.ts',
     'apps/desktop/electron.vite.config.ts', 'packages/core/src/control.ts', 'packages/core/src/control-codec.ts',
-    'packages/core/src/agentmux-cli-commands.ts', 'apps/desktop/src/renderer/src/store.ts']) receipt.inputs[file] = sha(await readFile(join(root, file)))
+    'packages/core/src/agentmux-cli-commands.ts', 'apps/desktop/src/renderer/src/store.ts',
+    'apps/desktop/src/renderer/src/components/BrowserPane.tsx', 'apps/desktop/src/main/spatial-link-ingress.ts',
+    'apps/desktop/src/renderer/src/components/InlineObjectLink.tsx']) receipt.inputs[file] = sha(await readFile(join(root, file)))
   receipt.baseline = await run('baseline')
   const atMutation = process.argv.indexOf('--mutation')
-  if (process.argv.includes('--mutations') || atMutation >= 0) for (const mutation of mutations.filter(item => atMutation < 0 || item.id === process.argv[atMutation + 1])) receipt.mutations.push(await run(mutation.id, mutation))
+  const documentIds = new Set(['isolated-sdk-exposed', 'exact-main-frame-guard-lost', 'native-commit-guard-lost', 'sdk-unrelated-pages-scan', 'response-request-identity-lost', 'loaded-instance-provenance-lost', 'same-document-provenance-lost', 'mode-policy-refresh-lost', 'active-operation-reload-protection-lost'])
+  const entryIds = new Set(['capsule-retry-container-lost', 'link-original-receipt-validation-lost', 'link-original-operation-notice-lost'])
+  const selected = mutations.filter(item => (atMutation < 0 || item.id === process.argv[atMutation + 1]) &&
+    (!process.argv.includes('--document-only') || documentIds.has(item.id)) && (!process.argv.includes('--entry-only') || entryIds.has(item.id)))
+  if (atMutation >= 0) assert.equal(selected.length, 1, 'A requested source mutation must exist exactly once')
+  if (process.argv.includes('--mutations') || atMutation >= 0) for (const mutation of selected) receipt.mutations.push(await run(mutation.id, mutation))
+  for (const [file, identity] of Object.entries(receipt.inputs)) assert.equal(sha(await readFile(join(root, file))), identity, 'Source changed during proof: ' + file)
   receipt.passed = true
 } finally {
   const at = process.argv.indexOf('--output')
