@@ -54,11 +54,23 @@ reports rendering unavailable while continuing to serve content. An injection
 port is trusted Host code and must bind any App bridge to the exact Browser and
 document. It must not expose generic RPC, Node or Electron authority. Without an
 adapter, injected-mode records remain readable and report unavailable App
-capabilities. Durable page requests and drafts cannot authenticate Human replies;
-trusted Core input composition is required for reply delivery.
+capabilities. Durable page requests and drafts cannot authenticate Human replies. A Host may
+compose the narrow reply port with its actual native confirmation and original
+Core input owner. Preparation freezes the original request, answer, recipient,
+Run and input ID before submission. The owner saves a dispatch boundary before
+the first possibly executing call; unknown submissions are inspected using that
+original input and never resent or retargeted. Saved principal and adapter metadata
+are data, not authority. An unattempted durable preparation can continue only
+through an explicit repetition of the same operation and a fresh trusted native
+confirmation. Pending Browser opens similarly reconcile their original
+presentation operation without opening a replacement. Unrelated page mutations
+remain available while an external presentation or reply is pending.
 
 `pnpm --filter @agentmux/capsule test` exercises real HTTP, content publication,
 CAS, four mode combinations, faults, process death and original-origin recovery.
 `pnpm --filter @agentmux/capsule test:mutation` changes the actual listener to pick
 a new port and proves the process-restart test rejects that mutation, then restores
 the original source and build.
+
+`pnpm --filter @agentmux/capsule test:reply:mutation` replaces original-input
+inspection with submission and proves the saved-reply replay test rejects it.
