@@ -16,6 +16,7 @@ import { parseAgentContinuityControlReceipts } from './control-contract.js'
 import type { AgentMuxContinuityControlReceipt } from './control-contract.js'
 import { validateAgentPromptInputKey, type AgentPromptInputKey } from '../agent-prompt-condition.js'
 import { browserInputContextFields, parseBrowserInputContext } from '../browser-input-context.js'
+import { AgentMuxError } from '../errors.js'
 
 /** Host-independent policy. Callers persist only authored fields; each admitted operation freezes this complete value. */
 export type AgentMuxContinuityPolicy = {
@@ -63,7 +64,15 @@ export function normalizeAgentContinuityPolicy(authored?: Partial<AgentMuxContin
   return policy
 }
 
-export type AgentMuxContinuityTrigger = 'startup' | 'host-restored' | 'mote-startup' | 'mote-open' | 'manual' | 'input'
+/** Original machine source, preserved verbatim. Only exact manual/input/startup values have reserved behavior; other sources use automatic policy. */
+export type AgentMuxContinuityTrigger = string
+
+export function parseAgentContinuityTrigger(value: unknown): AgentMuxContinuityTrigger {
+  if (typeof value !== 'string' || !value.trim() || new TextEncoder().encode(value).byteLength > 512 || /[\u0000-\u001f\u007f]/u.test(value)) {
+    throw new AgentMuxError('The recovery source must be a nonempty machine label without control characters.', 'INVALID_AGENT_CONTINUITY_TRIGGER')
+  }
+  return value
+}
 
 export type AgentMuxContinuityPendingReason = 'runtime-unverified' | 'active-manual' | 'active-delay' | 'idle-unknown' | 'not-active' | 'idle-window-expired' | 'resume-disabled' | 'provider-unverified' | 'operation-unconfirmed' | 'recovery-supervised' | 'intent-cancelled'
 /** Frozen against the old Run before a native writer is started. This never authorizes live input. */
@@ -252,8 +261,8 @@ export function normalizeAgentContinuityLaunchInput(value: unknown): AgentMuxCon
 export function normalizeAgentContinuityOperation(value: unknown): AgentMuxContinuityOperation {
   if (!value || typeof value !== 'object') throw new TypeError('Invalid continuity operation.')
   const op = value as AgentMuxContinuityOperation
+  const trigger = parseAgentContinuityTrigger(op.trigger)
   if (typeof op.operationId !== 'string' || !op.operationId || typeof op.agentSessionId !== 'string' || !op.agentSessionId ||
-    !['startup', 'host-restored', 'mote-startup', 'mote-open', 'manual', 'input'].includes(op.trigger) ||
     !['pending', 'starting', 'resumed', 'reattachable', 'unavailable', 'conflict', 'retired'].includes(op.kind) ||
     !op.previousRun || typeof op.previousRun.runId !== 'string' || typeof op.reason !== 'string' ||
     ![op.admittedAt, op.observedAt, op.rechecks, ...(op.nextActionAt === undefined ? [] : [op.nextActionAt])].every(value => Number.isSafeInteger(value) && value >= 0) ||
@@ -351,7 +360,7 @@ export function normalizeAgentContinuityOperation(value: unknown): AgentMuxConti
       throw new TypeError('Invalid original initialization recovery.')
     }
   }
-  return { ...structuredClone(op), policy: normalizeAgentContinuityPolicy(op.policy) }
+  return { ...structuredClone(op), trigger, policy: normalizeAgentContinuityPolicy(op.policy) }
 }
 
 export type AgentMuxAgentContinuityInput = {
@@ -361,7 +370,7 @@ export type AgentMuxAgentContinuityInput = {
   trigger?: AgentMuxContinuityTrigger
   input?: AgentMuxContinuityInputRequest
   policy?: Partial<AgentMuxContinuityPolicy>
-  /** A saved Mote timing overrides ordinary automatic admission only. */
+  /** A saved host-authored timing overrides ordinary automatic admission only. */
   timingOverride?: 'startup' | 'on-open'
   args?: readonly string[]
   env?: Readonly<Record<string, string>>
