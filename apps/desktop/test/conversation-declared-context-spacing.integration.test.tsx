@@ -102,7 +102,10 @@ async function originalWindow(f: Awaited<ReturnType<typeof fixture>>) {
   const page = await response.value
   expect(page.window.complete).toBe(true)
   expect(page.scope.sources.filter(source => source.kind === 'native')).toEqual([{ kind: 'native', ...f.page.source }])
-  expect(page.items.flatMap(entry => entry.kind === 'item' ? entry.item.records.map(record => record.reference) : [])
+  expect(page.items.flatMap(entry => entry.kind === 'item' ? entry.item.records.map(record => {
+    if (record.reference === null) throw new Error('The original native fixture needs its complete record reference')
+    return record.reference
+  }) : [])
     .sort((a, b) => a.source.recordId.localeCompare(b.source.recordId))).toEqual(records)
   expect(inspectConversationConsumers({ hostId: 'local', agentSessionId: f.session.agentSessionId }).consumers[0]!.accepted!.id).toBe(page.window.id)
   for (const [input] of f.changes.mock.calls) expect(input).toMatchObject({ hostId: 'local', agentSessionId: f.session.agentSessionId })
