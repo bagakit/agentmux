@@ -17,17 +17,11 @@ const fixture = await vi.hoisted(async () => {
   vi.stubEnv('AGENTMUX_SPATIAL_STATE_STORE', join(bootstrap, 'state', 'spatial-state.json'))
   return { bootstrap, home: join(bootstrap, 'home'), profile: join(bootstrap, 'profile'),
     handlers: new Map<string, (event: IpcMainInvokeEvent, ...values: any[]) => any>(),
-    connections: undefined as ConnectionPort | undefined,
-    encryption: undefined as { isAsyncEncryptionAvailable(): Promise<boolean>; encryptStringAsync(value: string): Promise<Buffer>; decryptStringAsync(value: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }> } | undefined }
+    connections: undefined as ConnectionPort | undefined }
 })
 vi.mock('node:os', async original => ({ ...await original<typeof import('node:os')>(), homedir: () => fixture.home }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   app: { getPath: (name: string) => name === 'home' ? fixture.home : fixture.profile, getAppPath: () => fixture.profile },
-  safeStorage: {
-    isAsyncEncryptionAvailable: async () => fixture.encryption!.isAsyncEncryptionAvailable(),
-    encryptStringAsync: (value: string) => fixture.encryption!.encryptStringAsync(value),
-    decryptStringAsync: (value: Buffer) => fixture.encryption!.decryptStringAsync(value)
-  },
   ipcMain: { handle: (channel: string, handler: (event: IpcMainInvokeEvent, ...values: any[]) => any) => fixture.handlers.set(channel, handler),
     removeHandler: (channel: string) => fixture.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, session: {}
@@ -43,27 +37,23 @@ vi.mock('../src/main/agent-notifier.js', () => ({ createAgentNotifier: () => ({ 
 
 import { AgentMuxMemoryAgentSessionStore, LocalExecutionHost } from '@agentmux/core'
 import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
+import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 import { DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { registerIpc } from '../src/main/ipc.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { WorkspaceFiles } from '../src/main/workspace-files.js'
-import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
 
 const roots: string[] = [], exec = promisify(execFile)
 afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllEnvs(); await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true }))) })
 afterAll(async () => { await rm(fixture.bootstrap, { recursive: true }) })
 
-function encryption() {
-  const original = enrollmentEncryption()
-  return { isAsyncEncryptionAvailable: vi.fn(original.isAsyncEncryptionAvailable), encryptStringAsync: vi.fn(original.encryptStringAsync), decryptStringAsync: vi.fn(original.decryptStringAsync) }
-}
 function directory(root: string, profile: 'default' | 'a' | 'b') {
   return profile === 'default' ? join(root, 'home', '.agentmux', 'connectors') : join(root, profile, 'connectors')
 }
 const secret = 'owned-profile-credential'
 const operation = (profile: string) => 'profile-policy-' + profile
 async function seed(root: string, profile: 'default' | 'a' | 'b') {
-  const services = await createConnectionServices({ directory: directory(root, profile), encryption: encryption() })
+  const services = await createConnectionServices({ directory: directory(root, profile) })
   try {
     const saved = await services.secrets.store({ operationId: 'credential-' + profile, secret })
     await services.connections.configure({ operationId: 'connection-operation-' + profile, expectedRevision: null,
@@ -79,7 +69,7 @@ async function registered(root: string, profile: 'default' | 'a' | 'b') {
   vi.stubEnv('AGENTMUX_SPATIAL_STATE_STORE', join(fixture.profile, 'state', 'spatial-state.json'))
   if (profile === 'default') vi.stubEnv('AGENTMUX_DESKTOP_USER_DATA', undefined)
   else vi.stubEnv('AGENTMUX_DESKTOP_USER_DATA', fixture.profile)
-  const secure = encryption(); fixture.encryption = secure
+  const resolveSecret = vi.spyOn(ConnectionSecrets.prototype, 'resolve')
   fixture.handlers.clear(); fixture.connections = undefined
   let config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: 'resource', name: 'Owned', hostId: 'local', path: fixture.profile, kind: 'folder' as const }] }
   const runtime = new RuntimeController(new AgentMuxMemoryAgentSessionStore(), localRuntimeConnector)
@@ -94,20 +84,20 @@ async function registered(root: string, profile: 'default' | 'a' | 'b') {
   expect(fixture.connections).toBeDefined()
   // Finish the unrelated real bootstrap writer before changing the fixture's profile or removing it.
   await fixture.handlers.get('notesStorage:inspect')!({ sender, senderFrame: sender.mainFrame } as unknown as IpcMainInvokeEvent)
-  return { connections: fixture.connections!, secure, dispose,
+  return { connections: fixture.connections!, resolveSecret, dispose,
     invoke: async (channel: string, ...args: any[]) => {
       const handler = fixture.handlers.get(channel); expect(handler).toBeTypeOf('function')
       return await handler!({ sender, senderFrame: sender.mainFrame } as unknown as IpcMainInvokeEvent, ...args)
     } }
 }
 async function original(f: Awaited<ReturnType<typeof registered>>, profile: string) {
+  expect(f.resolveSecret).not.toHaveBeenCalled()
   expect((await f.connections.list()).connections.map(row => row.config.connectionId)).toEqual(['connection-' + profile])
   expect(await f.connections.service!.get()).toEqual({ enabled: false, revision: 1 })
   expect((await f.connections.service!.inspect({ operationId: operation(profile) })).operation).toMatchObject({ operationId: operation(profile), service: { enabled: false, revision: 1 } })
-  expect(f.secure.isAsyncEncryptionAvailable).not.toHaveBeenCalled(); expect(f.secure.decryptStringAsync).not.toHaveBeenCalled()
 }
 
-it('keeps the actual registered default and explicit profile owners separate without decrypting metadata', async () => {
+it('keeps the actual registered default and explicit profile owners separate without resolving credentials for metadata', async () => {
   const root = await mkdtemp(join(fixture.bootstrap, 'owned-')); roots.push(root)
   for (const profile of ['default', 'a', 'b'] as const) await seed(root, profile)
   for (const profile of ['a', 'b', 'default', 'a'] as const) {
@@ -122,7 +112,7 @@ it('keeps the actual registered default and explicit profile owners separate wit
   }
 })
 
-it('reopens original profile records in a second owned process without reseeding or bypassing encryption', async ({ task }) => {
+it('reopens original profile records in a second owned process without reseeding the private credential owner', async ({ task }) => {
   const inherited = process.env.AGENTMUX_TEST_PROFILE_STORAGE_REOPEN
   if (inherited) {
     const expected = JSON.parse(await readFile(inherited, 'utf8')) as { root: string; parentPid: number; credentialRef: string }
@@ -131,9 +121,6 @@ it('reopens original profile records in a second owned process without reseeding
       await original(f, 'a')
       const stored = await f.invoke('connections:storeCredential', { operationId: 'credential-a', secret })
       expect(stored).toEqual({ credentialRef: expected.credentialRef })
-      expect(f.secure.isAsyncEncryptionAvailable).toHaveBeenCalledTimes(1)
-      expect(f.secure.decryptStringAsync).toHaveBeenCalledTimes(1)
-      expect(f.secure.encryptStringAsync).not.toHaveBeenCalled()
       expect((await f.connections.inspect({ operationId: 'connection-after-reopen' })).operation).toMatchObject({ operationId: 'connection-after-reopen', connection: { revision: 2, config: { label: 'Saved before child' } } })
       expect(process.pid).not.toBe(expected.parentPid)
       await writeFile(join(expected.root, 'child-receipt.json'), JSON.stringify({ pid: process.pid, credentialRef: stored.credentialRef }))
@@ -152,7 +139,7 @@ it('reopens original profile records in a second owned process without reseeding
   await writeFile(request, JSON.stringify({ root, parentPid: process.pid, credentialRef }))
   const repository = resolve(import.meta.dirname, '../../..'), config = process.env.AGENTMUX_TEST_PROFILE_STORAGE_CONFIG ?? join(repository, 'vitest.config.ts')
   await exec(process.execPath, [join(repository, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config, 'apps/desktop/test/connector-profile-bootstrap-isolation.test.ts', '-t', 'reopens original profile records in a second owned process'],
-    { cwd: repository, env: { ...process.env, AGENTMUX_TEST_PROFILE_STORAGE_REOPEN: request }, maxBuffer: 2 * 1024 * 1024 })
+    { cwd: repository, env: { ...process.env, pnpm_config_verify_deps_before_run: 'false', AGENTMUX_TEST_PROFILE_STORAGE_REOPEN: request }, maxBuffer: 2 * 1024 * 1024 })
   const receipt = JSON.parse(await readFile(join(root, 'child-receipt.json'), 'utf8'))
   expect(receipt).toEqual({ pid: expect.any(Number), credentialRef }); expect(receipt.pid).not.toBe(process.pid)
   Object.assign(task.meta, { profileReopen: { parentPid: process.pid, childPid: receipt.pid, originalConnectionRevision: 2 } })

@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxError } from '@agentmux/core'
+import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { createConnectionServices } from '../src/connection-services.js'
 import type { PublicationConversationPort } from '../src/publication-host.js'
 
@@ -15,19 +16,16 @@ afterEach(async () => {
 it('keeps one receive/publication owner while independent management reads remain available', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'amux-channel-owner-'))
   cleanup.push(() => rm(directory, { recursive: true, force: true }))
-  const encryption = { isAsyncEncryptionAvailable: async () => false,
-    encryptStringAsync: async () => { throw Error('No credential writes in this ownership proof') },
-    decryptStringAsync: async () => { throw Error('No credentials in this ownership proof') } }
   const noSource = vi.fn(async () => { throw Error('An empty binding owner cannot read a conversation') })
   const publication: PublicationConversationPort = { checkpoint: noSource, changes: noSource, inspect: noSource, observe: noSource }
-  const options = { directory, encryption, adapters: [], publication,
+  const options = { directory, adapters: [], publication,
     bindings: { spatial: { read: async () => null }, checkpoint: noSource } }
   const first = await createConnectionServices(options); cleanup.push(() => first.close())
   const second = await createConnectionServices(options); cleanup.push(() => second.close())
   expect(first.database).not.toBeNull(); expect(second.database).toBeNull()
   await expect(second.connections.list()).rejects.toMatchObject({ code: 'CONNECTION_OWNER_BUSY' })
   expect(await first.connections.list()).toEqual({ connections: [] })
-  const reader = await createConnectionServices({ directory, encryption, adapters: [] }); cleanup.push(() => reader.close())
+  const reader = await createConnectionServices({ directory, adapters: [] }); cleanup.push(() => reader.close())
   expect(await reader.connections.list()).toEqual({ connections: [] })
   expect(noSource).not.toHaveBeenCalled()
   first.close()
@@ -41,7 +39,6 @@ it('reacquires the same background database after its previous owner exits witho
   cleanup.push(() => rm(directory, { recursive: true, force: true }))
   const noSource = vi.fn(async () => { throw Error('No source exists') })
   const options = { directory, adapters: [],
-    encryption: { isAsyncEncryptionAvailable: async () => false, encryptStringAsync: noSource, decryptStringAsync: noSource },
     publication: { checkpoint: noSource, changes: noSource, inspect: noSource, observe: noSource },
     bindings: { spatial: { read: async () => null }, checkpoint: noSource } }
   const first = await createConnectionServices(options); cleanup.push(() => first.close())
@@ -60,12 +57,10 @@ it('forwards current administration authority through the real facade after a se
   cleanup.push(() => rm(directory, { recursive: true, force: true }))
   let release!: () => void, reached = false, authorized = true
   const held = new Promise<void>(resolve => { release = resolve })
-  // This controlled encryption port qualifies authority forwarding, not secure storage.
-  const owner = await createConnectionServices({ directory, adapters: [], encryption: {
-    isAsyncEncryptionAvailable: async () => true,
-    encryptStringAsync: async () => { reached = true; await held; return Buffer.from('controlled-ciphertext') },
-    decryptStringAsync: async () => { throw Error('No prior credential exists') }
-  } }); cleanup.push(() => owner.close())
+  // Delay only the original private storage observation; the facade must retain its current-authority callback.
+  const available = ConnectionSecrets.prototype.assertAvailable
+  vi.spyOn(ConnectionSecrets.prototype, 'assertAvailable').mockImplementationOnce(async function () { reached = true; await held; await available.call(this) })
+  const owner = await createConnectionServices({ directory, adapters: [] }); cleanup.push(() => owner.close())
   const write = owner.secrets.store({ operationId: 'original-entry', secret: 'synthetic-value' }, () => {
     if (!authorized) throw new AgentMuxError('The original operator was revoked.', 'CONTROL_PERMISSION_DENIED')
   })

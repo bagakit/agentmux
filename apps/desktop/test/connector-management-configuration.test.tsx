@@ -14,7 +14,6 @@ import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
-import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
 
 const dom = composerDOM(), goal = { kind: 'agent-conversation', interaction: 'messages' } as const
 const TOKEN = 'fixture-settings-configuration-private-qr', FLOW = 'fixture-settings-configuration-private-flow'
@@ -22,7 +21,7 @@ const USER = 'fixture-settings-configuration-account-id', TENANT = 'fixture-sett
 type Call = { method: ConnectionMethod; input: unknown; result?: unknown; delivered?: boolean; error?: { code?: string; message: string } }
 let directory: string, services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer
 let forward: typeof api.connections.call, calls: Call[], beforeCall: ((call: Call) => Promise<void>) | undefined, afterCall: ((call: Call) => Promise<void>) | undefined
-let native: Array<{ url: string; at: number; init?: RequestInit }>, trusted: ReturnType<typeof vi.fn>, secureAvailable: boolean
+let native: Array<{ url: string; at: number; init?: RequestInit }>, trusted: ReturnType<typeof vi.fn>
 let reopen: () => void
 const releases: Array<() => void> = []
 
@@ -30,8 +29,7 @@ beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   useAppStore.setState({ botTaskSelections: {} })
   directory = await mkdtemp(join(tmpdir(), 'settings-configuration-'))
-  const encryption = enrollmentEncryption(); secureAvailable = true
-  services = await createConnectionServices({ directory: join(directory, 'connections'), encryption: { ...encryption, isAsyncEncryptionAvailable: async () => secureAvailable } })
+  services = await createConnectionServices({ directory: join(directory, 'connections') })
   server = new AgentMuxControlServer({ socketPath: join(directory, 'control.sock'), connections: services.connections,
     coreClients: () => { throw new Error('Connection authentication may not borrow an Agent Runtime') } })
   await server.start()
@@ -133,7 +131,10 @@ function expectNoSetupWrites() {
 }
 async function unchanged(saved: Awaited<ReturnType<typeof seed>>) {
   expect((await forward('connection.inspect', { operationId: saved.operationId })).operation).toEqual(saved)
-  expect((await forward('connection.inspect', { connectionId: saved.connection.config.connectionId })).connection).toEqual(saved.connection)
+  const current = (await forward('connection.inspect', { connectionId: saved.connection.config.connectionId })).connection!
+  const { capabilities, ...stored } = current
+  expect(stored).toEqual(saved.connection)
+  expect(capabilities).toEqual({ roomDiscovery: true, roomCreation: true, roomLink: true })
 }
 async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) }) }
 

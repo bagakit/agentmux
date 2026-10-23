@@ -1,7 +1,5 @@
 import { DatabaseSync } from 'node:sqlite'
 import { ConnectionHost } from '@agentmux/connectors'
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
@@ -13,7 +11,9 @@ import type {
   ConnectionSetupView
 } from '@agentmux/core/connections'
 import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
-import type { CredentialEncryption } from '../../../packages/connectors/src/connection-secrets.js'
+import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
+import { assertPrivateCredentialFiles, privateCredentialValues } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
+import { AgentMuxError } from '@agentmux/core'
 import { ingressFixture } from '../../../packages/connectors/test/fixtures/ingress.js'
 import {
   defaultFeishuSdkTransport,
@@ -48,7 +48,7 @@ let calls: Array<{ url: string; path: string; preclaimed: boolean; cookie: strin
 let pollReply: (() => Response) | undefined
 let authorize: boolean
 let clock: number
-let secureAvailable: boolean
+let privateAvailable: boolean
 let rejectedCookieStage: 'initialize' | 'console' | 'creation' | null
 let sentCookies: Array<{ path: string; cookie: string }>
 let consoleDocument: string
@@ -71,27 +71,18 @@ beforeEach(async () => {
   calls = []
   authorize = true
   pollReply = undefined
-  secureAvailable = true
+  privateAvailable = true
   rejectedCookieStage = null
   sentCookies = []
   consoleDocument = `<script>${originalConsoleScript}</script>`
   consoleResponses = new Map()
   clock = Date.now()
   vi.spyOn(Date, 'now').mockImplementation(() => clock)
-  const key = randomBytes(32)
-  const encryption: CredentialEncryption = {
-    isAsyncEncryptionAvailable: async () => secureAvailable,
-    async encryptStringAsync(value) {
-      const iv = randomBytes(12),
-        cipher = createCipheriv('aes-256-gcm', key, iv)
-      return Buffer.concat([iv, cipher.update(value, 'utf8'), cipher.final(), cipher.getAuthTag()])
-    },
-    async decryptStringAsync(value) {
-      const decipher = createDecipheriv('aes-256-gcm', key, value.subarray(0, 12))
-      decipher.setAuthTag(value.subarray(-16))
-      return { result: (Buffer.concat([decipher.update(value.subarray(12, -16)), decipher.final()]).toString('utf8')), shouldReEncrypt: false }
-    }
-  }
+  const available = ConnectionSecrets.prototype.assertAvailable
+  vi.spyOn(ConnectionSecrets.prototype, 'assertAvailable').mockImplementation(async function () {
+    if (!privateAvailable) throw new AgentMuxError('Original private credential storage unavailable.', 'CONNECTION_CREDENTIAL_UNAVAILABLE')
+    await available.call(this)
+  })
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
@@ -164,7 +155,6 @@ beforeEach(async () => {
   )
   services = await createConnectionServices({
     directory: join(original.root, 'enrollment-host'),
-    encryption,
     bindings: {
       spatial: original.spatial,
       checkpoint: async (ref) => await original.client.conversationCheckpoint(ref)
@@ -266,11 +256,8 @@ it('default Host creates through compiled CLI and the original SDK receiver with
   expect(calls).toHaveLength(1)
   expect((await services.connections.list()).connections).toEqual([])
   services.database!.exec('PRAGMA wal_checkpoint(FULL)')
-  expect(
-    (await readFile(join(original.root, 'enrollment-host', 'connections.sqlite'))).includes(
-      Buffer.from(privateToken)
-    )
-  ).toBe(false)
+  await assertPrivateCredentialFiles(join(original.root, 'enrollment-host'))
+  expect((await privateCredentialValues(services.database!)).some(value => value.includes(privateToken))).toBe(true)
   const signedIn = await account(pending, true),
     beforeConfirm = calls.length
   const confirmed = await cli(['advance', '--input', '-'], decision(signedIn, 'confirm-account'))
@@ -306,9 +293,9 @@ it('default Host creates through compiled CLI and the original SDK receiver with
   expect(wire).not.toContain(privateToken)
   expect(wire).not.toContain(applicationSecret)
   services.database!.exec('PRAGMA wal_checkpoint(FULL)')
-  const stored = await readFile(join(original.root, 'enrollment-host', 'connections.sqlite'))
-  expect(stored.includes(Buffer.from(privateToken))).toBe(false)
-  expect(stored.includes(Buffer.from(applicationSecret))).toBe(false)
+  await assertPrivateCredentialFiles(join(original.root, 'enrollment-host'))
+  const privateValues = await privateCredentialValues(services.database!)
+  for (const value of [privateToken, applicationSecret]) expect(privateValues.some(original => original.includes(value))).toBe(true)
   const beforeDuplicate = calls.length
   expect((await client.call('connection.enrollment.advance', create)).operation).toEqual(saved.operation)
   expect(calls).toHaveLength(beforeDuplicate)
@@ -354,8 +341,8 @@ it('pending inspection remains passive and advancing respects the original platf
   expect(sdk.sockets).toEqual([])
 })
 
-it('unavailable encryption refuses only enrollment before any bootstrap effect and preserves manual configuration', async () => {
-  secureAvailable = false
+it('unavailable private storage refuses only enrollment before any bootstrap effect and preserves manual configuration', async () => {
+  privateAvailable = false
   const capabilities = await client.call('connection.enrollment.ls', {})
   expect(capabilities.capabilities).toContainEqual(
     expect.objectContaining({
@@ -628,7 +615,9 @@ it('creates and configures the original bot from its final alternate Console thr
   expect(record.config.application).toEqual(feishuConfig.application)
   const credential = services.database!.prepare('SELECT ciphertext FROM connection_credential WHERE credential_ref=?').get(record.config.credentialRef)
   expect(credential?.ciphertext).toBeInstanceOf(Uint8Array)
-  expect(Buffer.from(credential!.ciphertext as Uint8Array).includes(Buffer.from(applicationSecret))).toBe(false)
+  expect(Buffer.from(credential!.ciphertext as Uint8Array).equals(Buffer.from('amux.connection-credential.raw.v1\0' + applicationSecret))).toBe(true)
+  expect(await new ConnectionSecrets(services.database!).resolve(record.config.credentialRef)).toBe(applicationSecret)
+  await assertPrivateCredentialFiles(join(original.root, 'enrollment-host'))
   const beforeAdoption = calls.length
   expect((await client.call('connection.enrollment.advance', create)).operation).toEqual(saved.operation)
   expect((await cli(['inspect', '--operation-id', input.operationId])).operation).toEqual(saved.operation)
@@ -684,8 +673,9 @@ it('creates and configures the original bot from its final alternate Console thr
   const wire = JSON.stringify({ saved, record, adopted, accepted, configured })
   for (const value of [applicationSecret, 'private-alternate-login', 'private-alternate-cookie', 'private-continued-cookie', 'original-private-csrf']) expect(wire).not.toContain(value)
   services.database!.exec('PRAGMA wal_checkpoint(FULL)')
-  const bytes = await readFile(join(original.root, 'enrollment-host', 'connections.sqlite'))
-  for (const value of [applicationSecret, 'private-alternate-cookie', 'private-continued-cookie', 'original-private-csrf']) expect(bytes.includes(Buffer.from(value))).toBe(false)
+  await assertPrivateCredentialFiles(join(original.root, 'enrollment-host'))
+  const privateValues = await privateCredentialValues(services.database!)
+  for (const value of [applicationSecret, 'private-alternate-cookie', 'private-continued-cookie', 'original-private-csrf']) expect(privateValues.some(original => original.includes(value))).toBe(true)
 })
 
 it('continues native zero waiting through Host, SDK and compiled CLI to the original account', async () => {

@@ -6,7 +6,9 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, AgentMuxRpcService } from '@agentmux/core'
-import { ConnectionSetupHost } from '@agentmux/connectors'
+import { ConnectionSetupHost } from '../../../packages/connectors/src/connection-setup.js'
+import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
+import { AgentMuxError } from '@agentmux/core'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionRecord, ConnectionResultMap, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupView } from '@agentmux/core/connections'
 import { createConnectionServices } from '../../../packages/connectors/src/connection-services.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
@@ -15,7 +17,6 @@ import { api } from '../src/renderer/src/lib/api'
 import { setBotTaskSelection, useAppStore } from '../src/renderer/src/store'
 import { managementTaskScope, restoredManagementTask } from '../src/renderer/src/lib/bot-task-selection'
 import { composerDOM } from './helpers/composer-dom-fixture'
-import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
 import { moteEnrollmentWeb } from './fixtures/mote-enrollment-web'
 import { imagePng } from './fixtures/mote-identity-image'
 
@@ -33,8 +34,13 @@ beforeEach(async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   useAppStore.setState({ botTaskSelections: {} })
   directory = await mkdtemp(join(tmpdir(), 'settings-auth-'))
-  const encryption = enrollmentEncryption(); secureAvailable = true
-  services = await createConnectionServices({ directory: join(directory, 'connections'), encryption: { ...encryption, isAsyncEncryptionAvailable: async () => secureAvailable } })
+  secureAvailable = true
+  const available = ConnectionSecrets.prototype.assertAvailable
+  vi.spyOn(ConnectionSecrets.prototype, 'assertAvailable').mockImplementation(async function () {
+    if (!secureAvailable) throw new AgentMuxError('Original private credential storage unavailable.', 'CONNECTION_CREDENTIAL_UNAVAILABLE')
+    await available.call(this)
+  })
+  services = await createConnectionServices({ directory: join(directory, 'connections') })
   server = new AgentMuxControlServer({ socketPath: join(directory, 'control.sock'), connections: services.connections,
     coreClients: () => { throw new Error('Connection authentication may not borrow an Agent Runtime') } })
   await server.start()
@@ -130,7 +136,10 @@ function expectNoSetupWrites() {
 }
 async function unchanged(saved: Awaited<ReturnType<typeof seed>>) {
   expect((await forward('connection.inspect', { operationId: saved.operationId })).operation).toEqual(saved)
-  expect((await forward('connection.inspect', { connectionId: saved.connection.config.connectionId })).connection).toEqual(saved.connection)
+  const current = (await forward('connection.inspect', { connectionId: saved.connection.config.connectionId })).connection!
+  const { capabilities, ...stored } = current
+  expect(stored).toEqual(saved.connection)
+  expect(capabilities).toEqual({ roomDiscovery: true, roomCreation: true, roomLink: true })
 }
 async function settle() { await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)) }) }
 
@@ -203,7 +212,7 @@ it('the real Settings task follows native scan and phone confirmation, then expl
   }
 }, 30_000)
 
-it('an unconfirmed encrypted handoff stops automatic work and explicit resume copies the original offered action revision without another poll', async () => {
+it('an unconfirmed private credential handoff stops automatic work and explicit resume copies the original offered action revision without another poll', async () => {
   const saved = await seed(); calls = []
   let polls = 0
   const route = nativeRoute({ poll: () => { if (++polls === 1) { secureAvailable = false; return Response.json({ code: 0, data: { next_step: null, step_info: { status: 2 } } }) } return Response.json({ code: 0, data: { next_step: 'enter_app', step_info: { status: 1, cross_login_uri: 'https://accounts.feishu.cn/cross-login' } } }) } })
