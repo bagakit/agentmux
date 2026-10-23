@@ -1,4 +1,4 @@
-import { guideActionsSystemEndpoint, guideSharedCommandSafety } from './generated/agentmux-guides.js'
+import { guideActionsCapsuleOpen, guideActionsSystemEndpoint, guideSharedCommandSafety } from './generated/agentmux-guides.js'
 import { guideText } from './guide-text.js'
 import { AGENTMUX_NOTE_GUIDE } from './agentmux-cli-note-guide.js'
 import { AGENTMUX_CLI_COMMANDS, type AgentMuxCliCommand } from './agentmux-cli-commands.js'
@@ -20,6 +20,7 @@ const list = (path: string, selected: readonly AgentMuxCliCommand[]) => {
   }).join('\n')
 }
 const ENDPOINT_GUIDE = /* @__PURE__ */ guideText(guideActionsSystemEndpoint)
+const CAPSULE_OPEN_GUIDE = /* @__PURE__ */ guideText(guideActionsCapsuleOpen)
 
 const COMMON = /* @__PURE__ */ guideText(guideSharedCommandSafety)
 
@@ -44,6 +45,7 @@ export function agentMuxCommandHelp(path: string): string | null {
   const moduleEntry = agentMuxModuleSkillEntry(path.split('.')[0]!)
   const moduleGuide = moduleEntry ? `Module guide (local, read-only): ${moduleEntry}\nParameters and legal values below come from this version's command registration.` : ''
   const guide = path === 'system.endpoint' ? ENDPOINT_GUIDE
+    : path === 'capsule.open' ? CAPSULE_OPEN_GUIDE
     : path === 'notebook' ? AGENTMUX_NOTE_GUIDE
     : path.startsWith('notebook.') ? 'Read amux notebook --help for original Note content, links and editing conditions.'
     : path === 'device' ? DEVICE_GUIDE
