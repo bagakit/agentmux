@@ -3,6 +3,7 @@ import type { AgentInputMailboxItem } from '@agentmux/core/agent-input-mailbox'
 import { sessionInputMailboxAuthor, type SessionInputGroup } from '@agentmux/core/conversation'
 import { parseAgentMuxMessagePrefix } from '@agentmux/core/agent-message-render'
 import { ConversationMessage, type ConversationContentBoundary, type ConversationMessageProps, type ConversationReadingProps } from './ConversationMessage.js'
+import { ChannelProfileAvatar } from './ChannelProfileAvatar.js'
 import { MailboxRecordRow } from './MailboxRecordRow.js'
 import { MessageDeliveryFailure } from './MessageDeliveryFailure.js'
 import { presentMessageDeliveryFailure } from '../lib/message-delivery-presentation.js'
@@ -83,7 +84,9 @@ export function InputMailboxRecord({ item, hostId, failed, reading, onCopy, comp
   return <li data-input-mailbox-key={key} data-input-mailbox-kind={item.kind}>
     {compact ? <>
       <MailboxRecordRow recordKey={key} label={label} preview={preview || (view.text === null ? '原正文未随本条观察返回' : 'No text recorded.')}
-        avatar={<span className="composer-mailbox__record-avatar">{described?.avatar ?? platform.renderMessageAvatar({ speaker: view.speaker, name: label, providerId: described?.providerId, project: described?.project })}</span>}
+        avatar={<span className="composer-mailbox__record-avatar"><ChannelProfileAvatar url={described?.channelProfile?.profile?.avatarUrl} size={18}>
+          {described?.avatar ?? platform.renderMessageAvatar({ speaker: view.speaker, name: label, providerId: described?.providerId, project: described?.project })}
+        </ChannelProfileAvatar></span>}
         metadata={Number.isNaN(observed.getTime()) ? <span>Time not recorded</span> : <time dateTime={observed.toISOString()} title={observed.toLocaleString()}>{observed.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>}
         status={state ? <span className={unconfirmed ? 'composer-mailbox__risk' : undefined}>{state}</span> : null}
         {...(externalSelection ? {} : { expanded, controls: detailId })} onOpen={onOpen!} />
