@@ -149,7 +149,7 @@ it('source 自身年龄不被新 envelope 时间刷新，展开行在真实新�
   await render()
   expect.soft(node('.performance-reading-time').textContent, 'Source age uses its last successful reading').toContain('30s old')
   expect(node('.performance-body').textContent).toContain('Previous reading')
-  await click('[data-settings-target="runs"]')
+  await click('[data-performance-section-tab="resources"]'); await click('[data-settings-target="runs"]')
   const row = node<HTMLDetailsElement>('[data-run-id="preparation-run-1"]')
   await act(async () => { row.open = true; row.querySelector('summary')!.focus(); row.dispatchEvent(new Event('toggle')) })
   const originalRows = Array.from(document.querySelectorAll<HTMLElement>('.performance-contributor')).map(item => item.dataset.runId)
@@ -164,8 +164,8 @@ it('source 自身年龄不被新 envelope 时间刷新，展开行在真实新�
   expect(row.textContent).toContain('0.1%')
 
   // 原独立 mounted 反例纳入同一 actual owning 场景：其他消费者不能填回此 UI 的暂停期。
-  const appRender = async (key: string, paused = false) => act(async () => root.render(<PerformanceOverview key={key} snapshot={observation}
-    paused={paused} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} />))
+  const appRender = async (key: string, paused = false) => { await act(async () => root.render(<PerformanceOverview key={key} snapshot={observation}
+    paused={paused} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} />)); await click('[data-performance-section-tab="resources"]') }
   const path = () => node<SVGPathElement>('.performance-metrics svg > path:last-child').getAttribute('d')!
   observation = structuredClone(performanceSnapshot)
   await appRender('pause')
@@ -199,7 +199,7 @@ it('source 自身年龄不被新 envelope 时间刷新，展开行在真实新�
 
 it('selected Run 来源时间独立于 gap marker；cached available 不追加旧点，fresh 才开始新段', async () => {
   const render = async () => act(async () => root.render(<PerformanceOverview snapshot={observation} close={() => {}} onConfigure={() => {}} onViewScript={() => {}} />))
-  await render(); await click('[data-settings-target="runs"]')
+  await render(); await click('[data-performance-section-tab="resources"]'); await click('[data-settings-target="runs"]')
   const row = node<HTMLDetailsElement>('[data-run-id="preparation-run-1"]')
   await act(async () => { row.open = true; row.dispatchEvent(new Event('toggle')) })
   observation = structuredClone(observation); observation.observedAt! += 1000; observation.observation!.observedAt += 1000
@@ -243,7 +243,7 @@ it('128 Session/8 Host 中 unrelated Store 更新不扫描身份；真实新 Ses
   const closed = baselineCost(); await updateBackground(); const closedDelta = delta(closed)
   expect(closedDelta.panel).toBe(0); expect(closedDelta.visits).toBe(0); expect(vi.mocked(api.toolkit.observe).mock.calls).toHaveLength(0)
   expect(closedDelta.app, 'Unrelated writes do not render the App selector consumer').toBe(0)
-  await click('.performance-trigger'); await click('[data-settings-target="runs"]')
+  await click('.performance-trigger'); await click('[data-performance-section-tab="resources"]'); await click('[data-settings-target="runs"]')
   expect(node('[data-run-id="preparation-run-1"]').textContent).toContain('Observed Agent 1')
   expect(cost.visits, '非空 actual Session join 正控').toBeGreaterThanOrEqual(128)
   const open = baselineCost(); await updateBackground(); const openDelta = delta(open)
