@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | **Mote** | 独立协调快捷面与持久 Mote 对象 | 人格与协调沿[Mote 合同](motes-and-coordination.md)；Mote 本体可基于 Space，快捷面有自己的选择。 |
 | **Work** | **Space、Focus、Goals** | 工作现场、执行关注与目标闭环；Goal 的持久实体仍为 Demand，见[Goals 合同](goals-and-demand.md)。 |
-| **Know** | **Survey、Recall** | 浏览探索与知识积累；两工作面分别保留导航选择，具体流程见[Survey 与 Recall 工作流](knowledge-workflows.md#survey-与-recall-工作流)。 |
+| **Know** | **Survey、Recall** | 浏览探索与知识积累；两工作面分别保留导航选择，具体流程见[知识工作流](knowledge-workflows.md)。 |
 
 分组用于表达产品职责，不重新分配实体或内容归属；Mote、Category、Topic 的原工作面仍可在 Space 视图中加载，具体范围沿[实体与展示绑定](#zonetabsregions-的实体与展示绑定)。Settings 是配置动作，沿[设置合同](settings-and-observation.md)，不新增导航上下文。分组与共享空间底座、导航同步范围是不同问题，后者只由[导航上下文](#worksurveyrecall-与-mote-的导航上下文)定义。
 
