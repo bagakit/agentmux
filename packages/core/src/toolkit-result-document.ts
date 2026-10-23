@@ -1,4 +1,5 @@
 import { AgentMuxError } from './errors.js'
+import { isObjectId } from '@agentmux/identity'
 
 export const TOOLKIT_RESULT_DOCUMENT_MAX_BYTES = 32 * 1024
 export const TOOLKIT_AGENT_CARD_FIELDS = ['avatar', 'name', 'status', 'provider', 'workspace', 'host', 'sessionId', 'runId'] as const
@@ -8,11 +9,14 @@ export type ToolkitAgentCardReference =
   | { kind: 'session'; hostId: string; sessionId: string }
   | { kind: 'run'; hostId: string; runId: string }
 export type ToolkitAgentCard = { reference: ToolkitAgentCardReference; metrics: ToolkitResultItem[] }
+export type ToolkitCapsuleReference = { label: string; capsuleId: string }
 /** Inert display data. References never grant capabilities or define identity appearance. */
 export type ToolkitResultDocument = {
   schema: 'agentmux.toolkit.result.v1'; summary: string; items: ToolkitResultItem[]
   links: { label: string; url: string }[]; notice: string
   agentCards?: { fields: ToolkitAgentCardField[]; items: ToolkitAgentCard[]; omittedItems: number }
+  /** Stable page references. Authenticated provenance belongs to the enclosing execution, never this data. */
+  capsules?: ToolkitCapsuleReference[]
 }
 const utf8 = new TextEncoder()
 function invalid(): never { throw new AgentMuxError('Toolkit result document is invalid or exceeds its budget.', 'CONTROL_PROTOCOL_ERROR') }
@@ -55,7 +59,7 @@ export function parseToolkitAgentCardReference(value: unknown): ToolkitAgentCard
 }
 /** Browser-safe public parser; typed children have explicit budgets, not generic Settings nesting. */
 export function parseToolkitResultDocument(value: unknown): ToolkitResultDocument {
-  const r = shape(value, ['schema', 'summary', 'items', 'links', 'notice'], ['agentCards'])
+  const r = shape(value, ['schema', 'summary', 'items', 'links', 'notice'], ['agentCards', 'capsules'])
   if (r.schema !== 'agentmux.toolkit.result.v1') invalid()
   text(r.summary); text(r.notice); array(r.items, 128, item)
   array(r.links, 16, value => {
@@ -75,6 +79,14 @@ export function parseToolkitResultDocument(value: unknown): ToolkitResultDocumen
       const card = shape(value, ['reference', 'metrics'])
       parseToolkitAgentCardReference(card.reference)
       array(card.metrics, 16, item)
+    })
+  }
+  if (Object.hasOwn(r, 'capsules')) {
+    const seen = new Set<string>()
+    array(r.capsules, 16, value => {
+      const page = shape(value, ['label', 'capsuleId']); text(page.label)
+      if (!isObjectId(page.capsuleId) || seen.has(page.capsuleId)) invalid()
+      seen.add(page.capsuleId)
     })
   }
   if (utf8.encode(JSON.stringify(r)).length > TOOLKIT_RESULT_DOCUMENT_MAX_BYTES) invalid()
