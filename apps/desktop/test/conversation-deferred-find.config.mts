@@ -7,7 +7,10 @@ import { candidateAlias, candidateModule } from '../scripts/candidate-package-re
 
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_DEFERRED_FIND_MUTATION
+const loaded = process.env.AGENTMUX_DEFERRED_FIND_LOADED
 const edits: Record<string, [string, string, string]> = {
+  'skip-current-deferred-hit': ['packages/client-ui/src/components/ReadingFind.tsx',
+    'direction > 0 && before >= 0 && !matches.current[before]!.range ? 0 : direction', 'direction'],
   'skip-deferred-text': ['packages/client-ui/src/components/ConversationProgressiveBody.tsx',
     'if (!active || !reading || !node.current || !heavy) return', 'if (true) return'],
   'mount-window-on-find': ['packages/client-ui/src/components/ReadingFind.tsx',
@@ -32,9 +35,11 @@ export default defineConfig({ ...base, root, cacheDir: resolve(root, '.cache/con
     if (!isAbsolute(file)) return
     const actual = candidateModule(root, file)
     if (!actual.startsWith(root + '/') || actual.includes('/node_modules/')) return
-    const path = relative(root, actual), edit = mutation && edits[mutation]
+    const path = relative(root, actual), query = id.includes('?') ? id.slice(id.indexOf('?')) : ''
+    const kind = !query && /\.(?:[cm]?[jt]sx?)$/u.test(path) ? 'module' : 'resource'
+    const edit = mutation && edits[mutation]
     let code = source
-    if (edit && path === edit[0]) {
+    if (edit && kind === 'module' && path === edit[0]) {
       if (source.split(edit[1]).length !== 2) throw Error('Expected one exact deferred find mutation')
       code = source.replace(edit[1], edit[2])
       if (mutation === 'collapsed-trace-budget') {
@@ -44,8 +49,8 @@ export default defineConfig({ ...base, root, cacheDir: resolve(root, '.cache/con
       }
     }
     const hash = (text: string | Buffer) => createHash('sha256').update(text).digest('hex')
-    if (process.env.AGENTMUX_DEFERRED_FIND_LOADED) appendFileSync(process.env.AGENTMUX_DEFERRED_FIND_LOADED,
-      JSON.stringify({ path, fileSHA256: hash(readFileSync(actual)), originalSHA256: hash(source), loadedSHA256: hash(code), mutation: code === source ? null : mutation }) + '\n')
+    if (loaded) appendFileSync(loaded,
+      JSON.stringify({ path, kind, query, fileSHA256: hash(readFileSync(actual)), originalSHA256: hash(source), loadedSHA256: hash(code), mutation: code === source ? null : mutation }) + '\n')
     return code === source ? undefined : { code, map: null }
   } }], test: { ...base.test, include: ['apps/desktop/test/conversation-deferred-find.test.tsx', 'apps/desktop/test/reading-find.test.tsx', 'packages/client-ui/test/conversation-progressive-content.test.tsx'], passWithNoTests: false, fileParallelism: false, maxWorkers: 1 }
 })
