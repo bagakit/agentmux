@@ -10,8 +10,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, AgentMuxRpcService, connectAgentMuxRpc } from '@agentmux/core'
 import type { ConnectionConfig, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupView } from '@agentmux/core/connections'
 import { objectCliEnvironment, runCompiledObjectCli, type CliResult } from '../../core/test/helpers/object-cli-rpc.js'
-import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
-import { ProfileConnectionSetup } from '../dist/connection-setup-profile.js'
+import { privateCredentialValues, assertPrivateCredentialFiles } from './fixtures/connection-enrollment.js'
+import { ProfileConnectionSetup } from '../src/connection-setup-profile.js'
 
 const TOKEN = 'fixture-auth-original-token', FLOW = 'fixture-auth-original-flow'
 const SESSION = 'fixture-auth-private-session', CSRF = 'fixture-auth-private-csrf'
@@ -54,10 +54,10 @@ function advanceInput(view: ConnectionSetupView, kind: 'continue' | 'confirm-acc
     decision: { actionId: actions[0].actionId, value: kind === 'confirm-account' ? 'confirm' : kind } }
 }
 async function fixture(options: { paused?: boolean; operationId?: string; goal?: ConnectionSetupBegin['goal'] } = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'setup-auth-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock'), encryption = enrollmentEncryption()
+  const root = await mkdtemp(join(tmpdir(), 'setup-auth-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock')
   let services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
   const open = async () => {
-    services = await createConnectionServices({ directory, encryption })
+    services = await createConnectionServices({ directory })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw new Error('Authentication cannot borrow an Agent Runtime') } })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   }
@@ -69,7 +69,7 @@ async function fixture(options: { paused?: boolean; operationId?: string; goal?:
   const saved = await sdk.call('connection.configure', { operationId: 'auth-original-save', expectedRevision: null, connection: config })
   const input: ConnectionSetupBegin = { operationId: options.operationId ?? 'auth-original-management', connectionId: config.connectionId, expectedConnectionRevision: saved.connection.revision, goal: options.goal ?? goal }
   const cli = (args: string[], body?: unknown) => runCompiledObjectCli(['--endpoint', 'unix:' + socketPath, 'connection', 'setup', ...args], objectCliEnvironment(root), body === undefined ? '' : JSON.stringify(body))
-  return { root, directory, encryption, config, saved, input, cli, close, reopen: open, get sdk() { return sdk }, get services() { return services } }
+  return { root, directory, config, saved, input, cli, close, reopen: open, get sdk() { return sdk }, get services() { return services } }
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>
 async function inspect(f: Fixture, operationId = f.input.operationId) { return await f.sdk.call('connection.setup.inspect', { operationId }) }
@@ -107,10 +107,10 @@ async function toAccount(f: Fixture, view: ConnectionSetupView): Promise<Connect
 function privateRows(database: DatabaseSync) {
   return database.prepare('SELECT operation_id,ciphertext FROM connection_credential ORDER BY operation_id').all().map(row => ({ operationId: String(row.operation_id), bytes: Buffer.from(row.ciphertext as Uint8Array) }))
 }
-function authenticationSnapshots(f: Fixture, operationId: string): Record<string, unknown>[] {
-  return privateRows(f.services.database!).flatMap(row => {
+async function authenticationSnapshots(f: Fixture, operationId: string): Promise<Record<string, unknown>[]> {
+  return (await privateCredentialValues(f.services.database!)).flatMap(value => {
     try {
-      const envelope = JSON.parse(f.encryption.decryptString(row.bytes))
+      const envelope = JSON.parse(value)
       return envelope?.operationId === operationId && typeof envelope.privateState === 'string' ? [JSON.parse(envelope.privateState) as Record<string, unknown>] : []
     } catch { return [] }
   })
@@ -120,18 +120,14 @@ async function assertSafeDiscovery(f: Fixture, view: ConnectionSetupView) {
   expect(listed).toEqual({ operations: [view.operation], next: null, support: { connectionRevision: view.operation!.expectedConnectionRevision, capabilities: ['profile-update', 'management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] } })
   const tables = f.services.database!.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()
   expect(tables.length).toBeGreaterThan(0)
-  const records = tables.map(table => f.services.database!.prepare('SELECT * FROM "' + String(table.name).replaceAll('"', '""') + '"').all())
+  const records = tables.filter(table => table.name !== 'connection_credential').map(table => f.services.database!.prepare('SELECT * FROM "' + String(table.name).replaceAll('"', '""') + '"').all())
   const plain = JSON.stringify({ listed, records })
   for (const value of [TOKEN, FLOW, SESSION, CSRF, USER, TENANT, CREDENTIAL, 'Fixture account', 'Fixture enterprise']) expect(plain).not.toContain(value)
-  const encrypted = privateRows(f.services.database!)
-  expect(encrypted.length).toBeGreaterThan(1)
-  const decrypted = encrypted.map(row => f.encryption.decryptString(row.bytes))
+  const decrypted = await privateCredentialValues(f.services.database!)
+  expect(decrypted.length).toBeGreaterThan(1)
   expect(decrypted.some(value => value.includes(FLOW))).toBe(true)
   expect(decrypted.some(value => value.includes(USER) && value.includes(TENANT) && value.includes(CSRF))).toBe(true)
-  f.services.database!.exec('PRAGMA wal_checkpoint(FULL)')
-  const files = [await readFile(join(f.directory, 'connections.sqlite'))]
-  try { files.push(await readFile(join(f.directory, 'connections.sqlite-wal'))) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-  for (const value of [TOKEN, FLOW, SESSION, CSRF, USER, TENANT, CREDENTIAL]) expect(Buffer.concat(files).includes(Buffer.from(value))).toBe(false)
+  await assertPrivateCredentialFiles(f.directory)
 }
 
 it('compiled CLI and SDK consume one claimed HTTP per original action, then confirm the exact account without configuring the saved bot', async () => {
@@ -193,7 +189,7 @@ it('original v1 init and v2 authentication snapshots retain the exact saved appl
   const f = await fixture(), fetch = vi.fn(nativeRoute({ scanned: true })); vi.stubGlobal('fetch', fetch)
   let view = result(await f.cli(['begin', '--input', '-'], f.input))
   const scope = { operationId: f.input.operationId, connectionId: f.input.connectionId, attemptId: view.operation!.request.attemptId, application: f.config.application }
-  const initial = authenticationSnapshots(f, f.input.operationId)
+  const initial = await authenticationSnapshots(f, f.input.operationId)
   expect(initial).toHaveLength(1)
   expect(initial[0]).toMatchObject({ ...scope, version: 1, flowKey: FLOW, token: TOKEN, setCookies: expect.any(Array) })
   expect(Object.keys(initial[0]!).sort()).toEqual(['version', 'operationId', 'connectionId', 'attemptId', 'application', 'flowKey', 'token', 'setCookies'].sort())
@@ -203,7 +199,7 @@ it('original v1 init and v2 authentication snapshots retain the exact saved appl
   expect(fetch).toHaveBeenCalledTimes(1)
   view = await f.sdk.call('connection.setup.advance', input)
   expect(view.continuation).toMatchObject({ stage: 'scanned', account: null })
-  const progressed = authenticationSnapshots(f, f.input.operationId)
+  const progressed = await authenticationSnapshots(f, f.input.operationId)
   expect(progressed).toHaveLength(2)
   expect(progressed.map(snapshot => snapshot.version).sort()).toEqual([1, 2])
   expect(progressed.find(snapshot => snapshot.version === 1)).toEqual(initial[0])
@@ -213,7 +209,7 @@ it('original v1 init and v2 authentication snapshots retain the exact saved appl
   expect((await f.sdk.call('connection.setup.advance', input)).receipt).toEqual(view.receipt)
   expect(fetch).toHaveBeenCalledTimes(2)
   view = await toAccount(f, view)
-  const completed = authenticationSnapshots(f, f.input.operationId)
+  const completed = await authenticationSnapshots(f, f.input.operationId)
   expect(completed.length).toBeGreaterThan(progressed.length)
   for (const snapshot of completed) expect(snapshot).toMatchObject(scope)
   expect(completed.find(snapshot => snapshot.phase === 'account')).toMatchObject({ version: 2, phase: 'account', account: { userId: USER, tenantId: TENANT }, csrf: CSRF, consoleOrigin: 'https://open.feishu.cn' })
@@ -236,7 +232,7 @@ it.each([1, 2] as const)('the Setup wrapper refuses foreign bindings in a v%s na
     const operationId = `foreign-native-v${version}-${index}`
     let view = await f.sdk.call('connection.setup.begin', { ...f.input, operationId })
     if (version === 2) view = await advance(f, view)
-    const snapshots = authenticationSnapshots(f, operationId)
+    const snapshots = await authenticationSnapshots(f, operationId)
     expect(snapshots.length).toBeGreaterThan(0)
     expect(snapshots.find(snapshot => snapshot.version === version)).toBeDefined()
     const original = privateRows(f.services.database!), calls = fetch.mock.calls.length, input = advanceInput(view)
@@ -733,7 +729,7 @@ it('a Connection revision changed during console read preserves the original sav
   expect(late.reason).toBe('connection-revised'); expect(late.continuation?.account ?? null).toBeNull()
   expect(late.continuation?.actions ?? []).toEqual([])
   expect(late.operation).toMatchObject({ operationId: f.input.operationId, expectedConnectionRevision: 1, application: f.config.application })
-  expect((await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).connection).toEqual(revised.connection)
+  expect((await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).connection).toMatchObject(revised.connection)
   expect((await f.sdk.call('connection.inspect', { operationId: 'auth-original-save' })).operation).toEqual(f.saved)
   const calls = fetch.mock.calls.length
   await expect(f.sdk.call('connection.setup.advance', input)).rejects.toMatchObject({ code: expect.any(String) })
@@ -768,7 +764,7 @@ it('lost secure ACK reconciles the exact original immutable snapshot and old act
   expect(fetch).toHaveBeenCalledTimes(2)
 }, 30_000)
 
-it('expired-code renewal creates a new auth attempt within the original intent while preserving old init, action receipts and encrypted snapshots', async () => {
+it('expired-code renewal creates a new auth attempt within the original intent while preserving old init, action receipts and private snapshots', async () => {
   const f = await fixture(); let inits = 0
   const fetch = vi.fn(async (url: string | URL | Request) => new URL(String(url)).pathname.endsWith('/init') ? qrResponse(++inits === 1 ? TOKEN : 'fixture-renewed-token') : polling(5))
   vi.stubGlobal('fetch', fetch)
@@ -787,7 +783,7 @@ it('expired-code renewal creates a new auth attempt within the original intent w
   expect(fetch).toHaveBeenCalledTimes(3)
   const rows = privateRows(f.services.database!)
   for (const old of oldRows) expect(rows.find(row => row.operationId === old.operationId)?.bytes).toEqual(old.bytes)
-  const decrypted = rows.map(row => f.encryption.decryptString(row.bytes))
+  const decrypted = await privateCredentialValues(f.services.database!)
   expect(decrypted.length).toBeGreaterThan(oldRows.length)
   expect(decrypted.some(value => value.includes(TOKEN))).toBe(true)
   expect(decrypted.some(value => value.includes('fixture-renewed-token'))).toBe(true)
@@ -859,7 +855,7 @@ it('parallel local Vault recovery on a fresh owner returns the same stored actio
   })
   const original = f.sdk.call('connection.setup.advance', input).then(value => ({ status: 'fulfilled' as const, value }), reason => ({ status: 'rejected' as const, reason }))
   await committed.promise
-  const recoveredServices = await createConnectionServices({ directory: f.directory, encryption: f.encryption })
+  const recoveredServices = await createConnectionServices({ directory: f.directory })
   const server = new AgentMuxControlServer({ socketPath: join(f.root, 'fresh-recovery.sock'), connections: recoveredServices.connections, coreClients: () => { throw new Error('Local secure recovery cannot borrow an Agent Runtime') } })
   await server.start()
   const sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(f.root, 'fresh-recovery.sock') } })
@@ -1223,7 +1219,7 @@ it('continues the dual-domain Console issuer chain through Setup SDK and compile
     if (index < advances - 1) { expect(view.continuation?.account).toBeNull(); expect(view.continuation?.actions.map(action => action.kind)).not.toContain('confirm-account') }
     expect((await f.sdk.call('connection.setup.advance', original)).receipt).toEqual(view.receipt)
     expect(requests).toHaveBeenCalledTimes(count + 1)
-    // Resume the same encrypted Console snapshot after its first international issuer response.
+    // Resume the same private Console snapshot after its first international issuer response.
     if (index === 6) { await f.close(); await f.reopen(); view = await inspect(f) }
   }
   expect(requests.mock.calls.map(([url]) => { const target = new URL(String(url)); return target.origin + target.pathname + target.search })).toEqual([

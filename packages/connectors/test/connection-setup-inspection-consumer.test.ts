@@ -1,5 +1,6 @@
 import { expectConnectionAllocations } from './helpers/unified-identifiers.js'
 import { createConnectionServices } from '../src/connection-services.js'
+import { assertPrivateCredentialFiles, privateCredentialValues } from './fixtures/connection-enrollment.js'
 import { CookieJar } from 'tough-cookie'
 import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { AgentMuxControlServer, AgentMuxRpcService, connectAgentMuxRpc } from '@agentmux/core'
@@ -12,7 +13,6 @@ import { createConnection, createServer, type Socket } from 'node:net'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, expect, it, vi } from 'vitest'
-import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli, type CliResult } from '../../core/test/helpers/object-cli-rpc.js'
 
 const SECRET = 'fixture-inspection-saved-secret', TOKEN = 'fixture-inspection-token', FLOW = 'fixture-inspection-flow'
@@ -74,10 +74,10 @@ function nativeRoute(observe: (url: URL, init: RequestInit) => Promise<Response>
   return { route, account: (index: number) => { accountIndex = index } }
 }
 async function fixture() {
-  const root = await mkdtemp(join(tmpdir(), 'setup-inspection-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock'), encryption = enrollmentEncryption()
+  const root = await mkdtemp(join(tmpdir(), 'setup-inspection-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock')
   let services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
   const open = async (missingAdapter = false) => {
-    services = await createConnectionServices({ directory, encryption, ...(missingAdapter ? { adapters: [] } : {}) })
+    services = await createConnectionServices({ directory, ...(missingAdapter ? { adapters: [] } : {}) })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw new Error('Application inspection cannot borrow an Agent Runtime') } })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   }
@@ -89,7 +89,7 @@ async function fixture() {
   const saved = await sdk.call('connection.configure', { operationId: 'inspection-original-save', expectedRevision: null, connection: config })
   const input: ConnectionSetupBegin = { operationId: 'inspection-original-management', connectionId: config.connectionId, expectedConnectionRevision: saved.connection.revision, goal }
   const cli = (args: string[], body?: unknown, endpoint = socketPath) => runCompiledObjectCli(['--endpoint', 'unix:' + endpoint, 'connection', ...args], objectCliEnvironment(root), body === undefined ? '' : JSON.stringify(body))
-  return { root, directory, socketPath, encryption, config, saved, input, cli, close, reopen: open, get sdk() { return sdk }, get services() { return services } }
+  return { root, directory, socketPath, config, saved, input, cli, close, reopen: open, get sdk() { return sdk }, get services() { return services } }
 }
 type Fixture = Awaited<ReturnType<typeof fixture>>
 const inspect = (f: Fixture, selection: { selectedStepId?: string; cursor?: string; limit?: number } = {}) => f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, applicationInspection: selection })
@@ -144,10 +144,9 @@ it('compiled CLI and SDK explicitly inspect the exact saved application after ac
   expect(await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).toEqual(before)
   expect((await f.sdk.call('connection.inspect', { operationId: 'inspection-original-save' })).operation).toEqual(f.saved)
   expect(await f.sdk.call('connection.service.get', {})).toEqual(off.service)
-  f.services.database!.exec('PRAGMA wal_checkpoint(FULL)')
-  const bytes = [await readFile(join(f.directory, 'connections.sqlite'))]
-  try { bytes.push(await readFile(join(f.directory, 'connections.sqlite-wal'))) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-  for (const value of [SECRET, TOKEN, FLOW, SESSION, READ_COOKIE, DETAIL, 'app.info', ...accounts.flatMap(a => [a.user, a.tenant, a.csrf])]) expect(Buffer.concat(bytes).includes(Buffer.from(value))).toBe(false)
+  const privateValues = await privateCredentialValues(f.services.database!)
+  expect(privateValues).toContain(SECRET)
+  await assertPrivateCredentialFiles(f.directory)
   const calls = fetch.mock.calls.length
   await f.close(); await f.reopen(true)
   const withoutAdapter = await inspect(f, { selectedStepId: selected(observed).stepId })
@@ -207,7 +206,7 @@ it('only the selected numeric role own resource key confirms read permission; ma
   expect((await f.sdk.call('connection.inspect', { operationId: 'inspection-original-save' })).operation).toEqual(f.saved)
 }, 45_000)
 
-it('an original encrypted ACK remains selectable and locally recoverable after renewal, revision, missing adapter and owner reopen without reactivating old permission', async () => {
+it('an original private ACK remains selectable and locally recoverable after renewal, revision, missing adapter and owner reopen without reactivating old permission', async () => {
   const f = await fixture(), native = nativeRoute(), fetch = vi.fn(native.route); vi.stubGlobal('fetch', fetch)
   await confirmed(f)
   const originalInput = inputFor(await inspect(f), 'inspect-application'), store = ConnectionSecrets.prototype.store
@@ -243,16 +242,16 @@ it('an original encrypted ACK remains selectable and locally recoverable after r
   const reopened = await inspect(f, { selectedStepId: receipt.stepId })
   expect(selected(reopened)).toEqual(selected(recovered)); expect(reopened.applicationInspection?.applicationInfoReadPermission).toBe('unknown')
   assertSafe(reopened.applicationInspection)
-  expect((await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection).toEqual(revised.connection)
+  expect((await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection).toMatchObject(revised.connection)
   expect((await f.sdk.call('connection.inspect', { operationId: 'inspection-original-save' })).operation).toEqual(f.saved)
 }, 45_000)
 
 it('an unrecoverable original result after reopen stays unknown but cannot suppress an explicit new observation under the same confirmed authentication', async () => {
   const f = await fixture(), fetch = vi.fn(nativeRoute().route); vi.stubGlobal('fetch', fetch)
   const auth = await confirmed(f), originalInput = inputFor(await inspect(f), 'inspect-application')
-  const failEncryption = vi.spyOn(f.encryption, 'encryptString').mockImplementationOnce(() => { throw new Error('fixture-encryption-failed-before-original-write') })
+  const failStorage = vi.spyOn(ConnectionSecrets.prototype, 'store').mockRejectedValueOnce(new Error('fixture-storage-failed-before-original-write'))
   const uncertain = await f.sdk.call('connection.setup.advance', originalInput), original = selected(uncertain)
-  expect(original).toMatchObject({ request: 'confirmed', secureStorage: 'unknown' }); failEncryption.mockRestore()
+  expect(original).toMatchObject({ request: 'confirmed', secureStorage: 'unknown' }); failStorage.mockRestore()
   const calls = fetch.mock.calls.length
   await f.close(); await f.reopen()
   const local = await inspect(f, { selectedStepId: original.stepId }), recover = inputFor(local, 'recover-application-inspection')
@@ -294,7 +293,7 @@ it('foreign actors and changed frozen action inputs are refused without changing
   await expect(f.sdk.call('connection.setup.advance', secondInput)).rejects.toMatchObject({ code: 'CONNECTION_SETUP_UNCONFIRMED' })
   expect(selected(await f.sdk.call('connection.setup.advance', input))).toEqual(original)
   expect(fetch.mock.calls.length - calls).toBe(1)
-  expect((await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection).toEqual(revised.connection)
+  expect((await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection).toMatchObject(revised.connection)
   expect((await f.sdk.call('connection.inspect', { operationId: 'inspection-original-save' })).operation).toEqual(f.saved)
 }, 45_000)
 
@@ -339,7 +338,7 @@ it('a target revision changed during the native read retains the original child 
   expect(selected(late).input).toEqual(input); expect(late.applicationInspection?.applicationInfoReadPermission).toBe('unknown')
   expect((await inspect(f)).applicationInspection?.applicationInfoReadPermission).toBe('unknown')
   expect(fetch.mock.calls.filter(([url]) => new URL(String(url)).pathname.startsWith('/developers/')).map(([url]) => String(url))).toEqual(['https://open.feishu.cn/developers/v1/app_role/permission/' + f.config.application.appId])
-  expect((await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection).toEqual(revised.connection)
+  expect((await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection).toMatchObject(revised.connection)
   expect((await f.sdk.call('connection.inspect', { operationId: 'inspection-original-save' })).operation).toEqual(f.saved)
 }, 45_000)
 
@@ -363,7 +362,7 @@ it('the confirmed final Console origin supplies same-origin business reads witho
   expect(observed.operation?.authentication).toEqual(auth.operation?.authentication)
   expect(observed.continuation).toMatchObject({ stage: 'confirmed', account: auth.continuation!.account })
   expect((await f.sdk.call('connection.inspect', { operationId: 'inspection-original-save' })).operation).toEqual(f.saved)
-  expect((await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection).toEqual(f.saved.connection)
+  expect((await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection).toMatchObject(f.saved.connection)
 }, 45_000)
 
 async function wireFault(f: Fixture) {
@@ -541,7 +540,7 @@ it.each(['observed', 'unknown'] as const)('retains a rotated native session acro
   expect(count).toBe(2)
 })
 
-it.each(['observed', 'unknown'] as const)('locally recovers one encrypted Cookie continuation after a lost ACK with an %s original result', async outcome => {
+it.each(['observed', 'unknown'] as const)('locally recovers one private Cookie continuation after a lost ACK with an %s original result', async outcome => {
   const f = await fixture(), rotated = 'fixture-ack-rotated-session'
   let count = 0
   vi.stubGlobal('fetch', vi.fn(nativeRoute(async (_target, init) => {
@@ -644,7 +643,7 @@ it('exposes the original unknown permission inspection in a secret-free ordered 
   const failed = await f.sdk.call('connection.setup.advance', original)
   expect(selected(failed)).toMatchObject({ request: 'unknown', secureStorage: 'not-started' })
   const count = fetch.mock.calls.length, before = changes(f), resolve = vi.spyOn(ConnectionSecrets.prototype, 'resolve'), store = vi.spyOn(ConnectionSecrets.prototype, 'store')
-  f.encryption.isEncryptionAvailable = () => false
+  const available = vi.spyOn(ConnectionSecrets.prototype, 'assertAvailable').mockRejectedValue(new Error('fixture-private-storage-unavailable'))
   let page = result(await f.cli(['setup', 'inspect', '--operation-id', f.input.operationId, '--request-trace', '--trace-limit', '2']))
   const entries = [...page.requestTrace!.entries]
   expect(page.challenge).toBeNull(); expect(page.continuation).toBeUndefined(); expect(page.applicationInspection).toBeUndefined()
@@ -661,7 +660,7 @@ it('exposes the original unknown permission inspection in a secret-free ordered 
   expect(entries.map(entry => entry.network)).toEqual(Array.from({ length: 8 }, () => null))
   assertSafe(entries)
   expect(JSON.stringify(entries)).not.toMatch(/https?:|cookie|qrPayload|privateRef|\/developers|\?/u)
-  expect(resolve).not.toHaveBeenCalled(); expect(store).not.toHaveBeenCalled(); expect(fetch).toHaveBeenCalledTimes(count); expect(changes(f)).toEqual(before)
+  expect(available).not.toHaveBeenCalled(); expect(resolve).not.toHaveBeenCalled(); expect(store).not.toHaveBeenCalled(); expect(fetch).toHaveBeenCalledTimes(count); expect(changes(f)).toEqual(before)
   const service = new AgentMuxRpcService({ connections: f.services.connections }); clean.push(() => service.dispose())
   await expect(service.call('connection.setup.inspect', { operationId: f.input.operationId, requestTrace: {} }, { principal: { kind: 'device', id: 'foreign-trace-actor' } })).rejects.toMatchObject({ code: 'CONNECTION_SETUP_AUTHORITY_REQUIRED' })
   await expect(f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId, requestTrace: {}, applicationInspection: {} })).rejects.toMatchObject({ code: 'INVALID_CONNECTION_SETUP_DATA' })

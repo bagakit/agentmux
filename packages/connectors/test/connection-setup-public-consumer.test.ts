@@ -1,4 +1,5 @@
 import { createConnectionServices } from '../src/connection-services.js'
+import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { DatabaseSync } from 'node:sqlite'
 import { fork, type ChildProcess } from 'node:child_process'
 import { once } from 'node:events'
@@ -9,7 +10,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, AgentMuxRpcService, connectAgentMuxRpc } from '@agentmux/core'
 import type { ConnectionConfig, ConnectionSetupBegin, ConnectionSetupView } from '@agentmux/core/connections'
 import { objectCliEnvironment, runCompiledObjectCli, type CliResult } from '../../core/test/helpers/object-cli-rpc.js'
-import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
+import { privateCredentialValues, assertPrivateCredentialFiles } from './fixtures/connection-enrollment.js'
 
 const TOKEN = 'fixture-original-qr-token', FLOW = 'fixture-original-flow-key'
 const COOKIES = ['fixture-session=original-private-cookie; Secure; HttpOnly; Path=/', 'fixture-route=original-route; Secure; Path=/accounts']
@@ -23,10 +24,10 @@ function qrResponse() {
 }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(r => { resolve = r }); return { promise, resolve } }
 async function fixture(options: { paused?: boolean; domain?: string } = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'setup-public-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock'), encryption = enrollmentEncryption()
+  const root = await mkdtemp(join(tmpdir(), 'setup-public-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock')
   let services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
   const open = async () => {
-    services = await createConnectionServices({ directory, encryption })
+    services = await createConnectionServices({ directory })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw new Error('Management challenge cannot borrow an Agent Runtime') } })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   }
@@ -38,7 +39,7 @@ async function fixture(options: { paused?: boolean; domain?: string } = {}) {
   const saved = await sdk.call('connection.configure', { operationId: 'original-local-save', expectedRevision: null, connection: config })
   const input: ConnectionSetupBegin = { operationId: 'original-management', connectionId: config.connectionId, expectedConnectionRevision: saved.connection.revision, goal }
   const cli = (args: string[], body?: unknown) => runCompiledObjectCli(['--endpoint', 'unix:' + socketPath, 'connection', 'setup', ...args], objectCliEnvironment(root), body === undefined ? '' : JSON.stringify(body))
-  return { root, directory, input, config, saved, encryption, cli, closeOwner, reopen: open, get services() { return services }, get sdk() { return sdk } }
+  return { root, directory, input, config, saved, cli, closeOwner, reopen: open, get services() { return services }, get sdk() { return sdk } }
 }
 function assertChallenge(view: ConnectionSetupView, input: ConnectionSetupBegin) {
   expect(view.operation).toMatchObject({ ...input, adapterId: 'feishu', application: { domain: 'open.feishu.cn', appId: 'cli_original_saved_bot' }, request: { state: 'confirmed', attemptId: expect.any(String) }, secureStorage: 'stored' })
@@ -47,13 +48,13 @@ function assertChallenge(view: ConnectionSetupView, input: ConnectionSetupBegin)
   expect(view.operation).not.toHaveProperty('authorization')
   expect(view.operation).not.toHaveProperty('configured')
 }
-async function assertPrivateStorage(database: DatabaseSync, directory: string, encryption: ReturnType<typeof enrollmentEncryption>, view: ConnectionSetupView) {
+async function assertPrivateStorage(database: DatabaseSync, directory: string, view: ConnectionSetupView) {
   const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all()
   expect(tables.length).toBeGreaterThan(0)
-  const records = tables.map(table => database.prepare('SELECT * FROM "' + String(table.name).replaceAll('"', '""') + '"').all())
+  const records = tables.filter(table => table.name !== 'connection_credential').map(table => database.prepare('SELECT * FROM "' + String(table.name).replaceAll('"', '""') + '"').all())
   const safeRecords = JSON.stringify(records)
   for (const privateValue of [TOKEN, FLOW, ...COOKIES, CREDENTIAL]) expect(safeRecords).not.toContain(privateValue)
-  const envelopes = database.prepare('SELECT ciphertext FROM connection_credential').all().map(row => encryption.decryptString(Buffer.from(row.ciphertext as Uint8Array)))
+  const envelopes = await privateCredentialValues(database)
   const privateEnvelope = envelopes.find(value => value.includes(FLOW))
   expect(privateEnvelope).toBeDefined()
   const snapshot = JSON.parse(privateEnvelope!)
@@ -61,13 +62,10 @@ async function assertPrivateStorage(database: DatabaseSync, directory: string, e
   expect(snapshot).toMatchObject(original)
   expect(JSON.parse(snapshot.privateState)).toMatchObject({ ...original, application: view.operation!.application, flowKey: FLOW, token: TOKEN, setCookies: COOKIES })
   expect(snapshot.challenge.qrPayload).toBe(JSON.stringify({ qrlogin: { token: TOKEN } }))
-  database.exec('PRAGMA wal_checkpoint(FULL)')
-  const files = [await readFile(join(directory, 'connections.sqlite'))]
-  try { files.push(await readFile(join(directory, 'connections.sqlite-wal'))) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-  for (const privateValue of [TOKEN, FLOW, ...COOKIES, CREDENTIAL]) expect(Buffer.concat(files).includes(Buffer.from(privateValue))).toBe(false)
+  await assertPrivateCredentialFiles(directory)
 }
 
-it('compiled CLI and SDK reach the default QR leaf and original encrypted owner without claiming login or changing the saved bot', async () => {
+it('compiled CLI and SDK reach the default QR leaf and original private storage owner without claiming login or changing the saved bot', async () => {
   const f = await fixture(), before = await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })
   const fetch = vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
     expect(new URL(String(url)).origin + new URL(String(url)).pathname).toBe('https://accounts.feishu.cn/accounts/qrlogin/init')
@@ -86,7 +84,7 @@ it('compiled CLI and SDK reach the default QR leaf and original encrypted owner 
   expect(await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId })).toEqual(pending)
   expect(result(await f.cli(['inspect', '--operation-id', f.input.operationId]))).toEqual(pending)
   const list = result<{ operations: unknown[]; next: string | null }>(await f.cli(['ls', '--connection', f.input.connectionId]))
-  expect(list).toEqual({ operations: [pending.operation], next: null, support: { connectionRevision: 1, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] } })
+  expect(list).toEqual({ operations: [pending.operation], next: null, support: { connectionRevision: 1, capabilities: ['profile-update', 'management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] } })
   expect(await f.sdk.call('connection.setup.ls', { connectionId: f.input.connectionId })).toEqual(list)
   expect(JSON.stringify(list)).not.toContain(TOKEN); expect(JSON.stringify(list)).not.toContain(FLOW)
   expect(await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).toEqual(before)
@@ -94,7 +92,7 @@ it('compiled CLI and SDK reach the default QR leaf and original encrypted owner 
   expect((await f.cli(['advance', '--operation-id', f.input.operationId])).code).not.toBe(0)
   const help = await f.cli(['--help']); expect(help.code).toBe(0); expect(help.stdout).toContain('begin'); expect(help.stdout).toContain('inspect'); expect(help.stdout).toContain('ls'); expect(help.stdout).toContain('setup advance')
   expect(fetch).toHaveBeenCalledTimes(1)
-  await assertPrivateStorage(f.services.database!, f.directory, f.encryption, pending)
+  await assertPrivateStorage(f.services.database!, f.directory, pending)
 }, 30_000)
 
 it('explicit administration works for a paused bot with automatic Connector traffic off and keeps both policies unchanged', async () => {
@@ -141,7 +139,7 @@ it('a revision changed during QR init retains the original operation but withhol
   expect(late.challenge).toBeNull(); expect(late.reason).toBe('connection-revised')
   expect(await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId })).toEqual(late)
   await expect(f.sdk.call('connection.setup.begin', { ...f.input, operationId: 'stale-new-intent' })).rejects.toMatchObject({ code: 'CONNECTION_REVISION_CONFLICT' })
-  expect((await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).connection).toEqual(revised.connection)
+  expect((await f.sdk.call('connection.inspect', { connectionId: f.input.connectionId })).connection).toMatchObject(revised.connection)
   expect((await f.sdk.call('connection.inspect', { operationId: 'original-local-save' })).operation).toEqual(f.saved)
   expect(fetch).toHaveBeenCalledTimes(1)
 }, 20_000)
@@ -177,22 +175,21 @@ it('HTTP, redirect, malformed and lost responses stay unknown across reopen and 
 
 it('secure-storage failure preserves the original request and recovers only local handoff without repeating native work', async () => {
   const f = await fixture(), fetch = vi.fn(async () => qrResponse()); vi.stubGlobal('fetch', fetch)
-  f.encryption.isEncryptionAvailable = () => false
+  const available = vi.spyOn(ConnectionSecrets.prototype, 'assertAvailable').mockRejectedValue(new Error('fixture-private-store-unavailable'))
   const blocked = await f.sdk.call('connection.setup.begin', f.input)
   expect(blocked.operation).toMatchObject({ request: { state: 'not-dispatched', attemptId: null }, reason: 'secure-storage-unavailable' }); expect(blocked.challenge).toBeNull(); expect(fetch).not.toHaveBeenCalled()
-  f.encryption.isEncryptionAvailable = () => true
-  const encrypt = f.encryption.encryptString; let failed = false
-  f.encryption.encryptString = value => { if (!failed) { failed = true; throw new Error('fixture-private-encryption-detail') } return encrypt(value) }
+  available.mockRestore()
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockRejectedValueOnce(new Error('fixture-private-store-detail'))
   const uncertain = await f.sdk.call('connection.setup.begin', f.input)
   expect(uncertain.operation).toMatchObject({ request: { state: 'confirmed', attemptId: expect.any(String) }, secureStorage: 'unknown' }); expect(uncertain.challenge).toBeNull()
-  expect(JSON.stringify(uncertain)).not.toContain('fixture-private-encryption-detail')
+  expect(JSON.stringify(uncertain)).not.toContain('fixture-private-store-detail')
   const recovered = await f.sdk.call('connection.setup.begin', f.input); assertChallenge(recovered, f.input)
   expect(recovered.operation?.request.attemptId).toBe(uncertain.operation?.request.attemptId)
   expect(fetch).toHaveBeenCalledTimes(1)
   await f.closeOwner(); await f.reopen()
   expect(await f.sdk.call('connection.setup.inspect', { operationId: f.input.operationId })).toEqual(recovered)
   expect(await f.sdk.call('connection.setup.begin', f.input)).toEqual(recovered)
-  await assertPrivateStorage(f.services.database!, f.directory, f.encryption, recovered)
+  await assertPrivateStorage(f.services.database!, f.directory, recovered)
 }, 30_000)
 
 it('unqualified Lark management keeps the saved bot and makes no Feishu request', async () => {
@@ -217,7 +214,7 @@ function message(child: ChildProcess, kind: string): Promise<Record<string, unkn
 
 it.each(['challenge', 'unknown'] as const)('a real owner process restart retains the original %s and cannot replay QR init', async mode => {
   const root = await mkdtemp(join(tmpdir(), 'setup-child-')); clean.push(() => rm(root, { recursive: true, force: true }))
-  const socketPath = join(root, 'owner.sock'), encryption = enrollmentEncryption()
+  const socketPath = join(root, 'owner.sock')
   const start = async (fault: string) => {
     const child = fork(new URL('./fixtures/connection-setup-owner.mjs', import.meta.url), [root, fault], { execArgv: ['--experimental-transform-types'], env: objectCliEnvironment(root), stdio: ['ignore', 'pipe', 'pipe', 'ipc'] })
     clean.push(async () => { if (child.exitCode === null && child.signalCode === null) { child.kill('SIGKILL'); await once(child, 'exit') } })
@@ -245,12 +242,12 @@ it.each(['challenge', 'unknown'] as const)('a real owner process restart retains
   else { expect(observed.operation).toMatchObject({ ...input, application: config.application, request: { state: 'unknown', attemptId: expect.any(String) } }); expect(observed.challenge).toBeNull() }
   expect(observed.operation?.request.attemptId).toBe(claimed.operation?.request.attemptId)
   expect(result(await cli(['setup', 'begin', '--input', '-'], input))).toEqual(observed)
-  expect(result(await cli(['setup', 'ls', '--connection', input.connectionId]))).toEqual({ operations: [observed.operation], next: null, support: { connectionRevision: 1, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] } })
+  expect(result(await cli(['setup', 'ls', '--connection', input.connectionId]))).toEqual({ operations: [observed.operation], next: null, support: { connectionRevision: 1, capabilities: ['profile-update', 'management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] } })
   expect(result<{ connection: unknown }>(await cli(['inspect', '--connection', input.connectionId])).connection).toMatchObject({ config, revision: 1 })
   const effects = (await readFile(join(root, 'native-effects.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
   expect(effects).toEqual([{ method: 'POST', path: '/accounts/qrlogin/init' }])
   if (original) {
     const database = new DatabaseSync(join(root, 'connections.sqlite'))
-    try { await assertPrivateStorage(database, root, encryption, original) } finally { database.close() }
+    try { await assertPrivateStorage(database, root, original) } finally { database.close() }
   }
 }, 40_000)

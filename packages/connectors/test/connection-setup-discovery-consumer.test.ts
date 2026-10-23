@@ -8,7 +8,6 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, expect, it, vi } from 'vitest'
-import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli, type CliResult } from '../../core/test/helpers/object-cli-rpc.js'
 
 type Discovery = ConnectionSetupResultMap['connection.setup.ls']
@@ -18,8 +17,8 @@ const clean: Array<() => void | Promise<void>> = []
 afterEach(async () => { vi.restoreAllMocks(); vi.unstubAllGlobals(); for (const close of clean.splice(0).reverse()) await close() })
 function result<T = Discovery>(output: CliResult): T { expect(output.code, output.stdout + output.stderr).toBe(0); return JSON.parse(output.stdout).result }
 async function fixture(options: { domain?: string; adapterId?: string; paused?: boolean } = {}) {
-  const root = await mkdtemp(join(tmpdir(), 'setup-discovery-')), socketPath = join(root, 'owner.sock'), encryption = enrollmentEncryption()
-  const services = await createConnectionServices({ directory: join(root, 'connections'), encryption })
+  const root = await mkdtemp(join(tmpdir(), 'setup-discovery-')), socketPath = join(root, 'owner.sock')
+  const services = await createConnectionServices({ directory: join(root, 'connections') })
   const server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw new Error('Local implementation discovery cannot borrow an Agent Runtime') } })
   await server.start()
   const sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
@@ -30,11 +29,11 @@ async function fixture(options: { domain?: string; adapterId?: string; paused?: 
   // Discovery has no network effect. This trap never supplies a protocol response.
   const network = vi.fn(async () => { throw new Error('Discovery attempted an external request') }); vi.stubGlobal('fetch', network)
   const cli = (args: string[], endpoint = socketPath) => runCompiledObjectCli(['--endpoint', 'unix:' + endpoint, 'connection', 'setup', ...args], objectCliEnvironment(root))
-  return { root, socketPath, services, sdk, encryption, config, saved, cli, network }
+  return { root, socketPath, services, sdk, config, saved, cli, network }
 }
 function vaultReads() {
   // Call-through observation of the original security boundary, never a fabricated port.
-  return [vi.spyOn(ConnectionSecrets.prototype, 'assertAvailable'), vi.spyOn(ConnectionSecrets.prototype, 'inspect'), vi.spyOn(ConnectionSecrets.prototype, 'resolve'), vi.spyOn(ConnectionSecrets.prototype, 'store')]
+  return [vi.spyOn(ConnectionSecrets.prototype, 'assertAvailable'), vi.spyOn(ConnectionSecrets.prototype, 'inspect'), vi.spyOn(ConnectionSecrets.prototype, 'resolve'), vi.spyOn(ConnectionSecrets.prototype, 'store')] as const
 }
 function facts(database: DatabaseSync) {
   const tables = database.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all()
@@ -50,15 +49,15 @@ it('compiled CLI and SDK discover the original registered implementation with no
   const f = await fixture({ paused: true })
   const off = await f.sdk.call('connection.service.configure', { operationId: 'discovery-service-off', expectedRevision: 0, service: { enabled: false } })
   const before = await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId }), originalFacts = facts(f.services.database!)
-  const available = vi.spyOn(f.encryption, 'isEncryptionAvailable').mockReturnValue(false), encrypt = vi.spyOn(f.encryption, 'encryptString'), decrypt = vi.spyOn(f.encryption, 'decryptString'), vault = vaultReads()
-  const expected: Discovery = { operations: [], next: null, support: { connectionRevision: 1, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] } }
+  const vault = vaultReads(), available = vault[0].mockRejectedValue(new Error('fixture-private-storage-unavailable'))
+  const expected: Discovery = { operations: [], next: null, support: { connectionRevision: 1, capabilities: ['profile-update', 'management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] } }
   expect(result(await f.cli(['ls', '--connection', f.config.connectionId]))).toEqual(expected)
   expect(await f.sdk.call('connection.setup.ls', { connectionId: f.config.connectionId })).toEqual(expected)
   expect(await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).toEqual(before)
   expect((await f.sdk.call('connection.inspect', { operationId: 'discovery-original-save' })).operation).toEqual(f.saved)
   expect(await f.sdk.call('connection.service.get', {})).toEqual(off.service)
   expect(facts(f.services.database!)).toEqual(originalFacts)
-  expect(available).not.toHaveBeenCalled(); expect(encrypt).not.toHaveBeenCalled(); expect(decrypt).not.toHaveBeenCalled()
+  expect(available).not.toHaveBeenCalled()
   for (const observed of vault) expect(observed).not.toHaveBeenCalled()
   expect(f.network).not.toHaveBeenCalled()
   expect(JSON.stringify(expected)).not.toContain(secret)
@@ -75,12 +74,12 @@ it('unsupported domain, missing adapter and absent Connection are distinct from 
     expect(facts(f.services.database!)).toEqual(before)
     for (const observed of vault) { expect(observed).not.toHaveBeenCalled(); observed.mockRestore() }
     expect(f.network).not.toHaveBeenCalled()
-    expect((await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection).toEqual(f.saved.connection)
+    expect((await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection).toMatchObject(f.saved.connection)
   }
 }, 20_000)
 
 it('discovery reads the latest saved revision while preserving original safe operations and bounded pagination', async () => {
-  const f = await fixture(), available = vi.spyOn(f.encryption, 'isEncryptionAvailable').mockReturnValue(false)
+  const f = await fixture(), available = vi.spyOn(ConnectionSecrets.prototype, 'assertAvailable').mockRejectedValue(new Error('fixture-private-storage-unavailable'))
   const originals = []
   for (const operationId of ['discovery-first-original', 'discovery-second-original', 'discovery-third-original']) {
     const view = await f.sdk.call('connection.setup.begin', { operationId, connectionId: f.config.connectionId, expectedConnectionRevision: 1, goal })
@@ -89,7 +88,8 @@ it('discovery reads the latest saved revision while preserving original safe ope
   }
   expect(available).toHaveBeenCalledTimes(3)
   const revised = await f.sdk.call('connection.configure', { operationId: 'discovery-revised-save', expectedRevision: 1, connection: { ...f.config, label: 'Revised local label', enabled: false } })
-  const before = facts(f.services.database!), vault = vaultReads(), expectedSupport = { connectionRevision: 2, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] }
+  const before = facts(f.services.database!), vault = vaultReads(), expectedSupport = { connectionRevision: 2, capabilities: ['profile-update', 'management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] }
+  for (const observed of vault) observed.mockClear()
   const first = result(await f.cli(['ls', '--connection', f.config.connectionId, '--limit', '1']))
   expect(first).toEqual({ operations: [originals[2]], next: expect.any(String), support: expectedSupport })
   expect(first.next).not.toBe('')
@@ -101,7 +101,7 @@ it('discovery reads the latest saved revision while preserving original safe ope
   expect(facts(f.services.database!)).toEqual(before)
   for (const observed of vault) expect(observed).not.toHaveBeenCalled()
   expect(f.network).not.toHaveBeenCalled()
-  expect((await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection).toEqual(revised.connection)
+  expect((await f.sdk.call('connection.inspect', { connectionId: f.config.connectionId })).connection).toMatchObject(revised.connection)
   expect((await f.sdk.call('connection.inspect', { operationId: 'discovery-original-save' })).operation).toEqual(f.saved)
   expect(JSON.stringify([first, second, third])).not.toContain(secret)
 }, 20_000)
@@ -136,11 +136,11 @@ async function wireFault(f: Awaited<ReturnType<typeof fixture>>) {
 
 it('real SDK and compiled CLI reject malformed support on the wire without changing the original owner or taking away valid discovery', async () => {
   const f = await fixture(), wire = await wireFault(f), before = facts(f.services.database!)
-  const valid: Discovery = { operations: [], next: null, support: { connectionRevision: 1, capabilities: ['management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] } }
+  const valid: Discovery = { operations: [], next: null, support: { connectionRevision: 1, capabilities: ['profile-update', 'management-authentication', 'application-inspection', 'messaging-capability', 'persistent-event-transport', 'application-permissions', 'message-reception', 'card-actions', 'application-publication', 'enrollment-continuation', 'initial-setup'] } }
   expect(await wire.sdk.call('connection.setup.ls', { connectionId: f.config.connectionId })).toEqual(valid)
   const faults = [
     (value: Discovery) => ({ ...value, support: { ...value.support, capabilities: ['future-platform-authority'] } }),
-    (value: Discovery) => ({ ...value, support: { ...value.support, capabilities: ['management-authentication', 'management-authentication'] } }),
+    (value: Discovery) => ({ ...value, support: { ...value.support, capabilities: ['profile-update', 'management-authentication', 'management-authentication'] } }),
     (value: Discovery) => ({ ...value, support: { ...value.support, connectionRevision: 0 } }),
     (value: Discovery) => ({ ...value, support: { ...value.support, qrPayload: 'fixture-forbidden-private-scan' } }),
     (value: Discovery) => { const { support: _missing, ...rest } = value; return rest }

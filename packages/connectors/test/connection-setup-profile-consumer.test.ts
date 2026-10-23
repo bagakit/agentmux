@@ -15,11 +15,10 @@ import {
   type ConnectionSetupPublicationReview
 } from '@agentmux/core/connections'
 import type { ConnectionAdapter } from '@agentmux/connectors'
-import { ProfileConnectionSetup } from '../dist/connection-setup-profile.js'
+import { ProfileConnectionSetup } from '../src/connection-setup-profile.js'
 import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { createConnectionServices } from '../src/connection-services.js'
 import {
-  enrollmentEncryption,
   enrollmentAvatar
 } from './fixtures/connection-enrollment.js'
 import {
@@ -47,8 +46,7 @@ async function fixture(
   } = {}
 ) {
   const root = await mkdtemp(join(tmpdir(), 'console-profile-')),
-    socketPath = join(root, 'owner.sock'),
-    encryption = enrollmentEncryption()
+    socketPath = join(root, 'owner.sock')
   let services: Awaited<ReturnType<typeof createConnectionServices>>,
     server: AgentMuxControlServer,
     sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>,
@@ -366,7 +364,6 @@ async function fixture(
   const open = async () => {
     services = await createConnectionServices({
       directory: join(root, 'connections'),
-      encryption,
       adapters: [adapter]
     })
     server = new AgentMuxControlServer({
