@@ -12,16 +12,16 @@ export type ConnectorServiceObservation = {
 }
 export type ConnectorServiceObservations = Record<string, ConnectorServiceObservation>
 
-/** Default reads and an explicitly frozen Host never share a presentation scope. */
-export const connectorServiceScope = (target?: ConnectionHostingTarget): string => JSON.stringify(target ? [target.hostId, target.runtimeId] : [])
+/** Only an exact captured Host/Runtime names a presentation scope. */
+export const connectorServiceScope = (target: ConnectionHostingTarget): string => JSON.stringify([target.hostId, target.runtimeId])
 export function selectConnectorServiceObservation(observations: ConnectorServiceObservations, target?: ConnectionHostingTarget | null): ConnectorServiceObservation | null {
-  if (target === null) return null
+  if (!target) return null
   const observed = observations[connectorServiceScope(target)]
   return observed?.source === api.connections.call ? observed : null
 }
 
 /** Transient projections in the original AppStore; ConnectionHost alone owns configuration. */
-export function observeConnectorService(state: ConnectionServiceState, source = api.connections.call, target?: ConnectionHostingTarget): void {
+export function observeConnectorService(state: ConnectionServiceState, source: typeof api.connections.call, target: ConnectionHostingTarget): void {
   const key = connectorServiceScope(target)
   useAppStore.setState(current => {
     if (source !== api.connections.call) return current
@@ -34,17 +34,19 @@ export function observeConnectorService(state: ConnectionServiceState, source = 
 
 /** Opening or explicitly checking reads configuration only; no Agent or receiver work is started. */
 export async function readConnectorService(isCurrent = () => true, target?: ConnectionHostingTarget): Promise<ConnectionServiceState> {
-  const source = api.connections.call, key = connectorServiceScope(target)
+  const source = api.connections.call
+  const original = target ?? await api.connections.hostingTarget()
+  const key = connectorServiceScope(original)
   const previous = useAppStore.getState().connectorServiceObservation[key]
   const generation = (previous?.generation ?? 0) + 1
-  useAppStore.setState(current => ({ connectorServiceObservation: { ...current.connectorServiceObservation, [key]: {
+  useAppStore.setState(current => isCurrent() && source === api.connections.call ? ({ connectorServiceObservation: { ...current.connectorServiceObservation, [key]: {
     source, generation, state: previous?.source === source ? previous.state : null,
     issue: previous?.source === source ? previous.issue : ''
-  } } }))
+  } } }) : current)
   try {
-    const state = await source('connection.service.get', {}, target)
+    const state = await source('connection.service.get', {}, original)
     const current = useAppStore.getState().connectorServiceObservation[key]
-    if (isCurrent() && current?.source === source && current.generation === generation) observeConnectorService(state, source, target)
+    if (isCurrent() && current?.source === source && current.generation === generation) observeConnectorService(state, source, original)
     return state
   } catch (error) {
     useAppStore.setState(current => {
