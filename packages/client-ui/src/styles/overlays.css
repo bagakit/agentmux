@@ -8,6 +8,7 @@
 }
 [data-overlay-modal-scope][data-overlay-modal-scope] { position: fixed; z-index: var(--layer-dialog); inset: 0; isolation: isolate; pointer-events: none; }
 [data-overlay-modal-scope][hidden] { display: none; }
+[data-overlay-modal-boundary] { position: absolute; inset: 0; outline: none; pointer-events: none; }
 [data-overlay-modal-scope] [data-overlay-modal-part='scrim'] { z-index: 0; }
 [data-overlay-modal-scope] [data-overlay-modal-part='content'] { z-index: 1; }
 [data-overlay-modal-slot] { position: absolute; inset: 0; pointer-events: none; }

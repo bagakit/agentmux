@@ -3,6 +3,7 @@ import { Root as DismissableLayer, Branch as DismissableLayerBranch } from '@rad
 import { Children, cloneElement, createContext, forwardRef, useCallback, useContext, useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ComponentPropsWithoutRef, type HTMLAttributes, type ReactElement, type Ref, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useClientUiOwnerDocument } from '../platform.js'
+import { isImeOwnedKeyboardEvent } from '../lib/ime-keyboard-event.js'
 
 export * from '@radix-ui/react-dialog'
 
@@ -55,7 +56,7 @@ export function ModalAttachmentDismissal({ active, targetRef, onEscapeKeyDown, o
     slot.addEventListener(MODAL_OVERLAY_SLOT_REMOVED, departed)
     return () => slot.removeEventListener(MODAL_OVERLAY_SLOT_REMOVED, departed)
   }, [active, targetRef, onOwnerRemoved, attachment?.container, attachment?.ready])
-  return active ? <DismissableLayer asChild onEscapeKeyDown={onEscapeKeyDown}><AttachmentTarget targetRef={targetRef} /></DismissableLayer> : null
+  return active ? <DismissableLayer asChild onEscapeKeyDown={event => handleModalEscape(event, onEscapeKeyDown)}><AttachmentTarget targetRef={targetRef} /></DismissableLayer> : null
 }
 const AttachmentTarget = forwardRef<HTMLDivElement, { targetRef: RefObject<HTMLElement | null> }>(function AttachmentTarget({ targetRef }, ref) {
   useImperativeHandle(ref, () => targetRef.current as HTMLDivElement, [targetRef])
@@ -135,7 +136,9 @@ export function ModalPortal({ container, children, ...props }: ComponentProps<ty
   </>
 }
 
-/** One non-scrolling boundary gives Radix ownership of both the content and its attached controls. */
+/** A real, non-scrolling dialog boundary owns focus/ARIA and includes attached controls.
+ * The original Content remains the painted, independently scrolling surface.
+ */
 const ModalScope = forwardRef<HTMLDivElement, { context: ModalContextValue; document: Document; placed: boolean; children?: ComponentProps<typeof DialogPrimitive.Portal>['children'] }>(function ModalScope({ context, document, placed, children }, forwardedRef) {
   const [scope, setScope] = useState<HTMLDivElement | null>(null)
   const [boundary, setBoundary] = useState<HTMLDivElement | null>(null)
@@ -186,9 +189,10 @@ const ModalScope = forwardRef<HTMLDivElement, { context: ModalContextValue; docu
   const events = Object.fromEntries(Object.entries(behavior).filter(([name, value]) => /^on[A-Z]/.test(name) && typeof value === 'function').map(([name, handler]) => [name, (event: { target: EventTarget | null }) => {
     if (event.target && boundary?.contains(event.target as Node)) (handler as (event: unknown) => void)(event)
   }]))
+  const semantics = Object.fromEntries(Object.entries(behavior).filter(([name]) => isModalBoundaryAttribute(name)))
   return <div ref={attachScope} id={context.id} data-overlay-modal-scope={context.id} hidden={!visible}>
     <div ref={setScrimHost} style={{ display: 'contents' }} />
-    <div ref={setBoundary} style={{ display: 'contents' }} {...events}>
+    <div ref={setBoundary} data-overlay-modal-boundary="" {...semantics} data-state={visible ? 'open' : 'closed'} {...events}>
       <ModalBoundaryContext.Provider value={owner}><ModalAttachmentContext.Provider value={attachment}>{children}</ModalAttachmentContext.Provider></ModalBoundaryContext.Provider>
       {ready ? <DismissableLayerBranch ref={attachSlot} data-overlay-modal-slot="" /> : null}
     </div>
@@ -222,13 +226,20 @@ export const ModalContent = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<
   const [behavior, setBehavior] = useState<HTMLAttributes<HTMLDivElement>>({})
   const child = props.asChild ? Children.only(props.children) as ReactElement<Record<string, unknown>> : null
   const childRef = child?.props.ref as Ref<HTMLDivElement> | undefined
-  const documentLease = useRef({ document: inheritedBoundary?.document ?? element?.ownerDocument, generation: 0 })
+  const documentLease = useRef({ document: inheritedBoundary?.document ?? element?.ownerDocument, generation: 0,
+    focus: null as { element: HTMLElement; attempt: string | undefined } | null })
   // Ref retirement is not a document transfer. Radix returns focus asynchronously
   // after inline content has left the DOM, so retain its last actual lease document.
   const behaviorDocument = inheritedBoundary?.document ?? element?.ownerDocument ?? documentLease.current.document
-  if (documentLease.current.document !== behaviorDocument) documentLease.current = { document: behaviorDocument, generation: documentLease.current.generation + 1 }
+  if (documentLease.current.document !== behaviorDocument) {
+    const previousFocus = documentLease.current.document?.activeElement
+    const container = boundary?.boundary ?? element
+    documentLease.current = { document: behaviorDocument, generation: documentLease.current.generation + 1,
+      focus: previousFocus && container?.contains(previousFocus) ? { element: previousFocus as HTMLElement, attempt: context?.id } : null }
+  }
   const latest = useRef({ failure: context?.failure, id: context?.id, document: behaviorDocument }); latest.current = { failure: context?.failure, id: context?.id, document: behaviorDocument }
   const rawLeaseProps = { ...props, children: undefined }
+  if (boundary && child) for (const [name, value] of Object.entries(child.props)) if (isModalBoundaryAttribute(name)) (rawLeaseProps as Record<string, unknown>)[name] = value
   if (boundary) for (const name of Object.keys(rawLeaseProps)) if (/^on[A-Z]/.test(name) && !['onOpenAutoFocus', 'onCloseAutoFocus', 'onEscapeKeyDown', 'onPointerDownOutside', 'onFocusOutside', 'onInteractOutside'].includes(name)) delete (rawLeaseProps as Record<string, unknown>)[name]
   const leaseProps = useRef(rawLeaseProps)
   if (!sameShallow(leaseProps.current, rawLeaseProps)) leaseProps.current = rawLeaseProps
@@ -246,13 +257,20 @@ export const ModalContent = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<
       })
     }
   }, [ref, childRef])
-  // Radix's final DOM contract is attached to the retained visual node. Only its behavior
-  // shell retires on failure/closed forceMount, releasing FocusScope, hideOthers and input locks.
+  // Radix owns the real boundary; public refs and autofocus callbacks retain the original
+  // painted Content. Only behavior retires on failure/closed forceMount, never the draft DOM.
   const lease = useMemo(() => {
     const current = leaseProps.current, attemptId = context?.id
     const autofocus = (event: Event, close: boolean) => {
       if (close && (latest.current.failure != null || latest.current.id !== attemptId || latest.current.document !== behaviorDocument)) { event.preventDefault(); return }
       if (!element) return
+      const transferred = documentLease.current.focus
+      if (!close && transferred && transferred.attempt === attemptId && transferred.element.ownerDocument === behaviorDocument && (boundary?.boundary ?? element).contains(transferred.element)) {
+        // A document lease transfer is the same opening, not a new autofocus intent.
+        // Radix's default focusFirst(select:true) would otherwise select the saved draft.
+        documentLease.current.focus = null
+        event.preventDefault(); transferred.element.focus({ preventScroll: true }); return
+      }
       if (event.target === element) { (close ? current.onCloseAutoFocus : current.onOpenAutoFocus)?.(event); return }
       const Event = element.ownerDocument.defaultView?.CustomEvent ?? CustomEvent
       const actual = new Event(event.type, { cancelable: true })
@@ -260,20 +278,22 @@ export const ModalContent = forwardRef<HTMLDivElement, ComponentPropsWithoutRef<
       ;(close ? current.onCloseAutoFocus : current.onOpenAutoFocus)?.(actual)
       if (actual.defaultPrevented) event.preventDefault()
     }
-    return active ? <DialogPrimitive.Content key={documentLease.current.generation} {...current} asChild onOpenAutoFocus={event => autofocus(event, false)} onCloseAutoFocus={event => autofocus(event, true)}>
+    return active ? <DialogPrimitive.Content key={documentLease.current.generation} {...current} asChild onOpenAutoFocus={event => autofocus(event, false)} onCloseAutoFocus={event => autofocus(event, true)} onEscapeKeyDown={event => handleModalEscape(event, current.onEscapeKeyDown)}>
       <ContentBehavior target={boundary?.boundary ?? element} publish={setBehavior} boundaryPublish={boundary?.publish} />
     </DialogPrimitive.Content> : null
   }, [active, leaseProps.current, element, boundary, context?.id, behaviorDocument])
   if (context && !context.requestedOpen && !forceMount) return null
   const { asChild: _asChild, forceMount: _forceMount, children, onOpenAutoFocus: _open, onCloseAutoFocus: _close,
     onEscapeKeyDown: _escape, onPointerDownOutside: _pointerOutside, onFocusOutside: _focusOutside, onInteractOutside: _interactOutside, ...dom } = props
-  const attributes = Object.fromEntries(Object.entries(behavior).filter(([name]) => !boundary || !/^on[A-Z]/.test(name)))
+  if (boundary) for (const name of Object.keys(dom)) if (isModalBoundaryAttribute(name)) delete (dom as Record<string, unknown>)[name]
+  const attributes = Object.fromEntries(Object.entries(behavior).filter(([name]) => !boundary || !/^on[A-Z]/.test(name) && !isModalBoundaryAttribute(name)))
   const visual: Record<string, unknown> = { ...dom, ...(active ? attributes : {}), ...(context?.modal ? { 'data-overlay-modal-id': context.id, 'data-overlay-modal-part': 'content' } : {}),
-    'data-state': active ? 'open' : 'closed', role: dom.role ?? 'dialog', ref: attach }
+    'data-state': active ? 'open' : 'closed', ...(!boundary ? { role: dom.role ?? 'dialog' } : {}), ref: attach }
   if (child) {
     for (const [name, value] of Object.entries(child.props)) {
       const inherited = visual[name]
-      if (/^on[A-Z]/.test(name) && typeof value === 'function' && typeof inherited === 'function') visual[name] = (...args: unknown[]) => { value(...args); inherited(...args) }
+      if (boundary && isModalBoundaryAttribute(name)) visual[name] = undefined
+      else if (/^on[A-Z]/.test(name) && typeof value === 'function' && typeof inherited === 'function') visual[name] = (...args: unknown[]) => { value(...args); inherited(...args) }
       else if (name === 'style') visual[name] = { ...(inherited as object), ...(value as object) }
       else if (name === 'className') visual[name] = [inherited, value].filter(Boolean).join(' ')
     }
@@ -298,6 +318,9 @@ function moveModalHost(host: HTMLElement, destination: Element | DocumentFragmen
   if (host.isConnected && destination.isConnected && host.ownerDocument === destination.ownerDocument && typeof movable.moveBefore === 'function') { movable.moveBefore(host, null); return }
   const document = host.ownerDocument, active = document.activeElement
   const focus = active && host.contains(active) ? active as HTMLElement : null
+  const textControl = focus && (focus.tagName === 'INPUT' || focus.tagName === 'TEXTAREA') ? focus as HTMLInputElement | HTMLTextAreaElement : null
+  const textSelection = textControl && textControl.selectionStart !== null && textControl.selectionEnd !== null
+    ? { start: textControl.selectionStart, end: textControl.selectionEnd, direction: textControl.selectionDirection } : null
   const selection = document.getSelection(), range = selection?.rangeCount ? selection.getRangeAt(0) : null
   const saved = range && host.contains(range.startContainer) && host.contains(range.endContainer)
     ? { start: range.startContainer, startOffset: range.startOffset, end: range.endContainer, endOffset: range.endOffset } : null
@@ -309,11 +332,24 @@ function moveModalHost(host: HTMLElement, destination: Element | DocumentFragmen
     rebound.setStart(saved.start, saved.startOffset); rebound.setEnd(saved.end, saved.endOffset)
     const nextSelection = nextDocument.getSelection(); nextSelection?.removeAllRanges(); nextSelection?.addRange(rebound)
   }
+  // Document Range does not contain an input/textarea's native text selection.
+  // DOM adoption can reset that selection even though the original node survives.
+  if (textSelection) textControl!.setSelectionRange(textSelection.start, textSelection.end, textSelection.direction ?? 'none')
 }
 
 function sameShallow(left: object, right: object): boolean {
   const a = Object.entries(left), b = Object.entries(right)
   return a.length === b.length && a.every(([key, value]) => Object.is(value, (right as Record<string, unknown>)[key]))
+}
+
+function isModalBoundaryAttribute(name: string): boolean {
+  return name === 'id' || name === 'role' || name === 'tabIndex' || name.startsWith('aria-')
+}
+
+/** An IME-owned Escape does not enter either Radix dismissal or caller close effects. */
+function handleModalEscape(event: KeyboardEvent, onEscapeKeyDown?: (event: KeyboardEvent) => void): void {
+  if (isImeOwnedKeyboardEvent(event)) { event.preventDefault(); return }
+  onEscapeKeyDown?.(event)
 }
 
 export { ModalRoot as Root, ModalRoot as Dialog, ModalPortal as Portal, ModalPortal as DialogPortal, ModalOverlay as Overlay, ModalOverlay as DialogOverlay, ModalContent as Content, ModalContent as DialogContent }
