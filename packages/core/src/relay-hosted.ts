@@ -6,6 +6,7 @@ import { AgentMuxError, AgentMuxRpcError, parseRpcRequest, parseRpcResponse, rpc
 import { openAgentMuxRpcRelayRequest, type AgentMuxRpcRelayOptions, type AgentMuxRpcRelayReader } from './public-rpc-relay.js'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult, AgentMuxRpcStreamMethod, AgentMuxRpcStreamParams, AgentMuxRpcStreamInitial, AgentMuxRpcStreamEvent } from './public-rpc.js'
 import type { AgentMuxRpcSubscriptionOptions, AgentMuxRpcSubscription } from './public-rpc-client.js'
+import type { AgentMuxRpcCallContext } from './public-rpc-service.js'
 import { randomClientRequestId } from './client-request-id.js'
 
 type RuntimeSubscription = Parameters<AgentMuxHostedRpcPort['subscribe']>
@@ -24,12 +25,14 @@ export class HostedRelayRpcPort implements AgentMuxHostedRpcPort {
   constructor(private readonly options: AgentMuxRpcRelayOptions) {}
   async hello(name: string): Promise<void> { await this.exchange('device.hello', { name }) }
 
-  private exchange(method: string, params: object, handlers?: Handlers, signal?: AbortSignal): Promise<{
+  private exchange(method: string, params: object, handlers?: Handlers,
+    context: Pick<AgentMuxRpcCallContext, 'signal' | 'runtimeFence'> = {}): Promise<{
     value: unknown; subscription: AgentMuxHostedSubscription
   }> {
+    const { signal, runtimeFence } = context
     if (this.closed || signal?.aborted) return Promise.reject(cancelled())
     const body = rpcRecord(params)
-    if (Object.hasOwn(body, 'caller')) return Promise.reject(new AgentMuxError('A device principal is bound by the Host transport.', 'INVALID_CONTROL_REQUEST'))
+    if (Object.hasOwn(body, 'caller') || Object.hasOwn(body, 'runtimeFence')) return Promise.reject(new AgentMuxError('RPC caller and owner fence are transport metadata, not business input.', 'INVALID_CONTROL_REQUEST'))
     const id = randomClientRequestId(), controller = new AbortController()
     let reader: AgentMuxRpcRelayReader | undefined, ended = false, admitted = false
     let subscriptionId: string | undefined, sequence = 0
@@ -86,7 +89,7 @@ export class HostedRelayRpcPort implements AgentMuxHostedRpcPort {
       this.pending.add(abort); signal?.addEventListener('abort', abort, { once: true })
       if (signal?.aborted) { abort(); return }
       void openAgentMuxRpcRelayRequest(this.options,
-      { jsonrpc: '2.0', id, method, params: body }, receive, finish, controller.signal)
+      { jsonrpc: '2.0', id, method, params: { ...body, ...(runtimeFence ? { runtimeFence } : {}) } }, receive, finish, controller.signal)
         .then(value => { reader = value; if (ended) return value.dispose() })
         .catch(error => finish(error instanceof Error ? error : protocol()))
     })
@@ -96,7 +99,7 @@ export class HostedRelayRpcPort implements AgentMuxHostedRpcPort {
   call(method: 'runtime.invoke', params: { consumerId: string; invocation: AgentMuxHostedInvocation }, options?: { signal?: AbortSignal }): Promise<{ value: unknown }>
   call(method: 'runtime.release-consumer', params: { consumerId: string }): Promise<{ released: boolean }>
   async call(method: string, params: object, options?: { signal?: AbortSignal }): Promise<never> {
-    return (await this.exchange(method, params, undefined, options?.signal)).value as never
+    return (await this.exchange(method, params, undefined, options)).value as never
   }
 
   subscribe(...args: OutputSubscription): Promise<AgentMuxHostedSubscription>
@@ -105,7 +108,7 @@ export class HostedRelayRpcPort implements AgentMuxHostedRpcPort {
     const value = await this.exchange(method, params, {
       onInitial: value => handlers.onInitial(value as never), onEvent: value => handlers.onEvent(value as never),
       ...(handlers.onEnd ? { onEnd: handlers.onEnd } : {}), ...(handlers.signal ? { signal: handlers.signal } : {})
-    }, handlers.signal)
+    }, { ...(handlers.signal ? { signal: handlers.signal } : {}) })
     return value.subscription
   }
   async subscribePublic<M extends AgentMuxRpcStreamMethod>(method: M, params: AgentMuxRpcStreamParams<M>,
@@ -143,12 +146,12 @@ export class HostedRelayRpcPort implements AgentMuxHostedRpcPort {
         handlers.onEvent(event as AgentMuxRpcStreamEvent<M>)
       },
       ...(handlers.onEnd ? { onEnd: handlers.onEnd } : {}), ...(handlers.signal ? { signal: handlers.signal } : {})
-    }, handlers.signal)
+    }, { ...(handlers.signal ? { signal: handlers.signal } : {}) })
     const envelope = rpcRecord(opened.value, ['subscriptionId', 'method', 'initial'], 'CONTROL_PROTOCOL_ERROR')
     return { subscriptionId: envelope.subscriptionId as string, dispose: () => opened.subscription.dispose() }
   }
-  async forward<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>): Promise<AgentMuxRpcResult<M>> {
-    return (await this.exchange(method, params)).value as AgentMuxRpcResult<M>
+  async forward<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context?: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> {
+    return (await this.exchange(method, params, undefined, context)).value as AgentMuxRpcResult<M>
   }
   dispose(): void { if (this.closed) return; this.closed = true; for (const abort of [...this.pending]) abort() }
 }
@@ -160,7 +163,7 @@ export async function connectRelayHostedClient(options: AgentMuxRpcRelayOptions 
   try {
     options.signal.throwIfAborted()
     await rpc.hello(options.name)
-    const client = await connectHostedAgentMux({ rpc, forwardRpc: (method, params) => rpc.forward(method, params),
+    const client = await connectHostedAgentMux({ rpc, forwardRpc: (method, params, context) => rpc.forward(method, params, context),
       subscribeRpc: (method, params, handlers) => rpc.subscribePublic(method, params, handlers) })
     if (options.signal.aborted) { await client.dispose(); throw cancelled() }
     return client
