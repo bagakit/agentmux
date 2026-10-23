@@ -242,6 +242,8 @@ export class MoteConnectionOperations implements MoteConnectionPort {
       )
         throw failure('CONNECTION_REVISION_CONFLICT')
     }
+    // Requalify only this original target after asynchronous admission reads.
+    await this.ports.assertTarget(input.source.target)
     await this.authority(context)
     row = this.txn(() => {
       const old = this.read(input.operationId)
