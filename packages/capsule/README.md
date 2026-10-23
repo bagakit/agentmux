@@ -151,12 +151,14 @@ remain available while an external presentation or reply is pending.
 
 `pnpm --filter @agentmux/capsule test` exercises real HTTP, content publication,
 CAS, four mode combinations, faults, process death and original-origin recovery.
-`pnpm --filter @agentmux/capsule test:mutation` changes the actual listener to pick
-a new port and proves the process-restart test rejects that mutation, then restores
-the original source and build.
+`pnpm --filter @agentmux/capsule test:mutation` compiles actual listener and HTTP
+instance-header mutations in an isolated package copy and proves the original
+process-restart and HTTP-response tests reject them. Shared source and compiled
+artifacts remain unchanged.
 
-`pnpm --filter @agentmux/capsule test:reply:mutation` replaces original-input
-inspection with submission and proves the saved-reply replay test rejects it.
+`pnpm --filter @agentmux/capsule test:reply:mutation` uses the same isolated
+compilation for original-input inspection and reserved-input visibility mutations;
+the existing saved-reply and trusted-preparation tests must reject them.
 
 `pnpm --filter @agentmux/capsule test:runtime` launches the installed serving entry
 as a real independent subprocess, checks HTTP after client exit, original domain
