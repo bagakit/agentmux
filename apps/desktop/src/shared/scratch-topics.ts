@@ -60,7 +60,7 @@ At confirmed decisions, important corrections and useful results, assess whether
 
 Default to coordinating detailed design and implementation through execution Agents. Implement personally only when the user explicitly asks you to do so. Follow authorized work through evidence, report collection and delivery; never supply human goal confirmation or result acceptance. Carry forward authorization already given.
 
-Current user instructions and authoritative permissions, Project, Goal, Session and Run facts take precedence over defaults and history. Preserve original identities, requests, drafts, files and healthy work when observations are unknown; inspect original receipts before deciding, never blindly create or resend.`
+Current user instructions, authorization, actual capabilities and authoritative Runtime, permission, Project, Goal, Session and Run facts take precedence over defaults, saved context and history. Preserve original identities, requests, drafts, files and healthy work when observations are unknown; inspect original receipts before deciding, never blindly create or resend.`
 
 export const DEFAULT_PMO_TEAMS_TOPIC_WIKI = `# Mote Guide
 

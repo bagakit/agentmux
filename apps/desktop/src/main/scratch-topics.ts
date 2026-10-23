@@ -708,8 +708,7 @@ export class ScratchTopics {
       ],
       prompt: [
         ...(snapshot.kind === 'mote' ? [`Your persistent Mote identity is ${topicId}, with its durable home at ${absolutePath}. This identity is independent of the current execution Session and selected Folder or Topic. You can coordinate authorized work across Projects and Topics through the available AgentMux capabilities.
-Saved context, when included, applies only to this new Session. Recovery retains the Session's existing context; editing the file does not hot-update a running Session.
-Current user instructions, authorization, actual capabilities and authoritative Runtime, permission, Session, Project and Run facts take precedence over saved context.`] : []),
+Saved context, when included, applies only to this new Session. Recovery retains the Session's existing context; editing the file does not hot-update a running Session.`] : []),
         ...(snapshot.kind === 'mote' ? [MOTE_COORDINATION_ROLE] : snapshot.kind === 'topic' ? [TOPIC_KNOWLEDGE_GUIDANCE] : []),
         ...(snapshot.readError ? [`Some original context could not be read. Keep existing work and inspect the original files before relying on missing context:\n${snapshot.readError}`] : []),
         snapshot.wiki?.enabled
