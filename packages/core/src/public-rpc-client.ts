@@ -122,7 +122,7 @@ async function openRequest(endpoint: AgentMuxRpcEndpoint, request: JSONRPCReques
   }
   if (endpoint.transport !== 'unix') throw new AgentMuxError('SSH requests require their shared stdio transport.', 'CONTROL_PROTOCOL_ERROR')
   const lines = new AgentMuxRpcLines()
-  let closed = false
+  let closed = false, requestSent = false
   const socket = createConnection({ path: endpoint.path, signal })
   const input = socket, output = socket
   const finish = (error?: Error) => { if (closed) return; closed = true
@@ -132,9 +132,18 @@ async function openRequest(endpoint: AgentMuxRpcEndpoint, request: JSONRPCReques
   input.on('data', (chunk: Buffer) => { if (closed) return
     try { lines.accept(chunk, onFrame) } catch (error) { finish(transportError(error)) } })
   input.once('end', () => { try { lines.end(); finish() } catch (error) { finish(transportError(error)) } })
-  input.once('error', error => finish(transportError(error, 'connection')))
-  output.once('error', error => finish(transportError(error, 'connection')))
-  socket.once('connect', () => output.write(encoded))
+  const connectionFailed = (error: Error) => {
+    const failure = transportError(error, 'connection')
+    // The local socket never dispatched this request. A post-write failure cannot
+    // establish the remote business outcome and must retain its original uncertainty.
+    finish(!requestSent && failure instanceof AgentMuxError
+      ? new AgentMuxError(failure.message, failure.code, failure.detail,
+        { disposition: 'not_applied', confirmedInputBytes: null }, failure.logId)
+      : failure)
+  }
+  input.once('error', connectionFailed)
+  output.once('error', connectionFailed)
+  socket.once('connect', () => { requestSent = true; output.write(encoded) })
   if (signal.aborted) abort()
   return { dispose: async () => { signal.removeEventListener('abort', abort); if (closed) return
     closed = true; socket.destroy() } }
