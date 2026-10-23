@@ -1,8 +1,8 @@
 // @vitest-environment happy-dom
 import { expect, it, vi } from 'vitest'
-import type { AgentMuxContinuityInputDelivery, AgentMuxContinuityOperation } from '@agentmux/core'
-import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-continuity'
-import { createContinuityInputDelivery } from '../../../packages/core/src/agent-session-continuity-input'
+import type { AgentMuxContinuityInputDelivery, AgentMuxContinuityOperation } from '@agentmux/core/agent-session-recovery'
+import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-recovery'
+import { createContinuityInputDelivery } from '../../../packages/core/src/agent-session-recovery/continuity-input'
 import { AgentSessionComposer } from '../src/renderer/src/components/AgentSessionComposer'
 import { sessionServiceNotices } from '../src/renderer/src/lib/session-service-notices'
 import { useAppStore } from '../src/renderer/src/store'

@@ -58,7 +58,7 @@ it('deduplicates retry requests and does no work for unrelated Session events', 
   expect(f.observe).toHaveBeenCalledOnce()
   await vi.waitFor(() => expect(f.observe).toHaveBeenCalledTimes(2))
   const calls = f.inner.kernel.status.mock.calls.length
-  for (let i = 0; i < 100; i++) f.inner.continuitySupervisor.wake('unrelated')
+  for (let i = 0; i < 100; i++) f.inner.recovery.continuitySupervisor.wake('unrelated')
   await new Promise(resolve => setTimeout(resolve, 20))
   expect(f.inner.kernel.status).toHaveBeenCalledTimes(calls)
 })

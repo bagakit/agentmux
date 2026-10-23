@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest'
-import { agentContinuityRetryBaseDelay } from '../src/agent-session-continuity.js'
+import { agentContinuityRetryBaseDelay } from '../src/agent-session-recovery/continuity.js'
 
 it('doubles additional retry waits and caps each base without accumulating time', () => {
   const policy = { retryInitialDelayMs: 1000, retryMaxDelayMs: 5000 }

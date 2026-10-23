@@ -1,8 +1,8 @@
 import { fixturePath as _batchFixturePath } from "../../../test/fixture-values.mjs"
 import { afterEach, expect, it, vi } from 'vitest'
-import { observeResumedTurnInterruption } from '../src/agent-session-resumed-interruption.js'
-import { AgentSessionContinuityInputs, createContinuityInputDelivery } from '../src/agent-session-continuity-input.js'
-import { DEFAULT_AGENT_CONTINUITY_POLICY, normalizeAgentContinuityOperation, type AgentMuxContinuityOperation } from '../src/agent-session-continuity.js'
+import { observeResumedTurnInterruption } from '../src/agent-session-recovery/resumed-interruption.js'
+import { AgentSessionContinuityInputs, createContinuityInputDelivery } from '../src/agent-session-recovery/input.js'
+import { DEFAULT_AGENT_CONTINUITY_POLICY, normalizeAgentContinuityOperation, type AgentMuxContinuityOperation } from '../src/agent-session-recovery/continuity.js'
 import { AgentProviderRegistry, type AgentProvider } from '../src/agent-provider.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'

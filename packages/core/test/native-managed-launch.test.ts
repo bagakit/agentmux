@@ -1,7 +1,7 @@
 import { codexFrontendSocketPath, observeCodexTerminalFrontend, reconnectCodexTerminalFrontend, CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV } from '../src/providers/codex-managed-frontend.js'
 import { fixturePath as _historyFixturePath } from "./helpers/fixture-values.js"
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdtemp, writeFile, rm, readFile, realpath } from 'node:fs/promises'
+import { access, mkdtemp, writeFile, rm, readFile, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { spawn } from 'node:child_process'
@@ -24,7 +24,7 @@ async function command(version = 'codex-cli 0.163.0') {
 }
 
 it.runIf(process.platform === 'darwin')('qualifies create, preserving the original Provider invocation and Electron Node contract in the final launch plan', async () => {
-  const f = await command(), original = { command: f.path, args: ['--no-alt-screen', '--profile', 'original-profile', '--dangerously-bypass-hook-trust', '--', 'Original initial prompt'], env: { ORIGINAL_FIXTURE: 'kept' } }
+  const f = await command(), original = { command: f.path, args: ['--no-alt-screen', '--model', 'original-model', '--dangerously-bypass-hook-trust', '--', 'Original initial prompt'], env: { ORIGINAL_FIXTURE: 'kept' } }
   const prepared = await prepareCodexManagedLaunch(original, 'original-lifecycle', { kind: 'create', prompt: 'Original initial prompt' })
   expect(prepared.nativeActor?.launch).toEqual({ command: original.command, args: original.args })
   expect(prepared.nativeActor?.lifecycleOperationId).toBe('original-lifecycle'); expect(prepared.nativeActor?.token).toMatch(/^[a-f0-9]{64}$/u)
@@ -32,7 +32,7 @@ it.runIf(process.platform === 'darwin')('qualifies create, preserving the origin
   expect(prepared.plan.env).toMatchObject({ ORIGINAL_FIXTURE: 'kept', ELECTRON_RUN_AS_NODE: '1', [CODEX_NATIVE_TOKEN_ENV]: prepared.nativeActor!.token })
   expect(prepared.plan.command).toBe(process.execPath)
   const helper = JSON.parse(prepared.plan.args[1]!)
-  expect(helper).toEqual({ command: original.command, args: original.args, serverConfig: [], frontendArgs: ['--no-alt-screen', '--dangerously-bypass-hook-trust'] })
+  expect(helper).toEqual({ command: original.command, serverConfig: [], frontendArgs: ['--no-alt-screen', '--dangerously-bypass-hook-trust'], create: { model: 'original-model' } })
   expect(JSON.stringify(prepared.plan.args)).not.toContain(prepared.nativeActor!.token)
   expect(original.env).toEqual({ ORIGINAL_FIXTURE: 'kept' })
 })
@@ -59,10 +59,9 @@ it.runIf(process.platform === 'darwin').each([false, true])('prepares normal Cor
       '-C', f.root, '--enable', 'original-feature', 'resume', sid, ...(withPrompt ? ['--', prompt] : [])]
     const original = { command: f.path, args, env: { ORIGINAL_FIXTURE: 'kept' } }
     const prepared = await prepareCodexManagedLaunch(original, 'original-resume-lifecycle', { kind: 'resume', ...(withPrompt ? { prompt } : {}) })
-    const tuiArgs = ['--dangerously-bypass-hook-trust', '--no-alt-screen', '--model', 'original-model', '-C', f.root, '--enable', 'original-feature', 'resume', sid, ...(withPrompt ? ['--', prompt] : [])]
-    expect(prepared.nativeActor?.launch).toEqual({ command: original.command, args: tuiArgs })
+    expect(prepared.nativeActor?.launch).toEqual({ command: original.command, args })
     expect(prepared.nativeActor?.lifecycleOperationId).toBe('original-resume-lifecycle')
-    expect(JSON.parse(prepared.plan.args[1]!)).toEqual({ command: original.command, args: tuiArgs, serverConfig: ['--enable', 'original-feature'], frontendArgs: ['--dangerously-bypass-hook-trust', '--no-alt-screen'],
+    expect(JSON.parse(prepared.plan.args[1]!)).toEqual({ command: original.command, serverConfig: ['--enable', 'original-feature'], frontendArgs: ['--dangerously-bypass-hook-trust', '--no-alt-screen'],
       resume: { threadId: sid, model: 'original-model', cwd: f.root, ...(sandbox ? { sandbox } : {}), ...(approval ? { approvalPolicy: approval } : {}) } })
     expect(prepared.plan.env).toMatchObject({ ...original.env, [CODEX_NATIVE_TOKEN_ENV]: prepared.nativeActor!.token })
     expect(original.args).toEqual(args)
@@ -76,7 +75,7 @@ it.runIf(process.platform === 'darwin')('retains an exact prompt even when its t
     const original = { command: f.path, args, env: {} }
     const a = await prepareCodexManagedLaunch(original, 'first-resume', { kind: 'resume', prompt })
     const b = await prepareCodexManagedLaunch(original, 'second-resume', { kind: 'resume', prompt })
-    expect(a.nativeActor?.launch.args).toEqual(['--dangerously-bypass-hook-trust', 'resume', sid, '--', prompt])
+    expect(a.nativeActor?.launch.args).toEqual(args)
     expect(JSON.parse(a.plan.args[1]!).resume).toMatchObject({ sandbox: 'read-only', approvalPolicy: 'on-request' })
     expect(b.nativeActor?.actorId).not.toBe(a.nativeActor!.actorId)
     expect(b.nativeActor?.token).not.toBe(a.nativeActor!.token)
@@ -97,13 +96,13 @@ it.runIf(process.platform === 'darwin')('qualifies the configured bypass for cre
   const create = { command: f.path, args: [flag, '--dangerously-bypass-hook-trust', '--', 'Original initial prompt'], env: {} }
   const first = await prepareCodexManagedLaunch(create, 'original-create', { kind: 'create', prompt: 'Original initial prompt' })
   expect(first.nativeActor?.launch).toEqual({ command: create.command, args: create.args })
-  expect(JSON.parse(first.plan.args[1]!)).toEqual({ command: create.command, args: create.args, serverConfig: [], frontendArgs: ['--dangerously-bypass-hook-trust'] })
+  expect(JSON.parse(first.plan.args[1]!)).toEqual({ command: create.command, serverConfig: [], frontendArgs: ['--dangerously-bypass-hook-trust'], create: { sandbox: 'danger-full-access', approvalPolicy: 'never' } })
   for (const prompt of ['Original continuation', flag]) {
     const args = [flag, '--dangerously-bypass-hook-trust', '--model', 'original-model', '-C', '.', 'resume', sid, '--', prompt]
     const next = await prepareCodexManagedLaunch({ ...create, args }, 'original-resume', { kind: 'resume', prompt })
-    const actualArgs = args.slice(1)
+    const actualArgs = args
     expect(next.nativeActor?.launch).toEqual({ command: create.command, args: actualArgs })
-    expect(JSON.parse(next.plan.args[1]!)).toEqual({ command: create.command, args: actualArgs, serverConfig: [], frontendArgs: ['--dangerously-bypass-hook-trust'],
+    expect(JSON.parse(next.plan.args[1]!)).toEqual({ command: create.command, serverConfig: [], frontendArgs: ['--dangerously-bypass-hook-trust'],
       resume: { threadId: sid, sandbox: 'danger-full-access', approvalPolicy: 'never', model: 'original-model', cwd: '.' } })
   }
 })
@@ -142,7 +141,7 @@ it('never replaces a failed frozen native bootstrap with an embedded TUI', async
   const f = await command(), marker = join(f.root, 'unexpected-tui')
   vi.stubEnv(CODEX_NATIVE_TOKEN_ENV, 'a'.repeat(64))
   vi.stubEnv(CODEX_ACTOR_ID_ENV, 'original-actor'); vi.stubEnv(CODEX_ACTOR_LIFECYCLE_ENV, 'original-lifecycle')
-  await expect(runCodexManaged({ command: process.execPath, frontendArgs: [], serverConfig: ['--eval', 'process.exit(7)'], args: ['--eval', `require('node:fs').writeFileSync(${JSON.stringify(marker)},'wrong actor')`] })).rejects.toThrow('did not publish')
+  await expect(runCodexManaged({ command: process.execPath, frontendArgs: [], serverConfig: ['--eval', 'process.exit(7)'], create: {} })).resolves.toBe(7)
   await expect(readFile(marker)).rejects.toMatchObject({ code: 'ENOENT' })
 })
 
@@ -168,7 +167,7 @@ if(args.includes('app-server')) {
       const request=JSON.parse(String(bytes));appendFileSync(log,JSON.stringify(request)+'\\n')
       if(!Object.hasOwn(request,'id'))return
       if(request.method==='thread/resume')while(!existsSync(gate))await new Promise(done=>setTimeout(done,10))
-      ws.send(JSON.stringify({jsonrpc:'2.0',id:request.id,result:['thread/resume','thread/read'].includes(request.method)?${JSON.stringify(expected)}:{}}))
+      ws.send(JSON.stringify({jsonrpc:'2.0',id:request.id,result:request.method==='account/read'?{account:null,requiresOpenaiAuth:false}:['thread/resume','thread/read'].includes(request.method)?${JSON.stringify(expected)}:{}}))
     })
   })
 } else {
@@ -178,7 +177,7 @@ if(args.includes('app-server')) {
 `, { mode: 0o700 })
   vi.stubEnv(CODEX_NATIVE_TOKEN_ENV, 'a'.repeat(64))
   vi.stubEnv(CODEX_ACTOR_ID_ENV, 'original-actor'); vi.stubEnv(CODEX_ACTOR_LIFECYCLE_ENV, 'original-lifecycle')
-  const plan: CodexManagedRunPlan = { command: script, args: ['resume', sid, 'Original continuation prompt'], serverConfig: [], frontendArgs: [],
+  const plan: CodexManagedRunPlan = { command: script, serverConfig: [], frontendArgs: [],
     resume: { threadId: sid, sandbox: 'read-only', approvalPolicy: 'on-request', model: 'original-model', cwd: f.root } }
   return { ...f, log, marker, gate, plan }
 }
@@ -226,9 +225,9 @@ it.runIf(process.platform === 'darwin')('starts the real child TUI only after au
   await expect(completed).resolves.toEqual({ exitCode: 1, stderr: '' })
   const actual = JSON.parse(await readFile(f.marker, 'utf8'))
   expect(actual.connected).toBe(true)
-  expect(actual.requests.filter((row: { method: string }) => row.method !== 'initialized').map((row: { method: string }) => row.method)).toEqual(['initialize', 'thread/resume'])
+  expect(actual.requests.filter((row: { method: string }) => row.method !== 'initialized').map((row: { method: string }) => row.method)).toEqual(['initialize', 'account/read', 'thread/resume'])
   expect(actual.requests.find((row: { method: string }) => row.method === 'thread/resume').params).toEqual({ ...f.plan.resume, cwd: f.root, excludeTurns: true })
-  expect(actual.args.slice(4)).toEqual(f.plan.args)
+  expect(actual.args.slice(4)).toEqual(['resume', f.plan.resume!.threadId, ...f.plan.frontendArgs])
 })
 
 it.runIf(process.platform === 'darwin').each([
@@ -253,16 +252,24 @@ it.runIf(process.platform === 'darwin').each([
   expect(resume).toHaveLength(1)
   expect(resume[0].params).toEqual({ ...f.plan.resume, excludeTurns: true,
     ...(flag ? { config: { bypass_hook_trust: true } } : {}) })
-  expect(actual.args.slice(4)).toEqual(f.plan.args)
+  expect(actual.args.slice(4)).toEqual(['resume', f.plan.resume!.threadId, ...f.plan.frontendArgs])
   expect(original.args).toContain(prompt)
 })
 
 it.runIf(process.platform === 'darwin').each(['wrong-policy', 'wrong-thread', 'not-direct'] as const)('keeps the continuation out of TUI on an actual native %s response', async response => {
   const f = await nativeLifecycleFixture(response)
   await writeFile(f.gate, 'ready')
-  const { completed } = await runNativeLifecycle(f)
-  await expect(completed).resolves.toMatchObject({ exitCode: 1, stderr: expect.stringContaining('did not confirm') })
+  const running = await runNativeLifecycle(f)
+  const context = { processId: running.child.pid!, nativeActor: { protocolId: 'codex-app-server-v2-0.163', actorId: 'original-actor',
+    lifecycleOperationId: 'original-lifecycle', token: 'a'.repeat(64), launch: { command: f.plan.command, args: [] } }, workspacePath: f.root, signal: new AbortController().signal }
+  let latest: import('../src/agent-terminal-frontend.js').AgentTerminalFrontendObservation | undefined
+  await expect.poll(async () => { try { await access(codexFrontendSocketPath(context.nativeActor.token)); return true } catch { return false } }).toBe(true)
+  const observation = await observeCodexTerminalFrontend({ ...context, onFrontend: value => { latest = value }, onUnavailable() {} })
+  cleanup.push(async () => observation.dispose())
+  await expect.poll(() => latest?.initialization?.phase, { timeout: 10_000 }).toBe('unknown')
+  expect(latest?.initialization?.failure?.message).toContain('did not confirm')
   await expect(readFile(f.marker)).rejects.toMatchObject({ code: 'ENOENT' })
+  running.stop(); await expect(running.completed).resolves.toMatchObject({ exitCode: 1 })
 })
 
 
@@ -271,7 +278,7 @@ it.runIf(process.platform === 'darwin')('keeps the original backend working afte
   await writeFile(f.gate, 'ready')
   const running = await runNativeLifecycle(f)
   const context = { processId: running.child.pid!, nativeActor: { protocolId: 'codex-app-server-v2-0.163', actorId: 'original-actor',
-    lifecycleOperationId: 'original-lifecycle', token: 'a'.repeat(64), launch: { command: f.plan.command, args: f.plan.args } },
+    lifecycleOperationId: 'original-lifecycle', token: 'a'.repeat(64), launch: { command: f.plan.command, args: ['resume', f.plan.resume!.threadId] } },
     workspacePath: f.root, signal: new AbortController().signal }
   let latest: import('../src/agent-terminal-frontend.js').AgentTerminalFrontendObservation | undefined
   await expect.poll(() => readFile(f.marker, 'utf8').then(() => true, () => false), { timeout: 10_000 }).toBe(true)
@@ -282,15 +289,15 @@ it.runIf(process.platform === 'darwin')('keeps the original backend working afte
   await expect.poll(() => readFile(f.marker + '.heartbeat', 'utf8')).not.toBe(heartbeat)
   expect(running.child.exitCode).toBeNull()
   await expect(reconnectCodexTerminalFrontend(context, { operationId: 'wrong-target', expectedFrontendId: original.frontendId,
-    nativeSessionId: 'foreign-native-thread' })).rejects.toThrow('original loaded native thread')
+    target: { kind: 'native-session', nativeSessionId: 'foreign-native-thread' } })).rejects.toThrow('original initialized native target')
   expect((await readFile(f.marker + '.events', 'utf8')).trim().split('\n')).toHaveLength(1)
-  const request = { operationId: 'same-original-reconnect', expectedFrontendId: original.frontendId, nativeSessionId: f.plan.resume!.threadId }
+  const request = { operationId: 'same-original-reconnect', expectedFrontendId: original.frontendId, target: { kind: 'native-session' as const, nativeSessionId: f.plan.resume!.threadId } }
   // Abandon only the response; the wrapper retains this same original operation.
   const { createConnection } = await import('node:net')
   const { codexFrontendSocketPath } = await import('../src/providers/codex-managed-frontend.js')
   const socket = createConnection(codexFrontendSocketPath(context.nativeActor.token))
   await once(socket, 'connect')
-  socket.end(JSON.stringify({ ...request, method: 'reconnect', token: context.nativeActor.token,
+  socket.end(JSON.stringify({ operationId: request.operationId, expectedFrontendId: request.expectedFrontendId, nativeSessionId: request.target.nativeSessionId, method: 'reconnect', token: context.nativeActor.token,
     actorId: context.nativeActor.actorId, lifecycleOperationId: context.nativeActor.lifecycleOperationId, processId: context.processId }) + '\n')
   await expect.poll(async () => (await readFile(f.marker + '.events', 'utf8')).trim().split('\n').length).toBe(2)
   const resumed = await reconnectCodexTerminalFrontend(context, request)
@@ -298,7 +305,7 @@ it.runIf(process.platform === 'darwin')('keeps the original backend working afte
   expect(await reconnectCodexTerminalFrontend(context, request)).toEqual(resumed)
   const events = (await readFile(f.marker + '.events', 'utf8')).trim().split('\n').map(line => JSON.parse(line))
   expect(events).toHaveLength(2)
-  expect(events[1].args.slice(4)).toEqual(['resume', request.nativeSessionId])
+  expect(events[1].args.slice(4)).toEqual(['resume', request.target.nativeSessionId])
   expect(JSON.stringify(events[1])).not.toContain('Original continuation prompt')
   await expect.poll(() => latest?.frontendId === resumed.frontendId && latest.state === 'detached', { timeout: 10_000 }).toBe(true)
   await expect(reconnectCodexTerminalFrontend(context, { ...request, operationId: 'stale-reconnect' })).rejects.toThrow('generation changed')

@@ -2,8 +2,9 @@ const { fixtureEpoch: _batchFixtureEpoch } = await vi.hoisted(async () => await 
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
 import { createAgentInputContextCaptureRecord } from '@agentmux/core/agent-input-context-capture'
-import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-continuity'
-import type { AgentInputSubmissionReceipt, AgentMuxContinuityOperation, AgentMuxAgentSession } from '@agentmux/core'
+import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-recovery'
+import type { AgentInputSubmissionReceipt, AgentMuxAgentSession } from '@agentmux/core'
+import type { AgentMuxContinuityOperation } from '@agentmux/core/agent-session-recovery'
 import type { AgentSessionControl } from '../src/shared/contracts'
 import type { BrowserCapturedInput } from '../src/renderer/src/lib/browser-contextual-input'
 import { api } from '../src/renderer/src/lib/api'

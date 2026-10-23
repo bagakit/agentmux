@@ -7,7 +7,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import * as Source from '../src/index.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import { agentLifecycleOperationIdentity } from '../src/agent-session-store.js'
-import type { AgentMuxAgentResumeInput } from '../src/client.js'
+import type { AgentMuxAgentResumeInput } from '../src/agent-session-recovery.js'
 import type { AgentMuxAgentSession, AgentMuxStoredAgentSession } from '../src/types.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
@@ -298,8 +298,8 @@ it('a canonical Store binding protects a healthy Native Run from an earlier Core
   await vi.waitFor(async () => expect(rootOf((await f.store.readMetadata(f.previous.agentSessionId))!).supervision).toMatchObject({ attemptCount: 2, process: { state: 'running' } }))
   const canonical = (await f.store.readMetadata(f.previous.agentSessionId))!
   expect(stale.client.agentSession(canonical.agentSessionId).run).toEqual(f.previous.run)
-  stale.inner.continuitySupervisor.observe(canonical)
-  await stale.inner.continuitySupervisor.tails.get(canonical.agentSessionId)
+  stale.inner.recovery.continuitySupervisor.observe(canonical)
+  await stale.inner.recovery.continuitySupervisor.tails.get(canonical.agentSessionId)
   const observed = rootOf((await f.store.readMetadata(canonical.agentSessionId))!).supervision!
   expect(observed.process?.state).toBe('running')
   expect(observed).toMatchObject({ phase: 'observing', process: { run: canonical.run } })
@@ -345,7 +345,7 @@ it.each(['Host', 'native target'] as const)('retains a superseded %s without aut
   const session = (await f.store.readMetadata(f.previous.agentSessionId))!
   const foreign = { ...session, ...(changed === 'Host' ? { hostId: 'another-host' } : { nativeHandle: { ...session.nativeHandle!, sessionId: 'another-native' } }), updatedAt: session.updatedAt + 1 }
   await f.store.compareAndSwapMetadata(session, foreign)
-  f.inner.continuitySupervisor.wake(session.agentSessionId)
+  f.inner.recovery.continuitySupervisor.wake(session.agentSessionId)
   if (changed === 'Host') await vi.waitFor(() => expect(f.events.some(event => event.code === 'AGENT_CONTINUITY_OBSERVATION_UNCONFIRMED')).toBe(true))
   else expect((await phase(f, 'paused')).supervision!.reason).toBe('original-target-changed')
   expect(f.start).toHaveBeenCalledTimes(1); expect(f.stop).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled()
@@ -357,8 +357,8 @@ it('verified context completion releases its exact observer and timers while pre
     source: 'native-hook', hookReceiptId: 'context-complete', run: session.run, nativeTarget: session.nativeHandle, observedAt: Date.now() } } }))
   expect((await phase(f, 'settled')).supervision!.reason).toBe('context-observed')
   await vi.waitFor(() => {
-    expect(f.inner.continuitySupervisor.watches.size).toBe(0); expect(f.inner.continuitySupervisor.timers.size).toBe(0)
-    expect(f.inner.continuitySupervisor.facts.size).toBe(0)
+    expect(f.inner.recovery.continuitySupervisor.watches.size).toBe(0); expect(f.inner.recovery.continuitySupervisor.timers.size).toBe(0)
+    expect(f.inner.recovery.continuitySupervisor.facts.size).toBe(0)
   })
   await f.write(f.client.agentSession(f.previous.agentSessionId)); expect(f.start).toHaveBeenCalledTimes(2); expect(f.stop).not.toHaveBeenCalled()
 })
@@ -369,7 +369,7 @@ it('confirmed retirement preserves its original identity history and releases re
   await f.client.stopAgent(current.agentSessionId, current.run)
   expect(await f.store.readMetadata(current.agentSessionId)).toBeNull()
   expect(await f.store.loadRetiredAgentSessions()).toContainEqual(expect.objectContaining({ agentSessionId: current.agentSessionId, run: current.run }))
-  await vi.waitFor(() => { expect(f.inner.continuitySupervisor.roots.size).toBe(0); expect(f.inner.continuitySupervisor.watches.size).toBe(0) })
+  await vi.waitFor(() => { expect(f.inner.recovery.continuitySupervisor.roots.size).toBe(0); expect(f.inner.recovery.continuitySupervisor.watches.size).toBe(0) })
   expect(f.start).toHaveBeenCalledTimes(2); expect(f.stop).toHaveBeenCalledTimes(1)
 })
 it('cancellation before the atomic prepare claim prevents Start even after controller admission', async () => {

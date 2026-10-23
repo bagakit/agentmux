@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import type * as Source from '../src/index.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
-import type { AgentMuxAgentRestartIdentity } from '../src/agent-session-restart.js'
+import type { AgentMuxAgentRestartIdentity } from '../src/agent-session-recovery/restart.js'
 
 const core: typeof Source & Record<string, any> = process.env.AGENTMUX_TEST_RESTART_ENTRY
   ? await import(/* @vite-ignore */ process.env.AGENTMUX_TEST_RESTART_ENTRY)

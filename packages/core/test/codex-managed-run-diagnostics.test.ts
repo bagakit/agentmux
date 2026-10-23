@@ -9,6 +9,7 @@ const boundary = vi.hoisted(() => ({ spawn: vi.fn(), listeners: vi.fn(), publish
 vi.mock('node:child_process', () => ({ spawn: boundary.spawn }))
 vi.mock('../src/agent-native-process.js', () => ({ nativeProcessTcpListeners: boundary.listeners }))
 vi.mock('../src/providers/codex-managed-frontend.js', () => ({
+  CODEX_NATIVE_TOKEN_ENV: 'AGENTMUX_CODEX_ACTOR_TOKEN',
   CODEX_ACTOR_ID_ENV: 'AGENTMUX_CODEX_ACTOR_ID', CODEX_ACTOR_LIFECYCLE_ENV: 'AGENTMUX_CODEX_ACTOR_LIFECYCLE',
   openCodexFrontendControl: async (_token: string, _identity: unknown, handlers: unknown) => {
     boundary.handlers = handlers
@@ -16,7 +17,7 @@ vi.mock('../src/providers/codex-managed-frontend.js', () => ({
   }
 }))
 vi.mock('../src/providers/codex-native-rpc.js', () => ({ connectCodexNativeActor: async () => ({
-  request: async () => ({ thread: { id: 'original-native', canAcceptDirectInput: true } }), dispose() {}
+  request: async (method: string) => method === 'account/read' ? { account: null, requiresOpenaiAuth: false } : ({ thread: { id: 'original-native', sessionId: 'original-session', canAcceptDirectInput: true }, cwd: process.cwd() }), dispose() {}
 }) }))
 
 class Child extends EventEmitter {
@@ -26,7 +27,7 @@ class Child extends EventEmitter {
 let children: Child[], pending: Promise<number> | undefined, originalBytes: Buffer[]
 const current = (): AgentTerminalFrontendObservation => boundary.handlers.current()
 async function start() {
-  pending = runCodexManaged({ command: 'private-provider', args: [], serverConfig: [], frontendArgs: [] })
+  pending = runCodexManaged({ command: 'private-provider', create: {}, serverConfig: [], frontendArgs: [] })
   await vi.waitFor(() => expect(current()?.state).toBe('attached'))
   return children[1]!
 }
@@ -80,7 +81,7 @@ it('starts a clean generation and refuses to put late original stderr onto its r
   const child = await start(), originalId = current().frontendId
   child.stderr.write('original failure'); child.emit('exit', 1, null)
   expect(current().message).toBe('original failure')
-  await boundary.handlers.reconnect({ operationId: 'original-reconnect', expectedFrontendId: originalId, nativeSessionId: 'original-native' })
+  await boundary.handlers.reconnect({ operationId: 'original-reconnect', expectedFrontendId: originalId, target: { kind: 'native-session', nativeSessionId: 'original-native' } })
   const repairedId = current().frontendId
   expect(repairedId).not.toBe(originalId)
   expect(current()).toMatchObject({ state: 'attached', backendState: 'running' })
@@ -96,7 +97,7 @@ it('starts a clean generation and refuses to put late original stderr onto its r
 it('publishes one stable initial generation before slow backend preparation and keeps it through first TUI spawn', async () => {
   const endpoint = Promise.withResolvers<Array<{ endpoint: string }>>()
   boundary.listeners.mockReturnValueOnce(endpoint.promise)
-  pending = runCodexManaged({ command: 'private-provider', args: [], serverConfig: [], frontendArgs: [] })
+  pending = runCodexManaged({ command: 'private-provider', create: {}, serverConfig: [], frontendArgs: [] })
   try {
     await vi.waitFor(() => expect(boundary.handlers).toBeDefined())
     const originalId = current().frontendId
@@ -112,7 +113,7 @@ it('publishes one stable initial generation before slow backend preparation and 
 it('keeps complete preparation diagnostics before TUI start and drains later background logs without changing its screen or lifecycle', async () => {
   const endpoint = Promise.withResolvers<Array<{ endpoint: string }>>()
   boundary.listeners.mockReturnValueOnce(endpoint.promise)
-  pending = runCodexManaged({ command: 'private-provider', args: [], serverConfig: [], frontendArgs: [] })
+  pending = runCodexManaged({ command: 'private-provider', create: {}, serverConfig: [], frontendArgs: [] })
   try {
     await vi.waitFor(() => expect(boundary.handlers).toBeDefined())
     children[0]!.stderr.write('native preparation diagnostic\n')

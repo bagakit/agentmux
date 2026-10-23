@@ -14,7 +14,7 @@ import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { useSessionRestart } from '../src/renderer/src/components/SessionRestart'
 import { senderTrust, assertSenderTrusted } from '../src/main/ipc-sender-trust'
 import { withStopTimeout, sessionRestartTimeoutError } from '../src/shared/session-stop-timeout'
-import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-continuity'
+import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-recovery'
 
 const initial = useAppStore.getState(), target = composerSession('restart-target'), other = composerSession('restart-neighbor')
 const tab = createWorkbenchTab('restart-tab', { kind: 'agent', regionId: 'restart-region', phase: 'attached', workspaceId: 'workspace', sessionId: target.id })

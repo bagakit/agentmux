@@ -1,7 +1,7 @@
 import { expect, it, vi } from 'vitest'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { readFileSync } from 'node:fs'
-import type { AgentMuxContinuityControlInput } from '@agentmux/core'
+import type { AgentMuxContinuityControlInput } from '@agentmux/core/agent-session-recovery'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 
@@ -23,7 +23,7 @@ it('the actual typed IPC and preload route keep the exact request and structured
   expect(main).toContain("handle('sessions:controlContinuity'")
   expect(main).toContain('sessionObservationResult(() => args.runtime.controlContinuity(hostId, input))')
   expect(preload).toContain("ipcRenderer.invoke('sessions:controlContinuity', hostId, input)")
-  expect(preload).toContain("unwrapSessionObservationResult<{ hostId: string; result: import('@agentmux/core').AgentMuxContinuityControlResult }>")
+  expect(preload).toContain("unwrapSessionObservationResult<{ hostId: string; result: import('@agentmux/core/agent-session-recovery').AgentMuxContinuityControlResult }>")
 })
 
 it('the actual Main and Hosted Core cancel metadata while Native readiness is unavailable and preserve remote route scope', async () => {

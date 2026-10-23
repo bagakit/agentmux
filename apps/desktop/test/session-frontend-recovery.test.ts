@@ -6,7 +6,7 @@ import { composerSession, composerConfig } from './helpers/composer-dom-fixture'
 import { useAppStore } from '../src/renderer/src/store'
 import { sessionFrontendPresentation } from '../src/renderer/src/lib/session-recovery-banner'
 import { originalFrontendRecovery, originalSessionRestart } from '../src/renderer/src/lib/session-original-recovery'
-import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-continuity'
+import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-recovery'
 
 const initial = useAppStore.getState()
 afterEach(() => useAppStore.setState(initial, true))

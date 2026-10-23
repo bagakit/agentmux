@@ -1,8 +1,8 @@
 import { fixtureEpoch as _lateFixtureEpoch, fixturePath as _lateFixturePath } from "../../../test/fixture-values.mjs"
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
-import { inspectAgentSessionInterruption } from '../src/agent-session-interruption.js'
-import { agentContinuityAdmission, DEFAULT_AGENT_CONTINUITY_POLICY } from '../src/agent-session-continuity.js'
+import { inspectAgentSessionInterruption } from '../src/agent-session-recovery/interruption.js'
+import { agentContinuityAdmission, DEFAULT_AGENT_CONTINUITY_POLICY } from '../src/agent-session-recovery/continuity.js'
 import type { AgentMuxStoredAgentSession } from '../src/types.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
 

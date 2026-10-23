@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
-import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-continuity'
-import type { AgentMuxAgentSession, AgentMuxContinuityOperation } from '@agentmux/core'
+import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-recovery'
+import type { AgentMuxAgentSession } from '@agentmux/core'
+import type { AgentMuxContinuityOperation } from '@agentmux/core/agent-session-recovery'
 import { composeAgentPrompt } from '../../../packages/core/src/agent-outbound-message'
 import { api } from '../src/renderer/src/lib/api'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'

@@ -1,5 +1,5 @@
-import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-continuity'
-import type { AgentMuxContinuityOperation } from '@agentmux/core'
+import { DEFAULT_AGENT_CONTINUITY_POLICY } from '@agentmux/core/agent-session-recovery'
+import type { AgentMuxContinuityOperation } from '@agentmux/core/agent-session-recovery'
 import type { SessionSnapshot } from '../../src/shared/contracts'
 import { fixturePath } from '../../scripts/lib/fixture-values.mjs'
 

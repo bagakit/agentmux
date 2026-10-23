@@ -187,7 +187,7 @@ async function automaticFixture(options: { enabled?: boolean; ready?: boolean; l
   await expect(h.client.ensureAgentContinuity(request)).resolves.toMatchObject({ kind: 'resumed' })
   const operation = () => h.client.agentSession('original-session').continuityOperations!['automatic-original']!
   return { ...h, request, operation, delivery: () => operation().recoveryDelivery!, setReady: () => { ready = true },
-    wake: async () => { h.inner.continuityInputs.track(h.inner.registry.get('original-session')); await Promise.resolve() } }
+    wake: async () => { h.inner.recovery.continuityInputs.track(h.inner.registry.get('original-session')); await Promise.resolve() } }
 }
 
 async function automaticReader(h: Awaited<ReturnType<typeof automaticFixture>>) {
@@ -195,7 +195,7 @@ async function automaticReader(h: Awaited<ReturnType<typeof automaticFixture>>) 
   const inner = reader as any; inner.connected = true; await inner.registry.load('local')
   for (const key of ['isConnected', 'identity', 'status', 'list', 'start', 'stop', 'input']) inner.kernel[key] = h.inner.kernel[key]
   inner.screenEvidence.wait = vi.fn(async () => 0)
-  inner.continuityInputs.restore(inner.registry.list())
+  inner.recovery.continuityInputs.restore(inner.registry.list())
   return { reader, inner, packet: () => reader.agentSession('original-session').continuityOperations!['automatic-original']!.recoveryDelivery! }
 }
 
@@ -224,7 +224,7 @@ it('keeps automatic recovery with both parts off free of synthesized platform in
 
 it('rejects malformed frozen recovery context at the original durable packet boundary', async () => {
   const h = await automaticFixture({ ready: false })
-  await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+  await expect.poll(() => h.inner.recovery.continuityInputs.tails.size).toBe(0)
   const original = (await h.store.readMetadata('original-session'))!, malformed = structuredClone(original)
   malformed.continuityOperations!['automatic-original']!.recoveryDelivery!.systemContext = {} as unknown as string
   await expect(h.store.compareAndSwapMetadata(original, malformed)).rejects.toMatchObject({ code: 'AGENT_SESSION_STORE_UNAVAILABLE', cause: { message: 'Invalid continuity input delivery.' } })
@@ -238,11 +238,11 @@ it('reconciles a lost automatic input ACK from the same frozen context without d
   const frozen = structuredClone(h.delivery()), record = await h.client.inspectAgentPromptSubmission(frozen.key)
   expect(record?.admission?.intent?.message?.systemContext).toBe(frozen.systemContext)
   expect(frozen.systemContext).toContain(AGENTMUX_AGENT_MESSAGING_ENTRY)
-  await h.wake(); await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+  await h.wake(); await expect.poll(() => h.inner.recovery.continuityInputs.tails.size).toBe(0)
   expect(h.delivery().systemContext).toBe(frozen.systemContext)
   expect(h.delivery().reason).toBe('original-input-delivery-unconfirmed')
   const { reader, inner, packet } = await automaticReader(h)
-  await expect.poll(() => inner.continuityInputs.tails.size).toBe(0)
+  await expect.poll(() => inner.recovery.continuityInputs.tails.size).toBe(0)
   expect(packet()).toMatchObject({ phase: 'unknown', key: frozen.key, systemContext: frozen.systemContext, reason: 'original-input-delivery-unconfirmed' })
   expect((await reader.inspectAgentPromptSubmission(frozen.key))?.admission?.intent?.prompt).toBe(record?.admission?.intent?.prompt)
   expect(h.inner.kernel.input).toHaveBeenCalledOnce(); expect(h.inner.kernel.stop).not.toHaveBeenCalled()
@@ -251,7 +251,7 @@ it('reconciles a lost automatic input ACK from the same frozen context without d
 it('preserves the previous automatic packet without recomputing context when a new Core owner reads it', async () => {
   const previous = await previousWireCore({ resumeWithoutGuidance: true }); cleanups.push(previous.close)
   const h = await automaticFixture({ ready: false, owner: previous.owner })
-  await expect.poll(() => h.inner.continuityInputs.tails.size).toBe(0)
+  await expect.poll(() => h.inner.recovery.continuityInputs.tails.size).toBe(0)
   const frozen = structuredClone(h.delivery())
   expect(frozen.phase).toBe('waiting'); expect(frozen.systemContext).toBeUndefined()
   expect(frozen.reminder.selected).toBe(false); expect(h.inner.kernel.input).not.toHaveBeenCalled()

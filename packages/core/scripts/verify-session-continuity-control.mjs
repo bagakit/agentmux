@@ -19,8 +19,8 @@ async function bind(path) {
   if (inputs.has(absolute)) assert.equal(inputs.get(absolute), hash, 'Source changed during qualification: ' + path)
   inputs.set(absolute, hash)
 }
-for (const file of ['packages/core/src/client.ts', 'packages/core/src/agent-session-continuity-control.ts',
-  'packages/core/src/agent-session-continuity.ts', 'packages/core/src/agent-session-store.ts',
+for (const file of ['packages/core/src/client.ts', 'packages/core/src/agent-session-recovery/service.ts', 'packages/core/src/agent-session-recovery/ports.ts', 'packages/core/src/agent-session-recovery.ts', 'packages/core/src/agent-runtime-helpers.ts', 'packages/core/src/agent-session-recovery/control.ts',
+  'packages/core/src/agent-session-recovery/continuity.ts', 'packages/core/src/agent-session-store.ts',
   'packages/core/src/hosted-client-contract.ts', 'packages/core/src/hosted-client.ts', 'packages/core/src/hosted-runtime-service.ts',
   'packages/core/src/public-rpc.ts', 'packages/core/src/public-rpc-service.ts', 'packages/core/src/rpc-native-codec.ts',
   'packages/core/src/agentmux-cli-commands.ts', 'packages/core/src/agentmux-cli-module-skills.ts',
@@ -46,7 +46,7 @@ const variants = [
   },
   {
     "name": "reject-native-locator-enrichment",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": "!root.nativeTarget || !matchesProviderNativeSessionTarget(root.nativeTarget, current.nativeHandle)",
     "to": "!root.nativeTarget || !isDeepStrictEqual(root.nativeTarget, current.nativeHandle)",
     "target": "accepts retained canonical locator enrichment while rejecting changed or lost known native targets",
@@ -54,7 +54,7 @@ const variants = [
   },
   {
     "name": "accept-changed-attempt-locator",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": "!matchesProviderNativeSessionTarget(active.nativeTarget, current.nativeHandle)",
     "to": "false",
     "target": "accepts retained canonical locator enrichment while rejecting changed or lost known native targets",
@@ -62,7 +62,7 @@ const variants = [
   },
   {
     "name": "changed-control-body",
-    "path": "packages/core/src/agent-session-continuity-control.ts",
+    "path": "packages/core/src/agent-session-recovery/control.ts",
     "from": "a.action === b.action && a.additionalAttempts === b.additionalAttempts",
     "to": "true",
     "target": "rejects changed action budget root and Run for an accepted operation while preserving its original result",
@@ -86,7 +86,7 @@ const variants = [
   },
   {
     "name": "stale-run-before-receipt",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": "if (original) return original",
     "to": "if (original && original.state === 'active' && sameRun(original.session.run, input.expectedRun)) return original",
     "target": "continues a zero-budget paused intent with one new context-only attempt and one immutable receipt",
@@ -94,7 +94,7 @@ const variants = [
   },
   {
     "name": "reset-control-attempts",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": "next.attemptLimit = limit; next.phase = 'observing'",
     "to": "next.attemptCount = 1; next.attemptLimit = limit; next.phase = 'observing'",
     "target": "extends the original total limit without resetting attempts after multiple confirmed failures",
@@ -102,7 +102,7 @@ const variants = [
   },
   {
     "name": "continue-closed-control",
-    "path": "packages/core/src/client.ts",
+    "path": "packages/core/src/agent-session-recovery/service.ts",
     "from": "} else if (input.action === 'continue') {",
     "to": "} else if (input.action === 'continue') { supervision.phase = 'paused'; delete supervision.cancellation;",
     "target": "keeps cancelled and normally settled intents closed to new continuation controls",
@@ -118,7 +118,7 @@ const variants = [
   },
   {
     "name": "accept-foreign-control-reply",
-    "path": "packages/core/src/agent-session-continuity-control.ts",
+    "path": "packages/core/src/agent-session-recovery/control.ts",
     "from": "if (!sameAgentContinuityControlInput(receipt.request, input)) invalid()",
     "to": "if (false) invalid()",
     "target": "rejects a wire reply for another immutable control packet",
@@ -141,7 +141,7 @@ const save = () => writeFile(join(attempt, 'receipt.json'), JSON.stringify(recei
 await save()
 try {
   const browserFile = join(attempt, 'browser-control.mjs')
-  const browser = await build({ stdin: { contents: 'export { parseAgentContinuityControlInput, sameAgentContinuityControlInput } from "@agentmux/core/agent-session-continuity-control"',
+  const browser = await build({ stdin: { contents: 'export { parseAgentContinuityControlInput, sameAgentContinuityControlInput } from "@agentmux/core/agent-session-recovery"',
     resolveDir: join(root, 'packages/core'), loader: 'js' }, outfile: browserFile,
     bundle: true, platform: 'browser', format: 'esm', target: 'es2022', metafile: true, logLevel: 'warning' })
   for (const path of Object.keys(browser.metafile.inputs)) if (path !== '<stdin>') await bind(path)
@@ -150,7 +150,7 @@ try {
   assert.deepEqual(browserControl.parseAgentContinuityControlInput(browserPacket), browserPacket)
   assert.ok(browserControl.sameAgentContinuityControlInput(browserPacket, browserControl.parseAgentContinuityControlInput(browserPacket)))
   assert.throws(() => browserControl.parseAgentContinuityControlInput({ ...browserPacket, additionalAttempts: 0 }))
-  receipt.browser = { publicSubpath: '@agentmux/core/agent-session-continuity-control', actualBrowserBundle: true,
+  receipt.browser = { publicSubpath: '@agentmux/core/agent-session-recovery', actualBrowserBundle: true,
     parsedOriginalPacket: true, rejectedInvalidBudget: true, bundleSha256: sha(await readFile(browserFile)) }
   async function bundle(options, variant) {
     let transformed = false
