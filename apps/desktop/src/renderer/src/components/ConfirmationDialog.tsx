@@ -1,6 +1,6 @@
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
-import { useRef, type ReactNode } from 'react'
+import { useLayoutEffect, useRef, type ReactNode } from 'react'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 
@@ -38,13 +38,20 @@ export function ConfirmationDialog({
   const cancelRef = useRef<HTMLButtonElement>(null)
   const previousFocus = useRef<HTMLElement | null>(null)
   const openedContent = useRef<Element | null>(null)
+  // Presentation retry keeps the return target of the same requested opening.
+  const capturedOpeningFocus = useRef(false)
+  useLayoutEffect(() => { if (!open) capturedOpeningFocus.current = false }, [open])
   return (
     <Dialog.Root recoveryCloseDisabled={busy} open={open} onOpenChange={(next) => !next && !busy && onCancel()}>
       <DocumentOverlayPortal component={Dialog.Portal}>
         <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
         <Dialog.Content className="confirmation-dialog dialog-surface" aria-busy={busy}
-          onOpenAutoFocus={(event) => { const active = document.activeElement
-            previousFocus.current = active?.nodeType === 1 ? active as HTMLElement : null
+          onOpenAutoFocus={(event) => {
+            if (!capturedOpeningFocus.current) {
+              const active = document.activeElement
+              previousFocus.current = active?.nodeType === 1 ? active as HTMLElement : null
+              capturedOpeningFocus.current = true
+            }
             openedContent.current = (event.target as Node | null)?.nodeType === 1 ? event.target as Element : null
             if (cancelRef.current && !cancelRef.current.disabled) { event.preventDefault(); cancelRef.current.focus() } }}
           onCloseAutoFocus={(event) => { event.preventDefault(); const original = previousFocus.current, active = document.activeElement
