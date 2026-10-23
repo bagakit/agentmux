@@ -83,3 +83,49 @@ it('restores valid records independently without admitting invalid palettes or d
   await store.persist.rehydrate(); await initialize()
   expect(store.getState().toolkitPresentation).toEqual({ first: { theme: 'nord', size: { width: 960, height: 500 } }, second: { size: { width: 640, height: 400 } }, third: { theme: 'workspace' } })
 })
+
+it('awaits one explicit palette platform commit without changing another tool or clearing an unresolved workbench warning', async () => {
+  await initialize()
+  const { saveToolkitPalette } = await import('../src/renderer/src/store')
+  const config = store.getState().config
+  store.getState().reportWorkbenchSaveFailure(Error('Original spatial commit is still unconfirmed'))
+  vi.mocked(api.ui.requestStorageFlush).mockClear()
+  await saveToolkitPalette('first', 'nord', null)
+  expect(api.ui.requestStorageFlush).toHaveBeenCalledOnce()
+  expect(persisted().toolkitPresentation.first.theme).toBe('nord')
+  expect(store.getState().workbenchSaveWarning).toContain('Original spatial commit is still unconfirmed')
+  expect(store.getState().workbenchSaveWarningOwner).toBe('workbench')
+  expect(store.getState().config).toBe(config)
+  expect(persisted().toolkitPresentation.second).toBeUndefined()
+})
+
+it('keeps a newer local save failure when an older full-workbench platform receipt arrives', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises')
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { AgentMuxSpatialStateStore } = await import('../../../packages/core/src/spatial-state')
+  const { desktopSpatialGraph } = await import('../src/renderer/src/lib/desktop-spatial-state')
+  const root = await mkdtemp(join(tmpdir(), 'amx-palette-spatial-'))
+  try {
+    const owner = new AgentMuxSpatialStateStore(join(root, 'state.json'))
+    await owner.commit({ expectedRevision: 0, graph: desktopSpatialGraph({ config, sessions: [], tabs: {}, layouts: {}, spaceZoneBindings: {}, spatialRequests: {} }, []) })
+    vi.spyOn(api.spatial, 'read').mockImplementation(() => owner.read())
+    vi.spyOn(api.spatial, 'commit').mockImplementation(input => owner.commit(input))
+    vi.spyOn(api.spatial, 'onChange').mockImplementation(listener => owner.subscribe(listener))
+    await initialize()
+    // This scenario starts after unrelated preview-only naming ports have settled.
+    store.setState({ workbenchSaveWarning: null, workbenchSaveWarningOwner: null })
+    await vi.advanceTimersByTimeAsync(400)
+    let resolve!: () => void
+    vi.mocked(api.ui.requestStorageFlush).mockImplementationOnce(() => new Promise<void>(done => { resolve = done }))
+    const older = store.getState().retryWorkbenchSave()
+    await vi.advanceTimersByTimeAsync(0)
+    expect(resolve).toBeTypeOf('function')
+    const { saveToolkitPalette } = await import('../src/renderer/src/store')
+    vi.mocked(api.ui.requestStorageFlush).mockRejectedValueOnce(Error('Newer palette platform commit failed'))
+    await expect(saveToolkitPalette('first', 'nord', null)).rejects.toThrow('Newer palette platform commit failed')
+    resolve(); await older
+    expect(store.getState().workbenchSaveWarning).toContain('Newer palette platform commit failed')
+    expect(store.getState().workbenchSaveWarningOwner).toBe('local-storage')
+  } finally { await rm(root, { recursive: true, force: true }) }
+})
