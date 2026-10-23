@@ -119,6 +119,8 @@ describe('启动提示路径经同一出口', () => {
     expect(guide).toContain('browser --skill first')
     expect(guide).toContain("prefer AgentMux's Browser")
     expect(guide).toContain("reuse the confirmed Browser and honor the user's tool choice")
+    expect(guide).toContain('A new page for the same task usually belongs in a readable Region in your Tab')
+    expect(guide).toContain('Focus discoverability and exceptions')
     expect(guide).toContain('read space --skill')
     expect(guide).toContain('Preserve content, input and focus')
     expect(guide).toContain('confirm returned identities/receipts')

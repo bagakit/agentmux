@@ -539,7 +539,32 @@ async function mutationProof(root, original) {
       verify: text => assert(text.includes('If the task needs collaboration, choose'),
         'A startup capability entry must not prescribe collaboration for every task') }
   ]
-  for (const item of startupCases) {
+  const browserCases = [
+    { label: 'capsule-open-help-disconnected', file: 'src/agentmux-cli-help.ts',
+      before: ": path === 'capsule.open' ? CAPSULE_OPEN_GUIDE",
+      after: ": path === 'capsule.open' ? ''",
+      read: output => output.commandHelp['capsule.open'], cli: ['capsule', 'open', '--help'],
+      verify: text => assert(text.includes('"placement":{"kind":"split"') &&
+        text.includes('it does not say created or reused'),
+        'Capsule leaf help must consume the explicit placement and original result guide') },
+    { label: 'browser-same-tab-policy-reversed', file: 'guides/shared/spatial.md',
+      before: 'then prefer a directional Region in that same Tab', after: 'then prefer a separate new Tab',
+      read: output => output.modules.space, cli: ['space', '--skill'],
+      verify: text => assert(text.includes('then prefer a directional Region in that same Tab'),
+        'A related new page should normally stay readable in the same Tab') },
+    { label: 'browser-focus-visibility-invented', file: 'guides/shared/spatial.md',
+      before: 'a new Tab may be outside the current reading', after: 'a new Tab is always inside the current reading',
+      read: output => output.modules.space, cli: ['space', '--skill'],
+      verify: text => assert(text.replace(/\s+/gu, ' ').includes('a new Tab may be outside the current reading view and be harder to find'),
+        'A new Tab does not guarantee visibility in the current Focus reading view') },
+    { label: 'browser-vague-target-guessed', file: 'guides/actions/browser-targets.md',
+      before: "this task's same-Tab neighbor Regions", after: 'the globally most recent page',
+      read: output => output.commandHelp['browser.targets'], cli: ['browser', 'targets', '--help'],
+      verify: text => assert(text.includes("this task's same-Tab neighbor Regions") &&
+        text.includes('verify the exact typed Browser binding'),
+        'An unspecified Browser request must be resolved from task context and structured identity') }
+  ]
+  for (const item of [...startupCases, ...browserCases]) {
     item.verify(item.read(original))
     const destination = await fixture(item.label), path = join(destination, item.file)
     await writeFile(path, replaceOnce(await readFile(path, 'utf8'), item.before, item.after))
@@ -560,7 +585,7 @@ async function mutationProof(root, original) {
     cases.push({ label: item.label, killed: true, kind: 'source-semantic-output',
       cliExecuted: !!item.cli, sourceSha256: await sourceDigest(destination) })
   }
-  assert.equal(cases.length, guardCases.length + consumerCases.length + checkedCases.length + startupCases.length + 1)
+  assert.equal(cases.length, guardCases.length + consumerCases.length + checkedCases.length + startupCases.length + browserCases.length + 1)
   return { passed: true, count: cases.length, cases }
 }
 

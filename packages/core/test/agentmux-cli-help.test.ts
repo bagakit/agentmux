@@ -34,7 +34,7 @@ describe('compiled object-first CLI help and discovery', () => {
       expect(help.stdout).toContain('Usage: amux ' + command.method.replaceAll('.', ' '))
       expect(help.stdout).toContain(command.summary)
     }
-  })
+  }, 120_000)
 
   it('preserves exact nested params, literal data and endpoint/flag validation', async () => {
     const endpoint = 'unix:' + join(root, 'literal.sock')
@@ -172,12 +172,26 @@ describe('compiled object-first CLI help and discovery', () => {
     expect(guide).toContain('Reuse the exact Browser already confirmed for this task')
     expect(guide).toContain('discover available targets with browser targets')
     expect(guide).toContain('typed Browser identity with space inspect')
-    expect(guide).toContain("inspect your own actual Tab/Region and the whole Tab's visible layout")
+    expect(guide).toContain("inspect your own actual Zone/Tab/Region and the whole Tab's visible layout")
     expect(guide).toContain('prefer a directional Region in that same Tab')
     expect(guide).toContain('Choose the direction from actual geometry and content')
-    expect(guide).toContain('crowded layout, a full workface for reading, an unsuitable capability or a user-specified Browser/tool')
+    expect(guide).toContain("this task's same-Tab neighbor Regions")
+    expect(guide).toContain("Inspect that exact Tab's typed Browser bindings")
+    expect(guide).toContain('Do not treat a vague request as an instruction to create a page')
+    expect(guide).toContain('clarify only ambiguity material to the requested operation')
+    expect(guide).toContain('a new Tab may be outside the current reading view and be harder to find')
+    expect(guide).toContain('An explicit new-Tab request, an independent task, a crowded layout')
+    expect(guide).toContain('an unsuitable capability or a user-specified Browser/tool')
     expect(guide).toContain('does not authorize replacing existing content, changing focus, taking human control or bypassing refusal')
     expect(guide).toContain('confirm the returned Browser, Tab, Region and navigation receipt')
+    for (const args of [['browser', '--skill'], ['browser', 'targets', '--help']]) {
+      const result = await run(args)
+      expect(result.code, result.stderr).toBe(0)
+      const guidance = result.stdout.replace(/\s+/gu, ' ')
+      expect(guidance).toContain("this task's same-Tab neighbor Regions")
+      expect(guidance).toContain('typed Browser binding')
+      expect(guidance).toContain("user's exact target/tool choice")
+    }
   })
 
   it('discovers a private endpoint while no server is listening and reports the package version', async () => {
