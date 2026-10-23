@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import type { ConnectionObservation, ConnectionRecord, ConnectionStage } from '@agentmux/core/connections'
 import { api } from '../../lib/api'
-import type { ConnectionSettingsPort } from './ConnectionHostingSettings'
+import type { ConnectionSettingsPort } from '../../lib/connection-settings-port'
 
 const labels = { authentication: 'Application credentials', transport: 'Live connection', intake: 'Receiving messages', delivery: 'Group delivery' } as const
 const stage = (value: ConnectionStage) => value.state === 'ready' ? 'Confirmed' : value.state === 'disabled' ? 'Paused' : value.state === 'unavailable' ? 'Needs attention' : 'Not confirmed'
