@@ -1,4 +1,3 @@
-import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { sessionPresentationById } from '../lib/session-presentation'
@@ -61,6 +60,6 @@ export function SessionResultReview({ sessionId, items, origin, visible, surface
     </aside>
     <ModalAttachmentDismissal active={Boolean(expanded && popover.current && getModalOverlayContainer(popover.current))} targetRef={popover}
       onOwnerRemoved={collapse}
-      onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); collapse() }} />
+      onEscapeKeyDown={event => { if (event.defaultPrevented) return; event.preventDefault(); collapse() }} />
   </span>
 }

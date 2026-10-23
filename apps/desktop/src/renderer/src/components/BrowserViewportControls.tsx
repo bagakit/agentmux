@@ -114,8 +114,7 @@ export function BrowserViewportSizeDialog({ value, visible, onApply, onClose }: 
       <Dialog.Content ref={content} className="confirmation-dialog dialog-surface browser-viewport-size-dialog" aria-busy={pending}
         onOpenAutoFocus={event => { event.preventDefault(); previousFocus.current = content.current?.ownerDocument.activeElement as HTMLElement | null; field.current?.focus(); field.current?.select() }}
         onCloseAutoFocus={event => { event.preventDefault(); const original = previousFocus.current, active = original?.ownerDocument.activeElement
-          if (original?.isConnected && (!active?.isConnected || active === original.ownerDocument.body || content.current?.contains(active))) original.focus({ preventScroll: true }) }}
-        onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}>
+          if (original?.isConnected && (!active?.isConnected || active === original.ownerDocument.body || content.current?.contains(active))) original.focus({ preventScroll: true }) }}>
         <Dialog.Title className="confirmation-dialog__title">Custom viewport</Dialog.Title>
         <Dialog.Description className="confirmation-dialog__description">Page dimensions in CSS pixels. The page fits inside its current pane.</Dialog.Description>
         <form onSubmit={event => { event.preventDefault(); void apply() }} onKeyDown={event => { if (event.key === 'Enter' && isImeOwnedKeyboardEvent(event.nativeEvent)) event.preventDefault() }}>

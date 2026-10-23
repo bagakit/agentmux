@@ -419,6 +419,6 @@ export function GlobalSystemNotices({ nativeOverlayWarning }: { nativeOverlayWar
     </div>
     <ModalAttachmentDismissal active={Boolean(open && detailsRef.current && getModalOverlayContainer(detailsRef.current))} targetRef={detailsRef}
       onOwnerRemoved={() => detailsRef.current?.hidePopover()}
-      onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); detailsRef.current?.hidePopover() }} />
+      onEscapeKeyDown={event => { if (event.defaultPrevented) return; event.preventDefault(); detailsRef.current?.hidePopover() }} />
   </div>
 }

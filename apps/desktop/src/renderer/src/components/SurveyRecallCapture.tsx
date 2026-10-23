@@ -5,7 +5,6 @@ import { ComposerTextarea } from '@agentmux/client-ui/input'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { DEFAULT_NOTEBOOK_ID } from '@agentmux/core/notebook-catalog'
 import { useEffect, useRef, useState } from 'react'
-import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { fileNavigationSelection, useAppStore } from '../store'
 import { EMPTY_LAUNCHER_DRAFT, useLauncherState } from '../lib/launcher-state'
@@ -85,7 +84,7 @@ export function SurveyRecallCapture({ target, onClose }: { target: CaptureTarget
   return <Dialog.Root recoveryCloseDisabled={busy} open={Boolean(target)} onOpenChange={open => { if (!open && !busy) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content ref={content} className="confirmation-dialog dialog-surface topic-dialog survey-recall-capture"
-        onEscapeKeyDown={event => { if (busy || isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
+        onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
         onInteractOutside={event => { if (busy) event.preventDefault() }}>
         <Dialog.Title className="confirmation-dialog__title">Save to Recall</Dialog.Title>
         <Dialog.Description className="confirmation-dialog__description">Keep a finding with its source. Your browser stays here.</Dialog.Description>

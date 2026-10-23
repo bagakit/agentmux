@@ -191,7 +191,7 @@ export function OpenDestinationPopover({
       ) : null}
     </div><ModalAttachmentDismissal active={overlayHost.hasAttribute('data-overlay-modal-slot')} targetRef={containerRef}
       onOwnerRemoved={() => onDismiss(request.id)}
-      onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); onDismiss(request.id) }} /></>,
+      onEscapeKeyDown={event => { if (event.defaultPrevented) return; event.preventDefault(); onDismiss(request.id) }} /></>,
     overlayHost
   )
 }

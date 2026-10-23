@@ -8,7 +8,6 @@ import { api } from '../lib/api'
 import { refreshTopicSpatial } from '../lib/topic-knowledge-actions'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 
 export function TopicCategoryDialog({ target, onClose, returnFocus }: { target: TopicCategory | 'create' | null; onClose(): void; returnFocus?: () => HTMLElement | null }) {
   const ownerDocument = useWorkbenchDocument()
@@ -37,7 +36,7 @@ export function TopicCategoryDialog({ target, onClose, returnFocus }: { target: 
           const original = returnFocus(), active = ownerDocument.activeElement
           if (original?.isConnected && (active === ownerDocument.body || active === original || !active?.isConnected || content.current?.contains(active))) original.focus({ preventScroll: true })
         }}
-        onEscapeKeyDown={event => { if (busy || isImeOwnedKeyboardEvent(event)) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
+        onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
         <Dialog.Title className="confirmation-dialog__title">{target === 'create' ? 'New Topic category' : 'Rename Topic category'}</Dialog.Title>
         <Dialog.Description className="confirmation-dialog__description">Group related Topics under a shared theme.</Dialog.Description>
         <form onSubmit={event => { event.preventDefault(); void save() }}><label>Name<TextInput ref={input} value={name} maxLength={120} disabled={busy} autoComplete="off" onChange={event => setName(event.target.value)} /></label>

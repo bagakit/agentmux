@@ -44,7 +44,7 @@ export function MoteRenameDialog({ target, onClose, returnFocus }: {
         onOpenAutoFocus={event => { event.preventDefault(); input.current?.focus(); input.current?.select() }}
         onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus?.(); const active = ownerDocument.activeElement
           if (node?.isConnected && (active === ownerDocument.body || active === node || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}
-        onEscapeKeyDown={event => { if (busy || isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
+        onEscapeKeyDown={event => { if (busy) event.preventDefault() }}
         onInteractOutside={event => { if (busy) event.preventDefault() }}>
         <Dialog.Title className="confirmation-dialog__title">Rename Mote</Dialog.Title>
         <Dialog.Description className="confirmation-dialog__description">Choose the name shown in Space and the Mote list. Its discussions and files stay together.</Dialog.Description>

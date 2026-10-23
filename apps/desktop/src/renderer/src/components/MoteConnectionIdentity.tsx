@@ -4,7 +4,6 @@ import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useContext, useEffect, useId, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { moteConnectionBaseline, parseMotePreferencesReadResult, parseMotePreferencesSaveResult, sameMotePreferencesTarget,
   type MoteConnectionPreferencesReadResult, type MoteConnectionPreferencesSaveParams,
   type MoteConnectionPreferencesSaveResult, type MotePreferencesTarget } from '@agentmux/core/mote-preferences'
@@ -68,7 +67,7 @@ function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, retu
   const ownerDocument = useWorkbenchDocument(), content = useRef<HTMLDivElement>(null)
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}>
     <Dialog.Overlay className="dialog-scrim" />
-    <Dialog.Content ref={content} className="dialog-surface mote-connection-dialog" onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
+    <Dialog.Content ref={content} className="dialog-surface mote-connection-dialog"
       onCloseAutoFocus={event => { event.preventDefault(); const active = ownerDocument.activeElement, node = returnFocus();
         if (node?.isConnected && (active === ownerDocument.body || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}>
       <header className="mote-connection-dialog__header"><div><Dialog.Title>Bot for {moteName}</Dialog.Title>

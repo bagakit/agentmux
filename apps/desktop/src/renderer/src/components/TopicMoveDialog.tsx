@@ -1,7 +1,6 @@
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import type { KnowledgeTopic, TopicCategory } from '@agentmux/core/control'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
@@ -83,7 +82,7 @@ function TopicMoveContent({ target, onClose, onMoved }: TopicMoveDialogProps & {
     <Dialog.Root recoveryCloseDisabled={moving.current || creating} open onOpenChange={open => { if (!open && !moving.current && !creating) onClose() }}>
       <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
         <Dialog.Content className="confirmation-dialog dialog-surface topic-dialog topic-move-dialog"
-          onEscapeKeyDown={event => { if (moving.current || creating || isImeOwnedKeyboardEvent(event)) event.preventDefault() }}
+          onEscapeKeyDown={event => { if (moving.current || creating) event.preventDefault() }}
           onInteractOutside={event => { if (moving.current || creating) event.preventDefault() }}>
           <Dialog.Title className="confirmation-dialog__title">Move to category</Dialog.Title>
           <Dialog.Description className="confirmation-dialog__description">Keep discussions and knowledge together.</Dialog.Description>

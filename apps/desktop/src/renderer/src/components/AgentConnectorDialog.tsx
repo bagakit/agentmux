@@ -6,7 +6,6 @@ import { TextInput, Textarea } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SelectionField } from './SelectionField'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import type { ConnectionGrant, ConnectionRecord, RoomBinding, RoomBindingOperation, RoomBindingScope, RoomBindingTarget, RoomLinkOperation, RoomProvisioningOperation } from '@agentmux/core/connections'
 import type { AgentNativeSourceReference } from './AgentNativeSourceControls'
 import { api } from '../lib/api'
@@ -416,7 +415,7 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
       <Dialog.Content ref={content} className="dialog-surface agent-connector-dialog" aria-busy={busy}
         onOpenAutoFocus={event => { event.preventDefault(); (content.current?.querySelector<HTMLElement>('[aria-label="Group name"]') ?? content.current?.querySelector<HTMLElement>('[aria-label="Existing group"]') ?? content.current?.querySelector<HTMLElement>('[aria-label="Close group setup"]'))?.focus({ preventScroll: true }) }}
         onCloseAutoFocus={event => { event.preventDefault(); const node = returnFocus(), active = ownerDocument.activeElement; if (node?.isConnected && (active === ownerDocument.body || !active?.isConnected || content.current?.contains(active))) node.focus({ preventScroll: true }) }}
-        onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event) || event.target instanceof ownerDocument.defaultView!.Element && event.target.closest('[role="menu"]')) event.preventDefault() }}>
+        onEscapeKeyDown={event => { if (event.target instanceof ownerDocument.defaultView!.Element && event.target.closest('[role="menu"]')) event.preventDefault() }}>
         <header className="agent-connector-dialog__header"><div><Dialog.Title>{joining ? 'Join this group' : binding || detached ? 'Group connection' : 'Connect a group'}</Dialog.Title>
           <Dialog.Description className="agent-connector-identity">{original.identity ? <ResolvedAgentAvatar {...original.identity} label={original.name} size={22} /> : <AgentIcon size={20} aria-hidden="true" />}<span>{original.name}</span></Dialog.Description></div>
           <button type="button" className="icon-button" aria-label="Close group setup" onClick={onClose}><CloseIcon size={15} /></button></header>

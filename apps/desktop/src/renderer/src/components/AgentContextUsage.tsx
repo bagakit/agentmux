@@ -112,7 +112,7 @@ export function AgentContextUsage({ usage, source, visible = true }: { usage?: A
       </div>
       <ModalAttachmentDismissal active={Boolean(open && card.current && getModalOverlayContainer(card.current))} targetRef={card}
         onOwnerRemoved={() => card.current?.hidePopover()}
-        onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); card.current?.hidePopover() }} />
+        onEscapeKeyDown={event => { if (event.defaultPrevented) return; event.preventDefault(); card.current?.hidePopover() }} />
     </>
   )
 }
