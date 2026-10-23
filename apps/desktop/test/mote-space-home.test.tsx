@@ -493,9 +493,10 @@ it('lets an explicit public focus of the same original address reveal the existi
   expect(app.launch).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled()
 })
 
-it('prepares a home question in one original Launcher and reveals it without submitting or replacing existing work', async () => {
+it.each(['Profile', 'Ideas', 'Calendar'])('prepares a %s question in one original Launcher and reveals it without submitting or replacing existing work', async page => {
   useAppStore.setState({ projectRailOpen: true })
-  await app.mount(); await openHome()
+  await app.mount(); await openHome(); await moteClick(button(page))
+  expect(node('[aria-label="A question for this Mote"]').closest('[hidden], [inert], [aria-hidden="true"]')).toBeNull()
   await type('[aria-label="A question for this Mote"]', 'Prepare our next decision with the original source.')
   const before = useAppStore.getState()
   await moteClick(button('Prepare this question in a new discussion'))
@@ -506,6 +507,9 @@ it('prepares a home question in one original Launcher and reveals it without sub
   expect(Object.values(launcher.regions).map(region => region.kind)).toEqual(['launcher'])
   expect(current.agentComposerDrafts[launcher.layout.activeRegionId]).toBe('Prepare our next decision with the original source.')
   expect(current.agentComposerNotes[launcher.layout.activeRegionId]).toContain(revision)
+  expect(current.workbenchSpaceSelection).toMatchObject({ workspaceId: SCRATCH_WORKSPACE_ID, topicId: PMO_TEAMS_TOPIC_ID,
+    tabId: launcher.id, regionId: launcher.layout.activeRegionId })
+  expect(button('Discussion').getAttribute('aria-selected')).toBe('true')
   expect(homeExpanded()).toBeNull()
   expect(current.sessions).toBe(before.sessions)
   expect(current.tabs[defaultTab.id]).toBe(before.tabs[defaultTab.id])
@@ -680,7 +684,7 @@ it.each([false, true])('reveals a newly saved home arrangement after the existin
 })
 
 
-it('keeps one shared navigation and question lifecycle across Profile and Discussion without replacing the original workface', async () => {
+it('keeps one shared navigation and reachable question across all four Mote pages without replacing the original workface', async () => {
   useAppStore.setState({ projectRailOpen: true })
   await app.mount(); await openHome()
   const navigation = node('[aria-label="Mote pages"]')
@@ -693,6 +697,9 @@ it('keeps one shared navigation and question lifecycle across Profile and Discus
     await moteClick(button(mode))
     expect(node('[aria-label="Mote pages"]')).toBe(navigation)
     expect(node<HTMLTextAreaElement>('[aria-label="A question for this Mote"]')).toBe(question)
+    expect(app.container.querySelectorAll('[aria-label="A question for this Mote"]')).toHaveLength(1)
+    expect(question.closest('[hidden], [inert], [aria-hidden="true"]')).toBeNull()
+    expect(question.disabled).toBe(false)
     expect(button(mode).getAttribute('aria-selected')).toBe('true')
     expect(originalComposer()).toBe(composer)
   }
@@ -710,11 +717,17 @@ it('retains the original pending question across local page switches and prepare
   const replies: (() => void)[] = []
   vi.mocked(api.files.readPublic).mockImplementation(params => new Promise(resolve => replies.push(() => resolve(material(params)))))
   const before = useAppStore.getState()
+  const question = node<HTMLTextAreaElement>('[aria-label="A question for this Mote"]')
   await moteClick(button('Prepare this question in a new discussion'))
   expect(replies).toHaveLength(2)
-  await moteClick(button('Discussion')); await moteClick(button('Profile'))
-  expect(button('Reading original materials').disabled).toBe(true)
-  expect(replies).toHaveLength(2)
+  for (const page of ['Discussion', 'Ideas', 'Calendar', 'Profile']) {
+    await moteClick(button(page))
+    expect(node<HTMLTextAreaElement>('[aria-label="A question for this Mote"]')).toBe(question)
+    expect(question.closest('[hidden], [inert], [aria-hidden="true"]')).toBeNull()
+    expect(button('Reading original materials').disabled).toBe(true)
+    await act(async () => question.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true })))
+    expect(replies).toHaveLength(2)
+  }
   vi.mocked(api.files.readPublic).mockImplementation(async params => material(params))
   await act(async () => replies.forEach(reply => reply())); await settleMoteApp()
   const created = Object.values(useAppStore.getState().tabs).filter(tab => !before.tabs[tab.id])
