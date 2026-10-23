@@ -72,7 +72,7 @@ export function feishuReplyCard(text: string, fragment?: { ordinal: number; coun
 function splitBlock(raw: string, frame: (start: number, end: number) => PublicationTextFragment['presentationContext'], fits: (part: PublicationTextFragment) => boolean, boundaries?: readonly number[]): PublicationTextFragment[] {
   const result: PublicationTextFragment[] = []
   const chars = Array.from(raw)
-  let offset = 0, character = 0
+  let offset = 0, character = 0, previous = 0
   while (offset < raw.length) {
     // Every Unicode character occupies at least one encoded request byte.
     let low = 0, high = Math.min(FEISHU_MESSAGE_BODY_BYTES, chars.length - character)
@@ -80,12 +80,19 @@ function splitBlock(raw: string, frame: (start: number, end: number) => Publicat
       const text = chars.slice(character, character + count).join(''), context = frame(offset, offset + text.length)
       return { text, ...(context ? { presentationContext: context } : {}) }
     }
-    while (low < high) {
-      const count = Math.ceil((low + high) / 2)
-      if (fits(candidate(count))) low = count
-      else high = count - 1
+    const repeated = Math.min(previous, high)
+    if (repeated && fits(candidate(repeated))) low = repeated
+    else {
+      while (low < high) {
+        const count = Math.ceil((low + high) / 2)
+        if (fits(candidate(count))) low = count
+        else high = count - 1
+      }
     }
     if (!low) throw Error('The native reply envelope cannot contain one character')
+    // Recheck one previously fitting length before searching again. Native
+    // rendering remains the budget oracle for every source slice.
+    previous = low
     let part = candidate(low)
     const boundary = boundaries?.filter(end => end > offset && end <= offset + part.text.length).at(-1)
     const line = part.text.lastIndexOf('\n')
