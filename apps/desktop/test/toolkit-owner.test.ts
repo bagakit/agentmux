@@ -5,6 +5,8 @@ vi.mock('electron', () => ({ app: { getPath: () => _hygiene_fixturePath("tmp"), 
 import type { AgentMuxClientEvent } from '@agentmux/core'
 import { AGENTMUX_CONTROL_SCHEMA_VERSION, parseToolkitSnapshot, type MetricsObservation } from '@agentmux/core/control'
 import { PerformanceToolkitOwner as ToolkitOwner } from '../src/main/toolkit-owner.js'
+import { ProcessResourceSampler } from '../src/main/process-resource-sampler.js'
+import { createResourceMetricsPort } from '../src/main/resource-usage-control.js'
 import type { ToolkitRunPort } from '../src/main/toolkit-run-port.js'
 import { resolve } from 'node:path'
 
@@ -48,6 +50,27 @@ async function fixture(delayed = false) {
 const flush = async () => { for (let i=0;i<8;i++) await new Promise(resolve => setImmediate(resolve)) }
 
 describe('Toolkit observation owner', () => {
+  it('accepts the independent App first frame from the production metrics port while the process source is pending', async () => {
+    const f = await fixture(), sampler = new ProcessResourceSampler(() => new Promise(() => {}), () => 1000,
+      () => [{ pid: 200, creationTime: 10, type: 'Tab', cpu: { cumulativeCPUUsage: 1 }, memory: { workingSetSize: 64 } }] as Electron.ProcessMetric[])
+    sampler.setObservationSources({ observeRuntime: async () => [], processOwners: () => ({ rendererPids: [200], browserPids: [] }),
+      mainOwners: () => ({ sessionAttachmentOwners: 1, sessionAttachmentLeases: 1, fileWatchers: 0, browserViews: 0, releasedBrowserViews: 0 }) })
+    const port = createResourceMetricsPort({ sampler, currentWindow: () => null, now: () => 1000 }), values: MetricsObservation[] = []
+    const source = await port.subscribe(value => values.push(value), () => {}, new AbortController().signal)
+    try {
+      const first = values[0]!
+      expect(first.app).toMatchObject({ state: 'available', data: { rssKib: 64, cpuPercent: null, processes: [{ pid: 200, creationTime: 10 }] } })
+      expect(first.process).toMatchObject({ state: 'pending', data: null })
+      const lease = await f.owner.subscribe('performance', vi.fn(), vi.fn(), new AbortController().signal)
+      await f.bytes(Buffer.from(f.frame(1, first)))
+      const received = parseToolkitSnapshot(f.owner.current)
+      expect(received.kind).toBe('metrics')
+      if (received.kind !== 'metrics') throw new Error('Expected the original Performance Tool reader')
+      expect(received.observation?.app).toEqual(first.app); expect(received.observation?.process.state).toBe('pending')
+      expect(received.trend).toEqual([{ observedAt: 1000, appCpuPercent: null, appRssKib: 64 }])
+      lease.dispose(); await flush()
+    } finally { source.dispose(); port.dispose(); sampler.dispose() }
+  })
   it('shares one actual port acquisition and preserves manual reason beyond individual leases', async () => {
     const f = await fixture(); const a = new AbortController(), b = new AbortController()
     const one = vi.fn(), two = vi.fn()
@@ -138,7 +161,7 @@ describe('Toolkit observation owner', () => {
       enabled: () => true, receipts: { read: async () => ({ schema: 'agentmux.performance.receipt.v1', admission: {
         executionId: 'old-execution', run: { hostId: 'local', runId: 'old-run' }, startedAt: 100, reason: null } }), save: saved } })
     owners.push(owner)
-    ;(f.port.status as any).mockImplementation(async ref => ({ runId: ref.runId, state: ref.runId === 'old-run' ? 'exited' : 'running' }))
+    ;(f.port.status as any).mockImplementation(async (ref: Parameters<ToolkitRunPort['status']>[0]) => ({ runId: ref.runId, state: ref.runId === 'old-run' ? 'exited' : 'running' }))
     const lease = await owner.subscribe('performance', vi.fn(), vi.fn(), new AbortController().signal)
     expect(f.port.status).toHaveBeenCalledWith({ runId: 'old-run' })
     expect(f.port.stop).not.toHaveBeenCalled()

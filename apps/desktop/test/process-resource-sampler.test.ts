@@ -10,7 +10,7 @@ import {
   type UsageSample,
   type UsageSnapshot
 } from '../src/shared/process-usage.js'
-import { ProcessResourceSampler } from '../src/main/process-resource-sampler.js'
+import { ProcessResourceSampler, type ResourceSample } from '../src/main/process-resource-sampler.js'
 
 /**
  * 归并的正确性。
@@ -228,7 +228,7 @@ describe('ProcessResourceSampler', () => {
     // 全部经由 subscribe 观察，因为那是产品唯一的读取口（ipc.ts:359）。给测试单开一个
     // `snapshot()` 取数口，等于让断言走一条用户永远不走的路——那条路完好，产品那条坏了，
     // 测试照样绿。
-    const seen: UsageSnapshot[] = []
+    const seen: ResourceSample[] = []
     const watch = () => sampler.subscribe((snapshot) => { seen.push(snapshot) })
     const latest = () => seen.at(-1) ?? null
     return { readTable, sampler, seen, watch, latest, advance: (ms: number) => { now += ms } }
@@ -316,7 +316,7 @@ describe('ProcessResourceSampler', () => {
       })
       sampler.trackRun('run-a', 100, 'local')
       const stop = watch()
-      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
       expect(latest()?.unavailable).toContain('ps timed out')
       // 第一次采样就失败时 `runs` 保留的是"上一次"，而上一次不存在，所以它是空的
       // （`process-resource-sampler.ts:138` 的 `this.latest?.runs ?? []`）。这是正确行为：
@@ -344,13 +344,13 @@ describe('ProcessResourceSampler', () => {
       })
       sampler.trackRun('run-a', 100, 'local')
       const stop = watch()
-      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
       // 前提自检：先真的采到了一条带数字的样本，否则下面全是空话。
       expect(latest()?.unavailable).toBeNull()
       expect(latest()?.runs.map((run) => run.runId)).toEqual(['run-a'])
 
       fail = true
-      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS * 2)
 
       expect(latest()?.unavailable).toContain('ps timed out')
       // 那条 run 还在，数字还是上一次那批——没有被改写成 0。
@@ -370,7 +370,7 @@ describe('ProcessResourceSampler', () => {
       sampler.trackRun('gone', 99999, 'local')
       sampler.trackRun('run-a', 100, 'local')
       const stop = watch()
-      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
       expect(latest()?.runs.find((run) => run.runId === 'gone')?.rssKib).toBeNull()
       expect(latest()?.runs.find((run) => run.runId === 'run-a')?.rssKib).toBe(12_000)
       // 混成一个数就没法回答"是谁在吃"。
@@ -391,7 +391,7 @@ describe('ProcessResourceSampler', () => {
       sampler.trackRun('claimed', 103, 'local')
       sampler.trackRun('missing', 99999, 'local')
       const stop = watch()
-      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
       expect(latest()?.runs).toEqual([
         { runId: 'inner', hostId: 'local', rootPid: 101, processCount: 2, rssKib: 2500, rootRssKib: 2000, descendantsRssKib: 500, descendantProcessCount: 1, cpuPercent: 1.5 },
         { runId: 'outer', hostId: 'local', rootPid: 100, processCount: 2, rssKib: 13000, rootRssKib: 10000, descendantsRssKib: 3000, descendantProcessCount: 1, cpuPercent: 7 },
@@ -411,10 +411,10 @@ describe('ProcessResourceSampler', () => {
       const { sampler, watch, latest } = harness()
       sampler.trackRun('run-a', 100, 'local')
       const stop = watch()
-      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
       expect(latest()?.runs).toHaveLength(1)
       sampler.forgetRun('run-a')
-      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS * 2)
       expect(latest()?.runs).toHaveLength(0)
       stop()
       sampler.dispose()
@@ -435,7 +435,7 @@ describe('ProcessResourceSampler', () => {
       })
       sampler.trackRun('run-a', 100, 'local')
       const stop = watch()
-      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
       expect(latest()?.runs[0]?.cpuPercent).toBe(90)
       stop()
 
@@ -443,7 +443,7 @@ describe('ProcessResourceSampler', () => {
       cpu = '3.0'
       advance(2_000)
       const reopened = watch()
-      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
       // 显示的必须是重开后新采到的 3%，而不是关闭前留下的 90% 峰值。
       expect(latest()?.runs[0]?.cpuPercent).toBe(3)
       reopened()
@@ -455,7 +455,7 @@ describe('ProcessResourceSampler', () => {
 
   // 上面那条测不到下面这个洞：它的 `ps` 立刻返回，采样在关闭之前就已经落地了。真正会出错的
   // 是**关闭时还有一次采样在飞**——`stop()` 清掉 `samples` 与 `latest`，而那次采样醒来后照写，
-  // 于是清空被静默撤销。两条各盯 `runSample` 的一个写回出口（成功一侧、降级一侧）；只守一侧
+  // 于是清空被静默撤销。两条各盯 `runProcessSample` 的一个写回出口（成功一侧、降级一侧）；只守一侧
   // 的话另一侧照旧把上一段观察的事实递给重开的面板。
   const tableWithCpu = (cpu: string) => `  PID  PPID    RSS  %CPU\n  100     1  10000  ${cpu}`
 
@@ -472,7 +472,7 @@ describe('ProcessResourceSampler', () => {
       const stop = watch()
       await vi.advanceTimersByTimeAsync(0)
       release(tableWithCpu('5.0'))
-      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
       expect(latest()?.runs[0]?.cpuPercent).toBe(5)
 
       // 下一个周期起了第二次采样，它还在飞的时候用户关掉了面板。
@@ -489,14 +489,15 @@ describe('ProcessResourceSampler', () => {
       await vi.advanceTimersByTimeAsync(0)
 
       // 事实一：属于上一段观察的结果一次都不许递给重开的面板。
-      expect(seen.slice(beforeStaleLands)).toEqual([])
+      expect(latest()).toMatchObject({ processObservedAt: null, unavailable: null, runs: [], app: { rssKib: 4096 } })
+      expect(seen.slice(beforeStaleLands).filter(sample => sample.processObservedAt !== null || sample.unavailable !== null)).toEqual([])
 
       // 事实二：它也不许留在样本里。CPU 是 10 秒窗口取峰值，关掉两秒又打开时那个 95 还在窗口
       // 内，留下来就会被当成"此刻最凶的时候"显示出来——一个从未发生过的尖峰。
       advance(USAGE_SAMPLE_INTERVAL_MS)
       await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
       release(tableWithCpu('3.0'))
-      await vi.advanceTimersByTimeAsync(0)
+      await vi.advanceTimersByTimeAsync(USAGE_SAMPLE_INTERVAL_MS)
       expect(latest()?.runs[0]?.cpuPercent).toBe(3)
 
       reopened()
@@ -511,7 +512,7 @@ describe('ProcessResourceSampler', () => {
     try {
       let release: (value: string) => void = () => {}
       let fail: (error: Error) => void = () => {}
-      const { sampler, watch, seen, advance } = harness({
+      const { sampler, watch, seen, latest, advance } = harness({
         table: () => new Promise<string>((resolve, reject) => { release = resolve; fail = reject })
       })
       sampler.trackRun('run-a', 100, 'local')
@@ -534,7 +535,8 @@ describe('ProcessResourceSampler', () => {
 
       // 上一段观察里的失败不是这一段的事实。少了这道判断，重开的面板会立刻挂出一条与当前观察
       // 无关的"资源数据不可用"，而当前这段其实什么都还没采。
-      expect(seen.slice(beforeStaleLands)).toEqual([])
+      expect(latest()).toMatchObject({ processObservedAt: null, unavailable: null, runs: [], app: { rssKib: 4096 } })
+      expect(seen.slice(beforeStaleLands).filter(sample => sample.processObservedAt !== null || sample.unavailable !== null)).toEqual([])
 
       reopened()
       sampler.dispose()
