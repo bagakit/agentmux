@@ -91,4 +91,13 @@ describe('durable Note body and graph public consumer',()=>{
     await service.call('notebook.inspect',{noteId:'target',content:true});expect(reads).toBe(1)
     const headless=new AgentMuxRpcService({notebookStore:f.store,coreClients:()=>[]});await expect(headless.call('notebook.graph',{})).rejects.toMatchObject({code:'CONTROL_UNAVAILABLE'});expect((await headless.call('notebook.ls',{})).state.pages.target).toBeDefined()
   })
+  it('keeps shared content discovery independent of per-file preview byte caps and rejects unconfirmed cross-workspace shared scans',async()=>{
+    const f=await fixture()
+    const shared=serializeNoteDocument({schema:'agentmux.note.v1',noteId:'shared-one',kind:'shared-block',title:'Shared piece',content:{type:'doc',content:[{type:'paragraph',attrs:{blockId:'shared-p'},content:[{type:'text',text:'Shared body'}]}]}})
+    await writeFile(join(f.root,'shared-one.note.md'),shared)
+    await f.add('large-host',text('large-host','host-block',[{type:'noteInclude',attrs:{blockId:'inc-1',referenceId:'ref-inc-1',noteId:'shared-one',path:'shared-one.note.md'}},{type:'paragraph',attrs:{blockId:'pad-block'},content:[{type:'text',text:'x'.repeat(2048)}]}]))
+    const state=await f.store.read()
+    const observed=await f.owner.content(state,'shared-one',{maxBytes:512})
+    expect(observed.status).toBe('read')
+  })
 })
