@@ -63,9 +63,10 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(view.element.textContent).toContain('未记录作者')
     await click(button(view.element, '文档'))
     expect(open).toHaveBeenCalledExactlyOnceWith('https://example.test/docs', expect.objectContaining({ ctrlKey: false }))
-    await click(button(view.element, 'Copy message'))
+    const nativeInput = view.element.querySelector<HTMLElement>('[data-native-record-id="native-input"]')!
+    await click(button(nativeInput, 'Copy message'))
     expect(copy).toHaveBeenCalledExactlyOnceWith('原生输入 [文档](https://example.test/docs)')
-    await click(button(view.element, 'Message details'))
+    await click(button(nativeInput, 'Message details'))
     expect(document.body.textContent).toContain('Not recorded · shown as You')
     expect(document.body.textContent).toContain('native-session-original')
     expect(document.body.textContent).toContain('native-input')

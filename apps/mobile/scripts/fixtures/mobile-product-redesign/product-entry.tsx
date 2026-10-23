@@ -2,11 +2,13 @@ import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../../../test/fi
 import { fixturePath } from '../../../../../test/fixture-values.mjs'
 import { createRoot } from 'react-dom/client'
 import { useState } from 'react'
-import type { AgentMuxAgentSession, AgentMuxClientEvent, AgentMuxRpcResult, AgentMuxRpcGoal, AgentSessionHistoryReadInput, AgentSessionUserMessage } from '@agentmux/core'
+import type { AgentInputSubmissionReceipt, AgentMuxAgentSession, AgentMuxClientEvent, AgentMuxRpcResult, AgentMuxRpcGoal, AgentSessionHistoryReadInput, AgentSessionUserMessage } from '@agentmux/core'
+import { conversationRevision, projectConversationTimeline, type AgentConversationReadPage } from '@agentmux/core/conversation'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { MobileApp } from '../../../src/MobileApp'
 import { createBrowserPlatform } from '../../../src/platform/browser'
 import { getDeviceWorkface } from '../../../src/recovery/device-workface'
+import { DEFAULT_THEME_ID, GRAPHITE_THEME, themeValue } from '@agentmux/client-ui/theme'
 import '@agentmux/client-ui/styles.css'
 
 type Call = { sequence: number; observedAt: number; method: string; params: unknown }
@@ -17,6 +19,7 @@ const original = (id: string): AgentMuxAgentSession => ({ kind: 'agent', agentSe
 const main = original('session-mote'), waiting = original('session-waiting'), result = original('session-result')
 waiting.pendingInteraction = { request: { kind: 'permission', id: 'request-original', agentSessionId: waiting.agentSessionId,
   title: '请确认本次资料读取', evidence: { source: 'native-hook', observedAt: 1, run: waiting.run },
+  permissionHook: { receiptId: 'request-original' },
   options: [{ id: 'allow-original', label: '允许本次读取', kind: 'allow-once' }, { id: 'deny-original', label: '拒绝本次读取', kind: 'reject-once' }] } }
 const sessions = [main, waiting, result]
 // Same SID occurs first outside the Mote and then at its intended original Mote location.
@@ -51,7 +54,13 @@ const goal: AgentMuxRpcGoal = { id: 'goal-original', title: '把两个想法变�
   alignment: { revision: 1, summary: '给出小步可验证的建议，保留两种方案的依据。', criteria: [{ id: 'criterion-original', text: '形成可开始的实验步骤' }], openQuestions: [], confirmedAt: 1 },
   grounding: { alignmentRevision: 1, submissionId: 'result-original', summary: '建议先做范围更清晰的方案 A；以下是依据和第一步。', acceptedAt: null,
     checks: [{ criterionId: 'criterion-original', outcome: 'met', note: '已整理步骤、比较依据与需要你决定的地方。', evidence: ['原资料/实验建议.md'] }] } }
-let connected = location.hash !== '#fixture-offline', unknownNext = false
+let connected = location.hash !== '#fixture-offline', unknownNext = false, appearanceRevision = 0
+let appearanceSubscriber: { onEvent(event: { type: 'snapshot'; data: unknown }): void } | null = null
+const appearanceSnapshot = (appAppearance: 'dark' | 'light') => ({
+  sourceId: 'fixture-host', revision: ++appearanceRevision, issues: [],
+  values: { themeId: DEFAULT_THEME_ID, theme: themeValue(GRAPHITE_THEME), appAppearance, terminalTheme: 'workspace' as const }
+})
+const submittedBySession = new Map<string, Array<{ id: string; text: string }>>()
 const listeners = new Set<(event: AgentMuxClientEvent) => void>()
 const client = {
   agentSession: (id: string) => { record('sdk.agentSession', { id }); const found = sessions.find(session => session.agentSessionId === id); if (!found) throw Error('Unknown original fixture Session'); return found },
@@ -61,7 +70,8 @@ const client = {
   runtimeOwnerIdentity: () => ({ runtimeId: 'runtime-original', availability: connected ? 'connected' : 'disconnected' }),
   sessionHistoryPage: async (id: string) => { record('sdk.sessionHistoryPage', { id }); return { agentSessionId: id, source: { providerId: 'codex', nativeSessionId: `native-${id}` }, nextCursor: null,
     items: [{ id: `${id}-user-original`, kind: 'user-message', contentParts: [{ kind: 'text', text: '这两个想法，先从哪一个做成小实验比较好？请保留原来的依据。' }] },
-      { id: `${id}-answer-original`, kind: 'assistant-message', contentParts: [{ kind: 'text', text: id === result.agentSessionId ? '我建议先试方案 A。它的范围更清晰，一天就能取得第一批反馈。\n\n1. 保留现有资料和两种方案。\n2. 选三个最关键的问题。\n3. 先观察真实反馈，再决定是否继续。\n\n方案 B 仍有价值，原依据已经保留。' : '可以。我们先确认你想解决的问题，再比较这两种想法。\n\n我会保留原材料、已经确认的进展和还需要你决定的地方；不会把未知回执当作完成。' }] }] } },
+      { id: `${id}-answer-original`, kind: 'assistant-message', contentParts: [{ kind: 'text', text: id === result.agentSessionId ? '我建议先试方案 A。它的范围更清晰，一天就能取得第一批反馈。\n\n1. 保留现有资料和两种方案。\n2. 选三个最关键的问题。\n3. 先观察真实反馈，再决定是否继续。\n\n方案 B 仍有价值，原依据已经保留。' : '可以。我们先确认你想解决的问题，再比较这两种想法。\n\n我会保留原材料、已经确认的进展和还需要你决定的地方；不会把未知回执当作完成。' }] },
+      ...(submittedBySession.get(id) ?? []).map(item => ({ id: item.id, kind: 'user-message' as const, contentParts: [{ kind: 'text' as const, text: item.text }] }))] } },
   readAgentSessionHistory: async (input: AgentSessionHistoryReadInput) => {
     record('sdk.readAgentSessionHistory', input)
     if (input.hostId !== 'local' || !sessions.some(session => session.agentSessionId === input.agentSessionId)) throw Error('Wrong exact original history target')
@@ -83,8 +93,63 @@ const client = {
   },
   sessionTimeline: async (id: string) => { record('sdk.sessionTimeline', { id }); return { agentSessionId: id, revision: 1, items: [] } },
   observeSessionHistory: async (id: string) => { record('sdk.observeSessionHistory', { id }); return { source: { providerId: 'codex', nativeSessionId: `native-${id}` }, dispose() { record('sdk.releaseHistory', { id }) } } },
-  submitAgentPrompt: async (params: unknown) => { record('sdk.submitAgentPrompt', params); if (unknownNext) { unknownNext = false; throw Error('原 Host 已受理输入，但确认回执在返回途中断开。当前结果未知；保留原 operation、Session、Run 和正文，显式核对原请求后再决定是否重试。此处不会自动重发，后来补充的草稿也保留。') } },
-  respondAgentInteraction: async (params: unknown) => { record('sdk.respondAgentInteraction', params) },
+  readAgentConversation: async (input: Parameters<AgentMuxHostedClient['readAgentConversation']>[0]) => {
+    const sourceHostId = sessions.find(session => session.agentSessionId === input.agentSessionId)?.hostId ?? 'host-original'
+    const historyPage = await client.sessionHistoryPage(input.agentSessionId)
+    const captured = await client.sessionTimeline(input.agentSessionId)
+    const timeline = projectConversationTimeline({ agentSessionId: input.agentSessionId, executionHostId: sourceHostId,
+      historyPage: { ...historyPage, sourceHostId }, timeline: { ...captured, sourceHostId,
+        stream: { epoch: 'original-mobile-stream', sequence: captured.items.length, revision: 1, origin: 'beginning', gaps: [], positions: [] } } })
+    const reference = { hostId: input.hostId, agentSessionId: input.agentSessionId }
+    const checkpoint = { ...reference, sourceHostId, frontier: { ...reference, scope: timeline.scope, cuts: [] } }
+    return { ...reference, sourceHostId, scope: timeline.scope, coverage: timeline.coverage,
+      order: { ...timeline.order, direction: 'newest-first' }, budgetBytes: input.maxBytes ?? 128 * 1024, nextCursor: null,
+      items: [...timeline.events].reverse().map(event => ({ kind: 'item', item: { event,
+        records: timeline.records.filter(recordEntry => event.recordIds.includes(recordEntry.id)) } })),
+      window: { id: 'original-mobile-window', revision: 1, itemCount: timeline.events.length, complete: true,
+        view: 'original-mobile-view', replay: 'original-mobile-replay-1', checkpoint,
+        outside: { older: null, newer: null }, navigation: { older: null, newer: null } } } satisfies AgentConversationReadPage
+  },
+  readConversationChanges: async (input: Parameters<AgentMuxHostedClient['readConversationChanges']>[0]) => ({ ...await client.readAgentConversation(input), checkpoint: input.checkpoint, more: false }),
+  observeConversation: async (input: Parameters<AgentMuxHostedClient['observeConversation']>[0]) => {
+    const frame = await client.readAgentConversation(input)
+    return { hostId: frame.hostId, sourceHostId: frame.sourceHostId, agentSessionId: frame.agentSessionId,
+      scope: frame.scope, coverage: frame.coverage, closed: new AbortController().signal, dispose() {} }
+  },
+  releaseConversationView: async () => ({}),
+  inspectAgentInput: async (params: unknown) => { record('sdk.inspectAgentInput', params); return null },
+  subscribeRpc: async (_method: string, _params: unknown, handlers: { onInitial(value: { observation: unknown }): void; onEvent(event: { type: 'snapshot'; data: unknown }): void }) => {
+    appearanceSubscriber = handlers
+    handlers.onInitial({ observation: appearanceSnapshot('dark') })
+    return { subscriptionId: 'fixture-appearance', dispose: async () => { if (appearanceSubscriber === handlers) appearanceSubscriber = null } }
+  },
+  submitAgentPrompt: async (params: Parameters<AgentMuxHostedClient['submitAgentPrompt']>[0]): Promise<AgentInputSubmissionReceipt | void> => {
+    record('sdk.submitAgentPrompt', params)
+    if (unknownNext) {
+      unknownNext = false
+      throw Error('原 Host 已受理输入，但确认回执在返回途中断开。当前结果未知；保留原 operation、Session、Run 和正文，显式核对原请求后再决定是否重试。此处不会自动重发，后来补充的草稿也保留。')
+    }
+    if ('admissionIntent' in params && params.admissionIntent?.kind === 'manual-actor' && params.operationId) {
+      const list = submittedBySession.get(params.agentSessionId) ?? []
+      list.push({ id: `submitted-${params.operationId}`, text: params.prompt })
+      submittedBySession.set(params.agentSessionId, list)
+      const key = { kind: 'prompt' as const, agentSessionId: params.agentSessionId, expectedRun: params.expectedRun, submissionId: params.operationId }
+      const ref = { key, waitGeneration: 1 }, gateId = 'controlled-gate-' + params.operationId
+      return { key, ref, persistence: 'confirmed', status: 'terminal-confirmed', observation: 'closed',
+        control: { ref, state: 'dispatch-authorized', gateId, at: _tailRefreshFixtureEpoch(0, 1) },
+        admission: { agentSessionId: params.agentSessionId, run: params.expectedRun, admission: { inputKey: key, inputDispatch: { ref, gateId },
+          submissionId: params.operationId, operationId: params.operationId, transport: 'pty', startByte: 0,
+          endByte: new TextEncoder().encode(params.prompt + '\r').byteLength, acknowledged: true,
+          intent: { run: params.expectedRun, ownerInstanceId: 'controlled-original-owner', prompt: params.prompt, execution: 'immediate',
+            admissionIntent: { kind: 'manual-actor', expectedRun: params.expectedRun }, plan: { kind: 'single-phase', data: params.prompt + '\r' },
+            message: { userContent: params.prompt, authorHuman: true } } } } }
+    }
+  },
+  respondAgentInteraction: async (params: Parameters<AgentMuxHostedClient['respondAgentInteraction']>[0]) => {
+    record('sdk.respondAgentInteraction', params)
+    return { agentSessionId: params.agentSessionId, operationId: params.operationId, run: params.expectedRun,
+      expectedRequest: params.expectedRequest, response: params.response, delivery: 'connection-written' as const }
+  },
   forwardRpc: async (method: string, params: Record<string, unknown>) => {
     record(method, params)
     if (!connected) throw Error('原 Host 连接中断；原对象、历史与草稿保留。')
@@ -115,6 +180,7 @@ function Scene() {
   const [, refresh] = useState(0)
   Object.assign(window, { mobileProductScene: {
     unknownNext: () => { unknownNext = true },
+    setAppearance: (mode: 'dark' | 'light') => { appearanceSubscriber?.onEvent({ type: 'snapshot', data: appearanceSnapshot(mode) }) },
     offline: () => { connected = false; refresh(value => value + 1) },
     reconnect: () => { connected = true; refresh(value => value + 1) },
     facts: () => ({ calls, record: getDeviceWorkface().snapshot().record, controlledSdk: true, physicalPhone: false,
