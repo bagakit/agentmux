@@ -41,7 +41,7 @@ export async function exerciseIntegrity({ read, click, shot, until, native, appe
     const box=range.getBoundingClientRect(),viewport=feed.getBoundingClientRect();
     return {recordId:body?.dataset.nativeRecordId,text:range.toString(),connected:range.startContainer.isConnected,
       visible:box.height>0&&box.bottom>viewport.top&&box.top<viewport.bottom};})()`)
-  await read(`(()=>{window.integrityInputs=[];window.integrityObserve=e=>integrityInputs.push({type:e.type,trusted:e.isTrusted,key:e.key??null,meta:e.metaKey??false,target:e.target?.tagName});for(const type of ['keydown','keyup','input'])document.addEventListener(type,integrityObserve,true)})()`)
+  await read(`(()=>{const feed=document.querySelector('.activity-feed');window.integrityInputs=[];window.integrityObserve=e=>integrityInputs.push({type:e.type,trusted:e.isTrusted,key:e.key??null,meta:e.metaKey??false,target:e.target?.tagName,...(e.type==='wheel'?{deltaY:e.deltaY,inFeed:feed.contains(e.target),inPath:e.composedPath().includes(feed)}:{})});for(const type of ['keydown','keyup','input','wheel'])document.addEventListener(type,integrityObserve,true)})()`)
   try {
     await ready('(()=>{const c=readingProof.consumer();return c&&!c.loading&&!c.inFlight&&!c.held&&!c.watch.binding&&c.watch.bound})()', 'Original current frame and its own observer settle')
     const beforeCut = await read('readingProof.nativeCut()'), row = appendRow('integrity', `follow-${phase}`)
@@ -129,14 +129,23 @@ export async function exerciseIntegrity({ read, click, shot, until, native, appe
     await key('Escape', 'Escape', 27)
     await ready(`!document.querySelector('.reading-find__tools')`)
     result.captured = { initial, first, reopened, sameNode, payloadCount }
-    if (await read('!!document.querySelector(".activity-feed__jump")')) await click('document.querySelector(".activity-feed__jump")')
+    const beforeReturn = await read(tailGeometry)
+    const wheel = await read(`(()=>{const f=document.querySelector('.activity-feed'),r=f.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2,deltaY:-f.clientHeight}})()`)
+    await native('Input.dispatchMouseEvent', { type: 'mouseMoved', x: wheel.x, y: wheel.y })
+    await native('Input.dispatchMouseEvent', { type: 'mouseWheel', ...wheel, deltaX: 0 })
+    const away = await ready(`(()=>{const t=${tailGeometry},n=document.querySelector('.activity-feed__jump');return t.scrollTop<${beforeReturn.scrollTop}&&t.tailDistance>2&&n?.isConnected&&n.checkVisibility()&&!n.disabled&&n.getAttribute('aria-disabled')!=='true'?t:null})()`, 'Native upward reading exposes the original Current control')
+    result.returnToCurrent = { before: beforeReturn, wheel, away }
+    await click('document.querySelector(".activity-feed__jump")')
     await ready(`(()=>{const t=${tailGeometry};return !t.consumer?.held&&t.tailDistance<=2})()`, 'Current returns the original accepted reading window to its tail')
     result.current = await read(tailGeometry)
   } finally {
-    result.nativeInputs = await read(`(()=>{for(const type of ['keydown','keyup','input'])document.removeEventListener(type,integrityObserve,true);return integrityInputs})()`)
+    result.nativeInputs = await read(`(()=>{for(const type of ['keydown','keyup','input','wheel'])document.removeEventListener(type,integrityObserve,true);return integrityInputs})()`)
   }
   assert.ok(result.nativeInputs.length > 0 && result.nativeInputs.every(event => event.trusted))
   assert.ok(result.nativeInputs.some(event => event.type === 'keydown' && event.key === 'f' && event.meta))
   assert.ok(result.nativeInputs.some(event => event.type === 'input'))
+  const wheels = result.nativeInputs.filter(event => event.type === 'wheel')
+  assert.equal(wheels.length, 1, 'Current follows exactly one native upward wheel')
+  assert.ok(wheels[0].deltaY === result.returnToCurrent.wheel.deltaY && wheels[0].inFeed && wheels[0].inPath, 'The original feed receives the exact trusted upward wheel before Current')
   return result
 }
