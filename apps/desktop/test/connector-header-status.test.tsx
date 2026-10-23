@@ -120,10 +120,16 @@ it('actual recorded refusal and waiting stay separate from adoption, and typed b
     actor: { application: f.config.application, idType: 'open_id', userId: 'original-external-user' }, capabilities: ['input'], state: 'active' })
   payload.event.message.message_id = 'header-byte-original'; payload.header.event_id = 'header-byte-event'
   await f.ingressTransport!.receive(payload)
-  await vi.waitFor(async () => expect((await f.forward('connection.ingress.ls', { connectionId: binding.connectionId })).ingresses.some(value => value.kind !== 'action' && value.externalMessageId === 'header-byte-original' && value.state === 'claimed')).toBe(true))
+  let originalIngressId = ''
+  await vi.waitFor(async () => {
+    const original = (await f.forward('connection.ingress.ls', { connectionId: binding.connectionId })).ingresses.find(value => value.kind !== 'action' && value.externalMessageId === 'header-byte-original')
+    expect(original?.state).toBe('claimed'); originalIngressId = original!.ingressId
+    const saved = await f.forward('connection.diagnose', { ...target, bindingId: binding.bindingId, bindingRevision: binding.revision })
+    expect(saved.groups.value?.items[0]?.incoming.value?.rows.find(row => row.ingressId === originalIngressId)?.coreStatus).toBe('waiting')
+  }, { timeout: 8000 })
   await check(); await wait(() => expect(menu().textContent).toContain('Waiting for Agent'))
   const report = await f.forward('connection.diagnose', { ...target, bindingId: binding.bindingId, bindingRevision: binding.revision })
-  const group = report.groups.value!.items[0]!, incoming = group.incoming.value!, original = incoming.rows[0]!
+  const group = report.groups.value!.items[0]!, incoming = group.incoming.value!, original = incoming.rows.find(row => row.ingressId === originalIngressId)!
   expect(original, JSON.stringify(original)).toMatchObject({ recording: { state: 'recorded' }, coreStatus: 'waiting' })
   // The strict public contract records no native adoption, or an observed unknown; neither confirms acceptance.
   expect([null, 'unknown'], JSON.stringify(original)).toContain(original.nativeAdoption)
