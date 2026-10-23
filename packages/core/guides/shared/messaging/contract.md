@@ -5,7 +5,11 @@ For messages between independent AgentMux Sessions, use "$AGENTMUX_CLI" agent se
 
 Pass only the original body. Core authenticates the sender and saves the original Inbox message. Core owns the amux/a2a reference or full-message envelope; do not write it yourself.
 
-Ordinary peer sends enter the Inbox without injecting their body or interrupting current work. Core combines original-MID references at a confirmed idle opportunity. A self-closing a2a reference carries read-via="message --skill": read that Skill, then use "$AGENTMUX_CLI" message read --message-id MID to retrieve the original body when relevant. Reading does not acknowledge an Inbox batch or accept delegation. Notification submission is not proof of model adoption; unread bodies do not cause repeated reminders. Managed senders cannot self-authorize steer with immediate; a trusted user/device may make a separate explicit message notify action over original MIDs.
+Ordinary peer sends enter the Inbox without injecting their body or interrupting current work. Core combines original-MID references at a confirmed idle opportunity. Each self-closing a2a reference carries read-via="message --skill".
+
+[Original-message reference reading](./reference-reminder.md "amux:include")
+
+Reading does not acknowledge an Inbox batch or accept delegation. Notification submission is not proof of model adoption; unread bodies do not cause repeated reminders. Managed senders cannot self-authorize steer with immediate; a trusted user/device may make a separate explicit message notify action over original MIDs.
 
 Keep the original operationId and messageId while delivery is unknown or partial; never automatically resend with new IDs. An explicit replacement of that refused message may create a new operationId and messageId only after Core confirms the whole logical message was not applied. Keeping an old messageId still retries that original message, even with a new operationId.
 
