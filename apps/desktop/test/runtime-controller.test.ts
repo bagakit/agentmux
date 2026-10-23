@@ -16,17 +16,8 @@ import type { AgentMuxAgentSessionRegistry } from '../../../packages/core/src/ag
 import type { CtxmuxAdapterRun } from '../../../packages/core/src/ctxmux-run-adapter.js'
 import type { AgentScreenEvidenceStore } from '../../../packages/core/src/screen-evidence.js'
 import type { AgentMuxStoredAgentSession } from '../../../packages/core/src/types.js'
-import {
-  AgentMuxError,
-  type AgentCatalogEntry,
-  type AgentCapabilities,
-  type AgentMuxClientEvent,
-  type AgentMuxAgentSession,
-  type AgentMuxAgentContinuityResult,
-  type AgentMuxAgentSessionStore,
-  type AgentMuxRuntimeProjection,
-  type AgentSessionHistoryDescriptor
-} from '@agentmux/core'
+import { AgentMuxError, type AgentCatalogEntry, type AgentCapabilities, type AgentMuxClientEvent, type AgentMuxAgentSession, type AgentMuxAgentSessionStore, type AgentMuxRuntimeProjection, type AgentSessionHistoryDescriptor } from '@agentmux/core'
+import { type AgentMuxAgentContinuityResult } from '@agentmux/core/agent-session-recovery'
 // 衰减判据从 core 的 node-free 子路径取，而不是在测试里手抄阈值：阈值刻意不导出（它没有产品
 // 调用方），所以「带回的时刻对不对」只能由 core 自己回答。
 import {
@@ -1904,7 +1895,7 @@ describe('RuntimeController configuration transaction', () => {
     expect(client.resumeAgent).not.toHaveBeenCalled()
   })
 
-  it.each(['exact-running', 'other-run', 'ended'] as const)('reconciles a lost recovery conflict only from exact canonical running facts: %s', async situation => {
+  it.each(['exact-running', 'other-run', 'ended'] as const)('recovery receipt: retains Core conflict even when the canonical Run is %s', async situation => {
     const controller = await configuredController()
     const client = runtimeFixture.FakeClient.instances[0]!
     const config: AppConfig = { ...localConfig, executors: {
@@ -1925,9 +1916,7 @@ describe('RuntimeController configuration transaction', () => {
     client.ensureAgentContinuity.mockResolvedValueOnce(conflict)
     const result = await controller.recoverSession({ kind: 'agent', hostId: 'local', agentSessionId: 'agent-1',
       run: previous.session.run }, config, undefined, 'same-stable-intent')
-    if (situation === 'exact-running') {
-      expect(result).toMatchObject({ kind: 'reattachable', session: { processState: 'running', control: { run: { runId: 'canonical-run' } } } })
-    } else expect(result).toEqual(conflict)
+    expect(result).toEqual(conflict)
     expect(client.ensureAgentContinuity).toHaveBeenCalledTimes(1)
     expect(client.ensureAgentContinuity.mock.calls[0]?.[0]).toMatchObject({ operationId: 'same-stable-intent' })
     expect(client.ensureAgentContinuity.mock.calls[0]?.[0]).not.toHaveProperty('prompt')
