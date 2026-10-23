@@ -9,6 +9,7 @@ type Lease = { config: SshHostConfig; client: AgentMuxSshHostedClient }
 /** Read the original application configuration; own only these SSH consumer leases. */
 export function configuredHostClients(path: string | undefined) {
   const leases = new Map<string, Lease>()
+  const configurationRead = new AbortController()
   const routes = new Map<string, { config: SshHostConfig; controller: AbortController }>()
   const work = new Set<Promise<void>>()
   let watcher: FSWatcher | undefined, pending: Promise<void> | undefined, retry: NodeJS.Timeout | undefined
@@ -23,7 +24,7 @@ export function configuredHostClients(path: string | undefined) {
   const apply = async () => {
     if (!path || !isAbsolute(path)) { if (path !== undefined) issue('The original Host configuration path must be absolute.'); return }
     let value: unknown
-    try { value = JSON.parse(await readFile(path, 'utf8')) }
+    try { value = JSON.parse(await readFile(path, { encoding: 'utf8', signal: configurationRead.signal })) }
     catch { issue('Reading the original Host configuration failed.'); return }
     const parsed = parseHostConfigurations(value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>).hosts : undefined)
     if (!parsed.success) { issue('The original Hosts configuration is invalid: ' + parsed.issues.map(problem => [...problem.path, problem.message].join('.')).join('; ')); return }
@@ -99,7 +100,7 @@ export function configuredHostClients(path: string | undefined) {
     start() { if (!started && !closed) { started = true; void refresh() } },
     clients: () => [...leases].map(([hostId, lease]) => ({ hostId, client: lease.client })),
     async close() {
-      closed = true; if (retry) clearTimeout(retry); watcher?.close(); watcher = undefined
+      closed = true; configurationRead.abort(); if (retry) clearTimeout(retry); watcher?.close(); watcher = undefined
       for (const route of routes.values()) route.controller.abort()
       await pending
       const results = await Promise.allSettled([...work, ...[...leases.values()].map(lease => lease.client.dispose())])
