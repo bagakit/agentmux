@@ -57,6 +57,8 @@ import { workbenchDocumentIdentity } from '../lib/workbench-window-registry'
 import { useConversationReadAhead } from '../lib/use-conversation-read-ahead'
 import type { ConversationConsumerQuery } from '@agentmux/core/control'
 import type { ConversationConsumerSample } from '../../../shared/conversation-consumer-observation'
+import { channelProfileKey, useChannelActorProfiles } from '../lib/use-channel-actor-profiles'
+import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
 
 const ThemeNavigationUpIcon = semanticIconComponent('navigation.up')
 const ThemeActionCurrentIcon = semanticIconComponent('action.current')
@@ -139,7 +141,7 @@ export function ActivityView({
   fileReferenceNotice,
   onContinue,
   onSelectAnnotation,
-  describeSpeaker,
+  describeSpeaker: describeBaseSpeaker,
   moteConversation = false,
   questionReplyRoute, questionReplyTarget, questionReplyContext, questionDraftNotice, onOpenQuestionTerminal, questionReplyState, questionReplyDraft, onQuestionDraftChange, onQuestionReply,
   renderMessageActions, renderRecordActions, renderReadingTools
@@ -171,9 +173,8 @@ export function ActivityView({
   onContinue?: (prompt: string) => void
   onSelectAnnotation?: (selection: ConversationAnnotationSelection) => void
   /**
-   * 把一个说话人身份解析成「叫什么、画哪个 provider 的图标」。由持有 Session 的那一层给出——
-   * 本组件不读 Store，所以 `providerId` 与显示名只能从外面进来。缺省时两条对话轴不渲染：轴的
-   * 价值在于认出身份，没有名字的头像认不出谁，画出来只是一排装饰。
+   * Session owner supplies Agent and Mote presentation. Channel metadata follows
+   * this accepted reading window; without represented external actors the default stays unchanged.
    */
   describeSpeaker?: DescribeSpeaker
   moteConversation?: boolean
@@ -353,6 +354,21 @@ export function ActivityView({
   }, [conversationReading?.opened, conversationReading?.identity])
   const { records: conversationRecords, originalRecords: originalConversationRecords, coverage: conversationCoverage, nativeTailBeforeRecordId, unifiedItems, segments } = useMemo(
     () => buildActivityEntries(readingWindow.projection), [readingWindow.projection])
+  const channelAuthors = useMemo(() => [...conversationRecords, ...originalConversationRecords].flatMap(record =>
+    record.author?.kind === 'external' ? [record.author] : []), [conversationRecords, originalConversationRecords])
+  const channelOwner = useMemo(() => {
+    const snapshot = readingWindow.snapshot
+    return snapshot && [...conversationRecords, ...originalConversationRecords].every(record => record.author?.kind !== 'external' ||
+      record.executionHostId === snapshot.hostId && record.sourceHostId === snapshot.sourceHostId) ? snapshot : undefined
+  }, [readingWindow.snapshot, conversationRecords, originalConversationRecords])
+  const channelProfiles = useChannelActorProfiles(channelAuthors, channelOwner, readingEnabled && documentVisible &&
+    conversationReading?.consumer?.visible !== false && conversationReading?.consumer?.activityShown !== false)
+  const describeSpeaker = useMemo(() => {
+    if (!channelAuthors.length) return describeBaseSpeaker
+    const external = createSpeakerResolver({ lookupExternal: author => channelProfiles.get(channelProfileKey(author)) })
+    return ((speaker, size) => speaker.role === 'external' ? external(speaker) :
+      describeBaseSpeaker?.(speaker, size) ?? external(speaker)) satisfies DescribeSpeaker
+  }, [describeBaseSpeaker, channelProfiles, channelAuthors.length])
 
   const placed = useMemo(() => placeSegments(segments), [segments])
   const segmentEls = useRef(new Map<string, HTMLElement>())

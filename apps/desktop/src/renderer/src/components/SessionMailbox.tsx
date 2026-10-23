@@ -4,6 +4,7 @@ import { inputMailboxItemKey, useAgentInputMailbox } from '@agentmux/client-ui/u
 import { InputMailboxRecord, InputMailboxFrame, inputMailboxPresentation } from '@agentmux/client-ui/components/InputMailboxRecords'
 import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { useWorkbenchDocument } from '../lib/workbench-document'
+import { useWorkbenchDocumentVisibility } from '../lib/workbench-window-registry'
 import { MailboxLocationContext } from './MailboxLocationContext'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type PointerEvent, type ReactNode } from 'react'
@@ -36,7 +37,8 @@ import { ConversationMessage, type ConversationReadingProps } from '@agentmux/cl
 import type { ConversationHistoryResourceReader } from '@agentmux/client-ui/components/ConversationResourceImage'
 import { ConversationMessageAvatar } from './ConversationMessageAvatar'
 import { speakerOf } from '../lib/conversation-speaker'
-import type { ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
+import { createSpeakerResolver, type ConversationSpeaker } from '@agentmux/client-ui/conversation-speaker'
+import { channelProfileKey, useChannelActorProfiles } from '../lib/use-channel-actor-profiles'
 import type { RevealMailboxMessage } from '../lib/mailbox-message-navigation'
 import { createMailboxMessagesSelector, mailboxInputMessages, mailboxMessageKey as messageKey, isMailboxUserMessage as isUserMessage, type MailboxDisplayItem } from '../lib/session-mailbox-messages'
 
@@ -64,6 +66,8 @@ function latestFirst(a: number | undefined, b: number | undefined) {
   return b - a
 }
 
+const speakerIdentityKey = (speaker: ConversationSpeaker) => speaker.external
+  ? channelProfileKey(speaker.external) : JSON.stringify([speaker.role, speaker.id])
 
 function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, reading, sessionId, renderNavigation, historyResourceReader, rowsOnly = false, renderContributions, copyInParent = false }: {
   mailboxOrigin?: OpenHttpLinkOrigin | undefined
@@ -85,7 +89,7 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
     for (const { message, group } of recent) {
       const author = group?.author.kind === 'system' ? { kind: 'unknown' as const } : group?.author ?? message.author
       const speaker = speakerOf({ ...message, author }) as ConversationSpeaker
-      const key = `${speaker.role}:${speaker.id}`
+      const key = speakerIdentityKey(speaker)
       if (result.has(key)) continue
       const described = speaker.role !== 'unknown' ? reading?.describeSpeaker?.(speaker, 18) : undefined
       const name = described?.name || (author.kind === 'agent' ? `Agent ${author.agentSessionId.slice(0, 8)}`
@@ -99,7 +103,7 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
   const identity = (item: MailboxDisplayItem) => {
     const author = item.group?.author.kind === 'system' ? { kind: 'unknown' as const } : item.group?.author ?? item.message.author
     const speaker = speakerOf({ ...item.message, author }) as ConversationSpeaker
-    return identities.get(`${speaker.role}:${speaker.id}`)!
+    return identities.get(speakerIdentityKey(speaker))!
   }
   const authorLabel = (item: MailboxDisplayItem) => identity(item).name
   const time = (item: MailboxDisplayItem) => item.message.recordedAt
@@ -137,7 +141,7 @@ function MessageHistory({ mailboxOrigin, items, selectedKey, onOpen, onCopy, rea
 }
 
 /** Folders project durable delivery facts; read receipts never advance delivery state. */
-export function SessionMailbox({ pendingLayout, system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueuedToDraft, onMoveQueued, onSendQueued, onCancelQueuedPreparation, onCopyQueued, onEditQueued, sendImmediately = false, reading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false, noticePresentation, inputHistory, historyResourceReader, onHistoryVisible }: {
+export function SessionMailbox({ pendingLayout, system, queued, timeline, progressSession, visible = true, control: propControl, userMessages: propUserMessages, onArchiveQueued, onMoveQueuedToDraft, onMoveQueued, onSendQueued, onCancelQueuedPreparation, onCopyQueued, onEditQueued, sendImmediately = false, reading: baseReading, onRevealMessage, mailboxOrigin, children, pendingInteraction = false, noticePresentation, inputHistory, historyResourceReader, onHistoryVisible }: {
   pendingLayout?: PendingDeliveryLayout | undefined
   children?: (mailbox: ReactNode, pending: ReactNode, composerRef: import('react').RefObject<HTMLDivElement | null>) => ReactNode
   /** Presentation of an existing notice, shared by this mailbox and its right dock. */
@@ -166,6 +170,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
   sendImmediately?: boolean
 }) {
   const document = useWorkbenchDocument()
+  const documentVisible = useWorkbenchDocumentVisibility(document)
   const window = document.defaultView!
   const id = useId()
   // Reading intent survives a hidden workface; the native popover may leave top layer meanwhile.
@@ -399,6 +404,21 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
     mailbox: [], author: selectedGroup?.author ?? selectedOriginal.author }], sourceHostId)[0] : undefined
   const selectedJournal = wanted && folder === 'user' ? journalRows.find(row => row.key === wanted) : undefined
   const detail = Boolean(selectedNotice || selectedMessage || selectedJournal || (folder === 'inbox' || folder === 'outbox') && wanted?.startsWith('a2a:'))
+  const channelGroups = folder !== 'user' ? [] : selectedJournal ? [selectedJournal.group] : selectedMessage?.group ? [selectedMessage.group]
+    : rows.flatMap(row => row.kind === 'local' ? [] : [row.group])
+  const channelAuthors = channelGroups.flatMap(group => [group.author,
+    ...(selectedJournal || selectedMessage ? group.messages.map(message => message.author) : [])])
+    .flatMap(author => author.kind === 'external' ? [author] : [])
+  const channelOwner = sourceHostId && channelGroups.every(group => group.messages.every(message =>
+    !message.sourceRecord || message.sourceRecord.record.hostId === sourceHostId))
+    ? { hostId: inputMailboxHost, sourceHostId } : undefined
+  const channelProfiles = useChannelActorProfiles(channelAuthors, channelOwner, open && visible && documentVisible && folder === 'user')
+  const reading = useMemo(() => {
+    if (!channelAuthors.length) return baseReading
+    const external = createSpeakerResolver({ lookupExternal: author => channelProfiles.get(channelProfileKey(author)) })
+    return { ...baseReading, describeSpeaker: ((speaker, size) => speaker.role === 'external' ? external(speaker) :
+      baseReading?.describeSpeaker?.(speaker, size) ?? external(speaker)) satisfies NonNullable<ConversationReadingProps['describeSpeaker']> }
+  }, [baseReading, channelProfiles, channelAuthors.length])
   function queueRecordProps() {
     return { sessionId: mailboxSessionId, selectedId: selectedQueue?.id ?? null, reading, pendingInteraction,
       onSelect: (key: string) => { focusAfter.current = null; setSelection({ scope, folder: 'user', key: `queue:${key}` }) },
