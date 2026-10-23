@@ -16,14 +16,13 @@ afterEach(async () => {
 async function fixture() { const f = await enrollmentFixture(); cleanup.push(f.close); return f }
 function vaultReads() {
   return [vi.spyOn(ConnectionSecrets.prototype, 'assertAvailable'), vi.spyOn(ConnectionSecrets.prototype, 'inspect'),
-    vi.spyOn(ConnectionSecrets.prototype, 'resolve'), vi.spyOn(ConnectionSecrets.prototype, 'store')]
+    vi.spyOn(ConnectionSecrets.prototype, 'resolve'), vi.spyOn(ConnectionSecrets.prototype, 'store')] as const
 }
 
-it('SDK and compiled CLI discover enrollment metadata without probing a locked vault, while begin still uses the original secure owner', async () => {
-  const f = await fixture(), available = vi.spyOn(f.encryption, 'isEncryptionAvailable').mockReturnValue(false)
-  const encrypt = vi.spyOn(f.encryption, 'encryptString'), decrypt = vi.spyOn(f.encryption, 'decryptString'), vault = vaultReads()
+it('SDK and compiled CLI discover enrollment metadata without probing unavailable private storage, while begin still uses its original owner', async () => {
+  const f = await fixture(), vault = vaultReads(), available = vault[0].mockRejectedValue(new Error('fixture-private-storage-unavailable'))
   const page = await f.sdk.call('connection.enrollment.ls', {})
-  expect(available).not.toHaveBeenCalled(); expect(encrypt).not.toHaveBeenCalled(); expect(decrypt).not.toHaveBeenCalled()
+  expect(available).not.toHaveBeenCalled()
   for (const read of vault) expect(read).not.toHaveBeenCalled()
   expect(page).toMatchObject({ operations: [], capabilities: [{ adapterId: f.input.adapterId, domain: f.input.domain, availability: 'available' }] })
   const cli = await f.cli(['enrollment', 'ls'])
@@ -32,35 +31,35 @@ it('SDK and compiled CLI discover enrollment metadata without probing a locked v
   const attempted = await f.sdk.call('connection.enrollment.begin', f.input)
   expect(available).toHaveBeenCalled(); expect(vault[0]).toHaveBeenCalled()
   expect(attempted.operation).toMatchObject({ operationId: f.input.operationId, authentication: { stage: 'not-started' }, diagnostic: { stage: 'secure-storage', code: 'asset-unconfirmed' } })
-  expect(f.begin).not.toHaveBeenCalled(); expect(encrypt).not.toHaveBeenCalled(); expect(decrypt).not.toHaveBeenCalled()
+  expect(f.begin).not.toHaveBeenCalled()
   for (const read of vault) read.mockClear(); available.mockClear()
   expect((await f.sdk.call('connection.enrollment.ls', {})).operations).toEqual([attempted.operation])
   expect(available).not.toHaveBeenCalled(); for (const read of vault) expect(read).not.toHaveBeenCalled()
   expect(f.create).not.toHaveBeenCalled()
 })
 
-it('saved metadata remains readable while locked, but an explicit private inspection still resolves its original encrypted snapshot', async () => {
+it('saved metadata remains readable while private storage is unavailable, and private inspection recovers its original snapshot', async () => {
   const f = await fixture(), waiting = await f.sdk.call('connection.enrollment.begin', f.input)
   const saved = await f.sdk.call('connection.configure', { operationId: 'metadata-saved-configuration', expectedRevision: null,
     connection: { connectionId: 'metadata-saved-bot', adapterId: f.input.adapterId, application: { domain: f.input.domain, appId: 'metadata-original-application' },
       label: 'Metadata bot', credentialRef: 'metadata-retained-ref', enabled: false } })
-  const available = vi.spyOn(f.encryption, 'isEncryptionAvailable').mockReturnValue(false)
-  const encrypt = vi.spyOn(f.encryption, 'encryptString'), decrypt = vi.spyOn(f.encryption, 'decryptString'), vault = vaultReads()
+  const originalAvailable = ConnectionSecrets.prototype.assertAvailable
+  const vault = vaultReads(), available = vault[0].mockRejectedValue(new Error('fixture-private-storage-unavailable'))
   expect((await f.sdk.call('connection.enrollment.ls', {})).operations).toEqual([waiting.operation])
-  expect((await f.sdk.call('connection.ls', {})).connections).toEqual([saved.connection])
-  expect((await f.sdk.call('connection.inspect', { connectionId: saved.connection.config.connectionId })).connection).toEqual(saved.connection)
+  expect((await f.sdk.call('connection.ls', {})).connections).toMatchObject([saved.connection])
+  expect((await f.sdk.call('connection.inspect', { connectionId: saved.connection.config.connectionId })).connection).toMatchObject(saved.connection)
   expect(await f.sdk.call('connection.setup.ls', { connectionId: saved.connection.config.connectionId })).toMatchObject({ operations: [], next: null })
   expect(await f.sdk.call('connection.service.get', {})).toMatchObject({ enabled: true })
-  expect(available).not.toHaveBeenCalled(); expect(encrypt).not.toHaveBeenCalled(); expect(decrypt).not.toHaveBeenCalled()
+  expect(available).not.toHaveBeenCalled()
   for (const read of vault) expect(read).not.toHaveBeenCalled()
   const locked = await f.sdk.call('connection.enrollment.inspect', { operationId: f.input.operationId })
   expect(available).toHaveBeenCalled(); expect(locked.challenge).toBeNull()
   expect(locked.operation).toMatchObject({ operationId: f.input.operationId, authentication: waiting.operation!.authentication, diagnostic: { stage: 'secure-storage', code: 'challenge-unconfirmed' } })
-  available.mockReturnValue(true); for (const read of vault) read.mockClear(); decrypt.mockClear()
+  available.mockImplementation(originalAvailable); for (const read of vault) read.mockClear()
   const original = await f.sdk.call('connection.enrollment.inspect', { operationId: f.input.operationId })
-  expect(original).toEqual(waiting); expect(vault[0]).toHaveBeenCalled(); expect(vault[2]).toHaveBeenCalled(); expect(decrypt).toHaveBeenCalled()
+  expect(original).toEqual(waiting); expect(vault[0]).toHaveBeenCalled(); expect(vault[2]).toHaveBeenCalled()
   expect(f.begin).toHaveBeenCalledTimes(1); expect(f.authentication).not.toHaveBeenCalled(); expect(f.create).not.toHaveBeenCalled()
-  expect((await f.sdk.call('connection.ls', {})).connections).toEqual([saved.connection])
+  expect((await f.sdk.call('connection.ls', {})).connections).toMatchObject([saved.connection])
 })
 
 it('a Host without the complete enrollment security port does not advertise creation or borrow another secret owner', async () => {

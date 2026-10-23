@@ -13,7 +13,7 @@ import { parseConnectionEnrollmentDiagnostic, parseConnectionEnrollmentOperation
 import { ConnectionHost } from '@agentmux/connectors'
 import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
-import { enrollmentAvatar, enrollmentEncryption, enrollmentFixture, fixtureCredential, fixturePrivateState } from './fixtures/connection-enrollment.js'
+import { enrollmentAvatar, enrollmentFixture, fixtureCredential, fixturePrivateState } from './fixtures/connection-enrollment.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
 
@@ -30,10 +30,10 @@ async function confirmed(f: Fixture) { const waiting = await f.sdk.call('connect
 async function create(f: Fixture) { return advance(f, await confirmed(f), 'create') }
 function stored(f: Pick<Fixture, 'services' | 'input'>) { return JSON.parse(String(f.services.database!.prepare('SELECT record_json FROM connection_enrollment WHERE operation_id=?').get(f.input.operationId)!.record_json)) }
 async function defaultFixture() {
-  const root = await mkdtemp(join(tmpdir(), 'enroll-default-')), directory = join(root, 'connections'), socketPath = join(root, 'public.sock'), encryption = enrollmentEncryption()
+  const root = await mkdtemp(join(tmpdir(), 'enroll-default-')), directory = join(root, 'connections'), socketPath = join(root, 'public.sock')
   let services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
   const open = async () => {
-    services = await createConnectionServices({ directory, encryption })
+    services = await createConnectionServices({ directory })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw new Error('Registration cannot borrow an Agent Runtime') } })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   }
@@ -42,7 +42,7 @@ async function defaultFixture() {
   await open()
   const input = { operationId: 'original-platform-enrollment', connectionId: 'original-platform-connection', adapterId: 'feishu', domain: 'open.feishu.cn', label: 'Original bot', preset: { name: 'Original bot', avatar: { pngDataUrl: enrollmentAvatar } } }
   const cli = (args: string[], body?: unknown) => runCompiledObjectCli(['--endpoint', 'unix:' + socketPath, 'connection', 'enrollment', ...args], objectCliEnvironment(root), body === undefined ? '' : JSON.stringify(body))
-  return { root, directory, input, encryption, cli, closeOwner, reopen: open, get services() { return services }, get sdk() { return sdk } }
+  return { root, directory, input, cli, closeOwner, reopen: open, get services() { return services }, get sdk() { return sdk } }
 }
 async function legacy(f: Awaited<ReturnType<typeof defaultFixture>> | Fixture, state: 'pending' | 'unknown') {
   await f.sdk.call('connection.enrollment.ls', {})
@@ -100,11 +100,11 @@ it('joins concurrent same intent once and rejects changed target, actor and payl
   expect(f.begin).toHaveBeenCalledTimes(1); expect(f.authentication).not.toHaveBeenCalled()
 }, 20_000)
 
-it('keeps encryption unavailable before begin, and retains unknown effect without automatic authentication or creation', async () => {
+it('refuses unavailable private storage before begin, and retains unknown effects without automatic authentication or creation', async () => {
   const f = await fixture({ begin: async () => { throw new Error('private remote device code and credential') } })
-  f.encryption.isEncryptionAvailable = () => false
+  const available = vi.spyOn(ConnectionSecrets.prototype, 'assertAvailable').mockRejectedValue(new Error('fixture-private-storage-unavailable'))
   const notStarted = await f.sdk.call('connection.enrollment.begin', f.input); expect(notStarted.operation!.authorization).toBe('not-started'); expect(notStarted.operation!.diagnostic).toEqual({ stage: 'secure-storage', code: 'asset-unconfirmed' }); expect(f.begin).not.toHaveBeenCalled()
-  f.encryption.isEncryptionAvailable = () => true
+  available.mockRestore()
   const unknown = await f.sdk.call('connection.enrollment.begin', f.input); expect(unknown.operation!.authentication!.stage).toBe('unknown'); expect(JSON.stringify(unknown)).not.toContain('private remote')
   const recovered = await advance(f, unknown, 'recover-local'); expect(recovered.operation!.authentication!.stage).toBe('unknown')
   await f.closeOwner(); await f.reopen(); expect(result(await f.cli(['enrollment', 'ls'])).operations).toEqual([recovered.operation]); expect(f.begin).toHaveBeenCalledTimes(1); expect(f.authentication).not.toHaveBeenCalled(); expect(f.create).not.toHaveBeenCalled()
@@ -173,7 +173,7 @@ it('rejects a stale authentication action after another owner advances its revis
   const waiting = await f.sdk.call('connection.enrollment.begin', f.input), input = decision(waiting, 'continue-authentication')
   const row = f.services.database!.prepare('SELECT record_json FROM connection_enrollment WHERE operation_id=?').get(f.input.operationId)!
   const actor = JSON.parse(String(row.record_json)).actor as { kind: 'user'; id: string }
-  const second = await createConnectionServices({ directory: f.directory, encryption: f.encryption, adapters: [f.adapter] })
+  const second = await createConnectionServices({ directory: f.directory, adapters: [f.adapter] })
   clean.push(() => second.close())
   let release!: () => void, paused!: () => void, checks = 0
   const reached = new Promise<void>(r => { paused = r }), resume = new Promise<void>(r => { release = r })
@@ -327,7 +327,7 @@ it('does not attach a late checkpoint error to an original challenge another own
   const original = f.sdk.call('connection.enrollment.begin', f.input)
   const originalResult = original.then(value => ({ value }), error => ({ error }))
   await waiting
-  const second = await createConnectionServices({ directory: f.directory, encryption: f.encryption, adapters: [f.adapter] }); clean.push(() => second.close())
+  const second = await createConnectionServices({ directory: f.directory, adapters: [f.adapter] }); clean.push(() => second.close())
   const row = f.services.database!.prepare('SELECT record_json FROM connection_enrollment WHERE operation_id=?').get(f.input.operationId)!
   const actor = JSON.parse(String(row.record_json)).actor as { kind: 'user'; id: string }
   const waitingView = await second.connections.enrollment!.inspect({ operationId: f.input.operationId }, { actor })
@@ -495,7 +495,7 @@ it('reads bounded original Enrollment trace through SDK and compiled CLI without
   expect(configured.operation!.configuration).toBe('configured')
   const before = f.services.database!.prepare('SELECT total_changes() AS count').get()
   const resolve = vi.spyOn(ConnectionSecrets.prototype, 'resolve'), store = vi.spyOn(f.services.secrets, 'store')
-  f.encryption.isEncryptionAvailable = () => false
+  const available = vi.spyOn(ConnectionSecrets.prototype, 'assertAvailable').mockRejectedValue(new Error('fixture-private-storage-unavailable'))
   const first = result(await f.cli(['enrollment', 'inspect', '--operation-id', operationId, '--request-trace', '--trace-limit', '2']))
   expect(first.challenge).toBeNull(); expect(first.account).toBeNull(); expect(first.actions).toEqual([])
   expect(first.requestTrace.entries.map((entry: any) => entry.action)).toEqual(['initialize', 'authentication'])
@@ -511,7 +511,7 @@ it('reads bounded original Enrollment trace through SDK and compiled CLI without
   const steps = f.services.database!.prepare('SELECT attempt_id FROM connection_enrollment_attempt WHERE operation_id=? ORDER BY rowid').all(operationId)
   expect(entries.map(entry => entry.stepId)).toEqual(steps.map(step => step.attempt_id))
   expect(JSON.stringify([first.requestTrace, second.requestTrace, third.requestTrace])).not.toMatch(/original-user|original-tenant|private|credentialRef|cookie|qrPayload|data:image|verify\.example|Original bot/u)
-  expect(resolve).not.toHaveBeenCalled(); expect(store).not.toHaveBeenCalled()
+  expect(available).not.toHaveBeenCalled(); expect(resolve).not.toHaveBeenCalled(); expect(store).not.toHaveBeenCalled()
   expect(f.services.database!.prepare('SELECT total_changes() AS count').get()).toEqual(before)
   expect(f.begin).toHaveBeenCalledTimes(1); expect(f.authentication).toHaveBeenCalledTimes(1); expect(f.create).toHaveBeenCalledTimes(1); expect(f.credential).toHaveBeenCalledTimes(1)
   await f.closeOwner(); await f.reopen()
