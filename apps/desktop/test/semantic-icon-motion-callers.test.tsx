@@ -8,6 +8,10 @@ import { AgentAvatar, ResolvedAgentAvatar } from '../src/renderer/src/components
 import { FocusContextStateMark } from '../src/renderer/src/components/FocusContextState'
 import { GlobalFocusSurface } from '../src/renderer/src/components/GlobalFocusSurface'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
+import { api } from '../src/renderer/src/lib/api'
+import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
+import { activityReadingProps } from './helpers/activity-reading-props'
+import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 import { BrowserOperationStatus, BrowserOperationHistory, BrowserOperationTimeline, BrowserReplayPreview } from '../src/renderer/src/components/BrowserOperationSurface'
 import { WorkflowStatusGlyph } from '../src/renderer/src/components/workflow/WorkflowStatusGlyph'
 import { createFocusProjectionSelector } from '../src/renderer/src/lib/focus-context'
@@ -85,8 +89,10 @@ const operation: BrowserOperation = {
 }
 
 it('plays only the current agent-owned Browser operation and keeps the same running record, preparing history and step timeline static', async () => {
-  const history = [operation, { ...operation, id: 'recorded-preparing', phase: 'preparing' as const }]
-  const render = (activity: BrowserActivityState) => dom.render(<><BrowserOperationStatus activity={activity} /><BrowserOperationHistory operations={history} /><BrowserOperationTimeline operation={operation} /></>)
+  const history = [operation, { ...operation, id: 'recorded-preparing', phase: 'preparing' as const },
+    { ...operation, id: 'recorded-waiting', phase: 'waiting' as const }]
+  const render = (activity: BrowserActivityState, owner: 'agent' | 'human' = 'agent') => dom.render(<><BrowserOperationStatus activity={activity}
+    browserId={operation.browserId} control={{ owner, activeOperationId: owner === 'agent' ? operation.id : null, revision: 1, inputIsolation: 'isolated' }} /><BrowserOperationHistory operations={history} /><BrowserOperationTimeline operation={operation} /></>)
   await render({ control: 'agent', operation })
   const toolbar = () => dom.container.querySelector('.browser-operation-status')!
   expect(presets(toolbar())).toEqual(['execute'])
@@ -96,10 +102,11 @@ it('plays only the current agent-owned Browser operation and keeps the same runn
   expect(presets(dom.container.querySelector('.browser-rsi-timeline')!)).toEqual([])
   expect(dom.container.querySelectorAll('.spin, .wf-streaming-glyph')).toHaveLength(0)
   await render({ control: 'agent', operation: { ...operation, phase: 'preparing' } }); expect(presets(toolbar())).toEqual(['spin'])
-  for (const phase of ['waiting', 'completed', 'failed', 'indeterminate', 'stopped'] as const) {
+  await render({ control: 'agent', operation: { ...operation, phase: 'waiting' } }); expect(presets(toolbar())).toEqual(['wait'])
+  for (const phase of ['completed', 'failed', 'indeterminate', 'stopped'] as const) {
     await render({ control: 'agent', operation: { ...operation, phase } }); expect(presets(toolbar()), phase).toEqual([])
   }
-  await render({ control: 'human', operation }); expect(presets(toolbar())).toEqual([]); expect(toolbar().getAttribute('data-phase')).toBe('human')
+  await render({ control: 'human', operation }, 'human'); expect(presets(toolbar())).toEqual([]); expect(toolbar().getAttribute('data-phase')).toBe('human')
   await render({ control: 'agent', operation: null }); expect(presets(toolbar())).toEqual([]); expect(toolbar().getAttribute('data-phase')).toBe('unknown')
   expect(operation.phase).toBe('running'); expect(history[1]!.phase).toBe('preparing')
 })
@@ -112,7 +119,7 @@ it('uses the original local replay busy receipt for loading motion and removes i
 })
 
 it('animates the original Activity working indicator and removes it on the original confirmed state transitions', async () => {
-  const props = { sessionId: 'agent-1', items: [], capability: 'streaming' as const, describeSpeaker: () => ({ name: 'Original speaker' }) }
+  const props = { sessionId: 'agent-1', capability: 'streaming' as const, describeSpeaker: () => ({ name: 'Original speaker' }) }
   await dom.render(<ActivityView {...props} displayState="working" activitySemantic="active" />)
   const indicator = dom.container.querySelector('.activity-working')!
   expect(indicator).not.toBeNull(); expect(presets(indicator)).toEqual(['work']); expect(indicator.getAttribute('aria-live')).toBe('polite')
@@ -129,17 +136,57 @@ it('animates the original Activity working indicator and removes it on the origi
 })
 
 it('uses the original Activity read-state loading fact for spin and returns to a static readable surface when it completes or fails', async () => {
-  const props = { sessionId: 'agent-1', items: [], capability: 'complete-events' as const, displayState: 'done' as const }
-  const read = { loading: true, error: null as Error | null, hasMore: false, onRetry: vi.fn(), onReadEarlier: vi.fn() }
-  await dom.render(<ActivityView {...props} userMessageRead={read} />)
-  const status = dom.container.querySelector('.activity-feed__reading-status')!
-  expect(status).not.toBeNull(); expect(status.textContent).toContain('Reading records')
-  expect(presets(status)).toEqual(['spin']); expect(status.querySelector('[data-semantic-icon="status.loading"]')).not.toBeNull()
-  for (const error of [null, Error('Original read failure')]) {
-    await dom.render(<ActivityView {...props} userMessageRead={{ ...read, loading: false, error }} />)
-    expect(dom.container.querySelector('.activity-feed__loading-layer')).toBeNull(); expect(presets()).toEqual([])
+  const reference = { hostId: 'local', agentSessionId: 'agent-1' }, source = { providerId: 'codex', nativeSessionId: 'motion-native-source' }
+  const f = await conversationPagePortFixture(reference, source, async () => ({ ...reference, source, items: [
+    { id: 'original-motion-answer', kind: 'assistant-message', contentParts: [{ kind: 'text', text: 'Original answer remains readable.' }] }
+  ], nextCursor: null }))
+  let held: { release(): void; fail: boolean; reached: boolean } | null = null
+  try {
+    await dom.render(<ActivityView {...activityReadingProps({ control: reference })} displayState="done" />)
+    const settled = async () => vi.waitFor(async () => {
+      await act(async () => { await Promise.resolve() })
+      const view = inspectConversationConsumers(reference).consumers[0]
+      expect(view?.accepted).not.toBeNull(); expect(view?.loading).toBe(false); expect(view?.inFlight).toBe(false)
+      if (!view?.error && !view?.observationError) expect(view?.dirty).toBe(false)
+    })
+    await settled()
+    const body = dom.container.querySelector('[data-native-record-id="original-motion-answer"] .log-turn__body p')!
+    expect(body).not.toBeNull()
+    const originalChanges = api.conversation.readConversationChanges
+    vi.spyOn(api.conversation, 'readConversationChanges').mockImplementation(async (...args) => {
+      const response = await originalChanges(...args)
+      if (!held) return response
+      const current = held
+      current.reached = true
+      await new Promise<void>(resolve => { current.release = resolve })
+      if (current.fail) throw new Error('Original read failure')
+      return response
+    })
+    for (const fail of [false, true]) {
+      held = { release() { throw new Error('The original response has not reached its delivery gate') }, fail, reached: false }
+      await f.publishCaptured([{ id: fail ? 'failed-motion-update' : 'complete-motion-update', agentSessionId: reference.agentSessionId,
+        kind: 'lifecycle', source: 'agentmux', title: 'Recorded update', content: 'Original recorded update', status: 'complete', createdAt: 1, updatedAt: 1 }])
+      await vi.waitFor(async () => {
+        await act(async () => { await Promise.resolve() })
+        expect(held?.reached).toBe(true)
+        const status = dom.container.querySelector('.activity-ruler__pending[role="status"]')!
+        expect(status).not.toBeNull(); expect(status.textContent).toContain('Reading records')
+        expect(presets(status)).toEqual(['spin']); expect(status.querySelector('[data-semantic-icon="status.loading"]')).not.toBeNull()
+      })
+      await act(async () => { held!.release(); await Promise.resolve() })
+      held = null
+      await settled()
+      expect(dom.container.querySelector('.activity-ruler__pending[role="status"]')).toBeNull(); expect(presets()).toEqual([])
+      expect(dom.container.querySelector('[data-native-record-id="original-motion-answer"] .log-turn__body p')).toBe(body)
+    }
+    expect(dom.container.textContent).toContain('Original read failure'); expect(dom.draft()).toBe('Keep my draft')
+    expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
+  } finally {
+    const pending = held; held = null
+    if (pending?.reached) pending.release()
+    await dom.render(null)
+    await f.close()
   }
-  expect(dom.container.textContent).toContain('Original read failure'); expect(dom.draft()).toBe('Keep my draft')
 })
 
 it('keeps recorded streaming, recorded running and unknown observations static while explicit live workflow glyphs can animate', async () => {
