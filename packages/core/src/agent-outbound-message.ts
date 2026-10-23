@@ -39,10 +39,10 @@ export type AgentMuxOptionalContext = { text: string; omittedText: string }
 // detailed contracts; reading a guide grants no permission and is not an input gate.
 const AGENTMUX_RUNTIME_GUIDE = /* @__PURE__ */ guideText(guideSharedRuntime, { 'self-context-verb': AGENTMUX_SELF_CONTEXT_VERB, 'goal-skill-entry': AGENTMUX_GOAL_SKILL_ENTRY })
 
-// 引出紧随其后的用户原文——这句是 AgentMux 的引导语，不是用户的话，因此留在信封内。
+// 先说明本次阶段；原用户请求仍只在信封外出现一次。
 const USER_REQUEST_FOLLOWS = 'The user request follows.'
 // 还没有用户请求时的等待指示——同样是 AgentMux 自己的话，进信封。
-const AWAIT_USER_REQUEST = 'No request yet. Wait for the user.'
+const AWAIT_USER_REQUEST = 'No request yet. Complete any read-only initialization below, then wait for the user.'
 
 /**
  * 把 AgentMux 自己的话裹进署名信封。只在内部用于 {@link composeOutboundMessage}——
@@ -122,7 +122,7 @@ export function composeAgentLaunchPrompt(
   // 只有当 AgentMux 确实要说话时，才引出用户段——否则一个空信封只会徒增噪音。
   const compose = () => {
     const parts = [...amuxParts, ...selected].filter(part => part.trim())
-    if (parts.length > 0) parts.push(userRequest ? USER_REQUEST_FOLLOWS : AWAIT_USER_REQUEST)
+    if (parts.length > 0) parts.unshift(userRequest ? USER_REQUEST_FOLLOWS : AWAIT_USER_REQUEST)
     return composeAgentPrompt(userRequest, parts.join('\n\n'))
   }
   for (const [index, part] of optionalContext.entries()) {
