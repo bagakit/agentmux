@@ -36,7 +36,7 @@ beforeEach(async () => {
   service = new AgentMuxRpcService({ coreClients: () => [], capsules: owner })
   calls = []
   inFlight = new Set()
-  transport = <M extends CapsuleMethod>(method: M, params: CapsuleParamsMap[M]) => service.call(method, params, principal) as Promise<CapsuleResultMap[M]>
+  transport = ((method: CapsuleMethod, params: CapsuleParamsMap[CapsuleMethod]) => service.call<CapsuleMethod>(method, params, principal)) as CapsulePort['call']
   vi.spyOn(api.capsules, 'call').mockImplementation(((method: CapsuleMethod, params: CapsuleParamsMap[CapsuleMethod]) => {
     calls.push({ method, params: clone(params) })
     const promise = transport(method, params); inFlight.add(promise)
@@ -45,6 +45,11 @@ beforeEach(async () => {
   }) as CapsulePort['call'])
   vi.spyOn(api.ui, 'chooseDirectory').mockResolvedValue(null)
   vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue()
+  // These domain-editor cases keep their original Node/RPC owner. The dedicated
+  // runtime suite supplies the real Core/ctxmux management join.
+  vi.spyOn(api.capsuleRuntime, 'call').mockResolvedValue({ revision: 1, desired: 'running', phase: 'running',
+    stateDirectory: join(directory, 'state'), socketPath: join(directory, 'capsule.sock'),
+    run: { hostId: 'local', runId: 'domain-editor-fixture-run' }, runtime: null, operation: null, issue: null })
   container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
 })
 afterEach(async () => { await act(async () => root.unmount()); container.remove(); service.dispose(); await owner.close(); await rm(directory, { recursive: true, force: true }); vi.restoreAllMocks() })
@@ -128,7 +133,7 @@ it('keeps an unobserved original operation locked while allowing the draft and o
   transport = (async (method: CapsuleMethod, params: CapsuleParamsMap[CapsuleMethod]) => {
     if (method === 'capsule.config.update') throw new Error('Transport result unknown')
     if (method === 'capsule.operation.inspect') return { operation: null }
-    return real(method, params)
+    return real(method as CapsuleMethod, params)
   }) as CapsulePort['call']
   await change('New Capsule content root', nextRoot); await click('Save defaults'); await click('Check original operation')
   expect(mutations('capsule.config.update')).toHaveLength(1)
