@@ -1,7 +1,13 @@
 import type { AgentDisplayState, AgentProviderId } from '@agentmux/core'
 import type { ToolkitAgentCardField, ToolkitAgentCardReference } from '@agentmux/core/control'
 import type { AgentAvatarAppearance, AppConfig, SessionSnapshot } from '../../../shared/contracts'
-import { sessionStatusLabel } from './session-presentation'
+import { createFirstPromptSelector, sessionStatusLabel } from './session-presentation'
+import { agentDisplayName, workspaceForSession } from './workbench-tabs'
+import { projectWorkspaces, type WorkspaceProject } from './workspace-projects'
+import { scratchTopicsForConfig } from './scratch-topic-snapshots'
+import { formatPathForDisplay } from './copy-path-display'
+import { builtInAgentProviderLabel } from '@agentmux/core/provider-id'
+import type { AppState } from '../store'
 
 export type ToolkitAgentCardFacts = {
   state: 'resolved' | 'unavailable' | 'ambiguous'
@@ -11,13 +17,15 @@ export type ToolkitAgentCardFacts = {
   status?: AgentDisplayState | undefined
   statusLabel?: string | undefined
   workspace?: string | undefined
+  projectName?: string | undefined
+  clientSessionId?: string | undefined
   host?: string | undefined
   sessionId?: string | undefined
   runId?: string | undefined
   executorId?: string | undefined
   appearance?: AgentAvatarAppearance | undefined
 }
-type State = { sessions: readonly SessionSnapshot[]; config: AppConfig | null }
+type State = Pick<AppState, 'config' | 'agentNames' | 'timelines' | 'localHome' | 'scratchTopicSnapshots'> & { sessions: readonly SessionSnapshot[] }
 const EMPTY: ReadonlyMap<string, ToolkitAgentCardFacts> = new Map()
 export const toolkitAgentCardKey = (reference: ToolkitAgentCardReference) => reference.kind === 'session'
   ? JSON.stringify(['session', reference.hostId, reference.sessionId])
@@ -40,19 +48,44 @@ function references(sessions: readonly SessionSnapshot[]) {
   return byReference
 }
 
-function project(candidates: readonly SessionSnapshot[] | undefined, fields: ReadonlySet<ToolkitAgentCardField>, config: AppConfig | null): ToolkitAgentCardFacts {
+export type ToolkitAgentCardResolution =
+  | { state: 'resolved'; clientSessionId: string }
+  | { state: 'unavailable' | 'ambiguous'; reason: string }
+
+function resolve(candidates: readonly SessionSnapshot[] | undefined): ToolkitAgentCardResolution {
   if (!candidates?.length) return { state: 'unavailable', reason: 'Agent identity unavailable' }
   if (candidates.length !== 1) return { state: 'ambiguous', reason: 'Agent identity is ambiguous' }
   const session = candidates[0]!
   if (session.kind !== 'agent' || session.control.kind !== 'agent') return { state: 'unavailable', reason: 'Referenced Run is not an Agent Session' }
-  const avatar = fields.has('avatar')
+  if (session.control.hostId !== session.hostId) return { state: 'unavailable', reason: 'Agent host identity is inconsistent' }
+  return { state: 'resolved', clientSessionId: session.id }
+}
+
+/** Revalidate the original reference against the same current index before presentation navigation. */
+export function resolveToolkitAgentCardSession(sessions: readonly SessionSnapshot[], reference: ToolkitAgentCardReference): ToolkitAgentCardResolution {
+  return resolve(references(sessions).get(toolkitAgentCardKey(reference)))
+}
+
+function project(candidates: readonly SessionSnapshot[] | undefined, fields: ReadonlySet<ToolkitAgentCardField>, state: State,
+  firstPrompt: string | null, projects: readonly WorkspaceProject[], topics: ReturnType<typeof scratchTopicsForConfig>): ToolkitAgentCardFacts {
+  const resolution = resolve(candidates)
+  if (resolution.state !== 'resolved') return resolution
+  const session = candidates![0]! as Extract<SessionSnapshot, { kind: 'agent' }>
+  const avatar = fields.has('avatar'), config = state.config
   const appearance = avatar ? config?.executors[session.executorId]?.avatar ?? config?.appearance.agentAvatars?.[session.executorId] : undefined
+  const workspace = fields.has('workspace') ? workspaceForSession(config, session, topics) : undefined
+  const owner = workspace ? projects.find(candidate => candidate.workspaces.some(value => value.id === workspace.id)) : undefined
   return {
-    state: 'resolved', name: fields.has('name') || avatar ? session.label : undefined,
+    state: 'resolved', clientSessionId: resolution.clientSessionId,
+    name: fields.has('name') || avatar ? agentDisplayName({ userName: state.agentNames[session.id], firstPrompt,
+      fallbackLabel: session.label, providerLabel: builtInAgentProviderLabel(session.providerId) }) : undefined,
     provider: fields.has('provider') || avatar ? session.providerId : undefined,
     status: fields.has('status') ? session.status.state : undefined,
     statusLabel: fields.has('status') ? sessionStatusLabel(session) : undefined,
-    workspace: fields.has('workspace') ? session.workspacePath : undefined,
+    workspace: fields.has('workspace') ? formatPathForDisplay(session.workspacePath, {
+      home: config?.hosts.find(host => host.id === session.hostId)?.kind === 'local' ? state.localHome : '', copyPathsAsAbsolute: config?.copyPathsAsAbsolute
+    }) : undefined,
+    projectName: owner?.name,
     host: fields.has('host') ? session.hostId : undefined,
     sessionId: fields.has('sessionId') ? session.control.agentSessionId : undefined,
     runId: fields.has('runId') ? session.control.run.runId : undefined,
@@ -62,26 +95,45 @@ function project(candidates: readonly SessionSnapshot[] | undefined, fields: Rea
 }
 function same(a: ToolkitAgentCardFacts | undefined, b: ToolkitAgentCardFacts) {
   return a?.state === b.state && a.reason === b.reason && a.name === b.name && a.provider === b.provider &&
-    a.status === b.status && a.statusLabel === b.statusLabel && a.workspace === b.workspace && a.host === b.host &&
+    a.clientSessionId === b.clientSessionId && a.projectName === b.projectName && a.status === b.status && a.statusLabel === b.statusLabel && a.workspace === b.workspace && a.host === b.host &&
     a.sessionId === b.sessionId && a.runId === b.runId && a.executorId === b.executorId &&
     a.appearance?.tint === b.appearance?.tint && a.appearance?.badge === b.appearance?.badge
 }
 
 export function createToolkitAgentCardSelector(refs: readonly ToolkitAgentCardReference[], fields: readonly ToolkitAgentCardField[], active: boolean) {
   const selected = new Set(fields), wanted = new Map(refs.map(reference => [toolkitAgentCardKey(reference), reference]))
-  let sessions: State['sessions'] | undefined, executors: AppConfig['executors'] | undefined
-  let appearances: AppConfig['appearance']['agentAvatars'] | undefined
+  const naming = selected.has('name') || selected.has('avatar'), workspace = selected.has('workspace')
+  const prompts = new Map<string, { sessionId: string; select: ReturnType<typeof createFirstPromptSelector> }>()
+  let workspaces: AppConfig['workspaces'] | undefined, projects: readonly WorkspaceProject[] = []
+  let scratchSnapshots: State['scratchTopicSnapshots'] | undefined, topics: ReturnType<typeof scratchTopicsForConfig> = null
+  const previousInputs = new Map<string, readonly unknown[]>()
   let previous: ReadonlyMap<string, ToolkitAgentCardFacts> = EMPTY
   return (state: State): ReadonlyMap<string, ToolkitAgentCardFacts> => {
     if (!active || !selected.size || !wanted.size) return EMPTY
-    const nextExecutors = selected.has('avatar') ? state.config?.executors : undefined
-    const nextAppearances = selected.has('avatar') ? state.config?.appearance.agentAvatars : undefined
-    if (sessions === state.sessions && executors === nextExecutors && appearances === nextAppearances) return previous
-    sessions = state.sessions; executors = nextExecutors; appearances = nextAppearances
+    if (workspace && (state.config?.workspaces !== workspaces || state.scratchTopicSnapshots !== scratchSnapshots)) {
+      if (state.config?.workspaces !== workspaces) projects = projectWorkspaces(state.config?.workspaces ?? [])
+      workspaces = state.config?.workspaces; scratchSnapshots = state.scratchTopicSnapshots
+      topics = scratchTopicsForConfig(state.config, state.scratchTopicSnapshots)
+    }
     const index = references(state.sessions), next = new Map<string, ToolkitAgentCardFacts>()
     let changed = previous.size !== wanted.size
     for (const key of wanted.keys()) {
-      const projected = project(index.get(key), selected, state.config), old = previous.get(key)
+      const candidates = index.get(key), session = candidates?.length === 1 ? candidates[0] : undefined
+      let prompt: string | null = null
+      if (naming && session?.kind === 'agent' && !state.agentNames[session.id]?.trim()) {
+        let source = prompts.get(key)
+        if (source?.sessionId !== session.id) { source = { sessionId: session.id, select: createFirstPromptSelector(session.id) }; prompts.set(key, source) }
+        prompt = source.select(state)
+      } else prompts.delete(key)
+      const inputs = [session, candidates?.length, naming ? state.agentNames[session?.id ?? ''] : undefined, prompt,
+        selected.has('avatar') && session?.kind === 'agent' ? state.config?.executors[session.executorId]?.avatar ?? state.config?.appearance.agentAvatars?.[session.executorId] : undefined,
+        workspace ? state.config?.workspaces : undefined, workspace ? state.config?.hosts : undefined,
+        workspace ? state.config?.copyPathsAsAbsolute : undefined, workspace ? state.localHome : undefined,
+        workspace ? topics : undefined]
+      const before = previousInputs.get(key), old = previous.get(key)
+      if (before && inputs.every((value, index) => value === before[index])) { next.set(key, old!); continue }
+      previousInputs.set(key, inputs)
+      const projected = project(candidates, selected, state, prompt, projects, topics)
       if (same(old, projected)) next.set(key, old!)
       else { next.set(key, projected); changed = true }
     }
