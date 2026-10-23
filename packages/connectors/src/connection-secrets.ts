@@ -1,22 +1,33 @@
+import { chmodSync, statSync } from 'node:fs'
+import { dirname } from 'node:path'
 import type { DatabaseSync } from 'node:sqlite'
 import { mintObjectId, AgentMuxError } from '@agentmux/core'
 import type { WritableSecretPort } from './connection-host.js'
 
-export type CredentialEncryption = {
-  isAsyncEncryptionAvailable(): Promise<boolean>
-  getSelectedStorageBackend?(): string
-  encryptStringAsync(value: string): Promise<Buffer>
-  decryptStringAsync(value: Buffer): Promise<{ result: string; shouldReEncrypt: boolean }>
-}
-/** The executing Host stores only encrypted credential bytes; unavailable encryption never writes plaintext. */
+const FORMAT = Buffer.from('amux.connection-credential.raw.v1\0')
+const unavailable = (): never => { throw new AgentMuxError('The original private credential storage is unavailable. Restore this Host storage and inspect the original operation; existing Agents and records are retained.', 'CONNECTION_CREDENTIAL_UNAVAILABLE') }
+/** Permission-protected plaintext in the original SQLite owner. The historical column name does not imply encryption. */
 export class ConnectionSecrets implements WritableSecretPort {
-  constructor(private readonly database: DatabaseSync, private readonly encryption: CredentialEncryption) {
+  constructor(private readonly database: DatabaseSync) {
     database.exec('CREATE TABLE IF NOT EXISTS connection_credential (credential_ref TEXT PRIMARY KEY, operation_id TEXT UNIQUE NOT NULL, ciphertext BLOB NOT NULL)')
   }
   async assertAvailable(): Promise<void> {
-    let available = false
-    try { available = await this.encryption.isAsyncEncryptionAvailable() && this.encryption.getSelectedStorageBackend?.() !== 'basic_text' } catch { /* Never expose raw OS credential-service errors. */ }
-    if (!available) throw new AgentMuxError('Secure credential storage is unavailable on this Host. Unlock the operating system credential service and retry the same operation.', 'CONNECTION_CREDENTIAL_UNAVAILABLE')
+    try {
+      const path = this.database.location()
+      if (path) {
+        const directory = statSync(dirname(path)), file = statSync(path), uid = process.getuid?.()
+        if (!directory.isDirectory() || (directory.mode & 0o077) !== 0 || !file.isFile() || uid !== undefined && (directory.uid !== uid || file.uid !== uid)) return unavailable()
+        // Only this exact database and its SQLite-owned sidecars; never a parent sweep or global umask.
+        for (const owned of [path, path + '-journal', path + '-wal', path + '-shm']) {
+          let metadata
+          try { metadata = statSync(owned) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT' && owned !== path) continue; throw error }
+          if (!metadata.isFile() || uid !== undefined && metadata.uid !== uid) return unavailable()
+          chmodSync(owned, 0o600)
+          if ((statSync(owned).mode & 0o777) !== 0o600) return unavailable()
+        }
+      }
+      this.database.prepare('SELECT 1').get()
+    } catch { return unavailable() }
   }
   async inspect(operationId: string): Promise<{ credentialRef: string } | null> {
     if (typeof operationId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(operationId)) throw new AgentMuxError('Credential operation identity is invalid.', 'INVALID_CONNECTION_DATA')
@@ -25,46 +36,45 @@ export class ConnectionSecrets implements WritableSecretPort {
       return row ? { credentialRef: row.credential_ref as string } : null
     } catch { throw new AgentMuxError('The original credential operation is unconfirmed. Inspect it before replacing its identity.', 'CONNECTION_CREDENTIAL_UNCONFIRMED') }
   }
+  private value(bytes: unknown): string {
+    if (!(bytes instanceof Uint8Array)) throw new AgentMuxError('The original private credential value is unconfirmed. Its bytes and reference are retained.', 'CONNECTION_CREDENTIAL_UNCONFIRMED')
+    if (!Buffer.from(bytes).subarray(0, FORMAT.length).equals(FORMAT)) throw new AgentMuxError('This original credential format is unsupported. Its bytes, operation and reference are retained; no conversion was attempted.', 'CONNECTION_CREDENTIAL_FORMAT_UNSUPPORTED')
+    try { const value = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes.subarray(FORMAT.length)); if (!value.length) throw new Error('Empty private credential'); return value }
+    catch { throw new AgentMuxError('The original private credential value is unconfirmed. Its bytes and reference are retained.', 'CONNECTION_CREDENTIAL_UNCONFIRMED') }
+  }
   async store(input: { operationId: string; secret: string }, assertCurrent?: () => void | Promise<void>): Promise<{ credentialRef: string }> {
-    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['operationId', 'secret'].includes(key)) || typeof input.operationId !== 'string' || typeof input.secret !== 'string' || !input.secret.length || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(input.operationId)) throw new AgentMuxError('Credential input or operation identity is invalid.', 'INVALID_CONNECTION_DATA')
+    if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).some(key => !['operationId', 'secret'].includes(key)) || typeof input.operationId !== 'string' || typeof input.secret !== 'string' || !input.secret.length || Buffer.from(input.secret).toString('utf8') !== input.secret || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(input.operationId)) throw new AgentMuxError('Credential input or operation identity is invalid.', 'INVALID_CONNECTION_DATA')
     const { operationId, secret } = input
     await this.assertAvailable()
+    await assertCurrent?.()
     try {
-      const original = this.database.prepare('SELECT credential_ref, ciphertext FROM connection_credential WHERE operation_id = ?').get(operationId)
-      if (original) { const result = await this.matchOriginal(original, secret); await assertCurrent?.(); return result }
-      // OS authorization can remain pending. Never hold a SQLite writer across it.
-      const ciphertext = await this.encryption.encryptStringAsync(secret)
-      await assertCurrent?.()
-      let concurrent: Record<string, unknown> | undefined
       this.database.exec('BEGIN IMMEDIATE')
       try {
-        concurrent = this.database.prepare('SELECT credential_ref, ciphertext FROM connection_credential WHERE operation_id = ?').get(operationId)
-        if (!concurrent) {
-          const credentialRef = mintObjectId()
-          this.database.prepare('INSERT INTO connection_credential (credential_ref, operation_id, ciphertext) VALUES (?, ?, ?)').run(credentialRef, operationId, ciphertext)
-          this.database.exec('COMMIT'); return { credentialRef }
+        const original = this.database.prepare('SELECT credential_ref, ciphertext FROM connection_credential WHERE operation_id = ?').get(operationId)
+        if (original) {
+          if (this.value(original.ciphertext) !== secret) throw new AgentMuxError('The original credential operation has different input. Inspect it without replacing its identity.', 'CONNECTION_OPERATION_CONFLICT')
+          this.database.exec('COMMIT'); return { credentialRef: original.credential_ref as string }
         }
-        this.database.exec('COMMIT')
+        const credentialRef = mintObjectId()
+        this.database.prepare('INSERT INTO connection_credential (credential_ref, operation_id, ciphertext) VALUES (?, ?, ?)').run(credentialRef, operationId, Buffer.concat([FORMAT, Buffer.from(secret)]))
+        this.database.exec('COMMIT'); return { credentialRef }
       } catch (error) {
-        try { this.database.exec('ROLLBACK') } catch { /* Original commit may already exist. Inspect its operation. */ }
+        try { this.database.exec('ROLLBACK') } catch { /* A committed original remains inspectable after a lost ACK. */ }
         throw error
       }
-      const result = await this.matchOriginal(concurrent, secret); await assertCurrent?.(); return result
     } catch (error) {
       if (error instanceof AgentMuxError) throw error
-      throw new AgentMuxError('Secure credential storage could not confirm the original operation. Inspect it before retrying.', 'CONNECTION_CREDENTIAL_UNCONFIRMED')
+      throw new AgentMuxError('Private credential storage could not confirm the original operation. Inspect it before retrying.', 'CONNECTION_CREDENTIAL_UNCONFIRMED')
     }
-  }
-  private async matchOriginal(row: Record<string, unknown>, secret: string): Promise<{ credentialRef: string }> {
-    const decrypted = await this.encryption.decryptStringAsync(Buffer.from(row.ciphertext as Uint8Array))
-    if (decrypted.result !== secret) throw new AgentMuxError('The original credential operation has different input. Inspect it without replacing its identity.', 'CONNECTION_OPERATION_CONFLICT')
-    return { credentialRef: row.credential_ref as string }
   }
   async resolve(credentialRef: string): Promise<string | null> {
     await this.assertAvailable()
     try {
       const row = this.database.prepare('SELECT ciphertext FROM connection_credential WHERE credential_ref = ?').get(credentialRef)
-      return row ? (await this.encryption.decryptStringAsync(Buffer.from(row.ciphertext as Uint8Array))).result : null
-    } catch { throw new AgentMuxError('Secure credential resolution is unavailable. The credential and original connection are retained.', 'CONNECTION_CREDENTIAL_UNAVAILABLE') }
+      return row ? this.value(row.ciphertext) : null
+    } catch (error) {
+      if (error instanceof AgentMuxError) throw error
+      return unavailable()
+    }
   }
 }

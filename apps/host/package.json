@@ -12,7 +12,6 @@
     "@agentmux/connectors": "workspace:*",
     "@agentmux/core": "workspace:*",
     "@agentmux/relay": "workspace:*",
-    "@napi-rs/keyring": "2.1.2",
     "yaml": "2.9.0",
     "fs-native-extensions": "1.5.1"
   },
@@ -33,10 +32,6 @@
     "./mote-model": {
       "types": "./dist/mote-model.d.ts",
       "import": "./dist/mote-model.js"
-    },
-    "./credential-encryption": {
-      "types": "./dist/credential-encryption.d.ts",
-      "import": "./dist/credential-encryption.js"
     },
     "./credential-administration": {
       "types": "./dist/credential-administration.d.ts",
