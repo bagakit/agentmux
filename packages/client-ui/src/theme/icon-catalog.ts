@@ -361,6 +361,8 @@ export const SEMANTIC_ICON_CATALOG = {
   'object.survey': { label: 'Survey exploration', glyph: 'survey-explore' },
   'object.goal': { label: 'Goal consensus', glyph: 'goal-consensus' },
   'object.note': { label: 'Note', glyph: 'note-page' },
+  'object.note-block': { label: 'Note block', glyph: 'note-block' },
+  'object.shared-block': { label: 'Shared note block', glyph: 'shared-block' },
   'object.spaces': { label: 'Spaces', glyph: 'layers' },
   'object.list': { label: 'List', glyph: 'list' },
   'object.user': { label: 'User', glyph: 'user-round' },
