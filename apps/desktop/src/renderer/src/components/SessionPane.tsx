@@ -26,7 +26,6 @@ import { workspaceRootForPath } from '../lib/workbench-tabs'
 import { createSessionProjectFileContextSelector } from '../lib/session-project-file-context'
 import { api } from '../lib/api'
 import { agentSessionIdsOfUserMessages, createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
-import { channelProfileKey, useChannelActorProfiles } from '../lib/use-channel-actor-profiles'
 import { createConversationSpeakerFactsSelector, currentConversationSenderDetails, currentConversationSpeakerMetadata } from '../lib/conversation-sender-details'
 import { useSessionUserMessages } from '../lib/session-user-messages'
 import type { LinkClickModifiers } from '@agentmux/client-ui/components/AgentMarkdown'
@@ -454,10 +453,8 @@ export function SessionPane({
   const speakerScope = useMemo(() => ({ sessionIds: speakerIds, navigation: false }), [speakerIds])
   const speakerFactsSelector = useMemo(() => createConversationSpeakerFactsSelector(speakerIds, activityDemand), [speakerIds, activityDemand])
   const speakerFacts = useObservedAppStore('sessionPane', observationVisible, speakerScope, useShallow(speakerFactsSelector))
-  const channelProfiles = useChannelActorProfiles(userMessages, activityDemand)
   const describeSpeaker = useMemo(() => {
     const original = createSpeakerResolver({
-      lookupExternal: author => channelProfiles.get(channelProfileKey(author)),
       lookupAgent: (id) => {
         const state = useAppStore.getState()
         const sender = currentConversationSpeakerMetadata(id, {
@@ -485,7 +482,7 @@ export function SessionPane({
         sessionPresentationById(useAppStore.getState().sessions).get(speaker.id)) : undefined
       return mote ? { ...described, name: mote.name, avatar: <ConversationMessageAvatar speaker={speaker} name={mote.name} mote={mote} providerId={described.providerId} project={described.project} {...(avatarSize === undefined ? {} : { size: avatarSize })} /> } : described
     }
-  }, [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined, speakerFacts, moteOwner, channelProfiles]
+  }, [session?.id, session?.label, session?.kind, session?.kind === 'agent' ? session.providerId : undefined, speakerFacts, moteOwner]
   )
   const refreshSession = useAppStore.getState().refreshSession
   const recoverSession = useAppStore.getState().recoverSession
