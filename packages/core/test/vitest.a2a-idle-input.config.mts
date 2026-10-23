@@ -3,22 +3,31 @@ import { readFileSync } from 'node:fs'
 import { appendFileSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { resolve, relative } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { bundleIdentityRuntime } from '../../identity/scripts/runtime-bundle.mjs'
 const root = resolve(import.meta.dirname, '../../..')
+const identitySourcePath = resolve(root, 'packages/identity/dist/runtime-source.js')
+const identityArtifact = await import(pathToFileURL(identitySourcePath).href)
+// This generated export has no src/runtime-source.ts. Qualify the original artifact
+// against its non-writing build recipe before reusing it in the source consumer graph.
+if (identityArtifact.identityRuntimeSource !== (await bundleIdentityRuntime()).source)
+  throw new Error('The identity runtime source artifact does not match its original build recipe')
 const mutations: Record<string, [string, string, string]> = {
   'native-queue-becomes-steer': ['providers/codex-native-input.ts', "if (frozen.operation === 'queue-idle') {", 'if (false) {'],
   'native-idle-target-is-omitted': ['prompt-submission.ts', '...(control?.idleOnly ? { idleOnly: true } : {})', '...{}'],
   'completion-fence-is-omitted': ['prompt-submission.ts', '} else if (!control?.idleOnly?.nativeEvidence && (agentTurnCompletionIdentity(current) !== expectedCompletionId || current.promptCompletionAdmission?.completionId === expectedCompletionId && !independentIdleNotification)) {', '} else if (false) {'],
   'final-input-fence-is-omitted': ['prompt-submission.ts', 'if (control?.idleOnly && currentRun.acceptedInputBytes !== control.idleOnly.inputByte)', 'if (false)'],
-  'notification-identity-is-omitted': ['prompt-submission.ts', 'message.questionReply, message.a2aNotificationId])', 'message.questionReply])'],
+  'notification-identity-is-omitted': ['prompt-submission.ts', 'message.questionReply, message.a2aNotificationId, message.inputContext', 'message.questionReply, message.inputContext'],
   'edited-notification-is-adopted': ['native-input-adoption.ts', "item.contentParts.length === 1 && item.contentParts[0]?.kind === 'text' && item.contentParts[0].text === intent.prompt", 'true'],
   'native-queue-receipt-is-unchecked': ['providers/codex-native-input.ts', "if (typeof queued?.id !== 'string' || !queued.id || queued.clientUserMessageId !== frozen.clientCorrelation ||\n                !isDeepStrictEqual(queued.input, input)) throw unavailable()", 'void queued'],
   'notification-identity-is-not-restored': ['prompt-submission-record.ts', "...(message.a2aNotificationId === undefined ? {} : { a2aNotificationId: string(message.a2aNotificationId, 'original A2A notification identity') }),", ''],
-  'independent-idle-notification-is-blocked': ['prompt-submission.ts', ' && !independentIdleNotification)) {', ')) {'],
+  'independent-idle-notification-is-blocked': ['prompt-submission.ts', '&& !(manual && nativePredecessor) && !independentIdleNotification)) {', '&& !(manual && nativePredecessor))) {'],
   'independent-idle-completion-is-consumed': ['prompt-submission.ts', 'completionId === expectedCompletionId && !independentIdleNotification)', 'completionId === expectedCompletionId)'],
   'controlled-notice-reservation-spills-to-other-key': ['agent-global-message-queue.ts', "key.kind === 'prompt' && isDeepStrictEqual(this.notification(key.submissionId)?.key, key)", "key.kind === 'prompt' && this.notification(key.submissionId)"],
   'uncontrolled-notice-reservation-spills-to-other-key': ['agent-global-message-queue.ts', 'if (expectedNotificationId === undefined ? sameNotificationKey :', 'if (expectedNotificationId === undefined ? notice !== undefined :'],
 }
 export default defineConfig({ root, plugins: [{ name: 'original-workspace-source', enforce: 'pre', resolveId(id) {
+  if (id === '@agentmux/identity/runtime-source') return identitySourcePath
   const match = id.match(/^@agentmux\/([^/]+)(.*)$/u)
   if (!match) return
   const directory = resolve(root, 'packages', match[1]!)

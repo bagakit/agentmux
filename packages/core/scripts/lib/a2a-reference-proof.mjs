@@ -6,7 +6,9 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 export const referenceProofSha = bytes => createHash('sha256').update(bytes).digest('hex')
 const json = async path => JSON.parse(await readFile(path, 'utf8'))
 const indexPath = root => join(root, '.tmp/a2a-reference-delivery/current.json')
-const edits = ['default-managed-inbox-producer', 'notice-does-not-become-user-request', 'original-notice-run-boundary', 'submitted-reference-leaves-pending-index']
+const edits = ['default-managed-inbox-producer', 'notice-does-not-become-user-request', 'frozen-notice-run-boundary',
+  'retained-notice-uses-current-formatter', 'retained-notice-sender-is-unchecked', 'retained-notice-mid-order-is-unchecked',
+  'retained-notice-count-is-unchecked', 'retained-notice-context-is-unchecked', 'submitted-reference-leaves-pending-index']
 const nativeEdits = ['native-queue-becomes-steer', 'native-idle-target-is-omitted', 'completion-fence-is-omitted',
   'final-input-fence-is-omitted', 'notification-identity-is-omitted', 'edited-notification-is-adopted',
   'native-queue-receipt-is-unchecked', 'notification-identity-is-not-restored',
@@ -61,7 +63,9 @@ async function deliveryFacts({ root, receipt }) {
   assert.deepEqual(Object.keys(compiled.compiledInputs).sort(), actualJs, 'The entire actual Core executable graph is bound')
   for (const file of actualJs) assert.equal(referenceProofSha(await readFile(join(root, 'packages/core/dist', file))), compiled.compiledInputs[file], 'Actual compiled Core: ' + file)
   const directory = dirname(compiledPath), baseline = await testRun(root, directory, compiled.baseline, false, artifacts)
-  assert.equal(baseline.length, 14); assert.ok(baseline.some(name => name.includes('across concurrent Core processes and reopening')))
+  assert.equal(baseline.length, 25); assert.ok(baseline.some(name => name.includes('across concurrent Core processes and reopening')))
+  assert.ok(baseline.some(name => name.includes('imports retained container notification history')))
+  assert.ok(baseline.some(name => name.includes('invalid retained preceding-context packet')))
   assert.ok(baseline.some(name => name.includes('coalesces at native idle and reads without input or batch ACK')))
   assert.ok(baseline.some(name => name.includes('trusted user reference notifications through flags and JSON')))
   assert.deepEqual(compiled.cases.map(item => item.label), edits)
@@ -70,7 +74,7 @@ async function deliveryFacts({ root, receipt }) {
   assert.deepEqual(native.sourceBefore, native.sourceAfter); await inputs(root, native.sourceBefore)
   assert.deepEqual(native.cases.map(item => item.mutation), nativeEdits)
   const nativeDirectory = dirname(nativePath), nativeBaseline = await testRun(root, nativeDirectory, native.baseline, false, artifacts, true)
-  assert.equal(nativeBaseline.length, 23); assert.equal((await testRun(root, nativeDirectory, native.regression, false, artifacts, true)).length, 30)
+  assert.equal(nativeBaseline.length, 37); assert.equal((await testRun(root, nativeDirectory, native.regression, false, artifacts, true)).length, 30)
   for (const item of native.cases) {
     assert.deepEqual(await testRun(root, nativeDirectory, item.red, true, artifacts, true), nativeBaseline)
     assert.deepEqual(await testRun(root, nativeDirectory, item.restored, false, artifacts, true), nativeBaseline)
@@ -109,5 +113,5 @@ export async function verifyReferenceDeliveryProof({ root, index }) {
   assert.deepEqual([...facts.artifacts].map(path => relative(root, path)).sort(), Object.keys(sealed.artifacts).sort())
   return { passed: true, receipt: sealed.receipt, artifactIndex: index.path, sha256: index.sha256,
     sources: facts.compiled.sourceBefore, compiled: facts.compiled.compiledInputs,
-    cases: 14, compiledMutants: 4, nativeSourceMutants: nativeEdits.length, reopen: facts.reopened, sameIdleUnknown: facts.facts }
+    cases: facts.compiled.baseline.tests, compiledMutants: edits.length, nativeSourceMutants: nativeEdits.length, reopen: facts.reopened, sameIdleUnknown: facts.facts }
 }

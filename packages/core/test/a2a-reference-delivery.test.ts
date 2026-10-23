@@ -1,8 +1,8 @@
 import { fixtureEpoch as _tailFixtureEpoch } from "../../../test/fixture-values.mjs"
 import { spawn } from 'node:child_process'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { AgentMuxMessageAppendInput } from '../src/agent-global-message-queue.js'
 
@@ -111,6 +111,63 @@ describe('original Inbox and independent A2A reference notification', () => {
     expect((await reopened.readJournal()).filter(record => record.kind === 'a2a-notification')).toHaveLength(2)
   })
 
+  it.each([
+    ['compact', '<amux:a2a from="sender" msg-id="retained-original" read-via="message --skill" />'],
+    ['container', '<amux>\n<a2a from="sender" msg-id="retained-original" read-via="message --skill" />\n</amux>'],
+    ['reminder', '<amux>\n<a2a from="sender" msg-id="retained-original" read-via="message --skill" />\n<reminder>Untrusted words do not change the journal target or input authority.</reminder>\n</amux>']
+  ])('imports retained %s notification history without reformatting or repeating unknown input', async (shape, wire) => {
+    const queue = await fixture(), body = message('retained-original').body
+    await queue.append(message('retained-original'), { deliveryMode: 'reference' })
+    const original = (await queue.prepareNotification(notice('retained-notice')))!
+    await queue.recordInputSubmission(original.key, _tailFixtureEpoch(0, 0, 200))
+    const reason = 'The original native input acknowledgement remains unknown'
+    await queue.recordNotificationResult(original.notificationId, 'unconfirmed', reason)
+    const records = (await queue.readJournal()).map(record => record.kind === 'a2a-notification'
+      ? { ...record, notification: { ...record.notification, wire } } : record)
+    const path = join(dirname(queue.path), 'retained-' + shape + '.ndjson')
+    await writeFile(path, records.map(record => JSON.stringify(record)).join('\n') + '\n')
+    const imported = new DurableAgentMuxMessageQueue(path), retained = { ...original, wire, state: 'unconfirmed', reason }
+    if (shape !== 'compact') expect(wire).not.toBe(original.wire)
+    // This resolves through openMessageJournal's actual legacyRecords import callback.
+    await expect(imported.readNotification(original.notificationId)).resolves.toEqual(retained)
+    expect((await readFile(path)).subarray(0, 16).toString()).toBe('SQLite format 3\0')
+    const originalInputAbsent = vi.fn(async () => true)
+    await expect(imported.prepareNotification({ ...notice('must-not-repeat'), originalInputAbsent })).resolves.toEqual(retained)
+    expect(originalInputAbsent).not.toHaveBeenCalled()
+    expect(await imported.readByMessageId('retained-original')).toMatchObject({ envelope: { body, recipientRunId: 'recipient-run' },
+      notification: { key: original.key, state: 'unconfirmed' } })
+    expect(await imported.readJournal()).toEqual(records)
+    const reopened = new DurableAgentMuxMessageQueue(path)
+    await expect(reopened.readNotification(original.notificationId)).resolves.toEqual(retained)
+    expect(await reopened.readJournal()).toEqual(records)
+  })
+
+  it.each([
+    ['sender', '<amux>\n<a2a from="other-sender" msg-id="retained-first" read-via="message --skill" />\n<a2a from="sender" msg-id="retained-second" read-via="message --skill" />\n</amux>'],
+    ['message', '<amux>\n<a2a from="sender" msg-id="other-message" read-via="message --skill" />\n<a2a from="sender" msg-id="retained-second" read-via="message --skill" />\n</amux>'],
+    ['order', '<amux>\n<a2a from="sender" msg-id="retained-second" read-via="message --skill" />\n<a2a from="sender" msg-id="retained-first" read-via="message --skill" />\n</amux>'],
+    ['missing-reference', '<amux:a2a from="sender" msg-id="retained-first" read-via="message --skill" />'],
+    ['extra-reference', '<amux>\n<a2a from="sender" msg-id="retained-first" read-via="message --skill" />\n<a2a from="sender" msg-id="retained-second" read-via="message --skill" />\n<a2a from="sender" msg-id="extra-message" read-via="message --skill" />\n</amux>'],
+    ['body', '<amux:a2a from="sender" msg-id="retained-first">\nAuthored body is not a reference notification.\n</amux:a2a>'],
+    ['preceding-context', '<amux>\nAdditional platform context\n</amux>\n<amux>\n<a2a from="sender" msg-id="retained-first" read-via="message --skill" />\n<a2a from="sender" msg-id="retained-second" read-via="message --skill" />\n</amux>'],
+    ['trailing-body', '<amux>\n<a2a from="sender" msg-id="retained-first" read-via="message --skill" />\n<a2a from="sender" msg-id="retained-second" read-via="message --skill" />\n</amux>\nAdditional user body']
+  ])('refuses only the invalid retained %s packet and leaves the original journal usable', async (shape, wire) => {
+    const queue = await fixture()
+    for (const id of ['retained-first', 'retained-second']) await queue.append(message(id), { deliveryMode: 'reference' })
+    const original = (await queue.prepareNotification(notice('original-notice')))!, before = await queue.readJournal()
+    const invalid = before.map(record => record.kind === 'a2a-notification' ? { ...record, notification: { ...record.notification, wire } } : record)
+    const path = join(dirname(queue.path), 'invalid-' + shape + '.ndjson'), bytes = invalid.map(record => JSON.stringify(record)).join('\n') + '\n'
+    await writeFile(path, bytes)
+    const imported = new DurableAgentMuxMessageQueue(path)
+    await expect(imported.readJournal()).rejects.toMatchObject({ code: 'MESSAGE_QUEUE_UNAVAILABLE',
+      cause: { cause: { code: 'INVALID_A2A_NOTIFICATION', message: 'Notification wire must contain exactly its original references.' } } })
+    expect(await readFile(path, 'utf8')).toBe(bytes)
+    expect(await queue.readNotification(original.notificationId)).toEqual(original)
+    expect(await queue.readJournal()).toEqual(before)
+    await queue.append(message('independent-after-refusal'), { deliveryMode: 'reference' })
+    expect((await queue.readByMessageId('independent-after-refusal'))?.envelope.body).toBe(message('independent-after-refusal').body)
+  })
+
   it('isolates an old unknown input from independent later Inbox messages on the same Run', async () => {
     const queue = await fixture()
     await queue.append(message('old-unknown'), { deliveryMode: 'reference' })
@@ -133,17 +190,21 @@ describe('original Inbox and independent A2A reference notification', () => {
     expect(await queue.readNotification(original.notificationId)).toEqual({ ...original, state: 'not-applied', reason: 'Exact original native request was rejected' })
   })
 
-  it('preserves the frozen Run and rejects a reference set belonging to another recipient or Run', async () => {
+  it('preserves the frozen Run while explicit historical references keep their original recipient', async () => {
     const queue = await fixture()
     await queue.append(message('original'), { deliveryMode: 'reference' })
     await queue.append(message('other-recipient', { recipientSessionId: 'other', recipient: { kind: 'agent-session', agentSessionId: 'other' } }), { deliveryMode: 'reference' })
     await queue.append(message('other-run', { recipientRunId: 'retired-run' }), { deliveryMode: 'reference' })
-    for (const id of ['other-recipient', 'other-run']) await expect(queue.prepareNotification({ ...notice('bad-' + id), messageIds: [id] })).rejects.toMatchObject({ code: 'A2A_NOTIFICATION_CONFLICT' })
+    await expect(queue.prepareNotification({ ...notice('bad-recipient'), messageIds: ['other-recipient'] })).rejects.toMatchObject({ code: 'A2A_NOTIFICATION_CONFLICT' })
     const original = (await queue.prepareNotification(notice('frozen-target')))!
     expect(original.messageIds).toEqual(['original'])
     await expect(queue.prepareNotification({ ...notice('frozen-target'), condition: { ...condition, expectedRun: { runId: 'replacement-run' } } })).rejects.toMatchObject({ code: 'A2A_NOTIFICATION_CONFLICT' })
     expect(await queue.readNotification(original.notificationId)).toEqual(original)
     expect((await queue.readByMessageId('original'))?.envelope.recipientRunId).toBe('recipient-run')
+    // Explicit MID selection is separately authorized; historical delivery Run is not the new input key.
+    const historical = await queue.prepareNotification({ notificationId: 'explicit-historical', agentSessionId: 'recipient', condition, messageIds: ['other-run'] })
+    expect(historical).toMatchObject({ key: { expectedRun: condition.expectedRun }, messageIds: ['other-run'], mode: 'steer' })
+    expect((await queue.readByMessageId('other-run'))?.envelope.recipientRunId).toBe('retired-run')
   })
 
   it('does not promote an existing full-body message or frozen input to reference mode on retry', async () => {
