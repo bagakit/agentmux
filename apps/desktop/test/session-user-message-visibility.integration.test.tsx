@@ -1,954 +1,316 @@
 // @vitest-environment happy-dom
-import { act, startTransition, Suspense } from 'react'
-import { type Root } from 'react-dom/client'
-import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
-import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest'
-import type {
-  AgentSessionHistoryPage,
-  AgentTimelineItem,
-  AgentTimelineSnapshot
-} from '@agentmux/core'
+import { act, startTransition, Suspense, useLayoutEffect, type ReactNode } from 'react'
+import type { Root } from 'react-dom/client'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import type { AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
+import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
 import type { AgentSessionControl } from '../src/shared/contracts'
-import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
-import { ActivityView } from '../src/renderer/src/components/ActivityView'
 import { useSessionUserMessages } from '../src/renderer/src/lib/session-user-messages'
-import { createSpeakerResolver } from '@agentmux/client-ui/conversation-speaker'
+import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
+import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 
-/**
- * Notice on Controlled Public DTO:
- * This test uses controlled public AgentSessionHistoryPage DTOs to verify the shared
- * renderer hook (useSessionUserMessages) and ActivityView presentation contract.
- * It verifies the client message projection, pause/resume, DOM identity, Range preservation,
- * and multi-consumer lifecycle; it does not claim to prove vendor CLI writer behavior.
- */
-
-vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-
-const controlA: AgentSessionControl = {
-  kind: 'agent',
-  hostId: 'local',
-  agentSessionId: 'session-t036-alpha',
-  run: { runId: 'run-t036-alpha' }
-}
-
-const controlB: AgentSessionControl = {
-  kind: 'agent',
-  hostId: 'local',
-  agentSessionId: 'session-t036-beta',
-  run: { runId: 'run-t036-beta' }
-}
-
-let host: HTMLDivElement
-let root: Root
-let historyPageSpy: MockInstance<typeof api.sessions.historyPage>
-const baseline = useAppStore.getState()
-
+// Controlled typed native source leaves feed the original Core Reader, Unix RPC,
+// Main/preload and mounted public hook/shared view. This is not a vendor-writer
+// or SessionPane cover-command test; the actual host lifecycle has its own cases.
+const controlA: AgentSessionControl = { kind: 'agent', hostId: 'local', agentSessionId: 'visibility-alpha', run: { runId: 'original-page-fixture-run' } }
+const controlB: AgentSessionControl = { kind: 'agent', hostId: 'local', agentSessionId: 'visibility-beta', run: { runId: 'visibility-beta-run' } }
+const sourceA = { providerId: 'claude', nativeSessionId: 'visibility-native-alpha' }
+const sourceB = { providerId: 'claude', nativeSessionId: 'visibility-native-beta' }
+type Reader = ReturnType<typeof useSessionUserMessages>
+let host: HTMLDivElement, root: Root
+const readers = new Map<string, Reader>(), closes: Array<() => unknown | Promise<unknown>> = []
+const page = (text: string, ids = ['original'], control = controlA): AgentSessionHistoryPage => ({
+  agentSessionId: control.agentSessionId, source: control.agentSessionId === controlA.agentSessionId ? sourceA : sourceB,
+  items: ids.map((id, index) => ({ id, kind: 'user-message', startedAt: 10000 + index * 1000,
+    contentParts: [{ kind: 'text', text }] })), nextCursor: null
+})
+const captured = (text: string): AgentTimelineItem => ({ id: 'original-captured', agentSessionId: controlA.agentSessionId,
+  kind: 'user_message', status: 'complete', source: 'user', title: 'Original input', content: text, createdAt: 12000, updatedAt: 12000 })
 beforeEach(() => {
-  vi.clearAllMocks()
-  vi.stubGlobal('ResizeObserver', class {
-    observe() {}
-    disconnect() {}
-  })
-  vi.stubGlobal('IntersectionObserver', class {
-    observe() {}
-    disconnect() {}
-  })
-  host = document.createElement('div')
-  document.body.append(host)
-  root = createRoot(host)
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  vi.stubGlobal('IntersectionObserver', class { observe() {} unobserve() {} disconnect() {} })
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host); readers.clear()
 })
-
 afterEach(async () => {
-  await act(async () => {
-    root.unmount()
-  })
-  host.remove()
-  historyPageSpy?.mockRestore()
-  useAppStore.setState(baseline, true)
+  const failures: unknown[] = []
+  try { await act(async () => root.unmount()) } catch (error) { failures.push(error) }
+  host.remove(); window.getSelection()?.removeAllRanges()
+  for (const close of closes.splice(0).reverse()) {
+    try { await close() } catch (error) { failures.push(error) }
+  }
+  readers.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals()
+  if (failures.length) throw new AggregateError(failures, 'Original visibility fixture cleanup failed')
 })
-
-function ActivityPresenter({
-  control,
-  enabled = true,
-  items = [],
-  onRender,
-  passDownRef
-}: {
-  control?: AgentSessionControl
-  enabled?: boolean
-  items?: AgentTimelineItem[]
-  onRender?: (info: { messagesCount: number; loading: boolean; error: Error | null }) => void
-  passDownRef?: (callbacks: { refresh: () => Promise<void>; loadEarlier: () => Promise<void> }) => void
+function Presenter({ control = controlA, enabled = true, name = 'one', onRender }: {
+  control?: AgentSessionControl; enabled?: boolean; name?: string; onRender?: (control: AgentSessionControl) => void
 }) {
-  const { messages, loading, error, refresh, loadEarlier } = useSessionUserMessages(control, { enabled })
-
-  onRender?.({ messagesCount: messages.length, loading, error })
-  passDownRef?.({ refresh, loadEarlier })
-
-  const speakerResolver = createSpeakerResolver({
-    currentSession: control ? { id: control.agentSessionId, label: 'Agent' } : undefined
+  const reader = useSessionUserMessages(control, { enabled })
+  onRender?.(control)
+  useLayoutEffect(() => { readers.set(name, reader) }, [name, reader])
+  const reading = reader.conversation.reading
+  return <div data-consumer={name} data-messages-count={reader.messages.length} data-loading={reader.loading}>
+    <ConversationView sessionId={control.agentSessionId} executionHostId={control.hostId} active={enabled}
+      records={reading?.records ?? []} originalRecords={reading?.originalRecords ?? []}
+      page={reading?.historyPage ?? null} timeline={reading?.captured} coverage={reading?.timeline.coverage ?? []} />
+  </div>
+}
+const wait = (assertion: () => void) => vi.waitFor(async () => { await act(async () => { await Promise.resolve() }); assertion() }, { timeout: 10000, interval: 10 })
+const render = (node: ReactNode) => act(async () => root.render(node))
+function reader(name = 'one') { const actual = readers.get(name); expect(actual, name).toBeDefined(); return actual! }
+function scope(name = 'one') { const actual = host.querySelector<HTMLElement>(`[data-consumer="${name}"]`); expect(actual, name).not.toBeNull(); return actual! }
+const bodies = (name = 'one') => [...scope(name).querySelectorAll<HTMLElement>('.log-turn__body')]
+function selected(body: HTMLElement) {
+  const text = body.querySelector('p')!.firstChild!
+  const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, text.textContent!.length)
+  const selection = window.getSelection()!; selection.removeAllRanges(); selection.addRange(range)
+  return { body, text, range, selection, content: selection.toString() }
+}
+function unchanged(original: ReturnType<typeof selected>) {
+  expect(original.body.isConnected).toBe(true); expect(original.text.isConnected).toBe(true)
+  expect(original.body.querySelector('p')!.firstChild).toBe(original.text)
+  expect(original.selection.getRangeAt(0)).toBe(original.range)
+  expect(original.range.startContainer).toBe(original.text); expect(original.range.endContainer).toBe(original.text)
+  expect(original.selection.toString()).toBe(original.content)
+}
+function clearSelection() { window.getSelection()!.removeAllRanges(); document.dispatchEvent(new Event('selectionchange')) }
+async function ready(name = 'one', count = 1) {
+  await wait(() => {
+    expect(bodies(name)).toHaveLength(count)
+    expect(reader(name).conversation.inspect()).toMatchObject({ loading: false, inFlight: false, dirty: false, error: null,
+      watch: { bound: true, closed: false } })
   })
-
-  return (
-    <div data-testid="presenter-root" data-messages-count={messages.length} data-loading={loading ? 'true' : 'false'}>
-      <ActivityView
-        sessionId={control?.agentSessionId ?? 'default-session'}
-        items={items}
-        userMessages={messages}
-        capability="complete-events"
-        displayState="done"
-        describeSpeaker={speakerResolver}
-      />
-    </div>
-  )
+}
+async function readOriginalSubmission() {
+  await ready('one', 2)
+  const original = scope().querySelector<HTMLElement>('[data-submission-id="original-captured"]')
+  expect(original).not.toBeNull()
+  expect(JSON.parse(original!.dataset.conversationItemRef!)).toMatchObject({ hostId: controlA.hostId,
+    agentSessionId: controlA.agentSessionId, source: { kind: 'captured', recordId: 'original-captured' } })
+  const disclosure = original!.querySelector<HTMLDetailsElement>('details.message-disclosure')!
+  expect(disclosure).not.toBeNull(); expect(disclosure.open).toBe(false)
+  const summary = disclosure.querySelector<HTMLElement>('summary')!
+  expect(summary).not.toBeNull()
+  await act(async () => { disclosure.open = true; disclosure.dispatchEvent(new Event('toggle')) })
+  await ready('one', 3)
+  expect(disclosure.open).toBe(true)
+}
+async function fixture(initial = page('Original frozen message')) {
+  const originals = new Map([[controlA.agentSessionId, initial], [controlB.agentSessionId, page('Session B specific text', ['beta'], controlB)]])
+  const revisions = new Map([[controlA.agentSessionId, 1], [controlB.agentSessionId, 1]])
+  let readSource = async (id: string) => originals.get(id)!
+  const f = await conversationPagePortFixture(controlA, sourceA, async id => readSource(id))
+  closes.push(f.close)
+  const originalSession = await f.client.readAgentSession(controlA.agentSessionId)
+  if (!originalSession) throw new Error('Original visibility source Session is missing')
+  expect(originalSession).toMatchObject({ hostId: controlA.hostId, agentSessionId: controlA.agentSessionId, run: controlA.run })
+  await f.store.compareAndSwap(null, { ...originalSession, agentSessionId: controlB.agentSessionId, run: controlB.run,
+    hookBindingId: 'visibility-beta-binding', hookToken: 'visibility-beta-token',
+    nativeHandle: { kind: 'provider', providerId: sourceB.providerId, sessionId: sourceB.nativeSessionId } })
+  expect(await f.client.readAgentSession(controlB.agentSessionId)).toMatchObject({ hostId: controlB.hostId,
+    agentSessionId: controlB.agentSessionId, run: controlB.run, nativeHandle: { providerId: sourceB.providerId, sessionId: sourceB.nativeSessionId } })
+  const source = (id: string) => originals.get(id)!.source
+  const checkpoint = (id: string) => ({ agentSessionId: id, source: source(id), cursor: `visibility-cut-${revisions.get(id)}` })
+  const nativePending: Promise<AgentSessionHistoryPage>[] = []
+  f.nativeRead.mockImplementation((id) => {
+    const currentCheckpoint = checkpoint(id)
+    const pending = readSource(id).then(result => ({ ...result, changesCursor: currentCheckpoint.cursor }))
+    nativePending.push(pending); return pending
+  })
+  f.nativeCheckpoint.mockImplementation(async id => ({ hostId: 'local', agentSessionId: id,
+    source: source(id), items: [], checkpoint: checkpoint(id), more: false }))
+  f.nativeChanges.mockImplementation(async id => ({ hostId: 'local', agentSessionId: id,
+    source: source(id), items: [], checkpoint: checkpoint(id), more: false }))
+  vi.mocked(f.client.observeSessionHistory).mockImplementation(async id => ({ source: source(id), dispose() {} }))
+  await f.store.readCapturedHistory(controlA.agentSessionId, { limit: 1 })
+  await f.store.readCapturedHistory(controlB.agentSessionId, { limit: 1 })
+  const metadata = await f.store.loadMetadata()
+  const capturedSnapshot = async () => Promise.all([controlA, controlB].map(async control => {
+    const page = await f.store.readCapturedHistory(control.agentSessionId, { limit: 1 })
+    return { stream: page.stream, records: page.records }
+  }))
+  let capturedOriginals = await capturedSnapshot()
+  const gates: Array<() => void> = []
+  closes.push(async () => {
+    for (const release of gates.splice(0)) release()
+    await Promise.allSettled(nativePending)
+    // Core may persist private view/cursor bookkeeping in the same SQLite
+    // container. Reading cannot change either original durable Session or source.
+    expect(await f.store.loadMetadata()).toEqual(metadata)
+    expect(await capturedSnapshot()).toEqual(capturedOriginals)
+    expect(f.controls.map(spy => spy.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
+  })
+  return { ...f, nativePending,
+    replace: (next: AgentSessionHistoryPage) => { originals.set(next.agentSessionId, next); revisions.set(next.agentSessionId, revisions.get(next.agentSessionId)! + 1) },
+    fail: (error: Error) => { readSource = async () => { throw error } },
+    hold: (id = controlA.agentSessionId) => {
+      let entered = false
+      const originalRead = readSource
+      readSource = async target => {
+        if (target !== id) return originalRead(target)
+        const response = await originalRead(target)
+        entered = true
+        return new Promise<AgentSessionHistoryPage>(resolve => gates.push(() => resolve(response)))
+      }
+      return { entered: () => entered, release: () => { readSource = originalRead; for (const release of gates.splice(0)) release() } }
+    },
+    publish: async (item: AgentTimelineItem) => { const stream = await f.publishCaptured([item]); capturedOriginals = await capturedSnapshot(); return stream }
+  }
 }
 
-describe('T036 共享消息读取与视图可见性集成测试', () => {
-  it('证伪反例与核心不变式: 暂停读取 (enabled:false) 必须保持原Activity呈现正文DOM节点与选区Range', async () => {
-    const identicalText = 'Identical prompt text across sources'
-
-    const historyPage: AgentSessionHistoryPage = {
-      agentSessionId: controlA.agentSessionId,
-      source: { providerId: 'claude', nativeSessionId: 'claude-session-1' },
-      items: [
-        {
-          id: 'native-rec-1',
-          kind: 'user-message',
-          contentParts: [{ kind: 'text', text: identicalText }],
-          startedAt: 10_000
-        },
-        {
-          id: 'native-rec-2',
-          kind: 'user-message',
-          contentParts: [{ kind: 'text', text: identicalText }],
-          startedAt: 11_000
-        }
-      ],
-      nextCursor: null
-    }
-
-    historyPageSpy = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(historyPage)
-
-    const capturedTimelineItem: AgentTimelineItem = {
-      id: 'captured-sub-1',
-      agentSessionId: controlA.agentSessionId,
-      kind: 'user_message',
-      status: 'complete',
-      source: 'user',
-      title: 'Prompt',
-      content: identicalText,
-      createdAt: 12_000,
-      updatedAt: 12_000
-    }
-
-    const timelineSnap: AgentTimelineSnapshot = {
-      agentSessionId: controlA.agentSessionId,
-      items: [capturedTimelineItem],
-      revision: 1
-    }
-
-    useAppStore.setState({
-      timelines: {
-        [controlA.agentSessionId]: timelineSnap
-      }
-    })
-
-    // 1. 初始挂载：enabled = true
-    await act(async () => {
-      root.render(<ActivityPresenter control={controlA} enabled={true} items={[capturedTimelineItem]} />)
-    })
-
-    const turnsBefore = host.querySelectorAll('.log-turn')
-    expect(turnsBefore.length).toBe(3)
-
-    const nativeBody = turnsBefore[0]?.querySelector('.log-turn__body') as HTMLDivElement | null
-    expect(nativeBody, 'Native body element exists').not.toBeNull()
-    expect(nativeBody!.textContent).toContain(identicalText)
-    expect(nativeBody!.isConnected, 'nativeBody is connected to document').toBe(true)
-
-    const range = document.createRange()
-    range.selectNodeContents(nativeBody!)
-    const selection = window.getSelection()!
-    selection.removeAllRanges()
-    selection.addRange(range)
-
-    expect(selection.rangeCount).toBe(1)
-    expect(range.startContainer).toBe(nativeBody)
-
-    // 2. 模拟 History 覆盖打开：enabled 设为 false (暂停读取，不产生新 I/O)
-    await act(async () => {
-      root.render(<ActivityPresenter control={controlA} enabled={false} items={[capturedTimelineItem]} />)
-    })
-
-    expect(nativeBody!.isConnected, 'nativeBody MUST remain connected to DOM after pausing reading').toBe(true)
-
-    const turnsAfter = host.querySelectorAll('.log-turn')
-    expect(turnsAfter.length, 'All 3 turns must remain rendered').toBe(3)
-
-    const nativeBodyAfter = turnsAfter[0]?.querySelector('.log-turn__body')
-    expect(nativeBodyAfter, 'Body node after pause must be identical node instance').toBe(nativeBody)
-
-    expect(selection.rangeCount, 'Selection range count preserved').toBe(1)
-    const currentRange = selection.getRangeAt(0)
-    expect(currentRange.startContainer, 'Range startContainer preserved').toBe(nativeBody)
-  })
-
-  it('证伪 1: Registry projectedMessages 共享缺陷反例 - 另一 active 消费者 refresh 或父 rerender 时，paused 消费者私有投影与 Range 恒定', async () => {
-    const pageInit: AgentSessionHistoryPage = {
-      agentSessionId: controlA.agentSessionId,
-      source: { providerId: 'claude', nativeSessionId: 'claude-session-1' },
-      items: [
-        {
-          id: 'turn-init',
-          kind: 'user-message',
-          contentParts: [{ kind: 'text', text: 'Original frozen message' }],
-          startedAt: 10_000
-        }
-      ],
-      nextCursor: null
-    }
-
-    const pageRefreshed: AgentSessionHistoryPage = {
-      agentSessionId: controlA.agentSessionId,
-      source: { providerId: 'claude', nativeSessionId: 'claude-session-1' },
-      items: [
-        {
-          id: 'turn-refreshed',
-          kind: 'user-message',
-          contentParts: [{ kind: 'text', text: 'Brand new refreshed message' }],
-          startedAt: 20_000
-        }
-      ],
-      nextCursor: null
-    }
-
-    let pageToReturn = pageInit
-    historyPageSpy = vi.spyOn(api.sessions, 'historyPage').mockImplementation(async () => pageToReturn)
-
-    let consumer2Callbacks: { refresh: () => Promise<void> } | undefined
-
-    function DualHost({ consumer1Enabled, parentTick }: { consumer1Enabled: boolean; parentTick: number }) {
-      return (
-        <div>
-          <div data-testid="consumer-1-container" data-tick={parentTick}>
-            <ActivityPresenter control={controlA} enabled={consumer1Enabled} />
-          </div>
-          <div data-testid="consumer-2-container">
-            <ActivityPresenter
-              control={controlA}
-              enabled={true}
-              passDownRef={(c) => {
-                consumer2Callbacks = c
-              }}
-            />
-          </div>
-        </div>
-      )
-    }
-
-    // 1. 两个消费者同时挂载，读取初始事实
-    await act(async () => {
-      root.render(<DualHost consumer1Enabled={true} parentTick={0} />)
-    })
-
-    const consumer1Container = host.querySelector('[data-testid="consumer-1-container"]')!
-    const c1BodyBefore = consumer1Container.querySelector('.log-turn__body') as HTMLDivElement | null
-    expect(c1BodyBefore).not.toBeNull()
-    expect(c1BodyBefore!.textContent).toContain('Original frozen message')
-
-    // 选区锁定在 Consumer 1 的正文上
-    const range1 = document.createRange()
-    range1.selectNodeContents(c1BodyBefore!)
-    const sel = window.getSelection()!
-    sel.removeAllRanges()
-    sel.addRange(range1)
-
-    // 2. Consumer 1 暂停 (例如覆屏)，Consumer 2 保持活跃
-    await act(async () => {
-      root.render(<DualHost consumer1Enabled={false} parentTick={1} />)
-    })
-
-    // 3. Consumer 2 执行 refresh，返回全新消息
-    pageToReturn = pageRefreshed
-    await act(async () => {
-      await consumer2Callbacks!.refresh()
-    })
-
-    // Consumer 2 应该呈现新内容
-    const consumer2Container = host.querySelector('[data-testid="consumer-2-container"]')!
-    expect(consumer2Container.textContent).toContain('Brand new refreshed message')
-
-    // 4. Consumer 1 经历父级 rerender (例如窗口/Tab焦点触发重绘)
-    await act(async () => {
-      root.render(<DualHost consumer1Enabled={false} parentTick={2} />)
-    })
-
-    // 断言证伪 1:
-    // Consumer 1 绝不能因父 rerender 或全局 Registry.projectedMessages 共享而变成新内容！
-    // 它的 DOM 节点、正文与 Range 选区必须完整保持！
-    const c1BodyAfter = consumer1Container.querySelector('.log-turn__body')
-    expect(c1BodyAfter, 'Consumer 1 body must be the identical original node').toBe(c1BodyBefore)
-    expect(c1BodyAfter!.textContent).toContain('Original frozen message')
-    expect(c1BodyAfter!.textContent).not.toContain('Brand new refreshed message')
-    expect(c1BodyAfter!.isConnected).toBe(true)
-    expect(sel.getRangeAt(0).startContainer).toBe(c1BodyBefore)
-  })
-
-  it('证伪 2: disabled 回调必须不产生 read，源失败暴露诚实 error 并保原正文', async () => {
-    const historyPage: AgentSessionHistoryPage = {
-      agentSessionId: controlA.agentSessionId,
-      source: { providerId: 'claude', nativeSessionId: 'claude-session-1' },
-      items: [
-        {
-          id: 'turn-steady',
-          kind: 'user-message',
-          contentParts: [{ kind: 'text', text: 'Resilient stable body' }],
-          startedAt: 10_000
-        }
-      ],
-      nextCursor: 'cursor-page-2'
-    }
-
-    historyPageSpy = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(historyPage)
-
-    let callbacks: { refresh: () => Promise<void>; loadEarlier: () => Promise<void> } | undefined
-    let lastError: Error | null = null
-
-    // 1. 活跃挂载加载内容
-    await act(async () => {
-      root.render(
-        <ActivityPresenter
-          control={controlA}
-          enabled={true}
-          passDownRef={(c) => {
-            callbacks = c
-          }}
-          onRender={(info) => {
-            lastError = info.error
-          }}
-        />
-      )
-    })
-
-    expect(historyPageSpy).toHaveBeenCalledTimes(1)
-    expect(host.textContent).toContain('Resilient stable body')
-
-    // 2. 暂停 (enabled: false)
-    await act(async () => {
-      root.render(
-        <ActivityPresenter
-          control={controlA}
-          enabled={false}
-          passDownRef={(c) => {
-            callbacks = c
-          }}
-          onRender={(info) => {
-            lastError = info.error
-          }}
-        />
-      )
-    })
-
-    // 3. 在 disabled 下触发 refresh 与 loadEarlier
-    await act(async () => {
-      await callbacks!.refresh()
-      await callbacks!.loadEarlier()
-    })
-
-    // 断言证伪 2: disabled 回调绝不得发起网络 I/O
-    expect(historyPageSpy, 'Disabled callbacks must produce ZERO reads').toHaveBeenCalledTimes(1)
-
-    // 4. 恢复活跃并触发模拟网络失败的 refresh
-    await act(async () => {
-      root.render(
-        <ActivityPresenter
-          control={controlA}
-          enabled={true}
-          passDownRef={(c) => {
-            callbacks = c
-          }}
-          onRender={(info) => {
-            lastError = info.error
-          }}
-        />
-      )
-    })
-
-    historyPageSpy.mockRejectedValueOnce(new Error('Network transport error'))
-    await act(async () => {
-      await callbacks!.refresh()
-    })
-
-    // 源错误必须诚实抛出 error，同时保住原有正文 DOM
-    expect(lastError, 'Honest error must be exposed to caller').not.toBeNull()
-    expect(lastError!.message).toBe('Network transport error')
-    expect(host.textContent, 'Existing text must remain in DOM despite error').toContain('Resilient stable body')
-  })
-
-  it('证伪 4: History cover 与 Return pending 期间 native 与 captured 节点及选区均保，源成功诚实刷新', async () => {
-    const identicalProse = 'Triple identical prompt text'
-
-    const initPage: AgentSessionHistoryPage = {
-      agentSessionId: controlA.agentSessionId,
-      source: { providerId: 'claude', nativeSessionId: 'claude-session-1' },
-      items: [
-        {
-          id: 'turn-native-1',
-          kind: 'user-message',
-          contentParts: [{ kind: 'text', text: identicalProse }],
-          startedAt: 10_000
-        },
-        {
-          id: 'turn-native-2',
-          kind: 'user-message',
-          contentParts: [{ kind: 'text', text: identicalProse }],
-          startedAt: 11_000
-        }
-      ],
-      nextCursor: null
-    }
-
-    let resolvePendingPage!: (page: AgentSessionHistoryPage) => void
-    historyPageSpy = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(initPage)
-
-    const capturedItem: AgentTimelineItem = {
-      id: 'captured-turn-3',
-      agentSessionId: controlA.agentSessionId,
-      kind: 'user_message',
-      status: 'complete',
-      source: 'user',
-      title: 'Prompt',
-      content: identicalProse,
-      createdAt: 12_000,
-      updatedAt: 12_000
-    }
-
-    useAppStore.setState({
-      timelines: {
-        [controlA.agentSessionId]: {
-          agentSessionId: controlA.agentSessionId,
-          items: [capturedItem],
-          revision: 1
-        }
-      }
-    })
-
-    // 1. 活跃渲染全部三条 (native 1, native 2, captured 3)
-    await act(async () => {
-      root.render(<ActivityPresenter control={controlA} enabled={true} items={[capturedItem]} />)
-    })
-
-    const turns = host.querySelectorAll('.log-turn')
-    expect(turns.length).toBe(3)
-
-    const native1Body = turns[0]?.querySelector('.log-turn__body') as HTMLDivElement | null
-    const native2Body = turns[1]?.querySelector('.log-turn__body') as HTMLDivElement | null
-    const captured3Body = turns[2]?.querySelector('.log-turn__body') as HTMLDivElement | null
-
-    expect(native1Body).not.toBeNull()
-    expect(native2Body).not.toBeNull()
-    expect(captured3Body).not.toBeNull()
-
-    // 设置选区在 native1
-    const range = document.createRange()
-    range.selectNodeContents(native1Body!)
-    const sel = window.getSelection()!
-    sel.removeAllRanges()
-    sel.addRange(range)
-
-    // 2. 打开 History 覆盖层 (enabled: false)
-    await act(async () => {
-      root.render(<ActivityPresenter control={controlA} enabled={false} items={[capturedItem]} />)
-    })
-
-    // 暂停期间：native 与 captured 节点及选区均保持
-    expect(native1Body!.isConnected, 'native1Body connected during pause').toBe(true)
-    expect(native2Body!.isConnected, 'native2Body connected during pause').toBe(true)
-    expect(captured3Body!.isConnected, 'captured3Body connected during pause').toBe(true)
-    expect(sel.getRangeAt(0).startContainer).toBe(native1Body)
-
-    // 3. 点击 Return (enabled: true)，但此时触发的重新验证请求处于 in-flight pending 状态
-    const pendingPromise = new Promise<AgentSessionHistoryPage>((resolve) => {
-      resolvePendingPage = resolve
-    })
-    historyPageSpy.mockReturnValue(pendingPromise)
-
-    let callbacks: { refresh: () => Promise<void> } | undefined
-    await act(async () => {
-      root.render(
-        <ActivityPresenter
-          control={controlA}
-          enabled={true}
-          items={[capturedItem]}
-          passDownRef={(c) => {
-            callbacks = c
-          }}
-        />
-      )
-    })
-
-    // 显式触发一次 refresh 产生 pending in-flight
-    await act(async () => {
-      void callbacks?.refresh()
-    })
-
-    // 断言证伪 4：在 Return pending 期间，绝对不得将现有正文冲掉或用 captured-only fallback 替换
-    const turnsPending = host.querySelectorAll('.log-turn')
-    expect(turnsPending.length, 'All 3 turns must remain present during pending Return').toBe(3)
-    const currentNative1 = turnsPending[0]?.querySelector('.log-turn__body')
-    const currentCaptured3 = turnsPending[2]?.querySelector('.log-turn__body')
-    expect(currentNative1, 'native1Body must be preserved during pending Return').toBe(native1Body)
-    expect(currentCaptured3, 'captured3Body must be preserved during pending Return').toBe(captured3Body)
-    expect(sel.getRangeAt(0).startContainer).toBe(native1Body)
-
-    // 4. 源数据最终成功返回更新
-    await act(async () => {
-      resolvePendingPage({
-        agentSessionId: controlA.agentSessionId,
-        source: { providerId: 'claude', nativeSessionId: 'claude-session-1' },
-        items: [
-          {
-            id: 'turn-native-1',
-            kind: 'user-message',
-            contentParts: [{ kind: 'text', text: 'Refreshed native text' }],
-            startedAt: 10_000
-          }
-        ],
-        nextCursor: null
-      })
-    })
-
-    // 最终诚实刷新呈现
-    expect(host.textContent).toContain('Refreshed native text')
-  })
-
-  it('复显语义 (resume): 从暂停恢复为 enabled:true 保持同一节点并有界重新验证同一来源', async () => {
-    const historyPage: AgentSessionHistoryPage = {
-      agentSessionId: controlA.agentSessionId,
-      source: { providerId: 'claude', nativeSessionId: 'claude-session-1' },
-      items: [
-        {
-          id: 'turn-alpha',
-          kind: 'user-message',
-          contentParts: [{ kind: 'text', text: 'Resume prompt text' }],
-          startedAt: 10_000
-        }
-      ],
-      nextCursor: null
-    }
-
-    historyPageSpy = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(historyPage)
-
-    await act(async () => {
-      root.render(<ActivityPresenter control={controlA} enabled={true} />)
-    })
-
-    expect(historyPageSpy).toHaveBeenCalledTimes(1)
-    const bodyBefore = host.querySelector('.log-turn__body')
-    expect(bodyBefore?.isConnected).toBe(true)
-
-    // 暂停
-    await act(async () => {
-      root.render(<ActivityPresenter control={controlA} enabled={false} />)
-    })
-    expect(bodyBefore?.isConnected).toBe(true)
-
-    // 恢复
-    await act(async () => {
-      root.render(<ActivityPresenter control={controlA} enabled={true} />)
-    })
-
-    const bodyAfterResume = host.querySelector('.log-turn__body')
-    expect(bodyAfterResume).toBe(bodyBefore)
-    expect(historyPageSpy).toHaveBeenCalledTimes(2)
-  })
-
-  it('晚到结果不刷新已暂停者: 请求在途时暂停，晚到结果不刷新已暂停视图', async () => {
-    let resolveHistoryPage!: (page: AgentSessionHistoryPage) => void
-    const pendingPromise = new Promise<AgentSessionHistoryPage>((resolve) => {
-      resolveHistoryPage = resolve
-    })
-
-    historyPageSpy = vi.spyOn(api.sessions, 'historyPage').mockReturnValue(pendingPromise)
-
-    let renderCount = 0
-    await act(async () => {
-      root.render(
-        <ActivityPresenter
-          control={controlA}
-          enabled={true}
-          onRender={() => {
-            renderCount++
-          }}
-        />
-      )
-    })
-
-    // 在途时暂停 (enabled: false)
-    await act(async () => {
-      root.render(
-        <ActivityPresenter
-          control={controlA}
-          enabled={false}
-          onRender={() => {
-            renderCount++
-          }}
-        />
-      )
-    })
-
-    const pauseRenderCount = renderCount
-
-    // 此时后台异步结果晚到解决
-    await act(async () => {
-      resolveHistoryPage({
-        agentSessionId: controlA.agentSessionId,
-        source: { providerId: 'claude', nativeSessionId: 'claude-session-1' },
-        items: [
-          {
-            id: 'late-rec-1',
-            kind: 'user-message',
-            contentParts: [{ kind: 'text', text: 'Late arriving query' }],
-            startedAt: 10_000
-          }
-        ],
-        nextCursor: null
-      })
-    })
-
-    expect(renderCount, 'Paused component must not be re-rendered by late arrival').toBe(pauseRenderCount)
-  })
-
-  it('run/host/session 切换清旧投影与资源，新 key 迟到不串', async () => {
-    const pageA: AgentSessionHistoryPage = {
-      agentSessionId: controlA.agentSessionId,
-      source: { providerId: 'claude', nativeSessionId: 'claude-session-a' },
-      items: [
-        {
-          id: 'session-a-turn-1',
-          kind: 'user-message',
-          contentParts: [{ kind: 'text', text: 'Session A specific text' }],
-          startedAt: 10_000
-        }
-      ],
-      nextCursor: null
-    }
-
-    const pageB: AgentSessionHistoryPage = {
-      agentSessionId: controlB.agentSessionId,
-      source: { providerId: 'claude', nativeSessionId: 'claude-session-b' },
-      items: [
-        {
-          id: 'session-b-turn-1',
-          kind: 'user-message',
-          contentParts: [{ kind: 'text', text: 'Session B specific text' }],
-          startedAt: 20_000
-        }
-      ],
-      nextCursor: null
-    }
-
-    historyPageSpy = vi.spyOn(api.sessions, 'historyPage').mockImplementation(async (control) => {
-      if (control.agentSessionId === controlA.agentSessionId) return pageA
-      return pageB
-    })
-
-    // 1. 渲染 Session A
-    await act(async () => {
-      root.render(<ActivityPresenter control={controlA} enabled={true} />)
-    })
-    expect(host.textContent).toContain('Session A specific text')
-
-    // 2. 切换到 Session B
-    await act(async () => {
-      root.render(<ActivityPresenter control={controlB} enabled={true} />)
-    })
-
-    // Session A 的旧投影必须被清除，不得泄漏到 Session B
-    expect(host.textContent).not.toContain('Session A specific text')
-    expect(host.textContent).toContain('Session B specific text')
-  })
-
-  it('多消费者 singleflight 共享单条网络请求，真正无消费者时才释放资源', async () => {
-    let resolvePage!: (page: AgentSessionHistoryPage) => void
-    const pendingPromise = new Promise<AgentSessionHistoryPage>((resolve) => {
-      resolvePage = resolve
-    })
-
-    historyPageSpy = vi.spyOn(api.sessions, 'historyPage').mockReturnValue(pendingPromise)
-
-    function MultiHost({ showConsumer1, showConsumer2 }: { showConsumer1: boolean; showConsumer2: boolean }) {
-      return (
-        <div>
-          {showConsumer1 ? <ActivityPresenter control={controlA} enabled={true} /> : null}
-          {showConsumer2 ? <ActivityPresenter control={controlA} enabled={true} /> : null}
-        </div>
-      )
-    }
-
-    // 挂载两个 consumer
-    await act(async () => {
-      root.render(<MultiHost showConsumer1={true} showConsumer2={true} />)
-    })
-
-    expect(historyPageSpy).toHaveBeenCalledTimes(1)
-
-    await act(async () => {
-      resolvePage({
-        agentSessionId: controlA.agentSessionId,
-        source: { providerId: 'claude', nativeSessionId: 'claude-session-1' },
-        items: [
-          {
-            id: 'multi-turn-1',
-            kind: 'user-message',
-            contentParts: [{ kind: 'text', text: 'Shared request content' }],
-            startedAt: 10_000
-          }
-        ],
-        nextCursor: null
-      })
-    })
-
-    const bodies = host.querySelectorAll('.log-turn__body')
-    expect(bodies.length).toBe(2)
-
-    await act(async () => {
-      root.render(<MultiHost showConsumer1={false} showConsumer2={true} />)
-    })
-    expect(host.querySelectorAll('.log-turn__body').length).toBe(1)
-
-    await act(async () => {
-      root.render(<MultiHost showConsumer1={false} showConsumer2={false} />)
-    })
-    expect(host.querySelectorAll('.log-turn__body').length).toBe(0)
-  })
-
-  it('隐藏时停止 timeline 观察，新相关 timeline 变化不触发隐藏重渲染与工作', async () => {
-    const historyPage: AgentSessionHistoryPage = {
-      agentSessionId: controlA.agentSessionId,
-      source: { providerId: 'claude', nativeSessionId: 'claude-session-1' },
-      items: [
-        {
-          id: 'turn-steady',
-          kind: 'user-message',
-          contentParts: [{ kind: 'text', text: 'Steady prompt' }],
-          startedAt: 10_000
-        }
-      ],
-      nextCursor: null
-    }
-
-    historyPageSpy = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(historyPage)
-
-    let renderCount = 0
-    await act(async () => {
-      root.render(
-        <ActivityPresenter
-          control={controlA}
-          enabled={false}
-          onRender={() => {
-            renderCount++
-          }}
-        />
-      )
-    })
-
-    const baselineRenderCount = renderCount
-
-    // 在 hidden 期间更新当前 Session 的 timeline
-    await act(async () => {
-      useAppStore.setState({
-        timelines: {
-          [controlA.agentSessionId]: {
-            agentSessionId: controlA.agentSessionId,
-            items: [
-              {
-                id: 'active-turn-new',
-                agentSessionId: controlA.agentSessionId,
-                kind: 'user_message',
-                status: 'complete',
-                source: 'user',
-                title: 'New prompt',
-                content: 'New content while hidden',
-                createdAt: 20_000,
-                updatedAt: 20_000
-              }
-            ],
-            revision: 2
-          }
-        }
-      })
-    })
-
-    // 暂停时应停止观察，不增加工作，不触发隐藏重渲染
-    expect(renderCount, 'Hidden component must not re-render on timeline changes').toBe(baselineRenderCount)
-  })
-
-  it('证伪 10 (aborted render 不污染已提交快照): startTransition 渲染 B 并在同轮悬挂/中止，返回 A (enabled:false) 时保持原三 DOM 节点及 Range', async () => {
-    const identicalText = 'Identical prompt across aborted render'
-
-    const historyPageA: AgentSessionHistoryPage = {
-      agentSessionId: controlA.agentSessionId,
-      source: { providerId: 'claude', nativeSessionId: 'claude-session-1' },
-      items: [
-        {
-          id: 'native-a-1',
-          kind: 'user-message',
-          contentParts: [{ kind: 'text', text: identicalText }],
-          startedAt: 10_000
-        },
-        {
-          id: 'native-a-2',
-          kind: 'user-message',
-          contentParts: [{ kind: 'text', text: identicalText }],
-          startedAt: 11_000
-        }
-      ],
-      nextCursor: null
-    }
-
-    historyPageSpy = vi.spyOn(api.sessions, 'historyPage').mockImplementation(async (ctrl) => {
-      if (ctrl.agentSessionId === controlA.agentSessionId) return historyPageA
-      return {
-        agentSessionId: controlB.agentSessionId,
-        source: { providerId: 'claude', nativeSessionId: 'claude-session-2' },
-        items: [],
-        nextCursor: null
-      }
-    })
-
-    const capturedTimelineItem: AgentTimelineItem = {
-      id: 'captured-a-3',
-      agentSessionId: controlA.agentSessionId,
-      kind: 'user_message',
-      status: 'complete',
-      source: 'user',
-      title: 'Prompt',
-      content: identicalText,
-      createdAt: 12_000,
-      updatedAt: 12_000
-    }
-
-    useAppStore.setState({
-      timelines: {
-        [controlA.agentSessionId]: {
-          agentSessionId: controlA.agentSessionId,
-          items: [capturedTimelineItem],
-          revision: 1
-        }
-      }
-    })
-
-    let suspendPromise: Promise<void> | null = null
-
-    function SuspenseSibling({ shouldSuspend }: { shouldSuspend: boolean }) {
-      if (shouldSuspend) {
-        if (!suspendPromise) {
-          suspendPromise = new Promise<void>(() => {})
-        }
-        throw suspendPromise
-      }
-      return <div data-testid="sibling-ready">Ready</div>
-    }
-
-    function AbortHost({
-      currentControl,
-      enabled,
-      shouldSuspend,
-      items
-    }: {
-      currentControl: AgentSessionControl
-      enabled: boolean
-      shouldSuspend: boolean
-      items: AgentTimelineItem[]
-    }) {
-      return (
-        <div>
-          <Suspense fallback={<div data-testid="suspense-fallback">Suspending...</div>}>
-            <SuspenseSibling shouldSuspend={shouldSuspend} />
-          </Suspense>
-          <ActivityPresenter control={currentControl} enabled={enabled} items={items} />
-        </div>
-      )
-    }
-
-    // 1. Commit A 的三个正文 (native 1, native 2, captured 3)
-    await act(async () => {
-      root.render(
-        <AbortHost
-          currentControl={controlA}
-          enabled={true}
-          shouldSuspend={false}
-          items={[capturedTimelineItem]}
-        />
-      )
-    })
-
-    const turnsBefore = host.querySelectorAll('.log-turn')
-    expect(turnsBefore.length).toBe(3)
-
-    const nativeBody1 = turnsBefore[0]?.querySelector('.log-turn__body') as HTMLDivElement | null
-    const nativeBody2 = turnsBefore[1]?.querySelector('.log-turn__body') as HTMLDivElement | null
-    const capturedBody3 = turnsBefore[2]?.querySelector('.log-turn__body') as HTMLDivElement | null
-
-    expect(nativeBody1).not.toBeNull()
-    expect(nativeBody2).not.toBeNull()
-    expect(capturedBody3).not.toBeNull()
-    expect(nativeBody1!.isConnected).toBe(true)
-
-    // 设置 DOM Range 在 nativeBody1
-    const range = document.createRange()
-    range.selectNodeContents(nativeBody1!)
-    const sel = window.getSelection()!
-    sel.removeAllRanges()
-    sel.addRange(range)
-
-    expect(sel.getRangeAt(0).startContainer).toBe(nativeBody1)
-
-    // 2. startTransition 在同组件 render B，Sibling Suspense 实际 throw，B render 执行但未 commit
-    await act(async () => {
-      startTransition(() => {
-        root.render(
-          <AbortHost
-            currentControl={controlB}
-            enabled={true}
-            shouldSuspend={true}
-            items={[]}
-          />
-        )
-      })
-    })
-
-    // 此时 transition 悬挂，未提交。原 A 的节点依然连接在 DOM 上
-    expect(nativeBody1!.isConnected, 'nativeBody1 remains connected while B is suspended').toBe(true)
-
-    // 3. 返回原 A (enabled: false)，例如此时回到 A 的覆盖视图
-    await act(async () => {
-      root.render(
-        <AbortHost
-          currentControl={controlA}
-          enabled={false}
-          shouldSuspend={false}
-          items={[capturedTimelineItem]}
-        />
-      )
-    })
-
-    // 关键断言 (证伪点):
-    // 若在 render 期间写 ref 改写了 lastSessionKeyRef，则 A 会被误当成新 key，正文变 []，原 DOM 全断，Range 全断
-    // 修复后：原三个 DOM 节点必须保持连接，且 Range.startContainer 未断
-    expect(nativeBody1!.isConnected, 'nativeBody1 must remain connected after returning to A paused').toBe(true)
-    expect(nativeBody2!.isConnected, 'nativeBody2 must remain connected after returning to A paused').toBe(true)
-    expect(capturedBody3!.isConnected, 'capturedBody3 must remain connected after returning to A paused').toBe(true)
-
-    const turnsAfter = host.querySelectorAll('.log-turn')
-    expect(turnsAfter.length, 'All 3 turns must remain present in DOM').toBe(3)
-
-    const currentNative1 = turnsAfter[0]?.querySelector('.log-turn__body')
-    expect(currentNative1, 'Body node instance must be preserved').toBe(nativeBody1)
-
-    expect(sel.rangeCount).toBe(1)
-    expect(sel.getRangeAt(0).startContainer, 'Range startContainer must remain nativeBody1').toBe(nativeBody1)
-  })
+it('disabled original public consumer retains both native and captured bodies, TextNode and selected Range', async () => {
+  const text = 'Identical prompt text across sources', f = await fixture(page(text, ['native-one', 'native-two']))
+  await f.publish(captured(text)); await render(<Presenter />); await readOriginalSubmission()
+  const originals = bodies(), selection = selected(originals[0]!)
+  await render(<Presenter enabled={false} />)
+  expect(bodies()).toEqual(originals); unchanged(selection)
+  expect(reader().conversation.inspect()).toMatchObject({ loading: false, watch: { bound: false } })
+})
+
+it('an active independent consumer refresh and parent rerender cannot replace the paused consumer private frame or Range', async () => {
+  const f = await fixture()
+  const dual = (enabled: boolean, tick: number) => <div data-parent-tick={tick}>
+    <Presenter key="one" enabled={enabled} /><Presenter key="two" name="two" />
+  </div>
+  await render(dual(true, 0)); await ready(); await ready('two')
+  const original = bodies()[0]!, selection = selected(original), frame = reader().conversation.snapshot
+  expect(frame!.window.id).not.toBe(reader('two').conversation.snapshot!.window.id)
+  await render(dual(false, 1))
+  f.replace(page('Brand new refreshed message', ['refreshed']))
+  await act(async () => reader('two').refresh())
+  await wait(() => expect(scope('two').textContent).toContain('Brand new refreshed message'))
+  await render(dual(false, 2))
+  expect(reader().conversation.snapshot).toBe(frame); expect(bodies()[0]).toBe(original)
+  expect(scope().textContent).not.toContain('Brand new refreshed message'); unchanged(selection)
+})
+
+it('disabled callbacks do no original reads and a subsequent real source failure is honest while the connected body remains', async () => {
+  const f = await fixture(page('Resilient stable body'))
+  await render(<Presenter />); await ready()
+  const original = bodies()[0]!
+  await render(<Presenter enabled={false} />)
+  const reads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  const changes = vi.mocked(api.conversation.readConversationChanges).mock.calls.length
+  await act(async () => { await reader().refresh(); await reader().loadEarlier() })
+  expect(api.conversation.readAgentConversation).toHaveBeenCalledTimes(reads)
+  expect(api.conversation.readConversationChanges).toHaveBeenCalledTimes(changes)
+  await render(<Presenter />); await ready()
+  f.fail(new Error('Controlled original source unavailable'))
+  await act(async () => reader().refresh())
+  await wait(() => expect(reader().error).toMatchObject({ code: 'AGENT_CONVERSATION_SOURCE_READ_UNAVAILABLE' }))
+  expect(reader().error!.message).toContain('Controlled original source unavailable')
+  expect(bodies()[0]).toBe(original); expect(original.isConnected).toBe(true); expect(original.textContent).toContain('Resilient stable body')
+})
+
+it('paused and resumed pending source reads preserve all original nodes and Range until changed text is explicitly releasable', async () => {
+  const text = 'Triple identical prompt text', f = await fixture(page(text, ['native-one', 'native-two']))
+  await f.publish(captured(text)); await render(<Presenter />); await readOriginalSubmission()
+  const originals = bodies(), selection = selected(originals[0]!)
+  await render(<Presenter enabled={false} />)
+  expect(bodies()).toEqual(originals); unchanged(selection)
+  await render(<Presenter />); await ready('one', 3)
+  f.replace(page('Refreshed native text', ['native-one', 'native-two']))
+  const gate = f.hold()
+  let refresh!: Promise<void>
+  await act(async () => { refresh = reader().refresh() })
+  await wait(() => expect(gate.entered()).toBe(true))
+  expect(bodies()).toEqual(originals); unchanged(selection)
+  await act(async () => { gate.release(); await refresh })
+  expect(bodies()).toEqual(originals); unchanged(selection)
+  await act(async () => clearSelection())
+  await wait(() => expect(scope().textContent).toContain('Refreshed native text'))
+  expect(bodies()).toHaveLength(3)
+})
+
+it('resume preserves the same connected body and revalidates only its retained original view', async () => {
+  await fixture(page('Resume prompt text')); await render(<Presenter />); await ready()
+  const original = bodies()[0]!, frame = reader().conversation.snapshot!
+  await render(<Presenter enabled={false} />); expect(original.isConnected).toBe(true)
+  const reads = vi.mocked(api.conversation.readAgentConversation).mock.calls.length
+  await render(<Presenter />); await ready()
+  expect(bodies()[0]).toBe(original)
+  const resumed = vi.mocked(api.conversation.readAgentConversation).mock.calls.slice(reads)
+  expect(resumed).toHaveLength(1)
+  expect(resumed[0]![0]).toMatchObject({ hostId: controlA.hostId, agentSessionId: controlA.agentSessionId, view: frame.window.view })
+  expect(reader().conversation.snapshot!.window.id).toBe(frame.window.id)
+})
+
+it('an original in-flight source result cannot render or commit after its consumer is paused', async () => {
+  const f = await fixture(page('Late arriving query', ['late']))
+  const gate = f.hold(); let renders = 0
+  await render(<Presenter onRender={() => { renders++ }} />)
+  await wait(() => expect(gate.entered()).toBe(true))
+  await render(<Presenter enabled={false} onRender={() => { renders++ }} />)
+  const paused = renders
+  await act(async () => { gate.release(); await Promise.allSettled(f.nativePending) })
+  expect(renders).toBe(paused); expect(bodies()).toHaveLength(0); expect(reader().conversation.snapshot).toBeNull()
+})
+
+it('switching the exact Session rejects an old source result and keeps the new Session frame and body', async () => {
+  const f = await fixture(page('Session A specific text', ['alpha']))
+  await render(<Presenter />); await ready()
+  const gate = f.hold(); let oldRead!: Promise<void>
+  await act(async () => { oldRead = reader().refresh() })
+  await wait(() => expect(gate.entered()).toBe(true))
+  await render(<Presenter control={controlB} />); await ready()
+  const original = bodies()[0]!, frame = reader().conversation.snapshot!
+  expect(scope().textContent).toContain('Session B specific text'); expect(scope().textContent).not.toContain('Session A specific text')
+  expect(frame).toMatchObject({ hostId: controlB.hostId, agentSessionId: controlB.agentSessionId })
+  await act(async () => { gate.release(); await oldRead; await Promise.allSettled(f.nativePending) })
+  expect(reader().conversation.snapshot).toBe(frame); expect(bodies()[0]).toBe(original)
+  expect(scope().textContent).not.toContain('Session A specific text')
+})
+
+it('each mounted public consumer owns its exact window and removing one releases only that window', async () => {
+  await fixture(page('Original shared source'))
+  const dual = (one: boolean, two: boolean) => <div>
+    {one ? <Presenter key="one" /> : null}{two ? <Presenter key="two" name="two" /> : null}
+  </div>
+  await render(dual(true, true)); await ready(); await ready('two')
+  const first = reader().conversation.snapshot!, second = reader('two').conversation.snapshot!, original = bodies('two')[0]
+  expect(first.window.id).not.toBe(second.window.id)
+  expect(api.conversation.readAgentConversation).toHaveBeenCalled()
+  await render(dual(false, true))
+  await wait(() => expect(vi.mocked(api.conversation.releaseConversationView).mock.calls.some(([input]) => input.view === first.window.view)).toBe(true))
+  expect(reader('two').conversation.snapshot).toBe(second); expect(bodies('two')[0]).toBe(original)
+  expect(vi.mocked(api.conversation.releaseConversationView).mock.calls.some(([input]) => input.view === second.window.view)).toBe(false)
+  await render(dual(false, false))
+  await wait(() => expect(vi.mocked(api.conversation.releaseConversationView).mock.calls.some(([input]) => input.view === second.window.view)).toBe(true))
+  expect(host.querySelectorAll('.log-turn__body')).toHaveLength(0)
+})
+
+it('a real related captured publication updates the active consumer without waking the paused consumer', async () => {
+  const f = await fixture(page('Steady prompt')); let hiddenRenders = 0
+  const dual = (enabled: boolean) => <div><Presenter key="one" enabled={enabled} onRender={() => { hiddenRenders++ }} /><Presenter key="two" name="two" /></div>
+  await render(dual(true)); await ready(); await ready('two')
+  const original = bodies()[0]!, frame = reader().conversation.snapshot
+  await render(dual(false)); const paused = hiddenRenders
+  await act(async () => f.publish(captured('New content while hidden')))
+  await wait(() => expect(scope('two').textContent).toContain('New content while hidden'))
+  expect(hiddenRenders).toBe(paused); expect(reader().conversation.snapshot).toBe(frame); expect(bodies()).toEqual([original])
+  expect(scope().textContent).not.toContain('New content while hidden')
+  expect(reader().conversation.inspect()).toMatchObject({ loading: false, watch: { bound: false } })
+})
+
+it('a genuinely suspended uncommitted Session B render cannot erase committed paused A bodies or Range', async () => {
+  const text = 'Identical prompt across aborted render', f = await fixture(page(text, ['native-one', 'native-two']))
+  await f.publish(captured(text))
+  const suspended = new Promise<void>(() => {}); let bRenders = 0, suspensions = 0
+  function Sibling({ pending }: { pending: boolean }) { if (pending) { suspensions++; throw suspended } return <div data-ready>Ready</div> }
+  function AbortHost({ control, enabled, pending }: { control: AgentSessionControl; enabled: boolean; pending: boolean }) {
+    return <Suspense fallback={<div data-fallback>Pending</div>}>
+      <Presenter control={control} enabled={enabled} onRender={actual => { if (actual.agentSessionId === controlB.agentSessionId) bRenders++ }} />
+      <Sibling pending={pending} />
+    </Suspense>
+  }
+  await render(<AbortHost control={controlA} enabled pending={false} />); await readOriginalSubmission()
+  const originals = bodies(), selection = selected(originals[0]!), frame = reader().conversation.snapshot
+  await act(async () => startTransition(() => root.render(<AbortHost control={controlB} enabled pending />)))
+  expect(bRenders).toBeGreaterThan(0); expect(suspensions).toBeGreaterThan(0)
+  expect(host.querySelector('[data-fallback]')).toBeNull()
+  expect(f.nativeRead.mock.calls.filter(([id]) => id === controlB.agentSessionId)).toHaveLength(0)
+  expect(bodies()).toEqual(originals); unchanged(selection)
+  await render(<AbortHost control={controlA} enabled={false} pending={false} />)
+  expect(reader().conversation.snapshot).toBe(frame); expect(bodies()).toEqual(originals); unchanged(selection)
 })
