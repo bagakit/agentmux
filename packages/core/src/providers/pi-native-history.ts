@@ -3,7 +3,7 @@
 // Branch semantics follow Pi 0.84.3 SessionManager._buildIndex/getBranch (ccfe79ed, MIT):
 // last durable entry, parent traversal, including history before compaction; no mutating loader.
 import { AgentMuxError } from '../errors.js'
-import { NativeJsonlHistoryReader } from '../native-jsonl-history-reader.js'
+import { NativeJsonlHistoryReader, readNativeConversationChanges } from '../native-jsonl-history-reader.js'
 import {
   isNativeText,
   nativeJsonStringify,
@@ -12,6 +12,7 @@ import {
   type NativeHistoryItem as AgentSessionHistoryItem
 } from '../native-history-value.js'
 import type { AgentProviderSessionHistoryContext, AgentProviderSessionHistoryPage } from '../types.js'
+import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from '../session-history-changes.js'
 
 function object(value: unknown): Record<string, unknown> | undefined {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined
@@ -89,6 +90,23 @@ function parts(content: unknown, message?: Record<string, unknown>): AgentSessio
 
 function invalid(message: string): never { throw new AgentMuxError(message, 'AGENT_SESSION_HISTORY_INVALID_TRANSCRIPT') }
 
+function entryIdentity(entry: Record<string, unknown>): { id: string; parentId: string | null } {
+  if (typeof entry.id !== 'string' || !entry.id ||
+      (entry.parentId !== null && (typeof entry.parentId !== 'string' || !entry.parentId))) {
+    invalid('Pi transcript contains an invalid v3 entry.')
+  }
+  return { id: entry.id, parentId: entry.parentId }
+}
+
+async function validateHeader(reader: NativeJsonlHistoryReader,
+  context: Pick<AgentProviderSessionHistoryContext, 'source' | 'workspacePath'>): Promise<void> {
+  const header = await reader.readFirst()
+  if (header?.type !== 'session' || header.version !== 3 || header.id !== context.source.nativeSessionId ||
+      header.cwd !== context.workspacePath) {
+    throw new AgentMuxError('Pi requires this native Session\'s v3 transcript and workspace.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+  }
+}
+
 function convert(entry: Record<string, unknown>): AgentSessionHistoryItem {
   const message = entry.type === 'message' ? object(entry.message) : undefined
   const role = message?.role
@@ -122,11 +140,7 @@ function convert(entry: Record<string, unknown>): AgentSessionHistoryItem {
 export async function readPiSessionHistoryPage(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage> {
   const reader = await NativeJsonlHistoryReader.open(context)
   try {
-    const header = await reader.readFirst()
-    if (header?.type !== 'session' || header.version !== 3 || header.id !== context.source.nativeSessionId ||
-      header.cwd !== context.workspacePath) {
-      throw new AgentMuxError('Pi requires this native Session\'s v3 transcript and workspace.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
-    }
+    await validateHeader(reader, context)
     let parent = reader.continuation
     const visited = new Set<string>()
     const items: AgentSessionHistoryItem[] = []
@@ -138,18 +152,43 @@ export async function readPiSessionHistoryPage(context: AgentProviderSessionHist
         break
       }
       const entry = record.value
-      if (typeof entry.id !== 'string' || !entry.id ||
-        (entry.parentId !== null && (typeof entry.parentId !== 'string' || !entry.parentId))) {
-        invalid('Pi transcript contains an invalid v3 entry.')
-      }
-      if (parent !== undefined && entry.id !== parent) continue
-      if (visited.has(entry.id as string)) invalid('Pi transcript contains a branch cycle.')
-      visited.add(entry.id as string)
+      const identity = entryIdentity(entry)
+      if (parent !== undefined && identity.id !== parent) continue
+      if (visited.has(identity.id)) invalid('Pi transcript contains a branch cycle.')
+      visited.add(identity.id)
       items.push(convert(entry))
-      if (entry.parentId === null) { parent = undefined; break }
-      parent = entry.parentId as string
+      if (identity.parentId === null) { parent = undefined; break }
+      parent = identity.parentId
     }
     const nextCursor = parent === undefined ? (await reader.verifyUnchanged(), null) : await reader.nextCursor(parent)
-    return { source: context.source, items: await Promise.all(items.reverse().map(item => reader.materializeItem(item))), nextCursor }
+    return { source: context.source, items: await Promise.all(items.reverse().map(item => reader.materializeItem(item))), nextCursor,
+      changesCursor: await reader.historyChangesCursor(), replayCursor: await reader.historyReplayCursor(), sourceSizeBytes: reader.sourceSizeBytes }
+  } finally { await reader.close() }
+}
+
+/** Physical appends extend an accepted Pi branch only while each original parent
+ * is its preceding durable leaf. A branch change requires a fresh selected read. */
+export async function readPiConversationChanges(context: ProviderConversationChangesContext): Promise<ProviderConversationChangesPage> {
+  const reader = await NativeJsonlHistoryReader.open(context)
+  try {
+    await validateHeader(reader, context)
+    await reader.seekChanges(context.after, context.tail === true)
+    const previous = await reader.readBeforeChanges()
+    let leaf = previous && previous.value.type !== 'session' ? entryIdentity(previous.value).id : null
+    const visited = new Set(leaf === null ? [] : [leaf])
+    return await readNativeConversationChanges(reader, context, (entry, start) => {
+      if (entry.type === 'session') {
+        if (start !== 0) invalid('Pi transcript contains another Session header.')
+        return null
+      }
+      const identity = entryIdentity(entry)
+      if (identity.parentId !== leaf) {
+        throw new AgentMuxError('Pi selected a different native branch. Retain the original cut and read the current selected branch.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+      }
+      if (visited.has(identity.id)) invalid('Pi transcript contains a branch cycle.')
+      visited.add(identity.id)
+      leaf = identity.id
+      return convert(entry)
+    })
   } finally { await reader.close() }
 }

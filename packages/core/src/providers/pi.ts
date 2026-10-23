@@ -8,7 +8,7 @@ import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
 import { normalizeNativeSessionId, normalizeNativeTranscriptPath } from '../agent-native-locator.js'
 import { catalog } from './shared.js'
 import { hookDeliverySource } from '../agent-hook-delivery.js'
-import { readPiSessionHistoryPage } from './pi-native-history.js'
+import { readPiConversationChanges, readPiSessionHistoryPage } from './pi-native-history.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 
 type ProviderFactory = (definition: AgentProviderDefinition) => AgentProvider
@@ -298,6 +298,7 @@ export function createPiProvider(defineAgentProvider: ProviderFactory): AgentPro
   return defineAgentProvider({
     planManagedHooks: ({ env }) => createPiManagedHookPlan(env),
     readSessionHistoryPage: readPiSessionHistoryPage,
+    readConversationChanges: readPiConversationChanges,
     observeSessionHistory: observeNativeJsonlHistory,
     catalog: catalog({
       composer: {"skillRoots": [".pi/agent/skills", ".agents/skills"], "commands": [{"text": "/help", "description": "Available commands"}, {"text": "/model", "description": "Choose model"}, {"text": "/compact", "description": "Compact context"}]},
