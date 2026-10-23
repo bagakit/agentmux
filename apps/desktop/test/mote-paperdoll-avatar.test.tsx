@@ -221,3 +221,57 @@ it('renders focused part glyphs, group tabs, presets, 45/24px stage chips and ke
   expect(document.querySelector('[data-avatar-source="face"]')!.getAttribute('aria-pressed')).toBe('true')
   expect(button('Restore automatic').getAttribute('aria-pressed')).toBe('true')
 })
+
+it('saving a Mote silhouette preserves live articulated expressions across Footer, floating chooser, Space and reopened picker', async () => {
+  vi.stubGlobal('Image', class {
+    width = 256; height = 256; onload: (() => void) | null = null; onerror: (() => void) | null = null
+    set src(_source: string) { queueMicrotask(() => this.onload?.()) }
+  })
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockReturnValue({ clearRect: vi.fn(), drawImage: vi.fn() } as never)
+  vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockReturnValue('data:image/png;base64,FLATPNG')
+  vi.spyOn(api.scratch, 'saveMoteAvatar').mockResolvedValue({ kind: 'image', fileName: 'f'.repeat(64) + '.png' })
+  vi.spyOn(api.moteAvatars, 'list').mockResolvedValue({
+    roots: [{ origin: 'builtin', path: '/builtin', state: 'available' }],
+    series: [{ origin: 'builtin', seriesId: 'mote-silhouettes', title: 'Mote art directions', entries: [
+      { entryId: 'flat', title: 'Flat', definition: { kind: 'image', file: 'flat.png' } }
+    ] }],
+    issues: []
+  })
+  vi.spyOn(api.moteAvatars, 'preview').mockResolvedValue({
+    source: { origin: 'builtin', seriesId: 'mote-silhouettes', entryId: 'flat', revision: 'sha256:' + 'e'.repeat(64) },
+    definition: { kind: 'image', file: 'flat.png' },
+    payload: { kind: 'image', image: { width: 256, height: 256, dataUrl: 'data:image/png;base64,FLAT' } },
+    issues: []
+  })
+  localStorage.setItem(savedMoteKey, JSON.stringify({ open: true, targetTopicId: customMoteId, targetTabId: customTab.id }))
+  await app.mount(); await settleMoteApp()
+  await act(async () => app.entry().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2, clientX: 10, clientY: 50 }))); await settleMoteApp()
+  const changeItem = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Change avatar…')!
+  await moteClick(changeItem); await settleMoteApp()
+  await moteClick(button('Flat Mote image')); await settleMoteApp()
+  await moteClick(button('Save avatar')); await settleMoteApp()
+
+  const choice = useAppStore.getState().spaceObjectIcons[custom.key]
+  expect(choice).toMatchObject({ kind: 'series', source: { origin: 'builtin', seriesId: 'mote-silhouettes', entryId: 'flat' } })
+
+  // Footer launcher renders articulated silhouette rig, not a static <img>
+  expect(app.entry().querySelector('[data-space-icon-source="silhouette"] [data-silhouette-art="flat"]')).not.toBeNull()
+  expect(app.entry().querySelector('img')).toBeNull()
+
+  // Floating panel chooser renders articulated silhouette rig
+  await moteClick(app.entry()); await settleMoteApp()
+  expect(app.panel().querySelector(`[data-mote-topic-id="${customMoteId}"] [data-silhouette-art="flat"]`)).not.toBeNull()
+
+  // Full Space directory renders articulated silhouette rig
+  await moteClick(button('Open in Space')); await act(async () => useAppStore.setState({ projectRailOpen: true })); await settleMoteApp()
+  const spaceRow = [...app.container.querySelectorAll<HTMLElement>('[data-space-icon-target]')].find(node => node.dataset.spaceIconTarget === custom.key)!
+  expect(spaceRow.querySelector('[data-silhouette-art="flat"]')).not.toBeNull()
+
+  // Reopening Change avatar keeps Icon or image active with Flat selected and live on stage
+  await act(async () => app.entry().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2, clientX: 10, clientY: 50 }))); await settleMoteApp()
+  await moteClick([...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Change avatar…')!); await settleMoteApp()
+  expect(document.querySelector('[data-avatar-source="alternative"]')!.getAttribute('aria-pressed')).toBe('true')
+  expect(document.querySelector('.mote-avatar-alternative:not([hidden]) .mote-avatar-stage__source strong')?.textContent).toBe('Flat')
+  expect(document.querySelector('.mote-avatar-preview [data-silhouette-art="flat"]')).not.toBeNull()
+  expect(button('Flat Mote image').getAttribute('aria-pressed')).toBe('true')
+})
