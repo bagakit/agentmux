@@ -14,6 +14,7 @@ const host = 'apps/host/src/capsules.ts', ipc = 'apps/desktop/src/main/ipc.ts'
 const sha = value => createHash('sha256').update(value).digest('hex')
 const sources = Object.fromEntries(await Promise.all([reply, document, host, ipc, 'apps/desktop/src/main/capsule-presentation.ts',
   'packages/core/src/capsule-input.ts', 'packages/core/src/public-rpc-service.ts', 'packages/capsule/src/node.ts',
+  'packages/core/src/public-rpc-client.ts', 'packages/core/src/rpc-transport-error.ts',
   'packages/capsule/src/types.ts', 'packages/capsule/src/parsers.ts', 'packages/capsule/src/storage.ts', 'packages/capsule/src/runtime.ts',
   'packages/capsule/src/runtime-client.ts', 'packages/capsule/src/runtime-server.ts', 'packages/capsule/src/runtime-wire.ts',
   'apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/test/capsule-main.test.ts',
@@ -28,6 +29,8 @@ const dispatch = `if (this.confirmations.get(prepared.operationId) !== confirmat
       !isDeepStrictEqual(interaction.target, prepared.target) || interaction.reply?.operationId !== prepared.operationId ||
       interaction.reply.phase !== 'dispatch-started' || interaction.reply.delivery.inputOperationId !== prepared.inputOperationId ||
       !isDeepStrictEqual(interaction.reply.delivery.expectedRun, prepared.expectedRun))`
+const unsentPresentation = `if (failure?.controlFailure?.disposition !== 'not_applied' ||
+            !['CONTROL_UNAVAILABLE', 'CONTROL_CONNECTION_FAILED'].includes(String(failure.code))) throw error`
 const mutants = [
   { id: 'app-main-frame', file: ipc, before: "if (event.senderFrame !== contents.mainFrame) throw new Error('The original App main frame must confirm this answer.')", after: "if (false) throw new Error('The original App main frame must confirm this answer.')", test: 'does not turn a page sender, App subframe, local RPC user or forged envelope into Human confirmation' },
   { id: 'owner-input-reservation', file: reply, before: reservation, after: 'if (false)', test: 'rejects an unprepared input and mismatched original question during a live exact confirmation' },
@@ -37,6 +40,9 @@ const mutants = [
   { id: 'loaded-service-instance', file: document, before: '      endpoint.instanceId !== current.instanceId || binding.instanceId !== current.instanceId ||\n', after: '', test: 'revokes an old native document after the original Capsule service restarts on the same origin' },
   { id: 'graph-is-not-visibility', file: host, before: '        if (!capsuleCurrentlyVisible(observation, matches[0]!, current.endpoint.url)) return null\n', after: '', test: 'keeps a recorded Browser association unknown until the same native document is authoritatively visible, without focus replay' },
   { id: 'callback-original-credentials', file: host, before: 'try { client = await desktop.connect(originalContext) }', after: 'try { client = await desktop.connect() }', test: 'keeps each original Agent credential on its own Desktop callback across another Capsule call' },
+  { id: 'unsent-rendering-receipt-ignored', file: host, before: "failure?.controlFailure?.disposition !== 'not_applied'", after: 'true', test: 'returns a retained unavailable rendering receipt when the real Desktop socket cannot receive the original open' },
+  { id: 'dispatched-open-labelled-unavailable', file: host, before: unsentPresentation, after: 'if (false) throw error', test: 'retains an unknown original open when the actual Desktop socket disconnects after receiving it' },
+  { id: 'owner-refusal-labelled-absent', file: host, before: "!['CONTROL_UNAVAILABLE', 'CONTROL_CONNECTION_FAILED'].includes(String(failure.code))", after: 'false', test: 'preserves an original Desktop permission refusal instead of relabelling it as an absent owner' },
   { id: 'unknown-inspection', file: host, before: "client.call('capsule.input', { phase, prepared },", after: "client.call('capsule.input', { phase: 'submit', prepared },", test: 'does not resubmit an unknown original reply after actual Core firstsave or on repeated confirmation' }
 ].map(mutant => {
   assert.equal(sources[mutant.file].split(mutant.before).length - 1, 1, 'Exactly one production source anchor: ' + mutant.id)
