@@ -22,7 +22,6 @@
 .session-learning__field p { margin: 0; }
 .session-learning__confirmation { margin-top: 16px; }
 .session-learning__confirmation > button { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
-.session-learning__action-result { color: var(--text); font-size: var(--fs-micro); }
 .session-learning__confirmation .session-takeover__issue { margin-block: 8px 0; }
 .session-learning__candidate { color: var(--text-2); font-size: var(--fs-meta); margin-block: 16px; }
 .session-learning__candidate summary { cursor: pointer; }
