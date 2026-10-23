@@ -1,7 +1,7 @@
 import { openSync, closeSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { chmod, mkdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from '@agentmux/core'
 import { ConnectionHost, type ConnectionAdapter } from './connection-host.js'
@@ -32,7 +32,7 @@ export type ConnectionServices = {
 }
 type LiveServices = { lease?: number; database: DatabaseSync; connections: ConnectionHost; secrets: ConnectionSecrets; bindings?: RoomBindingHost; rooms?: RoomProvisioningHost; publication?: PublicationHost; ingress?: DurableIngressHost; receivers?: ConnectionReceivers; moteChat?: MoteChatHost }
 /** Optional failure stays local. A later exact operation retries storage on the same Host and database. */
-export async function createConnectionServices(options: { directory: string; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; ingress?: Pick<DurableIngressOptions, 'core'>; moteChat?: { agents: MoteChatAgentPort; assertTarget(target: MoteChatTarget): Promise<void>; assertReady?(target: MoteChatTarget): Promise<void> } }): Promise<ConnectionServices> {
+export async function createConnectionServices(options: { directory: string | undefined; adapters?: readonly ConnectionAdapter[]; bindings?: Omit<RoomBindingHostOptions, 'connections'>; publication?: PublicationConversationPort; ingress?: Pick<DurableIngressOptions, 'core'>; moteChat?: { agents: MoteChatAgentPort; assertTarget(target: MoteChatTarget): Promise<void>; assertReady?(target: MoteChatTarget): Promise<void> } }): Promise<ConnectionServices> {
   const adapters = options.adapters ?? createBuiltinConnectionAdapters()
   let live: LiveServices | undefined, opening: Promise<LiveServices> | undefined, closed = false
   const metadataListeners = new Set<(change: ChannelMetadataChange) => void>()
@@ -43,17 +43,19 @@ export async function createConnectionServices(options: { directory: string; ada
     opening ??= (async () => {
       let database: DatabaseSync | undefined, lease: number | undefined, publication: PublicationHost | undefined, ingress: DurableIngressHost | undefined, receivers: ConnectionReceivers | undefined
       try {
-        await mkdir(options.directory, { recursive: true, mode: 0o700 })
-        await chmod(options.directory, 0o700)
+        const directory = options.directory
+        if (typeof directory !== 'string' || !isAbsolute(directory)) throw new Error('The original absolute connection directory is unavailable.')
+        await mkdir(directory, { recursive: true, mode: 0o700 })
+        await chmod(directory, 0o700)
         if (options.ingress || options.publication) {
-          const fd = openSync(join(options.directory, 'connections.owner.lock'), 'a+', 0o600)
+          const fd = openSync(join(directory, 'connections.owner.lock'), 'a+', 0o600)
           const native = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
           try {
             if (!native.tryLock(fd)) throw new AgentMuxError('The original connection database has another live receive/publication owner. Its records and healthy Agents are retained.', 'CONNECTION_OWNER_BUSY')
             lease = fd
           } catch (error) { closeSync(fd); throw error }
         }
-        const path = join(options.directory, 'connections.sqlite')
+        const path = join(directory, 'connections.sqlite')
         database = new DatabaseSync(path); await chmod(path, 0o600)
         const secrets = new ConnectionSecrets(database)
         const connections = new ConnectionHost({ database, secrets, adapters })
