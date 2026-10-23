@@ -110,7 +110,7 @@ async function run(name, mutation) {
     plugin = `plugins:[{name:'capsule-browser-source-mutation',enforce:'pre',transform(code,id){if(id.split('?')[0]===${JSON.stringify(resolve(root, mutation.file))}){if(code.split(${JSON.stringify(mutation.from)}).length!==2)throw new Error('Mutation anchor unavailable');return {code:code.replace(${JSON.stringify(mutation.from)},${JSON.stringify(mutation.to)}),map:null}}}}],`
   }
   const base = sourceMode ? 'apps/desktop/test/vitest.performance-reading.config.mts' : 'vitest.config.ts'
-  const capsuleAlias = sourceMode ? `resolve:{...base.resolve,alias:[{find:/^@agentmux\\/capsule$/,replacement:${JSON.stringify(join(root, 'packages/capsule/src/index.ts'))}},...(base.resolve.alias??[])]},` : ''
+  const capsuleAlias = sourceMode ? `resolve:{...base.resolve,alias:[{find:/^@agentmux\\/capsule$/,replacement:${JSON.stringify(join(root, 'packages/capsule/src/index.ts'))}},{find:/^@agentmux\\/host\\/(.+)$/,replacement:${JSON.stringify(join(root, 'apps/host/src/$1.ts'))}},...(base.resolve.alias??[])]},` : ''
   await writeFile(config, `import base from ${JSON.stringify(join(root, base))};export default {...base,root:${JSON.stringify(root)},${capsuleAlias}${plugin}test:{...base.test,include:${JSON.stringify(tests)},maxWorkers:1,passWithNoTests:false}};\n`)
   const result = await new Promise((resolveRun, reject) => {
     const args = [join(root, 'node_modules/vitest/vitest.mjs'), 'run', '--config', config, '--reporter=json', '--outputFile', report]
