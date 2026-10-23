@@ -30,6 +30,7 @@ import { useAppStore } from '../src/renderer/src/store'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { installNoteCanvasGeometry } from './helpers/note-canvas-dom'
 import { noteSummaryCases, noteSummaryContent } from './helpers/note-summary-fixture'
+import { noteBlockFingerprint } from '../src/shared/note-share-range'
 import { NoteSnapshotTestWorker } from './note-snapshot-test-worker'
 
 const dom = composerDOM(), scope = { kind: 'notebook', notebookId: 'quick-notes' } as const
@@ -614,4 +615,63 @@ it.each(['matching', 'hostId', 'workspaceId', 'workspacePath', 'path'] as const)
   else expect(author.textContent).toBe('Author unconfirmed')
   expect(useAppStore.getState().documents[f.key]).toBe(current)
   expect(await readFile(join(directory, 'target.note.md'), 'utf8')).toBe(f.saved)
+})
+
+it('renders unanchored draft paragraphs and pending shared noteInclude blocks as separate Block cards inside the Note area', async () => {
+  const saved = serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'target', content: { type: 'doc', content: [{ type: 'paragraph', attrs: { blockId: 'initial-anchor' } }] } })
+  await writeFile(join(directory, 'target.note.md'), saved)
+  const sourceDoc = noteFromMarkdown(body('closed-source', 'Shared origin paragraph from source'))
+  const sourceBytes = serializeNoteDocument(sourceDoc)
+  await writeFile(join(directory, 'closed-source.note.md'), sourceBytes)
+  const workspace = { id: 'notes', hostId: 'local', path: directory, name: 'Notes', kind: 'folder' as const }
+  const sourceTarget = { noteId: 'closed-source', hostId: 'local', workspaceId: 'notes', workspacePath: directory, path: 'closed-source.note.md' }
+  const include = { referenceId: 'pending-share-ref', noteId: 'pending-shared-id', path: 'block-pending-shared-id.note.md' }
+  const draftNote = {
+    schema: 'agentmux.note.v1' as const,
+    noteId: 'target',
+    content: {
+      type: 'doc',
+      content: [
+        { type: 'paragraph', attrs: { blockId: 'initial-anchor' }, content: [{ type: 'text', text: 'First anchored draft paragraph' }] },
+        { type: 'paragraph', content: [{ type: 'text', text: 'Second unanchored draft paragraph' }] },
+        { type: 'noteInclude', attrs: include },
+      ],
+    },
+  }
+  const targetKey = documentKey('notes', 'target.note.md'), sourceKey = documentKey('notes', 'closed-source.note.md')
+  useAppStore.setState({
+    config: { ...composerConfig, workspaces: [workspace] },
+    dirtyDocuments: { [targetKey]: true },
+    documents: {
+      [sourceKey]: { path: 'closed-source.note.md', content: sourceBytes, revision: 'source-rev' },
+      [targetKey]: {
+        path: 'target.note.md',
+        content: serializeNoteDocument(draftNote),
+        revision: 'saved-base',
+        noteEditing: {
+          baseline: { content: saved, revision: 'saved-base' },
+          shares: {
+            'pending-share-ref': {
+              operationId: 'op-pending-share',
+              include,
+              copy: {
+                version: 1,
+                source: sourceTarget,
+                read: { zoneId: 'z1', path: 'closed-source.note.md', expectedResource: { hostId: 'local', workspaceId: 'notes', workspacePath: directory } },
+                block: { path: [0], blockId: 'closed-source-block', fingerprint: noteBlockFingerprint(sourceDoc.content.content![0]!) },
+                proposalId: 'pending-shared-id',
+              },
+            },
+          },
+        },
+      },
+    },
+  })
+  await dom.render(<NoteCanvas scope={scope} seedNoteIds={['target']} onOpen={() => {}} />)
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-block-node[data-note-id="target"]')).toHaveLength(3))
+  const cards = [...dom.container.querySelectorAll<HTMLElement>('.note-canvas-block-node[data-note-id="target"]')]
+  expect(cards[0]!.textContent).toContain('First anchored draft paragraph')
+  expect(cards[1]!.textContent).toContain('Second unanchored draft paragraph')
+  expect(cards[2]!.textContent).toContain('Pending shared content')
+  expect(cards[2]!.textContent).toContain('Shared origin paragraph from source')
 })
