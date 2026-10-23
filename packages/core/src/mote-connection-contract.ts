@@ -5,33 +5,41 @@ import type {
   MoteConnectionPreferencesSaveResult
 } from './mote-preferences.js'
 import type { ConnectionEnrollmentOperation, ConnectionEnrollmentCallContext, ConnectionEnrollmentAdvanceInput } from './connection-enrollment-contract.js'
-import type { ConnectionProfileOperation } from './connection-profile-contract.js'
+import type { DesiredConnectionProfile, ConnectionProfileOperation } from './connection-profile-contract.js'
 import type { ConnectionSetupInitialPublication, ConnectionSetupOperation, ConnectionSetupAdvance } from './connection-setup-contract.js'
 
-/** Exact saved sources. An appearance revision is required only for include-saved. */
-export type MoteConnectionSource = { target: MotePreferencesTarget; expectedTopicRevision: string; expectedAvatarRevision: string | null }
+/** Public client preparation provenance; it grants no authority over current appearance. */
+export type MoteConnectionSource = {
+  target: MotePreferencesTarget
+  preparedFrom: { topicRevision: string; avatarRevision: string | null } | null
+}
+/** Original admission prerequisites retained only on historical operation receipts. */
+export type MoteConnectionRecordedSource = MoteConnectionSource | {
+  target: MotePreferencesTarget
+  expectedTopicRevision: string
+  expectedAvatarRevision: string | null
+}
+export type MoteConnectionDesired = DesiredConnectionProfile & { name: string; description: string }
 export type MoteConnectionCreate = {
   operationId: string
   source: MoteConnectionSource
+  desired: MoteConnectionDesired & { avatar: { pngDataUrl: string } }
   adapterId: string
   domain: string
-  avatar: 'include-saved' | 'omit'
-  /** Omit to use the exact saved Mote name; an explicit name is frozen for this creation. */
-  name?: string
   /** Explicit authority to configure and publish this new identity for its creator. */
   initialPublication?: ConnectionSetupInitialPublication
 }
 export type MoteConnectionSync = {
   operationId: string
   source: MoteConnectionSource
+  desired: MoteConnectionDesired
   connection: MoteConnectionRef
   expectedConnectionRevision: number
-  avatar: 'include-saved' | 'omit'
 }
 export type MoteConnectionOperation = {
   operationId: string
   action: 'create' | 'sync'
-  source: MoteConnectionSource
+  source: MoteConnectionRecordedSource
   snapshot: { name: string; description: string | null; avatarSha256: string | null }
   connection: MoteConnectionRef | null
   enrollmentOperationId: string | null

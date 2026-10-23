@@ -39,7 +39,7 @@ import { NativeOverlayWindows } from './native-overlay-windows.js'
 import type { WorkbenchWindows } from './workbench-windows.js'
 import { WORKBENCH_WINDOW_RESPONSE } from '../shared/workbench-windows.js'
 import { MoteConnectionOperations } from '@agentmux/connectors'
-import { MoteConnectionSourceOwner } from './mote-connection-source.js'
+import { MoteConnectionTargetOwner } from './mote-connection-target.js'
 import { goalRoleInputNote } from './goal-role-input.js'
 import { GoalPatrolOwner } from './goal-patrol-owner.js'
 import { createPublicationConversationPort, createHostedIngressCorePort } from '@agentmux/connectors'
@@ -2429,11 +2429,13 @@ export async function registerIpc(args: {
       return await createPublicationConversationPort(() => original).checkpoint(reference, new AbortController().signal)
     } }
   })
+  const moteConnectionTargets = new MoteConnectionTargetOwner({
+    catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
+    workspace: id => config.workspaces.find(item => item.id === id),
+    topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory)
+  })
   const moteConnections = new MoteConnectionOperations({ connections: connectorServices, preferences: moteConnectionPreferences,
-    source: new MoteConnectionSourceOwner({ files: publicFiles, avatars: moteAvatars,
-      catalog: async () => { const state = await spatialState.read(); return state ? spatialCatalog(state.graph) : null },
-      workspace: id => config.workspaces.find(item => item.id === id),
-      topicForDirectory: (workspace, directory) => args.scratchTopics.readForDirectory(workspace, directory) }) })
+    assertTarget: target => moteConnectionTargets.assertTarget(target) })
   const disposeChannelMetadata = registerConnectorIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), secrets: connectorServices.secrets,
     callHost: (target, method, params) => args.runtime.callConnectionHost(target, method, params),
     metadata: { publish: change => { if (!args.window.isDestroyed() && !contents.isDestroyed()) contents.send(CONNECTION_METADATA_CHANGED_CHANNEL, change) },

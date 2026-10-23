@@ -141,8 +141,9 @@ export function MoteBotSetup({
     : ''
   const savedConnection = enrollment?.configured?.connection
   const profileTask = selected ? operation?.action === 'sync' || raw?.action === 'sync' : !!record && !replacing
-  const originalImage = setup.profile?.source.expectedAvatarRevision === operation?.source.expectedAvatarRevision &&
-    setup.profile?.source.expectedTopicRevision === operation?.source.expectedTopicRevision ? setup.profile?.image : null
+  const originalImage = raw && !raw.inspectOnly ? raw.input.desired.avatar?.pngDataUrl ?? null
+    : operation && 'preparedFrom' in operation.source && operation.source.preparedFrom !== null &&
+      JSON.stringify(setup.profile?.source.preparedFrom) === JSON.stringify(operation.source.preparedFrom) ? setup.profile?.image : null
   const hasCurrentAction = !!primaryEnrollmentAction || !!savedConnection && !enrollment?.initialPublication && !!onContinue
   const guideStage: BotSetupGuideStage = !selected ? 'prepare'
     : savedConnection ? enrollment?.initialPublication && initialProgress?.state !== 'complete' ? initialProgress?.state === 'attention' ? 'attention' : 'connect' : operation?.defaultLink.state === 'saved' ? 'ready' : 'bind'
@@ -481,7 +482,7 @@ export function MoteBotSetup({
               >
                 Check original result
               </button>
-              {raw?.phase === 'not-dispatched' ? (
+              {raw?.phase === 'not-dispatched' && !raw.inspectOnly ? (
                 <button type="button" className="small-button" onClick={() => void setup.send(raw)}>
                   Continue this request
                 </button>
