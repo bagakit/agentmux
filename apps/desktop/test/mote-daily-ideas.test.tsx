@@ -75,6 +75,8 @@ describe('actual Mote idea controls and original Calendar consumer', () => {
     expect(textarea.value).toBe('Find an experiment I can evaluate.'); expect(textarea.value).not.toContain('Zone:'); expect(create).not.toHaveBeenCalled(); expect(goal).not.toHaveBeenCalled()
     const context = calendar.querySelector<HTMLElement>('.calendar-schedules__context')!.textContent!
     expect(context).toContain(revision); expect(context).toContain('file.read / file.ls')
+    expect(context).toContain('This request permits discussion and read-only research. Carry forward earlier authorization')
+    expect(context).toContain('external writes need separate authorization; this guidance grants no new authorization')
     await edit(textarea, 'My edited direction to this Agent.')
     expect(ideaPanel().querySelector<HTMLTextAreaElement>('[aria-label="Idea direction"]')!.value).toBe('My edited direction to this Agent.')
     await moteClick([...calendar.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Save arrangement')!)
@@ -173,6 +175,11 @@ describe('original sourced idea intent preparation', () => {
     expect(prepared.frozenContext).toContain('File path in this Zone: SOUL.md'); expect(prepared.frozenContext).toContain('Revision observed at preparation: ' + revision)
     expect(prepared.frozenContext).toContain('read the current relevant original files'); expect(prepared.frozenContext).toContain('last-confirmed preparation facts')
     expect(prepared.frozenContext).toContain('earlier authorization to maintain this Mote’s original knowledge')
+    const authority = prepared.frozenContext.split('\n\n')[1]!
+    expect(authority).toContain('This request permits discussion and read-only research.')
+    expect(authority).toContain('earlier authorization to maintain this Mote’s original knowledge without another request')
+    expect(authority).toContain('external writes need separate authorization; this guidance grants no new authorization')
+    expect(prepared.frozenContext.split('This request permits discussion and read-only research.')).toHaveLength(2)
     expect(prepared.frozenContext).toContain('Keep an idea a proposal until the user decides')
     expect(prepared.frozenContext).toContain('revision-checked save and readback'); expect(prepared.frozenContext).toContain('grants no new authorization')
     expect(prepared.frozenContext).toContain('Do not rewrite SOUL or BEHAVIOR'); expect(prepared.frozenContext).toContain('extra Agent, model round or background reflection')
@@ -208,6 +215,8 @@ describe('original sourced idea intent preparation', () => {
     await expect(useAppStore.getState().launchAgent('fixture', input.direction, prepared.groupId, prepared)).rejects.toThrow('observation is unavailable')
     expect(launch).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ prompt: input.direction, agentMuxNote: context }), undefined)
     expect(context).toContain(path); expect(context).toContain(revision); expect(context).toContain('A saved, scoped decision.')
+    expect(context).toContain('This request permits discussion and read-only research. Carry forward earlier authorization')
+    expect(context).toContain('external writes need separate authorization; this guidance grants no new authorization')
     expect(useAppStore.getState().agentComposerDrafts[prepared.regionId]).toBe(input.direction); expect(note(prepared.regionId)).toBe(context)
   })
   it('refuses only an invalid source or absent exact schedule executor, without borrowing the first or neighboring Session', async () => {
