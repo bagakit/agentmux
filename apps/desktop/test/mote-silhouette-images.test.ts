@@ -25,9 +25,19 @@ it('the original source owner, strict RPC and compiled CLI discover and prepare 
   const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } }); releases.push(() => client.dispose())
   const catalog = await client.call('space.mote.avatar.list', {})
   const images = catalog.series.find(item => item.origin === 'builtin' && item.seriesId === 'mote-silhouettes')
+  const lowpoly = catalog.series.find(item => item.origin === 'builtin' && item.seriesId === 'lowpoly')
   expect(images?.entries.map(entry => entry.entryId)).toEqual(expected)
   expect(images?.entries.map(entry => entry.title)).toEqual(['Retro future', 'Low poly', 'Dada', 'Polka dot', 'Ukiyo-e', 'Cyberpunk', 'Flat', 'Neoclassical', 'Vaporwave', 'Klei', 'Ink', 'Fallout 4'])
+  expect(lowpoly?.entries.map(entry => entry.entryId)).toEqual(['wolf', 'owl', 'panther'])
   expect(images!.entries).toHaveLength(12)
+  const svgHashes = new Set<string>()
+  for (const id of expected) {
+    const svg = await readFile(join(collection, id + '.svg'), 'utf8')
+    expect(svg).not.toContain('M5 3H12.5')
+    expect(svg).toMatch(/4\.[457]\s+2\.[568]/)
+    svgHashes.add(sha(Buffer.from(svg)))
+  }
+  expect(svgHashes.size).toBe(12)
   const revisions = []
   for (const entry of images!.entries) {
     expect(entry.definition).toEqual({ kind: 'image', file: entry.entryId + '.png' })
