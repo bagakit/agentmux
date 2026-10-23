@@ -435,15 +435,6 @@ export class NodeCapsuleOwner implements CapsulePort {
     const issues: CapsuleIssue[] = service?.issues() ?? []
     if (content.status === 'unavailable') issues.push(content.issue)
     if (endpoint.status === 'unavailable') issues.push(endpoint.issue)
-    if (record.mode === 'injected' && !this.options.injection)
-      issues.push(
-        issue(
-          'injection',
-          'CAPSULE_INJECTION_UNAVAILABLE',
-          'This Host has no trusted document injection adapter. The original page is served without App capabilities.',
-          record.capsuleId,
-        ),
-      )
     return { record, content, endpoint, issues }
   }
   private async readOperation(operationId: string): Promise<SavedOperation | null> {
@@ -1504,15 +1495,6 @@ export class NodeCapsuleOwner implements CapsulePort {
       try {
         const endpoint = service.observation(),
           issues: CapsuleIssue[] = []
-        if (record.mode === 'injected' && !this.options.injection)
-          issues.push(
-            issue(
-              'injection',
-              'CAPSULE_INJECTION_UNAVAILABLE',
-              'This Host has no trusted document injection adapter. The original page is served without App capabilities.',
-              record.capsuleId,
-            ),
-          )
         const receipt: CapsuleMutationResult = {
           record,
           content,
