@@ -31,7 +31,6 @@ async function fixture(effect?: PublicationAdapter['dispatch'], agentActor = fal
     } }
   const conversation = createPublicationConversationPort(() => [{ hostId: 'local', client: original.client }])
   const services = await createConnectionServices({ directory: join(original.root, 'desktop-publication'),
-    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) },
     adapters: [{ adapterId: 'sample', publication: adapter, test: async () => ({ authentication: { state: 'ready' }, transport: { state: 'unknown', reason: 'not-started' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } }) }],
     bindings: { spatial: original.spatial, checkpoint: original.checkpoint }, publication: conversation })
   cleanup.push(() => services.close())

@@ -5,7 +5,6 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import { connectionSetupDecisionForAction, type ConnectionSetupAction, type ConnectionSetupAdvance, type ConnectionSetupScalarEffect, type ConnectionSetupView } from '@agentmux/core/connections'
 import { createConnectionServices } from '../src/connection-services.js'
-import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 
 const APP = 'cli_card_actions', connectionId = 'card-actions-bot', operationId = 'card-actions-setup'
@@ -23,7 +22,7 @@ function action(view: ConnectionSetupView, kind: ConnectionSetupAction['kind']):
 }
 async function fixture(initialMode = 1) {
   const root = await mkdtemp(join(tmpdir(), 'card-actions-')), socketPath = join(root, 'owner.sock')
-  const services = await createConnectionServices({ directory: join(root, 'connections'), encryption: enrollmentEncryption() })
+  const services = await createConnectionServices({ directory: join(root, 'connections') })
   clean.push(() => rm(root, { recursive: true, force: true }), () => services.close())
   const server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw Error('Setup cannot borrow an Agent Runtime') } })
   await server.start(); clean.push(() => server.stop())

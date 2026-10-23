@@ -28,7 +28,6 @@ async function fixture() {
   const originalStore = await readFile(f.storePath), originalTranscript = await readFile(f.transcript)
   const directory = join(f.root, 'lifecycle'), socketPath = join(f.root, 'lifecycle.sock')
   const open = () => createConnectionServices({ directory,
-    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
     bindings: { spatial: f.spatial, checkpoint: f.checkpoint }, publication: createPublicationConversationPort(() => [{ hostId: 'local', client: f.client }]) })
   let services = await open(), server = new AgentMuxControlServer({ socketPath, connections: services.connections, spatialState: f.spatial, coreClients: () => [{ hostId: 'local', client: f.client }] })
   await server.start(); cleanup.push(async () => { await server.stop(); services.close() })

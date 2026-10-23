@@ -10,7 +10,6 @@ import { connectionSetupDecisionForAction } from '@agentmux/core/connections'
 import type { ConnectionSetupAction, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupConfigurationEffect, ConnectionSetupView } from '@agentmux/core/connections'
 import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { createConnectionServices } from '../src/connection-services.js'
-import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 
 const APP = 'cli_publication_original', effect = 'create-application-version' as const
@@ -29,7 +28,7 @@ function action(view: ConnectionSetupView, kind: ConnectionSetupAction['kind']):
 }
 async function fixture(options: { enrollment?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'publication-')), directory = join(root, 'connections'), socketPath = join(root, 'owner.sock')
-  const services = await createConnectionServices({ directory, encryption: enrollmentEncryption() })
+  const services = await createConnectionServices({ directory })
   const server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw Error('Publication cannot borrow an Agent Runtime') } })
   await server.start()
   const sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
@@ -383,7 +382,7 @@ it('the original Enrollment creator creates and submits the first bot version th
   expect(created.applicationConfiguration!.selected).toMatchObject({ request: 'confirmed', secureStorage: 'unknown', versionId: VERSION, sourceStepIds: { versions: expect.any(String) } })
   const count = f.native.length
   await f.close()
-  const owner = await createConnectionServices({ directory: f.directory, encryption: enrollmentEncryption() })
+  const owner = await createConnectionServices({ directory: f.directory })
   const server = new AgentMuxControlServer({ socketPath: join(f.root, 'owner.sock'), connections: owner.connections, coreClients: () => { throw Error('Publication recovery cannot borrow an Agent Runtime') } })
   await server.start(); clean.push(async () => { await server.stop(); owner.close() })
   const current = await f.cli(['inspect', '--operation-id', f.input.operationId, '--application-configuration', 'create-application-version'])

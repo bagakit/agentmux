@@ -72,10 +72,7 @@ async function fixture() {
   } })
   let activeClient = f.client
   const coreClients = () => [{ hostId: 'local', client: activeClient }]
-  const services = await createConnectionServices({ directory: join(f.root, 'connections'), encryption: {
-    isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value),
-    decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false })
-  }, bindings: { spatial, checkpoint: input => activeClient.conversationCheckpoint(input) }, publication: createPublicationConversationPort(coreClients) })
+  const services = await createConnectionServices({ directory: join(f.root, 'connections'), bindings: { spatial, checkpoint: input => activeClient.conversationCheckpoint(input) }, publication: createPublicationConversationPort(coreClients) })
   cleanup.push(() => services.close())
   for (const config of [feishuConfig, discordConfig]) {
     const secret = await services.secrets.store({ operationId: config.adapterId + '-secret', secret: 'controlled-private-' + config.adapterId })

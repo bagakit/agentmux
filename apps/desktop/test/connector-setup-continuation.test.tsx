@@ -14,7 +14,6 @@ import { api } from '../src/renderer/src/lib/api'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { ingressFixture } from '../../../packages/connectors/test/fixtures/ingress.js'
 import { defaultFeishuSdkTransport, feishuConfig, feishuPayload } from '../../../packages/connectors/test/fixtures/feishu.js'
-import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
 
 const dom = composerDOM(), privateCode = 'private-setup-sign-in-code', credential = 'private-setup-credential'
 let original: Awaited<ReturnType<typeof ingressFixture>>
@@ -26,7 +25,7 @@ let platformCalls: string[]
 let trusted: ReturnType<typeof vi.fn>
 
 async function openOwner(receiver = true) {
-  services = await createConnectionServices({ directory: join(original.root, 'setup-continuation'), encryption: enrollmentEncryption(),
+  services = await createConnectionServices({ directory: join(original.root, 'setup-continuation'),
     bindings: { spatial: original.spatial, checkpoint: async ref => await original.client.conversationCheckpoint(ref) },
     ...(receiver ? { ingress: { core: (hostId: string) => hostId === 'local' ? original.client : undefined } } : {}) })
   server = new AgentMuxControlServer({ socketPath: join(original.root, 'setup-continuation.sock'), connections: services.connections, coreClients: original.coreClients })

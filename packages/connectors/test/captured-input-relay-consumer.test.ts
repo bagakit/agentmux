@@ -36,7 +36,6 @@ async function fixture(unknownCreate = false) {
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   const directory = join(original.root, 'relay-host')
   const open = () => createConnectionServices({ directory,
-    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) },
     bindings: { spatial: original.spatial, checkpoint: ref => original.client.conversationCheckpoint(ref) },
     publication: createPublicationConversationPort(original.coreClients) })
   let services = await open(); clean.push(() => services.close())

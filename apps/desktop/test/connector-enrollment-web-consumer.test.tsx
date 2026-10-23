@@ -15,7 +15,6 @@ import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
 import iconUrl from '../resources/icon-512.png'
 import { composerDOM } from './helpers/composer-dom-fixture'
-import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
 
 const dom = composerDOM()
 const APP = { domain: 'open.feishu.cn', appId: 'cli_settings_web_bot' }
@@ -75,7 +74,7 @@ beforeEach(async () => {
     if (target.pathname === '/developers/v1/secret/' + APP.appId) return Response.json({ code: 0, data: loseCredential ? {} : { secret: 'settings-private-app-secret' } })
     throw new Error('Unexpected settings Web request')
   }))
-  services = await createConnectionServices({ directory: join(root, 'connections'), encryption: enrollmentEncryption() })
+  services = await createConnectionServices({ directory: join(root, 'connections') })
   const list = services.connections.list.bind(services.connections)
   server = new AgentMuxControlServer({ socketPath: join(root, 'public.sock'), connections: { ...services.connections, list: async () => { if (failList) throw new Error('Controlled saved-bot list gap'); return list() } }, coreClients: () => { throw new Error('Creating a bot must not borrow an Agent Runtime') } })
   await server.start()

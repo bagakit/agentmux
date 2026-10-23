@@ -1,17 +1,13 @@
 import { appendFile } from 'node:fs/promises'
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { AgentMuxControlServer } from '@agentmux/core'
 import { ConnectionHost, createBuiltinConnectionAdapters } from '@agentmux/connectors'
 import { ConnectionSecrets } from '../../src/connection-secrets.ts'
 
-const root = process.argv[2], mode = process.argv[3], key = Buffer.alloc(32, 9)
+const root = process.argv[2], mode = process.argv[3]
 const database = new DatabaseSync(join(root, 'connections.sqlite'))
-const secrets = new ConnectionSecrets(database, { isAsyncEncryptionAvailable: async () => true,
-  encryptStringAsync: async value => { const iv = randomBytes(12), cipher = createCipheriv('aes-256-gcm', key, iv); const bytes = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]); return Buffer.concat([iv, cipher.getAuthTag(), bytes]) },
-  decryptStringAsync: async value => { const cipher = createDecipheriv('aes-256-gcm', key, value.subarray(0, 12)); cipher.setAuthTag(value.subarray(12, 28)); return { result: (Buffer.concat([cipher.update(value.subarray(28)), cipher.final()]).toString()), shouldReEncrypt: false } }
-})
+const secrets = new ConnectionSecrets(database)
 const credential = await secrets.store({ operationId: 'auth-saved-credential', secret: 'fixture-auth-saved-bot-secret' })
 globalThis.fetch = async (url, init) => {
   const target = new URL(String(url))

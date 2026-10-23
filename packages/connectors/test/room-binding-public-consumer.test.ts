@@ -19,7 +19,7 @@ afterEach(async () => {
 async function fixture(retired = true) {
   const f = await roomBindingFixture(true, { retired }); cleanup.push(() => f.close())
   // The original Desktop Host composition shares its one database, spatial owner and exact Core client.
-  const services = await createConnectionServices({ directory: join(f.root, 'desktop-connections'), encryption: { isAsyncEncryptionAvailable: async () => false, encryptStringAsync: async () => { throw new Error('No credential entry in this test') }, decryptStringAsync: async () => { throw new Error('No credential resolution in binding') } }, bindings: { spatial: f.spatial, checkpoint: f.checkpoint, session: async ref => ref.hostId === 'local' ? await f.client.readAgentSession(ref.agentSessionId) : null } })
+  const services = await createConnectionServices({ directory: join(f.root, 'desktop-connections'), bindings: { spatial: f.spatial, checkpoint: f.checkpoint, session: async ref => ref.hostId === 'local' ? await f.client.readAgentSession(ref.agentSessionId) : null } })
   cleanup.push(() => services.close())
   const socketPath = join(f.root, 'public.sock'), server = new AgentMuxControlServer({ socketPath, connections: services.connections, spatialState: f.spatial, coreClients: () => [{ hostId: 'local', client: f.client }] })
   await server.start(); cleanup.push(() => server.stop())

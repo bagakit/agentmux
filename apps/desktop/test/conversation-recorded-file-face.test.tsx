@@ -35,7 +35,7 @@ vi.mock('../src/main/browser-ref-ledger-store', () => ({ BrowserRefLedgerStore: 
 vi.mock('../src/main/browser-view-manager', () => ({ BrowserViewManager: class { setPresentationWindowOwner() {} dispose() {} } }))
 vi.mock('../src/main/agent-notifier', () => ({ createAgentNotifier: () => ({ dispose() {} }) }))
 vi.mock('../src/main/native-overlay-windows', () => ({ NativeOverlayWindows: class { resourceProcessIds() { return [] } dispose() {} } }))
-vi.mock('../src/main/connector-host', () => ({ createConnectionServices: async () => ({ connections: { list: async () => [] }, secrets: {}, close: async () => {} }) }))
+vi.mock('@agentmux/connectors', async actual => ({ ...await actual<typeof import('@agentmux/connectors')>(), createConnectionServices: async () => ({ connections: { list: async () => [] }, secrets: {}, close: async () => {} }) }))
 import '../src/preload/index'
 import { RuntimeController } from '../src/main/runtime-controller'
 import { registerIpc } from '../src/main/ipc'

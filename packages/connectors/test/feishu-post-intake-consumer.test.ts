@@ -56,7 +56,6 @@ async function fixture() {
     return remote.http.request({ ...request, ...(params === undefined ? {} : { params }) })
   })
   const services = await createConnectionServices({ directory: join(h.root, 'post-host'),
-    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) },
     bindings: { spatial, checkpoint: reference => h.client.conversationCheckpoint(reference) },
     publication: createPublicationConversationPort(h.coreClients), ingress: { core: hostId => hostId === 'local' ? h.client : undefined } })
   cleanup.push(() => services.close())

@@ -30,7 +30,6 @@ async function fixture() {
       request: { method: 'POST', path: '/messages', ...(operation.payload.kind === 'binding-lifecycle' ? {} : { body: operation.reference.source.recordId }) } }),
     dispatch: (...args) => args[0].request.body === undefined ? Promise.resolve({ state: 'confirmed', mapping: { messageId: 'notice-' + args[0].requestKey } }) : dispatch(...args) }
   const services = await createConnectionServices({ directory: join(f.root, 'sharing-host'),
-    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text), decryptStringAsync: async bytes => ({ result: (bytes.toString()), shouldReEncrypt: false }) },
     adapters: [{ adapterId: 'sample', publication: adapter, test: async () => ({ authentication: { state: 'ready' }, transport: { state: 'ready' }, intake: { state: 'unknown' }, delivery: { state: 'unknown' } }) }],
     bindings: { spatial: f.spatial, checkpoint: f.checkpoint }, publication: createPublicationConversationPort(() => [{ hostId: 'local', client: f.client }]) })
   cleanup.push(services.close)

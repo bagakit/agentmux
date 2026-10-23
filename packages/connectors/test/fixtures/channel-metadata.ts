@@ -11,7 +11,6 @@ import { feishuConfig, feishuPayload, feishuSdkTransport } from './feishu.js'
 export const actor = { application: feishuConfig.application, idType: 'open_id', userId: 'original-external-user' }
 export const actorSubject: ChannelMetadataSubject = { kind: 'actor', actor }
 export const groupSubject: ChannelMetadataSubject = { kind: 'conversation', externalConversationId: 'original-room' }
-const encryption = { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async (value: string) => Buffer.from(value), decryptStringAsync: async (value: Buffer) => ({ result: value.toString(), shouldReEncrypt: false }) }
 export async function channelMetadataFixture(cleanup: Array<() => void | Promise<void>>) {
   const f = await ingressFixture(true, feishuConfig); cleanup.push(f.close)
   const transport = feishuSdkTransport(), fallback = transport.request.getMockImplementation()!
@@ -31,7 +30,7 @@ export async function channelMetadataFixture(cleanup: Array<() => void | Promise
   const directory = join(f.root, 'desktop-metadata'), changes: ChannelMetadataChange[] = []
   const open = async () => {
     // Default registry, original private Connection owner and actual receiver lifecycle.
-    const services = await createConnectionServices({ directory, encryption, bindings: { spatial: f.spatial, checkpoint: ref => f.client.conversationCheckpoint(ref) }, ingress: { core: hostId => hostId === 'local' ? f.client : undefined } })
+    const services = await createConnectionServices({ directory, bindings: { spatial: f.spatial, checkpoint: ref => f.client.conversationCheckpoint(ref) }, ingress: { core: hostId => hostId === 'local' ? f.client : undefined } })
     cleanup.push(() => services.close())
     services.onChannelMetadataChanged(change => changes.push(change))
     const server = new core.AgentMuxControlServer({ socketPath: join(f.root, 'metadata.sock'), connections: services.connections, spatialState: f.spatial, coreClients: f.coreClients })

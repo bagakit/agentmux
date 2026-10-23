@@ -14,7 +14,6 @@ import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
 import iconUrl from '../resources/icon-512.png'
 import { composerDOM } from './helpers/composer-dom-fixture'
-import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
 
 const dom = composerDOM(), APP = 'cli_settings_continuation', USER = 'settings-continuation-user', TENANT = 'settings-continuation-enterprise'
 let root: string, services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer
@@ -58,7 +57,7 @@ beforeEach(async () => {
     }
     throw new Error('Unexpected Settings continuation request')
   }))
-  services = await createConnectionServices({ directory: join(root, 'connections'), encryption: enrollmentEncryption() })
+  services = await createConnectionServices({ directory: join(root, 'connections') })
   server = new AgentMuxControlServer({ socketPath: join(root, 'owner.sock'), connections: services.connections, coreClients: () => { throw new Error('Saved login continuation cannot borrow an Agent Runtime') } })
   await server.start()
   const handlers = new Map<string, (...args: any[]) => Promise<unknown>>(), sender = { ownedRenderer: true }

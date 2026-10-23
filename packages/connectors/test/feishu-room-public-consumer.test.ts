@@ -21,8 +21,7 @@ async function fixture(effect?: (request: RoomRequest) => Promise<unknown>) {
   const directory = join(f.root, 'desktop-platform-rooms'), socketPath = join(f.root, 'platform-rooms.sock')
   const open = async () => {
     // Adapters are intentionally omitted: this is the original Desktop default lazy registration.
-    const services = await createConnectionServices({ directory, bindings: { spatial: f.spatial, checkpoint: f.checkpoint },
-      encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: (value.toString()), shouldReEncrypt: false }) } })
+    const services = await createConnectionServices({ directory, bindings: { spatial: f.spatial, checkpoint: f.checkpoint } })
     cleanup.push(() => services.close())
     const server = new core.AgentMuxControlServer({ socketPath, connections: services.connections, spatialState: f.spatial, coreClients: () => [{ hostId: 'local', client: f.client }] })
     await server.start(); cleanup.push(() => server.stop())

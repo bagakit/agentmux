@@ -13,7 +13,6 @@ import { api } from '../src/renderer/src/lib/api'
 import { composerDOM } from './helpers/composer-dom-fixture'
 import { ingressFixture } from '../../../packages/connectors/test/fixtures/ingress.js'
 import { defaultFeishuSdkTransport, feishuConfig, feishuPayload } from '../../../packages/connectors/test/fixtures/feishu.js'
-import { enrollmentEncryption } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
 
 const dom = composerDOM(), privateDevice = 'private-mount-device-material', secret = 'private-mount-application-credential'
 const clean: Array<() => void | Promise<void>> = []
@@ -46,9 +45,9 @@ beforeEach(async () => {
     expect(action).toBe('poll'); expect(body.get('device_code')).toBe(privateDevice)
     return Response.json(authorize ? { client_id: feishuConfig.application.appId, client_secret: secret, user_info: { tenant_brand: 'feishu' } } : { error: 'authorization_pending' })
   }))
-  const directory = join(original.root, 'mounted-enrollment'), encryption = enrollmentEncryption()
+  const directory = join(original.root, 'mounted-enrollment')
   openOwner = async () => {
-    services = await createConnectionServices({ directory, encryption,
+    services = await createConnectionServices({ directory,
       bindings: { spatial: original.spatial, checkpoint: async ref => await original.client.conversationCheckpoint(ref) },
       ingress: { core: hostId => hostId === 'local' ? original.client : undefined } })
     server = new AgentMuxControlServer({ socketPath: join(original.root, 'mounted-enrollment.sock'), connections: services.connections, coreClients: original.coreClients })

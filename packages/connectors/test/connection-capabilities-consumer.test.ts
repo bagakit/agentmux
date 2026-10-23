@@ -4,12 +4,11 @@ import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '../../core/dist/index.js'
 import { createConnectionServices } from '../src/connection-services.js'
-import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 
 it('the original default Host exposes adapter room implementations through public SDK and compiled connection discovery without testing native permissions', async () => {
   const root = await mkdtemp(join(tmpdir(), 'amux-channel-support-'))
-  const services = await createConnectionServices({ directory: root, encryption: enrollmentEncryption() })
+  const services = await createConnectionServices({ directory: root })
   const socketPath = join(root, 'control.sock'), server = new AgentMuxControlServer({ socketPath, connections: services.connections })
   await server.start()
   const sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })

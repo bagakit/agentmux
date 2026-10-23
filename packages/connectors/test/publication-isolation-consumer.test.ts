@@ -46,10 +46,7 @@ it.each([false, true])('independent public final follows progress without replay
     bindings: [{ zoneId: 'zone', spaceId: 'space' }], layouts: { resource: createWorkspaceLayout('group', ['tab']) },
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'region' }, activeRegionId: 'region' } }, resources: {}
   } })
-  const options: Parameters<typeof createConnectionServices>[0] = { directory: join(f.root, 'connectors'), encryption: {
-    isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async text => Buffer.from(text),
-    decryptStringAsync: async bytes => ({ result: bytes.toString(), shouldReEncrypt: false })
-  }, bindings: { spatial, checkpoint: input => f.client.conversationCheckpoint(input) }, publication: createPublicationConversationPort(f.coreClients) }
+  const options: Parameters<typeof createConnectionServices>[0] = { directory: join(f.root, 'connectors'), bindings: { spatial, checkpoint: input => f.client.conversationCheckpoint(input) }, publication: createPublicationConversationPort(f.coreClients) }
   let services = await createConnectionServices(options); cleanup.push(() => services.close())
   const credential = await services.secrets.store({ operationId: 'fixture-credential', secret: 'fixture-credential' })
   await services.connections.configure({ operationId: 'fixture-configure', expectedRevision: null, connection: { ...feishuConfig, credentialRef: credential.credentialRef } })

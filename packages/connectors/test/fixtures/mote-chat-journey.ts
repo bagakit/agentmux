@@ -105,7 +105,6 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   const agents = { ...desktopAgents, prepare }
   async function open() {
     services = await createConnectionServices({ directory: join(original.root, 'connectors'), adapters: [adapter],
-      encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
       bindings: { spatial, checkpoint }, moteChat: { agents, assertTarget: desktopAgents.assertTarget, assertReady: desktopAgents.assertReady },
       publication: createPublicationConversationPort(clients), ingress: { core: host => host === 'local' ? original.client : undefined } })
     server = new core.AgentMuxControlServer({ socketPath: join(original.root, 'public.sock'), connections: services.connections, moteChat: services.moteChat!, spatialState: spatial, coreClients: clients })

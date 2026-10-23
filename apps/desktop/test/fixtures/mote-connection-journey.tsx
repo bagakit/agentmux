@@ -7,7 +7,7 @@ import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import { AgentMuxSpatialStateStore, spatialCatalog } from '@agentmux/core/spatial-state'
 import type { MoteConnectionPreferencesReadResult, MoteConnectionPreferencesSaveParams } from '@agentmux/core/mote-preferences'
 import type { ConnectionResultMap } from '@agentmux/core/connections'
-import { createConnectionServices } from '../../src/main/connector-host'
+import { createConnectionServices } from '../../../../packages/connectors/src/connection-services.js'
 import { MoteConnectionPreferences } from '../../src/main/mote-connection-preferences'
 import { registerMotePreferencesIpc } from '../../src/main/mote-preferences-ipc'
 import { registerConnectorIpc } from '../../src/main/connector-ipc'
@@ -24,10 +24,9 @@ import { useAppStore } from '../../src/renderer/src/store'
 import { createMoteApp, moteClick, settleMoteApp } from './mote-app'
 import { moteTopics, moteConfig } from './mote-workface'
 import { runCompiledObjectCli, objectCliEnvironment } from '../../../../packages/core/test/helpers/object-cli-rpc.js'
-import type { CredentialEncryption } from '../../../../packages/connectors/src/connection-secrets'
 
 /** Original App/Profile/Agent menus -> trusted IPC -> public Core -> Main/Files/Connection Host. */
-export async function moteConnectionJourney(options: { encryption?: CredentialEncryption } = {}) {
+export async function moteConnectionJourney() {
   const root = await mkdtemp(join(tmpdir(), 'amx-mote-choice-'))
   const workspace = { ...moteConfig.workspaces[0]!, path: root }
   // Exercise the loaded workface while the separate startup availability read finishes.
@@ -61,9 +60,7 @@ export async function moteConnectionJourney(options: { encryption?: CredentialEn
   const writer = new NoteFileWriter(files)
   const publicFiles = new FileReadOwner({ catalog, workspace: id => id === workspace.id ? workspace : undefined,
     files: { read: writer.read.bind(writer), listFiles: files.listFiles.bind(files), write: writer.write.bind(writer) } })
-  const services = await createConnectionServices({ directory: join(root, 'connections'), bindings: { spatial, checkpoint: async () => { throw new Error('This read-only menu does not bind or grant access') } }, encryption: options.encryption ?? {
-    isAsyncEncryptionAvailable: async () => false, encryptStringAsync: async () => { throw new Error('No credential writes in a default choice') }, decryptStringAsync: async () => { throw new Error('No credential reads in a default choice') }
-  } })
+  const services = await createConnectionServices({ directory: join(root, 'connections'), bindings: { spatial, checkpoint: async () => { throw new Error('This read-only menu does not bind or grant access') } } })
   for (const suffix of ['a', 'b']) await services.connections.configure({ operationId: 'configure-' + suffix, expectedRevision: null, connection: {
     connectionId: 'robot-' + suffix, adapterId: 'feishu', application: { domain: 'feishu.cn', appId: 'app-' + suffix },
     label: 'Robot ' + suffix.toUpperCase(), enabled: true, credentialRef: 'unused-' + suffix

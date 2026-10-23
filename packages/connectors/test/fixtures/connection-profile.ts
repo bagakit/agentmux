@@ -6,7 +6,6 @@ import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import type { ConnectionConfig } from '@agentmux/core/connections'
 import { createConnectionServices } from '../../src/connection-services.js'
-import { enrollmentEncryption } from './connection-enrollment.js'
 import {
   objectCliEnvironment,
   runCompiledObjectCli
@@ -69,12 +68,11 @@ export async function profileFixture(appResponse?: () => unknown) {
       }
     }
   )
-  const encryption = enrollmentEncryption()
   let services: Awaited<ReturnType<typeof createConnectionServices>>,
     server: AgentMuxControlServer,
     sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
   const open = async () => {
-    services = await createConnectionServices({ directory, encryption })
+    services = await createConnectionServices({ directory })
     server = new AgentMuxControlServer({
       socketPath,
       connections: services.connections,

@@ -5,7 +5,6 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc } from '@agentmux/core'
 import { parseConnectionSetupParams, parseConnectionSetupResult, type ConnectionSetupBegin, type ConnectionSetupView } from '@agentmux/core/connections'
 import { createConnectionServices } from '../src/connection-services.js'
-import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 
 const APP = 'cli_initial_conversations', VERSION = 'initial-version', USER = 'original-creator'
@@ -23,7 +22,7 @@ async function fixture(interaction: 'messages' | 'cards' = 'cards', unknownEffec
   const root = await mkdtemp(join(tmpdir(), 'initial-setup-')), socketPath = join(root, 'owner.sock')
   let services: Awaited<ReturnType<typeof createConnectionServices>>, server: AgentMuxControlServer, sdk: Awaited<ReturnType<typeof connectAgentMuxRpc>>
   const open = async () => {
-    services = await createConnectionServices({ directory: join(root, 'connections'), encryption: enrollmentEncryption() })
+    services = await createConnectionServices({ directory: join(root, 'connections') })
     server = new AgentMuxControlServer({ socketPath, connections: services.connections, coreClients: () => { throw Error('Initial setup cannot borrow an Agent Runtime') } })
     await server.start(); sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
   }

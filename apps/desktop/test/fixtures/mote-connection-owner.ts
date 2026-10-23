@@ -1,6 +1,5 @@
 import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
 import { AgentMuxControlServer, connectAgentMuxRpc, type MoteConnectionCreate } from '@agentmux/core'
 import { AgentMuxSpatialStateStore, spatialCatalog } from '@agentmux/core/spatial-state'
 import { createConnectionServices } from '../../../../packages/connectors/src/connection-services.js'
@@ -208,26 +207,11 @@ export async function moteConnectionOwner(
       })
     }
   }
-  const key = Buffer.alloc(32, 4),
-    encryption = {
-      isAsyncEncryptionAvailable: async () => true,
-      encryptStringAsync: async (v: string) => {
-        const iv = randomBytes(12),
-          c = createCipheriv('aes-256-gcm', key, iv)
-        return Buffer.concat([iv, c.update(v, 'utf8'), c.final(), c.getAuthTag()])
-      },
-      decryptStringAsync: async (v: Buffer) => {
-        const c = createDecipheriv('aes-256-gcm', key, v.subarray(0, 12))
-        c.setAuthTag(v.subarray(-16))
-        return { result: Buffer.concat([c.update(v.subarray(12, -16)), c.final()]).toString(), shouldReEncrypt: false }
-      }
-    }
   const adapters = options.generic ? [adapter] : createBuiltinConnectionAdapters()
   const chatAgentCalls = { prepare: 0, create: 0, inspect: 0, activity: 0 }
   const unavailableChatAgent = (kind: keyof typeof chatAgentCalls) => async () => { chatAgentCalls[kind]++; throw new Error('Profile metadata and settings must not create or borrow a Runtime') }
   const connections = await createConnectionServices({
     directory: join(root, 'connections'),
-    encryption,
     adapters,
     moteChat: { assertTarget: async target => { if ((await preferences.read({ kind: 'connection', target })).status !== 'ready') throw new Error('The exact original Mote home is unconfirmed') },
       ...(options.chatReadiness ? { assertReady: options.chatReadiness } : {}),

@@ -41,7 +41,6 @@ it('actual preload, trusted prompt IPC and the original Core writer share manual
     tabLayouts: { tab: { root: { type: 'leaf', regionId: 'original-region' }, activeRegionId: 'original-region' } }, resources: {}
   } })
   const services = await createConnectionServices({ directory: join(f.root, 'connector-host'),
-    encryption: { isAsyncEncryptionAvailable: async () => true, encryptStringAsync: async value => Buffer.from(value), decryptStringAsync: async value => ({ result: value.toString(), shouldReEncrypt: false }) },
     bindings: { spatial, checkpoint: ref => f.client.conversationCheckpoint(ref) }, publication: createPublicationConversationPort(f.coreClients) }); cleanup.push(() => services.close())
   const credential = await services.secrets.store({ operationId: 'credential-entry', secret: 'private-credential' })
   await services.connections.configure({ operationId: 'configure-channel', expectedRevision: null, connection: { ...feishuConfig, credentialRef: credential.credentialRef } })
