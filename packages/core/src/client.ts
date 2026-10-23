@@ -2092,7 +2092,8 @@ export class AgentMuxClient {
     options: Pick<AgentSessionHistoryPageOptions, 'commandOverride' | 'args' | 'env'> = {}): void {
     const provider = this.providers.get(session.providerId)
     const unconfirmed = this.registry.isDurabilityUnconfirmed(session.agentSessionId)
-    if (session.hostId !== 'local' || (!unconfirmed && (session.nativeHandle || !provider.discoverNativeSession ||
+    const enrichConfirmedIdentity = session.nativeActor?.initializationControl === true && (!session.nativeHandle || session.nativeHandle.kind === 'provider')
+    if (session.hostId !== 'local' || (!unconfirmed && (session.nativeHandle && (!enrichConfirmedIdentity || session.nativeHandle.kind !== 'provider' || session.nativeHandle.transcriptPath !== undefined) || !provider.discoverNativeSession ||
       provider.catalog.resumeStrategy.kind !== 'provider-native')) || !this.connected || !this.kernel.isConnected()) return
     const previous = this.nativeIdentityCaptures.get(session.agentSessionId)
     if (previous && sameRun(previous.run, session.run)) return
@@ -2123,12 +2124,13 @@ export class AgentMuxClient {
               if (this.registry.isDurabilityUnconfirmed(session.agentSessionId)) {
                 const confirmed = await this.registry.confirmDurability(session.agentSessionId, session.run)
                 assertConnection()
-                if (confirmed.nativeHandle || !provider.discoverNativeSession) return confirmed
+                if (confirmed.nativeHandle && (!enrichConfirmedIdentity || confirmed.nativeHandle.kind !== 'provider' || confirmed.nativeHandle.transcriptPath !== undefined) || !provider.discoverNativeSession) return confirmed
               }
               return await captureAgentNativeSessionIdentity({ session, provider, registry: this.registry,
                 kernel: this.kernel, signal: controller.signal, assertConnection,
                 command: resolveAgentExecutable(options.commandOverride, provider.executable),
-                args: options.args ?? [], env: options.env ?? {} })
+                args: options.args ?? [], env: options.env ?? {},
+                ...(enrichConfirmedIdentity ? { enrichConfirmedIdentity: true } : {}) })
             })()
             const next = await new Promise<AgentMuxStoredAgentSession>((resolve, reject) => {
               const abort = () => reject(controller.signal.reason)
@@ -2157,6 +2159,8 @@ export class AgentMuxClient {
       // Another capture or main Hook can durably confirm this Run while discovery is pending.
       // A retained locator with a source conflict or an unacknowledged save is not that fact.
       if (current.nativeHandle && !current.nativeSourceObservation && !current.observedNativeHandle &&
+        (!enrichConfirmedIdentity || current.nativeHandle.kind === 'provider' && current.nativeHandle.transcriptPath !== undefined &&
+          (!session.nativeHandle || matchesProviderNativeSessionTarget(session.nativeHandle, current.nativeHandle))) &&
         !this.registry.isDurabilityUnconfirmed(session.agentSessionId)) {
         this.publishSession(current)
         return
@@ -2164,9 +2168,13 @@ export class AgentMuxClient {
       const code = failure && typeof failure === 'object' && 'code' in failure ? String(failure.code) : ''
       const persistence = this.registry.isDurabilityUnconfirmed(session.agentSessionId) || ['EIO', 'ENOSPC', 'EDQUOT', 'EACCES', 'EPERM', 'EROFS',
         'AGENT_SESSION_STORE_LIMIT', 'AGENT_SESSION_STORE_BUSY', 'AGENT_SESSION_STORE_DURABILITY_UNCONFIRMED'].includes(code)
+      const confirmedIdentity = enrichConfirmedIdentity && current.nativeHandle?.kind === 'provider' ? current.nativeHandle : undefined
       this.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
         code: persistence ? 'AGENT_NATIVE_IDENTITY_PERSIST_FAILED' : 'AGENT_NATIVE_IDENTITY_UNCONFIRMED',
-        message: `${persistence ? 'Saving the native recovery identity is unconfirmed.' : 'The native recovery identity could not be confirmed.'} ` +
+        message: confirmedIdentity ? `The native conversation ${confirmedIdentity.sessionId} is confirmed. ` +
+          `${persistence ? 'Saving its record locator is unconfirmed.' : 'Its record locator/source could not be confirmed.'} ` +
+          `The original Run and input are kept. Refresh this Session to retry native activity observation. ${failure instanceof Error ? failure.message : ''}` :
+          `${persistence ? 'Saving the native recovery identity is unconfirmed.' : 'The native recovery identity could not be confirmed.'} ` +
           `The original Agent and input are kept. Refresh this Session to retry; recovery after Run loss is not yet confirmed. ${failure instanceof Error ? failure.message : ''}`,
         evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
     }

@@ -1206,15 +1206,19 @@ export class AgentSessionRecoveryService {
     const target = { kind: 'provider' as const, providerId: session.providerId, sessionId: initialization.native.sessionId }
     const current = await this.ports.sessions.updateExactAgentSession(session.agentSessionId, session.run, value => {
       if (!isDeepStrictEqual(value.nativeActor, actor) || value.capabilityHash !== session.capabilityHash ||
-        value.nativeHandle && !matchesProviderNativeSessionTarget(value.nativeHandle, target) ||
-        value.observedNativeHandle && !matchesProviderNativeSessionTarget(value.observedNativeHandle, target)) throw new AgentMuxError(
+        value.nativeHandle && !matchesProviderNativeSessionTarget(target, value.nativeHandle) ||
+        value.observedNativeHandle && !matchesProviderNativeSessionTarget(target, value.observedNativeHandle)) throw new AgentMuxError(
         'The original initialization target changed. Existing identities and input are retained.', 'AGENT_TERMINAL_FRONTEND_UNCONFIRMED')
-      if (value.nativeHandle && !value.nativeSourceObservation) return value
-      const updated = { ...value, nativeHandle: value.nativeHandle ?? target, updatedAt: Math.max(value.updatedAt + 1, Date.now()) }
-      delete updated.nativeSourceObservation
-      return updated
+      // An initialization identity does not attest a record locator or clear a
+      // later source observation. Keep the richer original binding untouched.
+      if (value.nativeHandle) return value
+      return { ...value, nativeHandle: target, updatedAt: Math.max(value.updatedAt + 1, Date.now()) }
     })
     this.ports.events.publishSession(current)
+    // The protocol confirms the original identity before a native record may be
+    // available. Let its existing Provider discovery enrich that same identity;
+    // a known SID must not suppress status/history observation of its own record.
+    this.ports.terminal.queueNativeIdentityCapture(current)
     return current
   }
 
