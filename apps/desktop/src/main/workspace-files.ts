@@ -1,3 +1,6 @@
+import { OrdinaryWorkspaceFiles, WorkspaceFileWriteScope, localPathWithin, localFileScope, localExistingPathWithin, localReadablePath, localMutablePathWithin,
+  assertRealPathWithin, assertMutableRelativePath, fileBytesAreBinary, revisionFor, resultError,
+  runWorkspaceFileWorker, type WorkspaceFileWorkerRequest as LocalWorkerRequest } from '@agentmux/host/ordinary-files'
 import { gitIgnoredNames } from './workspace-git-ignore.js'
 import { LOCAL_FILE_LIST_SOURCE } from './workspace-file-list.js'
 import type { FileNameListing } from '@agentmux/core'
@@ -37,25 +40,6 @@ const WORKSPACE_MOVE_HELPER = resolve(
   '../../resources/bin/agentmux-workspace-move'
 )
 
-type LocalWorkerRequest =
-  | { action: 'read'; name: string }
-  | { action: 'read-bytes'; name: string; offset: number; maxBytes: number; maxFileBytes: number; expectedRevision?: string }
-  | { action: 'list' }
-  | { action: 'list-files'; limit: number }
-  | { action: 'reveal'; name: string | null }
-  | { action: 'observe'; name: string }
-  | {
-      action: 'write'
-      name: string
-      expectedRevision: string | null
-      exclusive?: true
-      textOnly?: true
-      fault?: 'temporary-write' | 'replace' | 'receipt' | 'occupy'
-    }
-  | { action: 'create'; name: string; kind: 'file' | 'directory' }
-  | { action: 'delete'; name: string }
-  | { action: 'delete-exact'; name: string; expectedRevision: string; witness: NoteFileWitness; claim: string; fault: string }
-
 export type WorkspaceFileDeleteExactResult =
   | { status: 'deleted' }
   | { status: 'conflict' | 'unknown' | 'error'; code: string; message: string; retainedPath?: string }
@@ -93,20 +77,6 @@ export type WorkspaceFilesOptions = {
 let activeLocalFileObservers = 0
 
 /** Byte evidence, never a decoded replacement character or an extension guess. ESC logs stay text. */
-function fileBytesAreBinary(bytes: Uint8Array): boolean {
-  if (bytes.includes(0)) return true
-  const head = Buffer.from(bytes.buffer, bytes.byteOffset, Math.min(bytes.byteLength, 12))
-  if (head.toString('ascii', 0, 5) === '%PDF-' || head.toString('ascii', 0, 6) === 'GIF87a' ||
-      head.toString('ascii', 0, 6) === 'GIF89a' || head.toString('ascii', 0, 3) === 'ID3' ||
-      head.toString('ascii', 0, 4) === 'fLaC' ||
-      (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) ||
-      (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) ||
-      (head[0] === 0x50 && head[1] === 0x4b && head[2] === 3 && head[3] === 4) ||
-      (head[0] === 0x1f && head[1] === 0x8b) ||
-      (head.toString('ascii', 0, 4) === 'RIFF' && ['WEBP', 'WAVE', 'AVI '].includes(head.toString('ascii', 8, 12)))) return true
-  try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); return false } catch { return true }
-}
-
 export function workspaceFileObserverCount(): number {
   return activeLocalFileObservers
 }
@@ -185,15 +155,6 @@ try {
 }
 `
 
-function localPathWithin(root: string, requested: string): string {
-  const normalizedRoot = resolve(root)
-  const target = resolve(normalizedRoot, requested)
-  if (target !== normalizedRoot && !target.startsWith(`${normalizedRoot}${sep}`)) {
-    throw new Error('Path escapes the workspace root')
-  }
-  return target
-}
-
 function remotePathWithin(root: string, requested: string): string {
   const normalizedRoot = posix.resolve(root)
   const target = posix.resolve(normalizedRoot, requested)
@@ -201,18 +162,6 @@ function remotePathWithin(root: string, requested: string): string {
     throw new Error('Path escapes the workspace root')
   }
   return target
-}
-
-function assertRealPathWithin(root: string, target: string, separator: string): void {
-  if (target !== root && !target.startsWith(`${root}${separator}`)) {
-    throw new Error('Path escapes the workspace root')
-  }
-}
-
-function assertMutableRelativePath(requested: string): void {
-  if (!requested.trim() || requested === '.' || requested === '/') {
-    throw new Error('The workspace root cannot be changed')
-  }
 }
 
 function assertCanonicalWorkspacePath(requested: string): void {
@@ -226,45 +175,6 @@ function assertCanonicalWorkspacePath(requested: string): void {
 
 function isRelativePathWithin(path: string, root: string): boolean {
   return path === root || path.startsWith(`${root}/`)
-}
-
-async function localFileScope(owner: string | WorkspaceRecord, requested: string): Promise<{ root: string; requested: string }> {
-  const root = typeof owner === 'string' ? owner : owner.path
-  const lexical = localPathWithin(root, requested)
-  if (typeof owner === 'string' || owner.id !== SCRATCH_WORKSPACE_ID || owner.hostId !== 'local') return { root, requested }
-  const parts = relative(resolve(root), lexical).split(sep)
-  const id = scratchTopicIdFromDirectoryName(parts[0]!)
-  if (!id) return { root, requested }
-  const directory = await resolveScratchTopicDirectory(root, id)
-  if (!directory) throw Object.assign(new Error('This Topic directory is unavailable. Refresh its files before retrying.'), { code: 'ENOENT' })
-  return { root: dirname(directory), requested: [basename(directory), ...parts.slice(1)].join(sep) }
-}
-
-async function localExistingPathWithin(owner: string | WorkspaceRecord, requestedPath: string): Promise<LocalExistingPath> {
-  const { root, requested } = await localFileScope(owner, requestedPath)
-  const lexicalTarget = localPathWithin(root, requested)
-  const [realRoot, realTarget] = await Promise.all([realpath(root), realpath(lexicalTarget)])
-  assertRealPathWithin(realRoot, realTarget, sep)
-  return { root: realRoot, target: realTarget }
-}
-
-// Explorer follows explicit links for reads only. Mutations retain real-root confinement.
-// Resolve each lexical ancestor to detect directory cycles before adding another expandable level.
-async function localReadablePath(owner: string | WorkspaceRecord, requestedPath: string): Promise<LocalExistingPath> {
-  const { root, requested } = await localFileScope(owner, requestedPath)
-  const lexical = localPathWithin(root, requested)
-  const realRoot = await realpath(root)
-  const seen = new Set([realRoot])
-  let cursor = resolve(root)
-  let target = realRoot
-  for (const part of lexical.slice(cursor.length).split(sep).filter(Boolean)) {
-    cursor = resolve(cursor, part)
-    target = await realpath(cursor)
-    if (seen.has(target)) throw new Error('Directory link cycle: this folder is already an ancestor')
-    seen.add(target)
-  }
-  // The worker pins the already resolved read location. No write operation uses this boundary.
-  return { target, root: target === realRoot || target.startsWith(realRoot + sep) ? realRoot : (await stat(target)).isDirectory() ? target : dirname(target) }
 }
 
 // Reveal must survive a deleted target: the file being gone is the most common reason it "won't
@@ -290,108 +200,9 @@ export async function localExistingAncestorWithin(owner: string | WorkspaceRecor
   }
 }
 
-async function localMutablePathWithin(owner: string | WorkspaceRecord, requestedPath: string): Promise<LocalMutablePath> {
-  const { root, requested } = await localFileScope(owner, requestedPath)
-  assertMutableRelativePath(requested)
-  const lexicalTarget = localPathWithin(root, requested)
-  const [realRoot, realParent] = await Promise.all([realpath(root), realpath(dirname(lexicalTarget))])
-  assertRealPathWithin(realRoot, realParent, sep)
-  return { root: realRoot, parent: realParent, name: basename(lexicalTarget) }
-}
-
-async function runLocalWorker(
-  cwd: string,
-  root: string,
-  request: LocalWorkerRequest,
-  input?: string | Uint8Array,
-  signal?: AbortSignal,
-  deleteBarriers?: { before?: () => Promise<void>; after?: () => Promise<void> }
-): Promise<Buffer> {
-  signal?.throwIfAborted()
-  const environment: NodeJS.ProcessEnv = { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
-  delete environment.NODE_OPTIONS
-  const native = request.action !== 'observe' && request.action !== 'list-files'
-  const args = request.action === 'delete-exact' ? [
-    '--workspace-file', request.action, root, request.name, request.expectedRevision,
-    request.witness.device, request.witness.inode, request.witness.size, request.witness.ctimeNs,
-    request.witness.mtimeNs, request.claim, request.fault
-  ] : native ? [
-    '--workspace-file', request.action, root, 'name' in request ? request.name ?? '' : '',
-    request.action === 'write' ? request.expectedRevision ?? 'null' : request.action === 'create' ? request.kind : 'null',
-    request.action === 'write' && request.exclusive ? '1' : '0',
-    request.action === 'write' && request.textOnly ? '1' : '0',
-    request.action === 'write' ? request.fault ?? '' : '',
-    request.action === 'read-bytes' ? String(request.offset) : '0',
-    request.action === 'read-bytes' ? String(request.maxBytes) : '0',
-    request.action === 'read-bytes' ? String(request.maxFileBytes) : '0',
-    request.action === 'read-bytes' ? request.expectedRevision ?? 'null' : 'null'
-  ] : [
-    '--input-type=module',
-    '--eval',
-    LOCAL_WORKER_SOURCE,
-    JSON.stringify(request),
-    root
-  ]
-  const child = spawn(native ? WORKSPACE_MOVE_HELPER : process.execPath, args, {
-    cwd,
-    env: environment,
-    stdio: deleteBarriers ? ['pipe', 'pipe', 'pipe', deleteBarriers.before ? 'pipe' : 'ignore',
-      deleteBarriers.before ? 'pipe' : 'ignore', deleteBarriers.after ? 'pipe' : 'ignore', deleteBarriers.after ? 'pipe' : 'ignore'] : ['pipe', 'pipe', 'pipe'],
-    ...(signal ? { signal } : {})
-  })
-  const stdout: Buffer[] = []
-  let stderr = ''
-  let inputSent = false
-  let inputError: Error | undefined
-  let barrierError: Error | undefined, claimed = false
-  for (const [index, hook] of [[3, deleteBarriers?.before], [5, deleteBarriers?.after]] as const) {
-    if (!hook) continue
-    const ready = child.stdio.at(index) as Readable, release = child.stdio.at(index + 1) as Writable
-    release.on('error', error => { barrierError ??= error })
-    ready.once('data', () => {
-      if (index === 5) claimed = true
-      void hook().then(() => release.end('G'), error => {
-        barrierError = error instanceof Error ? error : new Error(String(error)); child.kill('SIGTERM')
-      })
-    })
-  }
-  // Cancellation or an early worker exit can close this pipe before READY is consumed.
-  // Keep its failure on this original request, including after the child emits AbortError.
-  child.stdin!.on('error', error => { inputError = error })
-  child.stdout!.on('data', (chunk: Buffer) => stdout.push(Buffer.from(chunk)))
-  child.stderr!.setEncoding('utf8')
-  child.stderr!.on('data', (chunk: string) => {
-    stderr += chunk
-    if (!inputSent && stderr.split('\n').includes(LOCAL_WORKER_READY)) {
-      inputSent = true
-      child.stdin!.end(input ?? '')
-    }
-  })
-
-  const result = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve, reject) => {
-    child.once('error', reject)
-    child.once('close', (code, signal) => resolve({ code, signal }))
-  })
-  if (result.code === 0 && !inputError && !barrierError) return Buffer.concat(stdout)
-  const record = stderr.split('\n').find((line) => line.startsWith(LOCAL_WORKER_ERROR))
-  if (record) {
-    const detail = JSON.parse(record.slice(LOCAL_WORKER_ERROR.length)) as {
-      message: string
-      code: string | null
-      writeOutcomeUnknown?: boolean
-      retainedPath?: string
-      readCost?: WorkspaceFileByteRead['readCost']
-    }
-    throw Object.assign(new Error(detail.message), detail.code ? { code: detail.code } : {},
-      detail.writeOutcomeUnknown ? { writeOutcomeUnknown: true } : {}, detail.readCost ? { readCost: detail.readCost } : {},
-      detail.retainedPath ? { retainedPath: detail.retainedPath } : {})
-  }
-  throw Object.assign(barrierError ?? inputError ?? new Error(
-    `Local Workspace operation failed${result.signal ? ` with ${result.signal}` : ` with exit ${result.code}`}`
-  ), (request.action === 'write' || request.action === 'delete-exact') && inputSent ? {
-    code: 'WORKSPACE_FILE_RESULT_UNKNOWN', writeOutcomeUnknown: true,
-    ...(request.action === 'delete-exact' && claimed ? { retainedPath: request.claim } : {})
-  } : {})
+function runLocalWorker(cwd: string, root: string, request: LocalWorkerRequest, input?: string | Uint8Array,
+  signal?: AbortSignal, deleteBarriers?: { before?: () => Promise<void>; after?: () => Promise<void> }): Promise<Buffer> {
+  return runWorkspaceFileWorker(cwd, root, request, { helperPath: WORKSPACE_MOVE_HELPER, workerSource: LOCAL_WORKER_SOURCE }, input, signal, deleteBarriers)
 }
 
 type AtomicMoveError = Error & {
@@ -805,20 +616,6 @@ function sortDirectoryEntries(entries: WorkspaceDirectoryEntry[]): WorkspaceDire
   })
 }
 
-function revisionFor(bytes: Uint8Array): string {
-  return `sha256:${createHash('sha256').update(bytes).digest('hex')}`
-}
-
-function resultError(error: unknown): { status: 'error'; code: string; message: string } {
-  return {
-    status: 'error',
-    code: typeof error === 'object' && error !== null && 'code' in error
-      ? String(error.code)
-      : 'WORKSPACE_FILE_ERROR',
-    message: error instanceof Error ? error.message : String(error)
-  }
-}
-
 function moveError(
   error: unknown,
   finalLocation: 'source' | 'unknown'
@@ -828,8 +625,8 @@ function moveError(
 }
 
 export class WorkspaceFiles {
-  private readonly writeRequestTails = new Map<string, Promise<void>>()
-  private readonly writeTails = new Map<string, Promise<void>>()
+  private readonly writeScope = new WorkspaceFileWriteScope()
+  private readonly ordinary: OrdinaryWorkspaceFiles
   private readonly observers = new Map<string, LocalObserverEntry>()
   private readonly observerStarts = new Map<string, Promise<LocalObserverEntry>>()
   private readonly observerDisposals = new Map<LocalObserverEntry, Promise<void>>()
@@ -840,7 +637,7 @@ export class WorkspaceFiles {
   constructor(
     private readonly hostFor: (id: string) => ExecutionHost,
     private readonly options: WorkspaceFilesOptions = {}
-  ) {}
+  ) { this.ordinary = new OrdinaryWorkspaceFiles({ helperPath: WORKSPACE_MOVE_HELPER, hostFor, ...options }, this.writeScope) }
 
   private async assertPrimaryMoteRetained(workspace: WorkspaceRecord, target: string): Promise<void> {
     const primary = await this.options.primaryMoteWorkspace?.()
@@ -884,25 +681,8 @@ export class WorkspaceFiles {
     return disposal
   }
 
-  private async serializeWrite<T>(
-    tails: Map<string, Promise<void>>,
-    key: string,
-    operation: () => Promise<T>
-  ): Promise<T> {
-    const previous = tails.get(key) ?? Promise.resolve()
-    let release!: () => void
-    const current = new Promise<void>((resolveCurrent) => {
-      release = resolveCurrent
-    })
-    const tail = previous.catch(() => {}).then(async () => await current)
-    tails.set(key, tail)
-    await previous.catch(() => {})
-    try {
-      return await operation()
-    } finally {
-      release()
-      if (tails.get(key) === tail) tails.delete(key)
-    }
+  private serializeWrite<T>(tails: Map<string, Promise<void>>, key: string, operation: () => Promise<T>): Promise<T> {
+    return this.writeScope.serialize(tails, key, operation)
   }
 
   async observe(
@@ -1027,10 +807,7 @@ export class WorkspaceFiles {
     options?.signal?.throwIfAborted()
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20000) throw new Error('File discovery limit must be between 1 and 20000')
     const resource = { ...workspace }, host = this.hostFor(resource.hostId)
-    if (host.kind === 'local') {
-      const directory = await localReadablePath(resource, requestedPath)
-      return JSON.parse((await runLocalWorker(directory.target, directory.root, { action: 'list-files', limit }, undefined, options?.signal)).toString('utf8')) as FileNameListing
-    }
+    if (host.kind === 'local') return await this.ordinary.listFiles(resource, requestedPath, limit, options)
     // Remote directory facts already enforce its Host/root and symlink boundaries. No second SSH codec.
     const pending = [requestedPath], files: string[] = []
     const base = requestedPath.split('/').filter(part => part && part !== '.').join('/')
@@ -1168,32 +945,7 @@ export class WorkspaceFiles {
     }
     try {
       const host = this.hostFor(workspace.hostId)
-      if (host.kind === 'local') {
-        const resolved = await localReadablePath(workspace, requestedPath)
-        // A directory is not a read failure: the caller reveals it in the file tree. Only Main can
-        // tell — path detection in the Renderer is pure-string. `resolved.target` is already the
-        // root-confined realpath, so this stat classifies exactly the object the worker would open.
-        if ((await stat(resolved.target)).isDirectory()) return { status: 'directory' }
-        const snapshot = budget ? await this.readByteRange(workspace, requestedPath, {
-          offset: 0, maxBytes: budget.maxFileBytes, maxFileBytes: budget.maxFileBytes, ...(budget.signal ? { signal: budget.signal } : {})
-        }) : null
-        if (snapshot) budget?.onReadCost?.(snapshot.readCost)
-        const bytes = snapshot ? Buffer.from(snapshot.bytes) : await runLocalWorker(dirname(resolved.target), resolved.root, {
-          action: 'read',
-          name: basename(resolved.target)
-        })
-        if (fileBytesAreBinary(bytes)) {
-          return { status: 'binary', path: requestedPath, revision: snapshot?.revision ?? revisionFor(bytes), byteLength: bytes.byteLength }
-        }
-        return {
-          status: 'read',
-          document: {
-            path: requestedPath,
-            content: budget ? new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes) : bytes.toString('utf8'),
-            revision: snapshot?.revision ?? revisionFor(bytes)
-          }
-        }
-      }
+      if (host.kind === 'local') return await this.ordinary.read(workspace, requestedPath, budget)
       if (budget) {
         // Preserve remote text resources through the existing Host transport. Both the
         // producer and receiving transport are bounded, including a file that grows.
@@ -1358,14 +1110,7 @@ export class WorkspaceFiles {
 
   private async readByteRange(workspace: WorkspaceRecord, requestedPath: string, options: WorkspaceFileByteReadOptions & { offset: number; maxBytes: number; maxFileBytes?: number; signal?: AbortSignal }): Promise<WorkspaceFileByteRead> {
     if (this.hostFor(workspace.hostId).kind !== 'local') throw new Error('Binary file transfer is unavailable for remote workspaces.')
-    const { offset, maxBytes } = options
-    const resolved = await localExistingPathWithin(workspace, requestedPath)
-    const document = JSON.parse((await runLocalWorker(dirname(resolved.target), resolved.root, {
-      action: 'read-bytes', name: basename(resolved.target), offset, maxBytes, maxFileBytes: options.maxFileBytes ?? WORKSPACE_FILE_MAX_BYTES,
-      ...(options.expectedRevision !== undefined ? { expectedRevision: options.expectedRevision } : {})
-    }, undefined, options.signal)).toString('utf8')) as Omit<WorkspaceFileByteRead, 'bytes'> & { data: string }
-    const { data, ...result } = document
-    return { ...result, bytes: Buffer.from(data, 'base64') }
+    return await this.ordinary.readByteRange(workspace, requestedPath, options)
   }
 
   private async writeContent(
@@ -1373,43 +1118,7 @@ export class WorkspaceFiles {
     input: { path: string; content: string | Uint8Array; expectedRevision: string | null; exclusive?: true },
     beforeWrite?: () => void | Promise<void>
   ): Promise<WorkspaceFileWriteResult> {
-    const requestKey = `${workspace.hostId}\0${workspace.path}\0${input.path}`
-    return await this.serializeWrite(this.writeRequestTails, requestKey, async () => {
-      try {
-        const host = this.hostFor(workspace.hostId)
-        if (host.kind !== 'local') {
-          return {
-            status: 'error',
-            code: 'REMOTE_WORKSPACE_FILE_WRITE_UNSUPPORTED',
-            message: 'Revision-aware atomic save is not available for remote workspaces.'
-          }
-        }
-        const resolved = await localMutablePathWithin(workspace, input.path)
-        const key = `${resolved.root}\0${resolved.parent}\0${resolved.name}`
-        return await this.serializeWrite(this.writeTails, key, async () => {
-          try {
-            await beforeWrite?.()
-            const fault = typeof this.options.localWriteFault === 'function'
-              ? this.options.localWriteFault()
-              : this.options.localWriteFault
-            return JSON.parse((await runLocalWorker(resolved.parent, resolved.root, {
-              action: 'write',
-              name: resolved.name,
-              expectedRevision: input.expectedRevision,
-              ...(input.exclusive ? { exclusive: true as const } : {}),
-              ...(typeof input.content === 'string' ? { textOnly: true as const } : {}),
-              ...(fault ? { fault } : {})
-            }, input.content)).toString('utf8')) as WorkspaceFileWriteResult
-          } catch (error) {
-            const detail = resultError(error)
-            return typeof error === 'object' && error !== null && 'writeOutcomeUnknown' in error && error.writeOutcomeUnknown === true
-              ? { ...detail, status: 'unknown' } : detail
-          }
-        })
-      } catch (error) {
-        return resultError(error)
-      }
-    })
+    return await this.ordinary.writeContent(workspace, input, beforeWrite)
   }
 
   async create(workspace: WorkspaceRecord, input: CreateWorkspacePathInput): Promise<void> {
@@ -1550,14 +1259,14 @@ export class WorkspaceFiles {
           return typeof value === 'string' && /^\d{1,20}$/.test(value) && BigInt(value) <= 18446744073709551615n
         })) return { status: 'error', code: 'WORKSPACE_FILE_INVALID_REQUEST', message: 'Exact deletion requires the original revision, creation generation and operation.' }
     const requestKey = `${workspace.hostId}\0${workspace.path}\0${input.path}`
-    return await this.serializeWrite(this.writeRequestTails, requestKey, async () => {
+    return await this.serializeWrite(this.writeScope.requests, requestKey, async () => {
       try {
         if (this.hostFor(workspace.hostId).kind !== 'local') return {
           status: 'error', code: 'REMOTE_WORKSPACE_FILE_DELETE_EXACT_UNSUPPORTED', message: 'Exact regular-file collection is unavailable on this remote Host.'
         }
         const resolved = await localMutablePathWithin(workspace, input.path)
         const key = `${resolved.root}\0${resolved.parent}\0${resolved.name}`
-        return await this.serializeWrite(this.writeTails, key, async () => {
+        return await this.serializeWrite(this.writeScope.paths, key, async () => {
           const token = createHash('sha256').update(JSON.stringify([requestKey, input.operationId])).digest('hex')
           const claim = `.agentmux-reclaim-${token}.note.md`
           const before = this.options.beforeLocalDeleteClaim, after = this.options.afterLocalDeleteClaim

@@ -40,6 +40,26 @@
     "./credential-administration": {
       "types": "./dist/credential-administration.d.ts",
       "import": "./dist/credential-administration.js"
+    },
+    "./file-resource": {
+      "types": "./dist/file-resource.d.ts",
+      "import": "./dist/file-resource.js"
+    },
+    "./ordinary-files": {
+      "types": "./dist/ordinary-files.d.ts",
+      "import": "./dist/ordinary-files.js"
+    },
+    "./workspace-file-bytes": {
+      "types": "./dist/workspace-file-bytes.d.ts",
+      "import": "./dist/workspace-file-bytes.js"
+    },
+    "./mote-connection-preferences": {
+      "types": "./dist/mote-connection-preferences.d.ts",
+      "import": "./dist/mote-connection-preferences.js"
+    },
+    "./mote-connection-target": {
+      "types": "./dist/mote-connection-target.d.ts",
+      "import": "./dist/mote-connection-target.js"
     }
   }
 }
