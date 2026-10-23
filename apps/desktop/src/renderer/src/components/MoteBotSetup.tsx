@@ -206,7 +206,7 @@ export function MoteBotSetup({
       </button>
     </div>
   ) : null
-  const setupFeedback = setup.issue && setup.issueKind !== 'notice' ? <p role="status" className="mote-details__issue">{setup.issue}</p> : null
+  const setupFeedback = setup.issue && setup.issueKind === 'issue' ? <p role="status" className="mote-details__issue">{setup.issue}</p> : null
   const taskTitle = completedCreation ? 'Bot setup complete'
     : publishedWithoutChoice ? 'Bot published. Choose it for your Mote.'
     : savedConnection && enrollment?.initialPublication ? initialProgress?.state === 'approval-required' ? 'Waiting for platform approval' : initialProgress?.state === 'attention' ? 'Check this setup step' : 'Setting up your bot'
@@ -472,15 +472,17 @@ export function MoteBotSetup({
             </>
           ) : (
             <>
-              {!setup.checking ? <p role="status">{raw && !raw.hostingTarget ? 'The original bot hosting owner is unconfirmed. The original request is kept without contacting another Host.' : raw ? 'The result is not confirmed. Your original request is retained.' : 'The original request could not be read. Its identifier is kept; no new setup was started.'}</p> : null}
+              {!setup.checking ? <p role="status">{!setup.hostingTarget ? 'The original bot hosting owner is unconfirmed. The original request is kept without contacting another Host.' : raw ? 'The result is not confirmed. Your original request is retained.' : 'The original request could not be read. Its identifier is kept; no new setup was started.'}</p> : null}
               {!raw ? <code>{setup.selectedId}</code> : null}
-              <button
-                type="button"
-                className="primary-button"
-                onClick={() => void setup.check(setup.selectedId!)}
-              >
-                Check original result
-              </button>
+              {setup.hostingTarget ? (
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={() => void setup.check(setup.selectedId!)}
+                >
+                  Check original result
+                </button>
+              ) : null}
               {raw?.hostingTarget && raw.phase === 'not-dispatched' && !raw.inspectOnly ? (
                 <button type="button" className="small-button" onClick={() => void setup.send(raw)}>
                   Continue this request
