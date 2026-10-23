@@ -6,13 +6,7 @@
 .browser-operation-status__trigger:hover, .browser-operation-status__trigger[data-state="open"] { color: var(--text); background: var(--surface-3); }
 .browser-operation-status__trigger:focus-visible { outline: 2px solid var(--green-line); outline-offset: -2px; }
 .browser-operation-status__trigger--presence { width: auto; gap: 7px; padding: 0 6px; background: var(--surface-2); }
-.browser-operation-status__trigger--create { width: auto; gap: var(--sp-1); padding: 0 var(--sp-3); }
 .browser-operation-status__trigger:disabled { opacity: .45; cursor: default; }
-.browser-operation-status__action-label { white-space: nowrap; font-size: var(--fs-micro); }
-@container browser-pane (max-width: 240px) {
-  .browser-operation-status__action-label { display: none; }
-  .browser-operation-status__trigger--create { width: 27px; padding: 0; }
-}
 .browser-operation-status__cue { max-width: 9ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; font-weight: 500; }
 .browser-operation-status[data-phase="running"], .browser-operation-status[data-phase="preparing"] { color: var(--green-2); }
 .browser-operation-status[data-phase="completed"] { color: var(--success); }
