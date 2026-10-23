@@ -7562,7 +7562,7 @@ export class AgentMuxClient {
     const input = parseExternalConversationReference(value)
     if (!owner) throw new AgentMuxError('The original external conversation owner is unavailable. Retain the original message; local input remains available.', 'EXTERNAL_RECORD_AUTHORITY_UNAVAILABLE')
     const observed = parseExternalConversationAuthority(await owner.resolveConversationMessage(input)), message = observed.message
-    if (!message || message.agentSessionId !== input.agentSessionId || message.ingressId !== input.ingressId) throw new AgentMuxError('The original external conversation target is unconfirmed.', 'EXTERNAL_RECORD_TARGET_UNCONFIRMED')
+    if (!message || message.agentSessionId !== input.agentSessionId || message.ingressId !== input.ingressId || !isDeepStrictEqual(message.authoritySource, input.authoritySource)) throw new AgentMuxError('The original external conversation target is unconfirmed.', 'EXTERNAL_RECORD_TARGET_UNCONFIRMED')
     const session = await this.currentStoredAgentSession(input.agentSessionId)
     if (message.hostId !== session.hostId) throw new AgentMuxError('The original message belongs to another Host.', 'EXTERNAL_RECORD_TARGET_UNCONFIRMED')
     const recordId = externalConversationRecordId(message.author), page = await this.store.readCapturedHistory(input.agentSessionId, { recordId }), existing = page.records[0]

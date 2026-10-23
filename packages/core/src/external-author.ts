@@ -7,6 +7,16 @@ import type { AgentMuxAgentInteractionInput, AgentMuxSessionQuestionReplyInput }
 import { sha256 } from '@noble/hashes/sha2.js'
 import { agentInteractionRequestTarget } from './agent-interaction-state.js'
 
+/** Original semantic owners, never an endpoint, credential or reusable input grant. */
+export type AgentExternalAuthoritySource = { hostingRuntimeId: string; executionRuntimeId: string }
+export function parseAgentExternalAuthoritySource(value: unknown): AgentExternalAuthoritySource {
+  const source = rpcRecord(value, ['hostingRuntimeId', 'executionRuntimeId'], 'INVALID_EXTERNAL_AUTHOR')
+  for (const id of [source.hostingRuntimeId, source.executionRuntimeId]) {
+    if (typeof id !== 'string' || !id.trim() || id.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(id)) throw new AgentMuxError('External authority source is malformed.', 'INVALID_EXTERNAL_AUTHOR')
+  }
+  return { hostingRuntimeId: source.hostingRuntimeId as string, executionRuntimeId: source.executionRuntimeId as string }
+}
+
 /** Recorded external attribution, never a serialized authorization or a local human identity. */
 export type AgentExternalMessageAuthor = {
   kind: 'external'
@@ -18,6 +28,7 @@ export type AgentExternalMessageAuthor = {
   bindingRevision: number
   grantId: string
   grantRevision: number
+  authoritySource?: AgentExternalAuthoritySource
 }
 export type AgentExternalInputIntent = {
   agentSessionId: string; expectedRun: { runId: string }; operationId: string; messageId: string; body: string
@@ -77,10 +88,10 @@ export function agentQuestionReplyIntentDigest(input: AgentMuxSessionQuestionRep
 }
 
 export function parseAgentExternalMessageAuthor(value: unknown): AgentExternalMessageAuthor {
-  const p = rpcRecord(value, ['kind', 'connectionId', 'actor', 'externalConversationId', 'externalMessageId', 'bindingId', 'bindingRevision', 'grantId', 'grantRevision'], 'INVALID_EXTERNAL_AUTHOR')
+  const p = rpcRecord(value, ['kind', 'connectionId', 'actor', 'externalConversationId', 'externalMessageId', 'bindingId', 'bindingRevision', 'grantId', 'grantRevision', 'authoritySource'], 'INVALID_EXTERNAL_AUTHOR')
   const fail = (): never => { throw new AgentMuxError('External attribution is malformed.', 'INVALID_EXTERNAL_AUTHOR') }
   const text = (v: unknown): string => { if (typeof v !== 'string' || !v.trim() || v.length > 16_384 || /[\u0000-\u001f\u007f]/u.test(v)) fail(); return v as string }
   const revision = (v: unknown): number => { if (!Number.isSafeInteger(v) || Number(v) < 1) fail(); return v as number }
   if (p.kind !== 'external') fail()
-  return { kind: 'external', connectionId: text(p.connectionId), actor: parseConnectionActor(p.actor), externalConversationId: text(p.externalConversationId), externalMessageId: text(p.externalMessageId), bindingId: text(p.bindingId), bindingRevision: revision(p.bindingRevision), grantId: text(p.grantId), grantRevision: revision(p.grantRevision) }
+  return { kind: 'external', connectionId: text(p.connectionId), actor: parseConnectionActor(p.actor), externalConversationId: text(p.externalConversationId), externalMessageId: text(p.externalMessageId), bindingId: text(p.bindingId), bindingRevision: revision(p.bindingRevision), grantId: text(p.grantId), grantRevision: revision(p.grantRevision), ...(p.authoritySource === undefined ? {} : { authoritySource: parseAgentExternalAuthoritySource(p.authoritySource) }) }
 }

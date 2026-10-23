@@ -25,7 +25,7 @@ export type ConnectionIngressMessage = {
   body: string
   addressing?: ConnectionIngressAddressing
   /** Captured at authenticated group intake, before ACK. null means no active relationship then. */
-  group?: { target: { hostId: string; agentSessionId: string; connectionId: string; bindingId: string; bindingRevision: number } | null; recorded?: import('./external-conversation.js').AgentExternalConversationReceipt; recording?: { state: 'unavailable' | 'refused'; code: string } }
+  group?: { target: { hostId: string; agentSessionId: string; connectionId: string; bindingId: string; bindingRevision: number; authoritySource?: import('./external-author.js').AgentExternalAuthoritySource } | null; recorded?: import('./external-conversation.js').AgentExternalConversationReceipt; recording?: { state: 'unavailable' | 'refused'; code: string } }
   state: 'received' | 'refused' | 'claimed'
   code?: string
   input?: {
@@ -85,7 +85,7 @@ export type ConnectionIngressInspection = {
   observation: 'not-started' | 'observed' | 'unavailable'
 }
 export type ConnectionIngressPage = { ingresses: ConnectionIngressRecord[]; nextAfterIngressId: string | null }
-export type ConnectionIngressAuthorityCode = 'INGRESS_SERVICE_DISABLED' | 'INGRESS_SERVICE_UNCONFIRMED' | 'INGRESS_CLAIM_UNAVAILABLE' | 'INGRESS_CONNECTION_UNAVAILABLE' | 'INGRESS_BINDING_UNAVAILABLE' | 'INGRESS_ACTOR_NOT_AUTHORIZED' | 'INGRESS_INPUT_OUTSIDE_SCOPE' | 'INGRESS_ADDRESSING_UNCONFIRMED' | 'INGRESS_AUTHORITY_REVISED' | 'INGRESS_STORAGE_UNCONFIRMED'
+export type ConnectionIngressAuthorityCode = 'INGRESS_SERVICE_DISABLED' | 'INGRESS_SERVICE_UNCONFIRMED' | 'INGRESS_CLAIM_UNAVAILABLE' | 'INGRESS_CONNECTION_UNAVAILABLE' | 'INGRESS_BINDING_UNAVAILABLE' | 'INGRESS_ACTOR_NOT_AUTHORIZED' | 'INGRESS_INPUT_OUTSIDE_SCOPE' | 'INGRESS_ADDRESSING_UNCONFIRMED' | 'INGRESS_AUTHORITY_REVISED' | 'INGRESS_TARGET_UNCONFIRMED' | 'INGRESS_STORAGE_UNCONFIRMED'
 /** Original claim and current owner observation only. No Core receipt read or serialized permission. */
 export type ConnectionIngressAuthority = {
   ingress: ConnectionIngressRecord | null
