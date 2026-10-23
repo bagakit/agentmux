@@ -350,7 +350,7 @@ export async function runPendingEditRestart(arguments_, mode = 'pending-edit') {
       build.brandInputs = { reason: 'This exact committed source has no brand derivation script; its tracked consumer bitmaps are used unchanged.' }
     }
     await command('private-workspace-helper-build', process.execPath, [join(privateRoot, 'apps/desktop/scripts/build-workspace-move-helper.mjs')], privateRoot)
-    if (demandCollaboration) build.workspaceHelper = { sourceSha256: build.sources['apps/desktop/native/workspace-move.c'], builderSha256: build.sources['apps/desktop/scripts/build-workspace-move-helper.mjs'], binarySha256: sha(await readFile(join(privateRoot, 'apps/desktop/resources/bin/agentmux-workspace-move'))) }
+    if (demandCollaboration) build.workspaceHelper = { sourceSha256: build.sources['apps/host/native/workspace-move.c'], builderSha256: build.sources['apps/desktop/scripts/build-workspace-move-helper.mjs'], binarySha256: sha(await readFile(join(privateRoot, 'apps/desktop/resources/bin/agentmux-workspace-move'))) }
     const closurePath = join(evidence, 'desktop-source-closure.json')
     const inactiveCompilerReceipt = join(evidence, 'inactive-window-compiler-input.json')
     const config = join(privateRoot, 'apps/desktop/restart-proof.vite.config.mjs')

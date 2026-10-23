@@ -41,7 +41,7 @@ const sourceInputs = [
   'packages/client-ui/src/theme/icon-catalog.ts', 'packages/client-ui/src/theme/icon-glyphs.ts',
   'packages/client-ui/src/theme/icon-sprite.ts',
   'apps/desktop/src/shared/contracts.ts',
-  'apps/desktop/src/main/workspace-files.ts', 'apps/desktop/native/workspace-move.c', 'apps/desktop/resources/bin/agentmux-workspace-move',
+  'apps/desktop/src/main/workspace-files.ts', 'apps/host/native/workspace-move.c', 'apps/desktop/resources/bin/agentmux-workspace-move',
   'apps/desktop/src/main/file-read-owner.ts', 'apps/desktop/src/shared/zone-file-resource.ts',
   ...['public-rpc-server.ts', 'public-rpc-client.ts', 'public-rpc-service.ts', 'rpc-business-codec.ts', 'control-codec.ts', 'agentmux.ts'].map(name => 'packages/core/src/' + name),
   ...['index.js', 'control-host.js', 'public-rpc.js', 'public-rpc-frame.js', 'public-rpc-client.js', 'public-rpc-service.js', 'public-rpc-server.js', 'public-rpc-wire.js', 'rpc-business-codec.js', 'control-codec.js', 'runtime-paths.js', 'agentmux-cli-commands.js', 'agentmux.js'].map(name => 'packages/core/dist/' + name),

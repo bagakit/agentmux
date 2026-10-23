@@ -40,7 +40,7 @@ export async function probePublishedPublic({ repository, evidence, mainRef } = {
       'tsconfig.base.json', 'packages/core/src', 'packages/core/package.json', 'packages/core/bin', `packages/core/vendor/ctxmux/${platform}`,
       'packages/core/test/fixtures/fake-codex-cli.mjs', 'apps/desktop/src', 'apps/desktop/package.json',
       'apps/desktop/test/helpers/client-ui-render.tsx', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/resources',
-      'apps/desktop/native/workspace-move.c', 'apps/desktop/scripts/migrate-topic-directories.mjs',
+      'apps/host/native/workspace-move.c', 'apps/desktop/scripts/migrate-topic-directories.mjs',
       'packages/demand', 'packages/layout', 'packages/client-ui', 'packages/relay'], { cwd: repositoryRoot, maxBuffer: 70 * 1024 * 1024 }) })
     for (const file of publicHarnessPaths) {
       const bytes = await readFile(join(repositoryRoot, file)); receipt.harnessSource[file] = hash(bytes)
@@ -70,8 +70,8 @@ export async function probePublishedPublic({ repository, evidence, mainRef } = {
         ;(receipt.compiledImports[compilation] ??= {})[logical] = sha256
       }
     }
-    const helper = join(privateRoot, 'workspace-move'); execFileSync('cc', ['-O2', join(source, 'apps/desktop/native/workspace-move.c'), '-o', helper])
-    receipt.helper = { source: 'apps/desktop/native/workspace-move.c', sourceSha256: hash(await readFile(join(source, 'apps/desktop/native/workspace-move.c'))), binarySha256: hash(await readFile(helper)) }
+    const helper = join(privateRoot, 'workspace-move'); execFileSync('cc', ['-O2', join(source, 'apps/host/native/workspace-move.c'), '-o', helper])
+    receipt.helper = { source: 'apps/host/native/workspace-move.c', sourceSha256: hash(await readFile(join(source, 'apps/host/native/workspace-move.c'))), binarySha256: hash(await readFile(helper)) }
     receipt.source[receipt.helper.source] = receipt.helper.sourceSha256
     const plugin = { name: 'pinned-public-owner-source', setup(builder) {
       builder.onResolve({ filter: /^@agentmux\// }, args => { const alias = aliases.find(one => one.find.test(args.path)); return alias ? { path: args.path.replace(alias.find, alias.replacement) } : null })

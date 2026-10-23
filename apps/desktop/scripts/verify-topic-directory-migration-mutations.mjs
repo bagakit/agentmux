@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
-const files = ['apps/desktop/native/workspace-move.c', 'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/test/topic-directory-migration.native.test.mjs', 'apps/desktop/src/main/scratch-directory-identity.mjs']
+const files = ['apps/host/native/workspace-move.c', 'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/test/topic-directory-migration.native.test.mjs', 'apps/desktop/src/main/scratch-directory-identity.mjs']
 const digest = source => createHash('sha256').update(source).digest('hex')
 const full = 'actual helper and script retain cwd'
 const mutations = [

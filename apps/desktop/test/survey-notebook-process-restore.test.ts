@@ -26,7 +26,7 @@ beforeAll(async () => {
   }
   const helper = resolve('.tmp/survey-notebook/process/workspace-move')
   if (process.platform === 'darwin') {
-    execFileSync('xcrun', ['clang', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', 'apps/desktop/native/workspace-move.c', '-o', helper])
+    execFileSync('xcrun', ['clang', '-std=c11', '-O2', '-Wall', '-Wextra', '-Werror', 'apps/host/native/workspace-move.c', '-o', helper])
     await mkdir(resolve('.tmp/resources/bin'), {recursive:true})
     await copyFile(helper, resolve('.tmp/resources/bin/agentmux-workspace-move'))
   }

@@ -9,7 +9,7 @@ const base = resolve(import.meta.dirname, '../../..'), output = join(base, '.tmp
 await mkdir(output, { recursive: true })
 const attempt = await mkdtemp(join(output, 'attempt-')), isolated = join(attempt, 'source')
 const hash = bytes => createHash('sha256').update(bytes).digest('hex')
-const native = 'apps/desktop/native/workspace-move.c', owner = 'apps/desktop/src/main/scratch-directory-maintenance.mjs'
+const native = 'apps/host/native/workspace-move.c', owner = 'apps/desktop/src/main/scratch-directory-maintenance.mjs'
 const metadata = 'apps/desktop/src/main/scratch-directory-identity.mjs', directories = 'apps/desktop/src/main/scratch-topic-directories.ts'
 const scratch = 'apps/desktop/src/main/scratch-topics.ts', files = 'apps/desktop/src/main/workspace-files.ts', ipc = 'apps/desktop/src/main/ipc.ts'
 const test = 'apps/desktop/test/mote-directory-short-maintenance.test.ts', oldTest = 'apps/desktop/test/mote-directory-identity.test.ts'
@@ -111,7 +111,7 @@ try {
   for (const path of ['apps/desktop/src', 'packages/core/src']) await tree(path)
   const copyTrees = ['apps/desktop/src', 'apps/desktop/test/fixtures', 'packages/core/src', 'packages/core/test/helpers']
   const copyFiles = [test, oldTest, 'apps/desktop/test/mote-primary-directory.test.ts', 'apps/desktop/test/topic-directory-migration.native.test.mjs',
-    'apps/desktop/native/workspace-move.c', 'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/scripts/migrate-topic-directories.d.mts',
+    'apps/host/native/workspace-move.c', 'apps/desktop/scripts/migrate-topic-directories.mjs', 'apps/desktop/scripts/migrate-topic-directories.d.mts',
     'apps/desktop/scripts/build-workspace-move-helper.mjs', 'apps/desktop/scripts/verify-mote-directory-short-maintenance.mjs',
     'apps/desktop/scripts/verify-mote-directory-short-name.mjs', 'apps/desktop/package.json', 'packages/core/package.json', 'tsconfig.base.json', 'vitest.setup.ts']
   await mkdir(isolated)

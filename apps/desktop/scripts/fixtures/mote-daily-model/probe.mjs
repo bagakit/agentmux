@@ -338,7 +338,7 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
       'tsconfig.base.json', 'packages/core/src', 'packages/core/package.json', 'packages/core/bin', `packages/core/vendor/ctxmux/${platform}`,
       'packages/core/test/helpers/real-codex-fixture.ts', 'apps/desktop/src', 'apps/desktop/package.json', 'apps/desktop/browser-extension/protocol.js',
       'apps/desktop/test/helpers/client-ui-render.tsx', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/resources',
-      'apps/desktop/native/workspace-move.c', 'packages/demand', 'packages/layout', 'packages/client-ui', 'packages/relay'],
+      'apps/host/native/workspace-move.c', 'packages/demand', 'packages/layout', 'packages/client-ui', 'packages/relay'],
       { cwd: repositoryRoot, maxBuffer: 90 * 1024 * 1024 }) })
     for (const file of modelHarnessPaths) {
       const bytes = await readFile(join(repositoryRoot, file)); receipt.harnessSource[file] = hash(bytes)
@@ -402,9 +402,9 @@ export async function probeRealMoteModel({ repository, evidence, mainRef, author
       }
     }
     const helper = join(buildRoot, 'workspace-move')
-    execFileSync('cc', ['-O2', join(source, 'apps/desktop/native/workspace-move.c'), '-o', helper])
-    await bind(join(source, 'apps/desktop/native/workspace-move.c'))
-    receipt.helper = { source: 'apps/desktop/native/workspace-move.c', sourceSha256: receipt.source['apps/desktop/native/workspace-move.c'], binarySha256: hash(await readFile(helper)), invoked: false }
+    execFileSync('cc', ['-O2', join(source, 'apps/host/native/workspace-move.c'), '-o', helper])
+    await bind(join(source, 'apps/host/native/workspace-move.c'))
+    receipt.helper = { source: 'apps/host/native/workspace-move.c', sourceSha256: receipt.source['apps/host/native/workspace-move.c'], binarySha256: hash(await readFile(helper)), invoked: false }
     const plugin = { name: 'real-mote-pinned-source', setup(builder) {
       builder.onResolve({ filter: /^@agentmux\// }, args => { const one = aliases.find(alias => alias.find instanceof RegExp && alias.find.test(args.path)); return one ? { path: args.path.replace(one.find, one.replacement) } : null })
       builder.onResolve({ filter: /^\.\.\/\.\.\/dist\/index\.js$/ }, args => args.importer.endsWith('/test/helpers/real-codex-fixture.ts')

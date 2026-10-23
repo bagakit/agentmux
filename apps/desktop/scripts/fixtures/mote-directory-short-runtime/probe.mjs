@@ -39,7 +39,7 @@ export async function probeDirectoryRuntime({ repository, evidence, mainRef } = 
       'packages/core/src', 'packages/core/package.json', 'packages/core/bin', `packages/core/vendor/ctxmux/${platform}`,
       'packages/core/test/fixtures/fake-codex-cli.mjs', 'apps/desktop/src', 'apps/desktop/package.json',
       'packages/demand', 'packages/layout', 'packages/client-ui', 'packages/relay'], { cwd: repo, maxBuffer: 50 * 1024 * 1024 }) })
-    const overlay = ['apps/desktop/native/workspace-move.c', 'apps/desktop/scripts/migrate-topic-directories.mjs',
+    const overlay = ['apps/host/native/workspace-move.c', 'apps/desktop/scripts/migrate-topic-directories.mjs',
       'apps/desktop/src/main/scratch-directory-identity.mjs', 'apps/desktop/src/main/scratch-directory-identity.d.mts',
       'apps/desktop/src/main/scratch-directory-maintenance.mjs', 'apps/desktop/src/main/scratch-directory-maintenance.d.mts',
       'apps/desktop/src/main/scratch-topic-directories.ts', 'apps/desktop/src/main/scratch-topics.ts',
@@ -63,7 +63,7 @@ export async function probeDirectoryRuntime({ repository, evidence, mainRef } = 
     const clientUi = join(source, 'packages/client-ui'), clientUiManifest = JSON.parse(await readFile(join(clientUi, 'package.json'), 'utf8'))
     aliases['@agentmux/client-ui/mote-face'] = resolve(clientUi, clientUiManifest.exports['./*'].browser.replace('*', 'mote-face'))
     const helper = join(privateRoot, 'workspace-move')
-    execFileSync('cc', ['-O2', join(source, 'apps/desktop/native/workspace-move.c'), '-o', helper])
+    execFileSync('cc', ['-O2', join(source, 'apps/host/native/workspace-move.c'), '-o', helper])
     const bound = new Map()
     const plugin = { name: 'same-directory-private-source', setup(builder) {
       builder.onLoad({ filter: /\.(ts|mjs|json)$/ }, async args => {
@@ -93,9 +93,9 @@ export async function probeDirectoryRuntime({ repository, evidence, mainRef } = 
       DIRECTORY_RUNTIME_PRIVATE_ROOT: privateRoot, DIRECTORY_RUNTIME_HELPER: helper, DIRECTORY_RUNTIME_NATIVE_CLI: nativeCli }
     const artifact = join(source, 'packages/core/vendor/ctxmux', platform, 'bin/ctxmuxd')
     receipt.artifact = { file: relative(source, artifact), sha256: digest(await readFile(artifact)) }
-    receipt.helper = { source: 'apps/desktop/native/workspace-move.c', sourceSha256: digest(await readFile(join(source, 'apps/desktop/native/workspace-move.c'))), binarySha256: digest(await readFile(helper)) }
+    receipt.helper = { source: 'apps/host/native/workspace-move.c', sourceSha256: digest(await readFile(join(source, 'apps/host/native/workspace-move.c'))), binarySha256: digest(await readFile(helper)) }
     receipt.source = Object.fromEntries(bound)
-    receipt.source['apps/desktop/native/workspace-move.c'] = receipt.helper.sourceSha256
+    receipt.source['apps/host/native/workspace-move.c'] = receipt.helper.sourceSha256
     assert.ok(Object.keys(receipt.source).length > 100, 'The real Core/controller imports cannot be empty')
     receipt.overlays = {}
     for (const name of overlay) receipt.overlays[name] = digest(await readFile(join(source, name)))
