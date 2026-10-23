@@ -67,15 +67,23 @@ export async function verifyRendererSourceMutations({ name, tests, sources, muta
     await mkdir(evidence, { recursive: true })
     for (const file of ['package.json', 'tsconfig.base.json', 'vitest.setup.ts']) await cp(join(root, file), join(copy, file))
     await symlink(join(root, 'node_modules'), join(copy, 'node_modules'))
-    for (const pkg of ['core', 'layout', 'demand', 'client-ui', 'git']) {
-      const destination = join(copy, 'packages', pkg)
+    const packageDirectories = ['packages/core', 'packages/layout', 'packages/demand', 'packages/client-ui', 'packages/git', 'apps/host']
+    for (const directory of packageDirectories) {
+      const destination = join(copy, directory)
       await mkdir(destination, { recursive: true })
-      for (const entry of await readdir(join(root, 'packages', pkg))) {
+      for (const entry of await readdir(join(root, directory))) {
         if (['node_modules', 'vendor'].includes(entry)) continue
-        await cp(join(root, 'packages', pkg, entry), join(destination, entry), { recursive: true })
+        await cp(join(root, directory, entry), join(destination, entry), { recursive: true })
       }
-      await symlink(join(root, 'packages', pkg, 'node_modules'), join(destination, 'node_modules'))
+      if (directory !== 'apps/host') await symlink(join(root, directory, 'node_modules'), join(destination, 'node_modules'))
     }
+    // Host imports must resolve to the same private workspace copies as the Renderer.
+    const hostModules = join(copy, 'apps/host/node_modules')
+    await mkdir(join(hostModules, '@agentmux'), { recursive: true })
+    for (const entry of await readdir(join(root, 'apps/host/node_modules'))) {
+      if (entry !== '@agentmux') await symlink(join(root, 'apps/host/node_modules', entry), join(hostModules, entry))
+    }
+    for (const directory of packageDirectories) await symlink(join(copy, directory), join(hostModules, '@agentmux', directory.split('/')[1]))
     const desktop = join(copy, 'apps/desktop')
     await mkdir(desktop, { recursive: true })
     for (const file of ['src', 'resources', 'package.json', 'tsconfig.json']) await cp(join(root, 'apps/desktop', file), join(desktop, file), { recursive: true })
@@ -83,7 +91,7 @@ export async function verifyRendererSourceMutations({ name, tests, sources, muta
     for (const entry of await readdir(join(root, 'apps/desktop/node_modules'))) {
       if (entry !== '@agentmux') await symlink(join(root, 'apps/desktop/node_modules', entry), join(desktop, 'node_modules', entry))
     }
-    for (const pkg of ['core', 'layout', 'demand', 'client-ui', 'git']) await symlink(join(copy, 'packages', pkg), join(desktop, 'node_modules/@agentmux', pkg))
+    for (const directory of packageDirectories) await symlink(join(copy, directory), join(desktop, 'node_modules/@agentmux', directory.split('/')[1]))
     for (const [file, bytes] of original) { await mkdir(dirname(join(copy, file)), { recursive: true }); await writeFile(join(copy, file), bytes) }
     await writeFile(join(copy, 'vitest.mutation.config.mts'), `${owningConfig ? `import owning from './${owningConfig}';\n` : 'const owning = {};\n'}import { defineConfig } from 'vitest/config';
 import { readFileSync, writeFileSync } from 'node:fs'; import { createHash } from 'node:crypto';
