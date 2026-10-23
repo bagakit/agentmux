@@ -6,6 +6,7 @@ import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
 import * as core from '../../../packages/core/src/index.js'
 import { connectHostedAgentMux, type AgentMuxHostedClient } from '../../../packages/core/src/hosted.js'
 import { rpcOwnerFixture } from '../../../packages/core/test/helpers/public-rpc-owner.js'
+import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import { feishuConfig, feishuPayload, feishuSdkTransport } from '../../../packages/connectors/test/fixtures/feishu.js'
 import { feishuPublicationHttp } from '../../../packages/connectors/test/fixtures/feishu-publication.js'
 import { createHostedIngressCorePort } from '../../../packages/connectors/src/core-ingress-port.js'
@@ -59,7 +60,7 @@ async function owner(name: string) {
   }
   await connectReader()
   const reconnect = async () => { rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } }); await connectReader() }
-  return { original, native, get rpc() { return rpc }, get reader() { return reader }, identity, start, stop, reconnect, client: () => host!.client,
+  return { original, native, socketPath, get rpc() { return rpc }, get reader() { return reader }, identity, start, stop, reconnect, client: () => host!.client,
     available: (value: boolean) => { available = value; if (host) (host.client as unknown as typeof original.inner).connected = value }, routes: (value: typeof clients) => { clients = value } }
 }
 
@@ -239,10 +240,36 @@ it('original waiting rejoin survives execution reopen and hosting loss, then rec
     expect(saved).toMatchObject({ status: 'waiting' })
   })
   const before = saved!
+  const originalIntake = await f.intake('saved-wait')
+  const executionJournal = await new core.DurableAgentMuxMessageQueue(f.execution.client().agentMessageQueuePath()).readByOperationId(before.originalControlOperationId)
+  const { channelQuote: _quote, channelProfile: _profile, ...originalEnvelope } = executionJournal!.envelope
+  f.hosting.available(false)
+  await f.hosting.client().submitAgentMessage({ agentSessionId: 'same-agent', envelope: { ...originalEnvelope,
+    sender: { kind: 'human', principal: 'local-cli' }, body: 'Foreign same-key human waiting sentinel' },
+    admissionIntent: { kind: 'manual-actor', expectedRun: before.key.expectedRun }, execution: 'immediate', sourceChannel: 'agent-message' })
+  const waitingSentinel = await f.hosting.reader.inspectAgentInput({ key: before.key })
+  expect(waitingSentinel).toMatchObject({ status: 'waiting', key: before.key, originalControlOperationId: before.originalControlOperationId })
+  await f.hosting.rpc.call('agent.input.stop', { ref: waitingSentinel!.ref, cancelOperationId: 'stop-foreign-sentinel' })
+  const sentinel = await f.hosting.reader.inspectAgentInput({ key: before.key })
+  expect(sentinel).toMatchObject({ status: 'stopped', key: before.key })
+  f.hosting.routes([{ hostId: 'outbound-execution', client: f.hosting.reader }])
+  const foreign = await f.hosting.rpc.call('connection.ingress.inspect', { ingressId: originalIntake.ingressId })
+  const wrongPort = createHostedIngressCorePort(() => [{ hostId: 'outbound-execution', client: f.hosting.reader }])('outbound-execution', f.source.executionRuntimeId)!
+  const foreignRejoin = await wrongPort.rejoinAgentInputWaiting({ ref: sentinel!.ref }).then(value => ({ value }), error => ({ error: error.code }))
+  facts.push({ case: 'foreign-receipt-sentinel', source: f.source, originalRef: before.ref, sentinelRef: sentinel!.ref, foreign, foreignRejoin })
+  expect(foreign).toMatchObject({ observation: 'unavailable', inputReceipt: null })
+  expect(foreignRejoin).toMatchObject({ error: 'RUNTIME_OWNER_MISMATCH' })
+  expect((await f.execution.reader.inspectAgentInput({ key: before.key }))?.ref).toEqual(before.ref)
+  expect((await f.hosting.reader.inspectAgentInput({ key: before.key }))?.ref).toEqual(sentinel!.ref)
+  expect(f.hosting.native.input).not.toHaveBeenCalled()
+  f.hosting.routes([{ hostId: 'outbound-execution', client: f.execution.reader }])
   await f.execution.stop(); await f.execution.start(); await f.execution.reconnect()
   f.hosting.routes([{ hostId: 'outbound-execution', client: f.execution.reader }]); f.execution.routes([])
   const reopened = await f.execution.reader.inspectAgentInput({ key: before.key })
   expect(reopened?.ref).toEqual(before.ref)
+  await expect(f.execution.rpc.call('agent.input.rejoin', { ref: before.ref })).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
+  expect(f.execution.native.input).not.toHaveBeenCalled()
+  f.execution.routes([{ hostId: 'original-hosting', client: f.execution.reader }])
   await expect(f.execution.rpc.call('agent.input.rejoin', { ref: before.ref })).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
   expect(f.execution.native.input).not.toHaveBeenCalled()
   f.execution.routes([{ hostId: 'original-hosting', client: f.hosting.reader }]); f.execution.available(true)
@@ -275,4 +302,32 @@ it('original waiting rejoin survives execution reopen and hosting loss, then rec
   expect(journal!.envelope.sender).toMatchObject({ authoritySource: f.source })
   facts.push({ case: 'reopen-loss-rejoin-revocation', source: f.source, originalRef: before.ref, reopenedRef: reopened!.ref,
     originalKey: before.key, revokedRef: revoked!.ref, originalJournal: journal, executionEffects: 2, foreignEffects: 0 })
+})
+
+it('the compiled CLI carries the original Runtime pair through existing record-authority and record commands without submitting input', async () => {
+  const f = await pair(); await f.receive('cli-record')
+  await vi.waitFor(async () => expect(await f.intake('cli-record')).toMatchObject({ state: 'refused', group: { recorded: { authoritySource: f.source } } }))
+  const intake = await f.intake('cli-record'), original = intake.group!.recorded!
+  await vi.waitFor(async () => expect((await f.execution.original.store.readCapturedHistory('same-agent', {})).records[0]?.item.externalInput?.state).toBe('refused'))
+  const current = await f.execution.reader.recordExternalConversationMessage({ agentSessionId: 'same-agent', ingressId: intake.ingressId, authoritySource: f.source })
+  expect(current.record).toEqual(original.record); expect(current.authoritySource).toEqual(original.authoritySource)
+  const source = ['--hosting-runtime', f.source.hostingRuntimeId, '--execution-runtime', f.source.executionRuntimeId]
+  const execute = async (target: typeof f.hosting, command: string[]) => {
+    const output = await runCompiledObjectCli(['--endpoint', 'unix:' + target.socketPath, ...command],
+      objectCliEnvironment(target.original.root, { pnpm_config_verify_deps_before_run: 'false' }))
+    expect(output.code, output.stdout + output.stderr).toBe(0)
+    return { output, result: JSON.parse(output.stdout).result }
+  }
+  const authority = await execute(f.hosting, ['connection', 'ingress', 'record-authority', '--session', 'same-agent', '--ingress', intake.ingressId, ...source])
+  expect(authority.result).toMatchObject({ authority: 'current', message: { authoritySource: f.source, author: { authoritySource: f.source }, body: intake.body } })
+  const recorded = await execute(f.execution, ['agent', 'conversation', 'record', '--host', 'local', '--session', 'same-agent', '--ingress', intake.ingressId, ...source])
+  expect(recorded.result).toEqual({ hostId: 'local', ...current })
+  const invalid = await runCompiledObjectCli(['--endpoint', 'unix:' + f.execution.socketPath, 'agent', 'conversation', 'record', '--host', 'local',
+    '--session', 'same-agent', '--ingress', intake.ingressId, '--hosting-runtime', f.source.hostingRuntimeId],
+    objectCliEnvironment(f.execution.original.root, { pnpm_config_verify_deps_before_run: 'false' }))
+  expect(invalid.code).not.toBe(0)
+  expect((await f.execution.original.store.readCapturedHistory('same-agent', {})).records).toHaveLength(1)
+  expect(await new core.DurableAgentMuxMessageQueue(f.execution.client().agentMessageQueuePath()).listAfter()).toEqual([])
+  expect(f.hosting.native.input).not.toHaveBeenCalled(); expect(f.execution.native.input).not.toHaveBeenCalled()
+  facts.push({ case: 'compiled-cli-original-source-pair', source: f.source, intake, authority, recorded, invalid, originalRecordUnchanged: true, nativeEffects: 0 })
 })

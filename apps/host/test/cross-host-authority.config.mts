@@ -6,6 +6,9 @@ const variants = {
   'wrong-hosting-runtime': ['apps/host/src/connections.ts', 'return { hostingRuntimeId, executionRuntimeId: expectedRuntimeId }', 'return { hostingRuntimeId: expectedRuntimeId, executionRuntimeId: expectedRuntimeId }'],
   'wrong-execution-runtime-accepted': ['apps/host/src/external-input-authority.ts', 'if (source && source.executionRuntimeId !== runtimeId) throw unavailable()', 'if (false) throw unavailable()'],
   'revoked-grant-accepted': ['apps/host/src/external-input-authority.ts', "if (result.authority !== 'current') {", 'if (false) {'],
+  'foreign-receipt-accepted': ['packages/connectors/src/durable-ingress.ts',
+    'const client = this.options.core(ingress.input.hostId, ingress.input.author.authoritySource?.executionRuntimeId)',
+    'const client = this.options.core(ingress.input.hostId)'],
   'final-destination-fence-lost': ['packages/connectors/src/core-ingress-port.ts',
     "const response = await client.forwardRpc!('runtime.invoke', { consumerId, fence,\n        invocation: encodeHostedValue({ method, args }) as import('@agentmux/core/hosted').AgentMuxHostedInvocation }, {}, fence)\n      return decodeHostedValue(response.value) as T",
     'return await (client[method] as (...args: unknown[]) => Promise<T>)(...args)']
