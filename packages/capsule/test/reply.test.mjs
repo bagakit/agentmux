@@ -5,8 +5,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fork } from 'node:child_process'
 import { once } from 'node:events'
+import { createHash } from 'node:crypto'
 import { NodeCapsuleOwner } from '../dist/node.js'
-import { parseCapsulePreparedReply, parseCapsuleInputObservation } from '../dist/index.js'
+import { parseCapsulePreparedReply, parseCapsuleInputObservation, parseCapsuleOperation } from '../dist/index.js'
 
 const principal = { kind: 'user', id: 'trusted-local-user' }
 const context = { principal }
@@ -91,6 +92,11 @@ test('trusted reply saves exact answer and dispatch boundary before one original
       const pending = await owner.call('capsule.operation.inspect', { operationId: input.operationId })
       assert.equal(pending.operation.status, 'pending')
       assert.equal(pending.operation.capsuleId, input.interaction.capsuleId)
+      assert.equal(pending.operation.inputOperationId, input.inputOperationId)
+      const key = createHash('sha256').update(input.operationId).digest('hex')
+      const durable = JSON.parse(await readFile(join(stateDirectory, 'operations', `${key}.json`), 'utf8'))
+      assert.equal(durable.effect.inputOperationId, input.inputOperationId)
+      assert.equal(Object.hasOwn(durable.operation, 'inputOperationId'), false)
       return prepared(input, ctx)
     },
     async submit(input, ctx) {
@@ -121,6 +127,8 @@ test('trusted reply saves exact answer and dispatch boundary before one original
   const setup = await fixture(t, () => ({ replies }))
   owner = setup.owner
   stateDirectory = setup.stateDirectory
+  const pageOperation = (await owner.call('capsule.operation.inspect', { operationId: 'page' })).operation
+  assert.equal(Object.hasOwn(pageOperation, 'inputOperationId'), false)
   const result = await owner.call('capsule.interaction.reply', setup.params, context)
   assert.equal(result.interaction.status, 'answered')
   assert.equal(result.interaction.revision, 2)
@@ -133,6 +141,9 @@ test('trusted reply saves exact answer and dispatch boundary before one original
   const confirmed = (await owner.call('capsule.operation.inspect', { operationId: setup.params.operationId }))
     .operation
   assert.equal(confirmed.status, 'committed')
+  assert.equal(confirmed.inputOperationId, result.delivery.inputOperationId)
+  assert.throws(() => parseCapsuleOperation({ ...confirmed, inputOperationId: 'invalid-input-id' }))
+  assert.throws(() => parseCapsuleOperation({ ...confirmed, inputOperationId: '111111111111' }))
   assert.equal(confirmed.result.delivery.inputStatus, 'admitted')
   await owner.call('capsule.interaction.reply', setup.params, context)
   assert.equal(prepareCount, 1)
