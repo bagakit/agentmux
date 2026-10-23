@@ -1,3 +1,5 @@
+import type { ConnectionHostingTarget } from '../../../shared/contracts'
+import { readConnectionHostingTarget } from '../../../shared/connection-hosting-target'
 import { parseConnectionParams, parseRoomBindingTarget, type ConnectionParamsMap, type RoomBindingTarget } from '@agentmux/core/connections'
 
 type Effect = 'connection.room.create' | 'connection.room.link.create' | 'connection.bind' | 'connection.binding.relink' | 'connection.binding.pause' | 'connection.binding.resume' | 'connection.binding.detach' | 'connection.grant'
@@ -24,7 +26,7 @@ export function restoredConnectorRoomDrafts(value: unknown): Record<string, Conn
 }
 /** Submitted UI correlation only. Original effects and receipts remain with their Core/Host owners. */
 export type ConnectorRoomIntent = { [M in Effect]: {
-  target: RoomBindingTarget; method: M; input: ConnectionParamsMap[M]; phase: 'not-dispatched' | 'may-have-dispatched'
+  target: RoomBindingTarget; hostingTarget?: ConnectionHostingTarget; method: M; input: ConnectionParamsMap[M]; phase: 'not-dispatched' | 'may-have-dispatched'
 } & (M extends 'connection.room.link.create' ? { replacesOperationId?: string } : {}) }[Effect]
 const effects: readonly string[] = ['connection.room.create', 'connection.room.link.create', 'connection.bind', 'connection.binding.relink', 'connection.binding.pause', 'connection.binding.resume', 'connection.binding.detach', 'connection.grant']
 export const sameConnectorTarget = (a: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>, b: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>) => a.executionHostId === b.executionHostId && a.agentSessionId === b.agentSessionId
@@ -55,8 +57,9 @@ export function restoredConnectorRoomIntents(value: unknown): Record<string, Con
           if (previous !== input.operationId) lineage = { replacesOperationId: previous }
         } catch { /* Invalid presentation lineage never removes an otherwise exact original intent. */ }
       }
-      // Missing old phase never authorizes a first effect.
-      result[key] = { method: entry.method, input, target, phase: entry.phase === 'not-dispatched' ? 'not-dispatched' : 'may-have-dispatched', ...lineage } as ConnectorRoomIntent
+      const hostingTarget = readConnectionHostingTarget(entry.hostingTarget)
+      // Missing old phase or owner never authorizes a first effect.
+      result[key] = { method: entry.method, input, target, ...(hostingTarget ? { hostingTarget } : {}), phase: entry.phase === 'not-dispatched' ? 'not-dispatched' : 'may-have-dispatched', ...lineage } as ConnectorRoomIntent
     } catch { /* Keep original Host facts; invalid client correlation never dispatches. */ }
   }
   return result
