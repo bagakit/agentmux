@@ -12,6 +12,29 @@ defaults, stable endpoint and retained operations. A Capsule ID identifies conte
 Browser, Tab or Region identifies its display. Names, paths, ports, producer source fields
 and amux links do not authenticate a caller or grant input permission.
 
+The Capsule runtime is a fixed independent process carried by an ordinary ctxmux Run.
+Core owns its durable running/stopped intent, exact Run binding and keepalive; the runtime
+owns content and HTTP. Bare headless Core provides this same capability. Closing the App
+or stopping Core only disconnects management; a healthy service continues serving.
+Existing absolute content/state paths stay with their original execution Host, including
+namespaces inside an App data directory. Independence never means opening an empty library.
+
+Use amux capsule runtime inspect to read revision, desired intent, original Run, actual
+runtime identity and any recovery issue. It creates no initial service. To explicitly
+start, use runtime start --input FILE with {operationId,expectedRevision}; to stop, use
+runtime stop --input FILE with {operationId,expectedRevision,expectedRun:{runId}|null}.
+Use exactly the revision and Run from inspection. Stop persists before the native effect;
+ordinary page reads and keepalive cannot undo it. A timeout leaves the original operation
+and Run unconfirmed: inspect them, do not resubmit Start/Stop or mint a replacement ID.
+Native process readiness, runtime handshake, page HTTP and Browser display are distinct.
+
+On a remote Core, paths and 127.0.0.1 refer to that execution Host. The existing authorized
+Core transport can manage the service; it does not create a tunnel or authorize a public
+listener. Without a confirmed presentation route the page remains saved and serving on
+its Host while remote Browser display is unavailable. A Toolkit TUI custom kit may wrap
+these same management commands. Its own tool execution/Run remains separate; closing or
+stopping that tool does not stop the Capsule service.
+
 Use this module for static HTML, assets, existing frontend build output and explicitly
 selected SPA routing. It does not run a build command, backend or temporary development
 server. Managed storage copies content into the Host's durable library. Path storage
