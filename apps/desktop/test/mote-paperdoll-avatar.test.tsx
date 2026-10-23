@@ -28,14 +28,14 @@ afterEach(async () => { await app.dispose(); dispose?.(); dispose = undefined; v
 function button(label: string) {
   if (label === 'Save avatar' && document.querySelector('[data-avatar-source=face][aria-pressed=true]')) label = 'Save face'
 
-  const scope = document.querySelector('[role="dialog"] .space-icon-picker') ?? document
+  const scope = document.querySelector('.space-icon-picker[role="dialog"]') ?? document
   const value = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent === label || node.getAttribute('aria-label') === label)
   expect(value, label).toBeDefined(); return value!
 }
 async function edit() {
   await act(async () => app.entry().dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, button: 2, clientX: 10, clientY: 50 }))); await settleMoteApp()
   const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Change avatar…')
-  expect(item).toBeDefined(); await moteClick(item!); expect(document.querySelector('[role="dialog"] .space-icon-picker')).not.toBeNull()
+  expect(item).toBeDefined(); await moteClick(item!); expect(document.querySelector('.space-icon-picker[role="dialog"]')).not.toBeNull()
   await moteClick(button('Make a face'))
 }
 function quiet(before: ReturnType<typeof useAppStore.getState>) {
@@ -74,7 +74,7 @@ it('Cancel and Escape discard actual component drafts, restoring automatic retur
   await moteClick(button('Mouth · grin')); await moteClick(button('Cancel'))
   expect(useAppStore.getState().spaceObjectIcons).toEqual({})
   await edit(); await moteClick(button('Detail · antenna'))
-  await act(async () => document.querySelector('[role="dialog"] .space-icon-picker')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await settleMoteApp()
+  await act(async () => document.querySelector('.space-icon-picker[role="dialog"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))); await settleMoteApp()
   expect(useAppStore.getState().spaceObjectIcons).toEqual({})
   await edit(); await moteClick(button('Save avatar'))
   expect(app.entry().querySelector('.mote-face')).not.toBeNull()
@@ -186,10 +186,28 @@ it.each(['book', { kind: 'image', fileName: 'a'.repeat(64) + '.png' }])('opens I
 })
 
 it('renders focused part glyphs, group tabs, presets, 45/24px stage chips and keeps the active tab on Restore automatic', async () => {
-  await app.mount(<SpaceIconPicker target={primary} onClose={vi.fn()} />)
+  vi.spyOn(api.moteAvatars, 'list').mockResolvedValue({
+    roots: [{ origin: 'builtin', path: '/builtin', state: 'available' }],
+    series: [{ origin: 'builtin', seriesId: 'mote-silhouettes', title: 'Mote art directions', entries: [
+      { entryId: 'flat', title: 'Flat', definition: { kind: 'image', file: 'flat.png' } }
+    ] }],
+    issues: []
+  })
+  vi.spyOn(api.moteAvatars, 'preview').mockResolvedValue({
+    source: { origin: 'builtin', seriesId: 'mote-silhouettes', entryId: 'flat', revision: 'sha256:' + 'a'.repeat(64) },
+    definition: { kind: 'image', file: 'flat.png' },
+    payload: { kind: 'image', image: { width: 256, height: 256, dataUrl: 'data:image/png;base64,FLAT' } },
+    issues: []
+  })
+  await app.mount(<SpaceIconPicker target={primary} onClose={vi.fn()} />); await settleMoteApp()
   expect(document.querySelector('[data-avatar-source="alternative"]')!.getAttribute('aria-pressed')).toBe('true')
   expect(document.querySelectorAll('.mote-avatar-stage__slot--45, .mote-avatar-stage__slot--24').length).toBeGreaterThanOrEqual(2)
   expect(document.querySelector('footer .space-icon-picker__automatic')).not.toBeNull()
+  expect(document.querySelector('.mote-avatar-gallery [data-silhouette-art="flat"]')).not.toBeNull()
+  await moteClick(button('Flat Mote image'))
+  expect(document.querySelector('.mote-avatar-alternative:not([hidden]) .mote-avatar-stage__source strong')?.textContent).toBe('Flat')
+  expect(document.querySelector('.mote-avatar-alternative:not([hidden]) .mote-avatar-stage__source small')?.textContent).toBe('Mote silhouette')
+  expect(document.querySelectorAll('.mote-avatar-alternative:not([hidden]) .mote-avatar-stage [data-silhouette-art="flat"]').length).toBe(3)
   await moteClick(button('Make a face'))
   expect(document.querySelectorAll('.mote-face--part').length).toBeGreaterThan(20)
   const exprTab = [...document.querySelectorAll<HTMLElement>('[role="tab"]')].find(node => node.textContent === 'Expression')!

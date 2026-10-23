@@ -34,7 +34,7 @@ it('the original source owner, strict RPC and compiled CLI discover and prepare 
   for (const id of expected) {
     const svg = await readFile(join(collection, id + '.svg'), 'utf8')
     expect(svg).not.toContain('M5 3H12.5')
-    expect(svg).toMatch(/4\.[457]\s+2\.[568]/)
+    expect(svg).toMatch(/4\.[457][\s,]+2\.[568]/)
     svgHashes.add(sha(Buffer.from(svg)))
   }
   expect(svgHashes.size).toBe(12)
