@@ -287,6 +287,7 @@ export async function copyRuntimeApplication(appPath, source) {
   await materializeDependency(desktopRoot, 'luxon', join(appResources, 'node_modules', 'luxon'))
   await materializeDependency(desktopRoot, 'zod', join(appResources, 'node_modules', 'zod'))
   await materializeDependency(desktopRoot, 'ws', join(appResources, 'node_modules', 'ws'))
+  await materializeDependency(connectorsRoot, 'fs-native-extensions', join(appResources, 'node_modules', 'fs-native-extensions'))
   await materializeDependency(connectorsRoot, '@larksuiteoapi/node-sdk', join(appResources, 'node_modules', '@larksuiteoapi', 'node-sdk'))
   await materializeDependency(connectorsRoot, '@discordjs/ws', join(appResources, 'node_modules', '@discordjs', 'ws'))
   await materializeDependency(connectorsRoot, '@discordjs/rest', join(appResources, 'node_modules', '@discordjs', 'rest'))
