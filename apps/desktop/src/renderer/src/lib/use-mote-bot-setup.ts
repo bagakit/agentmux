@@ -73,10 +73,10 @@ export async function readSavedMoteBotProfile(
 }
 
 /** A bounded UI reading window. Main owns the original operation and every child receipt. */
-export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: string) {
+export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: string, newHostingTarget?: ConnectionHostingTarget | null) {
   const retainedSelection = () => target ? readBotTaskLocator(useAppStore.getState().botTaskSelections[botTaskSelectionKey({ kind: 'mote', target })]) : null
   const identity = JSON.stringify(target),
-    historySource = JSON.stringify([identity, topicId]),
+    historySource = JSON.stringify([identity, topicId, newHostingTarget]),
     lifetime = useRef(0),
     enrollmentRead = useRef(0),
     occurrences = useRef(new Map<string, number>())
@@ -91,7 +91,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
   const [message, setMessage] = useState<{ kind: 'issue' | 'notice' | 'owner-unconfirmed'; text: string }>({ kind: 'issue', text: '' })
   const setIssue = (text: string) => setMessage({ kind: 'issue', text })
   const [busy, setBusy] = useState<string[]>([]),
-    [next, setNext] = useState<string | null>(null)
+    [next, setNext] = useState<{ cursor: string; hostingTarget: ConnectionHostingTarget } | null>(null)
   const [loading, setLoading] = useState(false),
     [historyRead, setHistoryRead] = useState<string | null>(null),
     [driving, setDriving] = useState(false)
@@ -149,6 +149,10 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       && current.value.operation.operationId === value.operation.operationId && current.value.operation.revision > value.operation.revision
       ? current : { parentId, value })
   }
+  async function newOwner(): Promise<ConnectionHostingTarget> {
+    if (newHostingTarget === null) throw new Error('The bot hosting owner for this new action is unconfirmed. Existing tasks and requests are kept.')
+    return newHostingTarget ? structuredClone(newHostingTarget) : await api.connections.hostingTarget()
+  }
   async function list(cursor?: string) {
     if (!target) return
     const token = lifetime.current,
@@ -157,7 +161,8 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       message = feedback.current
     if (!cursor) setHistoryRead(null)
     try {
-      const hostingTarget = await api.connections.hostingTarget()
+      if (cursor && cursor !== next?.cursor) throw new Error('Reopen the original bot setup page before reading its next page.')
+      const hostingTarget = cursor && next ? next.hostingTarget : await newOwner()
       if (token !== lifetime.current || request !== listRead.current) return
       const result = await api.moteConnections.call('space.mote.connection.ls', {
         target,
@@ -170,7 +175,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
           try { accept(operation, hostingTarget) }
           catch (error) { if (message === feedback.current) setIssue(presentError(error)) }
         }
-      setNext(result.next)
+      setNext(result.next ? { cursor: result.next, hostingTarget } : null)
       if (!cursor) setHistoryRead(historySource)
     } catch (error) {
       if (token === lifetime.current && request === listRead.current && !cursor)
@@ -214,8 +219,8 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     void refreshSource()
     void list()
     if (retained) void check(retained.operationId)
-    void api.connections
-      .call('connection.enrollment.ls', { limit: 1 })
+    setCapabilities([])
+    void newOwner().then(hostingTarget => api.connections.call('connection.enrollment.ls', { limit: 1 }, hostingTarget))
       .then((value) => {
         if (token === lifetime.current) setCapabilities(value.capabilities)
       })
@@ -223,7 +228,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     return () => {
       lifetime.current++
     }
-  }, [identity, topicId])
+  }, [identity, topicId, JSON.stringify(newHostingTarget)])
   const pending = (id: string, value: boolean) => {
     if (value) writing.current.add(id)
     else writing.current.delete(id)
@@ -327,7 +332,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
           initialPublication: initialBotPublication
         }
       }
-      const hostingTarget = await api.connections.hostingTarget()
+      const hostingTarget = await newOwner()
       if (draft.current === original) await send({ ...structuredClone(request), hostingTarget })
     } catch (error) {
       if (draft.current === original) setIssue(presentError(error))
@@ -351,7 +356,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
           expectedConnectionRevision: record.revision
         }
       }
-      const hostingTarget = await api.connections.hostingTarget()
+      const hostingTarget = await newOwner()
       if (draft.current === original) await send({ ...structuredClone(request), hostingTarget })
     } catch (error) {
       if (draft.current === original) setIssue(presentError(error))
@@ -479,7 +484,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     historyReady: historyRead === historySource,
     driving,
     progressIssue: progressIssue?.id === selectedId ? progressIssue.text : '',
-    next,
+    next: next?.cursor ?? null,
     list,
     refreshSource,
     begin,

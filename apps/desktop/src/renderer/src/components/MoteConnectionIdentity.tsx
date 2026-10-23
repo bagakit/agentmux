@@ -1,3 +1,4 @@
+import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
@@ -22,47 +23,52 @@ const BotIcon = semanticIconComponent('object.conversation')
 const CloseIcon = semanticIconComponent('action.close')
 const ForwardIcon = semanticIconComponent('navigation.forward')
 
-type Snapshot = { saved: MoteConnectionPreferencesReadResult; connections: ConnectionRecord[]; connectionIssue: string | null }
+type Snapshot = { hostingTarget: ConnectionHostingTarget; saved: MoteConnectionPreferencesReadResult; connections: ConnectionRecord[]; connectionIssue: string | null }
 const choiceKey = (ref: { connectionId: string; application: { domain: string; appId: string } }) => JSON.stringify([ref.connectionId, ref.application.domain, ref.application.appId])
-async function read(target: MotePreferencesTarget): Promise<Snapshot> {
+const sameHosting = (a: ConnectionHostingTarget | undefined, b: ConnectionHostingTarget) => a?.hostId === b.hostId && a.runtimeId === b.runtimeId
+async function read(target: MotePreferencesTarget, owner?: ConnectionHostingTarget | null): Promise<Snapshot> {
+  if (owner === null) throw new Error('The original bot hosting owner is unconfirmed. The Mote choice and requests are kept.')
+  const hostingTarget = owner ? structuredClone(owner) : await api.connections.hostingTarget()
   const input = { kind: 'connection' as const, target }
-  const [value, apps] = await Promise.allSettled([api.motePreferences.read(input), api.connections.call('connection.ls', {})])
+  const [value, apps] = await Promise.allSettled([api.motePreferences.read(input, hostingTarget), api.connections.call('connection.ls', {}, hostingTarget)])
   if (value.status === 'rejected') throw value.reason
-  return { saved: parseMotePreferencesReadResult(value.value, input), connections: apps.status === 'fulfilled' ? apps.value.connections : [],
+  return { hostingTarget, saved: parseMotePreferencesReadResult(value.value, input), connections: apps.status === 'fulfilled' ? apps.value.connections : [],
     connectionIssue: apps.status === 'fulfilled' ? null : presentError(apps.reason) }
 }
 
 /** A view of the original MOTE.md preference, never another identity registry. */
-export function MoteConnectionIdentity({ scope, active }: { scope: MoteWorkfaceScope; active: boolean }) {
+export function MoteConnectionIdentity({ scope, active, hostingTarget }: { scope: MoteWorkfaceScope; active: boolean; hostingTarget?: ConnectionHostingTarget | null }) {
   const bindings = useAppStore(state => state.spaceZoneBindings)
-  const target = moteConnectionTarget(scope, bindings), identity = JSON.stringify(target)
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null), [issue, setIssue] = useState(''), [editing, setEditing] = useState(false)
+  const target = moteConnectionTarget(scope, bindings), identity = JSON.stringify([target, hostingTarget])
+  const [reading, setReading] = useState<{ identity: string; value: Snapshot } | null>(null), [readingIssue, setReadingIssue] = useState<{ identity: string; value: string } | null>(null)
+  const [editing, setEditing] = useState<{ identity: string; hostingTarget: ConnectionHostingTarget | null | undefined } | null>(null)
+  const snapshot = reading?.identity === identity ? reading.value : null, issue = readingIssue?.identity === identity ? readingIssue.value : ''
   const lifetime = useRef<object>({}), invoker = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     const token = {}; lifetime.current = token
     if (!active || !target) return
-    void read(target).then(value => { if (lifetime.current === token) { setSnapshot(value); setIssue('') } })
-      .catch(error => { if (lifetime.current === token) setIssue(presentError(error)) })
+    void read(target, hostingTarget).then(value => { if (lifetime.current === token) { setReading({ identity, value }); setReadingIssue(null) } })
+      .catch(error => { if (lifetime.current === token) setReadingIssue({ identity, value: presentError(error) }) })
     return () => { lifetime.current = {} }
   }, [active, identity])
   const ref = snapshot?.saved.values?.connection
   const choice = ref && snapshot && !snapshot.connectionIssue ? moteConnectionChoice(ref, snapshot.connections) : null
   function accept(value: Snapshot) {
     // A later child read or writer acknowledgement supersedes the opening read.
-    lifetime.current = {}; setSnapshot(value); setIssue('')
+    lifetime.current = {}; setReading({ identity, value }); setReadingIssue(null)
   }
   return <section className="mote-connection" aria-label="Mote bot" data-mote-connection={scope.topic.id}>
-    <button ref={invoker} type="button" className="mote-connection__row" onClick={() => setEditing(true)}>
+    <button ref={invoker} type="button" className="mote-connection__row" onClick={() => setEditing({ identity, hostingTarget: hostingTarget === undefined ? snapshot?.hostingTarget : hostingTarget })}>
       <BotIcon size={14} /><span>Chat bot</span><strong>{choice?.record?.config.label ?? (ref ? 'Saved bot' : snapshot?.saved.status === 'ready' ? 'Choose a bot' : snapshot || issue ? 'Not confirmed' : 'View bots')}</strong><ForwardIcon size={12} />
     </button>
     {issue || snapshot?.saved.issue || snapshot?.connectionIssue || choice?.issue ? <p role="status" className="mote-details__hint">{issue || snapshot?.saved.issue || snapshot?.connectionIssue || choice?.issue}</p> : null}
-    {active && editing ? <MoteConnectionDialog key={identity} target={target} topicId={scope.topic.id} moteName={scope.topic.title} onClose={() => setEditing(false)}
+    {active && editing?.identity === identity ? <MoteConnectionDialog key={identity} hostingTarget={editing.hostingTarget} target={target} topicId={scope.topic.id} moteName={scope.topic.title} onClose={() => setEditing(null)}
       onRead={accept} returnFocus={() => invoker.current?.isConnected ? invoker.current : null} /> : null}
   </section>
 }
 
-function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, returnFocus }: {
-  target: MotePreferencesTarget | null; topicId: string; moteName: string; onClose(): void; onRead(value: Snapshot): void; returnFocus(): HTMLElement | null
+function MoteConnectionDialog({ hostingTarget, target, topicId, moteName, onClose, onRead, returnFocus }: {
+  hostingTarget?: ConnectionHostingTarget | null | undefined; target: MotePreferencesTarget | null; topicId: string; moteName: string; onClose(): void; onRead(value: Snapshot): void; returnFocus(): HTMLElement | null
 }) {
   const ownerDocument = useWorkbenchDocument(), content = useRef<HTMLDivElement>(null)
   return <Dialog.Root open onOpenChange={open => { if (!open) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}>
@@ -74,20 +80,23 @@ function MoteConnectionDialog({ target, topicId, moteName, onClose, onRead, retu
         <Dialog.Description>New group chats use this bot. Existing groups keep their bot.</Dialog.Description></div>
         <Dialog.Close asChild><button type="button" className="icon-button" aria-label="Close bot choice"><CloseIcon size={16} /></button></Dialog.Close>
       </header>
-      <MoteConnectionPanel target={target} topicId={topicId} moteName={moteName} onRead={onRead} onSaved={onClose} />
+      <MoteConnectionPanel hostingTarget={hostingTarget} target={target} topicId={topicId} moteName={moteName} onRead={onRead} onSaved={onClose} />
     </Dialog.Content>
   </DocumentOverlayPortal></Dialog.Root>
 }
 
 /** The same original preference and operation window in Settings and the Mote dialog. */
-export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved, createOnOpen = false, inSettings = false, onCreateIntentConsumed, onManageConnection, onContinueSetup }: {
-  target: MotePreferencesTarget | null; topicId: string; moteName: string; onRead(value: Snapshot): void; onSaved?(): void; createOnOpen?: boolean; inSettings?: boolean; onCreateIntentConsumed?: (() => void) | undefined; onManageConnection?: ((record: ConnectionRecord) => void) | undefined; onContinueSetup?: ((record: ConnectionRecord, source: ConnectionSetupEnrollmentSource) => void) | undefined
-}) {
+type MoteConnectionPanelProps = { hostingTarget?: ConnectionHostingTarget | null | undefined; target: MotePreferencesTarget | null; topicId: string; moteName: string; onRead(value: Snapshot): void; onSaved?(): void; createOnOpen?: boolean; inSettings?: boolean; onCreateIntentConsumed?: (() => void) | undefined; onManageConnection?: ((record: ConnectionRecord, hostingTarget: ConnectionHostingTarget) => void) | undefined; onContinueSetup?: ((record: ConnectionRecord, source: ConnectionSetupEnrollmentSource, hostingTarget: ConnectionHostingTarget) => void) | undefined }
+export function MoteConnectionPanel(props: MoteConnectionPanelProps) {
+  return <MoteConnectionPanelBody key={JSON.stringify([props.target, props.hostingTarget])} {...props} />
+}
+function MoteConnectionPanelBody({ hostingTarget, target, topicId, moteName, onRead, onSaved, createOnOpen = false, inSettings = false, onCreateIntentConsumed, onManageConnection, onContinueSetup }: MoteConnectionPanelProps) {
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null), [selection, setSelection] = useState(''), fieldId = useId()
   const [loading, setLoading] = useState(false), [busy, setBusy] = useState(false), [issue, setIssue] = useState('')
   const [attempt, setAttempt] = useState<{ input: MoteConnectionPreferencesSaveParams; receipt: MoteConnectionPreferencesSaveResult | null } | null>(null)
   const intents = useAppStore(state => state.moteConnectionSaveIntents)
-  const retained = Object.values(intents).filter(item => target && sameMotePreferencesTarget(item.input.target, target))
+  const originalSaves = Object.values(intents).filter(item => target && sameMotePreferencesTarget(item.input.target, target))
+  const retained = originalSaves.filter(item => snapshot && sameHosting(item.hostingTarget, snapshot.hostingTarget))
   const [choosing, setChoosing] = useState(false)
   const [reviewed, setReviewed] = useState(false), [newChoice, setNewChoice] = useState(false)
   const edited = useRef(false), alive = useRef<object | null>(null), flight = useRef(false), readEpoch = useRef(0)
@@ -100,7 +109,7 @@ export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved
     const token = alive.current, epoch = ++readEpoch.current
     setLoading(true)
     try {
-      const value = await read(target)
+      const value = await read(target, hostingTarget === undefined ? snapshot?.hostingTarget : hostingTarget)
       if (!token || alive.current !== token || readEpoch.current !== epoch) return
       setSnapshot(value); onRead(value)
       if (!edited.current) setSelection(value.saved.values?.connection ? choiceKey(value.saved.values.connection) : '')
@@ -120,15 +129,15 @@ export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved
     let dispatched = false
     edited.current = true; flight.current = true; setLoading(false); setBusy(true); setIssue(''); setReviewed(false); setNewChoice(false); setAttempt({ input, receipt: null })
     try {
-      const retained = await retainMoteConnectionSaveIntent({ input, phase: 'not-dispatched' })
+      const retained = await retainMoteConnectionSaveIntent({ input, hostingTarget: snapshot.hostingTarget, phase: 'not-dispatched' })
       if (!retained.localStorageWritten) throw new Error('The original save input could not be retained. No request was sent.')
-      const dispatch = await retainMoteConnectionSaveIntent({ input, phase: 'may-have-dispatched' })
+      const dispatch = await retainMoteConnectionSaveIntent({ input, hostingTarget: snapshot.hostingTarget, phase: 'may-have-dispatched' })
       if (!dispatch.localStorageWritten) {
-        await retainMoteConnectionSaveIntent({ input, phase: 'not-dispatched' })
+        await retainMoteConnectionSaveIntent({ input, hostingTarget: snapshot.hostingTarget, phase: 'not-dispatched' })
         throw new Error('The original dispatch input could not be retained. No request was sent.')
       }
       dispatched = true
-      const result = parseMotePreferencesSaveResult(await api.motePreferences.save(input), input)
+      const result = parseMotePreferencesSaveResult(await api.motePreferences.save(input, snapshot.hostingTarget), input)
       if (result.status !== 'unconfirmed') await clearMoteConnectionSaveIntent(input.operationId)
       if (!token || alive.current !== token) return
       setAttempt({ input, receipt: result })
@@ -155,10 +164,10 @@ export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved
   return <div className="mote-connection-panel" data-mote-identity-panel={topicId}>
         <div className="mote-connection-dialog__body">
           {current && savedBotIssue ? <section className="mote-bot-saved-issue" aria-label="Saved bot needs attention"><strong>Saved bot · {current.application.domain}</strong><code>{current.application.appId}</code><p role="status">{savedBotIssue}</p><button type="button" className="small-button" onClick={choose}>Review saved bot</button></section> : null}
-          <MoteBotSetup target={target} topicId={topicId} record={currentChoice?.record ?? null} hasSavedBot={!!current} onChoose={choose} onCurrent={() => void refresh()}
-            createOnOpen={createOnOpen} onCreateIntentConsumed={onCreateIntentConsumed} onContinue={onContinueSetup ?? (settings ? (record, source) => {
+          <MoteBotSetup hostingTarget={snapshot?.hostingTarget ?? hostingTarget} target={target} topicId={topicId} record={currentChoice?.record ?? null} hasSavedBot={!!current} onChoose={choose} onCurrent={() => void refresh()}
+            createOnOpen={createOnOpen} onCreateIntentConsumed={onCreateIntentConsumed} onContinue={onContinueSetup ?? (settings ? (record, source, hostingTarget) => {
               onSaved?.()
-              settings.openMoteLark({ target, topicId, moteName, setup: { connectionId: record.config.connectionId, source } })
+              settings.openMoteLark({ target, topicId, moteName, hostingTarget, setup: { connectionId: record.config.connectionId, source } })
             } : undefined)} />
           <details ref={identityOptions} className="mote-identity-options"><summary>Identity options</summary>
           {snapshot ? <details className="mote-bot-existing" open={choosing} onToggle={event => setChoosing(event.currentTarget.open)}><summary>Choose a saved bot</summary><label htmlFor={fieldId}>Chat bot</label><SelectionField id={fieldId} label="Mote chat bot" value={selection} menuClassName="mote-connection-dialog__choices"
@@ -173,13 +182,13 @@ export function MoteConnectionPanel({ target, topicId, moteName, onRead, onSaved
           <div className="mote-connection-dialog__secondary">
             <button type="button" className="small-button" onClick={() => void refresh()} disabled={loading}>Check current choice</button>
             {pending && reviewed && !busy ? <button type="button" className="small-button" onClick={() => { setAttempt(null); setNewChoice(true); edited.current = true }}>Use current revision for a new choice</button> : null}
-            {!inSettings && settings ? <button type="button" className="small-button" onClick={() => { onSaved?.(); settings.openMoteLark({ target, topicId, moteName }) }}>Manage bots</button> : null}
+            {!inSettings && settings ? <button type="button" className="small-button" onClick={() => { onSaved?.(); settings.openMoteLark({ target, topicId, moteName, hostingTarget: snapshot?.hostingTarget ?? hostingTarget ?? null }) }}>Manage bots</button> : null}
           </div>
-          {retained.length ? <details className="mote-connection-dialog__requests"><summary>Retained save requests</summary>
-            {retained.map(({ input, phase }) => <p key={input.operationId}><code>{input.operationId}</code><br />{input.values.connection?.application.appId ?? 'Remove default bot'} · {phase === 'not-dispatched' ? 'Not sent' : 'Result unconfirmed'}</p>)}
+          {originalSaves.length ? <details className="mote-connection-dialog__requests"><summary>Retained save requests</summary>
+            {originalSaves.map(({ input, phase, hostingTarget }) => <p key={input.operationId}><code>{input.operationId}</code><br />{input.values.connection?.application.appId ?? 'Remove default bot'} · {phase === 'not-dispatched' ? 'Not sent' : 'Result unconfirmed'} · {hostingTarget ? `Bot hosting: ${hostingTarget.hostId}` : 'Original bot hosting owner unconfirmed'}</p>)}
           </details> : null}
           </details>
-          {current ? <div className="mote-identity-management"><div className="mote-bot-actions">{currentChoice?.record && onManageConnection ? <button type="button" className="small-button" onClick={() => onManageConnection(currentChoice.record!)}>Manage bot application</button> : null}<button type="button" className="small-button" data-mote-identity-unbind disabled={busy || pending || snapshot?.saved.status !== 'ready'} onClick={() => void save('')}>Unbind identity</button></div><p className="mote-details__hint">Unbinding removes this Mote’s default identity. The bot and existing groups are kept.</p></div> : null}
+          {current ? <div className="mote-identity-management"><div className="mote-bot-actions">{currentChoice?.record && onManageConnection ? <button type="button" className="small-button" onClick={() => onManageConnection(currentChoice.record!, snapshot!.hostingTarget)}>Manage bot application</button> : null}<button type="button" className="small-button" data-mote-identity-unbind disabled={busy || pending || snapshot?.saved.status !== 'ready'} onClick={() => void save('')}>Unbind identity</button></div><p className="mote-details__hint">Unbinding removes this Mote’s default identity. The bot and existing groups are kept.</p></div> : null}
         </div>
         {choosing || pending || attempt ? <footer className="mote-connection-dialog__footer">
           <button type="button" className="primary-button" onClick={() => void save()} disabled={busy || pending || !snapshot || snapshot.saved.status !== 'ready'}>{busy ? 'Saving choice…' : 'Use this bot'}</button>

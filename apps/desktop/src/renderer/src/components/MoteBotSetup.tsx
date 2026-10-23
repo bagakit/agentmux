@@ -1,3 +1,4 @@
+import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useEffect, useRef, useState } from 'react'
 import { connectionProfileAvatarDigest, type ConnectionRecord, type ConnectionEnrollmentActionKind } from '@agentmux/core/connections'
 import type { MotePreferencesTarget } from '@agentmux/core/mote-preferences'
@@ -41,9 +42,11 @@ export function MoteBotSetup({
   onCurrent,
   createOnOpen = false,
   onCreateIntentConsumed,
-  onContinue
+  onContinue,
+  hostingTarget
 }: {
   target: MotePreferencesTarget | null
+  hostingTarget?: ConnectionHostingTarget | null | undefined
   topicId: string
   record: ConnectionRecord | null
   hasSavedBot: boolean
@@ -51,9 +54,9 @@ export function MoteBotSetup({
   onCurrent(): void
   createOnOpen?: boolean
   onCreateIntentConsumed?: (() => void) | undefined
-  onContinue?: ((record: ConnectionRecord, source: { kind: 'enrollment'; operationId: string; expectedRevision: number }) => void) | undefined
+  onContinue?: ((record: ConnectionRecord, source: { kind: 'enrollment'; operationId: string; expectedRevision: number }, hostingTarget: ConnectionHostingTarget) => void) | undefined
 }) {
-  const setup = useMoteBotSetup(target, topicId),
+  const setup = useMoteBotSetup(target, topicId, hostingTarget),
     [avatar, setAvatar] = useState(true),
     [issuer, setIssuer] = useState('')
   const [nameSource, setNameSource] = useState('mote'), [manualName, setManualName] = useState<string | null>(null)
@@ -143,7 +146,7 @@ export function MoteBotSetup({
   const profileTask = selected ? operation?.action === 'sync' || raw?.action === 'sync' : !!record && !replacing
   const candidateImage = raw && !raw.inspectOnly ? raw.input.desired.avatar?.pngDataUrl : setup.profile?.image
   const originalImage = candidateImage && connectionProfileAvatarDigest(candidateImage) === operation?.snapshot.avatarSha256 ? candidateImage : null
-  const hasCurrentAction = !!primaryEnrollmentAction || !!savedConnection && !enrollment?.initialPublication && !!onContinue
+  const hasCurrentAction = !!primaryEnrollmentAction || !!savedConnection && !enrollment?.initialPublication && !!onContinue && !!setup.hostingTarget
   const guideStage: BotSetupGuideStage = !selected ? 'prepare'
     : savedConnection ? enrollment?.initialPublication && initialProgress?.state !== 'complete' ? initialProgress?.state === 'attention' ? 'attention' : 'connect' : operation?.defaultLink.state === 'saved' ? 'ready' : 'bind'
     : primaryEnrollmentAction?.kind === 'confirm-account' ? 'account'
@@ -409,10 +412,10 @@ export function MoteBotSetup({
           {setup.progressIssue ? <p role="status" className="mote-details__hint">{setup.progressIssue}</p> : null}{setupFeedback}
           {operation ? (
             <>
-              {savedConnection && !enrollment?.initialPublication && onContinue ? <div className="mote-bot-next">
+              {savedConnection && !enrollment?.initialPublication && onContinue && setup.hostingTarget ? <div className="mote-bot-next">
                 <strong>Identity saved. Connect your bot.</strong>
                 <p>Continue with this bot’s saved sign-in to review message settings and publish it.</p>
-                <button type="button" className="primary-button" data-mote-bot-continue onClick={() => onContinue(savedConnection, { kind: 'enrollment', operationId: enrollment!.operationId, expectedRevision: enrollment!.revision })}>Continue bot setup</button>
+                <button type="button" className="primary-button" data-mote-bot-continue onClick={() => onContinue(savedConnection, { kind: 'enrollment', operationId: enrollment!.operationId, expectedRevision: enrollment!.revision }, setup.hostingTarget!)}>Continue bot setup</button>
               </div> : null}
               {enrollment?.configured && enrollment.initialPublication && !completedCreation ? <InitialBotSetupResult progress={initialProgress ?? null} /> : null}
               {operation.profile ? (
