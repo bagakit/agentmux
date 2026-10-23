@@ -1,5 +1,5 @@
 /** Canvas coordinates are client presentation, never Note content or relationship authority. */
-export type NoteCanvasScope = { kind: 'notebook'; notebookId: string } | { kind: 'note'; noteId: string }
+export type NoteCanvasScope = { kind: 'notebook'; notebookId: string }
 export type NoteCanvasPoint = { x: number; y: number }
 export type NoteCanvasViewport = NoteCanvasPoint & { zoom: number }
 export type NoteCanvasLayout = {
@@ -9,10 +9,10 @@ export type NoteCanvasLayout = {
   previewNoteIds: string[]
 }
 export function noteCanvasScopeKey(scope: NoteCanvasScope): string {
-  return JSON.stringify([scope.kind, scope.kind === 'note' ? scope.noteId : scope.notebookId])
+  return JSON.stringify(['notebook', scope.notebookId])
 }
-export function defaultNoteCanvasLayout(scope: NoteCanvasScope): NoteCanvasLayout {
-  return { positions: {}, expandedNoteIds: scope.kind === 'note' ? [scope.noteId] : [], previewNoteIds: [] }
+export function defaultNoteCanvasLayout(_scope?: NoteCanvasScope): NoteCanvasLayout {
+  return { positions: {}, expandedNoteIds: [], previewNoteIds: [] }
 }
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value)
 const point = (value: unknown): value is NoteCanvasPoint => record(value) && typeof value.x === 'number' && Number.isFinite(value.x) && typeof value.y === 'number' && Number.isFinite(value.y)

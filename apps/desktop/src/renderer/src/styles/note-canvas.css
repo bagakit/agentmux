@@ -199,11 +199,12 @@
 .note-canvas-versions button { border: 0; border-radius: var(--radius-sm); padding: 4px 7px; background: transparent; color: var(--text-3); font-size: var(--fs-micro); }
 .note-canvas-versions button[aria-pressed="true"] { background: var(--wash-2); color: var(--text); }
 
-/* Note Area envelope, independent Block cards, Shared bridges, 1-hop Focus, and Overview LOD */
+/* Note Area envelope, independent Block nodes, Shared bridges, 1-hop Focus, and Overview LOD */
 .note-canvas-card[data-canvas-role="note-area"] {
-  background: color-mix(in srgb, var(--surface-2) 64%, var(--surface-1));
+  background: color-mix(in srgb, var(--surface-2) 52%, var(--surface-1));
   border-color: color-mix(in srgb, var(--line) 82%, var(--blue));
-  border-radius: 12px;
+  border-style: dashed;
+  border-radius: 14px;
 }
 .note-canvas-area__envelope {
   position: absolute;
@@ -212,18 +213,81 @@
   height: 100%;
   pointer-events: none;
 }
-.note-canvas-area__envelope rect {
-  fill: none;
-  stroke: color-mix(in srgb, var(--line) 65%, transparent);
-  stroke-dasharray: 4 3;
+.note-canvas-area__envelope path {
+  fill: color-mix(in srgb, var(--surface-2) 38%, transparent);
+  stroke: color-mix(in srgb, var(--line) 75%, var(--blue));
+  stroke-width: 1.25;
+  stroke-dasharray: 5 3;
 }
-.note-canvas-card[data-canvas-role="note-area"] .note-canvas-reader .mobile-note-body > :is(.note-reader-excerpt, [data-block-id]) {
-  padding: 9px 11px;
-  margin-block: 0 8px;
+.note-canvas-area-stage {
+  position: relative;
+  width: 100%;
+  pointer-events: none;
+}
+.react-flow__node-block {
+  z-index: 3 !important;
+}
+.note-canvas-block-node {
+  position: relative;
+  width: 288px;
+  padding: 10px 12px;
   border: 1px solid var(--line);
-  border-radius: 7px;
+  border-radius: 8px;
   background: var(--surface-2);
-  box-shadow: 0 2px 6px #0000000a;
+  box-shadow: 0 3px 10px #00000012;
+  box-sizing: border-box;
+}
+.note-canvas-block-node[data-selected="true"],
+.note-canvas-block-node[data-emphasis="related"] {
+  border-color: var(--blue);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 22%, transparent), 0 4px 12px #00000016;
+}
+.note-canvas-block-node[data-emphasis="muted"] {
+  opacity: 0.38;
+  transition: opacity 140ms ease;
+}
+.note-canvas-block-drag {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid var(--line-soft);
+  cursor: grab;
+}
+.note-canvas-block-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-3);
+  font-family: var(--font-mono);
+  font-size: 9px;
+}
+.note-canvas-block-badge > svg {
+  flex: none;
+}
+.note-canvas-block-badge > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.note-canvas-block-open {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-3);
+}
+.note-canvas-block-open:hover {
+  color: var(--blue);
+  background: var(--wash-1);
+}
+.note-canvas-block-node > .note-canvas-row-endpoint {
+  top: 50%;
 }
 .note-canvas-card[data-canvas-role="shared-bridge"] {
   border-width: 1.5px;

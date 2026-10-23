@@ -6,7 +6,13 @@ import type { NoteCanvasScope } from './note-canvas-state'
 
 export type CanvasReference = NotebookGraph['references'][number]
 export type CanvasRelationship = { id: string; kind: 'hierarchy' | 'reference' | 'embed' | 'link'; source: string; target: string; sourceKind: 'page' | 'block'; targetKind: 'page' | 'block'; references: CanvasReference[] }
-export type CanvasAttachedRelationship = CanvasRelationship & { aggregateId: string; sourceBlockId?: string; targetBlockId?: string }
+export type CanvasAttachedRelationship = CanvasRelationship & {
+  aggregateId: string
+  sourceNodeId: string
+  targetNodeId: string
+  sourceBlockId?: string
+  targetBlockId?: string
+}
 export type CanvasSharedPlacement = 'area-member' | 'bridge'
 export type CanvasNote = {
   id: string
@@ -75,7 +81,7 @@ export function projectNoteCanvas(snapshot: NotebookGraphSnapshot, scope: NoteCa
       held.push(reference); unbound.set(reference.source.noteId, held)
     } else add(reference.mode, reference.source.noteId, reference.target.noteId, reference)
   }
-  const seeds = new Set(scope.kind === 'note' ? [scope.noteId] : seedNoteIds ?? Object.values(catalog.pages).filter(page => page.notebookId === scope.notebookId && !page.archivedAt).map(page => page.noteId))
+  const seeds = new Set(seedNoteIds ?? Object.values(catalog.pages).filter(page => page.notebookId === scope.notebookId && !page.archivedAt).map(page => page.noteId))
   const visible = new Set(seeds), queue = [...seeds], expansion = new Set(expanded)
   for (let index = 0; index < queue.length; index++) {
     const id = queue[index]!
@@ -127,7 +133,7 @@ export function projectNoteCanvas(snapshot: NotebookGraphSnapshot, scope: NoteCa
       ...(observation ? { observation } : {}),
       title: page?.title ?? (shared ? 'Shared block' : 'Uncatalogued note'),
       notebook: shared ? 'Shared block' : page ? catalog.notebooks[page.notebookId]?.name ?? 'Original notebook' : 'Outside this directory',
-      root: scope.kind === 'note' && id === scope.noteId,
+      root: seeds.has(id),
       context: !seeds.has(id),
       neighbors: adjacent.get(id)?.size ?? 0,
       incoming: incoming.get(id) ?? 0,
@@ -196,24 +202,54 @@ export function noteCanvasFocusNeighborhood(
   return { active: noteIds.size > 0 || relationshipIds.size > 0, noteIds, blockIdsByNote, relationshipIds }
 }
 
-/** Split only the displayed bundles whose original blocks have confirmed, currently visible ports. */
-export function attachNoteCanvasRelationships(relationships: readonly CanvasRelationship[], visibleBlocks: ReadonlyMap<string, ReadonlySet<string>>): CanvasAttachedRelationship[] {
+const encodeCanvasId = (value: string) => encodeURIComponent(value).replace(/[!'()*]/gu, char => `%${char.charCodeAt(0).toString(16).toUpperCase()}`)
+export const noteCanvasBlockNodeId = (noteId: string, blockId: string) => `block:${encodeCanvasId(noteId)}:${encodeCanvasId(blockId)}`
+export const noteCanvasBlockHandle = (blockId: string, direction: 'in' | 'out', side: 'left' | 'right') => `block-${direction}-${side}:${encodeCanvasId(blockId)}`
+
+/** Split only the displayed bundles whose original blocks have confirmed, currently visible Block nodes. */
+export function attachNoteCanvasRelationships(
+  relationships: readonly CanvasRelationship[],
+  visibleBlocks: ReadonlyMap<string, ReadonlySet<string> | ReadonlyMap<string, string>>,
+): CanvasAttachedRelationship[] {
+  const resolveBlockNode = (noteId: string, blockId: string): string | undefined => {
+    const entry = visibleBlocks.get(noteId)
+    if (!entry) return undefined
+    if (entry instanceof Set || 'has' in entry && !('get' in entry)) {
+      return (entry as ReadonlySet<string>).has(blockId) ? noteCanvasBlockNodeId(noteId, blockId) : undefined
+    }
+    return (entry as ReadonlyMap<string, string>).get(blockId)
+  }
   return relationships.flatMap(relationship => {
-    if (!relationship.references.length) return [{ ...relationship, aggregateId: relationship.id }]
+    if (!relationship.references.length) return [{ ...relationship, aggregateId: relationship.id, sourceNodeId: relationship.source, targetNodeId: relationship.target }]
     const groups = new Map<string, CanvasAttachedRelationship>()
     for (const reference of relationship.references) {
-      const sourceBlockId = visibleBlocks.get(reference.source.noteId)?.has(reference.source.blockId) ? reference.source.blockId : undefined
-      const targetBlockId = reference.resolution === 'resolved' && reference.target.kind === 'block' && visibleBlocks.get(reference.target.noteId)?.has(reference.target.blockId) ? reference.target.blockId : undefined
+      const sourceNode = resolveBlockNode(reference.source.noteId, reference.source.blockId)
+      const sourceBlockId = sourceNode ? reference.source.blockId : undefined
+      const targetNode = reference.resolution === 'resolved' && reference.target.kind === 'block'
+        ? resolveBlockNode(reference.target.noteId, reference.target.blockId)
+        : undefined
+      const targetBlockId = targetNode && reference.target.kind === 'block' ? reference.target.blockId : undefined
       const id = sourceBlockId || targetBlockId ? JSON.stringify([relationship.id, sourceBlockId ?? null, targetBlockId ?? null]) : relationship.id
       let group = groups.get(id)
-      if (!group) { group = { ...relationship, id, aggregateId: relationship.id, ...(sourceBlockId ? { sourceBlockId } : {}), ...(targetBlockId ? { targetBlockId } : {}), references: [] }; groups.set(id, group) }
+      if (!group) {
+        group = {
+          ...relationship,
+          id,
+          aggregateId: relationship.id,
+          sourceNodeId: sourceNode ?? relationship.source,
+          targetNodeId: targetNode ?? relationship.target,
+          ...(sourceBlockId ? { sourceBlockId } : {}),
+          ...(targetBlockId ? { targetBlockId } : {}),
+          references: [],
+        }
+        groups.set(id, group)
+      }
       group.references.push(reference)
     }
-    return [...groups.values()]
+    const list = [...groups.values()]
+    return list.length === 1 ? [{ ...list[0]!, id: relationship.id }] : list
   })
 }
-
-export const noteCanvasBlockHandle = (blockId: string, direction: 'in' | 'out', side: 'left' | 'right') => JSON.stringify(['block', blockId, direction, side])
 
 /** New nodes get provisional usable positions while the background layout is pending. */
 export function initialCanvasPositions(ids: readonly string[], held: Record<string, { x: number; y: number }>): Record<string, { x: number; y: number }> {
