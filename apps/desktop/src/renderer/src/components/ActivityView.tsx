@@ -725,10 +725,10 @@ export function ActivityView({
     <div ref={earlierRef} className="activity-feed__reading" data-conversation-reading={readingWindow.historical ? 'earlier' : 'current'}>
       <div className="activity-feed__reading-entry">
         {readingWindow.hasMore || readingWindow.capturedHasMore || readingWindow.automaticReadError ? (
-          <button type="button" className="activity-feed__reading-action" disabled={readingWindow.loading && !readingWindow.coverageLoading || readingWindow.capturedLoading || !conversationReading.enabled}
+          <button type="button" className="activity-feed__reading-action" disabled={readingWindow.loading && !readingWindow.coverageLoading || !conversationReading.enabled}
             title={readingWindow.automaticReadError ? undefined : 'Read earlier conversation and process records in the original sequence'}
             data-read-error={readingWindow.automaticReadError ? 'true' : undefined}
-            aria-busy={earlierReadPending || readingWindow.capturedLoading || undefined}
+            aria-busy={earlierReadPending || undefined}
             onClick={readingWindow.automaticReadError ? readingWindow.retry : readEarlierRecords}>
             {earlierReadPending ? <SemanticIcon name="status.loading" animation="spin" size={12} /> : <ThemeNavigationUpIcon size={12} aria-hidden="true" />}
             {readingWindow.automaticReadError ? <span className="activity-feed__reading-failure" role="status" aria-live="polite">
