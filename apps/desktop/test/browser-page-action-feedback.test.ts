@@ -831,3 +831,189 @@ describe('native shield presentation ownership through the real manager', () => 
     } finally { chrome.dispose() }
   })
 })
+
+
+describe('modal presentation and Agent input demands on the original native surface', () => {
+  it('shares a native barrier across nested presentations without installing page input cancellation', async () => {
+    const f = await managerFixture(), original = f.manager.nativeOwner('browser-one')!
+    const first = f.manager.acquireNativeInputBarrier(original, vi.fn())
+    await first.ready
+    const shield = f.manager.nativeOwner('browser-one')!.inputShield!
+    const second = f.manager.acquireNativeInputBarrier(original, vi.fn())
+    await second.ready
+    expect(f.manager.nativeOwner('browser-one')!.inputShield).toBe(shield)
+    expect(original.view.webContents.listenerCount('before-mouse-event')).toBe(0)
+    expect(f.manager.target('browser-one')!.control).toMatchObject({ owner: 'human', inputIsolation: 'inactive' })
+    first.release()
+    expect(f.manager.nativeOwner('browser-one')!.inputShield).toBe(shield)
+    expect(shield.webContents.isDestroyed()).toBe(false)
+    second.release()
+    expect(f.manager.nativeOwner('browser-one')!.inputShield).toBeUndefined()
+    expect(shield.webContents.isDestroyed()).toBe(true)
+    first.release(); second.release()
+    expect(original.view.webContents.isDestroyed()).toBe(false)
+  })
+
+  it.each(['modal', 'agent'])('releasing only the %s demand preserves the other owner and exact physical barrier', async released => {
+    const f = await managerFixture()
+    f.manager.returnControl('browser-one')
+    await vi.waitFor(() => expect(f.manager.target('browser-one')!.control!.inputIsolation).toBe('isolated'))
+    const original = f.manager.nativeOwner('browser-one')!, shield = original.inputShield!
+    const presentation = f.manager.acquireNativeInputBarrier(original, vi.fn())
+    await presentation.ready
+    if (released === 'modal') presentation.release()
+    else f.manager.takeControl('browser-one')
+    if (released === 'agent') expect((shield.webContents as any).executeJavaScript.mock.calls.at(-1)[0]).toContain('\"opacity\":0')
+    expect(f.manager.nativeOwner('browser-one')!.inputShield).toBe(shield)
+    expect(shield.webContents.isDestroyed()).toBe(false)
+    expect(f.manager.target('browser-one')!.control).toMatchObject({ owner: released === 'modal' ? 'agent' : 'human', inputIsolation: released === 'modal' ? 'isolated' : 'inactive' })
+    expect(original.view.webContents.listenerCount('before-mouse-event')).toBe(0)
+    if (released === 'modal') f.manager.takeControl('browser-one')
+    else presentation.release()
+    expect(shield.webContents.isDestroyed()).toBe(true)
+    expect(original.view.webContents.isDestroyed()).toBe(false)
+  })
+
+  it('keeps the same original barrier through bounds and visibility changes', async () => {
+    const f = await managerFixture(), original = f.manager.nativeOwner('browser-one')!
+    const presentation = f.manager.acquireNativeInputBarrier(original, vi.fn())
+    await presentation.ready
+    const shield = f.manager.nativeOwner('browser-one')!.inputShield!
+    const bounds = { x: 40, y: 55, width: 450, height: 320 }
+    f.manager.setBounds('browser-one', bounds)
+    expect(shield.getBounds()).toEqual(bounds)
+    f.manager.setBounds('browser-one', null)
+    expect(shield.getVisible()).toBe(false)
+    f.manager.setBounds('browser-one', bounds)
+    expect(f.manager.nativeOwner('browser-one')!.inputShield).toBe(shield)
+    expect(shield.getVisible()).toBe(true)
+    presentation.release()
+  })
+
+  it('releases a cancelled preparation without resurrecting the old native owner', async () => {
+    const f = await managerFixture(), original = f.manager.nativeOwner('browser-one')!
+    let finish!: () => void
+    native.nextLoadURL = async () => await new Promise<void>(resolve => { finish = resolve })
+    const presentation = f.manager.acquireNativeInputBarrier(original, vi.fn())
+    const shield = f.manager.nativeOwner('browser-one')!.inputShield!
+    presentation.release()
+    expect(shield.webContents.isDestroyed()).toBe(true)
+    finish(); await presentation.ready
+    expect(f.manager.nativeOwner('browser-one')!.inputShield).toBeUndefined()
+    expect(f.children).not.toContain(shield)
+    expect(original.view.webContents.isDestroyed()).toBe(false)
+  })
+
+  it('retires the exact presentation barrier when a prepared Profile replaces its page before old close completes', async () => {
+    const f = await managerFixture(), original = f.manager.nativeOwner('browser-one')!
+    let finish!: () => void, candidate: any
+    native.nextLoadURL = async contents => {
+      candidate = contents
+      await new Promise<void>(resolve => { finish = resolve })
+    }
+    native.deferredCloseId = f.contents.id
+    const switching = f.manager.switchProfile('browser-one', 'replacement-profile')
+    const failed = vi.fn(), presentation = f.manager.acquireNativeInputBarrier(original, failed)
+    await presentation.ready
+    const shield = f.manager.nativeOwner('browser-one')!.inputShield!
+    expect(f.children).toContain(shield)
+    finish()
+    const switched = await switching
+    expect(switched.profileId).toBe('replacement-profile')
+    expect(f.manager.nativeOwner('browser-one')!.view.webContents).toBe(candidate)
+    expect(failed).toHaveBeenCalledTimes(1)
+    expect(shield.getVisible()).toBe(false)
+    expect(f.children).not.toContain(shield)
+    expect(f.contents.isDestroyed()).toBe(false)
+    expect(candidate.isDestroyed()).toBe(false)
+    expect(f.manager.nativeOwner('browser-one')!.inputShield).toBeUndefined()
+    await presentation.release()
+    f.contents.finishClose(); await Promise.resolve()
+    expect(failed).toHaveBeenCalledTimes(1)
+    expect(candidate.isDestroyed()).toBe(false)
+    expect(f.sibling.isDestroyed()).toBe(false)
+  })
+
+  it('retains delayed cleanup as a resource fact without blocking a new presentation on the healthy page', async () => {
+    const f = await managerFixture(), original = f.manager.nativeOwner('browser-one')!
+    const first = f.manager.acquireNativeInputBarrier(original, vi.fn())
+    await first.ready
+    const retired = f.manager.nativeOwner('browser-one')!.inputShield! as any
+    retired.webContents.mainFrame.framesInSubtree = [{ osProcessId: 903, detached: false }]
+    native.deferredCloseId = retired.webContents.id
+    let released = false
+    const pending = first.release().then(() => { released = true })
+    expect(retired.getVisible()).toBe(false)
+    expect(f.children).not.toContain(retired)
+    expect(released).toBe(false)
+    expect(f.manager.resourceProcessIds()).toContain(903)
+    expect(f.manager.resourceTargets(new Map([[903, 1]])).find(target => target.id === 'browser-one')!.resource!.retention).toMatchObject({ status: 'unknown', reasons: expect.arrayContaining(['close-unconfirmed']) })
+    const next = f.manager.acquireNativeInputBarrier(original, vi.fn())
+    await next.ready
+    expect(f.manager.nativeOwner('browser-one')!.inputShield).not.toBe(retired)
+    expect(original.view.webContents.isDestroyed()).toBe(false)
+    retired.webContents.finishClose()
+    await pending
+    expect(released).toBe(true)
+    expect(f.manager.resourceProcessIds()).not.toContain(903)
+    await next.release()
+  })
+
+  it.each(['close', 'dispose'])('keeps a presentation-only cleanup target reachable through explicit %s after its page closes', async action => {
+    const f = await managerFixture(), original = f.manager.nativeOwner('browser-one')!
+    const presentation = f.manager.acquireNativeInputBarrier(original, vi.fn())
+    await presentation.ready
+    const shield = f.manager.nativeOwner('browser-one')!.inputShield! as any
+    shield.webContents.mainFrame.framesInSubtree = [{ osProcessId: 904, detached: false }]
+    native.deferredCloseId = shield.webContents.id
+    const pending = presentation.release()
+    f.manager.close('browser-one')
+    const target = f.manager.resourceTargets(new Map([[904, 1]])).find(target => target.id === 'browser-one')!
+    expect(target).toMatchObject({ status: 'unavailable', resource: { state: 'unknown', retention: { reasons: expect.arrayContaining(['close-unconfirmed']) } } })
+    expect(target.resource!.processes).toContainEqual({ pid: 904, creationTime: 1 })
+    const cleanup = Reflect.get(f.manager, 'inputSurfaceCleanup').get('browser-one') as Set<any>
+    const dispose = vi.spyOn([...cleanup][0].shield, 'dispose')
+    if (action === 'close') f.manager.close('browser-one')
+    else f.manager.dispose()
+    expect(dispose).toHaveBeenCalled()
+    shield.webContents.finishClose(); await pending; await Promise.resolve()
+    expect(f.manager.resourceProcessIds()).not.toContain(904)
+    expect(f.manager.resourceTargets(new Map([[904, 1]])).some(target => target.id === 'browser-one')).toBe(false)
+    if (action === 'close') expect(f.sibling.isDestroyed()).toBe(false)
+  })
+
+  it('releases original-page lifecycle listeners after each completed presentation', async () => {
+    const f = await managerFixture(), original = f.manager.nativeOwner('browser-one')!
+    const listeners = f.contents.listenerCount('destroyed')
+    for (let index = 0; index < 12; index++) {
+      const presentation = f.manager.acquireNativeInputBarrier(original, vi.fn())
+      await presentation.ready
+      await presentation.release()
+      expect(f.contents.listenerCount('destroyed')).toBe(listeners)
+    }
+    expect(original.view.webContents.isDestroyed()).toBe(false)
+  })
+
+  it('refuses an inexact native page before allocating a presentation barrier', async () => {
+    const f = await managerFixture(), original = f.manager.nativeOwner('browser-one')!
+    const sibling = f.children.find(view => view.webContents === f.sibling)
+    const count = native.views.length
+    expect(() => f.manager.acquireNativeInputBarrier({ ...original, view: sibling }, vi.fn())).toThrow('original native Browser')
+    expect(native.views).toHaveLength(count)
+    expect(f.manager.nativeOwner('browser-one')!.inputShield).toBeUndefined()
+    expect(original.view.webContents.isDestroyed()).toBe(false)
+  })
+
+  it('reports original page destruction to its presentation and retires only that native barrier', async () => {
+    const f = await managerFixture(), original = f.manager.nativeOwner('browser-one')!, failed = vi.fn()
+    const presentation = f.manager.acquireNativeInputBarrier(original, failed)
+    await presentation.ready
+    const shield = f.manager.nativeOwner('browser-one')!.inputShield!
+    original.view.webContents.close()
+    expect(failed).toHaveBeenCalledTimes(1)
+    expect(shield.webContents.isDestroyed()).toBe(true)
+    expect(f.sibling.isDestroyed()).toBe(false)
+    presentation.release()
+    expect(() => f.manager.acquireNativeInputBarrier(original, vi.fn())).toThrow('original native Browser')
+  })
+})

@@ -29,7 +29,7 @@ const box = { x: 10, y: 20, width: 100, height: 80 }
 const region = { id: 'chrome-1', bounds: box, radius: 4 }
 const view = {}, owner = { browserId: 'original-browser', bounds: box, view }
 let registry: NativeOverlayWindows
-const browsers = { visibleNativeBounds: vi.fn(), nativeOwner: vi.fn(), nativeOwnerForView: vi.fn(), windowForView: vi.fn() }
+const browsers = { visibleNativeBounds: vi.fn(), nativeOwner: vi.fn(), nativeOwnerForView: vi.fn(), windowForView: vi.fn(), acquireNativeInputBarrier: vi.fn() }
 beforeEach(() => {
   vi.clearAllMocks(); native.surfaces = []; main.focused = child.focused = false
   browsers.visibleNativeBounds.mockImplementation(host => host === child ? [box] : [])
