@@ -8072,6 +8072,8 @@ export class AgentMuxClient {
                 if (pending) saved = { ...saved, pendingInteraction: { ...pending, request: finishPermission(pending.request),
                   ...(pending.additionalRequests ? { additionalRequests: pending.additionalRequests.map(finishPermission) } : {}) } }
               }
+              // A retained transcript can settle its original request without proving current activity.
+              if (saved.nativeSourceObservation && sameRun(saved.nativeSourceObservation.run, saved.run)) return saved
               // Suppress a prior turn's current display, without discarding its exact historical end.
               const savedHook = saved.hookReceipt
               if (this.hookTurnPhases.get(session.run.runId) === 'in-turn' && savedHook?.nativeTurnId && savedHook.nativeTurnId !== observation.nativeTurnId &&
