@@ -643,11 +643,13 @@ it('preserves original connections when optional parent schema fails, and refuse
 it('recovers the same parent after a real child is killed after Files commit and before the parent ACK', async () => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'mote-bot-process-')))
   clean.push(() => rm(root, { recursive: true, force: true }))
+  const packageRoots = { core: resolve('packages/core'), connectors: resolve('packages/connectors'),
+    'client-ui': resolve('packages/client-ui'), host: resolve('apps/host') }
   const exported = Object.fromEntries(
     await Promise.all(
-      ['core', 'connectors', 'client-ui'].map(async (name) => [
+      Object.entries(packageRoots).map(async ([name, directory]) => [
         name,
-        JSON.parse(await readFile(resolve('packages', name, 'package.json'), 'utf8')) as { exports: Record<string, { import: string }> }
+        JSON.parse(await readFile(resolve(directory, 'package.json'), 'utf8')) as { exports: Record<string, { import: string }> }
       ])
     )
   )
@@ -664,7 +666,7 @@ it('recovers the same parent after a real child is killed after Files commit and
     const wildcard = key.includes('*')
       ? subpath.slice(key.split('*')[0]!.length, key.split('*')[1]!.length ? -key.split('*')[1]!.length : undefined)
       : ''
-    return resolve('packages', name!, manifest.exports[key]!.import.replace('*', wildcard))
+    return resolve(packageRoots[name as keyof typeof packageRoots], manifest.exports[key]!.import.replace('*', wildcard))
   }
   const requireDesktop = createRequire(resolve('apps/desktop/package.json'))
   await build({
