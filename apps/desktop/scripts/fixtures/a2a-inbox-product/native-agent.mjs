@@ -47,12 +47,18 @@ if (args.includes('app-server')) {
       const reply = result => socket.send(JSON.stringify({ jsonrpc: '2.0', id: request.id, result }))
       const reject = (code, message) => socket.send(JSON.stringify({ jsonrpc: '2.0', id: request.id, error: { code, message } }))
       if (request.method === 'initialize') return reply({ userAgent: 'AgentMux private synthetic actor' })
-      if (request.params?.threadId !== nativeId) return reject(-32602, 'The original native thread is required')
-      if (request.method === 'thread/read' || request.method === 'thread/resume') {
+      // This token-authenticated fixture has no model account or model-auth claim.
+      if (request.method === 'account/read') return reply({ account: null, requiresOpenaiAuth: false })
+      if (request.method !== 'thread/start' && request.params?.threadId !== nativeId) return reject(-32602, 'The original native thread is required')
+      if (['thread/start', 'thread/read', 'thread/resume'].includes(request.method)) {
         // Availability is a level, unlike the one-shot turn faults below. Core
         // may probe the same actor repeatedly before committing an input intent.
-        if (existsSync(controlPath) && JSON.parse(readFileSync(controlPath, 'utf8')).effect === 'unavailable') return reply({ thread: { id: nativeId, sessionId: nativeId, canAcceptDirectInput: false } })
-        return reply({ thread: { id: nativeId, sessionId: nativeId, canAcceptDirectInput: true } })
+        const available = !existsSync(controlPath) || JSON.parse(readFileSync(controlPath, 'utf8')).effect !== 'unavailable'
+        const thread = { id: nativeId, sessionId: nativeId, canAcceptDirectInput: available }
+        if (request.method === 'thread/read') return reply({ thread })
+        return reply({ thread, cwd: request.params.cwd, approvalPolicy: request.params.approvalPolicy ?? 'on-request',
+          model: request.params.model ?? 'private-model', sandbox: { type: request.params.sandbox === 'read-only' ? 'readOnly'
+            : request.params.sandbox === 'danger-full-access' ? 'dangerFullAccess' : 'workspaceWrite' } })
       }
       if (!['turn/start', 'turn/steer', 'thread/queue/add'].includes(request.method)) return reject(-32601, 'This private native protocol method is unsupported')
       let fault
