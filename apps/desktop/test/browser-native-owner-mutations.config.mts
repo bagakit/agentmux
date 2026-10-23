@@ -4,12 +4,16 @@ import { appendFileSync } from 'node:fs'
 import { defineConfig } from 'vitest/config'
 import original from '../../../vitest.config'
 
-const guard = 'entry.inputShield?.isCurrentFor(entry.view)'
+const guard = 'shield?.isCurrentFor(entry.view)'
 const current = 'this.page === page && this.current() && !this.contents.isDestroyed()'
 const changes = {
-  retired: { file: 'browser-view-manager.ts', from: guard, to: 'entry.inputShield && !entry.inputShield.contents.isDestroyed()' },
-  isolated: { file: 'browser-view-manager.ts', from: guard, to: 'entry.inputShield?.isolated' },
+  retired: { file: 'browser-view-manager.ts', from: guard, to: 'shield && !shield.contents.isDestroyed()' },
+  isolated: { file: 'browser-view-manager.ts', from: guard, to: 'shield?.isolated' },
   wrongPage: { file: 'browser-native-input-shield.ts', from: current, to: 'this.current() && !this.contents.isDestroyed()' },
+  modalDemand: { file: 'browser-view-manager.ts', from: 'presentations.size > 0 || entry.inputShield === shield && this.agentOwnsInput(entry)', to: 'entry.inputShield === shield && this.agentOwnsInput(entry)' },
+  agentDemand: { file: 'browser-view-manager.ts', from: 'if (surface.presentations.size || surface.entry.inputShield === surface.shield) return', to: 'if (surface.presentations.size) return' },
+  closedPresentationCleanup: { file: 'browser-view-manager.ts', from: 'if (!entry.inputShield && !this.inputSurfaceCleanup.has(entry.id)) return', to: 'if (!entry.inputShield) return' },
+  replacedPresentation: { file: 'browser-view-manager.ts', from: 'if (inputSurface) this.inputSurfaceFailed(inputSurface)', to: 'if (false) this.inputSurfaceFailed(inputSurface!)' },
   retiredCurrent: { file: 'browser-native-input-shield.ts', from: current, to: 'this.page === page && !this.contents.isDestroyed()' }
 } as const
 export default defineConfig({ ...original, plugins: [{ name: 'native-shield-owner-mutation', enforce: 'pre', transform(source, id) {

@@ -67,8 +67,10 @@ function fixture() {
   const nativeOwner = vi.fn((browserId: string) => { const view = pages.get(browserId); return view ? { browserId, bounds: view.getBounds(), view } : undefined })
   const nativeOwnerForView = vi.fn((view: unknown) => { for (const [id, candidate] of pages) if (candidate === view) return nativeOwner(id) })
   const warning = vi.fn(), pointer = vi.fn()
-  return { owner: new NativeOverlaySurfaces(window as any, { visibleNativeBounds: visible, nativeOwner, nativeOwnerForView } as any, warning, pointer), window, contents, visible, nativeOwner, nativeOwnerForView, pages, pageView, warning, pointer,
-    frameListeners, emitFrame: (image: any) => { currentImage = image.cropped ?? currentImage; frameListener?.(image, { x: 0, y: 0, width: 2000, height: 1400 }) } }
+  const barrierRelease = vi.fn(), barrierReady = Promise.resolve()
+  const acquireNativeInputBarrier = vi.fn(() => ({ ready: barrierReady, release: barrierRelease }))
+  return { owner: new NativeOverlaySurfaces(window as any, { visibleNativeBounds: visible, nativeOwner, nativeOwnerForView, acquireNativeInputBarrier } as any, warning, pointer), window, contents, visible, nativeOwner, nativeOwnerForView, pages, pageView, warning, pointer,
+    acquireNativeInputBarrier, barrierRelease, frameListeners, emitFrame: (image: any) => { currentImage = image.cropped ?? currentImage; frameListener?.(image, { x: 0, y: 0, width: 2000, height: 1400 }) } }
 }
 function originalPage(bounds: { x: number; y: number; width: number; height: number }) {
   const page = { bounds, getBounds: () => page.bounds, getVisible: () => true,
@@ -96,13 +98,15 @@ describe('required modal presentation unit', () => {
     const prevent = vi.fn()
     f.pageView.webContents.emit('before-mouse-event', { preventDefault: prevent }, { type: 'mouseDown', x: 5, y: 5 })
     f.pageView.webContents.emit('before-input-event', { preventDefault: prevent }, { key: 'a' })
-    expect(prevent).toHaveBeenCalledTimes(2)
+    expect(prevent).not.toHaveBeenCalled()
+    expect(f.acquireNativeInputBarrier).toHaveBeenCalledExactlyOnceWith(f.nativeOwner('page'), expect.any(Function))
     expect(f.pageView.setVisible).not.toHaveBeenCalled()
     finish({ isEmpty: () => false, toPNG: () => Buffer.from('prepared-content') })
     expect(await pending).toEqual({ projected: 2, capturedPixels: 8000 })
     expect(fake.views.map(view => view.getBounds())).toEqual(modal().map(region => region.bounds))
     expect(f.window.contentView.children).toEqual([f.pageView, ...fake.views])
     await f.owner.update([])
+    expect(f.barrierRelease).toHaveBeenCalledTimes(1)
     expect(f.pageView.webContents.listenerCount('before-mouse-event')).toBe(0)
     expect(f.pageView.webContents.listenerCount('before-input-event')).toBe(0)
     f.owner.dispose()
@@ -153,7 +157,9 @@ describe('required modal presentation unit', () => {
     expect(receipt).toMatchObject({ projected: 2, warning: expect.stringContaining('Accessory frame failed') })
     expect(receipt.failures).toBeUndefined()
     expect(f.window.contentView.children).toEqual([f.pageView, fake.views[0], fake.views[1]])
-    expect(f.pageView.webContents.listenerCount('before-mouse-event')).toBe(1)
+    expect(f.pageView.webContents.listenerCount('before-mouse-event')).toBe(0)
+    expect(f.acquireNativeInputBarrier).toHaveBeenCalledTimes(1)
+    expect(f.barrierRelease).not.toHaveBeenCalled()
     f.owner.dispose()
   })
 
@@ -271,7 +277,8 @@ describe('required modal presentation unit', () => {
     expect(script).toContain('<rect x=\\"100\\" y=\\"100\\" width=\\"600\\" height=\\"500\\" fill=\\"white\\"/>')
     const prevent = vi.fn()
     f.pageView.webContents.emit('before-input-event', { preventDefault: prevent }, { key: 'a' })
-    expect(prevent).toHaveBeenCalledTimes(1)
+    expect(prevent).not.toHaveBeenCalled()
+    expect(f.acquireNativeInputBarrier).toHaveBeenCalledTimes(1)
     expect(f.owner.forwardBrowserInput(f.nativeOwner('page')!, { type: 'escape' })).toBe(true)
     expect(f.pointer).not.toHaveBeenCalled()
     f.owner.dispose()
@@ -1346,4 +1353,46 @@ it('keeps the capture producer PNG unchanged and never encodes the untagged SDK 
     expect(f.contents.capturePage).toHaveBeenCalledTimes(2)
     expect(f.warning).not.toHaveBeenCalled()
   } finally { f.owner.dispose() }
+})
+
+
+describe('Browser-owned modal input preparation', () => {
+  it('holds both projections offscreen until the original input barrier is ready and releases a cancelled attempt', async () => {
+    const f = fixture()
+    let finish!: () => void
+    const release = vi.fn(), ready = new Promise<void>(resolve => { finish = resolve })
+    f.acquireNativeInputBarrier.mockReturnValueOnce({ ready, release })
+    const pending = f.owner.update(modal())
+    expect(f.acquireNativeInputBarrier).toHaveBeenCalledTimes(1)
+    expect(fake.views).toHaveLength(0)
+    await f.owner.update([])
+    expect(release).toHaveBeenCalledTimes(1)
+    finish(); await pending
+    expect(fake.views).toHaveLength(0)
+    expect(f.pageView.webContents.listenerCount('before-mouse-event')).toBe(0)
+    f.owner.dispose()
+  })
+
+  it('fails the required presentation when its barrier fails without changing the original page', async () => {
+    const f = fixture(), release = vi.fn()
+    f.acquireNativeInputBarrier.mockReturnValueOnce({ ready: Promise.reject(new Error('native barrier unavailable')), release })
+    expect(await f.owner.update(modal())).toMatchObject({ projected: 0, failures: [{ modalId: 'original-confirmation', message: expect.stringContaining('input barrier') }] })
+    expect(release).toHaveBeenCalledTimes(1)
+    expect(f.pageView.setVisible).not.toHaveBeenCalled()
+    expect(f.pageView.webContents.listenerCount('before-mouse-event')).toBe(0)
+    f.owner.dispose()
+  })
+
+  it('retains one exact background barrier while a nested modal closes', async () => {
+    const f = fixture()
+    const higher = modal().map((region, index) => ({ ...region, id: `chrome-${index + 3}`, modal: { ...region.modal!, id: 'higher-confirmation' } }))
+    await f.owner.update([...modal(), ...higher])
+    expect(f.acquireNativeInputBarrier).toHaveBeenCalledTimes(1)
+    await f.owner.update(modal())
+    expect(f.acquireNativeInputBarrier).toHaveBeenCalledTimes(1)
+    expect(f.barrierRelease).not.toHaveBeenCalled()
+    await f.owner.update([])
+    expect(f.barrierRelease).toHaveBeenCalledTimes(1)
+    f.owner.dispose()
+  })
 })
