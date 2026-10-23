@@ -133,7 +133,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     signal.throwIfAborted()
     if (!currentHistoryTarget(originalScope)) throw new Error('已切换 Agent，原记录保留，本次没有复制。')
     let cause: unknown
-    const copied = await platform.copyText(content.text, error => { cause = error })
+    const copied = await platform.copyText(content.originalText, error => { cause = error })
     signal.throwIfAborted()
     if (!copied && cause) throw cause
     return copied

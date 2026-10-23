@@ -119,7 +119,7 @@ export function useComposerInputHistory({ sessionId, control, visible, readOnly,
     const { controller } = beginAction(false)
     const result = await inputHistoryText(message, resourceReader, controller.signal)
     assertCurrent(controller)
-    return copyRecordedText(result.text)
+    return copyRecordedText(result.originalText)
   }
   return { history: userHistory, localEntries: local.map((text, index) => ({ id: `local:${scope}:${index}`, text })).reverse(),
     fill, fillText, fillLocal, copy, canFill: visible && !readOnly, resourceReader,
