@@ -14,8 +14,11 @@ const host = 'apps/host/src/capsules.ts', ipc = 'apps/desktop/src/main/ipc.ts'
 const sha = value => createHash('sha256').update(value).digest('hex')
 const sources = Object.fromEntries(await Promise.all([reply, document, host, ipc, 'apps/desktop/src/main/capsule-presentation.ts',
   'packages/core/src/capsule-input.ts', 'packages/core/src/public-rpc-service.ts', 'packages/capsule/src/node.ts',
-  'packages/capsule/src/types.ts', 'packages/capsule/src/parsers.ts', 'apps/desktop/src/main/runtime-controller.ts',
-  'apps/desktop/test/capsule-main.test.ts', 'apps/desktop/test/capsule-main.config.mts']
+  'packages/capsule/src/types.ts', 'packages/capsule/src/parsers.ts', 'packages/capsule/src/storage.ts', 'packages/capsule/src/runtime.ts',
+  'packages/capsule/src/runtime-client.ts', 'packages/capsule/src/runtime-server.ts', 'packages/capsule/src/runtime-wire.ts',
+  'apps/desktop/src/main/runtime-controller.ts', 'apps/desktop/test/capsule-main.test.ts',
+  'apps/desktop/test/capsule-main.config.mts', 'apps/desktop/test/capsule-settings.config.mts',
+  'apps/desktop/scripts/verify-capsule-main.mjs', 'packages/core/dist/control-endpoint-listener-worker.js']
   .map(async file => [file, await readFile(join(root, file), 'utf8')])))
 const reservation = `if (this.confirmations.get(request.operationId) !== confirmation || confirmation.dispatched || !operation ||
         operation.operationId !== request.operationId || operation.capsuleId !== request.interaction.capsuleId ||
@@ -32,13 +35,14 @@ const mutants = [
   { id: 'retained-run', file: reply, before: 'if (retainedInput && current.run.runId !== retainedInput.expectedRun.runId)', after: 'if (false)', test: 'does not retarget a retained prepared answer when the real Session registry has advanced to another Run' },
   { id: 'preflight-not-applied', file: reply, before: "{ disposition: 'not_applied', confirmedInputBytes: 0 }", after: "{ disposition: 'unknown', confirmedInputBytes: 0 }", test: 'reports failed confirmation prerequisites as not applied and keeps the original request writable' },
   { id: 'loaded-service-instance', file: document, before: '      endpoint.instanceId !== current.instanceId || binding.instanceId !== current.instanceId ||\n', after: '', test: 'revokes an old native document after the original Capsule service restarts on the same origin' },
-  { id: 'graph-is-not-visibility', file: host, before: '          if (!capsuleCurrentlyVisible(observation, matches[0]!, current.endpoint.url)) return null\n', after: '', test: 'keeps a recorded Browser association unknown until the same native document is authoritatively visible, without focus replay' },
-  { id: 'unknown-inspection', file: host, before: "client.call('capsule.input', { phase, prepared })", after: "client.call('capsule.input', { phase: 'submit', prepared })", test: 'does not resubmit an unknown original reply after actual Core firstsave or on repeated confirmation' }
+  { id: 'graph-is-not-visibility', file: host, before: '        if (!capsuleCurrentlyVisible(observation, matches[0]!, current.endpoint.url)) return null\n', after: '', test: 'keeps a recorded Browser association unknown until the same native document is authoritatively visible, without focus replay' },
+  { id: 'callback-original-credentials', file: host, before: 'try { client = await desktop.connect(originalContext) }', after: 'try { client = await desktop.connect() }', test: 'keeps each original Agent credential on its own Desktop callback across another Capsule call' },
+  { id: 'unknown-inspection', file: host, before: "client.call('capsule.input', { phase, prepared },", after: "client.call('capsule.input', { phase: 'submit', prepared },", test: 'does not resubmit an unknown original reply after actual Core firstsave or on repeated confirmation' }
 ].map(mutant => {
   assert.equal(sources[mutant.file].split(mutant.before).length - 1, 1, 'Exactly one production source anchor: ' + mutant.id)
   return { ...mutant, source: sources[mutant.file].replace(mutant.before, mutant.after) }
 })
-await writeFile(join(output, 'plan.json'), JSON.stringify({ root, mutants }, null, 2))
+await writeFile(join(output, 'plan.json'), JSON.stringify({ root, mutants, inputs: Object.keys(sources) }, null, 2))
 const config = join(output, 'verify.config.mts')
 await writeFile(config, `import base from ${JSON.stringify(join(root, 'apps/desktop/test/capsule-main.config.mts'))}
 import { readFileSync, writeFileSync } from 'node:fs'
@@ -51,17 +55,17 @@ const sha=value=>createHash('sha256').update(value).digest('hex')
 const publish=()=>writeFileSync(process.env.CAPSULE_MAIN_CAPTURE!,JSON.stringify(capture))
 export default {...base,cacheDir:${JSON.stringify(join(output, 'cache'))},plugins:[...base.plugins,
 {name:'capsule-main-owner-source',enforce:'pre',transform(input,id){
- const file=relative(plan.root,id.split('?')[0]);if(!plan.mutants.some(item=>item.file===file))return
+ const file=relative(plan.root,id.split('?')[0]);if(!plan.inputs.includes(file))return
  const original=readFileSync(id,'utf8'),text=mutant?.file===file?mutant.source:input
  capture.loaded[file]={original:sha(original),loaded:sha(text)};if(mutant?.file===file)capture.consumed++;publish()
  return{code:text,map:null}
 }},{name:'capsule-main-compiled-owner',enforce:'post',transform(code,id){
- const file=relative(plan.root,id.split('?')[0]);if(!plan.mutants.some(item=>item.file===file))return
+ const file=relative(plan.root,id.split('?')[0]);if(!plan.inputs.includes(file))return
  capture.compiled[file]=sha(code);publish()
 }}]}
 `)
 const callers = []
-for (const [symbol, definition] of [['CapsuleReplyAuthority', reply], ['capsuleDocumentIpc', document], ['hostCapsules', host],
+for (const [symbol, definition] of [['CapsuleReplyAuthority', reply], ['capsuleDocumentIpc', document], ['createCapsuleDesktopAdapters', host],
   ['capsulePresentation', 'apps/desktop/src/main/capsule-presentation.ts']]) {
   const found = execFileSync('rg', ['-n', '-w', symbol, 'apps/desktop/src', 'apps/host/src', '-g', '*.ts'], { cwd: root, encoding: 'utf8' })
     .trim().split('\n').filter(line => !line.startsWith(definition + ':'))
@@ -98,9 +102,11 @@ async function run(mutant) {
   runs.push(receipt); process.stdout.write(JSON.stringify(receipt) + '\n')
 }
 await run()
-if (args.includes('--mutations')) for (const mutant of mutants) await run(mutant)
+const atMutation = args.indexOf('--mutation'), selected = mutants.filter(item => atMutation < 0 || item.id === args[atMutation + 1])
+if (atMutation >= 0) assert.equal(selected.length, 1, 'Exactly one named mutation must exist')
+if (args.includes('--mutations') || atMutation >= 0) for (const mutant of selected) await run(mutant)
 const sourceIdentity = Object.fromEntries(Object.entries(sources).map(([file, text]) => [file, sha(text)]))
 for (const [file, hash] of Object.entries(sourceIdentity)) assert.equal(sha(await readFile(join(root, file))), hash, 'Owning source changed during verification: ' + file)
 await writeFile(join(output, 'receipt.json'), JSON.stringify({ schema: 'agentmux.capsule-main-proof.v1', sourceIdentity, runs, callers,
-  scope: 'Actual Main registration, Capsule Host port, Node owner, Unix dispatch and real Core journal/ordered byte receipts; native Browser substrate is controlled and no Provider adoption or native pixel claim is made.' }, null, 2))
+  scope: 'Actual Main registration, per-call Host adapters, independent Capsule runtime server/client over a private Unix socket, and real Core journal/ordered byte receipts. Native Browser and Run substrate are controlled; the runtime server shares this test process, so no actual service Run, Core-exit survival, Provider adoption or native pixel claim is made.' }, null, 2))
 process.stdout.write(JSON.stringify({ completed: true, output, tests: baselineCount, mutations: runs.length - 1, native: 'not-run' }) + '\n')
