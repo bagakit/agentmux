@@ -63,15 +63,16 @@ export function useNoteCanvasContent(snapshot: NotebookGraphSnapshot | null, act
       jobs.current.set(id, job)
       storeResult(id, { snapshot, pending: true })
       // Explicit reading keeps the original owner's full-file budget and remains available after a small automatic read.
-      void api.notebooks.content(id, { signal: controller.signal, ...intent.full ? {} : { maxBytes: AUTO_BYTES } }).then(value => {
-        if (!controller.signal.aborted && jobs.current.get(id) === job) storeResult(id, { snapshot, value, ...value.status === 'read' ? { document: { path: value.resource.path, content: value.content, revision: value.revision, ...(value.noteProvenance ? { noteProvenance: value.noteProvenance } : {}) } } : {} })
-      }).catch(error => {
-        if (!controller.signal.aborted && jobs.current.get(id) === job) storeResult(id, { snapshot, issue: error instanceof Error ? error.message : String(error) })
-      }).finally(() => {
+      const settle = (outcome: CanvasContent) => {
         if (jobs.current.get(id) !== job) return
         jobs.current.delete(id)
         setExplicit(values => values[id] === intent ? Object.fromEntries(Object.entries(values).filter(([key]) => key !== id)) : values)
-      })
+        if (!controller.signal.aborted) storeResult(id, outcome)
+      }
+      void api.notebooks.content(id, { signal: controller.signal, ...intent.full ? {} : { maxBytes: AUTO_BYTES } }).then(
+        value => settle({ snapshot, value, ...value.status === 'read' ? { document: { path: value.resource.path, content: value.content, revision: value.revision, ...(value.noteProvenance ? { noteProvenance: value.noteProvenance } : {}) } } : {} }),
+        error => settle({ snapshot, issue: error instanceof Error ? error.message : String(error) }),
+      )
     }
   }, [active, snapshot, visible, priority, results, explicit, observed, storeResult])
   // Stop this observation only; the original files and other clients remain unaffected.

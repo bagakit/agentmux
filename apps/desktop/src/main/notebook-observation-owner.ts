@@ -19,10 +19,18 @@ export class NotebookObservationOwner implements NotebookObservationPort {
   /** Hints from the latest in-call file graph, revalidated by Files on every content read. */
   private sharedResources = new Map<string, NoteContentMetadata[]>()
   private incompleteSharedScopes = new Set<string>()
+  private cachedDocuments = new Map<string, NoteFileDocument>()
   constructor(private readonly ports: { workspace(id: string): WorkspaceRecord | undefined; files: Pick<WorkspaceFiles, 'read'> & Partial<Pick<WorkspaceFiles, 'readDirectory'>>; metadata?: Pick<AgentMuxNotebookStore, 'readProvenance'> }) {}
   /** Explicit projection of original files; never a catalog recovery or registration. */
   scan(params: NoteCorpusParams, options?: { signal?: AbortSignal }): Promise<NoteCorpusResult> {
     return readNoteCorpus(this.ports, params, options)
+  }
+  private canonicalDocument(resource: NotebookPage['resource'], document: NoteFileDocument): NoteFileDocument {
+    if (document.noteProvenance) return document
+    const key = physicalFileKey(resource), cached = this.cachedDocuments.get(key)
+    if (cached && cached.path === document.path && cached.revision === document.revision && cached.content === document.content) return cached
+    this.cachedDocuments.set(key, document)
+    return document
   }
   private async read(page: Pick<NotebookPage, 'noteId' | 'resource'>, options?: { maxBytes?: number; signal?: AbortSignal }): Promise<{ observation: NoteContentObservation; document?: NoteFileDocument }> {
     const base = { noteId: page.noteId, resource: structuredClone(page.resource) }, original = page.resource
@@ -38,7 +46,7 @@ export class NotebookObservationOwner implements NotebookObservationPort {
       if (result.status === 'deleted') return { observation: { ...base, status: 'missing', message: 'The original file owner confirmed this Note file is missing. Its catalog identity is retained.' } }
       if (result.status !== 'read') return unknown(result.status === 'error' ? result.code + ': ' + result.message : 'The original Note resource is ' + result.status + ', not a readable Note body.')
       if (result.document.path !== original.path) return unknown('The file owner returned another resource path. No body was substituted.')
-      const document = result.document, parsed = parseNoteFile(document)
+      const document = this.canonicalDocument(original, result.document), parsed = parseNoteFile(document)
       if (parsed.status === 'invalid') return { observation: { ...base, status: 'invalid', revision: document.revision, message: parsed.message } }
       if (parsed.note.noteId !== page.noteId) return { observation: { ...base, status: 'identity-mismatch', revision: document.revision, actualNoteId: parsed.note.noteId, message: 'The original file contains another Note identity. Both identities and bytes are retained; inspect its source before editing.' } }
       const knowledge = noteKnowledge([{ location: { workspaceId: original.workspaceId, path: original.path }, document }])
@@ -48,11 +56,11 @@ export class NotebookObservationOwner implements NotebookObservationPort {
   async content(state: NotebookState, noteId: string, options?: { maxBytes?: number; signal?: AbortSignal }): Promise<NoteContentObservation> {
     let page: Pick<NotebookPage, 'noteId' | 'resource'> | undefined = state.pages[noteId]
     if (!page) {
-      if (!this.sharedResources.has(noteId)) await this.graph(state, {}, options)
+      if (!this.sharedResources.has(noteId)) await this.graph(state, {}, options?.signal ? { signal: options.signal } : undefined)
       const originals = this.sharedResources.get(noteId)
       if (!originals?.length) throw new AgentMuxError('The original shared Markdown file is not confirmed in this scope. Scan its original Workspace; no alternative file was selected.', 'NOTEBOOK_INPUT_INVALID')
       if (originals.length !== 1) return { noteId, resource: originals[0]!.resource, status: 'unknown', message: 'This shared identity exists in multiple original files. Resolve that ambiguity before reading one as the shared original.' }
-      if (this.incompleteSharedScopes.has(physicalScopeKey(originals[0]!.resource))) return { noteId, resource: originals[0]!.resource, status: 'unknown', message: 'The original file scan was incomplete. Refresh that scope to confirm this shared identity; ordinary Files reads remain available.' }
+      if (this.incompleteSharedScopes.size > 0 || originals[0]!.fileIdentity !== 'confirmed') return { noteId, resource: originals[0]!.resource, status: 'unknown', message: 'The original file scan was incomplete. Refresh that scope to confirm this shared identity; ordinary Files reads remain available.' }
       page = { noteId, resource: originals[0]!.resource }
     }
     const observation = (await this.read(page, options)).observation
