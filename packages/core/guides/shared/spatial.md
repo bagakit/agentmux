@@ -51,10 +51,11 @@ These are advisory strategies, not fixed directions, size thresholds or addition
 ## Read an amux object link
 An amux:// link carries one exact object identity, not a command, permission or sender credential.
 Use the public @agentmux/core/sharing parseAmuxObjectLink helper to decode its URI path segment
-without trimming or changing the original ID. Supported kinds are agent, region, tab, space, zone and capsule.
+without trimming or changing the original ID. Supported kinds are agent, region, tab, space and zone.
 For amux://agent/<SID>, use agent inspect --session SID or agent send --to-session SID --text TEXT.
 For spatial kinds, use space inspect with --region, --tab, --space or --zone and the decoded ID.
-For amux://capsule/<ID>, read capsule --skill and use capsule inspect with JSON {capsuleId:ID}.
+Capsule page identities are separate from spatial targets; this helper does not parse Capsule links.
+Read capsule --skill and use capsule inspect with JSON {capsuleId:ID} from original Capsule discovery.
 Request display through capsule open with the same ID and an original operationId; its page
 owner resolves the service before Browser presentation. A Capsule is not a spatial selector.
 Discover current Agent display positions with space ls; keep all original location candidates.
