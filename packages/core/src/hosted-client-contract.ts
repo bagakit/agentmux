@@ -14,7 +14,7 @@ export const AGENTMUX_HOSTED_METHODS = [
   'agentCreationAuthority', 'attestAgentCreation', 'listTrustedCreationSources', 'trustCreationSource',
   'listRuns', 'runtimeProjection', 'runtimeSubject', 'statusAgent', 'refreshAgentSession', 'confirmAgentNativeSession',
   'recordExternalConversationMessage', 'readAgentSession', 'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'releaseConversationView', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
-  'prepareTerminal', 'createPreparedTerminal', 'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
+  'prepareTerminal', 'createPreparedTerminal', 'inspectPreparedTerminal', 'prepareTerminalStop', 'stopPreparedTerminal', 'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'resizeTerminal', 'signalTerminal', 'stopTerminal',
   'createAgent', 'createAgentWithDelivery', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'listAgentSpawns', 'reattachAgent', 'ensureAgentContinuity', 'controlAgentContinuity',
   'restartAgent', 'inspectAgentRestart', 'resumeAgent', 'reopenAgent', 'reconcileAgentReopen', 'respawnAgent', 'writeAgent', 'pasteAgent', 'submitAgentPrompt', 'submitAgentMessage', 'notifyMessages', 'inspectMessageNotification', 'saveAgentFuturePromptIntent', 'replySessionQuestion',
@@ -29,7 +29,7 @@ export const AGENTMUX_HOSTED_RUNTIME_METHODS = [
   'createAgent', 'createAgentWithDelivery', 'createHostAgentWithDelivery',
   'ensureAgentContinuity', 'restartAgent', 'inspectAgentRestart', 'resumeAgent', 'statusAgent',
   'reattachAgent', 'writeAgent', 'pasteAgent', 'resizeAgent', 'signalAgent',
-  'createPreparedTerminal', 'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
+  'createPreparedTerminal', 'inspectPreparedTerminal', 'prepareTerminalStop', 'stopPreparedTerminal', 'createTerminal', 'attachTerminal', 'refreshRunAttachment', 'readRunReplay',
   'removeTerminal', 'releaseRunAttachment', 'writeTerminal', 'resizeTerminal', 'signalTerminal', 'stopTerminal'
 ] as const satisfies readonly (typeof AGENTMUX_HOSTED_METHODS[number])[]
 export type AgentMuxHostedMethod = typeof AGENTMUX_HOSTED_METHODS[number]

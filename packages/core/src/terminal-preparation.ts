@@ -10,6 +10,22 @@ export type AgentMuxPreparedTerminal = {
   launch: string
 }
 
+/** Original recoverable Stop identity. This is private management data, never a new grant. */
+export type AgentMuxPreparedTerminalStop = {
+  run: { runId: string }
+  ownerInstanceId: string
+  operationId: string
+}
+
+export function parsePreparedTerminalStop(value: unknown): AgentMuxPreparedTerminalStop {
+  const code = 'INVALID_TERMINAL_PREPARATION'
+  const r = rpcRecord(value, ['run', 'ownerInstanceId', 'operationId'], code)
+  const run = rpcRecord(r.run, ['runId'], code)
+  if ([run.runId, r.ownerInstanceId, r.operationId].some(v => typeof v !== 'string' || !v || /[\0\r\n]/u.test(v)))
+    throw new AgentMuxError('The original terminal Stop preparation is invalid.', code)
+  return structuredClone(r) as AgentMuxPreparedTerminalStop
+}
+
 /** Validate original creation data without consulting or repairing it from the current environment. */
 export function parsePreparedTerminal(
   value: unknown,
@@ -73,6 +89,7 @@ export function decodePreparedTerminal(value: unknown): {
     !string(request.program, true) ||
     !string(source.workspacePath, true) ||
     request.cwd !== source.workspacePath ||
+    env.AGENTMUX_LIFECYCLE_OPERATION_ID !== source.createOperationId ||
     !array(request.args) ||
     !request.args.every((value) => string(value)) ||
     !array(request.declared_inputs) ||

@@ -1,4 +1,4 @@
-import { decodePreparedTerminal, parsePreparedTerminal, type AgentMuxPreparedTerminal } from './terminal-preparation.js'
+import { decodePreparedTerminal, parsePreparedTerminal, parsePreparedTerminalStop, type AgentMuxPreparedTerminal, type AgentMuxPreparedTerminalStop } from './terminal-preparation.js'
 import { AgentSessionRecoveryService } from './agent-session-recovery/service.js'
 import type { AgentMuxAgentResumeInput, AgentMuxAgentReopenInput } from './agent-session-recovery/contracts.js'
 import { assertAgentPromptSize, runRef, safeId, hookBindingIdentity, terminalHandshakeOperationIdentity, terminalInitialPromptReadinessIdentity, terminalEnvironment } from './agent-runtime-helpers.js'
@@ -3716,7 +3716,8 @@ export class AgentMuxClient {
       launch: JSON.stringify({ createOperationId, request: this.kernel.prepareStart({
         program: input.command ?? process.env.SHELL ?? '/bin/sh',
         args: input.args ?? [], cwd: input.workspacePath,
-        env: terminalEnvironment({ ...input.env, AGENTMUX_MESSAGE_QUEUE_PATH: this.messageQueue.path }, this.agentSessionStorePath()),
+        env: terminalEnvironment({ ...input.env, AGENTMUX_MESSAGE_QUEUE_PATH: this.messageQueue.path,
+          AGENTMUX_LIFECYCLE_OPERATION_ID: createOperationId }, this.agentSessionStorePath()),
         ...(input.cols === undefined ? {} : { cols: input.cols }),
         ...(input.rows === undefined ? {} : { rows: input.rows })
       }) })
@@ -3736,6 +3737,17 @@ export class AgentMuxClient {
     const projected = this.projectRun(run)
     this.publisher.publishRunState(projected)
     return projected
+  }
+
+  /** Without an exact ref, null means unconfirmed. With a ref, null confirms that original Run is absent. Never submits Start. */
+  async inspectPreparedTerminal(input: AgentMuxPreparedTerminal, ref?: AgentMuxRunRef): Promise<AgentMuxRun | null> {
+    const { prepared, request } = decodePreparedTerminal(input)
+    this.requireConnected()
+    const run = await this.kernel.inspectPreparedStart(request, prepared.createOperationId, ref?.runId)
+    if (!run) return null
+    if (this.registry.findByRun(runRef(run.runId))) throw new AgentMuxError(
+      'The original terminal creation belongs to an Agent Session.', 'RUN_KIND_MISMATCH')
+    return this.projectRun(run)
   }
 
   async attachTerminal(runId: string, afterByte = 0, view: AgentMuxRunAttachmentView = 'raw'): Promise<AgentMuxRunAttachment> {
@@ -3857,10 +3869,21 @@ export class AgentMuxClient {
   }
 
   async stopTerminal(ref: AgentMuxRunRef): Promise<void> {
+    await this.stopPreparedTerminal(await this.prepareTerminalStop(ref))
+  }
+
+  async prepareTerminalStop(ref: AgentMuxRunRef): Promise<AgentMuxPreparedTerminalStop> {
     this.requireConnected()
+    const operation = await this.kernel.prepareStop(ref.runId)
+    return parsePreparedTerminalStop({ run: { ...ref }, ownerInstanceId: operation.daemonInstance, operationId: operation.operationKey })
+  }
+
+  async stopPreparedTerminal(value: AgentMuxPreparedTerminalStop): Promise<void> {
+    this.requireConnected()
+    const prepared = parsePreparedTerminalStop(value), ref = prepared.run
     // Reserve the operation before recording intent. A failed preparation must
     // not leave a stale "user stopped" marker that misclassifies a later exit.
-    const operation = await this.kernel.prepareStop(ref.runId)
+    const operation = { runId: ref.runId, daemonInstance: prepared.ownerInstanceId, operationKey: prepared.operationId }
     this.stopRequestedRuns.add(ref.runId)
     try {
       await this.kernel.stop(operation)
