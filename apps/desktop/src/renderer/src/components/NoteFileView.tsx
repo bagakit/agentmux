@@ -13,14 +13,12 @@ import { noteSavedEditors } from './NoteParticipants'
 import type { NotebookPage, NoteResource } from '@agentmux/core/notebook-catalog'
 import { sameNoteResource, useNotebookLibrary } from '../lib/notebook-library'
 import { NoteBlockEditor, type NoteEditorHandle } from './NoteBlockEditor'
-import { NoteCanvas, type CanvasFileTarget } from './NoteCanvas'
-import { useWorkbenchBrowserPresentation, WorkbenchPresentationContext } from '../lib/workbench-presentation'
-import { openNotebookFile, openNotebookPage } from '../lib/recall-notebooks'
+import { useWorkbenchBrowserPresentation } from '../lib/workbench-presentation'
+import { openNotebookPage } from '../lib/recall-notebooks'
 import { useAppStore } from '../store'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useNoteLinkNavigation } from '../lib/use-note-link-navigation'
 import { NoteLinksPanel } from './NoteLinksPanel'
-import { SurfaceModeSwitch } from './SurfaceModeSwitch'
 import { NoteFileIdentity } from './NoteFileIdentity'
 import type { NoteFileTarget } from '../lib/file-document-consumers'
 
@@ -52,8 +50,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
   const presentation = useWorkbenchBrowserPresentation()
   const openAttachment = useDesktopNoteLinkOpener()
   const toolbar = useContext(NoteViewToolbarContext)
-  const [canvasOpen, setCanvasOpen] = useState(false)
-  const [canvasBlock, setCanvasBlock] = useState<(NoteBlockTarget & { sourceIdentity: string }) | null>(null)
+  const [pendingBlock, setPendingBlock] = useState<(NoteBlockTarget & { sourceIdentity: string }) | null>(null)
   const read = useMemo(() => parseNoteFile(document), [document])
   const parentResource = useNoteFileResource()
   const savedEditors = useMemo(() => noteSavedEditors(document, read.status === 'valid' ? read.note.noteId : '', resource),
@@ -85,11 +82,10 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
   }, [read, restoredBlock, handle])
   useLayoutEffect(() => {
     if (!revealBlock) return
-    setCanvasBlock(null)
-    setCanvasOpen(false)
+    setPendingBlock(null)
   }, [revealBlock])
   useLayoutEffect(() => {
-    if (!revealBlock || read.status !== 'valid' || read.note.noteId !== revealBlock.noteId || canvasOpen) return
+    if (!revealBlock || read.status !== 'valid' || read.note.noteId !== revealBlock.noteId) return
     if (!presentation.active || !handle || handle.editor.isDestroyed) return
     const attempt = () => {
       if (handle.editor.isDestroyed) return false
@@ -99,7 +95,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     }
     if (attempt()) return
     return observeRevealDOM(handle, attempt)
-  }, [read, revealBlock, onRevealed, handle, canvasOpen, presentation.active])
+  }, [read, revealBlock, onRevealed, handle, presentation.active])
   useEffect(() => {
     if (!handle || focusRequest === undefined) return
     const editor = handle.editor
@@ -116,25 +112,24 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
     return () => observer.disconnect()
   }, [handle, focusRequest, canFocus, onFocused, read, restoredBlock, revealBlock])
   useLayoutEffect(() => {
-    if (canvasOpen || !presentation.active || !canvasBlock || !handle || revealBlock) return
-    if (read.status !== 'valid' || read.note.noteId !== canvasBlock.noteId || sourceIdentity !== canvasBlock.sourceIdentity) {
+    if (!presentation.active || !pendingBlock || !handle || revealBlock) return
+    if (read.status !== 'valid' || read.note.noteId !== pendingBlock.noteId || sourceIdentity !== pendingBlock.sourceIdentity) {
       setIssue('The selected original block belongs to a different Note or file location. Its exact target is retained; return to that Note or choose another target.')
       return
     }
     const attempt = () => {
       if (handle.editor.isDestroyed) return false
-      if (handle.focusBlock(canvasBlock.blockId, false, true)) { setIssue(null); setCanvasBlock(null); return true }
+      if (handle.focusBlock(pendingBlock.blockId, false, true)) { setIssue(null); setPendingBlock(null); return true }
       setIssue('The selected original block has not been revealed yet. Its exact target is retained; keep this Note visible or check its current draft.')
       return false
     }
     if (attempt()) return
     return observeRevealDOM(handle, attempt)
-  }, [canvasOpen, canvasBlock, handle, presentation.active, read, sourceIdentity, revealBlock])
-  async function openCanvasPage(page: NotebookPage, blockId?: string, signal?: AbortSignal) {
-    setCanvasBlock(null)
+  }, [pendingBlock, handle, presentation.active, read, sourceIdentity, revealBlock])
+  const openLinkedPage = async (page: NotebookPage, blockId?: string, signal?: AbortSignal) => {
+    setPendingBlock(null)
     if (read.status === 'valid' && page.noteId === read.note.noteId && resource && sameNoteResource(page.resource, resource)) {
-      setCanvasOpen(false)
-      if (blockId) setCanvasBlock({ noteId: page.noteId, blockId, sourceIdentity })
+      if (blockId) setPendingBlock({ noteId: page.noteId, blockId, sourceIdentity })
       else setIssue(null)
       return
     }
@@ -147,46 +142,26 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
         blockId ? { noteId: page.noteId, blockId } : undefined, undefined, signal)
     } catch (error) { setIssue(presentError(error)); useAppStore.getState().reportError(error) }
   }
-  const openCanvasFile = async (file: CanvasFileTarget, blockId: string | undefined, signal: AbortSignal) => {
-    if (onOpenOriginal) { await onOpenOriginal({ ...file.resource, noteId: file.noteId }, blockId, signal); return true }
-    const reference = presentation.reference
-    const space = reference && useAppStore.getState().tabs[reference.tabId]?.space
-    if (!reference || !space) throw new Error('The original file display position is unconfirmed. Your graph and source are kept; reopen from its Notebook.')
-    return openNotebookFile(file, presentation.projection?.onSelect, reference, blockId ? { noteId: file.noteId, blockId } : undefined,
-      { reference, space, ...(presentation.projection ? { projection: presentation.projection } : {}) }, signal)
-  }
-  const openLinkedPage = async (page: NotebookPage, blockId?: string, signal?: AbortSignal) => {
-    if (read.status === 'valid' && page.noteId === read.note.noteId && resource && sameNoteResource(page.resource, resource)) { await openCanvasPage(page, blockId, signal); return }
-    if (onOpenPage) await onOpenPage(page, blockId, signal)
-    else await openCanvasPage(page, blockId, signal)
-  }
-  const links = useNoteLinkNavigation(openLinkedPage, catalog, presentation.active && !canvasOpen,
+  const links = useNoteLinkNavigation(openLinkedPage, catalog, presentation.active,
     (link, target) => link.referenceId ? handle?.bindLink(link, target) ?? false : true,
     sourceIdentity, onOpenOriginal)
   const hasLinkedReferences = registered || read.status === 'valid' && read.note.kind === 'shared-block' && Boolean(resource)
   const footer = hasLinkedReferences || sourceCoverage ? <footer className="note-reading-footer" aria-label="Note references and sources">
-    {read.status === 'valid' && hasLinkedReferences ? <NoteLinksPanel noteId={read.note.noteId} active={presentation.active && !canvasOpen} onOpen={openLinkedPage} onOpenFile={onOpenOriginal} selectedBlockId={restoredBlock?.blockId} /> : null}
+    {read.status === 'valid' && hasLinkedReferences ? <NoteLinksPanel noteId={read.note.noteId} active={presentation.active} onOpen={openLinkedPage} onOpenFile={onOpenOriginal} selectedBlockId={restoredBlock?.blockId} /> : null}
     {sourceCoverage}
   </footer> : null
   if (read.status === 'invalid') return <div className="note-file-view"><div className="note-invalid" role="status"><strong>Note source needs attention</strong>
     <p>{read.message}</p><p>The original source is preserved. Use Source to inspect it; no block identities have been repaired.</p></div>{footer}</div>
-  const identityIcon = <NoteFileIdentity key={sourceIdentity} scope={sourceIdentity} document={document} resource={resource} dirty={dirty} active={presentation.active && !canvasOpen} />
+  const identityIcon = <NoteFileIdentity key={sourceIdentity} scope={sourceIdentity} document={document} resource={resource} dirty={dirty} active={presentation.active} />
   return <NoteFileLinkContext.Provider value={openAttachment}><NoteFileContext.Provider value={resource ?? parentResource}><div className="note-file-view">
     {restoreIssue || issue ? <div className="note-knowledge-notice" role="status">{restoreIssue || issue}</div> : null}
     {resource && catalog?.pages[read.note.noteId] && sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource) ? <NotebookPageDetails key={read.note.noteId} page={catalog.pages[read.note.noteId]!} savedEditors={savedEditors}
       {...(read.note.title === undefined ? {} : { sourceTitle: read.note.title })} {...(dirty === undefined ? {} : { sourceDirty: dirty })} {...(onCheckOriginal ? { onCheckOriginal } : {})} /> : null}
     {!registered ? <header className="notebook-page-heading"><h1>{identityIcon} {read.note.title ?? 'Untitled note'}</h1><p className="note-scope">Original file · {document.path}</p></header> : null}
     {resource && catalog?.pages[read.note.noteId] && !sameNoteResource(catalog.pages[read.note.noteId]!.resource, resource) ? <p className="note-knowledge-notice" role="status">This file has a different recorded Note location. Editing stays available; recover its Notebook history or inspect the original resource.</p> : null}
-    {resource && registered && toolbar && toolbar.documentKey === documentKey(resource.workspaceId, document.path) ? createPortal(<>
-      {identityIcon}
-      <SurfaceModeSwitch value={canvasOpen ? 'graph' : 'note'} onChange={view => setCanvasOpen(view === 'graph')} active={presentation.active} ariaLabel="Note presentation"
-        options={[{ value: 'note', label: 'Note', ariaLabel: 'Note view' }, { value: 'graph', label: 'Graph', ariaLabel: 'Graph view' }]} />
-    </>, toolbar.element) : null}
-    {canvasOpen ? <span className="note-view-snapshot" role="status">Saved relationships for this Note{dirty ? <span>Save your note to update this graph.</span> : null}</span> : null}
-    {canvasOpen ? <div className="note-association-canvas"><NoteCanvas scope={{ kind: 'note', noteId: read.note.noteId }} active={presentation.active} onOpen={openCanvasPage} onOpenFile={openCanvasFile} /></div> : null}
-    <div hidden={canvasOpen} inert={canvasOpen} className="note-original-editor">
-    <WorkbenchPresentationContext.Provider value={canvasOpen ? { ...presentation, active: false } : presentation}>
-    <NoteBlockEditor note={read.note} knowledge={knowledge} onChange={onChange} onSave={onSave} onOpen={onOpen} onIssue={setIssue} handleRef={attachHandle} onOpenLink={links.openLink} active={presentation.active && !canvasOpen} showBacklinks={!hasLinkedReferences} sourceIdentity={sourceIdentity} {...(onSelectedBlock ? { onSelectedBlock } : {})} {...(onCompositionChange ? { onCompositionChange } : {})}
+    {resource && registered && toolbar && toolbar.documentKey === documentKey(resource.workspaceId, document.path) ? createPortal(identityIcon, toolbar.element) : null}
+    <div className="note-original-editor">
+    <NoteBlockEditor note={read.note} knowledge={knowledge} onChange={onChange} onSave={onSave} onOpen={onOpen} onIssue={setIssue} handleRef={attachHandle} onOpenLink={links.openLink} active={presentation.active} showBacklinks={!hasLinkedReferences} sourceIdentity={sourceIdentity} {...(onSelectedBlock ? { onSelectedBlock } : {})} {...(onCompositionChange ? { onCompositionChange } : {})}
       {...(onSnapshotIssue ? { onSnapshotIssue: (displayedRaw: string, incomingRaw: string, reason: string) => {
         // The PM snapshot is canonical, while a file edited outside the app may
         // use different Markdown whitespace. Fence the canonical target, then
@@ -196,7 +171,7 @@ export function NoteFileView({ document, knowledge, onChange, onSave, onOpen, re
       {...(onKeepDisplayedDraft ? { onKeepDisplayedDraft: (displayedRaw: string, incomingRaw: string) => {
         if (incomingRaw === serializeNoteDocument(read.note)) onKeepDisplayedDraft(displayedRaw, document.content)
       } } : {})} />
-    </WorkbenchPresentationContext.Provider></div>
+    </div>
     {links.dialog}
     {footer}
   </div></NoteFileContext.Provider></NoteFileLinkContext.Provider>
