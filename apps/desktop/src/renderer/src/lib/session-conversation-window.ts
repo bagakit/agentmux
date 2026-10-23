@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react'
 import type { AgentSessionHistoryPage, AgentSessionHistorySource } from '@agentmux/core'
 import { useConversationView, type ConversationViewOperation } from '@agentmux/client-ui/use-conversation-view'
 import { projectConversationWindow } from '@agentmux/client-ui/conversation-records'
-import { CONVERSATION_MAX_WINDOW_RECORDS, type ConversationWindowSnapshot } from '@agentmux/core/conversation'
+import { CONVERSATION_MAX_WINDOW_RECORDS, type ConversationItemRef, type ConversationReadOptions, type ConversationWindowSnapshot } from '@agentmux/core/conversation'
 import { api } from './api'
 import type { SessionHistoryReference } from '../../../shared/contracts'
 import { nativeBindingKey, type AgentNativeSourceFacts } from '../../../shared/agent-native-source'
@@ -23,7 +23,7 @@ export type ConversationReading = {
   /** Presentation facts supplied by the existing host; absent facts remain unknown. */
   consumer?: { runId?: string; regionId?: string; presentationId?: string; visible: boolean; parked?: boolean; activityShown: boolean; viewMode: string }
 }
-export type ConversationReadingIntent = 'current' | 'seed' | 'earlier' | 'newer' | 'coverage' | 'live'
+export type ConversationReadingIntent = 'current' | 'record' | 'seed' | 'earlier' | 'newer' | 'coverage' | 'live'
 export { conversationReadingAnchor, restoreConversationAnchor } from '@agentmux/client-ui/conversation-reading-anchor'
 
 function handleSource(handle: AgentNativeSourceFacts['nativeHandle']): AgentSessionHistorySource | undefined {
@@ -61,10 +61,11 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
         : operation === 'changes' || operation === 'reopen' || operation === 'resume' ? 'live' : intent.current
       admissionIntent.current = currentIntent
       // The accepted current page is the first page of this explicit batch.
-      if (!replayingHeldIntent && operation === 'latest') coverageDemand.current.remaining = 2
+      if (!replayingHeldIntent && operation === 'latest') coverageDemand.current.remaining = snapshot.window.anchor ? 0 : 2
       if (!beforeCommit(next, currentIntent, boundary.current ?? undefined)) {
         protectionReason.current = 'native-reading-protection'; return false
       }
+      if (operation === 'latest') presentationIntent.current++
       acceptedBinding.current = { key, bindingKey }
       return true
     }
@@ -77,7 +78,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const navigate = (operation: ConversationViewOperation) => {
     intent.current = operation === 'older' ? 'earlier' : operation === 'newer' ? 'newer' : operation === 'latest' ? 'current' : 'live'
     if (operation === 'older' && !boundary.current) boundary.current = page?.items[0]?.id ?? null
-    if (operation === 'latest') { boundary.current = null; presentationIntent.current++ }
+    if (operation === 'latest') boundary.current = null
     return operation === 'older' ? view.earlier() : operation === 'newer' ? view.newer() : operation === 'changes' ? view.changes() : view.refresh()
   }
   useEffect(() => { boundary.current = null; intent.current = 'seed'; admissionIntent.current = 'seed' }, [key])
@@ -102,7 +103,7 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
     intent.current = 'coverage'; void view.earlier(limit)
   }, [page, view.loading, view.held, view.hasMore, view.error, reading?.enabled, bindingChanged, coverageDuration])
   const selectSource = (source?: AgentSessionHistorySource) => {
-    intent.current = 'current'; boundary.current = null; presentationIntent.current++; coverageDemand.current.remaining = 0
+    intent.current = 'current'; boundary.current = null; coverageDemand.current.remaining = 0
     if (source) void view.selectSource(source); else void view.refresh()
   }
   const automaticReadError = intent.current === 'coverage' && view.errorOperation === 'older' ? view.error : null
@@ -134,6 +135,10 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
         selectSource(original?.kind === 'native' ? { providerId: original.providerId, nativeSessionId: original.nativeSessionId } : undefined)
       } else void view.retry()
     }, showLatestAutomatically: () => { if (view.held) view.acceptHeld(); else if (!view.error && !view.historical && view.newerAvailable) void navigate('changes') },
+    selectRecord: (record: ConversationItemRef, readOptions?: ConversationReadOptions) => {
+      intent.current = 'record'; boundary.current = null; coverageDemand.current.remaining = 0
+      return view.selectRecord(record, readOptions)
+    },
     showCurrent: () => { coverageDemand.current.remaining = 0; void navigate('latest') },
     showCurrentSource: () => selectSource(currentSource), showPreviousSource: () => selectSource(handleSource(reading?.nativeSourceFacts?.nativeConfirmation?.previousNativeHandle)) }
 }

@@ -7,7 +7,7 @@ export type MailboxMessageNavigationResult =
   | { kind: 'unavailable'; message: string; itemRef?: ConversationItemRef }
   | { kind: 'cancelled' }
 
-export type RevealMailboxMessage = (message: AgentSessionUserMessage) => Promise<MailboxMessageNavigationResult>
+export type RevealMailboxMessage = (message: AgentSessionUserMessage, reference: ConversationItemRef | null) => Promise<MailboxMessageNavigationResult>
 
 export type RevealConversationItem = (itemRef: ConversationItemRef, routeHostId?: string) => Promise<MailboxMessageNavigationResult>
 
@@ -24,6 +24,8 @@ export type ConversationRevealIntent = {
 /** The Session host owns scope and intent. Activity only confirms a real rendered record. */
 export type ConversationRevealRequest = {
   generation: number
+  record: ConversationItemRef
+  signal: AbortSignal
   sourceKey: string
   isCurrent(): boolean
   complete(located: boolean, error?: string): void
