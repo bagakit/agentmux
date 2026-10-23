@@ -23,19 +23,20 @@ it('the production Desktop copying block supplies Main hashing, static avatars a
     return ts.isCallExpression(call) && ts.isIdentifier(call.expression) && call.expression.text === 'materializeDependency'
   })
   expect(copyingStatements.length, 'An empty production copying block cannot establish runtime closure').toBeGreaterThan(0)
-  const functions = ['pathExists', 'materializeDependencies', 'materializeDependency', 'resolvePackageRoot'].map(name => {
+  const functions = ['pathExists', 'materializeDependencies', 'materializeDependency'].map(name => {
     const declarations = source.statements.filter((statement): statement is ts.FunctionDeclaration =>
       ts.isFunctionDeclaration(statement) && statement.name?.text === name)
     expect(declarations, `Execute the actual packaging function ${name}`).toHaveLength(1)
     return declarations[0]!.getText(source)
   })
+  const { resolvePackageRoot } = await import(pathToFileURL(join(repositoryRoot, 'scripts/package-dependencies.mjs')).href)
   // Execute every direct dependency copying statement unchanged, rather than manually
   // requesting hashes from the materializer. Removing the production call removes its output.
   const copying = new Function('readFile', 'mkdir', 'cp', 'readdir', 'join', 'dirname', 'lstat', 'realpath',
-    'repositoryRoot', 'desktopRoot', 'coreRoot', 'connectorsRoot', functions.join('\n') +
+    'repositoryRoot', 'desktopRoot', 'coreRoot', 'connectorsRoot', 'resolvePackageRoot', functions.join('\n') +
     '\nreturn { materializeDependency, copyDependencies: async function(appResources) {\n' + copyingStatements.map(statement => statement.getText(source)).join('\n') + '\n} }')(
     readFile, mkdir, cp, readdir, join, dirname, lstat, realpath,
-    repositoryRoot, join(repositoryRoot, 'apps/desktop'), join(repositoryRoot, 'packages/core'), join(repositoryRoot, 'packages/connectors')) as {
+    repositoryRoot, join(repositoryRoot, 'apps/desktop'), join(repositoryRoot, 'packages/core'), join(repositoryRoot, 'packages/connectors'), resolvePackageRoot) as {
       copyDependencies(appResources: string): Promise<void>
       materializeDependency(sourcePackage: string, name: string, destination: string): Promise<void>
     }
