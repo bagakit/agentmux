@@ -46,3 +46,15 @@
 .toolkit-result__url { display: block; box-sizing: border-box; width: 100%; resize: vertical; }
 
 .toolkit-result__previous > summary { color:var(--amber-text); }
+
+.toolkit-capsules { display: grid; gap: var(--sp-3); margin-bottom: var(--sp-4); }
+.toolkit-capsules__row { min-width: 0; padding-block: var(--sp-3); border-top: 1px solid var(--line-soft); }
+.toolkit-capsules__main { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2) var(--sp-3); }
+.toolkit-capsules__main > span { flex: 1 1 160px; min-width: 0; }
+.toolkit-capsules__main strong { display: block; color: var(--text); font-size: var(--fs-body); overflow-wrap: anywhere; }
+.toolkit-capsules small, .toolkit-capsules p { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; overflow-wrap: anywhere; }
+.toolkit-capsules p { margin: var(--sp-2) 0 0; }
+.toolkit-capsules__receipt { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-2) var(--sp-3); margin-top: var(--sp-2); color: var(--text-2); font-size: var(--fs-meta); }
+.toolkit-capsules__receipt[role='alert'] { color: var(--amber-text); }
+.toolkit-capsules__receipt small { flex-basis: 100%; }
+.toolkit-capsules .toolkit-result__details { padding-block: var(--sp-2) 0; margin-top: var(--sp-2); border: 0; }
