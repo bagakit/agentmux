@@ -89,6 +89,7 @@ Settings 提供独立的 **Capsule** 资源管理模块，复用现有[编译期
 
 同一 Capsule 领域由一条独立服务 Run 承载多个页面，按固定入口及已保存的准确运行意图加载，不因页面数、Browser 数或客户端数重复启动服务。各页原固定 loopback origin 与独立 Browser partition 保持；端口被占用时保留原 origin、内容和对象，准确报告冲突，释放后沿原页面恢复，不随机改端口。
 
+- **首次运行意图必须明确。** 仅显式 `capsule.runtime.start` 或首次 `capsule.create` 可以建立领域的 running 意图。空域的其他页面、配置和交互领域操作（含原操作查询）返回 `CAPSULE_RUNTIME_UNCONFIGURED` 并提供显式 Start 恢复出口，不保存绑定或启动服务；管理入口的 `capsule.runtime.inspect` 仍只读返回 unconfigured，显式 `capsule.runtime.stop` 可保存 stopped 意图。已有 running 意图的原 Run 核对、恢复与保活继续成立，不因查询入口而撤销。
 - **Core／App 退出只 detach。** Core 关闭管理连接、App 关闭展示只释放各自观察和适配，不能 stop 健康服务 Run；HTTP 不依赖 Core／App 进程继续存活。Core 恢复后先核对准确原 Run 与领域绑定，接回仍健康的服务，不重放启动。
 - **显式 stop 尊重持久意图。** 停止服务先保留准确管理操作与持久 stopped 意图，保活不能将其重新拉起。停止、停止结果未知和已确认停止分别表达；停止不删除页面、配置、内容或未完成交互，恢复运行须经明确管理意图。
 - **新代 Run 只由权威终局推进。** 仅 ctxmux 对原 Run 的权威终局事实允许沿同一领域和页面恢复新代服务 Run，并明确 Run 与服务实例已变化；保活继续守已保存的运行意图。Core 重启、连接断开、探测失败、空观察或 unknown 都不等于 Run 死亡，保原绑定和操作，不重复创建、不改投另一环境。
