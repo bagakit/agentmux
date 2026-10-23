@@ -42,3 +42,6 @@ export type * from './channel-metadata-contract.js'
 export * from './channel-metadata-codec.js'
 
 export * from './connection-diagnosis-source.js'
+
+export * from './connection-credential-contract.js'
+export * from './connection-credential-codec.js'
