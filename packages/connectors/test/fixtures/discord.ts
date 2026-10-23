@@ -95,7 +95,7 @@ export async function discordTransport() {
     if (original.origin !== 'https://discord.com') throw Error('Unexpected native Discord API origin')
     return await fetch(origin + original.pathname + original.search, init as RequestInit)
   } }
-  return { http, calls, sessions, messages, emit, uploads,
+  return { origin, http, calls, sessions, messages, emit, uploads,
     get pausedConnections() { return paused.size },
     disconnect() { pauseHello = true; for (const socket of sockets) if (socket.readyState === 1) socket.close(4000) },
     resumeGateway() { pauseHello = false; for (const socket of paused) if (socket.readyState === 1) socket.send(JSON.stringify({ op: 10, d: { heartbeat_interval: 60000 } })); paused.clear() },
