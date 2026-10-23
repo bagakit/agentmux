@@ -49,7 +49,7 @@ export interface CapsuleIssue {
   capsuleId?: string
 }
 export type CapsuleEndpoint =
-  | { status: 'available'; url: string; port: number; observedAt: number }
+  | { status: 'available'; url: string; port: number; instanceId: string; observedAt: number }
   | { status: 'unavailable'; port: number; observedAt: number; issue: CapsuleIssue }
 export type CapsuleContent =
   | { status: 'available'; observedAt: number }

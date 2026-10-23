@@ -338,12 +338,13 @@ function array(v: unknown, p: string, check: (v: unknown, p: string) => unknown)
   v.forEach((x, i) => check(x, `${p}[${i}]`))
 }
 function endpoint(v: unknown, p: string): void {
-  const r = obj(v, ['status', 'url', 'port', 'observedAt', 'issue'], p)
+  const r = obj(v, ['status', 'url', 'port', 'instanceId', 'observedAt', 'issue'], p)
   en(r.status, ['available', 'unavailable'], `${p}.status`)
   const port = num(r.port, `${p}.port`, 1)
   if (port > 65535) fail(`${p}.port`)
   num(r.observedAt, `${p}.observedAt`)
   if (r.status === 'available') {
+    id(r.instanceId, `${p}.instanceId`)
     str(r.url, `${p}.url`)
     let u: URL
     try {
@@ -363,6 +364,7 @@ function endpoint(v: unknown, p: string): void {
   } else {
     issue(r.issue, `${p}.issue`)
     if ('url' in r) fail(`${p}.url`)
+    if ('instanceId' in r) fail(`${p}.instanceId`)
   }
 }
 function content(v: unknown, p: string): void {
