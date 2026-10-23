@@ -21,6 +21,10 @@
     "esbuild": "^0.25.0"
   },
   "exports": {
+    "./host-configuration": {
+      "types": "./dist/host-configuration.d.ts",
+      "import": "./dist/host-configuration.js"
+    },
     "./mote-resources": {
       "types": "./dist/mote-resources.d.ts",
       "import": "./dist/mote-resources.js"

@@ -5,6 +5,7 @@ import { constants, mkdir, open, readFile } from 'node:fs/promises'
 import { dirname, join, normalize as normalizeLocalPath } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
+import { parseHostConfiguration, parseHostConfigurations, type HostConfigurationResult } from '@agentmux/host/host-configuration'
 import { A2A_NOTIFICATION_IDS } from '../shared/a2a-preferences.js'
 import { validateThemeConfigEdit } from './theme-config.js'
 import { BUILT_IN_AGENT_PROVIDERS, defaultLocalHostLabel, durableWriteFile } from '@agentmux/core'
@@ -65,23 +66,16 @@ export const toolkitToolSchema = z.unknown().transform((value, context) => {
   }
 })
 
-export const hostSchema = z.discriminatedUnion('kind', [
-  z.object({ id: z.literal('local'), kind: z.literal('local'), label: z.string().min(1) }).strict(),
-  z
-    .object({
-      id: z.string().min(1),
-      kind: z.literal('ssh'),
-      label: z.string().min(1),
-      hostname: z.string().min(1),
-      user: z.string().min(1).optional(),
-      port: z.number().int().min(1).max(65535).optional(),
-      identityFile: z.string().min(1).optional(),
-      remoteCommand: z.string().min(1).optional(),
-      remoteSocketPath: z.string().startsWith('/').optional(),
-      runtimeId: z.string().min(1).optional()
-    })
-    .strict()
-])
+function hostConfigurationSchema<T>(parse: (value: unknown) => HostConfigurationResult<T>) {
+  return z.unknown().transform((value, context): T => {
+    const result = parse(value)
+    if (result.success) return result.data
+    for (const issue of result.issues) context.addIssue(issue)
+    return z.NEVER
+  })
+}
+export const hostSchema = hostConfigurationSchema(parseHostConfiguration)
+const hostsSchema = hostConfigurationSchema(parseHostConfigurations)
 
 const providerIds = new Set(BUILT_IN_AGENT_PROVIDERS.map((provider) => provider.id))
 export const executorIdSchema = z.string().regex(/^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$/)
@@ -291,7 +285,7 @@ const DEFAULT_COMPOSER_SHORTCUTS: ComposerShortcut[] = [
 const configSchema = z
   .object({
     version: z.literal(CONFIG_VERSION),
-    hosts: z.array(hostSchema),
+    hosts: hostsSchema,
     executors: z.record(executorIdSchema, executorSchema),
     workspaces: z.array(workspaceSchema),
     appearance: appearanceSchema,
@@ -387,12 +381,6 @@ const configSchema = z
       })
     }
     const hostIds = new Set(config.hosts.map((host) => host.id))
-    if (hostIds.size !== config.hosts.length) {
-      context.addIssue({ code: 'custom', path: ['hosts'], message: 'Host ids must be unique' })
-    }
-    if (!hostIds.has('local')) {
-      context.addIssue({ code: 'custom', path: ['hosts'], message: 'Local host is required' })
-    }
     for (const [executorId, executor] of Object.entries(config.executors)) {
       if (!providerIds.has(executor.providerId)) {
         context.addIssue({
