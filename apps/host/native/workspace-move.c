@@ -14,15 +14,14 @@
 
 #if defined(__APPLE__)
 #include <sys/stdio.h>
-#include <CommonCrypto/CommonDigest.h>
-#else
-#error "Atomic confined no-replace Workspace move is unavailable on this platform"
 #endif
 
 static _Noreturn void fail_with_errno(const char *operation) {
   fprintf(stderr, "errno=%d operation=%s message=%s\n", errno, operation, strerror(errno));
   exit(1);
 }
+
+#include "workspace-native-platform.h"
 
 static unsigned long long parse_identity(const char *value, const char *label) {
   char *end = NULL;
@@ -61,6 +60,7 @@ static int atomic_move_no_replace(
   const char *source_path,
   const char *destination_path
 ) {
+#if defined(__APPLE__)
   return renameatx_np(
     root_fd,
     source_path,
@@ -68,6 +68,11 @@ static int atomic_move_no_replace(
     destination_path,
     RENAME_EXCL | RENAME_NOFOLLOW_ANY | RENAME_RESOLVE_BENEATH
   );
+#else
+  /* Linux only publishes direct siblings in an already pinned directory. */
+  if (!native_basename(source_path) || !native_basename(destination_path)) { errno = EINVAL; return -1; }
+  return renameat2(root_fd, source_path, root_fd, destination_path, RENAME_NOREPLACE);
+#endif
 }
 
 static void commit_barrier(int enabled, int ready_fd, int release_fd, const char *phase) {
@@ -77,6 +82,7 @@ static void commit_barrier(int enabled, int ready_fd, int release_fd, const char
   if (read(release_fd, &signal, 1) != 1) fail_with_errno(phase);
 }
 
+#if defined(__APPLE__)
 typedef struct { char *storage, *parent, *name; } direct_entry;
 
 /* The caller owns object meaning. The helper confines two actual directory entries. */
@@ -95,6 +101,8 @@ typedef struct {
   unsigned long long parent_dev, parent_ino, record_dev, record_ino;
 } alias_witness;
 
+#endif
+
 static int file_exists(int fd, const char *name);
 static int file_matches(int fd, const char *name, unsigned long long dev,
                         unsigned long long ino, const char *digest, int sync_file);
@@ -103,7 +111,7 @@ static void restore_claim(int fd, const char *pending, const char *current, cons
 static void verify_entry(int fd, const char *name, const struct stat *expected, int directory,
                          const char *operation) {
   struct stat current;
-  if (fstatat(fd, name, &current, AT_SYMLINK_NOFOLLOW | AT_RESOLVE_BENEATH) != 0) {
+  if (native_entry_stat(fd, name, &current) != 0) {
     fail_with_errno(operation);
   }
   if (current.st_dev != expected->st_dev || current.st_ino != expected->st_ino ||
@@ -113,6 +121,7 @@ static void verify_entry(int fd, const char *name, const struct stat *expected, 
   }
 }
 
+#if defined(__APPLE__)
 static void verify_link(int fd, const char *name, const char *text, const struct stat *expected,
                         const char *operation) {
   if (expected) verify_entry(fd, name, expected, 0, operation);
@@ -322,10 +331,12 @@ static void atomic_alias_swap(int root_fd, const char *root_path, const char *so
   close(destination_fd);
 }
 
+#endif
+
 /* Bounded file publication shares the original confined no-replace owner. */
 static int file_exists(int fd, const char *name) {
   struct stat info;
-  if (fstatat(fd, name, &info, AT_SYMLINK_NOFOLLOW | AT_RESOLVE_BENEATH) == 0) return 1;
+  if (native_entry_stat(fd, name, &info) == 0) return 1;
   if (errno == ENOENT) return 0;
   fail_with_errno("file-publication-stat");
 }
@@ -335,8 +346,8 @@ static int file_matches(int fd, const char *name, unsigned long long dev,
   const int file = openat(fd, name, O_RDONLY | O_NOFOLLOW | O_CLOEXEC);
   if (file < 0) return 0;
   struct stat info;
-  unsigned char bytes[4097], output[CC_SHA256_DIGEST_LENGTH];
-  char actual[CC_SHA256_DIGEST_LENGTH * 2 + 1];
+  unsigned char bytes[4097], output[NATIVE_SHA256_BYTES];
+  char actual[NATIVE_SHA256_BYTES * 2 + 1];
   const int stat_result = fstat(file, &info);
   int failure_errno = stat_result == 0 ? ESTALE : errno;
   int valid = stat_result == 0 && S_ISREG(info.st_mode) && info.st_size <= 4096 &&
@@ -351,7 +362,7 @@ static int file_matches(int fd, const char *name, unsigned long long dev,
   }
   if (length > 4096) valid = 0;
   if (valid) {
-    CC_SHA256(bytes, (CC_LONG)length, output);
+    native_sha256(bytes, length, output);
     for (size_t index = 0; index < sizeof(output); index += 1) snprintf(actual + index * 2, 3, "%02x", output[index]);
     valid = strcmp(actual, digest) == 0;
   }
@@ -400,7 +411,7 @@ static void file_publication(int object_fd, const char *object_path, char **argv
   }
   const unsigned long long old_dev = parse_identity(argv[9], "old device"), old_ino = parse_identity(argv[10], "old inode");
   const char *old_hash = argv[11], *new_hash = argv[12];
-  if (strlen(old_hash) != CC_SHA256_DIGEST_LENGTH * 2 || strlen(new_hash) != CC_SHA256_DIGEST_LENGTH * 2) {
+  if (strlen(old_hash) != NATIVE_SHA256_BYTES * 2 || strlen(new_hash) != NATIVE_SHA256_BYTES * 2) {
     errno = EINVAL; fail_with_errno("file-publication-digest");
   }
   if (confirm) {
@@ -455,6 +466,9 @@ int main(int argc, char **argv) {
   const int alias_swap = argc > 1 && strcmp(argv[1], "--alias-swap") == 0;
   const int file_publish = argc > 1 && strcmp(argv[1], "--file-publish") == 0;
   const int file_confirm = argc > 1 && strcmp(argv[1], "--file-confirm") == 0;
+#if !defined(__APPLE__)
+  if (!file_publish && !file_confirm) { errno = ENOTSUP; fail_with_errno("unsupported-workspace-operation"); }
+#endif
   if (alias_swap || file_publish || file_confirm) { argc -= 1; argv += 1; }
   const int required = file_publish || file_confirm ? 13 : alias_swap ? 8 : 6;
   if (argc < required || (!alias_swap && argc > required + (file_publish || file_confirm ? 3 : 2))) {
@@ -473,9 +487,11 @@ int main(int argc, char **argv) {
   int before_commit_barrier = 0;
   int after_commit_barrier = 0;
   int file_sync_fault = 0;
+#if defined(__APPLE__)
   int witness_barrier = 0, finalize_barrier = 0, swap_barrier = 0, alias_sync_fault = 0;
   alias_witness witness = {0};
   int has_witness = 0;
+#endif
   for (int index = required; index < argc; index += 1) {
     if (strcmp(argv[index], "--before-commit-barrier") == 0) {
       before_commit_barrier = 1;
@@ -483,6 +499,7 @@ int main(int argc, char **argv) {
       after_commit_barrier = 1;
     } else if (file_publish && strcmp(argv[index], "--file-sync-fault") == 0) {
       file_sync_fault = 1;
+  #if defined(__APPLE__)
     } else if (alias_swap && strcmp(argv[index], "--witness") == 0 && index + 8 < argc && !has_witness) {
       witness.current = argv[++index]; witness.pending = argv[++index]; witness.stage = argv[++index];
       witness.parent_dev = parse_identity(argv[++index], "witness parent device");
@@ -490,7 +507,7 @@ int main(int argc, char **argv) {
       witness.record_dev = parse_identity(argv[++index], "witness record device");
       witness.record_ino = parse_identity(argv[++index], "witness record inode");
       witness.digest = argv[++index];
-      if (strlen(witness.digest) != CC_SHA256_DIGEST_LENGTH * 2) { errno = EINVAL; fail_with_errno("validate-witness-digest"); }
+      if (strlen(witness.digest) != NATIVE_SHA256_BYTES * 2) { errno = EINVAL; fail_with_errno("validate-witness-digest"); }
       has_witness = 1;
     } else if (alias_swap && strcmp(argv[index], "--after-stage-create-barrier") == 0) {
       witness_barrier = 1;
@@ -505,6 +522,7 @@ int main(int argc, char **argv) {
       if (!strcmp(role, "source")) alias_sync_fault = 1;
       else if (!strcmp(role, "destination")) alias_sync_fault = 2;
       else { errno = EINVAL; fail_with_errno("validate-alias-sync-role"); }
+  #endif
     } else {
       errno = EINVAL;
       fail_with_errno("validate-barrier");
@@ -530,6 +548,7 @@ int main(int argc, char **argv) {
     close(root_fd);
     return 0;
   }
+#if defined(__APPLE__)
   if (alias_swap) {
     atomic_alias_swap(root_fd, argv[1], argv[4], argv[5], parse_identity(argv[6], "source device"),
                       parse_identity(argv[7], "source inode"), before_commit_barrier, after_commit_barrier,
@@ -569,6 +588,7 @@ int main(int argc, char **argv) {
     if (read(6, &signal, 1) != 1) fail_with_errno("after-commit-release");
   }
 
+#endif
   close(root_fd);
   return 0;
 }
