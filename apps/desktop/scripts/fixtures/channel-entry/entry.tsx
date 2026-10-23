@@ -42,6 +42,7 @@ const headerStatus = new URLSearchParams(location.search).has('header-status')
 type Scenario = 'unbound' | 'owner-failure' | 'attention'
 const proof = { ready: false, omitOriginal: false, status: 'normal' as 'normal' | 'attention' | 'unavailable', scenario: 'unbound' as Scenario,
   calls: [] as string[], targets: [] as (ConnectionHostingTarget | undefined)[], errors: [] as string[],
+  hostingReads: 0, routes: [] as string[], channelSections: Object.fromEntries(settingsCatalog.channelEntries.map(entry => [entry.adapterId, entry.section])),
   setScenario(value: Scenario) {
     proof.scenario = value; proof.status = value === 'attention' ? 'attention' : 'normal'
     bindings = value === 'attention' ? [0, 1].map((index): RoomBinding => ({ ...target, regionAnchor: { regionId: 'channel-preview-region' }, bindingId: 'preview-original-binding-' + index,
@@ -64,6 +65,7 @@ const proof = { ready: false, omitOriginal: false, status: 'normal' as 'normal' 
 }
 const room = { externalConversationId: '345678901234567890', name: 'research-and-engineering', state: 'active' as const, mode: 'group' as const, membershipApproval: 'unknown' as const }
 api.connections.hostingTarget = async () => {
+  proof.hostingReads++
   if (headerStatus && proof.scenario === 'owner-failure') throw Error('The original bot hosting connection could not be reached. Existing groups and requests are kept. Check this Host again or open its channel settings; local Agent input remains available.')
   return structuredClone(hostingTarget)
 }
@@ -114,7 +116,7 @@ window.addEventListener('unhandledrejection', event => proof.errors.push(String(
 function Fixture() {
   const [route, setRoute] = useState<SettingsNavigationRequest | null>(null)
   return <DesktopClientUiProvider><SettingsNavigation.Provider value={{
-    open: section => setRoute({ section }), openToolkit() {}, openHost() {}, chooseAgent() {}, openMoteLark() {},
+    open: section => { proof.routes.push(section); setRoute({ section }) }, openToolkit() {}, openHost() {}, chooseAgent() {}, openMoteLark() {},
     channelPresentation: settingsCatalog.channelPresentation,
     channelEntries: settingsCatalog.channelEntries,
     openChannel: channelOrigin => setRoute({ section: settingsCatalog.channelPresentation(channelOrigin.connection.application, channelOrigin.connection.adapterId)?.section ?? 'overview', channelOrigin })
