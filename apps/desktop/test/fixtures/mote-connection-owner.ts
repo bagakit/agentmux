@@ -234,7 +234,12 @@ export async function moteConnectionOwner(
     avatars
   }
   const source = new MoteConnectionSourceOwner(sourcePorts)
-  const parent = new MoteConnectionOperations({ connections, preferences, source })
+  // The finite parent consumes the original owners through only their existing structure ports.
+  const parent = new MoteConnectionOperations({
+    connections: { connections: connections.connections, openDatabase: () => connections.openDatabase() },
+    source: { read: (input, avatar) => source.read(input, avatar) },
+    preferences: { read: input => preferences.read(input), save: (input, context) => preferences.save(input, context) }
+  })
   const moteChat = connections.moteChat!
   const server = new AgentMuxControlServer({
     socketPath: join(root, 'owner.sock'),

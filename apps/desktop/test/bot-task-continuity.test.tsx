@@ -40,7 +40,7 @@ async function failCreation() {
 }
 async function createFailedMote() {
   await f.renderSettings(route())
-  await f.click('Create a bot for this Mote')
+  await click('[data-mote-bot-create]')
   await click('[data-mote-enrollment-action="confirm-account"]')
   await click('[data-mote-enrollment-action="create"]')
   const input = f.parentCalls.mock.calls.find(([method]) => method === 'space.mote.connection.create')![1] as { operationId: string }
