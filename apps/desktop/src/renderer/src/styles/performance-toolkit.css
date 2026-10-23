@@ -237,3 +237,8 @@
 .performance-host-sources > div { display:grid; grid-template-columns:100px minmax(0,1fr); gap:var(--sp-3); }
 .performance-host-sources dt { color:var(--text-3); }
 .performance-host-sources dd { margin:0; overflow-wrap:anywhere; line-height:1.5; }
+
+.performance-run-card { min-width:0; flex:1; display:flex; flex-direction:column; align-items:flex-start; gap:var(--sp-1); }
+.performance-run-card > .toolkit-agent-card { width:100%; min-width:0; }
+.performance-run-open { padding:0; border:0; background:none; color:var(--text-2); font:inherit; font-size:var(--fs-meta); cursor:pointer; }
+.performance-run-open:hover { color:var(--text-1); }

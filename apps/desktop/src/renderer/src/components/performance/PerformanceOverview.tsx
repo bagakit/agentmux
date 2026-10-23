@@ -89,7 +89,7 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
           <button type="button" onClick={() => setSection('artifacts')}><strong>Capture or open evidence</strong><small>Keep originals and a technical report</small></button></div>
       </section>
       <section role="tabpanel" id={navigationId + '-panel-resources'} aria-labelledby={navigationId + '-resources'} hidden={section !== 'resources'} data-performance-section="resources">
-        <PerformanceResourceDetails snapshot={snapshot} paused={paused} active={section === 'resources'} />
+        <PerformanceResourceDetails snapshot={snapshot} paused={paused} active={section === 'resources'} onNavigate={close} />
       </section>
       <section role="tabpanel" id={navigationId + '-panel-diagnostics'} aria-labelledby={navigationId + '-diagnostics'} hidden={section !== 'diagnostics'} data-performance-section="diagnostics">
         <div className="performance-page-heading"><h3>Diagnose this window</h3><p>Explicit, short investigations of the original Renderer. Opening this view does not start a capture.</p></div>
