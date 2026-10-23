@@ -67,6 +67,17 @@ const mutations = [
     from: 'return await call<T>(action, { ...params, operationId })',
     to: 'return await call<T>(action, { ...params, operationId: mintObjectId() })',
     assertion: 'exposes only the narrow Capsule facade and preserves explicit operation identity' },
+  { id: 'implicit-request-identity-restored', file: preload,
+    from: 'request: (question, draft, operationId) =>',
+    to: 'request: (question, draft, operationId = mintObjectId()) =>',
+    assertion: 'requires a page-owned mutation ID before IPC' },
+  { id: 'implicit-draft-identity-restored', file: preload,
+    from: 'saveDraft: (interactionId, expectedRevision, draft, operationId) =>',
+    to: 'saveDraft: (interactionId, expectedRevision, draft, operationId = mintObjectId()) =>',
+    assertion: 'requires a page-owned mutation ID before IPC' },
+  { id: 'missing-operation-identity-admitted', file: preload,
+    from: "if (typeof operationId !== 'string' || !operationId.trim())",
+    to: 'if (false)', assertion: 'requires a page-owned mutation ID before IPC' },
   { id: 'public-capsule-identity-validation-lost', file: 'packages/core/src/control-codec.ts',
     from: '!isObjectId(source.capsuleId) || source.mode', to: 'false || source.mode',
     assertion: 'rejects malformed Capsule IDs and incompatible private creation' },
@@ -137,8 +148,10 @@ try {
   const atMutation = process.argv.indexOf('--mutation')
   const documentIds = new Set(['isolated-sdk-exposed', 'exact-main-frame-guard-lost', 'native-commit-guard-lost', 'sdk-unrelated-pages-scan', 'response-request-identity-lost', 'loaded-instance-provenance-lost', 'same-document-provenance-lost', 'mode-policy-refresh-lost', 'active-operation-reload-protection-lost'])
   const entryIds = new Set(['capsule-retry-container-lost', 'link-original-receipt-validation-lost', 'link-original-operation-notice-lost'])
+  const sdkIdentityIds = new Set(['explicit-operation-identity-lost', 'implicit-request-identity-restored', 'implicit-draft-identity-restored', 'missing-operation-identity-admitted'])
   const selected = mutations.filter(item => (atMutation < 0 || item.id === process.argv[atMutation + 1]) &&
-    (!process.argv.includes('--document-only') || documentIds.has(item.id)) && (!process.argv.includes('--entry-only') || entryIds.has(item.id)))
+    (!process.argv.includes('--document-only') || documentIds.has(item.id)) && (!process.argv.includes('--entry-only') || entryIds.has(item.id)) &&
+    (!process.argv.includes('--sdk-identity-only') || sdkIdentityIds.has(item.id)))
   if (atMutation >= 0) assert.equal(selected.length, 1, 'A requested source mutation must exist exactly once')
   if (process.argv.includes('--mutations') || atMutation >= 0) for (const mutation of selected) receipt.mutations.push(await run(mutation.id, mutation))
   for (const [file, identity] of Object.entries(receipt.inputs)) assert.equal(sha(await readFile(join(root, file))), identity, 'Source changed during proof: ' + file)

@@ -28,7 +28,7 @@ it('exposes only the narrow Capsule facade and preserves explicit operation iden
   expect(sdk).not.toHaveProperty('reply'); expect(sdk).not.toHaveProperty('call')
   const operationId = sdk.createOperationId(); expect(isObjectId(operationId)).toBe(true)
   wire.invoke.mockResolvedValueOnce({ ok: false, error: { code: 'CAPSULE_OPERATION_UNKNOWN', message: 'Original operation outcome is unknown.' } })
-  await expect(sdk.request('Choose a title', 'Draft title', operationId)).rejects.toMatchObject({ code: 'CAPSULE_OPERATION_UNKNOWN', operationId })
+  await expect(sdk.request('Choose a title', 'Draft title', operationId)).rejects.toMatchObject({ code: 'CAPSULE_OPERATION_UNKNOWN' })
   const requests = wire.invoke.mock.calls.filter(([, action]) => action === 'request')
   expect(requests).toEqual([['capsule:document', 'request', { question: 'Choose a title', draft: 'Draft title', operationId }]])
   wire.invoke.mockResolvedValueOnce({ ok: true, value: { operationId, method: 'capsule.interaction.request', status: 'pending' } })
@@ -43,6 +43,32 @@ it('exposes only the narrow Capsule facade and preserves explicit operation iden
   })
   await sdk.read('interaction')
   expect(wire.invoke).toHaveBeenLastCalledWith('capsule:document', 'read', { interactionId: 'interaction' })
+})
+
+it('requires a page-owned mutation ID before IPC and preserves recovery without error properties', async () => {
+  await import('../src/preload/capsule')
+  const sdk = wire.api!
+  await expect((sdk.request as any)('Original question', 'Draft')).rejects.toThrow('Retain an ID')
+  await expect((sdk.saveDraft as any)('interaction', 2, 'Draft')).rejects.toThrow('Retain an ID')
+  await expect(sdk.request('Original question', undefined, ' ')).rejects.toThrow('Retain an ID')
+  await expect(sdk.saveDraft('interaction', 2, 'Draft', '')).rejects.toThrow('Retain an ID')
+  expect(wire.invoke.mock.calls.filter(([, action]) => action === 'request' || action === 'saveDraft')).toEqual([])
+
+  const operationId = sdk.createOperationId()
+  wire.invoke.mockResolvedValueOnce({ ok: false, error: { code: 'CAPSULE_OPERATION_UNKNOWN', message: 'Original result unconfirmed.' } })
+  // This controlled seam discards Error fields; actual ContextBridge proof is Native.
+  const failure = await sdk.request('Original question', undefined, operationId)
+    .catch(error => new Error(error.message))
+  expect(failure).toBeInstanceOf(Error)
+  expect(failure).not.toHaveProperty('operationId')
+  expect(failure).not.toHaveProperty('code')
+  expect(wire.invoke.mock.calls.filter(([, action]) => action === 'request')).toEqual([
+    ['capsule:document', 'request', { question: 'Original question', operationId }]
+  ])
+  wire.invoke.mockResolvedValueOnce({ ok: true, value: { operationId, method: 'capsule.interaction.request', status: 'committed' } })
+  await expect(sdk.inspectOperation(operationId)).resolves.toMatchObject({ operationId, status: 'committed' })
+  expect(wire.invoke).toHaveBeenLastCalledWith('capsule:document', 'inspectOperation', { operationId })
+  expect(wire.invoke.mock.calls.filter(([, action]) => action === 'request')).toHaveLength(1)
 })
 
 it('keeps child frames outside the SDK exposure boundary', async () => {
