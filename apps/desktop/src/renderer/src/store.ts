@@ -4378,7 +4378,7 @@ export async function retainMoteConnectionSaveIntent(intent: MoteConnectionSaveI
   const parsed = restoredMoteConnectionSaveIntents({ [intent.input.operationId]: intent })[intent.input.operationId]
   if (!parsed) throw new Error('The exact original Mote preference input is required.')
   const previous = useAppStore.getState().moteConnectionSaveIntents[intent.input.operationId]
-  if (previous && JSON.stringify(previous.input) !== JSON.stringify(parsed.input)) throw new Error('The original Mote save input cannot be replaced.')
+  if (previous && JSON.stringify([previous.input, previous.hostingTarget]) !== JSON.stringify([parsed.input, parsed.hostingTarget])) throw new Error('The original Mote save input and hosting owner cannot be replaced.')
   useAppStore.setState(state => ({ moteConnectionSaveIntents: { ...state.moteConnectionSaveIntents, [parsed.input.operationId]: parsed } }))
   return await saveWorkbenchSelection(false)
 }
