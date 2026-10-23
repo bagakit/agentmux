@@ -290,6 +290,10 @@ Mac 设置与手机连接 Toolkit 消费同一 Host 设备 owner 的连接事实
 
 分层与远端身份沿[《联邦 Runtime 与远端恢复边界》](session-recovery.md#联邦-runtime-与远端恢复边界)，公共方法沿[《对象优先 CLI 与统一公共业务服务》](#对象优先-cli-与统一公共业务服务)，原工作面与健康 Run 沿[《Session Attach 与 Runtime Projection 的边界》](session-recovery.md#session-attach-与-runtime-projection-的边界)，终端字节、阅读与成本沿[《Terminal 连续向上阅读历史》](terminal-reading.md#terminal-连续向上阅读历史)。长期无 UI Host 使用原 Core/Hook/Store/Provider 与 ctxmux namespace，同时服务 Desktop 和 Mobile；加密连接接原公共 JSON-RPC dispatcher 与有限 Hosted SDK，不复制 Runtime。网络或手机入口故障只影响该入口，保留健康 Desktop、Unix、Agent 和 Run。
 
+跨进程转发保留原认证主体及授权来源。Host 借 Desktop 的文件、窗口或其他能力时，接收方必须从可信传输边界取得准确主体，并在原业务 owner 需要授权的执行点复核；不能把设备请求改记为本机用户，也不能从业务参数接受调用者自报的身份、授权或回调。转发中的原 method、目标、参数、operation 和接收 owner 保持绑定，业务回执与原归因原样返回；凭据失效或授权未知只影响这次操作，不能退回更高权限的本机身份。
+
+原始终端按键、粘贴与高阶输入都保留本次调用的可信授权有效期。原始字节输入在排队、异步准备后及实际字节派发前检查原授权、准确 Session／Run 和原 owner 有效期；设备撤销、已取消且尚未派发的原始字节调用或已结束的 owner 不能在后续重连时发送旧输入，也不能取消另一项健康输入的观察。本次远端操作所需的原授权无法核实则保留原意图并明确不可用，不冒撤销或准许执行；已由语义 owner 接受的持久输入仍沿其原等待与恢复合同。字节已经派发后，观察中断不撤销已发生业务、不将未知回执冒成未执行、不自动重放；原 operation、输入回执与已保存内容保持。授权检查不依赖展示文案，也不阻断无关本地输入或停止健康 Run。
+
 公共 `device.ls/link/revoke` 只借原 Host Authority：本机用户读取状态、取得当前完整链接及撤销设备；managed Agent 和远端设备不能调用这些管理方法。`device.hello` 仅允许已认证 Relay 设备命名自己的身份，目标由真实加密握手 principal 确定，不能由 JSON 选择。GUI、SDK、CLI、方法发现和回执共用这些方法；原邀请、approve、reject、intent 方法删除。请求或订阅只能观察、释放自己的 Runtime consumer。
 
 Toolkit 的设备列表只列原 Host 已确认连接中的设备，不铺离线设备；未确认或读取失败不伪装成离线或空结果，原展示及时间和旧请求 unknown 的独立服务窗保持。设置保留已登记设备与撤销能力，其设备记录只呈最近 connected/disconnected 及发生时间，不铺逐次业务操作日志；原授权、设备身份与已有操作记录保全。当前连接状态、最近连接事实与授权状态分别表达，失联不冒撤销。同一公钥的多个已认证通道只计一台；设备连接从零变为非零、最后一个通道释放时沿原 owner 记录连接／断开，重复释放不制造事件或影响其他通道。
