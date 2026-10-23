@@ -8,7 +8,7 @@ import { hostedTestOwner } from '../../core/test/helpers/hosted-runtime-port.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import type { AgentMuxAgentSessionRegistry } from '../../core/src/agent-session-registry.js'
 import type { AgentMuxStoredAgentSession } from '../../core/src/types.js'
-import { createDesktopExternalInputAuthority } from '../../../apps/host/src/external-input-authority.js'
+import { createRpcExternalInputAuthority } from './helpers/rpc-external-input-authority.js'
 import { DurableIngressHost } from '../dist/index.js'
 import { PublicationStore } from '../dist/publication-store.js'
 import { createHostedIngressCorePort } from '../src/core-ingress-port.js'
@@ -34,7 +34,7 @@ async function fixture() {
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   const businessPath = join(f.root, 'business.sock'), semanticPath = join(f.root, 'semantic.sock')
   const service = new AgentMuxHostedRuntimeService(f.client, f.store.path, () => hostedTestOwner(f.client), undefined,
-    createDesktopExternalInputAuthority({ desktopSocketPath: businessPath, executionHostId: 'local' }))
+    createRpcExternalInputAuthority({ socketPath: businessPath, executionHostId: 'local' }))
   cleanup.push(() => service.dispose())
   const business = new core.AgentMuxControlServer({ socketPath: businessPath, connections: f.connections, coreClients: f.coreClients })
   await business.start(); cleanup.push(() => business.stop())

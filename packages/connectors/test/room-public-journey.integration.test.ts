@@ -10,7 +10,7 @@ import { rpcOwnerFixture } from '../../core/test/helpers/public-rpc-owner.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import { createWorkspaceLayout } from '../../core/src/spatial-layout.js'
 import { createConnectionServices } from '../src/connection-services.js'
-import { createDesktopExternalInputAuthority } from '../../../apps/host/src/external-input-authority.js'
+import { createRpcExternalInputAuthority } from './helpers/rpc-external-input-authority.js'
 import { startAgentMuxHost } from '../../../apps/host/src/host.js'
 import { externalIngressMailbox } from '../../../apps/desktop/test/helpers/external-ingress-mailbox.js'
 import { createPublicationConversationPort } from '../src/core-conversation-port.js'
@@ -49,7 +49,8 @@ async function fixture(coreAvailable = true, execution: 'direct' | 'hosted' | 'n
       for (const name of ['isConnected', 'status', 'identity', 'input', 'observeOutput', 'attach', 'detach', 'stop']) inner.kernel[name] = runtime[name]
       inner.connected = true
     })
-    nodeHost = await startAgentMuxHost({ store: original.store, socketPath: semanticPath, desktopSocketPath: join(original.root, 'journey.sock'), mobileBuildDirectory: join(original.root, 'absent-mobile-assets') })
+    nodeHost = await startAgentMuxHost({ store: original.store, socketPath: semanticPath, desktopSocketPath: join(original.root, 'journey.sock'), mobileBuildDirectory: join(original.root, 'absent-mobile-assets'),
+      externalInputAuthority: createRpcExternalInputAuthority({ socketPath: join(original.root, 'journey.sock'), executionHostId: 'local' }) })
     cleanup.push(() => nodeHost!.dispose())
     original.client = nodeHost.client; original.inner = nodeHost.client as unknown as typeof original.inner
     original.coreClients = () => [{ hostId: 'local', client: original.client }]
@@ -244,14 +245,14 @@ it('public authority reads only the original claim and current grant, and the ex
   f.coreResolver.mockClear()
   const result = await f.cli(['connection', 'ingress', 'authority', '--operation-id', input.operationId])
   expect(result).toEqual({ ingress: record, authority: 'current' }); expect(f.coreResolver).not.toHaveBeenCalled()
-  const authority = createDesktopExternalInputAuthority({ desktopSocketPath: join(f.root, 'journey.sock'), executionHostId: 'local' })
+  const authority = createRpcExternalInputAuthority({ socketPath: join(f.root, 'journey.sock'), executionHostId: 'local' })
   const intent = { agentSessionId: input.agentSessionId, expectedRun: input.expectedRun, operationId: input.operationId, messageId: input.messageId, body: record.body }
   await expect(authority.assertCurrent(input.author, intent)).resolves.toBeUndefined()
   for (const change of [{ agentSessionId: 'replacement-agent' }, { expectedRun: { runId: 'replacement-run' } }, { operationId: 'replacement-operation' }, { messageId: 'replacement-message' }, { body: 'Replacement body' }]) {
     await expect(authority.assertCurrent(input.author, { ...intent, ...change })).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
   }
   await expect(authority.assertCurrent({ ...input.author, externalMessageId: 'replacement/message' }, intent)).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
-  await expect(createDesktopExternalInputAuthority({ desktopSocketPath: join(f.root, 'journey.sock'), executionHostId: 'another-host' }).assertCurrent(input.author, intent)).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
+  await expect(createRpcExternalInputAuthority({ socketPath: join(f.root, 'journey.sock'), executionHostId: 'another-host' }).assertCurrent(input.author, intent)).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
   await f.sdk.call('connection.grant', { ...f.grant, operationId: 'revoke-current-authority', expectedRevision: 1, state: 'revoked' })
   expect(await f.cli(['connection', 'ingress', 'authority', '--operation-id', input.operationId])).toEqual({ ingress: record, authority: 'refused', code: 'INGRESS_ACTOR_NOT_AUTHORIZED' })
   await expect(authority.assertCurrent(input.author, intent)).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })

@@ -20,7 +20,7 @@ import type { AgentExternalInputIntent, AgentExternalMessageAuthor } from '../..
 import type { AgentInputMailboxItem } from '../../../packages/core/src/agent-input-mailbox.js'
 import { InputMailboxRecord } from '../../../packages/client-ui/src/components/InputMailboxRecords.js'
 import { ClientUiProvider, type ClientUiPlatform } from '../../../packages/client-ui/src/platform.js'
-import { createDesktopExternalInputAuthority } from '../../../apps/host/src/external-input-authority.js'
+import { createRpcExternalInputAuthority } from '../../../packages/connectors/test/helpers/rpc-external-input-authority.js'
 
 const previewDirectory = process.env.AGENTMUX_QUOTE_PREVIEW_DIRECTORY
 const cleanup: Array<() => unknown | Promise<unknown>> = []
@@ -143,7 +143,7 @@ it('the original Desktop authority seam rejects edited quotes and admission targ
       ingress: { inspect: unexpected, list: unexpected, recordAuthority: unexpected,
         authority: async () => ({ ingress, authority: 'current' as const }) } } })
   await server.start(); cleanup.push(() => server.stop())
-  const authority = createDesktopExternalInputAuthority({ desktopSocketPath: server.path, executionHostId: 'local' })
+  const authority = createRpcExternalInputAuthority({ socketPath: server.path, executionHostId: 'local' })
   await expect(authority.assertCurrent(sender, f.expected)).resolves.toBeUndefined()
   await expect(authority.assertCurrent(sender, { ...f.expected, channelQuote: { ...f.expected.channelQuote!, records: [] } })).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
   await expect(authority.assertCurrent(sender, { ...f.expected, admissionIntent: { kind: 'manual-actor', expectedRun: { runId: 'another-run' } } })).rejects.toMatchObject({ code: 'EXTERNAL_INPUT_AUTHORITY_UNCONFIRMED' })
