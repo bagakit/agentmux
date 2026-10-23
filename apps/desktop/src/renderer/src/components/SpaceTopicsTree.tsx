@@ -5,10 +5,10 @@ import { MoteIcon } from './MoteIcon'
 import { ProjectActivity } from './ProjectActivity'
 import { SpaceSectionHeader } from './SpaceSectionHeader'
 import { MOTE_DIRECTORY_VIEW_DEFAULT, MOTE_DIRECTORY_AVATAR_SIZE_DEFAULT, type SessionSnapshot, type ScratchTopicSnapshot, type WorkspaceRecord } from '../../../shared/contracts'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, MOTE_SOUL_PATH, scratchTopicDirectoryName, scratchTopicPhysicalPath } from '../../../shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, MOTE_SOUL_PATH, scratchTopicLogicalPath, scratchTopicPhysicalPath } from '../../../shared/scratch-topics'
 import { useScratchTopics } from '../hooks/useScratchTopics'
 import { useTopicSessions, useTopicSessionPaths } from '../lib/topic-session-subscriptions'
-import { scratchMoteTopics } from '../lib/scratch-topic-snapshots'
+import { scratchMoteTopics, scratchTopicsForWorkspace } from '../lib/scratch-topic-snapshots'
 import { activeTopicIdFromLayout } from '../lib/scratch-topic-layout'
 import type { TopicCategory } from '@agentmux/core/control'
 import { formatSpaceAddress } from '@agentmux/core/sharing'
@@ -26,6 +26,7 @@ import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { SpaceObjectContextMenu } from './SpaceObjectContextMenu'
 import { MoteArchiveNotice, useMoteArchiveAction } from './MoteArchiveNotice'
 import { MoteRenameDialog } from './MoteRenameDialog'
+import { openMoteMaterial } from '../lib/mote-materials-actions'
 import { useSpaceContentPresentation } from '../lib/space-content-presentation'
 import '../styles/mote-directory.css'
 
@@ -62,7 +63,6 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
   const openTopic = useAppStore((state) => state.openScratchTopic)
   const createTopic = useAppStore((state) => state.createScratchTopic)
   const reportError = useAppStore((state) => state.reportError)
-  const openFile = useAppStore((state) => state.openFile)
   const setWorkspaceTool = useAppStore((state) => state.setWorkspaceTool)
   const selection = useAppStore(state => state.workbenchSpaceSelection)
   const categories = useAppStore(state => state.topicCategories)
@@ -104,16 +104,25 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
   }
   const pendingOpen = useRef<AbortController | null>(null)
   useEffect(() => () => pendingOpen.current?.abort(), [])
-  async function openMote(id: string, edit = false): Promise<boolean> {
+  async function openMote(id: string, action: 'profile' | 'persona' | 'materials' | 'discussion' = 'profile'): Promise<boolean> {
     pendingOpen.current?.abort()
     const controller = new AbortController(); pendingOpen.current = controller
     try {
       // Existing directory navigation does not create or repair files. The Topic
       // owner reveals its original selection before refreshing metadata.
       const opened = await openTopic(id, workspace.id, { signal: controller.signal,
-        ...(!edit ? { onRevealed: () => contentPresentation?.expand() } : {}) })
+        onRevealed: () => action === 'profile' ? contentPresentation?.expand() : contentPresentation?.collapse() })
       if (!opened || controller.signal.aborted) return false
-      if (edit) await openFile(`${scratchTopicDirectoryName(id)}/${MOTE_SOUL_PATH}`, undefined, undefined, workspace.id)
+      if (action === 'persona') {
+        const topic = scratchTopicsForWorkspace(useAppStore.getState().scratchTopicSnapshots, workspace)?.find(item => item.id === id)
+        const rootPath = topic ? scratchTopicLogicalPath(workspace, topic) : null
+        if (!topic || rootPath === null) {
+          reportError(new Error('The original Mote directory is unconfirmed. Its files and workface are kept; refresh its directory and retry Edit persona.'))
+          return false
+        }
+        return Boolean(await openMoteMaterial({ workspace, topic, rootPath }, `${rootPath}/${MOTE_SOUL_PATH}`, { signal: controller.signal }))
+      }
+
       return true
     } catch (cause) { reportError(cause); return false }
     finally { if (pendingOpen.current === controller) pendingOpen.current = null }
@@ -146,13 +155,13 @@ export function SpaceTopicsTree({ workspace, query = '', icons, onChangeIcon, vi
         const attentionLabel = rowAttentionLabel(rowAttention(bucket))
         const isPinned = pinned?.includes(id) === true
         const archived = topic.moteArchive?.state === 'archived'
-        const togglePin = () => togglePinned(SCRATCH_WORKSPACE_ID, id), editMote = () => void openMote(id, true)
+        const togglePin = () => togglePinned(SCRATCH_WORKSPACE_ID, id), editMote = () => void openMote(id, 'persona')
         return <SpaceObjectContextMenu key={id} target={target} onChangeIcon={onChangeIcon} {...(isMote ? {
           moteActions: { pinned: isPinned, onTogglePin: togglePin, onEdit: editMote,
             onRename: () => { renameId.current = topic.id; setRenameTarget(topic) },
-            onNewDiscussion: () => { void openMote(id).then(opened => { if (!opened) return; const state = useAppStore.getState(); const layout = state.layouts[workspace.id]
+            onNewDiscussion: () => { void openMote(id, 'discussion').then(opened => { if (!opened) return; const state = useAppStore.getState(); const layout = state.layouts[workspace.id]
               if (layout) state.openLauncher({ workspaceId: workspace.id, tabGroupId: layout.activeGroupId, topicId: id, reveal: true }) }) },
-            onMaterials: () => { void openMote(id).then(opened => { if (!opened) return; setWorkspaceTool('files-branches'); useAppStore.setState({ toolsOpen: true, explorerCollapsed: { ...useAppStore.getState().explorerCollapsed, [workspace.id]: false } }) }) }
+            onMaterials: () => { void openMote(id, 'materials').then(opened => { if (!opened) return; setWorkspaceTool('files-branches'); useAppStore.setState({ toolsOpen: true, explorerCollapsed: { ...useAppStore.getState().explorerCollapsed, [workspace.id]: false } }) }) }
           }, moteArchive: {
           archived, disabled: archive.pending === id || id === PMO_TEAMS_TOPIC_ID || !topic.moteArchive || topic.moteArchive.state === 'unknown',
           ...(id === PMO_TEAMS_TOPIC_ID ? { reason: 'Primary Mote cannot be archived' } : {}),
