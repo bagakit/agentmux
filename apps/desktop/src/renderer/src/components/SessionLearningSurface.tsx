@@ -70,6 +70,9 @@ export function SessionLearningSurface({ source, label, active, onClose, returnT
           expectedResource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path } }
         values.push({ value: JSON.stringify(target), label: space.name ?? space.topicId, description: `${space.kind === 'mote' ? 'Mote' : 'Topic'} · ${space.hostId} · ${space.directoryPath ?? space.spaceId}`, target })
       }
+      // Topic discovery is an independent observation. Keep confirmed Motes and the
+      // last known Topic references available while its original owner is unavailable.
+      setTargets(previous => [...values, ...previous.filter(item => item.target.kind === 'topic')])
       const topics = await api.topics.call('topic.ls', {})
       const spatial = await api.spatial.read()
       const bindings = spatial ? desktopBindingsFromSpatial(spatial.graph, config) : {}
