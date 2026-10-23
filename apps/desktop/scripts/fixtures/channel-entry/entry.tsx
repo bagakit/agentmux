@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createWorkspaceLayout } from '@agentmux/layout'
-import type { ConnectionRecord, RoomBinding } from '@agentmux/core/connections'
+import { groupTarget, type ConnectionDiagnosis, type ConnectionRecord, type RoomBinding } from '@agentmux/core/connections'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { SettingsNavigation, type SettingsNavigationRequest } from '../../../src/renderer/src/components/SettingsNavigation'
@@ -34,7 +34,7 @@ const connection: ConnectionRecord = { config: { connectionId: 'preview-discord'
   capabilities: { roomDiscovery: true, roomCreation: false, roomLink: true },
   observation: { authentication: { state: 'ready' }, transport: { state: 'ready' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } } }
 let bindings: RoomBinding[] = []
-const proof = { ready: false, omitOriginal: false, calls: [] as string[], errors: [] as string[] }
+const proof = { ready: false, omitOriginal: false, status: 'normal' as 'normal' | 'attention' | 'unavailable', calls: [] as string[], errors: [] as string[] }
 const room = { externalConversationId: '345678901234567890', name: 'research-and-engineering', state: 'active' as const, mode: 'group' as const, membershipApproval: 'unknown' as const }
 api.connections.call = (async (method: string, input: any) => {
   proof.calls.push(method)
@@ -45,6 +45,23 @@ api.connections.call = (async (method: string, input: any) => {
   if (method === 'connection.inspect') return { connection, operation: null }
   if (method === 'connection.service.get') return { enabled: true, revision: 1 }
   if (method === 'connection.binding.ls') return { bindings }
+  if (method === 'connection.diagnose') {
+    if (proof.status === 'unavailable') throw Error('Controlled unavailable local status read')
+    const binding = bindings.find(binding => binding.bindingId === input.bindingId && binding.revision === input.bindingRevision)
+    const attention = proof.status === 'attention'
+    return { target: input, service: { value: { enabled: true, revision: 1 }, issue: null }, groups: { issue: null, value: { nextBindingId: null, items: binding ? [{
+      target: groupTarget(binding), window: {}, limit: 5,
+      connection: { value: { revision: connection.revision, enabled: true, ...connection.observation }, issue: null },
+      binding: { value: { state: binding.state, currentRevision: binding.revision, scope: binding.scope, activeInputGrants: 0, activeAnswerGrants: 0, activePermissionGrants: 0 }, issue: null },
+      outgoing: { issue: null, value: { after: null, afterContent: null, next: null,
+        observation: attention ? { state: 'unavailable', reason: 'content-unconfirmed' } : { state: 'ready' },
+        sourceObservation: { state: 'ready', code: null, codeRecorded: false, checkpointKey: null },
+        effectObservation: attention ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'ready' },
+        deliveries: attention ? [1, 2].map(i => ({ kind: 'conversation' as const, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null }, operationId: 'preview-original-' + i, state: 'unknown' as const, receipt: 'unknown' as const, platformMessageId: null, reason: 'effect-unconfirmed' as const, resourceUpload: null })) : [],
+        coverage: { state: attention ? 'incomplete' : 'complete', nextContent: null, originCount: 0, omittedGapCount: 0, gaps: attention ? [1, 2, 3].map(i => ({ gapKey: 'preview-gap-' + i, reason: 'source-gap' as const, code: null, codeRecorded: false, sourceKind: null, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null } })) : [] }
+      } }, incoming: { issue: null, value: { beforeIngressId: null, next: null, rows: [] } }
+    }] : [] } } } satisfies ConnectionDiagnosis
+  }
   if (method === 'connection.binding.inspect') return { binding: bindings[0] ?? null, current: bindings[0] ?? null, operation: null, grants: [] }
   if (method === 'connection.room.ls' || method === 'connection.room.search') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, observation: { state: 'ready' }, rooms: [room], next: null }
   if (method === 'connection.room.get') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, observation: { state: 'ready' }, room }
