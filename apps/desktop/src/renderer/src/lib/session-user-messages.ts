@@ -33,7 +33,7 @@ export function useSessionUserMessages(control?: AgentSessionControlInput, optio
   }, [demand, view.earlier])
   // Exact-source history seeds retain record IDs; they are not entity list rows.
   const sourceMessages = useMemo(() => view.reading?.originalRecords.flatMap(record => record.input ? [record.input] : []) ?? [], [view.reading])
-  const sourceChanged = [view.error, view.observationError].some(error => ['AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'native-source-changed'].includes((error as (Error & { code?: string }) | null)?.code ?? ''))
+  const sourceChanged = ['AGENT_SESSION_HISTORY_SOURCE_CHANGED', 'native-source-changed'].includes((view.error as (Error & { code?: string }) | null)?.code ?? '')
   const readForReveal = useCallback(async (record: ConversationItemRef, readOptions: ConversationReadOptions = {}) => {
     let settled = await view.settle()
     let accepted = settled?.snapshot ? projectConversationWindow(settled.snapshot) : null
