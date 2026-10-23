@@ -1,11 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 24 24">
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="-2 -2 28 28">
   <title>Mote — low poly companion</title>
-  <path d="M4.7 2.8L10.5 5.3L6.2 8.8L4.1 7.8Z" fill="#d9d8b9"/>
-  <path d="M10.5 5.3L16.8 4.9L19.8 8.2L12.2 9.4L6.2 8.8Z" fill="#b2c3a7"/>
-  <path d="M4.1 7.8L6.2 8.8L7.1 13.8L2.8 13.2Z" fill="#b7c5a6"/>
-  <path d="M19.8 8.2L21.3 12.8L18.4 16.2L17.2 11.6Z" fill="#688e81"/>
-  <path d="M6.2 8.8L12.2 9.4L13.9 14.2L7.1 13.8ZM8.4 10.4L7.1 12.1L8.5 13.9L9.9 12.1Z" fill="#8ba58d" fill-rule="evenodd"/>
-  <path d="M12.2 9.4L19.8 8.2L18.4 16.2L13.9 14.2ZM15.5 9.9L14.1 11.8L15.6 13.8L17.1 11.8Z" fill="#52756a" fill-rule="evenodd"/>
-  <path d="M2.8 13.2L7.1 13.8L13.9 14.2L11.9 21L5.8 19.4Z" fill="#688e81"/>
-  <path d="M13.9 14.2L18.4 16.2L21.3 12.8L19.2 18.6L15.8 20.6L11.9 21Z" fill="#304e48"/>
+  <polygon points="4.7,2.8 10.5,5.2 4.1,8.5" fill="#d9e5dc"/><polygon points="10.5,5.2 16.8,4.9 12.2,10.2 4.1,8.5" fill="#9fc2b2"/><polygon points="16.8,4.9 21.1,9.8 18.2,14.5 12.2,10.2" fill="#6b9486"/><polygon points="4.1,8.5 12.2,10.2 7.2,16.5 2.8,13.2" fill="#82a898"/><polygon points="12.2,10.2 18.2,14.5 15.8,20.2 7.2,16.5" fill="#53796d"/><polygon points="18.2,14.5 21.2,12.8 19.2,18.4 15.8,20.2" fill="#3a5950"/><polygon points="2.8,13.2 7.2,16.5 15.8,20.2 11.8,21 5.6,19.4" fill="#416157"/><g fill="#16221f"><polygon points="7.3,10.8 9.7,10.6 9.9,13.4 7.1,13.2"/><polygon points="14.2,10.2 16.9,10.1 17.1,13.1 14.1,12.9"/></g>
 </svg>

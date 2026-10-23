@@ -129,6 +129,7 @@ export function MoteFaceEditor({ face, disabled, onChange, visible = true }: { f
             <span className="mote-avatar-stage__chip-meta"><strong>24 px</strong><small>Chat</small></span>
           </div>
         </div>
+        <div className="mote-avatar-stage__hint"><span>Move pointer to preview gaze · Articulated 2D rig</span></div>
       </div>
     </div>
     <div className="mote-face-editor__toolbar">
