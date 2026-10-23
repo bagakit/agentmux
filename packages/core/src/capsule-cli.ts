@@ -12,7 +12,7 @@ const descriptions = {
   'capsule.update': 'Update one original page at its expected revision.',
   'capsule.remove': 'Remove one exact page; external source content is never deleted.',
   'capsule.operation.inspect': 'Read one retained operation without repeating it.',
-  'capsule.config.inspect': 'Read the Host-owned creation defaults and new-content root.',
+  'capsule.config.inspect': 'Read the Capsule-owned creation defaults and new-content root.',
   'capsule.config.update': 'Save creation defaults without reinterpreting existing pages.',
   'capsule.open': 'Request presentation of one exact Capsule, retaining its original operation.',
   'capsule.interaction.request': 'Save a page-business question for the page’s original Agent target.',
