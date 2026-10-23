@@ -216,11 +216,32 @@ async function checkProof() {
     'capsule-restored-normal', 'capsule-restored-narrow']
   for (const name of requiredFrames) assert.ok(proof.frames.some(frame => frame.name === name), 'Actual Native frame: ' + name)
   for (const frame of proof.frames) {
-    assert.equal(frame.capturePort, 'macos-screencapture-window')
+    assert.equal(frame.capturePort, 'orca-computer-get-app-state')
     assert.match(frame.nativeWindowId, /^\d+$/u)
-    assert.ok(Number.isSafeInteger(Number(frame.nativeWindowId)) && Number(frame.nativeWindowId) > 0)
+    const windowId = Number(frame.nativeWindowId)
+    assert.ok(Number.isSafeInteger(windowId) && windowId > 0)
+    assert.ok(Number.isSafeInteger(frame.pid) && frame.pid > 1)
     assert.equal(frame.path, join(output, 'frames', frame.name + '.png'))
-    assert.equal(sha(await readFile(frame.path)), frame.sha256, 'Original Native screenshot bytes: ' + frame.name)
+    const bytes = await readFile(frame.path)
+    assert.equal(sha(bytes), frame.sha256, 'Original Native screenshot bytes: ' + frame.name)
+    assert.equal(frame.metadata, join(output, 'frames', frame.name + '.window.json'))
+    const metadataBytes = await readFile(frame.metadata)
+    assert.equal(sha(metadataBytes), frame.metadataSha256, 'Original window capture receipt: ' + frame.name)
+    const metadata = JSON.parse(metadataBytes)
+    assert.equal(metadata.api, 'orca computer get-app-state')
+    assert.equal(metadata.pid, frame.pid)
+    assert.equal(metadata.nativeWindow.mediaSourceId.split(':')[1], frame.nativeWindowId)
+    const selected = metadata.listed.result.windows.find(window => window.app.pid === frame.pid && window.id === windowId)
+    assert.ok(selected, 'The original CG window belongs to its exact private Electron PID')
+    assert.equal(selected.isMinimized, false); assert.equal(selected.isOffscreen, false)
+    const capture = metadata.captured.result, image = capture.screenshot
+    assert.equal(capture.snapshot.app.pid, frame.pid); assert.equal(capture.snapshot.window.id, windowId)
+    assert.equal(capture.screenshotStatus.state, 'captured')
+    assert.equal(capture.screenshotStatus.metadata.windowId, windowId)
+    assert.equal(image.format, 'png'); assert.ok(Number.isFinite(image.scale) && image.scale > 0)
+    assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a')
+    assert.equal(bytes.readUInt32BE(16), image.width); assert.equal(bytes.readUInt32BE(20), image.height)
+    assert.equal(image.width, selected.width * image.scale); assert.equal(image.height, selected.height * image.scale)
   }
   assertServiceContinuity(proof)
   assert.equal(proof.cleanup.originalRunStopped, true)
@@ -449,13 +470,33 @@ async function screenshot(app, name, width = 1440, height = 900) {
   const match = /^window:(\d+):/u.exec(captured.mediaSourceId)
   assert.ok(match, 'Exact original native window identity is required for capture')
   assert.ok(Number.isSafeInteger(Number(match[1])) && Number(match[1]) > 0, 'The private native window has a concrete OS identity')
-  const path = join(output, 'frames', name + '.png')
-  await executeFile('/usr/sbin/screencapture', ['-x', '-o', '-l' + match[1], path], { timeout: 15_000 })
-  const bytes = await readFile(path)
+  const pid = app.child.pid, windowId = Number(match[1]), appSelector = 'pid:' + pid
+  const computer = async args => {
+    const { stdout } = await executeFile('orca', ['computer', ...args, '--json'], { timeout: 15_000, maxBuffer: 8 * 1024 * 1024 })
+    const result = JSON.parse(stdout); assert.equal(result.ok, true, stdout); return result
+  }
+  const listed = await computer(['list-windows', '--app', appSelector])
+  const selected = listed.result.windows.find(window => window.app.pid === pid && window.id === windowId)
+  assert.ok(selected, 'The original CG window must belong to the exact private Electron PID')
+  assert.equal(selected.isMinimized, false); assert.equal(selected.isOffscreen, false)
+  const osCapture = await computer(['get-app-state', '--app', appSelector, '--window-id', match[1]])
+  assert.equal(osCapture.result.snapshot.app.pid, pid); assert.equal(osCapture.result.snapshot.window.id, windowId)
+  assert.equal(osCapture.result.screenshotStatus.state, 'captured')
+  assert.equal(osCapture.result.screenshotStatus.metadata.windowId, windowId)
+  const image = osCapture.result.screenshot
+  const bytes = image.path ? await readFile(image.path) : Buffer.from(image.data, 'base64')
   assert.equal(bytes.subarray(0, 8).toString('hex'), '89504e470d0a1a0a', 'OS capture returns actual PNG bytes')
+  assert.equal(image.format, 'png'); assert.ok(Number.isFinite(image.scale) && image.scale > 0)
+  assert.equal(bytes.readUInt32BE(16), image.width); assert.equal(bytes.readUInt32BE(20), image.height)
+  assert.equal(image.width, selected.width * image.scale); assert.equal(image.height, selected.height * image.scale)
+  const path = join(output, 'frames', name + '.png'), metadata = join(output, 'frames', name + '.window.json')
+  await writeFile(path, bytes)
+  const metadataBytes = Buffer.from(JSON.stringify({ api: 'orca computer get-app-state', pid, nativeWindow: captured, listed,
+    captured: { ...osCapture, result: { ...osCapture.result, screenshot: { ...image, data: undefined } } } }, null, 2) + '\n')
+  await writeFile(metadata, metadataBytes)
   const reading = await app.cdp.evaluate('({url:location.href,width:innerWidth,height:innerHeight,appearance:document.documentElement.dataset.appearance,regions:[...document.querySelectorAll("[data-workbench-region-id]")].filter(n=>n.getClientRects().length).map(n=>n.dataset.workbenchRegionId)})')
-  facts.frames.push({ name, path, sha256: sha(bytes), nativeSize: captured.size,
-    capturePort: 'macos-screencapture-window', nativeWindowId: match[1], reading })
+  facts.frames.push({ name, path, sha256: sha(bytes), nativeSize: captured.size, pid, metadata, metadataSha256: sha(metadataBytes),
+    capturePort: 'orca-computer-get-app-state', nativeWindowId: match[1], reading })
   return reading
 }
 async function pageDocument(app, endpoint) {
