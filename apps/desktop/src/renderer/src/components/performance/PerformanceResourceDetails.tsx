@@ -7,11 +7,13 @@ import { PerformanceAttribution, cpuCoreLabel } from './PerformanceAttribution'
 import { PerformanceTrend } from './PerformanceTrend'
 import { LiquidSelectionSurface } from '../LiquidSelectionSurface'
 import { ToolkitAgentCard, toolkitAgentCardKey, useToolkitAgentCards, type ToolkitAgentCardFacts } from '../toolkit/ToolkitAgentCards'
+import { useAppStore } from '../../store'
+import { usePathDisplay } from '../../hooks/usePathDisplay'
+import { resolveToolkitAgentCardSession } from '../../lib/toolkit-agent-card-facts'
 import { performanceCPU as cpu, performanceMemory as memory, performanceBytes as bytes, performanceReadingTime as readingTime } from './performance-format'
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 const ThemeObjectRunsIcon = semanticIconComponent('object.runs')
-const NO_CARDS: AgentCard[] = []
-const NO_FIELDS: ToolkitAgentCardField[] = []
+const RUN_FIELDS: ToolkitAgentCardField[] = ['avatar', 'name', 'status', 'provider', 'workspace']
 const runKey = (run: Pick<RunUsage, 'hostId' | 'runId'>) => JSON.stringify([run.hostId, run.runId])
 
 
@@ -20,20 +22,25 @@ function Metric({ label, value, hint, points, color, sourceKey, unit = '%' }: { 
     {points ? <PerformanceTrend key={sourceKey} points={points} color={color} label={label} unit={unit} /> : null}</section>
 }
 function Facts({ children }: { children: React.ReactNode }) { return <dl className="performance-facts">{children}</dl> }
-function RunRow({ run, card, fields, facts, onToggle, basis }: { run: RunUsage; card: AgentCard | null | undefined; fields: readonly ToolkitAgentCardField[]; facts: ToolkitAgentCardFacts | undefined; onToggle(key: string, open: boolean): void; basis: string | undefined }) {
+function RunRow({ run, facts, onToggle, onNavigate, navigationError, basis }: { run: RunUsage; facts: ToolkitAgentCardFacts | undefined; onToggle(key: string, open: boolean): void; onNavigate(run: RunUsage, facts: ToolkitAgentCardFacts): void; navigationError?: string | undefined; basis: string | undefined }) {
+  const card: AgentCard = { reference: { kind: 'run', hostId: run.hostId, runId: run.runId }, metrics: [] }
   return <details className="performance-contributor" data-run-id={run.runId} data-run-host={run.hostId} onToggle={event => onToggle(runKey(run), event.currentTarget.open)}>
     <summary className="performance-contributor__row"><span className="performance-run-identity"><ThemeNavigationDownIcon size={11} className="performance-run-chevron" aria-hidden="true" />
-      {card ? <ToolkitAgentCard card={card} fields={fields} resolvedFacts={facts} /> : <span className="performance-identity"><strong title={run.runId}>{run.runId}</strong><small>{card === null ? 'Agent card ambiguous' : 'Agent card unavailable'}</small></span>}</span>
-      <span>{cpu(run.cpuPercent)}<small className="performance-core-equivalent">{cpuCoreLabel(run.cpuPercent, basis)}</small></span><span>{memory(run.rssKib)}</span></summary>
+      <span className="performance-run-card"><ToolkitAgentCard card={card} fields={RUN_FIELDS} resolvedFacts={facts} />
+        {facts?.state === 'resolved' && facts.clientSessionId ? <button type="button" className="performance-run-open" aria-label={`Open Agent ${facts.name ?? ''}`} data-performance-open-run onClick={event => { event.preventDefault(); event.stopPropagation(); onNavigate(run, facts) }}>Open Agent ↗</button> : null}
+        {navigationError ? <small className="performance-state" role="status">{navigationError}</small> : null}
+      </span></span><span>{cpu(run.cpuPercent)}<small className="performance-core-equivalent">{cpuCoreLabel(run.cpuPercent, basis)}</small></span><span>{memory(run.rssKib)}</span></summary>
     <Facts><dt>Run</dt><dd>{run.runId}</dd><dt>Host</dt><dd>{run.hostId}</dd><dt>Processes</dt><dd>{run.processCount ?? '—'}</dd>
       <dt>Root · PID {run.rootPid}</dt><dd>{memory(run.rootRssKib)}</dd><dt>Descendants · {run.descendantProcessCount ?? '—'} processes</dt><dd>{memory(run.descendantsRssKib)}</dd></Facts>
   </details>
 }
 
 /** Keep the resource reader mounted, but do not process new hidden observations. */
-export const PerformanceResourceDetails = memo(function PerformanceResourceDetails({ snapshot, paused, active }: {
-  snapshot: ToolkitMetricsSnapshot | null; paused: boolean; active: boolean
+export const PerformanceResourceDetails = memo(function PerformanceResourceDetails({ snapshot, paused, active, onNavigate }: {
+  snapshot: ToolkitMetricsSnapshot | null; paused: boolean; active: boolean; onNavigate?(): void
 }) {
+  const displayPath = usePathDisplay()
+  const [navigationError, setNavigationError] = useState<{ key: string; message: string } | null>(null)
   const [scope, setScope] = useState<'app' | 'runs' | 'runtime'>('app')
   const [sort, setSort] = useState<'cpu' | 'rss'>('cpu')
   const [all, setAll] = useState(false)
@@ -56,21 +63,24 @@ export const PerformanceResourceDetails = memo(function PerformanceResourceDetai
   const activeRun = runs.find(run => runKey(run) === selectedRun) ?? null
   const rows = all ? ordered : ordered.slice(0, 5)
   const cardDocument = snapshot?.document?.agentCards
-  const fields = cardDocument?.fields ?? NO_FIELDS
-  const cardsByRun = useMemo(() => {
-    const result = new Map<string, AgentCard | null>()
-    for (const card of cardDocument?.items ?? NO_CARDS) {
-      if (card.reference.kind !== 'run') continue
-      const key = runKey(card.reference)
-      result.set(key, result.has(key) ? null : card)
+  // Local presentation resolves every visible Run, even when the public card budget omitted it.
+  const visibleCardSignature = JSON.stringify(active && scope === 'runs' ? rows.map(run => [run.hostId, run.runId]) : [])
+  const visibleCards: AgentCard[] = useMemo(() => (JSON.parse(visibleCardSignature) as [string, string][]).map(([hostId, runId]) => ({
+    reference: { kind: 'run', hostId, runId }, metrics: []
+  })), [visibleCardSignature])
+  const cardFacts = useToolkitAgentCards(visibleCards, RUN_FIELDS, active && scope === 'runs')
+  const navigate = (run: RunUsage, facts: ToolkitAgentCardFacts) => {
+    const state = useAppStore.getState(), current = resolveToolkitAgentCardSession(state.sessions, { kind: 'run', hostId: run.hostId, runId: run.runId })
+    if (current.state !== 'resolved' || current.clientSessionId !== facts.clientSessionId) {
+      setNavigationError({ key: runKey(run), message: current.state !== 'resolved' ? current.reason : 'The original Run identity changed. Refresh its reading before navigating.' })
+      return
     }
-    return result
-  }, [cardDocument?.items])
-  const visibleCardSignature = JSON.stringify(active && scope === 'runs' ? [...new Set([...rows.map(runKey), ...(selectedRun ? [selectedRun] : [])])] : [])
-  const visibleCards = useMemo(() => (JSON.parse(visibleCardSignature) as string[]).flatMap(key => {
-    const card = cardsByRun.get(key); return card ? [card] : []
-  }), [visibleCardSignature, cardsByRun])
-  const cardFacts = useToolkitAgentCards(visibleCards, fields, active && scope === 'runs')
+    if (!state.selectSession(current.clientSessionId)) {
+      setNavigationError({ key: runKey(run), message: 'The original Session could not be revealed. Its workface and this reading are kept.' })
+      return
+    }
+    setNavigationError(null); onNavigate?.()
+  }
   const totals = observation?.runTotals
   const source = scope === 'app' ? observation?.app : scope === 'runs' ? observation?.process : observation?.runtime
   // 只投影真实 owner 的有界点；自己的暂停断点不能被其他 watcher 的连续观察填上。
@@ -159,7 +169,7 @@ export const PerformanceResourceDetails = memo(function PerformanceResourceDetai
         <dt>Ended / unattached</dt><dd>{runtime.resources ? `${runtime.resources.terminatedRuns} / ${runtime.resources.terminatedUnattachedRuns}` : '—'}</dd>
         <dt>Storage · disk</dt><dd>{bytes(runtime.runtimeStorage?.bytes)}</dd>
         <dt>Storage observed</dt><dd>{readingTime(runtime.runtimeStorageObservedAt, snapshot?.observedAt)}</dd>
-        <dt>Storage path</dt><dd>{runtime.runtimeStorage?.path ?? runtime.runtimeStorageUnavailable ?? 'Unavailable'}</dd>
+        <dt>Storage path</dt><dd>{runtime.runtimeStorage?.path ? displayPath(runtime.runtimeStorage.path, runtime.hostId) : runtime.runtimeStorageUnavailable ?? 'Unavailable'}</dd>
         <dt>Process source</dt><dd>{runtime.process.unavailable}</dd>
       </Facts><p className="performance-note">Retention is an observation, not a leak verdict.</p></details>
     </section>)}
@@ -189,9 +199,10 @@ export const PerformanceResourceDetails = memo(function PerformanceResourceDetai
             <button type="button" aria-pressed={sort === 'cpu'} onClick={() => setSort('cpu')}>CPU</button><button type="button" aria-pressed={sort === 'rss'} onClick={() => setSort('rss')}>RSS</button></div></div>
           <div className="performance-table-head"><span>Run</span><span>CPU</span><span>RSS</span></div>
           <div ref={list} className="performance-run-list" onFocusCapture={lock} onBlurCapture={event => { if (!event.currentTarget.contains(event.relatedTarget as Node) && !openRuns.current.size) setLockedOrder(null) }}>
-            {rows.map(run => { const card = cardsByRun.get(runKey(run)); return <RunRow key={runKey(run)} run={run} card={card} fields={fields}
-              facts={card ? cardFacts.get(toolkitAgentCardKey(card.reference)) : undefined} onToggle={toggleRun} basis={observation?.units.cpuBasis} /> })}</div>
-          {cardDocument?.omittedItems ? <p className="performance-note">{cardDocument.omittedItems} Agent cards omitted by the result budget. Run readings and totals include all tracked Runs.</p> : null}
+            {rows.map(run => <RunRow key={runKey(run)} run={run}
+              facts={cardFacts.get(toolkitAgentCardKey({ kind: 'run', hostId: run.hostId, runId: run.runId }))} onToggle={toggleRun} onNavigate={navigate}
+              navigationError={navigationError?.key === runKey(run) ? navigationError.message : undefined} basis={observation?.units.cpuBasis} />)}</div>
+          {cardDocument?.omittedItems ? <p className="performance-note">{cardDocument.omittedItems} public result cards omitted. Local identities and Run readings are resolved independently.</p> : null}
           {!runs.length ? <p className="performance-empty">{source?.state === 'available' ? 'No observed Runs' : 'Waiting for Run readings'}</p> : null}
           {ranked.length > 5 ? <button type="button" className="performance-show-all" onClick={() => setAll(!all)}>{all ? 'Show top five' : `View all ${ranked.length} Runs`}<ThemeNavigationDownIcon size={12} /></button> : null}
         </>}
