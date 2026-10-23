@@ -10,14 +10,15 @@ const bridge = await vi.hoisted(async () => {
   const { EventEmitter } = await import('node:events')
   const { mkdtemp } = await import('node:fs/promises'), { tmpdir } = await vi.importActual<typeof import('node:os')>('node:os'), { join } = await import('node:path')
   const directory = await mkdtemp(join(tmpdir(), 'amux-manual-owner-'))
-  for (const key of ['window','document','navigator','HTMLElement','HTMLInputElement','HTMLSelectElement','Element','Node','Event','PointerEvent'] as const) vi.stubGlobal(key, key === 'window' ? window : window[key])
+  for (const key of ['window','document','navigator','HTMLElement','HTMLInputElement','HTMLSelectElement','Element','Node','Event','PointerEvent','MutationObserver','CustomEvent','NodeFilter','HTMLButtonElement','HTMLTextAreaElement'] as const) vi.stubGlobal(key, key === 'window' ? window : window[key])
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  vi.stubGlobal('getComputedStyle', window.getComputedStyle.bind(window))
   return { window, directory, profile: directory, api: null as AgentMuxPreloadApi | null, events: new EventEmitter(), invoke: vi.fn(), handlers: new Map<string, (...args: any[]) => Promise<any>>() }
 })
 vi.mock('node:os', async load => ({ ...await load<typeof import('node:os')>(), homedir: () => bridge.directory }))
 vi.mock('electron', () => ({ contextBridge: { exposeInMainWorld: (key: string, api: AgentMuxPreloadApi) => {
   bridge.api = api; Object.defineProperty(window, key, { configurable: true, value: api })
-} }, ipcRenderer: { invoke: bridge.invoke, on: (channel: string, listener: (...args: any[]) => void) => bridge.events.on(channel, listener), removeListener: (channel: string, listener: (...args: any[]) => void) => bridge.events.off(channel, listener) }, webFrame: { getZoomFactor: () => 1 },
+} }, ipcRenderer: { invoke: bridge.invoke, on: (channel: string, listener: (...args: any[]) => void) => bridge.events.on(channel, listener), removeListener: (channel: string, listener: (...args: any[]) => void) => bridge.events.off(channel, listener), off: (channel: string, listener: (...args: any[]) => void) => bridge.events.off(channel, listener) }, webFrame: { getZoomFactor: () => 1 },
   ipcMain: { handle: (channel: string, fn: (...args: any[]) => Promise<any>) => bridge.handlers.set(channel, fn), removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   app: { getPath: () => bridge.profile, getAppPath: () => bridge.profile }, clipboard: {}, dialog: {}, nativeImage: {}, shell: {}, session: {}
@@ -32,12 +33,15 @@ import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/co
 import { startAgentMuxHost } from '../../host/src/host.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { registerIpc } from '../src/main/ipc.js'
+import { createDesktopApplicationAccessOwner } from '../src/main/application-access-owner.js'
 import { WorkspaceFiles } from '../src/main/workspace-files.js'
 import { defaultHttpInstance } from '@larksuiteoapi/node-sdk'
 import { feishuSdkTransport } from '../../../packages/connectors/test/fixtures/feishu.js'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { restoredManualConnectionIntents, manualConnectionScope } from '../src/renderer/src/lib/manual-connection-intent'
+import { ConnectionIdentityRemoval } from '../src/renderer/src/components/settings/ConnectionIdentityRemoval'
+import { retainedIdentityRemovalTasks } from '../src/renderer/src/lib/bot-task-selection'
 import { larkSettingsModule } from '../src/renderer/src/components/settings/modules/lark'
 import { composerConfig } from './helpers/composer-dom-fixture'
 import { createClientUiRoot } from './helpers/client-ui-render'
@@ -63,7 +67,7 @@ async function originalHost(withConnections = true) {
     const previous = Object.fromEntries(Object.entries(process.env).filter(([key]) => /^(?:AGENTMUX_|CTXMUX_)/u.test(key)))
     for (const key of Object.keys(process.env)) if (/^(?:AGENTMUX_|CTXMUX_)/u.test(key)) delete process.env[key]
     Object.assign(process.env, launchEnvironment)
-    const connect = vi.spyOn(core.AgentMuxClient.prototype, 'connect').mockImplementationOnce(async function () {
+    const connect = vi.spyOn(core.AgentMuxClient.prototype, 'connect').mockImplementationOnce(async function (this: core.AgentMuxClient) {
       const inner = this as unknown as typeof f.inner; await inner.registry.load('local'); inner.connected = true
       for (const key of ['isConnected','status','identity','input','observeOutput','attach','detach','stop']) inner.kernel[key] = kernel[key]
     })
@@ -84,7 +88,7 @@ async function fixture() {
   const a = await originalHost(), b = await originalHost()
   const configs: HostConfig[] = [{ id: 'local', kind: 'local', label: 'Local Host' }, { id: 'owner-a', kind: 'ssh', label: 'Build Host A', hostname: 'owner-a.invalid' }, { id: 'owner-b', kind: 'ssh', label: 'Build Host B', hostname: 'owner-b.invalid' }]
   const targets = { a: { hostId: 'owner-a', runtimeId: a.owner.runtimeId }, b: { hostId: 'owner-b', runtimeId: b.owner.runtimeId } }
-  const config: AppConfig = { ...structuredClone(composerConfig), hosts: configs, workspaces: [] }
+  const config: AppConfig = { ...structuredClone(composerConfig), hosts: configs, workspaces: [], startup: { skipAgentAvailabilityCheckWait: true } }
   let replaceAfterOwnerInspection = false
   const runtime = new RuntimeController(new core.AgentMuxMemoryAgentSessionStore(), async host => {
     const original = host.id === 'owner-b' ? b : a
@@ -110,9 +114,10 @@ async function fixture() {
   vi.stubEnv('AGENTMUX_SPATIAL_STATE_STORE', join(bridge.profile, 'spatial.json'))
   const { EventEmitter } = await import('node:events')
   const sender = Object.assign(new EventEmitter(), { id: 752, isDestroyed: () => false, send: (channel: string, ...values: unknown[]) => { bridge.events.emit(channel, {}, ...values) }, mainFrame: { framesInSubtree: [] } })
-  const releaseMain = await registerIpc({ initialConfig: config,
+  const applicationAccess = createDesktopApplicationAccessOwner(runtime, join(bridge.profile, 'application-access.sqlite')); closes.push(() => applicationAccess.dispose())
+  const releaseMain = await registerIpc({ initialConfig: config, applicationAccess,
     window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
-    workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
+    workbenchWindows: { setNativeOwner: () => () => {} } as unknown as Parameters<typeof registerIpc>[0]['workbenchWindows'],
     configStore: { get: async () => config, validate: (value: AppConfig) => value, save: async (value: AppConfig) => value } as never,
     progressLoops: { subscribe: () => () => {} } as never, scratchTopics: { setNameAudit: vi.fn() } as never,
     workspaceFiles: new WorkspaceFiles(() => new core.LocalExecutionHost()) })
@@ -137,6 +142,9 @@ async function fixture() {
     if (channel === 'connections:call' && args[0] === 'connection.ls' && heldList) { heldList = false; listStarted = true; await listDelay }
     return result
   })
+  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({ sessions: [], timelines: {}, recoveryCandidates: [] })
+  window.localStorage.clear(); await useAppStore.persist.rehydrate()
+  const stop = await useAppStore.getState().initialize(); stop()
   useAppStore.setState({ config, sessions: [], manualConnectionIntents: {}, manualConnectionSelections: {}, botTaskSelections: {} })
   container = document.createElement('div'); document.body.append(container); root = createClientUiRoot(container)
   const nativeCalls: unknown[] = [], native = feishuSdkTransport(); let nativeName = 'Native room'
@@ -177,12 +185,13 @@ it('the mounted manual pane keeps colliding IDs on the exact hosting owner throu
   expect(JSON.stringify(f.nativeCalls)).toContain('synthetic-Owner A'); expect(JSON.stringify(f.nativeCalls)).not.toContain('synthetic-Owner B')
   await f.select('owner-b'); await settle('Owner B'); expect(container.textContent).not.toContain('Owner A')
   await click('[data-connection="same-connection"] button'); await click('[data-connection-check]'); await settle('Connection checked.')
+  await vi.waitFor(() => expect(bridge.invoke.mock.calls.some(call => call[0] === 'connections:call' && call[1] === 'connection.setup.ls' && JSON.stringify(call[3]) === JSON.stringify(f.targets.b))).toBe(true))
   expect(JSON.stringify(f.nativeCalls)).toContain('synthetic-Owner B'); expect(f.mainFallback).not.toHaveBeenCalled()
 })
 
 it('a lost save ACK survives page unmount and serialized UI restore with the original target, operation and credential reference', async () => {
   const f = await fixture(); await seed(f, f.targets.b, 'Owner B')
-  await f.select('owner-a'); await settle('Connect a bot'); await click('[data-enrollment-existing]')
+  await f.select('owner-a'); await settle('Your bots'); await click('[data-enrollment-existing]')
   await fill('Connection app ID', 'synthetic-manual'); await fill('Connection app secret', 'synthetic-private-input')
   await act(async () => { const enabled = container.querySelector<HTMLInputElement>('[aria-label="Connection enabled"]')!; enabled.click() })
   f.loseSave(); await click('[data-connection-save]'); await settle('Save result not confirmed.')
@@ -319,4 +328,144 @@ it('default trusted IPC and per-reader metadata borrow the background owner with
   await vi.waitFor(() => expect(afterReload).toHaveLength(1))
   f.sender.emit('did-start-navigation', {}, 'http://localhost/reloaded', false, true)
   expect(subscriptions[2]!.aborted).toBe(true)
+})
+
+
+it('the settings default discovers the background owner before listing bots and an ownerless original save never borrows it', async () => {
+  const f = await fixture()
+  await seed(f, f.targets.a, 'Background bot')
+  await act(async () => root!.render(null))
+  useAppStore.setState({ manualConnectionSelections: {}, manualConnectionIntents: {} })
+  await f.mount(); await settle('Background bot')
+  expect(useAppStore.getState().manualConnectionSelections.lark).toEqual({ hostId: 'local', runtimeId: f.a.owner.runtimeId })
+  expect(container.querySelector('[data-connection-hosting]')?.textContent).toContain('Background Host on this device')
+  expect(container.querySelector('[data-enrollment-new]')).not.toBeNull()
+  const key = manualConnectionScope('lark', null), original = {
+    channel: 'lark' as const, target: null, draft: { view: 'new' as const, label: 'Original draft', appId: 'original-unsent', domain: 'open.feishu.cn', enabled: false },
+    pending: { operationId: 'ownerless-original-save', expectedRevision: null, connection: { connectionId: 'original-unsent', adapterId: 'feishu', application: { domain: 'open.feishu.cn', appId: 'original-unsent' }, label: 'Original draft', enabled: false, credentialRef: '' } }
+  }
+  useAppStore.setState({ manualConnectionIntents: { [key]: original } })
+  await clickText('Review original save · Host not recorded')
+  await settle('Original bot Host not recorded')
+  expect(container.textContent).toContain(original.pending.operationId)
+  expect(container.querySelector('[data-connection-save]')).toBeNull()
+  expect(useAppStore.getState().manualConnectionIntents[key]).toEqual(original)
+  await act(async () => root!.render(null))
+  const beforeReopen = bridge.invoke.mock.calls.filter(call => call[0] === 'connections:hostingTarget').length
+  await f.mount(); await settle('Original bot Host not recorded')
+  expect(useAppStore.getState().manualConnectionSelections.lark).toBeNull()
+  expect(bridge.invoke.mock.calls.filter(call => call[0] === 'connections:hostingTarget')).toHaveLength(beforeReopen)
+  expect(useAppStore.getState().manualConnectionIntents[key]).toEqual(original)
+  expect((await f.a.rpc.call('connection.inspect', { operationId: original.pending.operationId })).operation).toBeNull()
+  expect((await f.b.rpc.call('connection.inspect', { operationId: original.pending.operationId })).operation).toBeNull()
+  expect(f.mainFallback).not.toHaveBeenCalled()
+})
+
+
+it('identity removal keeps same-ID requests on each original Host and checks the retained receipt without deleting on the current owner', async () => {
+  const f = await fixture(), a = await seed(f, f.targets.a, 'Owner A'), b = await seed(f, f.targets.b, 'Owner B')
+  const unknownKey = JSON.stringify(['identity-removal', 'same-connection', 'feishu', 'open.feishu.cn', 'synthetic-app', 1])
+  useAppStore.setState({ botTaskSelections: { [unknownKey]: 'old-ownerless-removal' } })
+  const originalCall = api.connections.call, deleted = vi.fn()
+  vi.spyOn(api.connections, 'call').mockImplementation(async (method, params, target) => {
+    const result = await originalCall(method, params, target)
+    if (method === 'connection.delete') throw Error('Original deletion ACK lost')
+    return result
+  })
+  const readings = { items: [], reading: false, issue: '', complete: true, refresh: () => {} }
+  const show = async (target: ConnectionHostingTarget, record: typeof a.connection) => {
+    await act(async () => root!.render(null))
+    await act(async () => root!.render(<ConnectionIdentityRemoval hostingTarget={target} record={record} readings={readings} active onDeleted={deleted} />))
+    await click('[data-identity-remove]')
+  }
+  const confirm = async (label: string) => {
+    await vi.waitFor(() => expect(document.querySelector('[data-confirm-label="' + label + '"]')).not.toBeNull())
+    await act(async () => document.querySelector<HTMLButtonElement>('[data-confirm-label="' + label + '"]')!.click())
+  }
+  await show(f.targets.a, a.connection); await confirm('Remove identity')
+  await vi.waitFor(() => expect(document.body.textContent).toContain('Removal result not confirmed'))
+  const first = retainedIdentityRemovalTasks(useAppStore.getState().botTaskSelections)
+  expect(first).toHaveLength(2); const originalA = first.find(value => value.hostingTarget?.hostId === f.targets.a.hostId)!; expect(originalA.hostingTarget).toEqual(f.targets.a)
+  expect(useAppStore.getState().botTaskSelections[unknownKey]).toBe('old-ownerless-removal')
+  expect((await f.b.rpc.call('connection.inspect', { connectionId: 'same-connection' })).connection).not.toBeNull()
+  await show(f.targets.b, b.connection); await confirm('Remove identity')
+  await vi.waitFor(() => expect(retainedIdentityRemovalTasks(useAppStore.getState().botTaskSelections)).toHaveLength(3))
+  const both = retainedIdentityRemovalTasks(useAppStore.getState().botTaskSelections)
+  expect(both.some(value => value.operationId === originalA.operationId && JSON.stringify(value.hostingTarget) === JSON.stringify(f.targets.a))).toBe(true)
+  await show(f.targets.a, a.connection); await confirm('Check original removal')
+  await vi.waitFor(() => expect(deleted).toHaveBeenCalledOnce())
+  expect(deleted.mock.calls[0]![0].operationId).toBe(originalA.operationId)
+  const remaining = retainedIdentityRemovalTasks(useAppStore.getState().botTaskSelections)
+  expect(remaining).toHaveLength(2); expect(remaining.find(value => value.hostingTarget)?.hostingTarget).toEqual(f.targets.b)
+  expect(useAppStore.getState().botTaskSelections[unknownKey]).toBe('old-ownerless-removal')
+})
+
+
+it.each(['before-credential', 'before-configuration'] as const)('the manual save retains its original input before effects when local storage fails %s', async failure => {
+  const f = await fixture()
+  await f.select('owner-a'); await click('[data-enrollment-existing]')
+  await fill('Connection app ID', 'storage-bound-application'); await fill('Connection app secret', 'synthetic-storage-input')
+  let rejectWrite = failure === 'before-credential'
+  const originalSet = window.localStorage.setItem.bind(window.localStorage)
+  const storage = vi.spyOn(window.localStorage, 'setItem').mockImplementation((key, value) => {
+    if (key === 'agentmux-workbench-v1' && rejectWrite) throw Error('Controlled original storage write refusal')
+    originalSet(key, value)
+  })
+  const store = api.connections.storeCredential, credential = vi.spyOn(api.connections, 'storeCredential').mockImplementation(async (input, target) => {
+    const result = await store(input, target)
+    if (failure === 'before-configuration') rejectWrite = true
+    return result
+  })
+  const before = bridge.invoke.mock.calls.length
+  await click('[data-connection-save]')
+  await vi.waitFor(() => expect(container.querySelector<HTMLButtonElement>('[data-connection-save]')?.disabled ?? false).toBe(false))
+  const original = useAppStore.getState().manualConnectionIntents[manualConnectionScope('lark', f.targets.a)]!.pending
+  const writes = bridge.invoke.mock.calls.slice(before).filter(call => call[0] === 'connections:call' && call[1] === 'connection.configure')
+  const operationId = original?.operationId ?? writes[0]?.[2]?.operationId
+  expect(operationId).toBeTruthy()
+  expect((await f.a.rpc.call('connection.inspect', { operationId })).operation, 'the original Host must not apply configuration after its reference retention was refused').toBeNull()
+  expect(credential).toHaveBeenCalledTimes(failure === 'before-credential' ? 0 : 1)
+  expect(writes, 'a refused original persistence write must prevent the actual Host configuration effect').toEqual([])
+  expect(original).toBeDefined()
+  expect(container.textContent).toContain(failure === 'before-credential' ? 'No credential or application request was sent.' : 'No application save was sent.')
+  expect((await f.a.rpc.call('connection.inspect', { operationId: original!.operationId })).operation).toBeNull()
+  await click('[data-connection-save]'); await settle('Continue this save')
+  await click('[data-connection-save]')
+  await vi.waitFor(() => expect(container.querySelector<HTMLButtonElement>('[data-connection-save]')?.disabled ?? false).toBe(false))
+  expect(credential).toHaveBeenCalledTimes(failure === 'before-credential' ? 0 : 1)
+  expect(bridge.invoke.mock.calls.slice(before).filter(call => call[0] === 'connections:call' && call[1] === 'connection.configure')).toEqual([])
+  expect(useAppStore.getState().manualConnectionIntents[manualConnectionScope('lark', f.targets.a)]!.pending!.operationId).toBe(original!.operationId)
+  storage.mockRestore(); rejectWrite = false
+  await click('[data-connection-save]'); await settle('Continue this save')
+  await click('[data-connection-save]'); await settle('Application saved.')
+  expect((await f.a.rpc.call('connection.inspect', { operationId: original!.operationId })).operation?.operationId).toBe(original!.operationId)
+  expect((await f.b.rpc.call('connection.inspect', { operationId: original!.operationId })).operation).toBeNull()
+})
+
+it('a refused original workbench write prevents a new identity removal while retaining the same request for recovery', async () => {
+  const f = await fixture(), seeded = await seed(f, f.targets.a, 'Owner A')
+  const readings = { items: [], reading: false, issue: '', complete: true, refresh: () => {} }
+  await act(async () => root!.render(<ConnectionIdentityRemoval hostingTarget={f.targets.a} record={seeded.connection} readings={readings} active onDeleted={() => {}} />))
+  await click('[data-identity-remove]')
+  const originalSet = window.localStorage.setItem.bind(window.localStorage)
+  const storage = vi.spyOn(window.localStorage, 'setItem').mockImplementation((key, value) => {
+    if (key === 'agentmux-workbench-v1') throw Error('Controlled original storage write refusal')
+    originalSet(key, value)
+  })
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-confirm-label="Remove identity"]')!.click())
+  await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>('[data-confirm-label]')?.disabled ?? false).toBe(false))
+  const pending = retainedIdentityRemovalTasks(useAppStore.getState().botTaskSelections)[0]
+  const dispatched = bridge.invoke.mock.calls.find(call => call[0] === 'connections:call' && call[1] === 'connection.delete')
+  const operationId = pending?.operationId ?? dispatched?.[2]?.operationId
+  expect(operationId).toBeTruthy()
+  expect((await f.a.rpc.call('connection.delete.inspect', { operationId })).operation, 'the original Host must not have applied a deletion after its locator write was refused').toBeNull()
+  const request = pending!
+  expect(request.hostingTarget).toEqual(f.targets.a)
+  expect((await f.a.rpc.call('connection.inspect', { connectionId: 'same-connection' })).connection).not.toBeNull()
+  expect(document.body.textContent).toContain('No removal was sent.')
+  storage.mockRestore()
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-confirm-label="Check original removal"]')!.click())
+  await vi.waitFor(() => expect(document.querySelector('[data-confirm-label="Continue original removal"]')).not.toBeNull())
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-confirm-label="Continue original removal"]')!.click())
+  await vi.waitFor(async () => expect((await f.a.rpc.call('connection.delete.inspect', { operationId: request.operationId })).operation?.operationId).toBe(request.operationId))
 })
