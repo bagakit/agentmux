@@ -39,7 +39,8 @@ const rpc: AgentMuxHostedRpcPort = {
 let client: AgentMuxHostedClient | null = null, setup: Setup, visible = true
 let connection: MobileConnection = { state: 'connecting', message: '正在连接原 Host' }
 const operations: unknown[] = [], reads: unknown[] = []
-const conversationReads: unknown[] = []
+const conversationReads: { hostId: string; agentSessionId: string; windowId: string; revision: number;
+  complete: boolean; olderCursor: string | null; [field: string]: unknown }[] = []
 const frames: number[] = [], longTasks: number[] = [], bodyMounts = new Map<string, number>()
 let firstFrame: { at: number; nodes: number; bodies: number; markdown: number } | null = null
 let frame = 0
@@ -75,9 +76,15 @@ async function connect() {
   for (const method of ['readAgentConversation', 'readConversationChanges'] as const) {
     const original = client[method]
     Reflect.set(client, method, async (...args: Parameters<typeof original>) => {
-      const started = performance.now(), page = await Reflect.apply(original, client, args) as Awaited<ReturnType<typeof original>>
+      const started = performance.now(), input = args[0]
+      const published = method === 'readAgentConversation' && typeof input.cursor === 'string' && input.cursor
+        ? conversationReads.findLast(read => read.complete && read.hostId === input.hostId &&
+          read.agentSessionId === input.agentSessionId && read.olderCursor === input.cursor) : undefined
+      const earlierWindow = published ? { hostId: published.hostId, agentSessionId: published.agentSessionId,
+        windowId: published.windowId, revision: published.revision, olderCursor: published.olderCursor } : null
+      const page = await Reflect.apply(original, client, args) as Awaited<ReturnType<typeof original>>
       conversationReads.push({ method, started, finished: performance.now(), hostId: page.hostId, agentSessionId: page.agentSessionId,
-        requestCursor: args[0].cursor ?? null, olderCursor: page.window.navigation.older ?? null,
+        requestCursor: input.cursor ?? null, earlierWindow, olderCursor: page.window.navigation.older ?? null,
         windowId: page.window.id, revision: page.window.revision, complete: page.window.complete, anchor: page.window.anchor ?? null, navigation: page.window.navigation,
         nativeCut: page.window.checkpoint.frontier.cuts.find(cut => cut.kind === 'native')?.checkpoint.cursor,
         nativeIds: page.items.flatMap(entry => entry.kind === 'item' ? entry.item.records.flatMap(record =>

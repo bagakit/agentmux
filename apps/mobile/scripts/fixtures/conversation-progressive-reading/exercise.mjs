@@ -76,7 +76,7 @@ export async function runMobile({BrowserWindow,setup,evidence,phase,scene,preloa
     }
     await capture('current')
     for(let demand=0;demand<3;demand++){
-      const before=await read(`(()=>{const receipts=mobileReading.facts().conversationReads;return {ids:[...document.querySelectorAll('[data-native-record-id]')].map(n=>n.dataset.nativeRecordId),started:performance.now(),olderCursor:receipts.findLast(r=>r.complete)?.olderCursor,receiptCount:receipts.length}})()`)
+      const before=await read(`(()=>{const receipts=mobileReading.facts().conversationReads,source=receipts.findLast(r=>r.hostId==='local'&&r.agentSessionId===${JSON.stringify(mobile.agentSessionId)}&&r.complete);return {ids:[...document.querySelectorAll('[data-native-record-id]')].map(n=>n.dataset.nativeRecordId),started:performance.now(),windowId:source?.windowId,revision:source?.revision,olderCursor:source?.olderCursor,receiptCount:receipts.length}})()`)
       assert.equal(typeof before.olderCursor,'string','The original accepted source supplies the next older cursor')
       await wheel(-900);await wheel(-900)
       let clicked=false,progress=null
@@ -85,7 +85,9 @@ export async function runMobile({BrowserWindow,setup,evidence,phase,scene,preloa
           const before=${JSON.stringify(before)},facts=mobileReading.facts(),ids=[...document.querySelectorAll('[data-native-record-id]')].map(n=>n.dataset.nativeRecordId);
           const own=r=>r.hostId==='local'&&r.agentSessionId===${JSON.stringify(mobile.agentSessionId)};
           const receipts=facts.conversationReads.slice(before.receiptCount);
-          const receipt=receipts.find(r=>own(r)&&r.method==='readAgentConversation'&&r.requestCursor===before.olderCursor&&r.finished>before.started);
+          const receipt=receipts.find(r=>own(r)&&r.method==='readAgentConversation'&&r.finished>before.started&&
+            r.earlierWindow&&own(r.earlierWindow)&&r.earlierWindow.windowId===before.windowId&&r.earlierWindow.revision>=before.revision&&
+            r.requestCursor===r.earlierWindow.olderCursor&&r.windowId===r.earlierWindow.windowId&&r.revision>=r.earlierWindow.revision);
           const complete=receipt&&receipts.find(r=>own(r)&&r.windowId===receipt.windowId&&r.revision===receipt.revision&&r.complete);
           const originalId=receipt&&receipts.filter(r=>own(r)&&r.windowId===receipt.windowId&&r.revision===receipt.revision).flatMap(r=>r.nativeIds).find(id=>!before.ids.includes(id)&&ids.includes(id));
           const pending=facts.reads.filter(r=>!r.finished&&r.method==='runtime.invoke'&&['readAgentConversation','readConversationChanges'].includes(r.params?.invocation?.method)&&r.params.invocation.args[0].hostId==='local'&&r.params.invocation.args[0].agentSessionId===${JSON.stringify(mobile.agentSessionId)}).map(r=>({method:r.params.invocation.method,started:r.started}));
