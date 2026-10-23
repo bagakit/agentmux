@@ -56,25 +56,30 @@ export async function learningBehaviorFixture(evidenceDirectory?: string) {
   const cli = (argv: string[], stdin = '', credentials?: { agentSessionId: string; capability: string }) =>
     runCompiledObjectCli(argv, objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: 'unix:' + server.path,
       AGENTMUX_AGENT_SESSION_ID: credentials?.agentSessionId, AGENTMUX_AGENT_CAPABILITY: credentials?.capability }), stdin)
-  async function packet(operation: AgentLearningOperation, stage: 'extraction' | 'learning', label: string) {
+  async function workerPacket(operationId: string, worker: { agentSessionId: string; createOperationId: string }, stage: 'extraction' | 'learning' | 'later', label: string) {
     if (!evidenceDirectory) throw Error('This observed model packet needs an explicit evidence directory.')
-    const worker = stage === 'extraction' ? operation.proposer : operation.learner!
     const stored = (await f.store.readMetadata(worker.agentSessionId))!
     const spec = f.started.find(entry => entry.env?.AGENTMUX_AGENT_SESSION_ID === worker.agentSessionId)
     if (!stored.initialInput?.prompt || !spec?.env.AGENTMUX_AGENT_CAPABILITY) throw Error('Original Core packet/caller unavailable.')
+    if (stored.creation?.createOperationId !== worker.createOperationId) throw Error('Packet belongs to another original Core creation.')
     const directory = join(evidenceDirectory, label); await mkdir(directory, { recursive: true })
     const original = stored.initialInput.prompt
     await writeFile(join(directory, 'production-input.txt'), original)
     await writeFile(join(directory, 'initial-input.json'), JSON.stringify(stored.initialInput, null, 2))
     const tools = await writeBehaviorTools({ directory, cliPath: resolve('packages/core/bin/amux'), endpoint: 'unix:' + server.path,
-      caller: worker.agentSessionId, capability: spec.env.AGENTMUX_AGENT_CAPABILITY, operationId: operation.operationId, production: original })
-    const binding = { label, stage, operationId: operation.operationId, fixtureCaller: worker.agentSessionId,
+      caller: worker.agentSessionId, capability: spec.env.AGENTMUX_AGENT_CAPABILITY, operationId, production: original })
+    const binding = { label, stage, operationId, fixtureCaller: worker.agentSessionId,
       createOperationId: worker.createOperationId, ...tools,
       nativeTaskId: null, providerLaunch: 'controlled-runtime-not-qualified' }
     await writeFile(join(directory, 'binding.json'), JSON.stringify(binding, null, 2))
     return binding
   }
+  const packet = (operation: AgentLearningOperation, stage: 'extraction' | 'learning', label: string) =>
+    workerPacket(operation.operationId, stage === 'extraction' ? operation.proposer : operation.learner!, stage, label)
+  const sessionPacket = (agentSessionId: string, createOperationId: string, label: string) =>
+    workerPacket(createOperationId, { agentSessionId, createOperationId }, 'later', label)
   return { ...f, state, files, competingFiles, originalFiles, knowledge: topics, audit, behaviorClient: client, resource, cli, packet,
+    sessionPacket,
     failNextSaveReceipt: () => { fault = 'receipt' }, raceNextSave: (action: (input: any) => Promise<void>) => { concurrent = action },
     closeBehavior: async () => { await client.dispose(); await server.stop(); await files.dispose(); await competingFiles.dispose() } }
 }
