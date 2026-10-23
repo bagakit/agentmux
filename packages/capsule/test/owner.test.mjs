@@ -215,6 +215,9 @@ test('real process death restores original IDs, bytes, operations, drafts and ex
   const recovered = await second.call('capsule.inspect', { capsuleId: created.record.capsuleId })
   assert.equal(recovered.record.port, port)
   assert.equal(recovered.endpoint.url, created.endpoint.url)
+  assert.notEqual(recovered.endpoint.instanceId, created.endpoint.instanceId)
+  const recoveredResponse = await fetch(recovered.endpoint.url)
+  assert.equal(recoveredResponse.headers.get('x-agentmux-capsule-instance'), recovered.endpoint.instanceId)
   assert.equal(await body(recovered.endpoint.url), 'cross-process durable')
   const original = (await second.call('capsule.operation.inspect', { operationId: 'cross-create' })).operation
   assert.equal(original.result.record.capsuleId, created.record.capsuleId)
@@ -652,3 +655,29 @@ test(
     )
   },
 )
+
+test('actual successful HTTP responses identify the current service lifetime without changing page identity', async (t) => {
+  const { owner, source } = await fixture(t)
+  const page = await owner.call('capsule.create', { operationId: 'instance-page', sourcePath: source })
+  assert.match(page.endpoint.instanceId, /^[1-9A-HJ-NP-Za-km-z]{12}$/u)
+  for (const [path, method] of [
+    ['/', 'GET'],
+    ['/app.js', 'GET'],
+    ['/', 'HEAD'],
+  ]) {
+    const response = await fetch(new URL(path, page.endpoint.url), { method })
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get('x-agentmux-capsule-instance'), page.endpoint.instanceId)
+    await response.arrayBuffer()
+  }
+  const updated = await owner.call('capsule.update', {
+    operationId: 'same-instance-revision',
+    capsuleId: page.record.capsuleId,
+    expectedRevision: 1,
+    changes: { title: 'New title' },
+  })
+  assert.equal(updated.endpoint.instanceId, page.endpoint.instanceId)
+  assert.equal(updated.record.capsuleId, page.record.capsuleId)
+  const { instanceId: _legacyMissing, ...legacyEndpoint } = page.endpoint
+  assert.throws(() => parseCapsuleResult('capsule.create', { ...page, endpoint: legacyEndpoint }))
+})
