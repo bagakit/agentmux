@@ -1,11 +1,16 @@
 import { fixturePath as _hygiene_fixturePath } from "../scripts/lib/fixture-values.mjs"
 import { activityReadingProps } from './helpers/activity-reading-props'
+import { conversationPagePortFixture } from './helpers/conversation-page-port-fixture'
+import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 // @vitest-environment happy-dom
 import { act } from 'react'
 import { type Root } from 'react-dom/client'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentSessionHistoryContentPart, AgentSessionHistoryPage, AgentTimelineItem } from '@agentmux/core'
+import { consumeConversationWindowPage, type ConversationWindowAssembly } from '@agentmux/core/conversation'
+import { projectConversationWindow } from '@agentmux/client-ui/conversation-records'
+import { ConversationView } from '@agentmux/client-ui/components/ConversationView'
 import type { AgentSessionControl } from '../src/shared/contracts'
 import { ActivityView } from '../src/renderer/src/components/ActivityView'
 
@@ -30,7 +35,8 @@ let annotate: ReturnType<typeof vi.fn>
 let openFile: ReturnType<typeof vi.fn>
 let openHttp: ReturnType<typeof vi.fn>
 let clipboardSpy: import('vitest').MockInstance<typeof api.ui.writeClipboardText>
-let historyPageSpy: import('vitest').MockInstance<typeof api.sessions.historyPage>
+let source: Awaited<ReturnType<typeof conversationPagePortFixture>> | undefined
+let nativePage: AgentSessionHistoryPage
 
 function page(parts: AgentSessionHistoryContentPart[]): AgentSessionHistoryPage {
   return {
@@ -48,6 +54,7 @@ function item(content: string): AgentTimelineItem {
     kind: 'assistant_message',
     status: 'complete',
     source: 'native-hook',
+    authorAgentSessionId: control.agentSessionId,
     createdAt: 1,
     updatedAt: 1,
     title: 'Actual live message',
@@ -56,14 +63,17 @@ function item(content: string): AgentTimelineItem {
 }
 
 beforeEach(() => {
+  source = undefined
   vi.clearAllMocks()
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
   vi.stubGlobal('ResizeObserver', class {
     observe() {}
+    unobserve() {}
     disconnect() {}
   })
   vi.stubGlobal('IntersectionObserver', class {
     observe() {}
+    unobserve() {}
     disconnect() {}
   })
   host = document.createElement('div')
@@ -73,31 +83,35 @@ beforeEach(() => {
   openFile = vi.fn()
   openHttp = vi.fn()
   clipboardSpy = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
-  historyPageSpy = vi.spyOn(api.sessions, 'historyPage').mockResolvedValue(page([{ kind: 'text', text: SOURCE }]))
+  // Only the headless viewport geometry is controlled. The original DOM Range,
+  // selection toolbar, explicit annotation action and note owner remain real.
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, 640, 480))
+  vi.spyOn(Range.prototype, 'getClientRects').mockImplementation(() => {
+    const rect = new DOMRect(20, 80, 160, 18)
+    return { 0: rect, length: 1, item: index => index === 0 ? rect : null,
+      [Symbol.iterator]: function* () { yield rect } }
+  })
 })
 
 afterEach(async () => {
   await act(async () => root.unmount())
   host.remove()
+  document.getElementById('agentmux-window-overlay-host')?.remove()
   window.getSelection()?.removeAllRanges()
   vi.useRealTimers()
-  vi.unstubAllGlobals()
-  clipboardSpy.mockRestore()
-  historyPageSpy.mockRestore()
+  try { source?.controls.forEach(control => expect(control).not.toHaveBeenCalled()) }
+  finally { await source?.close(); source = undefined; vi.restoreAllMocks(); vi.unstubAllGlobals() }
 })
 
 async function mount(entry: Entry, content = SOURCE, parts?: AgentSessionHistoryContentPart[]) {
-  historyPageSpy.mockResolvedValue(page(parts ?? [{ kind: 'text', text: content }]))
+  nativePage = entry === 'live' ? { ...page([]), items: [] } : page(parts ?? [{ kind: 'text', text: content }])
+  source ??= await conversationPagePortFixture(control, nativePage.source, async () => nativePage)
+  const stream = entry === 'live' ? await source.publishCaptured([item(content)]) : null
   await act(async () =>
     root.render(
       entry === 'live' ? (
         <ConversationAnnotationOwner onAnnotate={annotate}>{onSelectAnnotation => <ActivityView
-          sessionId={control.agentSessionId}
-          capability="complete-events"
-          displayState="done"
-          items={[item(content)]}
-          workspaceRoot={_hygiene_fixturePath("synthetic")}
-          describeSpeaker={() => ({ name: 'Agent' })}
+          {...activityReadingProps({ control, visible: true, workspaceRoot: _hygiene_fixturePath('synthetic'), label: 'Agent' })}
           onSelectAnnotation={onSelectAnnotation}
           openWorkspaceFile={openFile}
           openHttpLink={openHttp}
@@ -107,8 +121,47 @@ async function mount(entry: Entry, content = SOURCE, parts?: AgentSessionHistory
       )
     )
   )
+  await vi.waitFor(async () => {
+    await act(async () => { await Promise.resolve() })
+    const consumer = inspectConversationConsumers(control).consumers[0]
+    expect(consumer?.accepted).not.toBeNull()
+    expect(consumer).toMatchObject({ loading: false, inFlight: false, watch: { binding: false } })
+    if (stream) expect(source!.acceptedCaptured(stream)).toBe(true)
+  })
+  await revealBodies()
   expect(host.querySelectorAll('.log-turn')).toHaveLength(1)
   expect(host.querySelector('.log-turn__body')).not.toBeNull()
+}
+
+async function revealBodies() {
+  await act(async () => {
+    for (const group of host.querySelectorAll<HTMLButtonElement>('.wf-head[aria-expanded="false"]')) group.click()
+  })
+  await act(async () => {
+    for (const step of host.querySelectorAll<HTMLButtonElement>('[data-native-step-id] > .log-row[aria-expanded="false"]')) step.click()
+    for (const card of host.querySelectorAll<HTMLDetailsElement>('.message-disclosure')) { card.open = true; card.dispatchEvent(new Event('toggle')) }
+    for (const body of host.querySelectorAll<HTMLButtonElement>('.conversation-progressive-body__placeholder button')) body.click()
+  })
+}
+
+/** Actual fresh public frames isolate the shared part-disclosure owner; this is not a host Current-action substitute. */
+async function drawNativeFrame(original: AgentSessionHistoryPage) {
+  nativePage = original
+  source ??= await conversationPagePortFixture(control, original.source, async () => nativePage)
+  let pending: ConversationWindowAssembly | undefined, cursor: string | undefined
+  for (let index = 0; index < 20; index++) {
+    const response = await api.conversation.readAgentConversation({ hostId: control.hostId, agentSessionId: control.agentSessionId, limit: 100, ...(cursor ? { cursor } : {}) })
+    const frame = consumeConversationWindowPage(response, pending)
+    if (frame.kind === 'complete') {
+      const reading = projectConversationWindow(frame.snapshot)
+      await act(async () => root.render(<ConversationView sessionId={control.agentSessionId} executionHostId={control.hostId}
+        records={reading.records} originalRecords={reading.originalRecords} page={reading.historyPage ?? null} timeline={reading.captured}
+        workspaceRoot={_hygiene_fixturePath('synthetic')} openWorkspaceFile={openFile} openHttpLink={openHttp} />))
+      await revealBodies(); return
+    }
+    pending = frame.pending; cursor = response.nextCursor!; expect(cursor).toBeTruthy()
+  }
+  throw new Error('The original public native frame did not complete')
 }
 
 function copyButton(): HTMLButtonElement {
@@ -128,9 +181,35 @@ function selection(body: HTMLElement, node: Node, start: number, end: number) {
   body.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
 }
 
+async function openAnnotation() {
+  const toolbar = document.querySelector<HTMLElement>('.conversation-selection-actions')
+  expect(toolbar).not.toBeNull()
+  expect(document.querySelector('.log-turn__annotation')).toBeNull()
+  await vi.waitFor(async () => {
+    await act(async () => { await Promise.resolve() })
+    expect(toolbar!.style.visibility).toBe('visible')
+  })
+  const annotate = [...toolbar!.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '批注')
+  expect(annotate).toBeDefined()
+  await act(async () => annotate!.click())
+  const dialog = document.querySelector<HTMLElement>('.log-turn__annotation')
+  expect(dialog).not.toBeNull()
+  expect(dialog!.hidden).toBe(false)
+  await vi.waitFor(async () => {
+    await act(async () => { await Promise.resolve() })
+    expect(dialog!.style.visibility).toBe('visible')
+    expect(dialog!.getAttribute('data-anchor-state')).toBe('range')
+  })
+  return dialog!
+}
+
 async function addNote() {
-  const textarea = host.querySelector<HTMLTextAreaElement>('.log-turn__annotation textarea')
+  const dialog = await openAnnotation()
+  const textarea = dialog.querySelector<HTMLTextAreaElement>('textarea')
   expect(textarea).not.toBeNull()
+  const submit = dialog.querySelector<HTMLButtonElement>('[aria-label="将批注加入回复草稿"]')
+  expect(submit).not.toBeNull()
+  expect(submit!.disabled).toBe(true)
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(
       textarea!,
@@ -138,10 +217,6 @@ async function addNote() {
     )
     textarea!.dispatchEvent(new Event('input', { bubbles: true }))
   })
-  const submit = [...host.querySelectorAll<HTMLButtonElement>('.log-turn__annotation-actions button')].find(
-    (btn) => btn.textContent === 'Add to reply draft'
-  )
-  expect(submit).toBeDefined()
   expect(submit!.disabled).toBe(false)
   await act(async () => submit!.click())
   expect(annotate).toHaveBeenCalledTimes(1)
@@ -163,7 +238,8 @@ for (const entry of ['live', 'history'] as const) {
         http!.click()
         copyButton().click()
       })
-      expect(openFile).toHaveBeenCalledExactlyOnceWith('src/guide.ts', { line: 4 })
+      expect(openFile).toHaveBeenCalledExactlyOnceWith('src/guide.ts', { line: 4 },
+        expect.objectContaining({ type: 'click', target: file, metaKey: false, ctrlKey: false }))
       expect(openHttp).toHaveBeenCalledExactlyOnceWith(
         'https://docs.example.test/read',
         expect.objectContaining({ metaKey: false, ctrlKey: false })
@@ -173,7 +249,8 @@ for (const entry of ['live', 'history'] as const) {
       if (entry === 'history') {
         expect(host.querySelector('.log-turn')!.getAttribute('data-status')).toBeNull()
         expect(host.querySelector('.log-turn__time')).toBeNull()
-        expect(historyPageSpy).toHaveBeenCalledExactlyOnceWith(control, undefined)
+        expect(source!.nativeRead.mock.calls.length).toBeGreaterThan(0)
+        expect(source!.nativeRead.mock.calls.every(([id]) => id === control.agentSessionId)).toBe(true)
       }
     })
 
@@ -208,8 +285,10 @@ for (const entry of ['live', 'history'] as const) {
       expect(copyButton().getAttribute('aria-label')).toBe('Message copied')
     })
 
-    it('preserves the latest copy success when an older in-flight request later rejects', async () => {
-      await mount(entry, 'Same original source')
+    it('keeps a nested code Copy success when an already dispatched whole-message write later rejects', async () => {
+      const code = '  copy this exact code  '
+      const content = `Same original source\n\n\`\`\`\n${code}\n\`\`\`\n`
+      await mount(entry, content)
       let rejectFirst!: (error: Error) => void
       clipboardSpy.mockImplementationOnce(
         () =>
@@ -221,10 +300,17 @@ for (const entry of ['live', 'history'] as const) {
       expect(clipboardSpy).toHaveBeenCalledTimes(1)
       expect(copyButton().getAttribute('aria-label')).toBe('Copy message')
       await act(async () => copyButton().click())
+      expect(clipboardSpy.mock.calls).toEqual([[content]])
+      const localCopy = host.querySelector<HTMLButtonElement>('[aria-label="Copy code"]')
+      expect(localCopy).not.toBeNull()
+      await act(async () => localCopy!.click())
       expect(clipboardSpy).toHaveBeenCalledTimes(2)
-      expect(copyButton().getAttribute('aria-label')).toBe('Message copied')
+      expect(clipboardSpy.mock.calls).toEqual([[content], [code]])
+      expect(localCopy!.getAttribute('data-copy-state')).toBe('copied')
       await act(async () => rejectFirst(new Error('Older request rejected')))
-      expect(copyButton().getAttribute('aria-label')).toBe('Message copied')
+      expect(localCopy!.getAttribute('data-copy-state')).toBe('copied')
+      expect(copyButton().getAttribute('aria-label')).toBe('Copy message')
+      expect(host.querySelector('.log-turn__copy-error')?.textContent).toBe('Older request rejected')
     })
 
     it('allows a failed clipboard action to retry and then shows genuine acceptance', async () => {
@@ -295,33 +381,38 @@ it('keeps ordered rich native parts, failure and unknown metadata without invent
   await mount('history', '', parts)
   const body = host.querySelector<HTMLElement>('.log-turn__body')!
   const order = [...body.children].map(
-    (child) => child.getAttribute('data-trace-kind') ?? (child.matches('.log-turn__resource') ? 'resource' : 'text')
+    (child) => child.getAttribute('data-trace-kind') ?? (child.matches('.conversation-resource-file') ? 'resource' : 'text')
   )
   expect(order).toEqual(['text', 'reasoning', 'tool-call', 'tool-result', 'resource', 'text'])
   expect(body.querySelector('[data-trace-kind="tool-result"]')!.getAttribute('data-status')).toBe('failed')
-  expect(body.querySelector('.log-turn__resource code')!.textContent).toBe('opaque-resource')
-  expect(body.querySelector('.log-turn__resource button')).toBeNull()
-  expect(host.querySelector('.log-turn__annotation')).toBeNull()
+  const file = body.querySelector<HTMLElement>('.conversation-resource-file')!
+  expect(file).not.toBeNull()
+  expect(file.querySelector('.conversation-resource-file__name')?.textContent).toBe('File resource')
+  expect(file.querySelector('a[href]')).toBeNull()
+  expect(file.querySelector('.conversation-resource-file__download')).toBeNull()
+  expect(file.querySelector('[role="alert"]')?.textContent).toBe('File reading is unavailable here. Its original reference is kept.')
+  const reference = file.querySelector<HTMLDetailsElement>('.conversation-resource-file__reference')!
+  await act(async () => { reference.open = true; reference.dispatchEvent(new Event('toggle')) })
+  const copyReference = reference.querySelector<HTMLButtonElement>('[aria-label="Copy file reference"]')
+  expect(copyReference).not.toBeNull()
+  await act(async () => copyReference!.click())
+  expect(clipboardSpy).toHaveBeenCalledExactlyOnceWith('opaque-resource')
+  expect(openFile).not.toHaveBeenCalled(); expect(openHttp).not.toHaveBeenCalled()
+  expect(document.querySelector('.log-turn__annotation')).toBeNull()
   await act(async () => copyButton().click())
-  expect(clipboardSpy).toHaveBeenCalledExactlyOnceWith(
-    'first\nreason\nshell\nfirst command\nshell\nactual failure\nFile resource\nopaque-resource\nlast'
-  )
+  expect(clipboardSpy.mock.calls).toEqual([['opaque-resource'],
+    ['first\nreason\nshell\nfirst command\nshell\nactual failure\nFile resource\nopaque-resource\nlast']])
 })
 
-it('keeps expanded native tool identity when Latest replaces the same message parts order (T028 boundary)', async () => {
+it('keeps expanded native tool identity when a fresh public frame reorders the same original parts', async () => {
   const a: AgentSessionHistoryContentPart = { kind: 'tool-call', name: 'shell', input: 'command A', callId: 'call-a' }
   const b: AgentSessionHistoryContentPart = { kind: 'tool-call', name: 'shell', input: 'command B', callId: 'call-b' }
-  await mount('history', '', [a, b])
+  await drawNativeFrame(page([a, b]))
   const before = [...host.querySelectorAll<HTMLButtonElement>('.conversation-tool-trace__row')]
   expect(before).toHaveLength(2)
   await act(async () => before[0]!.click())
   expect(before[0]!.parentElement!.querySelector('pre')!.textContent).toBe('command A')
-  historyPageSpy.mockResolvedValueOnce(page([b, a]))
-  const latest = [...host.querySelectorAll<HTMLButtonElement>('button')].find(
-    (button) => button.textContent === ' Latest' || button.textContent?.trim() === 'Latest'
-  )
-  expect(latest).toBeDefined()
-  await act(async () => latest!.click())
+  await drawNativeFrame(page([b, a]))
   const expanded = [...host.querySelectorAll<HTMLElement>('.conversation-tool-trace')].filter(
     (trace) => trace.querySelector('button')!.getAttribute('aria-expanded') === 'true'
   )
@@ -348,12 +439,15 @@ it('retains the actual message body DOM node across copy and selection popover s
   const body = host.querySelector<HTMLElement>('.log-turn__body')!
   const textNode = document.createTreeWalker(body, NodeFilter.SHOW_TEXT).nextNode()!
   await act(async () => selection(body, textNode, 0, 8))
-  expect(host.querySelector('.log-turn__annotation')).not.toBeNull()
+  expect(document.querySelector('.conversation-selection-actions')).not.toBeNull()
+  expect(document.querySelector('.log-turn__annotation')).toBeNull()
   expect(host.querySelector('.log-turn__body p')).toBe(before)
   expect(before?.isConnected).toBe(true)
 
   // 3. Typing in popover does not remount the body node
-  const textarea = host.querySelector<HTMLTextAreaElement>('.log-turn__annotation textarea')!
+  const dialog = await openAnnotation()
+  expect(host.querySelector('.log-turn__body p')).toBe(before)
+  const textarea = dialog.querySelector<HTMLTextAreaElement>('textarea')!
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, 'Some note')
     textarea.dispatchEvent(new Event('input', { bubbles: true }))
@@ -361,12 +455,10 @@ it('retains the actual message body DOM node across copy and selection popover s
   expect(host.querySelector('.log-turn__body p')).toBe(before)
   expect(before?.isConnected).toBe(true)
 
-  // 4. Cancelling popover does not remount the body node
-  const cancel = [...host.querySelectorAll<HTMLButtonElement>('.log-turn__annotation button')].find(
-    (btn) => btn.textContent === 'Cancel'
-  )!
+  // 4. Explicitly discarding this note does not remount the body node
+  const cancel = dialog.querySelector<HTMLButtonElement>('.conversation-annotation-note__discard')!
   await act(async () => cancel.click())
-  expect(host.querySelector('.log-turn__annotation')).toBeNull()
+  expect(document.querySelector('.log-turn__annotation')).toBeNull()
   expect(host.querySelector('.log-turn__body p')).toBe(before)
   expect(before?.isConnected).toBe(true)
 })
@@ -424,17 +516,12 @@ it('renders a repeated readonly part reference without duplicate React keys', as
     items: [{ id: 'repeated-part-message', kind: 'assistant-message', contentParts: [part, part] }],
     nextCursor: null
   }
-  historyPageSpy.mockResolvedValueOnce(pageWithDupParts)
   const errors: unknown[][] = []
   const errorSpy = vi.spyOn(console, 'error').mockImplementation((...args) => {
     errors.push(args)
   })
   try {
-    await act(async () =>
-      root.render(
-        <ActivityView {...activityReadingProps({ control: control, label: "Agent", visible: true, workspaceRoot: _hygiene_fixturePath("synthetic"), openWorkspaceFile: openFile, openHttpLink: openHttp })} />
-      )
-    )
+    await drawNativeFrame(pageWithDupParts)
     expect(host.querySelectorAll('.log-turn__trace')).toHaveLength(2)
     expect(host.querySelectorAll('.log-turn__trace-payload')).toHaveLength(0)
     await act(async () => {
@@ -475,17 +562,12 @@ it('assigns distinct local keys to parts with duplicate callIds without key warn
     items: [{ id: 'dup-call-id-message', kind: 'assistant-message', contentParts: [dup1, dup2] }],
     nextCursor: null
   }
-  historyPageSpy.mockResolvedValueOnce(pageWithDupCallIds)
   const errors: unknown[][] = []
   const errorSpy = vi.spyOn(console, 'error').mockImplementation((...args) => {
     errors.push(args)
   })
   try {
-    await act(async () =>
-      root.render(
-        <ActivityView {...activityReadingProps({ control: control, label: "Agent", visible: true, workspaceRoot: _hygiene_fixturePath("synthetic"), openWorkspaceFile: openFile, openHttpLink: openHttp })} />
-      )
-    )
+    await drawNativeFrame(pageWithDupCallIds)
     const traces = host.querySelectorAll<HTMLButtonElement>('.conversation-tool-trace__row')
     expect(traces).toHaveLength(2)
     const keyWarnings = errors.filter(
@@ -521,7 +603,9 @@ it('does not re-parse Markdown during local copy and annotation note keystrokes'
   expect(parser.mock.calls.length).toBe(mountCalls)
 
   // 3. Typing in note textarea does not re-parse
-  const textarea = host.querySelector<HTMLTextAreaElement>('.log-turn__annotation textarea')!
+  const dialog = await openAnnotation()
+  expect(parser.mock.calls.length).toBe(mountCalls)
+  const textarea = dialog.querySelector<HTMLTextAreaElement>('textarea')!
   for (const text of ['n', 'no', 'not', 'note']) {
     await act(async () => {
       Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(textarea, text)
