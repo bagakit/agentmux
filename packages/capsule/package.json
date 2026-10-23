@@ -9,8 +9,10 @@
   "types": "./dist/index.d.ts",
   "exports": {
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
-    "./node": { "types": "./dist/node.d.ts", "import": "./dist/node.js" }
+    "./node": { "types": "./dist/node.d.ts", "import": "./dist/node.js" },
+    "./runtime": { "types": "./dist/runtime.d.ts", "import": "./dist/runtime.js" }
   },
+  "bin": { "capsule-runtime": "./dist/runtime-cli.js" },
   "files": ["dist"],
   "scripts": {
     "build": "tsc -b tsconfig.build.json --force",
