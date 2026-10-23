@@ -8,7 +8,7 @@ import { connectorJourneyFixture } from './fixtures/connector-journey'
 import { api } from '../src/renderer/src/lib/api'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import { retainConnectorRoomIntent, useAppStore } from '../src/renderer/src/store'
-import { observeConnectorService } from '../src/renderer/src/lib/connector-service-observation'
+import { observeConnectorService, connectorServiceScope } from '../src/renderer/src/lib/connector-service-observation'
 import { invalidateConnectorTarget } from '../src/renderer/src/lib/connector-room-intent'
 import { composerSession } from './helpers/composer-dom-fixture'
 import { ConnectorRoomJoinLink } from '../src/renderer/src/components/ConnectorRoomJoinLink'
@@ -116,7 +116,7 @@ it('bound header status separates saved binding from source-qualified automatic 
   expect(trigger().title).not.toContain('Group connected')
   const off = await api.connections.call('connection.service.configure', { operationId: 'header-sync-off', expectedRevision: 0, service: { enabled: false } })
   const count = writes().length
-  await act(async () => observeConnectorService(off.service))
+  await act(async () => observeConnectorService(off.service, api.connections.call, f.hostingTarget))
   // This fixture has no publication owner: Off remains a configuration fact,
   // while the new bounded source/effect read is accurately unconfirmed.
   await wait(() => expect(trigger().textContent).toBe('Original team· Status unknown'))
@@ -124,7 +124,7 @@ it('bound header status separates saved binding from source-qualified automatic 
   expect(trigger().title).toContain('oc_header')
   expect(trigger().title).toContain('Group linked')
   expect(trigger().title).toContain('Automatic sync Off')
-  await act(async () => useAppStore.setState({ connectorServiceObservation: { source: (async () => { throw Error('Other endpoint') }) as typeof api.connections.call, generation: 1, state: { enabled: false, revision: 3 }, issue: '' } }))
+  await act(async () => useAppStore.setState({ connectorServiceObservation: { [connectorServiceScope(f.hostingTarget)]: { source: (async () => { throw Error('Other endpoint') }) as typeof api.connections.call, generation: 1, state: { enabled: false, revision: 3 }, issue: '' } } }))
   expect(trigger().querySelector('span')?.textContent).toBe('Original team')
   expect(trigger().title).toContain('Automatic sync Off in checked snapshot')
   expect(writes()).toHaveLength(count)

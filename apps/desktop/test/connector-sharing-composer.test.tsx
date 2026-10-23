@@ -7,18 +7,25 @@ vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ()
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import type { Editor } from '@tiptap/core'
 import { connectorJourneyFixture } from './fixtures/connector-journey'
+import { moteClick } from './fixtures/mote-app'
 import { openConnectedGroup, openConnectionsMenu } from './helpers/connector-header-navigation'
 import { composerSession } from './helpers/composer-dom-fixture'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { invalidateConnectorTarget } from '../src/renderer/src/lib/connector-room-intent'
-import { observeConnectorService } from '../src/renderer/src/lib/connector-service-observation'
+import { observeConnectorService, connectorServiceScope } from '../src/renderer/src/lib/connector-service-observation'
 
 const f = connectorJourneyFixture(), target = { executionHostId: 'local', agentSessionId: 'original-agent', regionAnchor: { regionId: 'original-region' } }
 async function wait(check: () => void) { await vi.waitFor(async () => { await act(async () => {}); check() }, { timeout: 6000 }) }
 const input = () => document.querySelector<HTMLElement>('[data-workbench-region-id="original-region"] [role="textbox"]')! as HTMLElement & { editor: Editor }
 async function bindExisting(waitForNotice = true) {
   await f.journey('existing'); await f.fill('Existing group ID', 'existing-exact-group')
+  const content = document.querySelector<HTMLButtonElement>('[aria-label="Group sharing content"]')!
+  expect(content).not.toBeNull()
+  await moteClick(content)
+  let replyOnly!: HTMLElement
+  await wait(() => { replyOnly = [...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(node => node.textContent === 'Agent replies and questions')!; expect(replyOnly).toBeDefined() })
+  await moteClick(replyOnly)
   const box = document.querySelector<HTMLInputElement>('.agent-connector-check input')!
   await act(async () => box.click()); await f.button('Connect group')
   await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Group saved'))
@@ -50,7 +57,7 @@ it('the actual SessionPane injects read-only sharing scope while all connection 
 it('input sharing context distinguishes reply-only and new-content scope from confirmed off, paused and source-unknown policy', async () => {
   await f.mount(); const binding = await bindExisting()
   const off = await api.connections.call('connection.service.configure', { operationId: 'input-context-sync-off', expectedRevision: 0, service: { enabled: false } })
-  await act(async () => observeConnectorService(off.service))
+  await act(async () => observeConnectorService(off.service, api.connections.call, f.hostingTarget))
   expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Automatic sync off')
   expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Agent replies and questions → existing-exact-group')
   const broader = await api.connections.call('connection.binding.relink', { ...f.original.input, operationId: 'input-context-broader-scope', bindingId: binding.bindingId, expectedRevision: binding.revision,
@@ -58,8 +65,8 @@ it('input sharing context distinguishes reply-only and new-content scope from co
   expect(broader.state).toBe('applied')
   await act(async () => invalidateConnectorTarget(target))
   await wait(() => expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('New conversation content → existing-exact-group'))
-  await act(async () => useAppStore.setState({ connectorServiceObservation: { source: (async () => { throw Error('Other endpoint') }) as typeof api.connections.call,
-    generation: 1, state: { enabled: true, revision: 5 }, issue: '' } }))
+  await act(async () => useAppStore.setState({ connectorServiceObservation: { [connectorServiceScope(f.hostingTarget)]: { source: (async () => { throw Error('Other endpoint') }) as typeof api.connections.call,
+    generation: 1, state: { enabled: true, revision: 5 }, issue: '' } } }))
   expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Automatic sync unconfirmed')
   await api.connections.call('connection.binding.pause', { operationId: 'input-context-pause', bindingId: binding.bindingId, expectedRevision: 2 })
   await act(async () => invalidateConnectorTarget(target))
