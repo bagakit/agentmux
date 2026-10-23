@@ -14,6 +14,7 @@ export * from './public-rpc-frame.js'
 import { AgentMuxRpcLines, AgentMuxRpcError, AGENTMUX_RPC_MAX_MESSAGE_BYTES, rpcEncode, rpcFailure, parseRpcRequest, isRpcId as validId, type AgentMuxRpcFrame } from './public-rpc-frame.js'
 
 export type AgentMuxRpcConnection = {
+  lendForwarding?(context: AgentMuxRpcCallContext, request: JSONRPCRequest, destination: { path: string; instanceId: string }): ReturnType<import('./rpc-forwarding.js').RpcForwardingSource>
   /** Trusted transport identity; JSON params cannot mint or replace it. */
   principal?: AgentMuxRpcPrincipal
   /** Actual receiving hop; a frame cannot assert its own provenance. */
@@ -43,6 +44,7 @@ export class AgentMuxRpcDispatcher {
             ...(channel.principal === undefined ? {} : { principal: channel.principal }),
             ...(channel.transport === undefined ? {} : { transport: channel.transport }),
             ...(caller === undefined ? {} : { caller: rpcRecord(caller, ['agentSessionId', 'capability']) as NonNullable<AgentMuxRpcCallContext['caller']> }) }
+          if (channel.lendForwarding) context.forwarding = (request, destination) => channel.lendForwarding!(context, request, destination)
           let result: unknown
           if (method === 'system.subscription.cancel') result = { disposed: await channel.cancel(String(params.subscriptionId ?? '')) }
           else if (isAgentMuxRpcStream(method, params)) {

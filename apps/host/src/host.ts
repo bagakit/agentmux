@@ -6,7 +6,6 @@ import { AgentMuxFileAgentSessionStore, AgentMuxError,
   type AgentMuxRpcParams, type AgentMuxRpcResult, type AgentMuxRpcStreamMethod,
   type AgentMuxRpcStreamParams, type AgentMuxRpcSubscriptionOptions,
   type AgentProvider, type AgentMuxRpcMobileAccessState } from '@agentmux/core'
-import { isAppWindowMethod } from '@agentmux/core/control'
 import { isConnectionMethod } from '@agentmux/core/connections'
 import { isMoteConnectionMethod } from '@agentmux/core/mote-connections'
 import { DeviceAuthority } from './device-authority.js'
@@ -58,10 +57,13 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
   let resolveAuthority!: (value: DeviceAuthority) => void, rejectAuthority!: (error: unknown) => void
   const authorityReady = new Promise<DeviceAuthority>((resolve, reject) => { resolveAuthority = resolve; rejectAuthority = reject })
   void authorityReady.catch(() => {})
-  const desktopClient = async (context: AgentMuxRpcCallContext) => await connectAgentMuxRpc({
-    endpoint: { transport: 'unix', path: desktopPath },
-    ...(context.caller ? { credentials: context.caller } : {})
-  })
+  const desktopClient = async (context: AgentMuxRpcCallContext) => {
+    if (context.principal?.kind === 'device' && !context.forwarding) throw new AgentMuxError(
+      'The original device forwarding authority is unavailable. Keep this operation and reconnect to its original Host.', 'CONTROL_UNAVAILABLE')
+    return await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: desktopPath },
+      ...(context.caller ? { credentials: context.caller } : {}),
+      ...(context.principal?.kind === 'device' ? { forwarding: context.forwarding! } : {}) })
+  }
   const configurationPath = options.configurationPath ?? options.connections?.moteConfigurationPath
   const agentLearning = configurationPath && options.store instanceof AgentMuxFileAgentSessionStore ? createHostAgentLearning({
     configurationPath, directory: join(dirname(options.store.path), 'agent-learning'),
@@ -90,9 +92,6 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       return offerUrl()
     }),
     forwardControl: async <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> => {
-      if (isAppWindowMethod(method) && !context.caller && context.principal?.kind === 'device') {
-        throw new AgentMuxError('This desktop bridge cannot preserve the authenticated device identity for window control. Use the original desktop workface; original workfaces and Agents remain available.', 'CONTROL_UNAVAILABLE')
-      }
       if (isConnectionMethod(method) || isMoteConnectionMethod(method) || isMoteChatMethod(method) ||
           ((method === 'space.mote.preferences.read' || method === 'space.mote.preferences.save') &&
             (params as AgentMuxRpcParams<'space.mote.preferences.read'>).kind === 'connection')) {
@@ -174,6 +173,8 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     const externalInputAuthority = options.externalInputAuthority ?? connectionOwner?.authority
     runtime = await startHeadlessAgentMux({ store: options.store, socketPath: path,
       ...(options.providers ? { providers: options.providers } : {}), service,
+      forwardingPeer: { authoritySocketPath: desktopPath, bindAuthority: async principal => principal.kind === 'device'
+        ? await (await authorityReady).bindForwardedDevice(principal) : undefined },
       capsuleAdapters: createCapsuleDesktopAdapters({ connect: context => desktopClient(context ?? { transport: 'unix' }) }),
       inputContextCaptureReader: options.inputContextCaptureReader ?? createDesktopInputContextCaptureReader({ desktopSocketPath: desktopPath, captureHostId: 'local', executionHostId: 'local' }),
       ...(externalInputAuthority ? { externalInputAuthority } : {}) })

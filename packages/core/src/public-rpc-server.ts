@@ -12,8 +12,9 @@ import { ControlEndpointPublication } from './control-endpoint-publication.js'
 import type { AgentMuxControlEndpointState } from './control-endpoint-state.js'
 import { AgentMuxRpcService, type AgentMuxRpcServiceOptions } from './public-rpc-service.js'
 import { AgentMuxRpcDispatcher, AgentMuxRpcLines, rpcEncode, AGENTMUX_RPC_MAX_MESSAGE_BYTES,
-  type AgentMuxRpcFrame, type AgentMuxRpcConnection } from './public-rpc-wire.js'
+  parseRpcRequest, rpcRecord, rpcFailure, type AgentMuxRpcFrame, type AgentMuxRpcConnection } from './public-rpc-wire.js'
 import type { AgentMuxRpcStreamMethod, AgentMuxRpcPrincipal } from './public-rpc.js'
+import { RPC_FORWARD, RpcForwardingAuthority, receiveForwardedCall, type RpcForwardingPeer } from './rpc-forwarding.js'
 
 export type AgentMuxRpcHttpAuthorization = {
   principal: AgentMuxRpcPrincipal;
@@ -38,6 +39,8 @@ export type AgentMuxControlServerOptions = AgentMuxRpcServiceOptions & {
   onControlEndpointState?(state: AgentMuxControlEndpointState): void
   /** HTTP is absent by default. Binding and authorization must both be explicit. */
   http?: AgentMuxRpcHttpOptions
+  /** One explicit original local peer. Request bodies cannot select an authority endpoint. */
+  forwardingPeer?: RpcForwardingPeer
 }
 export function agentMuxRpcHttpOptions(env: Readonly<Record<string, string | undefined>> = process.env): AgentMuxRpcHttpOptions | undefined {
   const bind = env.AGENTMUX_RPC_HTTP_BIND, token = env.AGENTMUX_RPC_HTTP_TOKEN
@@ -61,6 +64,7 @@ export class AgentMuxControlServer {
   private readonly externalReaders = new Set<() => void>()
   private readonly service: AgentMuxRpcService
   private readonly dispatcher: AgentMuxRpcDispatcher
+  private readonly forwarding = new RpcForwardingAuthority()
   private httpFailure: AgentMuxError | null = null
   private readonly localPrincipal: AgentMuxRpcPrincipal = { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }
   readonly path: string
@@ -121,6 +125,7 @@ export class AgentMuxControlServer {
     const controller = new AbortController()
     const subscriptions = new Map<string, { method: AgentMuxRpcStreamMethod; dispose(): void | Promise<void> }>()
     const context: AgentMuxRpcConnection = {
+      lendForwarding: (original, request, destination) => this.forwarding.lend(original, request, destination),
       principal, transport, signal: authority?.signal ? AbortSignal.any([controller.signal, authority.signal]) : controller.signal,
       ...(authority?.assertCurrent ? { assertCurrent: authority.assertCurrent } : {}),
       stream: true, send, afterResponse: [],
@@ -185,19 +190,75 @@ export class AgentMuxControlServer {
     socket.setTimeout(AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS, () => channel.dispose())
     socket.on('error', () => channel.dispose())
     socket.once('end', () => { try { lines.end() } catch { /* An incomplete reader cannot own a business rollback. */ } channel.dispose() })
-    socket.once('close', () => { this.sockets.delete(socket); channel.dispose() })
+    let mode: 'ordinary' | 'authority' | 'forwarding' = 'ordinary'
+    let authorityCurrent: Awaited<ReturnType<RpcForwardingAuthority['claim']>> | undefined
+    let forwarded: ReturnType<AgentMuxControlServer['connection']> | undefined
+    let delegated: Awaited<ReturnType<typeof receiveForwardedCall>> | undefined
+    let activeCalls = 0
+    const releaseDelegation = () => { if (activeCalls === 0) { delegated?.dispose(); delegated = undefined } }
+    socket.once('close', () => { this.sockets.delete(socket); channel.dispose(); forwarded?.dispose(); releaseDelegation() })
+    const receive = async (value: unknown): Promise<void> => {
+      let incoming = value
+      const source = value && typeof value === 'object' && !Array.isArray(value) ? value as { method?: unknown } : undefined
+      if (source?.method === RPC_FORWARD.target) {
+        if (mode !== 'ordinary') throw new AgentMuxError('Forwarding negotiation already ended.', 'CONTROL_PERMISSION_DENIED')
+        const request = parseRpcRequest(value); rpcRecord(request.params, [])
+        await channel.context.send({ jsonrpc: '2.0', id: request.id!, result: { instanceId: this.forwarding.instanceId } }); return
+      }
+      if (source?.method === RPC_FORWARD.claim) {
+        if (mode !== 'ordinary') throw new AgentMuxError('A forwarding authority can only be claimed once.', 'CONTROL_PERMISSION_DENIED')
+        mode = 'authority'
+        const request = parseRpcRequest(value)
+        authorityCurrent = await this.forwarding.claim(request.params, socket, channel.context.send)
+        await channel.context.send({ jsonrpc: '2.0', id: request.id!, result: { principal: authorityCurrent.principal } }); return
+      }
+      if (mode === 'authority') {
+        const request = parseRpcRequest(value)
+        if (request.method !== RPC_FORWARD.current || !authorityCurrent) throw new AgentMuxError('This socket belongs to its original forwarding authority.', 'CONTROL_PERMISSION_DENIED')
+        rpcRecord(request.params, []); await authorityCurrent()
+        await channel.context.send({ jsonrpc: '2.0', id: request.id!, result: {} }); return
+      }
+      if (source?.method === RPC_FORWARD.call) {
+        if (mode !== 'ordinary') throw new AgentMuxError('A forwarding grant authorizes only its exact original request.', 'CONTROL_PERMISSION_DENIED')
+        mode = 'forwarding'
+        if (!this.options.forwardingPeer) throw new AgentMuxError('The original trusted forwarding peer is unavailable. No local identity was substituted.', 'CONTROL_UNAVAILABLE')
+        const request = parseRpcRequest(value)
+        delegated = await receiveForwardedCall(this.options.forwardingPeer, request.params, this.forwarding.instanceId, channel.context.signal)
+        if (request.id !== delegated.request.id) throw new AgentMuxError('The forwarded wire request identity changed.', 'CONTROL_PERMISSION_DENIED')
+        if (socket.destroyed) { releaseDelegation(); return }
+        forwarded = this.connection(channel.context.send, () => socket.destroy(), 'unix', delegated.principal,
+          { principal: delegated.principal, signal: delegated.signal, assertCurrent: delegated.assertCurrent })
+        incoming = delegated.request
+      } else if (mode === 'forwarding') {
+        const request = parseRpcRequest(value)
+        if (!forwarded || request.method !== 'system.subscription.cancel') throw new AgentMuxError('A forwarding grant authorizes only its exact original request.', 'CONTROL_PERMISSION_DENIED')
+      }
+      const owner = forwarded ?? channel
+      const context = { ...owner.context, afterResponse: [] as Array<() => void | Promise<void>> }
+      let responded = false
+      activeCalls++
+      try {
+        const response = await this.dispatcher.receive(incoming, context)
+        if (context.signal.aborted) return
+        if (response) { await owner.context.send(response as AgentMuxRpcFrame); responded = true }
+        for (const flush of context.afterResponse) await flush()
+      } catch (error) {
+        if (responded) owner.dispose()
+        else throw error
+      } finally {
+        activeCalls--
+        if (socket.destroyed || forwarded && forwarded.subscriptions.size === 0) releaseDelegation()
+      }
+    }
     socket.on('data', chunk => {
       try { lines.accept(chunk, value => {
         socket.setTimeout(0)
-        const context = { ...channel.context, afterResponse: [] as Array<() => void | Promise<void>> }
-        let responded = false
-        void this.dispatcher.receive(value, context).then(async response => {
-          if (context.signal.aborted) return
-          if (response) { await channel.context.send(response as AgentMuxRpcFrame); responded = true }
-          for (const flush of context.afterResponse) await flush()
-        }).catch(error => {
-          if (responded) channel.dispose()
-          else if (!socket.destroyed) socket.end(rpcEncode(createJSONRPCErrorResponse(null, -32603, error instanceof Error ? error.message : 'RPC service failed.')))
+        void receive(value).catch(error => {
+          releaseDelegation()
+          if (!socket.destroyed) {
+            const id = value && typeof value === 'object' && 'id' in value ? (value as { id: string }).id : null
+            void Promise.resolve(channel.context.send(rpcFailure(id, error))).catch(() => channel.dispose())
+          }
         })
       }) } catch {
         if (!socket.destroyed) socket.end(rpcEncode(createJSONRPCErrorResponse(null, -32700, 'Invalid JSON RPC frame.')))
