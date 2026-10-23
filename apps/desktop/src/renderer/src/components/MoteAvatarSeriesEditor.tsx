@@ -8,7 +8,6 @@ import { api } from '../lib/api'
 import { createSeriesGlbRenderer, type SeriesGlbRenderer } from '../lib/mote-avatar-series-renderer'
 import { MoteFace } from './MoteFace'
 import { MoteAvatarSeriesCreateDialog } from './MoteAvatarSeriesCreateDialog'
-import '../styles/mote-avatar-series.css'
 
 const ThemeObjectModel3dIcon = semanticIconComponent('object.model-3d')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')

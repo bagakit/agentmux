@@ -1,15 +1,13 @@
-import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import type { MoteAvatarSeriesCatalog, MoteAvatarSeriesDefinition, MoteAvatarSeriesLocator, MoteAvatarSeriesSource } from '@agentmux/core/mote-avatar-series'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { MoteSilhouetteArt } from './MoteSilhouetteArt'
-
-export { MoteSilhouetteArt } from './MoteSilhouetteArt'
+import { MoteSilhouetteArt, isMoteArticulatedId, type MoteArticulatedId } from './MoteSilhouetteArt'
 
 type Entry = MoteAvatarSeriesCatalog['series'][number]['entries'][number]
 type ImageGroup = 'silhouette' | 'companion'
 export type MoteGallerySelectionMeta = {
-  title: string; tag: string; silhouetteId?: string | undefined
+  title: string; tag: string; silhouetteId?: MoteArticulatedId | undefined
   source?: MoteAvatarSeriesSource | undefined; definition?: MoteAvatarSeriesDefinition | undefined
 }
 type ImageChoice = {
@@ -28,13 +26,13 @@ export function MoteAvatarImageGallery({ visible, disabled, selectedImage, selec
   const [choices, setChoices] = useState<ImageChoice[]>([])
   const [issue, setIssue] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const generation = useRef(0)
+  const generation = useRef(0), loaded = useRef(false)
   const chooseRef = useRef(onChoose); chooseRef.current = onChoose
   function selectionMeta(choice: ImageChoice): MoteGallerySelectionMeta {
     return {
       title: choice.entry.title,
       tag: choice.group === 'silhouette' ? 'Mote silhouette' : 'Low-poly companion',
-      ...(choice.group === 'silhouette' ? { silhouetteId: choice.entry.entryId } : {}),
+      ...(isMoteArticulatedId(choice.entry.entryId) ? { silhouetteId: choice.entry.entryId } : {}),
       ...(choice.preparedSource ? { source: choice.preparedSource, definition: choice.entry.definition } : {})
     }
   }
@@ -69,63 +67,63 @@ export function MoteAvatarImageGallery({ visible, disabled, selectedImage, selec
         setIssue('The built-in Mote images are unavailable. Your current avatar and other choices are kept.')
         return
       }
+      loaded.current = true
       setChoices(images)
       await Promise.all(images.map(choice => readImage(choice, request)))
     } catch (cause) { if (generation.current === request) setIssue(presentError(cause)) }
     finally { if (generation.current === request) setLoading(false) }
   }
   useEffect(() => {
-    if (visible) void readCatalog()
-    return () => { generation.current++ }
+    if (visible && !loaded.current) void readCatalog()
   }, [visible])
+  useEffect(() => () => { generation.current++ }, [])
+  const selectedKey = !selectedImage && selectedLocator ? choiceKey(selectedLocator) : null
   useEffect(() => {
     if (!shuffleRevision) return
     const readyChoices = choices.filter(item => item.dataUrl !== null)
     if (!readyChoices.length) return
-    const others = readyChoices.filter(item => item.dataUrl !== selectedImage)
+    const others = readyChoices.filter(item => item.dataUrl !== selectedImage && item.key !== selectedKey)
     const picked = (others.length ? others : readyChoices)[Math.floor(Math.random() * (others.length || readyChoices.length))]!
     chooseRef.current(picked.dataUrl!, selectionMeta(picked))
   }, [shuffleRevision])
-  if (!visible) return null
   const silhouettes = choices.filter(item => item.group === 'silhouette')
   const companions = choices.filter(item => item.group === 'companion')
-  const selectedKey = !selectedImage && selectedLocator ? choiceKey(selectedLocator) : null
-  const renderChoice = (choice: ImageChoice, index: number, className: string) => (
+  const renderChoice = (choice: ImageChoice, className: string) => (
     <button key={choice.key} type="button" className={className}
       aria-label={`${choice.entry.title} Mote image`}
       aria-pressed={Boolean(choice.dataUrl && selectedImage === choice.dataUrl) || selectedKey === choice.key}
       disabled={disabled}
-      style={{ '--mote-ambient-delay': `${-(index * 470)}ms` } as CSSProperties}
       title={choice.issue ?? choice.entry.title} onClick={() => {
         if (choice.dataUrl) onChoose(choice.dataUrl, selectionMeta(choice))
         else void readImage(choice, generation.current)
       }}>
       <span className="mote-avatar-gallery__thumb" aria-hidden="true">
-        {choice.dataUrl ? <>
-          <img className={choice.group === 'silhouette' ? 'mote-avatar-gallery__backing' : 'mote-live-breathe'} src={choice.dataUrl} alt="" draggable={false} />
-          {choice.group === 'silhouette' ? <MoteSilhouetteArt id={choice.entry.entryId} interactive={false} /> : null}
-        </> : <span className="mote-avatar-gallery__placeholder">{choice.issue ? 'Retry' : '…'}</span>}
+        {choice.dataUrl ? (
+          isMoteArticulatedId(choice.entry.entryId)
+            ? <MoteSilhouetteArt id={choice.entry.entryId} interactive={false} />
+            : <img src={choice.dataUrl} alt="" draggable={false} />
+        ) : <span className="mote-avatar-gallery__placeholder">{choice.issue ? 'Retry' : '…'}</span>}
       </span>
       <span>{choice.entry.title}</span>
     </button>
   )
-  return <section className="mote-avatar-gallery" aria-label="Mote silhouette images">
+  return <section className="mote-avatar-gallery" hidden={!visible} aria-label="Mote silhouette images">
     <div className="mote-avatar-gallery__header">
       <span className="space-icon-picker__description">Mote silhouettes</span>
       {uploadAction}
     </div>
     {silhouettes.length ? <div className="mote-avatar-gallery__choices" role="group" aria-label="Mote image choices">
-      {silhouettes.map((choice, index) => renderChoice(choice, index, 'mote-avatar-gallery__choice'))}
+      {silhouettes.map(choice => renderChoice(choice, 'mote-avatar-gallery__choice'))}
     </div> : null}
     {companions.length ? <>
       <div className="mote-avatar-gallery__subheader">
         <span className="space-icon-picker__description">Low-poly companions</span>
       </div>
       <div className="mote-avatar-gallery__companions" role="group" aria-label="Low-poly companion choices">
-        {companions.map((choice, index) => renderChoice(choice, index + 12, 'mote-avatar-gallery__companion'))}
+        {companions.map(choice => renderChoice(choice, 'mote-avatar-gallery__companion'))}
       </div>
     </> : null}
     {loading ? <p className="space-icon-picker__description" role="status">Reading Mote images…</p> : null}
-    {issue ? <p className="space-icon-picker__description" role="status">{issue} <button type="button" className="small-button" disabled={disabled} onClick={() => void readCatalog()}>Retry images</button></p> : null}
+    {issue ? <p className="space-icon-picker__description" role="status">{issue} <button type="button" className="small-button" disabled={disabled} onClick={() => { loaded.current = false; void readCatalog() }}>Retry images</button></p> : null}
   </section>
 }

@@ -3,6 +3,14 @@
   "title": "Low poly",
   "entries": [
     {
+      "id": "dragon",
+      "title": "Dragon",
+      "definition": {
+        "kind": "image",
+        "file": "lowpoly-dragon.png"
+      }
+    },
+    {
       "id": "wolf",
       "title": "Wolf",
       "definition": {
