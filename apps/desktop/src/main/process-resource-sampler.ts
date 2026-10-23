@@ -39,7 +39,7 @@ export type ProcessTableReader = () => Promise<string>
 
 export type ProcessResourceObservationSources = {
   observeRuntime(): Promise<RuntimeUsage[]>
-  observeDiagnostics?(signal: AbortSignal): Promise<Omit<PerformanceDiagnostics, 'eventLoop'>>
+  observeDiagnostics?(signal: AbortSignal, generation: number): Promise<Omit<PerformanceDiagnostics, 'eventLoop'>>
   processOwners(): { rendererPids: readonly number[]; browserPids: readonly number[] }
   mainOwners(): MainResourceOwnerCounts
   rendererWindow?(): MetricsWindow | null
@@ -409,7 +409,7 @@ export class ProcessResourceSampler {
       try {
         if (!sources?.observeDiagnostics) throw new Error('Performance owners are not connected')
         const cancelled = new Promise<never>((_resolve, reject) => controller.signal.addEventListener('abort', () => reject(controller.signal.reason), { once: true }))
-        reading = sources.observeDiagnostics(controller.signal)
+        reading = sources.observeDiagnostics(controller.signal, generation)
         const data = await Promise.race([reading, cancelled])
         if (generation !== this.generation || controller.signal.aborted) return
         const count = this.eventLoop.count

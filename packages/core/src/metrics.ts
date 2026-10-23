@@ -84,12 +84,27 @@ export type MetricsObservation = {
   renderer: MetricsSource<MetricsRenderer>
 }
 export type PerformanceDiagnostics = {
+  host: HostResourceSnapshot
   main: ClientPerformanceDiagnostics
   hosts: { hostId: string; data: ClientPerformanceDiagnostics | null; unavailable: string | null }[]
   omittedHosts: number
   storage: { location: 'main-user-home-volume'; availableBytes: number; totalBytes: number } | null
   storageUnavailable: string | null
   eventLoop: { resolutionMs: 20; generation: number; count: number; meanMs: number | null; maxMs: number | null }
+}
+/** Local machine facts. CPU capacity and interface traffic are not attributable to an Agent. */
+export type HostMetric<T> = { observedAt: number | null; data: T | null; unavailable: string | null }
+export type HostNetworkInterface = {
+  name: string; linkId: number; receivedBytes: number; sentBytes: number
+  receiveBytesPerSecond: number | null; sendBytesPerSecond: number | null
+  intervalMs: number | null; unavailable: string | null
+}
+export type HostResourceSnapshot = {
+  cpu: HostMetric<{ basis: 'whole-host-capacity'; percent: number | null; intervalMs: number | null; logicalCpuCount: number; unavailable: string | null }>
+  memory: HostMetric<{ source: 'node-os'; totalBytes: number; freeBytes: number }>
+  swap: HostMetric<{ source: 'darwin-sysctl'; usedBytes: number; totalBytes: number }>
+  pressure: HostMetric<{ source: 'darwin-sysctl'; level: 'normal' | 'warning' | 'critical' }>
+  network: HostMetric<{ source: 'darwin-netstat-link'; interfaces: HostNetworkInterface[] }>
 }
 export type MetricsSubscription = { dispose(): void }
 /** The host owns observation. Core only frames, validates and releases consumption. */
@@ -171,7 +186,24 @@ export function parseClientPerformanceDiagnostics(value: unknown): ClientPerform
   clientPerformanceParser(value)
   return value as ClientPerformanceDiagnostics
 }
-const diagnosticsParser = record({ main: clientPerformanceParser,
+const positive: Parser = value => { number(value); if (value === 0) invalid() }
+const hostMetric = (data: Parser): Parser => record({ observedAt: nullable(number), data: nullable(data), unavailable: nullable(text) })
+const hostResourceParser = record({
+  cpu: hostMetric(record({ basis: literal('whole-host-capacity'), percent: nullable(value => { number(value); if ((value as number) > 100) invalid() }),
+    intervalMs: nullable(positive), logicalCpuCount: value => { count(value); positive(value) }, unavailable: nullable(text) })),
+  memory: hostMetric(record({ source: literal('node-os'), totalBytes: count, freeBytes: count })),
+  swap: hostMetric(record({ source: literal('darwin-sysctl'), usedBytes: count, totalBytes: count })),
+  pressure: hostMetric(record({ source: literal('darwin-sysctl'), level: value => { if (!['normal', 'warning', 'critical'].includes(value as string)) invalid() } })),
+  network: hostMetric(record({ source: literal('darwin-netstat-link'), interfaces: array(record({ name: identity, linkId: count,
+    receivedBytes: count, sentBytes: count, receiveBytesPerSecond: nullable(number), sendBytesPerSecond: nullable(number),
+    intervalMs: nullable(positive), unavailable: nullable(text) })) }))
+})
+/** Validate local Host facts before composing them with unrelated diagnostic owners. */
+export function parseHostResourceSnapshot(value: unknown): HostResourceSnapshot {
+  hostResourceParser(value)
+  return value as HostResourceSnapshot
+}
+const diagnosticsParser = record({ main: clientPerformanceParser, host: hostResourceParser,
   hosts: boundedArray(64, record({ hostId: identity, data: nullable(clientPerformanceParser), unavailable: nullable(text) })),
   omittedHosts: count, storage: nullable(record({ location: literal('main-user-home-volume'), availableBytes: count, totalBytes: count })), storageUnavailable: nullable(text), eventLoop: record({ resolutionMs: literal(20), generation: count, count, meanMs: nullable(number), maxMs: nullable(number) }) })
 const consumerParser = record({ checks: count, changes: count, commits: count })

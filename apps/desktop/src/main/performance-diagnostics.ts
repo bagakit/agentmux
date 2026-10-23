@@ -2,6 +2,7 @@ import { statfs } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import type { ClientPerformanceDiagnostics } from '@agentmux/core'
 import { parseClientPerformanceDiagnostics, type PerformanceDiagnostics } from '@agentmux/core/control'
+import { HostResourceObserver } from './host-resource-observer.js'
 
 type HostClient = { clientPerformanceDiagnostics(options: { signal: AbortSignal }): Promise<ClientPerformanceDiagnostics> }
 type Storage = NonNullable<PerformanceDiagnostics['storage']>
@@ -30,10 +31,10 @@ export class MainPerformanceDiagnostics {
   constructor(private readonly readStorage: () => Promise<Storage> = async () => {
     const value = await statfs(homedir())
     return { location: 'main-user-home-volume', availableBytes: Math.max(0, value.bavail * value.bsize), totalBytes: value.blocks * value.bsize }
-  }, private readonly timeoutMs = 1000) {}
+  }, private readonly timeoutMs = 1000, private readonly hostResources: Pick<HostResourceObserver, 'observe'> = new HostResourceObserver()) {}
 
   async observe(entries: readonly { client: HostClient; executionHost: { id: string } }[],
-    readMain: () => ClientPerformanceDiagnostics, signal: AbortSignal): Promise<Omit<PerformanceDiagnostics, 'eventLoop'>> {
+    readMain: () => ClientPerformanceDiagnostics, signal: AbortSignal, generation: number): Promise<Omit<PerformanceDiagnostics, 'eventLoop'>> {
     signal.throwIfAborted()
     const reads: Reading<unknown>[] = []
     const hosts = Promise.all(entries.slice(0, 64).map(async ({ client, executionHost }) => {
@@ -54,9 +55,9 @@ export class MainPerformanceDiagnostics {
     signal.addEventListener('abort', abort, { once: true })
     if (signal.aborted) abort()
     try {
-      const [hostFacts, storageFacts] = await Promise.all([hosts, this.storage.result])
+      const [hostFacts, storageFacts, host] = await Promise.all([hosts, this.storage.result, this.hostResources.observe(generation, signal)])
       signal.throwIfAborted()
-      return { main: readMain(), hosts: hostFacts, omittedHosts: Math.max(0, entries.length - 64),
+      return { main: readMain(), host, hosts: hostFacts, omittedHosts: Math.max(0, entries.length - 64),
         storage: storageFacts.data, storageUnavailable: storageFacts.unavailable }
     } finally { signal.removeEventListener('abort', abort) }
   }

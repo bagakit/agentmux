@@ -539,7 +539,7 @@ export async function registerIpc(args: {
   }
   const releaseResourceObservation = args.runtime.resourceSampler.setObservationSources({
     observeRuntime: () => args.runtime.resourceUsageObservation(),
-    observeDiagnostics: signal => args.runtime.performanceDiagnostics(signal),
+    observeDiagnostics: (signal, generation) => args.runtime.performanceDiagnostics(signal, generation),
     rendererWindow: currentMetricsWindow,
     observeRenderer: signal => observeRendererResources(controlBridge, currentMetricsWindow, signal, () => contents.isDestroyed() ? null : contents.getOSProcessId()),
     processOwners: () => ({

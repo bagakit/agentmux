@@ -431,9 +431,9 @@ export class RuntimeController {
   private readonly inputPerformance = createInputPerformanceRecorder()
   private readonly performanceObservation = new MainPerformanceDiagnostics()
 
-  async performanceDiagnostics(signal: AbortSignal) {
+  async performanceDiagnostics(signal: AbortSignal, generation: number) {
     return this.performanceObservation.observe([...this.hosts.values()], () => ({ processId: process.pid, observedAt: Date.now(),
-      input: this.inputPerformance.snapshot(), carrier: hostedCarrierPerformance.snapshot() }), signal)
+      input: this.inputPerformance.snapshot(), carrier: hostedCarrierPerformance.snapshot() }), signal, generation)
   }
 
   resourceOwnerCounts(): { sessionAttachmentOwners: number; sessionAttachmentLeases: number } {
