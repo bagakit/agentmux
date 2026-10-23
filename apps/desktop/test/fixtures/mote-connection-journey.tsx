@@ -73,19 +73,21 @@ export async function moteConnectionJourney() {
   const handlers = new Map<string, (...args: any[]) => Promise<unknown>>(), trusted = {}
   const handleWithEvent = (channel: string, handler: (...args: any[]) => Promise<unknown>) => { handlers.set(channel, handler) }
   const assertTrusted = (_channel: string, event: { sender: object }) => { if (event.sender !== trusted) throw new Error('Untrusted renderer') }
+  const hostingTarget = { hostId: 'local', runtimeId: 'fixture-runtime' }
   const runtime: import('../../src/main/connection-host-ipc').ConnectionHostIpc = {
-    connectionHostingTarget: async () => ({ hostId: 'local', runtimeId: 'fixture-runtime' }),
+    connectionHostingTarget: async () => structuredClone(hostingTarget),
     callConnectionHost: async (_target, method, params) => client.call(method, params),
     watchConnectionMetadata: async (_target, handlers) => client.subscribe('connection.metadata.watch', {}, handlers)
   }
   registerMotePreferencesIpc({ socketPath: server.path, runtime, handleWithEvent, assertTrusted })
   registerConnectorIpc({ runtime, handleWithEvent, assertTrusted, metadata: { publish() {}, observation() {} } })
-  const forwardRead = async (input: Parameters<typeof api.motePreferences.read>[0]) => await handlers.get('motePreferences:read')!({ sender: trusted }, input)
-  const forwardSave = async (input: MoteConnectionPreferencesSaveParams) => await handlers.get('motePreferences:save')!({ sender: trusted }, input)
+  vi.spyOn(api.connections, 'hostingTarget').mockImplementation(hostId => runtime.connectionHostingTarget(hostId))
+  const forwardRead = async (input: Parameters<typeof api.motePreferences.read>[0], target?: import('../../src/shared/contracts').ConnectionHostingTarget) => await handlers.get('motePreferences:read')!({ sender: trusted }, input, target)
+  const forwardSave = async (input: MoteConnectionPreferencesSaveParams, target?: import('../../src/shared/contracts').ConnectionHostingTarget) => await handlers.get('motePreferences:save')!({ sender: trusted }, input, target)
   const reads = vi.spyOn(api.motePreferences, 'read').mockImplementation(forwardRead)
   const saves = vi.spyOn(api.motePreferences, 'save').mockImplementation(forwardSave)
-  const connections = vi.spyOn(api.connections, 'call').mockImplementation(async (method, input) => {
-    const envelope = structuredClone(await handlers.get('connections:call')!({ sender: trusted }, method, input)) as SessionInputOperationResult<ConnectionResultMap[typeof method]>
+  const connections = vi.spyOn(api.connections, 'call').mockImplementation(async (method, input, target) => {
+    const envelope = structuredClone(await handlers.get('connections:call')!({ sender: trusted }, method, input, target)) as SessionInputOperationResult<ConnectionResultMap[typeof method]>
     return unwrapSessionInputOperationResult(envelope)
   })
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
@@ -112,7 +114,7 @@ export async function moteConnectionJourney() {
     await vi.waitFor(() => expect([...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(node => node.textContent?.includes(label)), document.body.textContent).toBeDefined())
     await moteClick([...document.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find(node => node.textContent?.includes(label))!)
   }
-  return { app, root, config, topics, motes, target, services, client, reads, saves, connections, forwardRead, forwardSave, button, choose,
+  return { app, root, config, topics, motes, target, hostingTarget, services, client, reads, saves, connections, forwardRead, forwardSave, button, choose,
     path: (index = 0) => join(motes[index]!.directoryPath, 'MOTE.md'),
     read: async (index = 0) => await client.call('space.mote.preferences.read', { kind: 'connection', target: target(index) }) as MoteConnectionPreferencesReadResult,
     async cliRead(index = 0) {

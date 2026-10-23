@@ -11,7 +11,7 @@ import { createConnectionServices } from '../../../../packages/connectors/src/co
 import { registerConnectorIpc } from '../../src/main/connector-ipc.js'
 import { api } from '../../src/renderer/src/lib/api'
 import { unwrapSessionInputOperationResult } from '../../src/shared/session-input-result'
-import type { SessionInputOperationResult } from '../../src/shared/contracts'
+import type { ConnectionHostingTarget, SessionInputOperationResult } from '../../src/shared/contracts'
 import { useAppStore } from '../../src/renderer/src/store'
 import { createWorkbenchTab, addWorkbenchRegion } from '../../src/renderer/src/lib/workbench-tabs'
 import { WorkspaceWorkbench } from '../../src/renderer/src/components/WorkspaceWorkbench'
@@ -25,13 +25,15 @@ import { createPublicationConversationPort } from '../../../../packages/connecto
 import { defaultHttpInstance, type RoomReadWire } from '../../../../packages/connectors/test/fixtures/room-discovery.js'
 import type { AgentExternalConversationAuthorityPort } from '@agentmux/core'
 
-/** Production Renderer, IPC, public Core and Desktop Host; only adapter/terminal I/O leaves are controlled. */
+/** Original Renderer/IPC and Unix Core owners; hosting route, adapter and terminal I/O leaves are controlled. */
 export function connectorJourneyFixture(options: { platform?: (request: RoomReadWire) => Promise<unknown>; publication?: boolean; ingress?: boolean; conversationAuthority?: AgentExternalConversationAuthorityPort; connection?: ConnectionConfig; adapter?(): ConnectionAdapter } = {}) {
   const dom = composerDOM(), settings = vi.fn()
   let original: Awaited<ReturnType<typeof roomProvisioningFixture>>, services: Awaited<ReturnType<typeof createConnectionServices>>
   let server: InstanceType<typeof core.AgentMuxControlServer>, calls: { method: ConnectionMethod; input: unknown; result?: unknown }[]
-  let forward: <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M]) => Promise<ConnectionResultMap[M]>
+  let forward: <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M], target?: ConnectionHostingTarget) => Promise<ConnectionResultMap[M]>
   let platformCalls: RoomReadWire[], connectionConfig = config
+  const hostingTarget = { hostId: 'local', runtimeId: 'controlled-connection-owner' }
+  let rpc: Awaited<ReturnType<typeof core.connectAgentMuxRpc>>
   let ingressTransport: ReturnType<typeof feishuSdkTransport> | null = null
   beforeEach(async () => {
     vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
@@ -65,7 +67,11 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
       return await options.platform!(input as RoomReadWire)
     })
     vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
-    services = await createConnectionServices({ directory: join(original.root, 'ui-connections'), ...(options.platform ? {} : { adapters: [options.adapter?.() ?? original.adapter] }), bindings: { spatial: original.spatial, checkpoint: original.checkpoint },
+    services = await createConnectionServices({ directory: join(original.root, 'ui-connections'), ...(options.platform ? {} : { adapters: [options.adapter?.() ?? original.adapter] }), bindings: { spatial: original.spatial, checkpoint: original.checkpoint, session: async ref => {
+      if (ref.hostId !== 'local') return null
+      const session = await original.client.readAgentSession(ref.agentSessionId)
+      return session ? { hostId: 'local', agentSessionId: session.agentSessionId } : null
+    } },
       ...(options.ingress ? { ingress: { core: hostId => hostId === 'local' ? original.client : undefined } } : {}),
       ...(options.publication ? { publication: createPublicationConversationPort(() => [{ hostId: 'local', client: original.client }]) } : {}) })
     const secret = await services.secrets.store({ operationId: 'ui-credential', secret: 'controlled-host-credential' })
@@ -74,11 +80,21 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     server = new core.AgentMuxControlServer({ socketPath, connections: services.connections, spatialState: original.spatial, coreClients: () => [{ hostId: 'local', client: original.client }] })
     await server.start()
     const handlers = new Map<string, (...args: any[]) => Promise<unknown>>()
-    registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: vi.fn(), socketPath, secrets: services.secrets })
+    rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
+    const runtime: import('../../src/main/connection-host-ipc').ConnectionHostIpc = {
+      connectionHostingTarget: async () => structuredClone(hostingTarget),
+      callConnectionHost: async (target, method, params) => {
+        if (JSON.stringify(target) !== JSON.stringify(hostingTarget)) throw Error('The original controlled connection transport does not own this target')
+        return await rpc.call(method, params)
+      },
+      watchConnectionMetadata: async (_target, handlers) => rpc.subscribe('connection.metadata.watch', {}, handlers)
+    }
+    registerConnectorIpc({ handleWithEvent: (channel, handler) => { handlers.set(channel, handler) }, assertTrusted: vi.fn(), runtime, metadata: { publish() {}, observation() {} } })
+    vi.spyOn(api.connections, 'hostingTarget').mockImplementation(hostId => runtime.connectionHostingTarget(hostId))
     calls = []; settings.mockReset()
-    forward = async (method, params) => {
+    forward = async (method, params, target) => {
       const call: typeof calls[number] = { method, input: structuredClone(params) }; calls.push(call)
-      const envelope = structuredClone(await handlers.get('connections:call')!({}, method, params)) as SessionInputOperationResult<ConnectionResultMap[typeof method]>
+      const envelope = structuredClone(await handlers.get('connections:call')!({}, method, params, target)) as SessionInputOperationResult<ConnectionResultMap[typeof method]>
       const result = unwrapSessionInputOperationResult(envelope)
       call.result = result; return result
     }
@@ -98,13 +114,13 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
       const test = expect.getState().currentTestName!, directory = resolve(process.env['AGENTMUX_TEST_CONNECTOR_ARTIFACTS'] ?? '.bagakit/feature-tracker/features/f-2wr8fmvnv/artifacts/T-013-relationship-consumers')
       await mkdir(directory, { recursive: true })
       await writeFile(join(directory, createHash('sha256').update(test).digest('hex').slice(0, 12) + '.json'), JSON.stringify({
-        test, scope: 'Mounted original Workbench/menu/Composer through trusted IPC and compiled public Core/CLI into the original Desktop Host. Adapter I/O and terminal rendering are controlled; no real platform or provider qualification.',
+        test, scope: 'Mounted original Workbench/menu/Composer through registered IPC handlers and public Core/Unix owners. Hosting identity/routing, adapter I/O and terminal rendering are controlled; no RuntimeController, installed App, platform or provider qualification.',
         publicCalls: calls, platformBoundary: options.platform ? 'Original default adapter registry and official SDK; HTTP I/O only is controlled.' : 'Controlled room adapter.', platformCalls,
         originalRoomRequests: original.create.mock.calls.map(call => call[0]), originalMemberRequests: original.addMembers.mock.calls.map(call => call[0]),
         retainedClientIntents: useAppStore.getState().connectorRoomIntents, originalDraft: useAppStore.getState().agentComposerDrafts['original-agent']
       }, null, 2) + '\n')
     }
-    await dom.render(null); await server?.stop(); services?.close(); await original?.close(); vi.unstubAllEnvs()
+    await dom.render(null); await rpc?.dispose(); await server?.stop(); services?.close(); await original?.close(); vi.unstubAllEnvs()
   })
   async function mount() { await dom.render(<SettingsNavigation.Provider value={{ open: settings, openToolkit: () => {}, openHost: () => {}, openChannel: settings, channelPresentation: settingsCatalog.channelPresentation, openMoteLark: settings, chooseAgent: () => {} }}><WorkspaceWorkbench workspaceId="workspace" /></SettingsNavigation.Provider>) }
   async function journey(mode: 'create' | 'existing' | 'details', regionId = 'original-region', context = false) {
@@ -144,5 +160,5 @@ export function connectorJourneyFixture(options: { platform?: (request: RoomRead
     expect(output.code, output.stdout + output.stderr).toBe(0)
     return JSON.parse(output.stdout).result
   }
-  return { dom, mount, journey, fill, button, cli, settings, get config() { return connectionConfig }, get platformCalls() { return platformCalls }, get ingressTransport() { return ingressTransport }, get original() { return original }, get services() { return services }, get calls() { return calls }, get forward() { return forward }, get session() { return useAppStore.getState().sessions[0]! } }
+  return { dom, mount, hostingTarget, journey, fill, button, cli, settings, get config() { return connectionConfig }, get platformCalls() { return platformCalls }, get ingressTransport() { return ingressTransport }, get original() { return original }, get services() { return services }, get calls() { return calls }, get forward() { return forward }, get session() { return useAppStore.getState().sessions[0]! } }
 }

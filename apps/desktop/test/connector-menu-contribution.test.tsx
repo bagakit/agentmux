@@ -9,14 +9,14 @@ import { moteClick, settleMoteApp } from './fixtures/mote-app'
 import { defaultAgent } from './fixtures/mote-workface'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
-import { readConnectorService } from '../src/renderer/src/lib/connector-service-observation'
+import { readConnectorService, selectConnectorServiceObservation } from '../src/renderer/src/lib/connector-service-observation'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 
 let f: Awaited<ReturnType<typeof moteConnectionJourney>>
 const runtimeEvidence: unknown[] = []
 const evidence = (scenario: string, facts: unknown) => { runtimeEvidence.push({ scenario, facts }) }
 afterAll(async () => { if (process.env.AGENTMUX_CONNECTOR_MENU_RECEIPT) await writeFile(process.env.AGENTMUX_CONNECTOR_MENU_RECEIPT, JSON.stringify({ schema: 'agentmux.connector-menu-consumer.v1', scope: 'Mounted App, Settings and both original menus through trusted IPC, public Core, default ConnectionHost and compiled CLI; controlled I/O only', scenarios: runtimeEvidence }, null, 2) + '\n') })
-beforeEach(async () => { f = await moteConnectionJourney(); useAppStore.setState({ connectorServiceIntents: {}, connectorServiceObservation: null }) })
+beforeEach(async () => { f = await moteConnectionJourney(); useAppStore.setState({ connectorServiceIntents: {}, connectorServiceObservation: {} }) })
 afterEach(async () => { await f?.dispose() })
 const groupLabel = 'Connections'
 const master = () => document.querySelector<HTMLInputElement>('[aria-label="Enable external chat sync"]')!
@@ -114,7 +114,7 @@ it('keeps connection and settings discovery visible while the mounted Settings m
   const forward = f.connections.getMockImplementation()!
   f.connections.mockImplementation(async (method, input) => {
     if (method === 'connection.service.configure') {
-      expect(useAppStore.getState().connectorServiceIntents[(input as ConnectionServiceConfigure).operationId]).toEqual({ input, phase: 'may-have-dispatched' })
+      expect(useAppStore.getState().connectorServiceIntents[(input as ConnectionServiceConfigure).operationId]).toEqual({ input, hostingTarget: f.hostingTarget, phase: 'may-have-dispatched' })
     }
     return await forward(method, input)
   })
@@ -180,14 +180,14 @@ it('keeps an unknown save as its exact original request across remount and curre
   })
   await save(); await waitFor(() => expect(document.body.textContent).toContain('The save reply is unconfirmed'))
   const input = structuredClone(writes()[0]!)
-  expect(useAppStore.getState().connectorServiceIntents[input.operationId]).toEqual({ input, phase: 'may-have-dispatched' })
+  expect(useAppStore.getState().connectorServiceIntents[input.operationId]).toEqual({ input, hostingTarget: f.hostingTarget, phase: 'may-have-dispatched' })
   const persisted = JSON.parse(window.localStorage.getItem(useAppStore.persist.getOptions().name)!).state
-  expect(persisted.connectorServiceIntents).toEqual({ [input.operationId]: { input, phase: 'may-have-dispatched' } })
+  expect(persisted.connectorServiceIntents).toEqual({ [input.operationId]: { input, hostingTarget: f.hostingTarget, phase: 'may-have-dispatched' } })
   expect(persisted.connectorServiceObservation).toBeUndefined()
   await moteClick(original(input.operationId).querySelector<HTMLButtonElement>('button')!)
   await waitFor(() => expect(original(input.operationId).textContent).toContain('Original request confirmed: Off at revision 1'))
   expect(policy().dataset.connectorServiceState).toBe('on')
-  expect(useAppStore.getState().connectorServiceObservation?.state).toEqual({ enabled: true, revision: 0 })
+  expect(selectConnectorServiceObservation(useAppStore.getState().connectorServiceObservation, f.hostingTarget)?.state).toEqual({ enabled: true, revision: 0 })
   await f.button('Refresh status'); await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('off'))
   expect(original(input.operationId).textContent).toContain('Original request confirmed: Off at revision 1')
   await useAppStore.persist.rehydrate()
@@ -244,7 +244,7 @@ it('requires an explicit fresh revision for a new choice after an unknown save w
 it('checks an inspected receipt against the retained full input rather than the operation ID alone', async () => {
   const input = { operationId: 'original-input-collision', expectedRevision: 0, service: { enabled: false } }
   await f.client.call('connection.service.configure', { ...input, service: { enabled: true } })
-  useAppStore.setState({ connectorServiceIntents: { [input.operationId]: { input, phase: 'may-have-dispatched' } } })
+  useAppStore.setState({ connectorServiceIntents: { [input.operationId]: { input, hostingTarget: f.hostingTarget, phase: 'may-have-dispatched' } } })
   await f.mount(); await openSettings()
   await moteClick(original(input.operationId).querySelector<HTMLButtonElement>('button')!)
   await waitFor(() => expect(original(input.operationId).textContent).toContain('Connector service data does not describe the original policy or operation'))
@@ -333,7 +333,7 @@ it('keeps the newer current revision when an older configure receipt is returned
   await f.button('Refresh status'); await waitFor(() => expect(policy().dataset.connectorServiceState).toBe('on'))
   await act(async () => release()); await settleMoteApp()
   expect(policy().dataset.connectorServiceState).toBe('on')
-  expect(useAppStore.getState().connectorServiceObservation?.state).toEqual({ enabled: true, revision: 2 })
+  expect(selectConnectorServiceObservation(useAppStore.getState().connectorServiceObservation, f.hostingTarget)?.state).toEqual({ enabled: true, revision: 2 })
   expect(original(receipt!.operationId).textContent).toContain('Original request confirmed: Off at revision 1')
 })
 
@@ -420,7 +420,7 @@ it('keeps accurate unknown management and last-confirmed menu groups without cha
   expect(retainedBots).toHaveLength(2)
   expect(retainedBots.every(record => record.config.enabled)).toBe(true)
   expect(f.app.stop).not.toHaveBeenCalled(); expect(f.app.launch).not.toHaveBeenCalled()
-  evidence('actual-policy-read-fault-isolation', { policy: useAppStore.getState().connectorServiceObservation?.state, issue: useAppStore.getState().connectorServiceObservation?.issue, retainedBots: retainedBots.map(record => ({ connectionId: record.config.connectionId, enabled: record.config.enabled })) })
+  evidence('actual-policy-read-fault-isolation', { policy: selectConnectorServiceObservation(useAppStore.getState().connectorServiceObservation, f.hostingTarget)?.state, issue: selectConnectorServiceObservation(useAppStore.getState().connectorServiceObservation, f.hostingTarget)?.issue, retainedBots: retainedBots.map(record => ({ connectionId: record.config.connectionId, enabled: record.config.enabled })) })
 })
 
 it('keeps group and settings discovery when no bot is enabled and automatic sync is off', async () => {
