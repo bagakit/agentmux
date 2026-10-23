@@ -91,11 +91,17 @@ export async function connectSshAgentMux(
       ...(options.waitForReady === undefined ? {} : { waitForReady: options.waitForReady }),
       ...(options.consumerId === undefined ? {} : { consumerId: options.consumerId }),
       subscribeRpc: (method, params, handlers) => rpc.subscribe(method, params, handlers),
-      forwardRpc: (method, params, context = {}) => rpc.call(method, params, {
-        ...(context.signal === undefined ? {} : { signal: context.signal }),
-        ...(context.caller === undefined ? {} : { credentials: context.caller }),
-        ...(context.runtimeFence === undefined ? {} : { runtimeFence: context.runtimeFence })
-      })
+      forwardRpc: (method, params, context = {}) => {
+        if (context.principal?.kind === 'device' && !context.forwarding) {
+          throw new AgentMuxError('The original device forwarding authority is unavailable.', 'CONTROL_UNAVAILABLE')
+        }
+        return rpc.call(method, params, {
+          ...(context.signal === undefined ? {} : { signal: context.signal }),
+          ...(context.caller === undefined ? {} : { credentials: context.caller }),
+          ...(context.runtimeFence === undefined ? {} : { runtimeFence: context.runtimeFence }),
+          ...(context.principal?.kind === 'device' ? { forwarding: context.forwarding! } : {})
+        })
+      }
     })
     const releaseConsumer = client.dispose
     client.dispose = async () => { try { await releaseConsumer() } finally { await rpc.dispose() } }

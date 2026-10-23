@@ -202,6 +202,8 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
     handlers: AgentMuxRpcSubscriptionOptions<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcSubscription>
 }
 export type AgentMuxRpcCallContext = { caller?: AgentMuxRpcCredentials; signal?: AbortSignal; principal?: AgentMuxRpcPrincipal;
+  /** In-process transport capability. Never decoded from business arguments. */
+  forwarding?: import('./rpc-forwarding.js').RpcForwardingSource;
   /** Exact receiving wire ID for response capacity; never supplied by business params. */
   responseId?: JSONRPCID;
   /** Only the actual Host/transport supplies this current author restriction. */
@@ -1038,6 +1040,9 @@ export class AgentMuxRpcService {
       return parseGitResult(method, result, input) as AgentMuxRpcResult<M>
     }
     if (isFileMethod(method)) {
+      // Admission belongs to this original Files call. Once admitted, its writer
+      // owns the transaction even when the response reader ends.
+      context.signal?.throwIfAborted(); await context.assertCurrent?.(); context.signal?.throwIfAborted()
       if (method === 'file.upload' || method === 'file.upload.inspect') {
         const input = method === 'file.upload' ? parseFileUploadParams(params) : parseFileUploadIdentity(params)
         context.signal?.throwIfAborted()

@@ -141,6 +141,7 @@ import {
 import {
   AgentMuxControlServer,
   connectAgentMuxRpc,
+  defaultAgentMuxControlSocketPath,
   agentMuxRpcHttpOptions,
   AgentMuxError,
   AGENTMUX_CONTROL_SCHEMA_VERSION,
@@ -2415,6 +2416,7 @@ export async function registerIpc(args: {
   registerMoteConnectionIpc({ handleWithEvent, assertTrusted: requireTrustedSender, runtime: args.runtime })
   registerMotePreferencesIpc({ handleWithEvent, assertTrusted: requireTrustedSender, socketPath: desktopBusinessSocketPath(), runtime: args.runtime })
   const control = new AgentMuxControlServer({
+    forwardingPeer: { authoritySocketPath: defaultAgentMuxControlSocketPath() },
     capsules: capsulePresentation({ inspect: id => capsuleClient.call('capsule.inspect', { capsuleId: id }),
       graph: async () => (await spatialState.read())?.graph ?? null,
       current: id => browsers.target(id), ensure: id => ensureBrowser(id),

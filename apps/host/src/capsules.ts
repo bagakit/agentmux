@@ -9,8 +9,6 @@ export function createCapsuleDesktopAdapters(desktop: {
   // never inherit another caller's credentials or recover authority from saved JSON.
   return originalContext => {
     const desktopCall = async <T>(run: (client: Awaited<ReturnType<typeof connectAgentMuxRpc>>) => Promise<T>) => {
-      if (originalContext?.principal?.kind === 'device') throw new AgentMuxError(
-        'This Desktop bridge cannot preserve the original device identity. The original page and operation are retained; inspect them from the local App.', 'CONTROL_UNAVAILABLE')
       const client = await desktop.connect(originalContext)
       try { return await run(client) }
       finally { await client.dispose() }
@@ -49,8 +47,6 @@ export function createCapsuleDesktopAdapters(desktop: {
           operationId: params.operationId, capsuleId: params.capsuleId, endpoint: resolved.endpoint,
           rendering: { status: 'unavailable', reason }
         })
-        if (originalContext?.principal?.kind === 'device') return unavailable(
-          'This Desktop bridge cannot preserve the original device identity. Page content and the original operation are retained; open it from the local App.')
         let client: Awaited<ReturnType<typeof connectAgentMuxRpc>>
         try { client = await desktop.connect(originalContext) }
         catch {

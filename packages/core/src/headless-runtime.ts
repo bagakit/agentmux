@@ -10,7 +10,7 @@ import { DeliveryAttemptStore } from './delivery-attempt-store.js'
 import { durableWriteFile } from './durable-write.js'
 import { defaultAgentMuxControlSocketPath, defaultAgentMuxStateDirectory, defaultCtxmuxSocketPath,
   defaultCtxmuxStateDirectory, defaultAgentMuxHookPort } from './runtime-paths.js'
-import { AgentMuxControlServer, type AgentMuxRpcHttpOptions } from './public-rpc-server.js'
+import { AgentMuxControlServer, type AgentMuxRpcHttpOptions, type AgentMuxControlServerOptions } from './public-rpc-server.js'
 import type { AgentMuxRpcServiceOptions } from './public-rpc-service.js'
 import { AgentMuxHostedRuntimeService } from './hosted-runtime-service.js'
 import { AgentMuxHostExecutorOwner } from './executor-owner.js'
@@ -22,6 +22,7 @@ export type AgentMuxHeadlessRuntimeOptions = AgentMuxClientOptions & {
   socketPath?: string
   stateDirectory?: string
   http?: AgentMuxRpcHttpOptions
+  forwardingPeer?: AgentMuxControlServerOptions['forwardingPeer']
   /** Existing client-owned business ports mounted on this one public endpoint. */
   service?: Omit<AgentMuxRpcServiceOptions, 'coreClients' | 'hostedRuntime' | 'endpoint'>
   /** Borrow the original external input owner; the semantic Host never duplicates its grants or journal. */
@@ -97,6 +98,7 @@ export async function startHeadlessAgentMux(options: AgentMuxHeadlessRuntimeOpti
     hosted = new AgentMuxHostedRuntimeService(client, storePath, ownerIdentity, stop, options.externalInputAuthority, options.inputContextCaptureReader)
     capsules = new CapsuleRunManager(client, stateDirectory, options.capsuleAdapters)
     server = new AgentMuxControlServer({ ...options.service, socketPath, ...(options.http ? { http: options.http } : {}),
+      ...(options.forwardingPeer ? { forwardingPeer: options.forwardingPeer } : {}),
       capsules: options.service?.capsules ?? capsules,
       capsuleRuntime: options.service?.capsuleRuntime ?? capsules.runtime,
       deliveryAttempts: options.service?.deliveryAttempts ?? { hostId: 'local', store: new DeliveryAttemptStore(join(stateDirectory, 'client-delivery-attempts'), { clientJournal: true }) },

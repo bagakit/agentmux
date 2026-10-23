@@ -257,10 +257,26 @@ export class DeviceAuthority {
 
   /** Recheck the exact authenticated key; this never registers a key or borrows a Reader. */
   async assertCurrentKey(device: Pick<TrustedDevice, 'deviceId' | 'createdAt'>, publicKey: string): Promise<void> {
+    await this.assertCurrentRecord({ ...device, credentialHash: digest(publicKey) })
+  }
+
+  /** Only the trusted local forwarding receiver supplies this verified principal.
+   * Capture the original record generation/key, independently of a reply reader or grant. */
+  async bindForwardedDevice(principal: { kind: string; id: string }): Promise<{ assertCurrent(): Promise<void> }> {
+    if (principal.kind !== 'device' || !principal.id.startsWith(this.hostId + ':')) throw denied()
+    if (this.diskUnconfirmed && !await this.reconcileDisk()) throw new AgentMuxError(
+      'The original device authority storage is unconfirmed; the saved input remains waiting.', 'CONTROL_UNAVAILABLE')
+    const record = this.state.devices.find(value => value.deviceId === principal.id.slice(this.hostId.length + 1))
+    if (!record || record.revokedAt !== undefined) throw denied()
+    const original = { deviceId: record.deviceId, createdAt: record.createdAt, credentialHash: record.credentialHash }
+    return { assertCurrent: () => this.assertCurrentRecord(original) }
+  }
+
+  private async assertCurrentRecord(device: Pick<DeviceRecord, 'deviceId' | 'createdAt' | 'credentialHash'>): Promise<void> {
     if (this.diskUnconfirmed && !await this.reconcileDisk()) throw new AgentMuxError(
       'The original device authority storage is unconfirmed; the saved input remains waiting.', 'CONTROL_UNAVAILABLE')
     const current = this.state.devices.find(value => value.deviceId === device.deviceId)
-    if (!current || current.createdAt !== device.createdAt || current.credentialHash !== digest(publicKey) || current.revokedAt !== undefined) throw denied()
+    if (!current || current.createdAt !== device.createdAt || current.credentialHash !== device.credentialHash || current.revokedAt !== undefined) throw denied()
   }
 
   /** A continuing request/stream observes revocation without affecting any other device or Run. */

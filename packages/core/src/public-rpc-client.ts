@@ -11,6 +11,8 @@ import { parseConnectionOfferUrl } from '@agentmux/relay/offer'
 import { type KeyPair } from '@agentmux/relay/e2ee'
 import { openAgentMuxRpcHttpRequest } from './public-rpc-http.js'
 import { createConnection } from 'node:net'
+import { openForwardedUnixRequest, type RpcForwardingSource } from './rpc-forwarding.js'
+export type { RpcForwardingSource } from './rpc-forwarding.js'
 import { AgentMuxRpcSshTransport, AGENTMUX_RPC_SSH_TRANSPORT_BUDGET_MS } from './rpc-ssh-transport.js'
 import { rpcTransportError as transportError } from './rpc-transport-error.js'
 import { JSONRPCClient, type JSONRPCRequest, type JSONRPCResponse } from 'json-rpc-2.0'
@@ -43,6 +45,7 @@ export type AgentMuxRpcSubscriptionOptions<M extends AgentMuxRpcStreamMethod> = 
   onEnd?(error?: Error): void
   signal?: AbortSignal
   runtimeFence?: AgentMuxRuntimeFence
+  forwarding?: RpcForwardingSource
 }
 export type AgentMuxRpcSubscription = { subscriptionId: string; dispose(): Promise<void> }
 export type AgentMuxPreparedSshRoute = {
@@ -59,7 +62,7 @@ export interface AgentMuxRpcClient {
     options: AgentMuxRpcSubscriptionOptions<M>): Promise<AgentMuxRpcSubscription>
   dispose(): Promise<void>
 }
-export type AgentMuxRpcCallOptions = { signal?: AbortSignal; credentials?: AgentMuxRpcCredentials; runtimeFence?: AgentMuxRuntimeFence }
+export type AgentMuxRpcCallOptions = { signal?: AbortSignal; credentials?: AgentMuxRpcCredentials; runtimeFence?: AgentMuxRuntimeFence; forwarding?: RpcForwardingSource }
 export function agentMuxRpcEndpoint(selector?: string, env: Readonly<Record<string, string | undefined>> = process.env): AgentMuxRpcEndpoint {
   const value = selector ?? env.AGENTMUX_RPC_ENDPOINT
   if (!value) return { transport: 'unix', path: defaultAgentMuxControlSocketPath(env) }
@@ -114,7 +117,11 @@ export function agentMuxRpcSshArguments(endpoint: Extract<AgentMuxRpcEndpoint, {
 }
 type Reader = { dispose(): Promise<void> }
 async function openRequest(endpoint: AgentMuxRpcEndpoint, request: JSONRPCRequest, onFrame: (frame: unknown) => void,
-  onEnd: (error?: Error) => void, signal: AbortSignal, relayKeyPair?: KeyPair): Promise<Reader> {
+  onEnd: (error?: Error) => void, signal: AbortSignal, relayKeyPair?: KeyPair, forwarding?: RpcForwardingSource): Promise<Reader> {
+  if (forwarding) {
+    if (endpoint.transport !== 'unix') throw new AgentMuxError("This route cannot verify the original caller's authority. Continue through the original authenticated Host with the same Session and input.", 'CONTROL_PERMISSION_DENIED')
+    return await openForwardedUnixRequest(endpoint.path, request, forwarding, onFrame, onEnd, signal)
+  }
   if (endpoint.transport === 'relay') return await openAgentMuxRpcRelayRequest({ offer: endpoint.offer, ...(relayKeyPair ? { keyPair: relayKeyPair } : {}) }, request, onFrame, onEnd, signal)
   const encoded = rpcEncode(request)
   if (endpoint.transport === 'http') {
@@ -293,7 +300,8 @@ class RpcClient implements AgentMuxRpcClient {
   private get endpoint(): AgentMuxRpcEndpoint { return this.route.endpoint }
   private closed = false
   constructor(endpoint: AgentMuxRpcEndpoint, private readonly credentials?: AgentMuxRpcCredentials,
-    private readonly runtimeFence?: AgentMuxRuntimeFence, private readonly relayKeyPair?: KeyPair) { this.route = { endpoint: structuredClone(endpoint) } }
+    private readonly runtimeFence?: AgentMuxRuntimeFence, private readonly relayKeyPair?: KeyPair,
+    private readonly forwarding?: RpcForwardingSource) { this.route = { endpoint: structuredClone(endpoint) } }
   private async exchange<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     handlers?: AgentMuxRpcSubscriptionOptions<AgentMuxRpcStreamMethod>, signal?: AbortSignal, options: AgentMuxRpcCallOptions = {}, route = this.route): Promise<{ response: JSONRPCResponse; reader: Reader; subscriptionId?: string }> {
     if (this.closed) throw new AgentMuxError('RPC client is disposed.', 'CONTROL_CANCELLED')
@@ -403,10 +411,10 @@ class RpcClient implements AgentMuxRpcClient {
       // is independently owned here so cancelling a late opening can settle now.
       void (async () => {
         try {
-          if (route.endpoint.transport === 'ssh') {
+          if (route.endpoint.transport === 'ssh' && !(options.forwarding ?? this.forwarding)) {
             if (!route.ssh) route.ssh = new AgentMuxRpcSshTransport(agentMuxRpcSshArguments(route.endpoint), () => { delete route.ssh }, route.endpoint.socketPath)
             opening = route.ssh.open(payload, receive, end, controller.signal, armDeadline)
-          } else { armDeadline(); opening = openRequest(route.endpoint, payload, receive, end, controller.signal, this.relayKeyPair) }
+          } else { armDeadline(); opening = openRequest(route.endpoint, payload, receive, end, controller.signal, this.relayKeyPair, options.forwarding ?? this.forwarding) }
           reader = await opening
         } catch (error) { end(transportError(error)); return }
         if (finished) await reader.dispose()
@@ -431,7 +439,8 @@ class RpcClient implements AgentMuxRpcClient {
     finally { await exchange.reader.dispose(); this.readers.delete(exchange.reader) }
   }
   async subscribe<M extends AgentMuxRpcStreamMethod>(method: M, params: AgentMuxRpcStreamParams<M>, handlers: AgentMuxRpcSubscriptionOptions<M>): Promise<AgentMuxRpcSubscription> {
-    const exchange = await this.exchange(method, params, handlers as AgentMuxRpcSubscriptionOptions<AgentMuxRpcStreamMethod>, handlers.signal, handlers.runtimeFence === undefined ? {} : { runtimeFence: handlers.runtimeFence })
+    const exchange = await this.exchange(method, params, handlers as AgentMuxRpcSubscriptionOptions<AgentMuxRpcStreamMethod>, handlers.signal,
+      { ...(handlers.runtimeFence === undefined ? {} : { runtimeFence: handlers.runtimeFence }), ...(handlers.forwarding ? { forwarding: handlers.forwarding } : {}) })
     return { subscriptionId: exchange.subscriptionId!, dispose: async () => { await exchange.reader.dispose(); this.readers.delete(exchange.reader) } }
   }
   setSshRemoteCommand(command?: string): void {
@@ -471,9 +480,9 @@ class RpcClient implements AgentMuxRpcClient {
     this.candidates.clear()
     await Promise.all([...this.readers].map(reader => reader.dispose())); this.readers.clear() }
 }
-export async function connectAgentMuxRpc(options: { endpoint?: AgentMuxRpcEndpoint; credentials?: AgentMuxRpcCredentials; runtimeFence?: AgentMuxRuntimeFence; relayKeyPair?: KeyPair } = {}): Promise<AgentMuxRpcClient> {
+export async function connectAgentMuxRpc(options: { endpoint?: AgentMuxRpcEndpoint; credentials?: AgentMuxRpcCredentials; runtimeFence?: AgentMuxRuntimeFence; relayKeyPair?: KeyPair; forwarding?: RpcForwardingSource } = {}): Promise<AgentMuxRpcClient> {
   if (options.credentials) { rpcRecord(options.credentials, ['agentSessionId', 'capability']); rpcString(options.credentials.agentSessionId, 'Caller Session ID'); rpcString(options.credentials.capability, 'Caller capability') }
   const endpoint = options.endpoint ?? agentMuxRpcEndpoint()
   const relayKeyPair = endpoint.transport === 'relay' ? options.relayKeyPair ?? await loadOrCreateRelayKeyPair(join(homedir(), '.agentmux', 'relay-client-keypair.json')) : undefined
-  return new RpcClient(endpoint, options.credentials, options.runtimeFence, relayKeyPair)
+  return new RpcClient(endpoint, options.credentials, options.runtimeFence, relayKeyPair, options.forwarding)
 }
