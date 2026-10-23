@@ -1,5 +1,5 @@
 import { expect, it, vi } from 'vitest'
-import { mkdir, writeFile } from 'node:fs/promises'
+import { mkdir, rename, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { AgentMuxError } from '@agentmux/core'
 import { learningPublicFixture } from './agent-learning-public-fixture.js'
@@ -128,6 +128,28 @@ it('continues only the original approved learner after a pre-Core exit, keeping 
   await restarted.call('agent.learning.continue', { hostId: 'local', operationId: proposed.operationId, step: 'learning' }, { principal: { kind: 'user', id: 'fixture-person' } })
   expect(create).toHaveBeenCalledTimes(2); expect(f.started).toHaveLength(2)
   expect((await f.store.readMetadata('source'))!.run.runId).toBe('run-source'); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('refuses a changed original destination before continuing its frozen learner, then resumes only after that same resource is restored', async () => {
+  const f = await learningPublicFixture(), proposed = await f.propose(await f.prepare()), actual = f.core.createAgentWithDelivery.bind(f.core)
+  const create = vi.spyOn(f.core, 'createAgentWithDelivery').mockRejectedValueOnce(new Error('Exit after frozen learner intent, before original Core create'))
+  const approved = (await f.authority.confirm(f.confirmation(proposed, f.targets[1]))).operation
+  const frozen = structuredClone(create.mock.calls[0]![0]), directory = frozen.workspacePath!, moved = directory + '-moved'
+  expect(approved.learner!.state).toBe('unknown'); expect(f.started).toHaveLength(1)
+  await rename(directory, moved)
+  create.mockImplementation(actual)
+  const restarted = f.reopen(), input = { hostId: 'local', operationId: proposed.operationId, step: 'learning' as const }, actor = { principal: { kind: 'user' as const, id: 'fixture-person' } }
+  await expect(restarted.call('agent.learning.continue', input, actor)).rejects.toMatchObject({ code: 'LEARNING_TARGET_UNCONFIRMED' })
+  expect(create).toHaveBeenCalledOnce(); expect(f.started).toHaveLength(1)
+  const retained = (await restarted.call('agent.learning.inspect', { hostId: 'local', operationId: proposed.operationId }, actor)).operation!
+  expect(retained.approved).toEqual(approved.approved)
+  expect(retained.learner!.agentSessionId).toBe(approved.learner!.agentSessionId)
+  expect(retained.learner!.createOperationId).toBe(approved.learner!.createOperationId)
+  await rename(moved, directory)
+  const continued = (await restarted.call('agent.learning.continue', input, actor)).operation
+  expect(continued.learner!.state).toBe('created'); expect(create.mock.calls[1]![0]).toEqual(frozen)
+  expect(f.started).toHaveLength(2); expect((await f.store.readMetadata('source'))!.run.runId).toBe('run-source')
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
 
 it('uses the built public CLI for extraction, authenticated proposal, inspection and discovery without an approval flag', async () => {
