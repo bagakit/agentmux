@@ -3,7 +3,7 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { autoUpdate, computePosition, flip, offset, shift, size } from '@floating-ui/dom'
 import type { ScratchTopicSnapshot } from '../../../shared/contracts'
-import { MOTE_SOUL_PATH, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
+import { MOTE_SOUL_PATH, PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicLogicalPath } from '../../../shared/scratch-topics'
 import { homeZoneId, spatialSources } from '../../../shared/space-addresses'
 import { api } from '../lib/api'
 import { useScratchTopics } from '../hooks/useScratchTopics'
@@ -26,8 +26,8 @@ import { WorkbenchPresentationContext } from '../lib/workbench-presentation'
 import { StatusDot } from './StatusDot'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { topicSpaceIconTarget, type SpaceIconTarget } from '../lib/space-object-appearance'
-import { useMoteWorkfaceScope } from '../lib/mote-workface'
-import { useMoteMaterialsActions } from '../lib/mote-materials-actions'
+import { useMoteWorkfaceScope, type MoteWorkfaceScope } from '../lib/mote-workface'
+import { openMoteMaterial, useMoteMaterialsActions } from '../lib/mote-materials-actions'
 import { SpaceIconPicker } from './SpaceIconPicker'
 import { MoteRenameDialog } from './MoteRenameDialog'
 import { SpaceObjectContextMenu } from './SpaceObjectContextMenu'
@@ -116,7 +116,7 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
   onSelect(topicId: string, tabId: string | undefined): void
   onIdentity(anchor: HTMLButtonElement | null): void
   onArchive(topic: ScratchTopicSnapshot, archived: boolean): Promise<boolean>; pending: string | null; container(): HTMLElement | null; currentTopicId: string
-  onRename(topic: ScratchTopicSnapshot): void; onAvatar(target: SpaceIconTarget): void; onOpenSpace(topicId: string, tabId: string | undefined): void
+  onRename(topic: ScratchTopicSnapshot): void; onAvatar(target: SpaceIconTarget): void; onOpenSpace(topicId: string, tabId: string | undefined, intent?: 'space' | 'persona'): void
 }) {
   const recent = useAppStore(state => state.recentMoteAgents[topic.id])
   const selectTab = useMemo(() => createPmoTeamsTopicTargetSelector({ open: false, preview: false,
@@ -171,7 +171,7 @@ const MoteChoice = memo(function MoteChoice({ topic, selected, savedTabId, onSel
   </button>
   return iconTarget ? <SpaceObjectContextMenu target={iconTarget} container={container} onChangeIcon={onAvatar} moteActions={{
     pinned, onTogglePin: () => useAppStore.getState().togglePinnedItem(SCRATCH_WORKSPACE_ID, topic.id),
-    onRename: () => onRename(topic), onEdit: () => { if (scope && fileReference) void files.open(scope.rootPath + '/' + MOTE_SOUL_PATH); else onOpenSpace(topic.id, tabId) },
+    onRename: () => onRename(topic), onEdit: () => { if (scope && fileReference) void files.open(scope.rootPath + '/' + MOTE_SOUL_PATH); else onOpenSpace(topic.id, tabId, 'persona') },
     onNewDiscussion: () => { const state = useAppStore.getState(), layout = state.layouts[SCRATCH_WORKSPACE_ID]
       if (!layout) return
       const id = state.openLauncher({ workspaceId: SCRATCH_WORKSPACE_ID, tabGroupId: layout.activeGroupId, topicId: topic.id, reveal: false })
@@ -217,7 +217,7 @@ const MoteChooser = memo(function MoteChooser({ topics, topicId, tabId, railMode
   railMode: 'cards' | 'avatars'; onToggleMode(): void
   onSelect(topicId: string, tabId: string | undefined): void; onClose(): void
   onArchive(topic: ScratchTopicSnapshot, archived: boolean): Promise<boolean>; pending: string | null; container(): HTMLElement | null
-  onRename(topic: ScratchTopicSnapshot): void; onAvatar(target: SpaceIconTarget): void; onOpenMoteSpace(topicId: string, tabId: string | undefined): void
+  onRename(topic: ScratchTopicSnapshot): void; onAvatar(target: SpaceIconTarget): void; onOpenMoteSpace(topicId: string, tabId: string | undefined, intent?: 'space' | 'persona'): void
 }) {
   const [showArchived, setShowArchived] = useState(false)
   const [identityAnchor, setIdentityAnchor] = useState<HTMLButtonElement | null>(null)
@@ -263,7 +263,9 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
   const { topics, error: directoryError } = useScratchTopics(SCRATCH_WORKSPACE_ID)
   const motes = useMemo(() => scratchMoteTopics(topics), [topics])
   const archive = useMoteArchiveAction(scratch)
-  const target = usePmoTeamsTopicTarget(floating, projectionState?.activeReference)
+  // A Zone may gain members without selecting one. Explicit empty selection
+  // remains the target until a user action supplies an exact Tab/Region.
+  const target = usePmoTeamsTopicTarget(floating, floating.targetTabId === null ? undefined : projectionState?.activeReference)
   const tabs = useAppStore(state => state.tabs)
   const discussionChoices = useMemo(() => Object.values(tabs).filter(tab =>
     tab.workspaceId === SCRATCH_WORKSPACE_ID && tab.topicId === target.topicId), [tabs, target.topicId])
@@ -328,7 +330,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     [floating.open, floating.preview, target.topicId, target.tabId, floating.reference?.displayWorkspaceId,
       floating.reference?.groupId, floating.reference?.tabId, floating.reference?.regionId])
   useEffect(() => {
-    if (!floating.open || floating.agentTarget) return
+    if (!floating.open || floating.agentTarget || floating.targetTabId === null) return
     const selected = projectionState?.activeReference
     if (selected) {
       const reference = workbenchDisplayReferenceMatches(useAppStore.getState().layouts[selected.displayWorkspaceId], selected) ? selected : undefined
@@ -346,9 +348,9 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
   }, [floating.open, floating.agentTarget, floating.targetTopicId, floating.targetTabId, target.topicId, target.tabId, target.tab, discussionChoices.length, motes, setFloating, projectionState?.activeReference])
   useEffect(() => {
     const reference = projectionState?.projection?.selection[0]
-    if (floating.open && floating.reference === undefined && projectionState?.projection?.selectionMode !== undefined && reference?.tabId === target.tabId)
+    if (floating.open && floating.targetTabId !== null && floating.reference === undefined && projectionState?.projection?.selectionMode !== undefined && reference?.tabId === target.tabId)
       setFloating({ reference })
-  }, [floating.open, floating.reference, target.tabId, projectionState?.projection, setFloating])
+  }, [floating.open, floating.targetTabId, floating.reference, target.tabId, projectionState?.projection, setFloating])
   useEffect(() => {
     if (floating.open && !floating.agentTarget && target.session && pmoFocusSessionId(useAppStore.getState().agentFocus) !== target.session.id) focusPmoSession(target.session.id)
   }, [floating.open, floating.agentTarget, target.session, focusPmoSession])
@@ -485,7 +487,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     setFloating({ targetTabId: tabId, reference, targetAgent: undefined })
   }, [projectionState, setFloating, floating, reportError, topics])
   const close = useCallback(() => { endResize(false); spaceActionRef.current?.abort(); requestPmoTeamsTopicFloatingClose() }, [endResize])
-  const openSpace = useCallback((topicId = target.topicId, tabId = topicId === target.topicId ? target.tabId : undefined) => {
+  const openSpace = useCallback((topicId = target.topicId, tabId = topicId === target.topicId ? target.tabId : undefined, action: 'space' | 'persona' = 'space') => {
     spaceActionRef.current?.abort()
     const workspace = useAppStore.getState().config?.workspaces.find(item => item.id === SCRATCH_WORKSPACE_ID)
     const projection = projectionState?.projection
@@ -508,6 +510,7 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     let destination: WorkbenchProjectionSelection | null = null
     let destinationSpaceId: string | null = null
     let destinationZoneId: string | null = null
+    let personaScope: MoteWorkfaceScope | null = null
     const opening = (async () => {
       const before = useAppStore.getState()
       if (tabId) {
@@ -541,6 +544,11 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
       const topic = tabId ? topics?.find(topic => topic.id === topicId) : await api.scratch.ensureMote(SCRATCH_WORKSPACE_ID, topicId)
       if (controller.signal.aborted) return false
       if (!topic) throw new Error('The original Mote directory is still being confirmed')
+      if (action === 'persona') {
+        const rootPath = workspace ? scratchTopicLogicalPath(workspace, topic) : null
+        if (!workspace || rootPath === null) throw new Error('The original persona directory is unconfirmed. Its files and workface are kept; retry Edit persona after directory discovery.')
+        personaScope = { workspace, topic, rootPath }
+      }
       const current = useAppStore.getState()
       if (!current.config) throw new Error('The Workspace is still restoring')
       const sources = spatialSources(current.config, [topic], current.spaceZoneBindings)
@@ -586,14 +594,34 @@ export function PmoTeamsTopicFloatingPanel({ floating, setFloating, projectionSt
     const unsubscribeFloating = subscribePmoTeamsTopicFloatingState(() => {
       if (floatingIntent() !== intent) controller.abort()
     })
-    const disposeNavigation = () => { unsubscribe(); unsubscribeFloating(); controller.signal.removeEventListener('abort', disposeNavigation) }
+    const cancelInput = () => controller.abort()
+    const inputEvents = ['pointerdown', 'keydown', 'input'] as const
+    if (action === 'persona') for (const event of inputEvents) document.addEventListener(event, cancelInput, true)
+    const disposeNavigation = () => {
+      unsubscribe(); unsubscribeFloating(); controller.signal.removeEventListener('abort', disposeNavigation)
+      for (const event of inputEvents) document.removeEventListener(event, cancelInput, true)
+    }
     const cancelObservation = () => { if (operation) settleContextOperation(operation, 'unconfirmed') }
     controller.signal.addEventListener('abort', cancelObservation, { once: true })
     if (controller.signal.aborted) disposeNavigation()
     else controller.signal.addEventListener('abort', disposeNavigation, { once: true })
-    void opening.then(opened => {
+    void opening.then(async opened => {
       if (opened && controller === spaceActionRef.current && !controller.signal.aborted) {
         if (operation) settleContextOperation(operation, 'confirmed', null)
+        if (action === 'persona' && personaScope) {
+          // The confirmed Space action hands this same intent to the original
+          // File owner. Its own listeners now protect the exact File receipt.
+          controller.signal.removeEventListener('abort', cancelObservation)
+          disposeNavigation()
+          try {
+            const file = await openMoteMaterial(personaScope, `${personaScope.rootPath}/${MOTE_SOUL_PATH}`, { signal: controller.signal })
+            if (!file || controller !== spaceActionRef.current || controller.signal.aborted) return
+          } catch (error) {
+            if (controller === spaceActionRef.current && !controller.signal.aborted) reportError(error, {
+              kind: 'indeterminate', summary: 'The original persona file could not be opened. Its Space and existing work are kept; retry Edit persona.' })
+            return
+          }
+        }
         requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
       }
     }).catch(error => {
