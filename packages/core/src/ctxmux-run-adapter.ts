@@ -8,7 +8,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { Socket } from 'node:net'
 import type { Readable } from 'node:stream'
 import { fileURLToPath } from 'node:url'
-import { promisify } from 'node:util'
+import { isDeepStrictEqual, promisify } from 'node:util'
 import ctxmuxArtifacts from './ctxmux-artifact-contract.json' with { type: 'json' }
 import {
   Attachment,
@@ -1185,6 +1185,38 @@ export class CtxmuxRunAdapter {
     } catch (error) {
       throw translateCtxmuxError(error)
     }
+  }
+
+  /** Observe one frozen creation without ever submitting Start again. */
+  async inspectPreparedStart(request: RunSpec, operationKey: string, runId?: string): Promise<CtxmuxAdapterRun | null> {
+    if (request.env.AGENTMUX_LIFECYCLE_OPERATION_ID !== operationKey) throw new AgentMuxError(
+      'The prepared terminal has no original creation binding.', 'INVALID_TERMINAL_PREPARATION')
+    try {
+      if (runId !== undefined) {
+        let run: RunInfo
+        try { run = await this.requireClient().status(runId) }
+        catch (error) { if (translateCtxmuxError(error).code === 'CTXMUX_run_not_found') return null; throw error }
+        if (run.id !== runId || run.spec?.env.AGENTMUX_LIFECYCLE_OPERATION_ID !== operationKey || !isDeepStrictEqual(run.spec, request))
+          throw new AgentMuxError('The exact Run does not match the original complete prepared launch. The Run was preserved.', 'TERMINAL_PREPARATION_RUN_MISMATCH')
+        return this.projectRun(run)
+      }
+      const summaries = await this.requireClient().list()
+      const candidates = await mapWithConcurrency(summaries, RUN_STATUS_CONCURRENCY, async summary => {
+        try {
+          const run = await this.requireClient().status(summary.id)
+          return run.spec?.env.AGENTMUX_LIFECYCLE_OPERATION_ID === operationKey ? run : null
+        } catch (error) {
+          if (translateCtxmuxError(error).code === 'CTXMUX_run_not_found') return null
+          throw error
+        }
+      })
+      const matches = candidates.filter((run): run is RunInfo => run !== null)
+      if (!matches.length) return null
+      if (matches.length !== 1 || !isDeepStrictEqual(matches[0]!.spec, request)) throw new AgentMuxError(
+        'The original creation has no single Run matching its complete frozen launch. Preserve the operation without resending.',
+        'TERMINAL_CREATION_UNCONFIRMED')
+      return this.projectRun(matches[0]!)
+    } catch (error) { throw translateCtxmuxError(error) }
   }
 
   async attach(
