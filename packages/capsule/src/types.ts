@@ -98,6 +98,7 @@ export interface CapsuleConfigResult {
 export type CapsuleOperationStatus = 'pending' | 'committed' | 'failed'
 export interface CapsuleOperation {
   operationId: string
+  capsuleId?: string
   method: CapsuleMethod
   status: CapsuleOperationStatus
   createdAt: number
@@ -117,6 +118,7 @@ export interface CapsuleInteraction {
   target?: CapsuleTarget
   status: 'pending' | 'answered'
   answer?: string
+  reply?: CapsuleReplyState
 }
 export interface CapsuleRenderingUnavailable {
   status: 'unavailable'
@@ -138,7 +140,58 @@ export interface CapsuleOpenResult {
 export interface CapsuleReplyResult {
   operationId: string
   interaction: CapsuleInteraction
-  delivery: { status: 'unavailable' | 'submitted' | 'unknown'; inputOperationId?: string; reason?: string }
+  delivery: CapsuleInputObservation
+}
+export type CapsuleJson = null | boolean | number | string | CapsuleJson[] | { [key: string]: CapsuleJson }
+/** Saved producer metadata is data only. No value in this envelope supplies current authority. */
+export interface CapsulePreparedReply {
+  version: 1
+  operationId: string
+  capsuleId: string
+  interactionId: string
+  inputOperationId: string
+  target: CapsuleTarget
+  expectedRun: { runId: string }
+  principal: { kind: 'user' | 'device'; id: string }
+  prompt: string
+  adapterData?: CapsuleJson
+}
+/** A projection of the original Core input receipt, never an Agent completion claim. */
+export interface CapsuleInputObservation {
+  status: 'unavailable' | 'submitted' | 'unknown'
+  inputOperationId: string
+  expectedRun: { runId: string }
+  inputStatus?: 'waiting' | 'stopped' | 'terminal-confirmed' | 'admitted' | 'not-applied' | 'unknown'
+  reason?: string
+  receipt?: CapsuleJson
+}
+export interface CapsuleReplyState {
+  operationId: string
+  phase: 'prepared' | 'dispatch-started' | 'observed'
+  delivery: CapsuleInputObservation
+}
+export interface CapsuleReplyPort {
+  prepare(
+    input: { interaction: CapsuleInteraction; answer: string; inputOperationId: string; operationId: string },
+    context: CapsuleCallContext,
+  ): Promise<CapsulePreparedReply>
+  submit(prepared: CapsulePreparedReply, context: CapsuleCallContext): Promise<CapsuleInputObservation>
+  inspect(
+    prepared: CapsulePreparedReply,
+    context?: CapsuleCallContext,
+  ): Promise<CapsuleInputObservation | null>
+}
+export interface CapsulePresentationPort {
+  open(
+    params: CapsuleParamsMap['capsule.open'],
+    context: CapsuleCallContext | undefined,
+    resolved: CapsuleResultMap['capsule.resolve'],
+  ): Promise<CapsuleOpenResult>
+  /** Reads an original presentation operation; null never authorizes another open. */
+  inspect?(
+    params: CapsuleParamsMap['capsule.open'],
+    context?: CapsuleCallContext,
+  ): Promise<CapsuleOpenResult | null>
 }
 export interface CapsuleParamsMap {
   'capsule.ls': Record<string, never>
@@ -247,9 +300,22 @@ export interface CapsuleSdkCapabilities {
   interaction: boolean
   humanReply: false
 }
+export interface CapsuleSdkTheme {
+  mode: 'light' | 'dark'
+  tokens: Record<string, string>
+}
 export interface CapsuleSdk {
   capabilities(): Promise<CapsuleSdkCapabilities>
-  request(question: string, draft?: string): Promise<CapsuleInteraction>
+  theme(): Promise<CapsuleSdkTheme | null>
+  onThemeChanged(listener: (theme: CapsuleSdkTheme | null) => void): () => void
+  createOperationId(): string
+  request(question: string, draft?: string, operationId?: string): Promise<CapsuleInteraction>
   read(interactionId: string): Promise<CapsuleInteraction>
-  saveDraft(interactionId: string, expectedRevision: number, draft: string): Promise<CapsuleInteraction>
+  saveDraft(
+    interactionId: string,
+    expectedRevision: number,
+    draft: string,
+    operationId?: string,
+  ): Promise<CapsuleInteraction>
+  inspectOperation(operationId: string): Promise<CapsuleOperation | null>
 }

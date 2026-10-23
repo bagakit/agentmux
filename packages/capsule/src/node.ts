@@ -5,8 +5,10 @@ import { basename, dirname, join, resolve } from 'node:path'
 import {
   parseCapsuleConfig,
   parseCapsuleInteraction,
+  parseCapsuleInputObservation,
   parseCapsuleOperation,
   parseCapsuleParams,
+  parseCapsulePreparedReply,
   parseCapsuleRecord,
   parseCapsuleResult,
 } from './parsers.js'
@@ -18,6 +20,7 @@ import type {
   CapsuleInjectionPort,
   CapsuleInspection,
   CapsuleInteraction,
+  CapsuleInputObservation,
   CapsuleIssue,
   CapsuleMethod,
   CapsuleMutationResult,
@@ -25,6 +28,10 @@ import type {
   CapsuleOperation,
   CapsuleParamsMap,
   CapsulePort,
+  CapsulePreparedReply,
+  CapsulePresentationPort,
+  CapsuleReplyPort,
+  CapsuleReplyResult,
   CapsuleRecord,
   CapsuleResultMap,
 } from './types.js'
@@ -49,13 +56,8 @@ export interface NodeCapsuleOptions {
   stateDirectory: string
   contentRoot?: string
   injection?: CapsuleInjectionPort
-  presentation?: {
-    open(
-      params: CapsuleParamsMap['capsule.open'],
-      context: CapsuleCallContext | undefined,
-      resolved: CapsuleResultMap['capsule.resolve'],
-    ): Promise<CapsuleOpenResult>
-  }
+  presentation?: CapsulePresentationPort
+  replies?: CapsuleReplyPort
 }
 interface SavedRecord {
   schemaVersion: 1
@@ -75,7 +77,7 @@ interface SavedOperation {
   effect?:
     | { kind: 'record'; capsuleId: string }
     | { kind: 'config' }
-    | { kind: 'interaction'; capsuleId: string; interactionId: string }
+    | { kind: 'interaction'; capsuleId: string; interactionId: string; inputOperationId?: string }
 }
 interface SavedConfig {
   schemaVersion: 1
@@ -88,6 +90,7 @@ interface SavedInteraction {
   interaction: CapsuleInteraction
   lastOperationId: string
   receipt: unknown
+  preparedReply?: CapsulePreparedReply
 }
 const native = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
 function issue(
@@ -128,7 +131,10 @@ export class NodeCapsuleOwner implements CapsulePort {
   private readonly removed = new Set<string>()
   private readonly lifecycle = new AbortController()
   private readonly readers = new Set<Promise<unknown>>()
-  private queue: Promise<unknown> = Promise.resolve()
+  private readonly activeMutations = new Set<string>()
+  private readonly activeReconciliations = new Set<string>()
+  private readonly mutationQueues = new Map<string, Promise<unknown>>()
+  private readonly mutations = new Set<Promise<unknown>>()
   private closed = false
   private constructor(
     private readonly options: NodeCapsuleOptions,
@@ -227,7 +233,7 @@ export class NodeCapsuleOwner implements CapsulePort {
     if (this.closed) return
     this.closed = true
     this.lifecycle.abort()
-    await this.queue.catch(() => undefined)
+    await Promise.allSettled([...this.mutations])
     await Promise.allSettled([...this.readers])
     await Promise.allSettled([...this.services.values()].map((s) => s.close()))
     this.services.clear()
@@ -277,8 +283,37 @@ export class NodeCapsuleOwner implements CapsulePort {
       )
       return reading
     }
-    const pending = this.queue.then(work, work)
-    this.queue = pending.catch(() => undefined)
+    const input = params as { operationId: string; capsuleId?: string; interactionId?: string }
+    // The original operation is unique across resource kinds. CAS replacement
+    // also serializes its exact resource, never unrelated pages or observations.
+    const resource = input.interactionId
+      ? `interaction:${input.interactionId}`
+      : method === 'capsule.update' || method === 'capsule.remove'
+        ? `capsule:${input.capsuleId}`
+        : method === 'capsule.config.update'
+          ? 'config'
+          : undefined
+    const pending = this.serial(`operation:${input.operationId}`, () =>
+      resource ? this.serial(resource, work) : work(),
+    )
+    this.mutations.add(pending)
+    void pending.then(
+      () => this.mutations.delete(pending),
+      () => this.mutations.delete(pending),
+    )
+    return pending
+  }
+  private serial<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const previous = this.mutationQueues.get(key) ?? Promise.resolve()
+    const pending = previous.then(work, work)
+    const settled = pending.then(
+      () => undefined,
+      () => undefined,
+    )
+    this.mutationQueues.set(key, settled)
+    void settled.then(() => {
+      if (this.mutationQueues.get(key) === settled) this.mutationQueues.delete(key)
+    })
     return pending
   }
   private configPath() {
@@ -426,7 +461,56 @@ export class NodeCapsuleOwner implements CapsulePort {
     if (operation.status === 'committed') await confirmDurable(this.operationPath(operationId))
     return r as unknown as SavedOperation
   }
-  private async reconcile(saved: SavedOperation): Promise<SavedOperation> {
+  private async reconcile(
+    saved: SavedOperation,
+    context?: CapsuleCallContext,
+    external = false,
+    resume = false,
+  ): Promise<SavedOperation> {
+    if (!external) return this.reconcileState(saved, context)
+    const operationId = saved.operation.operationId
+    if (this.activeMutations.has(operationId) || this.activeReconciliations.has(operationId)) return saved
+    this.activeReconciliations.add(operationId)
+    try {
+      return await this.reconcileState(saved, context, true, resume)
+    } finally {
+      this.activeReconciliations.delete(operationId)
+    }
+  }
+  private async reconcileState(
+    saved: SavedOperation,
+    context?: CapsuleCallContext,
+    external = false,
+    resume = false,
+  ): Promise<SavedOperation> {
+    if (saved.operation.method === 'capsule.interaction.reply')
+      return this.reconcileReply(saved, context, external, resume)
+    if (
+      saved.operation.method === 'capsule.open' &&
+      saved.operation.status === 'pending' &&
+      external &&
+      this.options.presentation?.inspect
+    ) {
+      try {
+        const params = parseCapsuleParams('capsule.open', saved.params)
+        const observed = await this.observeExternal(
+          (ctx) => this.options.presentation!.inspect!(params, ctx),
+          context,
+        )
+        if (observed) {
+          const result = parseCapsuleResult('capsule.open', observed, params)
+          const complete: SavedOperation = {
+            ...saved,
+            operation: { ...saved.operation, status: 'committed', updatedAt: Date.now(), result },
+          }
+          await writeJson(this.operationPath(saved.operation.operationId), complete)
+          return complete
+        }
+      } catch {
+        // Reading a missing presentation receipt never opens a replacement Browser.
+      }
+      return saved
+    }
     if (saved.operation.status !== 'pending' || !saved.effect) return saved
     let committed: unknown, last: string | undefined, effectPath: string
     try {
@@ -536,7 +620,7 @@ export class NodeCapsuleOwner implements CapsulePort {
           'CAPSULE_OPERATION_CONFLICT',
           'This operation ID belongs to a different original request or caller.',
         )
-      const observed = await this.reconcile(original)
+      const observed = await this.reconcile(original, context, true, method === 'capsule.interaction.reply')
       if (observed.operation.status === 'committed')
         return parseCapsuleResult(method, observed.operation.result, params)
       throw new CapsuleError(
@@ -545,20 +629,37 @@ export class NodeCapsuleOwner implements CapsulePort {
       )
     }
     const now = Date.now(),
+      capsuleId =
+        effect?.kind === 'record' || effect?.kind === 'interaction'
+          ? effect.capsuleId
+          : (params as { capsuleId?: string }).capsuleId,
       saved: SavedOperation = {
         schemaVersion: 1,
-        operation: { operationId, method, status: 'pending', createdAt: now, updatedAt: now },
+        operation: {
+          operationId,
+          ...(capsuleId ? { capsuleId } : {}),
+          method,
+          status: 'pending',
+          createdAt: now,
+          updatedAt: now,
+        },
         params,
         ...(context?.caller ? { caller: context.caller } : {}),
         ...(context?.principal ? { principal: context.principal } : {}),
         ...(effect ? { effect } : {}),
       }
     await writeJson(this.operationPath(operationId), saved)
+    this.activeMutations.add(operationId)
     try {
       const result = parseCapsuleResult(method, await work(), params)
+      const status =
+        method === 'capsule.interaction.reply' &&
+        (result as CapsuleReplyResult).delivery.status !== 'submitted'
+          ? 'pending'
+          : 'committed'
       await writeJson(this.operationPath(operationId), {
         ...saved,
-        operation: { ...saved.operation, status: 'committed', updatedAt: Date.now(), result },
+        operation: { ...saved.operation, status, updatedAt: Date.now(), result },
       })
       return result
     } catch (error) {
@@ -582,6 +683,10 @@ export class NodeCapsuleOwner implements CapsulePort {
           'CAPSULE_REMOVED',
           'CAPSULE_TARGET_MISMATCH',
           'CAPSULE_INTERACTION_ANSWERED',
+          'CAPSULE_TARGET_UNAVAILABLE',
+          'CAPSULE_INPUT_TARGET_MISMATCH',
+          'CAPSULE_TRUSTED_REPLY_REQUIRED',
+          'CAPSULE_REPLY_PREPARATION_UNAVAILABLE',
         ].includes(error.code)
       if (!knownUnapplied || method === 'capsule.open') {
         try {
@@ -625,6 +730,8 @@ export class NodeCapsuleOwner implements CapsulePort {
         },
       }).catch(() => undefined)
       throw error
+    } finally {
+      this.activeMutations.delete(operationId)
     }
   }
   private async readInteraction(id: string, capsuleId: string): Promise<SavedInteraction> {
@@ -635,7 +742,29 @@ export class NodeCapsuleOwner implements CapsulePort {
         'CAPSULE_INTERACTION_UNCONFIRMED',
         'The original interaction identity cannot be confirmed.',
       )
-    return { schemaVersion: 1, interaction, lastOperationId: r.lastOperationId, receipt: r.receipt }
+    const preparedReply =
+      r.preparedReply === undefined ? undefined : parseCapsulePreparedReply(r.preparedReply)
+    if (
+      preparedReply &&
+      (preparedReply.capsuleId !== capsuleId ||
+        preparedReply.interactionId !== id ||
+        preparedReply.operationId !== interaction.reply?.operationId ||
+        preparedReply.inputOperationId !== interaction.reply.delivery.inputOperationId ||
+        preparedReply.expectedRun.runId !== interaction.reply.delivery.expectedRun.runId ||
+        canonical(preparedReply.target) !== canonical(interaction.target))
+    ) {
+      throw new CapsuleError(
+        'CAPSULE_INTERACTION_UNCONFIRMED',
+        'The original reply envelope does not match this exact interaction.',
+      )
+    }
+    return {
+      schemaVersion: 1,
+      interaction,
+      lastOperationId: r.lastOperationId,
+      receipt: r.receipt,
+      ...(preparedReply ? { preparedReply } : {}),
+    }
   }
   private async dispatch<M extends CapsuleMethod>(
     method: M,
@@ -664,7 +793,7 @@ export class NodeCapsuleOwner implements CapsulePort {
       }
       case 'capsule.operation.inspect': {
         const saved = await this.readOperation(p.operationId)
-        result = { operation: saved ? (await this.reconcile(saved)).operation : null }
+        result = { operation: saved ? (await this.reconcile(saved, context, true)).operation : null }
         break
       }
       case 'capsule.config.inspect':
@@ -895,7 +1024,13 @@ export class NodeCapsuleOwner implements CapsulePort {
         break
       }
       case 'capsule.interaction.inspect': {
-        const { interaction } = await this.readInteraction(p.interactionId, p.capsuleId)
+        let current = await this.readInteraction(p.interactionId, p.capsuleId)
+        if (current.preparedReply && current.interaction.reply) {
+          const operation = await this.readOperation(current.interaction.reply.operationId)
+          if (operation) await this.reconcile(operation, context, true)
+          current = await this.readInteraction(p.interactionId, p.capsuleId)
+        }
+        const { interaction } = current
         if (interaction.capsuleId !== p.capsuleId)
           throw new CapsuleError('CAPSULE_TARGET_MISMATCH', 'This interaction belongs to another Capsule.')
         result = { interaction }
@@ -942,10 +1077,9 @@ export class NodeCapsuleOwner implements CapsulePort {
           },
         )
       case 'capsule.interaction.reply':
-        throw new CapsuleError(
-          'CAPSULE_TRUSTED_REPLY_UNAVAILABLE',
-          'This Host has no trusted user input adapter. Page scripts and ordinary HTTP cannot authenticate a Human reply.',
-        )
+        return this.reply(params as CapsuleParamsMap['capsule.interaction.reply'], context) as Promise<
+          CapsuleResultMap[M]
+        >
     }
     return result as CapsuleResultMap[M]
   }
@@ -961,33 +1095,342 @@ export class NodeCapsuleOwner implements CapsulePort {
       )
     }
   }
-  private async present(
-    params: CapsuleParamsMap['capsule.open'],
-    context: CapsuleCallContext | undefined,
-    resolved: CapsuleResultMap['capsule.resolve'],
-  ): Promise<CapsuleOpenResult> {
+  private requireReplyContext(context: CapsuleCallContext | undefined): CapsuleCallContext {
+    if (!context?.principal || context.caller) {
+      throw new CapsuleError(
+        'CAPSULE_TRUSTED_REPLY_REQUIRED',
+        'A managed Agent or page declaration cannot authenticate a Human reply. Use the original trusted App confirmation.',
+      )
+    }
+    return context
+  }
+  private unknownInput(prepared: CapsulePreparedReply, reason: string): CapsuleInputObservation {
+    return {
+      status: 'unknown',
+      inputOperationId: prepared.inputOperationId,
+      expectedRun: prepared.expectedRun,
+      reason,
+    }
+  }
+  private checkedInput(value: unknown, prepared: CapsulePreparedReply): CapsuleInputObservation {
+    const observation = parseCapsuleInputObservation(value)
+    if (
+      observation.inputOperationId !== prepared.inputOperationId ||
+      observation.expectedRun.runId !== prepared.expectedRun.runId
+    ) {
+      throw new CapsuleError(
+        'CAPSULE_INPUT_TARGET_MISMATCH',
+        'The input observation belongs to another original input or Run. The saved reply has not been retargeted.',
+      )
+    }
+    return observation
+  }
+  private async saveReply(
+    current: SavedInteraction,
+    phase: NonNullable<CapsuleInteraction['reply']>['phase'],
+    delivery: CapsuleInputObservation,
+  ): Promise<SavedInteraction> {
+    const prepared = current.preparedReply!
+    const interaction: CapsuleInteraction = {
+      ...current.interaction,
+      reply: { operationId: prepared.operationId, phase, delivery },
+    }
+    const receipt: CapsuleReplyResult = { operationId: prepared.operationId, interaction, delivery }
+    const saved: SavedInteraction = { ...current, interaction, receipt }
+    await writeJson(this.interactionPath(interaction.interactionId, interaction.capsuleId), saved)
+    return saved
+  }
+  private async submitSavedReply(
+    current: SavedInteraction,
+    context: CapsuleCallContext,
+  ): Promise<SavedInteraction> {
+    const prepared = current.preparedReply!
+    if (current.interaction.reply?.phase !== 'prepared') return current
+    this.requireReplyContext(context)
+    if (canonical(context.principal) !== canonical(prepared.principal)) {
+      throw new CapsuleError(
+        'CAPSULE_OPERATION_CONFLICT',
+        'The original saved reply belongs to a different trusted principal.',
+      )
+    }
+    // This durable boundary is written before the possibly executing call. Once
+    // crossed, every path observes the original Core input rather than submitting.
+    current = await this.saveReply(
+      current,
+      'dispatch-started',
+      this.unknownInput(
+        prepared,
+        'The original answer is saved. Its Core input submission is not yet confirmed.',
+      ),
+    )
+    let delivery: CapsuleInputObservation
+    try {
+      delivery = this.checkedInput(
+        await this.observeExternal(
+          (ctx) => this.options.replies!.submit(structuredClone(prepared), ctx),
+          context,
+        ),
+        prepared,
+      )
+    } catch {
+      delivery = this.unknownInput(
+        prepared,
+        'The original Core input submission could not be confirmed. Inspect its original input key; the reply has not been resent.',
+      )
+    }
+    return this.saveReply(
+      current,
+      delivery.status === 'submitted' ? 'observed' : 'dispatch-started',
+      delivery,
+    )
+  }
+  private async reply(
+    params: CapsuleParamsMap['capsule.interaction.reply'],
+    context?: CapsuleCallContext,
+  ): Promise<CapsuleReplyResult> {
+    if (!this.options.replies) {
+      throw new CapsuleError(
+        'CAPSULE_TRUSTED_REPLY_UNAVAILABLE',
+        'This Host has no trusted user input adapter. Page scripts and ordinary HTTP cannot authenticate a Human reply.',
+      )
+    }
+    const trustedContext = this.requireReplyContext(context)
+    const inputOperationId = mintObjectId()
+    return this.mutation(
+      'capsule.interaction.reply',
+      params,
+      trustedContext,
+      {
+        kind: 'interaction',
+        capsuleId: params.capsuleId,
+        interactionId: params.interactionId,
+        inputOperationId,
+      },
+      async () => {
+        let current = await this.readInteraction(params.interactionId, params.capsuleId)
+        if (current.interaction.capsuleId !== params.capsuleId)
+          throw new CapsuleError(
+            'CAPSULE_TARGET_MISMATCH',
+            'This original interaction belongs to another Capsule.',
+          )
+        await this.completePreviousOperation(current.lastOperationId)
+        if (current.interaction.revision !== params.expectedRevision)
+          throw new CapsuleError(
+            'CAPSULE_REVISION_CONFLICT',
+            'The original interaction changed. Retain the answer and inspect the current revision before confirming.',
+          )
+        if (current.interaction.status !== 'pending')
+          throw new CapsuleError(
+            'CAPSULE_INTERACTION_ANSWERED',
+            'This original interaction already has a saved answer.',
+          )
+        if (!current.interaction.target)
+          throw new CapsuleError(
+            'CAPSULE_TARGET_UNAVAILABLE',
+            'This original request has no exact Agent target. The answer has not been sent to a selected or replacement Agent.',
+          )
+        let prepared: CapsulePreparedReply
+        try {
+          prepared = parseCapsulePreparedReply(
+            await this.observeExternal(
+              (ctx) =>
+                this.options.replies!.prepare(
+                  {
+                    interaction: structuredClone(current.interaction),
+                    answer: params.answer,
+                    inputOperationId,
+                    operationId: params.operationId,
+                  },
+                  ctx,
+                ),
+              trustedContext,
+            ),
+          )
+        } catch (error) {
+          const denied =
+            errorCode(error) === 'CONTROL_PERMISSION_DENIED' ||
+            errorCode(error) === 'CAPSULE_TRUSTED_REPLY_REQUIRED'
+          throw new CapsuleError(
+            denied ? 'CAPSULE_TRUSTED_REPLY_REQUIRED' : 'CAPSULE_REPLY_PREPARATION_UNAVAILABLE',
+            'Trusted preparation did not confirm this exact reply. No Core input was submitted; the original answer intent is retained.',
+          )
+        }
+        if (
+          prepared.operationId !== params.operationId ||
+          prepared.capsuleId !== params.capsuleId ||
+          prepared.interactionId !== params.interactionId ||
+          prepared.inputOperationId !== inputOperationId ||
+          canonical(prepared.target) !== canonical(current.interaction.target) ||
+          canonical(prepared.principal) !== canonical(trustedContext.principal)
+        ) {
+          throw new CapsuleError(
+            'CAPSULE_INPUT_TARGET_MISMATCH',
+            'The trusted preparation did not confirm the exact original request, recipient, input or principal. No reply was submitted.',
+          )
+        }
+        const delivery = this.unknownInput(
+          prepared,
+          'The original answer and exact input are saved. Submission has not started.',
+        )
+        const interaction: CapsuleInteraction = {
+          ...current.interaction,
+          status: 'answered',
+          answer: params.answer,
+          revision: current.interaction.revision + 1,
+          updatedAt: Date.now(),
+          reply: { operationId: params.operationId, phase: 'prepared', delivery },
+        }
+        const receipt: CapsuleReplyResult = { operationId: params.operationId, interaction, delivery }
+        current = {
+          schemaVersion: 1,
+          interaction,
+          preparedReply: prepared,
+          lastOperationId: params.operationId,
+          receipt,
+        }
+        await writeJson(this.interactionPath(params.interactionId, params.capsuleId), current)
+        current = await this.submitSavedReply(current, trustedContext)
+        return parseCapsuleResult('capsule.interaction.reply', current.receipt, params)
+      },
+    )
+  }
+  private async reconcileReply(
+    saved: SavedOperation,
+    context?: CapsuleCallContext,
+    external = false,
+    resume = false,
+  ): Promise<SavedOperation> {
+    if (saved.operation.status === 'failed' || saved.effect?.kind !== 'interaction') return saved
+    let current: SavedInteraction
+    try {
+      current = await this.readInteraction(saved.effect.interactionId, saved.effect.capsuleId)
+      if (
+        current.lastOperationId !== saved.operation.operationId ||
+        !current.preparedReply ||
+        !current.interaction.reply
+      )
+        return saved
+      await confirmDurable(this.interactionPath(saved.effect.interactionId, saved.effect.capsuleId))
+    } catch {
+      return saved
+    }
+    const prepared = current.preparedReply!
+    if (
+      prepared.operationId !== saved.operation.operationId ||
+      prepared.capsuleId !== saved.operation.capsuleId ||
+      saved.effect.inputOperationId !== prepared.inputOperationId ||
+      canonical(saved.principal) !== canonical(prepared.principal)
+    ) {
+      return {
+        ...saved,
+        operation: {
+          ...saved.operation,
+          issue: issue(
+            'interaction',
+            'CAPSULE_INPUT_TARGET_MISMATCH',
+            'The original reply recovery envelope could not be correlated. No input was submitted or retargeted.',
+            prepared.capsuleId,
+          ),
+        },
+      }
+    }
+    if (external && this.options.replies) {
+      if (resume && current.interaction.reply!.phase === 'prepared' && context) {
+        current = await this.submitSavedReply(current, this.requireReplyContext(context))
+      } else if (current.interaction.reply!.phase !== 'prepared') {
+        let next: CapsuleInputObservation
+        try {
+          const original = await this.observeExternal(
+            (ctx) => this.options.replies!.inspect(structuredClone(prepared), ctx),
+            context,
+          )
+          next = original
+            ? this.checkedInput(original, prepared)
+            : this.unknownInput(
+                prepared,
+                'The original Core input was not found by this observation. Absence does not authorize resubmission.',
+              )
+        } catch {
+          next = this.unknownInput(
+            prepared,
+            'Current Core input observation is unavailable. The original saved answer, Run and input identity are retained.',
+          )
+        }
+        const previous = current.interaction.reply!.delivery
+        if (previous.status === 'submitted' && next.status !== 'submitted') {
+          next = {
+            ...previous,
+            reason:
+              next.reason ?? 'The original Core receipt is retained; its current observation is unavailable.',
+          }
+        }
+        current = await this.saveReply(
+          current,
+          next.status === 'submitted' ? 'observed' : 'dispatch-started',
+          next,
+        )
+      }
+    }
+    const result = parseCapsuleResult(
+      'capsule.interaction.reply',
+      current.receipt,
+      parseCapsuleParams('capsule.interaction.reply', saved.params),
+    )
+    const status = result.delivery.status === 'submitted' ? 'committed' : 'pending'
+    const operation: CapsuleOperation = {
+      ...saved.operation,
+      status,
+      updatedAt: Date.now(),
+      result,
+      ...(status === 'pending'
+        ? {
+            issue: issue(
+              'interaction',
+              'CAPSULE_INPUT_UNCONFIRMED',
+              result.delivery.reason ?? 'The original Core input is not yet confirmed.',
+              prepared.capsuleId,
+            ),
+          }
+        : {}),
+    }
+    if (status === 'committed') delete operation.issue
+    const observed: SavedOperation = { ...saved, operation }
+    await writeJson(this.operationPath(saved.operation.operationId), observed)
+    return observed
+  }
+  private async observeExternal<T>(
+    work: (context: CapsuleCallContext) => Promise<T>,
+    context?: CapsuleCallContext,
+  ): Promise<T> {
     const signal = context?.signal
       ? AbortSignal.any([this.lifecycle.signal, context.signal])
       : this.lifecycle.signal
     if (signal.aborted)
       throw new CapsuleError(
         'CAPSULE_OPERATION_UNKNOWN',
-        'Presentation observation was cancelled. The original operation is retained.',
+        'Observation was cancelled. The original operation is retained.',
       )
-    return new Promise<CapsuleOpenResult>((accept, reject) => {
+    return new Promise<T>((accept, reject) => {
       const aborted = () =>
         reject(
           new CapsuleError(
             'CAPSULE_OPERATION_UNKNOWN',
-            'Presentation observation ended without confirmation. The original operation must not be replayed.',
+            'Observation ended without confirmation. The original operation must not be replayed.',
           ),
         )
       signal.addEventListener('abort', aborted, { once: true })
-      void this.options
-        .presentation!.open(params, { ...context, signal }, resolved)
+      void Promise.resolve()
+        .then(() => work({ ...context, signal }))
         .then(accept, reject)
         .finally(() => signal.removeEventListener('abort', aborted))
     })
+  }
+  private async present(
+    params: CapsuleParamsMap['capsule.open'],
+    context: CapsuleCallContext | undefined,
+    resolved: CapsuleResultMap['capsule.resolve'],
+  ): Promise<CapsuleOpenResult> {
+    return this.observeExternal((ctx) => this.options.presentation!.open(params, ctx, resolved), context)
   }
   private async create(
     params: CapsuleCreateParams,
