@@ -7,8 +7,35 @@ import type { NoteCanvasScope } from './note-canvas-state'
 export type CanvasReference = NotebookGraph['references'][number]
 export type CanvasRelationship = { id: string; kind: 'hierarchy' | 'reference' | 'embed' | 'link'; source: string; target: string; sourceKind: 'page' | 'block'; targetKind: 'page' | 'block'; references: CanvasReference[] }
 export type CanvasAttachedRelationship = CanvasRelationship & { aggregateId: string; sourceBlockId?: string; targetBlockId?: string }
-export type CanvasNote = { id: string; kind?: 'shared-block'; page?: NotebookPage; observation?: NoteContentMetadata; title: string; notebook: string; root: boolean; context: boolean; neighbors: number; incoming: number; outgoing: number; unbound: CanvasReference[] }
+export type CanvasSharedPlacement = 'area-member' | 'bridge'
+export type CanvasNote = {
+  id: string
+  kind?: 'shared-block'
+  hostNoteIds?: readonly string[]
+  hostNoteId?: string
+  sharedPlacement?: CanvasSharedPlacement
+  page?: NotebookPage
+  observation?: NoteContentMetadata
+  title: string
+  notebook: string
+  root: boolean
+  context: boolean
+  neighbors: number
+  incoming: number
+  outgoing: number
+  unbound: CanvasReference[]
+}
 export type CanvasProjection = { notes: CanvasNote[]; relationships: CanvasRelationship[]; unbound: CanvasReference[] }
+export type CanvasFocusTarget =
+  | { kind: 'note'; noteId: string }
+  | { kind: 'block'; noteId: string; blockId: string }
+  | { kind: 'relationship'; relationshipId: string; occurrences?: readonly string[] }
+export type CanvasFocusNeighborhood = {
+  active: boolean
+  noteIds: ReadonlySet<string>
+  blockIdsByNote: ReadonlyMap<string, ReadonlySet<string>>
+  relationshipIds: ReadonlySet<string>
+}
 const key = (kind: string, from: string, to: string, targetKind: string) => JSON.stringify([kind, from, to, targetKind])
 
 /** Only the scan owner can confirm a shared file's globally unique identity. */
@@ -75,14 +102,98 @@ export function projectNoteCanvas(snapshot: NotebookGraphSnapshot, scope: NoteCa
     outgoing.set(reference.source.noteId, (outgoing.get(reference.source.noteId) ?? 0) + 1)
     if (reference.target.kind !== 'unbound') incoming.set(reference.target.noteId, (incoming.get(reference.target.noteId) ?? 0) + 1)
   }
+  const isShared = (id: string) => {
+    const observation = observations.get(id)
+    return observation?.status === 'read' && observation.kind === 'shared-block'
+  }
+  const embedHosts = new Map<string, string[]>()
+  for (const reference of graph.references) {
+    if (reference.mode !== 'embed' || reference.target.kind !== 'page') continue
+    const hostId = reference.source.noteId, targetId = reference.target.noteId
+    if (!visible.has(hostId) || !visible.has(targetId) || hostId === targetId || isShared(hostId)) continue
+    const list = embedHosts.get(targetId) ?? []
+    if (!list.includes(hostId)) { list.push(hostId); embedHosts.set(targetId, list) }
+  }
   const notes = [...visible].map(id => {
     const page = catalog.pages[id], observation = observations.get(id)
-    const shared = observation?.status === 'read' && observation.kind === 'shared-block'
-    return { id, ...(shared ? { kind: 'shared-block' as const } : {}), ...(page ? { page } : {}), ...(observation ? { observation } : {}), title: page?.title ?? (shared ? 'Shared block' : 'Uncatalogued note'),
+    const shared = isShared(id)
+    const hostNoteIds = shared ? (embedHosts.get(id) ?? []) : undefined
+    const hostNoteId = shared && hostNoteIds?.length === 1 ? hostNoteIds[0]! : undefined
+    const sharedPlacement: CanvasSharedPlacement | undefined = shared ? (hostNoteId ? 'area-member' : 'bridge') : undefined
+    return {
+      id,
+      ...(shared ? { kind: 'shared-block' as const, hostNoteIds, ...(hostNoteId ? { hostNoteId } : {}), sharedPlacement } : {}),
+      ...(page ? { page } : {}),
+      ...(observation ? { observation } : {}),
+      title: page?.title ?? (shared ? 'Shared block' : 'Uncatalogued note'),
       notebook: shared ? 'Shared block' : page ? catalog.notebooks[page.notebookId]?.name ?? 'Original notebook' : 'Outside this directory',
-      root: scope.kind === 'note' && id === scope.noteId, context: !seeds.has(id), neighbors: adjacent.get(id)?.size ?? 0, incoming: incoming.get(id) ?? 0, outgoing: outgoing.get(id) ?? 0, unbound: unbound.get(id) ?? [] }
+      root: scope.kind === 'note' && id === scope.noteId,
+      context: !seeds.has(id),
+      neighbors: adjacent.get(id)?.size ?? 0,
+      incoming: incoming.get(id) ?? 0,
+      outgoing: outgoing.get(id) ?? 0,
+      unbound: unbound.get(id) ?? [],
+    }
   })
   return { notes, relationships: [...relationships.values()].filter(edge => visible.has(edge.source) && visible.has(edge.target)), unbound: [...unbound.values()].flat().filter(reference => visible.has(reference.source.noteId)) }
+}
+
+/** Compute the 1-hop neighborhood around a focused Note area, Block node, or Relationship edge. */
+export function noteCanvasFocusNeighborhood(
+  projection: CanvasProjection,
+  relationships: readonly CanvasAttachedRelationship[],
+  target: CanvasFocusTarget | null,
+): CanvasFocusNeighborhood {
+  const noteIds = new Set<string>(), blockIdsByNote = new Map<string, Set<string>>(), relationshipIds = new Set<string>()
+  if (!target) return { active: false, noteIds, blockIdsByNote, relationshipIds }
+  const addBlock = (noteId: string, blockId?: string) => {
+    if (!blockId) return
+    const set = blockIdsByNote.get(noteId) ?? new Set<string>()
+    set.add(blockId); blockIdsByNote.set(noteId, set)
+  }
+  const includeCluster = (noteId: string) => {
+    noteIds.add(noteId)
+    const item = projection.notes.find(note => note.id === noteId)
+    if (item?.hostNoteId) noteIds.add(item.hostNoteId)
+    for (const member of projection.notes) if (member.hostNoteId === noteId) noteIds.add(member.id)
+  }
+  if (target.kind === 'note') {
+    includeCluster(target.noteId)
+    for (const edge of relationships) {
+      if (edge.source !== target.noteId && edge.target !== target.noteId) continue
+      relationshipIds.add(edge.id)
+      includeCluster(edge.source); includeCluster(edge.target)
+      addBlock(edge.source, edge.sourceBlockId); addBlock(edge.target, edge.targetBlockId)
+    }
+  } else if (target.kind === 'block') {
+    includeCluster(target.noteId); addBlock(target.noteId, target.blockId)
+    for (const edge of relationships) {
+      const touches = edge.source === target.noteId && edge.sourceBlockId === target.blockId
+        || edge.target === target.noteId && edge.targetBlockId === target.blockId
+        || edge.references.some(ref => ref.source.noteId === target.noteId && ref.source.blockId === target.blockId
+          || ref.resolution === 'resolved' && ref.target.kind === 'block' && ref.target.noteId === target.noteId && ref.target.blockId === target.blockId)
+      if (!touches) continue
+      relationshipIds.add(edge.id)
+      includeCluster(edge.source); includeCluster(edge.target)
+      addBlock(edge.source, edge.sourceBlockId); addBlock(edge.target, edge.targetBlockId)
+      for (const ref of edge.references) {
+        if (ref.source.noteId === target.noteId && ref.source.blockId === target.blockId) {
+          if (ref.resolution === 'resolved' && ref.target.kind === 'block') addBlock(ref.target.noteId, ref.target.blockId)
+        }
+        if (ref.resolution === 'resolved' && ref.target.kind === 'block' && ref.target.noteId === target.noteId && ref.target.blockId === target.blockId) {
+          addBlock(ref.source.noteId, ref.source.blockId)
+        }
+      }
+    }
+  } else {
+    for (const edge of relationships) {
+      if (edge.id !== target.relationshipId && edge.aggregateId !== target.relationshipId) continue
+      relationshipIds.add(edge.id)
+      includeCluster(edge.source); includeCluster(edge.target)
+      addBlock(edge.source, edge.sourceBlockId); addBlock(edge.target, edge.targetBlockId)
+    }
+  }
+  return { active: noteIds.size > 0 || relationshipIds.size > 0, noteIds, blockIdsByNote, relationshipIds }
 }
 
 /** Split only the displayed bundles whose original blocks have confirmed, currently visible ports. */
