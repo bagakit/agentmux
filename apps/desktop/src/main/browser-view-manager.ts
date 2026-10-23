@@ -4325,6 +4325,7 @@ export class BrowserViewManager {
       this.inputSurfaces.delete(page)
       if (!existing.shield.contents.isDestroyed()) this.retainInputSurfaceCleanup(existing)
     }
+    const source = page.webContents
     const presentations = new Map<object, () => void>()
     const surface: NativeBrowserInputSurface = { entry, page, presentations, shield: undefined! }
     const shield: BrowserNativeInputShield = new BrowserNativeInputShield(page, () => this.windowForView(page), () =>
@@ -4338,7 +4339,7 @@ export class BrowserViewManager {
     this.inputSurfaces.set(page, surface)
     const pageDestroyed = (): void => this.inputSurfaceFailed(surface)
     shield.contents.once('destroyed', () => queueMicrotask(() => {
-      if (!page.webContents.isDestroyed()) page.webContents.off('destroyed', pageDestroyed)
+      if (!source.isDestroyed()) source.off('destroyed', pageDestroyed)
       const retained = this.forgetInputSurfaceCleanup(surface)
       const retired = this.releasedEntries.get(entry.id)
       if (retained && retired?.cleanupOnly && !retired.inputShield && !retired.pendingSwitch && !retired.detachedView && !this.inputSurfaceCleanup.has(entry.id)) this.releasedEntries.delete(entry.id)
@@ -4359,7 +4360,7 @@ export class BrowserViewManager {
       if (owner?.view === page && this.onNativeInput?.(owner, { type: 'escape' })) event.preventDefault()
     })
     shield.contents.on('render-process-gone', () => this.inputSurfaceFailed(surface))
-    page.webContents.once('destroyed', pageDestroyed)
+    source.once('destroyed', pageDestroyed)
     return surface
   }
 
