@@ -2,7 +2,7 @@ import { sessionInputOperationResult } from '../shared/session-input-result.js'
 import type { IpcMainInvokeEvent } from 'electron'
 import { connectAgentMuxRpc, type AgentMuxRpcParams, type AgentMuxRpcResult } from '@agentmux/core'
 import { isConnectionMethod, type ConnectionMethod, type ChannelMetadataChange } from '@agentmux/core/connections'
-import type { DesktopConnectorSecrets } from './connector-secrets.js'
+import type { ConnectionSecrets } from '@agentmux/connectors'
 
 export type ConnectorIpcChannel = 'connections:call' | 'connections:storeCredential' | 'connections:inspectCredential'
 /** Settings calls the same public service as CLI; only local credential entry stays off public wire. */
@@ -10,7 +10,7 @@ export function registerConnectorIpc(options: {
   handleWithEvent(channel: string, handler: (event: IpcMainInvokeEvent, ...args: any[]) => Promise<unknown>): void
   assertTrusted(channel: ConnectorIpcChannel, event: IpcMainInvokeEvent): void
   socketPath: string
-  secrets: Pick<DesktopConnectorSecrets, 'store' | 'inspect'>
+  secrets: Pick<ConnectionSecrets, 'store' | 'inspect'>
   connect?: typeof connectAgentMuxRpc
   metadata?: {
     subscribe(listener: (change: ChannelMetadataChange) => void): () => void
