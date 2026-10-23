@@ -82,6 +82,8 @@ export class ObjectCliProbe {
 export function objectCliSeed(method: string, input: string): string[] {
   const ids = { agent: 'SID', region: 'R', zone: 'Z', space: 'S', goal: 'G' }
   const fixed: Record<string, string[]> = {
+    'agent.learning.prepare': ['--input', '-'], 'agent.learning.ls': ['--input', '-'], 'agent.learning.inspect': ['--input', '-'],
+    'agent.learning.propose': ['--input', '-'], 'agent.learning.revise': ['--input', '-'], 'agent.learning.continue': ['--input', '-'],
     'runtime.network.inspect': ['--runtime', 'runtime-original', '--owner', 'owner-original'],
     'space.mote.connection.create': ['--input', '-'], 'space.mote.connection.sync': ['--input', '-'], 'space.mote.connection.advance': ['--operation-id', 'mote-original'], 'space.mote.connection.inspect': ['--operation-id', 'mote-original'], 'space.mote.connection.ls': ['--input', '-'],
     'connection.metadata.get': ['--input', '-'], 'connection.metadata.refresh': ['--input', '-'], 'connection.metadata.clear': ['--input', '-'], 'connection.metadata.ls': ['--connection', 'metadata-connection', '--kind', 'actor'],
