@@ -29,6 +29,8 @@ type Binding = {
 const unavailable = (message: string, code = 'CAPSULE_RUNTIME_UNAVAILABLE') => new AgentMuxError(message, code)
 // Native defines interrupted as historical ownership, distinct from observation loss.
 const terminalRun = (run: AgentMuxRun | null): boolean => run === null || run.state === 'exited' || run.state === 'interrupted'
+const serviceReads = new Set<CapsuleMethod>(['capsule.ls', 'capsule.inspect', 'capsule.resolve', 'capsule.operation.inspect',
+  'capsule.config.inspect', 'capsule.interaction.ls', 'capsule.interaction.inspect'])
 const launchKey = (launch: AgentMuxPreparedTerminal): string => `${launch.createOperationId}:${createHash('sha256').update(launch.launch).digest('hex')}`
 /** One durable service intent using the existing Core/ctxmux Run lifecycle, never another supervisor. */
 export class CapsuleRunManager {
@@ -93,9 +95,6 @@ export class CapsuleRunManager {
       b.command !== null && !['start', 'stop'].includes(b.command.kind))
       throw unavailable('The original service lifecycle identities or phases disagree. Preserve the binding and its Runs.', 'CAPSULE_RUNTIME_BINDING_INVALID')
     if (b.command) parseCapsuleRuntimeParams(`capsule.runtime.${b.command.kind}`, b.command.params)
-    // A previous rename with an unacknowledged directory sync is not yet a durable
-    // control fact. Reconfirm the exact original file and its directory before effects.
-    await this.confirmDurable(this.path)
     return b
   }
   private async confirmDurable(path: string): Promise<void> {
@@ -134,7 +133,9 @@ export class CapsuleRunManager {
   }
   private async connect(b: Binding, run: AgentMuxRun, context?: AgentMuxRpcCallContext) {
     const current = await this.load()
-    if (!current || current.revision !== b.revision || current.desired !== 'running' || current.run?.runId !== run.runId)
+    if (!current || current.revision !== b.revision || current.desired !== 'running' ||
+      current.run?.runId !== b.run?.runId || !isDeepStrictEqual(current.launch, b.launch) ||
+      current.run !== null && current.run.runId !== run.runId)
       throw unavailable('The original service intent changed before connection. Inspect its current Run and intent.', 'CAPSULE_RUNTIME_INTENT_CHANGED')
     b = current
     const controller = new AbortController(), deadline = setTimeout(() => controller.abort(new Error('The original runtime handshake timed out.')), 5000)
@@ -146,7 +147,6 @@ export class CapsuleRunManager {
       const identity = await connection.identity()
       if (identity.pid !== run.pid || identity.stateDirectory !== await realpath(b.stateDirectory) || (b.runtimeId && identity.runtimeId !== b.runtimeId))
         throw unavailable('The service identity does not match its original execution Host, namespace and Run.', 'CAPSULE_RUNTIME_IDENTITY_MISMATCH')
-      if (!b.runtimeId) { b.runtimeId = identity.runtimeId; await this.save(b) }
       this.connections.add(connection)
       return { connection, identity }
     } catch (error) { await connection?.dispose(); throw error }
@@ -157,6 +157,8 @@ export class CapsuleRunManager {
   }
   /** Only authoritative terminal/removal facts allow a fresh service generation. */
   private async converge(b: Binding): Promise<{ binding: Binding; run: AgentMuxRun | null }> {
+    // Only an effect owner reconfirms a previously unacknowledged durable intent.
+    await this.confirmDurable(this.path)
     await this.native('connect', () => this.client.connectRuntime())
     let run = await this.originalRun(b)
     if (b.run && terminalRun(run)) {
@@ -198,7 +200,14 @@ export class CapsuleRunManager {
     }
     return { binding: b, run: run ?? await this.originalRun(b) }
   }
-  private async observe(b: Binding | null, requested?: Command): Promise<CapsuleRuntimeObservation> {
+  /** Read the original Run or already-dispatched creation; never dispatch or save lifecycle work. */
+  private async observedRun(b: Binding): Promise<AgentMuxRun | null> {
+    if (!b.run && !(b.launch && b.launchPhase === 'dispatched')) return null
+    await this.native('connect', () => this.client.connectRuntime())
+    return b.run ? await this.originalRun(b) :
+      await this.native(`creation:${launchKey(b.launch!)}`, () => this.client.inspectPreparedTerminal(b.launch!))
+  }
+  private async observe(b: Binding | null, requested?: Command, originalFailure?: unknown): Promise<CapsuleRuntimeObservation> {
     const base: CapsuleRuntimeObservation = { revision: b?.revision ?? 0, desired: b?.desired ?? 'unconfigured', phase: b ? 'unavailable' : 'unconfigured',
       stateDirectory: b?.stateDirectory ?? this.stateDirectory, socketPath: b?.socketPath ?? this.socketPath,
       run: b?.run ? { hostId: 'local', ...b.run } : null, runtime: null, operation: null, issue: null }
@@ -207,13 +216,17 @@ export class CapsuleRunManager {
     if (command) base.operation = { operationId: command.params.operationId, kind: command.kind,
       phase: b.command?.params.operationId === command.params.operationId ? 'pending' : 'superseded' }
     try {
-      const { run } = await this.converge(b)
-      base.run = b.run ? { hostId: 'local', ...b.run } : null
+      if (originalFailure !== undefined) throw originalFailure
+      const run = await this.observedRun(b)
+      base.run = run ? { hostId: 'local', runId: run.runId } : base.run
+      if (!run && b.launchPhase === 'dispatched') throw unavailable('The original service creation is unconfirmed. Inspect the retained operation; do not resend Start.', 'CAPSULE_RUNTIME_CREATION_UNKNOWN')
       if (b.desired === 'stopped') {
-        const confirmed = b.stopPhase === 'confirmed' || (!b.run && b.launchPhase !== 'dispatched') || !!b.run && terminalRun(run)
+        const confirmed = b.stopPhase === 'confirmed' || (!b.run && b.launchPhase !== 'dispatched') || (b.run !== null || run !== null) && terminalRun(run)
+        if (!confirmed && b.stopPhase !== 'dispatched') { base.phase = 'stopping'; return base }
         base.phase = confirmed ? 'stopped' : 'unknown'
         if (!confirmed) throw unavailable('The original Stop is unconfirmed. The stopped intent is durable; observe the same Run without resending Stop.', 'CAPSULE_RUNTIME_STOP_UNKNOWN')
       } else {
+        if (!b.run && b.launchPhase !== 'dispatched') { base.phase = 'starting'; return base }
         if (!run || run.state !== 'running') throw unavailable('The original service Run is not currently running. Its retained intent will be observed again.')
         const { connection, identity } = await this.connect(b, run)
         try { base.runtime = { runtimeId: identity.runtimeId, ownerInstanceId: identity.ownerInstanceId, pid: identity.pid }; base.phase = 'running' }
@@ -223,7 +236,6 @@ export class CapsuleRunManager {
     } catch (error) {
       const code = error instanceof AgentMuxError ? error.code : 'CAPSULE_RUNTIME_UNAVAILABLE'
       base.phase = code.includes('UNKNOWN') ? 'unknown' : 'unavailable'
-      base.run = b.run ? { hostId: 'local', ...b.run } : null
       base.issue = { code, message: error instanceof Error ? error.message : String(error), recovery: 'Inspect this original service binding again. Retain the namespace, Run and operation; healthy Agents remain available.' }
       if (base.operation && base.operation.phase !== 'superseded') base.operation.phase = base.phase === 'unknown' ? 'unknown' : 'pending'
     }
@@ -240,7 +252,6 @@ export class CapsuleRunManager {
       const retained = JSON.parse(await readFile(path, 'utf8')) as CommandRecord
       if (retained.schema !== 'agentmux.capsule-command.v1' || !['prepared', 'committed'].includes(retained.phase) ||
         !isDeepStrictEqual(retained.command, command)) throw unavailable('This operation ID already belongs to a different service command or invalid record.', 'CAPSULE_RUNTIME_OPERATION_CONFLICT')
-      await this.confirmDurable(path)
       const observation = await this.observe(b, command)
       if (retained.phase === 'prepared' && b?.command?.params.operationId !== command.params.operationId) {
         observation.operation = { kind: command.kind, operationId: command.params.operationId, phase: 'unknown' }
@@ -250,13 +261,18 @@ export class CapsuleRunManager {
       return observation
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
     if (command.params.expectedRevision !== (b?.revision ?? 0)) throw unavailable('The service intent revision changed. Inspect the original binding before a new command.', 'CAPSULE_RUNTIME_REVISION_CONFLICT')
-    if (command.kind === 'stop' && !isDeepStrictEqual((command.params as CapsuleRuntimeParamsMap['capsule.runtime.stop']).expectedRun, b?.run ?? null))
+    let stopRun = b?.run ?? null
+    if (command.kind === 'stop' && !stopRun && b?.launchPhase === 'dispatched') {
+      const original = await this.observedRun(b)
+      if (original) stopRun = { runId: original.runId }
+    }
+    if (command.kind === 'stop' && !isDeepStrictEqual((command.params as CapsuleRuntimeParamsMap['capsule.runtime.stop']).expectedRun, stopRun))
       throw unavailable('The observed service Run changed. The new Run was preserved.', 'CAPSULE_RUNTIME_RUN_CONFLICT')
     if (command.kind === 'start' && b?.desired === 'stopped' && (b.run && b.stopPhase !== 'confirmed' || b.launchPhase === 'dispatched')) {
-      await this.native('connect', () => this.client.connectRuntime())
-      const original = await this.originalRun(b)
-      if (b.launchPhase === 'dispatched' || !terminalRun(original))
+      const original = await this.observedRun(b)
+      if (b.launchPhase === 'dispatched' && !original || !terminalRun(original))
         throw unavailable('The original Stop is still unconfirmed. Keep its Run fence before starting another generation.', 'CAPSULE_RUNTIME_STOP_UNKNOWN')
+      if (!b.run && original) { b.run = { runId: original.runId }; b.launchPhase = 'confirmed' }
     }
     const record: CommandRecord = { schema: 'agentmux.capsule-command.v1', command, phase: 'prepared' }
     await durableWriteFile(path, JSON.stringify(record) + '\n', { requireDirectorySync: true })
@@ -267,7 +283,12 @@ export class CapsuleRunManager {
     await this.save(b)
     record.phase = 'committed'
     await durableWriteFile(path, JSON.stringify(record) + '\n', { requireDirectorySync: true })
-    return await this.observe(b)
+    try {
+      await this.converge(b)
+      const observation = await this.observe(b)
+      if (observation.runtime && !b.runtimeId) { b.runtimeId = observation.runtime.runtimeId; await this.save(b) }
+      return observation
+    } catch (error) { return await this.observe(b, undefined, error) }
   }
   async call<M extends CapsuleMethod>(method: M, params: CapsuleParamsMap[M], context?: CapsuleCallContext, originalContext?: AgentMuxRpcCallContext): Promise<CapsuleResultMap[M]> {
     // Reserve/observe management serially, but never hold its lock over a page callback.
@@ -278,16 +299,23 @@ export class CapsuleRunManager {
         b = this.blank(); await this.save(b)
       }
       if (b.desired === 'stopped') throw unavailable('The Capsule service was explicitly stopped. Its pages and configuration are retained; start it explicitly to serve them.', 'CAPSULE_RUNTIME_STOPPED')
-      const result = await this.converge(b)
-      if (!result.run || result.run.state !== 'running') throw unavailable('The original Capsule service is not running yet. Inspect its retained Run.')
-      return { binding: b, run: result.run }
+      const run = serviceReads.has(method) ? await this.observedRun(b) : (await this.converge(b)).run
+      if (!run || run.state !== 'running') throw unavailable('The original Capsule service is not running yet. Inspect its retained Run.')
+      return { binding: b, run }
     })
     let last: unknown
     // Native readiness is distinct from the application socket. Observation never restarts a live Run.
     for (let attempt = 0; attempt < 50 && !this.closed; attempt++) {
       context?.signal?.throwIfAborted()
       let connected: Awaited<ReturnType<CapsuleRunManager['connect']>>
-      try { connected = await this.serial(() => this.connect(ready.binding, ready.run, originalContext)) }
+      try { connected = await this.serial(async () => {
+        const result = await this.connect(ready.binding, ready.run, originalContext)
+        if (!serviceReads.has(method) && !ready.binding.runtimeId) {
+          try { ready.binding.runtimeId = result.identity.runtimeId; await this.save(ready.binding) }
+          catch (error) { await this.release(result.connection); throw error }
+        }
+        return result
+      }) }
       catch (error) {
         // Only a connection failure before dispatch may be observed again. A domain call is never replayed.
         last = error
