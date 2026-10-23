@@ -9,7 +9,7 @@ import ts from 'typescript'
 import { build } from 'vite'
 import { expect, it } from 'vitest'
 
-it('the production Desktop copying block supplies Main hashing, static avatars and the compiled Host inside a standalone app', async () => {
+it('the production Desktop copying block supplies Main hashing, avatars, Host and the native connection owner inside a standalone app', async () => {
   const repositoryRoot = resolve(import.meta.dirname, '../../..')
   const scriptPath = process.env.AGENTMUX_PACKAGE_HASHING_SOURCE ?? join(repositoryRoot, 'apps/desktop/scripts/package-macos.mjs')
   const packageSource = await readFile(scriptPath, 'utf8')
@@ -116,6 +116,45 @@ it('the production Desktop copying block supplies Main hashing, static avatars a
     const desktopRequire = createRequire(join(desktopRoot, 'package.json'))
     const configFile = join(desktopRoot, 'electron.vite.config.ts')
     const hostEntry = join(repositoryRoot, 'apps/host/src/index.ts')
+    const connectionSource = join(repositoryRoot, 'packages/connectors/src/connection-services.ts')
+    const connectionEntry = join(temporary, 'connection-consumer.ts')
+    // Exercise the maintained factory's real lease branch. Empty adapters and no
+    // bindings keep external transport and conversation reads out of this fixture.
+    await writeFile(connectionEntry, `
+      import { createConnectionServices } from ${JSON.stringify(connectionSource)}
+      import { createRequire } from 'node:module'
+      import { spawnSync } from 'node:child_process'
+      import { fileURLToPath } from 'node:url'
+      const directory = process.argv[2], contender = process.argv[3] === 'contender'
+      let sourceCalls = 0, owner
+      const noSource = async () => { sourceCalls++; throw new Error('No external source exists in this private fixture') }
+      const result = {}
+      try {
+        owner = await createConnectionServices({ directory, adapters: [], publication: {
+          checkpoint: noSource, changes: noSource, inspect: noSource, observe: noSource, resource: noSource
+        } })
+        result.listed = await owner.connections.list()
+        const database = await owner.openDatabase()
+        result.databaseSame = database === owner.database
+        result.databaseFile = database.prepare('PRAGMA database_list').all().find(row => row.name === 'main')?.file
+        if (!contender) {
+          result.nativeResolution = createRequire(import.meta.url).resolve('fs-native-extensions')
+          const compete = () => {
+            const child = spawnSync(process.execPath, [fileURLToPath(import.meta.url), directory, 'contender'], {
+              cwd: process.cwd(), encoding: 'utf8', timeout: 5000, env: { PATH: process.env.PATH, NODE_PATH: '' }
+            })
+            return { status: child.status, signal: child.signal, error: child.error?.message,
+              stdout: child.stdout, stderr: child.stderr }
+          }
+          result.whileHeld = compete()
+          owner.close()
+          result.afterRelease = compete()
+        }
+      } catch (error) { result.error = { code: error.code, message: error.message } }
+      finally { owner?.close() }
+      result.sourceCalls = sourceCalls
+      console.log(JSON.stringify(result))
+    `)
     // electron-vite reads the package at process.cwd() when it creates its real
     // dependency/ESM plugins. Build in Desktop's ordinary cwd, not Vitest's root.
     const childEnvironment = { PATH: process.env.PATH, NODE_PATH: '' }
@@ -125,9 +164,13 @@ it('the production Desktop copying block supplies Main hashing, static avatars a
       const { config } = await resolveConfig({ root: ${JSON.stringify(desktopRoot)}, configFile: ${JSON.stringify(configFile)} }, 'build', 'production')
       if (!config?.main) throw new Error('The production Main configuration is absent')
       const main = config.main
-      await build({ ...main, root: ${JSON.stringify(desktopRoot)}, configFile: false,
+      const built = await build({ ...main, root: ${JSON.stringify(desktopRoot)}, configFile: false,
         build: { ...main.build, outDir: ${JSON.stringify(mainDirectory)}, emptyOutDir: false,
-          rollupOptions: { ...main.build?.rollupOptions, input: { 'agentmux-host': ${JSON.stringify(hostEntry)} } } } })
+          rollupOptions: { ...main.build?.rollupOptions, input: { 'agentmux-host': ${JSON.stringify(hostEntry)},
+            'connection-consumer': ${JSON.stringify(connectionEntry)} } } } })
+      const outputs = (Array.isArray(built) ? built : [built]).flatMap(result => result.output)
+      const factory = outputs.filter(chunk => chunk.type === 'chunk' && Object.hasOwn(chunk.modules, ${JSON.stringify(connectionSource)}))
+      console.log('connection_factory_outputs=' + JSON.stringify(factory.map(chunk => chunk.fileName)))
     `], { cwd: desktopRoot, env: childEnvironment, encoding: 'utf8', timeout: 20_000 })
     const compiledHost = join(mainDirectory, 'agentmux-host.js'), compiled = await readFile(compiledHost, 'utf8')
     const compiledTree = ts.createSourceFile(compiledHost, compiled, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS)
@@ -139,6 +182,14 @@ it('the production Desktop copying block supplies Main hashing, static avatars a
       const artifact = process.env.AGENTMUX_PACKAGE_HASHING_EVIDENCE + '.compiled-host.js'
       await writeFile(artifact, compiled)
       evidence.compiledHostArtifact = { path: artifact, sha256: digest(compiled), imports: compiledImports }
+      const factoryOutputs = JSON.parse((evidence.hostBuild as string).split('\n')
+        .find(line => line.startsWith('connection_factory_outputs='))!.slice('connection_factory_outputs='.length)) as string[]
+      expect(factoryOutputs, 'Preserve the actual source factory identified by production Rollup module ownership').toHaveLength(1)
+      const factoryFile = join(mainDirectory, factoryOutputs[0]!), factoryBytes = await readFile(factoryFile)
+      const ownerArtifact = process.env.AGENTMUX_PACKAGE_HASHING_EVIDENCE + '.compiled-connection-owner.js'
+      await writeFile(ownerArtifact, factoryBytes)
+      evidence.compiledConnectionOwner = { original: factoryFile, sourceModule: connectionSource,
+        artifact: ownerArtifact, sha256: digest(factoryBytes) }
     }
 
     // A minimal environment cannot inherit the active Agent's Store, Hook or
@@ -159,6 +210,34 @@ it('the production Desktop copying block supplies Main hashing, static avatars a
     expect(host.error).toBeUndefined(); expect(host.signal).toBeNull(); expect(host.status).toBe(1)
     expect(host.stderr, 'The production-config compiled Host must reach its original Store guard').toContain('The Host requires the original absolute Agent Session Store path.')
     expect(host.stderr).not.toContain('ERR_MODULE_NOT_FOUND'); expect(host.stdout).toBe('')
+
+    const connection = spawnSync(process.execPath, [join(mainDirectory, 'connection-consumer.js'), join(temporary, 'connection-owner')], {
+      cwd: temporary, encoding: 'utf8', env: childEnvironment, timeout: 15_000
+    })
+    evidence.connection = { status: connection.status, signal: connection.signal, error: connection.error?.message,
+      stdout: connection.stdout, stderr: connection.stderr, environmentKeys: Object.keys(childEnvironment),
+      factorySource: { path: connectionSource, sha256: digest(await readFile(connectionSource)) } }
+    expect(connection.error).toBeUndefined(); expect(connection.signal).toBeNull(); expect(connection.status).toBe(0)
+    type ConnectionRead = { listed?: { connections: unknown[] }; databaseSame?: boolean; databaseFile?: string;
+      error?: { code: string; message: string }; sourceCalls: number }
+    type ChildRead = { status: number; signal: string | null; error?: string; stdout: string; stderr: string }
+    const owner = JSON.parse(connection.stdout) as ConnectionRead & { nativeResolution: string; whileHeld: ChildRead; afterRelease: ChildRead }
+    expect(owner.error, 'The production-config connection factory must open its real native lease and private SQLite storage').toBeUndefined()
+    expect(owner.listed).toEqual({ connections: [] }); expect(owner.databaseSame).toBe(true)
+    expect(owner.databaseFile).toBe(await realpath(join(temporary, 'connection-owner/connections.sqlite')))
+    expect(owner.nativeResolution).toBe(join(canonicalAppResources, 'node_modules/fs-native-extensions/index.js'))
+    expect(owner.sourceCalls).toBe(0)
+    for (const child of [owner.whileHeld, owner.afterRelease]) {
+      expect(child.error).toBeUndefined(); expect(child.signal).toBeNull(); expect(child.status).toBe(0)
+    }
+    const held = JSON.parse(owner.whileHeld.stdout) as ConnectionRead
+    expect(held.error).toMatchObject({ code: 'CONNECTION_OWNER_BUSY' })
+    expect(held.sourceCalls).toBe(0)
+    const released = JSON.parse(owner.afterRelease.stdout) as ConnectionRead
+    expect(released.error).toBeUndefined(); expect(released.listed).toEqual({ connections: [] })
+    expect(released.databaseSame).toBe(true); expect(released.databaseFile).toBe(owner.databaseFile)
+    expect(released.sourceCalls).toBe(0)
+
 
     const identityResolution = execFileSync(process.execPath, ['--input-type=module', '-e',
       "console.log(import.meta.resolve('@agentmux/identity'))"], { cwd: mainDirectory, encoding: 'utf8', env: childEnvironment }).trim()
