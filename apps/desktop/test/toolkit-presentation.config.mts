@@ -5,6 +5,12 @@ import { relative } from 'node:path'
 import base from './toolkit-tui-ui.config.mts'
 
 const edits = {
+  'palette-ignore-external-restore': ['apps/desktop/src/renderer/src/components/settings/use-toolkit-palette-drafts.ts', 'const restored = current === draft.expected ? draft.saved : current', 'const restored = draft.saved'],
+  'palette-ignore-window-theme': ['apps/desktop/src/renderer/src/components/settings/ToolkitTerminalAppearance.tsx', 'useEffect(() => observeResolvedTheme(setWorkspaceTheme), [])', 'useEffect(() => undefined, [])'],
+  'palette-save-disconnected': ['apps/desktop/src/renderer/src/components/settings/use-toolkit-palette-drafts.ts', 'await saveToolkitPalette(id, captured.value, captured.expected)', 'await Promise.resolve()'],
+  'palette-early-apply': ['apps/desktop/src/renderer/src/components/settings/use-toolkit-palette-drafts.ts', 'const original = previous[id]', "useAppStore.getState().setToolkitPresentation(id, { theme: value }); const original = previous[id]"],
+  'palette-ignore-ack': ['apps/desktop/src/renderer/src/store.ts', 'await (workbenchSaveRequest === before ? requestWorkbenchStorageFlush(false) : workbenchStorageCommit)', 'void (workbenchSaveRequest === before ? requestWorkbenchStorageFlush(false) : workbenchStorageCommit).catch(() => {})'],
+  'palette-stale-warning': ['apps/desktop/src/renderer/src/store.ts', 'current() && failureRevision === workbenchSaveFailureRevision &&', 'current() &&'],
   'double-preference-commit': ['apps/desktop/src/renderer/src/store.ts', 'if (workbenchSaveRequest === requestBeforeFlush) requestWorkbenchStorageCommit()', 'requestWorkbenchStorageCommit()'],
   'forget-presentation': ['apps/desktop/src/renderer/src/store.ts', 'toolkitPresentation: state.toolkitPresentation,', 'toolkitPresentation: {},'],
   'ignore-tool-palette': ['apps/desktop/src/renderer/src/components/toolkit/TuiToolkitResult.tsx', 'state.toolkitPresentation[definition.id]?.theme ?? ', ''],
