@@ -1,52 +1,45 @@
-import { DatabaseSync } from 'node:sqlite'
-import { open, realpath } from 'node:fs/promises'
-import { createRequire } from 'node:module'
-import { createHash, randomUUID } from 'node:crypto'
 import { join } from 'node:path'
-import { ConnectionSecrets } from '../../../../packages/connectors/src/connection-secrets.ts'
-import { createHostCredentialEncryption, HOST_CREDENTIAL_KEYRING_SERVICE, hostCredentialKeyringAccount } from '../../src/credential-encryption.ts'
-import { createCredentialAdministration } from '../../src/credential-administration.ts'
-
-const root = process.argv[2], provider = process.argv[3]
-const database = new DatabaseSync(join(root, 'connections.sqlite'))
-let request = 0, lease
-const pending = new Map()
-const backend = method => new Promise((resolve, reject) => { const id = ++request; pending.set(id, { resolve, reject }); process.send({ kind: 'keyring', id, method }) })
-const keyring = provider === 'native' ? undefined : async () => ({ getSecret: () => backend('get'), setSecret: async value => {
-  const id = ++request
-  await new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); process.send({ kind: 'keyring', id, method: 'set', bytes: [...value] }) })
+import { createHash, randomBytes } from 'node:crypto'
+import { readFile } from 'node:fs/promises'
+import { AgentMuxClient, AgentMuxFileAgentSessionStore, connectAgentMuxRpc } from '../../../../packages/core/src/index.ts'
+import { issueAgentCapability, hashAgentCapability } from '../../../../packages/core/src/agent-capability.ts'
+import { startAgentMuxHost } from '../../src/host.ts'
+const root = process.argv[2], store = new AgentMuxFileAgentSessionStore(join(root, 'sessions.json'))
+const capability = issueAgentCapability(), previous = await store.readMetadata('managed-agent')
+await store.compareAndSwap(previous, { kind: 'agent', agentSessionId: 'managed-agent', hostId: 'local', providerId: 'codex', executorId: 'codex', workspacePath: root,
+  run: { runId: 'original-managed-run' }, retiredRuns: [], hookBindingId: 'fixture-hook', hookToken: 'fixture-token', capabilityHash: hashAgentCapability(capability), createdAt: previous?.createdAt ?? 1, updatedAt: 1 })
+// Control only original Runtime connectivity I/O. No Agent is created/restarted/input here.
+AgentMuxClient.prototype.connect = async function () { await this.registry.load('local'); this.connected = true; this.kernel.isConnected = () => false }
+let credentialCalls = 0
+const host = await startAgentMuxHost({ store, socketPath: join(root, 'host.sock'), desktopSocketPath: join(root, 'absent-desktop.sock'), mobileBuildDirectory: join(root, 'absent-mobile'), connections: {
+  directory: join(root, 'connections'), adapters: [{ adapterId: 'private-consumer', test: async (config, credential) => ({
+    authentication: createHash('sha256').update(credential).digest('hex') === config.application.appId ? { state: 'ready' } : { state: 'unavailable', reason: 'check-failed' },
+    transport: { state: 'unknown', reason: 'not-started' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' }
+  }) }]
 } })
-const encryption = createHostCredentialEncryption({ database, namespace: root, keyring })
-const secrets = new ConnectionSecrets(database, encryption)
-const target = { runtimeId: 'synthetic-runtime', ownerInstanceId: randomUUID() }
-const context = { principal: { kind: 'user', id: 'synthetic-person' }, runtimeFence: target }
-const administration = createCredentialAdministration({ target, secrets, maxBytes: 64 * 1024 })
-process.on('message', message => {
-  if (message.kind === 'keyring-result') {
-    const handler = pending.get(message.id); pending.delete(message.id)
-    if (message.denied) handler.reject(Error('synthetic backend denied'))
-    else handler.resolve(message.value)
-    return
-  }
-  void (async () => {
-    try {
-      let value
-      if (message.operation === 'key') value = await administration.key(context)
-      else if (message.operation === 'store') value = await administration.store(message.input, message.context ?? context)
-      else if (message.operation === 'inspect') value = await administration.inspect(message.operationId, context)
-      else if (message.operation === 'resolve') value = await secrets.resolve(message.credentialRef)
-      else if (message.operation === 'lock') {
-        lease = await open((await realpath(join(root, 'connections.sqlite'))) + '.credential-key.lock', 'a+', 0o600)
-        if (!createRequire(import.meta.url)('fs-native-extensions').tryLock(lease.fd)) throw Error('synthetic lock busy')
-        value = true
-      } else if (message.operation === 'unlock') { await lease.close(); lease = undefined; value = true }
-      else if (message.operation === 'remove-synthetic-key') {
-        const { AsyncEntry } = await import('@napi-rs/keyring')
-        value = await new AsyncEntry(HOST_CREDENTIAL_KEYRING_SERVICE, hostCredentialKeyringAccount(root), process.platform === 'linux' ? { linux: { store: 'secret-service' } } : undefined).deleteCredential()
-      } else throw Error('Unknown synthetic request')
-      process.send({ kind: 'result', id: message.id, value })
-    } catch (error) { process.send({ kind: 'result', id: message.id, error: { code: error.code ?? 'FIXTURE_FAILED' } }) }
-  })()
-})
-process.once('disconnect', () => { void lease?.close().finally(() => {}); database.close() })
-process.send({ kind: 'ready', pid: process.pid, target, source: __CREDENTIAL_SOURCE_RECEIPTS__ })
+const service = host.server.service, original = service.ports.connections
+// Count original credential-port dispatch, preserving the actual Host target/authority/storage consumers.
+service.ports.connections = new Proxy(original, { get(target, key) { if (key !== 'credential') return Reflect.get(target, key)
+  return { store: async (...args) => { credentialCalls++; return await target.credential.store(...args) }, inspect: (...args) => target.credential.inspect(...args) }
+} })
+process.on('message', message => { void (async () => {
+  try {
+    let value
+    if (message.operation === 'facts') { await (await host.deviceAuthority()).flush(); value = { credentialCalls, devices: await readFile(join(root, 'agentmux-devices.json'), 'utf8') } }
+    else if (message.operation === 'device-store') {
+      const authority = await host.deviceAuthority(), key = randomBytes(32).toString('base64'), device = await authority.authorizeKey(key), observed = authority.observe(device)
+      let reply
+      const frames = host.server.openAuthenticatedFrames({ authorization: { principal: { kind: 'device', id: device.deviceId }, signal: observed.signal,
+        assertCurrent: () => authority.assertCurrentKey(device, key) }, send: frame => { reply = frame }, close() {} })
+      try { await frames.receive({ jsonrpc: '2.0', id: 'original-device-credential', method: 'connection.credential.store', params: { ...message.input, runtimeFence: { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId } } }); await authority.flush(); value = { reply, device: authority.devices().find(current => current.deviceId === device.deviceId) } }
+      finally { frames.dispose(); observed.dispose() }
+    }
+    else if (message.operation === 'stop') { await host.dispose(); process.send({ id: message.id, value: true }, () => process.exit(0)); return }
+    else throw Error('Unknown synthetic control')
+    process.send({ id: message.id, value })
+  } catch (error) { process.send({ id: message.id, error: { code: error.code ?? 'FIXTURE_FAILED', message: error.message } }) }
+})() })
+process.once('disconnect', () => { void host.dispose().finally(() => process.exit(0)) })
+const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: join(root, 'host.sock') } })
+const { owner } = await client.call('runtime.owner.identity', {}); await client.dispose()
+process.send({ kind: 'ready', pid: process.pid, owner, capability })
