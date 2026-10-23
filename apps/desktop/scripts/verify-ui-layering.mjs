@@ -8,6 +8,7 @@ import { fileURLToPath } from 'node:url'
 import { runProbeProcess, stopProbeProcesses, listProbeProcesses } from './probe-process.mjs'
 import { assertWorkspaceDistBuiltFromCurrentSource } from '../../../vitest.dist-freshness.ts'
 import { radixOverlayAliases } from './radix-overlay-aliases.ts'
+import { privatePackageSmokeEnvironment } from './package-smoke-context.mjs'
 
 const repository = resolve(import.meta.dirname, '../../..'), desktop = join(repository, 'apps/desktop')
 const require = createRequire(join(desktop, 'package.json')), { build } = await import('vite')
@@ -35,7 +36,7 @@ function candidateIdentity() {
 const candidate = { started: candidateIdentity(), finished: null, unchanged: false }
 const originalInputs = new Map(), dependencyInputs = new Map(), results = []
 const harnessInputs = {}
-for (const path of ['apps/desktop/scripts/verify-ui-layering.mjs', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/scripts/radix-overlay-aliases.ts',
+for (const path of ['apps/desktop/scripts/verify-ui-layering.mjs', 'apps/desktop/scripts/probe-process.mjs', 'apps/desktop/scripts/package-smoke-context.mjs', 'apps/desktop/scripts/radix-overlay-aliases.ts',
   'apps/desktop/scripts/lib/fixture-values.mjs', 'vitest.dist-freshness.ts', 'pnpm-lock.yaml']) {
   const digest = hash(await readFile(join(repository, path))); originalInputs.set(path, digest); harnessInputs[path] = digest
 }
@@ -48,8 +49,8 @@ const evidence = { schema: 'agentmux.ui-layering.v1', passed: false, availableCh
 const mutations = [
   { label: 'non-atomic-required-pair', path: 'apps/desktop/src/main/native-overlay-surfaces.ts',
     before: 'await boundedChromePaint(this.paint(projection, Boolean(modalId)))', after: 'await boundedChromePaint(this.paint(projection, false))', expected: /Required modal pair has no orphan scrim/ },
-  { label: 'background-input-during-preparation', path: 'apps/desktop/src/main/native-overlay-surfaces.ts',
-    before: 'if (this.modalBlocks(view, owner.browserId)) event.preventDefault()', after: 'if (false) event.preventDefault()', expected: /Modal preparation blocks only its original background Browser input/ },
+  { label: 'page-protocol-input-during-preparation', path: 'apps/desktop/src/main/browser-view-manager.ts',
+    before: 'surface.presentations.set(token, failed)', after: "surface.presentations.set(token, failed); owner.view.webContents.on('before-mouse-event', event => event.preventDefault())", expected: /Modal preparation preserves the original Browser CDP action/ },
   { label: 'nested-overlay-escapes-modal', path: 'packages/client-ui/src/components/Modal.tsx',
     before: 'return attachment ? attachment.ready ? attachment.container : null : fallback', after: 'return fallback', expected: /A portaled tooltip stays above its parent modal/ }
 ]
@@ -93,7 +94,12 @@ async function run(label, mutation) {
     external: ['electron'], logLevel: 'silent', plugins: [esPlugin] })
   // Observe the unmodified Node loader before Main imports external Core. In
   // particular, a new generated Core file cannot silently escape source binding.
+  const electronPaths = { home: join(directory, 'user-data/home'), appData: join(directory, 'app-data'), userData: join(directory, 'user-data'), sessionData: join(directory, 'session-data') }
+  for (const path of [...Object.values(electronPaths), join(directory, 'runtime/tmp')]) await mkdir(path, { recursive: true })
   await writeFile(join(directory, 'bootstrap.cjs'), `
+const {app}=require('electron');const paths=${JSON.stringify(electronPaths)};
+for(const [name,path]of Object.entries(paths)){app.setPath(name,path);if(app.getPath(name)!==path)throw new Error('Private Electron path was not adopted: '+name)}
+require('node:fs').writeFileSync(${JSON.stringify(join(directory, 'isolation.json'))},JSON.stringify({paths,removedInheritedIdentity:!process.env.AGENTMUX_AGENT_SESSION_ID&&!process.env.AGENTMUX_HOOK_URL&&!process.env.AGENTMUX_CONTROL_ENDPOINT}));
 const { registerHooks } = require('node:module');
 const { readFileSync, appendFileSync } = require('node:fs');
 const { createHash } = require('node:crypto');
@@ -149,14 +155,17 @@ import('./main.mjs').catch(error => { console.error(error); require('electron').
   }
   const identity = { consumed, dependencies, compiled, changes, dependencyLockSHA256 }
   await writeFile(join(directory, 'inputs.json'), JSON.stringify(identity, null, 2))
-  const env = { ...process.env, AGENTMUX_UI_LAYERING_ROOT: directory, AGENTMUX_UI_LAYERING_HTML: join(out, 'index.html'), AGENTMUX_UI_LAYERING_MOBILE_HTML: join(out, 'mobile.html'),
+  const env = { ...privatePackageSmokeEnvironment(process.env, { userData: electronPaths.userData, runtimeRoot: join(directory, 'runtime'), readyFile: join(directory, 'unused-ready.json') }),
+    ...(process.env.AGENTMUX_VISUAL_ORCA_CLI ? { AGENTMUX_VISUAL_ORCA_CLI: process.env.AGENTMUX_VISUAL_ORCA_CLI } : {}),
+    ...(!mutation && process.env.AGENTMUX_UI_LAYERING_REVIEW_HOLD ? { AGENTMUX_UI_LAYERING_REVIEW_HOLD: process.env.AGENTMUX_UI_LAYERING_REVIEW_HOLD } : {}),
+    AGENTMUX_UI_LAYERING_ROOT: directory, AGENTMUX_UI_LAYERING_HTML: join(out, 'index.html'), AGENTMUX_UI_LAYERING_MOBILE_HTML: join(out, 'mobile.html'),
     AGENTMUX_UI_LAYERING_MOBILE_ONLY: mobileOnly ? '1' : '0', AGENTMUX_UI_LAYERING_FULLSCREEN_ONLY: fullscreenOnly ? '1' : '0',
     AGENTMUX_UI_LAYERING_WITHOUT_SYSTEM_FULLSCREEN: withoutSystemFullscreen ? '1' : '0' }; delete env.ELECTRON_RUN_AS_NODE
   // OS capture belongs to the candidate and restored candidate. A deliberately broken
   // mutation still retains native owner/input facts without multiplying OS work.
   if (mutation) delete env.AGENTMUX_VISUAL_ORCA_CLI
   const lines = [], processReceipt = await runProbeProcess(require('electron'), [join(directory, 'bootstrap.cjs')], {
-    cwd: repository, env, temporaryRoot: directory, timeoutMs: 180000, onLine: line => lines.push(line)
+    cwd: repository, env, temporaryRoot: directory, timeoutMs: env.AGENTMUX_UI_LAYERING_REVIEW_HOLD ? 420000 : 180000, onLine: line => lines.push(line)
   })
   await writeFile(join(directory, 'process.log'), lines.join('\n')); await writeFile(join(directory, 'process.json'), JSON.stringify(processReceipt, null, 2))
   await stopProbeProcesses(processReceipt.originalPid, directory)
