@@ -5,7 +5,10 @@ import { join } from 'node:path'
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { promisify } from 'node:util'
+import { createServer, type Server } from 'node:http'
 import { NativeOverlaySurfaces } from '../../../src/main/native-overlay-surfaces'
+import { BrowserViewManager } from '../../../src/main/browser-view-manager'
+import { BrowserRefLedgerStore } from '../../../src/main/browser-ref-ledger-store'
 import type { NativeOverlayRegion } from '../../../src/shared/native-overlay'
 import { createAvatarLayeringSeed } from './avatar-seed'
 
@@ -35,18 +38,21 @@ function finishAvailableChecks() {
   receipt.completeGate = qaScope === 'complete' && receipt.uncovered.length === 0
   receipt.passed = receipt.completeGate
 }
-let window: BrowserWindow, page: WebContentsView, overlays: NativeOverlaySurfaces
+let window: BrowserWindow, page: WebContentsView, overlays: NativeOverlaySurfaces, browsers: BrowserViewManager, pageServer: Server
 let revision = 0, publishing = 0, last: any, fault: 'none' | 'content' | 'hold' | 'attachment' = 'none'
 let held = false, release: (() => void) | undefined, captureFaults = 0
 let failedAccessoryId: string | undefined
 const pageBounds = { x: 0, y: 56, width: 1, height: 1 }
 const pageId = 'layering-original-browser'
-const independentWindows = new Map<number, { window: BrowserWindow; page: WebContentsView; overlays: NativeOverlaySurfaces; bounds: typeof pageBounds; revision: number; last?: any; publishing: number; publications: any[] }>()
+const independentWindows = new Map<number, { window: BrowserWindow; page: WebContentsView; browsers: BrowserViewManager; overlays: NativeOverlaySurfaces; bounds: typeof pageBounds; revision: number; last?: any; publishing: number; publications: any[] }>()
 const read = (source: string) => window.webContents.executeJavaScript(source)
 const facts = () => read('layeringProbe.read()')
 const visibleNativeBounds = (target: BrowserWindow, view: WebContentsView) => target.contentView.children.includes(view) && view.getVisible() && !view.webContents.isDestroyed() ? [view.getBounds()] : []
-const owners = (target = window, nativePage = page) => target.contentView.children.filter(view => 'webContents' in view).map((view: any) => ({ id: view.webContents.id, visible: view.getVisible(), bounds: view.getBounds(), page: view === nativePage }))
-const positive = () => owners().filter(owner => !owner.page && owner.visible && owner.bounds.x >= 0 && owner.bounds.y >= 0 && owner.bounds.width > 0 && owner.bounds.height > 0)
+const owners = (target = window, nativePage = page) => {
+  const browserOwner = target === window ? browsers?.nativeOwner(pageId) : [...independentWindows.values()].find(entry => entry.window === target)?.browsers.nativeOwner('independent-original-browser')
+  return target.contentView.children.filter(view => 'webContents' in view).map((view: any) => ({ id: view.webContents.id, visible: view.getVisible(), bounds: view.getBounds(), page: view === nativePage, inputBarrier: view === browserOwner?.inputShield }))
+}
+const positive = () => owners().filter(owner => !owner.page && !owner.inputBarrier && owner.visible && owner.bounds.x >= 0 && owner.bounds.y >= 0 && owner.bounds.width > 0 && owner.bounds.height > 0)
 const atPoint = (bounds: any, point: any) => point.x >= bounds.x && point.y >= bounds.y && point.x < bounds.x + bounds.width && point.y < bounds.y + bounds.height
 const topAt = (point: any) => [...window.contentView.children].reverse().find(view => view.getVisible() && atPoint(view.getBounds(), point)) as WebContentsView | undefined
 async function wait(test: () => Promise<any> | any, message: string) {
@@ -63,7 +69,7 @@ function visibility() {
 }
 async function setNativePageVisible(visible: boolean) {
   const publicationsBefore = receipt.publications.length
-  page.setVisible(visible)
+  browsers.setBounds(pageId, visible ? pageBounds : null)
   const demand = visibility(); window.webContents.send('layering:visibility', demand)
   await wait(() => receipt.publications.length > publicationsBefore && publishing === 0 &&
     (visible || last?.projected === 0 && positive().length === 0), 'Actual Browser visibility must reach its original Renderer and native projection owner')
@@ -72,7 +78,7 @@ async function setNativePageVisible(visible: boolean) {
 function layout() {
   const { width, height } = window.getContentBounds()
   Object.assign(pageBounds, { x: Math.floor(width * .48), y: 56, width: width - Math.floor(width * .48), height: height - 56 })
-  page.setBounds(pageBounds)
+  browsers.setBounds(pageId, pageBounds)
   window.webContents.send('layering:visibility', visibility())
 }
 async function nativeReady(count?: number) {
@@ -186,6 +192,26 @@ async function frame(label: string, target = window, nativePage: WebContentsView
     assert.deepEqual(owners(target, nativePage ?? page), before, 'Read-only OS capture preserves the original native owners')
     await writeFile(join(root, metadata), JSON.stringify({ api: 'orca computer get-app-state', pid: process.pid, selected, listed, captured: { ...captured, result: { ...captured.result, screenshot: { ...screenshot, data: undefined } } }, before, after: owners(target, nativePage ?? page) }, null, 2))
     receipt.osFrames.push({ label, file, metadata, pid: process.pid, windowId: selected.id, sha256: createHash('sha256').update(bytes).digest('hex'), scope: 'Actual OS window, no composite' })
+  }
+  if (process.env.AGENTMUX_UI_LAYERING_REVIEW_HOLD?.split(',').includes(label)) {
+    const releaseFile = join(root, 'review-release-' + label + '.json'), before = owners(target, nativePage ?? page)
+    const handoff = { label, pid: process.pid, windowId: target.id, title: target.getTitle(), bounds: target.getBounds(),
+      sourceIdentityFile: join(root, 'inputs.json'), before, releaseFile }
+    receipt.reviewHolds ??= []; receipt.reviewHolds.push(handoff)
+    await writeFile(join(root, 'review-hold.json'), JSON.stringify(handoff, null, 2))
+    const deadline = Date.now() + 60000
+    let released = false
+    while (Date.now() < deadline) {
+      const acknowledgement = await readFile(releaseFile, 'utf8').catch(error => { if (error.code === 'ENOENT') return null; throw error })
+      if (acknowledgement !== null) {
+        const original = JSON.parse(acknowledgement)
+        assert.equal(original.label, label); assert.equal(original.windowId, target.id)
+        released = true; break
+      }
+      await delay(50)
+    }
+    assert.ok(released, 'The exact private OS review hold requires its original acknowledgement')
+    assert.deepEqual(owners(target, nativePage ?? page), before, 'Independent OS image review preserves the original native owner objects')
   }
 }
 async function openStop(seed = true) {
@@ -591,13 +617,17 @@ async function run() {
   window.webContents.on('console-message', (_event, ...details) => { receipt.console ??= []; receipt.console.push(details) })
   window.webContents.on('preload-error', (_event, path, error) => { receipt.preloadError = { path, message: error.message } })
   window.webContents.on('did-fail-load', (_event, code, description, url) => { receipt.loadFailure = { code, description, url } })
-  page = new WebContentsView({ webPreferences: { sandbox: true, backgroundThrottling: false, focusOnNavigation: false } })
-  window.contentView.addChildView(page)
-  const originalURL = 'data:text/html,' + encodeURIComponent('<!doctype html><style>body{background:#17313d;color:#eaf5f8;font:16px system-ui;padding:28px}input{display:block;width:85%;margin:24px 0;padding:8px}button{padding:10px}</style><h2>Original Browser</h2><p>The page, its input and history remain intact.</p><input value="Original Browser draft stays here"><button id="background">Background action</button><output id="count">0</output><script>window.clicks=0;document.querySelector("button").onclick=()=>{document.querySelector("output").textContent=String(++window.clicks)}</script>')
-  await page.webContents.loadURL(originalURL)
-  const owner = () => visibleNativeBounds(window, page).length ? ({ browserId: pageId, view: page, bounds: page.getBounds(), workspaceId: 'isolated-workspace', windowId: 'isolated-window' }) : undefined
-  overlays = new NativeOverlaySurfaces(window, { visibleNativeBounds: () => visibleNativeBounds(window, page), nativeOwner: id => id === pageId ? owner() as any : undefined,
-    nativeOwnerForView: view => view === page ? owner() as any : undefined }, (message, modalId) => {
+  const originalHTML = '<!doctype html><style>body{background:#17313d;color:#eaf5f8;font:16px system-ui;padding:28px}input{display:block;width:85%;margin:24px 0;padding:8px}button{padding:10px}</style><h2>Original Browser</h2><p>The page, its input and history remain intact.</p><input value="Original Browser draft stays here"><button id="background">Background action</button><output id="count">0</output><script>window.clicks=0;document.querySelector("button").onclick=()=>{document.querySelector("output").textContent=String(++window.clicks)}</script>'
+  pageServer = createServer((_request, response) => { response.setHeader('Content-Type', 'text/html'); response.end(originalHTML) })
+  await new Promise<void>(resolve => pageServer.listen(0, '127.0.0.1', resolve))
+  const originalURL = `http://127.0.0.1:${(pageServer.address() as { port: number }).port}/`
+  const createBrowsers = (host: BrowserWindow, name: string) => new BrowserViewManager(host,
+    { defaultProfileId: () => name, resolvePartition: () => name }, new BrowserRefLedgerStore(join(root, name + '-refs.json')),
+    { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal() {} })
+  browsers = createBrowsers(window, 'layering-original-profile')
+  await browsers.create(pageId, originalURL, 'isolated-workspace'); browsers.setBounds(pageId, { x: 0, y: 56, width: 1, height: 1 })
+  page = browsers.nativeOwner(pageId)!.view
+  overlays = new NativeOverlaySurfaces(window, browsers, (message, modalId) => {
     receipt.warnings.push({ message, modalId }); if (!window.isDestroyed()) window.webContents.send('layering:warning', { message, modalId })
   }, input => window.webContents.send('layering:input', input))
   const capture = window.webContents.capturePage.bind(window.webContents)
@@ -695,16 +725,13 @@ async function run() {
   }
 
   const independent = new BrowserWindow({ show: false, width: 820, height: 600, webPreferences: { preload: join(root, 'preload.cjs'), sandbox: true, backgroundThrottling: false } })
-  const independentPage = new WebContentsView({ webPreferences: { sandbox: true, backgroundThrottling: false, focusOnNavigation: false } })
+  const independentBrowsers = createBrowsers(independent, 'layering-independent-profile')
   const independentBounds = { x: 394, y: 56, width: 426, height: 512 }
-  independent.contentView.addChildView(independentPage); independentPage.setBounds(independentBounds)
-  await independentPage.webContents.loadURL(originalURL)
-  const independentOwner = () => visibleNativeBounds(independent, independentPage).length ? ({ browserId: 'independent-original-browser', view: independentPage, bounds: independentPage.getBounds() }) : undefined
-  const independentOverlays = new NativeOverlaySurfaces(independent, {
-    visibleNativeBounds: () => visibleNativeBounds(independent, independentPage), nativeOwner: id => id === 'independent-original-browser' ? independentOwner() as any : undefined,
-    nativeOwnerForView: view => view === independentPage ? independentOwner() as any : undefined
-  }, (message, modalId) => independent.webContents.send('layering:warning', { message, modalId }), input => independent.webContents.send('layering:input', input))
-  const independentContext = { window: independent, page: independentPage, overlays: independentOverlays, bounds: independentBounds, revision: 0, publishing: 0, publications: [] as any[], last: undefined as any }
+  await independentBrowsers.create('independent-original-browser', originalURL, 'isolated-workspace'); independentBrowsers.setBounds('independent-original-browser', independentBounds)
+  const independentPage = independentBrowsers.nativeOwner('independent-original-browser')!.view
+  const independentOverlays = new NativeOverlaySurfaces(independent, independentBrowsers,
+    (message, modalId) => independent.webContents.send('layering:warning', { message, modalId }), input => independent.webContents.send('layering:input', input))
+  const independentContext = { window: independent, page: independentPage, browsers: independentBrowsers, overlays: independentOverlays, bounds: independentBounds, revision: 0, publishing: 0, publications: [] as any[], last: undefined as any }
   independentWindows.set(independent.webContents.id, independentContext)
   await independent.loadFile(html); independent.setTitle('AgentMux isolated independent document'); independent.showInactive(); independentPage.webContents.setBackgroundThrottling(false)
   independent.webContents.debugger.attach('1.3'); await independent.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled', { enabled: true })
@@ -729,16 +756,23 @@ async function run() {
   assert.equal(await independentPage.webContents.executeJavaScript('document.querySelector("input").value'), 'Original Browser draft stays here')
   receipt.cases.push({ label: 'independent-document-native-scope-and-cancel', facts: independentFacts, publications: independentContext.publications,
     rootBrowserId: page.webContents.id, independentBrowserId: independentPage.webContents.id })
-  independentWindows.delete(independent.webContents.id); independentOverlays.dispose(); independentPage.webContents.close(); independent.destroy()
+  independentWindows.delete(independent.webContents.id); independentOverlays.dispose(); independentBrowsers.dispose(); independent.destroy()
 
   fault = 'hold'; held = false; await openStop()
   await wait(() => held, 'The original content capture must reach the held external IO boundary')
-  assert.equal(positive().length, 0, 'Required modal pair has no orphan scrim while content prepares')
+  assert.equal(positive().filter(owner => owner.id !== browsers.nativeOwner(pageId)?.inputShield?.webContents.id).length, 0, 'Required modal pair has no orphan scrim while content prepares')
   const backgroundBefore = await page.webContents.executeJavaScript('clicks')
   const p = await page.webContents.executeJavaScript('(()=>{const r=document.querySelector("button").getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()')
-  for (const type of ['mouseDown', 'mouseUp'] as const) page.webContents.sendInputEvent({ type, ...p, button: 'left', clickCount: 1 })
+  const hit = topAt({ x: pageBounds.x + p.x, y: pageBounds.y + p.y })!
+  assert.notEqual(hit, page, 'Modal preparation installs its original Browser owner native input barrier')
+  const hitBounds = hit.getBounds()
+  for (const type of ['mouseDown', 'mouseUp'] as const) hit.webContents.sendInputEvent({ type, x: pageBounds.x + p.x - hitBounds.x, y: pageBounds.y + p.y - hitBounds.y, button: 'left', clickCount: 1 })
   await delay(80)
-  assert.equal(await page.webContents.executeJavaScript('clicks'), backgroundBefore, 'Modal preparation blocks only its original background Browser input')
+  assert.equal(await page.webContents.executeJavaScript('clicks'), backgroundBefore, 'Modal preparation blocks only its original background Browser native input')
+  page.webContents.debugger.attach('1.3')
+  for (const type of ['mousePressed', 'mouseReleased']) await page.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...p, button: 'left', clickCount: 1 })
+  assert.equal(await page.webContents.executeJavaScript('clicks'), backgroundBefore + 1, 'Modal preparation preserves the original Browser CDP action')
+  page.webContents.debugger.detach()
   release?.(); release = undefined; await nativeReady(); await assertModal('atomic-pair-preparation'); await key('Escape', 27); await nativeReady(0)
   receipt.cases.push({ label: 'atomic-preparation-background-input-guard', backgroundBefore, captureFaults })
 
@@ -856,8 +890,8 @@ async function run() {
 }
 void run().catch(async error => { receipt.failure = failureDetails(error); try { await frame('failure') } catch (captureError) { receipt.failureFrameError = failureDetails(captureError) } }).finally(async () => {
   release?.(); ipcMain.removeHandler('layering:visibility'); ipcMain.removeHandler('layering:publish')
-  for (const independent of independentWindows.values()) { independent.overlays.dispose(); independent.page.webContents.close(); independent.window.destroy() }
-  overlays?.dispose(); page?.webContents.close(); window?.destroy()
+  for (const independent of independentWindows.values()) { independent.overlays.dispose(); independent.browsers.dispose(); independent.window.destroy() }
+  overlays?.dispose(); browsers?.dispose(); pageServer?.close(); window?.destroy()
   if ((!receipt.osFrames.length || receipt.osCaptureFailure) && !receipt.uncovered.includes('OS-composition')) receipt.uncovered.push('OS-composition')
   await writeFile(join(root, 'result.json'), JSON.stringify(receipt, null, 2))
   app.exit(receipt.availableChecksPassed && (qaScope !== 'complete' || receipt.completeGate) ? 0 : 1)
