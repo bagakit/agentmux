@@ -647,14 +647,11 @@ export function restorePersistedWorkbench(input: {
     })
   )
   const layouts: Record<string, WorkspaceLayout> = {}
-  const workspaceIds = new Set([...input.config.workspaces.filter(workspace => !workspace.closeout).map(workspace => workspace.id), ...Object.values(tabs).map(tab => tab.workspaceId), ...Object.keys(input.persisted.layouts)])
-  for (const workspaceId of workspaceIds) {
+  for (const [workspaceId, persistedLayout] of Object.entries(input.persisted.layouts)) {
     // Preserve every live entity reference in this exact durable display layout. Zero occurrences
-    // are intentional after unbinding; resource membership never invents a new placement.
+    // are intentional after unbinding; resource membership never invents a display layout.
     const layout = normalizePersistedLayout(
-      input.persisted.layouts[workspaceId]
-        ? keepTabsInLayout(input.persisted.layouts[workspaceId]!, new Set(Object.keys(tabs)))
-        : createWorkspaceLayout(input.createTabGroupId())
+      keepTabsInLayout(persistedLayout, new Set(Object.keys(tabs)))
     )
     layouts[workspaceId] = layout
   }
