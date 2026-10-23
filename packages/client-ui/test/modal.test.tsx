@@ -27,6 +27,50 @@ function Attachment({ name = 'attached menu', fallback = overlays }: { name?: st
 function Content({ name }: { name: string }) { return <><Modal.Title>{name}</Modal.Title><Modal.Description>Original {name}</Modal.Description></> }
 
 describe('shared modal presentation ownership', () => {
+  it('keeps dialog semantics on the real non-scrolling boundary and refs on the original painted form', async () => {
+    const ref = createRef<HTMLDivElement>()
+    await update(() => root.render(<Modal.Root open><Modal.Portal container={overlays}>
+      <Modal.Overlay /><Modal.Content asChild ref={ref} id="original-dialog" aria-label="Original request" tabIndex={-1}>
+        <form aria-busy="true"><Content name="Original form" /><input defaultValue="Original draft" /></form>
+      </Modal.Content>
+    </Modal.Portal></Modal.Root>))
+    const boundary = overlays.querySelector<HTMLElement>('[data-overlay-modal-boundary]')!, form = ref.current!
+    expect(overlays.querySelector('[role="dialog"]')).toBe(boundary)
+    expect(boundary.tabIndex).toBe(-1)
+    expect(boundary.id).toBe('original-dialog')
+    expect(boundary.getAttribute('aria-label')).toBe('Original request')
+    expect(boundary.getAttribute('aria-busy')).toBe('true')
+    expect(boundary.querySelector(`#${boundary.getAttribute('aria-labelledby')}`)?.textContent).toBe('Original form')
+    expect(form.tagName).toBe('FORM')
+    expect(form.hasAttribute('role')).toBe(false); expect(form.hasAttribute('id')).toBe(false)
+    expect(form.hasAttribute('aria-busy')).toBe(false); expect(form.hasAttribute('tabindex')).toBe(false)
+    expect(form.getAttribute('data-overlay-modal-part')).toBe('content')
+    expect(form.getAttribute('data-state')).toBe('open')
+    expect(boundary.querySelector('[data-overlay-modal-slot]')?.parentElement).toBe(boundary)
+    expect(form.querySelector('[data-overlay-modal-slot]')).toBeNull()
+  })
+
+  it.each([true, false])('keeps IME Escape out of original dismissal effects while preserving modal=%s caller guards', async modal => {
+    let busy = true
+    const changed = vi.fn(), escaped = vi.fn((event: KeyboardEvent) => { if (busy) event.preventDefault() })
+    const scene = () => <Modal.Root open modal={modal} onOpenChange={changed}><Modal.Portal container={overlays}>
+      <Modal.Overlay /><Modal.Content onEscapeKeyDown={escaped}><Content name="Original editor" /><input /></Modal.Content>
+    </Modal.Portal></Modal.Root>
+    await update(() => root.render(scene()))
+    const input = overlays.querySelector('input')!
+    for (const marker of [{ isComposing: true }, { keyCode: 229 }]) {
+      const event = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...marker })
+      await update(() => input.dispatchEvent(event))
+      expect(event.defaultPrevented).toBe(true)
+    }
+    expect(escaped).not.toHaveBeenCalled(); expect(changed).not.toHaveBeenCalled()
+    await update(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    expect(escaped).toHaveBeenCalledOnce(); expect(changed).not.toHaveBeenCalled()
+    busy = false; await update(() => root.render(scene()))
+    await update(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    expect(escaped).toHaveBeenCalledTimes(2); expect(changed).toHaveBeenCalledExactlyOnceWith(false)
+  })
+
   it('reacquires the retained Portal placement before a reopened child traps focus and closes only itself', async () => {
     const parentChanged = vi.fn(), childOpened = vi.fn()
     await update(() => root.render(<Modal.Root defaultOpen onOpenChange={parentChanged}>
@@ -182,9 +226,9 @@ describe('shared modal presentation ownership', () => {
   it('moves the same draft and input A to B to A while rebinding the only behavior lease to its actual document', async () => {
     const frame = document.createElement('iframe'); document.body.append(frame)
     const child = frame.contentDocument!, childRoot = child.createElement('div'), outside = child.createElement('input'); child.body.append(childRoot, outside)
-    const changed = vi.fn(), closed = vi.fn((event: Event) => event.preventDefault())
+    const changed = vi.fn(), opened = vi.fn(), closed = vi.fn((event: Event) => event.preventDefault())
     function LocalForm() { const [draft, setDraft] = useState('Original form'); return <><button onClick={() => setDraft('Edited form')}>Edit local form</button><output>{draft}</output><input aria-label="Unsent transfer draft" defaultValue="Original unsent draft" /></> }
-    const scene = (container: HTMLElement) => <Modal.Root open onOpenChange={changed}><Modal.Portal container={container}><Modal.Overlay /><Modal.Content onCloseAutoFocus={closed}><Content name="Moved request" /><LocalForm /></Modal.Content></Modal.Portal></Modal.Root>
+    const scene = (container: HTMLElement) => <Modal.Root open onOpenChange={changed}><Modal.Portal container={container}><Modal.Overlay /><Modal.Content onOpenAutoFocus={opened} onCloseAutoFocus={closed}><Content name="Moved request" /><LocalForm /></Modal.Content></Modal.Portal></Modal.Root>
     try {
       await update(() => root.render(scene(overlays)))
       const input = overlays.querySelector<HTMLInputElement>('input')!, originalScope = input.closest('[data-overlay-modal-scope]')!
@@ -204,7 +248,7 @@ describe('shared modal presentation ownership', () => {
         await update(() => input.focus()); await update(() => target.focus())
         expect(container.ownerDocument.activeElement).toBe(input)
         await update(() => previousDocument.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
-        expect(changed).not.toHaveBeenCalled(); expect(closed).not.toHaveBeenCalled()
+        expect(changed).not.toHaveBeenCalled(); expect(closed).not.toHaveBeenCalled(); expect(opened).toHaveBeenCalledOnce()
       }
     } finally { await update(() => root.render(null)); frame.remove() }
   })
@@ -372,6 +416,10 @@ describe('shared modal presentation ownership', () => {
     const original = target.current!, input = original.querySelector('input')!
     await update(() => root.render(scene(true)))
     expect(target.current).toBe(original)
+    for (const marker of [{ isComposing: true }, { keyCode: 229 }]) {
+      await update(() => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true, ...marker })))
+    }
+    expect(escaped).not.toHaveBeenCalled(); expect(changed).not.toHaveBeenCalled()
     await update(() => { input.focus(); input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })) })
     expect(escaped).toHaveBeenCalledOnce(); expect(changed).not.toHaveBeenCalled()
     await update(() => root.render(scene(false)))
