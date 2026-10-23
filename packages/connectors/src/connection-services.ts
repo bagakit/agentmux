@@ -1,7 +1,7 @@
 import { openSync, closeSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { chmod, mkdir } from 'node:fs/promises'
-import { isAbsolute, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from '@agentmux/core'
 import { ConnectionHost, type ConnectionAdapter } from './connection-host.js'
@@ -131,7 +131,7 @@ export async function createConnectionServices(options: { directory: string | un
       if (closed) return Promise.reject(new AgentMuxError('The original connection owner is closed. Its retained database must be backed up through its current owner.', 'CONNECTION_STORAGE_UNAVAILABLE'))
       return backingUp ??= (async () => {
         const owner = await ensure()
-        return await backupConnections(owner.database, options.directory!)
+        return await backupConnections(owner.database, dirname(owner.database.location()!))
       })().finally(() => { backingUp = undefined })
     },
     ...(options.moteChat ? { moteChat: {
