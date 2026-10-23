@@ -95,31 +95,8 @@ export type AgentAttentionNotifyInput = {
   sound: boolean
 }
 
-// Not exported: the only consumer is the `HostConfig` union below. Its sibling `SshHostConfig` IS
-// exported because five call sites narrow on it by name; this one has none, and an export nobody
-// imports reads as a promise that the shape is part of the wire surface.
-type LocalHostConfig = {
-  id: 'local'
-  kind: 'local'
-  label: string
-}
-
-export type SshHostConfig = {
-  id: string
-  kind: 'ssh'
-  label: string
-  hostname: string
-  user?: string
-  port?: number
-  identityFile?: string
-  /** Executable and Unix socket of the existing remote public service. */
-  remoteCommand?: string
-  remoteSocketPath?: string
-  /** Durable semantic owner learned over the trusted SSH connection. */
-  runtimeId?: string
-}
-
-export type HostConfig = LocalHostConfig | SshHostConfig
+import type { HostConfig } from '@agentmux/host/host-configuration'
+export type { HostConfig, SshHostConfig } from '@agentmux/host/host-configuration'
 
 export type { AgentExecutorId, AgentTimelineItem, AgentTimelineSnapshot }
 
