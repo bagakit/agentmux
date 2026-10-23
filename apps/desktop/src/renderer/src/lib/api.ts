@@ -409,6 +409,7 @@ const mockApi: AgentMuxDesktopApi = {
     scope: 'renderer-v8-isolate', heap: null, unavailable: 'Renderer process observation requires the desktop app.' } }),
   capsuleReplies: { confirm: async () => { throw Object.assign(new Error('Confirm Capsule answers in the original Desktop App. This preview did not submit input.'), { code: 'CONTROL_UNAVAILABLE' }) } },
   capsules: { call: async () => { throw Object.assign(new Error('Capsule requires its original Desktop Host. Pages and operations are retained; this preview did not perform the request.'), { code: 'CONTROL_UNAVAILABLE' }) } },
+  capsuleRuntime: { call: async () => { throw Object.assign(new Error('Capsule runtime management requires its original Core owner. This preview did not start or stop a service.'), { code: 'CONTROL_UNAVAILABLE' }) } },
   notesStorage: { inspect: async () => ({ directory: new URL("preview/notes", new URL('/', new URL(import.meta.url))).pathname, catalogPath: new URL("preview/notes/notebooks.json", new URL('/', new URL(import.meta.url))).pathname, resourceChanges: [], directoryChanges: [], operation: null }), change: async () => { throw new Error('Change the Notes directory in Desktop Settings. Your preview is retained.') }, onChange: () => () => {} },
   moteChat: { call: async () => { throw new Error('Open Desktop to configure this Mote’s private chat or inspect its original history.') } },
   moteConnections: { call: async () => { throw new Error('Open Desktop to read or continue the original Mote bot setup. Your request and current bot are retained.') } },

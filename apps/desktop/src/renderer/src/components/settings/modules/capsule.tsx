@@ -9,6 +9,7 @@ export const capsuleSettingsModule = {
   description: 'Keep generated pages available, isolated or connected to your App.',
   keywords: 'capsule persistent pages html static spa managed storage root isolated injected theme hitl 页面 托管 隔离 注入',
   searchTargets: [
+    { id: 'capsule-service', title: 'Page service', keywords: 'runtime start stop independent', kind: 'action' },
     { id: 'capsule-storage', title: 'Default content management', keywords: 'managed path storage' },
     { id: 'capsule-mode', title: 'Default run mode', keywords: 'isolated injected' },
     { id: 'capsule-theme', title: 'Follow App theme', keywords: 'style inheritance' },
