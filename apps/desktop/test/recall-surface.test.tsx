@@ -218,8 +218,8 @@ function knowledgeTransport() {
   }
   return vi.spyOn(api.topics, 'call').mockImplementation(handler)
 }
-const captureDialog = () => document.querySelector<HTMLElement>('[role="dialog"].topic-dialog:not(.topic-knowledge-editor)')!
-const knowledgeDialog = () => document.querySelector<HTMLElement>('[role="dialog"].topic-knowledge-editor')!
+const captureDialog = () => document.querySelector<HTMLElement>('[role="dialog"] .topic-dialog:not(.topic-knowledge-editor)')!
+const knowledgeDialog = () => document.querySelector<HTMLElement>('[role="dialog"] .topic-knowledge-editor')!
 async function captureScope(scope: 'research' | 'panel') {
   await openItemOptions()
   const item = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === (scope === 'research' ? 'Save research to Topic…' : 'Save current panel to Topic…'))!
