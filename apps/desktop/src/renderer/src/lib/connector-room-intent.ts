@@ -47,7 +47,7 @@ export function restoredConnectorRoomIntents(value: unknown): Record<string, Con
       const entry = raw as ConnectorRoomIntent
       if (!effects.includes(entry.method)) continue
       const input = parseConnectionParams(entry.method, entry.input), target = parseRoomBindingTarget(entry.target)
-      if (key !== input.operationId || 'executionHostId' in input && (!sameConnectorTarget(input, target) || input.regionAnchor.regionId !== target.regionAnchor.regionId)) continue
+      if (key !== input.operationId || 'executionHostId' in input && (!sameConnectorTarget(input, target) || input.regionAnchor?.regionId !== target.regionAnchor?.regionId)) continue
       let lineage: { replacesOperationId?: string } = {}
       if (entry.method === 'connection.room.link.create' && entry.replacesOperationId !== undefined) {
         try {
