@@ -494,11 +494,17 @@ export class DurableAgentMuxMessageQueue {
         if (!original || typeof original.sender_id !== 'string') throw new AgentMuxError('An original peer message is required.', 'MESSAGE_NOT_FOUND')
         const candidate = { senderSessionId: original.sender_id, messageId: String(position.message_id) }
         const candidateWire = renderAgentMuxMessageReferences([...references, candidate], AGENTMUX_A2A_REFERENCE_REMINDER)
-        if (Buffer.byteLength(candidateWire) > MAX_A2A_NOTIFICATION_BYTES) {
+        let selectedWire = candidateWire
+        // Optional guidance must not displace one otherwise deliverable reference.
+        if (references.length === 0 && Buffer.byteLength(candidateWire) > MAX_A2A_NOTIFICATION_BYTES) {
+          const referenceWire = renderAgentMuxMessageReferences([candidate])
+          if (Buffer.byteLength(referenceWire) <= MAX_A2A_NOTIFICATION_BYTES) selectedWire = referenceWire
+        }
+        if (Buffer.byteLength(selectedWire) > MAX_A2A_NOTIFICATION_BYTES) {
           if (input.messageIds) throw new AgentMuxError('The selected reference set exceeds the notification byte budget. Select fewer original MIDs.', 'INVALID_A2A_NOTIFICATION')
           break
         }
-        references.push(candidate); wire = candidateWire
+        references.push(candidate); wire = selectedWire
       }
       const notice: AgentMuxMessageNotification = { notificationId: input.notificationId,
         key: { kind: 'prompt', agentSessionId: input.agentSessionId, expectedRun: condition.expectedRun, submissionId: input.notificationId },
