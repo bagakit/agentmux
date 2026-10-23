@@ -20,7 +20,10 @@ Existing absolute content/state paths stay with their original execution Host, i
 namespaces inside an App data directory. Independence never means opening an empty library.
 
 Use amux capsule runtime inspect to read revision, desired intent, original Run, actual
-runtime identity and any recovery issue. It creates no initial service. To explicitly
+runtime identity and any recovery issue. Inspection and page/configuration/interaction reads,
+including original-operation queries, do not start or stop a service, replace an ended Run,
+or save a binding. Prepared work remains starting/stopping; unknown dispatch stays unknown.
+Existing keepalive owns convergence separately. To explicitly
 start, use runtime start --input FILE with {operationId,expectedRevision}; to stop, use
 runtime stop --input FILE with {operationId,expectedRevision,expectedRun:{runId}|null}.
 Use exactly the revision and Run from inspection. Stop persists before the native effect;
