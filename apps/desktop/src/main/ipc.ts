@@ -1,5 +1,6 @@
 import { createMoteChatAgents } from './mote-chat-agents.js'
 import { registerMoteChatIpc } from './mote-chat-ipc.js'
+import { callCapsuleFromApp } from './capsule-ipc.js'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { ClientIncidentIpcOwner } from './client-incident-ipc.js'
 import { ClientIncidentRuntimeOwner } from './client-incident-runtime.js'
@@ -751,6 +752,10 @@ export async function registerIpc(args: {
       if (!isApplicationAccessMethod(method)) throw new AgentMuxError('Unsupported application access method.', 'INVALID_APPLICATION_ACCESS')
       return callUserRpc(method, parseApplicationAccessParams(method,value))
     })
+  })
+  handleWithEvent('capsules:call', async (event, method: unknown, value: unknown) => {
+    requireTrustedSender('capsules:call', event)
+    return sessionInputOperationResult(() => callCapsuleFromApp(args.runtime.callOriginalCore.bind(args.runtime), method, value))
   })
   const conversationReads = registerConversationReadIpc({ handle: handleWithEvent, trust: requireTrustedSender,
     connect: () => connectAgentMuxRpc({ endpoint: { transport: 'unix', path: control.path } }) })

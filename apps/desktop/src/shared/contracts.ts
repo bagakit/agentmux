@@ -1647,6 +1647,7 @@ export type HostCreationTrustSnapshot = {
 export type ThemeFileExportResult = { status: 'saved'; path: string } | { status: 'cancelled' } | { status: 'download-requested' }
 
 export type AgentMuxDesktopApi = {
+  capsules: import('@agentmux/core/capsule').CapsulePort
   clientIncidents: {
     open(): Promise<{ token: string } | null>
     report(token: string, report: import('@agentmux/core').AgentMuxClientIncidentReport): Promise<{ accepted: boolean; logId?: string }>
