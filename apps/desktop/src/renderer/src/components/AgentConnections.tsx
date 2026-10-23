@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { RoomBinding } from '@agentmux/core/connections'
 import type { SessionSnapshot } from '../../../shared/contracts'
-import { api } from '../lib/api'
+import { selectConnectorServiceObservation } from '../lib/connector-service-observation'
 import { useAppStore } from '../store'
 import { hasConnectorRoomIntent, invalidateConnectorTarget } from '../lib/connector-room-intent'
 import { useSessionConnections } from '../lib/use-session-connections'
@@ -14,7 +14,7 @@ export function AgentConnections({ session, regionId, visible }: { session: Extr
   const connector = useAgentConnectorMenu(regionId ?? '', regionId ? session.id : null)
   const target = { executionHostId: session.control.hostId, agentSessionId: session.control.agentSessionId }
   const hasRetainedSetup = useAppStore(state => hasConnectorRoomIntent(state.connectorRoomIntents, target))
-  const syncEnabled = useAppStore(state => state.connectorServiceObservation?.source === api.connections.call ? state.connectorServiceObservation.state?.enabled ?? null : null)
+  const syncEnabled = useAppStore(state => selectConnectorServiceObservation(state.connectorServiceObservation)?.state?.enabled ?? null)
   const current = useSessionConnections(target, visible)
   const [dialog, setDialog] = useState<AgentConnectorTarget | null>(null), returned = useRef<HTMLElement | null>(null)
   const setupWasOpen = useRef(false)

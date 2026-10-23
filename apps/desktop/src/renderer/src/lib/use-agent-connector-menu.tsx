@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState } from 'react'
-import { api } from './api'
 import { useAppStore } from '../store'
 import { sessionPresentationById } from './session-presentation'
 import { AgentConnectorDialog, type AgentConnectorTarget } from '../components/AgentConnectorDialog'
 import { agentMoteConnectionSource } from './mote-connection-default'
-import { readConnectorService } from './connector-service-observation'
+import { readConnectorService, selectConnectorServiceObservation } from './connector-service-observation'
 
 /** The existing Region menu owns this transient presentation; opening it reads only configuration. */
 export function useAgentConnectorMenu(regionId: string, sessionId: string | null, tabId?: string) {
   const [issue, setIssue] = useState('')
-  const observation = useAppStore(state => sessionId ? state.connectorServiceObservation : null)
-  const observed = observation?.source === api.connections.call ? observation : null
+  const observed = useAppStore(state => sessionId ? selectConnectorServiceObservation(state.connectorServiceObservation) : null)
   const service = observed?.state
   const [dialog, setDialog] = useState<{ original: AgentConnectorTarget; mode: 'create' | 'existing' | 'details' } | null>(null)
   const selection = useRef<typeof dialog>(null), menuOpen = useRef(false)

@@ -1,6 +1,6 @@
 import type { RoomBinding } from '@agentmux/core/connections'
 import type { SessionSnapshot } from '../../../shared/contracts'
-import { api } from '../lib/api'
+import { selectConnectorServiceObservation } from '../lib/connector-service-observation'
 import { useAppStore } from '../store'
 import { useSessionConnections } from '../lib/use-session-connections'
 import { useConnectorRoomName } from '../lib/use-connector-room-name'
@@ -8,8 +8,7 @@ import { useConnectorRoomName } from '../lib/use-connector-room-name'
 /** Read-only context composed by the Session workface, never a message destination control. */
 export function ConversationSharingNotice({ session, visible }: { session: Extract<SessionSnapshot, { kind: 'agent' }>; visible: boolean }) {
   const current = useSessionConnections({ executionHostId: session.control.hostId, agentSessionId: session.control.agentSessionId }, visible)
-  const observation = useAppStore(state => state.connectorServiceObservation)
-  const service = observation?.source === api.connections.call ? observation : null
+  const service = useAppStore(state => selectConnectorServiceObservation(state.connectorServiceObservation))
   if (!current?.bindings.length) return null
   const sync = !service?.state || service.issue ? 'Automatic sync unconfirmed' : service.state.enabled ? '' : 'Automatic sync off'
   return <aside className="conversation-sharing-notice" aria-label="External sharing scope" aria-busy={current?.loading || undefined}>
