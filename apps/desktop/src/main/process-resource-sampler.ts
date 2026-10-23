@@ -147,9 +147,9 @@ export class ProcessResourceSampler {
     if (this.timer === null) {
       this.eventLoop.reset(); this.eventLoop.enable()
       void this.observeRuntime(this.generation)
-      // 立刻采一次，否则面板要空等一个周期才有数。
-      void this.sampleOnce()
       this.timer = setInterval(() => void this.sampleOnce(), USAGE_SAMPLE_INTERVAL_MS)
+      // The cached callback below delivers the first independent App/Main frame exactly once.
+      void this.sampleOnce(false)
     }
     try { if (this.latest) onSample(this.latest) } catch (error) {
       this.subscribers.delete(onSample)
@@ -299,21 +299,40 @@ export class ProcessResourceSampler {
     return aggregateUsage(next, observedAt).cpuPercent
   }
 
-  /**
-   * 采一次。
-   *
-   * 上一次还没回来时不再起第二个——`ps` 比采样周期慢时，定时器照常到点，没有这层去重，
-   * 一台负载高的机器会越采越慢、越慢越堆，正好在用户最需要看资源的时候把机器压垮。
-   */
-  private async sampleOnce(): Promise<void> {
+  /** One consumer-driven tick; the independent App/Main read never waits for process-table IO. */
+  private async sampleOnce(publish = true): Promise<void> {
+    const generation = this.generation
+    void this.observeRenderer(generation)
+    this.observeDiagnostics(generation)
+    this.sampleApplication()
+    if (publish) this.notify()
+    if (generation !== this.generation || this.subscribers.size === 0) return
     if (this.inFlight) return this.inFlight
-    this.inFlight = this.runSample(this.generation).finally(() => { this.inFlight = null })
+    this.inFlight = this.runProcessSample(generation).finally(() => { this.inFlight = null })
     return this.inFlight
   }
 
-  private async runSample(generation: number): Promise<void> {
-    void this.observeRenderer(generation)
-    this.observeDiagnostics(generation)
+  private sampleApplication(): void {
+    const observedAt = this.now(), application = this.sampleApp(this.cpuNow())
+    let mainOwners = this.latest?.mainOwners ?? null
+    let mainObservedAt = this.latest?.mainObservedAt ?? null
+    let mainUnavailable: string | null = null
+    try {
+      mainOwners = this.observationSources?.mainOwners() ?? null
+      mainObservedAt = mainOwners === null ? null : observedAt
+    } catch (error) { mainUnavailable = error instanceof Error ? error.message : String(error) }
+    this.latest = {
+      observedAt,
+      runs: this.latest?.runs ?? [], runTotals: this.latest?.runTotals ?? null,
+      unavailable: this.latest?.unavailable ?? null, processObservedAt: this.latest?.processObservedAt ?? null,
+      app: application, appObservedAt: application.unavailable ? this.latest?.appObservedAt ?? null : observedAt,
+      runtime: this.runtime, runtimeUnavailable: this.runtimeUnavailable, runtimeObservedAt: this.runtimeObservedAt,
+      mainOwners, mainObservedAt, mainUnavailable, diagnostics: this.diagnostics, renderer: this.renderer
+    }
+  }
+
+  /** One process-table flight. Completion changes only its own source, without another publication. */
+  private async runProcessSample(generation: number): Promise<void> {
     let rows = null
     let unavailable: string | null = null
     try {
@@ -366,37 +385,18 @@ export class ProcessResourceSampler {
       })
     }
 
-    const application = this.sampleApp(windowAt)
-    let mainOwners = this.latest?.mainOwners ?? null
-    let mainObservedAt = this.latest?.mainObservedAt ?? null
-    let mainUnavailable: string | null = null
-    try {
-      mainOwners = this.observationSources?.mainOwners() ?? null
-      mainObservedAt = mainOwners === null ? null : observedAt
-    } catch (error) { mainUnavailable = error instanceof Error ? error.message : String(error) }
-    this.latest = {
-      observedAt,
-      runs,
-      runTotals,
-      app: application,
-      runtime: this.runtime,
-      runtimeUnavailable: this.runtimeUnavailable,
-      mainOwners,
-      mainObservedAt, mainUnavailable,
-      unavailable,
-      processObservedAt: unavailable ? this.latest?.processObservedAt ?? null : observedAt,
-      appObservedAt: application.unavailable ? this.latest?.appObservedAt ?? null : observedAt,
-      runtimeObservedAt: this.runtimeObservedAt,
-      diagnostics: this.diagnostics,
-      renderer: this.renderer
-    }
-    this.notify()
+    this.latest = { ...this.latest!, observedAt, runs, runTotals, unavailable,
+      processObservedAt: unavailable ? this.latest?.processObservedAt ?? null : observedAt }
   }
 
   private notify(): void {
     const snapshot = this.latest
     if (!snapshot) return
-    for (const subscriber of this.subscribers) subscriber(snapshot)
+    const generation = this.generation
+    for (const subscriber of [...this.subscribers]) {
+      if (generation !== this.generation) return
+      if (this.subscribers.has(subscriber)) subscriber(snapshot)
+    }
   }
 
   private observeDiagnostics(generation: number): void {
