@@ -1,3 +1,4 @@
+import type { ConnectionDeliverySourceObservation } from './connection-diagnosis-source.js'
 import type { ConversationItemRef } from './conversation.js'
 import type { ConnectionApplication } from './connections-contract.js'
 import type { RoomBindingCallContext } from './room-binding-contract.js'
@@ -80,7 +81,7 @@ export type ConnectionDeliveryParamsMap = {
 }
 export type ConnectionDeliveryResultMap = {
   'connection.delivery.inspect': { delivery: ConnectionDelivery | null }
-  'connection.delivery.ls': { deliveries: ConnectionDelivery[]; next: string | null; observation?: ConnectionDeliveryObservation; coverage?: ConnectionDeliveryCoverage }
+  'connection.delivery.ls': { deliveries: ConnectionDelivery[]; next: string | null; observation?: ConnectionDeliveryObservation; sourceObservation?: ConnectionDeliverySourceObservation; effectObservation?: ConnectionDeliveryObservation; coverage?: ConnectionDeliveryCoverage }
   'connection.delivery.retry': { delivery: ConnectionDelivery }
 }
 export type ConnectionDeliveryMethod = keyof ConnectionDeliveryParamsMap

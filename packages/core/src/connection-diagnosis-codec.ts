@@ -1,3 +1,4 @@
+import { parseConnectionDeliverySourceObservation } from './connection-delivery-codec.js'
 import { AgentMuxError } from './errors.js'
 import { parseIngressContextObservation } from './ingress-codec.js'
 import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisSourceCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosis, type ConnectionDiagnosisInput, type ConnectionDiagnosisReading, type ConnectionGroupDiagnosis } from './connection-diagnosis-contract.js'
@@ -40,12 +41,17 @@ function scope(value: unknown) {
   return { input: member(p.input, ['mentions-and-replies', 'all-messages'] as const), publication: member(p.publication, ['future-native-user-facing', 'future-shared-conversation'] as const) }
 }
 const deliveryReasons = ['effect-unconfirmed', 'platform-rejected', 'adapter-unavailable', 'platform-unavailable', 'rate-limited', 'thread-unavailable', 'unsupported-format', 'binding-revised', 'original-speech-withdrawn', 'outside-conversation-scope', 'private-content', 'public-content-unconfirmed', 'version-unavailable'] as const
+function association(value: unknown) {
+  const a = object(value, ['sourceKey', 'recordKey', 'eventKey', 'partKey'])
+  const key = (value: unknown) => { if (typeof value !== 'string' || !/^[a-f0-9]{64}$/u.test(value)) return fail(); return value }
+  return { sourceKey: nullable(a.sourceKey, key), recordKey: nullable(a.recordKey, key), eventKey: nullable(a.eventKey, key), partKey: nullable(a.partKey, key) }
+}
 function sourceGap(value: unknown) {
-  const g = object(value, ['gapId', 'reason', 'code', 'codeRecorded', 'sourceKind'])
+  const g = object(value, ['gapId', 'reason', 'code', 'codeRecorded', 'sourceKind', 'association'])
   const code = nullable(g.code, value => member(value, connectionDiagnosisSourceCodes)), codeRecorded = bool(g.codeRecorded)
   if (code !== null && !codeRecorded) return fail()
   return { gapId: id(g.gapId), reason: member(g.reason, ['public-content-unconfirmed', 'transport-unsupported', 'resource-unavailable', 'start-cut-unconfirmed', 'source-gap', 'version-unavailable'] as const),
-    code, codeRecorded, sourceKind: nullable(g.sourceKind, value => member(value, ['captured', 'native', 'native-unavailable'] as const)) }
+    code, codeRecorded, association: association(g.association), sourceKind: nullable(g.sourceKind, value => member(value, ['captured', 'native', 'native-unavailable'] as const)) }
 }
 function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGroupDiagnosis {
   const p = object(value, ['target', 'window', 'limit', 'connection', 'binding', 'outgoing', 'incoming']), t = object(p.target, ['bindingId', 'bindingRevision', 'connectionId', 'domain', 'appId', 'externalConversationId', 'executionHostId', 'agentSessionId'])
@@ -62,15 +68,17 @@ function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGro
     return { state: member(b.state, ['active', 'paused', 'detached'] as const), currentRevision: nullable(b.currentRevision, value => count(value, 1)), scope: scope(b.scope), activeInputGrants: count(b.activeInputGrants), activeAnswerGrants: count(b.activeAnswerGrants), activePermissionGrants: count(b.activePermissionGrants) }
   })
   const outgoing = reading(p.outgoing, value => {
-    const o = object(value, ['after', 'afterContent', 'next', 'deliveries', 'observation', 'coverage'])
+    const o = object(value, ['after', 'afterContent', 'next', 'deliveries', 'observation', 'sourceObservation', 'effectObservation', 'coverage'])
     if (o.after !== (request.after ?? null) || o.afterContent !== (request.afterContent ?? null)) return fail()
     return { after: nullable(o.after, text), afterContent: nullable(o.afterContent, text), next: nullable(o.next, text), deliveries: array(o.deliveries, value => {
-      const d = object(value, ['kind', 'operationId', 'state', 'receipt', 'platformMessageId', 'reason', 'resourceUpload'])
+      const d = object(value, ['kind', 'operationId', 'state', 'receipt', 'platformMessageId', 'reason', 'resourceUpload', 'association'])
       const receipt = nullable(d.receipt, value => member(value, ['confirmed', 'unknown', 'not-applied'] as const))
       if (receipt !== 'confirmed' && d.platformMessageId !== null) return fail()
-      return { kind: member(d.kind, ['conversation', 'permission', 'binding-notice'] as const), operationId: id(d.operationId), state: member(d.state, ['pending', 'dispatching', 'unknown', 'confirmed', 'not-applied', 'cancelled', 'superseded'] as const), receipt, platformMessageId: nullable(d.platformMessageId, text), reason: nullable(d.reason, value => member(value, deliveryReasons)), resourceUpload: nullable(d.resourceUpload, value => member(value, ['pending', 'dispatching', 'unknown', 'confirmed'] as const)) }
+      return { association: association(d.association), kind: member(d.kind, ['conversation', 'permission', 'binding-notice'] as const), operationId: id(d.operationId), state: member(d.state, ['pending', 'dispatching', 'unknown', 'confirmed', 'not-applied', 'cancelled', 'superseded'] as const), receipt, platformMessageId: nullable(d.platformMessageId, text), reason: nullable(d.reason, value => member(value, deliveryReasons)), resourceUpload: nullable(d.resourceUpload, value => member(value, ['pending', 'dispatching', 'unknown', 'confirmed'] as const)) }
     }), observation: nullable(o.observation, value => {
       const s = object(value, ['state', 'reason']); return { state: member(s.state, stageStates), ...(s.reason === undefined ? {} : { reason: member(s.reason, ['not-started', 'source-unconfirmed', 'source-gap', 'content-unconfirmed', 'storage-unconfirmed', 'adapter-unavailable', 'credential-missing', 'effect-unconfirmed'] as const) }) }
+    }), sourceObservation: nullable(o.sourceObservation, parseConnectionDeliverySourceObservation), effectObservation: nullable(o.effectObservation, value => {
+      const s = object(value, ['state', 'reason']); return { state: member(s.state, ['unknown', 'unavailable'] as const), reason: member(s.reason, ['effect-unconfirmed'] as const) }
     }), coverage: nullable(o.coverage, value => {
       const c = object(value, ['state', 'nextContent', 'gaps', 'originCount', 'omittedGapCount'])
       return { state: member(c.state, ['complete', 'incomplete'] as const), nextContent: nullable(c.nextContent, text), originCount: count(c.originCount), omittedGapCount: count(c.omittedGapCount), gaps: array(c.gaps, sourceGap) }
