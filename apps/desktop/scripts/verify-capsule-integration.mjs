@@ -172,6 +172,16 @@ async function checkProof() {
   for (const name of ['ordinary private Desktop launch', 'SIGKILL original Host and Desktop; retain ctxmux Run', 'original Native workface restored'])
     assert.ok(proof.phases.some(phase => phase.name === name), 'Completed Native phase: ' + name)
   const content = proof.content, recovery = proof.recovery, original = proof.originalAgent
+  assert.equal(proof.initialServiceStart.before.desired, 'unconfigured')
+  assert.equal(proof.initialServiceStart.params.expectedRevision, proof.initialServiceStart.before.revision)
+  assert.equal(proof.initialServiceStart.receipt.desired, 'running')
+  assert.equal(proof.initialServiceStart.receipt.operation.operationId, proof.initialServiceStart.params.operationId)
+  assert.equal(proof.initialServiceStart.confirmed.desired, 'running')
+  assert.equal(proof.initialServiceStart.confirmed.phase, 'running')
+  assert.equal(proof.initialServiceStart.confirmed.operation.kind, 'start')
+  assert.equal(proof.initialServiceStart.confirmed.operation.phase, 'confirmed')
+  assert.equal(proof.initialServiceStart.confirmed.operation.operationId, proof.initialServiceStart.params.operationId)
+  assert.deepEqual(proof.initialServiceStart.confirmed.run, proof.service.before.observation.run)
   assert.equal(content.managedSourceRemoved, true)
   assert.equal(content.pathSourceObservedLive, true)
   assert.equal(content.managed.record.capsuleId, recovery.recovered.record.capsuleId)
@@ -581,6 +591,20 @@ try {
     destination: { zoneId: zone.zoneId, newTab: true }, focus: true })
   assert.equal(agentPlace.to?.regionId !== undefined, true)
   facts.agentPlace = agentPlace
+  const initialRuntime = await call('capsule.runtime.inspect', {})
+  assert.equal(initialRuntime.desired, 'unconfigured')
+  const startParams = { operationId: randomUUID(), expectedRevision: initialRuntime.revision }
+  const startReceipt = await call('capsule.runtime.start', startParams)
+  assert.equal(startReceipt.desired, 'running')
+  assert.equal(startReceipt.operation?.operationId, startParams.operationId)
+  const startConfirmed = await waitFor('original explicit Capsule Start', async () => {
+    const current = await call('capsule.runtime.inspect', {})
+    assert.equal(current.operation?.operationId, startParams.operationId)
+    assert.equal(current.operation?.kind, 'start')
+    return current.desired === 'running' && current.phase === 'running' &&
+      current.operation.phase === 'confirmed' && current.run && current.runtime ? current : null
+  })
+  facts.initialServiceStart = { before: initialRuntime, params: startParams, receipt: startReceipt, confirmed: startConfirmed }
   const initialConfig = await call('capsule.config.inspect', {})
   const longRoot = join(workspace, 'published-agent-pages', 'quarterly-research-and-decision-records',
     'original-project-review-surfaces', 'managed-artifacts-retained-across-desktop-restarts')
