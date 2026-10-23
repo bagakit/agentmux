@@ -25,6 +25,7 @@ type Inner = {
     replay: (...args: unknown[]) => Promise<CtxmuxAdapterOutputObservation>
   }
   writeAgentInput(session: AgentMuxStoredAgentSession, data: string): Promise<unknown>
+  agentInputTails: Map<string, { renderObservations: Set<{ controller: AbortController }> }>
 }
 const clients: AgentMuxClient[] = []
 afterEach(async () => {
@@ -78,6 +79,14 @@ async function fixture(providerId: 'codex' | 'claude') {
 
 
 const checkpoint = (): Promise<void> => new Promise(done => setImmediate(done))
+const payload = '\x1b[200~hello\x1b[201~'
+
+async function writesBeforeRelease(h: Awaited<ReturnType<typeof fixture>>, count: number) {
+  // Observe the actual byte port while the render barrier is still held. The
+  // fallback below settles a broken owner; this retained snapshot is the oracle.
+  try { await expect.poll(() => h.writes.length).toBe(count) } catch { /* Assert exact bytes after releasing cleanup. */ }
+  return h.writes.map(write => write.data)
+}
 
 function blankTerminalObservation(run: CtxmuxAdapterRun, close: () => Promise<void>): CtxmuxAdapterOutputObservation {
   if (run.cols === null || run.rows === null || run.latestOutputBytes !== 0) {
@@ -123,13 +132,12 @@ it.each(['codex', 'claude'] as const)('preempts optional %s rendering, preservin
   try {
     await screen.entered.promise
     raw = ['\x1b[<64;10;10M', 'z'].map(data => h.client.writeAgent({ agentSessionId: h.stored.agentSessionId, expectedRun: h.client.agentSession(h.stored.agentSessionId).run, data: data, source: 'user' }))
-    await checkpoint()
-    const beforeRelease = h.writes.map(write => write.data)
+    const beforeRelease = await writesBeforeRelease(h, 4)
     // The fallback only settles broken implementations; it cannot make the before-release oracle green.
     screen.release.resolve(1)
     await Promise.all([prompt, ...raw])
-    expect(beforeRelease).toEqual(['hello', '\r', '\x1b[<64;10;10M', 'z'])
-    expect(h.writes.map(write => write.expectedByte)).toEqual([0, 5, 6, 18])
+    expect(beforeRelease).toEqual([payload, '\r', '\x1b[<64;10;10M', 'z'])
+    expect(h.writes.map(write => write.expectedByte)).toEqual([0, 17, 18, 30])
     expect(new Set(h.writes.map(write => write.operationId)).size).toBe(4)
     expect(h.client.agentSession(h.stored.agentSessionId).terminalPromptDelivery).toMatchObject({
       state: 'unverified', reason: 'screen-evidence-replaced', submissionId: 'synthetic-operation', run: h.stored.run
@@ -160,18 +168,20 @@ it('registers observation cancellation before a prompt enters its queued render 
   await priorEntered.promise
   const prompt = h.client.submitAgentPrompt({ ...agentPromptCondition(h.client.agentSession(h.stored.agentSessionId)), agentSessionId: h.stored.agentSessionId,
     expectedRun: h.stored.run, operationId: 'queued-operation', prompt: 'hello' })
+  await expect.poll(() => h.inner.agentInputTails.get(h.stored.agentSessionId)?.renderObservations.size).toBe(1)
+  const observation = [...h.inner.agentInputTails.get(h.stored.agentSessionId)!.renderObservations][0]!
   const raw = h.client.writeAgent({ agentSessionId: h.stored.agentSessionId, expectedRun: h.client.agentSession(h.stored.agentSessionId).run, data: 'z', source: 'user' })
   try {
+    await expect.poll(() => observation.controller.signal.aborted).toBe(true)
     priorRelease.resolve()
     await screen.entered.promise
-    await checkpoint()
-    const beforeRelease = h.writes.map(write => write.data)
+    const beforeRelease = await writesBeforeRelease(h, 4)
     const abortedAtWait = screen.signals[0]?.aborted
     screen.release.resolve(1)
     await Promise.all([prior, prompt, raw])
     expect(abortedAtWait).toBe(true)
-    expect(beforeRelease).toEqual(['prior', 'hello', '\r', 'z'])
-    expect(h.writes.map(write => write.expectedByte)).toEqual([0, 5, 10, 11])
+    expect(beforeRelease).toEqual(['prior', payload, '\r', 'z'])
+    expect(h.writes.map(write => write.expectedByte)).toEqual([0, 5, 22, 23])
   } finally {
     priorRelease.resolve()
     screen.release.resolve(1)
@@ -196,8 +206,8 @@ it('does not cancel another Run or preempt a prompt for empty input', async () =
     await Promise.all([prompt, empty])
     expect(await wrongRun).toMatchObject({ code: 'STALE_AGENT_SESSION' })
     expect(aborted).toBe(false)
-    expect(beforeRelease).toEqual(['hello'])
-    expect(h.writes.map(write => write.data)).toEqual(['hello', '\r'])
+    expect(beforeRelease).toEqual([payload])
+    expect(h.writes.map(write => write.data)).toEqual([payload, '\r'])
   } finally {
     screen.release.resolve(1)
     await Promise.allSettled([prompt, empty, wrongRun])
