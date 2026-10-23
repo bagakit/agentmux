@@ -68,6 +68,46 @@ it('copies each original part through the actual message consumer, preserving or
   expect(host.querySelector('.conversation-tool-trace[data-status="failed"]')).not.toBeNull()
 })
 
+it.each(['tool', 'reasoning'] as const)('preserves native %s Copy pending and receipt across unchanged original snapshots through ConversationMessage', async kind => {
+  const attempts = pending(), text = kind === 'tool' ? '\n  {"original":1}\n' : reasoning.text
+  const label = kind === 'tool' ? 'Copy tool input' : 'Copy reasoning'
+  const draw = async (state: 'streaming' | 'complete', original = text, nativeSessionId = 'original-native') => render(
+    <ConversationMessage messageId="original-field" conversationSessionId="original-session" speaker={{ role: 'agent', id: 'original-session' }}
+      itemRef={{ hostId: 'local', agentSessionId: 'original-session', source: { kind: 'native', providerId: 'claude', nativeSessionId, recordId: 'original-record' } }}
+      status={state} content={[kind === 'tool' ? { kind: 'tool-call', name: 'inspect', input: original, callId: 'original-call' }
+        : { kind: 'reasoning', text: original }]} />)
+  await draw('streaming')
+  await act(async () => {
+    if (kind === 'tool') host.querySelector<HTMLButtonElement>('.conversation-tool-trace__row')!.click()
+    else { const details = host.querySelector<HTMLDetailsElement>('details.log-turn__trace')!; details.open = true; details.dispatchEvent(new Event('toggle')) }
+  })
+  const control = button(label), body = kind === 'tool' ? host.querySelector('pre')! : host.querySelector('strong')!
+  const node = body.firstChild!, range = document.createRange()
+  await act(async () => { range.selectNodeContents(node); window.getSelection()!.addRange(range) })
+  const selected = window.getSelection()!.toString()
+  expect(selected.length).toBeGreaterThan(0)
+  await click(label); expect(attempts.map(attempt => attempt.text)).toEqual([text]); expect(status(label)).toBe('Copying…')
+  await draw('complete')
+  expect(button(label)).toBe(control)
+  expect(status(label), 'Unchanged original field keeps its pending Copy receipt').toBe('Copying…')
+  await click(label); expect(attempts).toHaveLength(1)
+  await act(async () => attempts[0]!.resolve(true)); expect(status(label)).toBe('Copied')
+  await draw('complete'); expect(status(label), 'Unchanged original field keeps completed Copy feedback').toBe('Copied')
+  expect(body.firstChild).toBe(node); expect(range.startContainer).toBe(node); expect(window.getSelection()!.toString()).toBe(selected)
+  expect(document.activeElement).toBe(control)
+  await draw('complete', text + '\nchanged'); expect(status(label)).toBe('Copy')
+  await click(label); expect(attempts.map(attempt => attempt.text)).toEqual([text, text + '\nchanged'])
+  await draw('complete', text + '\nchanged', 'another-original-native'); expect(status(label)).toBe('Copy')
+  await act(async () => attempts[1]!.resolve(true)); expect(status(label)).toBe('Copy')
+  // A standalone part with no original field identity must still isolate a new object.
+  const unscoped = () => render(kind === 'tool'
+    ? <ConversationToolTrace part={{ kind: 'tool-call', name: 'inspect', input: text, callId: 'original-call' }} expanded />
+    : <ConversationReasoningTrace part={{ kind: 'reasoning', text }} expanded />)
+  await unscoped(); await click(label)
+  expect(attempts).toHaveLength(3); await act(async () => attempts[2]!.resolve(true)); expect(status(label)).toBe('Copied')
+  await unscoped(); expect(status(label)).toBe('Copy')
+})
+
 it('preserves original reading nodes, selection and button focus while copying', async () => {
   await render(<ConversationReasoningTrace part={reasoning} expanded />)
   const body = host.querySelector('strong')!, range = document.createRange(); range.selectNodeContents(body); window.getSelection()!.addRange(range)
