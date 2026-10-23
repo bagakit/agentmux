@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { readFile } from 'node:fs/promises'
+import { mkdir, readFile, realpath, writeFile } from 'node:fs/promises'
+import { appendFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
-import { join } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 // Same private inspector / seeded-then-ordinary-launch seam as the maintained Browser and
@@ -41,9 +42,44 @@ export async function connectCdp(url, connections) {
   return cdp
 }
 
+// Core NotesStorage uses its own locator and os.homedir(), independently of the
+// later Electron app.getPath('home') override. Check before reading the locator or
+// launching App code. This fences state/locator/current directory, not historical
+// operation payloads: fixtures must originate their own private state.
+export async function preparePrivateNotesIsolation({ root, privateHome, environment }) {
+  const originalRoot = await realpath(root)
+  const projected = async path => {
+    try { return await realpath(path) }
+    catch (error) {
+      if (error.code !== 'ENOENT' || dirname(path) === path) throw error
+      return join(await projected(dirname(path)), basename(path))
+    }
+  }
+  const inside = async path => typeof path === 'string' && isAbsolute(path) &&
+    !relative(originalRoot, await projected(resolve(path))).split(/[\\/]/u).includes('..')
+  const state = environment.AGENTMUX_STATE_DIRECTORY
+  assert.ok(await inside(state), 'A private Notes locator needs this fixture state directory')
+  const locator = join(state, 'notes-location.json')
+  assert.ok(await inside(locator), 'The private Notes locator must resolve inside this fixture')
+  let notes
+  try { notes = JSON.parse(await readFile(locator, 'utf8')) }
+  catch (error) {
+    if (error.code !== 'ENOENT') throw error
+    const directory = join(privateHome, '.agentmux', 'notes')
+    assert.ok(await inside(directory), 'The initial private Notes directory must belong to this fixture')
+    await mkdir(state, { recursive: true, mode: 0o700 }); await mkdir(directory, { recursive: true, mode: 0o700 })
+    await writeFile(locator, JSON.stringify({ schemaVersion: 1, directory, operations: {}, pending: null }) + '\n', { flag: 'wx', mode: 0o600 })
+    notes = JSON.parse(await readFile(locator, 'utf8'))
+  }
+  assert.ok(notes.schemaVersion === 1 && await inside(notes.directory),
+    'The original private Notes locator is outside this fixture; preserve it and refuse App launch')
+  return { locator, directory: notes.directory }
+}
+
 export function desktopFixture({ desktopRoot, root, privateHome, environment, children, connections, waitFor, packagedApplication, beforeRuntimePrepare }) {
   const require = createRequire(join(desktopRoot, 'package.json'))
   return async function launch(label, seed, { expectRuntimeUnavailable } = {}) {
+    await preparePrivateNotesIsolation({ root, privateHome, environment })
     if (expectRuntimeUnavailable) {
       assert.ok(['CONTROL_UNAVAILABLE', 'RPC_METHOD_NOT_FOUND'].includes(expectRuntimeUnavailable.code))
       assert.ok(typeof expectRuntimeUnavailable.message === 'string' && expectRuntimeUnavailable.message.length > 0,
@@ -67,6 +103,7 @@ export function desktopFixture({ desktopRoot, root, privateHome, environment, ch
     let diagnostics = '', mainUrl, rendererUrl, spawnError
     child.once('error', error => { spawnError = error })
     child.stderr.on('data', bytes => {
+      appendFileSync(join(root, label + '-desktop.stderr.txt'), bytes)
       diagnostics = (diagnostics + bytes).slice(-16_384)
       mainUrl ??= /Debugger listening on (ws:\/\/\S+)/.exec(diagnostics)?.[1]
       rendererUrl ??= /DevTools listening on (ws:\/\/\S+)/.exec(diagnostics)?.[1]
@@ -79,15 +116,17 @@ export function desktopFixture({ desktopRoot, root, privateHome, environment, ch
     await main.call('Runtime.enable'); await main.call('Debugger.enable')
     const mainPath = join(desktopRoot, 'out/main/index.js')
     const anchors = (await readFile(mainPath, 'utf8')).split('\n').flatMap((line, index) => (
-      line.includes('const SCRATCH_BACKING_PATH = join(app.getPath("home")') ? [index] : []
+      line.includes('const SCRATCH_BACKING_PATH = ') && line.includes('app.getPath("home")') ? [index] : []
     ))
     assert.equal(anchors.length, 1, 'Private home isolation needs the exact compiled home boundary')
     const breakpoint = await main.call('Debugger.setBreakpointByUrl', { urlRegex: mainPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '$', lineNumber: anchors[0] })
     await main.call('Runtime.runIfWaitingForDebugger')
     let paused = await waitFor(`${label} bootstrap pause`, () => main.pauses.shift())
     if (!paused.hitBreakpoints?.includes(breakpoint.breakpointId)) {
+      const initial = paused.callFrames.map(frame => ({ url: frame.url, location: frame.location }))
       await main.call('Debugger.resume')
-      paused = await waitFor(`${label} home boundary`, () => main.pauses.shift())
+      try { paused = await waitFor(`${label} home boundary`, () => main.pauses.shift()) }
+      catch (error) { throw new Error(`${error.message}; initial=${JSON.stringify(initial)}; requested=${JSON.stringify(breakpoint)}; diagnostics=${diagnostics}`) }
     }
     assert.ok(paused.hitBreakpoints?.includes(breakpoint.breakpointId))
     const isolated = await main.call('Debugger.evaluateOnCallFrame', { callFrameId: paused.callFrames[0].callFrameId,
