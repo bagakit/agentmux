@@ -5,6 +5,7 @@ import { defineConfig } from 'vitest/config'
 
 const root = resolve(import.meta.dirname, '../../..')
 const core = JSON.parse(readFileSync(resolve(root, 'packages/core/package.json'), 'utf8'))
+const host = JSON.parse(readFileSync(resolve(root, 'apps/host/package.json'), 'utf8'))
 const mutation = process.env.AGENT_LEARNING_MUTANT
 const variants = {
   'proposer-authority': ['apps/host/src/agent-learning-owner.ts', 'context.caller?.agentSessionId !== operation.proposer.agentSessionId', 'false'],
@@ -30,6 +31,10 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }
     if (source.startsWith('@agentmux/core/')) {
       const entry = core.exports['./' + source.slice('@agentmux/core/'.length)]?.import
       if (typeof entry === 'string' && entry.startsWith('./dist/')) return resolve(root, 'packages/core/src', entry.slice(7).replace(/\.js$/u, '.ts'))
+    }
+    if (source.startsWith('@agentmux/host/')) {
+      const entry = host.exports['./' + source.slice('@agentmux/host/'.length)]?.import
+      if (typeof entry === 'string' && entry.startsWith('./dist/')) return resolve(root, 'apps/host/src', entry.slice(7).replace(/\.js$/u, '.ts'))
     }
   },
   transform(original, id) {
