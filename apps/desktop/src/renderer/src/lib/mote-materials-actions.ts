@@ -163,17 +163,24 @@ export async function openMoteMaterialAt(owner: MoteWorkfaceScope, path: string,
   if (signal.aborted || (reference ? !confirmedMoteReference(state, owner, { reference }) :
   !confirmedMoteDestination(state, owner, destination, true))) return null
   const { displayWorkspaceId, groupId } = destination
-  const identity = fileWorkbenchIdentity(state, workspaceId, path, { displayWorkspaceId })
-  const tabId = identity.tabId
-  const existing = state.tabs[tabId]
   const topic = scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace)?.find(item => {
     const root = scratchTopicLogicalPath(owner.workspace, item)
     return root !== null && fileExplorerContains(root, path)
-  })
-  const topicId = existing ? existing.topicId : topic?.id ?? (fileExplorerContains(owner.rootPath, path) ? owner.topic.id : undefined)
-  const identityTopic = topic ?? (topicId === owner.topic.id ? owner.topic : undefined)
-  const spaceId = directoryIdentity(owner.workspace.hostId, identityTopic ? scratchTopicIdentityPath(owner.workspace, identityTopic) : owner.workspace.path)
-  const space = existing?.space ?? { spaceId, zoneId: homeZoneId(spaceId) }
+  }) ?? (fileExplorerContains(owner.rootPath, path) ? owner.topic : undefined)
+  const topicId = topic?.id
+  const spaceId = directoryIdentity(owner.workspace.hostId, topic ? scratchTopicIdentityPath(owner.workspace, topic) : owner.workspace.path)
+  const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace) ?? [owner.topic])
+  const original = reference ? catalog.locations.find(location => sameWorkbenchProjectionSelection(location, reference)) : undefined
+  const zoneId = original?.spaceId === spaceId ? original.zoneId : homeZoneId(spaceId)
+  if (!zoneId) {
+    state.reportError(new Error('The original File destination Zone is unconfirmed. Its workface and content are kept; choose its confirmed Group and retry.'))
+    return null
+  }
+  const space = { spaceId, zoneId }
+  const context = { displayWorkspaceId, space, selection: { topicId: topicId ?? null } }
+  const identity = fileWorkbenchIdentity(state, workspaceId, path, context)
+  const tabId = identity.tabId
+  const existing = state.tabs[tabId]
   const fileRegions = existing ? Object.values(existing.regions).filter(region => region.kind === 'file' &&
     region.workspaceId === workspaceId && region.path === path) : []
   const heldFileRegion = existing?.id === reference?.tabId ? fileRegions.find(region => region.regionId === reference?.regionId) : undefined
@@ -182,7 +189,6 @@ export async function openMoteMaterialAt(owner: MoteWorkfaceScope, path: string,
   }
   const regionId = heldFileRegion?.regionId ?? fileRegions[0]?.regionId ?? identity.regionId
   const fileReference = { displayWorkspaceId, groupId, tabId, regionId }
-  const catalog = spatialCatalog(state, scratchTopicsForWorkspace(state.scratchTopicSnapshots, owner.workspace) ?? [owner.topic])
   const alreadyPlaced = catalog.locations.some(location => sameWorkbenchProjectionSelection(location, fileReference))
   let opened = false, openedReference: WorkbenchProjectionSelection | null = null
   // A retained File keeps its entity/Space. The File owner adds or reuses only
@@ -201,19 +207,79 @@ export async function openMoteMaterialAt(owner: MoteWorkfaceScope, path: string,
   if (signal.aborted || !opened || !openedReference || (reference ?
   !confirmedMoteReference(useAppStore.getState(), owner, { reference }) :
   !confirmedMoteDestination(useAppStore.getState(), owner, destination, false))) return null
-  return { reference: openedReference as WorkbenchProjectionSelection, tabId, regionId, topicId, space }
+  const placed = openedReference as WorkbenchProjectionSelection
+  return { reference: placed, tabId: placed.tabId, regionId: placed.regionId, topicId, space }
 }
 
 
-/** Materials use the original File/launcher owners, never the background Project. */
-export function useMoteMaterialsActions(scope: MoteWorkfaceScope | null, options: {
+type MoteMaterialOptions = {
   floating?: boolean | undefined
   onTabSelect?: ((tabId: string) => void) | undefined
   onReferenceSelect?: ((reference: WorkbenchProjectionSelection) => void) | undefined
   onOpened?: (() => void) | undefined
   reference?: WorkbenchProjectionSelection | null | undefined
   destination?: FileDestination | null | undefined
+}
+
+/** One original File open and reveal, shared by materials and directory menu actions. */
+export async function openMoteMaterial(owner: MoteWorkfaceScope, path: string, options: MoteMaterialOptions & {
+  signal?: AbortSignal
+  isCurrent?: () => boolean
 } = {}) {
+  const state = useAppStore.getState()
+  const reference = options.destination !== undefined && !options.reference ? null : confirmedMoteReference(state, owner, options)
+  const destination = reference ?? emptyMoteDestination(state, owner, options)
+  if (!destination) { state.reportError(new Error('The exact original Mote display is unconfirmed. Your work is kept; choose its Tab and Region, or an exact empty destination, then retry opening the file.')); return }
+  const { displayWorkspaceId, groupId } = destination
+  const navigation = fileNavigationSelection(state), floating = floatingSelection()
+  const controller = new AbortController()
+  const unsubscribers: (() => void)[] = []
+  const events = ['pointerdown', 'keydown', 'input', 'focusin'] as const
+  const release = () => {
+    for (const unsubscribe of unsubscribers) unsubscribe()
+    for (const event of events) document.removeEventListener(event, cancel, true)
+    options.signal?.removeEventListener('abort', cancel)
+  }
+  const cancel = () => { controller.abort(); release() }
+  options.signal?.addEventListener('abort', cancel, { once: true })
+  if (options.signal?.aborted) { cancel(); return }
+  // These listeners exist only during this cold file request. Latching records
+  // A→B→A and later input, rather than comparing only the final selected Mote.
+  unsubscribers.push(useAppStore.subscribe(current => {
+    if (fileNavigationSelection(current) !== navigation) cancel()
+  }), subscribePmoTeamsTopicFloatingState(() => {
+    if (floatingSelection() !== floating) cancel()
+  }))
+  for (const event of events) document.addEventListener(event, cancel, true)
+  let result
+  try { result = await openMoteMaterialAt(owner, path, reference, destination, controller.signal) } finally { release() }
+  const openedReference = result?.reference
+  const opened = !!result
+  const { tabId, regionId, topicId, space } = result ?? { tabId: '', regionId: '', topicId: undefined, space: undefined }
+  if (controller.signal.aborted || !opened || !space || options.isCurrent?.() === false) return
+  if (reference ? !confirmedMoteReference(useAppStore.getState(), owner, { ...options, reference }) :
+    !confirmedMoteDestination(useAppStore.getState(), owner, destination, false)) {
+    useAppStore.getState().reportError(new Error('The original Mote display changed while the file was opening. Its data and your work are kept; choose the exact Tab and Region, then retry.')); return
+  }
+  if (options.floating && topicId === owner.topic.id && (options.onReferenceSelect || options.onTabSelect)) {
+    if (options.onReferenceSelect) {
+      if (!openedReference) { useAppStore.getState().reportError(new Error('The original File placement is unconfirmed. Its content and your work are kept; inspect the exact File Region and retry.')); return }
+      options.onReferenceSelect(openedReference)
+    } else options.onTabSelect?.(tabId)
+  }
+  else {
+    const current = useAppStore.getState()
+    current.focusRegion(displayWorkspaceId, tabId, regionId, 'pointer', groupId)
+    useAppStore.setState({ activeWorkspaceId: displayWorkspaceId, mainSurface: 'workbench',
+      workbenchSpaceSelection: { ...space, workspaceId: displayWorkspaceId, groupId, tabId, regionId, topicId: topicId ?? null } })
+    if (options.floating) requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
+  }
+  options.onOpened?.()
+  return openedReference
+}
+
+/** Materials use the original File/launcher owners, never the background Project. */
+export function useMoteMaterialsActions(scope: MoteWorkfaceScope | null, options: MoteMaterialOptions = {}) {
   const latest = useRef({ scope, options }); latest.current = { scope, options }
   const pending = useRef<(() => void) | null>(null)
   useEffect(() => () => pending.current?.(), [scope?.topic.id, scope?.topic.directoryPath, scope?.rootPath,
@@ -221,60 +287,16 @@ export function useMoteMaterialsActions(scope: MoteWorkfaceScope | null, options
     options.reference?.groupId, options.reference?.tabId, options.reference?.regionId,
     options.destination?.displayWorkspaceId, options.destination?.groupId])
   const open = useCallback(async (path: string) => {
-    const captured = latest.current, owner = captured.scope
     pending.current?.()
+    const captured = latest.current, owner = captured.scope
     if (!owner) return
-    const state = useAppStore.getState(), workspaceId = owner.workspace.id
-    const reference = captured.options.destination !== undefined && !captured.options.reference ? null : confirmedMoteReference(state, owner, captured.options)
-    const destination = reference ?? emptyMoteDestination(state, owner, captured.options)
-    if (!destination) { state.reportError(new Error('The exact original Mote display is unconfirmed. Your work is kept; choose its Tab and Region, or an exact empty destination, then retry opening the file.')); return }
-    const { displayWorkspaceId, groupId } = destination
-    const navigation = fileNavigationSelection(state), floating = floatingSelection()
-    const controller = new AbortController()
-    const unsubscribers: (() => void)[] = []
-    const events = ['pointerdown', 'keydown', 'input', 'focusin'] as const
-    const release = () => {
-      for (const unsubscribe of unsubscribers) unsubscribe()
-      for (const event of events) document.removeEventListener(event, cancel, true)
-      if (pending.current === cancel) pending.current = null
-    }
-    const cancel = () => { controller.abort(); release() }
+    const controller = new AbortController(), cancel = () => controller.abort()
     pending.current = cancel
-    // These listeners exist only during this cold file request. Latching records
-    // A→B→A and later input, rather than comparing only the final selected Mote.
-    unsubscribers.push(useAppStore.subscribe(current => {
-      if (fileNavigationSelection(current) !== navigation) cancel()
-    }), subscribePmoTeamsTopicFloatingState(() => {
-      if (floatingSelection() !== floating) cancel()
-    }))
-    for (const event of events) document.addEventListener(event, cancel, true)
-    let result
-    try { result = await openMoteMaterialAt(owner, path, reference, destination, controller.signal) } finally { release() }
-    const openedReference = result?.reference
-    const opened = !!result
-    const { tabId, regionId, topicId, space } = result ?? { tabId: '', regionId: '', topicId: undefined, space: undefined }
-    const currentOwner = latest.current.scope
-    if (controller.signal.aborted || !opened || !space || !sameOwner(currentOwner, owner) || captured.options.reference &&
-      !sameWorkbenchProjectionSelection(latest.current.options.reference ?? null, captured.options.reference)) return
-    if (reference ? !confirmedMoteReference(useAppStore.getState(), owner, { ...captured.options, reference }) :
-      !confirmedMoteDestination(useAppStore.getState(), owner, destination, false)) {
-      useAppStore.getState().reportError(new Error('The original Mote display changed while the file was opening. Its data and your work are kept; choose the exact Tab and Region, then retry.')); return
-    }
-    if (captured.options.floating && topicId === owner.topic.id && (captured.options.onReferenceSelect || captured.options.onTabSelect)) {
-      if (captured.options.onReferenceSelect) {
-        if (!openedReference) { useAppStore.getState().reportError(new Error('The original File placement is unconfirmed. Its content and your work are kept; inspect the exact File Region and retry.')); return }
-        captured.options.onReferenceSelect(openedReference)
-      } else captured.options.onTabSelect?.(tabId)
-    }
-    else {
-      const current = useAppStore.getState()
-      current.focusRegion(displayWorkspaceId, tabId, regionId, 'pointer', groupId)
-      useAppStore.setState({ activeWorkspaceId: displayWorkspaceId, mainSurface: 'workbench',
-        workbenchSpaceSelection: { ...space, workspaceId: displayWorkspaceId, groupId, tabId, regionId, topicId: topicId ?? null } })
-      if (captured.options.floating) requestPmoTeamsTopicFloatingClose({ restoreFocus: false })
-    }
-    captured.options.onOpened?.()
-    return openedReference
+    try {
+      return await openMoteMaterial(owner, path, { ...captured.options, signal: controller.signal,
+        isCurrent: () => sameOwner(latest.current.scope, owner) && (!captured.options.reference ||
+          sameWorkbenchProjectionSelection(latest.current.options.reference ?? null, captured.options.reference)) })
+    } finally { if (pending.current === cancel) pending.current = null }
   }, [])
   const terminal = useCallback(async (path: string) => {
     const captured = latest.current, owner = captured.scope
