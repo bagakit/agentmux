@@ -48,10 +48,17 @@ it('exposes only the narrow Capsule facade and preserves explicit operation iden
 it('requires a page-owned mutation ID before IPC and preserves recovery without error properties', async () => {
   await import('../src/preload/capsule')
   const sdk = wire.api!
-  await expect((sdk.request as any)('Original question', 'Draft')).rejects.toThrow('Retain an ID')
-  await expect((sdk.saveDraft as any)('interaction', 2, 'Draft')).rejects.toThrow('Retain an ID')
-  await expect(sdk.request('Original question', undefined, ' ')).rejects.toThrow('Retain an ID')
-  await expect(sdk.saveDraft('interaction', 2, 'Draft', '')).rejects.toThrow('Retain an ID')
+  const missingIdentity = [
+    () => (sdk.request as any)('Original question', 'Draft'),
+    () => (sdk.saveDraft as any)('interaction', 2, 'Draft'),
+    () => sdk.request('Original question', undefined, ' '),
+    () => sdk.saveDraft('interaction', 2, 'Draft', '')
+  ]
+  const refused = await Promise.all(missingIdentity.map(async invoke => {
+    try { await invoke(); return false }
+    catch (error) { return String(error).includes('Retain an ID') }
+  }))
+  expect(refused).toEqual([true, true, true, true])
   expect(wire.invoke.mock.calls.filter(([, action]) => action === 'request' || action === 'saveDraft')).toEqual([])
 
   const operationId = sdk.createOperationId()
