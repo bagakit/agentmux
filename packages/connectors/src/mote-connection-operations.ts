@@ -30,7 +30,7 @@ import {
   type ConnectionEnrollmentBeginInput,
   parseConnectionSetupResult,
   type ConnectionSetupBegin,
-  summarizeConnectionEnrollmentPreset,
+  connectionProfileAvatarDigest,
   type ConnectionSetupAdvance
 } from '@agentmux/core/connections'
 import type { ConnectionServices } from './connection-services.js'
@@ -221,7 +221,7 @@ export class MoteConnectionOperations implements MoteConnectionPort {
     const source = {
       name: input.desired.name, description: input.desired.description,
       pngDataUrl: input.desired.avatar?.pngDataUrl ?? null,
-      avatarSha256: input.desired.avatar ? summarizeConnectionEnrollmentPreset({ ...input.desired, avatar: input.desired.avatar }).avatarSha256 : null
+      avatarSha256: input.desired.avatar ? connectionProfileAvatarDigest(input.desired.avatar.pngDataUrl) : null
     }
     const baseline =
       action === 'create'
