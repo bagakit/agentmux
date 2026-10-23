@@ -16,6 +16,13 @@ import { nativeTurnEndFixture } from './fixtures/native-turn-end.js'
 import type { AgentProviderSessionStatus } from '../src/types.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 
+// Run the unchanged listener worker from source when this suite loads Core source.
+vi.mock('node:child_process', async original => {
+  const actual = await original<typeof import('node:child_process')>()
+  return { ...actual, fork: ((path: string | URL, args: readonly string[], options: import('node:child_process').ForkOptions) =>
+    actual.fork(String(path).endsWith('/control-endpoint-listener-worker.js')
+      ? fileURLToPath(new URL('../src/control-endpoint-listener-worker.ts', import.meta.url)) : path, args, options)) as typeof actual.fork }
+})
 
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs() })
 
@@ -99,6 +106,44 @@ it('keeps a suppressed old turn end without replacing the newer Hook current dis
     await h.binding.close(); expect(await (await older).json()).toEqual({})
     expect(h.inner.kernel.input).not.toHaveBeenCalled()
   } finally { await h.close() }
+})
+
+it.each(['changed', 'ambiguous', 'unknown'] as const)('retains history without promoting an unqualified semantic source: %s', async state => {
+  const h = await nativeTurnEndFixture()
+  const server = new AgentMuxControlServer({ socketPath: join(h.root, 'source-control.sock'), coreClients: h.coreClients })
+  await server.start()
+  const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
+  try {
+    const { pending } = await h.open('original-source-hook')
+    const original = h.client.agentSession('recipient')
+    await h.change(session => {
+      const observedAt = session.updatedAt + 1
+      return { ...session, updatedAt: observedAt,
+        nativeSourceObservation: { state, run: { ...session.run }, observedAt, reason: 'current-main-unconfirmed' },
+        ...(state === 'changed' ? { observedNativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: 'another-main' } } : {}) }
+    })
+    const published: unknown[] = []
+    h.client.onEvent(event => { if (event.type === 'agent-status') published.push(event) })
+    await h.observe({ state: 'working', recordId: 'unqualified-working', nativeTurnId: 'turn-original', nativeObservedAt: Date.now() })
+    const working = await rpc.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: 'recipient' } })
+    expect(working.session.semanticStatus).toEqual(original.semanticStatus)
+    expect(working.session.nativeSourceObservation?.state).toBe(state)
+    expect(working.status!.observation.process).toBe('running')
+    await h.observe({ state: 'done', recordId: 'unqualified-end', nativeTurnId: 'turn-original' })
+    const ended = await rpc.call('agent.inspect', { target: { kind: 'agent-session', agentSessionId: 'recipient' } })
+    expect(ended.session.semanticStatus).toEqual(original.semanticStatus)
+    expect(ended.session.nativeHandle).toEqual(original.nativeHandle)
+    expect(ended.session.run).toEqual(original.run)
+    expect(ended.session.nativeSourceObservation?.state).toBe(state)
+    expect(published).toEqual([])
+    expect((await h.store.readMetadata('recipient'))!.nativeTurnEnds?.turns['turn-original']).toMatchObject({ recordId: 'unqualified-end' })
+    const request = h.read('original-source-hook')
+    expect(request?.kind === 'permission' && request.permissionHook?.nativeTurnEnded).toMatchObject({ recordId: 'unqualified-end' })
+    await h.client.writeAgent({ agentSessionId: 'recipient', expectedRun: original.run, source: 'user', data: 'still available' })
+    expect(h.inner.kernel.input).toHaveBeenCalledOnce()
+    expect(h.inner.kernel.stop).not.toHaveBeenCalled()
+    await h.binding.close(); expect(await (await pending).json()).toEqual({})
+  } finally { await rpc.dispose(); await server.stop(); await h.close() }
 })
 
 it.each(['run', 'provider', 'subject', 'source'] as const)('does not borrow a retained end from another %s scope', async scope => {
