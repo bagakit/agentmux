@@ -1599,6 +1599,8 @@ export class BrowserViewManager {
       this.applyViewport(entry, candidate)
       if (entry.bounds) candidate.setBounds(entry.bounds)
       candidate.setVisible(entry.visible)
+      const inputSurface = this.inputSurfaces.get(authoritativeView)
+      if (inputSurface) this.inputSurfaceFailed(inputSurface)
       this.detachView(authoritativeView)
 
       this.releaseUploadFiles(entry)
