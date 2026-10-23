@@ -14,6 +14,7 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./agent-learning": { "types": "./dist/agent-learning.d.ts", "import": "./dist/agent-learning.js" },
     "./capsule": {
       "types": "./dist/capsule.d.ts",
       "import": "./dist/capsule.js"

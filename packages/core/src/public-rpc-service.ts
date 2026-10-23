@@ -5,6 +5,8 @@ import { isCapsuleRuntimeMethod, parseCapsuleRuntimeParams, parseCapsuleRuntimeR
 import { isCapsuleMethod, parseCapsuleRpcParams, parseCapsuleRpcResult, type CapsuleCallContext, type CapsuleMethod, type CapsuleParamsMap, type CapsuleResultMap } from './capsule.js'
 import { parseExternalConversationReference, parseExternalConversationReceipt } from './external-conversation.js'
 import { isMoteChatMethod, parseMoteChatParams, parseMoteChatResult } from './mote-chat-codec.js'
+import { isAgentLearningMethod, parseAgentLearningParams, parseAgentLearningResult,
+  type AgentLearningPort, type AgentLearningMethod } from './agent-learning.js'
 import type { MoteChatPort, MoteChatMethod, MoteChatParamsMap } from './mote-chat-contract.js'
 import { isConnectionDeletionMethod, parseConnectionDeletionParams } from './connection-deletion-codec.js'
 import { mintObjectId } from './object-id.js'
@@ -140,6 +142,8 @@ export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
   applicationAccess?: ApplicationAccessPort
   windows?: AgentMuxRpcWindowsOwner
   moteChat?: MoteChatPort
+  /** Host-owned learning workflow; Core neither stores nor interprets its knowledge. */
+  agentLearning?: AgentLearningPort
   moteConnections?: MoteConnectionPort
   connections?: ConnectionPort
   goalDelegations?: GoalDelegationsOwner
@@ -322,7 +326,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, CapsuleRuntimeMethod | CapsuleMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, CapsuleRuntimeMethod | CapsuleMethod | AgentLearningMethod | 'capsule.input' | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -562,6 +566,22 @@ export class AgentMuxRpcService {
   }
   async call<M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>,
     context: AgentMuxRpcCallContext = {}): Promise<AgentMuxRpcResult<M>> {
+    if (isAgentLearningMethod(method)) {
+      const caller = await this.authenticated(context)
+      if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind) || !context.principal.id.trim()))
+        throw new AgentMuxError('Learning requires its original authenticated actor. Existing Agents remain available.', 'CONTROL_PERMISSION_DENIED')
+      const input = parseAgentLearningParams(method, params)
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      const ownerContext: AgentMuxRpcCallContext = { ...context, assertCurrent: async () => {
+        context.signal?.throwIfAborted(); await context.assertCurrent?.()
+        if (caller) await this.authenticated(context)
+      } }
+      if (!this.ports.agentLearning && !this.ports.forwardControl)
+        throw new AgentMuxError('The original Host learning owner is unavailable. Keep the source and operation; existing Agents remain available.', 'CONTROL_UNAVAILABLE')
+      const result = this.ports.agentLearning ? await this.ports.agentLearning.call(method, input, ownerContext)
+        : await this.ports.forwardControl!<AgentLearningMethod>(method, input, ownerContext)
+      return parseAgentLearningResult(method, result, input) as AgentMuxRpcResult<M>
+    }
     if (isMoteChatMethod(method)) {
       const caller = await this.authenticated(context)
       if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError('Mote chat requires its original authenticated actor.', 'CONTROL_PERMISSION_DENIED')
