@@ -140,3 +140,20 @@ it('binds Mote preferences and chat reads to one hosting target and isolates a l
   await waitFor(() => expect(view.node.querySelector('output')?.getAttribute('data-profile-status')).toBe('unconfirmed'))
   facts.push({ case: 'mote-read-owner-and-lifetime', original: f.hostingTarget, other: f.targetB, routes: f.calls, finalOriginalResourceOnForeignOwner: 'unconfirmed', nullOwnerCalls: 0 })
 })
+
+it('captures the default hosting identity before reading and keeps a replacement owner low revision separate', async () => {
+  const f = await fixture(), original = await f.client.call('connection.service.get', {})
+  const higher = await f.client.call('connection.service.configure', { operationId: 'original-higher-revision', expectedRevision: original.revision, service: { enabled: true } })
+  const first = await readConnectorService()
+  f.selectB()
+  const second = await readConnectorService()
+  expect(first).toEqual(higher.service)
+  expect(second.enabled).toBe(false); expect(second.revision).toBeLessThan(first.revision)
+  const projections = useAppStore.getState().connectorServiceObservation
+  expect(selectConnectorServiceObservation(projections, f.targetB)?.state).toEqual(second)
+  expect(selectConnectorServiceObservation(projections, f.hostingTarget)?.state).toEqual(first)
+  expect(selectConnectorServiceObservation(projections)).toBeNull()
+  expect(f.calls.filter(call => call.method === 'connection.service.get').map(call => call.target)).toEqual([f.hostingTarget, f.targetB])
+  expect(f.calls.filter(call => call.method === 'connection.service.configure')).toHaveLength(0)
+  facts.push({ case: 'default-owner-replacement-revision', originalTarget: f.hostingTarget, replacementTarget: f.targetB, first, second, cachedOriginal: first, cachedReplacement: second, implicitSnapshot: null })
+})
