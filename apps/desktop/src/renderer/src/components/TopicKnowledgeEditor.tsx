@@ -5,7 +5,6 @@ import type { KnowledgeTopic, TopicKnowledge, TopicKnowledgeSource } from '@agen
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { useAppStore } from '../store'
 import { refreshTopicSpatial } from '../lib/topic-knowledge-actions'
@@ -39,7 +38,7 @@ export function TopicKnowledgeEditor({ target, onClose, onSaved }: {
   return <Dialog.Root recoveryCloseDisabled={busy} open={Boolean(target)} onOpenChange={open => { if (!open && !busy) onClose() }}>
     <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" />
       <Dialog.Content className="confirmation-dialog dialog-surface topic-dialog topic-knowledge-editor" onOpenAutoFocus={event => { event.preventDefault(); input.current?.focus() }}
-        onEscapeKeyDown={event => { if (busy || isImeOwnedKeyboardEvent(event)) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
+        onEscapeKeyDown={event => { if (busy) event.preventDefault() }} onInteractOutside={event => { if (busy) event.preventDefault() }}>
         <Dialog.Title className="confirmation-dialog__title">{target?.entry ? 'Edit knowledge note' : 'Create knowledge note'}</Dialog.Title>
         <Dialog.Description className="confirmation-dialog__description">{target?.topicLabel ? `In ${target.topicLabel}. ` : ''}{sources.length ? 'Keep the source references and add what you learned.' : 'Write what future discussions should be able to find.'}</Dialog.Description>
         <form onSubmit={event => { event.preventDefault(); void save() }}>
@@ -96,7 +95,7 @@ export function TopicKnowledgeCapture({ target, onClose, onSaved }: { target: { 
   }
   return <><Dialog.Root open={Boolean(target) && !edit} onOpenChange={open => { if (!open && !edit && !creating) onClose() }}><DocumentOverlayPortal component={Dialog.Portal}>
     <Dialog.Overlay className="confirmation-dialog__overlay dialog-scrim" /><Dialog.Content className="confirmation-dialog dialog-surface topic-dialog"
-      onEscapeKeyDown={event => { if (creating || isImeOwnedKeyboardEvent(event)) event.preventDefault() }} onInteractOutside={event => { if (creating) event.preventDefault() }}>
+      onEscapeKeyDown={event => { if (creating) event.preventDefault() }} onInteractOutside={event => { if (creating) event.preventDefault() }}>
       <Dialog.Title className="confirmation-dialog__title">Collect sources</Dialog.Title><Dialog.Description className="confirmation-dialog__description">Create a knowledge note with references to {target?.title || 'the selected content'}. The original content stays in place.</Dialog.Description>
       <label>Destination topic<select value={topicId} disabled={creating} onChange={event => setTopicId(event.target.value)}><option value="">Choose a knowledge topic…</option><option value="__new_topic__">Create a knowledge topic…</option>{topics.map(topic => <option key={topic.topicId} value={topic.topicId}>{destinationLabel(topic)}</option>)}</select></label>
       {topicId === '__new_topic__' ? <><label>Topic title<TextInput value={newTitle} maxLength={120} disabled={creating} onChange={event => setNewTitle(event.target.value)} /></label>

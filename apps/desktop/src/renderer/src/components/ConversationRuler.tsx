@@ -1,4 +1,3 @@
-import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SemanticIcon } from './semantic-icons'
@@ -346,7 +345,7 @@ export function Ruler({
       </div>
       <ModalAttachmentDismissal active={Boolean(legendOpen && legend.current && getModalOverlayContainer(legend.current))} targetRef={legend}
         onOwnerRemoved={() => legend.current?.hidePopover()}
-        onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); legend.current?.hidePopover() }} />
+        onEscapeKeyDown={event => { if (event.defaultPrevented) return; event.preventDefault(); legend.current?.hidePopover() }} />
       {readout && (readout.body.kind !== 'range' || range) ? (
         <div
           className="activity-ruler__readout"

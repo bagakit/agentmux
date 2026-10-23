@@ -1,4 +1,3 @@
-import { isImeOwnedKeyboardEvent } from '@agentmux/client-ui/ime-keyboard-event'
 import { getModalOverlayContainer, ModalAttachmentDismissal } from '@agentmux/client-ui/components/Modal'
 import { useWorkbenchDocument } from '../lib/workbench-document'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
@@ -143,6 +142,6 @@ export function ServiceNoticeDisclosure({ scope, notices, available = true, comp
     </div>
     <ModalAttachmentDismissal active={Boolean(open && panel.current && getModalOverlayContainer(panel.current))} targetRef={panel}
       onOwnerRemoved={() => panel.current?.hidePopover()}
-      onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); collapse() }} />
+      onEscapeKeyDown={event => { if (event.defaultPrevented) return; event.preventDefault(); collapse() }} />
   </div>
 }

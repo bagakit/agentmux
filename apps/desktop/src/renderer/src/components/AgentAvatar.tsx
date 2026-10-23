@@ -369,6 +369,6 @@ export function AgentAvatar({ label, onOpen, providerId, state, appearance, coun
     </div>, overlayHost) : null}
     <ModalAttachmentDismissal active={Boolean(position && overlayHost?.hasAttribute('data-overlay-modal-slot'))} targetRef={panel}
       onOwnerRemoved={closeNow}
-      onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); closeToTrigger() }} />
+      onEscapeKeyDown={event => { if (event.defaultPrevented) return; event.preventDefault(); closeToTrigger() }} />
   </>
 }

@@ -680,7 +680,7 @@ export function SessionMailbox({ pendingLayout, system, queued, timeline, progre
     </div>
     <ModalAttachmentDismissal active={Boolean(open && visible && popover.current && getModalOverlayContainer(popover.current))} targetRef={popover}
       onOwnerRemoved={() => popover.current?.hidePopover()}
-      onEscapeKeyDown={event => { if (event.defaultPrevented || isImeOwnedKeyboardEvent(event)) return; event.preventDefault(); popover.current?.hidePopover(); trigger.current?.focus({ preventScroll: true }) }} />
+      onEscapeKeyDown={event => { if (event.defaultPrevented) return; event.preventDefault(); popover.current?.hidePopover(); trigger.current?.focus({ preventScroll: true }) }} />
   </>
   return children ? children(mailbox, visible ? <ComposerPendingDelivery surfaceRef={dock} returning={!open && motion.retaining} notice={noticePresentation?.content} suppressed={open} anchorRef={trigger} composerRef={composerRef} layout={pendingLayout} queued={pendingIntents} pendingInteraction={pendingInteraction} onSend={onSendQueued} onCancelPreparation={onCancelQueuedPreparation} onCopy={onCopyQueued} onEdit={onEditQueued} onArchive={onArchiveQueued} onMoveToDraft={onMoveQueuedToDraft} sendImmediately={sendImmediately} onMore={showUserMessages} /> : null, composerRef) : mailbox
 }

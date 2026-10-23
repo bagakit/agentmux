@@ -79,8 +79,7 @@ export function AnnotationFileDialog({ mode, initialPath, onSubmit, onCheck, onC
           const original = previousFocus.current, active = document.activeElement
           if (original?.isConnected && (active === document.body || active === original || !active?.isConnected || openedContent.current?.contains(active)))
             original.focus({ preventScroll: true })
-        }}
-        onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}>
+        }}>
         <Dialog.Title className="confirmation-dialog__title">{mode === 'save' ? 'Save editable original' : 'Open editable original'}</Dialog.Title>
         <Dialog.Description className="confirmation-dialog__description">{mode === 'save'
           ? 'Contains the original image and editable annotations. Use Copy PNG/context to share the processed result.'

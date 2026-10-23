@@ -105,7 +105,7 @@ function LandmarkPopover({ title, trigger, active, onOpen, children }: {
   }, [open, active, anchor, content])
   return <Dialog.Root modal={false} open={open && active} onOpenChange={next => { focusPending.current = next; setOpen(next); if (next) onOpen?.() }}>
     <Dialog.Trigger asChild><button ref={setAnchor} type="button" className="conversation-landmark__trigger" aria-label={title} title={title}>{trigger}</button></Dialog.Trigger>
-    <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Content ref={setContent} className="conversation-landmark" style={{ visibility: 'hidden' }} aria-describedby={undefined} onOpenAutoFocus={event => event.preventDefault()} onEscapeKeyDown={event => { if (isImeOwnedKeyboardEvent(event)) event.preventDefault() }}>
+    <DocumentOverlayPortal component={Dialog.Portal}><Dialog.Content ref={setContent} className="conversation-landmark" style={{ visibility: 'hidden' }} aria-describedby={undefined} onOpenAutoFocus={event => event.preventDefault()}>
       <header><Dialog.Title>{title}</Dialog.Title><Dialog.Close type="button" className="icon-button" aria-label={`Close ${title}`}><CloseIcon size={13}/></Dialog.Close></header>
       {children}
     </Dialog.Content></DocumentOverlayPortal>
