@@ -16,7 +16,7 @@ import { ROOM_DISCOVERY_RPC_METHODS, isRoomDiscoveryMethod, parseRoomDiscoveryPa
 import { AgentMuxError } from './errors.js'
 import type { ConnectionMethod, ConnectionOperation, ConnectionParamsMap, ConnectionResultMap } from './connections-contract.js'
 
-export const CONNECTION_RPC_METHODS = { ...CONNECTION_CREDENTIAL_RPC_METHODS, ...CHANNEL_METADATA_RPC_METHODS, ...CONNECTION_DELETION_RPC_METHODS, ...CONNECTION_SETUP_RPC_METHODS, ...CONNECTION_SERVICE_RPC_METHODS, ...CONNECTION_PROFILE_RPC_METHODS, ...CONNECTION_ENROLLMENT_RPC_METHODS, ...ROOM_DISCOVERY_RPC_METHODS, ...ROOM_PROVISIONING_RPC_METHODS, ...ROOM_BINDING_RPC_METHODS, ...CONNECTION_DELIVERY_RPC_METHODS, ...INGRESS_RPC_METHODS, 'connection.diagnose': 'long', 'connection.ls': 'long', 'connection.inspect': 'long', 'connection.configure': 'long', 'connection.test': 'long' } as const
+export const CONNECTION_RPC_METHODS = { ...CONNECTION_CREDENTIAL_RPC_METHODS, ...CHANNEL_METADATA_RPC_METHODS, ...CONNECTION_DELETION_RPC_METHODS, ...CONNECTION_SETUP_RPC_METHODS, ...CONNECTION_SERVICE_RPC_METHODS, ...CONNECTION_PROFILE_RPC_METHODS, ...CONNECTION_ENROLLMENT_RPC_METHODS, ...ROOM_DISCOVERY_RPC_METHODS, ...ROOM_PROVISIONING_RPC_METHODS, ...ROOM_BINDING_RPC_METHODS, ...CONNECTION_DELIVERY_RPC_METHODS, ...INGRESS_RPC_METHODS, 'connection.owner.inspect': 'long', 'connection.diagnose': 'long', 'connection.ls': 'long', 'connection.inspect': 'long', 'connection.configure': 'long', 'connection.test': 'long' } as const
 export const isConnectionMethod = (value: unknown): value is ConnectionMethod => typeof value === 'string' && Object.hasOwn(CONNECTION_RPC_METHODS, value)
 const fail = (): never => { throw new AgentMuxError('Connection data is malformed or belongs to another original object.', 'INVALID_CONNECTION_DATA') }
 function object(value: unknown, fields: string[]): Record<string, unknown> {
@@ -47,7 +47,7 @@ export function parseConnectionParams<M extends ConnectionMethod>(method: M, val
   if (isConnectionDeliveryMethod(method)) return parseConnectionDeliveryParams(method, value) as ConnectionParamsMap[M]
   if (isIngressMethod(method)) return parseIngressParams(method, value) as ConnectionParamsMap[M]
   if (isRoomBindingMethod(method)) return parseRoomBindingParams(method, value) as ConnectionParamsMap[M]
-  if (method === 'connection.ls') { object(value, []); return {} as ConnectionParamsMap[M] }
+  if (method === 'connection.ls' || method === 'connection.owner.inspect') { object(value, []); return {} as ConnectionParamsMap[M] }
   if (method === 'connection.configure') {
     const p = object(value, ['operationId', 'expectedRevision', 'connection'])
     return { operationId: identity(p.operationId), expectedRevision: p.expectedRevision === null ? null : revision(p.expectedRevision), connection: parseConnectionConfig(p.connection) } as ConnectionParamsMap[M]
@@ -58,6 +58,11 @@ export function parseConnectionParams<M extends ConnectionMethod>(method: M, val
   return (p.connectionId === undefined ? { operationId: identity(p.operationId) } : { connectionId: identity(p.connectionId) }) as ConnectionParamsMap[M]
 }
 export function parseConnectionResult<M extends ConnectionMethod>(method: M, value: unknown, input: ConnectionParamsMap[M]): ConnectionResultMap[M] {
+  if (method === 'connection.owner.inspect') {
+    const p = object(value, ['ownership'])
+    if (p.ownership !== 'local' && p.ownership !== 'forwarded' && p.ownership !== 'unavailable') fail()
+    return { ownership: p.ownership } as ConnectionResultMap[M]
+  }
   if (isConnectionCredentialMethod(method)) return parseConnectionCredentialResult(method, value) as ConnectionResultMap[M]
   if (isChannelMetadataMethod(method)) return parseChannelMetadataResult(method, value, input as never) as ConnectionResultMap[M]
   if (isConnectionDeletionMethod(method)) return parseConnectionDeletionResult(method, value, input as never) as ConnectionResultMap[M]

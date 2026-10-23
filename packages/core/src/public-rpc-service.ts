@@ -624,10 +624,14 @@ export class AgentMuxRpcService {
       const caller = await this.authenticated(context)
       if (!caller && (!context.principal || !['user', 'device'].includes(context.principal.kind))) throw new AgentMuxError('Connection administration requires an authenticated original actor.', 'CONTROL_PERMISSION_DENIED')
       const input = parseConnectionParams(method, params)
+      await this.assertRuntimeFence(context)
+      if (method === 'connection.owner.inspect') {
+        context.signal?.throwIfAborted(); await context.assertCurrent?.()
+        return parseConnectionResult(method, { ownership: this.ports.connections ? 'local' : this.ports.forwardControl ? 'forwarded' : 'unavailable' }, input) as unknown as AgentMuxRpcResult<M>
+      }
       if (isConnectionCredentialMethod(method)) {
         if (caller || !context.runtimeFence) throw new AgentMuxError('Credential administration requires the original person/device and exact Runtime owner.', 'CONTROL_PERMISSION_DENIED')
         if (method === 'connection.credential.store' && context.transport !== 'unix' && context.transport !== 'relay') throw new AgentMuxError('Credential entry requires the original protected Unix, SSH-to-Unix or end-to-end relay transport.', 'CONTROL_PERMISSION_DENIED')
-        await this.assertRuntimeFence(context)
         context.signal?.throwIfAborted(); await context.assertCurrent?.()
         const credential = this.ports.connections?.credential
         if (!credential) throw new AgentMuxError('The original Host credential owner is unavailable. Original references and healthy Agents are retained.', 'CONTROL_UNAVAILABLE')
