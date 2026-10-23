@@ -100,3 +100,34 @@ it('uses a selected original leaf when Range boundaries are offsets on its proce
   added = 1040; restoreConversationAnchor(viewport, anchor!)
   expect(row.getBoundingClientRect().top).toBe(150); expect(getSelection()!.getRangeAt(0)).toBe(range)
 })
+
+
+for (const kind of ['segment', 'record', 'group'] as const) it(`restores a known ${kind} by its quoted JSON identity without enumerating the reading window`, () => {
+  const { viewport, row, space } = foldedPage()
+  const id = JSON.stringify(['local', 'original-session', kind, 'record"quote\\path'])
+  const attribute = kind === 'segment' ? 'data-segment-key' : kind === 'record' ? 'data-native-record-id' : 'data-observation-id'
+  row.removeAttribute('data-native-record-id'); row.setAttribute(attribute, id)
+  const outside = document.createElement('div'), neighbor = document.createElement('div'), duplicate = document.createElement('div')
+  outside.setAttribute(attribute, id); neighbor.setAttribute(attribute, id + '-neighbor'); duplicate.setAttribute(attribute, id)
+  const outsideRect = vi.fn(() => new DOMRect(0, 900, 300, 20)), neighborRect = vi.fn(() => new DOMRect(0, 700, 300, 20)), duplicateRect = vi.fn(() => new DOMRect(0, 800, 300, 20))
+  outside.getBoundingClientRect = outsideRect; neighbor.getBoundingClientRect = neighborRect; duplicate.getBoundingClientRect = duplicateRect
+  document.body.prepend(outside); surfaces.push(outside); viewport.prepend(neighbor); viewport.append(duplicate)
+  const body = document.createElement('p'); body.textContent = 'Original selected anchor body'; row.append(body)
+  let target: HTMLElement = row
+  const nested = document.createElement('button'), nestedRect = vi.fn(() => new DOMRect(0, 1000, 300, 20))
+  if (kind === 'group') {
+    row.className = 'wf-card--observation'
+    nested.className = 'wf-head'; nested.setAttribute('aria-expanded', 'false'); nested.getBoundingClientRect = nestedRect
+    const child = document.createElement('div'); child.append(nested); row.prepend(child)
+    target = document.createElement('button'); target.className = 'wf-head'; target.setAttribute('aria-expanded', 'false')
+    target.getBoundingClientRect = row.getBoundingClientRect; row.append(target)
+  }
+  const range = document.createRange(); range.selectNodeContents(body.firstChild!); getSelection()!.addRange(range)
+  const enumerate = vi.spyOn(viewport, 'querySelectorAll')
+  restoreConversationAnchor(viewport, { kind, id, offset: 180 }, space)
+  expect(target.getBoundingClientRect().top, 'The original first matching target keeps its saved offset').toBe(180)
+  expect(viewport.scrollTop).toBe(78); expect(space.style.height).toBe('176px')
+  expect(getSelection()!.getRangeAt(0)).toBe(range); expect(getSelection()!.toString()).toBe('Original selected anchor body')
+  expect(outsideRect).not.toHaveBeenCalled(); expect(neighborRect).not.toHaveBeenCalled(); expect(duplicateRect).not.toHaveBeenCalled(); expect(nestedRect).not.toHaveBeenCalled()
+  expect(enumerate, 'Restoring a known identity must not enumerate the reading window').not.toHaveBeenCalled()
+})
