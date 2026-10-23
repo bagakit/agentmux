@@ -1,4 +1,4 @@
-import { mintObjectId, mintCapabilityToken } from '@agentmux/core/object-id'
+import { mintObjectId, mintCapabilityToken, isObjectId } from '@agentmux/core/object-id'
 import type { CapsuleInspection, CapsuleRecord } from '@agentmux/core/capsule'
 import type { WorkbenchWindowDocument } from '../shared/workbench-windows.js'
 import type { BrowserInputFrameCapture } from '../shared/browser-input-context-capture.js'
@@ -113,6 +113,8 @@ type BrowserEntry = {
   navigationId: string
   /** A native main-frame commit, distinct from a requested navigation or a displayed URL. */
   committedNavigationId: string | null
+  capsuleRequest: { id: number; navigationId: string; frame: WebFrameMain } | null
+  capsuleResponse: { instanceId: string; navigationId: string; frame: WebFrameMain } | null
   initialDocument: {
     view: WebContentsView; completion: AbortController; superseded: AbortController
     failure: { error: unknown } | null
@@ -557,6 +559,7 @@ export class BrowserViewManager {
   private readonly faviconUrls = new WeakMap<WebContentsView, { documentUrl: string; navigationId: string | undefined; urls: string[] }>()
   private readonly releasedEntries = new Map<string, ReleasedBrowser>()
   private readonly webAuthnSessions = new Map<Session, () => void>()
+  private readonly capsuleResponseSessions = new Set<Session>()
   private readonly presentationLeases = new Map<string, PresentationLease>()
   private readonly presentationCaptures = new Map<string, PresentationCapture>()
   private presentationDocument: PresentationDocument | null = null
@@ -626,11 +629,16 @@ export class BrowserViewManager {
   }
 
   /** Page SDK admission is an observation of this exact native document, never a URL capability. */
-  capsuleDocument(sender: WebContents, frame: WebFrameMain | null): { record: CapsuleRecord; browserId: string; navigationId: string } | null {
+  capsuleDocument(sender: WebContents, frame: WebFrameMain | null): { record: CapsuleRecord; browserId: string; navigationId: string; instanceId: string } | null {
     const entry = this.entriesByContents.get(sender)
     if (!entry || entry.view.webContents !== sender || !('capsule' in entry.storage) || entry.storage.capsule.record.mode !== 'injected' ||
       !this.isCapsuleDocument(entry, frame)) return null
-    return { record: entry.storage.capsule.record, browserId: entry.id, navigationId: entry.navigationId }
+    return { record: entry.storage.capsule.record, browserId: entry.id, navigationId: entry.navigationId, instanceId: entry.capsuleResponse!.instanceId }
+  }
+
+  capsuleId(browserId: string): string | null {
+    const entry = this.entries.get(browserId) ?? this.releasedEntries.get(browserId)
+    return entry && 'capsule' in entry.storage ? entry.storage.capsule.record.capsuleId : null
   }
 
   /** The original admitted page transport for optional App theme projection; never acquires a page. */
@@ -665,6 +673,7 @@ export class BrowserViewManager {
     if (!('capsule' in entry.storage) || entry.storage.capsule.endpoint.status !== 'available' || !frame ||
       !this.owns(entry, entry.view) || entry.view.webContents.isDestroyed() || frame.detached || frame.isDestroyed() ||
       frame !== entry.view.webContents.mainFrame || entry.committedNavigationId !== entry.navigationId ||
+      !entry.capsuleResponse || entry.capsuleResponse.navigationId !== entry.navigationId || entry.capsuleResponse.frame !== frame ||
       entry.view.webContents.isLoadingMainFrame()) return false
     try {
       return new URL(entry.view.webContents.getURL()).origin === entry.storage.capsuleOrigin &&
@@ -1292,6 +1301,10 @@ export class BrowserViewManager {
 
   /** Request safe native release. A budget request never commits owner destruction. */
   async release(id: string, navigationId: string): Promise<AgentMuxBrowserReleaseReceipt> {
+    return this.releaseNative(id, navigationId)
+  }
+
+  private async releaseNative(id: string, navigationId: string, explicitReload = false): Promise<AgentMuxBrowserReleaseReceipt> {
     const result = (status: AgentMuxBrowserReleaseReceipt['status'], reasons: readonly AgentMuxBrowserRetentionReason[]): AgentMuxBrowserReleaseReceipt =>
       ({ browserId: id, navigationId, status, reasons })
     const entry = this.entries.get(id)
@@ -1304,7 +1317,10 @@ export class BrowserViewManager {
       return receipt.navigationId === navigationId ? receipt : result(receipt.status, receipt.reasons)
     }
     const retention = this.retention(entry)
-    if (retention.status !== 'eligible') return result(retention.status, retention.reasons)
+    // An explicit Reload already requests a new document. Visibility and previous ordinary page
+    // use are budget protections, not active operations; native beforeunload still owns refusal.
+    const reasons = explicitReload ? retention.reasons.filter(reason => !['visible', 'presentation', 'document-used'].includes(reason)) : retention.reasons
+    if (reasons.length) return result(retention.status === 'unknown' ? 'unknown' : 'retained', reasons)
     const view = entry.view, contents = view.webContents
     let resolve!: (receipt: AgentMuxBrowserReleaseReceipt) => void
     const promise = new Promise<AgentMuxBrowserReleaseReceipt>(yes => { resolve = yes })
@@ -1438,7 +1454,7 @@ export class BrowserViewManager {
   ): Promise<BrowserSnapshot> {
     if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
     if (this.entries.has(id)) throw new Error(`Browser already exists: ${id}`)
-    const view = this.createView(storage.partition, 'capsule' in storage && storage.capsule.record.mode === 'injected')
+    const view = this.createView(storage.partition, 'capsule' in storage ? storage.capsule.record : undefined)
     const entry: BrowserEntry = {
       id,
       workspaceId,
@@ -1447,6 +1463,7 @@ export class BrowserViewManager {
       requestedUrl: url,
       navigationId: mintObjectId(),
       committedNavigationId: null,
+      capsuleRequest: null, capsuleResponse: null,
       initialDocument: null,
       selectionRevision: 0,
       selectionOperation: null,
@@ -1636,6 +1653,36 @@ export class BrowserViewManager {
     entry.error = null
     entry.view.webContents.reload()
     return this.snapshot(entry)
+  }
+
+  /** Refresh the policy of this exact container without changing its Browser, route or partition. */
+  async reloadCapsule(id: string, inspection: CapsuleInspection): Promise<BrowserSnapshot> {
+    const entry = this.require(id), storage = entry.storage
+    this.requireHumanInput(entry)
+    if (!('capsule' in storage) || storage.capsule.record.capsuleId !== inspection.record.capsuleId ||
+      new URL(`http://127.0.0.1:${inspection.record.port}`).origin !== storage.capsuleOrigin) {
+      throw new Error('The original Capsule container could not be confirmed. Its page and address are retained.')
+    }
+    if (storage.capsule.record.mode === inspection.record.mode) {
+      entry.storage = { ...storage, capsule: inspection }
+      entry.capsuleRequest = null; entry.capsuleResponse = null; entry.committedNavigationId = null
+      return this.reload(id)
+    }
+    const receipt = await this.releaseNative(id, entry.navigationId, true)
+    if (receipt.status !== 'released') {
+      if (this.owns(entry, entry.view)) {
+        entry.activity = { ...entry.activity, warning: `Capsule mode reload is ${receipt.status}. The original page is retained (${receipt.reasons.join(', ')}). Complete its current Browser activity or inspect its original close before reloading.` }
+        this.emit(entry)
+        return this.snapshot(entry)
+      }
+      throw new Error('The original Capsule native close is unconfirmed. Its Browser Region is retained; inspect the same owner before retrying.')
+    }
+    const released = this.releasedEntries.get(id)
+    if (!released || !('capsule' in released.storage) || released.storage.capsule.record.capsuleId !== inspection.record.capsuleId) {
+      throw new Error('The original Capsule restore owner is unconfirmed. Its Region and operation are retained.')
+    }
+    released.storage = { ...released.storage, capsule: inspection }
+    return this.restore(id)
   }
 
   async switchProfile(id: string, profileId: string): Promise<BrowserSnapshot> {
@@ -3552,6 +3599,11 @@ export class BrowserViewManager {
     this.popupWindows.dispose()
     for (const unsubscribe of this.webAuthnSessions.values()) unsubscribe()
     this.webAuthnSessions.clear()
+    for (const session of this.capsuleResponseSessions) {
+      session.webRequest.onBeforeRequest(null)
+      session.webRequest.onResponseStarted(null)
+    }
+    this.capsuleResponseSessions.clear()
     void this.uploads?.dispose().catch(error => console.warn('Browser upload staging cleanup failed during disposal:', error))
     void this.recoveryPreviews?.dispose().catch(error => console.warn('Browser preview cleanup failed during disposal:', error))
     if (cleanupErrors.length === 1) throw cleanupErrors[0]
@@ -3722,8 +3774,11 @@ export class BrowserViewManager {
       ).catch(() => {})
       this.clearFavicon(entry, details.isSameDocument)
       entry.requestedUrl = requestedUrl
+      const previousNavigationId = entry.navigationId
       entry.navigationId = mintObjectId()
       entry.committedNavigationId = null
+      if (details.isSameDocument && entry.capsuleResponse?.navigationId === previousNavigationId) entry.capsuleResponse.navigationId = entry.navigationId
+      else { entry.capsuleRequest = null; entry.capsuleResponse = null }
       const document = entry.initialDocument
       if (document?.view === view && (!details.isSameDocument || document.navigationId)) {
         const previous = document.navigationId
@@ -3871,17 +3926,46 @@ export class BrowserViewManager {
     }
   }
 
-  private createView(partition: string, capsulePreload = false): WebContentsView {
+  private createView(partition: string, capsule?: CapsuleRecord): WebContentsView {
     const view = new WebContentsView({
       webPreferences: {
         partition,
-        ...(capsulePreload ? { preload: fileURLToPath(new URL('../preload/capsule.cjs', import.meta.url)) } : {}),
+        ...(capsule?.mode === 'injected' ? { preload: fileURLToPath(new URL('../preload/capsule.cjs', import.meta.url)) } : {}),
         contextIsolation: true,
         sandbox: true,
         nodeIntegration: false
       }
     })
     const session = view.webContents.session
+    if (capsule && !this.capsuleResponseSessions.has(session)) {
+      this.capsuleResponseSessions.add(session)
+      const owner = (details: { webContents?: WebContents; frame?: WebFrameMain | null; resourceType: string; url: string }): BrowserEntry | null => {
+        try {
+          const sender = details.webContents, frame = details.frame
+          if (!sender || !frame || details.resourceType !== 'mainFrame') return null
+          const entry = this.entriesByContents.get(sender)
+          if (!entry || !('capsule' in entry.storage) || !this.owns(entry, entry.view) || entry.view.webContents !== sender ||
+            sender.isDestroyed() || frame.detached || frame.isDestroyed() || frame !== sender.mainFrame) return null
+          return new URL(details.url).origin === entry.storage.capsuleOrigin ? entry : null
+        } catch { return null }
+      }
+      session.webRequest.onBeforeRequest((details, callback) => {
+        try {
+          const entry = owner(details)
+          if (entry) entry.capsuleRequest = { id: details.id, navigationId: entry.navigationId, frame: details.frame! }
+        } catch { /* An unconfirmed observation cannot interrupt the original HTTP request. */ }
+        finally { callback({}) }
+      })
+      session.webRequest.onResponseStarted(details => {
+        const entry = owner(details), request = entry?.capsuleRequest
+        if (!entry || !request || request.id !== details.id || request.navigationId !== entry.navigationId ||
+          request.frame !== details.frame || details.statusCode < 200 || details.statusCode >= 300) return
+        const headers = Object.entries(details.responseHeaders ?? {}).filter(([name]) => name.toLowerCase() === 'x-agentmux-capsule-instance')
+        const values = headers.length === 1 ? headers[0]![1] : []
+        if (values.length !== 1 || !isObjectId(values[0])) return
+        entry.capsuleResponse = { instanceId: values[0], navigationId: entry.navigationId, frame: details.frame! }
+      })
+    }
     if (!this.webAuthnSessions.has(session)) {
       const resolveOwner = (contents: WebContents): BrowserWebAuthnOwner | null => this.webAuthnOwner(contents)
       const releaseAccess = registerBrowserWebAuthnAccess(session, resolveOwner)

@@ -1129,6 +1129,7 @@ function BrowserPaneContent({
             onEditAddress={() => addressInput.current?.focus()}
             onCopy={text => copyTextToClipboard(text, reportError)}
             onRetry={() => void run(async () => {
+              if (tab.capsuleId) return api.browser.reload(tab.browserId)
               const browser = await api.browser.create(tab.browserId, tab.url, tab.workspaceId, tab.profileId || undefined, tab.mode)
               return browser.error ? await api.browser.reload(tab.browserId) : browser
             })}
