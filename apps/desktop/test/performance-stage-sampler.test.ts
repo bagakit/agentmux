@@ -94,11 +94,12 @@ it('keeps reading history bounded under frozen/backwards wall clocks and expires
   sampler.trackRun('synthetic-run',100,'local')
   const seen: MetricsObservation[] = [],port=createResourceMetricsPort({sampler,currentWindow:()=>null})
   const subscription=await port.subscribe(value=>seen.push(parseMetricsObservation(value)),()=>{},new AbortController().signal)
-  await flush();expect(seen.at(-1)?.process.data?.[0]?.cpuPercent).toBe(100)
+  await flush();await vi.advanceTimersByTimeAsync(1000);await flush()
+  expect(seen.at(-1)?.process.data?.[0]?.cpuPercent).toBe(100)
   cpu=1
   // Two samples are fewer than the history cap: expiration must follow the real
   // monotonic interval, even while the wall-clock timestamp remains frozen.
-  mono=11_001;await vi.advanceTimersByTimeAsync(1000);await flush()
+  mono=11_001;await vi.advanceTimersByTimeAsync(2000);await flush()
   expect(seen.at(-1)?.process.data?.[0]?.cpuPercent).toBe(1)
   for(let i=0;i<25;i++){mono+=1000;await vi.advanceTimersByTimeAsync(1000);await flush()}
   expect(seen.at(-1)?.process.data?.[0]?.cpuPercent).toBe(1)
