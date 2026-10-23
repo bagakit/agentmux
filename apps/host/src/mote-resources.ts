@@ -4,7 +4,7 @@ import { MOTE_QUICK_MODE_PATH, parseMoteQuickMode, type MoteQuickMode } from './
 import { directoryIdentity, homeZoneId } from './mote-model.js'
 import { constants, lstat, mkdir, open, readFile, readdir, realpath, stat, unlink } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { basename, dirname, join, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, sep } from 'node:path'
 import { ensureScratchStorageRoot, resolveScratchTopicDirectory, scratchDirectoryAddress, scratchDirectoryIdentity, scratchStorageTopicIds, scratchIdentityContext, scratchConfirmedDirectoryPaths } from './mote-directories.js'
 import { DirectoryIdentityUpgradeRequiredError, normalizeDirectoryIdentity, retainDirectoryIdentity, inspectDirectoryIdentity, moteDirectoryName, type DirectoryIdentityWriteOptions } from './mote-directory-identity.mjs'
 import { AgentMuxError, durableWriteFile, type AgentProviderId, type AgentExecutorConfig } from '@agentmux/core'
@@ -679,6 +679,7 @@ export interface MoteChatResourcePort {
 }
 export type MoteResourceConfiguration = { workspace: ScratchWorkspace | null; profileContext?: string }
 async function readOriginalMoteConfiguration(path: string): Promise<unknown> {
+  if (!isAbsolute(path)) throw new Error('The original absolute Mote configuration path is unavailable.')
   return JSON.parse(await readFile(path, 'utf8'))
 }
 /** Read only the original AppConfig launch fields; no registration, mirror or alternate lookup. */

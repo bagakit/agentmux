@@ -8,13 +8,17 @@ const storePath = process.env.AGENTMUX_AGENT_SESSION_STORE
 if (!storePath || !isAbsolute(storePath)) throw new Error('The Host requires the original absolute Agent Session Store path.')
 const storeArgument = process.argv.indexOf('--store')
 if (storeArgument !== -1 && process.argv[storeArgument + 1] !== storePath) throw new Error('The Host Store argument and original namespace do not agree.')
+const connectionDirectory = process.env.AGENTMUX_CONNECTOR_DIRECTORY
+const moteConfigurationPath = process.env.AGENTMUX_MOTE_CONFIGURATION_PATH
 const mobileBuildDirectory = process.env.AGENTMUX_MOBILE_BUILD_DIRECTORY ?? join(dirname(fileURLToPath(import.meta.url)), '../../mobile/dist')
 // The long-lived execution owner must load the user's shell environment itself;
 // a Desktop launched from Finder may still be hydrating when it starts this Host.
 const environment = await hydrateProcessEnvironmentFromLoginShell()
 const environmentWarning = loginShellEnvironmentWarning(environment)
 if (environmentWarning) process.stderr.write(`${environmentWarning}\n`)
-const host = await startAgentMuxHost({ store: agentMuxHostStore(storePath), mobileBuildDirectory })
+const host = await startAgentMuxHost({ store: agentMuxHostStore(storePath), mobileBuildDirectory,
+  ...(connectionDirectory === undefined && moteConfigurationPath === undefined ? {} : { connections: { directory: connectionDirectory,
+    ...(moteConfigurationPath === undefined ? {} : { moteConfigurationPath }) } }) })
 let stopping = false
 for (const signal of ['SIGTERM', 'SIGINT'] as const) process.on(signal, () => {
   if (stopping) return; stopping = true
