@@ -2,8 +2,10 @@ import { fixtureEpoch as _tailRefreshFixtureEpoch, fixturePath as _tailRefreshFi
 import { expect, it } from 'vitest'
 import { emptyNotebookState } from '@agentmux/core/notebook-catalog'
 import type { NotebookGraphSnapshot } from '../src/shared/notebook-observation'
-import { projectNoteCanvas, canvasSharedObservation, initialCanvasPositions, attachNoteCanvasRelationships, noteCanvasFocusNeighborhood } from '../src/renderer/src/lib/note-canvas-model'
+import { projectNoteCanvas, canvasSharedObservation, initialCanvasPositions, attachNoteCanvasRelationships, noteCanvasBlockNodeId, noteCanvasFocusNeighborhood } from '../src/renderer/src/lib/note-canvas-model'
 import { arrangeNoteCanvas } from '../src/renderer/src/lib/note-canvas-layout-engine'
+
+const scope = { kind: 'notebook', notebookId: 'default' } as const
 
 function fixture(): NotebookGraphSnapshot {
   const catalog = emptyNotebookState()
@@ -12,7 +14,7 @@ function fixture(): NotebookGraphSnapshot {
   return { catalog, graph: { catalogRevision: 0, scope: { kind: 'catalog' }, scannedScope: 'catalog', completeness: 'partial', duplicateNoteIds: [], observations: [], hierarchy: [{ parentNoteId: 'root', noteId: 'left' }], references: [reference('root', 'right'), reference('left', 'shared'), reference('right', 'shared'), reference('shared', 'root'), reference('closed', 'root'), reference('root', 'outside'), reference('root', 'root'), reference('root', 'right', 'second')] } }
 }
 it('projects one-hop incoming, outgoing, hierarchy, external and cyclic context without inventing resources', () => {
-  const graph = projectNoteCanvas(fixture(), { kind: 'note', noteId: 'root' }, ['root'])
+  const graph = projectNoteCanvas(fixture(), scope, ['root'], ['root'])
   expect(new Set(graph.notes.map(note => note.id))).toEqual(new Set(['root', 'left', 'right', 'shared', 'closed', 'outside']))
   expect(graph.notes.find(note => note.id === 'outside')).toMatchObject({ title: 'Uncatalogued note', context: true })
   expect(graph.notes.find(note => note.id === 'outside')!.page).toBeUndefined()
@@ -26,7 +28,7 @@ it('projects page and block links as real edges, retaining unbound occurrences o
     { source: { noteId: 'root', blockId: 'words' }, sourceResource: resource, target: { kind: 'block', noteId: 'right', blockId: 'heading' }, occurrence: { kind: 'stored', referenceId: 'heading-link' }, mode: 'link', resolution: 'resolved' },
     { source: { noteId: 'root', blockId: 'words' }, sourceResource: resource, target: { kind: 'unbound', text: 'Still undecided #Heading' }, occurrence: { kind: 'text', revision: 'original-revision', from: 3, to: 33 }, mode: 'link', resolution: 'unbound' },
   )
-  const result = projectNoteCanvas(f, { kind: 'note', noteId: 'root' }, ['root'])
+  const result = projectNoteCanvas(f, scope, ['root'], ['root'])
   expect(result.relationships.filter(edge => edge.source === 'root' && edge.target === 'right').map(edge => [edge.kind, edge.sourceKind, edge.targetKind])).toEqual([['reference', 'block', 'block'], ['link', 'block', 'page'], ['link', 'block', 'block']])
   expect(result.relationships.filter(edge => edge.kind === 'link').map(edge => edge.references.map(ref => ref.target))).toEqual([[{ kind: 'page', noteId: 'right' }], [{ kind: 'block', noteId: 'right', blockId: 'heading' }]])
   expect(new Set(result.relationships.map(edge => edge.id)).size).toBe(result.relationships.length)
@@ -36,31 +38,33 @@ it('projects page and block links as real edges, retaining unbound occurrences o
   expect(result.unbound).toHaveLength(1)
   expect(result.notes.find(note => note.id === 'root')?.unbound).toEqual(result.unbound)
   expect(result.notes.every(note => note.id !== 'Still undecided #Heading')).toBe(true)
-  expect(projectNoteCanvas(f, { kind: 'note', noteId: 'right' }, []).unbound).toEqual([])
+  expect(projectNoteCanvas(f, scope, [], ['right']).unbound).toEqual([])
 })
 it('collapses only unreachable context, keeping shared nodes and cycles reached by another expanded path', () => {
   const f = fixture(); f.graph.references = f.graph.references.filter(edge => edge.source.noteId !== 'shared')
-  const scope = { kind: 'note', noteId: 'root' } as const
-  expect(projectNoteCanvas(f, scope, ['root', 'left', 'right']).notes.some(note => note.id === 'shared')).toBe(true)
-  expect(projectNoteCanvas(f, scope, ['root', 'right']).notes.some(note => note.id === 'shared')).toBe(true)
-  expect(projectNoteCanvas(f, scope, ['root']).notes.some(note => note.id === 'shared')).toBe(false)
-  expect(projectNoteCanvas(f, scope, []).notes.map(note => note.id)).toEqual(['root'])
+  expect(projectNoteCanvas(f, scope, ['root', 'left', 'right'], ['root']).notes.some(note => note.id === 'shared')).toBe(true)
+  expect(projectNoteCanvas(f, scope, ['root', 'right'], ['root']).notes.some(note => note.id === 'shared')).toBe(true)
+  expect(projectNoteCanvas(f, scope, ['root'], ['root']).notes.some(note => note.id === 'shared')).toBe(false)
+  expect(projectNoteCanvas(f, scope, [], ['root']).notes.map(note => note.id)).toEqual(['root'])
 })
-it('attaches confirmed visible endpoints without losing bundled occurrences or granting an unknown target a block port', () => {
-  const snapshot = fixture(), projection = projectNoteCanvas(snapshot, { kind: 'note', noteId: 'root' }, ['root'])
+it('attaches confirmed visible endpoints to independent Block nodes without losing bundled occurrences or granting an unknown target a block port', () => {
+  const snapshot = fixture(), projection = projectNoteCanvas(snapshot, scope, ['root'], ['root'])
   const ports = new Map([['root', new Set(['root', 'rootsecond'])], ['right', new Set(['right'])], ['outside', new Set(['outside'])]])
   const attached = attachNoteCanvasRelationships(projection.relationships, ports)
   const right = attached.filter(edge => edge.source === 'root' && edge.target === 'right')
-  expect(right.map(edge => [edge.sourceBlockId, edge.targetBlockId, edge.references.length])).toEqual([['root', 'right', 1], ['rootsecond', undefined, 1]])
-  expect(attached.find(edge => edge.target === 'outside')).toMatchObject({ sourceBlockId: 'root' })
+  expect(right.map(edge => [edge.sourceNodeId, edge.targetNodeId, edge.sourceBlockId, edge.targetBlockId, edge.references.length])).toEqual([
+    [noteCanvasBlockNodeId('root', 'root'), noteCanvasBlockNodeId('right', 'right'), 'root', 'right', 1],
+    [noteCanvasBlockNodeId('root', 'rootsecond'), 'right', 'rootsecond', undefined, 1],
+  ])
+  expect(attached.find(edge => edge.target === 'outside')).toMatchObject({ sourceNodeId: noteCanvasBlockNodeId('root', 'root'), targetNodeId: 'outside', sourceBlockId: 'root' })
   expect(attached.find(edge => edge.target === 'outside')?.targetBlockId).toBeUndefined()
   expect(attached.find(edge => edge.kind === 'hierarchy')?.sourceBlockId).toBeUndefined()
   expect(attached.flatMap(edge => edge.references)).toEqual(projection.relationships.flatMap(edge => edge.references))
   expect(new Set(attached.map(edge => edge.id)).size).toBe(attached.length)
-  expect(attachNoteCanvasRelationships(projection.relationships, new Map()).map(({ aggregateId, ...edge }) => edge)).toEqual(projection.relationships)
+  expect(attachNoteCanvasRelationships(projection.relationships, new Map()).map(({ aggregateId, sourceNodeId, targetNodeId, ...edge }) => edge)).toEqual(projection.relationships)
 })
 it('respects Notebook search/archive seeds until a deliberate relationship expansion crosses the boundary', () => {
-  const f = fixture(), scope = { kind: 'notebook', notebookId: 'default' } as const
+  const f = fixture()
   expect(projectNoteCanvas(f, scope, [], ['left']).notes.map(note => note.id)).toEqual(['left'])
   expect(new Set(projectNoteCanvas(f, scope, ['left'], ['left']).notes.map(note => note.id))).toEqual(new Set(['left', 'root', 'shared']))
   expect(projectNoteCanvas(f, scope, [], []).notes).toEqual([])
@@ -84,7 +88,7 @@ it('requires one confirmed shared file observation without manufacturing a catal
   delete snapshot.catalog.pages.shared
   const observation = { noteId: 'shared', resource, status: 'read' as const, actualNoteId: 'shared', kind: 'shared-block' as const, fileIdentity: 'confirmed' as const, revision: 'shared-revision', blockIds: ['actual-shared-child'] }
   snapshot.graph.observations.push(observation)
-  const result = projectNoteCanvas(snapshot, { kind: 'note', noteId: 'root' }, ['root', 'left', 'right'])
+  const result = projectNoteCanvas(snapshot, scope, ['root', 'left', 'right'], ['root'])
   expect(result.notes.filter(note => note.id === 'shared')).toHaveLength(1)
   expect(result.notes.find(note => note.id === 'shared')).toMatchObject({ kind: 'shared-block', title: 'Shared block' })
   expect(result.notes.find(note => note.id === 'shared')!.page).toBeUndefined()
@@ -94,7 +98,7 @@ it('requires one confirmed shared file observation without manufacturing a catal
   observation.fileIdentity = 'confirmed'
   snapshot.graph.observations.push({ ...observation, resource: { ...resource, path: 'duplicate.note.md' } })
   expect(canvasSharedObservation(snapshot, 'shared')).toBeUndefined()
-  expect(projectNoteCanvas(snapshot, { kind: 'note', noteId: 'shared' }, []).notes[0]!.observation).toBeUndefined()
+  expect(projectNoteCanvas(snapshot, scope, [], ['shared']).notes[0]!.observation).toBeUndefined()
 })
 
 it('shows directly embedded shared originals even in a restored collapsed graph without expanding ordinary or nested neighbors', () => {
@@ -104,15 +108,14 @@ it('shows directly embedded shared originals even in a restored collapsed graph 
   snapshot.graph.observations.push({ noteId: 'nested', resource: { ...resource, path: 'block-nested.note.md' }, status: 'read', actualNoteId: 'nested', kind: 'shared-block', fileIdentity: 'confirmed', revision: 'nested-revision', blockIds: ['nested-body'] })
   const embed = (from: string, to: string) => ({ source: { noteId: from, blockId: from + '-include' }, sourceResource: resource, target: { kind: 'page' as const, noteId: to }, occurrence: { kind: 'stored' as const, referenceId: from + '-' + to }, mode: 'embed' as const, resolution: 'resolved' as const })
   snapshot.graph.references.push(embed('root', 'shared'), embed('shared', 'nested'))
-  const scope = { kind: 'note' as const, noteId: 'root' }
-  const collapsed = projectNoteCanvas(snapshot, scope, [])
+  const collapsed = projectNoteCanvas(snapshot, scope, [], ['root'])
   expect(collapsed.notes.map(note => note.id)).toEqual(['root', 'shared'])
   expect(collapsed.notes.find(note => note.id === 'shared')).toMatchObject({ kind: 'shared-block' })
   expect(collapsed.notes.find(note => note.id === 'shared')!.page).toBeUndefined()
   expect(collapsed.relationships.filter(edge => edge.kind === 'embed')).toHaveLength(1)
   snapshot.graph.observations[0]!.fileIdentity = 'unknown'
-  expect(projectNoteCanvas(snapshot, scope, []).notes.map(note => note.id)).toEqual(['root'])
-  expect(projectNoteCanvas(snapshot, { kind: 'notebook', notebookId: 'default' }, [], []).notes).toEqual([])
+  expect(projectNoteCanvas(snapshot, scope, [], ['root']).notes.map(note => note.id)).toEqual(['root'])
+  expect(projectNoteCanvas(snapshot, scope, [], []).notes).toEqual([])
 })
 
 it('assigns single-host shared blocks to their host Note area and multi-host shared blocks as independent bridge nodes', () => {
@@ -124,7 +127,7 @@ it('assigns single-host shared blocks to their host Note area and multi-host sha
   )
   const embed = (from: string, to: string) => ({ source: { noteId: from, blockId: from + '-' + to }, sourceResource: resource, target: { kind: 'page' as const, noteId: to }, occurrence: { kind: 'stored' as const, referenceId: from + '-' + to }, mode: 'embed' as const, resolution: 'resolved' as const })
   snapshot.graph.references.push(embed('root', 'shared-single'), embed('root', 'shared-bridge'), embed('right', 'shared-bridge'))
-  const projected = projectNoteCanvas(snapshot, { kind: 'note', noteId: 'root' }, ['root'])
+  const projected = projectNoteCanvas(snapshot, scope, ['root'], ['root'])
   const single = projected.notes.find(note => note.id === 'shared-single')!
   const bridge = projected.notes.find(note => note.id === 'shared-bridge')!
   expect(single).toMatchObject({ kind: 'shared-block', hostNoteIds: ['root'], hostNoteId: 'root', sharedPlacement: 'area-member' })
@@ -133,7 +136,7 @@ it('assigns single-host shared blocks to their host Note area and multi-host sha
 })
 
 it('computes 1-hop focus neighborhoods for Note areas, Block nodes and Relationship edges', () => {
-  const snapshot = fixture(), projection = projectNoteCanvas(snapshot, { kind: 'note', noteId: 'root' }, ['root'])
+  const snapshot = fixture(), projection = projectNoteCanvas(snapshot, scope, ['root'], ['root'])
   const attached = attachNoteCanvasRelationships(projection.relationships, new Map([['root', new Set(['root', 'rootsecond'])], ['right', new Set(['right'])]]))
   const byBlock = noteCanvasFocusNeighborhood(projection, attached, { kind: 'block', noteId: 'root', blockId: 'rootsecond' })
   expect(byBlock.active).toBe(true)

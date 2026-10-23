@@ -85,7 +85,7 @@ it('the actual saved-note graph themes direction drawings while retaining counts
   vi.spyOn(api.notebooks, 'onChange').mockImplementation(() => () => {})
   useAppStore.setState({ noteCanvasLayouts: {}, noteCanvasSaveIssues: {}, documents: {}, dirtyDocuments: {} })
   const open = vi.fn()
-  await dom.render(<NoteCanvas scope={{ kind: 'note', noteId: original.noteId }} onOpen={open} />)
+  await dom.render(<NoteCanvas scope={{ kind: 'notebook', notebookId: original.notebookId }} seedNoteIds={[original.noteId]} onOpen={open} />)
   await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-degrees')).toHaveLength(1))
   const row = dom.container.querySelector('.note-canvas-degrees')!, node = dom.container.querySelector('.react-flow__node')!
   expect(row.getAttribute('aria-label')).toBe('1 incoming, 1 outgoing occurrences in the saved graph')

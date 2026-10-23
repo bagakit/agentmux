@@ -18,7 +18,7 @@ const initial = useAppStore.getState(), workspacePath = join(tmpdir(), 'agentmux
 const config: AppConfig = { version: 9, hosts: [{ id: 'local', kind: 'local', label: 'Local' }], executors: {},
   workspaces: [{ id: 'canvas-workspace', name: 'Notes', hostId: 'local', path: workspacePath, kind: 'folder' }],
   appearance: { terminalTheme: 'graphite' }, browser: { toolbar: { selectElement: true, screenshot: true, devTools: true, viewport: true, saveBookmark: true, more: true } } }
-const scope = { kind: 'note' as const, noteId: 'kept-note' }, key = noteCanvasScopeKey(scope)
+const scope = { kind: 'notebook' as const, notebookId: 'kept-notebook' }, key = noteCanvasScopeKey(scope)
 const layout = { positions: { 'kept-note': { x: 421, y: -73 }, other: { x: -950, y: 711 } }, viewport: { x: -91, y: 36, zoom: 0.8 }, expandedNoteIds: ['kept-note', 'other'], previewNoteIds: ['other'] }
 afterEach(() => { vi.restoreAllMocks(); useAppStore.setState(initial, true) })
 
@@ -40,8 +40,8 @@ it('keeps manual geometry through neighbor and preview toggles, and distinguishe
   expect(changed.viewport).toBe(layout.viewport)
   expect(changed.expandedNoteIds).toEqual([])
   expect(restoreNoteCanvasLayouts({ [key]: changed })).toEqual({ [key]: changed })
-  expect(defaultNoteCanvasLayout(scope).expandedNoteIds).toEqual(['kept-note'])
-  expect(noteCanvasScopeKey({ kind: 'notebook', notebookId: scope.noteId })).not.toBe(key)
+  expect(defaultNoteCanvasLayout(scope).expandedNoteIds).toEqual([])
+  expect(noteCanvasScopeKey({ kind: 'notebook', notebookId: 'other-notebook' })).not.toBe(key)
 })
 
 it('retains valid scopes and coordinates independently of malformed optional fields without count truncation', () => {
@@ -62,10 +62,10 @@ it('keeps an interactive layout and explicit retry state when original presentat
 
 function seedOriginalNote() {
   const workspaceId = 'canvas-workspace', path = 'original.note.md', spaceId = directoryIdentity('local', workspacePath), zoneId = homeZoneId(spaceId)
-  const note = newNoteDocument('Original disk text', scope.noteId, 'original-block')
+  const note = newNoteDocument('Original disk text', 'kept-note', 'original-block')
   const tab = { ...createWorkbenchTab('original-tab', { kind: 'file', regionId: 'original-region', workspaceId, path }), space: { spaceId, zoneId } }
   const docKey = documentKey(workspaceId, path), document = { path, content: serializeNoteDocument(note).replace('Original disk text', 'Kept unsaved draft'), revision: 'base' }
-  useAppStore.setState({ config, loading: false, mainSurface: 'recall', activeWorkspaceId: workspaceId, recallNotebookId: 'quick-notes', recallNoteId: scope.noteId,
+  useAppStore.setState({ config, loading: false, mainSurface: 'recall', activeWorkspaceId: workspaceId, recallNotebookId: 'quick-notes', recallNoteId: 'kept-note',
     recallZoneSelection: null, tabs: { [tab.id]: tab }, layouts: { [workspaceId]: createWorkspaceLayout('original-group', [tab.id]) },
     documents: { [docKey]: document }, dirtyDocuments: { [docKey]: true }, documentRevealTargets: {} })
   vi.spyOn(api.files, 'read').mockResolvedValue({ status: 'read', document: { path, content: serializeNoteDocument(note), revision: 'base' } })
