@@ -1,5 +1,6 @@
 // @vitest-environment happy-dom
 import { webcrypto } from 'node:crypto'
+import { rename } from 'node:fs/promises'
 import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
@@ -116,4 +117,34 @@ it('rejects a foreign native sender before reading or editing a private candidat
   const retained = (await f.client.call('agent.learning.inspect', { hostId: 'local', operationId: proposed.operationId })).operation!
   expect(retained).toEqual(proposed)
   expect(f.started).toHaveLength(1)
+})
+
+it.each(['topic', 'spatial'] as const)('keeps a confirmed Mote usable when independent %s discovery is unavailable', async failed => {
+  const f = await consumer(), proposed = await f.propose(await f.prepare())
+  if (failed === 'topic') vi.spyOn(api.topics, 'call').mockRejectedValue(new Error('Original Topic owner is unavailable'))
+  else vi.spyOn(api.spatial, 'read').mockRejectedValue(new Error('Original Topic owner is unavailable'))
+  await f.render(); await waitFor(() => expect(container.textContent).toContain('Original Topic owner is unavailable'))
+  await choose('Learning destination', 'Mote · local'); await choose('Learning Agent', 'Original saved Executor')
+  await click(button('Confirm & send for learning'))
+  const current = (await f.client.call('agent.learning.inspect', { hostId: 'local', operationId: proposed.operationId })).operation!
+  expect(current.approved!.target).toEqual(f.targets[0]); expect(current.learner!.state).toBe('created')
+  expect(f.started).toHaveLength(2); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('retains a known Topic selection and draft through an unavailable observation, while its original resource still fences confirmation', async () => {
+  const f = await consumer(), proposed = await f.propose(await f.prepare())
+  await f.render(); await waitFor(() => expect(container.querySelector('textarea')).not.toBeNull())
+  await choose('Learning destination', 'Topic · local'); await choose('Learning Agent', 'Original saved Executor')
+  const editor = container.querySelector<HTMLTextAreaElement>('textarea')!, local = proposed.candidate!.content + '\nRetain my original qualification.'
+  await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(editor, local); editor.dispatchEvent(new Event('input', { bubbles: true })) })
+  vi.spyOn(api.topics, 'call').mockRejectedValue(new Error('Original Topic owner is unavailable'))
+  await click(button('Check original')); await waitFor(() => expect(container.textContent).toContain('Original Topic owner is unavailable'))
+  expect(editor.value).toBe(local); expect(container.querySelector('[aria-label="Learning destination"]')!.textContent).toContain('Same displayed destination')
+  await click(button('Save draft')); await waitFor(() => expect(button('Confirm & send for learning').disabled).toBe(false))
+  const original = (await f.topics.read(f.workspace, f.targets[1]!.topicId))!.physicalDirectoryPath!
+  await rename(original, original + '-moved')
+  await click(button('Confirm & send for learning')); await waitFor(() => expect(container.textContent).toContain('Original result needs attention'))
+  const current = (await f.client.call('agent.learning.inspect', { hostId: 'local', operationId: proposed.operationId })).operation!
+  expect(current.approved).toBeNull(); expect(current.learner).toBeNull(); expect(current.candidate!.content).toBe(local)
+  expect(f.started).toHaveLength(1); expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
