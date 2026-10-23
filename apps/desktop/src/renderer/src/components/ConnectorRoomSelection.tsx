@@ -1,3 +1,4 @@
+import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useEffect, useRef, useState } from 'react'
 import { TextInput } from '@agentmux/client-ui/input'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -15,19 +16,19 @@ const scopeOf = (connection: Connection) => ({ connectionId: connection.config.c
 export const roomName = (room: RoomSummary) => room.name ?? room.externalConversationId
 
 /** A modal's bounded page, never a directory cache or an authority check. */
-export function ConnectorRoomSelection({ connection, value, onChange, disabled }: {
-  connection: Connection; value: string; onChange(value: string): void; disabled: boolean
+export function ConnectorRoomSelection({ connection, value, onChange, disabled, hostingTarget }: {
+  connection: Connection; value: string; onChange(value: string): void; disabled: boolean; hostingTarget?: ConnectionHostingTarget | null
 }) {
   const [query, setQuery] = useState(''), [page, setPage] = useState<RoomListResult | null>(null)
   const [selected, setSelected] = useState<RoomSummary | null>(null), [issue, setIssue] = useState(''), [pending, setPending] = useState(false)
   const flight = useRef(false), live = useRef(true), pageQuery = useRef('')
   async function read(next?: string) {
-    if (flight.current) return
+    if (hostingTarget === null || flight.current) return
     flight.current = true; setPending(true)
     const exactQuery = next ? pageQuery.current : query
     try {
       const input = { ...scopeOf(connection), limit: 20, ...(next ? { cursor: next } : {}) }
-      const result = exactQuery ? await api.connections.call('connection.room.search', { ...input, query: exactQuery }) : await api.connections.call('connection.room.ls', input)
+      const result = exactQuery ? await api.connections.call('connection.room.search', { ...input, query: exactQuery }, hostingTarget) : await api.connections.call('connection.room.ls', input, hostingTarget)
       if (live.current) { setPage(result); setIssue(''); pageQuery.current = exactQuery }
     } catch (error) { if (live.current) setIssue(presentError(error)) }
     finally { flight.current = false; if (live.current) setPending(false) }
@@ -56,20 +57,20 @@ export function ConnectorRoomSelection({ connection, value, onChange, disabled }
 }
 
 /** Exact visible room only. Changing the application, revision or room releases this read window. */
-export function useConnectorRoomFacts(connection: Connection | undefined, externalConversationId: string) {
-  const identity = JSON.stringify([connection?.config.connectionId, connection?.revision, externalConversationId])
+export function useConnectorRoomFacts(connection: Connection | undefined, externalConversationId: string, hostingTarget?: ConnectionHostingTarget | null) {
+  const identity = JSON.stringify([connection?.config.connectionId, connection?.revision, externalConversationId, hostingTarget])
   const [read, setRead] = useState<{ identity: string; room: RoomGetResult | null; people: RoomMembersResult | null; issue: string } | null>(null)
   const current = useRef(identity), flight = useRef<object | null>(null), [pending, setPending] = useState(false)
   const occurrence = useRef({})
   current.current = identity
   async function refresh(cursor?: string) {
-    if (!connection || !externalConversationId || flight.current) return
+    if (!connection || !externalConversationId || hostingTarget === null || flight.current) return
     const original = identity, originalOccurrence = occurrence.current, input = { ...scopeOf(connection), externalConversationId }
     const request = {}; flight.current = request; setPending(true)
     const update = (value: Partial<NonNullable<typeof read>>) => { if (current.current === original && occurrence.current === originalOccurrence) setRead(previous => ({ identity: original, room: null, people: null, issue: '', ...(previous?.identity === original ? previous : {}), ...value })) }
     try {
-      const reads = cursor ? [] : [api.connections.call('connection.room.get', input).then(room => update({ room }))]
-      reads.push(api.connections.call('connection.room.members', { ...input, limit: 20, ...(cursor ? { cursor } : {}) }).then(people => update({ people })))
+      const reads = cursor ? [] : [api.connections.call('connection.room.get', input, hostingTarget).then(room => update({ room }))]
+      reads.push(api.connections.call('connection.room.members', { ...input, limit: 20, ...(cursor ? { cursor } : {}) }, hostingTarget).then(people => update({ people })))
       const results = await Promise.allSettled(reads)
       const failed = results.find(result => result.status === 'rejected')
       update({ issue: failed?.status === 'rejected' ? presentError(failed.reason) : '' })

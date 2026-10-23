@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
+import type { ConnectionHostingTarget } from '../../../shared/contracts'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { RoomBinding } from '@agentmux/core/connections'
 import { api } from '../lib/api'
@@ -6,21 +7,25 @@ import { deliveryFacts, deliveryMatches, formatGroupDiagnosis, groupTarget, read
 
 const LoadingIcon = semanticIconComponent('status.loading')
 /** Bounded original incoming/outgoing observations. Reading or copying never retries an effect. */
-export function ConnectorDeliveryDetails({ binding }: { binding: RoomBinding }) {
-  const target = groupTarget(binding), key = JSON.stringify(target), source = api.connections.call
+export function ConnectorDeliveryDetails({ binding, hostingTarget }: { binding: RoomBinding; hostingTarget?: ConnectionHostingTarget | null }) {
+  const target = groupTarget(binding), key = JSON.stringify([target, hostingTarget]), originalSource = api.connections.call
+  const source: typeof api.connections.call = useMemo(() => (method, params) => {
+    if (hostingTarget === null) return Promise.reject(new Error('The original bot hosting owner is unconfirmed.'))
+    return originalSource(method, params, hostingTarget)
+  }, [originalSource, key])
   const current = useRef({ key, source }), live = useRef(false), epoch = useRef(0), exportRead = useRef(0)
   current.current = { key, source }
-  const [read, setRead] = useState<GroupDiagnosis | null>(null), [pending, setPending] = useState(false), [expanded, setExpanded] = useState(false)
+  const [read, setRead] = useState<{ key: string; value: GroupDiagnosis } | null>(null), [pending, setPending] = useState(false), [expanded, setExpanded] = useState(false)
   const [detail, setDetail] = useState<{ key: string; value: ReturnType<typeof deliveryFacts> | null; issue: boolean } | null>(null)
   const [copying, setCopying] = useState(false), [feedback, setFeedback] = useState('')
-  const visible = read && JSON.stringify(read.target) === key ? read : null
+  const visible = read?.key === key ? read.value : null
   const original = detail?.key === key ? detail : null
-  const accepts = () => live.current && current.current.key === key && current.current.source === source && api.connections.call === source
+  const accepts = () => live.current && current.current.key === key && current.current.source === source && api.connections.call === originalSource
   async function inspect(window: GroupWindow = {}) {
     const request = ++epoch.current; setPending(true)
     const result = await readGroupDiagnosis(source, target, window)
     if (!accepts() || request !== epoch.current) return
-    setRead(previous => retainGroupDiagnosis(previous, result)); setPending(false)
+    setRead(previous => ({ key, value: retainGroupDiagnosis(previous?.key === key ? previous.value : null, result) })); setPending(false)
   }
   async function inspectOriginal(operationId: string) {
     const request = ++epoch.current; setPending(true)
@@ -40,7 +45,7 @@ export function ConnectorDeliveryDetails({ binding }: { binding: RoomBinding }) 
     try {
       const report = await readGroupDiagnosis(source, target, window)
       if (!accepts() || request !== exportRead.current) return
-      await api.ui.writeClipboardText(formatGroupDiagnosis(report))
+      await api.ui.writeClipboardText((hostingTarget ? `Bot hosting: ${hostingTarget.hostId} · Runtime: ${hostingTarget.runtimeId}\n` : '') + formatGroupDiagnosis(report))
       if (accepts() && request === exportRead.current) setFeedback('Bounded sanitized group diagnosis copied.')
     } catch { if (accepts() && request === exportRead.current) setFeedback('The diagnosis could not be copied. Original receipts remain available.') }
     finally { if (accepts() && request === exportRead.current) setCopying(false) }

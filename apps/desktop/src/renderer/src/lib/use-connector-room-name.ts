@@ -1,13 +1,14 @@
+import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { useEffect, useState } from 'react'
 import type { ChannelMetadataResult, RoomBinding } from '@agentmux/core/connections'
 import { api } from './api'
 
 /** Names are local Channel observations; only this visible original group's miss needs a native lookup. */
-export function useConnectorRoomName(binding: RoomBinding | null, refresh = 0, visible = true) {
-  const identity = binding ? JSON.stringify([binding.connectionId, binding.application.domain, binding.application.appId, binding.externalConversationId]) : ''
+export function useConnectorRoomName(binding: RoomBinding | null, refresh = 0, visible = true, hostingTarget?: ConnectionHostingTarget | null) {
+  const identity = binding ? JSON.stringify([binding.connectionId, binding.application.domain, binding.application.appId, binding.externalConversationId, hostingTarget]) : ''
   const [read, setRead] = useState<{ identity: string; name?: string; issue: string; loading: boolean } | null>(null)
   useEffect(() => {
-    if (!binding || !visible) return
+    if (!binding || !visible || hostingTarget === null) return
     let live = true, generation = 0, subscriptionIssue = ''
     const subject = { kind: 'conversation' as const, externalConversationId: binding.externalConversationId }
     const finish = (request: number, name: string | undefined, issue: string, preserveName = false) => {
@@ -22,11 +23,11 @@ export function useConnectorRoomName(binding: RoomBinding | null, refresh = 0, v
       const request = ++generation
       setRead(previous => ({ ...(previous?.identity === identity ? previous : {}), identity, issue: subscriptionIssue, loading: true }))
       void (async () => {
-        let result = await api.connections.call('connection.metadata.get', { connectionId: binding.connectionId, subject })
+        let result = await api.connections.call('connection.metadata.get', { connectionId: binding.connectionId, subject }, hostingTarget)
         if (!live || request !== generation) return
         if (!matches(result)) { finish(request, undefined, 'Group name unconfirmed', true); return }
         const saved = result.entry.observation.profile?.name
-        if (!saved && nativeOnMiss) result = await api.connections.call('connection.metadata.refresh', { connectionId: binding.connectionId, expectedConnectionRevision: result.connectionRevision, subject })
+        if (!saved && nativeOnMiss) result = await api.connections.call('connection.metadata.refresh', { connectionId: binding.connectionId, expectedConnectionRevision: result.connectionRevision, subject }, hostingTarget)
         if (!matches(result)) { finish(request, undefined, 'Group name unconfirmed', true); return }
         const name = result.entry.observation.profile?.name
         finish(request, name, result.entry.observation.freshness === 'stale' ? 'Saved name · refresh unconfirmed' : name ? '' : 'Group name unconfirmed')
@@ -41,11 +42,11 @@ export function useConnectorRoomName(binding: RoomBinding | null, refresh = 0, v
         subscriptionIssue = state === 'ready' ? '' : 'Group name updates unconfirmed'
         if (state === 'ready') load(false)
         else setRead(previous => ({ ...(previous?.identity === identity ? previous : {}), identity, issue: subscriptionIssue, loading: false }))
-      })
+      }, hostingTarget)
     } catch { subscriptionIssue = 'Group name updates unconfirmed' }
     load(true)
     return () => { live = false; generation++; if (release) release() }
   }, [identity, refresh, visible])
   const current = read?.identity === identity ? read : null
-  return { label: current?.name ?? binding?.externalConversationId ?? '', issue: current?.issue ?? '', loading: visible && !!binding && (!current || current.loading) }
+  return { label: current?.name ?? binding?.externalConversationId ?? '', issue: hostingTarget === null ? 'Original bot hosting owner unconfirmed' : current?.issue ?? '', loading: hostingTarget !== null && visible && !!binding && (!current || current.loading) }
 }

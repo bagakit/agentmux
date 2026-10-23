@@ -10,13 +10,13 @@ export type ConnectorRoomDraft = {
   scope: 'mentions-and-replies' | 'all-messages'; publication: 'future-native-user-facing' | 'future-shared-conversation'
   actorId: string; actorType: string
 }
-export const connectorRoomDraftKey = (target: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>) => JSON.stringify([target.executionHostId, target.agentSessionId])
+export const connectorRoomDraftKey = (target: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>, hostingTarget?: ConnectionHostingTarget) => JSON.stringify([target.executionHostId, target.agentSessionId, ...(hostingTarget ? [hostingTarget.hostId, hostingTarget.runtimeId] : [])])
 export function restoredConnectorRoomDrafts(value: unknown): Record<string, ConnectorRoomDraft> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
   return Object.fromEntries(Object.entries(value).filter((entry): entry is [string, ConnectorRoomDraft] => {
     try {
       const target = JSON.parse(entry[0]), draft = entry[1] as ConnectorRoomDraft
-      return Array.isArray(target) && target.length === 2 && target.every(id => typeof id === 'string' && !!id) &&
+      return Array.isArray(target) && (target.length === 2 || target.length === 4) && target.every(id => typeof id === 'string' && !!id) &&
         !!draft && typeof draft === 'object' && ['connectionId', 'name', 'group', 'members', 'memberType', 'actorId', 'actorType'].every(key => typeof Reflect.get(draft, key) === 'string') &&
         (draft.bindingId === null || typeof draft.bindingId === 'string') && (draft.bindingRevision === null || Number.isSafeInteger(draft.bindingRevision) && draft.bindingRevision > 0) &&
         ['create', 'existing', 'details'].includes(draft.mode) && ['mentions-and-replies', 'all-messages'].includes(draft.scope) && ['future-native-user-facing', 'future-shared-conversation'].includes(draft.publication)
