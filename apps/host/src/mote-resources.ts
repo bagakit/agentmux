@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto'
 import { basename, dirname, join, sep } from 'node:path'
 import { ensureScratchStorageRoot, resolveScratchTopicDirectory, scratchDirectoryAddress, scratchDirectoryIdentity, scratchStorageTopicIds, scratchIdentityContext, scratchConfirmedDirectoryPaths } from './mote-directories.js'
 import { DirectoryIdentityUpgradeRequiredError, normalizeDirectoryIdentity, retainDirectoryIdentity, inspectDirectoryIdentity, moteDirectoryName, type DirectoryIdentityWriteOptions } from './mote-directory-identity.mjs'
-import { AgentMuxError, durableWriteFile, type AgentProviderId } from '@agentmux/core'
+import { AgentMuxError, durableWriteFile, type AgentProviderId, type AgentExecutorConfig } from '@agentmux/core'
 export type ScratchWorkspace = { id: string; hostId: string; path: string }
 type WorkspaceRecord = ScratchWorkspace
 export interface ScratchNameAudit { run<T>(changes: readonly { target: import('@agentmux/core/control').AgentMuxNameTarget; before: string | null; requested: string | null; ownerRevision?: string | number | null; location?: Record<string, string | null> }[], apply: () => Promise<T>, observe?: (result: T) => { actual: string | null; ownerRevision?: string | number | null }): Promise<T> }
@@ -678,11 +678,34 @@ export interface MoteChatResourcePort {
   prepare(target: import('@agentmux/core/mote-chat').MoteChatTarget, resource: MoteChatResource, input: { providerId: AgentProviderId; sessionId: string }): Promise<PreparedScratchAgentTopic>
 }
 export type MoteResourceConfiguration = { workspace: ScratchWorkspace | null; profileContext?: string }
+async function readOriginalMoteConfiguration(path: string): Promise<unknown> {
+  return JSON.parse(await readFile(path, 'utf8'))
+}
+/** Read only the original AppConfig launch fields; no registration, mirror or alternate lookup. */
+export async function readMoteConfiguredExecutor(path: string, executorId: string): Promise<AgentExecutorConfig> {
+  const invalid = (): never => { throw new AgentMuxError('The original Mote Executor configuration is unconfirmed. Keep its original settings and conversations; inspect that saved Executor.', 'MOTE_CHAT_EXECUTOR_UNCONFIRMED') }
+  let raw: unknown
+  try { raw = await readOriginalMoteConfiguration(path) } catch { return invalid() }
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return invalid()
+  const executors = (raw as Record<string, unknown>).executors
+  if (!executors || typeof executors !== 'object' || Array.isArray(executors)) return invalid()
+  if (!Object.hasOwn(executors, executorId)) throw new AgentMuxError('The saved Mote Executor is unavailable in its original configuration. Keep that choice and restore its original settings; no other Executor was selected.', 'MOTE_CHAT_EXECUTOR_UNAVAILABLE')
+  const value = (executors as Record<string, unknown>)[executorId]
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid()
+  const input = value as Record<string, unknown>
+  // The existing AppConfig six-field launch contract; presentation-only metadata is not a launch condition.
+  if (!['label', 'providerId', 'command'].every(key => typeof input[key] === 'string' && input[key].length > 0) ||
+    !Array.isArray(input.args) || input.args.some(arg => typeof arg !== 'string') ||
+    !input.env || typeof input.env !== 'object' || Array.isArray(input.env) || Object.values(input.env).some(value => typeof value !== 'string') ||
+    typeof input.injectAgentMuxGuide !== 'boolean') return invalid()
+  return { label: input.label as string, providerId: input.providerId as string, command: input.command as string,
+    args: [...input.args] as string[], env: { ...input.env } as Record<string, string>, injectAgentMuxGuide: input.injectAgentMuxGuide }
+}
 /** Fresh projection of the original file, not a second configuration or a cached AppConfig mirror. */
 export async function readMoteResourceConfiguration(path: string, resource: import('@agentmux/core/mote-chat').MoteChatTarget['expectedResource']): Promise<MoteResourceConfiguration> {
   const fail = (): never => { throw new AgentMuxError('The original Mote resource configuration is unconfirmed. Retain its files and conversations; restore the original configuration.', 'MOTE_CHAT_TARGET_UNCONFIRMED') }
   let raw: Record<string, unknown>
-  try { raw = JSON.parse(await readFile(path, 'utf8')) } catch { return fail() }
+  try { raw = await readOriginalMoteConfiguration(path) as Record<string, unknown> } catch { return fail() }
   if (!raw || typeof raw !== 'object' || !Array.isArray(raw.workspaces)) return fail()
   const found = raw.workspaces.filter((value): value is ScratchWorkspace => !!value && typeof value === 'object' && value.id === resource.workspaceId)
   if (found.length !== 1 || typeof found[0]!.path !== 'string' || typeof found[0]!.hostId !== 'string') return fail()
