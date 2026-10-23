@@ -21,6 +21,22 @@ type ReadAttempt = { id: string; operation: Operation; superseded: boolean; erro
 type ViewState = { snapshot: ConversationWindowSnapshot | null; loading: boolean; operation: Operation | null; sourceRead: ConversationSourceRead | null; error: Error | null; errorOperation: Operation | null; sourceError: Error | null; observationError: Error | null; held: boolean; historical: boolean; newerAvailable: boolean }
 const empty = (): ViewState => ({ snapshot: null, loading: false, operation: null, sourceRead: null, error: null, errorOperation: null, sourceError: null, observationError: null, held: false, historical: false, newerAvailable: false })
 const errorOf = (error: unknown) => error instanceof Error ? error : new Error(String(error))
+/** Cancellation settles the owned opening even when transport returns its handle later. */
+function awaitObservation(observed: Promise<ConversationObservationHandle>, signal: AbortSignal): Promise<ConversationObservationHandle> {
+  return new Promise((resolve, reject) => {
+    const cancelled = () => reject(signal.reason)
+    signal.addEventListener('abort', cancelled, { once: true })
+    if (signal.aborted) cancelled()
+    observed.then(value => {
+      signal.removeEventListener('abort', cancelled)
+      if (signal.aborted) value.dispose()
+      else resolve(value)
+    }, error => {
+      signal.removeEventListener('abort', cancelled)
+      reject(error)
+    })
+  })
+}
 function diagnosticErrorReason(error: unknown): ReadingDiagnosticReason {
   try {
     const code = (error as { code?: unknown } | null)?.code
@@ -161,27 +177,19 @@ export function useConversationView(client: ConversationViewClient | null, refer
             note({ phase: 'invalidation-received', watchId, ...frame, sourceHostId: observation.sourceHostId,
               ...conversationDiagnosticSource(observation.source) })
             current.invalidations++
+            // A qualified notification recovers only its original source. An
+            // unrelated captured update cannot clear a native observation gap.
+            failures.delete(conversationSourceKey(observation.source))
             if (!opening) {
-              setState(value => ({ ...value, newerAvailable: current.historical || current.held || value.newerAvailable }))
+              setState(value => ({ ...value, observationError: watchError(failures),
+                newerAvailable: current.historical || current.held || value.newerAvailable }))
               schedule()
             }
           }
         }, { signal: openingController.signal })
         // Cancellation ends this read even when transport completion is late.
         // The original opening still owns and disposes its eventual handle.
-        handle = await new Promise<ConversationObservationHandle>((resolve, reject) => {
-          const cancelled = () => reject(openingController.signal.reason)
-          openingController.signal.addEventListener('abort', cancelled, { once: true })
-          if (openingController.signal.aborted) cancelled()
-          observed.then(value => {
-            openingController.signal.removeEventListener('abort', cancelled)
-            if (openingController.signal.aborted) value.dispose()
-            else resolve(value)
-          }, error => {
-            openingController.signal.removeEventListener('abort', cancelled)
-            reject(error)
-          })
-        })
+        handle = await awaitObservation(observed, openingController.signal)
       } catch (error) {
         dispose()
         note({ phase: 'watch-closed', watchId, attemptId, reason: diagnosticErrorReason(error), ...conversationDiagnosticFrame(snapshot) })
@@ -300,6 +308,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
         let complete: ConversationWindowSnapshot | null = null
         let reopenExpired = false
         let prepared: PreparedObservation | undefined
+        let currentSource: ConversationObservationHandle | undefined
         let admission: PendingFrame['admission']
         let released = false
         const releaseComplete = () => {
@@ -308,6 +317,23 @@ export function useConversationView(client: ConversationViewClient | null, refer
           }
         }
         try {
+          if (kind === 'latest' && !request.nativeSource && !request.record && !request.anchor) {
+            // The original current observation owns discovery, including a
+            // confirmed locator that could not yet be saved. Keep it alive
+            // through this same consumer's current read→view-watch handoff.
+            try {
+              currentSource = await awaitObservation(client.observeConversation(ref, observation => {
+                if (!isCurrent()) return
+                if (observation.kind === 'unavailable') {
+                  setState(value => ({ ...value, observationError: Object.assign(new Error(observation.message), { code: observation.code }) }))
+                } else current.dirty = true
+              }, { signal: requestSignal }), requestSignal)
+            } catch (error) {
+              if (!isCurrent()) return
+              // Observation uncertainty cannot take away retained saved reads.
+              setState(value => ({ ...value, observationError: errorOf(error) }))
+            }
+          }
           let assembly: ConversationWindowAssembly | undefined, cursor: string | undefined
           let more = false
           do {
@@ -429,6 +455,7 @@ export function useConversationView(client: ConversationViewClient | null, refer
           if (kind === 'resume' && ['CONTROL_UNAVAILABLE', 'CONTROL_TIMEOUT'].includes(code ?? '')) reconnect()
         } }
         finally {
+          currentSource?.dispose()
           note({ phase: 'read-ended', attemptId: attempt.id, operation: kind,
             ...(requestSignal.aborted ? { reason: 'cancelled' as const } : {}) })
           flush('progress')
