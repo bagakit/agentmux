@@ -15,6 +15,7 @@ import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { activityReadingProps } from './helpers/activity-reading-props'
 import { desktopConversationReadBridge } from './helpers/conversation-read-bridge'
+import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
 
 const NOTE = 'Keep the original local context.'
 const context = composeOutboundMessage({ amux: NOTE })
@@ -60,14 +61,15 @@ async function fixture(bodies: readonly string[]) {
   const native = await nativeHistoryFixture('claude', jsonl(bodies.map((text, index) => ({ sessionId: 'native-main', uuid: ids[index], type: 'user', message: { role: 'user', content: text } }))))
   natives.push(native)
   originalMetadata.set(native, await native.store.load())
-  const reads = vi.spyOn(native.client, 'sessionHistoryPage'), page = await native.client.sessionHistoryPage(native.session.agentSessionId, { limit: 30 })
+  const page = await native.client.sessionHistoryPage(native.session.agentSessionId, { limit: 30 })
   expect(page.items.map(item => [item.id, item.kind, item.startedAt])).toEqual(ids.map(id => [id, 'user-message', undefined]))
   expect(page.items.map(item => item.contentParts)).toEqual(bodies.map(text => [{ kind: 'text', text, contentEligibility: 'unconfirmed' }]))
   const messages = projectSessionUserMessages({ agentSessionId: page.agentSessionId, historyPage: page })
   expect(messages.map(message => [message.rawId, message.author.kind, message.recordedAt])).toEqual(ids.map(id => [id, 'unknown', undefined]))
   expect(messages.map(message => message.content)).toEqual(bodies)
+  const windows = vi.spyOn(native.client, 'readAgentConversation'), changes = vi.spyOn(native.client, 'readConversationChanges')
   await desktopConversationReadBridge(native, bridges)
-  return { ...native, ids, bodies, page, messages, reads }
+  return { ...native, ids, bodies, page, messages, windows, changes }
 }
 function activity(f: Awaited<ReturnType<typeof fixture>>, state: 'done' | 'working' = 'done') {
   return <ActivityView {...activityReadingProps({ control: f.session })} displayState={state} nativeHistoryPage={f.page} />
@@ -78,6 +80,32 @@ async function draw(f: Awaited<ReturnType<typeof fixture>>, state: 'done' | 'wor
     await act(async () => { await Promise.resolve() })
     expect([...host.querySelectorAll<HTMLElement>('[data-native-record-id]')].map(row => row.dataset.nativeRecordId)).toEqual(f.ids)
   })
+}
+async function originalWindow(f: Awaited<ReturnType<typeof fixture>>) {
+  const records = f.ids.map(recordId => ({ hostId: 'local', agentSessionId: f.session.agentSessionId,
+    source: { kind: 'native' as const, ...f.page.source, recordId } }))
+  await vi.waitFor(async () => {
+    await act(async () => { await Promise.resolve() })
+    const consumers = inspectConversationConsumers({ hostId: 'local', agentSessionId: f.session.agentSessionId, records }).consumers
+    expect(consumers).toHaveLength(1)
+    expect(consumers[0]).toMatchObject({ loading: false, inFlight: false, dirty: false, error: null, sourceError: null,
+      observationError: null, watch: { binding: false, bound: true, closed: false },
+      accepted: { recordCount: f.ids.length, membership: records.map(record => ({ record, present: true })) } })
+  })
+  // The explicit seed above verifies the Provider page. Only this public window
+  // owns Activity's rendered records; the Reader no longer calls sessionHistoryPage.
+  expect(f.windows).toHaveBeenCalledOnce()
+  expect(f.windows.mock.calls[0]![0]).toMatchObject({ hostId: 'local', agentSessionId: f.session.agentSessionId })
+  const response = f.windows.mock.results[0]!
+  expect(response.type).toBe('return')
+  if (response.type !== 'return') throw new Error('The original Activity window did not return its public page')
+  const page = await response.value
+  expect(page.window.complete).toBe(true)
+  expect(page.scope.sources.filter(source => source.kind === 'native')).toEqual([{ kind: 'native', ...f.page.source }])
+  expect(page.items.flatMap(entry => entry.kind === 'item' ? entry.item.records.map(record => record.reference) : [])
+    .sort((a, b) => a.source.recordId.localeCompare(b.source.recordId))).toEqual(records)
+  expect(inspectConversationConsumers({ hostId: 'local', agentSessionId: f.session.agentSessionId }).consumers[0]!.accepted!.id).toBe(page.window.id)
+  for (const [input] of f.changes.mock.calls) expect(input).toMatchObject({ hostId: 'local', agentSessionId: f.session.agentSessionId })
 }
 function turn(id: string) { const row = host.querySelector<HTMLElement>(`[data-native-record-id="${id}"] .log-turn`); expect(row).not.toBeNull(); return row! }
 function paragraph(row: HTMLElement) { const p = row.querySelector<HTMLElement>('.log-turn__text p.md-paragraph'); expect(p).not.toBeNull(); return p! }
@@ -104,7 +132,7 @@ it('actual Claude declaration separators use shared Markdown paragraphs while pr
     expect([...p.childNodes].map(node => node.nodeName)).toEqual(['#text'])
     expect(row.querySelectorAll('.log-turn__declared-context')).toHaveLength(1); await copy(row, variant.wire)
   }
-  expect(f.reads).toHaveBeenCalledTimes(2)
+  await originalWindow(f)
 })
 
 it('undeclared input keeps shared Markdown hard breaks while unmarked standalone text preserves whitespace and file references', async () => {
@@ -122,7 +150,7 @@ it('undeclared input keeps shared Markdown hard breaks while unmarked standalone
   await act(async () => root.render(<>{activity(f)}<AgentMarkdown content={unmarked} className="spacing-original-class" workspaceRoot={f.root} openWorkspaceFile={open} /></>))
   const custom = host.querySelector<HTMLElement>('p.spacing-original-class'); expect(custom).not.toBeNull(); expect(custom!.classList.contains('md-paragraph')).toBe(true); expect(custom!.textContent).toBe(unmarked)
   const reference = custom!.querySelector<HTMLButtonElement>('button.md-link--file'); expect(reference).not.toBeNull()
-  await act(async () => reference!.click()); expect(open).toHaveBeenCalledOnce(); expect(open.mock.calls[0]![0]).toBe('src/task.ts'); expect(f.reads).toHaveBeenCalledTimes(2)
+  await act(async () => reference!.click()); expect(open).toHaveBeenCalledOnce(); expect(open.mock.calls[0]![0]).toBe('src/task.ts'); await originalWindow(f)
 })
 
 it('actual Claude declaration tails preserve four-space Markdown code and indented XML literals including line-end spaces', async () => {
@@ -135,7 +163,7 @@ it('actual Claude declaration tails preserve four-space Markdown code and indent
   const literalRow = turn(f.ids[1]!); expect(literalRow.querySelectorAll('.log-turn__declared-context')).toHaveLength(1)
   expect(literalRow.querySelector('pre code')?.textContent).toBe('<amux from="amux">Original indented literal.</amux>  ')
   expect(literalRow.querySelector('pre code amux')).toBeNull(); await copy(literalRow, literal)
-  expect(f.reads).toHaveBeenCalledTimes(2)
+  await originalWindow(f)
 })
 
 it('actual three-record reading keeps IDs, unknown facts, paragraph DOM and Range, disclosure, scroll, stored draft and complete raw Copy across rerender', async () => {
@@ -149,11 +177,11 @@ it('actual three-record reading keeps IDs, unknown facts, paragraph DOM and Rang
   await draw(f, 'working'); expect(turn(f.ids[0]!)).toBe(row); expect(paragraph(row)).toBe(p); expect(row.querySelector('.log-turn__text')).toBe(body)
   expect(row.querySelector('details.log-turn__declared-context')).toBe(disclosure); expect(disclosure.open).toBe(true); expect(range.startContainer).toBe(text); expect(window.getSelection()!.toString()).toBe('Clarify'); expect(feed!.scrollTop).toBe(167)
   const noTail = turn(f.ids[1]!); expect(parseAgentMuxMessagePrefix(contextOnly.text)?.body).toBe(''); expect(noTail.querySelectorAll('.log-turn__text p.md-paragraph')).toHaveLength(0); expect(noTail.querySelectorAll('.log-turn__declared-context')).toHaveLength(1)
-  expect(row.querySelector('.log-turn__who')?.textContent).toBe('You'); expect(row.querySelector('.log-turn__declared-source')).toBeNull(); await copy(row, plain); expect(f.reads).toHaveBeenCalledTimes(2)
+  expect(row.querySelector('.log-turn__who')?.textContent).toBe('You'); expect(row.querySelector('.log-turn__declared-source')).toBeNull(); await copy(row, plain); await originalWindow(f)
   if (process.env.AGENTMUX_CONTEXT_SPACING_SCENE_OUTPUT) {
     const output = resolve(process.env.AGENTMUX_CONTEXT_SPACING_SCENE_OUTPUT); await mkdir(resolve(output, '..'), { recursive: true })
     await writeFile(output, JSON.stringify({ schema: 'agentmux.conversation-declared-context-spacing-public-scene.v1', page: f.page, messages: f.messages, draft: DRAFT,
-      producer: { plain, contextOnly, code, originalCodeTail: CODE_TAIL }, kernelControls: f.controls.map(control => control.mock.calls.length), uiControls: controls.map(control => control.mock.calls.length), readerCalls: f.reads.mock.calls.length,
-      provenance: 'Actual public compose → private FileStore and built-in Claude reader → public projector → actual Activity/NativeThread/Message. Original unknown authors, IDs, parts and absent recorded time retained.' }, null, 2))
+      producer: { plain, contextOnly, code, originalCodeTail: CODE_TAIL }, kernelControls: f.controls.map(control => control.mock.calls.length), uiControls: controls.map(control => control.mock.calls.length), conversationWindowReads: f.windows.mock.calls.length, conversationChangesReads: f.changes.mock.calls.length,
+      provenance: 'Actual public compose → private FileStore and built-in Claude reader → public Core window over Unix/MainIPC/preload → actual Activity/Message. Original unknown authors, IDs, parts and absent recorded time retained.' }, null, 2))
   }
 })
