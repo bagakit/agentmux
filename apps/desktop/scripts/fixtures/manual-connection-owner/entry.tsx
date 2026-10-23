@@ -8,19 +8,26 @@ import { mountThemeRuntime } from '@agentmux/client-ui/theme'
 import '../../../src/renderer/src/styles/index.css'
 
 // Production Settings presentation; all business DTOs here are controlled synthetic preview inputs.
-const target = { hostId: 'build-host', runtimeId: 'original-build-runtime' }
+const target = { hostId: 'build-host', runtimeId: 'original-build-runtime' }, local = { hostId: 'local', runtimeId: 'original-local-runtime' }
 const records: ConnectionRecord[] = [], operations = new Map<string, ConnectionOperation>(), credentials = new Map<string, { credentialRef: string }>()
-const config = { ...await api.config.get(), hosts: [{ id: 'build-host', kind: 'ssh' as const, label: 'Build server', hostname: 'build.invalid' }], workspaces: [] }
+const config = { ...await api.config.get(), hosts: [{ id: 'build-host', kind: 'ssh' as const, label: 'Build server', hostname: 'build.invalid' }], workspaces: [], startup: { skipAgentAvailabilityCheckWait: true } }
+api.config.get = async () => config
+api.sessions.snapshot = async () => ({ sessions: [], timelines: {}, recoveryCandidates: [] })
+window.localStorage.clear(); await useAppStore.persist.rehydrate()
+const stop = await useAppStore.getState().initialize(); stop()
 useAppStore.setState({ config, sessions: [], botTaskSelections: {}, manualConnectionIntents: {}, manualConnectionSelections: { lark: target } })
 mountThemeRuntime(window, config.appearance)
 api.connections.inspectCredential = async operation => credentials.get(operation) ?? null
 api.connections.storeCredential = async input => { const ref = { credentialRef: 'synthetic-private-reference' }; credentials.set(input.operationId, ref); return ref }
 api.ui.openExternal = async () => {}
+api.connections.hostingTarget = async (hostId = 'local') => hostId === 'local' ? local : target
 let loseReply = true
 api.connections.call = async <M extends ConnectionMethod>(method: M, input: ConnectionParamsMap[M], owner = target): Promise<ConnectionResultMap[M]> => {
-  if (owner.hostId !== target.hostId || owner.runtimeId !== target.runtimeId) throw Error('Preview owner mismatch')
+  if (![target, local].some(original => owner.hostId === original.hostId && owner.runtimeId === original.runtimeId)) throw Error('Preview owner mismatch')
   let result: unknown
-  if (method === 'connection.ls') result = { connections: records }
+  if (method === 'connection.service.get') result = { enabled: false, revision: 1 }
+  else if (method === 'connection.enrollment.ls' || method === 'connection.setup.ls') result = { operations: [], next: null }
+  else if (method === 'connection.ls') result = { connections: records }
   else if (method === 'connection.inspect') {
     const p = input as ConnectionParamsMap['connection.inspect']
     const operation = p.operationId ? operations.get(p.operationId) ?? null : null
@@ -37,9 +44,16 @@ api.connections.call = async <M extends ConnectionMethod>(method: M, input: Conn
   else throw Error('Preview does not perform ' + method)
   return structuredClone(result) as ConnectionResultMap[M]
 }
-const proof = { ready: false, errors: [] as string[] }
+const root = createRoot(document.getElementById('root')!), render = (scene: string) => root.render(<DesktopClientUiProvider><SettingsPanel key={scene} visible initialSection="lark" onClose={() => {}} /></DesktopClientUiProvider>)
+const proof = { ready: false, errors: [] as string[], showDefault() {
+  records.length = 0
+  useAppStore.setState({ manualConnectionSelections: {}, manualConnectionIntents: {}, botTaskSelections: {} }); render('default')
+}, showOwnerless() {
+  const original = { channel: 'lark' as const, target: null, draft: { view: 'new' as const, label: 'Original bot', appId: 'cli_original_unknown_owner', domain: 'open.feishu.cn', enabled: false }, pending: { operationId: 'original-save-unconfirmed', expectedRevision: null, connection: { connectionId: 'original-application', adapterId: 'feishu', application: { domain: 'open.feishu.cn', appId: 'cli_original_unknown_owner' }, label: 'Original bot', enabled: false, credentialRef: '' } } }
+  useAppStore.setState({ manualConnectionIntents: { [JSON.stringify(['lark', null, null])]: original } }); render('ownerless')
+} }
 Object.assign(window, { manualOwnerProof: proof })
 window.addEventListener('error', event => proof.errors.push(event.message))
 window.addEventListener('unhandledrejection', event => proof.errors.push(String(event.reason)))
-createRoot(document.getElementById('root')!).render(<DesktopClientUiProvider><SettingsPanel visible initialSection="lark" onClose={() => {}} /></DesktopClientUiProvider>)
+render('remote')
 proof.ready = true
