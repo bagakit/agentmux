@@ -24,7 +24,7 @@ const changes: Record<string, [string, string, string]> = {
   consumption: ['apps/desktop/src/renderer/src/lib/use-performance-observation.ts', 'if (!active) { setPending(false); return }', 'if (true) { setPending(false); return }'],
   release: ['apps/desktop/src/renderer/src/lib/use-performance-observation.ts', 'return () => { connected = false; lease?.dispose() }', 'return () => { connected = false }'],
   focus: ['apps/desktop/src/renderer/src/components/performance/PerformancePopover.tsx', "origin.current = 'hover'; setOpen(true)", "origin.current = 'hover'; setOpen(true); trigger.current?.focus()"],
-  age: ['apps/desktop/src/renderer/src/components/performance/PerformanceOverview.tsx', 'readingTime(source?.lastSuccessAt, snapshot?.observedAt)', 'readingTime(snapshot?.observedAt, snapshot?.observedAt)']
+  age: ['apps/desktop/src/renderer/src/components/performance/PerformanceResourceDetails.tsx', 'readingTime(source?.lastSuccessAt, snapshot?.observedAt)', 'readingTime(snapshot?.observedAt, snapshot?.observedAt)']
 }
 assert.ok(mutant === 'baseline' || changes[mutant], '已知 owning 变异，不接受空名称')
 mkdirSync(evidence, { recursive: true })
@@ -40,7 +40,7 @@ export default defineConfig({ ...original, root, resolve:{...original.resolve,co
     if (path.endsWith('/performance/PerformancePanel.tsx')) {
       observeOne('memo(function PerformancePanel(selection: ToolkitPopoverSelection) {', "memo(function PerformancePanel(selection: ToolkitPopoverSelection) { globalThis.__performanceUIRecord?.('panel-render')")
     }
-    if (path.endsWith('/performance/PerformanceOverview.tsx')) {
+    if (path.endsWith('/performance/PerformanceResourceDetails.tsx')) {
       observeOne("  const [scope, setScope] = useState<'app' | 'runs' | 'runtime'>('app')", "  globalThis.__performanceUIRecord?.('overview-render')\n  const [scope, setScope] = useState<'app' | 'runs' | 'runtime'>('app')")
     }
     if (path.endsWith('/lib/toolkit-agent-card-facts.ts')) {

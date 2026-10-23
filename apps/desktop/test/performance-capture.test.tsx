@@ -486,3 +486,24 @@ it('exports original native gzip bytes through the actual trace button and keeps
   expect(JSON.parse(await downloads[1]!.blob.text())).toEqual({ ...original, trace: { ...trace, data: '(export original native gzip)' } })
   expect(decode).toHaveBeenCalledOnce(); expect(tracePort).toHaveBeenCalledOnce(); expect(profilePort).not.toHaveBeenCalled()
 })
+
+it('keeps the original live and imported analysis while navigating the workbench and expanding its view', async () => {
+  await render(); await click('[data-performance-section-tab="diagnostics"]')
+  await click(sampleButton); await click('.performance-module-row')
+  const live = node('.performance-frame-detail'), liveText = live.textContent, captureView = node('[aria-label="Capture result"]')
+  expect(liveText).not.toContain('(root)')
+  await click('[data-performance-section-tab="artifacts"]')
+  await chooseLocalProfile(localProfileFile()); await waitForLocalProfile('saved.cpuprofile')
+  await click('[aria-label="Imported CPU profile"] .performance-module-row')
+  const imported = node('[aria-label="Imported CPU profile"]'), frame = imported.querySelector('.performance-frame-detail')!
+  const originalText = frame.textContent
+  await click('[aria-label="Expand Performance"]'); await click('[data-performance-section-tab="resources"]')
+  await click('[data-performance-section-tab="overview"]'); await click('[aria-label="Compact Performance"]')
+  await click('[data-performance-section-tab="artifacts"]')
+  expect(node('[aria-label="Imported CPU profile"]')).toBe(imported)
+  expect(imported.querySelector('.performance-frame-detail')).toBe(frame); expect(frame.textContent).toBe(originalText)
+  await click('[data-performance-section-tab="diagnostics"]')
+  expect(node('[aria-label="Capture result"]')).toBe(captureView); expect(node('.performance-frame-detail')).toBe(live)
+  expect(live.textContent).toBe(liveText); expect(profilePort).toHaveBeenCalledOnce()
+  expect(tracePort).not.toHaveBeenCalled(); expect(scenePort).not.toHaveBeenCalled()
+})
