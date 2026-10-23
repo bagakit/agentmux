@@ -40,7 +40,7 @@ const inputPaths = [...await files(fixture), path.join(import.meta.dirname, 'ver
     'apps/mobile/package.json', 'apps/mobile/tsconfig.json'].map(file => path.join(root, file)),
   ...await files(path.join(root, 'apps/desktop/src')), ...await files(path.join(root, 'packages/client-ui/src')), ...await files(path.join(root, 'packages/core/src')),
   ...await files(path.join(root, 'packages/core/dist')), ...await files(path.join(root, 'packages/layout/src')),
-  ...(await Promise.all(['identity', 'demand', 'relay', 'git', 'diagnostic-evidence', 'connectors'].flatMap(pkg => ['src', 'dist'].map(directory => files(path.join(root, 'packages', pkg, directory)))))).flat()]
+  ...(await Promise.all(['identity', 'demand', 'relay', 'git', 'diagnostic-evidence', 'connectors', 'capsule'].flatMap(pkg => ['src', 'dist'].map(directory => files(path.join(root, 'packages', pkg, directory)))))).flat()]
 for (const entry of await fs.readdir(path.join(root, 'packages'), { withFileTypes: true })) {
   if (!entry.isDirectory()) continue
   const manifest = path.join(root, 'packages', entry.name, 'package.json')
