@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { createBrowserPageDispatch } from '../src/main/browser-page-dispatch.js'
 import { DEFAULT_BROWSER_AGENT_CONTROL, type BrowserAgentControlPreferences } from '../src/shared/browser-agent-control.js'
 
-const native = vi.hoisted(() => ({ views: [] as any[], mode: 'click', key: undefined as string | undefined, onFeedback: undefined as undefined | (() => void), onWaiting: undefined as undefined | (() => Promise<void>), displayFails: false, displayThrows: false, displayAllThrows: false, controlDisplayFails: false, observe: undefined as undefined | (() => Promise<unknown>), takeover: undefined as undefined | (() => void), deferredCloseId: undefined as number | undefined,
+const native = vi.hoisted(() => ({ views: [] as any[], mode: 'click', key: undefined as string | undefined, priorRef: undefined as string | undefined, onFeedback: undefined as undefined | (() => void), onWaiting: undefined as undefined | (() => Promise<void>), onAfterAction: undefined as undefined | (() => Promise<void>), failResolves: 0, displayFails: false, displayThrows: false, displayAllThrows: false, controlDisplayFails: false, observe: undefined as undefined | (() => Promise<unknown>), takeover: undefined as undefined | (() => void), deferredCloseId: undefined as number | undefined,
   nextLoadURL: undefined as undefined | ((contents: any, url: string) => Promise<void>) }))
 vi.mock('../src/main/browser-page-dispatch.js', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/main/browser-page-dispatch.js')>()
@@ -22,7 +22,14 @@ vi.mock('../src/main/browser-page-dispatch.js', async importOriginal => {
 })
 vi.mock('../src/main/browser-script-runner.js', () => ({ runBrowserScript: async ({ onPageCall }: any) => {
   try {
+    if (native.mode === 'prior-ref') {
+      await onPageCall('click', [native.priorRef])
+      await native.onAfterAction?.()
+      return { completed: true, value: true, logs: [] }
+    }
     const page = await onPageCall('snapshot', [])
+    native.priorRef = page.nodes[0].ref
+    native.observe = () => onPageCall('snapshot', [])
     if (native.mode === 'held-wait') {
       const waiting = onPageCall('wait', [0])
       await native.onWaiting!()
@@ -38,6 +45,7 @@ vi.mock('../src/main/browser-script-runner.js', () => ({ runBrowserScript: async
       const next = await onPageCall('snapshot', [])
       await onPageCall('click', [next.nodes[0].ref])
     }
+    await native.onAfterAction?.()
     return { completed: true, value: true, logs: [] }
   } catch (error) { return { completed: false, failure: { kind: 'script-error', message: String(error) }, logs: [] } }
 } }))
@@ -57,7 +65,10 @@ vi.mock('electron', async () => {
         if (method === 'Page.getFrameTree') return { frameTree: { frame: { id: 'main', loaderId: 'loaded' } } }
         if (method === 'Page.createIsolatedWorld') return { executionContextId: 8 }
         if (method === 'Accessibility.getFullAXTree') return { nodes: [{ nodeId: '1', backendDOMNodeId: 11, role: { value: 'button' }, name: { value: 'Continue' }, childIds: [] }] }
-        if (method === 'DOM.resolveNode') return { object: { objectId: params.executionContextId ? 'feedback-object' : 'action-object' } }
+        if (method === 'DOM.resolveNode') {
+          if (!params.executionContextId && native.failResolves > 0) { native.failResolves--; throw new Error('Controlled original locator became stale') }
+          return { object: { objectId: params.executionContextId ? 'feedback-object' : 'action-object' } }
+        }
         if (method === 'Runtime.evaluate') {
           const code = params.expression ?? '', start = code.lastIndexOf(')(')
           if (start >= 0 && code.slice(start + 2, -1).startsWith('{')) this.documentPayloads.push(JSON.parse(code.slice(start + 2, -1)))
@@ -125,6 +136,9 @@ vi.mock('electron', async () => {
 })
 import { BrowserViewManager } from '../src/main/browser-view-manager.js'
 import { BrowserRefLedgerStore } from '../src/main/browser-ref-ledger-store.js'
+import { BrowserOperationJournal, BrowserOperationFileStore } from '../src/main/browser-operation-journal.js'
+import { BrowserStepEvidenceStore } from '../src/main/browser-step-evidence.js'
+import { BrowserTaskAssets, BrowserTaskAssetFileStore } from '../src/main/browser-task-assets.js'
 import { NativeOverlaySurfaces } from '../src/main/native-overlay-surfaces.js'
 const roots: string[] = [], managers: BrowserViewManager[] = []
 afterEach(async () => {
@@ -135,11 +149,12 @@ afterEach(async () => {
     expect(view.webContents.displays.filter((call: any) => call.family === 'unknown')).toEqual([])
   }
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true })
-  native.views.length = 0; native.mode = 'click'; native.key = undefined; native.onFeedback = undefined; native.onWaiting = undefined; native.displayFails = false; native.displayThrows = false; native.displayAllThrows = false; native.controlDisplayFails = false; native.observe = undefined; native.takeover = undefined; native.deferredCloseId = undefined; native.nextLoadURL = undefined
+  vi.restoreAllMocks()
+  native.views.length = 0; native.mode = 'click'; native.key = undefined; native.priorRef = undefined; native.onFeedback = undefined; native.onWaiting = undefined; native.onAfterAction = undefined; native.failResolves = 0; native.displayFails = false; native.displayThrows = false; native.displayAllThrows = false; native.controlDisplayFails = false; native.observe = undefined; native.takeover = undefined; native.deferredCloseId = undefined; native.nextLoadURL = undefined
 })
 const actionPayloads = (contents: any, start = 0): any[] => contents.displays.slice(start).filter((call: any) => call.family === 'action').map((call: any) => call.payload)
 const controlPayloads = (contents: any): any[] => contents.displays.filter((call: any) => call.family === 'control').map((call: any) => call.payload)
-async function managerFixture(preferences?: () => BrowserAgentControlPreferences, options: { nativeVisible?: boolean } = {}) {
+async function managerFixture(preferences?: () => BrowserAgentControlPreferences, options: { nativeVisible?: boolean; journal?: boolean; evidence?: boolean; assets?: boolean } = {}) {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-action-feedback-source-")); roots.push(root)
   const children: any[] = [], events: any[] = []
   const rendererUrl = _hygiene_fixtureFileUrl('app/renderer/index.html')
@@ -155,9 +170,12 @@ async function managerFixture(preferences?: () => BrowserAgentControlPreferences
       getZoomFactor: () => 1, beginFrameSubscription: vi.fn(), endFrameSubscription: vi.fn(),
       capturePage: vi.fn(async () => ({ isEmpty: () => false, toPNG: () => Buffer.from('original Renderer chrome') })),
       send: (_name: string, e: any) => events.push(structuredClone(e)) }) })
+  const journal = options.journal ? new BrowserOperationJournal(new BrowserOperationFileStore(join(root, 'operations.json'))) : undefined
+  const evidence = options.evidence ? new BrowserStepEvidenceStore(join(root, 'evidence')) : undefined
+  const assets = options.assets ? new BrowserTaskAssets(new BrowserTaskAssetFileStore(join(root, 'assets.json'))) : undefined
   const manager = new BrowserViewManager(window as never, { defaultProfileId: () => 'default', resolvePartition: () => 'persist:feedback' },
     new BrowserRefLedgerStore(join(root, 'refs.json')), { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal() {} },
-    undefined, undefined, undefined, undefined, undefined, undefined, undefined, preferences)
+    journal, evidence, undefined, undefined, assets, undefined, undefined, preferences)
   managers.push(manager)
   // These control-decoration scenes already have an exact Agent; receiver-free Return is invalid.
   await manager.create('browser-one', 'https://generic.invalid/one', 'workspace', undefined, undefined, 'responsive', {
@@ -173,7 +191,7 @@ async function managerFixture(preferences?: () => BrowserAgentControlPreferences
       location: { displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'region' } },
     geometry: visible ? { visible: true, bounds: { x: 20, y: 30, width: 500, height: 400 } } : { visible: false }
   }, { processId: frame.processId, frameToken: frame.frameToken })
-  return { window, manager, contents: source.webContents, source, frame, register, sibling: sibling.webContents, siblingBefore, children, events }
+  return { root, window, manager, journal, evidence, assets, contents: source.webContents, source, frame, register, sibling: sibling.webContents, siblingBefore, children, events }
 }
 
 describe('Browser control decoration through actual Main ownership and presentation callbacks', () => {
@@ -504,7 +522,222 @@ describe('actual resolved document and sender after display', () => {
     expect(next.nodes.length).toBeGreaterThan(0); expect(next.navigationId).toBe(navigationId)
   })
 })
+const currentBrowser = (f: { events: any[] }) => f.events.filter(event => event.type === 'updated' && event.browser.id === 'browser-one').at(-1)!.browser
+async function noticeTask(f: Awaited<ReturnType<typeof managerFixture>>) {
+  const url = 'https://generic.invalid/one'
+  const imported = await f.assets!.importRecording({ id: 'notice-recording', browserId: 'browser-one', navigationId: 'recorded-document', url,
+    status: 'stopped', revision: 1, startedAt: 1, updatedAt: 2, steps: [] })
+  const edited = await f.assets!.edit(imported.id, imported.revision, { ...imported.draft, steps: [
+    { id: 'current-click', kind: 'click', url, reviewed: true, target: { role: 'button', name: 'Continue', ordinal: 1, count: 1 } },
+    { id: 'later-checkpoint', kind: 'checkpoint', url, reviewed: true }
+  ], completion: { criteria: [{ kind: 'human-checkpoint', checkpointId: 'later-checkpoint' }] } })
+  const asset = await f.assets!.saveVersion(edited.id, edited.revision)
+  return () => f.manager.runTaskAsset({ browserId: 'browser-one', assetId: asset.id, version: 1, parameters: {} })
+}
+
 describe('actual BrowserViewManager consumer', () => {
+  it('publishes actual ref-healing notes while the operation is still running', async () => {
+    const f = await managerFixture()
+    await f.manager.runScript('browser-one', 'record the prior ref')
+    native.mode = 'prior-ref'
+    let observed = false
+    native.onAfterAction = async () => {
+      const current = currentBrowser(f)
+      expect(current.activity.operation.phase).toBe('running')
+      expect(current.activity.warning).toBe(current.activity.operation.warning)
+      expect(current.activity.warning.length).toBeGreaterThan(0)
+      observed = true
+    }
+    expect((await f.manager.runScript('browser-one', 'use the original prior ref')).outcome.kind).toBe('indeterminate')
+    expect(observed).toBe(true); expect(f.contents.actions).toBe(2)
+  })
+
+  it('publishes one evidence-storage notice during the live program despite repeated capture failures', async () => {
+    const f = await managerFixture(undefined, { evidence: true })
+    vi.spyOn(f.evidence!, 'write').mockRejectedValue(new Error('Controlled optional evidence storage failure'))
+    native.onAfterAction = async () => {
+      await native.observe!()
+      const current = currentBrowser(f)
+      expect(current.activity.operation.phase).toBe('running')
+      expect(current.activity.warning).toContain('Step evidence could not be saved')
+      expect(current.activity.warning.match(/Step evidence could not be saved/gu)).toHaveLength(1)
+    }
+    const report = await f.manager.runScript('browser-one', 'observe and act with unavailable evidence')
+    expect(report.outcome.kind).toBe('completed'); expect(f.contents.actions).toBe(1)
+    expect(currentBrowser(f).activity.warning).toContain('Step evidence could not be saved')
+    expect(f.evidence!.write).toHaveBeenCalledTimes(2)
+  })
+
+  it('publishes local recovery and repeated completion-recording failure notices on the current original operation', async () => {
+    const f = await managerFixture(undefined, { journal: true, evidence: true, assets: true })
+    const run = await noticeTask(f); native.failResolves = 1
+    const report = await run()
+    const runningWarnings = f.events.filter(event => event.type === 'updated' && event.browser.id === 'browser-one' && event.browser.activity.operation?.phase === 'running')
+      .map(event => event.browser.activity.warning).filter(Boolean)
+    expect(runningWarnings, JSON.stringify(runningWarnings)).toContain('The recovery snapshot is incomplete. Inspect the page and its unavailable frames before retrying.')
+    expect(report.status).toBe('failed'); expect(f.contents.actions).toBe(0)
+    const operationId = report.operationIds[0]!
+    vi.spyOn(Reflect.get(f.journal!, 'saveStore'), 'save').mockRejectedValue(new Error('Controlled completion recording failure'))
+    const first = await f.manager.verifyOutcome('browser-one', operationId)
+    expect(first.warning).toContain('The result was checked but could not be saved')
+    await f.manager.verifyOutcome('browser-one', operationId)
+    expect(currentBrowser(f).activity.warning).toContain(first.warning)
+    expect(currentBrowser(f).activity.warning.match(/The result was checked but could not be saved/gu)).toHaveLength(1)
+    expect((await f.manager.getOperation(operationId))?.outcome?.evaluation?.warning).toBe(first.warning)
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands)
+  })
+
+  it('keeps completion registration storage failure visible before task script dispatch', async () => {
+    const f = await managerFixture(undefined, { journal: true, evidence: true, assets: true })
+    const run = await noticeTask(f), register = f.journal!.registerOutcome.bind(f.journal!)
+    vi.spyOn(f.journal!, 'registerOutcome').mockImplementation(async (...args) => {
+      const save = vi.spyOn(Reflect.get(f.journal!, 'saveStore'), 'save').mockRejectedValueOnce(new Error('Controlled declaration storage failure'))
+      try { return await register(...args) } finally { save.mockRestore() }
+    })
+    let observed = false
+    native.onAfterAction = async () => {
+      expect(currentBrowser(f).activity.operation.phase).toBe('running')
+      expect(currentBrowser(f).activity.warning).toContain('Completion recording is unavailable')
+      observed = true
+    }
+    await run()
+    expect(observed).toBe(true); expect(f.contents.actions).toBe(1)
+  })
+
+  it('keeps failed preparation current through a fresh program preparing, then clears only the recovered notice and retains history', async () => {
+    const f = await managerFixture(undefined, { journal: true })
+    native.nextLoadURL = async () => { throw new Error('Controlled native shield preparation failure') }
+    const original = await f.manager.runScript('browser-one', 'first preparation fails', undefined, undefined, 'isolation-prepare-original')
+    expect(original.outcome.kind).toBe('completed')
+    expect(currentBrowser(f)).toMatchObject({ control: { owner: 'agent', inputIsolation: 'unconfirmed' },
+      activity: { warning: expect.stringContaining('Native Browser input isolation is unconfirmed') } })
+    const history = await f.manager.getOperation(original.runOperation.id)
+    expect(history?.warning).toContain('Native input isolation was unconfirmed during this operation.')
+    expect(currentBrowser(f).activity.warning).toContain('submit a fresh Agent program')
+
+    let finish!: () => void, entered = false
+    native.nextLoadURL = async () => { entered = true; await new Promise<void>(resolve => { finish = resolve }) }
+    native.mode = 'held-wait'
+    native.onWaiting = async () => {
+      const current = currentBrowser(f)!
+      expect(current.control).toMatchObject({ owner: 'agent', inputIsolation: 'isolated' })
+      expect(current.activity.warning ?? '').not.toContain('Native Browser input isolation is unconfirmed')
+    }
+    const next = f.manager.runScript('browser-one', 'fresh program retries without a human handoff', undefined, undefined, 'isolation-prepare-fresh')
+    await vi.waitFor(() => expect(entered).toBe(true))
+    expect(currentBrowser(f)).toMatchObject({ control: { owner: 'agent', inputIsolation: 'preparing' },
+      activity: { warning: expect.stringContaining('Native Browser input isolation is unconfirmed') } })
+    finish()
+    expect((await next).outcome.kind).toBe('completed')
+    expect(currentBrowser(f)?.activity.warning ?? '').not.toContain('Native Browser input isolation is unconfirmed')
+    expect((await f.journal!.get(original.runOperation.id))?.warning).toBe(history?.warning)
+    expect(original.runOperation.warning).toBe(history?.warning)
+    expect(f.contents.isDestroyed()).toBe(false); expect(f.contents.actions).toBe(1)
+    expect(f.sibling.commands).toEqual(f.siblingBefore.commands); expect(f.sibling.scripts).toEqual(f.siblingBefore.scripts)
+  })
+
+  it('persists the original isolation incident before a failed program replaces its outcome warning', async () => {
+    const f = await managerFixture(undefined, { journal: true })
+    native.nextLoadURL = async () => { throw new Error('Controlled native shield preparation failure') }
+    native.mode = 'unsupported-page-method'
+    const report = await f.manager.runScript('browser-one', 'worker reports a separate script failure', undefined, undefined, 'isolation-before-failed-finish')
+    expect(report.outcome.kind).toBe('script-failed')
+    expect(currentBrowser(f).control.inputIsolation).toBe('unconfirmed')
+    expect(currentBrowser(f).activity.warning).toContain('Native Browser input isolation is unconfirmed')
+    const stored = await f.journal!.get(report.runOperation.id)
+    expect(stored?.phase).toBe('failed')
+    expect(stored?.warning).toContain('Native input isolation was unconfirmed during this operation.')
+    expect(stored?.warning).toContain('unsupported-page-method')
+    expect(stored?.warning).not.toContain('is unconfirmed')
+    expect(f.contents.isDestroyed()).toBe(false)
+  })
+
+  it('clears a failed native surface after explicit handoff without reviving its warning at the same operation completion', async () => {
+    const f = await managerFixture(undefined, { journal: true })
+    native.mode = 'held-wait'
+    native.onWaiting = async () => {
+      const shield = f.manager.nativeOwner('browser-one')!.inputShield!
+      shield.webContents.emit('render-process-gone')
+      const failed = currentBrowser(f)!
+      expect(failed.control).toMatchObject({ owner: 'agent', inputIsolation: 'unconfirmed' })
+      expect(failed.activity.warning).toContain('Native Browser input isolation is unconfirmed')
+      const entry = Reflect.get(f.manager, 'entries').get('browser-one')
+      entry.activity.warning += '\nOther current storage notice.'
+      f.manager.takeControl('browser-one')
+      expect(currentBrowser(f)).toMatchObject({ control: { owner: 'human', inputIsolation: 'inactive' } })
+      expect(currentBrowser(f)?.activity.warning ?? '').not.toContain('Native Browser input isolation is unconfirmed')
+      f.manager.returnControl('browser-one')
+      await vi.waitFor(() => expect(currentBrowser(f)?.control?.inputIsolation).toBe('isolated'))
+      expect(currentBrowser(f)?.activity.warning ?? '').not.toContain('Native Browser input isolation is unconfirmed')
+    }
+    const report = await f.manager.runScript('browser-one', 'native surface fails while worker waits', undefined, undefined, 'isolation-native-failure')
+    expect(report.outcome.kind).toBe('stopped')
+    expect(report.runOperation.warning).toContain('Native input isolation was unconfirmed during this operation.')
+    expect((await f.manager.getOperation(report.runOperation.id))?.warning).toContain('Native input isolation was unconfirmed during this operation.')
+    expect((await f.journal!.get(report.runOperation.id))?.warning).toContain('Native input isolation was unconfirmed during this operation.')
+    expect(currentBrowser(f)?.control).toMatchObject({ owner: 'agent', inputIsolation: 'isolated' })
+    expect(currentBrowser(f)?.activity.warning ?? '').not.toContain('Native Browser input isolation is unconfirmed')
+    expect(currentBrowser(f)?.activity.warning ?? '').not.toContain('Native input isolation was unconfirmed during this operation.')
+    expect(currentBrowser(f)?.activity.warning).toContain('Other current storage notice.')
+    expect(f.contents.isDestroyed()).toBe(false); expect(f.sibling.commands).toEqual(f.siblingBefore.commands)
+  })
+
+  it('retains unknown cleanup until the exact late release confirms human input inactive, preserving other notices', async () => {
+    const f = await managerFixture(); native.mode = 'held-wait'
+    let shield: any
+    native.onWaiting = async () => {
+      shield = f.manager.nativeOwner('browser-one')!.inputShield!
+      native.deferredCloseId = shield.webContents.id
+      shield.webContents.emit('render-process-gone')
+    }
+    const report = await f.manager.runScript('browser-one', 'late original native release', undefined, undefined, 'isolation-late-release')
+    const entry = Reflect.get(f.manager, 'entries').get('browser-one')
+    entry.activity.warning += '\nOther current storage notice.'
+    f.manager.takeControl('browser-one')
+    expect(currentBrowser(f)?.control).toMatchObject({ owner: 'human', inputIsolation: 'unconfirmed' })
+    expect(currentBrowser(f)?.activity.warning).toContain('Native Browser input isolation is unconfirmed')
+    expect(currentBrowser(f)?.activity.warning).toContain('Other current storage notice.')
+    shield.webContents.finishClose()
+    await vi.waitFor(() => expect(currentBrowser(f)?.control?.inputIsolation).toBe('inactive'))
+    expect(currentBrowser(f)?.activity.warning ?? '').not.toContain('Native Browser input isolation is unconfirmed')
+    expect(currentBrowser(f)?.activity.warning).toContain('Other current storage notice.')
+    expect(report.runOperation.warning).toContain('Native input isolation was unconfirmed during this operation.')
+    expect(currentBrowser(f)?.activity.warning ?? '').not.toContain('could not be fully released')
+    expect(report.runOperation.warning ?? '').not.toContain('could not be fully released')
+    expect(f.contents.isDestroyed()).toBe(false)
+  })
+
+  it('does not let a timed-out old preparation clear the newer exact surface failure', async () => {
+    const f = await managerFixture(undefined, { journal: true })
+    let finishOld!: () => void, oldContents: any
+    native.nextLoadURL = async contents => {
+      oldContents = contents
+      await new Promise<void>(resolve => { finishOld = resolve })
+    }
+    const original = await f.manager.runScript('browser-one', 'held native preparation exceeds its existing budget', undefined, undefined, 'isolation-timeout-original')
+    expect(original.outcome.kind).toBe('completed')
+    expect(currentBrowser(f).control.inputIsolation).toBe('unconfirmed')
+    expect(oldContents.isDestroyed()).toBe(true)
+    native.mode = 'held-wait'
+    native.onWaiting = async () => {
+      const currentShield = f.manager.nativeOwner('browser-one')!.inputShield!
+      expect(currentShield.webContents).not.toBe(oldContents)
+      currentShield.webContents.emit('render-process-gone')
+      expect(currentBrowser(f).activity.warning).toContain('Native Browser input isolation is unconfirmed')
+      const before = structuredClone(currentBrowser(f))
+      finishOld(); await Promise.resolve(); await Promise.resolve()
+      expect(currentBrowser(f).control).toEqual(before.control)
+      expect(currentBrowser(f).activity.warning).toBe(before.activity.warning)
+      expect(currentBrowser(f).activity.operation.id).toBe('isolation-timeout-new')
+    }
+    const next = await f.manager.runScript('browser-one', 'new exact surface independently fails', undefined, undefined, 'isolation-timeout-new')
+    expect(next.outcome.kind).toBe('completed')
+    expect(currentBrowser(f).control.inputIsolation).toBe('unconfirmed')
+    expect(currentBrowser(f).activity.warning).toContain('Native Browser input isolation is unconfirmed')
+    expect((await f.journal!.get(original.runOperation.id))?.warning).toBe(original.runOperation.warning)
+    expect(f.contents.isDestroyed()).toBe(false); expect(f.sibling.commands).toEqual(f.siblingBefore.commands)
+  })
+
   it.each(['completed', 'takeover'])('clears only its confirmed cleanup notice after delayed native destruction following %s', async ending => {
     const f = await managerFixture(); native.mode = 'held-wait'
     const operationId = 'delayed-close-' + ending
@@ -543,14 +776,14 @@ describe('actual BrowserViewManager consumer', () => {
     native.onWaiting = async () => {
       const before = f.events.at(-1).browser.activity.operation
       expect(before.id).toBe('new-operation')
-      expect(before.warning).toContain('Native Browser input isolation is unconfirmed')
+      expect(before.warning).toContain('Native input isolation was unconfirmed during this operation.')
       shield.webContents.finishClose(); await Promise.resolve(); await Promise.resolve()
       const after = f.events.at(-1).browser.activity.operation
-      expect(after.id).toBe('new-operation'); expect(after.warning).toContain('Native Browser input isolation is unconfirmed')
+      expect(after.id).toBe('new-operation'); expect(after.warning).toContain('Native input isolation was unconfirmed during this operation.')
     }
     const next = await f.manager.runScript('browser-one', 'new healthy program with retained input observation', undefined, undefined, 'new-operation')
-    expect(next.outcome.kind).toBe('completed'); expect(next.runOperation?.warning).toContain('Native Browser input isolation is unconfirmed')
-    expect(original.runOperation?.warning).toContain('Native Browser input isolation is unconfirmed')
+    expect(next.outcome.kind).toBe('completed'); expect(next.runOperation?.warning).toContain('Native input isolation was unconfirmed during this operation.')
+    expect(original.runOperation?.warning).toContain('Native input isolation was unconfirmed during this operation.')
   })
   it('consumes the saved pointer preferences and dispatch acknowledgement through the original target callback', async () => {
     const preferences = { ...DEFAULT_BROWSER_AGENT_CONTROL, pointerDurationMs: 530, clickRadius: 33, glowColor: '#3366cc' }
