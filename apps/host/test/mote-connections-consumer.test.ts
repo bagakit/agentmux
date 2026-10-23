@@ -154,9 +154,9 @@ it('the actual Node Host and compiled preference CLI share original exclusive cr
     content: 'Original Note edit.\n', baseContent: note, expectedRevision: 'sha256:' + sha(note), operationId: 'original-note-operation' })).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
   expect(f.writes).toBe(2)
   await expect(stat(join(f.physical, 'original.note.md'))).rejects.toMatchObject({ code: 'ENOENT' })
-  // Preserve the actual Host's existing generic bridge behavior, not a new
-  // catch-all execute or a new headless Space routing promise.
-  await expect(rpc.call('space.ls', { target: {} })).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
+  // Plain catalog reads use this same registered graph. Rich public Note writes
+  // above retain their original Desktop owner and cannot use the ordinary leaf.
+  expect((await rpc.call('space.ls', { target: {} })).catalog).toEqual(core.spatialCatalog(f.graph))
   expect((await rpc.call('system.endpoint', {})).protocol).toBe('jsonrpc-2.0')
   facts.push({ case: 'actual-sdk-cli-file-chain', helperSHA256: f.helperSHA256, writes: f.writes, finalRevision: 'sha256:' + sha(bytes), noDesktop: true, publicNoteUntouched: true })
 })
