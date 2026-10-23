@@ -110,6 +110,20 @@ export const AUTHORED_ICON_DEFINITIONS = {
       motion: { kind: "still", animation: "none", description: "阅读范围由原正文与按钮状态表达，摘录轮廓保持完整静止", trigger: "原相关块阅读动作；点击与视图切换不代表读取成功、正文写入或持续活动。" }
     }
   },
+  "note-block": {
+    shapes: [["rect",{"x":"4","y":"6","width":"16","height":"12","rx":"2"}],["path",{"d":"M8 10.5h8M8 14h5"}]],
+    design: {
+      rest: "无折角的横向圆角块卡与内部两条错长短线，表达单个语义内容块；区别于折角整页、书册与 Note 区域外框",
+      motion: { kind: "still", animation: "none", description: "块身份与关联状态由卡片边界和连线表达，图形保持完整静止", trigger: "按原 Note 语义块节点显示；不表示读取成功、保存或连接执行。" }
+    }
+  },
+  "shared-block": {
+    shapes: [["rect",{"x":"6","y":"5","width":"12","height":"14","rx":"2"}],["path",{"d":"M2 12h4M18 12h4M9.5 10h5M9.5 14h3"}]],
+    design: {
+      rest: "带左右连接短线的共享内容块卡，表达同一份独立原内容被多处引用；区别于单块与复制页",
+      motion: { kind: "still", animation: "none", description: "共享与桥接事实由原观察模型与连线表达，图形保持完整静止", trigger: "按已确认的共享 Markdown 实体显示；不随悬停或选择产生循环动画。" }
+    }
+  },
   "work-writing": {
     shapes: [["path",{"d":"M4 6h8 M4 12h5"}],["path",{"d":"M9 20l1-4 9-9 3 3-9 9-4 1Z","data-semantic-icon-part":"writing-pen"}]],
     design: {

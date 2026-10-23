@@ -30,33 +30,6 @@
     ]
   },
   {
-    "id": "shared-content",
-    "label": "共享内容",
-    "proposedSemantic": "object.shared-block",
-    "description": "一份完整正文，可被多个位置明确引用。",
-    "definitions": [
-      "docs/design/behavior/knowledge-workflows.md"
-    ],
-    "shapes": [
-      [
-        "rect",
-        {
-          "x": 6,
-          "y": 5,
-          "width": 12,
-          "height": 14,
-          "rx": 2
-        }
-      ],
-      [
-        "path",
-        {
-          "d": "M2 12h4M18 12h4M9.5 10h5M9.5 14h3"
-        }
-      ]
-    ]
-  },
-  {
     "id": "shared-source",
     "label": "共享来源",
     "proposedSemantic": "note.shared-source",
