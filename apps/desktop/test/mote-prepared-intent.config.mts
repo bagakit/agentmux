@@ -5,6 +5,10 @@ import { dirname, relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(resolve(root, 'packages/connectors/package.json'))
 const variants = {
+  'drop-retirement-lifetime': ['apps/desktop/src/renderer/src/lib/use-mote-bot-setup.ts', '          if (token !== lifetime.current || order !== occurrences.current.get(id)) return\n          accept(operation)', '          accept(operation)'],
+  'discard-intent-correlation': ['apps/desktop/src/renderer/src/store.ts', "  if (request.action === 'create') parseMoteConnectionResult('space.mote.connection.create', operation, request.input)\n  else parseMoteConnectionResult('space.mote.connection.sync', operation, request.input)", '  // The original admission correlation was removed.'],
+  'borrow-current-image': ['apps/desktop/src/renderer/src/components/MoteBotSetup.tsx', 'connectionProfileAvatarDigest(candidateImage) === operation?.snapshot.avatarSha256', 'true'],
+  'omit-target-recheck': ['packages/connectors/src/mote-connection-operations.ts', '// Requalify only this original target after asynchronous admission reads.\n    await this.ports.assertTarget(input.source.target)', '// The original target recheck was removed.'],
   'discard-historical-unknown': ['apps/desktop/src/renderer/src/lib/mote-bot-request.ts', "if (input.operationId === key) result[key] = { action: row.action, input, phase, inspectOnly: true } as MoteBotRequest", 'if (false) result[key] = { action: row.action, input, phase, inspectOnly: true } as MoteBotRequest'],
   'ignore-prepared-profile': ['packages/connectors/src/mote-connection-operations.ts', 'name: input.desired.name, description: input.desired.description,', "name: 'Substitute name', description: 'Substitute description',"],
   'ignore-prepared-png': ['packages/connectors/src/mote-connection-operations.ts', 'pngDataUrl: input.desired.avatar?.pngDataUrl ?? null,', 'pngDataUrl: null,'],

@@ -11,7 +11,7 @@ beforeEach(async () => { f = await moteBotUi() })
 afterEach(async () => { await f?.close() })
 async function text(value: string) { await vi.waitFor(async () => { await f.settle(); expect(document.body.textContent).toContain(value) }, { timeout: 4000 }) }
 const original = () => f.parentCalls.mock.calls.find(([m]) => m === 'space.mote.connection.create')![1] as any
-async function create(code = true) { await f.open(); await text('Saved public name'); await f.click('Create a bot for this Mote'); if (code) await text('Scan to sign in') }
+async function create(code = true) { await f.open(); await text('Saved public name'); await f.click('Sign in & continue'); if (code) await text('Scan to sign in') }
 async function confirmAndCreate() {
   const parent = (await f.client.call('space.mote.connection.inspect', { operationId: original().operationId })).operation!
   let view = await f.client.call('connection.enrollment.inspect', { operationId: parent.enrollmentOperationId! })
@@ -28,12 +28,13 @@ async function confirmAndCreate() {
 }
 
 it('creates the saved public profile once and keeps unconfirmed initial setup separate from its saved identity', async () => {
-  await create()
-  expect(document.querySelector('.mote-bot-confirmation')?.textContent).toContain('Sign in to Feishu')
+  await create(false)
+  await text('Check the account and enterprise')
+  expect(document.querySelector('.bot-task-eyebrow')?.textContent).toContain('Feishu')
   expect(document.body.textContent).not.toContain('DO-NOT-PUBLISH-DISPLAY')
-  expect(f.beginCount).toBe(1); expect(f.authenticationCount).toBe(0); expect(f.creationCount).toBe(0)
+  expect(f.beginCount).toBe(1); expect(f.authenticationCount).toBeGreaterThan(0); expect(f.creationCount).toBe(0)
   const current = document.querySelector('.mote-bot-auth-actions')!
-  expect([...current.querySelectorAll('.primary-button')].map(node => node.textContent)).toEqual(['Check sign-in'])
+  expect([...current.querySelectorAll('.primary-button')].map(node => node.textContent)).toEqual(['Confirm this account'])
   expect([...current.querySelectorAll('.small-button')].map(node => node.textContent)).toEqual([])
   expect(document.querySelector('.mote-details__issue')).toBeNull()
   const input = original()
@@ -42,7 +43,7 @@ it('creates the saved public profile once and keeps unconfirmed initial setup se
   expect(input.desired.avatar.pngDataUrl).toMatch(/^data:image\/png;base64,/)
   expect((await f.cli('ls', { target: f.target() })).operations[0].operationId).toBe(input.operationId)
   await confirmAndCreate()
-  await text('Original save confirmed'); await text('This setup needs attention')
+  await text('Original save confirmed'); await text('Check this setup step')
   const saved = (await f.client.call('space.mote.connection.inspect', { operationId: input.operationId })).operation!
   expect(saved.defaultSave?.observedReceipt?.status).toBe('saved')
   expect(saved.profileOperationId).toBeNull(); expect(saved.profile).toBeNull()
@@ -136,7 +137,7 @@ it('retains original create before a lost Renderer reply, discovers the same par
     if (method === 'space.mote.connection.create' && lose) { lose = false; throw new Error('Controlled lost Renderer reply') }
     return value
   })
-  await f.open(); await text('Saved public name'); await f.click('Create a bot for this Mote');
+  await f.open(); await text('Saved public name'); await f.click('Sign in & continue');
   await expect(f.parentCalls.mock.results[f.parentCalls.mock.calls.findIndex(([m]) => m === 'space.mote.connection.create')]!.value).rejects.toThrow('Controlled lost Renderer reply'); await text('This setup is not confirmed')
   const input = original(); expect(useAppStore.getState().moteBotRequests[input.operationId]?.input).toEqual(input)
   await f.click('Close bot choice'); await f.remount()
@@ -154,13 +155,13 @@ it('keeps an unresolved raw request discoverable when both the create reply and 
     if (method === 'space.mote.connection.create') { failed = true; throw new Error('Controlled lost Renderer reply') }
     return value
   })
-  await f.open(); await text('Saved public name'); await f.click('Create a bot for this Mote')
+  await f.open(); await text('Saved public name'); await f.click('Sign in & continue')
   await expect(f.parentCalls.mock.results[f.parentCalls.mock.calls.findIndex(([m]) => m === 'space.mote.connection.create')]!.value).rejects.toThrow('Controlled lost Renderer reply');
   await text('This setup is not confirmed'); const input = original()
   await vi.waitFor(async () => expect((await f.client.call('space.mote.connection.inspect', {operationId: input.operationId})).operation, 'The original public owner must record the same operation before testing Renderer reply loss').not.toBeNull())
   await f.click('Close bot choice'); await f.remount()
   await f.click('Previous bot operations'); await f.click('Unconfirmed bot setup · Creation'); await text('Scan to sign in')
-  expect(f.beginCount).toBe(1); expect(useAppStore.getState().moteBotRequests[input.operationId]?.input).toEqual(input)
+  expect(f.beginCount).toBe(1); expect(useAppStore.getState().moteBotRequests[input.operationId]).toBeUndefined()
 })
 
 it('does not let a late Mote A create result populate Mote B and allows an independent setup while A is waiting', async () => {
@@ -170,10 +171,10 @@ it('does not let a late Mote A create result populate Mote B and allows an indep
     if (method === 'space.mote.connection.create' && (input as any).source.target.spaceId === f.target().spaceId) await new Promise<void>(resolve => { release = resolve })
     return value
   })
-  await f.open(); await text('Saved public name'); await f.click('Create a bot for this Mote')
+  await f.open(); await text('Saved public name'); await f.click('Sign in & continue')
   await vi.waitFor(() => expect(release).toBeTypeOf('function'))
   const a = original().operationId
-  await f.render(1); await f.open(1); await text('Saved public name'); await f.click('Create a bot for this Mote'); await text('Scan to sign in')
+  await f.render(1); await f.open(1); await text('Saved public name'); await f.click('Sign in & continue'); await text('Scan to sign in')
   const b = (f.parentCalls.mock.calls.filter(([m]) => m === 'space.mote.connection.create').at(-1)![1] as any).operationId
   expect(b).not.toBe(a); expect(f.beginCount).toBe(2)
   await act(async () => release()); await f.settle()
@@ -210,7 +211,7 @@ it('changes the default through the original choice writer and reads the same ex
 
 it('keeps another original operation readable while an older query response is waiting', async () => {
   await create(); const a = original().operationId
-  await f.click('Create another bot'); await f.click('Start a separate setup'); await f.click('Create a bot for this Mote'); await text('Scan to sign in')
+  await f.click('Create another bot'); await f.click('Start a separate setup'); await f.click('Sign in & continue'); await text('Scan to sign in')
   const b = (f.parentCalls.mock.calls.filter(([m]) => m === 'space.mote.connection.create').at(-1)![1] as any).operationId
   let release!: () => void
   f.parentCalls.mockImplementation(async (method, input) => {
@@ -264,7 +265,7 @@ it('keeps the original Mote Profile caller and source preview while leaving the 
 it('retains a known not-dispatched request when local persistence is unavailable and explicitly continues that same request after recovery', async () => {
   await f.open(); await text('Saved public name')
   const store = vi.spyOn(window.localStorage, 'setItem').mockImplementation(() => { throw new Error('Controlled local persistence failure') })
-  await f.click('Create a bot for this Mote'); await text('No request was sent')
+  await f.click('Sign in & continue'); await text('No request was sent')
   const raw = Object.values(useAppStore.getState().moteBotRequests)[0]!
   expect(raw.phase).toBe('not-dispatched'); expect(f.beginCount).toBe(0)
   store.mockRestore()
