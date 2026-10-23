@@ -4,7 +4,7 @@ import { act } from 'react'
 import { createClientUiRoot as createRoot } from './helpers/client-ui-render'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ScratchTopicSnapshot } from '../src/shared/contracts'
-import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { SCRATCH_WORKSPACE_ID, PMO_TEAMS_TOPIC_ID, scratchTopicDirectoryName, scratchTopicLogicalPath } from '../src/shared/scratch-topics'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
@@ -266,7 +266,11 @@ it('the real 180px Space Mote keyboard menu pins and unpins the same archived ob
 })
 it('the real narrow Space Mote keyboard menu edits its exact original SOUL owner after menu close and keeps primary archive protection', async () => {
   selected(true); localStorage.setItem(savedMoteKey, JSON.stringify({ open: false, targetTopicId: customMoteId, targetTabId: customTab.id }))
-  const openFile = vi.spyOn(useAppStore.getState(), 'openFile').mockResolvedValue(true)
+  const path = scratchTopicLogicalPath(scratchWorkspace, catalog.find(topic => topic.id === customMoteId)!)! + '/SOUL.md'
+  vi.spyOn(api.files, 'observe').mockResolvedValue()
+  vi.spyOn(api.files, 'unobserve').mockResolvedValue()
+  const read = vi.spyOn(api.files, 'read').mockImplementation(async (_workspace, originalPath) => ({ status: 'read', document: {
+    path: originalPath, content: '# Original archived persona', revision: 'original-persona' } }))
   useAppStore.setState({ projectRailOpen: true, projectRailWidth: 180 }); await app.mount()
   await moteClick(button('Show archived Motes in Space')); app.ensureMote.mockClear()
   const original = document.querySelector<HTMLElement>(`[data-space-nav="topic:${customMoteId}"]`)!
@@ -274,8 +278,12 @@ it('the real narrow Space Mote keyboard menu edits its exact original SOUL owner
   const item = [...content.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Edit persona')
   expect(item).toBeDefined(); await moteClick(item!)
   expect(document.querySelector('[role="menu"]')).toBeNull()
-  expect(app.ensureMote).toHaveBeenCalledOnce(); expect(app.ensureMote).toHaveBeenCalledWith(SCRATCH_WORKSPACE_ID, customMoteId)
-  expect(openFile).toHaveBeenCalledOnce(); expect(openFile).toHaveBeenCalledWith('topic--launcher--analyst/SOUL.md', undefined, undefined, SCRATCH_WORKSPACE_ID)
+  expect(app.ensureMote).not.toHaveBeenCalled()
+  expect(read).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, path)
+  const state = useAppStore.getState(), selectedFile = state.workbenchSpaceSelection!
+  expect(selectedFile.topicId).toBe(customMoteId)
+  expect(state.tabs[selectedFile.tabId!]?.topicId).toBe(customMoteId)
+  expect(state.tabs[selectedFile.tabId!]?.regions[selectedFile.regionId!]).toMatchObject({ kind: 'file', workspaceId: SCRATCH_WORKSPACE_ID, path })
   expect(useAppStore.getState().tabs[customTab.id]!.regions[customTab.layout.activeRegionId]).toEqual(customTab.regions[customTab.layout.activeRegionId])
   expect(useAppStore.getState().agentComposerDrafts[customAgent.id]).toContain('Analyst unsent')
   expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled(); expect(app.enqueue).not.toHaveBeenCalled()

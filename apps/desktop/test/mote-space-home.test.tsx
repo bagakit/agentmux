@@ -4,13 +4,16 @@ import { createWorkspaceLayout } from '@agentmux/layout'
 import type { ContinuousProgressLoop, FileReadParams, FileReadResult } from '@agentmux/core'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { createMoteApp, moteClick, moteType, settleMoteApp, type MoteAppFixture } from './fixtures/mote-app'
-import { defaultAgent, defaultTab, neighborTab, customTab, customAgent, customMoteId, moteTopics, scratchWorkspace } from './fixtures/mote-workface'
+import { defaultAgent, defaultTab, neighborTab, customTab, customAgent, customMoteId, quietMoteId, moteTopics, scratchWorkspace } from './fixtures/mote-workface'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { beginMoteStartupRecovery } from '../src/renderer/src/lib/mote-session-recovery'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { desktopWorkbenchObservationSchema } from '../src/shared/client-observation'
-import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName } from '../src/shared/scratch-topics'
+import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID, scratchTopicDirectoryName, scratchTopicIdentityPath, scratchTopicLogicalPath } from '../src/shared/scratch-topics'
+import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
+import { createWorkbenchTab, documentKey, fileTabId } from '../src/renderer/src/lib/workbench-tabs'
+import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingOpen } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 
 let app: MoteAppFixture
 const rootPath = scratchTopicDirectoryName(PMO_TEAMS_TOPIC_ID)
@@ -50,6 +53,201 @@ beforeEach(() => {
   vi.spyOn(api.schedule, 'onChanged').mockImplementation(() => () => {})
 })
 afterEach(async () => { await app.dispose() })
+
+async function editPersona(topicId: string, floating = false) {
+  const row = floating ? app.panel().querySelector<HTMLElement>('[data-mote-topic-id="' + topicId + '"]')! : node<HTMLElement>('[data-space-nav="topic:' + topicId + '"]')
+  expect(row).not.toBeNull()
+  await act(async () => {
+    row.focus()
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }))
+  }); await settleMoteApp()
+  const menu = document.querySelector('[role="menu"]')
+  expect(menu).not.toBeNull()
+  const edit = [...menu!.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Edit persona')
+  expect(edit).toBeDefined(); await moteClick(edit!)
+  expect(document.querySelector('[role="menu"]')).toBeNull()
+}
+
+async function expectPersonaRegion(regionId: string) {
+  await vi.waitFor(() => {
+    const region = app.container.querySelector<HTMLElement>('.workspace-main-surface [data-workbench-region-id="' + regionId + '"]')
+    expect(region).not.toBeNull()
+    expect(region!.closest('[hidden], [inert], [aria-hidden="true"]')).toBeNull()
+  })
+}
+
+function emptyPersonaOwner(customDirectory = false, topicId = customMoteId) {
+  const original = moteTopics.find(topic => topic.id === topicId)!
+  const physicalDirectoryPath = scratchWorkspace.path + '/retained-persona'
+  const topic = customDirectory ? { ...original, physicalDirectoryPath, identityDirectoryPath: physicalDirectoryPath,
+    confirmedDirectoryPaths: [physicalDirectoryPath] } : original
+  const topics = moteTopics.map(item => item.id === topic.id ? topic : item)
+  vi.mocked(api.scratch.listTopics).mockResolvedValue(topics)
+  vi.mocked(api.scratch.readTopic).mockImplementation(async (_workspace, id) => topics.find(item => item.id === id) ?? null)
+  useAppStore.setState(state => ({ projectRailOpen: true,
+    tabs: Object.fromEntries(Object.entries(state.tabs).filter(([, tab]) => tab.topicId !== topic.id)),
+    layouts: { ...state.layouts, [SCRATCH_WORKSPACE_ID]: { ...state.layouts[SCRATCH_WORKSPACE_ID]!,
+      groups: state.layouts[SCRATCH_WORKSPACE_ID]!.groups.map(group => ({ ...group,
+        tabOrder: group.tabOrder.filter(id => state.tabs[id]?.topicId !== topic.id),
+        recentTabIds: group.recentTabIds.filter(id => state.tabs[id]?.topicId !== topic.id),
+        activeTabId: group.activeTabId && state.tabs[group.activeTabId]?.topicId === topic.id ? defaultTab.id : group.activeTabId })) } },
+    scratchTopicSnapshots: { ...state.scratchTopicSnapshots, [SCRATCH_WORKSPACE_ID]: { ...state.scratchTopicSnapshots[SCRATCH_WORKSPACE_ID]!, topics } }
+  }))
+  const spaceId = directoryIdentity(scratchWorkspace.hostId, scratchTopicIdentityPath(scratchWorkspace, topic))
+  return { topic, path: scratchTopicLogicalPath(scratchWorkspace, topic)! + '/SOUL.md', space: { spaceId, zoneId: homeZoneId(spaceId) } }
+}
+
+it.each([true, false])('keeps Space tool buttons in Discussion and the original sidebar reachable across Mote pages (sidebar open=%s)', async sidebarOpen => {
+  useAppStore.setState({ projectRailOpen: sidebarOpen, toolsOpen: sidebarOpen })
+  await app.mount()
+  const tools = node('[aria-label="Space tool selection"]'), header = tools.closest<HTMLElement>('header')!
+  const files = tools.querySelector('[data-space-tool="files-branches"]'), agents = tools.querySelector('[data-space-tool="agents"]')
+  expect(files).not.toBeNull(); expect(agents).not.toBeNull(); expect(header.hidden).toBe(false)
+  const before = useAppStore.getState()
+  for (const page of ['Profile', 'Ideas', 'Calendar']) {
+    await moteClick(button(page))
+    expect(node('[aria-label="Space tool selection"]')).toBe(tools)
+    expect(header.hidden).toBe(true)
+    if (!sidebarOpen) {
+      const sidebar = node<HTMLElement>('.mote-space-frame__header [data-project-rail-toggle]')
+      expect(sidebar.closest('[hidden]')).toBeNull()
+      expect(sidebar.getAttribute('aria-label')).toBe('Show projects sidebar')
+    }
+  }
+  await moteClick(button('Discussion'))
+  expect(header.hidden).toBe(false)
+  if (!sidebarOpen) expect(node('.mote-space-frame').querySelectorAll('[aria-label="Window sidebars"]')).toHaveLength(1)
+  expect(tools.querySelector('[data-space-tool="files-branches"]')).toBe(files)
+  expect(tools.querySelector('[data-space-tool="agents"]')).toBe(agents)
+  if (!sidebarOpen) {
+    await moteClick(button('Profile'))
+    await moteClick(node<HTMLElement>('.mote-space-frame__header [data-project-rail-toggle]'))
+    expect(useAppStore.getState().projectRailOpen).toBe(true)
+    expect(homeExpanded()).not.toBeNull()
+  }
+  expect(useAppStore.getState().tabs).toBe(before.tabs)
+  expect(useAppStore.getState().sessions).toBe(before.sessions)
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+})
+
+it.each([false, true])('the real persona menu opens its empty Mote owner while another Topic remains in the original layout (custom physical directory=%s)', async customDirectory => {
+  const owner = emptyPersonaOwner(customDirectory)
+  const read = vi.spyOn(api.files, 'read').mockImplementation(async (_workspace, path) => ({ status: 'read', document: { path, content: '# Original persona', revision } }))
+  await app.mount()
+  const before = useAppStore.getState()
+  expect(before.layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.activeTabId).toBe(defaultTab.id)
+  await editPersona(owner.topic.id)
+  expect(read).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, owner.path)
+  const state = useAppStore.getState(), selected = state.workbenchSpaceSelection!, tab = state.tabs[selected.tabId!]!
+  expect(selected).toMatchObject({ ...owner.space, topicId: owner.topic.id, workspaceId: SCRATCH_WORKSPACE_ID })
+  expect(tab.topicId).toBe(owner.topic.id); expect(tab.space).toEqual(owner.space)
+  expect(tab.regions[selected.regionId!]).toMatchObject({ kind: 'file', workspaceId: SCRATCH_WORKSPACE_ID, path: owner.path })
+  await expectPersonaRegion(selected.regionId!)
+  expect(homeExpanded()).toBeNull()
+  expect(state.tabs[defaultTab.id]).toBe(before.tabs[defaultTab.id]); expect(state.tabs[neighborTab.id]).toBe(before.tabs[neighborTab.id])
+  expect(state.sessions).toBe(before.sessions); expect(state.agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(app.ensureMote).not.toHaveBeenCalled(); expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
+})
+
+it.each([false, true])('the persona menu retains a foreign same-path dirty File and displays the original Mote in its own context (stored space=%s)', async storedSpace => {
+  const owner = emptyPersonaOwner(), id = fileTabId(SCRATCH_WORKSPACE_ID, owner.path), key = documentKey(SCRATCH_WORKSPACE_ID, owner.path)
+  const foreignSpaceId = directoryIdentity(scratchWorkspace.hostId, scratchTopicIdentityPath(scratchWorkspace, moteTopics[0]!))
+  const foreign = { ...createWorkbenchTab(id, { kind: 'file', workspaceId: SCRATCH_WORKSPACE_ID, regionId: 'retained-foreign-file', path: owner.path }),
+    topicId: PMO_TEAMS_TOPIC_ID, ...(storedSpace ? { space: { spaceId: foreignSpaceId, zoneId: homeZoneId(foreignSpaceId) } } : {}) }
+  const document = { path: owner.path, content: '# Original unsaved persona\nKeep this user edit.', revision }
+  useAppStore.setState(state => ({ tabs: { ...state.tabs, [foreign.id]: foreign },
+    layouts: { ...state.layouts, [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('mote-group', [defaultTab.id, neighborTab.id, foreign.id]) },
+    documents: { ...state.documents, [key]: document }, dirtyDocuments: { ...state.dirtyDocuments, [key]: true } }))
+  const read = vi.spyOn(api.files, 'read')
+  await app.mount(); const before = useAppStore.getState()
+  await editPersona(owner.topic.id)
+  const state = useAppStore.getState(), selected = state.workbenchSpaceSelection!, shown = state.tabs[selected.tabId!]!
+  expect(selected).toMatchObject({ ...owner.space, topicId: owner.topic.id })
+  expect(shown.id).not.toBe(foreign.id); expect(shown.topicId).toBe(owner.topic.id); expect(shown.space).toEqual(owner.space)
+  expect(shown.regions[selected.regionId!]).toMatchObject({ kind: 'file', path: owner.path, workspaceId: SCRATCH_WORKSPACE_ID })
+  await expectPersonaRegion(selected.regionId!)
+  expect(state.tabs[foreign.id]).toBe(foreign)
+  expect(state.layouts[SCRATCH_WORKSPACE_ID]!.groups[0]!.tabOrder).toContain(foreign.id)
+  expect(state.documents[key]).toBe(document); expect(state.dirtyDocuments[key]).toBe(true); expect(read).not.toHaveBeenCalled()
+  expect(state.tabs[defaultTab.id]).toBe(before.tabs[defaultTab.id]); expect(state.sessions).toBe(before.sessions)
+  expect(state.agentComposerDrafts).toBe(before.agentComposerDrafts); expect(homeExpanded()).toBeNull()
+})
+
+it.each(['Profile', 'another Topic'] as const)('a delayed persona read retains later %s input and never retakes its display', async later => {
+  const owner = emptyPersonaOwner()
+  let finish!: () => void
+  const read = vi.spyOn(api.files, 'read').mockImplementation((_workspace, path) => new Promise(resolve => {
+    finish = () => resolve({ status: 'read', document: { path, content: '# Original delayed persona', revision } })
+  }))
+  await app.mount(); await editPersona(owner.topic.id)
+  expect(read).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, owner.path)
+  if (later === 'another Topic') await moteClick(node<HTMLElement>('[data-space-nav="topic:' + PMO_TEAMS_TOPIC_ID + '"]'))
+  else await moteClick(button('Profile'))
+  await type('[aria-label="A question for this Mote"]', 'Keep this later question unsent.')
+  const before = useAppStore.getState(), home = homeExpanded(), input = node<HTMLTextAreaElement>('[aria-label="A question for this Mote"]')
+  expect(home).not.toBeNull(); expect(document.activeElement).toBe(input)
+  await act(async () => finish()); await settleMoteApp()
+  expect(homeExpanded()).toBe(home); expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+  expect(document.activeElement).toBe(input); expect(input.value).toBe('Keep this later question unsent.')
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(useAppStore.getState().documents[documentKey(SCRATCH_WORKSPACE_ID, owner.path)]?.content).toBe('# Original delayed persona')
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
+})
+
+it('the floating persona menu opens an empty original Mote File without borrowing the background Agent', async () => {
+  const control = vi.spyOn(useAppStore.getState(), 'executeControl')
+  const owner = emptyPersonaOwner(false, quietMoteId)
+  const read = vi.spyOn(api.files, 'read').mockImplementation(async (_workspace, path) => ({ status: 'read', document: { path, content: '# Quiet original persona', revision } }))
+  await app.mount()
+  await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: owner.topic.id })); await settleMoteApp()
+  const before = useAppStore.getState()
+  expect(before.workbenchSpaceSelection?.topicId).toBe(PMO_TEAMS_TOPIC_ID)
+  await editPersona(owner.topic.id, true)
+  expect(control).toHaveBeenCalledOnce()
+  await act(async () => { await control.mock.results[0]!.value }); await settleMoteApp()
+  expect(read).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, owner.path)
+  const state = useAppStore.getState(), selected = state.workbenchSpaceSelection!, tab = state.tabs[selected.tabId!]!
+  expect(selected).toMatchObject({ ...owner.space, topicId: owner.topic.id, tabId: expect.any(String), regionId: expect.any(String) })
+  expect(tab?.regions[selected.regionId!]).toMatchObject({ kind: 'file', workspaceId: SCRATCH_WORKSPACE_ID, path: owner.path })
+  await expectPersonaRegion(selected.regionId!)
+  expect(readPmoTeamsTopicFloatingState()?.open).toBe(false)
+  expect(state.tabs[defaultTab.id]).toBe(before.tabs[defaultTab.id]); expect(state.tabs[neighborTab.id]).toBe(before.tabs[neighborTab.id])
+  expect(state.sessions).toBe(before.sessions); expect(state.agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
+})
+
+it('a delayed floating persona read retains later Mote A to B to A choices and newer input', async () => {
+  const control = vi.spyOn(useAppStore.getState(), 'executeControl')
+  const owner = emptyPersonaOwner(false, quietMoteId)
+  let finish!: () => void
+  const read = vi.spyOn(api.files, 'read').mockImplementation((_workspace, path) => new Promise(resolve => {
+    finish = () => resolve({ status: 'read', document: { path, content: '# Retained delayed quiet persona', revision } })
+  }))
+  await app.mount()
+  await act(async () => requestPmoTeamsTopicFloatingOpen({ targetTopicId: owner.topic.id })); await settleMoteApp()
+  await editPersona(owner.topic.id, true)
+  expect(control).toHaveBeenCalledOnce()
+  await act(async () => { await control.mock.results[0]!.value }); await settleMoteApp()
+  expect(read).toHaveBeenCalledExactlyOnceWith(SCRATCH_WORKSPACE_ID, owner.path)
+  for (const id of [customMoteId, owner.topic.id]) await moteClick(app.panel().querySelector<HTMLElement>('[data-mote-topic-id="' + id + '"]')!)
+  await moteClick(button('Profile')); await type('[aria-label="A question for this Mote"]', 'Keep this later quiet question.')
+  const before = useAppStore.getState(), floating = readPmoTeamsTopicFloatingState(), home = homeExpanded(), input = node<HTMLTextAreaElement>('[aria-label="A question for this Mote"]')
+  expect(floating?.open).toBe(true); expect(floating?.targetTopicId).toBe(owner.topic.id)
+  await act(async () => finish()); await settleMoteApp()
+  expect(readPmoTeamsTopicFloatingState()).toEqual(floating)
+  expect(useAppStore.getState().workbenchSpaceSelection).toBe(before.workbenchSpaceSelection)
+  expect(homeExpanded()).toBe(home); expect(document.activeElement).toBe(input); expect(input.value).toBe('Keep this later quiet question.')
+  expect(useAppStore.getState().agentComposerDrafts).toBe(before.agentComposerDrafts)
+  expect(useAppStore.getState().documents[documentKey(SCRATCH_WORKSPACE_ID, owner.path)]?.content).toBe('# Retained delayed quiet persona')
+  const retainedFile = Object.values(useAppStore.getState().tabs).find(tab => tab.topicId === owner.topic.id &&
+    Object.values(tab.regions).some(region => region.kind === 'file' && region.path === owner.path))!
+  expect(retainedFile).toBeDefined()
+  const fileChoice = app.panel().querySelector<HTMLButtonElement>('button[data-workbench-tab-id="' + retainedFile.id + '"]')
+  expect(fileChoice).not.toBeNull(); await moteClick(fileChoice!)
+  expect(readPmoTeamsTopicFloatingState()).toMatchObject({ targetTopicId: owner.topic.id, targetTabId: retainedFile.id,
+    reference: { displayWorkspaceId: SCRATCH_WORKSPACE_ID, tabId: retainedFile.id, regionId: retainedFile.layout.activeRegionId } })
+  expect(app.launch).not.toHaveBeenCalled(); expect(app.stop).not.toHaveBeenCalled(); expect(app.send).not.toHaveBeenCalled()
+})
 
 it('keeps the same original file tree only in Discussion while other Mote pages use its space', async () => {
   await app.mount()
