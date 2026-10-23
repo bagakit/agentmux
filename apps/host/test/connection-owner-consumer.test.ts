@@ -17,7 +17,7 @@ const cleanup: Array<() => void | Promise<void>> = []
 const runtimeFacts: unknown[] = []
 afterAll(async () => { if (process.env.HOST_CONNECTION_FACTS) await writeFile(process.env.HOST_CONNECTION_FACTS, JSON.stringify({
   schema: 'agentmux.actual-host-connection-consumer.v1',
-  scope: 'Actual startAgentMuxHost, complete Core owner, public Unix endpoint and default platform adapters. Synthetic SecretPort and controlled Runtime/official-SDK I/O; no live account, installed App or real remote Linux qualification.',
+  scope: 'Actual startAgentMuxHost, complete Core owner, public Unix endpoint, private credential store and default platform adapters. Synthetic credential values and controlled Runtime/official-SDK I/O; no live account, installed App or real remote Linux qualification.',
   facts: runtimeFacts
 }, null, 2) + '\n') })
 afterEach(async () => { for (const close of cleanup.splice(0).reverse()) await close(); vi.restoreAllMocks(); vi.unstubAllEnvs() })
@@ -35,7 +35,7 @@ async function independentHost() {
   const native = (id: string, text: string) => JSON.stringify({ type: 'assistant', sessionId: 'original-native', uuid: id,
     message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n'
   await writeFile(transcript, native('private-before-sharing', 'Original earlier unshared answer'))
-  await mkdir(directory)
+  await mkdir(directory, { mode: 0o700 })
   // Seed only synthetic credential bytes through the original credential owner; never a second connection/SDK owner.
   const database = new DatabaseSync(join(directory, 'connections.sqlite')), secrets = new ConnectionSecrets(database)
   const configs: ConnectionConfig[] = []
@@ -152,7 +152,7 @@ it('actual Host receives and publishes with every Desktop client absent, then re
   const failedFlush = new Error('Controlled original device persistence failure'), authority = await f.authority()
   vi.spyOn(authority, 'flush').mockRejectedValueOnce(failedFlush)
   await expect(f.stop()).rejects.toBe(failedFlush)
-  await f.start()
+  await expect(f.start()).resolves.toBeDefined()
   expect(await f.identity()).toEqual(originalIdentity)
   const afterFlushOwner = await f.owner()
   expect(afterFlushOwner.runtimeId).toBe(originalOwner.runtimeId); expect(afterFlushOwner.ownerInstanceId).not.toBe(reopenedOwner.ownerInstanceId)
