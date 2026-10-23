@@ -303,7 +303,10 @@ it('rejoins a committed unclaimed deferred packet on the same operation instead 
   try {
     vi.spyOn(h.core, 'deliverPostLaunchPrompt').mockResolvedValueOnce(false)
     await h.client.ensureAgentContinuity(h.request)
-    expect(h.op()!.launchInput?.state).toBe('unknown'); expect(h.core.kernel.input).not.toHaveBeenCalled()
+    expect(h.op()!.launchInput?.state).toBe('prepared'); expect(h.core.kernel.input).not.toHaveBeenCalled()
+    // No submission owner was entered, so this original packet is still known
+    // unsent. Unknown is reserved for an admitted claim with an unconfirmed result.
+    expect((await h.client.inspectAgentPromptSubmission(h.op()!.launchInput!.key!))?.admission).toBeUndefined()
     await h.client.ensureAgentContinuity(h.request)
     expect(h.op()!.launchInput?.state).toBe('terminal-confirmed')
     expect(h.started).toHaveLength(1); expect(h.core.kernel.input).toHaveBeenCalledTimes(2)

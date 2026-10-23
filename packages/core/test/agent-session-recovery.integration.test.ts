@@ -19,7 +19,8 @@ const evidenceRoot = resolve(process.env.AGENTMUX_TEST_RECOVERY_EVIDENCE_DIRECTO
 const runStamp = new Date().toISOString().replace(/[:.]/gu, '-') + '-' + process.pid
 const harnessPaths = ['agent-session-recovery.integration.test.ts', 'agent-session-recovery.integration.config.mts',
   'fixtures/agent-session-recovery/register.mjs', 'fixtures/agent-session-recovery/source-loader.mjs',
-  'fixtures/agent-session-recovery/owner.mjs', 'fixtures/agent-session-recovery/native.mjs']
+  'fixtures/agent-session-recovery/owner.mjs', 'fixtures/agent-session-recovery/native.mjs',
+  'fixtures/agent-session-recovery/compiled-owner.mjs']
 let harnessBefore: Array<{ path: string; sha256: string }>
 async function harnessHashes() {
   return await Promise.all(harnessPaths.map(async path => ({ path: 'packages/core/test/' + path,
