@@ -9,11 +9,13 @@ import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { AGENTMUX_RPC_NATIVE_METHODS, isAgentMuxRpcMethod } from '../src/public-rpc.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import { parseCapsuleRpcParams } from '../src/capsule.js'
+import { CAPSULE_RUNTIME_METHODS, type CapsuleRuntimeObservation } from '../src/capsule-runtime.js'
 import { AGENTMUX_CLI_COMMANDS, parseAgentMuxCliInvocation } from '../src/agentmux-cli-commands.js'
 import { agentMuxCommandHelp } from '../src/agentmux-cli-help.js'
 import { agentMuxModuleSkill } from '../src/agentmux-cli-module-skills.js'
 import { AgentMuxError } from '../src/errors.js'
-import { CAPSULE_RUNTIME_METHODS, type CapsuleRuntimeObservation } from '../src/capsule-runtime.js'
+import { AGENTMUX_CONTROL_SCHEMA_VERSION } from '../src/control.js'
+import { parseAgentMuxControlRequest } from '../src/control-codec.js'
 import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
 
 const capsuleId = '123456789ABC', otherId = '23456789ABCD'
@@ -35,8 +37,9 @@ async function directory() {
 function port(call: (...args: unknown[]) => Promise<unknown>): CapsulePort { return { call } as CapsulePort }
 
 describe('Capsule public composition', () => {
-  it('derives all wire and CLI methods from the domain and Core runtime registries', () => {
-    const registry = { ...CAPSULE_METHODS, ...CAPSULE_RUNTIME_METHODS }, methods = Object.keys(registry)
+  it('derives wire and CLI methods from the nonempty original Capsule and runtime registries', () => {
+    const registry = { ...CAPSULE_METHODS, ...CAPSULE_RUNTIME_METHODS }
+    const methods = Object.keys(registry)
     expect(methods.length).toBeGreaterThan(0)
     expect(AGENTMUX_CLI_COMMANDS.filter(command => command.method.startsWith('capsule.')).map(command => command.method)).toEqual(methods)
     for (const method of methods) {
@@ -166,6 +169,12 @@ describe('Capsule public composition', () => {
     expect(guide.code, guide.stderr).toBe(0); expect(guide.stdout).toContain('The Capsule owner holds each original page')
     const help = await run(['capsule', 'open', '--help'])
     expect(help.code, help.stderr).toBe(0); expect(help.stdout).toContain('Usage: amux capsule open --input <FILE|->')
+    expect(help.stdout).toContain('Do not rely on the Desktop\'s new-Tab default when placement is omitted')
+    expect(help.stdout).toContain('placement is used only when a new Browser is needed')
+    expect(help.stdout).toContain('it does not say created or reused')
+    expect(help.stdout).toContain('A pending original operation is still unknown')
+    expect(help.stdout).toContain('amux space inspect --region REGION')
+    expect(guide.stdout).toContain('normally pass an explicit readable split in the same Tab')
     expect(await readdir(root)).toEqual([])
     const input = { capsuleId, operationId: 'original-open' }, file = join(root, 'open.json')
     await writeFile(file, JSON.stringify(input))
@@ -174,5 +183,49 @@ describe('Capsule public composition', () => {
     await expect(parseAgentMuxCliInvocation(['capsule', 'open'])).rejects.toMatchObject({ code: 'INVALID_CLI_ARGUMENT' })
     await writeFile(file, JSON.stringify({ ...input, authorHuman: true }))
     await expect(parseAgentMuxCliInvocation(['capsule', 'open', '--input', file])).rejects.toMatchObject({ code: 'INVALID_CONTROL_REQUEST' })
+  })
+
+  it('carries the leaf help placement examples through real CLI dispatch and preserves original result identities and unknown errors', async () => {
+    const root = await directory(), env = objectCliEnvironment(root)
+    const help = await runCompiledObjectCli(['capsule', 'open', '--help'], env)
+    expect(help.code, help.stderr).toBe(0)
+    const examples = [...help.stdout.matchAll(/```json\n([^\n]+)\n```/gu)].map(match => JSON.parse(match[1]!))
+    expect(examples).toHaveLength(2)
+    expect(examples.map(example => example.placement.kind)).toEqual(['split', 'new-tab'])
+    for (const example of examples) {
+      const request = parseAgentMuxControlRequest({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION,
+        requestId: 'original-placement', operation: 'open.browser', capsuleId,
+        url: inspection.endpoint.status === 'available' ? inspection.endpoint.url : '', destination: example.placement })
+      expect(request).toMatchObject({ operation: 'open.browser', destination: example.placement })
+    }
+    const seen: unknown[] = []
+    const available = { status: 'available', browserId: 'retained-browser', tabId: 'returned-tab', regionId: 'returned-region' }
+    const unavailable = { status: 'unavailable', reason: 'Original presentation is not confirmed.' }
+    const server = new AgentMuxControlServer({ socketPath: join(root, 'rpc.sock'), coreClients: () => [], capsules: port(async (method, input) => {
+      expect(method).toBe('capsule.open')
+      seen.push(input)
+      const request = input as { operationId: string }
+      if (request.operationId === 'original-unknown') throw new AgentMuxError('Original presentation response is unknown.', 'CAPSULE_OPERATION_UNKNOWN')
+      return { capsuleId, operationId: request.operationId, endpoint: inspection.endpoint,
+        rendering: request.operationId === 'original-split' ? available : unavailable }
+    }) })
+    await server.start(); cleanup.push(() => server.stop())
+    const inputs = [
+      { ...examples[0], capsuleId, operationId: 'original-split' },
+      { ...examples[1], capsuleId, operationId: 'original-tab' },
+      { ...examples[0], capsuleId, operationId: 'original-unknown' }
+    ]
+    for (const [index, input] of inputs.entries()) {
+      const reply = await runCompiledObjectCli(['--endpoint', 'unix:' + server.path, 'capsule', 'open', '--input', '-'], env, JSON.stringify(input))
+      if (index < 2) {
+        expect(reply.code, reply.stderr).toBe(0)
+        expect(JSON.parse(reply.stdout).result).toEqual({ capsuleId, operationId: input.operationId,
+          endpoint: inspection.endpoint, rendering: index === 0 ? available : unavailable })
+      } else {
+        expect(reply.code).toBe(1)
+        expect(JSON.parse(reply.stderr).error.code).toBe('CAPSULE_OPERATION_UNKNOWN')
+      }
+    }
+    expect(seen).toEqual(inputs)
   })
 })
