@@ -1,3 +1,4 @@
+import { restoredManualConnectionIntents, restoredManualConnectionSelections, manualConnectionScope, type ManualConnectionIntent } from "./lib/manual-connection-intent"
 import { restoreToolkitPresentations, updateToolkitPresentation, type ToolkitPresentations, type ToolkitPresentationPatch } from './lib/toolkit-presentation'
 import { isSessionRecoveryReplyUnconfirmed } from '../../shared/session-recovery-result'
 import { goalDiscussionTarget } from './lib/goal-discussion-recipient'
@@ -927,6 +928,8 @@ export type AppState = {
   connectorServiceObservation: ConnectorServiceObservation | null
   moteBotRequests: Record<string, MoteBotRequest>
   botTaskSelections: BotTaskSelections
+  manualConnectionSelections: Partial<Record<ManualConnectionIntent['channel'], ManualConnectionIntent['target']>>
+  manualConnectionIntents: Record<string, ManualConnectionIntent>
   moteConnectionSaveIntents: Record<string, MoteConnectionSaveIntent>
   moteChatIntents: Record<string, MoteChatIntent>
   agentComposerDrafts: Record<string, string>
@@ -3601,6 +3604,8 @@ type PersistedAppState = {
   mailboxNotificationIntents?: MailboxNotificationIntents
   moteBotRequests?: Record<string, MoteBotRequest>
   botTaskSelections?: BotTaskSelections
+  manualConnectionSelections?: Partial<Record<ManualConnectionIntent['channel'], ManualConnectionIntent['target']>>
+  manualConnectionIntents?: Record<string, ManualConnectionIntent>
   moteConnectionSaveIntents?: Record<string, MoteConnectionSaveIntent>
   moteChatIntents?: Record<string, MoteChatIntent>
   agentComposerDrafts?: Record<string, string>
@@ -3871,6 +3876,8 @@ function selectPersistedInputs(state: AppState, coreSpatialReady: boolean) {
     mailboxNotificationIntents: state.mailboxNotificationIntents,
     moteBotRequests: state.moteBotRequests,
     botTaskSelections: state.botTaskSelections,
+    manualConnectionIntents: state.manualConnectionIntents,
+    manualConnectionSelections: state.manualConnectionSelections,
     moteConnectionSaveIntents: state.moteConnectionSaveIntents,
     moteChatIntents: state.moteChatIntents,
     agentComposerDrafts: state.agentComposerDrafts,
@@ -4308,6 +4315,28 @@ export function setBotTaskSelection(scope: BotTaskScope, operationId: string | n
   if (scope.kind === 'management' && operationId !== null) selections.management = key
   useAppStore.setState({ botTaskSelections: selections })
   void saveWorkbenchSelection(false)
+}
+/** UI owner selection only; each pending request keeps its own independent frozen target. */
+export function selectManualConnectionOwner(channel: ManualConnectionIntent['channel'], target: ManualConnectionIntent['target']): void {
+  useAppStore.setState(state => ({ manualConnectionSelections: { ...state.manualConnectionSelections, [channel]: target } }))
+  void saveWorkbenchSelection(false)
+}
+/** Retain only this Settings request/draft; all results remain on the original Host. */
+export async function retainManualConnectionIntent(intent: ManualConnectionIntent, confirmedOperationId?: string): Promise<AgentMuxSpatialSave> {
+  const key = manualConnectionScope(intent.channel, intent.target)
+  const parsed = restoredManualConnectionIntents({ [key]: intent })[key]
+  if (!parsed) throw new Error("The original manual connection intent is invalid.")
+  const previous = useAppStore.getState().manualConnectionIntents[key]?.pending
+  if (previous && confirmedOperationId !== undefined && confirmedOperationId !== previous.operationId) throw new Error('The confirmed save belongs to another original request.')
+  if (previous && confirmedOperationId === undefined) {
+    if (!parsed.pending) parsed.pending = previous
+    else {
+      if (previous.operationId !== parsed.pending.operationId || JSON.stringify({ ...previous, connection: { ...previous.connection, credentialRef: undefined } }) !== JSON.stringify({ ...parsed.pending, connection: { ...parsed.pending.connection, credentialRef: undefined } }) || previous.connection.credentialRef && parsed.pending.connection.credentialRef && previous.connection.credentialRef !== parsed.pending.connection.credentialRef) throw new Error("The original connection save cannot be replaced.")
+      if (previous.connection.credentialRef) parsed.pending.connection.credentialRef = previous.connection.credentialRef
+    }
+  }
+  useAppStore.setState(state => ({ manualConnectionIntents: { ...state.manualConnectionIntents, [key]: parsed } }))
+  return await saveWorkbenchSelection(false)
 }
 /** Retain the exact submitted file input; this is neither a preference nor an effect journal. */
 export async function retainMoteConnectionSaveIntent(intent: MoteConnectionSaveIntent): Promise<AgentMuxSpatialSave> {
@@ -4876,6 +4905,8 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
   connectorServiceObservation: null,
   moteBotRequests: {},
   botTaskSelections: {},
+  manualConnectionIntents: {},
+  manualConnectionSelections: {},
   moteConnectionSaveIntents: {},
   moteChatIntents: {},
   retainedSpatialFocus: null,
@@ -12388,7 +12419,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     state.spaceObjectIcons = restoreSpaceIconOverrides(Object.hasOwn(current.config?.appearance ?? {}, 'spaceObjectIcons')
       ? current.config!.appearance.spaceObjectIcons : retainedSpaceIconHandoff)
     state.botTaskSelections = restoredBotTaskSelections(state.botTaskSelections)
-    return { ...state, workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorRoomDrafts: restoredConnectorRoomDrafts(state.connectorRoomDrafts), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), goalFiniteStartIntents: restoredGoalFiniteStartIntents(state.goalFiniteStartIntents), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
+    return { ...state, manualConnectionIntents: restoredManualConnectionIntents(state.manualConnectionIntents), manualConnectionSelections: restoredManualConnectionSelections(state.manualConnectionSelections), workspaceAgentOrder: restoreWorkspaceAgentOrder(state.workspaceAgentOrder), moteBotRequests: restoredMoteBotRequests(state.moteBotRequests), connectorRoomIntents: restoredConnectorRoomIntents(state.connectorRoomIntents), connectorRoomDrafts: restoredConnectorRoomDrafts(state.connectorRoomDrafts), connectorServiceIntents: restoredConnectorServiceIntents(state.connectorServiceIntents), mailboxNotificationIntents: restoredMailboxNotificationIntents(state.mailboxNotificationIntents), mailboxNotificationFeedback: current.mailboxNotificationFeedback, mailboxNotificationHistory: current.mailboxNotificationHistory, moteConnectionSaveIntents: restoredMoteConnectionSaveIntents(state.moteConnectionSaveIntents), moteChatIntents: restoredMoteChatIntents(state.moteChatIntents), noteCanvasLayouts: restoreNoteCanvasLayouts(state.noteCanvasLayouts), recentMoteAgents: restoredRecentMoteAgents(state.recentMoteAgents), questionReplies: restoredQuestionReplies(state.questionReplies), goalAgentSelectionDrafts: restoredGoalAgentSelectionDrafts(state.goalAgentSelectionDrafts), goalAgentCreationDrafts: restoredGoalAgentCreationDrafts(state.goalAgentCreationDrafts), goalFiniteStartIntents: restoredGoalFiniteStartIntents(state.goalFiniteStartIntents), agentComposerHistory: restoreComposerHistory(state.agentComposerHistory),
       agentComposerHistoryNavigation: {}, surveyZoneSelection: restoredSurveyZoneSelection(state.surveyZoneSelection), recallZoneSelection: restoredSurveyZoneSelection(state.recallZoneSelection) }
   },
   partialize: partializeAppState

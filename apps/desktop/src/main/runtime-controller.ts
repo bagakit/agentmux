@@ -12,6 +12,8 @@ import { AgentMuxError, readRoutedInputMailbox, createInputPerformanceRecorder, 
 import { type AgentMuxAgentResumeInput } from '@agentmux/core/agent-session-recovery'
 import { callOriginalDesktopHost } from './desktop-host.js'
 import type { AgentMuxRpcMethod, AgentMuxRpcParams, AgentMuxRpcResult } from '@agentmux/core'
+import type { ConnectionMethod } from '@agentmux/core/connections'
+import type { ConnectionHostingTarget } from '../shared/contracts.js'
 import type { DesktopRuntimeClient as AgentMuxClient, DesktopRuntimeConnector } from './desktop-host.js'
 // 进程事实的投影走那个 node-free 子路径，与 renderer 侧的实时路径**同一个**实现。走子路径而不是包根，
 // 是为了让两侧 import 的是同一个模块——包根那条链拖 node:crypto，renderer 引不动。
@@ -2488,6 +2490,18 @@ export class RuntimeController {
       ? { ...params, hostId: 'local' } as AgentMuxRpcParams<M> : params
     const result = await callOriginalDesktopHost(client, method, originalParams, context)
     return (method === 'message.read' || method === 'message.dispatch.read') ? { ...result, hostId } as AgentMuxRpcResult<M> : result
+  }
+
+  /** Explicit hosting route; the Binding's execution Host never selects this owner. */
+  async callConnectionHost<M extends ConnectionMethod>(target: ConnectionHostingTarget, method: M, params: AgentMuxRpcParams<M>): Promise<AgentMuxRpcResult<M>> {
+    const client = this.configuredClient(target.hostId)
+    const context = { transport: 'unix' as const }
+    const { owner } = await callOriginalDesktopHost(client, 'runtime.owner.identity', { expectedRuntimeId: target.runtimeId }, context)
+    const expectedOwner = { runtimeId: owner.runtimeId, ownerInstanceId: owner.ownerInstanceId }
+    const { ownership } = await callOriginalDesktopHost(client, 'connection.owner.inspect', {}, context, expectedOwner)
+    if (ownership !== 'local') throw new AgentMuxError('This endpoint does not own connections. Its original connection route and Agents are retained.', 'CONTROL_UNAVAILABLE')
+    if (this.configuredClient(target.hostId) !== client) throw new AgentMuxError('The configured connector Host changed. Inspect the original save on its original Host.', 'RUNTIME_OWNER_MISMATCH')
+    return await callOriginalDesktopHost(client, method, params, context, expectedOwner)
   }
 
   async readOriginalDispatch(hostId: string, sourceMessageId: string) {

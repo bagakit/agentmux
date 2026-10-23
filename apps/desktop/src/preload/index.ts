@@ -212,9 +212,9 @@ const api: AgentMuxPreloadApi = {
       ipcRenderer.on(CONNECTION_METADATA_OBSERVATION_CHANNEL, observed)
       return () => { ipcRenderer.removeListener(CONNECTION_METADATA_CHANGED_CHANNEL, receive); ipcRenderer.removeListener(CONNECTION_METADATA_OBSERVATION_CHANNEL, observed) }
     },
-    call: async (method, params) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('connections:call', method, params)),
-    storeCredential: input => ipcRenderer.invoke('connections:storeCredential', input),
-    inspectCredential: operationId => ipcRenderer.invoke('connections:inspectCredential', operationId)
+    call: async (method, params, target) => unwrapSessionInputOperationResult(await ipcRenderer.invoke('connections:call', method, params, ...(target === undefined ? [] : [target]))),
+    storeCredential: (input, target) => ipcRenderer.invoke('connections:storeCredential', input, ...(target === undefined ? [] : [target])),
+    inspectCredential: (operationId, target) => ipcRenderer.invoke('connections:inspectCredential', operationId, ...(target === undefined ? [] : [target]))
   },
   deviceManagement: {
     link: (params) => ipcRenderer.invoke('deviceManagement:link', params),

@@ -4,12 +4,13 @@ import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { ChannelProfileAvatar } from '@agentmux/client-ui/components/ChannelProfileAvatar'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../../lib/api'
+import type { ConnectionSettingsPort } from './ConnectionHostingSettings'
 import '../../styles/channel-metadata.css'
 
 const LoadingIcon = semanticIconComponent('status.loading'), RefreshIcon = semanticIconComponent('action.refresh'), PersonIcon = semanticIconComponent('object.user'), GroupIcon = semanticIconComponent('object.team')
 
 /** The Channel owns its schemas and storage. This panel consumes bounded typed observations only. */
-export function ChannelMetadataPanel({ connection, active }: { connection: ConnectionRecord; active: boolean }) {
+export function ChannelMetadataPanel({ connection, active, connections = api.connections }: { connection: ConnectionRecord; active: boolean; connections?: ConnectionSettingsPort }) {
   const [open, setOpen] = useState(false), [kind, setKind] = useState<'actor' | 'conversation'>('actor')
   const [entries, setEntries] = useState<ChannelMetadataEntry[]>([]), [next, setNext] = useState<string | null>(null)
   const [busy, setBusy] = useState(''), [issue, setIssue] = useState('')
@@ -20,7 +21,7 @@ export function ChannelMetadataPanel({ connection, active }: { connection: Conne
     const original = scope, request = ++generation.current
     setBusy('read'); setIssue('')
     try {
-      const result = await api.connections.call('connection.metadata.ls', { connectionId: connection.config.connectionId, kind, limit: 10, ...(cursor ? { cursor } : {}) })
+      const result = await connections.call('connection.metadata.ls', { connectionId: connection.config.connectionId, kind, limit: 10, ...(cursor ? { cursor } : {}) })
       if (current.current !== original || request !== generation.current) return
       revision.current = result.connectionRevision
       setEntries(previous => cursor ? [...previous, ...result.entries] : result.entries); setNext(result.next)
@@ -31,15 +32,15 @@ export function ChannelMetadataPanel({ connection, active }: { connection: Conne
     setEntries([]); setNext(null); setIssue('')
     if (active && open) void read()
     return () => { generation.current++ }
-  }, [scope, active, open])
+  }, [scope, active, open, connections])
   async function change(entry: ChannelMetadataEntry, action: 'refresh' | 'clear') {
     if (busy) return
     const original = scope, request = ++generation.current, key = channelMetadataSubjectKey(entry.subject)
     setBusy(key); setIssue('')
     try {
       const input = { connectionId: connection.config.connectionId, expectedConnectionRevision: revision.current, subject: entry.subject }
-      const result = action === 'refresh' ? await api.connections.call('connection.metadata.refresh', input)
-        : await api.connections.call('connection.metadata.clear', { ...input, expectedCacheRevision: entry.cacheRevision })
+      const result = action === 'refresh' ? await connections.call('connection.metadata.refresh', input)
+        : await connections.call('connection.metadata.clear', { ...input, expectedCacheRevision: entry.cacheRevision })
       if (current.current === original && generation.current === request) setEntries(previous => previous.map(value => channelMetadataSubjectKey(value.subject) === key ? result.entry : value))
     } catch (error) { if (current.current === original && generation.current === request) setIssue(presentError(error)) }
     finally { if (current.current === original && generation.current === request) setBusy('') }
