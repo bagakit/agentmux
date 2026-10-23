@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite'
 import { afterEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer, connectAgentMuxRpc, AgentMuxError } from '@agentmux/core'
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
-import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { enrollmentEncryption } from './fixtures/connection-enrollment.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import type { ConnectionSetupView, ConnectionSetupListing } from '@agentmux/core/connections'
@@ -106,8 +106,8 @@ it('saved creation hands its original account to the same Setup with zero HTTP, 
 it('authority revoked while the original Vault read yields cannot leak the old account or dispatch a request', async () => {
   const f = await fixture(), before = [...f.calls], entered = deferred(), release = deferred()
   const row = JSON.parse(String(f.services.database!.prepare('SELECT record_json FROM connection_enrollment WHERE operation_id=?').get(f.enrollment.operation!.operationId)!.record_json))
-  const originalResolve = DesktopConnectorSecrets.prototype.resolve
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve').mockImplementation(async function (ref) {
+  const originalResolve = ConnectionSecrets.prototype.resolve
+  vi.spyOn(ConnectionSecrets.prototype, 'resolve').mockImplementation(async function (ref) {
     const value = await originalResolve.call(this, ref)
     if (ref === row.privateRef) { entered.resolve(); await release.promise }
     return value
@@ -126,8 +126,8 @@ it('an independently saved Setup rechecks its current actor after a private Vaul
   const f = await fixture(), before = [...f.calls]
   await f.sdk.call('connection.setup.begin', f.input)
   const row = f.services.database!.prepare('SELECT actor_json,private_ref FROM connection_setup_operation WHERE operation_id=?').get(f.input.operationId)!
-  const entered = deferred(), release = deferred(), resolve = DesktopConnectorSecrets.prototype.resolve
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve').mockImplementation(async function (ref) {
+  const entered = deferred(), release = deferred(), resolve = ConnectionSecrets.prototype.resolve
+  vi.spyOn(ConnectionSecrets.prototype, 'resolve').mockImplementation(async function (ref) {
     const value = await resolve.call(this, ref)
     if (ref === row.private_ref) { entered.resolve(); await release.promise }
     return value
@@ -147,15 +147,15 @@ it.each(['source-attempt', 'actor', 'target'] as const)('first local handoff can
   const f = await fixture(), before = [...f.calls], db = f.services.database!
   const originalSource = String(db.prepare('SELECT record_json FROM connection_enrollment WHERE operation_id=?').get(f.enrollment.operation!.operationId)!.record_json)
   const row = JSON.parse(originalSource), entered = deferred(), release = deferred()
-  const inspect = DesktopConnectorSecrets.prototype.inspect, store = DesktopConnectorSecrets.prototype.store
+  const inspect = ConnectionSecrets.prototype.inspect, store = ConnectionSecrets.prototype.store
   let held = false, authorized = true
   const stored: string[] = []
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'inspect').mockImplementation(async function (operationId) {
+  vi.spyOn(ConnectionSecrets.prototype, 'inspect').mockImplementation(async function (operationId) {
     const receipt = await inspect.call(this, operationId)
     if (!held && !receipt && operationId.startsWith('connection-setup-auth:')) { held = true; entered.resolve(); await release.promise }
     return receipt
   })
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function (input) {
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function (input) {
     if (input.operationId.startsWith('connection-setup-auth:')) stored.push(input.operationId)
     return store.call(this, input)
   })
@@ -188,8 +188,8 @@ it.each(['source-attempt', 'actor', 'target'] as const)('first local handoff can
 it.each(['source-attempt', 'target'] as const)('a changed %s during the original Vault read cannot bind the late account', async change => {
   const f = await fixture(), before = [...f.calls], entered = deferred(), release = deferred()
   const db = f.services.database!, stored = db.prepare('SELECT record_json FROM connection_enrollment WHERE operation_id=?').get(f.enrollment.operation!.operationId)!, row = JSON.parse(String(stored.record_json))
-  const resolve = DesktopConnectorSecrets.prototype.resolve
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve').mockImplementation(async function (ref) {
+  const resolve = ConnectionSecrets.prototype.resolve
+  vi.spyOn(ConnectionSecrets.prototype, 'resolve').mockImplementation(async function (ref) {
     const value = await resolve.call(this, ref)
     if (ref === row.privateRef) { entered.resolve(); await release.promise }
     return value

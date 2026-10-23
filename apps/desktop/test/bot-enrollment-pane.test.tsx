@@ -4,7 +4,7 @@ import type { AgentMuxRpcParams } from '@agentmux/core'
 import { join, resolve } from 'node:path'
 import { readFile } from 'node:fs/promises'
 import iconUrl from '../resources/icon-512.png'
-import { DesktopConnectorSecrets } from '../src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
 import { enrollmentFixture } from '../../../packages/connectors/test/fixtures/connection-enrollment.js'
@@ -106,9 +106,9 @@ it('reads earlier durable setups by their real cursor without selecting or recre
 
 it('explicitly recovers an unknown encrypted handoff locally before a separate user action polls the original challenge', async () => {
   await open()
-  const store = DesktopConnectorSecrets.prototype.store
+  const store = ConnectionSecrets.prototype.store
   let loseSnapshot = true
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function(this: DesktopConnectorSecrets, input) {
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function(this: ConnectionSecrets, input) {
     const result = await store.call(this, input)
     if (loseSnapshot && input.secret.includes('privateState')) { loseSnapshot = false; throw new Error('Controlled encrypted snapshot receipt loss') }
     return result

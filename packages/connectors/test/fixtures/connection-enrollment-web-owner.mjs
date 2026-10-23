@@ -4,11 +4,11 @@ import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { AgentMuxControlServer } from '@agentmux/core'
 import { ConnectionHost, createBuiltinConnectionAdapters } from '@agentmux/connectors'
-import { DesktopConnectorSecrets } from '../../../../apps/desktop/src/main/connector-secrets.ts'
+import { ConnectionSecrets } from '../../src/connection-secrets.ts'
 
 const root = process.argv[2], mode = process.argv[3], key = Buffer.alloc(32, 9)
 const database = new DatabaseSync(join(root, 'connections.sqlite'))
-const secrets = new DesktopConnectorSecrets(database, { isAsyncEncryptionAvailable: async () => true,
+const secrets = new ConnectionSecrets(database, { isAsyncEncryptionAvailable: async () => true,
   encryptStringAsync: async value => { const iv = randomBytes(12), c = createCipheriv('aes-256-gcm', key, iv), bytes = Buffer.concat([c.update(value, 'utf8'), c.final()]); return Buffer.concat([iv, c.getAuthTag(), bytes]) },
   decryptStringAsync: async value => { const c = createDecipheriv('aes-256-gcm', key, value.subarray(0, 12)); c.setAuthTag(value.subarray(12, 28)); return { result: (Buffer.concat([c.update(value.subarray(28)), c.final()]).toString()), shouldReEncrypt: false } }
 })

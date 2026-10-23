@@ -8,7 +8,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { AgentMuxControlServer } from '@agentmux/core'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap, ConnectionSetupBegin, ConnectionSetupView, ConnectionEnrollmentView, ConnectionEnrollmentAdvanceInput } from '@agentmux/core/connections'
 import { createDesktopConnections } from '../src/main/connector-host.js'
-import { DesktopConnectorSecrets } from '../src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../../../packages/connectors/src/connection-secrets.js'
 import { registerConnectorIpc } from '../src/main/connector-ipc.js'
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { api } from '../src/renderer/src/lib/api'
@@ -163,9 +163,9 @@ it('saved Settings creation explicitly continues the same bot with its original 
 }, 20_000)
 
 it('lost local handoff ACK reopens the original safe submission and repairs only its original child', async () => {
-  const { before } = await savedCreation(), store = DesktopConnectorSecrets.prototype.store
+  const { before } = await savedCreation(), store = ConnectionSecrets.prototype.store
   let lost = false
-  vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementation(async function (input) {
+  vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementation(async function (input) {
     const result = await store.call(this, input)
     if (!lost && input.operationId.startsWith('connection-setup-auth:')) { lost = true; throw new Error('Controlled handoff ACK loss') }
     return result

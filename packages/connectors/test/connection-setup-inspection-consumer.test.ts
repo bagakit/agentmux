@@ -1,7 +1,7 @@
 import { expectConnectionAllocations } from './helpers/unified-identifiers.js'
 import { createDesktopConnections } from '../../../apps/desktop/src/main/connector-host.js'
 import { CookieJar } from 'tough-cookie'
-import { DesktopConnectorSecrets } from '../../../apps/desktop/src/main/connector-secrets.js'
+import { ConnectionSecrets } from '../src/connection-secrets.js'
 import { AgentMuxControlServer, AgentMuxRpcService, connectAgentMuxRpc } from '@agentmux/core'
 import { CONNECTION_SETUP_READ_ACTIONS } from '@agentmux/core/connections'
 import type { ConnectionConfig, ConnectionSetupAction, ConnectionSetupAdvance, ConnectionSetupBegin, ConnectionSetupInspectionReceipt, ConnectionSetupView } from '@agentmux/core/connections'
@@ -162,7 +162,7 @@ it('CLI selector pagination reads bounded original children and can select an ol
   const originals: ConnectionSetupInspectionReceipt[] = []
   for (let index = 0; index < 3; index++) originals.push(selected(await f.sdk.call('connection.setup.advance', inputFor(await inspect(f), 'inspect-application'))))
   expect(new Set(originals.map(row => row.stepId)).size).toBe(3)
-  const before = changes(f), calls = fetch.mock.calls.length, store = vi.spyOn(DesktopConnectorSecrets.prototype, 'store')
+  const before = changes(f), calls = fetch.mock.calls.length, store = vi.spyOn(ConnectionSecrets.prototype, 'store')
   const first = result(await f.cli(['setup', 'inspect', '--operation-id', f.input.operationId, '--application-inspection', '--inspection-limit', '1']))
   expect(first.applicationInspection?.observations).toEqual([originals[2]]); expect(first.applicationInspection?.next).toEqual(expect.any(String))
   const second = await inspect(f, { cursor: first.applicationInspection!.next!, limit: 1 })
@@ -210,8 +210,8 @@ it('only the selected numeric role own resource key confirms read permission; ma
 it('an original encrypted ACK remains selectable and locally recoverable after renewal, revision, missing adapter and owner reopen without reactivating old permission', async () => {
   const f = await fixture(), native = nativeRoute(), fetch = vi.fn(native.route); vi.stubGlobal('fetch', fetch)
   await confirmed(f)
-  const originalInput = inputFor(await inspect(f), 'inspect-application'), store = DesktopConnectorSecrets.prototype.store
-  const fault = vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementationOnce(async function(this: DesktopConnectorSecrets, input) {
+  const originalInput = inputFor(await inspect(f), 'inspect-application'), store = ConnectionSecrets.prototype.store
+  const fault = vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementationOnce(async function(this: ConnectionSecrets, input) {
     await store.call(this, input)
     throw new Error('fixture-lost-inspection-vault-ack')
   })
@@ -551,8 +551,8 @@ it.each(['observed', 'unknown'] as const)('locally recovers one encrypted Cookie
     return response
   }).route))
   await confirmed(f)
-  const store = DesktopConnectorSecrets.prototype.store
-  const fault = vi.spyOn(DesktopConnectorSecrets.prototype, 'store').mockImplementationOnce(async function(this: DesktopConnectorSecrets, input) {
+  const store = ConnectionSecrets.prototype.store
+  const fault = vi.spyOn(ConnectionSecrets.prototype, 'store').mockImplementationOnce(async function(this: ConnectionSecrets, input) {
     await store.call(this, input); throw new Error('fixture-cookie-evidence-ack-lost')
   })
   const originalInput = inputFor(await inspect(f), 'inspect-application')
@@ -643,7 +643,7 @@ it('exposes the original unknown permission inspection in a secret-free ordered 
   const offered = await inspect(f), original = inputFor(offered, 'inspect-application')
   const failed = await f.sdk.call('connection.setup.advance', original)
   expect(selected(failed)).toMatchObject({ request: 'unknown', secureStorage: 'not-started' })
-  const count = fetch.mock.calls.length, before = changes(f), resolve = vi.spyOn(DesktopConnectorSecrets.prototype, 'resolve'), store = vi.spyOn(DesktopConnectorSecrets.prototype, 'store')
+  const count = fetch.mock.calls.length, before = changes(f), resolve = vi.spyOn(ConnectionSecrets.prototype, 'resolve'), store = vi.spyOn(ConnectionSecrets.prototype, 'store')
   f.encryption.isEncryptionAvailable = () => false
   let page = result(await f.cli(['setup', 'inspect', '--operation-id', f.input.operationId, '--request-trace', '--trace-limit', '2']))
   const entries = [...page.requestTrace!.entries]

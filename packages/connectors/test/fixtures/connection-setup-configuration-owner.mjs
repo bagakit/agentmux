@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { AgentMuxControlServer } from '@agentmux/core'
 import { DatabaseSync } from 'node:sqlite'
 import { ConnectionHost, createBuiltinConnectionAdapters } from '@agentmux/connectors'
-import { DesktopConnectorSecrets } from '../../../../apps/desktop/src/main/connector-secrets.ts'
+import { ConnectionSecrets } from '../../src/connection-secrets.ts'
 
 const root = process.argv[2], mode = process.argv[3], key = Buffer.alloc(32, 17)
 const encryption = {
@@ -13,8 +13,8 @@ const encryption = {
   decryptStringAsync: async value => { const cipher = createDecipheriv('aes-256-gcm', key, value.subarray(0, 12)); cipher.setAuthTag(value.subarray(12, 28)); return { result: (Buffer.concat([cipher.update(value.subarray(28)), cipher.final()]).toString()), shouldReEncrypt: false } }
 }
 let effectStarted = false
-const originalStore = DesktopConnectorSecrets.prototype.store
-DesktopConnectorSecrets.prototype.store = async function(input) {
+const originalStore = ConnectionSecrets.prototype.store
+ConnectionSecrets.prototype.store = async function(input) {
   const receipt = await originalStore.call(this, input)
   // This window holds only the real committed Vault ACK; no journal rows are fabricated.
   if (mode === 'vault-committed' && effectStarted) { process.send({ kind: 'vault-committed' }); return await new Promise(() => {}) }
@@ -37,7 +37,7 @@ globalThis.fetch = async (url, init) => {
   }
   throw new Error('Unexpected configuration fixture native endpoint')
 }
-const database = new DatabaseSync(join(root, 'connections.sqlite')), secrets = new DesktopConnectorSecrets(database, encryption)
+const database = new DatabaseSync(join(root, 'connections.sqlite')), secrets = new ConnectionSecrets(database, encryption)
 const connections = new ConnectionHost({ database, secrets, adapters: mode === 'observe-only' ? [] : createBuiltinConnectionAdapters() })
 // A restart must consume original credentials and owner data, never seed a replacement.
 const credential = mode === 'observe-only' ? null : await secrets.store({ operationId: 'configuration-child-credential', secret: 'fixture-configuration-saved-secret' })
