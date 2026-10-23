@@ -688,8 +688,15 @@ try {
   facts.themeTransitions = []
   for (const appearance of ['light', 'dark']) {
     await first.cdp.evaluate(`(async()=>{const c=await window.agentmux.config.get();return window.agentmux.config.save({...c,appearance:{...c.appearance,appAppearance:${JSON.stringify(appearance)}}},c)})()`)
-    await waitFor('injected theme projection ' + appearance, () => document.evaluate(`proof.themes.some(t=>t?.mode===${JSON.stringify(appearance)})`))
-    const projected = await document.evaluate('({theme:proof.themes.at(-1),background:document.documentElement.style.getPropertyValue("--bg"),colorScheme:document.documentElement.style.getPropertyValue("color-scheme")})')
+    const projected = await waitFor('injected theme projection ' + appearance, () => document.evaluate(`(()=>{
+      const theme=proof.themes.at(-1),root=document.documentElement
+      if(theme?.mode!==${JSON.stringify(appearance)})return null
+      const tokens=Object.fromEntries(Object.keys(theme.tokens).map(name=>[name,root.style.getPropertyValue(name)]))
+      const projection={theme,tokens,background:root.style.getPropertyValue("--bg"),colorScheme:root.style.getPropertyValue("color-scheme")}
+      return Object.keys(tokens).length>0&&projection.colorScheme===${JSON.stringify(appearance)}&&Object.entries(theme.tokens).every(([name,value])=>tokens[name]===value)?projection:null
+    })()`))
+    assert.equal(projected.theme.mode, appearance)
+    assert.deepEqual(projected.tokens, projected.theme.tokens)
     assert.equal(projected.background, projected.theme.tokens['--bg'])
     assert.equal(projected.colorScheme, appearance)
     facts.themeTransitions.push(projected)
