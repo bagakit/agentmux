@@ -28,7 +28,7 @@ try {
   await writeFile(resolve(visual, 'capture.log'), lines.join('\n'))
   const render = JSON.parse(await readFile(resolve(visual, 'render.json'), 'utf8'))
   assert.equal(execution.exitCode, 0, JSON.stringify(render.failure)); assert.equal(render.passed, true)
-  assert.equal(render.frames.length, 4)
+  assert.equal(render.frames.length, process.env.MOTE_PREPARED_CAPTURE_OWNERLESS_ONLY === '1' ? 2 : 6)
   receipt.render = render; receipt.images = Object.fromEntries(await Promise.all(render.frames.map(async file => [file, sha(await readFile(resolve(visual, file)))])))
   receipt.passed = true
 } catch (error) { receipt.failure = { name: error.name, message: error.message, stack: error.stack }; throw error }
