@@ -7,7 +7,7 @@ import { type AgentInputSubmissionReceipt, type AgentInputCallContext } from '..
 import { AgentMuxClientEventPublisher } from '../client-event-publisher.js'
 import { type AgentPromptInputKey } from '../agent-prompt-condition.js'
 import { AgentScreenEvidenceStore } from '../screen-evidence.js'
-import { CtxmuxRunAdapter, type CtxmuxAdapterRun } from '../ctxmux-run-adapter.js'
+import { CtxmuxRunAdapter, type CtxmuxAdapterRun, type CtxmuxAdapterStopOperation } from '../ctxmux-run-adapter.js'
 import { type AgentMuxAgentSessionStore } from '../agent-session-store.js'
 import { AgentMuxAgentSessionRegistry } from '../agent-session-registry.js'
 import { AgentHookServer, type AgentHookBinding } from '../hook-server.js'
@@ -32,12 +32,12 @@ export type AgentSessionRecoveryPorts = {
     retainUnconfirmedLifecycle(error: unknown, expected: AgentMuxStoredAgentSession): AgentMuxStoredAgentSession;
   };
   runtime: {
-    readonly kernel: Pick<CtxmuxRunAdapter, "list" | "prepareStop" | "status" | "stop" | "launchIdentity" | "start" | "observeLifecycle">;
+    readonly kernel: Pick<CtxmuxRunAdapter, "list" | "prepareStop" | "status" | "launchIdentity" | "start" | "observeLifecycle">;
     assertAgentRun(session: AgentMuxAgentSession, run: CtxmuxAdapterRun, durableSessions?: readonly AgentMuxAgentSession[]): void;
     requireCurrentAgentRun(session: AgentMuxAgentSession, durableSessions?: readonly AgentMuxAgentSession[]): Promise<CtxmuxAdapterRun>;
     retireUncommittedRun(runId: string): Promise<void>;
-    readonly runPids: Pick<Map<string, number | null>, "set" | "delete">;
-    readonly stopRequestedRuns: Pick<Set<string>, "add">;
+    recordRunTransition(previous: AgentMuxRunRef | null, run: CtxmuxAdapterRun): void;
+    requestStop(operation: CtxmuxAdapterStopOperation): Promise<void>;
   };
   providers: {
     readonly providers: Pick<AgentProviderRegistry, "get">;
@@ -52,8 +52,14 @@ export type AgentSessionRecoveryPorts = {
   };
   hooks: {
     readonly hookServer: Pick<AgentHookServer, "createBinding">;
-    readonly hookBindings: Pick<Map<string, AgentHookBinding>, "has" | "set" | "get" | "delete" | "values">;
-    readonly pendingLifecycleBindings: Pick<Map<string, AgentHookBinding>, "get" | "set" | "delete">;
+    hasActiveBinding(runId: string): boolean;
+    activeBinding(runId: string): AgentHookBinding | undefined;
+    pendingBinding(operationId: string): AgentHookBinding | undefined;
+    retainBinding(operationId: string, binding: AgentHookBinding): void;
+    activateBinding(runId: string, binding: AgentHookBinding, operationId?: string): void;
+    closeRunBinding(runId: string, binding?: AgentHookBinding): Promise<void>;
+    releaseUnusedBinding(binding: AgentHookBinding, operationId: string, retainPending: boolean): Promise<void>;
+    forgetPendingBinding(operationId: string): void;
     ensureManagedHooks(
     provider: AgentProvider,
     workspacePath: string,
@@ -107,7 +113,7 @@ export type AgentSessionRecoveryPorts = {
   };
   terminal: {
     ensureTerminalFrontendObservation(session: AgentMuxStoredAgentSession | AgentMuxAgentSession): Promise<boolean>;
-    readonly terminalFrontendWatches: Pick<Map<string, { frontend?: AgentTerminalFrontend }>, "get">;
+    readFrontendObservation(agentSessionId: string): AgentTerminalFrontend | undefined;
     ensureTerminalHandshakeOrDegrade(
     requestedSession: AgentMuxStoredAgentSession,
     knownRun?: CtxmuxAdapterRun
@@ -126,7 +132,7 @@ export type AgentSessionRecoveryPorts = {
     executable: string, capability: AgentCapabilitySnapshot, run: CtxmuxAdapterRun): void;
   };
   observations: {
-    readonly providerReads: Pick<Set<AbortController>, 'add' | 'delete'>
+    registerProviderRead(controller: AbortController): () => void
   };
   connection: {
     readonly connectionEpoch: number;

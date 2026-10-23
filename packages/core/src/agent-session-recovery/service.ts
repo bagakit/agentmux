@@ -70,7 +70,7 @@ export class AgentSessionRecoveryService {
       watch: (run, changed) => this.ports.runtime.kernel.observeLifecycle(run, changed),
       frontend: async session => {
         await this.ports.terminal.ensureTerminalFrontendObservation(session)
-        return this.ports.terminal.terminalFrontendWatches.get(session.agentSessionId)?.frontend
+        return this.ports.terminal.readFrontendObservation(session.agentSessionId)
       },
       update: async (session, change) => {
         const updated = await this.ports.sessions.updateExactAgentSession(session.agentSessionId, session.run, change)
@@ -524,14 +524,13 @@ export class AgentSessionRecoveryService {
 
   private async restoreReopenObservation(session: AgentMuxStoredAgentSession, run: CtxmuxAdapterRun, operationId: string): Promise<void> {
     try {
-      if (!this.ports.hooks.hookBindings.has(run.runId)) {
+      if (!this.ports.hooks.hasActiveBinding(run.runId)) {
         await this.ports.hooks.requireHookIngressOwner()
-        const binding = this.ports.hooks.pendingLifecycleBindings.get(operationId) ?? this.ports.hooks.hookServer.createBinding(
+        const binding = this.ports.hooks.pendingBinding(operationId) ?? this.ports.hooks.hookServer.createBinding(
           session.agentSessionId, session.providerId, session.hookBindingId, session.hookToken)
-        this.ports.hooks.pendingLifecycleBindings.set(operationId, binding)
+        this.ports.hooks.retainBinding(operationId, binding)
         await binding.bindRun(run.runId)
-        this.ports.hooks.hookBindings.set(run.runId, binding)
-        this.ports.hooks.pendingLifecycleBindings.delete(operationId)
+        this.ports.hooks.activateBinding(run.runId, binding, operationId)
       }
     } catch (error) {
       this.ports.events.publisher.publish({ type: 'agent-error', agentSessionId: session.agentSessionId,
@@ -539,7 +538,7 @@ export class AgentSessionRecoveryService {
         message: `The original conversation has Run ${run.runId}; its Hook observation is unconfirmed. Keep this Run and check again. ${error instanceof Error ? error.message : String(error)}`,
         evidence: { source: 'agentmux', observedAt: Date.now() } })
     }
-    this.ports.runtime.runPids.set(run.runId, run.pid)
+    this.ports.runtime.recordRunTransition(null, run)
     this.ports.events.publishSession(session)
     this.ports.events.publisher.publishRunState(this.ports.events.projectRun(run, this.ports.sessions.registry.get(session.agentSessionId)), session.agentSessionId)
   }
@@ -687,8 +686,7 @@ export class AgentSessionRecoveryService {
       if (restartReservation) {
         if (!matchesProviderNativeSessionTarget(restartReservation.restart?.nativeTarget, current.nativeHandle)) throw new AgentMuxError('The original restart native target changed.', 'AGENT_RESTART_CONFLICT')
         if (oldRun?.state.type === 'running') {
-          this.ports.runtime.stopRequestedRuns.add(current.run.runId)
-          try { await this.ports.runtime.kernel.stop(restartReservation.restart!.stopOperation) }
+          try { await this.ports.runtime.requestStop(restartReservation.restart!.stopOperation) }
           catch (error) {
             if (!(error instanceof AgentMuxError) || error.code !== 'CTXMUX_run_not_found') throw new AgentMuxError(
               `The original restart Stop is unconfirmed. Inspect or retry the same operation. ${error instanceof Error ? error.message : String(error)}`,
@@ -708,8 +706,7 @@ export class AgentSessionRecoveryService {
             continuity: pending, continuityOperations: { ...session.continuityOperations, [input.operationId]: pending }, updatedAt: Math.max(session.updatedAt + 1, Date.now()) })))
         }
       }
-      await this.ports.hooks.hookBindings.get(current.run.runId)?.close()
-      this.ports.hooks.hookBindings.delete(current.run.runId)
+      await this.ports.hooks.closeRunBinding(current.run.runId)
       this.ports.hooks.settleHookRestore(current)
       hookBinding = this.ports.hooks.hookServer.createBinding(
         current.agentSessionId,
@@ -738,7 +735,7 @@ export class AgentSessionRecoveryService {
           capabilityHash: hashAgentCapability(invocationCapability), updatedAt: Date.now(), nativeHandle: structuredClone(current.nativeHandle) }
         delete preparedSession.nativePromptPredecessor
         reservation = await this.ports.sessions.registry.prepareReopen(reservation, preparedSession)
-        this.ports.hooks.pendingLifecycleBindings.set(lifecycleOperationId, hookBinding)
+        this.ports.hooks.retainBinding(lifecycleOperationId, hookBinding)
       }
       if (reopening && this.reopensDisposed) throw new AgentMuxError('Continue owner was disposed before dispatch.', 'AGENT_REOPEN_OWNER_DISPOSED', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
       // The Provider's old turn belongs to the Run that just ended, even when its
@@ -767,7 +764,7 @@ export class AgentSessionRecoveryService {
           continuityOperations: { ...previous?.continuityOperations, [input.operationId]: continuity },
           hookBindingId: hookBinding.bindingId, hookToken: hookBinding.endpoint.token,
           capabilityHash: hashAgentCapability(invocationCapability) })
-        this.ports.hooks.pendingLifecycleBindings.set(lifecycleOperationId, hookBinding)
+        this.ports.hooks.retainBinding(lifecycleOperationId, hookBinding)
       }
       launchAttempted = true
       const run = await this.ports.runtime.kernel.start({
@@ -871,13 +868,12 @@ export class AgentSessionRecoveryService {
               return { ...value, continuity: failed, continuityOperations: { ...value.continuityOperations, [input.operationId]: failed } }
             })
             this.ports.events.publishSession(retained); await this.ports.events.publishCurrentRunState(retained)
-          } catch { preserveUnconfirmedRun = true; this.ports.hooks.pendingLifecycleBindings.set(lifecycleOperationId, hookBinding!) }
+          } catch { preserveUnconfirmedRun = true; this.ports.hooks.retainBinding(lifecycleOperationId, hookBinding!) }
           throw failure
         }
         const rollbackErrors: unknown[] = [failure]
         try {
-          await hookBinding!.close()
-          this.ports.hooks.hookBindings.delete(run.runId)
+          await this.ports.hooks.closeRunBinding(run.runId, hookBinding!)
           await this.ports.runtime.retireUncommittedRun(run.runId)
           abandonedRun = runRef(run.runId)
         }
@@ -942,13 +938,12 @@ export class AgentSessionRecoveryService {
             } catch (readError) {
               // Unknown commit acknowledgement cannot authorize stopping a possibly committed healthy Run.
               preserveUnconfirmedRun = true
-              this.ports.hooks.pendingLifecycleBindings.set(lifecycleOperationId, hookBinding)
+              this.ports.hooks.retainBinding(lifecycleOperationId, hookBinding)
               throw new AggregateError([error, readError], 'Continue result is unconfirmed. Read the same Session; no operation was resent.')
             }
           }
           if (persisted) {
-            this.ports.hooks.hookBindings.set(run.runId, hookBinding)
-            this.ports.hooks.pendingLifecycleBindings.delete(lifecycleOperationId)
+            this.ports.hooks.activateBinding(run.runId, hookBinding, lifecycleOperationId)
             readySession = this.ports.sessions.registry.get(current.agentSessionId)
             if (!hookBound) this.ports.hooks.observeHookRestoreFailure(readySession, 'binding', error)
             let observationError: unknown = error
@@ -956,8 +951,7 @@ export class AgentSessionRecoveryService {
               try {
                 await hookBinding.bindRun(run.runId)
                 hookBound = true
-                this.ports.hooks.hookBindings.set(run.runId, hookBinding)
-                this.ports.hooks.pendingLifecycleBindings.delete(lifecycleOperationId)
+                this.ports.hooks.activateBinding(run.runId, hookBinding, lifecycleOperationId)
                 readySession = await this.ports.terminal.ensureTerminalHandshakeOrDegrade(readySession, run)
                 observationError = null
               } catch (readError) {
@@ -973,7 +967,7 @@ export class AgentSessionRecoveryService {
               evidence: { source: 'agentmux', run: { ...next.run }, observedAt: Date.now() } })
           } else {
             preserveUnconfirmedRun = true
-            this.ports.hooks.pendingLifecycleBindings.set(lifecycleOperationId, hookBinding)
+            this.ports.hooks.retainBinding(lifecycleOperationId, hookBinding)
             if (reservation.kind !== 'resume') throw error
             if (next.continuity) {
               next.continuity = { ...next.continuity, reason: 'operation-unconfirmed',
@@ -982,7 +976,7 @@ export class AgentSessionRecoveryService {
             }
             readySession = await this.ports.sessions.registry.rememberStartedResume(reservation, next)
             await this.restoreReopenObservation(readySession, run, lifecycleOperationId)
-            hookBound = this.ports.hooks.hookBindings.has(run.runId)
+            hookBound = this.ports.hooks.hasActiveBinding(run.runId)
             try { readySession = await this.ports.terminal.ensureTerminalHandshakeOrDegrade(readySession, run) }
             catch (observationError) {
               if (observationError instanceof AgentMuxError && observationError.code === AGENT_TERMINAL_HANDSHAKE_FAILED) throw observationError
@@ -995,9 +989,8 @@ export class AgentSessionRecoveryService {
           await rollbackFailedResume(error)
         }
       }
-      if (hookBound) this.ports.hooks.hookBindings.set(run.runId, hookBinding)
-      this.ports.runtime.runPids.delete(current.run.runId)
-      this.ports.runtime.runPids.set(run.runId, run.pid)
+      if (hookBound) this.ports.hooks.activateBinding(run.runId, hookBinding)
+      this.ports.runtime.recordRunTransition(current.run, run)
       this.ports.terminal.queueNativeIdentityCapture(readySession, input)
       this.ports.events.publishSession(readySession)
       await this.ports.events.publishCurrentRunState(readySession)
@@ -1025,18 +1018,17 @@ export class AgentSessionRecoveryService {
       throw error
     } finally {
       const cleanupErrors: unknown[] = []
-      if (hookBinding && !preserveUnconfirmedRun && ![...this.ports.hooks.hookBindings.values()].includes(hookBinding) &&
-        !(persisted && this.ports.hooks.pendingLifecycleBindings.get(lifecycleOperationId) === hookBinding)) {
+      if (hookBinding && !preserveUnconfirmedRun) {
         try {
-          await hookBinding.close()
+          await this.ports.hooks.releaseUnusedBinding(hookBinding, lifecycleOperationId, Boolean(persisted))
         } catch (error) {
           cleanupErrors.push(error)
         }
       }
       try {
-        if (restartReservation && !preserveUnconfirmedRun && !persisted) this.ports.hooks.pendingLifecycleBindings.delete(lifecycleOperationId)
+        if (restartReservation && !preserveUnconfirmedRun && !persisted) this.ports.hooks.forgetPendingBinding(lifecycleOperationId)
         if (!preserveUnconfirmedRun && !restartReservation) {
-          if (!persisted || hookBound) this.ports.hooks.pendingLifecycleBindings.delete(lifecycleOperationId)
+          if (!persisted || hookBound) this.ports.hooks.forgetPendingBinding(lifecycleOperationId)
           await this.ports.sessions.registry.releaseLifecycle(reservation, abandonedRun ? [abandonedRun] : [])
         }
       } catch (error) {
@@ -1123,7 +1115,7 @@ export class AgentSessionRecoveryService {
     if (existing) return await existing
     const controller = new AbortController(), epoch = this.ports.connection.connectionEpoch
     this.providerReads.add(controller)
-    this.ports.observations.providerReads.add(controller)
+    const unregisterRead = this.ports.observations.registerProviderRead(controller)
     const pending = observeResumedTurnInterruption(session, {
       provider: this.ports.providers.providers.get(session.providerId), signal: controller.signal,
       status: async () => { const run = await this.ports.runtime.kernel.status(session.run.runId); this.ports.runtime.assertAgentRun(session, run, [session]); return run },
@@ -1141,7 +1133,7 @@ export class AgentSessionRecoveryService {
         message: `The original recovered turn is unconfirmed. Its Session, healthy Run and ordinary input remain available. ${error instanceof Error ? error.message : String(error)}`,
         evidence: { source: 'agentmux', run: { ...session.run }, observedAt: Date.now() } })
       return session
-    }).finally(() => { this.providerReads.delete(controller); this.ports.observations.providerReads.delete(controller); if (this.resumedInterruptionReads.get(key) === pending) this.resumedInterruptionReads.delete(key) })
+    }).finally(() => { this.providerReads.delete(controller); unregisterRead(); if (this.resumedInterruptionReads.get(key) === pending) this.resumedInterruptionReads.delete(key) })
     this.resumedInterruptionReads.set(key, pending)
     return await pending
   }
@@ -1168,7 +1160,7 @@ export class AgentSessionRecoveryService {
   private async recoverOriginalFrontend(session: AgentMuxStoredAgentSession, run: CtxmuxAdapterRun,
     request: AgentTerminalFrontendRecoveryRequest, ownerOperationId = request.operationId): Promise<AgentTerminalFrontendObservation> {
     const controller = new AbortController()
-    this.providerReads.add(controller); this.ports.observations.providerReads.add(controller)
+    this.providerReads.add(controller); const unregisterRead = this.ports.observations.registerProviderRead(controller)
     try {
       const assertRequest = async (): Promise<void> => {
         const exact = !this.reopensDisposed && await this.exactRecoverySession(session, ownerOperationId)
@@ -1189,7 +1181,7 @@ export class AgentSessionRecoveryService {
       }, request))
       await assertRequest()
       return parseTerminalFrontendObservation(observed)
-    } finally { this.providerReads.delete(controller); this.ports.observations.providerReads.delete(controller) }
+    } finally { this.providerReads.delete(controller); unregisterRead() }
   }
 
   private async assertRecoveryInputCurrent(session: AgentMuxStoredAgentSession, operationId?: string, automatic = false): Promise<void> {
@@ -1256,7 +1248,7 @@ export class AgentSessionRecoveryService {
       if (this.reopensDisposed) return
       const run = await this.ports.runtime.requireCurrentAgentRun(current)
       if (controlled) {
-        const frontend = this.ports.terminal.terminalFrontendWatches.get(session.agentSessionId)?.frontend
+        const frontend = this.ports.terminal.readFrontendObservation(session.agentSessionId)
         if (!frontend || !sameRun(frontend.run, current.run) || frontend.initialization?.phase !== 'ready') return
         current = await this.bindInitializedNativeSession(current, run, frontend)
       }
@@ -1598,7 +1590,7 @@ export class AgentSessionRecoveryService {
     if (decision.kind === 'reattachable' && current) {
       const provider = this.ports.providers.providers.get(current.providerId)
       await this.ports.terminal.ensureTerminalFrontendObservation(current)
-      const frontend = this.ports.terminal.terminalFrontendWatches.get(current.agentSessionId)?.frontend
+      const frontend = this.ports.terminal.readFrontendObservation(current.agentSessionId)
       const initialization = frontend && sameRun(frontend.run, current.run) ? frontend.initialization : undefined
       const initializedTarget = initialization?.phase === 'ready' && initialization.native.state === 'confirmed' &&
         current.nativeHandle?.kind === 'provider' && current.nativeHandle.providerId === current.providerId &&
@@ -1721,7 +1713,7 @@ export class AgentSessionRecoveryService {
     }
     if (decision.kind === 'reattachable' && current && input.env !== undefined) {
       void this.ports.hooks.ensureManagedHooks(this.ports.providers.providers.get(current.providerId), current.workspacePath, current.agentSessionId,
-        input.env, this.ports.hooks.hookBindings.get(current.run.runId)?.endpoint).catch(error => {
+        input.env, this.ports.hooks.activeBinding(current.run.runId)?.endpoint).catch(error => {
         if (epoch !== this.ports.connection.connectionEpoch || this.reopensDisposed) return
         receipt.error = `Managed Hook restoration is unconfirmed. The original running Agent remains available. ${error instanceof Error ? error.message : String(error)}`
         this.ports.events.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId, code: 'AGENT_CONTINUITY_HOOK_UNCONFIRMED',
@@ -1798,7 +1790,7 @@ export class AgentSessionRecoveryService {
     let nativeSource: { providerId: string; nativeSessionId: string } | undefined
     if (session.nativeActor?.initializationControl) {
       await this.ports.terminal.ensureTerminalFrontendObservation(session)
-      const frontend = this.ports.terminal.terminalFrontendWatches.get(session.agentSessionId)?.frontend, initialization = frontend?.initialization
+      const frontend = this.ports.terminal.readFrontendObservation(session.agentSessionId), initialization = frontend?.initialization
       if (!frontend || !sameRun(frontend.run, session.run) || initialization?.phase !== 'ready' || initialization.native.state !== 'confirmed' ||
         initialization.lifecycleOperationId !== input.lifecycleOperationId || session.nativeHandle?.kind !== 'provider' ||
         session.nativeHandle.providerId !== session.providerId || session.nativeHandle.sessionId !== initialization.native.sessionId) return session
