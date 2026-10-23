@@ -106,9 +106,10 @@ export function MobileMailbox({ client, session, connected, messages, inputs, so
   const historyActions = { onRead: readMessage, onFill: (message: AgentSessionUserMessage) => originalAction(message, onHistoryFill),
     onCopy: (message: AgentSessionUserMessage) => originalAction(message, onHistoryCopy) }
   const recordedKeys = new Set(mailbox.items.map(item => inputMailboxItemKey(session?.hostId ?? '',item)))
-  const recordedOperationIds = new Set(mailbox.items.flatMap(item => item.key.kind === 'prompt' ? [item.key.submissionId] : []))
   const localIntents = localEntries.filter(entry => !entry.inputOrigin || !recordedKeys.has(inputMailboxKey(entry.inputOrigin.hostId,entry.inputOrigin.key)))
-  const unrecordedAttempts = promptAttempts.filter(([, attempt]) => !recordedOperationIds.has(attempt.operationId) && (attempt.inputReceipt || attempt.logId || attempt.phase !== 'confirmed'))
+  const unrecordedAttempts = promptAttempts.filter(([, attempt]) =>
+    !(attempt.inputReceipt && attempt.originalHostId && recordedKeys.has(inputMailboxKey(attempt.originalHostId, attempt.inputReceipt.key))) &&
+    (attempt.inputReceipt || attempt.logId || attempt.phase !== 'confirmed'))
   const state = session?.semanticStatus?.state
   const stateLabels: Readonly<Record<string, string>> = { working: '执行中', running: '状态未确认', starting: '启动中', waiting: '等待输入', blocked: '需要处理', done: '已完成', error: '出错', exited: '已结束', disconnected: '状态未知' }
   const label = !connected ? '连接中断 · 最近状态保留' : session?.pendingInteraction ? '需要回应' : stateLabels[state ?? ''] ?? '状态未知'
