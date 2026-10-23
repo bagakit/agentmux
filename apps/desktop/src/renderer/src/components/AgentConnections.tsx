@@ -23,24 +23,21 @@ export function AgentConnections({ session, regionId, visible }: { session: Extr
     if (setupWasOpen.current && !connector.dialogOpen) invalidateConnectorTarget(target)
     setupWasOpen.current = connector.dialogOpen
   }, [connector.dialogOpen])
-  function openBinding(binding: RoomBinding, trigger: HTMLElement) {
-    if (!current?.hostingTarget) { setIssue('The original bot hosting owner is unconfirmed. Refresh this connection before managing it.'); return }
+  function openBinding(binding: RoomBinding, trigger: HTMLElement, channel?: string) {
     const anchor = regionId ?? binding.regionAnchor?.regionId
     if (!anchor) { setIssue('Open this conversation to manage its connection. You can review the bot in its channel settings.'); return }
     setIssue('')
     const store = useAppStore.getState(), executorId = session.executorId ?? undefined
     const appearance = executorId ? store.config?.executors[executorId]?.avatar ?? store.config?.appearance.agentAvatars?.[executorId] : undefined
-    returned.current = trigger; setDialog({ name: store.agentNames[session.id] ?? session.label, session, hostingTarget: current.hostingTarget, connectionId: binding.connectionId, bindingId: binding.bindingId,
+    returned.current = trigger; setDialog({ ...(channel ? { channel } : {}), name: store.agentNames[session.id] ?? session.label, session, hostingTarget: current?.hostingTarget ?? null, connectionId: binding.connectionId, bindingId: binding.bindingId,
       identity: { providerId: session.providerId, executorId, ...(appearance ? { appearance: structuredClone(appearance) } : {}) },
       target: { ...target, regionAnchor: { regionId: anchor } } })
   }
-  return <><ConnectorHeaderLinks bindings={current?.bindings ?? []} issue={current?.issue ?? ''} checking={visible && (!current || current.loading)}
+  return <><ConnectorHeaderLinks bindings={current?.bindings ?? []} issue={[current?.issue, issue, connector.issue].filter(Boolean).join(' ')} checking={visible && (!current || current.loading)}
     hostingTarget={current?.hostingTarget ?? null} retainedSetup={!current?.bindings.length && hasRetainedSetup} syncEnabled={syncEnabled} nameVersion={current?.version ?? 0} visible={visible}
-    onOpen={openBinding} onConnect={trigger => connector.openConnect(trigger)}
+    onOpen={openBinding} onConnect={(trigger, channel) => connector.openConnect(trigger, 'existing', channel)}
     onMenuOpen={open => { if (open) invalidateConnectorTarget(target); connector.onOpen(open) }}
-    onSettings={trigger => connector.openConnect(trigger, 'details')} />
-    {issue ? <span className="agent-connections__error" role="status">{issue}</span> : null}
-    {connector.issue ? <span className="agent-connections__error" role="status">{connector.issue}</span> : null}
+    onSettings={(trigger, channel) => connector.openConnect(trigger, 'details', channel)} />
     {connector.dialog}
     {dialog ? <AgentConnectorDialog original={dialog} mode="details"
       onClose={() => { setDialog(null); invalidateConnectorTarget(target) }} returnFocus={() => returned.current} /> : null}

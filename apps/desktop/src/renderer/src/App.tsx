@@ -125,7 +125,7 @@ function DesktopApp() {
   const [windowResizeActive, setWindowResizeActive] = useState(false)
   const [quickSwitchOpen, setQuickSwitchOpen] = useState(false)
   const chooseAgent = useCallback(() => { setSettingsOpen(false); setQuickSwitchOpen(true) }, [])
-  const settingsNavigation = useMemo(() => ({ open: openSettings, openToolkit, openHost: openHostSettings, openChannel, channelPresentation: settingsCatalog.channelPresentation, openMoteLark, chooseAgent }), [openSettings, openToolkit, openHostSettings, openChannel, openMoteLark, chooseAgent])
+  const settingsNavigation = useMemo(() => ({ open: openSettings, openToolkit, openHost: openHostSettings, openChannel, channelPresentation: settingsCatalog.channelPresentation, channelEntries: settingsCatalog.channelEntries, openMoteLark, chooseAgent }), [openSettings, openToolkit, openHostSettings, openChannel, openMoteLark, chooseAgent])
   const quickSwitchOrigin = useRef<{ element: HTMLElement | null; navigation: string } | null>(null)
   const initialize = useAppStore((state) => state.initialize)
   const loading = useAppStore((state) => state.loading)
