@@ -698,16 +698,31 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
         const highlightedBlockIds = itemSelectedBlocks.length ? itemSelectedBlocks : focusedBlockIds
         const areaInfo = areaProjections.get(item.id)
         const blockSpecs = areaInfo?.blocks ?? []
-        const cols = blockSpecs.length >= 4 ? 2 : 1
+        const headerOffset = areaInfo?.bodyStatus?.dirty ? 184 : 116
+        const cols = blockSpecs.length >= 2 ? 2 : 1
+        const rowHeights: number[] = []
+        for (const [index, spec] of blockSpecs.entries()) {
+          const row = Math.floor(index / cols)
+          const existing = byId.get(spec.blockNodeId)
+          const h = existing?.measured?.height ?? BLOCK_H
+          rowHeights[row] = Math.max(rowHeights[row] ?? BLOCK_H, h)
+        }
+        const rowTops: number[] = []
+        let cursorY = headerOffset
+        for (let r = 0; r < rowHeights.length; r++) {
+          rowTops[r] = cursorY
+          cursorY += rowHeights[r]! + BLOCK_GAP_Y
+        }
         const memberBoxes: CollaborationLayoutBox[] = []
         for (const [index, spec] of blockSpecs.entries()) {
           const existing = byId.get(spec.blockNodeId)
           const savedPos = refs.current.layout.positions[spec.blockNodeId]
+          const row = Math.floor(index / cols), col = index % cols
           const defaultPos = {
-            x: AREA_PAD_X + (index % cols) * (BLOCK_W + BLOCK_GAP_X),
-            y: AREA_HEADER_H + Math.floor(index / cols) * (BLOCK_H + BLOCK_GAP_Y),
+            x: AREA_PAD_X + col * (BLOCK_W + BLOCK_GAP_X),
+            y: rowTops[row] ?? headerOffset,
           }
-          const pos = existing?.position ?? savedPos ?? defaultPos
+          const pos = existing?.dragging && existing.position ? existing.position : savedPos ?? defaultPos
           const width = existing?.measured?.width ?? BLOCK_W
           const height = existing?.measured?.height ?? BLOCK_H
           memberBoxes.push({ id: spec.blockNodeId, areaId: item.id, kind: 'agent', folded: false, x: pos.x, y: pos.y, width, height })
@@ -749,12 +764,12 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
           })
         }
         const stageWidth = memberBoxes.length ? Math.max(BLOCK_W, Math.max(...memberBoxes.map(b => b.x + b.width)) - AREA_PAD_X) : BLOCK_W
-        const stageBottom = memberBoxes.length ? Math.max(...memberBoxes.map(b => b.y + b.height)) : AREA_HEADER_H
-        const stageHeight = memberBoxes.length ? Math.max(BLOCK_H, stageBottom - AREA_HEADER_H + 12) : 0
+        const stageBottom = memberBoxes.length ? Math.max(...memberBoxes.map(b => b.y + b.height)) : headerOffset
+        const stageHeight = memberBoxes.length ? Math.max(BLOCK_H, stageBottom - headerOffset + 16) : 0
         const areaWidth = stageWidth + AREA_PAD_X * 2
         const areaHeight = stageBottom + AREA_FOOTER_H
         const envelope = collaborationEnvelope(
-          { id: item.id, areaId: item.id, kind: 'area', folded: false, x: 0, y: 0, width: areaWidth, height: areaHeight, heading: { x: AREA_PAD_X, y: 12, width: areaWidth - AREA_PAD_X * 2, height: AREA_HEADER_H - 16 } },
+          { id: item.id, areaId: item.id, kind: 'area', folded: false, x: 0, y: 0, width: areaWidth, height: areaHeight, heading: { x: AREA_PAD_X, y: 12, width: areaWidth - AREA_PAD_X * 2, height: headerOffset - 16 } },
           memberBoxes.length ? [...memberBoxes, { id: `${item.id}:footer`, areaId: item.id, kind: 'agent', folded: false, x: AREA_PAD_X, y: stageBottom + 8, width: areaWidth - AREA_PAD_X * 2, height: AREA_FOOTER_H - 16 }] : [],
         )
         const existingNote = byId.get(item.id) as CanvasNoteNode | undefined
@@ -982,7 +997,53 @@ function NoteCanvasSurface({ scope, active = true, onOpen, onOpenFile, onTalk, s
           }
           setNodes(held => {
             const updated = applyNodeChanges(changes, held)
-            return memberShifts.size ? updated.map(node => memberShifts.has(node.id) ? { ...node, position: memberShifts.get(node.id)! } : node) : updated
+            const shifted = memberShifts.size ? updated.map(node => memberShifts.has(node.id) ? { ...node, position: memberShifts.get(node.id)! } : node) : updated
+            if (!changes.some(change => change.type === 'dimensions')) return shifted
+            const blocksByNote = new Map<string, CanvasBlockNode[]>()
+            for (const node of shifted) {
+              if (node.type === 'block' && node.data.desired) {
+                const list = blocksByNote.get(node.data.noteId) ?? []
+                list.push(node); blocksByNote.set(node.data.noteId, list)
+              }
+            }
+            const nextBlockPos = new Map<string, { x: number; y: number }>()
+            const nextAreaMetrics = new Map<string, { areaWidth: number; areaHeight: number; stageHeight: number; envelope: string }>()
+            for (const [noteId, blocks] of blocksByNote) {
+              const noteNode = shifted.find((n): n is CanvasNoteNode => n.type === 'note' && n.id === noteId)
+              if (!noteNode) continue
+              const headerOffset = noteNode.data.bodyStatus?.dirty ? 184 : 116
+              const cols = blocks.length >= 2 ? 2 : 1
+              const rowHeights: number[] = []
+              blocks.forEach((b, idx) => {
+                const r = Math.floor(idx / cols), h = b.measured?.height ?? BLOCK_H
+                rowHeights[r] = Math.max(rowHeights[r] ?? BLOCK_H, h)
+              })
+              const rowTops: number[] = []
+              let cursorY = headerOffset
+              for (let r = 0; r < rowHeights.length; r++) { rowTops[r] = cursorY; cursorY += rowHeights[r]! + BLOCK_GAP_Y }
+              const memberBoxes: CollaborationLayoutBox[] = []
+              blocks.forEach((b, idx) => {
+                const savedPos = refs.current.layout.positions[b.id]
+                const pos = b.dragging ? b.position : savedPos ?? { x: AREA_PAD_X + (idx % cols) * (BLOCK_W + BLOCK_GAP_X), y: rowTops[Math.floor(idx / cols)] ?? headerOffset }
+                nextBlockPos.set(b.id, pos)
+                memberBoxes.push({ id: b.id, areaId: noteId, kind: 'agent', folded: false, x: pos.x, y: pos.y, width: b.measured?.width ?? BLOCK_W, height: b.measured?.height ?? BLOCK_H })
+              })
+              const stageWidth = Math.max(BLOCK_W, Math.max(...memberBoxes.map(b => b.x + b.width)) - AREA_PAD_X)
+              const stageBottom = Math.max(...memberBoxes.map(b => b.y + b.height))
+              const stageHeight = Math.max(BLOCK_H, stageBottom - headerOffset + 16)
+              const areaWidth = stageWidth + AREA_PAD_X * 2
+              const areaHeight = stageBottom + AREA_FOOTER_H
+              const envelope = collaborationEnvelope(
+                { id: noteId, areaId: noteId, kind: 'area', folded: false, x: 0, y: 0, width: areaWidth, height: areaHeight, heading: { x: AREA_PAD_X, y: 12, width: areaWidth - AREA_PAD_X * 2, height: headerOffset - 16 } },
+                [...memberBoxes, { id: `${noteId}:footer`, areaId: noteId, kind: 'agent', folded: false, x: AREA_PAD_X, y: stageBottom + 8, width: areaWidth - AREA_PAD_X * 2, height: AREA_FOOTER_H - 16 }],
+              )
+              nextAreaMetrics.set(noteId, { areaWidth, areaHeight, stageHeight, envelope })
+            }
+            return shifted.map(node => {
+              if (node.type === 'block' && nextBlockPos.has(node.id)) return { ...node, position: nextBlockPos.get(node.id)! }
+              if (node.type === 'note' && nextAreaMetrics.has(node.id)) return { ...node, data: { ...node.data, ...nextAreaMetrics.get(node.id)! } }
+              return node
+            })
           })
           const completed = changes.filter(change => change.type === 'position' && change.position && change.dragging === false)
           if (completed.length) {
