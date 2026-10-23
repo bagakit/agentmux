@@ -3,12 +3,37 @@ import type { SessionSnapshot } from '../../../shared/contracts'
 import { currentRunRecoveryOperation } from './continuity-presentation'
 
 /** A live Run and its terminal frontend have distinct, source-owned lifetimes. */
-export function sessionFrontendPresentation(session: SessionSnapshot | undefined): { kind: 'detached' | 'unknown'; phase?: 'failed'; title: string; detail: string; diagnostic?: string } | null {
+export function sessionFrontendPresentation(session: SessionSnapshot | undefined): { kind: 'detached' | 'initialization' | 'unknown'; phase?: 'failed' | 'recovering' | 'parked'; fullPage?: boolean; title: string; detail: string; diagnostic?: string } | null {
   if (session?.kind !== 'agent' || session.processState !== 'running') return null
   const frontend = session.terminalFrontend
   if (!frontend || frontend.run.runId !== session.control.run.runId) return null
+  const initialization = frontend.initialization
+  if (initialization && initialization.phase !== 'ready') {
+    // Presentation consumes the original actor's typed observation. A slow/unknown
+    // bootstrap cannot cover an already attached, usable terminal.
+    const noTerminal = frontend.state === 'starting'
+    const diagnostic = initialization.failure?.message
+    if (initialization.phase === 'failed') return {
+      kind: noTerminal ? 'initialization' : 'unknown', fullPage: noTerminal, phase: 'failed',
+      title: 'Agent couldn’t finish starting',
+      detail: `${frontend.backendState === 'running' ? 'The backend is still running. ' : frontend.backendState === 'stopping' ? 'The backend is stopping. ' : frontend.backendState === 'exited' ? 'The backend has exited. ' : 'The backend state is unconfirmed. '}${initialization.native.state === 'not-created'
+        ? 'Setup failed before a native conversation was created. Resume continues this original initialization.'
+        : initialization.native.state === 'confirmed' ? 'The conversation is saved. Resume reconnects its terminal.'
+          : 'The native startup result is unconfirmed. Resume checks the original request.'} Your Session and draft are kept.`, ...(diagnostic ? { diagnostic } : {})
+    }
+    if (initialization.phase === 'unknown') return {
+      kind: noTerminal ? 'initialization' : 'unknown', fullPage: noTerminal, phase: 'parked',
+      title: 'Startup result unconfirmed',
+      detail: 'The original native request may still be in progress. Check the original request for its latest result. Your Session, draft and available input are kept.', ...(diagnostic ? { diagnostic } : {})
+    }
+    if (noTerminal) return {
+      kind: 'initialization', fullPage: true, phase: 'recovering',
+      title: initialization.phase === 'creating' ? 'Opening your conversation' : 'Preparing your session',
+      detail: 'The backend is preparing the original Session. You can keep writing your draft while startup completes.'
+    }
+  }
   if (frontend.state === 'detached' && typeof frontend.exitCode === 'number' && frontend.exitCode !== 0) return {
-    kind: 'detached', phase: 'failed', title: 'Terminal process exited',
+    kind: 'detached', fullPage: true, phase: 'failed', title: 'Terminal process exited',
     detail: `The terminal process exited with code ${frontend.exitCode}. ${frontend.backendState === 'running'
       ? 'The backend is still running.' : frontend.backendState === 'stopping'
         ? 'The backend is finishing its shutdown.' : frontend.backendState === 'exited'

@@ -2290,23 +2290,14 @@ export class RuntimeController {
       ...executor,
       ...(executor.env && scratchTopicId ? { env: { ...executor.env, AGENTMUX_WIKI_DIR: stored.workspacePath } } : {})
     })
-    if (result.kind === 'conflict' && result.reason === 'session-run-changed' && result.currentRun) {
-      // A prior recovery whose reply was lost may already own the canonical Run.
-      const session = await this.sessionByTarget(client,
-        { kind: 'agent-session', agentSessionId: control.agentSessionId }, config)
-      if (session.kind === 'agent' && session.processState === 'running' &&
-        session.control.run.runId === result.currentRun.runId) return { kind: 'reattachable', session, ...(advisory ? { advisory } : {}) }
-    }
     if (result.kind !== 'reattachable' && result.kind !== 'resumed') return result
-    return {
-      kind: result.kind,
-      ...(advisory ? { advisory } : {}),
-      session: await this.sessionByTarget(
-        client,
-        { kind: 'agent-session', agentSessionId: control.agentSessionId },
-        config
-      )
+    const session = await this.sessionByTarget(client,
+      { kind: 'agent-session', agentSessionId: control.agentSessionId }, config)
+    if (session.kind !== 'agent' || session.control.hostId !== control.hostId ||
+      session.control.agentSessionId !== control.agentSessionId || session.control.run.runId !== result.run.runId) {
+      throw new AgentMuxError('The original Core recovery Run changed before its result was projected.', 'STALE_AGENT_SESSION')
     }
+    return { kind: result.kind, session, ...(advisory ? { advisory } : {}) }
   }
 
   async restartSession(

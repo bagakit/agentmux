@@ -1,4 +1,5 @@
 import { restoreToolkitPresentations, updateToolkitPresentation, type ToolkitPresentations, type ToolkitPresentationPatch } from './lib/toolkit-presentation'
+import { isSessionRecoveryReplyUnconfirmed } from '../../shared/session-recovery-result'
 import { goalDiscussionTarget } from './lib/goal-discussion-recipient'
 import { restoredGoalFiniteStartIntents, type GoalFiniteStartIntent } from './lib/goal-finite-start'
 import { observeNotifications } from './lib/notification-observation'
@@ -9,7 +10,7 @@ import { noteShareUndoRecoveryMessage, removedSavedNoteIncludes } from './lib/no
 import { fileShareSourceOperation, parseFileHistoryResult, parseFileShareResult, parseFileShareUndoResult, type FileShareUndoParams, type FileShareUndoResult, type FileShareParams, type FileShareResult, type FileWriteParams } from '@agentmux/core/files'
 import { retainFileDocument, hasFileDocumentConsumer, type NoteFileTarget } from './lib/file-document-consumers'
 import { executorEnvironmentRevision } from '../../shared/executor-probe-context'
-import { parseAgentContinuityControlInput, parseAgentContinuityControlResult, sameAgentContinuityControlInput } from '@agentmux/core/agent-session-recovery-control'
+import { parseAgentContinuityControlInput, parseAgentContinuityControlResult, sameAgentContinuityControlInput } from '@agentmux/core/agent-session-recovery'
 import { continuityControlKey, continuityControlRequests, readContinuityControlIntent, terminalContinuityControlRejection, type ContinuityControlIntents } from './lib/continuity-control-intent'
 import { currentContinuitySupervision } from './lib/continuity-supervision'
 import { conversationLandmarkIntentKey, type ConversationLandmarkIntents } from './lib/conversation-landmark-intent'
@@ -11850,7 +11851,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     }
     const current = projected
     if (!current) return
-    const recoveryControl = options?.inputControl ?? current.control
+    const recoveryControl = structuredClone(options?.inputControl ?? current.control)
     if (options?.inputControl && (current.kind !== 'agent' || recoveryControl.kind !== 'agent' ||
         recoveryControl.hostId !== current.control.hostId || recoveryControl.agentSessionId !== current.control.agentSessionId))
       throw new Error('Recovery input belongs to another Agent Session. The original message is kept.')
@@ -11859,21 +11860,22 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
     // view owner. Existing durable Regions keep their layout/focus during background resync.
     if (!options?.preserveView && !hasAttachedSessionView(get().tabs, sessionId)) get().selectSession(sessionId)
     const priorFailure = current.kind === 'agent' ? lifecycleNotification(before.notificationEvents, { subject: current.control }) : undefined
+    const recoveryOperationId = operationId ?? mintObjectId()
+    const request = { trigger: options?.trigger ?? 'manual' as const, ...(options?.timingOverride ? { timingOverride: options.timingOverride } : {}),
+      ...(options?.input ? { input: structuredClone(options.input) } : {}) }
+    const recoverOriginal = () => api.sessions.recover(structuredClone(recoveryControl), current.workspacePath,
+      recoveryOperationId, structuredClone(request))
     try {
       let recovery: SessionRecoveryResult
-      try {
-        recovery = await api.sessions.recover(recoveryControl, current.workspacePath, operationId ?? mintObjectId(), {
-          trigger: options?.trigger ?? 'manual', ...(options?.timingOverride ? { timingOverride: options.timingOverride } : {}),
-          ...(options?.input ? { input: options.input } : {}) })
-      } catch (error) {
-        // A lost continuity reply is not permission to launch again. First read canonical facts.
-        if (!operationId || current.kind !== 'agent') throw error
-        const observed = get().sessions.find(session => session.id === sessionId)
-        const pending = get().agentSteerQueues[sessionId]?.find(entry => entry.operationId === operationId)
-        const canonical = observed && pending && originalResumeInputReceipt(observed, pending)?.state === 'launch-carried'
-          ? observed : await api.sessions.refresh(current.control).catch(() => undefined)
-        if (!canonical || canonical.kind !== 'agent' || canonical.control.hostId !== current.control.hostId || canonical.control.agentSessionId !== current.control.agentSessionId || canonical.processState !== 'running') throw error
-        recovery = { kind: 'reattachable', session: canonical }
+      try { recovery = await recoverOriginal() }
+      catch (error) {
+        if (current.kind !== 'agent' || !isSessionRecoveryReplyUnconfirmed(error)) throw error
+        if (options?.stillCurrent && !options.stillCurrent()) return
+        if (options?.preserveView && !hasAttachedSessionView(get().tabs, sessionId)) return
+        if (!workbenchViewCloseAllowsSession(get().closingWorkbenchViews, sessionId)) return
+        // Core re-enters this exact durable operation and validates its immutable
+        // request. Only its owner can reconcile a lost result or continue pending work.
+        recovery = await recoverOriginal()
       }
       if (options?.stillCurrent && !options.stillCurrent()) return
       if (current.kind === 'agent' && 'agentSessionId' in recovery &&
