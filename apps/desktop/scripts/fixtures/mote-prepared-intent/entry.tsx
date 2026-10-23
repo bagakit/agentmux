@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
+import { MoteChatRequests } from '../../../src/renderer/src/components/MoteChatRequests'
 import { MoteBotSetup } from '../../../src/renderer/src/components/MoteBotSetup'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { useAppStore } from '../../../src/renderer/src/store'
@@ -22,9 +23,17 @@ api.sessions.snapshot = async () => ({ sessions: [], timelines: {}, recoveryCand
 await useAppStore.persist.rehydrate()
 const stop = await useAppStore.getState().initialize(); stop()
 useAppStore.setState({ config, sessions: [] }); mountThemeRuntime(window, config.appearance)
-let mode: 'legacy' | 'prepared' = 'legacy'
+const hostingTarget = { hostId: 'preview-connector-host', runtimeId: 'preview-connector-runtime' }
+api.connections.hostingTarget = async () => ({ ...hostingTarget })
+let mode: 'legacy' | 'prepared' | 'chat' = 'legacy'
 const legacy = { operationId: 'original-unknown', source: { target, expectedTopicRevision: revision, expectedAvatarRevision: revision }, adapterId: input.adapterId, domain: input.domain, avatar: 'include-saved' }
-function select(value: typeof mode) { mode = value; const request = value === 'legacy' ? legacy : input; useAppStore.setState({ moteBotRequests: restoredMoteBotRequests({ [request.operationId]: { action: 'create', input: request, phase: 'may-have-dispatched' } }), botTaskSelections: { [botTaskSelectionKey({ kind: 'mote', target })]: request.operationId } }) }
+function select(value: typeof mode) {
+  mode = value
+  const request = value === 'legacy' ? legacy : input
+  useAppStore.setState({ moteBotRequests: restoredMoteBotRequests({ [request.operationId]: { action: 'create', input: request, phase: 'may-have-dispatched', ...(value === 'prepared' ? { hostingTarget } : {}) } }),
+    botTaskSelections: { [botTaskSelectionKey({ kind: 'mote', target })]: value === 'prepared' ? { operationId: request.operationId, hostingTarget } : request.operationId },
+    moteChatIntents: value === 'chat' ? { 'original-chat-unknown': { method: 'space.mote.chat.configure', phase: 'may-have-dispatched', input: { operationId: 'original-chat-unknown', target, expectedRevision: null, expectedConnectionRevision: null, values: { enabled: false, connection: null, conversationIdleMs: 1800000, strangerMessageLimit: 0 } } } } : {} })
+}
 api.files.readPublic = async params => ({ resource: { ...target.expectedResource, zoneId: target.zoneId, zonePath: target.expectedResource.workspacePath, path: 'topic.md' }, result: { status: 'read', document: { path: 'topic.md', content: '# '+name+'\n\n'+description+'\n', revision } } })
 api.moteAvatars.read = async params => ({ target: params.target, revision, choice: null, image: { dataUrl: __MOTE_PREPARED_IMAGE__.dataUrl, width: 256, height: 256 }, issues: [] })
 api.moteConnections.call = async (method, params) => {
@@ -40,5 +49,5 @@ api.connections.call = async (method, params) => {
 const proof = { ready: false, errors: [] as string[], select: (_value: typeof mode) => {} }; Object.assign(window, { motePreparedProof: proof })
 window.addEventListener('error', event => proof.errors.push(event.message)); window.addEventListener('unhandledrejection', event => proof.errors.push(String(event.reason)))
 select('legacy')
-function Preview() { const [scene, setScene] = useState(mode); proof.select = value => { select(value); setScene(value) }; return <DesktopClientUiProvider><main className="mote-connection-dialog"><div className="mote-connection-dialog__body" style={{ paddingTop: 20 }}><MoteBotSetup key={scene} target={target} topicId="preview-topic" record={null} hasSavedBot={false} onChoose={() => {}} onCurrent={() => {}} /></div></main></DesktopClientUiProvider> }
+function Preview() { const [scene, setScene] = useState(mode); proof.select = value => { select(value); setScene(value) }; return <DesktopClientUiProvider><main className="mote-connection-dialog"><div className="mote-connection-dialog__body" style={{ paddingTop: 20 }}>{scene === 'chat' ? <MoteChatRequests target={target} onConfirmed={() => { throw Error('No visual preview receipt') }} /> : <MoteBotSetup key={scene} target={target} topicId="preview-topic" record={null} hasSavedBot={false} onChoose={() => {}} onCurrent={() => {}} />}</div></main></DesktopClientUiProvider> }
 createRoot(document.getElementById('root')!).render(<Preview />); proof.ready = true
