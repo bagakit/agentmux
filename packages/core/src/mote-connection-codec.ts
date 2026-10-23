@@ -8,12 +8,14 @@ import {
   sameMotePreferencesTarget,
   sameMoteConnectionValues
 } from './mote-preferences.js'
-import { parseConnectionEnrollmentOperation, parseConnectionEnrollmentParams } from './connection-enrollment-codec.js'
-import { parseConnectionProfileOperation } from './connection-profile-codec.js'
+import { parseConnectionEnrollmentOperation, parseConnectionEnrollmentParams, summarizeConnectionEnrollmentPreset } from './connection-enrollment-codec.js'
+import { parseConnectionProfileOperation, parseDesiredConnectionProfile } from './connection-profile-codec.js'
 import { parseConnectionSetupInitialPublication, parseConnectionSetupOperation, parseConnectionSetupParams } from './connection-setup-codec.js'
 import type {
   MoteConnectionMethod,
   MoteConnectionSource,
+  MoteConnectionRecordedSource,
+  MoteConnectionDesired,
   MoteConnectionOperation,
   MoteConnectionParamsMap,
   MoteConnectionResultMap
@@ -68,12 +70,31 @@ function target(value: unknown) {
   }
 }
 export function parseMoteConnectionSource(v: unknown): MoteConnectionSource {
-  const p = obj(v, ['target', 'expectedTopicRevision', 'expectedAvatarRevision'])
-  return {
-    target: target(p.target),
-    expectedTopicRevision: revision(p.expectedTopicRevision),
-    expectedAvatarRevision: p.expectedAvatarRevision === null ? null : revision(p.expectedAvatarRevision)
+  const p = obj(v, ['target', 'preparedFrom'])
+  const observed = p.preparedFrom === null ? null : obj(p.preparedFrom, ['topicRevision', 'avatarRevision'])
+  return { target: target(p.target), preparedFrom: observed === null ? null : {
+    topicRevision: revision(observed.topicRevision),
+    avatarRevision: observed.avatarRevision === null ? null : revision(observed.avatarRevision)
+  } }
+}
+/** Read the original receipt, never use historical prerequisites as a new write input. */
+export function parseMoteConnectionRecordedSource(v: unknown): MoteConnectionRecordedSource {
+  if (v && typeof v === 'object' && Object.hasOwn(v, 'expectedTopicRevision')) {
+    const p = obj(v, ['target', 'expectedTopicRevision', 'expectedAvatarRevision'])
+    return { target: target(p.target), expectedTopicRevision: revision(p.expectedTopicRevision),
+      expectedAvatarRevision: p.expectedAvatarRevision === null ? null : revision(p.expectedAvatarRevision) }
   }
+  return parseMoteConnectionSource(v)
+}
+function desired(v: unknown): MoteConnectionDesired {
+  const profile = parseDesiredConnectionProfile(v)
+  if (profile.name === undefined || profile.description === undefined) return fail()
+  const result: MoteConnectionDesired = { ...profile, name: profile.name, description: profile.description }
+  if (result.avatar) {
+    const summary = summarizeConnectionEnrollmentPreset({ ...result, avatar: result.avatar })
+    if (summary.width !== 256 || summary.height !== 256) fail()
+  }
+  return result
 }
 export function parseMoteConnectionParams<M extends MoteConnectionMethod>(m: M, v: unknown): MoteConnectionParamsMap[M] {
   if (m === 'space.mote.connection.ls') {
@@ -89,16 +110,12 @@ export function parseMoteConnectionParams<M extends MoteConnectionMethod>(m: M, 
     if (p.enrollment !== undefined && p.setup !== undefined) fail()
     return { operationId: id(p.operationId), ...(m === 'space.mote.connection.advance' && p.enrollment !== undefined ? { enrollment: parseConnectionEnrollmentParams('connection.enrollment.advance', p.enrollment) } : {}), ...(m === 'space.mote.connection.advance' && p.setup !== undefined ? { setup: parseConnectionSetupParams('connection.setup.advance', p.setup) } : {}) } as MoteConnectionParamsMap[M]
   }
-  const p = obj(
-    v,
-    m === 'space.mote.connection.create'
-      ? ['operationId', 'source', 'adapterId', 'domain', 'avatar', 'name', 'initialPublication']
-      : ['operationId', 'source', 'connection', 'expectedConnectionRevision', 'avatar']
-  )
-  const source = parseMoteConnectionSource(p.source),
-    avatar = one(p.avatar, ['include-saved', 'omit'])
-  if (avatar === 'include-saved' && !source.expectedAvatarRevision) fail()
-  const base = { operationId: id(p.operationId), source, avatar }
+  const p = obj(v, m === 'space.mote.connection.create'
+    ? ['operationId', 'source', 'desired', 'adapterId', 'domain', 'initialPublication']
+    : ['operationId', 'source', 'desired', 'connection', 'expectedConnectionRevision'])
+  const profile = desired(p.desired)
+  if (m === 'space.mote.connection.create' && !profile.avatar) fail()
+  const base = { operationId: id(p.operationId), source: parseMoteConnectionSource(p.source), desired: profile }
   if (m === 'space.mote.connection.sync')
     return {
       ...base,
@@ -107,7 +124,7 @@ export function parseMoteConnectionParams<M extends MoteConnectionMethod>(m: M, 
     } as MoteConnectionParamsMap[M]
   const domain = text(p.domain)
   if (!/^[a-z0-9]+(?:[.-][a-z0-9]+)*$/u.test(domain)) fail()
-  return { ...base, adapterId: id(p.adapterId), domain, ...(p.name === undefined ? {} : { name: text(p.name) }), ...(p.initialPublication === undefined ? {} : { initialPublication: parseConnectionSetupInitialPublication(p.initialPublication) }) } as MoteConnectionParamsMap[M]
+  return { ...base, adapterId: id(p.adapterId), domain, ...(p.initialPublication === undefined ? {} : { initialPublication: parseConnectionSetupInitialPublication(p.initialPublication) }) } as MoteConnectionParamsMap[M]
 }
 export function parseMoteConnectionOperation(v: unknown): MoteConnectionOperation {
   const p = obj(v, [
@@ -128,11 +145,11 @@ export function parseMoteConnectionOperation(v: unknown): MoteConnectionOperatio
     ]),
     s = obj(p.snapshot, ['name', 'description', 'avatarSha256']),
     d = obj(p.defaultLink, ['state', 'current'])
-  const source = parseMoteConnectionSource(p.source),
+  const source = parseMoteConnectionRecordedSource(p.source),
     connection = p.connection === null ? null : ref(p.connection)
   const snapshot = {
-    name: text(s.name),
-    description: s.description === null ? null : text(s.description),
+    name: parseDesiredConnectionProfile({ name: s.name }).name!,
+    description: s.description === null ? null : parseDesiredConnectionProfile({ description: s.description }).description!,
     avatarSha256: s.avatarSha256 === null ? null : text(s.avatarSha256)
   }
   if (snapshot.avatarSha256 !== null && !/^[a-f0-9]{64}$/u.test(snapshot.avatarSha256)) fail()
@@ -270,8 +287,8 @@ export function parseMoteConnectionResult<M extends MoteConnectionMethod>(
     if (
       operation.action !== (m === 'space.mote.connection.create' ? 'create' : 'sync') ||
       JSON.stringify(operation.source) !== JSON.stringify(request.source) ||
-      (request.avatar === 'include-saved') !== (operation.snapshot.avatarSha256 !== null) ||
-      ('name' in request && request.name !== undefined && operation.snapshot.name !== request.name)
+      operation.snapshot.name !== request.desired.name || operation.snapshot.description !== request.desired.description ||
+      operation.snapshot.avatarSha256 !== (request.desired.avatar ? summarizeConnectionEnrollmentPreset({ ...request.desired, avatar: request.desired.avatar }).avatarSha256 : null)
     )
       fail()
     if (

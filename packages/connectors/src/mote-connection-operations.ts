@@ -9,8 +9,7 @@ import {
   type MoteConnectionSync,
   type MoteConnectionOperation,
   type MoteConnectionAdvanceInput,
-  type MoteConnectionListInput,
-  type MoteConnectionSource
+  type MoteConnectionListInput
 } from '@agentmux/core'
 import {
   moteConnectionBaseline,
@@ -31,24 +30,17 @@ import {
   type ConnectionEnrollmentBeginInput,
   parseConnectionSetupResult,
   type ConnectionSetupBegin,
+  summarizeConnectionEnrollmentPreset,
   type ConnectionSetupAdvance
 } from '@agentmux/core/connections'
 import type { ConnectionServices } from './connection-services.js'
 
-export type PreparedMoteConnectionSource = {
-  name: string
-  description: string | null
-  avatarSha256: string | null
-  pngDataUrl: string | null
-}
-
 type Input = MoteConnectionCreate | MoteConnectionSync
 type Row = {
-  input: Input
+  input: unknown
   actor: ConnectionEnrollmentCallContext['actor']
   operation: MoteConnectionOperation
   baseline: MoteConnectionBaseline | null
-  pngDataUrl: string | null
   enrollmentInput: ConnectionEnrollmentBeginInput | null
   setupInput?: ConnectionSetupBegin | null
   defaultOperationId: string
@@ -73,9 +65,7 @@ export class MoteConnectionOperations implements MoteConnectionPort {
   constructor(
     private readonly ports: {
       connections: Pick<ConnectionServices, 'openDatabase' | 'connections'>
-      source: {
-        read(source: MoteConnectionSource, avatar: 'include-saved' | 'omit'): Promise<PreparedMoteConnectionSource>
-      }
+      assertTarget(target: MoteConnectionCreate['source']['target']): Promise<void>
       preferences: {
         read(input: MoteConnectionPreferencesReadInput): Promise<MoteConnectionPreferencesReadResult>
         save(input: MoteConnectionPreferencesSaveParams, context?: ConnectionEnrollmentCallContext): Promise<MoteConnectionPreferencesSaveResult>
@@ -227,7 +217,12 @@ export class MoteConnectionOperations implements MoteConnectionPort {
       await this.authority(context, row)
       return this.project(row)
     }
-    const source = await this.ports.source.read(input.source, input.avatar)
+    await this.ports.assertTarget(input.source.target)
+    const source = {
+      name: input.desired.name, description: input.desired.description,
+      pngDataUrl: input.desired.avatar?.pngDataUrl ?? null,
+      avatarSha256: input.desired.avatar ? summarizeConnectionEnrollmentPreset({ ...input.desired, avatar: input.desired.avatar }).avatarSha256 : null
+    }
     const baseline =
       action === 'create'
         ? moteConnectionBaseline(
@@ -247,10 +242,6 @@ export class MoteConnectionOperations implements MoteConnectionPort {
       )
         throw failure('CONNECTION_REVISION_CONFLICT')
     }
-    if (action === 'create' && !source.pngDataUrl) throw failure('MOTE_CONNECTION_SOURCE_UNCONFIRMED')
-    // Async reads do not claim cross-owner atomicity. Recheck the exact saved source before admitting an effect boundary.
-    if (!same(source, await this.ports.source.read(input.source, input.avatar)))
-      throw failure('MOTE_CONNECTION_SOURCE_UNCONFIRMED')
     await this.authority(context)
     row = this.txn(() => {
       const old = this.read(input.operationId)
@@ -263,7 +254,7 @@ export class MoteConnectionOperations implements MoteConnectionPort {
           throw failure('CONNECTION_OPERATION_CONFLICT')
         return old
       }
-      const name = action === 'create' ? (input as MoteConnectionCreate).name ?? source.name : source.name,
+      const name = source.name,
         enrollmentOperationId = action === 'create' ? mintObjectId() : null,
         setupOperationId = action === 'sync' ? mintObjectId() : null,
         connectionId =
@@ -304,7 +295,6 @@ export class MoteConnectionOperations implements MoteConnectionPort {
         actor: context.actor,
         operation,
         baseline,
-        pngDataUrl: source.pngDataUrl,
         enrollmentInput,
         setupInput: action === 'sync' ? {
           operationId: setupOperationId!, connectionId,
@@ -410,7 +400,7 @@ export class MoteConnectionOperations implements MoteConnectionPort {
         if (!r.operation.defaultSave) r.operation.defaultSave = {
             params: parseMotePreferencesSaveParams({
               kind: 'connection',
-              target: r.input.source.target,
+              target: r.operation.source.target,
               operationId: r.defaultOperationId,
               baseline: r.baseline!,
               values: { connection: r.operation.connection! }
@@ -462,7 +452,7 @@ export class MoteConnectionOperations implements MoteConnectionPort {
     if (row.operation.defaultSave && (advance || row.defaultPhase !== 'pending')) {
       try {
         const current = moteConnectionBaseline(
-          await this.ports.preferences.read({ kind: 'connection', target: row.input.source.target })
+          await this.ports.preferences.read({ kind: 'connection', target: row.operation.source.target })
         )
         if (current)
           row = this.update(id, (r) => {

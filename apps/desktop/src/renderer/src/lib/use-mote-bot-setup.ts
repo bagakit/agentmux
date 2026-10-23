@@ -17,7 +17,7 @@ import type {
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { topicPublicCopy } from '../../../shared/scratch-topics'
 import { api } from './api'
-import { retainMoteBotRequest, setBotTaskSelection, useAppStore } from '../store'
+import { retainMoteBotRequest, retireMoteBotRequest, setBotTaskSelection, useAppStore } from '../store'
 import type { MoteBotRequest } from './mote-bot-request'
 import { botTaskSelectionKey } from './bot-task-selection'
 import { initialBotPublication } from './bot-creation-preset'
@@ -66,8 +66,7 @@ export async function readSavedMoteBotProfile(
     avatarIssue,
     source: {
       target,
-      expectedTopicRevision: saved.result.document.revision,
-      expectedAvatarRevision: revision
+      preparedFrom: { topicRevision: saved.result.document.revision, avatarRevision: revision }
     }
   }
 }
@@ -211,6 +210,10 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
   }
   async function send(request: MoteBotRequest) {
     const id = request.input.operationId
+    if (request.inspectOnly) {
+      setIssue('This historical request is retained for checking only. Start an explicit new action to publish prepared profile data.')
+      return
+    }
     if (writing.current.has(id)) return
     const token = lifetime.current,
       order = occurrence(id)
@@ -240,6 +243,9 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
               await api.moteConnections.call('space.mote.connection.sync', request.input),
               request.input
             )
+      let retentionIssue = ''
+      try { await retireMoteBotRequest(request, result) }
+      catch { retentionIssue = 'The original Host accepted this request. Its local saved view could not be retained; check the same operation.' }
       if (token === lifetime.current && order === occurrences.current.get(id)) {
         accept(result)
         if (result.enrollmentOperationId) {
@@ -255,7 +261,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
         }
         if (result.setupOperationId && token === lifetime.current && selection.current === id) setDriving(true)
         if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id)
-          setMessage({ kind: 'notice', text: '' })
+          setMessage({ kind: retentionIssue ? 'issue' : 'notice', text: retentionIssue })
       }
     } catch (error) {
       if (!dispatched) {
@@ -289,15 +295,11 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
         phase: 'not-dispatched',
         input: {
           operationId: mintObjectId(),
-          source: {
-            ...profile.source,
-            expectedAvatarRevision: includeAvatar ? profile.source.expectedAvatarRevision : null
-          },
+          source: profile.source,
+          desired: { name: name === undefined ? profile.name : name.trim(), description: profile.description ?? '', avatar: { pngDataUrl: profile.image } },
           adapterId: capability.adapterId,
           domain: capability.domain,
-          avatar: includeAvatar ? 'include-saved' : 'omit',
-          initialPublication: initialBotPublication,
-          ...(name === undefined ? {} : { name: name.trim() })
+          initialPublication: initialBotPublication
         }
       })
     } finally {
@@ -314,13 +316,10 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
         phase: 'not-dispatched',
         input: {
           operationId: mintObjectId(),
-          source: {
-            ...profile.source,
-            expectedAvatarRevision: includeAvatar ? profile.source.expectedAvatarRevision : null
-          },
+          source: profile.source,
+          desired: { name: profile.name, description: profile.description ?? '', ...(includeAvatar && profile.image ? { avatar: { pngDataUrl: profile.image } } : {}) },
           connection: { connectionId: record.config.connectionId, application: record.config.application },
-          expectedConnectionRevision: record.revision,
-          avatar: includeAvatar ? 'include-saved' : 'omit'
+          expectedConnectionRevision: record.revision
         }
       })
     } finally {
@@ -336,6 +335,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     if (!automatic)
       setMessage({ kind: 'notice', text: advance ? 'Checking this setup…' : 'Reading the original result…' })
     if (advance) pending(id, true)
+    let retentionIssue = ''
     try {
       const child = enrollmentView?.parentId === id ? enrollmentView.value.operation : null
       if (action && !child) throw new Error('Read the original account view before choosing its action.')
@@ -356,7 +356,14 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       if (token === lifetime.current && order === occurrences.current.get(id)) {
         if (operation && (!target || !sameMotePreferencesTarget(operation.source.target, target)))
           throw new Error('This original request belongs to another Mote. Its identifier is kept; choose this Mote’s original task.')
-        if (operation) accept(operation)
+        if (operation) {
+          const retained = useAppStore.getState().moteBotRequests[id]
+          if (retained && !retained.inspectOnly) {
+            try { await retireMoteBotRequest(retained, operation) }
+            catch { retentionIssue = 'The original Host receipt is available. Its local saved view could not be retained.' }
+          }
+          accept(operation)
+        }
         if (operation?.enrollmentOperationId) {
           const observation = ++enrollmentRead.current
           const view = await api.connections.call('connection.enrollment.inspect', {
@@ -371,7 +378,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
         }
         if (!automatic && token === lifetime.current && order === occurrences.current.get(id) && selection.current === id)
           setMessage(operation
-            ? { kind: 'notice', text: 'Saved progress checked.' }
+            ? { kind: retentionIssue ? 'issue' : 'notice', text: retentionIssue || 'Saved progress checked.' }
             : { kind: 'issue', text: 'No recorded result was found. Keep the original request; this does not confirm that nothing happened.' }
           )
       }

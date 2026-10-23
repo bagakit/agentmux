@@ -4305,6 +4305,22 @@ export async function retainMoteBotRequest(request: MoteBotRequest): Promise<Age
   useAppStore.setState(state => ({ moteBotRequests: { ...state.moteBotRequests, [parsed.input.operationId]: parsed } }))
   return await saveWorkbenchSelection(false)
 }
+/** Retire only a prepared body correlated with the original Host admission; receipts remain on that owner. */
+export async function retireMoteBotRequest(request: MoteBotRequest, operation: import('@agentmux/core/mote-connections').MoteConnectionOperation): Promise<void> {
+  if (request.inspectOnly) return
+  const { parseMoteConnectionResult } = await import('@agentmux/core/mote-connections')
+  if (request.action === 'create') parseMoteConnectionResult('space.mote.connection.create', operation, request.input)
+  else parseMoteConnectionResult('space.mote.connection.sync', operation, request.input)
+  const previous = useAppStore.getState().moteBotRequests[request.input.operationId]
+  if (!previous || previous.action !== request.action || JSON.stringify(previous.input) !== JSON.stringify(request.input)) return
+  useAppStore.setState(state => {
+    const requests = { ...state.moteBotRequests }
+    delete requests[request.input.operationId]
+    return { moteBotRequests: requests }
+  })
+  const saved = await saveWorkbenchSelection(false)
+  if (!saved.localStorageWritten) throw new Error('The original Host receipt is confirmed, but its local saved view could not be retained.')
+}
 /** Remember only which original task to read; selection never dispatches its input. */
 export function setBotTaskSelection(scope: BotTaskScope, operationId: string | null): void {
   const key = botTaskSelectionKey(scope), current = useAppStore.getState().botTaskSelections
