@@ -219,15 +219,16 @@ it('exact captured reveal and ruler target the visible body, preserving original
     vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(id => { frames.delete(id) })
     vi.spyOn(HTMLElement.prototype, 'scrollIntoView').mockImplementation(() => {})
     vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue({ x: 0, y: 0, width: 400, height: 100, top: 0, bottom: 100, left: 0, right: 400, toJSON() {} })
-    const complete = vi.fn()
+    const complete = vi.fn(), present = vi.fn(() => true)
     try {
-      await update({ revealRequest: { generation: 1, signal: new AbortController().signal, record: { hostId: f.timeline.sourceHostId!, agentSessionId: f.timeline.agentSessionId, source: { kind: 'captured', recordId: 'capture' } }, sourceKey: target.dataset.messageSourceKey!, isCurrent: () => true, complete } })
+      await update({ revealRequest: { generation: 1, signal: new AbortController().signal, record: { hostId: f.timeline.sourceHostId!, agentSessionId: f.timeline.agentSessionId, source: { kind: 'captured', recordId: 'capture' } }, sourceKey: target.dataset.messageSourceKey!, isCurrent: () => true, present, complete } })
       await act(async () => {
         const callbacks = [...frames.values()]; frames.clear()
         callbacks.forEach(callback => callback(1))
       })
       expect(disclosure(node)).toBeNull()
       expect(complete).toHaveBeenCalledWith(true, undefined)
+      expect(present).not.toHaveBeenCalled()
       expect(document.activeElement).toBe(target.querySelector('.log-turn'))
       expect(node.querySelector('[data-message-id="native:claude:native-main:native"]')).toBe(native)
       expect(native.querySelector('.log-turn__body')).toBe(body)
