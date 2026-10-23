@@ -1,4 +1,4 @@
-import type { AgentMuxControlRequest, AgentMuxControlResult, AgentMuxSpaceCatalog } from '@agentmux/core/control'
+import type { AgentMuxSpaceCatalog } from '@agentmux/core/control'
 import { parseFileReadResult, parseFileWriteResult, parseFileCreateResult, type AgentMuxRpcFilesOwner } from '@agentmux/core/files'
 import type { ConnectionEnrollmentCallContext, ConnectionPort } from '@agentmux/core/connections'
 import { moteConnectionBaseline, parseMotePreferencesReadResult, parseMotePreferencesSaveParams, parseMotePreferencesSaveResult,
@@ -8,18 +8,17 @@ import { homeZoneId } from './mote-model.js'
 import { SCRATCH_WORKSPACE_ID } from './mote-topic-model.js'
 import { MOTE_QUICK_MODE_PATH, parseMoteConnectionMode, serializeMoteConnectionMode } from './mote-quick-mode.js'
 
-type Request = Extract<AgentMuxControlRequest, { operation: 'space.mote.preferences.read' | 'space.mote.preferences.save' }>
 const message = (error: unknown) => error instanceof Error ? error.message : String(error)
 const resourceFields = ['hostId', 'workspaceId', 'workspacePath', 'zoneId', 'zonePath', 'path', 'logicalDirectory'] as const
 
-/** Framework-free composition over the original Files owner. No preference history or Renderer lease. */
+export type MoteConnectionPreferencesPorts = {
+  files: AgentMuxRpcFilesOwner
+  catalog(): Promise<AgentMuxSpaceCatalog | null>
+  connections(): ReturnType<ConnectionPort['list']>
+}
+/** Framework-free connection preferences over the original Files owner. */
 export class MoteConnectionPreferences {
-  constructor(private readonly ports: {
-    files: AgentMuxRpcFilesOwner
-    catalog(): Promise<AgentMuxSpaceCatalog | null>
-    connections(): ReturnType<ConnectionPort['list']>
-    quick(request: Request, signal?: AbortSignal): Promise<AgentMuxControlResult>
-  }) {}
+  constructor(private readonly ports: MoteConnectionPreferencesPorts) {}
 
   private async original(input: MoteConnectionPreferencesReadInput): Promise<void> {
     const catalog = await this.ports.catalog(), matches = catalog?.spaces.filter(space => space.spaceId === input.target.spaceId)
@@ -82,11 +81,4 @@ export class MoteConnectionPreferences {
     } catch (error) { return result(dispatched ? 'unconfirmed' : 'refused-before-write', null, message(error)) }
   }
 
-  async execute(request: Request, signal?: AbortSignal): Promise<AgentMuxControlResult> {
-    if (request.kind === 'quick') return this.ports.quick(request, signal)
-    if (request.operation === 'space.mote.preferences.read') return { operation: request.operation, ...await this.read(request) }
-    const { operationId: _operationId, ...body } = await this.save({ kind: request.kind, target: request.target,
-      baseline: request.baseline, values: request.values, operationId: request.requestId })
-    return { operation: request.operation, requestId: request.requestId, ...body }
-  }
 }
