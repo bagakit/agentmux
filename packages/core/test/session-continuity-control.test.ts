@@ -76,9 +76,10 @@ async function fixture(exitMode: 'immediate' | 'deferred' = 'immediate', options
   })
   const ended = await original.nativeStart({ operationKey: 'original-seed', program: process.execPath, args: ['-e', 'process.exit(0)'], cwd: root, env: {} })
   await vi.waitFor(async () => expect((await original.inner.kernel.status(ended.runId)).state.type).toBe('exited'), { timeout: 5000 })
+  const activityAt = Date.now()
   const previous: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'original-session', providerId: provider.id, executorId: 'configured-resume',
-    hostId: 'local', workspacePath: root, run: { runId: ended.runId }, retiredRuns: [], createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1),
-    hookBindingId: 'original-binding', hookToken: 'original-token', semanticStatus: { state: 'working', source: 'native-hook', observedAt: _historyFixtureEpoch(0, 0, 1) }, nativeHandle: { kind: 'provider', providerId: provider.id, sessionId: 'original-native' } }
+    hostId: 'local', workspacePath: root, run: { runId: ended.runId }, retiredRuns: [], createdAt: activityAt, updatedAt: activityAt,
+    hookBindingId: 'original-binding', hookToken: 'original-token', semanticStatus: { state: 'working', source: 'native-hook', observedAt: activityAt }, nativeHandle: { kind: 'provider', providerId: provider.id, sessionId: 'original-native' } }
   await original.store.compareAndSwap(null, previous); await original.inner.registry.load('local')
   const request: AgentMuxAgentResumeInput = { agentSessionId: previous.agentSessionId, operationId: 'original-resume', prompt: 'the frozen original task' }
   const resume = (changes: Partial<AgentMuxAgentResumeInput> = {}, owner = original) => owner.client.resumeAgent({ ...request, ...changes })

@@ -60,9 +60,10 @@ async function fixture(options: { healthy?: boolean; noTarget?: boolean } = {}) 
   const nativeStart = inner.kernel.start.bind(inner.kernel), nativeList = inner.kernel.list.bind(inner.kernel), nativeStatus = inner.kernel.status.bind(inner.kernel)
   const seed = await nativeStart({ operationKey: 'original-native', program: process.execPath, args: ['-e', options.healthy ? program : 'process.exit(0)'], cwd: root, env: {} })
   await vi.waitFor(async () => expect((await nativeStatus(seed.runId)).state.type).toBe(options.healthy ? 'running' : 'exited'))
+  const activityAt = Date.now()
   const previous: AgentMuxStoredAgentSession = { kind: 'agent', agentSessionId: 'original-waiting-session', providerId: provider.id, executorId: 'original-executor', hostId: 'local', workspacePath: root,
-    run: { runId: seed.runId }, retiredRuns: [], createdAt: _historyFixtureEpoch(0, 0, 1), updatedAt: _historyFixtureEpoch(0, 0, 1), hookBindingId: 'original-binding', hookToken: 'original-token',
-    semanticStatus: { state: 'working', source: 'native-hook', observedAt: _historyFixtureEpoch(0, 0, 1) }, ...(options.noTarget ? {} : { nativeHandle: { kind: 'provider', providerId: provider.id, sessionId: 'original-native' } as const }) }
+    run: { runId: seed.runId }, retiredRuns: [], createdAt: activityAt, updatedAt: activityAt, hookBindingId: 'original-binding', hookToken: 'original-token',
+    semanticStatus: { state: 'working', source: 'native-hook', observedAt: activityAt }, ...(options.noTarget ? {} : { nativeHandle: { kind: 'provider', providerId: provider.id, sessionId: 'original-native' } as const }) }
   await store.compareAndSwap(null, previous); await client.refreshAgentSession(previous.agentSessionId)
   cleanups.push(async () => {
     vi.restoreAllMocks()
