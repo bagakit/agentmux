@@ -8,7 +8,7 @@ import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import type { AgentMuxBrowserControl } from '@agentmux/core'
 import type { BrowserActivityState, BrowserOperation, BrowserOperationPhase } from '../src/shared/browser-operation'
-import { BrowserOperationStatus, BrowserOperationWarning } from '../src/renderer/src/components/BrowserOperationSurface'
+import { BrowserOperationStatus, BrowserOperationTimeline, BrowserOperationWarning } from '../src/renderer/src/components/BrowserOperationSurface'
 
 vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
 const operation: BrowserOperation = {
@@ -191,7 +191,7 @@ describe('Browser operation status in existing controls', () => {
     const host = document.createElement('div'), root = createRoot(host)
     const warning = 'The result is unknown. Inspect the page before retrying.\n    at private diagnostic frame'
     try {
-      await act(async () => root.render(createElement(BrowserOperationWarning, { activity: { operation: { ...operation, phase: 'failed', warning }, control: 'human' } })))
+      await act(async () => root.render(createElement(BrowserOperationWarning, { activity: { operation: { ...operation, phase: 'failed', warning }, control: 'human', warning } })))
       expect(host.querySelector('[role="status"]')!.textContent).toContain(warning.split('\n')[0])
       expect(host.textContent).not.toContain('private diagnostic frame')
       const details = host.querySelector<HTMLButtonElement>('[aria-label="Show browser warning details"]')!
@@ -199,6 +199,27 @@ describe('Browser operation status in existing controls', () => {
       expect(host.querySelector('pre')!.textContent).toBe(warning)
       await act(async () => details.click())
       expect(host.querySelector('pre')).toBeNull()
+    } finally { await act(async () => root.unmount()) }
+  })
+
+  it('keeps a resolved incident in history while current notices follow the Main activity projection', async () => {
+    const host = document.createElement('div'), root = createRoot(host)
+    const warning = 'Native input isolation was unconfirmed during this operation.'
+    const historical = { ...operation, phase: 'completed' as const, warning }
+    const render = (currentWarning?: string) => root.render(createElement('div', null,
+      createElement(BrowserOperationWarning, { activity: { operation: historical, control: 'agent', ...(currentWarning ? { warning: currentWarning } : {}) } }),
+      createElement(BrowserOperationTimeline, { operation: historical })))
+    try {
+      await act(async () => render(warning))
+      expect(host.querySelector('.browser-operation-warning')!.textContent).toContain(warning)
+      await act(async () => render())
+      expect(host.querySelector('.browser-operation-warning')).toBeNull()
+      expect(host.querySelector('.browser-rsi-timeline__warning')!.textContent).toContain(warning)
+      const unrelated = 'Step evidence could not be saved. Inspect local storage.'
+      await act(async () => render(unrelated))
+      expect(host.querySelector('.browser-operation-warning')!.textContent).toContain(unrelated)
+      expect(host.querySelector('.browser-rsi-timeline__warning')!.textContent).toContain(warning)
+      expect(historical.warning).toBe(warning)
     } finally { await act(async () => root.unmount()) }
   })
 
