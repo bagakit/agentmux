@@ -38,22 +38,47 @@
 .mote-avatar-crop__reset { padding: var(--sp-1) var(--sp-2); min-height: 22px; font-size: var(--fs-micro); font-variant-numeric: tabular-nums; color: var(--text-2); cursor: pointer; }
 .mote-avatar-stage__hint { min-height: 22px; display: flex; align-items: center; font-size: var(--fs-meta); color: var(--text-3); }
 
-/* Live breathing, blinking & pointer gaze follow for Mote silhouettes and stage companion */
-@keyframes mote-stage-breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.6px); } }
+/* Live breathing, blinking, expressions & pointer gaze follow across Mote surfaces and picker */
+@keyframes mote-stage-breathe { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-1.4px); } }
 @keyframes mote-stage-blink { 0%, 84%, 90%, 100% { transform: scaleY(1); } 87% { transform: scaleY(.1); } }
 .mote-silhouette-art { display: block; width: 100%; height: 100%; overflow: visible; }
-.mote-live-breathe { transform-box: fill-box; transform-origin: center; animation: mote-stage-breathe 4.4s ease-in-out infinite; animation-delay: var(--mote-ambient-delay, 0ms); }
-.mote-live-eyes { transform-box: fill-box; transform-origin: center; animation: mote-stage-blink 5.4s ease-in-out infinite; animation-delay: var(--mote-ambient-delay, 0ms); }
-.mote-live-gaze { transform: translate(var(--mote-gaze-x, var(--mote-stage-gaze-x, 0px)), var(--mote-gaze-y, var(--mote-stage-gaze-y, 0px))); transition: transform var(--dur-fast) ease-out; }
-.mote-avatar-stage .mote-companion { animation: mote-stage-breathe 4.4s ease-in-out infinite; }
+.mote-identity-motion .space-object-icon svg.mote-silhouette-art { animation: none; }
+.mote-silhouette__press, .mote-silhouette__gesture-head, .mote-silhouette__head, .mote-silhouette__eyes, .mote-silhouette__gesture-eyes { transform-box: view-box; }
+.mote-silhouette__press { transform-origin: 12px 21px; }
+.mote-silhouette__gesture-head, .mote-silhouette__head { transform-origin: 12px 18px; }
+.mote-silhouette__eyes, .mote-silhouette__gesture-eyes, .mote-silhouette__sleep-eyes { transform-origin: 12px 12px; }
+.mote-silhouette__gesture-gaze { transform-box: fill-box; transform-origin: center; }
+.mote-identity-motion[data-mote-visible="on"] .mote-silhouette__press,
+.space-icon-picker .mote-silhouette__press { transform: rotate(var(--mote-head-turn, var(--mote-stage-turn, 0deg))); transition: transform var(--dur-fast) ease-out; }
+.mote-identity-motion[data-mote-visible="on"][data-mote-press="on"] .mote-silhouette__press,
+.mote-identity-motion[data-mote-visible="on"]:active .mote-silhouette__press,
+:is(button:enabled, a[href], [role="button"]:not([aria-disabled="true"])):active .mote-identity-motion[data-mote-visible="on"] .mote-silhouette__press { transform: scale(1.035, .92) rotate(var(--mote-head-turn, 0deg)); }
+.mote-identity-motion[data-mote-visible="on"] .mote-silhouette__gaze,
+.space-icon-picker .mote-silhouette__gaze { transform: translate(calc(var(--mote-gaze-x, var(--mote-stage-gaze-x, 0px)) * .5), calc(var(--mote-gaze-y, var(--mote-stage-gaze-y, 0px)) * .5)); transition: transform var(--dur-fast) ease-out; }
+.mote-identity-motion[data-mote-motion="on"]:is([data-mote-expression="identity"], [data-mote-expression="idle"], [data-mote-expression="sleep"]) .mote-silhouette__head,
+.space-icon-picker .mote-silhouette__head,
+.mote-live-breathe { animation: mote-stage-breathe 4.6s ease-in-out infinite; animation-delay: var(--mote-ambient-delay, 0ms); }
+.mote-identity-motion[data-mote-motion="on"]:is([data-mote-expression="identity"], [data-mote-expression="idle"], [data-mote-expression="waiting"], [data-mote-expression="unknown"]) .mote-silhouette__eyes,
+.space-icon-picker .mote-silhouette__eyes,
+.mote-live-eyes { animation: mote-stage-blink 5.6s ease-in-out infinite; animation-delay: var(--mote-ambient-delay, 0ms); }
+.mote-identity-motion[data-mote-motion="on"][data-mote-expression="thinking"] .mote-silhouette__gesture-gaze { animation: mote-think 3.8s ease-in-out infinite; }
+.mote-identity-motion[data-mote-motion="on"][data-mote-expression="tool"] .mote-silhouette__gesture-gaze { animation: mote-tool-look 1.6s ease-in-out infinite; }
+.mote-identity-motion[data-mote-motion="on"][data-mote-expression="starting"] .mote-silhouette__eyes { animation: mote-wake 2s ease-in-out infinite; }
+.mote-identity-motion[data-mote-gesture="blink"] .mote-silhouette__gesture-eyes { animation: mote-gesture-blink .45s ease-in-out; }
+.mote-identity-motion[data-mote-gesture="double-blink"] .mote-silhouette__gesture-eyes { animation: mote-gesture-double-blink .9s ease-in-out; }
+.mote-identity-motion:is([data-mote-gesture="glance-left"], [data-mote-gesture="glance-right"]) .mote-silhouette__gesture-gaze { animation: mote-gesture-glance 1.4s ease-in-out; }
+.mote-identity-motion[data-mote-gesture="focus"] .mote-silhouette__gesture-gaze { animation: mote-gesture-focus 1.4s ease-in-out; }
+.mote-identity-motion:is([data-mote-gesture="curious"], [data-mote-gesture="ponder"]) .mote-silhouette__gesture-head { animation: mote-gesture-tilt 1.5s ease-in-out; }
+.mote-identity-motion:is([data-mote-gesture="doze"], [data-mote-gesture="nod"], [data-mote-gesture="wake"]) .mote-silhouette__gesture-head { animation: mote-gesture-nod 1.5s ease-in-out; }
+.mote-avatar-stage .mote-companion:not(.mote-silhouette-art) { animation: mote-stage-breathe 4.4s ease-in-out infinite; }
 .mote-avatar-stage .mote-companion__head { transform: rotate(var(--mote-head-turn, var(--mote-stage-turn, 0deg))); transition: transform var(--dur-fast) ease-out; }
 .mote-avatar-stage .mote-companion__gaze { transform: translate(calc(var(--mote-gaze-x, var(--mote-stage-gaze-x, 0px)) * .45), calc(var(--mote-gaze-y, var(--mote-stage-gaze-y, 0px)) * .45)); transition: transform var(--dur-fast) ease-out; }
 .mote-avatar-stage .mote-companion__eyes { animation: mote-stage-blink 5.4s ease-in-out infinite; }
 .mote-face-editor__preview .mote-face__neck { transform: rotate(var(--mote-head-turn, var(--mote-stage-turn, 0deg))); }
 .mote-face-editor__preview .mote-face__gaze-follow { transform: translate(var(--mote-gaze-x, var(--mote-stage-gaze-x, 0px)), var(--mote-gaze-y, var(--mote-stage-gaze-y, 0px))); }
 @media (prefers-reduced-motion: reduce) {
-  .mote-live-breathe, .mote-live-eyes, .mote-avatar-stage .mote-companion, .mote-avatar-stage .mote-companion__eyes { animation: none !important; }
-  .mote-live-gaze, .mote-avatar-crop__motion, .mote-avatar-stage .mote-companion__head, .mote-avatar-stage .mote-companion__gaze { transition: none !important; transform: none !important; }
+  .mote-live-breathe, .mote-live-eyes, .mote-silhouette__head, .mote-silhouette__eyes, .mote-silhouette__gesture-eyes, .mote-silhouette__gesture-gaze, .mote-silhouette__gesture-head, .mote-avatar-stage .mote-companion, .mote-avatar-stage .mote-companion__eyes { animation: none !important; }
+  .mote-silhouette__press, .mote-silhouette__gaze, .mote-avatar-crop__motion, .mote-avatar-stage .mote-companion__head, .mote-avatar-stage .mote-companion__gaze { transition: none !important; transform: none !important; }
 }
 
 .pmo-teams-topic-compact-launcher__surface > .space-object-icon { width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center; }
@@ -109,6 +134,7 @@
 .mote-face-editor__preview .space-object-icon > .mote-face { width: 100px; height: 100px; }
 .mote-avatar-preview > .space-object-icon, .mote-avatar-preview > .mote-identity-motion { display: grid; place-items: center; width: 104px; height: 104px; border: 1px solid var(--line); border-radius: 50%; background: var(--surface-1); overflow: hidden; }
 .mote-avatar-preview svg { width: 68px; height: 68px; }
+.mote-avatar-preview svg.mote-silhouette-art { width: 92px; height: 92px; }
 .mote-avatar-preview .space-object-icon__avatar { width: 104px; height: 104px; }
 .mote-avatar-stage__aside { grid-column: 2; grid-row: 1; min-width: 0; display: grid; gap: var(--sp-2); }
 .mote-avatar-stage__header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }

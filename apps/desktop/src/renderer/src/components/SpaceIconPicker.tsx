@@ -4,7 +4,7 @@ import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { useLayoutEffect, useRef, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SPACE_ICON_CATALOG, type SpaceIconChoice, type SpaceIconId, type SpaceIconTarget } from '../lib/space-object-appearance'
-import { DEFAULT_MOTE_FACE, isMoteFace, MOTE_AVATAR_INPUT_MAX_BYTES, type MoteAvatarInput } from '../../../shared/mote-avatars'
+import { DEFAULT_MOTE_FACE, isMoteFace, MOTE_AVATAR_EDGE, MOTE_AVATAR_INPUT_MAX_BYTES, type MoteAvatarInput } from '../../../shared/mote-avatars'
 import { api } from '../lib/api'
 import { isMoteAvatarSeriesChoice, type MoteAvatarSeriesChoice } from '@agentmux/core/mote-avatar-series'
 import type { MoteAvatarRead, MoteAvatarSave } from '@agentmux/core/mote-avatar-write'
@@ -14,6 +14,7 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
 import { MoteAvatarCrop, type MoteAvatarCropFrame } from './MoteAvatarCrop'
 import { MoteAvatarImageGallery, MoteSilhouetteArt, type MoteGallerySelectionMeta } from './MoteAvatarImageGallery'
+import { MOTE_SILHOUETTE_TITLES, isBuiltinMoteSilhouetteLocator } from './MoteSilhouetteArt'
 import { MoteFaceEditor } from './MoteFaceEditor'
 import { SpaceObjectIcon } from './SpaceObjectIcon'
 import { LiquidSelectionSurface } from './LiquidSelectionSurface'
@@ -22,6 +23,9 @@ import { keepMoteAvatarSaveDraft, moteAvatarSaveRequestHash, readMoteAvatarSaveD
 
 type SeriesSaveAttempt = { request: MoteAvatarSave; state: 'unsent' | 'unknown' | 'refused' | 'saved'; issue: string }
 const pickerIdentity = (target: SpaceIconTarget | null) => JSON.stringify([target?.key, target?.avatarTarget ?? null, target?.imageTarget ?? null])
+const isGallerySeriesChoice = (value: unknown): value is MoteAvatarSeriesChoice =>
+  isMoteAvatarSeriesChoice(value) && value.source.origin === 'builtin' &&
+  (value.source.seriesId === 'mote-silhouettes' || value.source.seriesId === 'lowpoly')
 function freezeSeriesSave(request: MoteAvatarSave): MoteAvatarSave {
   const frozen = structuredClone(request)
   const freeze = (value: object) => { for (const child of Object.values(value)) if (child && typeof child === 'object') freeze(child); Object.freeze(value) }
@@ -79,7 +83,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
     const saved = target ? useAppStore.getState().spaceObjectIcons[target.key] ?? null : null
     const face = isMoteFace(saved) ? saved : { ...DEFAULT_MOTE_FACE }
     const originalSaved: unknown = saved
-    const series = isMoteAvatarSeriesChoice(originalSaved) ? originalSaved : null
+    const series = isMoteAvatarSeriesChoice(originalSaved) && !isGallerySeriesChoice(originalSaved) ? originalSaved : null
     setFaceDraft(face); setAlternativeDraft(isMoteFace(saved) || series ? null : saved)
     setDraft(saved)
     setSeriesSeed(series); setSeriesDraft(null); setSeriesPreparing(false)
@@ -125,7 +129,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
       setAvatarBaseline(value); setAvatarReadIssue(value.issues.length ? value.issues.join('\n') : null)
       if (!avatarSeeded.current) {
         avatarSeeded.current = true
-        const series = isMoteAvatarSeriesChoice(value.choice) ? value.choice : null
+        const series = isMoteAvatarSeriesChoice(value.choice) && !isGallerySeriesChoice(value.choice) ? value.choice : null
         setSeriesSeed(submitted ?? series); setSeriesImage(submitted?.pngDataUrl ?? value.image?.dataUrl ?? null)
         setSeriesImageConfirmed(!submitted && Boolean(series && value.image))
         if (submitted && !localIntent.current) setMode('series')
@@ -239,8 +243,23 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
       if (!editingFace && preview && (original.avatarTarget || original.imageTarget)) {
         if (!canvas.current) throw new Error('The avatar preview is not ready. Select the image again.')
         const input = { mimeType: 'image/png' as const, dataUrl: canvas.current.toDataURL('image/png') }
-        choice = original.imageTarget ? await api.spaceObjects.saveAvatar(original.imageTarget, input)
+        const savedImage = original.imageTarget ? await api.spaceObjects.saveAvatar(original.imageTarget, input)
           : await api.scratch.saveMoteAvatar(original.avatarTarget!.workspaceId, original.avatarTarget!.topicId, input, original.avatarTarget!.objectKey)
+        if (original.avatarTarget && preview.source && preview.definition && preview.definition.kind === 'image') {
+          const maxOffset = Math.max(1, (MOTE_AVATAR_EDGE * cropFrame.zoom - MOTE_AVATAR_EDGE) / 2)
+          choice = {
+            kind: 'series',
+            source: preview.source,
+            definition: preview.definition,
+            parameters: {
+              kind: 'image',
+              zoom: Math.max(1, Math.min(3, cropFrame.zoom)),
+              offsetX: cropFrame.zoom > 1 ? Math.max(-1, Math.min(1, cropFrame.offsetX / maxOffset)) : 0,
+              offsetY: cropFrame.zoom > 1 ? Math.max(-1, Math.min(1, cropFrame.offsetY / maxOffset)) : 0
+            },
+            image: savedImage
+          }
+        } else choice = savedImage
       }
       // A completed asset belongs to the submitted object, but a replaced editor cannot publish it.
       if (!current()) return
@@ -265,10 +284,14 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
       : editingSeries && seriesAttempt?.state === 'unsent' ? 'Save not sent'
         : editingSeries && seriesStorageIssue ? 'Request unconfirmed'
           : error && errorStep === 'save' ? 'Retry saving' : supportsImages ? editingFace ? 'Save face' : 'Save avatar' : 'Save icon'
+  const savedGallery = isGallerySeriesChoice(alternativeDraft) ? alternativeDraft : null
   const stageSourceTitle = preview ? (preview.title ?? 'Uploaded image') : alternativeDraft === null ? 'Automatic companion'
-    : typeof alternativeDraft === 'string' && alternativeDraft in SPACE_ICON_CATALOG ? SPACE_ICON_CATALOG[alternativeDraft].label : 'Saved image'
+    : typeof alternativeDraft === 'string' && alternativeDraft in SPACE_ICON_CATALOG ? SPACE_ICON_CATALOG[alternativeDraft].label
+      : savedGallery ? isBuiltinMoteSilhouetteLocator(savedGallery.source) ? MOTE_SILHOUETTE_TITLES[savedGallery.source.entryId]
+        : savedGallery.source.entryId.slice(0, 1).toUpperCase() + savedGallery.source.entryId.slice(1) : 'Saved image'
   const stageSourceTag = preview ? (preview.tag ?? 'PNG · 256 px') : alternativeDraft === null ? 'Default Mote'
-    : typeof alternativeDraft === 'string' ? 'Symbol icon' : 'Mote avatar'
+    : typeof alternativeDraft === 'string' ? 'Symbol icon'
+      : savedGallery ? savedGallery.source.seriesId === 'mote-silhouettes' ? 'Mote silhouette' : 'Low-poly companion' : 'Mote avatar'
   const clampedCropX = Math.max(-(cropFrame.zoom - 1) * 50, Math.min((cropFrame.zoom - 1) * 50, (cropFrame.offsetX / 256) * 100))
   const clampedCropY = Math.max(-(cropFrame.zoom - 1) * 50, Math.min((cropFrame.zoom - 1) * 50, (cropFrame.offsetY / 256) * 100))
   const renderLiveChipContent = () => {
@@ -276,7 +299,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
     if (preview) {
       const style = { transform: `translate(${clampedCropX.toFixed(2)}%, ${clampedCropY.toFixed(2)}%) scale(${cropFrame.zoom})` }
       return preview.silhouetteId
-        ? <span className="mote-avatar-stage__live-crop" style={style}><MoteSilhouetteArt id={preview.silhouetteId} /></span>
+        ? <span className="mote-avatar-stage__live-crop" style={style}><MoteSilhouetteArt id={preview.silhouetteId} interactive={false} /></span>
         : <img className="space-object-icon__avatar mote-live-breathe" src={preview.dataUrl} alt="" draggable={false} style={style} />
     }
     return <SpaceObjectIcon kind={target.kind} name={target.name} manualIcon={alternativeDraft} avatarWorkspaceId={target.avatarTarget.workspaceId}
@@ -366,7 +389,7 @@ export function SpaceIconPicker({ target, onClose, returnFocus }: {
               </div> : null}
             </div>
             {target.avatarTarget ? <MoteAvatarImageGallery key={targetIdentity} visible={mode === 'alternative'} disabled={busy}
-              selectedImage={preview?.dataUrl ?? null} shuffleRevision={shuffleRevision} uploadAction={uploadControl} onChoose={(dataUrl, meta) => {
+              selectedImage={preview?.dataUrl ?? null} selectedLocator={savedGallery?.source ?? null} shuffleRevision={shuffleRevision} uploadAction={uploadControl} onChoose={(dataUrl, meta) => {
                 localIntent.current = true; inputRequest.current = {}; setPreparing(false); setError(null); setPreviewReady(false)
                 setCropFrame({ zoom: 1, offsetX: 0, offsetY: 0 })
                 setPreview(previous => ({ dataUrl, revision: (previous?.revision ?? 0) + 1, ...meta }))
