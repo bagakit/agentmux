@@ -14,6 +14,7 @@ import { ConnectorHeaderLinks } from '../src/renderer/src/components/ConnectorHe
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 import { settingsCatalog } from '../src/renderer/src/components/settings/settings-modules'
 import { connectorGroupStatus } from '../src/renderer/src/lib/connector-group-status'
+import { useAppStore } from '../src/renderer/src/store'
 import type { RoomBinding } from '@agentmux/core/connections'
 
 let lose = false
@@ -102,7 +103,10 @@ it('a later failed check retains the exact group and earlier observations, with 
   for (const text of ['Original status group', 'Unavailable', 'Kept after this check failed', 'Connect a conversation', 'Automatic sync settings', 'Check group status']) expect(menu().textContent).toContain(text)
   expect(trigger().getAttribute('aria-disabled')).not.toBe('true')
   expect(menu().textContent).not.toContain('PRIVATE credential path')
-  expect(document.querySelector<HTMLTextAreaElement>('.agent-composer textarea')?.disabled).not.toBe(true)
+  const input = document.querySelector<HTMLElement>('[data-workbench-region-id="original-region"] [role="textbox"]')
+  expect(input, 'original visible Agent input is retained').not.toBeNull()
+  expect(input!.getAttribute('contenteditable')).toBe('true')
+  expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
 }, 30_000)
 
 it('actual recorded refusal and waiting stay separate from adoption, and typed byte receipts keep their exact presentation', async () => {
