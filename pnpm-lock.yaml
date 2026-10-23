@@ -355,6 +355,22 @@ importers:
         specifier: ^3.2.0
         version: 3.2.7(@types/debug@4.1.13)(@types/node@24.13.3)(happy-dom@20.14.0)(yaml@2.9.0)
 
+  packages/capsule:
+    dependencies:
+      '@agentmux/identity':
+        specifier: workspace:*
+        version: link:../identity
+      fs-native-extensions:
+        specifier: 1.5.1
+        version: 1.5.1
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.13.3
+      typescript:
+        specifier: ^5.9.0
+        version: 5.9.3
+
   packages/client-ui:
     dependencies:
       '@agentmux/core':
@@ -536,6 +552,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@agentmux/capsule':
+        specifier: workspace:*
+        version: link:../capsule
       '@agentmux/demand':
         specifier: workspace:*
         version: link:../demand

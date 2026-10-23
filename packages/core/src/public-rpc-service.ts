@@ -1,4 +1,5 @@
 import { isChannelMetadataMethod, parseChannelMetadataParams } from './channel-metadata-codec.js'
+import { isCapsuleMethod, parseCapsuleRpcParams, parseCapsuleRpcResult, type CapsulePort, type CapsuleCallContext, type CapsuleMethod } from './capsule.js'
 import { parseExternalConversationReference, parseExternalConversationReceipt } from './external-conversation.js'
 import { isMoteChatMethod, parseMoteChatParams, parseMoteChatResult } from './mote-chat-codec.js'
 import type { MoteChatPort, MoteChatMethod, MoteChatParamsMap } from './mote-chat-contract.js'
@@ -127,6 +128,8 @@ export type AgentMuxRpcCorePort = Pick<AgentMuxClient,
 export type AgentMuxRpcCoreClient = { hostId: string; client: AgentMuxRpcCorePort }
 type BorrowedHostedRuntime = Pick<AgentMuxHostedRuntimeService, 'call' | 'subscribe' | 'assertFence'> & Partial<Pick<AgentMuxHostedRuntimeService, 'client'>>
 export type AgentMuxRpcServiceOptions = Partial<AgentMuxControlHost> & {
+  /** Borrow the original UI-free Capsule owner; no content or configuration is stored here. */
+  capsules?: CapsulePort
   inputContextCaptures?: AgentInputContextCaptureReader
   applicationAccess?: ApplicationAccessPort
   windows?: AgentMuxRpcWindowsOwner
@@ -313,7 +316,7 @@ const NATIVE_FIELDS = {
   'goal.activity': ['goalId', 'projectId', 'agentSessionId', 'assigneeSessionId', 'supervisorSessionId', 'status', 'since', 'limit'],
   'system.storage': ['hostId', 'runId'], 'system.doctor': ['workspacePath'], 'system.endpoint': [],
   'system.subscription.cancel': ['subscriptionId']
-} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod>, readonly string[]>
+} as const satisfies Record<Exclude<keyof typeof AGENTMUX_RPC_NATIVE_METHODS, CapsuleMethod | import('./public-rpc-device.js').AgentMuxRpcDeviceMethod | AgentMuxHostedRuntimeMethod | ApplicationAccessMethod | MoteChatMethod | MoteConnectionMethod | MoteAvatarSeriesMethod | MoteAvatarWriteMethod | TopicMethod | ConnectionMethod | HostSettingsMethod | import('./public-rpc-files.js').FileMethod | GitMethod | AppWindowMethod | ScheduleMethod>, readonly string[]>
 
 function cause(error: unknown, fallback = 'CONTROL_FAILED') {
   return { code: error instanceof AgentMuxError ? error.code : fallback,
@@ -918,6 +921,23 @@ export class AgentMuxRpcService {
       }
     }
     const caller = await this.authenticated(context)
+    if (isCapsuleMethod(method)) {
+      const capsuleMethod: CapsuleMethod = method
+      const input = parseCapsuleRpcParams(capsuleMethod, params)
+      const principal = context.principal && ['user', 'device'].includes(context.principal.kind) && context.principal.id.trim()
+        ? context.principal as CapsuleCallContext['principal'] : undefined
+      if (!caller && !principal) throw new AgentMuxError('Capsule operations require an authenticated Agent, user or device. Original pages and Agents remain available.', 'CONTROL_PERMISSION_DENIED')
+      if (method === 'capsule.interaction.reply' && (caller || !principal)) throw new AgentMuxError('A page or managed Agent cannot certify a human answer. Submit the original answer through trusted App chrome; the request and Agent remain available.', 'CONTROL_PERMISSION_DENIED')
+      context.signal?.throwIfAborted(); await context.assertCurrent?.()
+      if (!this.ports.capsules && !this.ports.forwardControl) throw new AgentMuxError('The original Capsule owner is unavailable. Retain the original page and operation; existing Agents remain available.', 'CONTROL_UNAVAILABLE')
+      const capsuleContext: CapsuleCallContext = {
+        ...(caller ? { caller: { hostId: caller.hostId, agentSessionId: caller.agentSessionId } } : {}),
+        ...(principal ? { principal } : {}), ...(context.signal ? { signal: context.signal } : {})
+      }
+      const result = this.ports.capsules ? await this.ports.capsules.call<CapsuleMethod>(capsuleMethod, input, capsuleContext)
+        : await this.ports.forwardControl!<CapsuleMethod>(capsuleMethod, input, context)
+      return parseCapsuleRpcResult<CapsuleMethod>(capsuleMethod, result, input) as AgentMuxRpcResult<M>
+    }
     if (isGoalDelegationMethod(method)) {
       const input = parseGoalDelegationParams(method, params)
       if (!this.ports.goalDelegations) {
