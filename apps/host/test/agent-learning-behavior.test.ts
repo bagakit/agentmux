@@ -1,7 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { spawn } from 'node:child_process'
+import { tmpdir } from 'node:os'
 import { learningBehaviorFixture } from './agent-learning-behavior-fixture.js'
 import { writeBehaviorTools } from './agent-learning-behavior-tools.mjs'
 
@@ -79,4 +80,31 @@ it('forwards the original file-write stdin bytes through the delegated shipping 
     const actions = (await readFile(join(directory, 'cli-actions.ndjson'), 'utf8')).trim().split('\n').map(line => JSON.parse(line))
     expect(actions.map(row => row.stdin)).toEqual(['', '', body, query])
   } finally { await f.closeBehavior() }
+})
+
+
+it('binds complete delegated packets to their original independent Core creation', async () => {
+  const evidence = await mkdtemp(join(tmpdir(), 'amx-learning-packet-'))
+  const f = await learningBehaviorFixture(evidence)
+  try {
+    const operation = await f.prepare('packet-extraction')
+    const extraction = await f.packet(operation, 'extraction', 'extraction')
+    expect(extraction.fixtureCaller).toBe(operation.proposer.agentSessionId)
+    expect(extraction.createOperationId).toBe(operation.proposer.createOperationId)
+    const original = await f.store.readMetadata(operation.proposer.agentSessionId)
+    expect(await readFile(join(evidence, 'extraction/production-input.txt'), 'utf8')).toBe(original!.initialInput!.prompt)
+    const agentSessionId = 'packet-independent-session', createOperationId = 'packet-independent-create'
+    const prepared = await f.topics.prepareAgent(f.workspace, f.targets[0]!.topicId, { providerId: 'codex', sessionId: agentSessionId })
+    await f.core.createAgentWithDelivery({ agentSessionId, createOperationId, providerId: 'codex', executorId: 'saved',
+      workspacePath: prepared.absolutePath, injectAgentMuxGuide: true, agentMuxNote: prepared.prompt, optionalContext: prepared.optionalContext,
+      agentMuxTask: 'Read the current original knowledge without changing it.' })
+    const later = await f.sessionPacket(agentSessionId, createOperationId, 'later')
+    expect(later).toMatchObject({ stage: 'later', fixtureCaller: agentSessionId, operationId: createOperationId, createOperationId })
+    expect(later.operationId).not.toBe(operation.operationId)
+    const independent = await f.store.readMetadata(agentSessionId)
+    expect(await readFile(join(evidence, 'later/production-input.txt'), 'utf8')).toBe(independent!.initialInput!.prompt)
+    expect(JSON.parse(await readFile(join(evidence, 'later/initial-input.json'), 'utf8'))).toEqual(independent!.initialInput)
+    await expect(f.sessionPacket(agentSessionId, operation.proposer.createOperationId, 'wrong-creation')).rejects.toThrow('another original Core creation')
+    expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  } finally { await f.closeBehavior(); await rm(evidence, { recursive: true, force: true }) }
 })
