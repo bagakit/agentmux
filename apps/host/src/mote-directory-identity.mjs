@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process'
 export const SCRATCH_DIRECTORY_IDENTITY_PATH = '.agentmux/directory-identity.json'
 export const SCRATCH_DIRECTORY_IDENTITY_PENDING_PATH = '.agentmux/directory-identity.pending.json'
 export const SCRATCH_DIRECTORY_ALIAS_PENDING_PATH = '.agentmux/directory-identity.pending.alias'
-const defaultHelper = resolve(import.meta.dirname, '../resources/bin/agentmux-workspace-move')
+const defaultHelper = process.env.AGENTMUX_WORKSPACE_MOVE_HELPER ?? resolve(import.meta.dirname, '../resources/bin/agentmux-workspace-move')
 const invalid = message => Object.assign(new Error(message), { code: 'DIRECTORY_IDENTITY_INVALID' })
 const same = (a, b) => a.dev === b.dev && a.ino === b.ino
 const hash = path => createHash('sha256').update(path).digest('hex')
