@@ -41,16 +41,16 @@ function scope(value: unknown) {
   return { input: member(p.input, ['mentions-and-replies', 'all-messages'] as const), publication: member(p.publication, ['future-native-user-facing', 'future-shared-conversation'] as const) }
 }
 const deliveryReasons = ['effect-unconfirmed', 'platform-rejected', 'adapter-unavailable', 'platform-unavailable', 'rate-limited', 'thread-unavailable', 'unsupported-format', 'binding-revised', 'original-speech-withdrawn', 'outside-conversation-scope', 'private-content', 'public-content-unconfirmed', 'version-unavailable'] as const
+function fingerprint(value: unknown): string { if (typeof value !== 'string' || !/^[a-f0-9]{64}$/u.test(value)) return fail(); return value }
 function association(value: unknown) {
   const a = object(value, ['sourceKey', 'recordKey', 'eventKey', 'partKey'])
-  const key = (value: unknown) => { if (typeof value !== 'string' || !/^[a-f0-9]{64}$/u.test(value)) return fail(); return value }
-  return { sourceKey: nullable(a.sourceKey, key), recordKey: nullable(a.recordKey, key), eventKey: nullable(a.eventKey, key), partKey: nullable(a.partKey, key) }
+  return { sourceKey: nullable(a.sourceKey, fingerprint), recordKey: nullable(a.recordKey, fingerprint), eventKey: nullable(a.eventKey, fingerprint), partKey: nullable(a.partKey, fingerprint) }
 }
 function sourceGap(value: unknown) {
-  const g = object(value, ['gapId', 'reason', 'code', 'codeRecorded', 'sourceKind', 'association'])
+  const g = object(value, ['gapKey', 'reason', 'code', 'codeRecorded', 'sourceKind', 'association'])
   const code = nullable(g.code, value => member(value, connectionDiagnosisSourceCodes)), codeRecorded = bool(g.codeRecorded)
   if (code !== null && !codeRecorded) return fail()
-  return { gapId: id(g.gapId), reason: member(g.reason, ['public-content-unconfirmed', 'transport-unsupported', 'resource-unavailable', 'start-cut-unconfirmed', 'source-gap', 'version-unavailable'] as const),
+  return { gapKey: fingerprint(g.gapKey), reason: member(g.reason, ['public-content-unconfirmed', 'transport-unsupported', 'resource-unavailable', 'start-cut-unconfirmed', 'source-gap', 'version-unavailable'] as const),
     code, codeRecorded, association: association(g.association), sourceKind: nullable(g.sourceKind, value => member(value, ['captured', 'native', 'native-unavailable'] as const)) }
 }
 function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGroupDiagnosis {
