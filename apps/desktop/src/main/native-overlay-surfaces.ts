@@ -3,7 +3,7 @@ import type { BrowserBounds } from '../shared/contracts.js'
 import { normalizeBrowserBounds } from '../shared/browser-bounds.js'
 import { nativeOverlayScrimScript, type NativeScrimExclusion } from './native-overlay-scrim.js'
 import { boundsOverlap, NATIVE_OVERLAY_LIMIT, NATIVE_OVERLAY_PIXEL_LIMIT, type NativeBrowserInput, type NativeOverlayReceipt, type NativeOverlayRegion } from '../shared/native-overlay.js'
-import type { BrowserViewManager, NativeBrowserOwner, NativeBrowserPageInput } from './browser-view-manager.js'
+import type { BrowserViewManager, NativeBrowserOwner, NativeBrowserPageInput, NativeBrowserInputBarrier } from './browser-view-manager.js'
 
 const CHROME_DOCUMENT = 'data:text/html,' + encodeURIComponent('<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}img,svg{display:block;width:100%;height:100%;pointer-events:none}svg{display:none}</style><img alt="" aria-hidden="true"><svg xmlns="http://www.w3.org/2000/svg"><defs><mask id="chrome-clear" maskUnits="userSpaceOnUse"></mask></defs><path mask="url(#chrome-clear)"/></svg>')
 const contains = (outer: BrowserBounds, inner: BrowserBounds): boolean => inner.x >= outer.x && inner.y >= outer.y &&
@@ -51,8 +51,8 @@ export class NativeOverlaySurfaces {
   private pendingFrame: SourceFrame | undefined
   private frameRunning = false
   private readonly visibilityChanged = (): void => { this.synchronizeFrames() }
-  private readonly inputGuards = new Map<WebContentsView, () => void>()
-  constructor(private readonly window: BrowserWindow, private readonly browsers: Pick<BrowserViewManager, 'visibleNativeBounds' | 'nativeOwner' | 'nativeOwnerForView'>, private readonly onWarning: (warning: string, modalId?: string) => void,
+  private readonly inputGuards = new Map<WebContentsView, NativeBrowserInputBarrier>()
+  constructor(private readonly window: BrowserWindow, private readonly browsers: Pick<BrowserViewManager, 'visibleNativeBounds' | 'nativeOwner' | 'nativeOwnerForView' | 'acquireNativeInputBarrier'>, private readonly onWarning: (warning: string, modalId?: string) => void,
     private readonly onBrowserInput: (input: NativeBrowserInput) => void) {
     window.on('hide', this.visibilityChanged)
     window.on('show', this.visibilityChanged)
@@ -101,7 +101,7 @@ export class NativeOverlaySurfaces {
       ++this.generation
       this.stopFrames()
       this.requested = []
-      this.synchronizeInputGuards()
+      void this.synchronizeInputGuards().catch(() => {})
       for (const [id, projection] of this.projections) this.remove(id, projection)
       return { projected: 0, capturedPixels: 0 }
     }
@@ -165,7 +165,14 @@ export class NativeOverlaySurfaces {
     for (const [id, projection] of this.projections) if (!current.has(id)) this.remove(id, projection)
     // The original modal declaration is the input fact. Only its actual native Browser
     // attachments yield, including while the first foreground frame is being prepared.
-    this.synchronizeInputGuards()
+    try {
+      const ready = this.synchronizeInputGuards()
+      if (this.inputGuards.size) await boundedChromePaint(ready)
+    } catch {
+      if (generation === this.generation && !this.disposed) {
+        for (const modalId of modals.keys()) fail(modalId, 'The modal background input barrier could not be prepared. Original Browser and pending action remain; reopen the confirmation.')
+      }
+    }
     for (const unit of units) {
       if (generation !== this.generation || this.disposed) break
       const modalId = unit[0]!.modal?.id
@@ -239,7 +246,7 @@ export class NativeOverlaySurfaces {
     this.window.off('minimize', this.visibilityChanged)
     this.window.off('restore', this.visibilityChanged)
     this.requested = []
-    this.synchronizeInputGuards()
+    void this.synchronizeInputGuards().catch(() => {})
     ++this.generation
     for (const [id, projection] of this.projections) this.remove(id, projection)
   }
@@ -357,7 +364,7 @@ export class NativeOverlaySurfaces {
   private removeModal(modalId: string): void {
     this.requested = this.requested.filter(region => region.modal?.id !== modalId)
     for (const [id, projection] of this.projections) if (projection.region.modal?.id === modalId) this.remove(id, projection)
-    this.synchronizeInputGuards()
+    void this.synchronizeInputGuards().catch(() => {})
   }
 
   /** Modal input is a presentation fact, scoped to the exact attached background page. */
@@ -374,28 +381,40 @@ export class NativeOverlaySurfaces {
     })
   }
 
-  private synchronizeInputGuards(): void {
-    const hasModal = !this.disposed && this.requested.some(region => region.modal)
+  private synchronizeInputGuards(): Promise<void> {
     const chrome = new Set([...this.projections.values()].map(projection => projection.view))
-    const pages = new Set(this.window.isDestroyed() || !hasModal ? [] : this.window.contentView.children.filter(candidate => {
-      if (chrome.has(candidate as WebContentsView) || !('webContents' in candidate)) return false
-      const view = candidate as WebContentsView
-      if (view.webContents === this.window.webContents || view.webContents.isDestroyed() || !view.getVisible()) return false
-      return this.browsers.nativeOwnerForView(view)?.view === view
-    }) as WebContentsView[])
-    for (const [view, release] of this.inputGuards) if (!pages.has(view)) { release(); this.inputGuards.delete(view) }
-    for (const view of pages) if (!this.inputGuards.has(view)) {
-      const owner = this.browsers.nativeOwnerForView(view)
-      if (!owner) continue
-      const prevent = (event: Electron.Event): void => { if (this.modalBlocks(view, owner.browserId)) event.preventDefault() }
-      view.webContents.on('before-mouse-event', prevent)
-      view.webContents.on('before-input-event', prevent)
-      this.inputGuards.set(view, () => {
-        if (view.webContents.isDestroyed()) return
-        view.webContents.off('before-mouse-event', prevent)
-        view.webContents.off('before-input-event', prevent)
-      })
+    const pages = new Map<WebContentsView, NativeBrowserOwner>()
+    if (!this.disposed && !this.window.isDestroyed() && this.requested.some(region => region.modal)) {
+      for (const candidate of this.window.contentView.children) {
+        if (chrome.has(candidate as WebContentsView) || !('webContents' in candidate)) continue
+        const owner = this.browsers.nativeOwnerForView(candidate as WebContentsView)
+        if (owner && this.modalBlocks(owner.view, owner.browserId)) pages.set(owner.view, owner)
+      }
     }
+    for (const [view, guard] of this.inputGuards) if (!pages.has(view)) {
+      this.inputGuards.delete(view)
+      try {
+        void boundedChromePaint(Promise.resolve(guard.release())).catch(() => {
+          this.onWarning('The original Browser input barrier cleanup is unconfirmed. Original page and Agent remain available; close and reopen the floating control to retry its presentation.')
+        })
+      } catch {
+        this.onWarning('The original Browser input barrier cleanup is unconfirmed. Original page and Agent remain available; close and reopen the floating control to retry its presentation.')
+      }
+    }
+    for (const [view, owner] of pages) if (!this.inputGuards.has(view)) {
+      let guard: NativeBrowserInputBarrier
+      guard = this.browsers.acquireNativeInputBarrier(owner, () => {
+        if (this.inputGuards.get(view) !== guard) return
+        const message = 'The modal background input barrier became unavailable. Original Browser and pending action remain; reopen the confirmation.'
+        const modalIds = new Set(this.requested.flatMap(region => region.modal ? [region.modal.id] : []))
+        for (const modalId of modalIds) {
+          this.removeModal(modalId)
+          this.onWarning(message, modalId)
+        }
+      })
+      this.inputGuards.set(view, guard)
+    }
+    return Promise.all([...this.inputGuards.values()].map(guard => guard.ready)).then(() => {})
   }
 
   private arrangeLayers(): void {

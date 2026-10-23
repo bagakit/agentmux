@@ -1,8 +1,8 @@
 import { WebContentsView, type BrowserWindow, type WebContents } from 'electron'
 import { browserAgentBoundaryAppearance, type BrowserAgentControlPreferences } from '../shared/browser-agent-control.js'
 
-function documentFor(preferences: BrowserAgentControlPreferences): string {
-  const appearance = browserAgentBoundaryAppearance(preferences)
+function documentFor(preferences: BrowserAgentControlPreferences | null): string {
+  const appearance = preferences ? browserAgentBoundaryAppearance(preferences) : { color: 'transparent', opacity: 0 }
   return 'data:text/html,' + encodeURIComponent(`<!doctype html><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'"><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent;user-select:none}svg{position:absolute;inset:0;width:100%;height:100%;overflow:hidden;pointer-events:none;color:${appearance.color};opacity:${appearance.opacity}}</style><svg xmlns="http://www.w3.org/2000/svg" data-browser-control-boundary aria-hidden="true"><rect width="100%" height="100%" fill="none" stroke="currentColor" stroke-width="2" vector-effect="non-scaling-stroke"/></svg>`)
 }
 
@@ -21,7 +21,8 @@ export class BrowserNativeInputShield {
     try {
       if (!this.current() || !this.source.isFocused()) return
       if (this.contents.isDestroyed()) throw new Error('The native input surface ended before focus transfer')
-      this.contents.focus()
+      if (this.redirectFocus) this.redirectFocus()
+      else this.contents.focus()
     } catch { this.failed() }
   }
   private readonly boundsChanged = (): void => {
@@ -30,7 +31,8 @@ export class BrowserNativeInputShield {
 
   constructor(private readonly page: WebContentsView, private readonly window: () => BrowserWindow,
     private readonly isCurrent: () => boolean, private readonly onFailure: () => void,
-    private readonly preferences: () => BrowserAgentControlPreferences) {
+    private readonly preferences: () => BrowserAgentControlPreferences | null,
+    private readonly redirectFocus?: () => void) {
     this.source = page.webContents
     this.view = new WebContentsView({ webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false,
       focusOnNavigation: false, navigateOnDragDrop: false } })
@@ -60,7 +62,8 @@ export class BrowserNativeInputShield {
   /** Only saved appearance changes touch this document; page navigations cannot remove it. */
   async refreshAppearance(): Promise<void> {
     if (!this.current() || this.contents.isDestroyed()) return
-    const appearance = browserAgentBoundaryAppearance(this.preferences())
+    const preferences = this.preferences()
+    const appearance = preferences ? browserAgentBoundaryAppearance(preferences) : { color: 'transparent', opacity: 0 }
     await this.contents.executeJavaScript(`Object.assign(document.querySelector('[data-browser-control-boundary]').style, ${JSON.stringify(appearance)})`)
   }
 
@@ -96,6 +99,8 @@ export class BrowserNativeInputShield {
     this.view.setBounds(this.page.getBounds())
     this.view.setVisible(this.page.getVisible())
   }
+
+  get closing(): boolean { return this.closeRequested }
 
   dispose(): void {
     const restoreFocus = !this.contents.isDestroyed() && this.contents.isFocused()
