@@ -6,6 +6,7 @@ import {removeIconSprite} from '../../../packages/client-ui/src/theme/icon-sprit
 import {getSemanticIconCatalog} from '../../../packages/client-ui/src/theme/icon-catalog-metadata.js'
 import {ICON_GLYPHS} from '../../../packages/client-ui/src/theme/icon-catalog.js'
 import {createReviewCatalog} from '../scripts/icon-review/catalog.mjs'
+import futureDesigns from '../scripts/icon-review/future-designs.json'
 
 afterEach(() => { window.dispatchEvent(new Event('pagehide')); removeIconSprite(document); document.body.replaceChildren(); vi.unstubAllGlobals() })
 
@@ -70,8 +71,12 @@ it('projects every authored state design into the actual workbench, plays only t
   document.querySelector<HTMLElement>('[data-close="motion-dialog"]')!.click()
   document.getElementById('view-future')!.click()
   const candidates=[...document.querySelectorAll<HTMLElement>('[data-future-glyph]')]
-  expect(candidates).toHaveLength(7)
+  expect(futureDesigns.length).toBeGreaterThan(0)
+  expect(candidates.map(candidate => candidate.dataset.futureGlyph)).toEqual(futureDesigns.map(design => design.id))
+  expect(candidates.some(candidate => candidate.dataset.futureGlyph === 'shared-content')).toBe(false)
   for(const candidate of candidates) expect(ICON_GLYPHS).not.toHaveProperty(candidate.dataset.futureGlyph!)
+  expect(ICON_GLYPHS).toHaveProperty('note-block')
+  expect(ICON_GLYPHS).toHaveProperty('shared-block')
   expect(document.querySelectorAll('[data-pick]')).toHaveLength(0)
   document.getElementById('view-gallery')!.click()
   expect(document.querySelectorAll('[data-glyph]').length).toBe(new Set(getSemanticIconCatalog().icons.map(icon=>icon.defaultGlyph)).size)
