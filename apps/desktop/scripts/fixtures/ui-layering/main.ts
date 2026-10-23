@@ -52,7 +52,8 @@ const owners = (target = window, nativePage = page) => {
   const browserOwner = target === window ? browsers?.nativeOwner(pageId) : [...independentWindows.values()].find(entry => entry.window === target)?.browsers.nativeOwner('independent-original-browser')
   return target.contentView.children.filter(view => 'webContents' in view).map((view: any) => ({ id: view.webContents.id, visible: view.getVisible(), bounds: view.getBounds(), page: view === nativePage, inputBarrier: view === browserOwner?.inputShield }))
 }
-const positive = () => owners().filter(owner => !owner.page && !owner.inputBarrier && owner.visible && owner.bounds.x >= 0 && owner.bounds.y >= 0 && owner.bounds.width > 0 && owner.bounds.height > 0)
+const positive = (target = window, nativePage = page) => owners(target, nativePage).filter(owner => !owner.page && !owner.inputBarrier && owner.visible && owner.bounds.x >= 0 && owner.bounds.y >= 0 && owner.bounds.width > 0 && owner.bounds.height > 0)
+const nativeProjections = (manager = overlays) => (manager as unknown as { projections: Map<string, { view: WebContentsView; region: NativeOverlayRegion }> }).projections
 const atPoint = (bounds: any, point: any) => point.x >= bounds.x && point.y >= bounds.y && point.x < bounds.x + bounds.width && point.y < bounds.y + bounds.height
 const topAt = (point: any) => [...window.contentView.children].reverse().find(view => view.getVisible() && atPoint(view.getBounds(), point)) as WebContentsView | undefined
 async function wait(test: () => Promise<any> | any, message: string) {
@@ -86,11 +87,10 @@ async function nativeReady() {
     'The matching original modal publication must finish native paint')
 }
 async function nativeModalClosed() {
-  const registry = () => (overlays as unknown as { projections: Map<string, { region: NativeOverlayRegion }> }).projections
   await wait(async () => {
     const publication = receipt.publications.at(-1)
     if (publishing !== 0 || !last || !publication || positive().length !== last.projected ||
-      publication.regions.some((region: NativeOverlayRegion) => region.modal) || [...registry().values()].some(projection => projection.region.modal)) return false
+      publication.regions.some((region: NativeOverlayRegion) => region.modal) || [...nativeProjections().values()].some(projection => projection.region.modal)) return false
     return await read(`!document.querySelector('[data-overlay-modal-scope]:not([hidden]) [data-overlay-modal-part="content"][data-state="open"]')`)
   }, 'The original modal DOM and exact native scrim/content projections must retire while unrelated Chrome remains available')
   receipt.modalClosures ??= []
@@ -754,19 +754,28 @@ async function run() {
   await childRead('layeringProbe.seed()'); await delay(160)
   const childClose = await childRead('(()=>{const r=document.querySelector(".workbench-tab__close").getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()')
   for (const type of ['mousePressed', 'mouseReleased']) await independent.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type, ...childClose, button: 'left', clickCount: 1 })
-  await wait(() => independentContext.publishing === 0 && independentContext.last?.projected === 2, 'Independent actual document must publish its own required native pair')
+  await wait(() => independentContext.publishing === 0 && independentContext.last &&
+    positive(independent, independentPage).length === independentContext.last.projected &&
+    [...nativeProjections(independentOverlays).values()].filter(projection => projection.region.modal).length === 2,
+  'Independent actual document must publish its own required native pair')
   const independentFacts = await childRead('layeringProbe.read()')
   assert.equal(independentFacts.nodes.filter((node: any) => node.part).length, 2)
   assert.ok(independentFacts.nodes.find((node: any) => node.part === 'content').hit, 'Independent document content remains above its own scrim')
   assert.equal((await facts()).nodes.filter((node: any) => node.part).length, 0, 'Independent window opening cannot create a modal in the original document')
-  assert.equal(positive().length, 0, 'Independent native projection cannot allocate a layer in the original native window')
+  assert.equal([...nativeProjections().values()].filter(projection => projection.region.modal).length, 0, 'Independent modal cannot allocate its native pair in the original native window')
   await frame('independent-document', independent, independentPage)
   const cancelPoint = await childRead('(()=>{const r=document.querySelector(".confirmation-dialog__cancel").getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()')
   const independentTop = [...independent.contentView.children].reverse().find(view => view.getVisible() && atPoint(view.getBounds(), cancelPoint)) as WebContentsView
   assert.ok(independentTop && independentTop !== independentPage)
   const independentTopBounds = independentTop.getBounds()
   for (const type of ['mouseDown', 'mouseUp'] as const) independentTop.webContents.sendInputEvent({ type, x: cancelPoint.x - independentTopBounds.x, y: cancelPoint.y - independentTopBounds.y, button: 'left', clickCount: 1 })
-  await wait(() => independentContext.publishing === 0 && independentContext.last?.projected === 0, 'Independent cancel removes only the original independent modal')
+  await wait(async () => {
+    if (independentContext.publishing !== 0 || !independentContext.last ||
+      positive(independent, independentPage).length !== independentContext.last.projected ||
+      independentContext.publications.at(-1)?.regions.some((region: NativeOverlayRegion) => region.modal) ||
+      [...nativeProjections(independentOverlays).values()].some(projection => projection.region.modal)) return false
+    return await childRead(`!document.querySelector('[data-overlay-modal-scope]:not([hidden]) [data-overlay-modal-part="content"][data-state="open"]')`)
+  }, 'Independent cancel removes only the original independent modal')
   assert.equal(await independentPage.webContents.executeJavaScript('document.querySelector("input").value'), 'Original Browser draft stays here')
   receipt.cases.push({ label: 'independent-document-native-scope-and-cancel', facts: independentFacts, publications: independentContext.publications,
     rootBrowserId: page.webContents.id, independentBrowserId: independentPage.webContents.id })
@@ -774,7 +783,10 @@ async function run() {
 
   fault = 'hold'; held = false; await openStop()
   await wait(() => held, 'The original content capture must reach the held external IO boundary')
-  assert.equal(positive().filter(owner => owner.id !== browsers.nativeOwner(pageId)?.inputShield?.webContents.id).length, 0, 'Required modal pair has no orphan scrim while content prepares')
+  const preparingModalId = await read('document.querySelector("[data-overlay-modal-scope]").id')
+  assert.ok(preparingModalId, 'Held preparation must retain its original modal identity')
+  assert.equal([...nativeProjections().values()].filter(projection => projection.region.modal?.id === preparingModalId).length, 0, 'Required modal pair has no orphan scrim while content prepares')
+  receipt.preparingPair = { modalId: preparingModalId, native: [...nativeProjections().values()].map(projection => ({ region: projection.region, webContentsId: projection.view.webContents.id })), owners: owners() }
   const backgroundBefore = await page.webContents.executeJavaScript('clicks')
   const p = await page.webContents.executeJavaScript('(()=>{const r=document.querySelector("button").getBoundingClientRect();return{x:Math.round(r.x+r.width/2),y:Math.round(r.y+r.height/2)}})()')
   const hit = topAt({ x: pageBounds.x + p.x, y: pageBounds.y + p.y })!
@@ -793,7 +805,7 @@ async function run() {
   fault = 'content'; await openStop()
   await wait(() => read('document.querySelectorAll(".modal-presentation-note").length===1'), 'Presentation failure must retain one nonblocking retry service window')
   await wait(() => publishing === 0 && receipt.publications.at(-1)?.regions.every((region: NativeOverlayRegion) => !region.modal), 'Failed required pair must withdraw its modal declarations')
-  assert.ok(positive().every(owner => owner.bounds.width < window.getContentBounds().width), 'A failed required content leaves no isolated native scrim')
+  assert.ok([...nativeProjections().values()].every(projection => !projection.region.modal), 'A failed required content leaves no isolated native scrim or content')
   await wait(() => read('document.querySelector("[data-overlay-modal-scope]")?.hidden === true'), 'Failed modal must pause its retained original business DOM')
   assert.equal((await facts()).nodes.filter((node: any) => node.part).length, 0, 'Failed DOM modal releases its unavailable presentation and retains its hidden original body')
   assert.notEqual(await read('getComputedStyle(document.body).pointerEvents'), 'none', 'Failed modal releases its background DOM input guard')
