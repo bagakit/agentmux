@@ -6,9 +6,11 @@ import { defineConfig } from 'vitest/config'
 
 const root = resolve(import.meta.dirname, '../../..'), require = createRequire(resolve(root, 'packages/connectors/package.json'))
 const variants = {
-  'foreign-host-route': ['apps/desktop/src/main/runtime-controller.ts', 'const client = this.configuredClient(target.hostId)', "const client = this.configuredClient('owner-b')"],
+  'foreign-host-route': ['apps/desktop/src/main/runtime-controller.ts', 'client = this.configuredClient(hostId)', "client = this.configuredClient('owner-b')"],
   'pending-target-lost': ['apps/desktop/src/renderer/src/lib/manual-connection-intent.ts', 'result[key] = { channel: raw.channel, target, draft,', 'result[key] = { channel: raw.channel, target: null, draft,']
   , 'destination-fence-lost': ['packages/core/src/hosted-client.ts', 'runtimeFence: expectedOwner ?? fence()', 'runtimeFence: fence()']
+  , 'default-owner-lost': ['apps/desktop/src/main/connection-host-ipc.ts', 'runtime.connectionHostingTarget()', "runtime.connectionHostingTarget('owner-b')"]
+  , 'metadata-reader-scope-lost': ['apps/desktop/src/preload/index.ts', 'if (live && value?.watchId === watchId) listener(value.change)', 'if (live) listener(value.change)']
 } as const
 const mutation = process.env.MANUAL_OWNER_MUTANT as keyof typeof variants | undefined
 if (mutation && !variants[mutation]) throw Error('Unknown manual-owner mutation')

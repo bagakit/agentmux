@@ -8,7 +8,7 @@ import { AgentMuxSpatialStateStore, spatialCatalog } from '@agentmux/core/spatia
 import type { MoteConnectionPreferencesReadResult, MoteConnectionPreferencesSaveParams } from '@agentmux/core/mote-preferences'
 import type { ConnectionResultMap } from '@agentmux/core/connections'
 import { createConnectionServices } from '../../../../packages/connectors/src/connection-services.js'
-import { MoteConnectionPreferences } from '../../src/main/mote-connection-preferences'
+import { MoteConnectionPreferences } from '@agentmux/host/mote-connection-preferences'
 import { registerMotePreferencesIpc } from '../../src/main/mote-preferences-ipc'
 import { registerConnectorIpc } from '../../src/main/connector-ipc'
 import { FileReadOwner } from '../../src/main/file-read-owner'
@@ -65,16 +65,21 @@ export async function moteConnectionJourney() {
     connectionId: 'robot-' + suffix, adapterId: 'feishu', application: { domain: 'feishu.cn', appId: 'app-' + suffix },
     label: 'Robot ' + suffix.toUpperCase(), enabled: true, credentialRef: 'unused-' + suffix
   } })
-  const owner = new MoteConnectionPreferences({ files: publicFiles, catalog, connections: () => services.connections.list(), quick: async () => { throw new Error('Quick is outside this proof') } })
+  const owner = new MoteConnectionPreferences({ files: publicFiles, catalog, connections: () => services.connections.list() })
   const server = new AgentMuxControlServer({ socketPath: join(root, 'public.sock'), files: publicFiles, connections: services.connections,
-    execute: request => owner.execute(request), coreClients: () => [] })
+    motePreferences: owner, coreClients: () => [] })
   await server.start()
   const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
   const handlers = new Map<string, (...args: any[]) => Promise<unknown>>(), trusted = {}
   const handleWithEvent = (channel: string, handler: (...args: any[]) => Promise<unknown>) => { handlers.set(channel, handler) }
   const assertTrusted = (_channel: string, event: { sender: object }) => { if (event.sender !== trusted) throw new Error('Untrusted renderer') }
-  registerMotePreferencesIpc({ socketPath: server.path, handleWithEvent, assertTrusted })
-  registerConnectorIpc({ socketPath: server.path, handleWithEvent, assertTrusted, secrets: services.secrets })
+  const runtime: import('../../src/main/connection-host-ipc').ConnectionHostIpc = {
+    connectionHostingTarget: async () => ({ hostId: 'local', runtimeId: 'fixture-runtime' }),
+    callConnectionHost: async (_target, method, params) => client.call(method, params),
+    watchConnectionMetadata: async (_target, handlers) => client.subscribe('connection.metadata.watch', {}, handlers)
+  }
+  registerMotePreferencesIpc({ socketPath: server.path, runtime, handleWithEvent, assertTrusted })
+  registerConnectorIpc({ runtime, handleWithEvent, assertTrusted, metadata: { publish() {}, observation() {} } })
   const forwardRead = async (input: Parameters<typeof api.motePreferences.read>[0]) => await handlers.get('motePreferences:read')!({ sender: trusted }, input)
   const forwardSave = async (input: MoteConnectionPreferencesSaveParams) => await handlers.get('motePreferences:save')!({ sender: trusted }, input)
   const reads = vi.spyOn(api.motePreferences, 'read').mockImplementation(forwardRead)

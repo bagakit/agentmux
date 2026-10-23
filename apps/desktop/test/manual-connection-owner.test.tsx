@@ -82,14 +82,15 @@ async function originalHost(withConnections = true) {
 }
 async function fixture() {
   const a = await originalHost(), b = await originalHost()
-  const configs: HostConfig[] = [{ id: 'owner-a', kind: 'ssh', label: 'Build Host A', hostname: 'owner-a.invalid' }, { id: 'owner-b', kind: 'ssh', label: 'Build Host B', hostname: 'owner-b.invalid' }]
+  const configs: HostConfig[] = [{ id: 'local', kind: 'local', label: 'Local Host' }, { id: 'owner-a', kind: 'ssh', label: 'Build Host A', hostname: 'owner-a.invalid' }, { id: 'owner-b', kind: 'ssh', label: 'Build Host B', hostname: 'owner-b.invalid' }]
   const targets = { a: { hostId: 'owner-a', runtimeId: a.owner.runtimeId }, b: { hostId: 'owner-b', runtimeId: b.owner.runtimeId } }
   const config: AppConfig = { ...structuredClone(composerConfig), hosts: configs, workspaces: [] }
   let replaceAfterOwnerInspection = false
   const runtime = new RuntimeController(new core.AgentMuxMemoryAgentSessionStore(), async host => {
-    const original = host.id === 'owner-a' ? a : b
+    const original = host.id === 'owner-b' ? b : a
     const rpc = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: original.socketPath } })
     const client = await connectHostedAgentMux({ rpc, expectedRuntimeId: original.owner.runtimeId,
+      subscribeRpc: (method, params, handlers) => rpc.subscribe(method, params, handlers),
       forwardRpc: async (method, params, context = {}) => {
         const result = await rpc.call(method, params, { ...(context.signal ? { signal: context.signal } : {}), ...(context.runtimeFence ? { runtimeFence: context.runtimeFence } : {}) })
         if (host.id === 'owner-a' && method === 'connection.owner.inspect' && replaceAfterOwnerInspection) {
@@ -108,7 +109,7 @@ async function fixture() {
   bridge.profile = join(a.f.root, 'desktop'); await mkdir(bridge.profile, { mode: 0o700 })
   vi.stubEnv('AGENTMUX_SPATIAL_STATE_STORE', join(bridge.profile, 'spatial.json'))
   const { EventEmitter } = await import('node:events')
-  const sender = Object.assign(new EventEmitter(), { id: 752, isDestroyed: () => false, send: vi.fn(), mainFrame: { framesInSubtree: [] } })
+  const sender = Object.assign(new EventEmitter(), { id: 752, isDestroyed: () => false, send: (channel: string, ...values: unknown[]) => { bridge.events.emit(channel, {}, ...values) }, mainFrame: { framesInSubtree: [] } })
   const releaseMain = await registerIpc({ initialConfig: config,
     window: { setBackgroundColor: vi.fn(), isDestroyed: () => false, webContents: sender } as unknown as BrowserWindow, runtime,
     workbenchWindows: { setNativeOwner: () => () => {} } as Parameters<typeof registerIpc>[0]['workbenchWindows'],
@@ -273,4 +274,31 @@ it('the exact destination instance fences dispatch when the same Runtime restart
   expect(await f.a.rpc.call('connection.owner.inspect', {})).toEqual({ ownership: 'forwarded' })
   await expect(api.connections.call('connection.ls', {}, f.targets.a)).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
   expect(f.mainFallback).not.toHaveBeenCalled()
+})
+
+it('default trusted IPC and per-reader metadata borrow the background owner without a Main connection factory', async () => {
+  const f = await fixture()
+  await seed(f, f.targets.a, 'Owner A'); await seed(f, f.targets.b, 'Owner B')
+  expect(await api.connections.hostingTarget()).toEqual({ hostId: 'local', runtimeId: f.a.owner.runtimeId })
+  expect((await api.connections.call('connection.ls', {})).connections.map(value => value.config.label)).toEqual(['Owner A'])
+  const changesA: unknown[] = [], changesB: unknown[] = [], statesA: string[] = [], statesB: string[] = []
+  const releaseA = api.connections.onMetadataChanged(value => changesA.push(value), value => statesA.push(value), f.targets.a)
+  const releaseB = api.connections.onMetadataChanged(value => changesB.push(value), value => statesB.push(value), f.targets.b)
+  closes.push(releaseA, releaseB)
+  await vi.waitFor(() => { expect(statesA).toEqual(['ready']); expect(statesB).toEqual(['ready']) })
+  const subject = { kind: 'conversation' as const, externalConversationId: 'same-room' }
+  f.nativeName('Original A room')
+  await api.connections.call('connection.metadata.refresh', { connectionId: 'same-connection', expectedConnectionRevision: 1, subject }, f.targets.a)
+  await vi.waitFor(() => expect(changesA).toHaveLength(1))
+  expect(changesB).toEqual([])
+  releaseA()
+  f.nativeName('Original B room')
+  await api.connections.call('connection.metadata.refresh', { connectionId: 'same-connection', expectedConnectionRevision: 1, subject }, f.targets.b)
+  await vi.waitFor(() => expect(changesB).toHaveLength(1))
+  expect(changesA).toHaveLength(1)
+  f.nativeName('Later A room')
+  await api.connections.call('connection.metadata.refresh', { connectionId: 'same-connection', expectedConnectionRevision: 1, subject }, f.targets.a)
+  expect(changesA).toHaveLength(1)
+  expect((await api.connections.call('connection.ls', {})).connections[0]!.config.label).toBe('Owner A')
+  expect((await api.connections.call('connection.ls', {}, f.targets.b)).connections[0]!.config.label).toBe('Owner B')
 })

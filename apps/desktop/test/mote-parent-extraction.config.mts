@@ -9,7 +9,7 @@ const root = resolve(import.meta.dirname, '../../..'), mutation = process.env.MO
 if (mutation && !Object.hasOwn(moteParentMutations, mutation)) throw Error('Unknown finite parent mutation')
 const observed = new Set(['packages/connectors/dist/mote-connection-operations.js',
   'apps/desktop/src/main/mote-connection-ipc.ts', 'apps/desktop/src/main/mote-connection-source.ts',
-  'apps/desktop/src/main/mote-connection-preferences.ts'])
+  'apps/host/src/mote-connection-preferences.ts'])
 export default defineConfig({ ...original, root, plugins: [{ name: 'actual-package-mote-parent', enforce: 'pre', transform(source, id) {
   const path = relative(root, id.split('?')[0]!)
   if (!observed.has(path)) return
