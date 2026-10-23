@@ -692,7 +692,7 @@ const api: AgentMuxPreloadApi = {
       return () => ipcRenderer.off('browser:targetsChanged', wrapped)
     },
     forgetAppLinkScheme: (scheme, expected) => ipcRenderer.invoke('browser:forgetAppLinkScheme', scheme, expected),
-    create: (id: string, url: string, workspaceId: string | null, rememberedProfileId?: string, mode?: import('@agentmux/core').AgentMuxBrowserMode, viewport?: BrowserViewport) => ipcRenderer.invoke('browser:create', id, url, workspaceId, rememberedProfileId, mode, viewport),
+    create: (id: string, url: string, workspaceId: string | null, rememberedProfileId?: string, mode?: import('@agentmux/core').AgentMuxBrowserMode, viewport?: BrowserViewport, capsuleId?: string, capsuleOpenOperationId?: string) => ipcRenderer.invoke('browser:create', id, url, workspaceId, rememberedProfileId, mode, viewport, capsuleId, capsuleOpenOperationId),
     navigate: (id: string, url: string) => ipcRenderer.invoke('browser:navigate', id, url),
     back: (id: string) => ipcRenderer.invoke('browser:back', id),
     forward: (id: string) => ipcRenderer.invoke('browser:forward', id),

@@ -6876,7 +6876,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
       throw primary
     }
     try {
-      const browser = await api.browser.create(browserId, request.url, workspace.id, undefined, request.mode)
+      const browser = request.capsuleId === undefined
+        ? await api.browser.create(browserId, request.url, workspace.id, undefined, request.mode)
+        : await api.browser.create(browserId, request.url, workspace.id, undefined, request.mode, undefined, request.capsuleId, request.requestId)
       createdBrowserId = browser.id
       if (browser.id !== browserId) await cleanup(controlFailure('LAUNCH_RESULT_MISMATCH', 'Browser owner returned another Browser identity.'))
       if (signal?.aborted) await cleanup(controlCancellation(signal))

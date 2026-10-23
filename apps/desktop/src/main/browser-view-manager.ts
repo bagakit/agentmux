@@ -1,4 +1,5 @@
 import { mintObjectId, mintCapabilityToken } from '@agentmux/core/object-id'
+import type { CapsuleInspection, CapsuleRecord } from '@agentmux/core/capsule'
 import type { WorkbenchWindowDocument } from '../shared/workbench-windows.js'
 import type { BrowserInputFrameCapture } from '../shared/browser-input-context-capture.js'
 import { BROWSER_FAVICON_TIMEOUT_MS, readBrowserFavicon } from './browser-favicon.js'
@@ -100,6 +101,7 @@ import {
 
 type BrowserStorage =
   | { mode: 'normal'; profileId: string; partition: string }
+  | { mode: 'normal'; profileId: null; partition: string; capsule: CapsuleInspection; capsuleOrigin: string; capsuleOpenOperationIds: string[] }
   | { mode: 'private'; profileId: null; partition: string; session: Session; windows: Set<BrowserWindow> }
 
 type BrowserEntry = {
@@ -109,6 +111,8 @@ type BrowserEntry = {
   storage: BrowserStorage
   requestedUrl: string
   navigationId: string
+  /** A native main-frame commit, distinct from a requested navigation or a displayed URL. */
+  committedNavigationId: string | null
   initialDocument: {
     view: WebContentsView; completion: AbortController; superseded: AbortController
     failure: { error: unknown } | null
@@ -368,6 +372,8 @@ export class BrowserViewManager {
   onNativeVisibilityChange: ((visibility: import('../shared/native-overlay.js').NativeBrowserVisibility, window?: BrowserWindow) => void) | undefined
   private nativeVisibilityRevision = 0
   onNativeInput: ((owner: NativeBrowserOwner, input: NativeBrowserPageInput) => boolean) | undefined
+  /** Optional App appearance projection; the receiver rechecks the original native document. */
+  capsuleDocumentReady: ((browserId: string) => void) | undefined
   /** Facts from real embedded page owners; external tabs never enter this registry. */
   targets(): AgentMuxBrowserTarget[] {
     return [...this.entries.values()].map(entry => this.projectTarget(entry))
@@ -386,6 +392,9 @@ export class BrowserViewManager {
   recoveryPreviewScope(id: string): BrowserRecoveryPreviewScope | null {
     const entry = this.entries.get(id) ?? this.releasedEntries.get(id)
     if (!entry || ('cleanupOnly' in entry && entry.cleanupOnly)) return null
+    // Capsule storage has no user Profile. Historical thumbnails are optional; do not borrow a
+    // Profile identity to address this independent container. Its original Close still proceeds.
+    if ('capsule' in entry.storage) return null
     return entry.storage.mode === 'private'
       ? { browserId: id, workspaceId: entry.workspaceId, mode: 'private', profileId: null }
       : { browserId: id, workspaceId: entry.workspaceId, mode: 'normal', profileId: entry.storage.profileId }
@@ -468,6 +477,8 @@ export class BrowserViewManager {
   private readonly entries = new Map<string, BrowserEntry>()
   private readonly inputSurfaces = new Map<WebContentsView, NativeBrowserInputSurface>()
   private readonly inputSurfaceCleanup = new Map<string, Set<NativeBrowserInputSurface>>()
+  /** Native-handle index only; entries and its exact current view remain the sole owner facts. */
+  private readonly entriesByContents = new WeakMap<WebContents, BrowserEntry>()
   /** Actual native handles awaiting destruction, grouped by their original Browser identity. */
   private readonly closingViews = new Map<string, Map<WebContentsView, ClosingBrowserView>>()
 
@@ -612,6 +623,53 @@ export class BrowserViewManager {
     if (entry.storage.profileId !== profileId) throw new Error('The Browser Profile changed before input history was requested.')
     if (entry.workspaceId === null) throw new Error('This Browser has no verified Workspace for input history.')
     return { workspaceId: entry.workspaceId, profileId: entry.storage.profileId }
+  }
+
+  /** Page SDK admission is an observation of this exact native document, never a URL capability. */
+  capsuleDocument(sender: WebContents, frame: WebFrameMain | null): { record: CapsuleRecord; browserId: string; navigationId: string } | null {
+    const entry = this.entriesByContents.get(sender)
+    if (!entry || entry.view.webContents !== sender || !('capsule' in entry.storage) || entry.storage.capsule.record.mode !== 'injected' ||
+      !this.isCapsuleDocument(entry, frame)) return null
+    return { record: entry.storage.capsule.record, browserId: entry.id, navigationId: entry.navigationId }
+  }
+
+  /** The original admitted page transport for optional App theme projection; never acquires a page. */
+  capsuleDocumentContents(browserId: string): WebContents | null {
+    const entry = this.entries.get(browserId)
+    if (!entry || !('capsule' in entry.storage) || entry.storage.capsule.record.mode !== 'injected' ||
+      !this.isCapsuleDocument(entry, entry.view.webContents.mainFrame)) return null
+    return entry.view.webContents
+  }
+
+  /** Low-frequency App appearance changes enumerate the original owners, without another catalogue. */
+  capsuleDocumentIds(): string[] {
+    return [...this.entries.values()].flatMap(entry => 'capsule' in entry.storage &&
+      entry.storage.capsule.record.mode === 'injected' && this.capsuleDocumentContents(entry.id) ? [entry.id] : [])
+  }
+
+  /** Bind an original open request to its actual container without navigating or granting page input. */
+  recordCapsuleOpen(browserId: string, capsuleId: string, operationId: string): BrowserSnapshot {
+    const entry = this.require(browserId)
+    if (!('capsule' in entry.storage) || entry.storage.capsule.record.capsuleId !== capsuleId) {
+      throw new Error('The original Capsule does not match this Browser container. Its page is retained.')
+    }
+    if (typeof operationId !== 'string' || !operationId.trim()) throw new Error('The original Capsule open operation identity is required.')
+    if (!entry.storage.capsuleOpenOperationIds.includes(operationId)) {
+      entry.storage.capsuleOpenOperationIds.push(operationId)
+      this.emit(entry)
+    }
+    return this.snapshot(entry)
+  }
+
+  private isCapsuleDocument(entry: BrowserEntry, frame: WebFrameMain | null): boolean {
+    if (!('capsule' in entry.storage) || entry.storage.capsule.endpoint.status !== 'available' || !frame ||
+      !this.owns(entry, entry.view) || entry.view.webContents.isDestroyed() || frame.detached || frame.isDestroyed() ||
+      frame !== entry.view.webContents.mainFrame || entry.committedNavigationId !== entry.navigationId ||
+      entry.view.webContents.isLoadingMainFrame()) return false
+    try {
+      return new URL(entry.view.webContents.getURL()).origin === entry.storage.capsuleOrigin &&
+        new URL(frame.url).origin === entry.storage.capsuleOrigin
+    } catch { return false }
   }
 
   registerPresentation(sender: WebContents, frame: WebFrameMain | null, input: {
@@ -1164,6 +1222,9 @@ export class BrowserViewManager {
     }
     if (this.entries.get(id) || this.releasedEntries.get(id)) return await this.restore(id, binding)
     if (saved.id !== id) throw new Error('Browser recovery returned another identity. The original Region is kept.')
+    if (saved.capsuleId && (!saved.capsule || saved.capsule.record.capsuleId !== saved.capsuleId)) {
+      throw new Error('The original Capsule container has not been resolved. Its Browser Region is retained; reconnect its original Host.')
+    }
     this.assertWorkspaceBinding(saved.workspaceId, input?.workspaceId ?? null)
     if (input?.mode !== undefined && input.mode !== saved.mode) throw new Error('The saved Browser mode does not match this Region.')
     // create rechecks the original maps and registers synchronously before loadURL. Concurrent
@@ -1171,26 +1232,51 @@ export class BrowserViewManager {
     return await this.create(id, saved.url, saved.workspaceId, saved.profileId, saved.mode, saved.viewport, saved)
   }
 
-  async create(id: string, rawUrl: string, workspaceId: string | null = null, rememberedProfileId?: string, mode?: AgentMuxBrowserMode, viewport: BrowserViewport = 'responsive', saved?: Pick<BrowserColdDescriptor, 'agent' | 'warning'>): Promise<BrowserSnapshot> {
+  async create(id: string, rawUrl: string, workspaceId: string | null = null, rememberedProfileId?: string, mode?: AgentMuxBrowserMode, viewport: BrowserViewport = 'responsive', saved?: Pick<BrowserColdDescriptor, 'agent' | 'warning' | 'capsule' | 'capsuleOrigin' | 'capsuleOpenOperationIds'>): Promise<BrowserSnapshot> {
     if (!id.trim()) throw new Error('Browser id is required')
     if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
     if (mode !== undefined && mode !== 'normal' && mode !== 'private') throw new Error('Browser mode must be normal or private')
     if (mode === 'private' && rememberedProfileId !== undefined) throw new Error('A private Browser cannot use a saved Profile. Open a normal Browser to use that Profile.')
+    if (saved?.capsule && (mode === 'private' || rememberedProfileId !== undefined)) throw new Error('A Capsule uses its own persistent container and cannot use a Browser Profile or private mode.')
+    if (saved?.capsuleOpenOperationIds && (!saved.capsule || saved.capsuleOpenOperationIds.some(operationId => typeof operationId !== 'string' || !operationId.trim()))) {
+      throw new Error('Capsule open requests require their original container and operation identities.')
+    }
     // A repeated recovery handshake addresses this owner, not a new navigation/profile choice.
     const existing = this.entries.get(id)
     if (existing) {
       this.assertWorkspaceBinding(existing.workspaceId, workspaceId)
+      if (saved?.capsule && (!('capsule' in existing.storage) || existing.storage.capsule.record.capsuleId !== saved.capsule.record.capsuleId)) {
+        throw new Error('This Browser belongs to another container. Its original page is retained; open the Capsule in a separate Browser.')
+      }
       if (existing.releaseAttempt?.pending) await this.prepareForConsumption(id)
       if (this.entries.get(id) !== existing) return await this.create(id, rawUrl, workspaceId, rememberedProfileId, mode, viewport, saved)
       if (mode !== undefined && existing.storage.mode !== mode) throw new Error('An existing Browser cannot change mode. Open a new Browser instead.')
+      for (const operationId of saved?.capsuleOpenOperationIds ?? []) this.recordCapsuleOpen(id, saved!.capsule!.record.capsuleId, operationId)
       return this.snapshot(existing)
     }
-    if (this.releasedEntries.has(id)) return await this.restore(id, { workspaceId, ...(mode === undefined ? {} : { mode }) })
+    const released = this.releasedEntries.get(id)
+    if (released) {
+      if (saved?.capsule && (!('capsule' in released.storage) || released.storage.capsule.record.capsuleId !== saved.capsule.record.capsuleId)) {
+        throw new Error('This Browser belongs to another container. Its original page is retained; open the Capsule in a separate Browser.')
+      }
+      await this.restore(id, { workspaceId, ...(mode === undefined ? {} : { mode }) })
+      for (const operationId of saved?.capsuleOpenOperationIds ?? []) this.recordCapsuleOpen(id, saved!.capsule!.record.capsuleId, operationId)
+      return this.snapshot(this.require(id))
+    }
     const url = normalizeBrowserUrl(rawUrl)
     let storage: BrowserStorage
     if (mode === 'private') {
       const partition = `agentmux-browser-private:${mintObjectId()}`
       storage = { mode: 'private', profileId: null, partition, session: session.fromPartition(partition), windows: new Set() }
+    } else if (saved?.capsule) {
+      const endpoint = saved.capsule.endpoint
+      const origin = endpoint.status === 'available' ? new URL(endpoint.url).origin : saved.capsuleOrigin
+      if (!origin || origin !== new URL(`http://127.0.0.1:${saved.capsule.record.port}`).origin ||
+        (saved.capsuleOrigin !== undefined && saved.capsuleOrigin !== origin)) {
+        throw new Error('The original Capsule origin is unconfirmed. Its Browser identity is retained; retry the original Host.')
+      }
+      storage = { mode: 'normal', profileId: null, partition: `persist:agentmux-capsule:${saved.capsule.record.capsuleId}`,
+        capsule: saved.capsule, capsuleOrigin: origin, capsuleOpenOperationIds: [...new Set(saved.capsuleOpenOperationIds ?? [])] }
     } else {
       const profileId = rememberedProfileId ?? this.profiles.defaultProfileId()
       storage = { mode: 'normal', profileId, partition: this.resolvePartition(profileId) }
@@ -1319,6 +1405,7 @@ export class BrowserViewManager {
     if (input?.mode !== undefined && input.mode !== released.storage.mode) throw new Error('An existing Browser cannot change mode. Open a new Browser instead.')
     const profileId = input?.profileId ?? released.storage.profileId
     if (released.storage.mode === 'private' && profileId !== null) throw new Error('A private Browser cannot use a saved Profile.')
+    if ('capsule' in released.storage && profileId !== null) throw new Error('A Capsule cannot restore into a Browser Profile. Its original container is retained.')
     // The retained Main descriptor is the only authoritative URL while the native owner is gone.
     // Renderer tab.url can lag did-start-navigation, so accepting it here could restore an older
     // committed page and silently change the Region's identity.
@@ -1326,7 +1413,7 @@ export class BrowserViewManager {
     const viewport = cloneBrowserViewport(input?.viewport ?? released.viewport)
     // Validate the profile before removing the retained descriptor. A failed restore must leave the
     // original profile ownership intact so deleting/repairing a profile cannot orphan this Region.
-    const storage: BrowserStorage = released.storage.mode === 'private' ? released.storage
+    const storage: BrowserStorage = released.storage.mode === 'private' || 'capsule' in released.storage ? released.storage
       : { mode: 'normal', profileId: profileId!, partition: this.resolvePartition(profileId!) }
     this.cleanupReleasedOwner(released)
     this.releasedEntries.delete(id)
@@ -1347,11 +1434,11 @@ export class BrowserViewManager {
     viewport: BrowserViewport = 'responsive',
     workspaceId: string | null = null,
     retiredInputShield?: BrowserNativeInputShield,
-    saved?: Pick<BrowserColdDescriptor, 'agent' | 'warning'>
+    saved?: Pick<BrowserColdDescriptor, 'agent' | 'warning' | 'capsule' | 'capsuleOrigin' | 'capsuleOpenOperationIds'>
   ): Promise<BrowserSnapshot> {
     if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
     if (this.entries.has(id)) throw new Error(`Browser already exists: ${id}`)
-    const view = this.createView(storage.partition)
+    const view = this.createView(storage.partition, 'capsule' in storage && storage.capsule.record.mode === 'injected')
     const entry: BrowserEntry = {
       id,
       workspaceId,
@@ -1359,6 +1446,7 @@ export class BrowserViewManager {
       storage,
       requestedUrl: url,
       navigationId: mintObjectId(),
+      committedNavigationId: null,
       initialDocument: null,
       selectionRevision: 0,
       selectionOperation: null,
@@ -1554,6 +1642,7 @@ export class BrowserViewManager {
     const entry = this.require(id)
     this.requireHumanInput(entry)
     if (entry.storage.mode === 'private') throw new Error('A private Browser cannot switch to a saved Profile. Open a new normal Browser instead.')
+    if ('capsule' in entry.storage) throw new Error('A Capsule uses its own persistent container. Open a separate Browser to use a Profile.')
     const partition = this.resolvePartition(profileId)
     this.cancelPendingSwitch(entry, new Error('Browser profile switch was superseded'))
     if (entry.storage.profileId === profileId) return this.snapshot(entry)
@@ -1623,6 +1712,7 @@ export class BrowserViewManager {
       entry.storage = { mode: 'normal', profileId, partition }
       entry.requestedUrl = candidate.webContents.getURL() || url
       entry.navigationId = mintObjectId()
+      entry.committedNavigationId = null
       entry.selectionOperation = null
       entry.selectionRevision += 1
       entry.annotationRevision += 1
@@ -3478,6 +3568,7 @@ export class BrowserViewManager {
   }
 
   private attach(entry: BrowserEntry, view: WebContentsView): BrowserControlFeedback {
+    this.entriesByContents.set(view.webContents, entry)
     this.browserIdsByView.set(view, entry.id)
     const contents = view.webContents
     const controlFeedback: BrowserControlFeedback = new BrowserControlFeedback({ contents, browserId: entry.id, ownerId: mintObjectId(),
@@ -3632,6 +3723,7 @@ export class BrowserViewManager {
       this.clearFavicon(entry, details.isSameDocument)
       entry.requestedUrl = requestedUrl
       entry.navigationId = mintObjectId()
+      entry.committedNavigationId = null
       const document = entry.initialDocument
       if (document?.view === view && (!details.isSameDocument || document.navigationId)) {
         const previous = document.navigationId
@@ -3659,11 +3751,16 @@ export class BrowserViewManager {
       this.synchronizeVisiblePage(entry, view)
       this.sampleRecoveryPreview(entry, view)
       this.emit(entry)
+      if ('capsule' in entry.storage && entry.storage.capsule.record.mode === 'injected' && this.isCapsuleDocument(entry, contents.mainFrame)) {
+        try { this.capsuleDocumentReady?.(entry.id) }
+        catch { /* Optional appearance cannot take away the original document or its available SDK methods. */ }
+      }
     })
     contents.on('did-navigate', (_event, url) => {
       if (!this.owns(entry, view)) return
       const document = entry.initialDocument
       if (document?.view === view && document.navigationId === entry.navigationId) document.committedNavigationId = entry.navigationId
+      entry.committedNavigationId = entry.navigationId
       entry.resourceDocumentConfirmed = true
       this.releaseUploadFiles(entry)
       entry.requestedUrl = url
@@ -3672,6 +3769,7 @@ export class BrowserViewManager {
     })
     contents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
       if (!isMainFrame || !this.owns(entry, view)) return
+      entry.committedNavigationId = entry.navigationId
       const reported = this.faviconUrls.get(view)
       if (reported) this.faviconUrls.set(view, { ...reported, documentUrl: url })
       entry.requestedUrl = url
@@ -3695,12 +3793,14 @@ export class BrowserViewManager {
     })
     contents.on('render-process-gone', (_event, details) => {
       if (!this.owns(entry, view)) return
+      entry.committedNavigationId = null
       this.cancelRecoveryPreview(entry)
       this.revokePresentationCapture(entry, 'source-replaced')
       entry.error = `Browser renderer stopped: ${details.reason}`
       this.emit(entry)
     })
     contents.once('destroyed', () => {
+      this.entriesByContents.delete(contents)
       if (entry.view === view) this.cancelRecoveryPreview(entry)
       const attempt = entry.releaseAttempt
       if (attempt?.view === view) attempt.settle('released', [])
@@ -3771,10 +3871,11 @@ export class BrowserViewManager {
     }
   }
 
-  private createView(partition: string): WebContentsView {
+  private createView(partition: string, capsulePreload = false): WebContentsView {
     const view = new WebContentsView({
       webPreferences: {
         partition,
+        ...(capsulePreload ? { preload: fileURLToPath(new URL('../preload/capsule.cjs', import.meta.url)) } : {}),
         contextIsolation: true,
         sandbox: true,
         nodeIntegration: false
@@ -3999,6 +4100,9 @@ export class BrowserViewManager {
       navigationId: entry.navigationId,
       faviconDataUrl: entry.faviconDataUrl,
       profileId: entry.storage.profileId,
+      ...('capsule' in entry.storage ? { capsuleId: entry.storage.capsule.record.capsuleId,
+        capsuleOrigin: entry.storage.capsuleOrigin, capsuleOpenOperationIds: [...entry.storage.capsuleOpenOperationIds],
+        capsuleActive: this.isCapsuleDocument(entry, contents.mainFrame) } : {}),
       url: contents.getURL() || entry.requestedUrl,
       title: contents.getTitle(),
       loading: contents.isLoading(),

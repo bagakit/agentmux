@@ -274,6 +274,8 @@ export type AgentMuxControlOpenBrowserRequest = RequestBase & {
   operation: 'open.browser'; url: string; destination: AgentMuxOpenDestination; caller?: AgentMuxControlCaller
   /** A new private page gets its own temporary website session; existing pages never switch mode. */
   mode?: AgentMuxBrowserMode
+  /** Original content identity; the client resolves its Host-owned container and document policy. */
+  capsuleId?: string
 }
 export type AgentMuxMessageTarget =
   | AgentMuxSelfAnchor

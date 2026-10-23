@@ -1,4 +1,5 @@
 import { parseRendererAllocationsInput, parseRendererAllocationsResult } from './renderer-allocations.js'
+import { isObjectId } from './object-id.js'
 import { parseRendererSceneCaptureInput, parseRendererSceneCaptureResult, parseRendererSceneInspectInput, parseRendererSceneInspection } from './renderer-performance-scene.js'
 import { parseRendererV8ProfileInput, parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseRendererMemoryInput, parseRendererMemoryResult } from './renderer-memory.js'
@@ -470,6 +471,9 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
     if (source.operation === 'open.browser' && source.mode !== undefined && source.mode !== 'normal' && source.mode !== 'private') {
       throw new AgentMuxError('Browser mode must be normal or private.', 'INVALID_CONTROL_REQUEST')
     }
+    if (source.operation === 'open.browser' && source.capsuleId !== undefined && (!isObjectId(source.capsuleId) || source.mode === 'private')) {
+      throw new AgentMuxError('A Capsule requires its exact object ID and an independent normal Browser container.', 'INVALID_CONTROL_REQUEST')
+    }
     const destination = openDestination(source.destination)
     const owner = optionalCaller(source.caller)
     if (destinationUsesSelf(destination) && !owner) throw new AgentMuxError('A self destination requires a managed caller.', 'INVALID_CONTROL_REQUEST')
@@ -488,6 +492,7 @@ export function parseAgentMuxControlRequest(value: unknown): AgentMuxControlRequ
           operation: source.operation,
           url: text(source.url, 'Browser URL'),
           ...(source.mode === undefined ? {} : { mode: source.mode as 'normal' | 'private' }),
+          ...(source.capsuleId === undefined ? {} : { capsuleId: source.capsuleId as string }),
           destination,
           ...(owner ? { caller: owner } : {})
         }

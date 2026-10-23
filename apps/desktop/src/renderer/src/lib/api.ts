@@ -1330,7 +1330,8 @@ const mockApi: AgentMuxDesktopApi = {
       mockConfig = structuredClone(next)
       for (const listener of configListeners) listener(structuredClone(mockConfig))
     },
-    create: async (id, url, _workspace, rememberedProfileId, mode = 'normal', viewport = 'responsive') => {
+    create: async (id, url, _workspace, rememberedProfileId, mode = 'normal', viewport = 'responsive', capsuleId) => {
+      if (capsuleId !== undefined) throw Object.assign(new Error('Capsule containers require the original Desktop and Host owners.'), { code: 'CONTROL_UNAVAILABLE' })
       if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
       const browser: BrowserSnapshot = {
         id,

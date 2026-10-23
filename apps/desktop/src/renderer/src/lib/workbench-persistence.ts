@@ -38,6 +38,9 @@ export type PersistedBrowserSurface = {
   browserId: string
   mode?: import('@agentmux/core').AgentMuxBrowserMode
   profileId?: string | null
+  capsuleId?: string
+  capsuleOrigin?: string
+  capsuleOpenOperationIds?: string[]
   url: string
   title: string
   viewport?: BrowserWorkbenchSurface['viewport']
@@ -93,7 +96,9 @@ function hydratePersistedBrowserSurface(surface: PersistedBrowserSurface): Brows
     navigationId: '',
     nativeOwnerDeferred: true,
     ...(!isBrowserViewport(surface.viewport) ? { restoredViewportUnknown: true as const } : {}),
-    profileId: privateMode ? null : surface.profileId ?? '',
+    profileId: privateMode || surface.capsuleId ? null : surface.profileId ?? '',
+    ...(!privateMode && surface.capsuleId ? { capsuleId: surface.capsuleId, capsuleOrigin: surface.capsuleOrigin } : {}),
+    ...(!privateMode && surface.capsuleOpenOperationIds ? { capsuleOpenOperationIds: [...surface.capsuleOpenOperationIds] } : {}),
     loading: false,
     canGoBack: false,
     canGoForward: false,
@@ -120,6 +125,8 @@ function reduceBrowserSurfaceForPersistence(surface: BrowserWorkbenchSurface): P
     workspaceId: surface.workspaceId,
     browserId: surface.browserId,
     ...association,
+    ...(surface.capsuleId ? { capsuleId: surface.capsuleId, capsuleOrigin: surface.capsuleOrigin } : {}),
+    ...(surface.capsuleOpenOperationIds ? { capsuleOpenOperationIds: [...surface.capsuleOpenOperationIds] } : {}),
     ...(surface.profileId ? { profileId: surface.profileId } : {}),
     url: surface.url,
     title: surface.title,
