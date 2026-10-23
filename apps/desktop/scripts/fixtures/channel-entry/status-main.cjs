@@ -16,6 +16,7 @@ app.whenReady().then(async () => {
     const entry = adapter => region + ' [data-channel-entry="' + adapter + '"]'
     const menu = '.connector-header-menu'
     const exists = selector => 'document.querySelector(' + JSON.stringify(selector) + ')'
+    const action = (label, selector = '.connector-header-menu [role="menuitem"]') => 'js:[...document.querySelectorAll(' + JSON.stringify(selector) + ')].find(node=>node.textContent.trim()===' + JSON.stringify(label) + ')'
     const facts = () => read(`(() => {const region=document.querySelector(${JSON.stringify(region)}),menu=document.querySelector(${JSON.stringify(menu)});return {
       viewport:{width:innerWidth,height:innerHeight},region:region?.getBoundingClientRect().toJSON(),regionCount:document.querySelectorAll('[data-workbench-region-id]').length,
       entries:[...region.querySelectorAll('[data-channel-entry]')].map(node=>({adapter:node.dataset.channelEntry,state:node.dataset.channelState,label:node.getAttribute('aria-label'),title:node.title,html:node.outerHTML})),
@@ -59,6 +60,20 @@ app.whenReady().then(async () => {
     await layout(false); await read('window.channelEntryProof.setScenario("owner-failure")'); await state('unknown'); await open('feishu')
     await until('document.querySelector(".connector-header-menu__issue")')
     await capture('header-owner-failure-wide')
+    const beforeHostingReads = await read('window.channelEntryProof.hostingReads')
+    await click(action('Check bot hosting'))
+    await until(exists('[role="dialog"] button[aria-label="Close group setup"]') + ' && [...document.querySelectorAll("[role=dialog] button")].some(node=>node.textContent.trim()==="Check bot hosting")')
+    result.hostingRecovery = await read('({dialog:document.querySelector("[role=dialog]").outerHTML,hostingReads:window.channelEntryProof.hostingReads,draft:window.channelEntryProof.draft()})')
+    assert.ok(result.hostingRecovery.hostingReads > beforeHostingReads, 'Check bot hosting reaches the original dialog owner-discovery read')
+    assert.match(result.hostingRecovery.dialog, /Lark connections/)
+    await click('[aria-label="Close group setup"]'); await until('!document.querySelector("[role=dialog]")')
+    assert.equal(await read('document.activeElement===document.querySelector(' + JSON.stringify(entry('feishu')) + ')'), true, 'Original hosting recovery dialog returns focus to its exact channel')
+    await open('feishu'); await click(action('Channel settings'))
+    const section = await read('window.channelEntryProof.channelSections.feishu')
+    await until(exists('[data-settings-pane="' + section + '"]:not([hidden])'))
+    result.channelSettingsRecovery = await read('({routes:window.channelEntryProof.routes,pane:document.querySelector(' + JSON.stringify('[data-settings-pane="' + section + '"]:not([hidden])') + ').outerHTML})')
+    assert.equal(result.channelSettingsRecovery.routes.at(-1), section, 'Channel settings opens the actual selected contribution section')
+    await click('[aria-label="Close settings"]'); await until('!' + exists('[aria-label="Close settings"]'))
     await layout(true); await state('unknown'); await open('feishu')
     await capture('header-owner-failure-narrow')
 
