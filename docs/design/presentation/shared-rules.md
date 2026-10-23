@@ -404,6 +404,7 @@ styles/
   chrome.css  Titlebar、Project Rail、Tabbar 与窗口 chrome
   space-tree.css  Space 查找、分类、折叠与目录 pins 归属
   space-object-appearance.css  Space 共用身份图标与紧凑选择面
+  mote-avatar-series.css  Mote 头像系列目录、3D/图片调整与示例创建向导
   selector.css  同一族列表行的共享表现层（容器 header + 行 + Agent 簇）
   dock.css  Tool Dock 这个容器本身及其 Topics / Agents 面板
   topic-topology.css  Topic 行尾的工作台拓扑：Region 缩略图、在场簇、悬停展开的 Tab/Region 检视面
