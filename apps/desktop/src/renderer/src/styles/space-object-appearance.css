@@ -87,14 +87,7 @@
 .mote-face-editor fieldset[hidden] { display: none; }
 .mote-face-editor legend { font-size: var(--fs-meta); color: var(--text-2); margin-bottom: var(--sp-2); }
 .mote-face-editor fieldset > div { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
-.mote-face-editor__color { width: 18px; height: 18px; border-radius: 50%; background: color-mix(in srgb, var(--green) 78%, #ffffff); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--line) 80%, #000000); flex-shrink: 0; }
-.mote-face-editor__color[data-palette="peach"] { background: color-mix(in srgb, var(--amber) 58%, #ffffff); }
-.mote-face-editor__color[data-palette="lavender"] { background: color-mix(in srgb, var(--text-2) 65%, #ffffff); }
-.mote-face-editor__color[data-palette="sky"] { background: color-mix(in srgb, var(--green) 45%, #ffffff); }
-.mote-face-editor__color[data-palette="cocoa"] { background: color-mix(in srgb, var(--amber) 62%, #000000); }
-.mote-face-editor__color[data-palette="sand"] { background: color-mix(in srgb, var(--amber) 72%, #ffffff); }
-.mote-face-editor__color[data-palette="rose"] { background: color-mix(in srgb, var(--red) 58%, #ffffff); }
-.mote-face-editor__color[data-palette="slate"] { background: color-mix(in srgb, var(--text-2) 78%, #ffffff); }
+.mote-face-editor__color { width: 18px; height: 18px; display: block; flex-shrink: 0; }
 
 .mote-identity-motion.project-rail-row__icon > .space-object-icon > svg:not(.mote-face) { width: 100%; height: 100%; }
 .pmo-teams-topic-compact-launcher__surface > .mote-identity-motion .space-object-icon__avatar { width: 26px; height: 26px; }

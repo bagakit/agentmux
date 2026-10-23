@@ -25,7 +25,25 @@ const presets: ReadonlyArray<{ id: string; label: string; face: MoteFaceChoice }
   { id: 'muse', label: 'Muse', face: { kind: 'face', shape: 'diamond', palette: 'lavender', eyes: 'wink', brows: 'arched', mouth: 'smirk', accessory: 'horns', nose: 'round', marking: 'blush' } }
 ]
 
+const paletteSwatches: Record<MoteFaceChoice['palette'], readonly [fill: string, rim: string]> = {
+  mint: ['#8fd6b4', '#2d5c4e'],
+  peach: ['#ebb69a', '#6e4238'],
+  lavender: ['#c2b4e6', '#4b3f6b'],
+  sky: ['#9fc8e4', '#2e556e'],
+  cocoa: ['#b67d58', '#4a2f22'],
+  sand: ['#e3c888', '#6b532c'],
+  rose: ['#e49fb9', '#6b384e'],
+  slate: ['#9fb2bf', '#334654']
+}
+
+function NonePartGlyph() {
+  return <svg className="mote-face mote-face--part" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round">
+    <circle cx="12" cy="12" r="5.5" strokeDasharray="2.5 2.5" opacity=".6" />
+  </svg>
+}
+
 function MoteFacePartGlyph({ part, value }: { part: PartKey; value: string }) {
+  if (value === 'none') return <NonePartGlyph />
   if (part === 'shape') {
     return <svg className="mote-face mote-face--part" viewBox="6 6 52 54" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2.3" strokeLinejoin="round">
       {value === 'slim' ? <path d="M18 10C22 10.6 25.5 13 28 15.5C30 15 33 14.8 35.5 15C45 15.5 50 23.5 50 35C50 47 42.5 55 32 55C21.5 55 14 47.2 14 35.5C14 30 15.2 25.5 17 22L18 10Z" />
@@ -161,7 +179,10 @@ export function MoteFaceEditor({ face, automatic = false, disabled, onChange, vi
       <div>{MOTE_FACE_PARTS[part].map(value => <button type="button" className={`small-button${(face[part] ?? 'none') === value ? ' small-button--active' : ''}`} key={value}
         aria-label={`${labels[part]} · ${value}`} title={`${labels[part]} · ${value}`} aria-pressed={(face[part] ?? 'none') === value} disabled={disabled}
         data-mote-face-part={part} data-mote-face-value={value} onClick={() => onChange({ ...face, [part]: value })}>
-        {part !== 'palette' ? <span className="mote-face-editor__sample" aria-hidden="true"><MoteFacePartGlyph part={part} value={value} /></span> : <span className="mote-face-editor__color" data-palette={value} aria-hidden="true" /> }
+        {part !== 'palette' ? <span className="mote-face-editor__sample" aria-hidden="true"><MoteFacePartGlyph part={part} value={value} /></span>
+          : <svg className="mote-face-editor__color" viewBox="0 0 20 20" data-palette={value} aria-hidden="true">
+            <circle cx="10" cy="10" r="8.5" fill={paletteSwatches[value as MoteFaceChoice['palette']][0]} stroke={paletteSwatches[value as MoteFaceChoice['palette']][1]} strokeWidth="1.2" />
+          </svg>}
         <ThemeStatusSelectedIcon size={12} className="mote-avatar-selection-mark" aria-hidden="true" />
       </button>)}</div>
     </fieldset>)}

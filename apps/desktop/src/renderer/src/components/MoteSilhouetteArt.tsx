@@ -223,40 +223,68 @@ export function MoteSilhouetteArt({ id, expression = 'identity', parameters, int
       break
     case 'dragon':
       body = <>
-        <circle cx="12" cy="12" r="13.8" fill="#171b20" />
-        <g transform="translate(-2 -2) scale(0.4375)">
-          <polygon points="15,18 9,7 16,3 23,14" fill="#3a4c47" />
-          <polygon points="9,7 16,3 14,11" fill="#63e2a5" />
-          <polygon points="15,18 14,11 23,14 25,19" fill="#253430" />
-          <polygon points="49,19 55,8 48,4 41,15" fill="#293834" />
-          <polygon points="55,8 48,4 50,12" fill="#46bd84" />
-          <polygon points="49,19 50,12 41,15 39,19" fill="#1d2926" />
-          <polygon points="10,13 24,18 13,26" fill="#9cf5c8" />
-          <polygon points="24,18 32,12 32,21" fill="#7be8b2" />
-          <polygon points="32,12 40,18 32,21" fill="#3eb882" />
-          <polygon points="40,18 52,16 49,26" fill="#2b9466" />
-          <polygon points="13,26 24,18 32,21 21,30" fill="#68dfa5" />
-          <polygon points="32,21 40,18 49,26 43,30" fill="#35ab77" />
-          <polygon points="21,30 32,21 43,30 32,33" fill="#8ff0bf" />
-          <polygon points="13,26 21,30 16,42 9,35" fill="#4bc98d" />
-          <polygon points="49,26 43,30 48,42 55,35" fill="#207853" />
-          <polygon points="9,35 16,42 13,48 7,41" fill="#319c6b" />
-          <polygon points="55,35 48,42 51,48 57,41" fill="#17593e" />
-          <polygon points="17,29.5 32,31.2 47,29.2 49,40.2 32,42 15,40.5" fill="#0d1e19" />
-          <polygon points="17,29.5 32,31.2 47,29.2 45.5,30.6 32,32.2 18.5,30.8" fill="#4ad496" opacity=".45" />
-          <polygon points="16,42 21,30 15,40.5" fill="#3bb57d" />
-          <polygon points="48,42 43,30 49,40.2" fill="#1e704e" />
-          <polygon points="15,40.5 32,42 24,51 16,42" fill="#44bf86" />
-          <polygon points="49,40.2 32,42 40,51 48,42" fill="#248059" />
-          <polygon points="24,51 32,42 40,51 32,55" fill="#5bd69c" />
-          <polygon points="16,42 24,51 32,55 21,54" fill="#2c9164" />
-          <polygon points="48,42 40,51 32,55 43,54" fill="#195e41" />
+        <defs>
+          <radialGradient id={`dbg-${uid}`} cx="50%" cy="38%" r="65%">
+            <stop offset="0" stopColor="#223036" /><stop offset="1" stopColor="#14191e" />
+          </radialGradient>
+          <linearGradient id={`dhl-${uid}`} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#4e635d" /><stop offset="1" stopColor="#222e2b" />
+          </linearGradient>
+          <linearGradient id={`dhr-${uid}`} x1="1" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#3d4f4a" /><stop offset="1" stopColor="#192320" />
+          </linearGradient>
+          <linearGradient id={`dcl-${uid}`} x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stopColor="#b8fada" /><stop offset="1" stopColor="#5cd99c" />
+          </linearGradient>
+          <linearGradient id={`dct-${uid}`} x1="0.2" y1="0" x2="0.8" y2="1">
+            <stop offset="0" stopColor="#a8f7ce" /><stop offset="1" stopColor="#45bf85" />
+          </linearGradient>
+          <linearGradient id={`dbb-${uid}`} x1="0.5" y1="0" x2="0.5" y2="1">
+            <stop offset="0" stopColor="#9ef5c8" /><stop offset="1" stopColor="#53cf94" />
+          </linearGradient>
+          <linearGradient id={`dvs-${uid}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#081411" /><stop offset="1" stopColor="#112620" />
+          </linearGradient>
+          <linearGradient id={`deg-${uid}`} x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0" stopColor="#9effe2" /><stop offset="1" stopColor="#3de3b0" />
+          </linearGradient>
+          <linearGradient id={`dcf-${uid}`} x1="0.3" y1="0" x2="0.7" y2="1">
+            <stop offset="0" stopColor="#6ee3ab" /><stop offset="1" stopColor="#2d9466" />
+          </linearGradient>
+        </defs>
+        <circle cx="12" cy="12" r="14" fill={`url(#dbg-${uid})`} />
+        <g transform="translate(-0.11 -0.11) scale(0.3784)">
+          <circle cx="32" cy="34" r="24" fill="#1e4236" opacity=".36" />
+          <polygon points="16,19 11,8 17.5,4.5 24,15" fill={`url(#dhl-${uid})`} />
+          <polygon points="11,8 17.5,4.5 15.5,12" fill="#70ebaf" />
+          <polygon points="16,19 15.5,12 24,15 25.5,19.5" fill="#253430" />
+          <polygon points="48,19.5 53,9 46.5,5.5 40,15.5" fill={`url(#dhr-${uid})`} />
+          <polygon points="53,9 46.5,5.5 48.5,12.5" fill="#46bd84" />
+          <polygon points="48,19.5 48.5,12.5 40,15.5 38.5,19.5" fill="#1b2623" />
+          <polygon points="11,14 24.5,18.5 14,26.5" fill={`url(#dcl-${uid})`} />
+          <polygon points="24.5,18.5 32,12.5 32,21.5" fill={`url(#dct-${uid})`} />
+          <polygon points="32,12.5 39.5,18.5 32,21.5" fill="#3ab37d" />
+          <polygon points="39.5,18.5 51,16.5 48.5,26.5" fill="#288c60" />
+          <polygon points="14,26.5 24.5,18.5 32,21.5 21,30" fill="#68dfa5" />
+          <polygon points="32,21.5 39.5,18.5 48.5,26.5 43,30" fill="#32a371" />
+          <polygon points="21,30 32,21.5 43,30 32,32.5" fill={`url(#dbb-${uid})`} />
+          <polygon points="14,26.5 21,30 16.5,41.5 10,35" fill="#4bc98d" />
+          <polygon points="48.5,26.5 43,30 47.5,41.5 54,35" fill="#1f7551" />
+          <polygon points="10,35 16.5,41.5 14,47.5 8.5,40.5" fill="#2e9667" />
+          <polygon points="54,35 47.5,41.5 50,47.5 55.5,40.5" fill="#16543a" />
+          <polygon points="16.5,41.5 32,42 24.5,50.5" fill="#42bd84" />
+          <polygon points="47.5,41.5 32,42 39.5,50.5" fill="#227a54" />
+          <polygon points="24.5,50.5 32,42 39.5,50.5 32,54.8" fill={`url(#dcf-${uid})`} />
+          <polygon points="16.5,41.5 24.5,50.5 32,54.8 21.5,53.5" fill="#2a8c60" />
+          <polygon points="47.5,41.5 39.5,50.5 32,54.8 42.5,53.5" fill="#18593d" />
+          <polygon points="17.5,29.5 32,31.2 46.5,29.2 48,40.2 32,42 16,40.4" fill={`url(#dvs-${uid})`} />
+          <polygon points="17.5,29.5 32,31.2 46.5,29.2 45.2,30.5 32,32.1 18.8,30.7" fill="#63e2a5" opacity=".48" />
         </g>
         {renderEyes(<>
-          <polygon points="6.75,12.5 9.6,12.35 9.9,14.55 6.55,14.55" fill="#6ffad0" />
-          <polygon points="14.1,12.25 17.25,12.1 17.5,14.45 13.9,14.45" fill="#6ffad0" />
-          <circle cx="7.6" cy="13.05" r=".5" fill="#ffffff" />
-          <circle cx="15.15" cy="12.9" r=".52" fill="#ffffff" />
+          <polygon points="7.53,12.45 9.95,12.3 10.18,14.19 7.38,14.19" fill={`url(#deg-${uid})`} />
+          <polygon points="13.81,12.23 16.46,12.07 16.69,14.12 13.66,14.12" fill={`url(#deg-${uid})`} />
+          <circle cx="8.25" cy="12.91" r=".44" fill="#ffffff" />
+          <circle cx="14.68" cy="12.76" r=".46" fill="#ffffff" />
         </>)}
       </>
       break

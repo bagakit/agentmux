@@ -1,50 +1,84 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 64 64">
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="-5 -5 74 74" shape-rendering="geometricPrecision">
   <title>Mote — Emerald Low-Poly Dragon Companion</title>
-  <rect width="64" height="64" fill="#171b20"/>
-  <!-- Soft ambient rim -->
-  <circle cx="32" cy="34" r="24" fill="#1b3a30" opacity=".32"/>
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="38%" r="65%">
+      <stop offset="0" stop-color="#223036"/>
+      <stop offset="1" stop-color="#14191e"/>
+    </radialGradient>
+    <linearGradient id="horn-l" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#4e635d"/>
+      <stop offset="1" stop-color="#222e2b"/>
+    </linearGradient>
+    <linearGradient id="horn-r" x1="1" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3d4f4a"/>
+      <stop offset="1" stop-color="#192320"/>
+    </linearGradient>
+    <linearGradient id="crest-l" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#b8fada"/>
+      <stop offset="1" stop-color="#5cd99c"/>
+    </linearGradient>
+    <linearGradient id="crown-top" x1="0.2" y1="0" x2="0.8" y2="1">
+      <stop offset="0" stop-color="#a8f7ce"/>
+      <stop offset="1" stop-color="#45bf85"/>
+    </linearGradient>
+    <linearGradient id="brow-bridge" x1="0.5" y1="0" x2="0.5" y2="1">
+      <stop offset="0" stop-color="#9ef5c8"/>
+      <stop offset="1" stop-color="#53cf94"/>
+    </linearGradient>
+    <linearGradient id="visor" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#081411"/>
+      <stop offset="1" stop-color="#112620"/>
+    </linearGradient>
+    <linearGradient id="eye-glow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#9effe2"/>
+      <stop offset="1" stop-color="#3de3b0"/>
+    </linearGradient>
+    <linearGradient id="chin-front" x1="0.3" y1="0" x2="0.7" y2="1">
+      <stop offset="0" stop-color="#6ee3ab"/>
+      <stop offset="1" stop-color="#2d9466"/>
+    </linearGradient>
+  </defs>
+  <rect x="-8" y="-8" width="80" height="80" fill="url(#bg)"/>
+  <circle cx="32" cy="34" r="24" fill="#1e4236" opacity=".36"/>
 
-  <!-- Swept-back obsidian & emerald dragon horns (brand dragon motif) -->
-  <polygon points="15,18 9,7 16,3 23,14" fill="#3a4c47"/>
-  <polygon points="9,7 16,3 14,11" fill="#63e2a5"/>
-  <polygon points="15,18 14,11 23,14 25,19" fill="#253430"/>
+  <!-- Swept-back obsidian & emerald dragon horns (safely inside circular mask) -->
+  <polygon points="16,19 11,8 17.5,4.5 24,15" fill="url(#horn-l)"/>
+  <polygon points="11,8 17.5,4.5 15.5,12" fill="#70ebaf"/>
+  <polygon points="16,19 15.5,12 24,15 25.5,19.5" fill="#253430"/>
 
-  <polygon points="49,19 55,8 48,4 41,15" fill="#293834"/>
-  <polygon points="55,8 48,4 50,12" fill="#46bd84"/>
-  <polygon points="49,19 50,12 41,15 39,19" fill="#1d2926"/>
+  <polygon points="48,19.5 53,9 46.5,5.5 40,15.5" fill="url(#horn-r)"/>
+  <polygon points="53,9 46.5,5.5 48.5,12.5" fill="#46bd84"/>
+  <polygon points="48,19.5 48.5,12.5 40,15.5 38.5,19.5" fill="#1b2623"/>
 
-  <!-- Signature Mote lifted left ear-fin + crown ridge -->
-  <polygon points="10,13 24,18 13,26" fill="#9cf5c8"/>
-  <polygon points="24,18 32,12 32,21" fill="#7be8b2"/>
-  <polygon points="32,12 40,18 32,21" fill="#3eb882"/>
-  <polygon points="40,18 52,16 49,26" fill="#2b9466"/>
+  <!-- Signature Mote lifted left ear-fin + sculpted crown ridge -->
+  <polygon points="11,14 24.5,18.5 14,26.5" fill="url(#crest-l)"/>
+  <polygon points="24.5,18.5 32,12.5 32,21.5" fill="url(#crown-top)"/>
+  <polygon points="32,12.5 39.5,18.5 32,21.5" fill="#3ab37d"/>
+  <polygon points="39.5,18.5 51,16.5 48.5,26.5" fill="#288c60"/>
 
-  <!-- Connected companion-proportioned low-poly cranium & cheeks -->
-  <polygon points="13,26 24,18 32,21 21,30" fill="#68dfa5"/>
-  <polygon points="32,21 40,18 49,26 43,30" fill="#35ab77"/>
-  <polygon points="21,30 32,21 43,30 32,33" fill="#8ff0bf"/>
+  <!-- Cheek & lower jaw facets (drawn BEFORE visor so zero overlap into visor pocket) -->
+  <polygon points="14,26.5 24.5,18.5 32,21.5 21,30" fill="#68dfa5"/>
+  <polygon points="32,21.5 39.5,18.5 48.5,26.5 43,30" fill="#32a371"/>
+  <polygon points="21,30 32,21.5 43,30 32,32.5" fill="url(#brow-bridge)"/>
 
-  <polygon points="13,26 21,30 16,42 9,35" fill="#4bc98d"/>
-  <polygon points="49,26 43,30 48,42 55,35" fill="#207853"/>
-  <polygon points="9,35 16,42 13,48 7,41" fill="#319c6b"/>
-  <polygon points="55,35 48,42 51,48 57,41" fill="#17593e"/>
+  <polygon points="14,26.5 21,30 16.5,41.5 10,35" fill="#4bc98d"/>
+  <polygon points="48.5,26.5 43,30 47.5,41.5 54,35" fill="#1f7551"/>
+  <polygon points="10,35 16.5,41.5 14,47.5 8.5,40.5" fill="#2e9667"/>
+  <polygon points="54,35 47.5,41.5 50,47.5 55.5,40.5" fill="#16543a"/>
 
-  <!-- Unified dark emerald visor pocket (Mote companion family signature) -->
-  <polygon points="17,29.5 32,31.2 47,29.2 49,40.2 32,42 15,40.5" fill="#0d1e19"/>
-  <polygon points="17,29.5 32,31.2 47,29.2 45.5,30.6 32,32.2 18.5,30.8" fill="#4ad496" opacity=".45"/>
+  <polygon points="16.5,41.5 32,42 24.5,50.5" fill="#42bd84"/>
+  <polygon points="47.5,41.5 32,42 39.5,50.5" fill="#227a54"/>
+  <polygon points="24.5,50.5 32,42 39.5,50.5 32,54.8" fill="url(#chin-front)"/>
+  <polygon points="16.5,41.5 24.5,50.5 32,54.8 21.5,53.5" fill="#2a8c60"/>
+  <polygon points="47.5,41.5 39.5,50.5 32,54.8 42.5,53.5" fill="#18593d"/>
 
-  <!-- Expressive dual glowing emerald companion eyes -->
-  <polygon points="20,33.2 26.5,32.8 27.2,37.8 19.6,37.8" fill="#6ffad0"/>
-  <polygon points="36.8,32.6 44,32.2 44.6,37.6 36.4,37.6" fill="#6ffad0"/>
-  <circle cx="22" cy="34.4" r="1.15" fill="#ffffff"/>
-  <circle cx="39.2" cy="34" r="1.2" fill="#ffffff"/>
+  <!-- Clean, unobstructed dark emerald visor pocket on top -->
+  <polygon points="17.5,29.5 32,31.2 46.5,29.2 48,40.2 32,42 16,40.4" fill="url(#visor)"/>
+  <polygon points="17.5,29.5 32,31.2 46.5,29.2 45.2,30.5 32,32.1 18.8,30.7" fill="#63e2a5" opacity=".48"/>
 
-  <!-- Rounded low-poly lower companion shell & dragon chin scales -->
-  <polygon points="16,42 21,30 15,40.5" fill="#3bb57d"/>
-  <polygon points="48,42 43,30 49,40.2" fill="#1e704e"/>
-  <polygon points="15,40.5 32,42 24,51 16,42" fill="#44bf86"/>
-  <polygon points="49,40.2 32,42 40,51 48,42" fill="#248059"/>
-  <polygon points="24,51 32,42 40,51 32,55" fill="#5bd69c"/>
-  <polygon points="16,42 24,51 32,55 21,54" fill="#2c9164"/>
-  <polygon points="48,42 40,51 32,55 43,54" fill="#195e41"/>
+  <!-- Luminous dual emerald companion eyes -->
+  <polygon points="20.2,33.2 26.6,32.8 27.2,37.8 19.8,37.8" fill="url(#eye-glow)"/>
+  <polygon points="36.8,32.6 43.8,32.2 44.4,37.6 36.4,37.6" fill="url(#eye-glow)"/>
+  <circle cx="22.1" cy="34.4" r="1.15" fill="#ffffff"/>
+  <circle cx="39.1" cy="34.0" r="1.2" fill="#ffffff"/>
 </svg>
