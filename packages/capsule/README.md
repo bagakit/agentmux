@@ -38,6 +38,11 @@ neither a durable page ID nor an authority token. Browser adapters must correlat
 the actual navigation response with the original owner observation rather than
 infer loaded-document provenance from a reused origin.
 
+Reply operation inspection projects its original reserved `inputOperationId`
+from the existing operation effect, including while the trusted prepare callback
+is running. The field is an identity correlation fact and supplies no input or
+Human authority; no second reservation or persistent input field is created.
+
 Each page retains its original loopback port after owner or process restart. A
 port conflict remains visible on that exact page until the original port becomes
 available. Resolving retries the same port; it never silently changes the origin.
