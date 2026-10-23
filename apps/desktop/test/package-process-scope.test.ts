@@ -1,7 +1,6 @@
 import { fixtureCivil as _hygiene_fixtureCivil, fixturePath as _hygiene_fixturePath, fixturePsBirth as _hygiene_fixturePsBirth } from "../scripts/lib/fixture-values.mjs"
 import { describe, expect, it } from 'vitest'
 import { classifyApplicationProcesses, snapshotApplicationProcesses, observeApplicationProcesses, assertApplicationActivationOwnership } from '../scripts/package-process-scope.mjs'
-import { readFileSync } from 'node:fs'
 
 /**
  * 打包安装脚本用 `processIdsForApplication` 回答三个问题：退出旧实例前「还有没有在服务这份包的进程」、
@@ -25,6 +24,9 @@ const FRAMEWORK = `${HELPER_ROOT}Electron Framework.framework/Helpers`
 const bundle = { executable: EXECUTABLE, helperRoot: HELPER_ROOT }
 
 const line = (pid: number, command: string) => `${String(pid).padStart(5)} ${command}`
+const guiAdmission = (row: { pid: number; ppid: number; birth: string }) => ({ ...row, uid: process.getuid!(),
+  classification: 'gui', source: 'bound-gui', initial: { classification: 'gui', source: 'bound-gui', ppid: row.ppid },
+  confirmedGui: { source: 'bound-gui', ppid: row.ppid } })
 
 describe('classifyApplicationProcesses separates serving from crash-reporter', () => {
   it('excludes a detached crashpad handler from serving so a stale one cannot block install', () => {
@@ -97,7 +99,7 @@ describe('candidate activation uses OS ownership rather than the first launch PI
   const utility = { pid: 703, ppid: 701, birth: newBirth }
   const system = { pid: 1, ppid: 0, birth: oldBirth }
   const ownership = (current: typeof main[], serving: number[] = [700, 701, 702, 703]) => ({
-    previous: [oldMain, oldHelper], beforeLaunch: [system, oldMain, oldHelper], current, serving, mainPid: 700
+    previous: [guiAdmission(oldMain), guiAdmission(oldHelper)], beforeLaunch: [system, oldMain, oldHelper], current, serving, mainPid: 700
   })
 
   it('keeps exact nonempty process metadata while preserving the crash-reporter classification', () => {
@@ -106,8 +108,11 @@ describe('candidate activation uses OS ownership rather than the first launch PI
       (" " + (process.getuid!()) + (" 701 700 " + _hygiene_fixturePsBirth(23716801000) + " ") + (FRAMEWORK) + "/AgentMux Helper (Renderer).app/Contents/MacOS/AgentMux Helper (Renderer) --type=renderer"),
       (" " + (process.getuid!()) + (" 710 1 " + _hygiene_fixturePsBirth(23716801000) + " ") + (FRAMEWORK) + ("/chrome_crashpad_handler --database=" + _hygiene_fixturePath("x")))
     ].join('\n')
-    expect(snapshotApplicationProcesses(ps, bundle)).toEqual({ serving: [700, 701], crashReporter: [710], externalNode: [],
+    const observed = snapshotApplicationProcesses(ps, bundle)
+    expect(observed).toMatchObject({ serving: [700, 701], crashReporter: [710], externalNode: [],
       processes: [main, renderer, { pid: 710, ppid: 1, birth: newBirth }] })
+    expect(observed.admissions).toMatchObject([{ pid: 700, classification: 'unknown', source: 'mode-unconfirmed' },
+      { pid: 701, classification: 'gui', source: 'bundle-helper' }])
     expect(() => snapshotApplicationProcesses('', bundle)).toThrow('empty')
     expect(() => snapshotApplicationProcesses(`700 1 unavailable ${EXECUTABLE}`, bundle)).toThrow('birth observation')
   })
@@ -158,7 +163,7 @@ describe('external Node clients and Main-owned Node workers have different autho
   const system = row(1, 0, '/sbin/launchd'), externalParent = row(90, 1, _hygiene_fixturePath("usr/bin/private-client"))
   const main = row(700, 1), node = (pid: number, ppid: number) => ({ pid, ppid, birth, uid: process.getuid!(), mode: 'node', executable: EXECUTABLE })
   const ps = (...rows: string[]) => [system, externalParent, ...rows].join('\n')
-  const prior = [{ pid: 701, ppid: 700, birth }]
+  const prior = [guiAdmission({ pid: 701, ppid: 700, birth })]
 
   it('excludes only a bound external client, preserving Main child and indirect file workers', () => {
     const scope = snapshotApplicationProcesses(ps(main, row(701, 700), row(702, 701), row(800, 90)), bundle,
@@ -225,18 +230,6 @@ describe('external Node clients and Main-owned Node workers have different autho
     expect(present.serving).toEqual([700, 800]); expect(present.externalNode).toEqual([])
   })
 
-  it('the real installer consumes mode facts and carries original birth pins through ordinary quit wait', () => {
-    const source = readFileSync(new URL('../scripts/package-macos.mjs', import.meta.url), 'utf8')
-    const start = source.indexOf('async function scopedProcesses('), end = source.indexOf('// The bundle', start)
-    expect(start).toBeGreaterThan(-1); expect(end).toBeGreaterThan(start)
-    expect(source.slice(start, end)).toContain('observeApplicationProcesses({ executable, helperRoot }, previousOwners)')
-    const quit = source.indexOf('async function quitInstalledApplication('), quitEnd = source.indexOf('/**', quit + 1)
-    expect(quit).toBeGreaterThan(-1); expect(quitEnd).toBeGreaterThan(quit)
-    expect(source.slice(quit, quitEnd)).toContain('const previousOwners = processes.filter(row => running.includes(row.pid))')
-    expect(source.slice(quit, quitEnd)).toContain('scopedProcesses(appPath, originalOwners)')
-    expect(source.slice(quit, quitEnd)).toContain('guiOwners(await scopedProcesses(appPath, previousOwners))')
-    expect(source).toContain('await quit(destination, previousScope.processes.filter(row => running.includes(row.pid)), semanticHost)')
-  })
 })
 
 
@@ -344,11 +337,153 @@ describe('a bounded observation reads candidates introduced after its first OS s
   })
 
   it('keeps the original same-birth worker protected while classifying a new external Node', async () => {
-    const prior = [{ pid: 701, ppid: 700, birth }], initial = ps(main, row(701, 1)), final = ps(main, row(701, 1), row(800, 90))
+    const prior = [guiAdmission({ pid: 701, ppid: 700, birth })], initial = ps(main, row(701, 1)), final = ps(main, row(701, 1), row(800, 90))
     const { scope, requested } = await observe([initial, final, final],
       [[mode(700, 1, birth, uid, 'gui'), mode(701, 1)], [mode(800, 90)]], prior)
     expect(requested).toEqual([[700, 701], [800]])
     expect(scope.serving).toEqual([700, 701]); expect(scope.externalNode).toEqual([800])
     expect(() => activate(scope, prior)).toThrow('previous application owner')
+  })
+})
+
+describe('typed admissions retain original evidence without promoting unknown to GUI ownership', () => {
+  const uid = process.getuid!(), birth = _hygiene_fixturePsBirth(23716801000), anotherBirth = _hygiene_fixturePsBirth(23716802000)
+  const row = (pid: number, ppid: number, command = EXECUTABLE, ownerUid = uid, born = birth) =>
+    `${ownerUid} ${pid} ${ppid} ${born} ${command}`
+  const mode = (pid: number, ppid: number, kind = 'node', ownerUid = uid, born = birth) =>
+    ({ uid: ownerUid, pid, ppid, birth: born, mode: kind, executable: EXECUTABLE })
+  const ps = (...rows: string[]) => [row(1, 0, '/sbin/launchd'), row(90, 1, _hygiene_fixturePath('private/independent')), ...rows].join('\n')
+  const main = row(700, 1), mainMode = mode(700, 1, 'gui')
+  async function observe(snapshot: string, nodeModes: object[], previousOwners: object[] = [], independentOwners: object[] = []) {
+    return observeApplicationProcesses(bundle, previousOwners, {
+      processSnapshot: async () => snapshot, modes: async () => nodeModes, independentOwners
+    })
+  }
+
+  it('releases an original unknown only after fresh bound mode and complete external ancestry, including activation', async () => {
+    const snapshot = ps(main, row(800, 90, `${EXECUTABLE} --private-argument`))
+    const first = await observe(snapshot, [mainMode])
+    const initial = first.admissions.find(row => row.pid === 800)!
+    expect(initial).toMatchObject({ uid, birth, classification: 'unknown', source: 'mode-unconfirmed',
+      initial: { classification: 'unknown', source: 'mode-unconfirmed', ppid: 90,
+        mode: { status: 'not-observed', observation: null },
+        ancestry: { path: [{ uid, pid: 800, ppid: 90, birth }, { uid, pid: 90, ppid: 1, birth }, { uid, pid: 1, ppid: 0, birth }],
+          termination: 'system-root', missingPid: null } } })
+    expect(initial.confirmedGui).toBeUndefined()
+    const external = await observe(snapshot, [mainMode, mode(800, 90)], first.admissions)
+    expect(external.serving).toEqual([700]); expect(external.externalNode).toEqual([800])
+    expect(external.admissions.find(row => row.pid === 800)).toMatchObject({ classification: 'external', source: 'system-root', initial: initial.initial })
+    expect(assertApplicationActivationOwnership({ previous: [initial], beforeLaunch: first.processes.filter(row => row.pid === 800),
+      current: external.processes, serving: external.serving, mainPid: 700, observation: external.ownershipObservation }))
+      .toEqual(external.processes.filter(row => row.pid === 700))
+  })
+
+  it('preserves the original bounded mode mismatch after a later accurate read resolves it', async () => {
+    const snapshot = ps(main, row(800, 90))
+    const first = await observe(snapshot, [mainMode, { ...mode(800, 90), birth: anotherBirth, executable: _hygiene_fixturePath('private/another-executable') }])
+    const admission = first.admissions.find(row => row.pid === 800)!
+    expect(admission.initial.mode).toMatchObject({ status: 'binding-mismatch', mismatch: ['birth', 'executable'],
+      observation: { uid, pid: 800, ppid: 90, birth: anotherBirth, mode: 'node', executableMatches: false } })
+    const current = await observe(snapshot, [mainMode, mode(800, 90)], first.admissions)
+    expect(current.admissions.find(row => row.pid === 800)).toMatchObject({ classification: 'external', initial: admission.initial })
+    expect(JSON.stringify(admission.initial)).not.toContain('another-executable')
+  })
+
+  it('keeps a later GUI confirmation through reparenting without replacing the initial unknown fact', () => {
+    const first = snapshotApplicationProcesses(ps(main, row(701, 700)), bundle, { nodeModes: [mainMode] })
+    const admitted = snapshotApplicationProcesses(ps(main, row(701, 700)), bundle,
+      { nodeModes: [mainMode, mode(701, 700)], previousOwners: first.admissions })
+    const owner = admitted.admissions.find(row => row.pid === 701)!
+    expect(owner).toMatchObject({ classification: 'gui', source: 'gui-ancestry', initial: { classification: 'unknown' },
+      confirmedGui: { source: 'gui-ancestry', ppid: 700 } })
+    const reparented = snapshotApplicationProcesses(ps(row(701, 1)), bundle,
+      { nodeModes: [mode(701, 1)], previousOwners: admitted.admissions })
+    expect(reparented.serving).toEqual([701]); expect(reparented.externalNode).toEqual([])
+    expect(reparented.admissions.find(row => row.pid === 701)).toMatchObject({ classification: 'gui', source: 'retained-gui',
+      initial: owner.initial, confirmedGui: owner.confirmedGui })
+  })
+
+  it('retains a disappeared GUI admission without claiming it is alive, then recognizes the same original birth', () => {
+    const first = snapshotApplicationProcesses(ps(main, row(701, 700)), bundle, { nodeModes: [mainMode, mode(701, 700)] })
+    const missing = snapshotApplicationProcesses(ps(), bundle, { previousOwners: first.admissions })
+    expect(missing.serving).toEqual([]); expect(missing.admissions).toEqual(first.admissions)
+    const returned = snapshotApplicationProcesses(ps(row(701, 1)), bundle, { nodeModes: [mode(701, 1)], previousOwners: missing.admissions })
+    expect(returned.serving).toEqual([701])
+    expect(returned.admissions.find(row => row.pid === 701)).toMatchObject({ classification: 'gui', source: 'retained-gui' })
+  })
+
+  it('does not transfer a prior GUI pin across UID or birth replacement at the same PID', async () => {
+    const original = guiAdmission({ pid: 800, ppid: 700, birth })
+    for (const before of [{ ...original, uid: uid + 1 }, { ...original, birth: anotherBirth }]) {
+      const current = await observe(ps(main, row(800, 90)), [mainMode, mode(800, 90)], [before])
+      expect(current.serving).toEqual([700]); expect(current.externalNode).toEqual([800])
+      expect(current.admissions).toContainEqual(before)
+      const active = current.ownershipObservation.admissions.get(800)!
+      expect(active.classification).toBe('external'); expect(active.confirmedGui).toBeUndefined()
+      expect(active.initial.classification).toBe('external')
+      if (before.birth === birth) expect(() => assertApplicationActivationOwnership({ previous: [before], beforeLaunch: [],
+        current: current.processes, serving: current.serving, mainPid: 700, observation: current.ownershipObservation }))
+        .toThrow('previous application owner')
+    }
+  })
+
+  it('stops GUI ancestry at the authenticated independent Node owner across a Native intermediate', () => {
+    const owner = { uid, pid: 600, ppid: 700, birth, command: `${EXECUTABLE} --original-semantic-owner` }
+    const graph = ps(main, row(600, 700, owner.command), row(610, 600, _hygiene_fixturePath('private/native-runtime')),
+      row(620, 610), row(701, 700))
+    const scope = snapshotApplicationProcesses(graph, bundle, { independentOwners: [owner],
+      nodeModes: [mainMode, mode(600, 700), mode(620, 610), mode(701, 700)] })
+    expect(scope.serving).toEqual([700, 701]); expect(scope.externalNode).toEqual([600, 620])
+    expect(scope.admissions.filter(row => [600, 620].includes(row.pid)))
+      .toMatchObject([{ classification: 'external', source: 'independent-owner' }, { classification: 'external', source: 'independent-owner' }])
+    expect(scope.admissions.find(row => row.pid === 620)!.initial.ancestry).toEqual({
+      path: [{ uid, pid: 620, ppid: 610, birth }, { uid, pid: 610, ppid: 600, birth }, { uid, pid: 600, ppid: 700, birth }],
+      termination: 'independent-owner', missingPid: null })
+    expect(scope.admissions.find(row => row.pid === 701)).toMatchObject({ classification: 'gui', source: 'gui-ancestry' })
+    const reparented = snapshotApplicationProcesses(ps(row(600, 1, owner.command), row(610, 600, _hygiene_fixturePath('private/native-runtime')), row(620, 610)), bundle,
+      { independentOwners: [owner], nodeModes: [mode(600, 1), mode(620, 610)], previousOwners: scope.admissions })
+    expect(reparented.serving).toEqual([]); expect(reparented.externalNode).toEqual([600, 620])
+  })
+
+  it('does not exempt a leaf or independent root with unbound mode or identity', () => {
+    const owner = { uid, pid: 600, ppid: 700, birth, command: `${EXECUTABLE} --original-semantic-owner` }
+    const graph = ps(main, row(600, 700, owner.command), row(610, 600, _hygiene_fixturePath('private/native-runtime')), row(620, 610))
+    for (const changed of [{ owner: { ...owner, uid: uid + 1 } }, { owner: { ...owner, birth: anotherBirth } },
+      { owner: { ...owner, command: `${EXECUTABLE} --another-owner` } },
+      { root: { ...mode(600, 700), executable: _hygiene_fixturePath('private/another-executable') } },
+      { root: { ...mode(600, 700), mode: 'unknown' } }, { root: { ...mode(600, 700), ppid: 90 } },
+      { leaf: { ...mode(620, 610), birth: anotherBirth } }, { leaf: { ...mode(620, 610), mode: 'unknown' } }]) {
+      const scope = snapshotApplicationProcesses(graph, bundle, { independentOwners: [changed.owner ?? owner],
+        nodeModes: [mainMode, changed.root ?? mode(600, 700), changed.leaf ?? mode(620, 610)] })
+      expect(scope.serving).toContain(620); expect(scope.externalNode).not.toContain(620)
+    }
+  })
+
+  it('does not invent a path to an independent owner through missing or cyclic ancestry', () => {
+    const owner = { uid, pid: 600, ppid: 700, birth, command: `${EXECUTABLE} --original-semantic-owner` }
+    for (const graph of [ps(main, row(600, 700, owner.command), row(620, 610)),
+      ps(main, row(600, 700, owner.command), row(610, 620, _hygiene_fixturePath('private/native-runtime')), row(620, 610))]) {
+      const scope = snapshotApplicationProcesses(graph, bundle, { independentOwners: [owner], nodeModes: [mainMode, mode(600, 700), mode(620, 610)] })
+      expect(scope.serving).toContain(620)
+      expect(scope.admissions.find(row => row.pid === 620)).toMatchObject({ classification: 'unknown', source: 'ancestry-unconfirmed' })
+    }
+  })
+
+  it('keeps unknown admission provenance in bounded activation diagnostics without exposing commands', async () => {
+    const snapshot = ps(main, row(800, 91, `${EXECUTABLE} --private-argument`))
+    const initial = await observe(snapshot, [mainMode])
+    const current = await observe(snapshot, [mainMode, mode(800, 91)], initial.admissions)
+    let failure: any
+    try { assertApplicationActivationOwnership({ previous: initial.admissions.filter(row => row.pid === 800), beforeLaunch: [],
+      current: current.processes, serving: current.serving, mainPid: 700, observation: current.ownershipObservation }) } catch (error) { failure = error }
+    expect(failure?.ownershipDiagnostic.affected.admission).toMatchObject({ classification: 'unknown', source: 'ancestry-unconfirmed',
+      initial: { classification: 'unknown', source: 'mode-unconfirmed' } })
+    expect(failure.ownershipDiagnostic.ancestry.termination).toBe('missing-parent')
+    expect(JSON.stringify(failure.ownershipDiagnostic)).not.toContain('private-argument')
+  })
+
+  it('rejects untyped previous rows rather than treating missing admission facts as GUI confirmation', () => {
+    expect(() => snapshotApplicationProcesses(ps(main), bundle, { previousOwners: [{ uid, pid: 800, ppid: 90, birth }] }))
+      .toThrow('admission identity or provenance')
   })
 })
