@@ -716,4 +716,81 @@ it('keeps different self-reference and embed loops separately visible and select
   }
 })
 
+it('highlights 1-hop neighborhood on block/area focus, moves single-host shared members with their Note area, and switches to overview LOD at low zoom', async () => {
+  const sharedSingle = noteFromMarkdown(body('shared-single', 'Single-host shared block'))
+  sharedSingle.kind = 'shared-block'; sharedSingle.title = 'Single host block'
+  const sharedBridge = noteFromMarkdown(body('shared-bridge', 'Multi-host bridge block'))
+  sharedBridge.kind = 'shared-block'; sharedBridge.title = 'Bridge block'
+  await writeFile(join(directory, 'shared-single.note.md'), serializeNoteDocument(sharedSingle))
+  await writeFile(join(directory, 'shared-bridge.note.md'), serializeNoteDocument(sharedBridge))
+  const targetNote = noteFromMarkdown(body('target', 'Saved target'))
+  targetNote.content.content!.push(
+    { type: 'noteInclude', attrs: { blockId: 'target-inc-single', referenceId: 'ref-single', noteId: 'shared-single', path: 'shared-single.note.md' } },
+    { type: 'noteInclude', attrs: { blockId: 'target-inc-bridge', referenceId: 'ref-bridge-1', noteId: 'shared-bridge', path: 'shared-bridge.note.md' } },
+  )
+  const sourceNote = noteFromMarkdown(body('closed-source', 'Saved source', true))
+  sourceNote.content.content!.push(
+    { type: 'noteInclude', attrs: { blockId: 'source-inc-bridge', referenceId: 'ref-bridge-2', noteId: 'shared-bridge', path: 'shared-bridge.note.md' } },
+  )
+  await writeFile(join(directory, 'target.note.md'), serializeNoteDocument(targetNote))
+  await writeFile(join(directory, 'closed-source.note.md'), serializeNoteDocument(sourceNote))
+  const key = noteCanvasScopeKey(scope)
+  useAppStore.setState({
+    noteCanvasLayouts: {
+      [key]: {
+        positions: { target: { x: 100, y: 100 }, 'shared-single': { x: 140, y: 320 }, 'shared-bridge': { x: 460, y: 200 }, 'closed-source': { x: 800, y: 100 } },
+        viewport: { x: 0, y: 0, zoom: 1 },
+        expandedNoteIds: ['target'],
+        previewNoteIds: [],
+      },
+    },
+  })
+  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />)
+  await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-card')).toHaveLength(4))
+  const targetCard = dom.container.querySelector<HTMLElement>('.react-flow__node[data-id="target"] .note-canvas-card')!
+  const singleCard = dom.container.querySelector<HTMLElement>('.react-flow__node[data-id="shared-single"] .note-canvas-card')!
+  const bridgeCard = dom.container.querySelector<HTMLElement>('.react-flow__node[data-id="shared-bridge"] .note-canvas-card')!
+  const sourceCard = dom.container.querySelector<HTMLElement>('.react-flow__node[data-id="closed-source"] .note-canvas-card')!
+  expect(targetCard.dataset.canvasRole).toBe('note-area')
+  expect(targetCard.querySelector('.note-canvas-area__envelope')).not.toBeNull()
+  expect(singleCard.dataset.canvasRole).toBe('shared-member')
+  expect(singleCard.dataset.hostNoteId).toBe('target')
+  expect(bridgeCard.dataset.canvasRole).toBe('shared-bridge')
+  expect(bridgeCard.textContent).toContain('Shared bridge · 2 notes')
+
+  // Hovering singleCard highlights its 1-hop neighborhood (target + shared-single) and mutes closed-source & shared-bridge
+  await act(async () => { singleCard.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })) })
+  expect(singleCard.dataset.emphasis).toBe('related')
+  expect(targetCard.dataset.emphasis).toBe('related')
+  expect(sourceCard.dataset.emphasis).toBe('muted')
+  await act(async () => { singleCard.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })) })
+  expect(sourceCard.dataset.emphasis).toBe('normal')
+
+  // Moving the host Note area (target) translates its single-host shared member (shared-single) together
+  const targetNode = dom.container.querySelector<HTMLElement>('.react-flow__node[data-id="target"]')!
+  await act(async () => { targetNode.focus(); targetNode.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })) })
+  await act(async () => targetNode.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })))
+  const savedPositions = useAppStore.getState().noteCanvasLayouts[key]!.positions
+  const dx = savedPositions.target!.x - 100
+  expect(dx).toBeGreaterThan(0)
+  expect(savedPositions['shared-single']!.x).toBe(140 + dx)
+  expect(savedPositions['shared-bridge']!.x).toBe(460)
+
+  // Zooming out below NOTE_CANVAS_OVERVIEW_ZOOM switches cards to overview LOD without mounting NoteReader
+  await dom.render(null)
+  useAppStore.setState({
+    noteCanvasLayouts: {
+      [key]: {
+        positions: savedPositions,
+        viewport: { x: 0, y: 0, zoom: 0.3 },
+        expandedNoteIds: ['target'],
+        previewNoteIds: [],
+      },
+    },
+  })
+  await dom.render(<NoteCanvas scope={scope} onOpen={() => {}} />)
+  await vi.waitFor(() => expect(dom.container.querySelector('.note-canvas-card[data-canvas-lod="overview"]')).not.toBeNull())
+  expect(dom.container.querySelector('.note-canvas-reader')).toBeNull()
+})
+
 function noteFromMarkdown(content:string) { const read=readNoteDocument(content);expect(read.status).toBe('valid');if(read.status!=='valid')throw Error(read.message);return read.note }

@@ -1,5 +1,6 @@
 import { readNoteDocument } from '@agentmux/client-ui/note/note-document'
 import { serializeNoteDocument } from '@agentmux/client-ui/note/note-document'
+import { noteInlineLinkContent } from '@agentmux/client-ui/note/note-wikilinks'
 import { fixtureEpoch as _tailRefreshFixtureEpoch } from "../../../test/fixture-values.mjs"
 // @vitest-environment happy-dom
 import { EventEmitter } from 'node:events'
@@ -32,9 +33,9 @@ const body = (id: string, text: string, references = false) => serializeNoteDocu
     ...[0, 1, 2].map(index => ({ type: 'blockReference', attrs: { blockId: 'source-reference-' + index, referenceId: 'original-reference-' + index, mode: index === 2 ? 'embed' : 'reference', target: { noteId: 'target', blockId: 'target-block' } } })),
     { type: 'paragraph', attrs: { blockId: 'source-inline' }, content: [
       { type: 'text', text: 'Original closed source links to ' },
-      { type: 'noteLink', attrs: { referenceId: 'page-link', text: 'Original target', target: { noteId: 'target' } } },
+      noteInlineLinkContent({ referenceId: 'page-link', text: 'Original target', target: { noteId: 'target' } }),
       { type: 'text', text: ' and ' },
-      { type: 'noteLink', attrs: { referenceId: 'heading-link', text: 'Original target #Heading', target: { noteId: 'target', blockId: 'target-block' } } },
+      noteInlineLinkContent({ referenceId: 'heading-link', text: 'Original target #Heading', target: { noteId: 'target', blockId: 'target-block' } }),
       { type: 'text', text: ' plus [[Unconfirmed page]]' },
     ] },
   ] : []
@@ -65,7 +66,7 @@ beforeEach(async () => {
 })
 afterEach(async () => { await rm(directory, { recursive: true, force: true }) })
 async function ready() { await vi.waitFor(() => expect(dom.container.querySelectorAll('.note-canvas-title[data-note-id]')).toHaveLength(2)) }
-const link = (referenceId: string, noteId: string, blockId?: string) => ({ type: 'noteLink', attrs: { referenceId, text: noteId + (blockId ? ' #' + blockId : ''), target: { noteId, ...blockId ? { blockId } : {} } } })
+const link = (referenceId: string, noteId: string, blockId?: string) => noteInlineLinkContent({ referenceId, text: noteId + (blockId ? ' #' + blockId : ''), target: { noteId, ...blockId ? { blockId } : {} } })
 const paragraph = (blockId: string, text: string) => ({ type: 'paragraph', attrs: { blockId }, content: [{ type: 'text', text }] })
 async function selectedFixture() {
   await writeFile(join(directory, 'target.note.md'), serializeNoteDocument({ schema: 'agentmux.note.v1', noteId: 'target', content: { type: 'doc', content: Array.from({ length: 6 }, (_, i) => paragraph('target-' + i, 'Exact target content ' + i)) } }))
@@ -91,7 +92,7 @@ it('selects only the three original default-outside occurrences, compares each t
   await vi.waitFor(() => expect(api.notebooks.content).toHaveBeenCalledTimes(2))
   expect(targetCard().querySelector('[data-block-id="target-5"]')).toBeNull()
   const summary = () => dom.container.querySelector<HTMLButtonElement>('.note-canvas-edge-label[data-target-kind="block"][data-target-attachment="summary"]')
-  await vi.waitFor(() => { expect(summary()).not.toBeNull(); expect(summary()!.textContent).toContain('3 links') })
+  await vi.waitFor(() => { expect(summary()).not.toBeNull(); expect(summary()!.getAttribute('aria-label')).toContain('3 links') })
   const layout = structuredClone(useAppStore.getState().noteCanvasLayouts[noteCanvasScopeKey(scope)])
   await act(async () => summary()!.click())
   await vi.waitFor(() => expect(targetCard().querySelectorAll('[data-note-selected-block]')).toHaveLength(3))
