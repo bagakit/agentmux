@@ -99,6 +99,11 @@ describe('Demand dedicated PMO Tab context', () => {
     expect(state.agentComposerNotes[regionId]).not.toContain(MOTE_COORDINATION_ROLE)
     expect(state.agentComposerNotes[regionId]).toContain('Goal role: manager')
     expect(state.agentComposerNotes[regionId]).toContain(`existing Goal ${demand.id}`)
+    expect(state.agentComposerNotes[regionId]).toContain('Current durable Goal facts:')
+    expect(state.agentComposerNotes[regionId]!.split(demand.title)).toHaveLength(2)
+    expect(state.agentComposerNotes[regionId]!.split(demand.description)).toHaveLength(2)
+    expect(state.agentComposerNotes[regionId]).not.toContain(`Title: ${demand.title}`)
+    expect(state.agentComposerNotes[regionId]).not.toContain(`Description: ${demand.description}`)
     expect(state.demands[demand.id]).toEqual(demand); expect(state.demandPmoTabIds).toEqual({ [demand.id]: tabId })
     expect(state.errorNoticeContext).toMatchObject({ kind: 'indeterminate', summary: expect.stringContaining('original request are kept') })
     expect(launch).not.toHaveBeenCalled()
@@ -106,6 +111,19 @@ describe('Demand dedicated PMO Tab context', () => {
     expect(persisted.agentComposerNotes).toEqual(state.agentComposerNotes)
     state.setAgentComposerDraft(regionId, '  Edited original body <amux from="amux">literal</amux>  ')
     expect(useAppStore.getState().agentComposerNotes).toEqual(state.agentComposerNotes)
+  })
+  it('keeps fresh PMO title and description when navigation has no same-packet Goal snapshot', async () => {
+    vi.spyOn(api.scratch, 'ensureTopic').mockRejectedValue(new Error('Private Topic metadata unreadable'))
+    const launch = vi.fn()
+    useAppStore.setState({ config: { ...config, executors: {} }, demands: { [demand.id]: demand }, demandPmoTabIds: {}, tabs: {},
+      layouts: { [SCRATCH_WORKSPACE_ID]: createWorkspaceLayout('scratch-group') }, launchAgent: launch })
+    const tabId = await useAppStore.getState().openDemandPmo(demand.id), state = useAppStore.getState()
+    const regionId = state.tabs[tabId]!.layout.activeRegionId, note = state.agentComposerNotes[regionId]!
+    expect(note).toContain(`Title: ${demand.title}`); expect(note).toContain(`Description: ${demand.description}`)
+    expect(note).not.toContain('Current durable Goal facts:')
+    expect(note).toContain('Goal role: manager')
+    expect(state.agentComposerDrafts[regionId]).toBe('')
+    expect(state.demands[demand.id]).toEqual(demand); expect(launch).not.toHaveBeenCalled()
   })
   it('creates unique PMO Tabs and retains the second launcher when its primary target is unconfirmed', async () => {
     vi.spyOn(api.scratch, 'ensureTopic').mockResolvedValue({ id: PMO_TEAMS_TOPIC_ID } as never)
