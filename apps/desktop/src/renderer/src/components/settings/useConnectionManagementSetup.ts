@@ -6,7 +6,7 @@ import { connectionSetupDecisionForAction } from '@agentmux/core/connections'
 import { connectionManagementTask } from './connection-management-task'
 import { api } from '../../lib/api'
 import { setBotTaskSelection, useAppStore } from '../../store'
-import { botTaskSelectionKey, managementTaskScope } from '../../lib/bot-task-selection'
+import { botTaskSelectionKey, managementTaskScope, readBotTaskLocator } from '../../lib/bot-task-selection'
 
 type Source = typeof api.connections.call
 type Submission = { key: string; source: Source; input: ConnectionSetupBegin }
@@ -25,7 +25,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
   const key = scope(record), source = api.connections.call
   const locatorScope = record ? managementTaskScope(record) : null
   const locatorKey = locatorScope ? botTaskSelectionKey(locatorScope) : ''
-  const selectedId = useAppStore(state => state.botTaskSelections[locatorKey] ?? null)
+  const selectedId = useAppStore(state => readBotTaskLocator(state.botTaskSelections[locatorKey])?.operationId ?? null)
   const [catalog, setCatalog] = useState<Catalog | null>(null), [reading, setReading] = useState<Reading | null>(null)
   const [publication, setPublication] = useState<{ key: string; source: Source; id: string; fields: PublicationForm } | null>(null)
   const [submissions, setSubmissions] = useState<Submission[]>([])
@@ -287,7 +287,7 @@ export function useConnectionManagementSetup(record: ConnectionRecord | null, ac
     setReading(null); setPublication(null); setDriving(false); setFresh(false); submittedActions.current.clear()
     if (!active || !opened) { requestedHandoff.current = null; return }
     if (requestedHandoff.current?.key === key && requestedHandoff.current.source === source) return
-    const id = useAppStore.getState().botTaskSelections[locatorKey]
+    const id = readBotTaskLocator(useAppStore.getState().botTaskSelections[locatorKey])?.operationId
     if (id) void perform(id, () => source('connection.setup.inspect', { operationId: id, applicationInspection: {}, applicationConfiguration: { effect: 'enable-messaging' } }), false)
   }, [key, source, active, opened])
   useEffect(() => {

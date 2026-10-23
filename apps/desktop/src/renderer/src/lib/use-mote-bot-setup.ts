@@ -1,3 +1,4 @@
+import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { useEffect, useRef, useState } from 'react'
 import { parseFileReadResult } from '@agentmux/core/files'
@@ -19,7 +20,7 @@ import { topicPublicCopy } from '../../../shared/scratch-topics'
 import { api } from './api'
 import { retainMoteBotRequest, retireMoteBotRequest, setBotTaskSelection, useAppStore } from '../store'
 import type { MoteBotRequest } from './mote-bot-request'
-import { botTaskSelectionKey } from './bot-task-selection'
+import { botTaskSelectionKey, readBotTaskLocator } from './bot-task-selection'
 import { initialBotPublication } from './bot-creation-preset'
 
 export type SavedMoteBotProfile = {
@@ -73,7 +74,7 @@ export async function readSavedMoteBotProfile(
 
 /** A bounded UI reading window. Main owns the original operation and every child receipt. */
 export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: string) {
-  const retainedSelection = () => target ? useAppStore.getState().botTaskSelections[botTaskSelectionKey({ kind: 'mote', target })] ?? null : null
+  const retainedSelection = () => target ? readBotTaskLocator(useAppStore.getState().botTaskSelections[botTaskSelectionKey({ kind: 'mote', target })]) : null
   const identity = JSON.stringify(target),
     historySource = JSON.stringify([identity, topicId]),
     lifetime = useRef(0),
@@ -82,8 +83,8 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
   const writing = useRef(new Set<string>()),
     draft = useRef(0),
     creating = useRef<number | null>(null)
-  const [operations, setOperations] = useState<MoteConnectionOperation[]>([]),
-    [selectedId, setSelected] = useState<string | null>(retainedSelection)
+  const [operations, setOperations] = useState<Array<MoteConnectionOperation & { hostingTarget: ConnectionHostingTarget }>>([]),
+    [selectedId, setSelected] = useState<string | null>(() => retainedSelection()?.operationId ?? null)
   const [checkingId, setChecking] = useState<string | null>(selectedId)
   const [profile, setProfile] = useState<SavedMoteBotProfile | null>(null),
     [capabilities, setCapabilities] = useState<ConnectionEnrollmentCapability[]>([])
@@ -103,12 +104,19 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     feedback = useRef(0),
     sourceRead = useRef(0),
     listRead = useRef(0)
-  const pick = (id: string | null) => {
+  const ownerFor = (id: string) => {
+    const retained = useAppStore.getState().moteBotRequests[id]
+    if (retained) return retained.hostingTarget ?? null
+    const locator = retainedSelection()
+    if (locator?.operationId === id) return locator.hostingTarget
+    return operations.find(operation => operation.operationId === id)?.hostingTarget ?? null
+  }
+  const pick = (id: string | null, hostingTarget = id ? ownerFor(id) : null) => {
     setDriving(false)
     selection.current = id
     feedback.current++
     setSelected(id)
-    if (target) setBotTaskSelection({ kind: 'mote', target }, id)
+    if (target) setBotTaskSelection({ kind: 'mote', target }, id && hostingTarget ? { operationId: id, hostingTarget } : id)
   }
   const raw = useAppStore((state) => state.moteBotRequests)
   const requests = Object.values(raw).filter(
@@ -119,7 +127,11 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     occurrences.current.set(id, next)
     return next
   }
-  const accept = (value: MoteConnectionOperation) => {
+  const accept = (value: MoteConnectionOperation, hostingTarget: ConnectionHostingTarget) => {
+    const known = ownerFor(value.operationId)
+    if ((useAppStore.getState().moteBotRequests[value.operationId] || retainedSelection()?.operationId === value.operationId) && !known)
+      throw new Error('The original bot hosting owner is unconfirmed. Its request and task are kept.')
+    if (known && JSON.stringify(known) !== JSON.stringify(hostingTarget)) throw new Error('This reading belongs to another bot hosting owner. The original task is kept.')
     if (!target || !sameMotePreferencesTarget(value.source.target, target)) return
     const retained = useAppStore.getState().moteBotRequests[value.operationId]
     if (retained && !retained.inspectOnly) {
@@ -128,8 +140,8 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     }
     setOperations((previous) =>
       previous.some((item) => item.operationId === value.operationId)
-        ? previous.map((item) => (item.operationId === value.operationId ? value : item))
-        : [value, ...previous]
+        ? previous.map((item) => (item.operationId === value.operationId ? { ...value, hostingTarget } : item))
+        : [{ ...value, hostingTarget }, ...previous]
     )
   }
   const acceptEnrollment = (parentId: string, value: ConnectionEnrollmentView) => {
@@ -145,15 +157,17 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       message = feedback.current
     if (!cursor) setHistoryRead(null)
     try {
+      const hostingTarget = await api.connections.hostingTarget()
+      if (token !== lifetime.current || request !== listRead.current) return
       const result = await api.moteConnections.call('space.mote.connection.ls', {
         target,
         limit: 25,
         ...(cursor ? { cursor } : {})
-      })
+      }, hostingTarget)
       if (token !== lifetime.current || request !== listRead.current) return
       for (const operation of result.operations)
         if (before.get(operation.operationId) === occurrences.current.get(operation.operationId)) {
-          try { accept(operation) }
+          try { accept(operation, hostingTarget) }
           catch (error) { if (message === feedback.current) setIssue(presentError(error)) }
         }
       setNext(result.next)
@@ -192,14 +206,14 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     setHistoryRead(null)
     setEnrollmentView(null)
     const retained = retainedSelection()
-    pick(retained)
+    pick(retained?.operationId ?? null, retained?.hostingTarget ?? null)
     setProfile(null)
     setIssue('')
     setNext(null)
     draft.current++
     void refreshSource()
     void list()
-    if (retained) void check(retained)
+    if (retained) void check(retained.operationId)
     void api.connections
       .call('connection.enrollment.ls', { limit: 1 })
       .then((value) => {
@@ -215,10 +229,11 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     else writing.current.delete(id)
     setBusy([...writing.current])
   }
-  async function send(request: MoteBotRequest) {
+  async function send(input: MoteBotRequest) {
+    const request = structuredClone(input)
     const id = request.input.operationId
-    if (request.inspectOnly) {
-      setIssue('This historical request is retained for checking only. Start an explicit new action to publish prepared profile data.')
+    if (request.inspectOnly || !request.hostingTarget) {
+      setIssue('This request is retained without sending it. Its original bot hosting owner or prepared input is unconfirmed; start an explicit new action for a new request.')
       return
     }
     if (writing.current.has(id)) return
@@ -226,9 +241,9 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
       order = occurrence(id)
     let dispatched = false
     pending(id, true)
-    pick(id)
-    setIssue('')
     try {
+      pick(id, request.hostingTarget)
+      setIssue('')
       const saved = await retainMoteBotRequest({ ...request, phase: 'not-dispatched' })
       if (!saved.localStorageWritten)
         throw new Error('The original request could not be retained. Nothing was sent.')
@@ -242,23 +257,23 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
         request.action === 'create'
           ? parseMoteConnectionResult(
               'space.mote.connection.create',
-              await api.moteConnections.call('space.mote.connection.create', request.input),
+              await api.moteConnections.call('space.mote.connection.create', request.input, request.hostingTarget),
               request.input
             )
           : parseMoteConnectionResult(
               'space.mote.connection.sync',
-              await api.moteConnections.call('space.mote.connection.sync', request.input),
+              await api.moteConnections.call('space.mote.connection.sync', request.input, request.hostingTarget),
               request.input
             )
       const retired = await retireMoteBotRequest(request, result)
       const retentionIssue = retired && !retired.localStorageWritten ? 'The original Host accepted this request. Its local saved view could not be retained; check the same operation.' : ''
       if (token === lifetime.current && order === occurrences.current.get(id)) {
-        accept(result)
+        accept(result, request.hostingTarget)
         if (result.enrollmentOperationId) {
           const observation = ++enrollmentRead.current
           const view = await api.connections.call('connection.enrollment.inspect', {
             operationId: result.enrollmentOperationId
-          })
+          }, request.hostingTarget)
           if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id) {
             if (observation === enrollmentRead.current) acceptEnrollment(id, view)
             setDriving(request.action === 'create' && result.issue !== 'child-unconfirmed' &&
@@ -296,7 +311,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     const original = draft.current
     creating.current = original
     try {
-      await send({
+      const request: MoteBotRequest = {
         action: 'create',
         phase: 'not-dispatched',
         input: {
@@ -307,7 +322,11 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
           domain: capability.domain,
           initialPublication: initialBotPublication
         }
-      })
+      }
+      const hostingTarget = await api.connections.hostingTarget()
+      if (draft.current === original) await send({ ...structuredClone(request), hostingTarget })
+    } catch (error) {
+      if (draft.current === original) setIssue(presentError(error))
     } finally {
       if (creating.current === original) creating.current = null
     }
@@ -317,7 +336,7 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     const original = draft.current
     creating.current = original
     try {
-      await send({
+      const request: MoteBotRequest = {
         action: 'sync',
         phase: 'not-dispatched',
         input: {
@@ -327,13 +346,23 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
           connection: { connectionId: record.config.connectionId, application: record.config.application },
           expectedConnectionRevision: record.revision
         }
-      })
+      }
+      const hostingTarget = await api.connections.hostingTarget()
+      if (draft.current === original) await send({ ...structuredClone(request), hostingTarget })
+    } catch (error) {
+      if (draft.current === original) setIssue(presentError(error))
     } finally {
       if (creating.current === original) creating.current = null
     }
   }
   async function check(id: string, advance = false, action?: ConnectionEnrollmentAction, automatic = false) {
     if (advance && writing.current.has(id)) return
+    const hostingTarget = ownerFor(id)
+    if (!hostingTarget) {
+      setChecking(current => current === id ? null : current)
+      setIssue('The original bot hosting owner is unconfirmed. The original task and request are kept without contacting another Host.')
+      return
+    }
     const token = lifetime.current,
       order = occurrence(id)
     pick(id)
@@ -357,8 +386,8 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
                   }
                 }
               : {})
-          })
-        : (await api.moteConnections.call('space.mote.connection.inspect', { operationId: id })).operation
+          }, hostingTarget)
+        : (await api.moteConnections.call('space.mote.connection.inspect', { operationId: id }, hostingTarget)).operation
       if (token === lifetime.current && order === occurrences.current.get(id)) {
         if (operation && (!target || !sameMotePreferencesTarget(operation.source.target, target)))
           throw new Error('This original request belongs to another Mote. Its identifier is kept; choose this Mote’s original task.')
@@ -369,13 +398,13 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
             if (retired && !retired.localStorageWritten) retentionIssue = 'The original Host receipt is available. Its local saved view could not be retained.'
           }
           if (token !== lifetime.current || order !== occurrences.current.get(id)) return
-          accept(operation)
+          accept(operation, hostingTarget)
         }
         if (operation?.enrollmentOperationId) {
           const observation = ++enrollmentRead.current
           const view = await api.connections.call('connection.enrollment.inspect', {
             operationId: operation.enrollmentOperationId
-          })
+          }, hostingTarget)
           if (token === lifetime.current && order === occurrences.current.get(id) && selection.current === id) {
             if (observation === enrollmentRead.current) acceptEnrollment(id, view)
             setDriving(advance && !!action && ['continue-authentication', 'renew-authentication'].includes(action.kind) &&
@@ -414,11 +443,13 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
   useEffect(() => {
     if (!observing || !selectedId || !childId) { setProgressIssue(null); return }
     let current = true, timer: ReturnType<typeof setTimeout>
-    const token = lifetime.current, parentId = selectedId
+    const token = lifetime.current, parentId = selectedId, hostingTarget = ownerFor(parentId)
+    if (!hostingTarget) return
+    const originalOwner = hostingTarget
     async function observe() {
       try {
         const observation = enrollmentRead.current
-        const value = await api.connections.call('connection.enrollment.inspect', { operationId: childId! })
+        const value = await api.connections.call('connection.enrollment.inspect', { operationId: childId! }, originalOwner)
         if (observation === enrollmentRead.current && current && token === lifetime.current && selection.current === parentId && writing.current.has(parentId)) { acceptEnrollment(parentId, value); setProgressIssue(null) }
       } catch {
         if (current && token === lifetime.current && selection.current === parentId && writing.current.has(parentId)) setProgressIssue({ id: parentId, text: 'The request is still pending here. Its latest progress could not be read; earlier results are kept.' })
@@ -449,7 +480,12 @@ export function useMoteBotSetup(target: MotePreferencesTarget | null, topicId: s
     refreshSource,
     begin,
     sync,
-    acceptOperation: accept,
+    acceptOperation: (value: MoteConnectionOperation) => {
+      const hostingTarget = ownerFor(value.operationId)
+      if (!hostingTarget) throw new Error('The original bot hosting owner is unconfirmed. Its task is kept.')
+      accept(value, hostingTarget)
+    },
+    hostingTarget: selectedId ? ownerFor(selectedId) : null,
     check,
     send,
     select(id: string) {

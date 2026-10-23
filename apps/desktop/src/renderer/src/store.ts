@@ -17,7 +17,7 @@ import { currentContinuitySupervision } from './lib/continuity-supervision'
 import { conversationLandmarkIntentKey, type ConversationLandmarkIntents } from './lib/conversation-landmark-intent'
 import { parseConversationLandmarkWrite, type ConversationLandmarkWrite } from '@agentmux/core/conversation'
 import { restoredMoteBotRequests, type MoteBotRequest } from './lib/mote-bot-request'
-import { botTaskSelectionKey, restoredBotTaskSelections, type BotTaskScope, type BotTaskSelections } from './lib/bot-task-selection'
+import { botTaskSelectionKey, readBotTaskLocator, restoredBotTaskSelections, type BotTaskLocator, type BotTaskScope, type BotTaskSelections } from './lib/bot-task-selection'
 import { goalRoleGuidance } from '@agentmux/core/goal-role-guidance'
 import { noteHistoryRevision } from '@agentmux/core/note-history'
 import { readNoteMarkdownHeader } from '@agentmux/core/note-format'
@@ -4333,13 +4333,17 @@ export async function retireMoteBotRequest(request: MoteBotRequest, operation: i
   return await saveWorkbenchSelection(false)
 }
 /** Remember only which original task to read; selection never dispatches its input. */
-export function setBotTaskSelection(scope: BotTaskScope, operationId: string | null): void {
+export function setBotTaskSelection(scope: BotTaskScope, selection: string | BotTaskLocator | null): void {
   const key = botTaskSelectionKey(scope), current = useAppStore.getState().botTaskSelections
-  if ((current[key] === operationId || operationId === null && !Object.hasOwn(current, key)) && (scope.kind !== 'management' || operationId === null || current.management === key)) return
+  if (selection !== null && !restoredBotTaskSelections({ [key]: selection })[key]) throw new Error('The original bot task locator is invalid.')
+  const previous = readBotTaskLocator(current[key]), next = readBotTaskLocator(selection)
+  if (previous && next && previous.operationId === next.operationId && JSON.stringify(previous.hostingTarget) !== JSON.stringify(next.hostingTarget))
+    throw new Error('Keep this task’s original bot hosting owner. An unconfirmed old owner cannot be replaced by the current Host.')
+  if ((JSON.stringify(current[key]) === JSON.stringify(selection) || selection === null && !Object.hasOwn(current, key)) && (scope.kind !== 'management' || selection === null || current.management === key)) return
   const selections = { ...current }
-  if (operationId === null) delete selections[key]
-  else selections[key] = operationId
-  if (scope.kind === 'management' && operationId !== null) selections.management = key
+  if (selection === null) delete selections[key]
+  else selections[key] = structuredClone(selection)
+  if (scope.kind === 'management' && selection !== null) selections.management = key
   useAppStore.setState({ botTaskSelections: selections })
   void saveWorkbenchSelection(false)
 }

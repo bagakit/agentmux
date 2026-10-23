@@ -101,7 +101,7 @@ export function MoteBotSetup({
       }
       if (operation?.action === 'sync' && operation.setupOperationId) {
         const operationId = operation.setupOperationId
-        void api.connections.call('connection.setup.inspect', { operationId })
+        void api.connections.call('connection.setup.inspect', { operationId }, setup.hostingTarget ?? undefined)
           .then(view => consume(view.operation?.operationId === operationId && view.profileUpdate?.state === 'complete'))
           .catch(() => consume(false))
       } else consume(operation?.action === 'create' && creationComplete(operation))
@@ -220,7 +220,7 @@ export function MoteBotSetup({
     : completedCreation ? 'Published and saved for this Mote.' : primaryEnrollmentAction?.kind === 'confirm-account' ? 'Your confirmation is needed to continue.' : 'Continue from the saved result below.'
   if (profileTask && operation?.setupOperationId) return <section className="mote-bot-setup" aria-label="Mote bot profile">
     <button type="button" className="small-button" onClick={() => { newDraft(); onCurrent() }}>Back to bot profile</button>
-    <MoteProfileSetup key={operation.operationId} operation={operation} automatic={setup.driving} onOperation={setup.acceptOperation} />
+    <MoteProfileSetup key={operation.operationId} operation={operation} hostingTarget={operation.hostingTarget} automatic={setup.driving} onOperation={setup.acceptOperation} />
     {setupFeedback}
   </section>
   return (
@@ -472,7 +472,7 @@ export function MoteBotSetup({
             </>
           ) : (
             <>
-              {!setup.checking ? <p role="status">{raw ? 'The result is not confirmed. Your original request is retained.' : 'The original request could not be read. Its identifier is kept; no new setup was started.'}</p> : null}
+              {!setup.checking ? <p role="status">{raw && !raw.hostingTarget ? 'The original bot hosting owner is unconfirmed. The original request is kept without contacting another Host.' : raw ? 'The result is not confirmed. Your original request is retained.' : 'The original request could not be read. Its identifier is kept; no new setup was started.'}</p> : null}
               {!raw ? <code>{setup.selectedId}</code> : null}
               <button
                 type="button"
@@ -481,7 +481,7 @@ export function MoteBotSetup({
               >
                 Check original result
               </button>
-              {raw?.phase === 'not-dispatched' && !raw.inspectOnly ? (
+              {raw?.hostingTarget && raw.phase === 'not-dispatched' && !raw.inspectOnly ? (
                 <button type="button" className="small-button" onClick={() => void setup.send(raw)}>
                   Continue this request
                 </button>
@@ -492,8 +492,8 @@ export function MoteBotSetup({
       )}
       </div>
       </div>
-      {profileTask && operation?.profileOperationId ? <ConnectionProfileTrace operationId={operation?.profileOperationId ?? undefined} parentId={operation?.operationId ?? setup.selectedId!} original={operation?.profile} /> : !profileTask || selected ? <ConnectionRequestTrace source={enrollment ? { kind: 'enrollment', operationId: enrollment.operationId } : null} revision={enrollment?.revision} enrollmentView={setup.enrollmentView} diagnosisTarget={setup.selectedId ? { kind: 'mote', operationId: setup.selectedId, sourceTarget: target, ...(raw ? { action: raw.action, phase: raw.phase } : {}) } : null} title={profileTask ? "Profile update requests" : enrollment?.initialSetup ? "Sign-in & creation requests" : undefined} /> : null}
-      {!profileTask && enrollment?.configured && initialSetup ? <ConnectionRequestTrace source={{ kind: 'setup', operationId: initialSetup.operationId }} revision={JSON.stringify(initialProgress)} hideCopy title="Configuration & publication requests" /> : null}
+      {profileTask && operation?.profileOperationId ? <ConnectionProfileTrace hostingTarget={setup.hostingTarget} operationId={operation?.profileOperationId ?? undefined} parentId={operation?.operationId ?? setup.selectedId!} original={operation?.profile} /> : !profileTask || selected ? <ConnectionRequestTrace hostingTarget={setup.hostingTarget} source={enrollment ? { kind: 'enrollment', operationId: enrollment.operationId } : null} revision={enrollment?.revision} enrollmentView={setup.enrollmentView} diagnosisTarget={setup.selectedId ? { kind: 'mote', operationId: setup.selectedId, sourceTarget: target, ...(raw ? { action: raw.action, phase: raw.phase } : {}) } : null} title={profileTask ? "Profile update requests" : enrollment?.initialSetup ? "Sign-in & creation requests" : undefined} /> : null}
+      {!profileTask && enrollment?.configured && initialSetup ? <ConnectionRequestTrace hostingTarget={setup.hostingTarget} source={{ kind: 'setup', operationId: initialSetup.operationId }} revision={JSON.stringify(initialProgress)} hideCopy title="Configuration & publication requests" /> : null}
       {resumeId || selected ? (
         <details className="mote-bot-history">
           <summary>Create another bot</summary>
