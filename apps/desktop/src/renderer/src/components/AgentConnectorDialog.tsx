@@ -275,7 +275,7 @@ export function AgentConnectorDialog({ original, mode: initialMode, initialSecti
   }
   function createRoom() {
     if (!connection || creationUnsupported || !availableForNewGroup(connection) || roomIntent || binding || awaitingCreator || !name.trim() || members && !memberType.trim()) return
-    void work(() => execute({ method: 'connection.room.create', target: { ...target, regionAnchor: { ...target.regionAnchor } }, phase: 'not-dispatched', input: {
+    void work(() => execute({ method: 'connection.room.create', target: structuredClone(target), phase: 'not-dispatched', input: {
       ...target, operationId: mintObjectId(), connectionId, expectedConnectionRevision: connection.revision, name,
       members: [...new Map([...(creatorInvitation.member ? [creatorInvitation.member] : []), ...members.split('\n').filter(value => value !== '').map(userId => ({ idType: memberType, userId }))].map(member => [JSON.stringify([member.idType, member.userId]), member])).values()]
     } }))
