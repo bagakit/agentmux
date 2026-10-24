@@ -71,9 +71,10 @@ export function parseConnectionIngressRecord(value: unknown): ConnectionIngressR
     if (g.recording !== undefined) { const r = object(g.recording, ['state', 'code']); if (!['unavailable', 'refused'].includes(String(r.state))) fail(); recording = { state: r.state as 'unavailable' | 'refused', code: text(r.code) } }
     if (g.target === null) { if (g.recorded !== undefined) fail(); group = { target: null } }
     else {
-      const t = object(g.target, ['hostId', 'agentSessionId', 'connectionId', 'bindingId', 'bindingRevision', 'authoritySource'])
+      const t = object(g.target, ['hostId', 'agentSessionId', 'connectionId', 'bindingId', 'bindingRevision', 'publicationRevision', 'authoritySource'])
       if (!Number.isSafeInteger(t.bindingRevision) || Number(t.bindingRevision) < 1) fail()
-      const target = { hostId: text(t.hostId), agentSessionId: text(t.agentSessionId), connectionId: text(t.connectionId), bindingId: text(t.bindingId), bindingRevision: t.bindingRevision as number, ...(t.authoritySource === undefined ? {} : { authoritySource: parseAgentExternalAuthoritySource(t.authoritySource) }) }
+      if (t.publicationRevision !== undefined && (!Number.isSafeInteger(t.publicationRevision) || Number(t.publicationRevision) < 1 || Number(t.publicationRevision) > Number(t.bindingRevision))) fail()
+      const target = { hostId: text(t.hostId), agentSessionId: text(t.agentSessionId), connectionId: text(t.connectionId), bindingId: text(t.bindingId), bindingRevision: t.bindingRevision as number, ...(t.publicationRevision === undefined ? {} : { publicationRevision: t.publicationRevision as number }), ...(t.authoritySource === undefined ? {} : { authoritySource: parseAgentExternalAuthoritySource(t.authoritySource) }) }
       group = { target, ...(recording ? { recording } : {}), ...(g.recorded === undefined ? {} : { recorded: parseExternalConversationReceipt(g.recorded, { agentSessionId: target.agentSessionId, ingressId: base.ingressId, ...(target.authoritySource ? { authoritySource: target.authoritySource } : {}) }) }) }
     }
   }
