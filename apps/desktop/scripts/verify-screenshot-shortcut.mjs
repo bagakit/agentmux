@@ -53,6 +53,9 @@ const mutations = [
   { id: 'original-input-focus', file: source + 'renderer/src/lib/use-composer-attachments.ts',
     from: 'originalFocus.focus({ preventScroll: true })', to: 'void originalFocus',
     test: 'screenshot-shortcut-composer.test.tsx', expected: 'Composer focus claims the shortcut, saves original PNG, maps its bookmark' },
+  { id: 'saved-image-recovery-context', file: source + 'renderer/src/lib/use-composer-attachments.ts',
+    from: 'if (savedPath) throw new Error(', to: 'if (false) throw new Error(',
+    test: 'screenshot-shortcut-composer.test.tsx', expected: 'retains saved recovery when late composing rejects insertion' },
   { id: 'maintained-editor-bookmark', file: 'packages/client-ui/src/lib/composer-insertion.ts',
     from: 'bookmark = bookmark.map(transaction.mapping)', to: 'void transaction.mapping',
     test: 'screenshot-shortcut-composer.test.tsx', expected: 'Composer focus claims the shortcut, saves original PNG, maps its bookmark' }
