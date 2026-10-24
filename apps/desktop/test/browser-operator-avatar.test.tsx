@@ -9,6 +9,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 const testDirectory = dirname(fileURLToPath(import.meta.url))
 const avatarCss = readFileSync(resolve(testDirectory, '../src/renderer/src/styles/agent-avatar.css'), 'utf8')
+const sharedAvatarCss = readFileSync(resolve(testDirectory, '../../../packages/client-ui/src/styles/agent-avatar-face.css'), 'utf8')
 const baseCss = readFileSync(resolve(testDirectory, '../src/renderer/src/styles/base.css'), 'utf8')
 import { GRAPHITE_THEME } from '../../../packages/client-ui/src/theme/catalog'
 import { updateIconSprite, removeIconSprite } from '../../../packages/client-ui/src/theme/icon-sprite'
@@ -31,7 +32,7 @@ function input(overrides: Partial<BrowserOperatorAvatarInput> = {}): BrowserOper
 function xml(source: string): Document { return new DOMParser().parseFromString(source, 'image/svg+xml') }
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  const style = document.createElement('style'); style.dataset.avatarProof = ''; style.textContent = baseCss + avatarCss; document.head.append(style)
+  const style = document.createElement('style'); style.dataset.avatarProof = ''; style.textContent = baseCss + sharedAvatarCss + avatarCss; document.head.append(style)
   updateIconSprite(document, GRAPHITE_THEME, GRAPHITE_THEME.variants.dark.colors.text)
   png = encodedPng(); svgSources.length = 0; imageSources.length = 0
   decode = async () => {}
