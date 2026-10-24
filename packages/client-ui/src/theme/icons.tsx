@@ -1,6 +1,6 @@
 import type { ComponentType, CSSProperties, SVGProps } from 'react'
 import type { SemanticIconId } from './icon-catalog.js'
-import { semanticIconHref, WORK_ICON_PARTS, workIconHref } from './icon-sprite.js'
+import { semanticIconHref, workIconHref } from './icon-sprite.js'
 import { SEMANTIC_ICON_PEN, type SemanticIconPresentation } from './icon-presentation.js'
 export { ICON_ANIMATIONS, type IconAnimation, type SemanticIconPresentation } from './icon-presentation.js'
 export { AUTHORED_ICON_DESIGNS } from './icon-authored.js'
@@ -31,14 +31,9 @@ export function SemanticIcon({ name, size = 14, animation = 'none', color, strok
     ...(strokeWidth !== undefined ? { strokeWidth } : {}), ...(strokeLinecap !== undefined ? { strokeLinecap } : {}),
     ...(strokeLinejoin !== undefined ? { strokeLinejoin } : {}), pointerEvents: 'none', overflow: 'hidden' }
   const glyph = <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-    aria-hidden="true" focusable="false" className={['semantic-icon', className].filter(Boolean).join(' ')}
-    data-semantic-icon={name} style={iconStyle} {...props}>{children}{animation === 'work'
-      ? <foreignObject width="24" height="24" data-semantic-icon-work={name}>
-        <div className="semantic-icon-work-model">{WORK_ICON_PARTS.map(part =>
-          <div key={part} className={`semantic-icon-work-${part}`} data-semantic-icon-part={part === 'pen' ? 'writing-pen' : undefined}>
-            <svg viewBox="0 0 24 24" width="24" height="24"><use href={workIconHref(name, part)} /></svg>
-          </div>)}</div>
-      </foreignObject>
-      : <use href={semanticIconHref(name)} />}</svg>
-  return animation === 'none' ? glyph : <span className="semantic-icon-motion" data-icon-animation={animation}>{glyph}</span>
+    aria-hidden="true" focusable="false" className={['semantic-icon', animation === 'work' && 'semantic-icon-work-body', className].filter(Boolean).join(' ')}
+    data-semantic-icon={name} style={iconStyle} {...props}>{children}<use href={semanticIconHref(name)} /></svg>
+  return animation === 'none' ? glyph : <span className="semantic-icon-motion" data-icon-animation={animation} data-semantic-work={animation === 'work' ? name : undefined}>{glyph}
+    {animation === 'work' && <span className="semantic-icon-work-pen" data-semantic-icon-part="writing-pen"><svg viewBox="0 0 24 24" width="100%" height="100%" fill="none" stroke="currentColor" style={iconStyle} aria-hidden="true" focusable="false"><use href={workIconHref(name, 'pen')} /></svg></span>}
+  </span>
 }
