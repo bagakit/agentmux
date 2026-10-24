@@ -1,3 +1,4 @@
+import { desktopGoalControl, desktopGoalChanges } from '../../../desktop/src/main/desktop-goals.ts'
 import { join } from 'node:path'
 import { writeFile } from 'node:fs/promises'
 import { AgentMuxControlServer, AgentMuxSpatialStateStore, AgentMuxFileAgentSessionStore, defaultAgentMuxControlSocketPath } from '../../../../packages/core/src/index.ts'
@@ -20,6 +21,8 @@ const server = new AgentMuxControlServer({ socketPath: desktopBusinessSocketPath
   spatialState: new AgentMuxSpatialStateStore(),
   forwardingPeer: { authoritySocketPath: defaultAgentMuxControlSocketPath() },
   coreClients: () => runtime.rpcClients(), clientIncidents: () => archive,
+  goalChanges: desktopGoalChanges(runtime),
+  goalControl: (request, _name, context) => desktopGoalControl(runtime)(request, context),
   callOriginalCore: (hostId, method, params, context) => runtime.callOriginalCore(hostId, method, params, context) })
 await server.start()
 process.stdout.write(JSON.stringify({ ready: true, path: desktopBusinessSocketPath() }) + '\n')
