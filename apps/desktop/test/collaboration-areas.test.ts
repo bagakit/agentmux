@@ -92,6 +92,8 @@ it('keeps Topic category Space and original Zone distinct and groups a category 
   const select = createCollaborationAreasSelector(resolve), graph = select(facts, { workspaceId: scratchWorkspace.id, choice: selection })
   expect(graph.issue).toBeNull(); expect(graph.current).toHaveLength(1)
   expect(graph.areas.find(value => value.id === graph.current[0])?.kind).toBe('topic')
+  expect(graph.areas.find(value => value.id === graph.current[0])?.parentId).toBe(category.spaceId)
+  expect(graph.areas.find(value => value.id === category.spaceId)).toMatchObject({ kind: 'category', name: category.title, members: [] })
   expect(graph.areas.find(value => value.id === graph.current[0])).toMatchObject({ workspaceId: scratchWorkspace.id, hostId: scratchWorkspace.hostId,
     iconTarget: { key: source.spaceId, kind: 'topic', imageTarget: { kind: 'topic', workspaceId: scratchWorkspace.id, topicId: topic.id, objectKey: source.spaceId } } })
   expect(source.spaceId).not.toBe(category.spaceId)
@@ -115,6 +117,19 @@ it('keeps the captured request independent from background selection and coalesc
     { hostId: other.hostId, workspaceId: other.id, iconTarget: { key: workspaceProjectId(other), name: other.name, kind: 'folder' } }
   ])
   expect(initial.current).toHaveLength(1); expect(initial.areas.find(value => value.id === initial.current[0])?.members).toEqual([key(customAgent.id)])
+})
+
+it('preserves the real project ancestry without grouping prefix siblings, other Hosts or worktrees as children', () => {
+  const state = useAppStore.getState(), project = moteConfig.workspaces.find(value => value.id === 'project')!
+  const child = { ...project, id: 'child', path: project.path + '/tools' }, grandchild = { ...project, id: 'grandchild', path: project.path + '/tools/deep' }
+  const sibling = { ...project, id: 'prefix-sibling', path: project.path + '-preview' }, remote = { ...child, id: 'remote-child', hostId: 'remote' }
+  const worktree = { ...project, id: 'worktree', kind: 'worktree' as const, path: project.path + '/.worktrees/work', repoPath: project.path }
+  const graph = createCollaborationAreasSelector(resolve)({ ...state, config: { ...moteConfig, workspaces: [grandchild, sibling, worktree, remote, project, child] } })
+  expect(graph.areas.filter(area => area.kind === 'project').map(area => [area.id, area.parentId])).toEqual([
+    [workspaceProjectId(grandchild), workspaceProjectId(child)], [workspaceProjectId(sibling), null],
+    [workspaceProjectId(project), null], [workspaceProjectId(remote), null], [workspaceProjectId(child), workspaceProjectId(project)]
+  ])
+  expect(graph.areas.some(area => area.id === workspaceProjectId(worktree) && area.parentId === workspaceProjectId(project))).toBe(false)
 })
 
 function retained(id: string, workspacePath: string, hostId = 'local', providerId = 'fixture'): AgentSessionHistoryDescriptor {
