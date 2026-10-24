@@ -5,7 +5,7 @@ vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 vi.mock('react-resizable-panels', async () => { const { createRequire } = await import('node:module'); return createRequire(import.meta.url)('../node_modules/react-resizable-panels/dist/react-resizable-panels.browser.development.cjs.js') })
 vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: () => <div>Controlled terminal rendering</div> }))
 import { connectorJourneyFixture } from './fixtures/connector-journey'
-import { openConnectedGroup } from './helpers/connector-header-navigation'
+import { openConnectionsMenu } from './helpers/connector-header-navigation'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import type { ConnectionMethod, ConnectionParamsMap, ConnectionResultMap } from '@agentmux/core/connections'
@@ -15,6 +15,11 @@ import { composerSession } from './helpers/composer-dom-fixture'
 
 let native: (request: RoomReadWire) => Promise<unknown>
 const f = connectorJourneyFixture({ platform: request => native(request) })
+const channelEntries = () => [...document.querySelectorAll<HTMLButtonElement>('.agent-region-header__connector[data-channel-entry="feishu"]')]
+async function closeConnectionsMenu() {
+  await act(async () => document.querySelector('[role="menu"]')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+  await vi.waitFor(() => expect(document.querySelector('.connector-header-menu')).toBeNull())
+}
 beforeEach(() => { native = async request => {
   if (request.url?.endsWith('/link')) return { code: 0, data: { share_link: 'https://applink.feishu.cn/client/chat/chatter/add_by_link?link_token=fixture-join', expire_time: String(Math.floor(Date.now() / 1000) + 300), is_permanent: false } }
   if (request.url?.endsWith('/members')) return { code: 0, data: { items: [{ member_id_type: 'open_id', member_id: 'ou_original', name: 'Original person' }], has_more: false } }
@@ -32,11 +37,12 @@ async function chooseGroup(id: string) {
 }
 async function consent() { await act(async () => document.querySelector<HTMLInputElement>('.agent-connector-check input')!.click()) }
 
-it('an exact platform off policy remains visible while the global service read is pending or unavailable', async () => {
+it('an exact platform off policy remains available from the header while the global service read is pending or unavailable', async () => {
   expect((await api.connections.call('connection.bind', { ...f.original.input, connectionId: f.config.connectionId, externalConversationId: 'oc_other' })).state).toBe('applied')
   await api.connections.call('connection.service.configure', { operationId: 'visible-platform-off', adapterId: 'feishu', expectedRevision: 0, service: { enabled: false } }, f.hostingTarget)
   let reject!: (reason: Error) => void
   const pending = new Promise<never>((_resolve, fail) => { reject = fail })
+  void pending.catch(() => {}) // The controlled read can outlive a disposed observer.
   vi.mocked(api.connections.call).mockImplementation(async <M extends ConnectionMethod>(method: M, params: ConnectionParamsMap[M], owner): Promise<ConnectionResultMap[M]> => {
     if (method === 'connection.service.get' && !('adapterId' in params)) return pending
     return f.forward(method, params, owner)
@@ -44,17 +50,27 @@ it('an exact platform off policy remains visible while the global service read i
   await f.mount()
   const offVisible = async () => vi.waitFor(async () => {
     await act(async () => {})
-    const notices = document.querySelectorAll('.conversation-sharing-notice')
-    expect(notices).toHaveLength(2)
-    for (const notice of notices) {
-      expect(notice.textContent).toContain('Lark off')
-      expect(notice.textContent).not.toMatch(/Checking sync|Automatic sync check unavailable/u)
-      expect(notice.querySelectorAll('.conversation-sharing-notice__status')).toHaveLength(1)
+    const entries = channelEntries()
+    expect(entries).toHaveLength(2)
+    for (const entry of entries) {
+      expect(entry.dataset.channelState).not.toBe('unbound')
+      expect(entry.title).not.toMatch(/Checking sync|Automatic sync check unavailable/u)
+      expect(entry.querySelectorAll('.agent-region-header__connector-marker')).toHaveLength(1)
     }
+    expect(document.querySelector('.conversation-sharing-notice')).toBeNull()
   })
-  try { await offVisible() }
+  try {
+    await offVisible()
+    await vi.waitFor(() => expect(vi.mocked(api.connections.call).mock.calls.some(([method, params]) => method === 'connection.service.get' && !('adapterId' in params))).toBe(true))
+  }
   finally { await act(async () => reject(Error('Original global policy unavailable'))) }
   await offVisible()
+  await openConnectionsMenu('original-region', 'feishu')
+  await vi.waitFor(() => {
+    expect([...document.querySelectorAll('.connector-header-menu [role="menuitem"]')].some(item => item.textContent === 'Channel settings')).toBe(true)
+    expect(document.querySelector('[data-problem-kind="platform-off"]')?.textContent).toContain('Platform is turned off')
+  })
+  await closeConnectionsMenu()
   expect(document.querySelector('[role="menu"], [role="dialog"]')).toBeNull()
   await f.original.unchanged()
 }, 25_000)
@@ -72,11 +88,11 @@ it('a TTL-expired observed group name stays readable without claiming a failed r
     await f.mount()
     await vi.waitFor(async () => {
       await act(async () => {})
-      const audiences = document.querySelectorAll<HTMLElement>('.conversation-sharing-notice__audience')
-      expect(audiences).toHaveLength(2)
-      for (const audience of audiences) {
-        expect(audience.textContent).toContain('Team group')
-        expect(audience.title).not.toMatch(/name.*unconfirmed|name.*unavailable|refresh unconfirmed/u)
+      const entries = channelEntries()
+      expect(entries).toHaveLength(2)
+      for (const entry of entries) {
+        expect(entry.title).toContain('Team group')
+        expect(entry.title).not.toMatch(/name.*unconfirmed|name.*unavailable|refresh unconfirmed/u)
       }
     })
     expect(f.platformCalls).toHaveLength(reads)
@@ -84,14 +100,15 @@ it('a TTL-expired observed group name stays readable without claiming a failed r
     native = async () => { throw Error('Original metadata source unavailable') }
     const failed = await api.connections.call('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject })
     expect(failed.entry.observation).toMatchObject({ state: 'unavailable', freshness: 'stale', profile: { name: 'Team group' } })
+    await openConnectionsMenu('original-region', 'feishu')
     await vi.waitFor(async () => {
       await act(async () => {})
-      for (const audience of document.querySelectorAll<HTMLElement>('.conversation-sharing-notice__audience')) {
-        expect(audience.title).toContain('Group name update unavailable')
-        expect(audience.textContent).toContain('Team group')
-        expect(audience.textContent).not.toContain('Group name update unavailable')
-      }
+      const group = document.querySelector('.connector-header-menu__group')!
+      expect(group.querySelector('strong')?.textContent).toBe('Team group')
+      expect(group.querySelector('.connector-header-menu__diagnostics')?.textContent).toContain('Group name update unavailable')
+      for (const entry of channelEntries()) expect(entry.title).toContain('Team group')
     })
+    await closeConnectionsMenu()
     await f.original.unchanged()
   } finally { clock.mockRestore() }
 }, 25_000)
@@ -120,7 +137,7 @@ it('the original Agent menu selects an actual default-Host SDK room, confirms th
 }, 25_000)
 
 
-it('the Composer names its exact default-Host audience and keeps that audience and input through a later name observation failure', async () => {
+it('the shared header retains its exact default-Host group and healthy input through a later name observation failure', async () => {
   const originalNative = native; let failed = false
   native = async request => {
     if (request.url?.endsWith('/chats/oc_other')) {
@@ -131,7 +148,7 @@ it('the Composer names its exact default-Host audience and keeps that audience a
   }
   await f.mount(); const editor = document.querySelector<HTMLElement>('[data-workbench-region-id="original-region"] [role="textbox"]')!
   await f.journey('existing'); await chooseGroup('oc_other'); await consent(); await f.button('Connect group'); await ready('Connection saved'); await f.button('Close')
-  await vi.waitFor(async () => { await act(async () => {}); expect([...document.querySelectorAll('.conversation-sharing-notice__audience')].every(node => node.textContent?.includes('Design review'))).toBe(true); expect(document.querySelectorAll('.conversation-sharing-notice__audience')).toHaveLength(2) })
+  await vi.waitFor(async () => { await act(async () => {}); expect(channelEntries()).toHaveLength(2); for (const entry of channelEntries()) expect(entry.title).toContain('Design review') })
   const binding = (await f.services.connections.bindings!.list({})).bindings[0]!, counts = f.calls.length
   await act(async () => useAppStore.setState(state => ({ sessions: [...state.sessions, ...Array.from({ length: 250 }, (_, index) => composerSession('unrelated-name-' + index))] })))
   await act(async () => {}); expect(f.calls).toHaveLength(counts)
@@ -139,11 +156,19 @@ it('the Composer names its exact default-Host audience and keeps that audience a
   await api.connections.call('connection.metadata.refresh', { connectionId: f.config.connectionId, expectedConnectionRevision: 1, subject: { kind: 'conversation', externalConversationId: 'oc_other' } })
   await api.connections.call('connection.binding.pause', { operationId: 'pause-named-audience', bindingId: binding.bindingId, expectedRevision: binding.revision })
   await act(async () => { editor.focus(); invalidateConnectorTarget(binding) })
-  await vi.waitFor(async () => { await act(async () => {}); expect(document.querySelector('.conversation-sharing-notice')?.textContent).toContain('Sharing paused'); expect(document.querySelector('.conversation-sharing-notice__audience')?.getAttribute('title')).toContain('Group name update unavailable') })
+  await vi.waitFor(async () => { await act(async () => {}); for (const entry of channelEntries()) { expect(entry.title).toContain('Design review') } })
   expect(document.querySelector('[data-workbench-region-id="original-region"] [role="textbox"]')).toBe(editor); expect(document.activeElement).toBe(editor)
   expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
   expect(f.calls.filter(call => call.method === 'connection.room.get').every(call => (call.input as { externalConversationId: string }).externalConversationId === 'oc_other')).toBe(true)
-  await openConnectedGroup('oc_other')
+  await openConnectionsMenu('original-region', 'feishu')
+  await vi.waitFor(() => {
+    expect(document.querySelector('[data-connection-action="resume"]')?.textContent).toContain('Resume group sync')
+    expect(document.querySelector('.connector-header-menu__diagnostics')?.textContent).toContain('Group name update unavailable')
+    expect(document.querySelector('[data-problem-kind="sharing-paused"]')?.textContent).toContain('Group sharing is paused')
+  })
+  const originalGroup = [...document.querySelectorAll<HTMLElement>('.connector-header-menu__item')].find(node => node.title.split(' · ').includes('oc_other'))!
+  expect(originalGroup).toBeDefined()
+  await act(async () => originalGroup.click())
   await ready('Join this group'); expect(document.querySelector('.agent-connector-identity [data-executor-id]')?.getAttribute('data-executor-id')).toBe(f.session.kind === 'agent' ? f.session.executorId : null)
   expect((await f.cli(['binding', 'inspect', '--binding', binding.bindingId])).binding).toMatchObject({ externalConversationId: 'oc_other', state: 'paused' })
   await f.original.unchanged()
