@@ -32,6 +32,8 @@ async function app(presentation: boolean | 'missing-provider' = true) {
   await owner.updateConversation({ version: 1, drafts: [['session-original', 'Original retained draft']], attempts: [], responses: [] })
   const original = owner.snapshot().record.conversation
   const view = await mount(<MobileApp client={f.client} connection={connection} platform={{ ...createBrowserPlatform(), copyText: copy }} />)
+  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
+  expect(view.element.querySelector('.mobile-conversation-panel')?.hasAttribute('hidden')).toBe(true)
   return { ...f, ...view, fullDirectory, pointRead, copy, ensure, original, failCatalog: () => { catalogFails = true } }
 }
 

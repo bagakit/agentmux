@@ -19,11 +19,11 @@ it('the original phone mailbox applies distinct semantic controls and state mask
  const platform=createBrowserPlatform({overlayContainer:()=>overlay}),props={session:original,connected:true,messages:[],platform,describeSpeaker:()=>undefined,refresh,terminal,historyScope:JSON.stringify([original.hostId,original.agentSessionId]),
  readHistory:vi.fn(async()=>({messages:[],nextCursor:null,sourceHostId:original.hostId})),onHistoryFill:vi.fn(async()=>undefined),onHistoryCopy:vi.fn(async()=>true)}
  const view=await mount(<MobileMailbox {...props}/>),trigger=view.element.querySelector<HTMLButtonElement>('.mobile-message-tools__trigger')!,state=trigger.querySelector('i')!
- expect(trigger.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('object.mailbox'));expect(trigger.getAttribute('aria-label')).toBe('通信记录 · 状态未知');expect(state.dataset.state).toBe('unknown')
+ expect(trigger.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('object.mailbox'));expect(trigger.getAttribute('aria-label')).toBe('输入历史与通信记录 · 状态未知');expect(state.dataset.state).toBe('unknown')
  expect(declaration('.mobile-message-tools__trigger i','width')).toBe('5px');expect(declaration('.mobile-message-tools__trigger i','height')).toBe('5px');expect(declaration('.mobile-message-tools__trigger i','mask')).toBe('var(--native-presence-unknown-mask) center / contain no-repeat');expect(declaration('.mobile-message-tools__trigger i','border-radius')).toBeUndefined()
  for(const [value,label] of [['neutral','状态未知'],['working','执行中'],['running','状态未确认'],['starting','启动中'],['waiting','等待输入'],['blocked','需要处理'],['error','出错'],['done','已完成'],['exited','已结束'],['disconnected','状态未知']] as const){
   original.semanticStatus={state:value,source:'run-process',observedAt:_reshape_fixtureEpoch(0, 0, 1)}
-  await view.render(<MobileMailbox {...props}/>);expect(trigger.querySelector('i')).toBe(state);expect(state.dataset.state).toBe(value);expect(trigger.getAttribute('aria-label')).toBe(`通信记录 · ${label}`)
+  await view.render(<MobileMailbox {...props}/>);expect(trigger.querySelector('i')).toBe(state);expect(state.dataset.state).toBe(value);expect(trigger.getAttribute('aria-label')).toBe(`输入历史与通信记录 · ${label}`)
   expect(declaration(`.mobile-message-tools__trigger i[data-state='${value}']`,'mask-image')).toBe(`var(--native-presence-${value}-mask)`)
  }
  original.semanticStatus={state:'waiting',source:'native-hook',observedAt:_reshape_fixtureEpoch(0, 0, 1)}
@@ -37,5 +37,5 @@ it('the original phone mailbox applies distinct semantic controls and state mask
  expect(refreshButton.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('action.refresh'));expect(terminalButton.querySelector('use')?.getAttribute('href')).toBe(semanticIconHref('object.terminal'))
  await click(refreshButton);expect(refresh).toHaveBeenCalledExactlyOnceWith();expect(overlay.querySelector('[role=dialog]')).not.toBeNull()
  await click(close);expect(overlay.querySelector('[role=dialog]')).toBeNull();await click(trigger);await click([...overlay.querySelectorAll('button')].find(n=>n.textContent?.includes('查看 Terminal'))!);expect(terminal).toHaveBeenCalledExactlyOnceWith();expect(overlay.querySelector('[role=dialog]')).toBeNull();expect(original.semanticStatus).toBe(originalStatus)
- await view.render(<MobileMailbox {...props} connected={false}/>);expect(trigger.getAttribute('aria-label')).toBe('通信记录 · 连接中断 · 最近状态保留');expect(state.dataset.state).toBe('waiting')
+ await view.render(<MobileMailbox {...props} connected={false}/>);expect(trigger.getAttribute('aria-label')).toBe('输入历史与通信记录 · 连接中断 · 最近状态保留');expect(state.dataset.state).toBe('waiting')
 })

@@ -40,7 +40,7 @@ describe('original spatial Agent remains readable before SDK inventory hydration
     const element = await mount(<MobileSpatialNavigation client={f.client} connected home={home} sessions={[]} openSession={f.open} />)
     await click(element, 'Original Project'); await click(element, 'Known original Agent')
     expect(f.open).toHaveBeenLastCalledWith('sid-original', expect.objectContaining({ name: 'Known original Agent', context: expect.objectContaining({ tabId: 'tab-original', regionId: 'region-original', groupId: 'group-original' }) }))
-    const rows = element.querySelectorAll<HTMLButtonElement>('.mobile-spatial-tab .mobile-session-list > li > button')
+    const rows = element.querySelectorAll<HTMLButtonElement>(home === 'mote' ? '.mobile-mote-agents .mobile-agent-row__open' : '.mobile-spatial-tab .mobile-session-list > li > button')
     expect(rows).toHaveLength(2)
     await act(async () => rows[1]!.click())
     expect(f.open).toHaveBeenLastCalledWith('sid-second', expect.objectContaining({ context: expect.objectContaining({ regionId: 'region-second' }) }))

@@ -318,9 +318,10 @@ describe('actual mobile Goal panel consumer', () => {
       tabs: [{ tabId: 'tab', zoneId: 'zone', workspaceId: 'workspace', name: 'Original Agent', regionIds: ['region'] }], regions: [{ regionId: 'region', tabId: 'tab', kind: 'agent', agentSessionId: 'session-original', runId: 'run-original', execution: { hostId: 'host-original', cwd: fixturePath("workspace") } }], bindings: [{ spaceId: 'space', zoneId: 'zone' }], locations: [{ spaceId: 'space', zoneId: 'zone', workspaceId: 'workspace', displayWorkspaceId: 'workspace', groupId: 'group', tabId: 'tab', regionId: 'region' }] }
     f.forward.mockImplementation(async (method, params) => method.startsWith('goal.') ? original(method, params) : method === 'app.snapshot' ? { agents: [] } : method === 'agent.inspect' ? { session: f.client.agentSession('session-original'), displayName: { override: null, availability: 'observed' } } : { catalog })
     const app = (connected: boolean) => <MobileApp client={f.client} connection={{ state: connected ? 'connected' : 'disconnected', message: connected ? '原连接' : '连接不可用' }} platform={createBrowserPlatform()} />
-    const view = await mount(app(true)); await click(view.element.querySelector<HTMLButtonElement>('.mobile-spatial-panel .mobile-session-list button')!); await click(view.element.querySelector<HTMLButtonElement>('.mobile-spatial-tab .mobile-session-list button')!)
+    const view = await mount(app(true)); await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Space'))
+    await click(view.element.querySelector<HTMLButtonElement>('.mobile-spatial-panel .mobile-session-list button')!); await click(view.element.querySelector<HTMLButtonElement>('.mobile-spatial-tab .mobile-session-list button')!)
     await paste(view.element, '后来仍在编辑的原草稿'); const input = editor(view.element)
-    await click(button(view.element, '目标与结果')); await click(button(view.element, `查看目标 ${goal.title}`)); await click(button(view.element, '返回原对话'))
+    await click(button(view.element, '目标与结果')); await click(button(view.element, `查看目标 ${goal.title}`)); await click(button(view.element.querySelector<HTMLElement>('.mobile-header')!, '返回对话'))
     expect(editor(view.element)).toBe(input); expect(input.textContent).toContain('后来仍在编辑的原草稿')
     await view.render(app(false)); expect(editor(view.element)).toBe(input)
     expect(getDeviceWorkface().snapshot().record.selectedSessionId).toBe('session-original')

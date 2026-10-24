@@ -76,6 +76,7 @@ async function appMenu(inspect: (id: string) => Promise<unknown>, initial = cach
   const original = owner.snapshot().record.conversation
   const app = () => <MobileApp client={f.client} connection={connection} platform={{ ...createBrowserPlatform(), copyText: copy }} />
   const view = await mount(app())
+  await click(button(view.element.querySelector<HTMLElement>('.mobile-navigation')!, 'Focus'))
   return { ...f, ...view, copy, ensure, original, app }
 }
 it.each(['close', 'Escape', 'Back'])('opens the actual App menu before delayed inspect, allows Copy and preserves the original workface on %s', async dismissal => {
