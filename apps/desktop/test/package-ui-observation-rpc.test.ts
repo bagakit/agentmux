@@ -50,7 +50,7 @@ afterEach(async () => {
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
 })
 
-async function fixture(mode: 'success' | 'rpc-error' | 'invalid-observation', startupDetail?: unknown, desktopDetail?: unknown) {
+async function fixture(mode: 'success' | 'rpc-error' | 'invalid-observation', startupDetail?: unknown, desktopDetail?: unknown, readerDelayMs = 0) {
   const root = await mkdtemp(_hygiene_fixturePath("tmp/amx-ui-reader-")); roots.push(root)
   const endpoint = join(root, 'rpc.sock'), disposed = join(root, 'disposed.txt')
   const core = join(root, 'current.app/Contents/Resources/app/node_modules/@agentmux/core')
@@ -62,6 +62,7 @@ async function fixture(mode: 'success' | 'rpc-error' | 'invalid-observation', st
 import { connectAgentMuxRpc as connect } from ${JSON.stringify(pathToFileURL(join(repository, 'packages/core/dist/index.js')).href)};
 import { appendFile } from 'node:fs/promises';
 export async function connectAgentMuxRpc(...args) {
+  await new Promise(resolve => setTimeout(resolve, ${readerDelayMs}));
   const client = await connect(...args);
   return { call: (...args) => client.call(...args), dispose: async () => {
     await client.dispose(); await appendFile(${JSON.stringify(disposed)}, 'disposed\\n');
@@ -102,6 +103,21 @@ it('reads the current loaded identity and nonempty workbench through the actual 
   expect(await readFile(f.disposed, 'utf8')).toBe('disposed\n')
   expect(f.counts()).toEqual({ connections: 1, closed: 1, open: 0 })
 })
+
+it('[ui-reader-budget] the default inspector child can finish a legitimate read after ten seconds and releases its original RPC client', async () => {
+  // Delay only the fixture App's SDK entry before its real public connection.
+  // This crosses the old whole-child timer without depending on an RPC timeout.
+  const f = await fixture('success', undefined, undefined, 10_250)
+  const read = await installer.observeUiClient(f.app).then((value: unknown) => ({ ok: true, value }), (error: Error & { killed?: boolean; signal?: string }) => ({
+    ok: false, error: error.message, killed: error.killed, signal: error.signal
+  }))
+  expect(read, 'The original UI reader must survive the removed ten-second wrapper limit: ' + JSON.stringify({
+    killed: 'killed' in read ? read.killed : null, signal: 'signal' in read ? read.signal : null
+  })).toEqual({ ok: true, value: observation })
+  expect(f.requests).toEqual([{ jsonrpc: '2.0', id: expect.any(String), method: 'app.inspect', params: {} }])
+  expect(await readFile(f.disposed, 'utf8')).toBe('disposed\n')
+  expect(f.counts()).toEqual({ connections: 1, closed: 1, open: 0 })
+}, 25_000)
 
 it.each([
   { hostId: 'local', current: 0, total: null, pending: true, waiting: true },
