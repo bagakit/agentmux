@@ -5,15 +5,46 @@ import { discordConfig, discordFailure, discordId } from './protocol.js'
 export type DiscordHttpOptions = Pick<RESTOptions, 'makeRequest'>
 /** The mature SDK owns rate limits; possibly applied requests are never automatically retried. */
 export class DiscordClients {
-  private readonly clients = new Map<string, { credential: string; rest: REST }>()
-  private readonly identities = new Map<REST, Promise<{ botId: string; name?: string; avatar?: string | null }>>()
+  private readonly clients = new Map<string, { credential: string; rest: REST; consumers: Set<string> }>()
+  private readonly identities = new WeakMap<REST, Promise<{ botId: string; name?: string; avatar?: string | null }>>()
+  private closed = false
+  private clientRetention = (_connectionId: string) => true
   constructor(private readonly http?: Partial<DiscordHttpOptions>) {}
+  setClientRetention(read: (connectionId: string) => boolean): void { this.clientRetention = read }
+  private release(rest: REST): void {
+    rest.clearHashSweeper(); rest.clearHandlerSweeper()
+    this.identities.delete(rest)
+  }
+  releaseConnection(connectionId: string): void {
+    for (const [key, entry] of this.clients) {
+      if (entry.consumers.delete(connectionId) && entry.consumers.size === 0) {
+        this.release(entry.rest); this.clients.delete(key)
+      }
+    }
+  }
+  close(): void {
+    this.closed = true
+    this.clientRetention = () => false
+    for (const entry of this.clients.values()) this.release(entry.rest)
+    this.clients.clear()
+  }
   rest(config: ConnectionConfig, credential: string): REST {
     discordConfig(config)
     const key = JSON.stringify(config.application), current = this.clients.get(key)
-    if (current?.credential === credential) return current.rest
+    let retain = false
+    try { retain = !this.closed && (current?.consumers.has(config.connectionId) || this.clientRetention(config.connectionId)) } catch { /* Do not retain a new consumer without its original observation. */ }
+    if (current?.credential === credential) {
+      if (retain) current.consumers.add(config.connectionId)
+      return current.rest
+    }
     const rest = new REST({ version: '10', retries: 0, ...this.http }).setToken(credential)
-    this.clients.set(key, { credential, rest }); return rest
+    if (retain) {
+      const consumers = current?.consumers ?? new Set<string>()
+      if (current) this.release(current.rest)
+      consumers.add(config.connectionId)
+      this.clients.set(key, { credential, rest, consumers })
+    } else this.release(rest)
+    return rest
   }
   async identity(config: ConnectionConfig, credential: string, signal?: AbortSignal, refresh = false): Promise<{ botId: string; name?: string; avatar?: string | null }> {
     const rest = this.rest(config, credential), existing = this.identities.get(rest)

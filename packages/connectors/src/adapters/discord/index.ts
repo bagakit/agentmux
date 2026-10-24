@@ -38,6 +38,9 @@ export class DiscordAdapter implements ConnectionAdapter, IngressAuthenticator {
     this.roomDiscovery = createDiscordRooms(this.clients)
     this.publication = new DiscordPublicationAdapter(this.clients, target => this.stores.get(applicationKey(target))?.())
   }
+  setClientRetention(read: (connectionId: string) => boolean): void { this.clients.setClientRetention(read) }
+  releaseConnection(connectionId: string): void { this.clients.releaseConnection(connectionId) }
+  close(): void { this.clients.close() }
   async test(config: ConnectionConfig, credential: string): Promise<ConnectionObservation> {
     try {
       await this.clients.identity(config, credential, undefined, true)

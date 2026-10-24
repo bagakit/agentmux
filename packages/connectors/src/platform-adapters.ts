@@ -9,13 +9,23 @@ import { createFeishuChannelProfiles } from './adapters/feishu/channel-profile.j
 
 /** Built-in leaves stay unloaded until an explicit adapter operation or receiver consumes them. */
 export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] {
+  let feishuRetention = (_connectionId: string) => true
+  let feishuClosed = false
+  let feishuAdapter: import('./adapters/feishu/index.js').FeishuAdapter | undefined
   let loading: Promise<import('./adapters/feishu/index.js').FeishuAdapter> | undefined
-  const feishu = () => loading ??= import('./adapters/feishu/index.js').then(({ FeishuAdapter }) => new FeishuAdapter()).catch(() => {
+  const feishu = () => loading ??= import('./adapters/feishu/index.js').then(({ FeishuAdapter }) => {
+    feishuAdapter = new FeishuAdapter()
+    feishuAdapter.setClientRetention(id => !feishuClosed && feishuRetention(id))
+    return feishuAdapter
+  }).catch(() => {
     loading = undefined
     throw new AgentMuxError('The connection adapter is unavailable. Existing Agents are retained.', 'CONNECTION_ADAPTER_UNAVAILABLE')
   })
   const adapter: ConnectionAdapter = {
     adapterId: 'feishu',
+    setClientRetention: read => { feishuRetention = read },
+    releaseConnection: connectionId => feishuAdapter?.releaseConnection(connectionId),
+    close: () => { feishuClosed = true; feishuRetention = () => false; feishuAdapter?.close() },
     channelProfiles: createFeishuChannelProfiles(async (config, credential, call, signal) => (await feishu()).withClient(config, credential, call, signal)),
     profile: {
       get: async (config, revision, credential, signal) => (await feishu()).profile.get(config, revision, credential, signal)
@@ -86,14 +96,24 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
       addMembers: async (input, credential, signal) => (await feishu()).rooms.addMembers(input, credential, signal)
     }
   }
+  let discordClosed = false
+  let discordRetention = (_connectionId: string) => true
+  let discordAdapterOwner: import('./adapters/discord/index.js').DiscordAdapter | undefined
   let discordLoading: Promise<import('./adapters/discord/index.js').DiscordAdapter> | undefined
-  const discord = () => discordLoading ??= import('./adapters/discord/index.js').then(({ DiscordAdapter }) => new DiscordAdapter()).catch(() => {
+  const discord = () => discordLoading ??= import('./adapters/discord/index.js').then(({ DiscordAdapter }) => {
+    discordAdapterOwner = new DiscordAdapter()
+    discordAdapterOwner.setClientRetention(id => !discordClosed && discordRetention(id))
+    return discordAdapterOwner
+  }).catch(() => {
     discordLoading = undefined
     throw new AgentMuxError('The connection adapter is unavailable. Existing Agents are retained.', 'CONNECTION_ADAPTER_UNAVAILABLE')
   })
   const discordProfiles = createDiscordMetadataCache({ readActor: readDiscordActor })
   const discordAdapter: ConnectionAdapter = {
     adapterId: DISCORD_PUBLICATION.adapterId,
+    setClientRetention: read => { discordRetention = read },
+    releaseConnection: connectionId => discordAdapterOwner?.releaseConnection(connectionId),
+    close: () => { discordClosed = true; discordRetention = () => false; discordAdapterOwner?.close() },
     test: async (...input) => (await discord()).test(...input),
     ingress: { adapterId: DISCORD_PUBLICATION.adapterId, verify: async (...input) => (await discord()).verify(...input), qualifyReply: async (...input) => (await discord()).qualifyReply(...input), readHistory: async (...input) => (await discord()).readHistory(...input) },
     transport: { start: async input => (await discord()).transport.start(input) },
