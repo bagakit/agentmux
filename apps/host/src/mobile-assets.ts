@@ -55,6 +55,9 @@ export async function loadMobileSnapshot(directory: string, candidateDigest?: st
   if ((await lstat(manifestPath)).size > remainingBytes) throw new MobileAssetCapacityError('The current candidate exceeds the remaining payload budget')
   const manifestBytes = await bytesAt(manifestPath, Math.min(MOBILE_ASSET_LIMITS.manifestBytes, remainingBytes))
   const manifest = parseMobileAssetManifest(JSON.parse(manifestBytes.toString('utf8')))
+  // An opaque Core identity must also remain one stable path segment in this Host.
+  const segment = encodeURIComponent(manifest.buildId)
+  if (segment === '.' || segment === '..') throw Error('Mobile build identity cannot address its original document')
   const canonical = { schema: manifest.schema, buildId: manifest.buildId,
     files: [...manifest.files].sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0) }
   if (mobileDigest(JSON.stringify(canonical)) !== manifest.digest || candidateDigest !== undefined && manifest.digest !== candidateDigest) throw Error('Mobile manifest digest mismatch')
