@@ -930,14 +930,6 @@ export class CtxmuxRunAdapter {
 
   async connect(): Promise<void> {
     if (this.client !== null) return
-    await Promise.all([
-      mkdir(dirname(this.socketPath), { recursive: true, mode: 0o700 }),
-      mkdir(this.stateDirectory, { recursive: true, mode: 0o700 })
-    ])
-    await Promise.all([
-      chmod(dirname(this.socketPath), 0o700),
-      chmod(this.stateDirectory, 0o700)
-    ])
     const diagnosticsClient = new CtxmuxClient({ socketPath: this.socketPath })
     let runtime: RuntimeIdentity | null = null
     try {
@@ -953,6 +945,14 @@ export class CtxmuxRunAdapter {
         activation = daemonActivations.get(this.socketPath)
         if (!activation) {
           const artifacts = await verifyArtifacts()
+          await Promise.all([
+            mkdir(dirname(this.socketPath), { recursive: true, mode: 0o700 }),
+            mkdir(this.stateDirectory, { recursive: true, mode: 0o700 })
+          ])
+          await Promise.all([
+            chmod(dirname(this.socketPath), 0o700),
+            chmod(this.stateDirectory, 0o700)
+          ])
           activation = daemonActivations.get(this.socketPath) ?? startDaemonActivation(
             artifacts, this.socketPath, this.stateDirectory,
             (diagnostic) => this.errorListener?.(diagnostic)
@@ -982,6 +982,12 @@ export class CtxmuxRunAdapter {
     }
     if (runtime === null) {
       throw new AgentMuxError('CtxMux did not report its daemon instance.', 'CTXMUX_OWNER_IDENTITY_UNPROVEN')
+    }
+    // An already-private namespace needs no filesystem mutation to reconnect.
+    // Otherwise retain the existing same-user/private-directory permission boundary.
+    const namespace = await stat(dirname(this.socketPath))
+    if (typeof process.getuid !== 'function' || namespace.uid !== process.getuid() || (namespace.mode & 0o077) !== 0) {
+      await chmod(dirname(this.socketPath), 0o700)
     }
     const activation = daemonActivations.get(this.socketPath)
     if (activation?.daemonInstanceId === runtime.daemonInstanceId) {
