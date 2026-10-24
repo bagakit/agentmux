@@ -3,7 +3,7 @@ const assert = require('node:assert/strict'), fs = require('node:fs/promises'), 
 const [html, root, evidence, proof] = process.argv.slice(2)
 app.setPath('userData', path.join(root, 'user-data')); app.setPath('sessionData', path.join(root, 'session-data'))
 let win
-const report = { passed: false, frames: [], scenarios: [], userRunTouched: false }
+const report = { passed: false, frames: [], scenarios: [], userRunTouched: false, console: [], runtime: process.versions }
 const evaluate = source => win.webContents.executeJavaScript(source)
 const surface = `document.querySelector('[data-workbench-region-id="result-input-owner"] .agent-surface')`
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
@@ -14,7 +14,8 @@ async function wait(expression) {
 }
 async function paint() { await evaluate('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))'); await delay(100) }
 async function viewport(width,height) {
-  await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false})
+  if(proof.startsWith('connector-'))win.setContentSize(width,height)
+  else await win.webContents.debugger.sendCommand('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false})
   await paint()
 }
 async function pointer(expression,button='left',hover=false) {
@@ -79,6 +80,90 @@ async function terminalScene(width) {
   await wait(`Boolean(document.querySelector('.agent-region-menu'))`)
   assert.equal(await evaluate(`[...document.querySelectorAll('.agent-region-menu [role="menuitem"]')].filter(e=>e.textContent==='Conversation history').length`),1,'The original unique history entry remains reachable')
   await escape();report.scenarios.push({width,before,notified,notes,passed:true})
+}
+async function connectorFacts() {
+  const facts = await terminalFacts()
+  return { ...facts, ...await evaluate(`(()=>{const s=${surface},b=s.querySelector('.agent-body'),v=s.querySelector('.terminal-view'),screen=s.querySelector('.xterm-screen'),header=s.querySelector('.agent-region-header');const rect=e=>{const r=e.getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height,bottom:r.bottom}};return{devicePixelRatio,viewport:{width:innerWidth,height:innerHeight},canvases:[...screen.querySelectorAll('canvas')].map(e=>({box:rect(e),pixels:{width:e.width,height:e.height}})),surface:rect(s),body:rect(b),view:rect(v),screen:rect(screen),header:rect(header),name:rect(header.querySelector('.agent-region-header__name')),headerPaint:getComputedStyle(header,'::before').height,reading:terminalChrome.reading(),connectors:[...s.querySelectorAll('[data-channel-entry]')].map(e=>{const style=getComputedStyle(e),pseudo=getComputedStyle(e,'::before');return{channel:e.dataset.channelEntry,state:e.dataset.channelState,box:rect(e),glyph:rect(e.querySelector('img,svg')),marker:e.querySelector('.agent-region-header__connector-marker')?rect(e.querySelector('.agent-region-header__connector-marker')):null,background:style.backgroundColor,focused:e===document.activeElement,focusVisible:e.matches(':focus-visible'),outline:style.outlineStyle,outlineWidth:style.outlineWidth,paint:{content:pseudo.content,background:pseudo.backgroundColor,height:pseudo.height}}}),reads:terminalChrome.connectorReads()}})()`) }
+}
+function connectorGeometry(facts) {
+  const bandBottom=facts.header.y+parseFloat(facts.headerPaint)
+  assert.ok(facts.canvases.length>0,'The actual Terminal canvas is nonempty')
+  for(const canvas of facts.canvases){assert.equal(canvas.pixels.width,Math.round(canvas.box.width*facts.devicePixelRatio),'The native Terminal canvas and CSS width share the actual device scale');assert.equal(canvas.pixels.height,Math.round(canvas.box.height*facts.devicePixelRatio),'The native Terminal canvas and CSS height share the actual device scale')}
+  assert.equal(facts.screen.y,bandBottom,'The first row follows the original quiet band without extra full-width inset')
+  assert.ok(facts.name.bottom<=facts.screen.y,'The original name cannot cover first-row cells')
+  for(const entry of facts.connectors) {
+    assert.equal(entry.box.width,22);assert.equal(entry.box.height,22,'The original connector hit target remains usable')
+    assert.equal(entry.glyph.width,12);assert.equal(entry.glyph.height,12,'The visible glyph fits the quiet information band')
+    assert.equal(entry.background,'rgba(0, 0, 0, 0)','The connector has no extra hover background box')
+    assert.equal(entry.paint.content,'none','There is no stacked connector hover paint layer')
+    assert.ok(entry.glyph.bottom<=bandBottom,'The channel glyph stays inside the original paint band')
+    if(entry.marker){assert.equal(entry.marker.height,8);assert.equal(entry.marker.width,8);assert.ok(entry.marker.bottom<=bandBottom,'The status marker stays inside the original paint band')}
+  }
+}
+async function connectorScene(width) {
+  report.stage={proof:'connector-geometry',width}
+  await viewport(width*2+1,740);await evaluate(`terminalChrome.workbench();terminalNotice.seed('healthy');terminalChrome.connectors()`)
+  await wait(`Boolean(${surface}?.querySelector('.xterm-helper-textarea')) && !${surface}.querySelector('.terminal-view__xterm--hydrating')`)
+  await wait(`${surface}.querySelectorAll('[data-channel-entry]').length===2`);await delay(350);await paint()
+  await wait(`${surface}.querySelectorAll('[data-channel-state="unbound"]').length===2`)
+  // The retained fixture initially focuses its neighbor. Select the actual owner once
+  // before comparing chrome interactions, so a normal first-row click is not a layout failure.
+  await pointer(`${surface}.querySelector('.terminal-view__xterm')`)
+  const unbound=await connectorFacts()
+  await evaluate('terminalChrome.hostingUnavailable()')
+  await wait(`${surface}.querySelectorAll('.agent-region-header__connector-marker').length===2`)
+  const before=await connectorFacts();assert.equal(before.connectors.length,2);assert.ok(before.terminal.baseY>0,'The actual original xterm has nonempty scrollback')
+  const scenario={width,unbound,before,passed:false};report.scenarios.push(scenario)
+  if(proof!=='connector-baseline')connectorGeometry(before)
+  await pointer(`${surface}.querySelector('[data-channel-entry="feishu"]')`,'left',true)
+  const hovered=await connectorFacts();stable(before,hovered)
+  await pointer(`${surface}.querySelector('[data-channel-entry="feishu"]')`)
+  await wait(`Boolean(document.querySelector('.connector-header-menu'))`)
+  const opened=await connectorFacts();stable(before,opened)
+  await escape();const closed=await connectorFacts();stable(before,closed)
+  assert.equal(closed.connectors[0].focused,true,'Escape returns focus to the exact original channel')
+  assert.equal(closed.connectors[0].focusVisible,true,'Keyboard focus remains visible')
+  assert.notEqual(closed.connectors[0].outline,'none');assert.ok(parseFloat(closed.connectors[0].outlineWidth)>0)
+  for(const facts of [unbound,hovered,opened,closed]) {
+    if(proof!=='connector-baseline')connectorGeometry(facts)
+    assert.deepEqual(facts.connectors.map(entry=>entry.box),before.connectors.map(entry=>entry.box),'Hover, focus and open retain the original hit targets')
+    assert.deepEqual(facts.header,before.header,'Hover, focus and open do not move the original header')
+    assert.deepEqual(facts.buttons.map(button=>button.box),before.buttons.map(button=>button.box),'Adjacent More and X controls do not move')
+  }
+  const screen=before.screen,cellWidth=screen.width/before.terminal.cols,cellHeight=screen.height/before.terminal.rows
+  const firstRow={x:screen.x,y:screen.y,width:screen.width,height:cellHeight,text:before.terminal.visibleLines[0]}
+  assert.ok(firstRow.text.startsWith('Original terminal history'),'The first row contains original retained text')
+  // Native drag across actual first-row cells; no DOM selection or synthetic xterm selection API.
+  const start={x:screen.x+cellWidth*.2,y:screen.y+cellHeight*.5},end={x:screen.x+cellWidth*17.2,y:start.y}
+  for(const event of [{type:'mouseMoved',...start,button:'none'},{type:'mousePressed',...start,button:'left',clickCount:1},{type:'mouseMoved',...end,button:'left',buttons:1},{type:'mouseReleased',...end,button:'left',clickCount:1}])await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',event)
+  await paint();const selected=await connectorFacts();stable(before,selected)
+  scenario.selected=selected;scenario.firstRow=firstRow
+  assert.ok(selected.reading.selection.startsWith('Original'),'Native first-row drag selects original text')
+  assert.ok(firstRow.text.includes(selected.reading.selection.trim()),'The selection belongs to the original first row')
+  await pointer(`${surface}.querySelector('[data-channel-entry="feishu"]')`,'left',true)
+  await wait('Boolean(document.querySelector(".connector-header-menu"))')
+  // Pin the disclosure's existing focus owner before sending its keyboard dismissal.
+  // A hover alone deliberately leaves the original Terminal keyboard focus intact.
+  await pointer(`${surface}.querySelector('[data-channel-entry="feishu"]')`)
+  await wait('Boolean(document.activeElement?.closest(".connector-header-menu"))')
+  await escape()
+  await frame('connector-'+width+'-first-row',width)
+  const wheelPoint={x:screen.x+screen.width/2,y:screen.y+cellHeight*5}
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',...wheelPoint,button:'none'})
+  await wait('!document.querySelector(".connector-header-menu")')
+  assert.equal(await evaluate(`${surface}.querySelector('.terminal-view__xterm').contains(document.elementFromPoint(${wheelPoint.x},${wheelPoint.y}))`),true,'The native wheel reaches original Terminal cells outside controls and menus')
+  await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseWheel',...wheelPoint,deltaX:0,deltaY:-180})
+  await wait('terminalNotice.terminal().viewportY<'+before.terminal.viewportY)
+  const scrolled=await connectorFacts();stable(before,scrolled)
+  scenario.scrolled=scrolled
+  assert.equal(scrolled.reading.buffer,before.reading.buffer,'Native wheel keeps the original buffer')
+  await pointer(`${surface}.querySelector('.terminal-view__xterm')`)
+  assert.equal(await evaluate(`document.activeElement===${surface}.querySelector('.xterm-helper-textarea')`),true,'An ordinary text-area click still focuses the original Terminal')
+  const after=await connectorFacts();stable(before,after)
+  scenario.after=after
+  assert.deepEqual(after.state.writes,before.state.writes,'Header, selection, wheel and click do not dispatch input bytes')
+  assert.ok(after.reads.length>0&&after.reads.every(method=>['connection.ls','connection.binding.ls','connection.service.get'].includes(method)),'The fixture executed only the original bounded connection reads')
+  Object.assign(scenario,{hovered,opened,closed,passed:true})
 }
 async function loadingFacts() {
   return evaluate("(()=>{const s=document.querySelector('#loading-root .full-page-loading'),stage=s.querySelector('.full-page-loading__stage'),art=s.querySelector('img'),r=s.getBoundingClientRect(),b=stage.getBoundingClientRect(),nodes=[stage,art,s.querySelector('.full-page-loading__light'),...s.querySelectorAll('.full-page-loading__activity i')].filter(Boolean);return{appearance:document.documentElement.dataset.appearance,colorScheme:getComputedStyle(document.documentElement).colorScheme,phase:s.dataset.loadingPhase,busy:s.getAttribute('aria-busy'),role:s.getAttribute('role'),artLoaded:art?art.complete&&art.naturalWidth>0:null,artWidth:art?.getBoundingClientRect().width??null,artTransform:art?getComputedStyle(art).transform:null,hero:!!s.querySelector('.full-page-loading__atmosphere'),stage:{left:b.left,right:b.right,top:b.top,bottom:b.bottom},clientWidth:stage.clientWidth,scrollWidth:stage.scrollWidth,clientHeight:stage.clientHeight,scrollHeight:stage.scrollHeight,animations:nodes.map(e=>({name:getComputedStyle(e).animationName,iterations:getComputedStyle(e).animationIterationCount})),activity:s.querySelectorAll('.full-page-loading__activity').length,text:stage.innerText}})()")
@@ -153,9 +238,10 @@ async function recoveryScenes() {
 app.whenReady().then(async()=>{
   try {
     await fs.mkdir(evidence,{recursive:true});win=new BrowserWindow({show:false,width:1440,height:900,webPreferences:{backgroundThrottling:false,sandbox:false}})
-    await win.loadFile(html);win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
+    win.webContents.on('console-message', details => { if(details.level==='error') report.console.push({message:details.message,sourceId:details.sourceId,lineNumber:details.lineNumber}) })
+    await win.loadFile(html,{query:proof.startsWith('connector-')?{'connector-geometry':'true'}:{}});win.webContents.debugger.attach('1.3');await win.webContents.debugger.sendCommand('Emulation.setFocusEmulationEnabled',{enabled:true})
     await wait('Boolean(window.terminalChrome)')
-    if(proof==='recovery') await recoveryScenes();else for(const width of [640,320])await terminalScene(width)
+    if(proof==='recovery') await recoveryScenes();else if(proof.startsWith('connector-'))for(const width of [640,320])await connectorScene(width);else for(const width of [640,320])await terminalScene(width)
     assert.ok(report.scenarios.length>0);report.passed=true
   } catch(error) {report.failure={name:error.name,message:error.message,stack:error.stack,stage:report.stage}}
   finally {await fs.writeFile(path.join(evidence,'render.json'),JSON.stringify(report,null,2));win?.destroy();app.exit(report.passed?0:1)}
