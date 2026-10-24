@@ -72,6 +72,36 @@ beforeEach(() => {
     agentSteerQueues: {}, agentSteerInFlight: {}, recoveryCandidates: [], pendingAgentLaunches: {}, timelines: {}, notificationEvents: [] })
 })
 
+it('[terminal recovery] late raw Terminal recovery preserves the canonical Core Run after its view disappears', async () => {
+  const raw = { ...original, kind: 'terminal' as const, id: 'old-raw-run', control: { kind: 'terminal' as const, hostId: 'local', runId: 'old-raw-run', run: { runId: 'old-raw-run' } } }
+  const rawTab = createWorkbenchTab('raw-tab', { regionId: 'raw-region', workspaceId: 'workspace', kind: 'terminal', phase: 'attached', sessionId: raw.id })
+  useAppStore.setState({ sessions: [raw as never], tabs: { [rawTab.id]: rawTab } })
+  let complete!: (value: any) => void
+  vi.mocked(api.sessions.recover).mockImplementationOnce(() => new Promise(resolve => { complete = resolve }))
+  const job = useAppStore.getState().recoverSession(raw.id, 'original-raw-recovery')
+  await vi.waitFor(() => expect(complete).toBeTypeOf('function'))
+  useAppStore.setState({ tabs: {} })
+  complete({ kind: 'terminal-restarted', session: { ...raw, id: 'replacement-run', control: { ...raw.control, runId: 'replacement-run', run: { runId: 'replacement-run' } } } })
+  await job
+  expect(api.sessions.stop).not.toHaveBeenCalled()
+  expect(useAppStore.getState().tabs).toEqual({})
+})
+
+it('[terminal recovery] actual Pane automatic daemon-restart recovery and remount use startup observation without continuation authority', async () => {
+  const raw = { ...original, kind: 'terminal' as const, id: 'interrupted-raw-run', processState: 'interrupted' as const, interruptionReason: 'daemon_restart',
+    control: { kind: 'terminal' as const, hostId: 'local', runId: 'interrupted-raw-run', run: { runId: 'interrupted-raw-run' } } }
+  const rawTab = createWorkbenchTab('original-tab', { regionId: 'original-region', workspaceId: 'workspace', kind: 'terminal', phase: 'attached', sessionId: raw.id })
+  useAppStore.setState({ sessions: [raw as never], tabs: { [rawTab.id]: rawTab } })
+  vi.mocked(api.sessions.recover).mockResolvedValue({ kind: 'terminal-pending', recovery: { kind: 'pending', expectedRun: raw.control.run, runtimeId: 'runtime',
+    operationId: 'canonical-raw-operation', phase: 'dispatched', message: 'Original Start unconfirmed' } })
+  await dom.render(<WorkspaceWorkbench key="first" workspaceId="workspace" />)
+  await vi.waitFor(() => expect(api.sessions.recover).toHaveBeenCalledOnce())
+  await dom.render(<WorkspaceWorkbench key="remount" workspaceId="workspace" />)
+  await vi.waitFor(() => expect(api.sessions.recover).toHaveBeenCalledTimes(2))
+  expect(vi.mocked(api.sessions.recover).mock.calls.every(call => call[3]?.trigger === 'startup')).toBe(true)
+  expect(api.sessions.stop).not.toHaveBeenCalled()
+})
+
 it('recovery receipt: re-enters the same original Core operation and retains its pending outcome after IPC reply loss', async () => {
   vi.mocked(api.sessions.recover).mockRejectedValueOnce(lost).mockResolvedValueOnce(pending())
   await dom.render(<WorkspaceWorkbench workspaceId="workspace" />)
