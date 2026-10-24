@@ -18,8 +18,9 @@ export function MobileAgentCreate({ client, connected, visible, target, platform
   const catalog = discovery?.client === client ? discovery?.catalog : null
   const executors = discovery?.client === client ? discovery?.executors ?? [] : []
   const [spaceId, setSpace] = useState(''), [zoneId, setZone] = useState(''), [executorId, setExecutor] = useState(''), [prompt, setPrompt] = useState('')
-  const [issue, setIssue] = useState(''), [busy, setBusy] = useState(false), [, redraw] = useState(0)
-  const original = useRef({ client, visible, connected }), flight = useRef(false)
+  const [issue, setIssue] = useState(''), [, redraw] = useState(0)
+  const original = useRef({ client, visible, connected }), flights = useRef(new Set<AgentMuxHostedClient>())
+  const busy = client !== null && flights.current.has(client)
   original.current = { client, visible, connected }
   const owner = getDeviceWorkface(), record = owner.snapshot().record
   const runtimeId = client?.runtimeOwnerIdentity?.()?.runtimeId, deviceHostId = record.host?.hostId ?? null
@@ -40,8 +41,8 @@ export function MobileAgentCreate({ client, connected, visible, target, platform
   }, [client, connected, visible, target.spaceId, target.zoneId])
   const boundZones = catalog?.zones.filter(zone => catalog.bindings.some(binding => binding.spaceId === spaceId && binding.zoneId === zone.zoneId)) ?? []
   async function run(inspect: MobileAgentCreateIntent | null) {
-    if (!client?.forwardRpc || !connected || !visible || flight.current) return
-    flight.current = true; setBusy(true)
+    if (!client?.forwardRpc || !connected || !visible || flights.current.has(client)) return
+    flights.current.add(client); redraw(value => value + 1)
     const source = client, recordId = owner.recordIdentity(), scope = { runtimeId, deviceHostId }
     const current = () => original.current.client === source && original.current.visible && original.current.connected && owner.recordIdentity() === recordId &&
       source.runtimeOwnerIdentity?.()?.runtimeId === scope.runtimeId && (owner.snapshot().record.host?.hostId ?? null) === scope.deviceHostId
@@ -61,11 +62,11 @@ export function MobileAgentCreate({ client, connected, visible, target, platform
       if (report.agent && (report.agent.executorId !== intent.input.content.executorId || report.agent.createOperationId !== intent.input.operationId)) throw new Error('回执绑定了另一创建操作；未采用该 Agent。')
       const confirmed = report.outcome === 'opened' && report.agent !== null && report.save.diskDurability === 'confirmed'
       await owner.retainAgentCreate({ ...intent, phase: confirmed ? 'confirmed' : 'unknown', ...(report.agent ? { agentSessionId: report.agent.agentSessionId } : {}) }, recordId)
-      if (current()) setIssue(confirmed ? 'Agent 已创建。可打开原对话；初始输入与任务进展以原回执为准。' : `原创建：${report.outcome}。${report.issues.map(issue => `${issue.message} ${issue.recovery}`).join('\n')} 保留原操作，可核对。`)
+      if (current()) setIssue(confirmed ? 'Agent 已创建。可打开原对话；初始输入与任务进展以原回执为准。' : `原创建：${report.outcome}。${report.save.diskDurability !== 'confirmed' ? '工作面持久化尚未确认。' : ''}${report.issues.map(issue => `${issue.message} ${issue.recovery}`).join('\n')} 保留原操作，可核对。`)
     } catch (error) {
       if (intent && !inspect) { try { await owner.retainAgentCreate({ ...intent, phase: 'unknown' }, recordId) } catch { /* Preserve the replacement record and original in-memory intent. */ } }
       if (current()) setIssue(error instanceof Error ? error.message : String(error))
-    } finally { flight.current = false; setBusy(false); redraw(value => value + 1) }
+    } finally { flights.current.delete(source); redraw(value => value + 1) }
   }
   return <Dialog.Root open={visible} onOpenChange={open => { if (!open) onClose() }}><Dialog.Portal container={platform.overlayContainer()}>
     <Dialog.Overlay className="mobile-sheet-backdrop" /><Dialog.Content className="mobile-sheet mobile-agent-create" aria-describedby="mobile-create-description">
