@@ -10,8 +10,9 @@ import { createHostMoteChat } from './mote-chat.js'
 import { createCredentialAdministration } from './credential-administration.js'
 import { createHostMoteConnections } from './mote-connections.js'
 import { createHostMoteAvatarRead } from './mote-avatar-read.js'
-import { createMoteChatResources, readMoteResourceConfiguration } from './mote-resources.js'
+import { createMoteChatResources, readMoteResourceConfiguration, readOriginalMoteConfiguration } from './mote-resources.js'
 import { homeZoneId } from './mote-model.js'
+import { rasterizeStaticAvatar, savedAgentAvatarDrawing } from './static-avatar.js'
 
 type ExecutionClient = AgentMuxClient | AgentMuxHostedClient
 
@@ -120,7 +121,23 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
             }
           }
         } catch { signal.throwIfAborted() /* Original role remains known without a display label. */ }
-        if (!resources || !avatars) return result
+        const agentPortrait = async () => {
+          try {
+            if (!session.providerId || reference.hostId !== 'local' || !options.moteConfigurationPath) {
+              result.avatar = { observation: 'unavailable', code: 'AGENT_AVATAR_SOURCE_UNCONFIRMED' }; return result
+            }
+            const raw = await readOriginalMoteConfiguration(options.moteConfigurationPath)
+            const artwork = savedAgentAvatarDrawing(raw, session.providerId, session.executorId)
+            const image = await rasterizeStaticAvatar(artwork.svg, 64, signal)
+            const after = savedAgentAvatarDrawing(await readOriginalMoteConfiguration(options.moteConfigurationPath), session.providerId, session.executorId)
+            if (after.revision !== artwork.revision) { result.avatar = { revision: artwork.revision, observation: 'changed' }; return result }
+            const dataBase64 = image.dataUrl.slice('data:image/png;base64,'.length), bytes = Buffer.from(dataBase64, 'base64')
+            result.avatar = { revision: artwork.revision, observation: 'available', image: { dataBase64, byteLength: bytes.length,
+              mimeType: 'image/png', width: image.width, height: image.height, sha256: createHash('sha256').update(bytes).digest('hex') } }
+          } catch { signal.throwIfAborted(); result.avatar = { observation: 'unavailable', code: 'AGENT_AVATAR_SOURCE_UNCONFIRMED' } }
+          return result
+        }
+        if (!resources || !avatars) return await agentPortrait()
         try {
           let portrait = mote
           if (!portrait && affiliation) {
@@ -128,7 +145,7 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
             if (configuration.workspace) portrait = { spaceId: affiliation.spaceId, zoneId: affiliation.zoneId,
               expectedResource: { hostId: reference.hostId, workspaceId: configuration.workspace.id, workspacePath: configuration.workspace.path } }
           }
-          if (!portrait) return result
+          if (!portrait) return await agentPortrait()
           const original = await resources.read(portrait)
           if (mote) result.name = original.topic.title
           result.mote = portrait

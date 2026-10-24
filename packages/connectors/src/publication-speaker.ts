@@ -12,7 +12,8 @@ export type PublicationSpeaker = {
   reference?: ConversationRef
   mote?: MoteChatTarget
   avatar?: {
-    target: MoteAvatarTarget
+    /** Present only for an original Mote resource; Agent artwork is owned by reference. */
+    target?: MoteAvatarTarget
     revision?: string
     observation: 'available' | 'unavailable' | 'changed'
     code?: string
