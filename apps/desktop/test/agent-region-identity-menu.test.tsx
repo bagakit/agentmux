@@ -276,9 +276,9 @@ it.each(['more', 'context'] as const)('the actual %s menu groups controls separa
   const conversation = menu.querySelector('[role="group"][aria-label="Conversation"]')!
   expect(controls).not.toBeNull(); expect(conversation).not.toBeNull()
   const labels = (root: ParentNode) => [...root.querySelectorAll('[role="menuitem"]')].map(node => node.textContent?.trim())
-  expect(labels(controls)).toEqual(['Take over', 'Fork current conversation…', 'Restart Session…', 'Stop Agent'])
+  expect(labels(controls)).toEqual(['Take over', 'Pass on experience', 'Fork current conversation…', 'Restart Session…', 'Stop Agent'])
   expect(labels(conversation)).toEqual(['Conversation history', 'Session details'])
-  expect(controls.compareDocumentPosition(conversation) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
+  expect(conversation.compareDocumentPosition(controls) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0)
   expect(menu.querySelector('[data-terminal-menu-tools]')).toBeNull()
 })
 

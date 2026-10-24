@@ -54,9 +54,9 @@ async function renderer(label,probe='complete',unreadableProgressActions=false,f
   await build({configFile:false,root:fixture,base:'./',logLevel:'error',worker:{format:'es'},resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper}]},
     plugins:[{name:'record-private-renderer-inputs',enforce:'pre',async transform(source,id){
       if((id.startsWith(join(desktop,'src')+'/')||id.startsWith(join(repository,'packages/client-ui/src')+'/')||id.startsWith(fixture+'/'))&&!id.includes('?'))loadedSourceInputs[id.slice(repository.length+1)]=hash(source)
-      if(menuMutation&&id===join(desktop,'src/renderer/src/components/AgentRegionMenuActions.tsx')){
-        const anchor='{workspace.map(render)}'
-        assert.equal(source.split(anchor).length,2,'Actual root layout consumer is unique')
+      if(menuMutation&&id===join(desktop,'src/renderer/src/components/AgentRegionMenuContent.tsx')){
+        const anchor='{nativeSourceCheck}'
+        assert.equal(source.split(anchor).length,2,'Actual root source-check consumer is unique')
         const altered=source.replace(anchor,'{null}')
         sourceMutations.push({path:id.slice(repository.length+1),original:hash(source),mutated:hash(altered),productionWritten:false})
         return altered
@@ -116,7 +116,7 @@ async function renderer(label,probe='complete',unreadableProgressActions=false,f
       declarations[0].value='0px sans-serif'
       progressCssMutations.push({path:cssPath.slice(repository.length+1),selector:'.continuous-progress-panel__actions button',property:'font',from:'inherit',to:'0px sans-serif',productionWritten:false})
     }}]}},define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},esbuild:{jsx:'automatic'},
-    build:{outDir,emptyOutDir:true,commonjsOptions:{include:[/node_modules/,/xterm-locked-925/]}}})
+    build:{outDir,emptyOutDir:true,...(agentMenuOwning?{minify:false,cssMinify:false}:{}),commonjsOptions:{include:[/node_modules/,/xterm-locked-925/]}}})
   const compiledFiles=await compiled(outDir),terminalWrapperSha256=hash(await readFile(wrapper))
   assert.ok(Object.keys(loadedSourceInputs).length>0,'Actual renderer input collection is nonempty')
   assert.ok(cssBefore.length>0,'The actual owner stylesheet is nonempty')
@@ -206,12 +206,14 @@ try{
   result.render=await renderer('fixed',visualOnly?(agentMenuOwning?'agent-menu-owning':mailboxLayoutOwning?'mailbox-layout-owning':composerToolbarOwning?'composer-toolbar-owning':mailboxMotionOwning?'mailbox-motion-owning':messageFeedbackOwning?'message-feedback-owning':terminalLoadingOwning?'terminal-loading-owning':progressLayoutOwning?'composer-layout-owning':'composer-visual'):swapOnly?'swap-full':'complete');assert.equal(result.render.outcome.exitCode,0,JSON.stringify(result.render.rendered.failure));assert.equal(result.render.rendered.passed,true)
   if(visualOnly){
     if(agentMenuOwning){
-      const red=await renderer('menu-root-layout-red','agent-menu-owning',false,false,'',true)
+      const red=await renderer('menu-root-maintenance-red','agent-menu-owning',false,false,'',true)
       assert.equal(red.outcome.exitCode,1);assert.equal(red.rendered.failure.name,'AssertionError')
-      assert.match(red.rendered.failure.message,/Layout commands remain at the menu root/)
-      const restored=await renderer('menu-root-layout-restored','agent-menu-owning')
+      assert.match(red.rendered.failure.message,/Maintenance actions are directly reachable at root/)
+      // The mutant exists only in its private compilation. Reuse the unchanged
+      // fixed candidate's successful run instead of rebuilding and rerunning it.
+      const restored=result.render
       assert.equal(restored.outcome.exitCode,0,JSON.stringify(restored.rendered.failure));assert.equal(restored.rendered.passed,true)
-      result.mutations.push({label:'root-layout-consumer-removed',red,restored,productionWritten:false})
+      result.mutations.push({label:'root-source-check-consumer-removed',red,restored,productionWritten:false})
     }
     if(mailboxLayoutOwning){
       const navigationRed=await renderer('mailbox-navigation-red','mailbox-layout-owning',false,false,'navigation')
