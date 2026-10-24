@@ -45,6 +45,7 @@ it.each(stages)('default registered Feishu adapter adds the %s milestone to the 
   const publisher = createBuiltinConnectionAdapters().find(adapter => adapter.adapterId === 'feishu')!.publication!
   const original = operation(stage), prepared = publisher.prepare(original), frozen = JSON.stringify(prepared), signal = new AbortController().signal
   expect(publisher.queryFeedback).toBe(true)
+  expect(prepared.renderVersion).toBe(publisher.renderVersion)
   expect(prepared.request).toEqual({ method: 'POST', path: '/open-apis/im/v1/messages/original-user-query/reactions', contentType: 'application/json', body: JSON.stringify({ reaction_type: { emoji_type: emojiType } }) })
   const confirmed = { state: 'confirmed', mapping: { messageId: 'original-user-query', reactionId: 'original-reaction-1' } }
   expect(await publisher.dispatch(prepared, original.target, 'synthetic-credential', signal)).toEqual(confirmed)
@@ -53,6 +54,24 @@ it.each(stages)('default registered Feishu adapter adds the %s milestone to the 
   expect(f.remote.messageCalls().map(call => call.method)).toEqual(['POST', 'GET'])
   expect(f.remote.messageCalls()[0]!.body).toBe(prepared.request.body)
   expect(f.remote.origins.every(origin => origin === 'https://' + original.target.application.domain)).toBe(true)
+})
+
+it('uses the publication envelope to qualify current and retained reaction requests before native dispatch or inspection', async () => {
+  const f = await fixture(), original = operation(), signal = new AbortController().signal
+  const prepared = f.publisher.prepare(original)
+  const retained = { ...prepared, renderVersion: 'feishu-conversation-v6' }
+  expect((await f.publisher.dispatch(retained, original.target, 'synthetic-credential', signal)).state).toBe('confirmed')
+  expect((await f.publisher.inspect(retained, original.target, 'synthetic-credential', signal))?.state).toBe('confirmed')
+  const calls = f.remote.messageCalls().length
+  for (const invalid of [
+    { ...prepared, renderVersion: 'unrecognized-publication-envelope' },
+    { ...prepared, request: { ...prepared.request, query: { unrelated: 'query' } } },
+    { ...prepared, request: { ...prepared.request, body: JSON.stringify({ reaction_type: { emoji_type: 'Get' }, unrelated: true }) } }
+  ]) {
+    expect(await f.publisher.dispatch(invalid, original.target, 'synthetic-credential', signal)).toEqual({ state: 'not-applied', reason: 'unsupported-format' })
+    expect(await f.publisher.inspect(invalid, original.target, 'synthetic-credential', signal)).toBeNull()
+  }
+  expect(f.remote.messageCalls()).toHaveLength(calls)
 })
 
 it('retains all three milestones and never withdraws the original user query while legacy cards remain usable', async () => {
