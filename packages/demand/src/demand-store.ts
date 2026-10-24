@@ -1101,6 +1101,12 @@ export class DemandStore {
   async addDecision(id: string, input: Omit<DemandDecision, 'id' | 'createdAt'> & { id?: string; createdAt?: number }): Promise<DemandReceipt> {
     return this.mutate('decision-log', (snapshot) => {
       const demand = findDemand(snapshot, id, this.storePath)
+      const original = input.id ? demand.decisions.find(decision => decision.id === input.id) : undefined
+      if (original) {
+        if (original.question !== input.question || original.decision !== input.decision || original.rationale !== input.rationale || original.actorId !== input.actorId)
+          throw new DemandStoreError('INVALID_INPUT', 'validate', this.storePath, 'The original decision identity belongs to different content or author.')
+        return { unchanged: demand }
+      }
       const decision: DemandDecision = {
         id: input.id ?? mintObjectId(),
         question: input.question,
