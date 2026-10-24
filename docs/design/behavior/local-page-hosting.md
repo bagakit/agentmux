@@ -178,6 +178,8 @@ CLI 只适配公共业务合同，skill 的机械能力说明与运行时实际�
 
 内嵌复用原 Browser 独立 partition、sandbox、准确文档和 Capsule 模式。页面不进入宿主 DOM，不继承 Node、Electron 或任意 RPC；注入沿原主文档及服务实例资格，隔离页仍没有 App 通道。人工回答仍由可信宿主问题控件和原输入 owner 确认，标签、URL 和页面脚本不能自称 Human。
 
+Capsule 使用指南建议 Agent 为对话内嵌的新页面显式选择注入模式并跟随 App 主题，使字体、颜色及明暗模式与对话协调；页面消费原主题变量并响应主题变化。需要独立视觉或隔离的页面仍可选择隔离模式。该建议不改变全局默认、不转换既有页面，也不扩展原页面实际获授的通信或人工输入能力。
+
 展示与页面身份分别成立：有 Region 的卡片消费真实承载位置，无空间 Region 的 Gallery／Focus 卡片按已鉴权原 Renderer 和窗口文档标识内嵌 occurrence，不制造 Core Region，不借焦点或 cwd 猜展示。准确原消息／来源、content part、Markdown 嵌入位置、原 URI 和承载工作面共同限定内嵌呈现引用；不同消息或同页的不同嵌入不合并。沿现有身份组件派生同一 Browser 寻址，原 native owner 的 existing／released 绑定保持唯一，消息暂离阅读窗口或组件卸载后再回原位置仍复用原 Browser，不以另开一页代替保留的表单和 DOM。缺少准确来源或承载位置的独立阅读面保原地址；位置未确认时就近说明并保完整打开动作，不创建匿名、可能互串的页面，也不因此判原页面故障。
 
 隐藏撤原 lease 与 capture，沿原 native release 的 released／retained／unknown 回执保原 Browser 和导航身份，不自动 Close、不清表单或重放未知操作。原生输入覆盖不能越出真实滚动窗口或遮住时间尺：部分裁剪时保 live capture 和原页，仅撤下不适用于当前几何的 native 输入覆盖；完整进入阅读窗口或打开原 Browser 后仍可交互，几何不成为页面／Agent 权限或健康事实。完整 Browser 打开仍沿原 Capsule 公共 owner。
