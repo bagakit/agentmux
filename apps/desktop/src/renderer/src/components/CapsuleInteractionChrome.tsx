@@ -23,18 +23,23 @@ export function CapsuleInteractionChrome({ capsuleId, active, visible = true, to
     const observed = ++generation.current
     setLoading(true)
     try {
-      const [inspection, result] = await Promise.all([api.capsules.call('capsule.inspect', { capsuleId }), api.capsules.call('capsule.interaction.ls', { capsuleId })])
+      const [inspection, result] = await Promise.allSettled([api.capsules.call('capsule.inspect', { capsuleId }), api.capsules.call('capsule.interaction.ls', { capsuleId })])
       if (generation.current !== observed) return
-      setPage(inspection)
-      setQuestions(current => {
-        const known = new Map(current?.filter(question => question.capsuleId === capsuleId).map(question => [question.interactionId, question]))
-        for (const question of result.interactions) {
-          const previous = known.get(question.interactionId)
-          if (!previous || question.revision >= previous.revision) known.set(question.interactionId, question)
-        }
-        return [...known.values()]
-      })
-      setNotice(result.issues.map(issue => issue.message).join(' '))
+      const issues: string[] = []
+      if (inspection.status === 'fulfilled') setPage(inspection.value)
+      else issues.push(`Page information could not be refreshed. ${presentError(inspection.reason)}`)
+      if (result.status === 'fulfilled') {
+        setQuestions(current => {
+          const known = new Map(current?.filter(question => question.capsuleId === capsuleId).map(question => [question.interactionId, question]))
+          for (const question of result.value.interactions) {
+            const previous = known.get(question.interactionId)
+            if (!previous || question.revision >= previous.revision) known.set(question.interactionId, question)
+          }
+          return [...known.values()]
+        })
+        issues.push(...result.value.issues.map(issue => issue.message))
+      } else issues.push(`Page requests could not be refreshed. Existing questions and drafts are retained. ${presentError(result.reason)}`)
+      setNotice(issues.join(' '))
     } catch (error) { if (generation.current === observed) setNotice(`Page requests could not be refreshed. Existing questions and drafts are retained. ${presentError(error)}`) }
     finally { if (generation.current === observed) setLoading(false) }
   }, [capsuleId])
