@@ -506,4 +506,57 @@ describe('mounted mobile consumer of the original hosted Session and shared UI',
     expect(f.submit).not.toHaveBeenCalled()
   })
 
+  it('reads Skills only on demand and inserts the original selected reference through the real composer', async () => {
+    const f = fixture(), original = f.client.agentSession('session-original'), path = fixturePath('workspace/.skills/review/SKILL.md')
+    const forward = vi.fn(async () => ({ hostId: 'local', sourceHostId: original.hostId, agentSessionId: original.agentSessionId,
+      providerId: original.providerId, workspacePath: original.workspacePath, skills: [
+        { name: 'review-evidence', description: '核对原证据', path, source: 'project' },
+        { name: 'outline', description: '整理提纲', path: fixturePath('workspace/.skills/outline/SKILL.md'), source: 'project' }
+      ] }))
+    f.client.forwardRpc = forward as NonNullable<typeof f.client.forwardRpc>
+    const view = await mount(<MobileConversationSurface {...props(f)} />)
+    await paste(view.element, '保留正在编辑的正文 ')
+    await click(button(view.element, 'Show the message tool row'))
+    expect(forward).not.toHaveBeenCalled()
+    await click(button(view.element, '选择 Skill'))
+    expect(forward).toHaveBeenCalledExactlyOnceWith('skill.ls', { hostId: 'local', agentSessionId: original.agentSessionId })
+    const search = document.querySelector<HTMLInputElement>('input[aria-label="查找 Skills"]')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(search, 'evidence')
+      search.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    const choices = [...document.querySelectorAll<HTMLButtonElement>('[aria-label="Skills"] [role="menuitem"]')]
+    expect(view.element.querySelector('[aria-label="Skills"]')).toBeNull()
+    expect(choices.map(choice => choice.querySelector('strong')!.textContent)).toEqual(['review-evidence'])
+    await click(choices[0]!)
+    expect(editor(view.element).textContent).toContain('保留正在编辑的正文')
+    expect(editor(view.element).textContent).toContain('review-evidence')
+    expect(editor(view.element).querySelector('[data-tool-reference="skill"]')?.getAttribute('title')).toBe(`Open reference: @${path}`)
+    expect(f.submit).not.toHaveBeenCalled()
+    await act(async () => editor(view.element).dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'z', ctrlKey: true })))
+    expect(editor(view.element).textContent).toContain('保留正在编辑的正文')
+    expect(editor(view.element).textContent).not.toContain('review-evidence')
+  })
+
+  it('keeps Skills read failures visible without disabling Send and rejects a late prior Session read', async () => {
+    const f = fixture(), late = deferred<any>(), original = f.client.agentSession('session-original')
+    const forward = vi.fn().mockRejectedValueOnce(new Error('Original discovery unavailable')).mockReturnValueOnce(late.promise)
+    f.client.forwardRpc = forward
+    const view = await mount(<MobileConversationSurface {...props(f)} />)
+    await paste(view.element, '原草稿')
+    await click(button(view.element, 'Show the message tool row')); await click(button(view.element, '选择 Skill'))
+    expect(document.body.textContent).toContain('Original discovery unavailable')
+    expect(button(view.element, 'Send').disabled).toBe(false)
+    expect(editor(view.element).textContent).toContain('原草稿')
+    await click(button(document.body, '重试读取 Skills'))
+    const next = session('next-session'); f.sessions.set(next.agentSessionId, next)
+    await view.render(<MobileConversationSurface {...props(f)} agentSessionId={next.agentSessionId} />)
+    await act(async () => late.resolve({ hostId: 'local', sourceHostId: original.hostId, agentSessionId: original.agentSessionId,
+      providerId: original.providerId, workspacePath: original.workspacePath, skills: [{ name: 'stale-skill', description: 'Old result', path: fixturePath('old/SKILL.md'), source: 'project' }] }))
+    expect(document.body.textContent).not.toContain('stale-skill')
+    expect(editor(view.element).textContent).not.toContain('原草稿')
+    await view.render(<MobileConversationSurface {...props(f)} />)
+    expect(editor(view.element).textContent).toContain('原草稿')
+    expect(f.submit).not.toHaveBeenCalled()
+  })
 })
