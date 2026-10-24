@@ -17,16 +17,18 @@ import { fixturePath } from '../../../test/fixture-values.mjs'
 beforeEach(async () => { localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }; document.body.replaceChildren(); vi.restoreAllMocks() })
 function setup() {
+  const creations = new Map<string, unknown>()
   let state = { config: { workspaces: [{ id: 'original-workspace', hostId: 'local', path: fixturePath('original'), name: 'Original Project', kind: 'folder' }], hosts: [{ id: 'local', name: 'Local', kind: 'local' }], executors: { original: { name: 'Original Executor', hostId: 'local', providerId: 'codex' } } }, sessions: [], tabs: {}, layouts: { 'original-workspace': createWorkspaceLayout('original-group', []) }, spaceZoneBindings: {}, spatialRequests: {} } as any
   const launch = vi.fn(async input => {
     expect(getDeviceWorkface().snapshot().record.agentCreates?.some(item => item.input.operationId === input.createOperationId)).toBe(true)
     const session = { id: input.agentSessionId, kind: 'agent', providerId: 'codex', executorId: 'original', hostId: 'local', workspacePath: input.workspacePath, label: 'Original Agent', processState: 'running', capabilities: {}, status: { state: 'running', source: 'run-process', observedAt: 1 }, control: { kind: 'agent', agentSessionId: input.agentSessionId, hostId: 'local', run: { runId: 'created-run' } } } as any
     state.sessions.push(session)
     const created = { ...agentCreationFixture(session), creation: { createOperationId: input.createOperationId, initialPrompt: 'not-requested' } }
+    creations.set(session.id, created)
     return { created, session, creation: created.creation, timeline: { agentSessionId: session.id, revision: 0, items: [] }, projectionFailures: [] }
   })
   const ports = { get: () => state, patch: (patch: any) => { state = { ...state, ...patch } }, topics: async () => [],
-    launch, creation: async (_host: string, id: string) => agentCreationFixture(state.sessions.find((item: any) => item.id === id)),
+    launch, creation: async (_host: string, id: string) => creations.get(id) ?? null,
     createResource: async () => { throw new Error('No new resource requested') }, attach: async () => {},
     save: async (layoutApplied: boolean) => ({ layoutApplied, localStorageWritten: true, storageFlushRequested: true, diskDurability: 'confirmed', reason: null }),
     focus: vi.fn(), isFocused: () => false, notice: vi.fn(), closing: () => false }
@@ -87,6 +89,9 @@ it('keeps a lost creation receipt across reload and inspects the original operat
   await click(button(document.body, '核对原创建操作'))
   expect(f.launch).toHaveBeenCalledTimes(1)
   expect(f.rpc).toHaveBeenCalledWith('space.inspect', { target: { operationId: intent.input.operationId } })
+  await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.agentSessionId).toBeTruthy()) })
+  expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase).toBe('unknown')
+  expect(document.body.textContent).toContain('工作面持久化尚未确认')
 })
 
 it('uses the existing complete device budget for a long initial instruction', async () => {
@@ -107,4 +112,36 @@ it('does not qualify a new Host with a previous client discovery while its exact
   expect(getDeviceWorkface().snapshot().record.agentCreates ?? []).toHaveLength(0)
   await act(async () => { spaces.resolve({ catalog: next.catalog }); executors.resolve({ items: [{ id: 'original', value: { name: 'New Host Executor' } }] }); await spaces.promise; await executors.promise })
   expect(document.querySelector('[aria-label="新 Agent 执行器"]')?.textContent).toContain('New Host Executor')
+})
+
+it('keeps another healthy Host creation independent of a pending original request and reconciles each original operation', async () => {
+  const f = setup(), next = setup(), held = deferred<void>(), source = f.client.forwardRpc
+  next.client.runtimeOwnerIdentity = () => ({ runtimeId: 'next-runtime' })
+  f.client.forwardRpc = async (method: string, params: any) => {
+    const result = await source(method, params)
+    if (method === 'agent.open') await held.promise
+    return result
+  }
+  const view = await mount(<MobileAgentCreate {...f.props} />); await choose(f)
+  await click(button(document.body, '创建 Agent'))
+  await vi.waitFor(() => expect(f.launch).toHaveBeenCalledTimes(1))
+  const first = getDeviceWorkface().snapshot().record.agentCreates!.at(-1)!
+  expect(first.phase).toBe('sending')
+  await view.render(<MobileAgentCreate {...next.props} />); await choose(next)
+  expect(button(document.body, '创建 Agent').disabled).toBe(false)
+  await click(button(document.body, '创建 Agent'))
+  await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.at(-1)?.phase).toBe('confirmed')) })
+  const second = getDeviceWorkface().snapshot().record.agentCreates!.at(-1)!
+  expect(second.input.operationId).not.toBe(first.input.operationId)
+  expect(second.runtimeId).toBe('next-runtime'); expect(next.launch).toHaveBeenCalledTimes(1)
+  await act(async () => { held.reject(new Error('Original A receipt lost')); await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.find(item => item.input.operationId === first.input.operationId)?.phase).toBe('unknown')) })
+  expect(document.body.textContent).not.toContain('Original A receipt lost')
+  await view.render(<MobileAgentCreate {...f.props} />)
+  await click(button(document.body, '核对原创建操作'))
+  await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.agentCreates?.find(item => item.input.operationId === first.input.operationId)?.agentSessionId).toBeTruthy()) })
+  expect(getDeviceWorkface().snapshot().record.agentCreates?.find(item => item.input.operationId === first.input.operationId)?.phase).toBe('unknown')
+  expect(document.body.textContent).toContain('工作面持久化尚未确认')
+  expect(f.rpc).toHaveBeenCalledWith('space.inspect', { target: { operationId: first.input.operationId } })
+  expect(f.launch).toHaveBeenCalledTimes(1); expect(next.launch).toHaveBeenCalledTimes(1)
+  expect(getDeviceWorkface().snapshot().record.agentCreates).toHaveLength(2)
 })
