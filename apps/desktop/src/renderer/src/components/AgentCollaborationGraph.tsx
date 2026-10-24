@@ -27,7 +27,7 @@ import '../styles/collaboration.css'
 export type CollaborationSelection = { kind: 'agent' | 'relation'; id: string; relatedIds?: readonly string[] } | null
 type NodeActivity = { pulse: CollaborationPulse; direction: 'sent' | 'received' }
 type AgentData = { box: CollaborationBox; agent: CollaborationAgent; selected: boolean; activity?: NodeActivity | undefined; identity?: FocusContextIdentity | undefined; goals?: FocusGoalLinks | undefined; onPreview(enter: boolean): void; onSelect(): void; onOpen(id: string): void }
-type AreaData = { box: Extract<CollaborationBox, { kind: 'area' }>; envelope: string; memberGeometry: readonly CollaborationBox[]; area: CollaborationArea; totalMembers: number; depth: number; folded: boolean; activity?: NodeActivity | undefined; internal: readonly CollaborationRelation[]; onInspect(): void; onLocate(): void; onToggle(anchor?: { x: number; y: number }): void }
+type AreaData = { box: Extract<CollaborationBox, { kind: 'area' }>; envelope: string; memberGeometry: readonly CollaborationBox[]; area: CollaborationArea; totalMembers: number; childCount: number; depth: number; folded: boolean; activity?: NodeActivity | undefined; internal: readonly CollaborationRelation[]; onInspect(): void; onLocate(): void; onToggle(anchor?: { x: number; y: number }): void }
 type AgentNode = Node<AgentData, 'agent'>
 type AreaNode = Node<AreaData, 'area'>
 type GraphNode = AgentNode | AreaNode
@@ -191,12 +191,13 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
       const memberGeometry = [...area.members.flatMap(id => { const member = geometry.get(collaborationAgentNode(area.id, id)); return member ? [member] : [] }),
         ...(hierarchy.children.get(area.id) ?? []).flatMap(child => geometry.get(collaborationAreaNode(child.id)) ?? [])]
       const totalMembers = hierarchy.members.get(area.id)?.length ?? area.members.length, depth = hierarchy.depth.get(area.id) ?? 0
+      const childCount = hierarchy.children.get(area.id)?.length ?? 0
       const sameGeometry = old && sameItems(old.memberGeometry, memberGeometry)
       const envelope = old?.box === box && sameGeometry ? old.envelope : collaborationEnvelope(box, memberGeometry)
-      const areaNode: AreaNode = old?.box === box && sameGeometry && old.area === area && old.totalMembers === totalMembers && old.depth === depth && old.activity === live && sameItems(old.internal, internal) ? previous as AreaNode : {
+      const areaNode: AreaNode = old?.box === box && sameGeometry && old.area === area && old.totalMembers === totalMembers && old.childCount === childCount && old.depth === depth && old.activity === live && sameItems(old.internal, internal) ? previous as AreaNode : {
         id: areaId, type: 'area', position: { x: box.x, y: box.y }, width: box.width, height: box.height, measured: { width: box.width, height: box.height }, handles: emptyHandles,
         style: { width: box.width, height: box.height, zIndex: depth }, selectable: false, draggable: false,
-        data: { box, envelope, memberGeometry, area, totalMembers, depth, folded: box.folded, internal, activity: live,
+        data: { box, envelope, memberGeometry, area, totalMembers, childCount, depth, folded: box.folded, internal, activity: live,
           onLocate: old?.onLocate ?? (() => {
             foldAnchor.current = null
             setFolded(previous => { if (!previous.has(area.id)) return previous; const next = new Set(previous); next.delete(area.id); return next })
