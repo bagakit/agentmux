@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useShallow } from 'zustand/react/shallow'
 import type { AgentMuxBrowserSource } from '@agentmux/core'
 import { regionIds } from '@agentmux/layout'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { useAppStore } from '../store'
-import { resolveBrowserSource } from '../lib/browser-child-projection'
+import { createBrowserSourceSelector, resolveBrowserSource } from '../lib/browser-child-projection'
 import { workbenchTabDisplayName } from '../lib/workbench-tab-presentation'
 import type { WorkbenchProjectionSelection } from '../lib/workbench-projection'
 import { focusWorkbenchWindow } from '../lib/workbench-windows'
@@ -14,16 +15,18 @@ const SourceIcon = semanticIconComponent('object.display')
 
 /** The same control stays with BrowserPane when its original host moves between windows. */
 export function BrowserSourceNavigation({ source, onOpenChange }: { source: AgentMuxBrowserSource; onOpenChange?(open: boolean): void }) {
-  const tabs = useAppStore(state => state.tabs), layouts = useAppStore(state => state.layouts)
+  const select = useMemo(() => createBrowserSourceSelector(source), [source])
+  const resolution = useAppStore(select)
+  const locations = resolution.status === 'available' ? [resolution.location] : resolution.locations
+  const tabs = useAppStore(useShallow(state => locations.map(location => state.tabs[location.tabId])))
   const [expanded, setExpanded] = useState(false), [notice, setNotice] = useState<string | null>(null)
-  const resolution = resolveBrowserSource({ tabs, layouts }, source)
   const change = (open: boolean) => { setExpanded(open); onOpenChange?.(open) }
   useEffect(() => {
     if (resolution.status === 'available' && !notice && expanded) { setExpanded(false); onOpenChange?.(false) }
   }, [resolution.status, notice, expanded, onOpenChange])
   useEffect(() => () => onOpenChange?.(false), [onOpenChange])
   const label = (location: WorkbenchProjectionSelection) => {
-    const tab = tabs[location.tabId], state = useAppStore.getState()
+    const tab = tabs.find(tab => tab?.id === location.tabId), state = useAppStore.getState()
     const ordinal = tab ? regionIds(tab.layout.root).indexOf(location.regionId) + 1 : 0
     const name = tab ? workbenchTabDisplayName(tab, state.sessions, state.agentNames, state.timelines, state.sessionNameMetadata) : 'Tab'
     return `${name} · Region ${ordinal || '?'}`

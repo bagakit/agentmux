@@ -23,21 +23,43 @@ function orderedGroups(state: BrowserProjectionState) {
 
 const workspaceIdentity = (id: string | null | undefined): string | undefined => id?.trim() ? id : undefined
 
-/** Resolve the original Browser object against actual current placements, never human focus. */
-export function resolveBrowserSource(state: BrowserProjectionState, source: AgentMuxBrowserSource): BrowserSourceResolution {
-  const locations: WorkbenchProjectionSelection[] = []
+// All Source controls share this disposable derivation of the immutable Store snapshots.
+// It is not another placement owner: actions still resolve against the current snapshots.
+const placementCache = new WeakMap<BrowserProjectionState['tabs'], WeakMap<BrowserProjectionState['layouts'], Map<string, WorkbenchProjectionSelection[]>>>()
+function browserPlacements(state: BrowserProjectionState) {
+  let layouts = placementCache.get(state.tabs)
+  if (!layouts) { layouts = new WeakMap(); placementCache.set(state.tabs, layouts) }
+  const cached = layouts.get(state.layouts)
+  if (cached) return cached
+  const index = new Map<string, WorkbenchProjectionSelection[]>()
   for (const { displayWorkspaceId, group } of orderedGroups(state)) {
     for (const tabId of group.tabOrder) {
       const tab = state.tabs[tabId]
       if (!tab) continue
       for (const regionId of regionIds(tab.layout.root)) {
         const surface = tab.regions[regionId]
-        if (surface?.kind !== 'browser' || surface.browserId !== source.browserId) continue
+        if (surface?.kind !== 'browser') continue
+        const locations = index.get(surface.browserId) ?? []
         locations.push({ displayWorkspaceId, groupId: group.id, tabId, regionId: surface.regionId })
+        index.set(surface.browserId, locations)
       }
     }
   }
+  layouts.set(state.layouts, index)
+  return index
+}
+
+/** Resolve the original Browser object against actual current placements, never human focus. */
+export function resolveBrowserSource(state: BrowserProjectionState, source: AgentMuxBrowserSource): BrowserSourceResolution {
   const original = source.location
+  if (original) {
+    const tab = state.tabs[original.tabId], surface = tab?.regions[original.regionId]
+    const layout = state.layouts[original.displayWorkspaceId]
+    const group = layout?.groups.find(group => group.id === original.groupId)
+    if (surface?.kind === 'browser' && surface.browserId === source.browserId && group?.tabOrder.includes(original.tabId) &&
+      groupIds(layout!.root).includes(original.groupId) && regionIds(tab!.layout.root).includes(original.regionId)) return { status: 'available', location: original }
+  }
+  const locations = browserPlacements(state).get(source.browserId) ?? []
   const exact = original && locations.find(location => sameWorkbenchProjectionSelection(location, original))
   if (exact) return { status: 'available', location: exact }
   // Moving the original Region preserves its identity even if this Browser has other displays.
@@ -45,6 +67,40 @@ export function resolveBrowserSource(state: BrowserProjectionState, source: Agen
   if (sameRegion.length === 1) return { status: 'available', location: sameRegion[0]! }
   if (locations.length === 1) return { status: 'available', location: locations[0]! }
   return locations.length ? { status: 'ambiguous', locations } : { status: 'unavailable', locations: [] }
+}
+
+/** A selector retains only the derived answer; every action still resolves current facts. */
+export function createBrowserSourceSelector(source: AgentMuxBrowserSource) {
+  let previous: BrowserSourceResolution | undefined
+  let tabs: BrowserProjectionState['tabs'] | undefined, layouts: BrowserProjectionState['layouts'] | undefined
+  return (state: BrowserProjectionState): BrowserSourceResolution => {
+    if (previous && tabs === state.tabs && layouts === state.layouts) return previous
+    const next = resolveBrowserSource(state, source)
+    tabs = state.tabs; layouts = state.layouts
+    const locations = (value: BrowserSourceResolution) => value.status === 'available' ? [value.location] : value.locations
+    const before = previous && locations(previous), after = locations(next)
+    if (previous?.status === next.status && before?.length === after.length &&
+      before.every((location, index) => sameWorkbenchProjectionSelection(location, after[index]!))) return previous
+    previous = next
+    return next
+  }
+}
+
+/** Pending pages only await a legal layout/Workspace binding, never page activity. */
+export function nativeBrowserContainerChanged(state: BrowserProjectionState, previous: BrowserProjectionState): boolean {
+  if (state.layouts !== previous.layouts) return true
+  if (state.tabs === previous.tabs) return false
+  return Object.values(state.layouts).some(layout => layout.groups.some(group => group.tabOrder.some(tabId => {
+    const tab = state.tabs[tabId], before = previous.tabs[tabId]
+    if (tab?.workspaceId !== before?.workspaceId) return true
+    if (tab === before || !tab) return false
+    if (tab.layout.root !== before?.layout.root) return true
+    return regionIds(tab.layout.root).some(regionId => {
+      const surface = tab.regions[regionId], prior = before?.regions[regionId]
+      return surface?.workspaceId !== prior?.workspaceId ||
+        (surface?.kind === 'browser' ? surface.browserId : null) !== (prior?.kind === 'browser' ? prior.browserId : null)
+    })
+  })))
 }
 
 export function projectNativeBrowserOpening(state: BrowserProjectionState, event: Extract<BrowserEvent, { type: 'native-opened' }>):
