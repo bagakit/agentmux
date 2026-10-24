@@ -477,7 +477,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     if (change === 'record') await getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
     await ui.render(render(change === 'session' ? 'other' : 'session-original', change === 'client' ? { ...f.client } : f.client))
     await act(async () => { gate.resolve(); await f.forward.mock.results[0]!.value })
-    if (change === 'record') await act(async () => { await vi.waitFor(() => expect(ui.element.textContent).toContain('附件回执仅在本次运行中保留')) })
+    if (change === 'record') await act(async () => { await vi.waitFor(() => expect(ui.element.textContent).toContain('原附件回执尚未保全')) })
     else await settled('uploaded')
     expect(f.submit).not.toHaveBeenCalled()
     expect(getDeviceWorkface().snapshot().record.conversation.attempts).toEqual([])
@@ -658,7 +658,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     vi.spyOn(getDeviceWorkface(), 'retainFileUpload').mockImplementation(() => { throw new Error('private device storage full') })
     await click(button(ui.element, '上传并加入 notes.md'))
     expect(f.calls).toHaveLength(0); expect(added).toEqual([])
-    expect(ui.element.textContent).toContain('本次没有上传')
+    expect(ui.element.textContent).toContain('原上传操作尚未保全')
     expect(button(ui.element, '移除 notes.md 本地引用')).toBeDefined()
   })
   it('bounds pending local selections without taking away the existing attachment or message path', async () => {
