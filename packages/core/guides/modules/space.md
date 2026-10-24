@@ -29,8 +29,13 @@ spatial Tab Groups. With --input FILE|- provide {organization:{ungrouped:[ZONE],
 groups:[{groupId,name,collapsed,zoneIds:[ZONE]}]},expected:originalStoredOrganization}.
 Use exact saved Zone and list-group IDs, each item once. Create, rename, collapse,
 dissolve and reorder by replacing that organization at its exact expected value.
-Membership, content, selection, cwd and Runs stay at their original owners;
-omitted members return to ungrouped. Applied organization and disk confirmation
+Organization writes preserve membership; omitted members return to ungrouped.
+Read collectedZoneIds from the same list. Explicit collection/restoration uses
+{collection:{zoneIds:[ZONE],expectedZoneIds:originalCollectedZoneIds}}. These IDs
+are a set; organization still owns order. New members require a confirmed exact
+Zone; an unavailable saved member can remain. Both changes can share one atomic
+input. Never infer original membership from all Browser/Tab topology. Content,
+selection, layout, cwd and Runs stay unchanged. Applied preferences and disk confirmation
 are separate. After a partial or unknown save, read this same list before changing it.
 A missing client owner is unavailable, never an empty confirmed list.
 
