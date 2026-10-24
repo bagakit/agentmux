@@ -1,6 +1,9 @@
 // @vitest-environment happy-dom
 import { act, useState } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
+import type { CapsuleRuntimeObservation } from '@agentmux/core'
+import type { CapsuleConfig, CapsuleMethod, CapsulePort } from '@agentmux/core/capsule'
+import { fixturePath } from '../scripts/lib/fixture-values.mjs'
 import type { SettingsModule, SettingsPaneProps } from '../src/renderer/src/components/settings/settings-catalog'
 vi.hoisted(() => vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true))
 
@@ -241,6 +244,21 @@ it('all static field contributions have unique local target identities and remai
 it('every production static target reaches its connected original Pane location through explicit search selection', async () => {
   const save = vi.spyOn(api.config, 'save'), reveal = vi.spyOn(api.ui, 'revealCrashLog')
   const system = vi.spyOn(api.ui, 'openDefaultBrowserSettings')
+  // This navigation proof supplies platform reads for service-owned fields. It
+  // never starts a service or replaces the original Pane/field destinations.
+  const capsuleRuntime = vi.spyOn(api.capsuleRuntime, 'call').mockImplementation(async method => {
+    if (method !== 'capsule.runtime.inspect') throw new Error(`Unexpected service mutation: ${method}`)
+    return { revision: 1, desired: 'running', phase: 'running',
+      stateDirectory: fixturePath('settings-targets/state'), socketPath: fixturePath('settings-targets/capsule.sock'),
+      run: { hostId: 'local', runId: 'settings-targets-fixture-run' }, runtime: null, operation: null, issue: null } satisfies CapsuleRuntimeObservation
+  })
+  const capsuleConfig: CapsuleConfig = { revision: 1, contentRoot: fixturePath('settings-targets/content'),
+    defaultStorageMode: 'managed', defaultMode: 'isolated', defaultTheme: 'follow' }
+  const capsuleReads = vi.spyOn(api.capsules, 'call').mockImplementation((async (method: CapsuleMethod) => {
+    if (method === 'capsule.config.inspect') return { config: capsuleConfig }
+    if (method === 'capsule.ls') return { capsules: [], issues: [] }
+    throw new Error(`Unexpected Capsule mutation: ${method}`)
+  }) as CapsulePort['call'])
   await dom.render(<SettingsPanel onClose={() => {}} />)
   const contributions = settingsModules.filter(module => (module as SettingsModule).id !== 'fixture')
     .flatMap(module => (module as SettingsModule).searchTargets?.map(target => ({ module, target })) ?? [])
@@ -250,7 +268,7 @@ it('every production static target reaches its connected original Pane location 
     await dom.click(result(`${module.id}:${target.id}`))
     const pane = connected<HTMLElement>(`[data-settings-pane="${module.id}"]`)
     expect(pane.hidden).toBe(false)
-    expect(pane.querySelectorAll(`[data-settings-field="${target.id}"]`)).toHaveLength(1)
+    expect(pane.querySelectorAll(`[data-settings-field="${target.id}"]`), `${module.id}:${target.id} (${target.title}); mounted fields: ${[...pane.querySelectorAll<HTMLElement>('[data-settings-field]')].map(node => node.dataset.settingsField).join(', ')}`).toHaveLength(1)
     const location = connected(`[data-settings-field="${target.id}"]`, pane)
     expect(location.closest('[hidden], [inert]')).toBeNull()
     expect(document.activeElement).toBe(location)
@@ -258,4 +276,7 @@ it('every production static target reaches its connected original Pane location 
     expect(dom.container.querySelector('.settings-search-return [role="status"]')).toBeNull()
   }
   expect(save).not.toHaveBeenCalled(); expect(reveal).not.toHaveBeenCalled(); expect(system).not.toHaveBeenCalled()
+  expect([...new Set(capsuleRuntime.mock.calls.map(([method]) => method))]).toEqual(['capsule.runtime.inspect'])
+  expect([...new Set(capsuleReads.mock.calls.map(([method]) => method))].sort()).toEqual(['capsule.config.inspect', 'capsule.ls'])
+  for (const [, params] of [...capsuleRuntime.mock.calls, ...capsuleReads.mock.calls]) expect(params).toEqual({})
 })
