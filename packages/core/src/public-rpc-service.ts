@@ -1,3 +1,4 @@
+import { isConnectionApiMethod, parseConnectionApiParams } from './connection-api-codec.js'
 import { isBackgroundLocalAgentOpen } from './spatial-agent-open-contract.js'
 import { parseGoalParticipationConfirm } from './goal-participation.js'
 import { parseGoalChanges, type GoalChangePort } from './goal-changes.js'
@@ -809,6 +810,20 @@ export class AgentMuxRpcService {
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
       const administration = { actor: caller ? { kind: 'agent' as const, id: caller.agentSessionId } : { kind: context.principal!.kind as 'user' | 'device', id: context.principal!.id }, assertCurrent: async () => { context.signal?.throwIfAborted(); await context.assertCurrent?.(); if (caller) await this.authenticated(context) } }
+      if (isConnectionApiMethod(method)) {
+        const api = owner.api
+        if (!api) throw new AgentMuxError('The original Host native API owner is unavailable. Existing Agent capabilities remain available.', 'CONTROL_UNAVAILABLE')
+        const original = { ...administration, ...(caller ? { session: { hostId: caller.session.hostId, agentSessionId: caller.session.agentSessionId } } : {}),
+          assertCurrent: async () => { await administration.assertCurrent(); await this.assertRuntimeFence(context) } }
+        if (method === 'connection.api.identities' && caller && (input as { agentSessionId: string }).agentSessionId !== caller.session.agentSessionId) {
+          throw new AgentMuxError('Native API identities require this authenticated original Session.', 'CONTROL_PERMISSION_DENIED')
+        }
+        await original.assertCurrent()
+        const result = method === 'connection.api.identities' ? await api.identities(parseConnectionApiParams(method, input), original)
+          : method === 'connection.api.request' ? await api.request(parseConnectionApiParams(method, input), original)
+          : await api.inspect(parseConnectionApiParams(method, input), original)
+        return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
+      }
       if (caller) await assertAgentConnectionAccess(owner, method, input, caller.agentSessionId)
       if (isConnectionDeletionMethod(method)) {
         if (caller) throw new AgentMuxError('Deleting saved identities requires the original person or device.', 'CONTROL_PERMISSION_DENIED')
