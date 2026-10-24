@@ -16,7 +16,7 @@ const edits: Record<string, [string, string, string]> = {
   'snapshot-splits-process': ['ConversationView.tsx', "record.role === 'observation' ? 'anchor' : 'message'", "record.role === 'observation' ? 'message' : 'message'"],
   'raw-snapshot-preview': ['CapturedConversationMessage.tsx', "conversationReplyPreview(item.content ?? '')", "(item.content ?? '').replace(/\\s+/gu, ' ').slice(0, 180)"],
   'progress-repeats-identity': ['ConversationView.tsx', 'continuation={!original && continuedProgress.has(record.id)', 'continuation={false && !original && continuedProgress.has(record.id)'],
-  'hidden-preview-work': ['CapturedConversationMessage.tsx', 'active && observation ? conversationReplyPreview', 'observation ? conversationReplyPreview'],
+  'hidden-preview-work': ['CapturedConversationMessage.tsx', 'active && observation ? {', 'observation ? {'],
   'hide-original-anchor': ['NativeProcessObservation.tsx', 'keepContentVisible={anchored}', 'keepContentVisible={false}'],
   'activity-keeps-preview-active': ['ActivityView.tsx', 'active={readingEnabled}\n          item={entry.item}', 'active={true}\n          item={entry.item}'],
   'repeat-unknown-status': ['WorkflowObservation.tsx', "!observation.metrics && !compact ?", "!observation.metrics ?"],
