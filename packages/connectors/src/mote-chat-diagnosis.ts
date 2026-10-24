@@ -18,7 +18,8 @@ export type MoteChatDiagnosisOwner = {
 const safeCode = (error: unknown) => moteChatDiagnosisCode(error instanceof AgentMuxError ? error.code : undefined)
 
 async function publication(target: MoteChatTarget, generation: MoteChatGenerationRow, intakeKeys: string[], connections: ConnectionHost): Promise<MoteChatDiagnosisPublication> {
-  const result: MoteChatDiagnosisPublication = { generationKey: moteChatDiagnosisGenerationKey(target, generation.generation.generationId), intakeKeys,
+  const result: MoteChatDiagnosisPublication = { generationKey: moteChatDiagnosisGenerationKey(target, generation.generation.generationId),
+    preparedProviderId: generation.prepared?.input.providerId ?? null, intakeKeys,
     reading: generation.binding ? 'unavailable' : 'not-started', observation: null, sourceObservation: null, effectObservation: null, coverage: null, effects: null, more: false }
   if (!generation.binding || !connections.delivery) return result
   const binding = generation.binding, input = { connectionId: binding.connectionId, bindingId: binding.bindingId, bindingRevision: binding.revision, order: 'newest' as const, limit: moteChatDiagnosisWindowLimit }
