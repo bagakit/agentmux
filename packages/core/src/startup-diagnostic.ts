@@ -1,4 +1,3 @@
-import { isDeepStrictEqual } from 'node:util'
 import type { DiagnosticEvidenceAuthority, DiagnosticEvidenceRead, DiagnosticEvidenceRef } from '@agentmux/diagnostic-evidence'
 import { AgentMuxError } from './errors.js'
 import { isObjectId } from './object-id.js'
@@ -55,9 +54,11 @@ export type AgentStartupDiagnosticRead = DiagnosticEvidenceRead<AgentStartupDiag
 
 const bad = (): never => { throw new AgentMuxError('Startup diagnostic evidence does not satisfy its original contract.', 'CONTROL_PROTOCOL_ERROR') }
 const member = (value: unknown, values: readonly unknown[]) => { if (!values.includes(value)) bad() }
+const encoder = new TextEncoder()
+const utf8Bytes = (value: string) => encoder.encode(value).byteLength
 const id = (value: unknown, nullable = false) => {
   if (nullable && value === null) return
-  if (typeof value !== 'string' || !value || Buffer.byteLength(value) > 2048 || /[\0\r\n]/u.test(value)) bad()
+  if (typeof value !== 'string' || !value || value.length > 2048 || utf8Bytes(value) > 2048 || /[\0\r\n]/u.test(value)) bad()
 }
 const number = (value: unknown) => { if (!Number.isSafeInteger(value) || (value as number) < 0) bad() }
 const exact = (value: unknown, keys: readonly string[]) => {
@@ -90,6 +91,21 @@ export function parseStartupDiagnosticTarget(value: unknown): AgentStartupDiagno
     return structuredClone(p) as AgentStartupDiagnosticTarget
   } catch { throw new AgentMuxError('An exact startup record or bounded original Host recent query is required.', 'INVALID_CONTROL_REQUEST') }
 }
+function sameStartupTarget(actual: AgentStartupDiagnosticTarget, expected: AgentStartupDiagnosticTarget): boolean {
+  if (actual.hostId !== expected.hostId) return false
+  if ('logId' in actual) {
+    if (!('logId' in expected) || actual.logId !== expected.logId || Object.hasOwn(actual, 'authority') !== Object.hasOwn(expected, 'authority')) return false
+    return actual.authority === undefined ? expected.authority === undefined : expected.authority !== undefined &&
+      actual.authority.kind === expected.authority.kind && actual.authority.id === expected.authority.id
+  }
+  if (!('recent' in expected)) return false
+  return (['limit', 'cursor', 'since', 'until', 'agentSessionId', 'runId'] as const).every(key =>
+    Object.hasOwn(actual.recent, key) === Object.hasOwn(expected.recent, key) && Object.is(actual.recent[key], expected.recent[key]))
+}
+function sameStartupAuthority(value: unknown, expected: DiagnosticEvidenceAuthority): boolean {
+  const authority = parseStartupDiagnosticAuthority(value)
+  return authority.kind === expected.kind && authority.id === expected.id && authority.lifetime === expected.lifetime
+}
 const RECORD_KEYS = ['kind', 'logId', 'authority', 'ownerInstanceId', 'receivedAt', 'observedAt', 'hostId', 'agentSessionId', 'runId', 'actorId', 'frontendId',
   'lifecycleOperationId', 'continuityOperationId', 'source', 'event', 'phase', 'frontendState', 'backendState', 'native', 'failure', 'previousLogId', 'output', 'material', 'original'] as const
 export function parseStartupDiagnosticRecord(value: unknown, includeRaw: boolean): AgentStartupDiagnosticRecord {
@@ -120,9 +136,9 @@ export function parseStartupDiagnosticRecord(value: unknown, includeRaw: boolean
   if (p.original !== null) {
     if (!includeRaw || material.retention !== 'retained' || p.failure === null) bad()
     const raw = exact(p.original, ['message', 'code'])
-    if (typeof raw.message !== 'string' || Buffer.byteLength(raw.message) > 4096 ||
-      !(raw.code === null || typeof raw.code === 'number' && Number.isSafeInteger(raw.code) || typeof raw.code === 'string' && Buffer.byteLength(raw.code) <= 2048)) bad()
-    if (Buffer.byteLength(JSON.stringify(raw)) !== material.retainedBytes) bad()
+    if (typeof raw.message !== 'string' || raw.message.length > 4096 || utf8Bytes(raw.message) > 4096 ||
+      !(raw.code === null || typeof raw.code === 'number' && Number.isSafeInteger(raw.code) || typeof raw.code === 'string' && raw.code.length <= 2048 && utf8Bytes(raw.code) <= 2048)) bad()
+    if (utf8Bytes(JSON.stringify(raw)) !== material.retainedBytes) bad()
   }
   if (material.retention === 'not-retained' && (material.retainedBytes !== 0 || p.original !== null)) bad()
   return structuredClone(p) as AgentStartupDiagnosticRecord
@@ -139,7 +155,9 @@ export function parseStartupDiagnosticCoverage(value: unknown): AgentStartupDiag
 export function parseStartupDiagnosticRead(value: unknown, input: AgentStartupDiagnosticTarget, includeRaw = false): AgentStartupDiagnosticRead {
   const target = parseStartupDiagnosticTarget(input)
   const p = exact(value, ['target', 'recordRef', 'readAuthority', 'authorityStatus', 'availability', 'data', 'persistence', 'scope', 'observedAt', 'readAt', 'completeness', 'raw', 'issue'])
-  if (!isDeepStrictEqual(p.target, target)) bad()
+  let replyTarget: AgentStartupDiagnosticTarget
+  try { replyTarget = parseStartupDiagnosticTarget(p.target) } catch { return bad() }
+  if (!sameStartupTarget(replyTarget, target)) bad()
   if (p.readAuthority !== null) parseStartupDiagnosticAuthority(p.readAuthority)
   member(p.authorityStatus, ['verified', 'unconfirmed', 'unavailable']); member(p.availability, ['found', 'not-found', 'unavailable', 'corrupt'])
   member(p.persistence, [null, 'confirmed', 'observed', 'unconfirmed']); member(p.scope, ['record', 'interval-observation']); number(p.readAt)
@@ -161,7 +179,7 @@ export function parseStartupDiagnosticRead(value: unknown, input: AgentStartupDi
     const r = parseStartupDiagnosticRecord(p.data, includeRaw)
     const ref = exact(p.recordRef, ['domain', 'logId', 'authority', 'routeHostId'])
     if (ref.domain !== 'agent.startup' || ref.logId !== target.logId || r.logId !== target.logId || ref.routeHostId !== target.hostId ||
-      !isDeepStrictEqual(ref.authority, r.authority) || p.scope !== 'record' || p.observedAt !== r.observedAt ||
+      !sameStartupAuthority(ref.authority, r.authority) || p.scope !== 'record' || p.observedAt !== r.observedAt ||
       raw.retention !== r.material.retention || raw.truncated !== r.material.truncated || (r.original !== null) !== (raw.returned === 'included')) bad()
     if (target.authority && (target.authority.kind !== r.authority.kind || target.authority.id !== r.authority.id)) bad()
   } else {
@@ -176,7 +194,7 @@ export function parseStartupDiagnosticRead(value: unknown, input: AgentStartupDi
       const r = parseStartupDiagnosticRecord({ ...observation, original: null }, false)
       const ref = exact(item.recordRef, ['domain', 'logId', 'authority', 'routeHostId'])
       if (ref.domain !== 'agent.startup' || ref.logId !== r.logId || ref.routeHostId !== target.hostId ||
-        !isDeepStrictEqual(ref.authority, r.authority) || seen.has(r.logId)) bad()
+        !sameStartupAuthority(ref.authority, r.authority) || seen.has(r.logId)) bad()
       seen.add(r.logId); member(item.persistence, ['confirmed', 'observed', 'unconfirmed'])
       const q = target.recent
       if (q.agentSessionId && q.agentSessionId !== r.agentSessionId || q.runId && q.runId !== r.runId || q.since !== undefined && r.observedAt < q.since || q.until !== undefined && r.observedAt > q.until) bad()
