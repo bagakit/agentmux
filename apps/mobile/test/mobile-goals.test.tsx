@@ -47,7 +47,7 @@ async function mount(initial = [original], onBackChange?: (back: (() => void) | 
   const openSession = vi.fn(), client = { forwardRpc, runtimeOwnerIdentity: () => ({ runtimeId: 'private-goal-runtime', ownerInstanceId: 'original-goal-process', availability: 'connected' }) } as any
   const render = async (visible = true, connected = true) => { await act(async () => root.render(<MobileGoalsSurface client={client} connected={connected} visible={visible} openSession={openSession} {...(onBackChange ? { onBackChange } : {})} />)) }
   await render()
-  const click = async (text: string) => { const button = [...element.querySelectorAll('button')].find(button => button.textContent === text && !button.closest('[hidden]')); expect(button).toBeDefined(); await act(async () => button!.click()) }
+  const click = async (text: string) => { const button = [...element.querySelectorAll('button')].find(button => (button.getAttribute('aria-label') ?? button.textContent) === text && !button.closest('[hidden]')); expect(button).toBeDefined(); await act(async () => button!.click()) }
   const text = async (input: HTMLInputElement | HTMLTextAreaElement, value: string) => { await act(async () => { Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(input, value); input.dispatchEvent(new Event('input', { bubbles: true })) }) }
   const change = async (label: string, value: string) => { const input = [...element.querySelectorAll(`[aria-label="${label}"]`)].find(node => !node.closest('[hidden]')) as HTMLSelectElement; await act(async () => { input.value = value; input.dispatchEvent(new Event('change', { bubbles: true })) }) }
   return { element, root, client, forwardRpc, openSession, click, change, render, text }
@@ -207,8 +207,7 @@ describe('Mobile Goals original owner slice', () => {
     await view.change('优先级', 'normal')
     expect(view.element.textContent).toContain('unknown original write')
     await view.click('返回目标列表'); await view.click('第二目标原项目 · 已完成原用户意图')
-    const back = [...view.element.querySelectorAll('button')].find(button => button.textContent === '返回目标列表' && !button.closest('[hidden]'))!
-    await act(async () => back.click())
+    await view.click('返回目标列表')
     await view.click('原目标原项目 · 已完成原用户意图')
     await view.click('编辑目标正文')
     const shown = view.element.querySelector('[aria-label="目标详情"]')!
