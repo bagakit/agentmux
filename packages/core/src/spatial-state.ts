@@ -3,12 +3,13 @@ import { createRequire } from 'node:module';
 import { mkdir, open, readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { isDeepStrictEqual } from 'node:util';
 import { durableWriteFile, DurableWriteError } from './durable-write.js';
 import { AgentMuxError } from './errors.js';
 import { defaultAgentMuxStateDirectory } from './runtime-paths.js';
 import type { AgentMuxSpaceBindingTarget } from './space-control.js';
 import { addTabOccurrence, removeTab } from './spatial-layout.js';
-import { parseAgentMuxSpatialGraph, type AgentMuxSpatialState, type AgentMuxSpatialCommit } from './spatial-graph.js';
+import { parseAgentMuxSpatialGraph, type AgentMuxSpatialState, type AgentMuxSpatialCommit, type SpatialJson } from './spatial-graph.js';
 import { AGENTMUX_SPATIAL_AGENT_OPEN_RESOURCE, admitSpatialAgentOpen, spatialAgentOpenRecord } from './spatial-agent-open.js';
 export * from './spatial-agent-open.js';
 import { AGENTMUX_DISPLAY_LABEL_RESOURCE, displayLabelDocument, setDisplayLabelDocument, projectSpatialState, nameTargetKey, validateNameIntent,
@@ -310,6 +311,26 @@ export class AgentMuxSpatialStateStore {
       setDisplayLabelDocument(graph, document); return projectSpatialState(await this.writeLocked(current, graph));
     });
   }
+  /** Host-owned metadata uses the original graph transaction, never a layout writer. */
+  async commitOwnedResource(input: { key: string; expectedRevision: number; value: SpatialJson }): Promise<{
+    state: AgentMuxSpatialState; key: string; diskDurability: 'confirmed';
+  }> {
+    const { key, expectedRevision } = input;
+    if (typeof key !== 'string' || !key.startsWith('owned:') || key.length === 'owned:'.length || key.includes('\0'))
+      invalid('An exact owned resource key with a nonempty stable suffix is required.');
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0)
+      invalid('An exact nonnegative expected revision is required.');
+    const value = structuredClone(input.value);
+    return this.locked(async () => {
+      const current = await this.requiredState();
+      if (current.revision !== expectedRevision)
+        throw new AgentMuxError('Spatial state changed. Read the current revision and preserve both edits before retrying.', 'SPATIAL_STATE_CONFLICT');
+      const graph = parseAgentMuxSpatialGraph({ ...current.graph, resources: { ...current.graph.resources, [key]: value } });
+      // An equal read is not a producer ACK. Reconfirm even an identical value.
+      const state = projectSpatialState(await this.writeLocked(current, graph));
+      return { state, key, diskDurability: 'confirmed' };
+    });
+  }
   async commit(input: AgentMuxSpatialCommit): Promise<AgentMuxSpatialState> {
     if (!Number.isSafeInteger(input.expectedRevision) || input.expectedRevision < 0)
       invalid('An exact nonnegative expected revision is required.');
@@ -323,6 +344,15 @@ export class AgentMuxSpatialStateStore {
       const current = await this.read();
       if ((current?.revision ?? 0) !== input.expectedRevision)
         throw new AgentMuxError('Spatial state changed. Read the current revision and preserve both edits before retrying.', 'SPATIAL_STATE_CONFLICT');
+      // Bulk/bootstrap callers may echo confirmed owned metadata, but cannot
+      // contribute it or erase it by omitting it from a layout snapshot.
+      for (const [key, value] of Object.entries(graph.resources)) {
+        if (key.startsWith('owned:') && (!current || !Object.hasOwn(current.graph.resources, key) || !isDeepStrictEqual(value, current.graph.resources[key])))
+          throw new AgentMuxError('This resource belongs to its original owner. Preserve its binding and submit the layout edit without replacing owned metadata.', 'SPATIAL_RESOURCE_AUTHORITY_CONFLICT');
+      }
+      if (current) for (const [key, value] of Object.entries(current.graph.resources)) {
+        if (key.startsWith('owned:')) graph.resources[key] = value;
+      }
       const groupIds = new Set(graph.projectGroups?.map(group => group.groupId));
       const removedGroupIds = new Set(input.removedProjectGroupIds ?? []);
       if (current?.graph.projectGroups?.some(group => !groupIds.has(group.groupId) && !removedGroupIds.has(group.groupId))) {
