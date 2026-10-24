@@ -24,7 +24,10 @@ import { createSessionProjectFileContextSelector } from '../src/renderer/src/lib
 import { executionFocusPresentation } from '../src/renderer/src/lib/focus-tab-projection'
 import { directoryIdentity } from '../src/shared/space-addresses'
 import { documentKey, workbenchSurfaces } from '../src/renderer/src/lib/workbench-tabs'
-import { useAppStore } from '../src/renderer/src/store'
+import { currentCoreSpatialGraph, useAppStore } from '../src/renderer/src/store'
+import * as storeModule from '../src/renderer/src/store'
+import { desktopSpatialGraph } from '../src/renderer/src/lib/desktop-spatial-state'
+import { goalDiscussionBindingKey } from '@agentmux/host/goal-discussion-bindings'
 import { targetSid, regionIdA, regionIdB, tabId } from './helpers/workface-control-fixture'
 import { startWorkfaceFileFixture, fileCatalog, zoneFor } from './helpers/workface-file-fixture'
 
@@ -32,7 +35,7 @@ const initial = useAppStore.getState()
 const origin = { workspaceId: 'display', tabGroupId: 'display-group', tabId, regionId: regionIdA, sessionId: targetSid }
 const reference = { displayWorkspaceId: origin.workspaceId, groupId: origin.tabGroupId, tabId, regionId: regionIdA }
 let fixture: Awaited<ReturnType<typeof startWorkfaceFileFixture>>, container: HTMLDivElement, root: ReturnType<typeof createRoot>
-const context = () => createSessionProjectFileContextSelector(targetSid, origin)(useAppStore.getState())
+const context = () => createSessionProjectFileContextSelector(targetSid, origin, currentCoreSpatialGraph)(useAppStore.getState())
 const file = () => workbenchSurfaces(useAppStore.getState().tabs[tabId]!).find(surface => surface.kind === 'file')!
 beforeEach(async () => {
   vi.restoreAllMocks(); localStorage.clear(); useAppStore.setState(initial, true)
@@ -161,7 +164,10 @@ describe('Focus original File and link destinations', () => {
   })
   it('a mapped foreign Goal resource offers an explicit Tab without reading into or replacing the original Agent Region', async () => {
     const before = useAppStore.getState(), project = before.config!.workspaces.find(workspace => workspace.id === 'display')!
-    useAppStore.setState({ demandPmoTabIds: { 'actual-goal': tabId }, demands: { 'actual-goal': { id: 'actual-goal', title: 'Foreign project',
+    const graph = desktopSpatialGraph(before, [])
+    vi.spyOn(storeModule, 'currentCoreSpatialGraph').mockReturnValue({ ...graph, resources: { ...graph.resources,
+      [goalDiscussionBindingKey('actual-goal')]: { schema: 'agentmux.goal-discussion-binding.v1', tabId, regionId: regionIdA, recipient: { kind: 'agent', hostId: 'local', agentSessionId: targetSid } } } })
+    useAppStore.setState({ demands: { 'actual-goal': { id: 'actual-goal', title: 'Foreign project',
       description: '', status: 'backlog', priority: 'normal', projectId: directoryIdentity(project.hostId, project.path), projectName: project.name,
       sessionIds: [], createdAt: _tailFixtureEpoch(0, 0, 1), updatedAt: _tailFixtureEpoch(0, 0, 1), source: 'session' } } })
     expect(context().kind).toBe('goal'); expect(context().project?.workspaceId).toBe('display')

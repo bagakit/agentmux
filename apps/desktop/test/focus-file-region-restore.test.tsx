@@ -123,7 +123,7 @@ it(restoreName, async () => {
   useAppStore.setState({ mainSurface: 'agents', agentFocus: { execution: { sessionId: targetSid, reference,
     history: [{ sessionId: targetSid, focusedAt: 1 }] }, pmo: { sessionId: null } } })
   expect(useAppStore.getState().selectMainRegion(reference)).toBe(true)
-  const original = snapshot(), context = createSessionProjectFileContextSelector(targetSid, origin)(useAppStore.getState())
+  const original = snapshot(), context = createSessionProjectFileContextSelector(targetSid, origin, () => null)(useAppStore.getState())
   expect(context.kind).toBe('session')
   await openSessionFileLink(origin, context, path, undefined, 'right')
   const file = fileRegion(), inserted = useAppStore.getState()

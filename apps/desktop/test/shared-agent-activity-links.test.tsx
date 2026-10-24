@@ -194,7 +194,7 @@ it('actual B original Topic owner keeps the file link available without a stored
     const context = createSessionProjectFileContextSelector(scene.session.id, {
       workspaceId: occurrence.displayId, tabGroupId: occurrence.groupId, tabId: scene.tab.id,
       regionId: 'activity-original-region', sessionId: scene.session.id
-    })(useAppStore.getState())
+    }, () => null)(useAppStore.getState())
     expect(useAppStore.getState().tabs[scene.tab.id]!.space).toBeUndefined()
     expect(originalZone).toBeDefined(); expect(birthContext).toBeDefined()
     expect(context.kind).toBe('session')
@@ -233,7 +233,7 @@ it.each(['missing', 'conflicting'] as const)('actual B %s original Topic metadat
     const context = createSessionProjectFileContextSelector(scene.session.id, {
       workspaceId: occurrence.displayId, tabGroupId: occurrence.groupId, tabId: scene.tab.id,
       regionId: 'activity-original-region', sessionId: scene.session.id
-    })(useAppStore.getState())
+    }, () => null)(useAppStore.getState())
     expect(context.kind).toBe('unconfirmed'); expect(context.placement).toBeUndefined()
     expect(occurrence.presentation.textContent).toContain('file resource, Space or display occurrence is unconfirmed')
     expect(occurrence.presentation.textContent).toContain('Open original sample')
@@ -320,7 +320,7 @@ it('original file context retains its related metadata memo and invalidates real
     const catalogRead = vi.spyOn(spatialOwner, 'spatialCatalog'), contextRead = vi.spyOn(spatialOwner, 'zoneContext')
     try {
       const selector = createSessionProjectFileContextSelector(scene.session.id, { workspaceId: occurrence.displayId,
-        tabGroupId: occurrence.groupId, tabId: scene.tab.id, regionId: 'activity-original-region', sessionId: scene.session.id })
+        tabGroupId: occurrence.groupId, tabId: scene.tab.id, regionId: 'activity-original-region', sessionId: scene.session.id }, () => null)
       const state = useAppStore.getState(), context = selector(state)
       expect(context.kind).toBe('session'); expect(context.placement).toBeDefined()
       const baseline = { catalog: catalogRead.mock.calls.length, context: contextRead.mock.calls.length, pages: scene.reads.mock.calls.length }
@@ -373,7 +373,7 @@ for (const scenario of ['same', 'different', 'legacy-known', 'unknown', 'conflic
     await addLink(scene, '[Open original sample](./sample.ts:7)')
     const occurrence = await selectOccurrence(scene, 'foreign')
     const selector = createSessionProjectFileContextSelector(scene.session.id, { workspaceId: occurrence.displayId,
-      tabGroupId: occurrence.groupId, tabId: scene.tab.id, regionId: 'activity-original-region', sessionId: scene.session.id })
+      tabGroupId: occurrence.groupId, tabId: scene.tab.id, regionId: 'activity-original-region', sessionId: scene.session.id }, () => null)
     const context = selector(useAppStore.getState())
     expect(context.kind).toBe('session'); expect(context.placement).toBeDefined()
     let placement = context.placement

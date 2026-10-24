@@ -21,7 +21,7 @@ it('a pending original Focus File consumes the exact main owner, while floating 
   let resolve!: (value: Awaited<ReturnType<typeof api.files.read>>) => void
   vi.spyOn(api.files, 'read').mockImplementation(() => new Promise(accept => { resolve = accept }))
   const before = useAppStore.getState(), execution = before.agentFocus.execution
-  const context = createSessionProjectFileContextSelector(targetSid, origin)(before)
+  const context = createSessionProjectFileContextSelector(targetSid, origin, () => null)(before)
   const opening = openSessionFileLink(origin, context, 'pending-main.md', undefined, 'right')
   await vi.waitFor(() => expect(resolve).toBeTypeOf('function'))
   useAppStore.getState().focusRegion('display', tabId, regionIdB, 'floating-pointer', 'display-group')
@@ -38,7 +38,7 @@ it('a pending original Focus File consumes the exact main owner, while floating 
 it('an older File reply preserves a later same-SID exact Region choice', async () => {
   let resolve!: (value: Awaited<ReturnType<typeof api.files.read>>) => void
   vi.spyOn(api.files, 'read').mockImplementation(() => new Promise(accept => { resolve = accept }))
-  const before = useAppStore.getState(), context = createSessionProjectFileContextSelector(targetSid, origin)(before)
+  const before = useAppStore.getState(), context = createSessionProjectFileContextSelector(targetSid, origin, () => null)(before)
   const outcome = openSessionFileLink(origin, context, 'late-main.md', undefined, 'right').catch(error => error)
   await vi.waitFor(() => expect(resolve).toBeTypeOf('function'))
   const later = { ...reference, regionId: regionIdB }
