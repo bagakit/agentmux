@@ -1,10 +1,11 @@
+import { privateCodexConfigArgs } from './helpers/private-codex-config.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { execFile } from 'node:child_process'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
 import { afterEach, describe, expect, it } from 'vitest'
-import { assertExitedAdmission, ObservedPromptStore, prepareRealCodexScope, privateCodexConfigArgs, type RealCodexScope } from './helpers/real-codex-fixture.js'
+import { assertExitedAdmission, ObservedPromptStore, prepareRealCodexScope, type RealCodexScope } from './helpers/real-codex-fixture.js'
 import { AgentProviderRegistry, AgentManagedHookInstaller, AgentMuxClient, type AgentMuxClientEvent } from '../dist/index.js'
 
 const execFileAsync = promisify(execFile)
