@@ -44,17 +44,19 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         if CommandLine.arguments.contains("--interactive") { begin(id: 0) }
     }
 
-    private func begin(id: Int) {
+    private func begin(id: Int, allowEditing: Bool = false) {
         DispatchQueue.global().async { [weak self] in
-            let result = Result { try NativeSelectionRequest.run() }
+            let result = Result { try NativeSelectionRequest.run(allowEditing: allowEditing) }
             DispatchQueue.main.async {
                 guard let self else { return }
                 self.completions += 1
                 self.current = nil
                 switch result {
-                case let .success(rectangle):
-                    self.emit(["event": "completion", "state": rectangle == nil ? "cancelled" : "confirmed",
-                               "rect": rectangle.map(self.rect) as Any? ?? NSNull(), "count": self.completions])
+                case let .success(choice):
+                    var receipt: [String: Any] = ["event": "completion", "state": choice == nil ? "cancelled" : "confirmed",
+                               "rect": choice.map { self.rect($0.rectangle) } as Any? ?? NSNull(), "count": self.completions]
+                    if allowEditing, let choice { receipt["completionAction"] = choice.completionAction.rawValue }
+                    self.emit(receipt)
                 case let .failure(error):
                     self.emit(["event": "completion", "state": "failed", "message": String(describing: error), "count": self.completions])
                 }
@@ -82,7 +84,7 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         let id = value["id"] as? Int ?? -1
         do {
             let method = value["method"] as? String ?? ""
-            if method == "begin" { begin(id: id); return }
+            if method == "begin" { begin(id: id, allowEditing: value["allowEditing"] as? Bool == true); return }
             if method == "close" { emit(["id": id, "ok": true]); NSApp.terminate(nil); return }
             if method == "inspect" { emit(observation(id: id)); return }
             guard let view = current, let window = view.window else { throw PreviewFailure("Original picker is unavailable") }
@@ -116,7 +118,12 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
                 button.performClick(nil)
             } else if method == "layout" {
                 guard let path = value["path"] as? String else { throw PreviewFailure("Missing capture output") }
-                captureLayout(path: path, id: id)
+                var size: NSSize?
+                if let width = value["width"] as? Double, let height = value["height"] as? Double {
+                    guard width.isFinite, height.isFinite, width >= 160, height >= 160, width <= 4096, height <= 4096 else { throw PreviewFailure("Invalid bounded layout viewport") }
+                    size = NSSize(width: width, height: height)
+                }
+                captureLayout(path: path, id: id, constrainedSize: size)
                 return
             } else { throw PreviewFailure("Unknown fixture command") }
             emit(observation(id: id))
@@ -156,12 +163,27 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         return NSPoint(x: x, y: y)
     }
 
-    private func captureLayout(path: String, id: Int) {
+    private func captureLayout(path: String, id: Int, constrainedSize: NSSize? = nil) {
         do {
-            guard let view = current, let window = view.window, let backdrop = background.contentView else {
+            var constrainedWindow: NSWindow?
+            if let size = constrainedSize {
+                let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: .borderless, backing: .buffered, defer: false)
+                window.isReleasedWhenClosed = false
+                let view = NativeScreenSelection(frame: NSRect(origin: .zero, size: size), allowEditing: true)
+                window.contentView = view
+                for (type, point) in [(NSEvent.EventType.leftMouseDown, NSPoint(x: 24, y: size.height * 0.52)), (.leftMouseUp, NSPoint(x: size.width - 24, y: size.height - 44))] {
+                    guard let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1) else { throw PreviewFailure("Could not create constrained layout event") }
+                    if type == .leftMouseDown { view.mouseDown(with: event) } else { view.mouseUp(with: event) }
+                }
+                constrainedWindow = window
+            }
+            defer { constrainedWindow?.close() }
+            guard let view = constrainedWindow?.contentView as? NativeScreenSelection ?? current,
+                  let window = view.window, let backgroundView = background.contentView else {
                 throw PreviewFailure("Original production view is unavailable")
             }
-            let crop = background.frame.offsetBy(dx: -window.frame.minX, dy: -window.frame.minY)
+            let backdrop = constrainedSize.map { PreviewBackground(frame: NSRect(origin: .zero, size: $0)) } ?? backgroundView
+            let crop = constrainedSize == nil ? background.frame.offsetBy(dx: -window.frame.minX, dy: -window.frame.minY) : view.bounds
             backdrop.displayIfNeeded()
             view.displayIfNeeded()
             // A non-key bare window may cache only its layer-backed controls.
@@ -193,7 +215,8 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             try data.write(to: URL(fileURLWithPath: path), options: .atomic)
             emit(["id": id, "ok": true, "width": composite.pixelsWide, "height": composite.pixelsHigh,
                   "source": "AppKit-view-layout-only", "windowServerFrame": false,
-                  "rasterization": "actual-root-draw-and-cached-controls", "compositing": "source-over", "scale": 1])
+                  "rasterization": "actual-root-draw-and-cached-controls", "compositing": "source-over", "scale": 1,
+                  "constrainedViewport": constrainedSize != nil])
         } catch { emit(["id": id, "ok": false, "message": String(describing: error)]) }
     }
 
@@ -234,6 +257,7 @@ private final class PreviewBackground: NSView {
         for x in stride(from: CGFloat(0), through: bounds.width, by: 48) { grid.move(to: NSPoint(x: x, y: 0)); grid.line(to: NSPoint(x: x, y: bounds.height)) }
         for y in stride(from: CGFloat(0), through: bounds.height, by: 48) { grid.move(to: NSPoint(x: 0, y: y)); grid.line(to: NSPoint(x: bounds.width, y: y)) }
         grid.stroke()
+        if bounds.width < 600 { return }
         let title = "AgentMux · 原生截图选区"
         title.draw(at: NSPoint(x: 64, y: bounds.height - 100), withAttributes: [.font: NSFont.systemFont(ofSize: 25, weight: .semibold), .foregroundColor: NSColor.white])
         "Production AppKit picker · logical points · original capture contract".draw(at: NSPoint(x: 64, y: bounds.height - 132),

@@ -157,24 +157,25 @@ async function exercise(directory, capture) {
     const verify = (condition, message) => { cases.push(message); behavioral(condition, message) }
     const ready = await host.ready()
     const screen = ready.screen
-    const begin = await host.request('begin')
+    const begin = await host.request('begin', { allowEditing: true })
     const offset = { x: screen.x - begin.window.x, y: screen.y - begin.window.y }
     let rectangle = { x: offset.x + screen.width * 0.22, y: offset.y + screen.height * 0.28,
       width: screen.width * 0.38, height: screen.height * 0.35 }
     const point = (x, y) => ({ x, y })
     const drag = (from, to) => host.request('drag', { from, to })
     const images = []
-    const image = async name => {
+    const image = async (name, viewport = {}) => {
       if (!capture) return
       await delay(60)
       const path = join(directory, name + '-layout.png')
-      const value = await host.request('layout', { path })
+      const value = await host.request('layout', { path, ...viewport })
       assert.equal(value.source, 'AppKit-view-layout-only')
       assert.equal(value.windowServerFrame, false)
       const bytes = readFileSync(path)
       assert(bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) && bytes.readUInt32BE(16) === value.width && bytes.readUInt32BE(20) === value.height, 'Actual AppKit layout PNG metadata mismatch')
       images.push({ name, state: 'captured', path, width: value.width, height: value.height, source: value.source,
         windowServerFrame: false, rasterization: value.rasterization, compositing: value.compositing, scale: value.scale,
+        constrainedViewport: value.constrainedViewport,
         sha256: createHash('sha256').update(bytes).digest('hex') })
     }
     await image('initial')
@@ -195,12 +196,12 @@ async function exercise(directory, capture) {
     const inspection = await host.request('inspect')
     const toolbar = inspection.toolbar
     await drag(point(toolbar.x + 3, toolbar.y + 3), point(toolbar.x + 28, toolbar.y + 5))
-    await drag(point(toolbar.x + 18, toolbar.y + 21), point(toolbar.x + 35, toolbar.y + 22))
+    await drag(point(toolbar.x + 95, toolbar.y + 21), point(toolbar.x + 95, toolbar.y + 22))
     const controls = (await host.request('inspect')).controls
     verify(controls.some(button => button.identifier === 'native-selection-confirm' && button.enabled), 'Real confirm button is enabled for a valid released selection')
     await host.request('button', { identifier: 'native-selection-confirm' })
     const confirmed = await host.completion(1)
-    verify(confirmed.state === 'confirmed', 'Confirm button must confirm rather than cancel')
+    verify(confirmed.state === 'confirmed' && confirmed.completionAction === 'capture', 'Confirm button must preserve direct capture intent rather than cancel or edit')
     const expected = { x: rectangle.x + begin.window.x, y: screen.y + screen.height - (rectangle.y + begin.window.y + rectangle.height), width: rectangle.width, height: rectangle.height }
     for (const key of Object.keys(expected)) verify(Math.abs(confirmed.rect[key] - expected[key]) < 0.01, `Actual moved/resized/nudged ${key} must preserve Quartz geometry`)
     await delay(40)
@@ -228,6 +229,36 @@ async function exercise(directory, capture) {
     await host.request('key', { keyCode: 36 })
     const redrawResult = await host.completion(4)
     verify(redrawResult.state === 'confirmed' && Math.abs(redrawResult.rect.width - redrawn.width) < 0.01 && Math.abs(redrawResult.rect.height - redrawn.height) < 0.01, 'Outside drag redraws and Return confirms the new selection')
+    verify(redrawResult.completionAction === undefined, 'Pure capture completion does not leak a host editing intent')
+    await host.request('begin', { allowEditing: true })
+    await host.request('key', { keyCode: 14 })
+    await delay(40)
+    verify(host.completions.length === 4, 'Edit shortcut cannot complete an empty selection')
+    await drag(point(offset.x + 80, offset.y + 180), point(offset.x + 400, offset.y + 370))
+    const editableControls = (await host.request('inspect')).controls
+    verify(editableControls.some(button => button.identifier === 'native-selection-edit' && button.enabled), 'Opt-in exposes a real enabled Edit button for the selected image')
+    await image('editable-selected')
+    await image('narrow', { width: 280, height: 360 })
+    await image('short', { width: 640, height: 240 })
+    await host.request('button', { identifier: 'native-selection-edit' })
+    verify((await host.completion(5)).completionAction === 'edit', 'Real Edit button passes the typed editing intent with original geometry')
+    await host.request('begin', { allowEditing: true })
+    await drag(point(offset.x + 80, offset.y + 180), point(offset.x + 400, offset.y + 370))
+    await host.request('key', { keyCode: 14 })
+    verify((await host.completion(6)).completionAction === 'edit', 'E shortcut passes the same typed editing intent')
+    await host.request('begin', { allowEditing: true })
+    await drag(point(offset.x + 80, offset.y + 180), point(offset.x + 400, offset.y + 370))
+    await host.request('key', { keyCode: 36 })
+    verify((await host.completion(7)).completionAction === 'capture', 'Return keeps direct completion for an opt-in request')
+    await host.request('begin')
+    await drag(point(offset.x + 80, offset.y + 180), point(offset.x + 400, offset.y + 370))
+    const pureControls = (await host.request('inspect')).controls
+    verify(!pureControls.some(button => button.identifier === 'native-selection-edit'), 'No opt-in means no edit control without a consumer')
+    await host.request('key', { keyCode: 14 })
+    await delay(40)
+    verify(host.completions.length === 7, 'No opt-in means E cannot open an editor or complete selection')
+    await host.request('key', { keyCode: 53 })
+    verify((await host.completion(8)).state === 'cancelled', 'Pure capture retains cancellation after an unused edit shortcut')
     return { tests: cases.length, cases, completions: host.completions, images, events: host.events }
   } catch (error) {
     error.diagnostics = { events: host.events, completions: host.completions, stderr: host.errors }
@@ -264,6 +295,9 @@ try {
       { name: 'release', path: view, before: 'selection.pointerUp(convert(event.locationInWindow, from: nil)); refresh()', after: 'selection.pointerUp(convert(event.locationInWindow, from: nil)); refresh(); confirm()' },
       { name: 'escape', path: view, before: 'case 53: cancel()', after: 'case 53: confirm()' },
       { name: 'toolbar', path: view, before: 'confirmButton.action = #selector(confirm)', after: 'confirmButton.action = #selector(cancel)' },
+      { name: 'edit-action', path: view, before: 'editButton.action = #selector(edit)', after: 'editButton.action = #selector(confirm)' },
+      { name: 'edit-opt-in', path: view, before: 'guard allowEditing else { return }', after: '// Mutant: ignores the original host opt-in.' },
+      { name: 'consumer-edit-intent', path: operationsSource, before: 'if allowEditing { result["completionAction"] = selection.completionAction.rawValue }', after: 'if allowEditing { result["completionAction"] = "capture" }' },
       { name: 'dimensions-toolbar', path: view, before: 'selection: rect, toolbar: toolbar.frame, screen: screen)', after: 'selection: rect, toolbar: .zero, screen: screen)' },
     ]
     assert(mutations.length > 0)
