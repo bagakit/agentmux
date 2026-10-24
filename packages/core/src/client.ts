@@ -1,5 +1,7 @@
 import { decodePreparedTerminal, parsePreparedTerminal, parsePreparedTerminalStop, type AgentMuxPreparedTerminal, type AgentMuxPreparedTerminalStop } from './terminal-preparation.js'
+import type { AgentMuxCreationRuntime, AgentMuxTerminalCreationRetirement, AgentMuxTerminalCreationRetirementObservation } from './terminal-creation-retirement.js'
 import { AgentSessionRecoveryService } from './agent-session-recovery/service.js'
+import { retryAgentCreationResources } from './agent-creation-resource-retry.js'
 import type { AgentMuxAgentResumeInput, AgentMuxAgentReopenInput } from './agent-session-recovery/resume-contract.js'
 import { assertAgentPromptSize, runRef, safeId, hookBindingIdentity, terminalHandshakeOperationIdentity, terminalInitialPromptReadinessIdentity, terminalEnvironment } from './agent-runtime-helpers.js'
 import { parseExternalConversationReference, parseExternalConversationAuthority, externalConversationAuthor, externalConversationRecordId, type AgentExternalConversationAuthorityPort, type AgentExternalConversationReceipt, type AgentExternalConversationReference } from './external-conversation.js'
@@ -3942,6 +3944,24 @@ export class AgentMuxClient {
     if (this.registry.findByRun(runRef(run.runId))) throw new AgentMuxError(
       'The original terminal creation belongs to an Agent Session.', 'RUN_KIND_MISMATCH')
     return this.projectRun(run)
+  }
+
+  terminalCreationRuntimeIdentity(): AgentMuxCreationRuntime { this.requireConnected(); return this.kernel.creationRuntimeIdentity() }
+
+  async retirePreparedTerminalCreation(input: AgentMuxPreparedTerminal, runtime: AgentMuxCreationRuntime): Promise<AgentMuxTerminalCreationRetirement> {
+    const { prepared, request } = decodePreparedTerminal(input)
+    this.requireConnected()
+    const result = await this.kernel.retirePreparedStart(request, prepared.createOperationId, runtime)
+    if (result.outcome === 'retired') return result
+    if (this.registry.findByRun(runRef(result.run.runId))) throw new AgentMuxError(
+      'The original terminal creation belongs to an Agent Session. Its Run was preserved.', 'RUN_KIND_MISMATCH')
+    return { ...result, run: this.projectRun(result.run) }
+  }
+
+  async observePreparedTerminalCreationRetirement(input: AgentMuxPreparedTerminal, runtime: AgentMuxCreationRuntime): Promise<AgentMuxTerminalCreationRetirementObservation> {
+    const { prepared } = decodePreparedTerminal(input)
+    this.requireConnected()
+    return await this.kernel.observePreparedStartRetirement(prepared.createOperationId, runtime)
   }
 
   async attachTerminal(runId: string, afterByte = 0, view: AgentMuxRunAttachmentView = 'raw'): Promise<AgentMuxRunAttachment> {

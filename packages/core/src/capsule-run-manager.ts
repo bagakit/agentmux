@@ -13,12 +13,13 @@ import { mintObjectId } from './object-id.js'
 import { defaultAgentMuxRuntimeDirectory } from './runtime-paths.js'
 import { observeRead } from './observation-read.js'
 import { parsePreparedTerminal, parsePreparedTerminalStop, type AgentMuxPreparedTerminal, type AgentMuxPreparedTerminalStop } from './terminal-preparation.js'
-import { parseCapsuleRuntimeParams, parseCapsuleRuntimeResult, type CapsuleRuntimeMethod, type CapsuleRuntimeObservation, type CapsuleRuntimeOperation, type CapsuleRuntimeParamsMap, type CapsuleRuntimePort } from './capsule-runtime.js'
+import { parseCreationRuntime, type AgentMuxCreationRuntime } from './terminal-creation-retirement.js'
+import { parseCapsuleRuntimeParams, parseCapsuleRuntimeRecovery, parseCapsuleRuntimeResult, type CapsuleRuntimeMethod, type CapsuleRuntimeObservation, type CapsuleRuntimeOperation, type CapsuleRuntimeParamsMap, type CapsuleRuntimePort, type CapsuleRuntimeRecoveryTarget, type CapsuleRuntimeRecovery } from './capsule-runtime.js'
 
 export type CapsuleDesktopAdapters = (context?: AgentMuxRpcCallContext) => { presentation?: CapsulePresentationPort; replies?: CapsuleReplyPort }
 type Command = { kind: 'start' | 'stop'; params: CapsuleRuntimeParamsMap['capsule.runtime.start'] | CapsuleRuntimeParamsMap['capsule.runtime.stop'] }
 type NativeReceipt = { key: string; launchKey: string; operationId: string; runId?: string; ownerInstanceId?: string; outcome?: Outcome }
-type CommandRecord = { schema: 'agentmux.capsule-command.v1'; command: Command; phase: 'prepared' | 'committed'; receipt?: CapsuleRuntimeOperation; native?: NativeReceipt; latestNative?: NativeReceipt }
+type CommandRecord = { schema: 'agentmux.capsule-command.v1'; command: Command; phase: 'prepared' | 'committed'; receipt?: CapsuleRuntimeOperation; native?: NativeReceipt; latestNative?: NativeReceipt; recovery?: CapsuleRuntimeRecovery; recoveryLaunch?: AgentMuxPreparedTerminal }
 type Outcome = { disposition: 'applied' | 'not_applied' | 'unknown'; failure?: AgentMuxErrorData }
 type Effect = {
   kind: 'start' | 'stop'; key: string; operationId: string; commandId: string | null
@@ -31,9 +32,11 @@ type Binding = {
   run: { runId: string } | null; launch: AgentMuxPreparedTerminal | null
   launchPhase: 'prepared' | 'dispatched' | 'confirmed' | 'not_applied' | null
   launchOutcome?: Outcome; launchCommandId?: string | null
+  launchRuntime?: AgentMuxCreationRuntime
   stop: AgentMuxPreparedTerminalStop | null; stopPhase: 'prepared' | 'dispatched' | 'confirmed' | 'not_applied' | null
   stopOutcome?: Outcome; stopCommandId?: string | null
   command: Command | null
+  recoveryOperationId?: string
 }
 const unavailable = (message: string, code = 'CAPSULE_RUNTIME_UNAVAILABLE') => new AgentMuxError(message, code)
 // Native defines interrupted as historical ownership, distinct from observation loss.
@@ -106,13 +109,14 @@ export class CapsuleRunManager {
       (b.run !== null && (typeof b.run?.runId !== 'string' || !b.run.runId)))
       throw unavailable('The original service binding is invalid. Preserve its namespace and repair the original binding; no replacement was created.', 'CAPSULE_RUNTIME_BINDING_INVALID')
     if (b.launch) parsePreparedTerminal(b.launch)
+    if (b.launchRuntime) parseCreationRuntime(b.launchRuntime)
     if (b.stop) parsePreparedTerminalStop(b.stop)
     if ((b.stop && b.stop.run.runId !== b.run?.runId) || (b.stop === null) !== (b.stopPhase === null) ||
       (b.launch === null) !== (b.launchPhase === null) || b.run !== null && b.launchPhase !== 'confirmed' ||
       b.launchPhase === 'confirmed' && b.run === null || b.desired === 'running' && b.stop !== null && !['confirmed', 'not_applied'].includes(b.stopPhase ?? '') ||
       b.command !== null && !['start', 'stop'].includes(b.command.kind))
       throw unavailable('The original service lifecycle identities or phases disagree. Preserve the binding and its Runs.', 'CAPSULE_RUNTIME_BINDING_INVALID')
-    for (const id of [b.launchCommandId, b.stopCommandId]) if (id !== undefined && id !== null &&
+    for (const id of [b.launchCommandId, b.stopCommandId, b.recoveryOperationId]) if (id !== undefined && id !== null &&
       (typeof id !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/u.test(id)))
       throw unavailable('The original management operation ID is invalid.', 'CAPSULE_RUNTIME_BINDING_INVALID')
     if (b.launchPhase === 'not_applied' && b.launchOutcome?.disposition !== 'not_applied' ||
@@ -225,6 +229,15 @@ export class CapsuleRunManager {
       if (record.receipt && (record.receipt.operationId !== id || record.receipt.kind !== record.command.kind))
         throw unavailable('The original command receipt names another operation.', 'CAPSULE_RUNTIME_OPERATION_CONFLICT')
       if (record.receipt) parseCapsuleRuntimeResult({ revision: 0, desired: 'unconfigured', phase: 'unconfigured', stateDirectory: this.stateDirectory, socketPath: this.socketPath, run: null, runtime: null, operation: record.receipt, issue: null })
+      if (record.recovery) {
+        parseCapsuleRuntimeRecovery(record.recovery)
+        if (record.recoveryLaunch) parsePreparedTerminal(record.recoveryLaunch)
+        if (record.command.kind !== 'start' || record.recovery.operationId !== id || !record.recoveryLaunch ||
+          record.recoveryLaunch.createOperationId !== record.recovery.target.createOperationId ||
+          createHash('sha256').update(record.recoveryLaunch.launch).digest('hex') !== record.recovery.target.launchDigest ||
+          !isDeepStrictEqual((record.command.params as CapsuleRuntimeParamsMap['capsule.runtime.start']).recovery, record.recovery.target))
+          throw unavailable('The retained retirement does not belong to this original recovery command.', 'CAPSULE_RUNTIME_OPERATION_CONFLICT')
+      }
       return record
     } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error }
   }
@@ -370,7 +383,7 @@ export class CapsuleRunManager {
     if (b.run && terminalRun(run)) {
       if (b.desired === 'stopped') { if (b.stop && b.stopPhase !== 'confirmed') { b.stopPhase = 'confirmed'; await this.save(b) }; return { binding: b, run } }
       b.run = null; b.launch = null; b.launchPhase = null; b.stop = null; b.stopPhase = null
-      delete b.launchOutcome; delete b.stopOutcome; delete b.launchCommandId; delete b.stopCommandId
+      delete b.launchOutcome; delete b.stopOutcome; delete b.launchCommandId; delete b.stopCommandId; delete b.recoveryOperationId
       await this.save(b)
     }
     if (b.desired === 'stopped') {
@@ -399,6 +412,7 @@ export class CapsuleRunManager {
           args: [capsuleRuntimeEntrypoint(), 'serve', '--state-directory', b.stateDirectory, '--socket', b.socketPath],
           workspacePath: b.stateDirectory, env: { ELECTRON_RUN_AS_NODE: '1' }, createOperationId: mintObjectId() })
         b.launchPhase = 'prepared'
+        b.launchRuntime = await this.client.terminalCreationRuntimeIdentity()
         b.launchCommandId = b.command?.kind === 'start' ? b.command.params.operationId : null
         await this.save(b)
       }
@@ -466,6 +480,134 @@ export class CapsuleRunManager {
     }
     return base
   }
+  private async recoveryObservation(observed: CapsuleRuntimeObservation, b: Binding | null, record?: CommandRecord | null): Promise<CapsuleRuntimeObservation> {
+    if (record?.recovery) observed.recovery = structuredClone(record.recovery)
+    if (b?.launch && b.launchPhase === 'dispatched' && !b.run) {
+      if (!observed.recovery && b.recoveryOperationId) {
+        const pending = await this.commandRecord(b.recoveryOperationId)
+        if (pending?.recovery) observed.recovery = structuredClone(pending.recovery)
+        else if (observed.issue) observed.issue.recovery = `The original recovery operation ${b.recoveryOperationId} has no readable intent. Preserve its record and original binding; do not submit another retirement.`
+      }
+      try {
+        observed.recoveryTarget = { revision: b.revision, managementOperationId: b.launchCommandId ?? null,
+          createOperationId: b.launch.createOperationId, launchDigest: createHash('sha256').update(b.launch.launch).digest('hex'),
+          runtime: b.launchRuntime ?? null }
+        if (!b.launchRuntime && observed.issue) observed.issue.recovery += ' This older binding did not record its original Native Runtime identity; establish that exact owner from original authoritative records before supplying a recovery target. The current listener is not proof of the old owner.'
+      } catch { /* Missing Runtime identity stays unknown; reading never supplies a guessed recovery target. */ }
+    }
+    return observed
+  }
+  private matchesRecoveryBinding(b: Binding | null, target: CapsuleRuntimeRecoveryTarget): b is Binding {
+    return !!b?.launch && b.revision === target.revision && b.launchPhase === 'dispatched' && !b.run &&
+      b.desired === 'running' && b.launch.createOperationId === target.createOperationId &&
+      (b.launchCommandId ?? null) === target.managementOperationId &&
+      (!b.launchRuntime || isDeepStrictEqual(b.launchRuntime, target.runtime)) &&
+      createHash('sha256').update(b.launch.launch).digest('hex') === target.launchDigest
+  }
+  /** One explicit retry-safe retirement intent; never resubmit the original Start. */
+  private async recover(command: Command, b: Binding | null, retained?: CommandRecord): Promise<CapsuleRuntimeObservation> {
+    const target = (command.params as CapsuleRuntimeParamsMap['capsule.runtime.start']).recovery!
+    const path = join(this.commandsDirectory, `${command.params.operationId}.json`)
+    if (retained?.phase === 'committed' || retained?.recovery?.phase === 'not_applied') return await this.recoveryObservation(await this.observe(b, command, undefined, retained.receipt), b, retained)
+    if (retained?.recovery && ['retired', 'retained'].includes(retained.recovery.phase) &&
+      b?.command?.params.operationId === command.params.operationId && isDeepStrictEqual(b.command, command) && b.revision === target.revision + 1) {
+      // A durable binding can outlive the observer of the following command-journal write.
+      await this.confirmDurable(this.path)
+      retained.phase = 'committed'
+      await durableWriteFile(path, JSON.stringify(retained) + '\n', { requireDirectorySync: true })
+      return await this.recoveryObservation(await this.observe(b, command, undefined, retained.receipt), b, retained)
+    }
+    if (command.params.expectedRevision !== target.revision || !this.matchesRecoveryBinding(b, target))
+      throw unavailable('The recovery target does not match the original revision, management operation and complete frozen creation. The binding and Runs were preserved.', 'CAPSULE_RUNTIME_RECOVERY_CONFLICT')
+    const originalLaunch = b.launch!
+    await this.native('connect', () => this.client.connectRuntime())
+    const record: CommandRecord = retained ?? { schema: 'agentmux.capsule-command.v1', command, phase: 'prepared', recovery: { operationId: command.params.operationId, target, phase: 'intent' }, recoveryLaunch: structuredClone(originalLaunch) }
+    if (!record.recovery || !isDeepStrictEqual(record.recovery.target, target))
+      throw unavailable('The recovery command has no matching original retirement intent.', 'CAPSULE_RUNTIME_OPERATION_CONFLICT')
+    if ((await this.client.terminalCreationRuntimeIdentity()).runtimeId !== target.runtime.runtimeId)
+      throw unavailable('The recovery fence belongs to another persistent Runtime. Preserve its original command and namespace.', 'CAPSULE_RUNTIME_RECOVERY_CONFLICT')
+    if (!retained) {
+      if (!b.launchRuntime && !isDeepStrictEqual(await this.client.terminalCreationRuntimeIdentity(), target.runtime))
+        throw unavailable('The observed Native Runtime changed before retirement. Inspect the original binding again.', 'CAPSULE_RUNTIME_RECOVERY_CONFLICT')
+      if (b.recoveryOperationId && b.recoveryOperationId !== command.params.operationId) {
+        const previous = await this.commandRecord(b.recoveryOperationId)
+        if (previous?.recovery?.phase !== 'not_applied') throw new AgentMuxError(
+          'This original creation already has a recovery operation. Inspect and continue that exact operation without another retirement.', 'CAPSULE_RUNTIME_RECOVERY_CONFLICT', JSON.stringify({ operationId: b.recoveryOperationId }))
+      }
+    }
+    let invoked = !!retained
+    try {
+      if (!retained) {
+        // The command owns the target; the existing binding only references that original operation.
+        await durableWriteFile(path, JSON.stringify(record) + '\n', { requireDirectorySync: true })
+        b.recoveryOperationId = command.params.operationId
+        await this.save(b)
+        await this.confirmDurable(this.path)
+      }
+      const retireOriginal = async () => await this.native(`retire:${command.params.operationId}`, async () => {
+        invoked = true
+        const result = await this.client.retirePreparedTerminalCreation(originalLaunch, target.runtime)
+        record.recovery = { operationId: command.params.operationId, target, phase: result.outcome, runtime: result.runtime,
+          ...(result.outcome === 'retained' ? { run: { runId: result.run.runId } } : {}) }
+        // Late replies remain durable even after this observer has disconnected.
+        const latest = await this.commandRecord(command.params.operationId) ?? record
+        latest.recovery = record.recovery
+        await durableWriteFile(path, JSON.stringify(latest) + '\n', { requireDirectorySync: true })
+        return result
+      })
+      if (record.recovery.phase !== 'retired' && record.recovery.phase !== 'retained') {
+        if (!retained) {
+          const result = await retireOriginal()
+          if (result.outcome === 'retained') {
+            b.run = { runId: result.run.runId }; b.launchPhase = 'confirmed'
+          }
+        } else {
+          const result = await this.native(`retirement:${command.params.operationId}`, () => this.client.observePreparedTerminalCreationRetirement(originalLaunch, target.runtime))
+          if (result.outcome === 'retired') record.recovery = { operationId: command.params.operationId, target, phase: 'retired', runtime: result.runtime }
+          else {
+            // not_retired does not prove nonapplication. Only the exact retained frozen launch can reconnect.
+            const original = await this.native(`creation:${launchKey(originalLaunch)}`, () => this.client.inspectPreparedTerminal(originalLaunch))
+            if (original) record.recovery = { operationId: command.params.operationId, target, phase: 'retained', runtime: result.runtime, run: { runId: original.runId } }
+            else {
+              // Explicitly continue this same monotonic future fence; Native alone resolves its physical owner.
+              await retireOriginal()
+            }
+          }
+        }
+      }
+      // Confirmation must be durable before replacing the original launch or admitting any new key.
+      await durableWriteFile(path, JSON.stringify(record) + '\n', { requireDirectorySync: true })
+      await this.confirmDurable(path)
+      if (record.recovery.phase === 'retired') {
+        b.run = null; b.launch = null; b.launchPhase = null; b.stop = null; b.stopPhase = null
+        delete b.launchOutcome; delete b.stopOutcome; delete b.launchCommandId; delete b.stopCommandId
+      } else if (record.recovery.phase === 'retained') {
+        const original = await this.native(`creation:${launchKey(originalLaunch)}`, () => this.client.inspectPreparedTerminal(originalLaunch, record.recovery!.run))
+        // An exact status miss is authoritative absence of this retained Run; converge owns its ordinary terminal recovery.
+        b.run = { runId: original?.runId ?? record.recovery.run!.runId }; b.launchPhase = 'confirmed'
+      }
+      b.revision++; b.command = command; b.desired = 'running'
+      delete b.recoveryOperationId
+      await this.save(b)
+      record.phase = 'committed'
+      await durableWriteFile(path, JSON.stringify(record) + '\n', { requireDirectorySync: true })
+      b = (await this.converge(b)).binding
+      const observation = await this.observe(b, command)
+      if (observation.operation) await this.retainReceipt(command.params.operationId, observation.operation.phase, observation.operation.failure)
+      return await this.recoveryObservation(observation, b, await this.commandRecord(command.params.operationId))
+    } catch (error) {
+      // Preserve an acknowledged receipt if one exists; a lost observation never rewrites the old Start as not_applied.
+      const saved = await this.commandRecord(command.params.operationId)
+      if (saved?.recovery && !['retired', 'retained'].includes(saved.recovery.phase)) {
+        const phase = invoked ? 'unknown' : 'not_applied'
+        saved.recovery.phase = phase
+        saved.receipt = { operationId: command.params.operationId, kind: 'start', phase, failure: this.failure(error), firstFailure: saved.receipt?.firstFailure ?? this.failure(error) }
+        await durableWriteFile(path, JSON.stringify(saved) + '\n', { requireDirectorySync: true }).catch(() => {})
+      }
+      const current = await this.load()
+      return await this.recoveryObservation(await this.observe(current, command, error, saved?.receipt), current, await this.commandRecord(command.params.operationId))
+    }
+  }
   private async manage<M extends CapsuleRuntimeMethod>(method: M, value: CapsuleRuntimeParamsMap[M]): Promise<CapsuleRuntimeObservation> {
     const params = parseCapsuleRuntimeParams(method, value)
     let b = await this.load()
@@ -474,7 +616,7 @@ export class CapsuleRunManager {
       const record = id ? await this.commandRecord(id) : b?.command ? await this.commandRecord(b.command.params.operationId) : null
       const observed = await this.observe(b, record?.command, undefined, record?.receipt)
       if (id && !record) observed.operation = null
-      return observed
+      return await this.recoveryObservation(observed, b, record)
     }
     await this.settlePending()
     b = await this.load()
@@ -483,9 +625,11 @@ export class CapsuleRunManager {
     await mkdir(this.commandsDirectory, { recursive: true, mode: 0o700 })
     const path = join(this.commandsDirectory, `${command.params.operationId}.json`)
     try {
-      const retained = JSON.parse(await readFile(path, 'utf8')) as CommandRecord
+      const retained = await this.commandRecord(command.params.operationId)
+      if (!retained) throw Object.assign(new Error('The command was not found.'), { code: 'ENOENT' })
       if (retained.schema !== 'agentmux.capsule-command.v1' || !['prepared', 'committed'].includes(retained.phase) ||
         !isDeepStrictEqual(retained.command, command)) throw unavailable('This operation ID already belongs to a different service command or invalid record.', 'CAPSULE_RUNTIME_OPERATION_CONFLICT')
+      if (command.kind === 'start' && (command.params as CapsuleRuntimeParamsMap['capsule.runtime.start']).recovery) return await this.recover(command, b, retained)
       const observation = await this.observe(b, command, undefined, retained.receipt)
       if (retained.phase === 'prepared' && b?.command?.params.operationId !== command.params.operationId) {
         observation.operation = { kind: command.kind, operationId: command.params.operationId, phase: 'unknown' }
@@ -494,6 +638,7 @@ export class CapsuleRunManager {
       }
       return observation
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    if (command.kind === 'start' && (command.params as CapsuleRuntimeParamsMap['capsule.runtime.start']).recovery) return await this.recover(command, b)
     if (command.params.expectedRevision !== (b?.revision ?? 0)) throw unavailable('The service intent revision changed. Inspect the original binding before a new command.', 'CAPSULE_RUNTIME_REVISION_CONFLICT')
     let stopRun = b?.run ?? null
     if (command.kind === 'stop' && !stopRun && b?.launchPhase === 'dispatched') {
@@ -522,7 +667,7 @@ export class CapsuleRunManager {
     if (!b) b = this.blank()
     else b.revision++
     b.desired = command.kind === 'start' ? 'running' : 'stopped'; b.command = command
-    if (command.kind === 'start' && (b.stopPhase === 'confirmed' || startFailed)) { b.run = null; b.launch = null; b.launchPhase = null; b.stop = null; b.stopPhase = null; delete b.launchOutcome; delete b.stopOutcome; delete b.launchCommandId; delete b.stopCommandId }
+    if (command.kind === 'start' && (b.stopPhase === 'confirmed' || startFailed)) { b.run = null; b.launch = null; b.launchPhase = null; b.stop = null; b.stopPhase = null; delete b.launchOutcome; delete b.stopOutcome; delete b.launchCommandId; delete b.stopCommandId; delete b.recoveryOperationId }
     if (stopFailed) { b.stop = null; b.stopPhase = null; delete b.stopOutcome; delete b.stopCommandId }
     await this.save(b)
     record.phase = 'committed'
