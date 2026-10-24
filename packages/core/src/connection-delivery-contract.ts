@@ -73,7 +73,7 @@ export type ConnectionDeliveryObservation = {
   reason?: 'not-started' | 'access-unconfirmed' | 'source-unconfirmed' | 'source-gap' | 'content-unconfirmed' | 'storage-unconfirmed' | 'adapter-unavailable' | 'credential-missing' | 'credential-format-unsupported' | 'credential-unavailable' | 'effect-unconfirmed'
 }
 export type ConnectionDeliveryOperationInput = { operationId: string }
-export type ConnectionDeliveryListInput = { connectionId: string; bindingId: string; bindingRevision: number; after?: string; afterContent?: string; limit?: number }
+export type ConnectionDeliveryListInput = { connectionId: string; bindingId: string; bindingRevision: number; after?: string; afterContent?: string; limit?: number; order?: 'oldest' | 'newest' }
 export type ConnectionDeliveryParamsMap = {
   'connection.delivery.inspect': ConnectionDeliveryOperationInput
   'connection.delivery.ls': ConnectionDeliveryListInput

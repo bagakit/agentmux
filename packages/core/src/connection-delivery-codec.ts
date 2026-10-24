@@ -147,9 +147,10 @@ export function parseConnectionDeliverySourceObservation(value: unknown): Connec
 }
 export function parseConnectionDeliveryParams<M extends ConnectionDeliveryMethod>(method: M, value: unknown): ConnectionDeliveryParamsMap[M] {
   if (method !== 'connection.delivery.ls') { const p = object(value, ['operationId']); return { operationId: text(p.operationId) } as ConnectionDeliveryParamsMap[M] }
-  const p = object(value, ['connectionId', 'bindingId', 'bindingRevision', 'after', 'afterContent', 'limit'])
+  const p = object(value, ['connectionId', 'bindingId', 'bindingRevision', 'after', 'afterContent', 'limit', 'order'])
   const limit = p.limit === undefined ? undefined : integer(p.limit, 1); if (limit !== undefined && limit > 100) fail()
-  return { connectionId: text(p.connectionId), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1), ...(p.after === undefined ? {} : { after: text(p.after) }), ...(p.afterContent === undefined ? {} : { afterContent: text(p.afterContent) }), ...(limit === undefined ? {} : { limit }) } as ConnectionDeliveryParamsMap[M]
+  if (p.order !== undefined && p.order !== 'oldest' && p.order !== 'newest') fail()
+  return { connectionId: text(p.connectionId), bindingId: text(p.bindingId), bindingRevision: integer(p.bindingRevision, 1), ...(p.after === undefined ? {} : { after: text(p.after) }), ...(p.afterContent === undefined ? {} : { afterContent: text(p.afterContent) }), ...(limit === undefined ? {} : { limit }), ...(p.order === undefined ? {} : { order: p.order }) } as ConnectionDeliveryParamsMap[M]
 }
 export function parseConnectionDeliveryResult<M extends ConnectionDeliveryMethod>(method: M, value: unknown, input: ConnectionDeliveryParamsMap[M]): ConnectionDeliveryResultMap[M] {
   if (method === 'connection.delivery.ls') {

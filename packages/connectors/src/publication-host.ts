@@ -470,7 +470,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
   async list(value: ConnectionDeliveryListInput) {
     const input = parseConnectionDeliveryParams('connection.delivery.ls', value), binding = this.options.bindings.readExact(input.bindingId, input.bindingRevision)
     if (!binding || binding.connectionId !== input.connectionId) throw new AgentMuxError('The delivery audience does not match this exact Binding.', 'PUBLICATION_SOURCE_CONFLICT')
-    const deliveries = this.store.list(binding, input.limit ?? 30, input.after).map(publicDelivery)
+    const deliveries = this.store.list(binding, input.limit ?? 30, input.after, input.order).map(publicDelivery)
     const lane = this.lanes.get(binding.bindingId), sourceObservation = lane?.binding.revision === binding.revision ? lane.sourceObservation : undefined
     const effectObservation = this.effectObservation(binding)
     return { ...(sourceObservation ? { sourceObservation: { ...sourceObservation } } : {}), ...(effectObservation ? { effectObservation } : {}), deliveries, next: deliveries.length === (input.limit ?? 30) ? deliveries.at(-1)!.operationId : null, observation: this.observation(binding.bindingId, binding.revision), coverage: this.store.coverage(binding, input.limit ?? 30, input.afterContent) }

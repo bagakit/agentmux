@@ -57,7 +57,7 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
   const [connection, binding, outgoing, incoming] = await Promise.all([
     reading(() => owner.inspect({ connectionId: target.connectionId })),
     reading(() => owner.bindings!.inspect({ bindingId: target.bindingId })),
-    reading(() => owner.delivery!.list({ connectionId: target.connectionId, bindingId: target.bindingId, bindingRevision: target.bindingRevision, limit: groupWindowLimit, ...(window.after ? { after: window.after } : {}), ...(window.afterContent ? { afterContent: window.afterContent } : {}) })),
+    reading(() => owner.delivery!.list({ connectionId: target.connectionId, bindingId: target.bindingId, bindingRevision: target.bindingRevision, order: 'newest', limit: groupWindowLimit, ...(window.after ? { after: window.after } : {}), ...(window.afterContent ? { afterContent: window.afterContent } : {}) })),
     reading(() => owner.ingress!.listAudience!({ application: { domain: target.domain, appId: target.appId }, externalConversationId: target.externalConversationId, limit: groupWindowLimit, ...(window.beforeIngressId ? { beforeIngressId: window.beforeIngressId } : {}) }))
   ])
   const c = connection.value?.connection, b = binding.value?.binding

@@ -267,13 +267,14 @@ export class PublicationStore {
     return this.database.prepare("SELECT operation_json,state FROM connector_publication_operation WHERE json_extract(operation_json,'$.payload.kind')='binding-lifecycle' AND state IN ('pending','dispatching','unknown') ORDER BY ordinal")
       .all().map(row => this.read(row)!)
   }
-  list(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, limit = 30, after?: string): PublicationOperation[] {
+  list(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, limit = 30, after?: string, order: 'oldest' | 'newest' = 'oldest'): PublicationOperation[] {
     if (!Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new AgentMuxError('Publication pages require a limit from 1 to 100.', 'INVALID_PUBLICATION_REQUEST')
     const cursor = after === undefined ? undefined : this.database.prepare('SELECT ordinal FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND operation_id=?')
       .get(boundary.bindingId, boundary.revision, after)
     if (after !== undefined && !cursor) throw new AgentMuxError('The publication cursor belongs to another audience or operation.', 'INVALID_PUBLICATION_REQUEST')
-    return this.database.prepare('SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND ordinal>? ORDER BY ordinal LIMIT ?')
-      .all(boundary.bindingId, boundary.revision, Number(cursor?.ordinal ?? 0), limit).map(row => this.read(row)!)
+    const direction = order === 'newest' ? 'DESC' : 'ASC', comparison = order === 'newest' ? '<' : '>'
+    return this.database.prepare(`SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=?${cursor ? ` AND ordinal${comparison}?` : ''} ORDER BY ordinal ${direction} LIMIT ?`)
+      .all(boundary.bindingId, boundary.revision, ...(cursor ? [cursor.ordinal!] : []), limit).map(row => this.read(row)!)
   }
   /** Lift only original authorized cuts. Current discovery supplies namespace, never a replacement cut. */
   checkpoint(boundary: PublicationBoundary, sourceHostId: string): ConversationCheckpoint {
