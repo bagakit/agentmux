@@ -20,7 +20,7 @@ const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null,
   listeners: new Map<string, Set<(...args: unknown[]) => void>>() }))
 export { bridge }
 vi.mock('node:os', async importOriginal => ({ ...await importOriginal<typeof import('node:os')>(), homedir: () => bridge.directory }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   safeStorage: { isAsyncEncryptionAvailable: async () => false,
     encryptStringAsync: async () => { throw new Error('Credential encryption is outside this input fixture') },
     decryptStringAsync: async () => { throw new Error('Credential decryption is outside this input fixture') } },
@@ -36,7 +36,9 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
     off: (channel: string, listener: (...args: unknown[]) => void) => bridge.listeners.get(channel)?.delete(listener),
     removeListener: (channel: string, listener: (...args: unknown[]) => void) => bridge.listeners.get(channel)?.delete(listener),
     send: vi.fn() },
-  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.directory, getAppPath: () => bridge.directory },
+  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.directory, getAppPath: () => bridge.directory,
+    once: vi.fn(), on: vi.fn(), off: vi.fn() },
+  globalShortcut: { register: vi.fn(() => true), unregister: vi.fn(), isRegistered: vi.fn(() => false) },
   ipcMain: { handle: (channel: string, handler: (...args: unknown[]) => unknown) => bridge.handlers.set(channel, handler),
     removeHandler: (channel: string) => bridge.handlers.delete(channel), on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
