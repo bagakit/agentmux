@@ -233,6 +233,9 @@ final class Provider: @unchecked Sendable {
         if params["restoreWindow"] != nil {
             throw ProviderError.coded("invalid_argument", "restoreWindow is not supported; target the exact native window explicitly")
         }
+        if let raw = params["noScreenshot"], raw.bool == nil {
+            throw ProviderError.coded("invalid_argument", "noScreenshot must be a protocol boolean")
+        }
         let query = try requiredString(params, "app")
         let windowId = try requestedWindowId(params)
         guard windowId != nil, params["windowIndex"] == nil else {
@@ -376,7 +379,7 @@ final class Provider: @unchecked Sendable {
                 "windows": [
                     "list": true,
                     "targetById": true,
-                    "targetByIndex": true,
+                    "targetByIndex": false,
                     "focus": false,
                     "moveResize": false,
                 ],
@@ -902,10 +905,6 @@ private func parsePid(_ query: String) -> pid_t? {
     return pid
 }
 
-private func matches(_ app: AppDescriptor, query: String) -> Bool {
-    app.name.caseInsensitiveCompare(query) == .orderedSame ||
-        app.bundleId?.caseInsensitiveCompare(query) == .orderedSame
-}
 
 private func pidIsLive(_ pid: pid_t) -> Bool {
     kill(pid, 0) == 0
@@ -2241,7 +2240,7 @@ private enum Input {
                     ? "bring the target window forward, run get-app-state again, and retry"
                     : "\(deliveredPresses) press(es) may already have been delivered; run get-app-state and verify state before retrying"
                 throw ProviderError.coded(
-                    "window_not_focused",
+                    deliveredPresses == 0 ? "window_not_focused" : "action_outcome_unknown",
                     "coordinate click aborted because target pid \(expected.ownerPID) window \(expected.windowID) is no longer the focused topmost recipient (current: \(actualDescription)); \(recovery)"
                 )
             }
@@ -2300,7 +2299,7 @@ private enum Input {
             let units = Array(String(character).utf16)
             guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true),
                   let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else {
-                throw ProviderError.coded("accessibility_error", "failed to create keyboard event")
+                throw ProviderError.coded(delivered == 0 ? "accessibility_error" : "action_outcome_unknown", "keyboard event allocation failed after \(delivered) posted event(s)")
             }
             units.withUnsafeBufferPointer { buffer in
                 if let address = buffer.baseAddress {
@@ -2335,7 +2334,10 @@ private enum Input {
         }
         func send(_ code: CGKeyCode, down: Bool) throws {
             try requireRecipient(targetWindow, deliveredEvents: delivered)
-            try keyEvent(code, down: down, flags: flags, pid: targetWindow.app.pid)
+            do { try keyEvent(code, down: down, flags: flags, pid: targetWindow.app.pid) }
+            catch {
+                throw ProviderError.coded(delivered == 0 ? "accessibility_error" : "action_outcome_unknown", "key event allocation failed after \(delivered) posted event(s); no remainder was replayed")
+            }
             delivered += 1
         }
         for modifier in parsed.modifiers {
@@ -2352,32 +2354,31 @@ private enum Input {
 
     static func pasteText(_ text: String, targetWindow: Snapshot) throws -> [String: Any] {
         try withNativeClipboard {
-            let prepared: ([NSPasteboardItem], Int) = try onMain {
-                let pasteboard = NSPasteboard.general
-                let previous: [NSPasteboardItem] = pasteboard.pasteboardItems?.map { item in
-                    let copy = NSPasteboardItem()
-                    for type in item.types { if let data = item.data(forType: type) { copy.setData(data, forType: type) } }
-                    return copy
-                } ?? []
-                pasteboard.clearContents()
-                guard pasteboard.setString(text, forType: .string) else {
-                    pasteboard.clearContents()
-                    if !previous.isEmpty { _ = pasteboard.writeObjects(previous) }
-                    throw ProviderError.coded("clipboard_write_failed", "temporary clipboard text was not accepted; no paste shortcut was posted")
+            try requireRecipient(targetWindow, deliveredEvents: 0)
+            let write: (accepted: Bool, changeCount: Int) = try onMain {
+                try requireRecipient(targetWindow, deliveredEvents: 0)
+                let item = NSPasteboardItem()
+                guard item.setString(text, forType: .string) else {
+                    throw ProviderError.coded("clipboard_write_failed", "could not prepare paste text; previous clipboard retained and no shortcut posted")
                 }
-                return (previous, pasteboard.changeCount)
-            }
-            var postingError: Error?
-            do { try pressKey("cmd+v", targetWindow: targetWindow) } catch { postingError = error }
-            let restoration: String = onMain {
                 let pasteboard = NSPasteboard.general
-                // A person or another process may copy while the paste is in flight.
-                guard pasteboard.changeCount == prepared.1 else { return "preserved_external_change" }
                 pasteboard.clearContents()
-                return prepared.0.isEmpty || pasteboard.writeObjects(prepared.0) ? "restored" : "failed"
+                let accepted = pasteboard.writeObjects([item])
+                return (accepted, pasteboard.changeCount)
             }
-            if let postingError { throw postingError }
-            return ["state": "unverified", "reason": "clipboard_paste", "clipboardRestoration": restoration]
+            guard write.accepted else {
+                return ["state": "unverified", "reason": "clipboard_write_unconfirmed", "clipboardChangeCount": write.changeCount,
+                        "error": ["code": "clipboard_write_failed", "message": "macOS did not confirm the clipboard write; no shortcut was posted"]]
+            }
+            do { try pressKey("cmd+v", targetWindow: targetWindow) }
+            catch {
+                return ["state": "unverified", "reason": "clipboard_paste_post_unconfirmed", "clipboardRestoration": "retained_for_paste",
+                        "clipboardChangeCount": write.changeCount, "error": nativeErrorPayload(error)]
+            }
+            // CGEvent posting provides no acknowledgement that the app consumed
+            // the pasteboard. Keep the requested text for that asynchronous read.
+            return ["state": "unverified", "reason": "clipboard_paste", "clipboardRestoration": "retained_for_paste",
+                    "clipboardChangeCount": write.changeCount]
         }
     }
 
@@ -3717,7 +3718,7 @@ private final class SocketListener: @unchecked Sendable {
         let authorizedPeer = NativePeerPolicy.isAuthorized(
             expectedPID: parentPID, actualPID: peerPID,
             expectedUID: getuid(), actualUID: uidKnown ? peerUID : nil
-        ) && peerPID.map { NativePeerAuthorizer.authorizes(pid: $0) } == true
+        ) && NativePeerAuthorizer.authorizes(auditToken: peerAuditToken(fd))
         let decoder = JSONDecoder()
         let reader = NativeNDJSONReader(descriptor: fd)
         NativeConnectionRequestLoop.run(readLine: { reader.readLine() }) { line in
@@ -3783,9 +3784,19 @@ private func peerProcessId(_ fd: Int32) -> pid_t? {
     var pid = pid_t(0)
     var length = socklen_t(MemoryLayout<pid_t>.size)
     let result = withUnsafeMutablePointer(to: &pid) { pointer in
-        getsockopt(fd, 0, 2, pointer, &length)
+        getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, pointer, &length)
     }
     return result == 0 && pid > 0 ? pid : nil
+}
+
+private func peerAuditToken(_ fd: Int32) -> Data? {
+    var token = audit_token_t()
+    var length = socklen_t(MemoryLayout<audit_token_t>.size)
+    let status = withUnsafeMutablePointer(to: &token) { pointer in
+        getsockopt(fd, SOL_LOCAL, LOCAL_PEERTOKEN, pointer, &length)
+    }
+    guard status == 0, length == MemoryLayout<audit_token_t>.size else { return nil }
+    return withUnsafeBytes(of: token) { Data($0) }
 }
 
 
@@ -3816,18 +3827,6 @@ private func printPermissionStatus() {
     print(#"{"accessibility":"\#(accessibility)","screenshots":"\#(screenshots)"}"#)
 }
 
-private func writePermissionStatus(to path: String) {
-    let snapshot = permissionStatusSnapshotSettled()
-    let accessibility = snapshot.accessibilityGranted ? "granted" : "not-granted"
-    let screenshots = snapshot.screenshotsGranted ? "granted" : "not-granted"
-    let text = #"{"accessibility":"\#(accessibility)","screenshots":"\#(screenshots)"}"#
-    do {
-        try text.write(toFile: path, atomically: true, encoding: .utf8)
-    } catch {
-        fputs("failed to write permission status: \(error)\n", stderr)
-        exit(1)
-    }
-}
 
 private func runStdio() {
     fputs("AgentMux Native provider must be launched by its owner in native mode.\n", stderr)
@@ -3879,7 +3878,7 @@ private func handleRequest(
     if let expected = request.expectedInstanceId, expected != provider.instanceId {
         return failed("instance_mismatch", "the original native process is unavailable")
     }
-    let mutation = NativeOperationPolicy.isMutation(request.method)
+    let mutation = NativeOperationPolicy.isMutation(request.method, includesScreenshot: request.params?["noScreenshot"]?.bool == false)
     if mutation {
         guard request.expectedInstanceId == provider.instanceId else {
             return failed("instance_mismatch", "native process changed; the original operation was not replayed")
@@ -4002,12 +4001,7 @@ if arguments.first == "--agent" {
     runPermissionCheck(initialPermission: PermissionKind.parse(arguments.dropFirst().first))
 } else if arguments.first == "--permission-status" {
     printPermissionStatus()
-} else if arguments.first == "--permission-status-file" {
-    guard arguments.count >= 2 else {
-        fputs("usage: agentmux-native-macos --permission-status-file <path>\n", stderr)
-        exit(2)
-    }
-    writePermissionStatus(to: arguments[1])
+
 } else {
     runStdio()
 }
