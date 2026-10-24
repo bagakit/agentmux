@@ -6,13 +6,14 @@ const { nativeRendererInput } = require('../settings-connections/native-input.cj
 const [html, privateRoot, evidence] = process.argv.slice(2)
 const popoverClarity = process.argv.includes('--popover-clarity')
 const refusalClarity = process.argv.includes('--refusal-clarity')
+const groupActivityActions = process.argv.includes('--group-activity-actions')
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
 const result = { passed: false, frames: [], scenes: [], interactions: [], hoverGeometry: {}, boundary: 'Actual production Workbench, split Regions, channel contributions, header/menu, original group form and CSS; controlled typed public connection/diagnosis/member/retained-link DTOs. Native pointer/keyboard operates the original components. No IPC/SDK, live account, delivery, installed App or healthy-Agent qualification.' }
 let win
 app.whenReady().then(async () => {
   try {
     win = new BrowserWindow({ width: 1380, height: 980, show: false, webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true, backgroundThrottling: false } })
-    await win.loadFile(html, { query: { 'header-status': '1', ...(popoverClarity ? { 'popover-clarity': '1' } : {}), ...(refusalClarity ? { 'refusal-clarity': '1' } : {}) } })
+    await win.loadFile(html, { query: { 'header-status': '1', ...(popoverClarity ? { 'popover-clarity': '1' } : {}), ...(refusalClarity ? { 'refusal-clarity': '1' } : {}), ...(groupActivityActions ? { 'group-activity-actions': '1' } : {}) } })
     const { read, until, settle, click, press } = nativeRendererInput(win, result.interactions, '')
     const region = '[data-workbench-region-id="channel-preview-region"]'
     const entry = adapter => region + ' [data-channel-entry="' + adapter + '"]'
@@ -76,6 +77,42 @@ app.whenReady().then(async () => {
     await until('window.channelEntryProof?.ready && document.querySelector(' + JSON.stringify(entry('discord')) + ')')
     await read('window.__connectionsTrustedEvents=[];for(const type of ["click","keydown","input","mousemove"])document.addEventListener(type,event=>window.__connectionsTrustedEvents.push({type,trusted:event.isTrusted,key:event.key}),true)')
     win.showInactive(); win.focus(); win.webContents.focus(); await until('document.hasFocus()')
+    if (groupActivityActions) {
+      await read('window.channelEntryProof.setScenario("mixed")')
+      const group = '.agent-connector-dialog [aria-label="Group delivery"]'
+      const overview = group + ' .connector-traffic-summary'
+      const problemAction = label => 'js:[...document.querySelectorAll(' + JSON.stringify(overview + ' button') + ')].find(node=>node.textContent===' + JSON.stringify(label) + ')'
+      for (const narrow of [false, true]) {
+        await layout(narrow); await open('feishu')
+        await until('document.querySelector(' + JSON.stringify(menu) + ')?.textContent.includes("Member request was refused")')
+        await capture(narrow ? 'activity-header-narrow' : 'activity-header-wide')
+        await click('js:[...document.querySelectorAll(".connector-header-menu__item")].find(node=>node.getAttribute("aria-label")?.includes("345678901234567890"))')
+        await until('document.querySelector(' + JSON.stringify(overview) + ')?.textContent.includes("Member request was refused")')
+        if (narrow) { win.setContentSize(520, 980); await until('innerWidth===520') }
+        await read('document.querySelector(' + JSON.stringify(group) + ').scrollIntoView({block:"start"})')
+        assert.equal(await read('(document.querySelector(' + JSON.stringify(overview) + ').textContent.match(/Member request was refused/g)||[]).length'), 1)
+        assert.equal(await read('document.querySelector(' + JSON.stringify(overview) + ').textContent.includes("5 recent updates delivered")'), true)
+        await capture(narrow ? 'group-activity-narrow' : 'group-activity-wide')
+        if (!narrow) {
+          for (const [label, section] of [['View content details', 'content'], ['View delivery details', 'receipts']]) {
+            await click(problemAction(label))
+            await until('document.activeElement===document.querySelector(' + JSON.stringify('[data-receipt-section="' + section + '"]') + ')')
+            if (section === 'content') await capture('group-content-details-wide')
+          }
+        }
+        await click(problemAction('Member access'))
+        await until('document.activeElement===document.querySelector("[data-connection-section=members][aria-label=\\"Member access\\"]")')
+        if (narrow) await capture('group-member-access-narrow')
+        const report = await read('window.channelEntryProof.lastDiagnosis.groups.value.items[0]')
+        assert.equal(report.binding.value.activeInputGrants, 2); assert.equal(report.binding.value.activePermissionGrants, 1)
+        result.interactions.push({ kind: 'original-contextual-actions', narrow, inputGrants: report.binding.value.activeInputGrants, focus: await read('document.activeElement.outerHTML') })
+        await click('[aria-label="Close group setup"]'); await until('!document.querySelector(".agent-connector-dialog")')
+      }
+      result.writes = await read('window.channelEntryProof.requests.filter(request=>/configure|\\.bind$|\\.grant$|\\.pause$|\\.resume$|\\.detach$|\\.retry$|\\.create$/.test(request.method))')
+      assert.deepEqual(result.writes, []); assert.deepEqual(await read('window.channelEntryProof.errors'), [])
+      result.passed = true
+      return
+    }
     if (refusalClarity) {
       await read('window.channelEntryProof.setScenario("unsupported")')
       for (const narrow of [false, true]) {
