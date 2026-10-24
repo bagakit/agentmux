@@ -12,14 +12,24 @@ it('keeps a qualified identity small and literal above complete native Markdown 
     icon: { tag: 'custom_icon', img_key: 'confirmed-original-image', size: '24px 24px' } })
   expect(body(card).slice(1)).toEqual(feishuReplyElements(text))
   expect(body(card).some(node => node.tag === 'table')).toBe(true)
-  expect(body(card)[1].content).toContain('[message · source · agent]')
+  expect(body(card)[1]!.content).toContain('[message · source · agent]')
 })
 it.each(['agent', 'human', 'external', 'mixed', 'unknown'] as const)('retains complete body without inventing a %s portrait or name', kind => {
   const text = 'Complete original body\nNo avatar is available.'
   const card = feishuRoleCard(text, { kind })
-  expect(body(card)[0].icon).toBeUndefined()
-  expect(body(card)[0].text.content).toBe({ agent: 'Agent', human: 'User · via amux', external: 'External message', mixed: 'Mixed authors', unknown: 'Unknown author' }[kind])
+  expect(body(card)[0]!.icon).toMatchObject({ tag: 'standard_icon', size: '20px 20px' })
+  expect(body(card)[0]!.text.content).toBe({ agent: 'Agent', human: 'User · via amux', external: 'External message', mixed: 'Mixed authors', unknown: 'Unknown author' }[kind])
   expect(body(card).slice(1)).toEqual(feishuReplyElements(text))
+})
+it('keeps progress complete with native small Markdown, a compact portrait row and reduced padding', () => {
+  const text = '**Original progress**\n\nEvery original paragraph remains.\n\n```ts\nconst original = "完整正文";\n```'
+  const card = feishuRoleCard(text, { kind: 'agent', name: 'Exact sender', imageKey: 'confirmed-original-image' }, { phase: 'progress' })
+  expect(card.body).toMatchObject({ padding: '4px 8px 4px 8px', vertical_spacing: '4px' })
+  expect(body(card)[0]!.icon).toMatchObject({ tag: 'custom_icon', size: '16px 16px' })
+  expect(body(card).slice(1)).toEqual(feishuReplyElements(text).map(element => ({ ...element, text_size: 'notation' })))
+  const final = feishuRoleCard(text, { kind: 'agent' }, { phase: 'final' })
+  expect(final.body).toMatchObject({ padding: '12px 14px 12px 14px', vertical_spacing: '8px' })
+  expect(body(final).slice(1)).toEqual(feishuReplyElements(text))
 })
 it('uses exact source slices and measures the identity row in the native encoded request budget', () => {
   const text = '**Original source**\n\n' + '正文 😀 "quoted"\\literal\n'.repeat(900)
