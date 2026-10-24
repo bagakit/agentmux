@@ -240,7 +240,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
   private async region(input: RoomBindingBindInput): Promise<void> {
     if (!await readRoomTarget(this.options, input)) refuse('ROOM_BINDING_TARGET_CHANGED')
   }
-  private async cut(input: Pick<RoomBindingBindInput, 'executionHostId' | 'agentSessionId' | 'scope' | 'expectedSource'>): Promise<Pick<RoomBinding, 'sourceCheckpoints' | 'sourceFrontier'>> {
+  private async cut(input: Pick<RoomBinding, 'executionHostId' | 'agentSessionId' | 'scope'> & { expectedSource: RoomBindingBindInput['expectedSource'] }): Promise<Pick<RoomBinding, 'sourceCheckpoints' | 'sourceFrontier'>> {
     const ref = { hostId: input.executionHostId, agentSessionId: input.agentSessionId }
     let page: ConversationCheckpointPage
     try { page = parseConversationCheckpointPage(await this.options.checkpoint(ref), ref) }

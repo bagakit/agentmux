@@ -7,7 +7,7 @@ import type { AgentSessionHistorySource } from './types.js'
 export type RoomBindingAuthority = { kind: 'user' | 'device' | 'agent'; id: string }
 export type RoomBindingScope = {
   input: 'mentions-and-replies' | 'all-messages'
-  /** Existing grants retain assistant speech. Ordinary conversation sharing requires an explicit new Binding revision and cut. */
+  /** Immutable prior scopes and dedicated private-chat origins remain readable. */
   publication: 'future-native-user-facing' | 'future-shared-conversation'
 }
 export type RoomBindingTarget = { executionHostId: string; agentSessionId: string; regionAnchor?: { regionId: string } }
@@ -36,11 +36,17 @@ export type RoomBinding = Omit<RoomBindingTarget, 'regionAnchor'> & {
   publicationOrigin?: { createOperationId: string }
   authorizedBy: RoomBindingAuthority
 }
-export type RoomBindingBindInput = RoomBindingTarget & {
+/** Original recorded request shape, not permission to dispatch a new group request. */
+export type RoomBindingRecordedBindInput = RoomBindingTarget & {
   operationId: string; bindingId: string; connectionId: string; expectedConnectionRevision: number
   externalConversationId: string; scope: RoomBindingScope; expectedSource: AgentSessionHistorySource
   inputTarget?: RoomBindingInputTarget
 }
+/** Ordinary groups share one complete public conversation across every audience. */
+export type RoomBindingBindInput = Omit<RoomBindingRecordedBindInput, 'scope'> & {
+  scope: { input: RoomBindingScope['input']; publication: 'future-shared-conversation' }
+}
+export type RoomBindingRecordedRelinkInput = RoomBindingRecordedBindInput & { expectedRevision: number }
 /** Relinking includes an explicit fresh source cut, also when continuing a paused binding to the same audience. */
 export type RoomBindingRelinkInput = RoomBindingBindInput & { expectedRevision: number }
 export type RoomBindingNoticeEvent = 'connected' | 'disconnected' | 'paused' | 'resumed' | 'updated'
