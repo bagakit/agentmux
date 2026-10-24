@@ -1,7 +1,7 @@
 import type { ConnectionSetupPermissionPurpose, ConnectionSetupPermissionReview } from '@agentmux/core/connections'
 import type { SetupPermissionPlan } from '../../connection-setup-adapter.js'
 
-const messages = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg'] as const
+const messages = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:message.reactions:write_only'] as const
 const groups = ['im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only'] as const
 const record = (value: unknown): Record<string, unknown> | null => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 /** Lossless local support, not an assertion about every native scope ID representation. */

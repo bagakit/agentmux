@@ -50,6 +50,8 @@ export type DurableIngressOptions = {
   authenticators: readonly IngressAuthenticator[]
   /** Resolve only an authenticated, retained, unclaimed input before borrowing Core. */
   prepareInput?(record: ConnectionIngressMessage): Promise<{ state: 'ready' } | { state: 'refused'; code: string }>
+  /** Optional publication feedback follows authorized intake, never owns Agent input. */
+  queryReceived?(binding: RoomBinding, record: ConnectionIngressMessage): void
   /** Borrow original confirmed publication identities; never a second history or authority owner. */
   contextPublications?: Pick<import('./publication-store.js').PublicationStore, 'knownContextMessages'>
   /** Return the original executing Host's client; Region occupants and focus are not routes. */
@@ -94,6 +96,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     this.safe(() => this.database.exec(`
       CREATE TABLE IF NOT EXISTS connection_ingress_message (sequence INTEGER PRIMARY KEY AUTOINCREMENT, ingress_id TEXT NOT NULL UNIQUE, domain TEXT NOT NULL, app_id TEXT NOT NULL, message_id TEXT NOT NULL, connection_id TEXT NOT NULL, event_json TEXT NOT NULL, record_json TEXT NOT NULL, UNIQUE(domain, app_id, message_id));
       CREATE TABLE IF NOT EXISTS connection_ingress_event (domain TEXT NOT NULL, app_id TEXT NOT NULL, event_id TEXT NOT NULL, ingress_id TEXT NOT NULL, event_json TEXT NOT NULL, raw_payload TEXT NOT NULL, PRIMARY KEY(domain, app_id, event_id));
+      CREATE INDEX IF NOT EXISTS connection_ingress_query_input ON connection_ingress_message(json_extract(record_json,'$.input.hostId'),json_extract(record_json,'$.input.agentSessionId'),json_extract(record_json,'$.input.expectedRun.runId'),json_extract(record_json,'$.input.messageId'));
       CREATE INDEX IF NOT EXISTS connection_ingress_received ON connection_ingress_message(connection_id,sequence) WHERE json_extract(record_json,'$.state')='received';
       CREATE UNIQUE INDEX IF NOT EXISTS connection_ingress_input_operation ON connection_ingress_message(json_extract(record_json,'$.input.operationId')) WHERE json_extract(record_json,'$.input.operationId') IS NOT NULL;
     `))
@@ -376,6 +379,12 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     let intake = this.read(ingressId)
     if (!intake) fail('UNKNOWN_CONNECTION_INGRESS')
     if (intake.kind === 'action') return intake.state === 'received' ? await this.dispatchAction(intake) : await this.inspect({ ingressId })
+    if (intake.state === 'received' && intake.conversationKind === 'group' && this.options.queryReceived) {
+      // Receipt feedback needs only durable authenticated intake and the original addressed authority.
+      // Pending reply qualification still follows the original path below; no Core record is fabricated.
+      try { const original = this.authorize(intake); this.options.queryReceived(original.binding, intake) }
+      catch { /* This optional feedback cannot decide or block original input; deliver records its own authority result below. */ }
+    }
     if (intake.conversationKind === 'group' && intake.code !== 'INGRESS_CONTENT_UNSUPPORTED' && intake.group?.target && !intake.group.recorded && intake.group.recording?.state !== 'refused') {
       try { intake = await this.recordGroup(intake) }
       catch (error) {
@@ -411,6 +420,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       this.transaction(() => { const current = this.read(ingressId)!; if (current.kind !== 'action' && current.state === 'received') this.write({ ...current, state: 'refused', code: error.code }) })
       return await this.inspect({ ingressId })
     }
+    this.options.queryReceived?.(original.binding, record)
     const client = this.options.core(original.binding.executionHostId, original.author.authoritySource?.executionRuntimeId)
     if (!client) fail('INGRESS_CORE_UNAVAILABLE')
     const exact = await client.readAgentSession(original.binding.agentSessionId, original.author.authoritySource?.executionRuntimeId)

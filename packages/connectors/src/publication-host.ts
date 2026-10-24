@@ -28,7 +28,7 @@ export interface PublicationPermissionsPort {
 }
 export type PublicationObservation = ConnectionDeliveryObservation
 type Lane = { binding: RoomBinding; abort: AbortController; dirty: boolean; notice?: PublicationOperation; work?: Promise<void> | undefined; inspection?: Promise<void> | undefined; inspectionAfter?: string; watch?: ConversationObservationHandle | undefined; watchViewId?: string | undefined; permissionStop?: (() => void) | undefined; observation: PublicationObservation; sourceObservation?: ConnectionDeliverySourceObservation; gapAfter?: number; view?: string | undefined; viewId?: string | undefined; read?: { after: ConversationCheckpoint; cursor?: string; pending?: ConversationWindowAssembly | undefined } | undefined }
-export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; speaker?: PublicationSpeakerReader }
+export type PublicationHostOptions = { connections: ConnectionHost; bindings: RoomBindingReadPort; conversation: PublicationConversationPort; permissions?: PublicationPermissionsPort; store?: PublicationStore; queryFeedback?: true; speaker?: PublicationSpeakerReader }
 
 
 /** Durable external publication. Each Binding has an independent read/effect lane, outside original Core input. */
@@ -69,6 +69,18 @@ export class PublicationHost implements ConnectionDeliveryPort {
         } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' } }
         this.wake(lane)
       } else if (!recoveryOnly || lane.observation.state !== 'ready' || !lane.watch || lane.watch.closed?.aborted) this.wake(lane)
+    }
+  }
+  /** Optional feedback has no network work on the ingress path; its durable effect wakes only this audience. */
+  receiveQuery(binding: RoomBinding, record: import('@agentmux/core/connections').ConnectionIngressMessage): void {
+    const lane = this.lanes.get(binding.bindingId)
+    try {
+      if (!this.authorized(binding) || this.options.connections.publicationAdapter(binding.connectionId)?.queryFeedback !== true) return
+      this.store.queueQueryReceived(binding, record)
+      if (lane) this.wake(lane)
+    } catch {
+      if (lane) lane.observation = { state: 'unavailable', reason: 'storage-unconfirmed' }
+      // The captured input/native adoption window recovers this same effect; input remains usable.
     }
   }
   /** A member rule changes only existing lanes for that original application; receiver configuration is unchanged. */
@@ -215,7 +227,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       const resolvedText = await this.resolve(reference, ordered, signal, binding, adapter)
       const speakers = await this.speakers(reference, ordered, signal)
       const questions = adapter.questionActions ? this.options.permissions?.questions?.(binding, ordered) : undefined
-      this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, speakers, fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(adapter.fragmentText ? { fragmentText: (payload, speaker) => adapter.fragmentText!(payload, binding, speaker) } : {}), ...(questions ? { questions } : {}) })
+      this.store.commitPage(binding, state.after, page, () => this.authorized(binding), { units: ordered, resolvedText, speakers, ...(this.options.queryFeedback && adapter.queryFeedback ? { queryFeedback: true } : {}), fragmentBytes: adapter.fragmentBytesFor?.(binding) ?? adapter.fragmentBytes, ...(adapter.fragmentText ? { fragmentText: (payload, speaker) => adapter.fragmentText!(payload, binding, speaker) } : {}), ...(questions ? { questions } : {}) })
       after = page.checkpoint; lane.view = page.window.view!; lane.viewId = page.window.id; lane.read = { after }
       if (lane.watchViewId !== lane.viewId) lane.dirty = true
       if (!page.more) { lane.read = undefined; break }
