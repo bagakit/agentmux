@@ -55,10 +55,45 @@ async function fixture() {
   const rpc = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: server.path } })
   cleanups.push(() => rpc.dispose())
   const cli = (args: string[], stdin = '') => runCompiledObjectCli(['--endpoint', `unix:${server.path}`, ...args], objectCliEnvironment(root), stdin)
-  return { root, workspacePath, source, store, client, connect, server, rpc, cli }
+  return { root, workspacePath, source, store, client, executorOwner, connect, server, rpc, cli }
 }
 
 describe('original native conversations through public RPC and the compiled CLI', () => {
+  it('shares the original native scan across simultaneous RPC and CLI reads without sharing Executor provenance', async () => {
+    const f = await fixture(), { config } = await f.executorOwner.resolve('native-custom')
+    await f.executorOwner.configure({ executorId: 'same-source-other-executor', config: {
+      ...config, label: 'Another Executor', command: (new URL('file:///').pathname + "private/unused-wrapper"), args: ['unused-launch-option']
+    } })
+    const provider = f.client.providers.get('codex'), originalScan = provider.listNativeSessions!
+    let release!: () => void, callersReady!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const entered = new Promise<void>(resolve => { callersReady = resolve })
+    const scan = vi.spyOn(provider, 'listNativeSessions').mockImplementation(async context => { await gate; return await originalScan(context) })
+    const originalList = f.client.listNativeAgentSessions.bind(f.client)
+    let callers = 0
+    vi.spyOn(f.client, 'listNativeAgentSessions').mockImplementation(input => {
+      callers += 1
+      if (callers === 2) callersReady()
+      return originalList(input)
+    })
+    const rpcRead = f.rpc.call('agent.native.ls', { hostId: 'local', executorId: 'native-custom', workspacePath: f.workspacePath })
+    const cliRead = f.cli(['agent', 'native', 'ls', '--host', 'local', '--executor', 'same-source-other-executor', '--workspace-path', f.workspacePath])
+    await entered
+    const concurrentScans = scan.mock.calls.length
+    release()
+    const [rpcResult, output] = await Promise.all([rpcRead, cliRead])
+    expect(callers).toBe(2); expect(concurrentScans).toBe(1)
+    expect(output.code, output.stdout + output.stderr).toBe(0)
+    const cliResult = JSON.parse(output.stdout).result
+    expect(rpcResult.executorId).toBe('native-custom')
+    expect(cliResult.executorId).toBe('same-source-other-executor')
+    for (const result of [rpcResult, cliResult]) expect(result.sessions).toEqual([expect.objectContaining({ source: f.source,
+      managed: { agentSessionId: 'original-managed', executorId: 'native-custom', run: { runId: 'original-run' }, state: 'active' } })])
+    expect(output.stdout).not.toContain('PRIVATE_SECRET'); expect(output.stdout).not.toContain('catalog-must-not-leak')
+    expect(f.connect).not.toHaveBeenCalled()
+    expect((await loadAgentSessions(f.store)).map(session => [session.agentSessionId, session.run.runId])).toEqual([['original-managed', 'original-run']])
+  })
+
   it('discovers the configured Provider directory and original managed identity while Runtime handshakes are unavailable', async () => {
     const f = await fixture(), params = { hostId: 'local', executorId: 'native-custom', workspacePath: f.workspacePath }
     const output = await f.cli(['agent', 'native', 'ls', '--host', 'local', '--executor', 'native-custom', '--workspace-path', f.workspacePath])
@@ -108,8 +143,9 @@ describe('original native conversations through public RPC and the compiled CLI'
       .rejects.toMatchObject({ code: 'INVALID_CLI_ARGUMENT' })
     expect(agentMuxCommandHelp('agent.open')).toContain('--native-source FILE|-')
     expect(agentMuxCommandHelp('agent.native.ls')).toContain('Read-only')
-    expect(agentMuxModuleSkill('agent')!).toContain('no user request is invented')
-    expect(agentMuxModuleSkill('agent')!).toContain('same --operation-id')
+    expect(agentMuxModuleSkill('agent')!).toContain('amux agent native --help')
+    expect(agentMuxCommandHelp('agent.native')).toContain('no user request is invented')
+    expect(agentMuxCommandHelp('agent.native')).toContain('same --operation-id')
   })
 
   it('checks catalog scope, capabilities, source identity and partial issues at the client boundary', async () => {

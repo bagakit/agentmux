@@ -11,6 +11,7 @@ import { AgentMuxClient, type AgentMuxAgentCreateInput } from '../src/client.js'
 import { AgentProviderRegistry } from '../src/agent-provider.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
 import { AgentMuxError } from '../src/errors.js'
+import { NativeJsonlHistoryReader } from '../src/native-jsonl-history-reader.js'
 import type { AgentMuxStoredAgentSession, AgentNativeResumeSource } from '../src/types.js'
 import type { CtxmuxAdapterRun, CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 
@@ -54,8 +55,117 @@ async function fixture(providerId: 'codex' | 'claude' = 'codex') {
   const catalog = await client.listNativeAgentSessions({ providerId, env }), source = catalog.sessions[0]!.source
   const create: AgentMuxAgentCreateInput = { createOperationId: 'original-native-resume-operation', providerId, executorId: 'private', workspacePath: workspace,
     nativeResumeSource: source, injectAgentMuxGuide: true, agentMuxNote: 'A generated note is not a request.', env, args: ['--private'] }
-  return { root, home, workspace, provider, file, record, client, inner, store, kernel, runs, catalog, source, create, start, stop, input, close, bind }
+  return { root, home, workspace, provider, file, record, client, inner, store, kernel, runs, catalog, source, create, env, start, stop, input, close, bind }
 }
+
+it.each(['codex', 'claude'] as const)('shares only simultaneous %s native scans and returns independent catalogs', async providerId => {
+  const f = await fixture(providerId), read = vi.spyOn(NativeJsonlHistoryReader, 'open')
+  const scan = vi.spyOn(f.provider, 'listNativeSessions')
+  const results = await Promise.all(Array.from({ length: 4 }, (_, index) => f.client.listNativeAgentSessions({ providerId,
+    workspacePath: f.workspace, env: index % 2 ? { PRIVATE_SOURCE: 'original', ...f.env } : { ...f.env, PRIVATE_SOURCE: 'original' } })))
+  expect(results).toHaveLength(4)
+  expect(scan).toHaveBeenCalledTimes(1)
+  expect(read.mock.calls.filter(([context]) => context.transcriptPath === f.file)).toHaveLength(1)
+  for (const result of results) expect(result.sessions.map(entry => entry.source)).toEqual([f.source])
+  results[0]!.issues.push({ code: 'CALLER_LOCAL', message: 'A caller observation is not shared Provider state.' })
+  results[0]!.sessions[0]!.title = 'Caller local title'
+  results[0]!.capabilities.providerResume = false
+  expect(results[1]!.issues).toEqual([])
+  expect(results[1]!.sessions[0]!.title).toBe(f.catalog.sessions[0]!.title)
+  expect(results[1]!.capabilities.providerResume).toBe(true)
+  const next = await f.client.listNativeAgentSessions({ providerId, workspacePath: f.workspace, env: { ...f.env, PRIVATE_SOURCE: 'original' } })
+  expect(scan).toHaveBeenCalledTimes(2)
+  expect(read.mock.calls.filter(([context]) => context.transcriptPath === f.file)).toHaveLength(2)
+  expect(next.sessions.map(entry => entry.source)).toEqual([f.source])
+  expect(f.start).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled()
+})
+
+it.each(['codex', 'claude'] as const)('keeps different %s source environments and directories separate', async providerId => {
+  const f = await fixture(providerId), otherHome = join(f.root, 'other-native-home')
+  const otherFile = f.file.replace(f.home, otherHome)
+  await mkdir(dirname(otherFile), { recursive: true }); await writeFile(otherFile, JSON.stringify(f.record) + '\n')
+  const otherEnv = providerId === 'codex' ? { CODEX_HOME: otherHome } : { CLAUDE_CONFIG_DIR: otherHome }
+  const scan = vi.spyOn(f.provider, 'listNativeSessions')
+  const [original, other, differentDirectory] = await Promise.all([
+    f.client.listNativeAgentSessions({ providerId, env: f.env, workspacePath: f.workspace }),
+    f.client.listNativeAgentSessions({ providerId, env: otherEnv, workspacePath: f.workspace }),
+    f.client.listNativeAgentSessions({ providerId, env: f.env, workspacePath: join(f.workspace, 'another') })
+  ])
+  expect(scan).toHaveBeenCalledTimes(3)
+  expect(original.sessions.map(entry => entry.source.nativeHandle.transcriptPath)).toEqual([f.file])
+  expect(other.sessions.map(entry => entry.source.nativeHandle.transcriptPath)).toEqual([otherFile])
+  expect(differentDirectory.sessions).toEqual([])
+})
+
+it('captures explicit source inputs without turning inherited environment into Provider overrides', async () => {
+  const f = await fixture(), env = { ...f.env, PRIVATE_SOURCE: 'original' }, request = { providerId: 'codex', workspacePath: f.workspace, env }
+  vi.stubEnv('PRIVATE_INHERITED_NATIVE_SOURCE', 'first')
+  const scan = vi.spyOn(f.provider, 'listNativeSessions')
+  const original = f.client.listNativeAgentSessions(request)
+  env.PRIVATE_SOURCE = 'changed'; request.workspacePath = join(f.workspace, 'changed')
+  vi.stubEnv('PRIVATE_INHERITED_NATIVE_SOURCE', 'second')
+  const next = f.client.listNativeAgentSessions({ providerId: 'codex', workspacePath: f.workspace, env: { ...f.env, PRIVATE_SOURCE: 'original' } })
+  const results = await Promise.all([original, next])
+  expect(scan).toHaveBeenCalledTimes(2)
+  expect(scan.mock.calls.map(([context]) => ({ env: context.env, workspacePath: context.workspacePath }))).toEqual([
+    { env: { ...f.env, PRIVATE_SOURCE: 'original' }, workspacePath: f.workspace },
+    { env: { ...f.env, PRIVATE_SOURCE: 'original' }, workspacePath: f.workspace }
+  ])
+  expect(results.map(result => result.sessions.map(entry => entry.source))).toEqual([[f.source], [f.source]])
+})
+
+it('projects each caller from its current managed identity after the shared Provider scan', async () => {
+  const f = await fixture()
+  await f.client.createAgentWithDelivery(f.create)
+  const created = (await loadAgentSessions(f.store))[0]!
+  const first = { ...created, agentSessionId: 'first-owned', executorId: 'first-executor', run: { runId: 'first-run' } }
+  const second = { ...created, agentSessionId: 'second-owned', executorId: 'second-executor', run: { runId: 'second-run' } }
+  vi.spyOn(f.store, 'loadMetadata').mockResolvedValueOnce([first]).mockResolvedValueOnce([second])
+  const scan = vi.spyOn(f.provider, 'listNativeSessions')
+  const results = await Promise.all([f.client.listNativeAgentSessions({ providerId: 'codex', env: f.env }),
+    f.client.listNativeAgentSessions({ providerId: 'codex', env: f.env })])
+  expect(scan).toHaveBeenCalledTimes(1)
+  expect(results.map(result => result.sessions.map(entry => entry.managed))).toEqual([
+    [{ agentSessionId: 'first-owned', executorId: 'first-executor', run: { runId: 'first-run' }, state: 'active' }],
+    [{ agentSessionId: 'second-owned', executorId: 'second-executor', run: { runId: 'second-run' }, state: 'active' }]
+  ])
+})
+
+it('does not merge another Core client or a replacement Provider into an original in-flight read', async () => {
+  const f = await fixture(), originalScan = f.provider.listNativeSessions!
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const scan = vi.spyOn(f.provider, 'listNativeSessions').mockImplementation(async context => { await gate; return await originalScan(context) })
+  const otherClient = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(join(f.root, 'other-sessions.json')), providers: [f.provider] })
+  cleanups.push(() => otherClient.dispose())
+  const original = f.client.listNativeAgentSessions({ providerId: 'codex', env: f.env })
+  const other = otherClient.listNativeAgentSessions({ providerId: 'codex', env: f.env })
+  const replacementScan = vi.fn(async (context: Parameters<typeof originalScan>[0]) => ({ ...await originalScan(context),
+    issues: [{ code: 'REPLACED_PROVIDER', message: 'This is the new Provider contribution.' }] }))
+  f.client.providers.replace({ ...f.provider, listNativeSessions: replacementScan })
+  const replacement = f.client.listNativeAgentSessions({ providerId: 'codex', env: f.env })
+  release()
+  const results = await Promise.all([original, other, replacement])
+  expect(scan).toHaveBeenCalledTimes(2); expect(replacementScan).toHaveBeenCalledTimes(1)
+  expect(results.map(result => result.sessions.map(entry => entry.source))).toEqual([[f.source], [f.source], [f.source]])
+  expect(results.map(result => result.issues.map(issue => issue.code))).toEqual([[], [], ['REPLACED_PROVIDER']])
+})
+
+it.each(['reject', 'throw'] as const)('releases a failed shared scan (%s) so the next original-source read can recover', async failureKind => {
+  const f = await fixture(), originalScan = f.provider.listNativeSessions!, failure = new Error('PRIVATE_NATIVE_READ_FAILED')
+  const scan = vi.spyOn(f.provider, 'listNativeSessions').mockImplementationOnce(() => {
+    if (failureKind === 'throw') throw failure
+    return Promise.reject(failure)
+  }).mockImplementation(originalScan)
+  const results = await Promise.allSettled([f.client.listNativeAgentSessions({ providerId: 'codex', env: f.env }),
+    f.client.listNativeAgentSessions({ providerId: 'codex', env: f.env })])
+  expect(results).toEqual([{ status: 'rejected', reason: failure }, { status: 'rejected', reason: failure }])
+  expect(scan).toHaveBeenCalledTimes(1)
+  const recovered = await f.client.listNativeAgentSessions({ providerId: 'codex', env: f.env })
+  expect(scan).toHaveBeenCalledTimes(2)
+  expect(recovered.sessions.map(entry => entry.source)).toEqual([f.source])
+  expect(f.start).not.toHaveBeenCalled(); expect(f.input).not.toHaveBeenCalled()
+})
 
 it.each(['codex', 'claude'] as const)('discovers persisted %s without Run control, filters exact cwd, and keeps valid candidates beside failed metadata', async providerId => {
   const f = await fixture(providerId)
@@ -79,7 +189,8 @@ it.each(['codex', 'claude'] as const)('discovers persisted %s without Run contro
 it.each(['codex', 'claude'] as const)('uses exact %s native resume argv with no generated Prompt, preserves native identity and replays one durable creation', async providerId => {
   const f = await fixture(providerId), receipt = await f.client.createAgentWithDelivery(f.create)
   const args = f.start.mock.calls[0]![0].args
-  expect(args).toEqual(providerId === 'codex' ? ['resume', 'private-native', '--dangerously-bypass-hook-trust', '--private'] : ['--resume', 'private-native', '--private'])
+  expect(args).toEqual(providerId === 'codex' ? ['--private', '--dangerously-bypass-hook-trust', 'resume', 'private-native']
+    : ['--resume', 'private-native', '--private', '--plugin-dir', join(f.workspace, '.claude', 'agentmux', 'native-activity')])
   expect(receipt.session.nativeHandle).toEqual(f.source.nativeHandle); expect(receipt.creation.initialPrompt).toBe('not-requested')
   expect(receipt.creation.intentDigest).toMatch(/^[a-f0-9]{64}$/u)
   expect(await f.client.resolveAgentCreationSessionId(f.create.createOperationId!)).toBe(receipt.session.agentSessionId)
@@ -137,7 +248,7 @@ for(const name of ['start','stop','input'])client.kernel[name]=async()=>{throw E
 client.hookServer.isRunning=()=>true;client.hookServer.createBinding=()=>({bindingId:'b'.repeat(43),endpoint:{url:'http://127.0.0.1:0',token:'t'.repeat(43)},bindRun:async()=>{},close:async()=>{}});
 await client.registry.load('local');const receipt=await client.createAgentWithDelivery(${JSON.stringify(f.create)});process.kill(${holder.pid},0);console.log(JSON.stringify(receipt));await client.dispose();`,
     resolveDir: process.cwd(), sourcefile: 'native-resume-recovery.ts' }, bundle: true, platform: 'node', format: 'esm', outfile: modulePath,
-    plugins: [{ name: 'private-source-package-locators', setup(build) { build.onResolve({ filter: /^(?:stream-json\/|fs-native-extensions$|yaml$|@xmldom\/xmldom$|@ctxmux\/sdk$)/ }, async args => {
+    plugins: [{ name: 'private-source-package-locators', setup(build) { build.onResolve({ filter: /^(?:stream-json\/|fs-native-extensions$|yaml$|ws$|@xmldom\/xmldom$|@ctxmux\/sdk$)/ }, async args => {
       if (args.pluginData?.resolved) return
       const resolved = await build.resolve(args.path, { resolveDir: resolve('packages/core'), kind: args.kind, pluginData: { resolved: true } })
       return { path: resolved.path, external: true }

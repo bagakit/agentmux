@@ -4,6 +4,10 @@ import { relative, resolve } from 'node:path'
 import { defineConfig } from 'vitest/config'
 const root = resolve(import.meta.dirname, '../../../../..')
 const mutants: Record<string, [string, string, string]> = {
+  'duplicate-native-scan': ['packages/core/src/client.ts', 'let pending = reads.get(key)', "let pending: Promise<Omit<AgentNativeSessionCatalog, 'capabilities'>> | undefined = undefined"],
+  'share-native-result': ['packages/core/src/client.ts', 'const catalog = structuredClone(await pending)', 'const catalog = await pending'],
+  'merge-native-environments': ['packages/core/src/client.ts', '[workspacePath ?? null, entries(env), entries(process.env)]', '[workspacePath ?? null, [], entries(process.env)]'],
+  'retain-completed-native-read': ['packages/core/src/client.ts', 'if (reads.get(key) === pending) reads.delete(key)', 'void reads.get(key)'],
   'forget-observed-owner': ['packages/core/src/client.ts', 'append(session.observedNativeHandle, binding)', 'void session.observedNativeHandle'],
   'reject-created-composer': ['packages/core/src/agent-session-store.ts', 'const { run, retiredRuns, creation, terminalPromptReadiness, ...actual } = next', 'const { run, retiredRuns, creation, ...actual } = next; const terminalPromptReadiness = undefined'],
   'launch-new-conversation': ['packages/core/src/client.ts', ': nativeResumeSource ? provider.buildResumeLaunch({ ...launchContext, nativeHandle: nativeResumeSource.nativeHandle })', ': nativeResumeSource ? provider.buildLaunch(launchContext)'],
@@ -28,5 +32,5 @@ export default defineConfig({ root, plugins: [{ name: 'native-resume-actual-sour
     sourceSHA256: createHash('sha256').update(source).digest('hex'), loadedSHA256: createHash('sha256').update(code).digest('hex'),
     ...(code !== source ? { mutation } : {}) }) + '\n')
   if (code !== source) return { code, map: null }
-} }], test: { include: ['packages/core/test/native-session-catalog-resume.test.ts'], passWithNoTests: false,
+} }], test: { include: ['packages/core/test/native-session-catalog-resume.test.ts', 'packages/core/test/public-rpc-native-sessions.test.ts'], passWithNoTests: false,
   fileParallelism: false, maxWorkers: 1, testTimeout: 30000, hookTimeout: 30000 } })
