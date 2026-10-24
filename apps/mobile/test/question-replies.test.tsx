@@ -1,6 +1,6 @@
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import type { AgentSessionHistoryPage } from '@agentmux/core'
+import type { AgentMuxAgentSession, AgentSessionHistoryPage } from '@agentmux/core'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { projectConversationTimeline, type AgentConversationReadPage } from '@agentmux/core/conversation'
 import { questionReplyKey } from '@agentmux/client-ui/conversation-question-reply'
@@ -29,10 +29,11 @@ const page: AgentSessionHistoryPage = { ...history(), nextCursor: null, items: [
 ] } }] }
 const held = { phase: 'unknown' as const, runtimeId: 'original-runtime', hostId: 'host-original', diagnostic: { code: 'ORIGINAL_UNKNOWN', message: '原答复回执仍未知' }, input: { ...target, operationId: 'original-operation', expectedRun: { runId: 'run-original' }, afterSubmissionId: 'original-predecessor', answers: [{ questionId: 'first', answer: 'Original frozen answer' }] } }
 const record = () => JSON.parse(localStorage.getItem(DEVICE_WORKFACE_KEY)!).conversation
-const attempt = () => record().questions?.find(([id]: [string]) => id === key)?.[1]
-function questionFixture() {
-  const f = fixture(); f.setPage(page)
-  f.sessions.set(sid, { ...f.sessions.get(sid)!, nativeHandle: { kind: 'provider', providerId: page.source.providerId, sessionId: page.source.nativeSessionId } })
+const attempt = (replyKey = key) => record().questions?.find(([id]: [string]) => id === replyKey)?.[1]
+function questionFixture(historyPage = page) {
+  const f = fixture(); f.setPage(historyPage)
+  const questionTarget = { ...target, source: historyPage.source }, replyKey = questionReplyKey(sid, questionTarget)
+  f.sessions.set(sid, { ...f.sessions.get(sid)!, nativeHandle: { kind: 'provider', providerId: historyPage.source.providerId, sessionId: historyPage.source.nativeSessionId } })
   const rpc = vi.fn(async (method: string) => {
     if (method === 'space.ls') return { catalog: { spaces: [], zones: [], tabs: [], regions: [], bindings: [], locations: [], agentPresentation: [] } }
     if (method === 'app.snapshot') return { agents: [] }
@@ -69,7 +70,7 @@ function questionFixture() {
     },
     releaseConversationView: async () => ({}),
     runtimeIdentity: () => ({ hostId: 'host-original', instanceId: 'original-runtime' }), runtimeOwnerIdentity: () => ({ runtimeId: 'original-runtime' }) })
-  return { ...f, rpc, write, reply }
+  return { ...f, rpc, write, reply, questionTarget, replyKey }
 }
 async function type(element: HTMLElement, value: string) { const field = element.querySelector<HTMLTextAreaElement>('[aria-label="Your answer: 补充说明"]')!; expect(field.disabled).toBe(false); await act(async () => { Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(field, value); field.dispatchEvent(new Event('input', { bubbles: true })) }) }
 async function refresh(element: HTMLElement) { if (!element.querySelector('[aria-label="刷新原对话"]')) await click(button(element, 'Show the message tool row')); await click(button(element, '刷新原对话')) }
@@ -196,10 +197,69 @@ it('actual mobile surface treats changed or unknown current native source as ret
   const view = await mount(<MobileConversationSurface client={f.client} agentSessionId={sid} connection={{ state: 'connected', message: 'connected' }} platform={platform} onShowTerminal={show}/>)
   await type(view.element, 'Kept draft across source changes'); expect(button(view.element, '发送答案')).toBeDefined()
   for (const nativeHandle of [{ kind: 'provider' as const, providerId: 'codex', sessionId: 'changed-native-source' }, undefined]) {
-    const next = { ...f.sessions.get(sid)!, nativeHandle }; await act(async () => { f.sessions.set(sid, next); f.emit({ type: 'agent-session', session: next }) })
+    const { nativeHandle: _previousHandle, ...retained } = f.sessions.get(sid)!
+    const next = nativeHandle ? { ...retained, nativeHandle } : retained
+    await act(async () => { f.sessions.set(sid, next); f.emit({ type: 'agent-session', session: next }) })
     expect(button(view.element, '打开原终端')).toBeDefined(); expect(view.element.textContent).toContain('准确回复通道暂不可用')
     expect(view.element.querySelector<HTMLTextAreaElement>('[aria-label="Your answer: 补充说明"]')!.disabled).toBe(false)
     await click(button(view.element, 'Copy answer: 补充说明')); expect(copy.mock.lastCall?.[0]).toBe('Kept draft across source changes')
   }
   await click(button(view.element, '打开原终端')); expect(show).toHaveBeenCalledOnce(); expect(f.write).not.toHaveBeenCalled(); expect(f.submit).not.toHaveBeenCalled()
+})
+
+it.each([target.source.nativeSessionId, 'selected-other-native'])('mounted mobile replies to selected Run member %s with the original operation and separate later drafts', async nativeSessionId => {
+  const f = questionFixture({ ...page, source: { ...target.source, nativeSessionId } }), local = createLocalDrafts()
+  const original = { ...held, input: { ...held.input, ...f.questionTarget } }
+  local.questions.set(f.replyKey, structuredClone(original)); await local.save()
+  const session = f.sessions.get(sid)!
+  f.sessions.set(sid, { ...session, nativeBinding: { source: 'user-selected', run: session.run, observedAt: session.updatedAt },
+    nativeSourceObservation: { state: 'ambiguous', run: session.run, observedAt: session.updatedAt, reason: 'frontend-selection-unconfirmed',
+      candidates: [target.source.nativeSessionId, 'selected-other-native'].map(sessionId => ({ kind: 'provider', providerId: 'codex', sessionId })) } })
+  f.reply.mockImplementation(async input => {
+    expect(attempt(f.replyKey)).toMatchObject({ phase: 'sending', input: original.input })
+    return { agentSessionId: input.agentSessionId, source: input.source, recordId: input.recordId,
+      questionIds: input.answers.map(answer => answer.questionId), operationId: input.operationId, outcome: 'submitted' }
+  }).mockRejectedValueOnce(new Error('Original reply acknowledgement unavailable'))
+  const show = vi.fn(), view = await mount(<MobileConversationSurface client={f.client} agentSessionId={sid} connection={{ state: 'connected', message: 'connected' }} platform={createBrowserPlatform()} onShowTerminal={show}/>)
+  await type(view.element, 'Later answer stays a separate draft')
+  await click(button(view.element, '继续原发送'))
+  expect(f.reply).toHaveBeenCalledExactlyOnceWith({ ...original.input, agentSessionId: sid, authorHuman: true, sourceChannel: 'question-reply' })
+  expect(attempt(f.replyKey)).toMatchObject({ phase: 'unknown', input: original.input })
+  await click(button(view.element, '继续原发送'))
+  expect(f.reply).toHaveBeenCalledTimes(2)
+  expect(f.reply.mock.calls[1]).toEqual(f.reply.mock.calls[0])
+  expect(attempt(f.replyKey).phase).toBe('submitted')
+  expect(record().questionDrafts.find(([id]: [string]) => id === f.replyKey)?.[1]).toEqual([...original.input.answers, { questionId: 'second', answer: 'Later answer stays a separate draft' }])
+  for (const action of [f.write, f.submit, f.respond, show]) expect(action).not.toHaveBeenCalled()
+})
+
+it('mounted mobile retains selected-target drafts and original operations when current source facts cannot qualify their exact owner', async () => {
+  const f = questionFixture(), local = createLocalDrafts(); local.questions.set(key, structuredClone(held)); await local.save()
+  const session = f.sessions.get(sid)!, selected = { ...session,
+    nativeBinding: { source: 'user-selected' as const, run: session.run, observedAt: session.updatedAt },
+    nativeSourceObservation: { state: 'ambiguous' as const, run: session.run, observedAt: session.updatedAt, reason: 'frontend-selection-unconfirmed',
+      candidates: [{ kind: 'provider' as const, providerId: 'codex', sessionId: target.source.nativeSessionId }] } }
+  const show = vi.fn(), view = await mount(<MobileConversationSurface client={f.client} agentSessionId={sid} connection={{ state: 'connected', message: 'connected' }} platform={createBrowserPlatform()} onShowTerminal={show}/>)
+  await type(view.element, 'Preserved across unavailable sources')
+  const { candidates: _candidates, ...missingCandidates } = selected.nativeSourceObservation
+  const states: AgentMuxAgentSession[] = [
+    { ...selected, nativeSourceObservation: { ...selected.nativeSourceObservation, state: 'unknown' } },
+    { ...selected, nativeSourceObservation: { ...selected.nativeSourceObservation, state: 'changed' } },
+    { ...selected, nativeBinding: { ...selected.nativeBinding, run: { runId: 'old-run' } } },
+    { ...selected, nativeSourceObservation: missingCandidates },
+    { ...selected, nativeSourceObservation: { ...selected.nativeSourceObservation, candidates: [{ kind: 'provider', providerId: 'codex', sessionId: 'foreign-native' }] } },
+    { ...selected, nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: 'foreign-native' },
+      nativeSourceObservation: { ...selected.nativeSourceObservation, candidates: [{ kind: 'provider', providerId: 'codex', sessionId: 'foreign-native' }] } }
+  ]
+  for (const next of states) {
+    await act(async () => f.emit({ type: 'agent-session', session: next }))
+    expect(view.element.querySelector('[data-question-action="send"]')).toBeNull()
+    expect(button(view.element, '打开原终端')).toBeDefined()
+    expect(view.element.querySelector<HTMLTextAreaElement>('[aria-label="Your answer: 补充说明"]')!.value).toBe('Preserved across unavailable sources')
+    expect(attempt()).toEqual(held)
+    for (const action of [f.reply, f.write, f.submit, f.respond, show]) expect(action).not.toHaveBeenCalled()
+  }
+  await act(async () => f.emit({ type: 'agent-session', session: { ...selected, nativeSourceObservation: { ...selected.nativeSourceObservation, run: { runId: 'earlier-observation-run' } } } }))
+  expect(button(view.element, '继续原发送')).toBeDefined()
+  expect(f.reply).not.toHaveBeenCalled(); expect(attempt()).toEqual(held)
 })
