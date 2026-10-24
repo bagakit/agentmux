@@ -688,6 +688,10 @@ export class AgentPromptSubmissionCoordinator {
     const defaultMessageInput = control?.requiredNativeSource || control?.idleOnly || inputKey.kind === 'message'
     const defaultSemanticInput = execution === 'default' && admissionIntent?.kind === 'exact-condition' && !rejoiningFrozenPlan
     const nativeIdleOnly = Boolean(control?.idleOnly || control?.nativeIdleOnly || expectedCompletionId !== undefined || expectedFutureIntent !== undefined)
+    // An original Core initialization input already names its Provider-confirmed
+    // native object. An unknown transcript locator cannot revoke that input:
+    // prepareNativeInput still verifies the exact live actor/object before claim.
+    // Changed targets, conflicting handles and original unknown claims stay fenced.
     const defaultNativeSource = (current: AgentMuxStoredAgentSession) => {
       const handle = current.nativeHandle
       const selected = hasSelectedNativeTarget(current)
@@ -696,7 +700,8 @@ export class AgentPromptSubmissionCoordinator {
           handle?.kind !== 'provider' || handle.providerId !== current.providerId ||
           current.nativeBinding && !sameRun(current.nativeBinding.run, current.run) ||
           !selected && (current.observedNativeHandle && !sameNativeHandle(current.observedNativeHandle, handle) ||
-            current.nativeSourceObservation && sameRun(current.nativeSourceObservation.run, current.run))) return undefined
+            current.nativeSourceObservation && sameRun(current.nativeSourceObservation.run, current.run) &&
+              !(control?.onlyIfUnclaimed && control.requiredNativeSource && current.nativeSourceObservation.state === 'unknown'))) return undefined
       const source = { providerId: handle.providerId, nativeSessionId: handle.sessionId }
       if (control?.requiredNativeSource && !isDeepStrictEqual(source, control.requiredNativeSource)) return undefined
       return source

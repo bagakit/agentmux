@@ -97,7 +97,8 @@ export class AgentSessionRecoveryReconciler {
       await assertRequest()
       const provider = this.ports.providers.providers.get(session.providerId)
       const observed = await observePromptInput(controller.signal, () => provider.reconnectTerminalFrontend!({
-        processId: run.pid!, nativeActor: session.nativeActor!, workspacePath: session.workspacePath, signal: controller.signal
+        processId: run.pid!, nativeActor: session.nativeActor!, workspacePath: session.workspacePath, signal: controller.signal,
+        ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}), assertCurrent: assertRequest
       }, request))
       await assertRequest()
       return parseTerminalFrontendObservation(observed)

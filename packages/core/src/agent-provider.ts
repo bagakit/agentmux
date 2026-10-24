@@ -191,7 +191,11 @@ export type AgentProvider = {
   planQuestionReply?(record: AgentSessionHistoryItem, answers: readonly AgentSessionHistoryQuestionAnswer[]): string
   prepareNativeInput?(context: AgentProviderNativeInputPreparationContext, target: { providerId: string; nativeSessionId: string; expectedTurnId?: string; idleOnly?: true }): Promise<AgentProviderPreparedNativeInput>
   observeTerminalFrontend?(context: AgentProviderNativeInputContext & { onFrontend(observation: AgentTerminalFrontendObservation): void; onUnavailable(message: string): void }): Promise<{ dispose(): void }>
-  reconnectTerminalFrontend?(context: AgentProviderNativeInputContext, request: AgentTerminalFrontendRecoveryRequest): Promise<AgentTerminalFrontendObservation>
+  reconnectTerminalFrontend?(context: AgentProviderNativeInputContext & {
+    nativeHandle?: Readonly<AgentNativeSessionHandle>
+    /** Recheck the original recovery authorization after Provider preparation. */
+    assertCurrent(): Promise<void>
+  }, request: AgentTerminalFrontendRecoveryRequest): Promise<AgentTerminalFrontendObservation>
   resolveLaunchArgv(selections: LaunchOptionSelection): string[]
   planPromptInput(prompt: string, context?: { execution?: AgentPromptExecution }): AgentPromptInputPlan
   /** Provider owns native terminal decoding; unavailable refuses only this immediate operation. */

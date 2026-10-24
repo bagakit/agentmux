@@ -4,6 +4,8 @@ import { createConnection, createServer, type Socket } from 'node:net'
 import { once } from 'node:events'
 import type { AgentProvider } from '../agent-provider.js'
 import { AgentMuxError } from '../errors.js'
+import { nativeProcessBirth, nativeProcessTcpListeners } from '../agent-native-process.js'
+import { connectCodexNativeActor } from './codex-native-rpc.js'
 import { parseTerminalFrontendObservation, type AgentTerminalFrontendObservation, type AgentTerminalFrontendRecoveryRequest } from '../agent-terminal-frontend.js'
 
 export const CODEX_NATIVE_TOKEN_ENV = 'AGENTMUX_CODEX_ACTOR_TOKEN'
@@ -100,6 +102,38 @@ export const observeCodexTerminalFrontend: NonNullable<AgentProvider['observeTer
   await connect(context, 'observe', {}, context.onFrontend, context.onUnavailable)
 export const reconnectCodexTerminalFrontend: NonNullable<AgentProvider['reconnectTerminalFrontend']> = async (context, request) => {
   if (request.target.kind === 'initialization' && !context.nativeActor.initializationControl) throw unavailable('The original Run did not declare native initialization control. Its Session and existing channels are kept.')
+  if (request.target.kind === 'native-session') {
+    const target = context.nativeHandle
+    if (context.nativeActor.protocolId !== 'codex-app-server-v2-0.163' || target?.kind !== 'provider' ||
+        target.providerId !== 'codex' || target.sessionId !== request.target.nativeSessionId) throw unavailable('The original native recovery target is unconfirmed. No frontend was dispatched.')
+    const { processId, nativeActor, signal } = context
+    const birth = await nativeProcessBirth(processId, signal)
+    const listeners = await nativeProcessTcpListeners(processId, signal)
+    if (listeners.length !== 1) throw unavailable()
+    const listener = listeners[0]!, listenerBirth = await nativeProcessBirth(listener.processId, signal)
+    const connection = await connectCodexNativeActor(listener.endpoint, nativeActor.token, signal, 'agentmux_frontend_reconnect')
+    try {
+      const loaded = await connection.request('thread/read', { threadId: target.sessionId, includeTurns: false })
+      if (loaded?.thread?.id !== target.sessionId || loaded.thread.canAcceptDirectInput !== true ||
+          typeof loaded.thread.sessionId !== 'string' || !loaded.thread.sessionId) throw unavailable()
+      await context.assertCurrent()
+      // Loaded membership does not prove that the original TUI can resume. Join
+      // the same Native object before dispatch; do not alter its configuration.
+      // A missing source leaves this operation pending, without spawning a doomed
+      // frontend or consuming the actor's original reconnect operation.
+      const joined = await connection.request('thread/resume', { threadId: target.sessionId, excludeTurns: false })
+      if (joined?.thread?.id !== target.sessionId || joined.thread.sessionId !== loaded.thread.sessionId ||
+          joined.thread.canAcceptDirectInput !== true) throw unavailable()
+      const after = await nativeProcessTcpListeners(processId, signal)
+      if (await nativeProcessBirth(processId, signal) !== birth || await nativeProcessBirth(listener.processId, signal) !== listenerBirth ||
+          after.length !== 1 || after[0]!.processId !== listener.processId || after[0]!.endpoint !== listener.endpoint) throw unavailable()
+    } catch (error) {
+      if (error instanceof AgentMuxError) throw error
+      const failure = unavailable(`The original native frontend join is unconfirmed. The backend and input remain available. ${error instanceof Error ? error.message : String(error)}`)
+      Object.defineProperty(failure, 'cause', { value: error }); throw failure
+    } finally { connection.dispose() }
+  }
+  await context.assertCurrent()
   let result: AgentTerminalFrontendObservation | undefined
   const wire = { operationId: request.operationId, expectedFrontendId: request.expectedFrontendId,
     ...(request.target.kind === 'native-session' ? { nativeSessionId: request.target.nativeSessionId }
