@@ -1,3 +1,5 @@
+import { deferConversationProcessRecord } from '../../core/src/conversation-process-detail.js'
+import { publicationPartKey } from '../src/publication-content.js'
 import { DatabaseSync } from 'node:sqlite'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
@@ -415,4 +417,29 @@ it('correlates late receipts to their original durable attempt without changing 
     { attempt: second.attempt, receipt: { state: 'unknown', reason: 'effect-unconfirmed' } }
   ])
   expect(() => owner.retry(second.operationId, () => true)).toThrowError(/not confirmed non-application/)
+})
+
+it.each([false, true])('deferred process headers retain publication and allow independent speech (empty selectors: %s)', empty => {
+  const db = new DatabaseSync(':memory:'); databases.push(db)
+  const owner = new PublicationStore(db), shared: PublicationBoundary = { ...boundary, scope: { ...boundary.scope, publication: 'future-shared-conversation' } }
+  owner.checkpoint(shared, 'host-a')
+  const artifact: AgentSessionHistoryItem = { id: 'original-artifact', kind: 'activity', startedAt: 1,
+    contentParts: [{ kind: 'resource', resourceType: 'text', reference: 'original-resource', contentEligibility: 'public',
+      content: { kind: 'text', encoding: 'json-utf8', byteLength: 4, sha256: 'a'.repeat(64) } }] }
+  const first = page([artifact], 'first-cut'), units = first.items.flatMap(entry => entry.kind === 'item' ? [entry.item] : [])
+  const slot = units[0]!.event.content[0]!, record = units[0]!.records[0]!
+  const key = publicationPartKey({ record: record.reference!, selector: slot.selector })
+  owner.commitPage(shared, checkpoint(), first, () => true, { units, resolvedText: new Map([[key, { kind: 'text', text: 'Known original artifact' }]]) })
+  const claimed = owner.claimNext(shared, owner.next(shared)!.operationId, () => true, adapter)!
+  owner.settle(claimed.operationId, claimed.attempt!, { state: 'confirmed', mapping: { messageId: 'original-platform-message' } })
+  const before = owner.inspect(claimed.operationId)
+  const next = page([{ ...artifact, contentParts: empty ? [] : artifact.contentParts }, speech('independent', 'Independent original speech')], 'second-cut')
+  const readUnits = next.items.flatMap(entry => entry.kind === 'item' ? [entry.item] : []).map(unit => unit.event.role === 'process'
+    ? { ...unit, records: unit.records.map(record => deferConversationProcessRecord(record as import('@agentmux/core/conversation').ConversationSourceRecord)) } : unit)
+  owner.commitPage(shared, first.checkpoint, next, () => true, { units: readUnits, resolvedText: new Map() })
+  expect(owner.inspect(claimed.operationId)).toEqual(before)
+  expect(owner.list(shared).some(operation => operation.effect === 'withdraw')).toBe(false)
+  expect(owner.coverage(shared)).toMatchObject({ state: 'incomplete', gaps: expect.arrayContaining([expect.objectContaining({ code: 'PUBLICATION_PROCESS_DETAILS_DEFERRED' })]) })
+  expect(owner.next(shared)?.payload).toMatchObject({ kind: 'speech', text: 'Independent original speech' })
+  expect(owner.checkpoint(shared, 'host-a')).toEqual(next.checkpoint)
 })
