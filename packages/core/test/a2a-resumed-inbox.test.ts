@@ -8,7 +8,7 @@ import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { DurableAgentMuxMessageQueue } from '../src/agent-global-message-queue.js'
-import { messageNotificationSourceRuns } from '../src/agent-message-notification-sources.js'
+import { sessionSemanticResumeSourceRuns } from '../src/agent-session-resume-sources.js'
 import { agentPromptCondition } from '../src/agent-prompt-condition.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
 import { nativeInputCorrelationKey } from '../src/native-input-correlation.js'
@@ -137,7 +137,7 @@ it('coalesces different historical Runs of the same recipient and keeps a retain
 
 it.each([false, true])('automatically selects untouched historical references through the actual Core Level B recovery chain (selected=%s)', async selected => {
   const f = await fixture(selected), a = await f.append('a'); await f.resume(); const b = await f.append('b'); const current = await f.resume()
-  expect(messageNotificationSourceRuns(current)).toEqual([current.run.runId, 'resumed-1', f.old.run.runId])
+  expect(sessionSemanticResumeSourceRuns(current)).toEqual([current.run.runId, 'resumed-1', f.old.run.runId])
   f.idle(); await f.notifications.restore(); await f.settled()
   expect(f.native).toHaveBeenCalledTimes(1)
   const notice = (await f.queue.readNotification((await f.queue.readByMessageId('a'))!.notification!.notificationId!))!
@@ -154,11 +154,11 @@ it.each(['missing-chain', 'changed-target', 'changed-provider', 'wrong-binding',
   else if (failure === 'changed-provider') altered.nativeHandle = { ...f.nativeHandle, providerId: 'claude' }
   else if (failure === 'wrong-binding') altered.nativeBinding = { source: 'native-hook', run: current.run, observedAt: Date.now() }
   else altered.continuityOperations = { ...altered.continuityOperations, conflict: { ...altered.continuity!, operationId: 'conflict', previousRun: { runId: 'another-previous' } } }
-  expect(messageNotificationSourceRuns(altered)).toEqual([current.run.runId])
+  expect(sessionSemanticResumeSourceRuns(altered)).toEqual([current.run.runId])
   const before = await f.queue.pendingNotificationPosition('recipient', [current.run.runId])
   expect(before).toBe(0)
   expect(await f.queue.prepareNotification({ notificationId: 'bounded-current', agentSessionId: 'recipient', condition: agentPromptCondition(current),
-    idle: { nativeEvidence: { sourceId: 'private-native-source', id: 'idle' }, inputByte: 0 }, sourceRuns: messageNotificationSourceRuns(altered) })).toBeNull()
+    idle: { nativeEvidence: { sourceId: 'private-native-source', id: 'idle' }, inputByte: 0 }, sourceRuns: sessionSemanticResumeSourceRuns(altered) })).toBeNull()
   await f.client.submitAgentPrompt({ agentSessionId: 'recipient', expectedRun: current.run, operationId: 'healthy-manual', admissionIntent: { kind: 'manual-actor' }, execution: 'immediate', prompt: 'Still usable', authorHuman: true })
   await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalled())
 })
@@ -205,7 +205,7 @@ it('reopens old-version manual unknown derived rows without automatically replay
   db.prepare('UPDATE a2a_message_notifications SET notification_id=NULL WHERE message_id=?').run('old-version-unknown')
   db.prepare('UPDATE a2a_notifications SET active=0 WHERE notification_id=?').run(notice.notificationId); db.close()
   const reopened = new DurableAgentMuxMessageQueue(f.queue.path)
-  expect(await reopened.pendingNotificationPosition('recipient', messageNotificationSourceRuns(current))).toBe(0)
+  expect(await reopened.pendingNotificationPosition('recipient', sessionSemanticResumeSourceRuns(current))).toBe(0)
   expect(await reopened.readJournal()).toEqual(before)
   const read = new DatabaseSync(f.queue.path, { readOnly: true })
   expect(read.prepare('SELECT incarnation FROM metadata').get()!.incarnation).toEqual(incarnation); read.close()
@@ -223,9 +223,9 @@ it('indexes the first notification in an original legacy journal before any auto
   await writeFile(path, records.map(record => JSON.stringify(record)).join('\n') + '\n')
   const imported = new DurableAgentMuxMessageQueue(path)
   expect(await imported.readJournal()).toEqual(records)
-  expect(await imported.pendingNotificationPosition('recipient', messageNotificationSourceRuns(current))).toBe(0)
+  expect(await imported.pendingNotificationPosition('recipient', sessionSemanticResumeSourceRuns(current))).toBe(0)
   expect(await imported.prepareNotification({ notificationId: 'must-not-replay', agentSessionId: 'recipient', condition: agentPromptCondition(current),
-    idle: { nativeEvidence: { sourceId: 'source', id: 'idle' }, inputByte: 0 }, sourceRuns: messageNotificationSourceRuns(current) })).toBeNull()
+    idle: { nativeEvidence: { sourceId: 'source', id: 'idle' }, inputByte: 0 }, sourceRuns: sessionSemanticResumeSourceRuns(current) })).toBeNull()
 })
 
 it('reads a missing operation without prepare, submit, message body read or journal append for users and managed callers', async () => {
@@ -372,7 +372,7 @@ it('uses recipient and exact MID indexes for eligible, excluded and bounded sele
     return statement
   })
   try {
-    const sourceRuns = messageNotificationSourceRuns(current)
+    const sourceRuns = sessionSemanticResumeSourceRuns(current)
     await f.queue.pendingNotificationPosition('recipient', sourceRuns)
     await f.queue.excludedNotificationPosition('recipient', sourceRuns)
     await f.queue.prepareNotification({ notificationId: 'index-query-only', agentSessionId: 'recipient', condition: agentPromptCondition(current),
