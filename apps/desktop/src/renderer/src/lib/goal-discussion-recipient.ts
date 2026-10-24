@@ -2,7 +2,8 @@ import { useShallow } from 'zustand/react/shallow'
 import { tabGroupForTab } from './workbench-tabs'
 import { useAppStore } from '../store'
 import { PMO_TEAMS_TOPIC_ID, SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
-import { agentDisplayName, firstPromptFromTimeline } from './workbench-tabs'
+import { agentDisplayName } from './workbench-tabs'
+import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { agentSessionPresentationIndex, sessionPresentationById } from './session-presentation'
 
 type State = Pick<ReturnType<typeof useAppStore.getState>, 'demandPmoTabIds' | 'tabs' | 'layouts'>

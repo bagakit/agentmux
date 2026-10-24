@@ -9,7 +9,7 @@ import type { DemandRecord } from '../lib/global-demand-board'
 import type { GoalFiniteStartIntent } from '../lib/goal-finite-start'
 import { goalAgentRows } from '../lib/goal-agent-selection'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
-import { firstPromptFromTimeline } from '../lib/workbench-tabs'
+import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { GoalAgentFace, GoalAgentPicker } from './GoalAgentPicker'
 
 /** An explicit one-time task. The existing Start owner retains all input and execution facts. */

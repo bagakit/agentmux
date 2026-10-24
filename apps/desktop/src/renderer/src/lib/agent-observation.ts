@@ -40,19 +40,3 @@ export function observeAgentSession(
 export function observationSummary(observation: AgentObservation): string {
   return `${observation.process} · ${observation.semantic} · ${observation.readiness}`
 }
-
-/** Explanatory copy only; neither the last observation nor its age is a current task state. */
-export function activityObservationPresentation(observation: AgentObservation, observationAvailable = true): { label: string; detail: string } | null {
-  if (!observation.reason) return null
-  const last = observation.lastKnownActivity
-  const confirmed = last
-    ? `Last confirmed ${last.state} · ${new Date(last.observedAt).toLocaleString()}`
-    : 'Last confirmed activity unavailable'
-  return {
-    label: observation.reason === 'activity-stale' ? 'Activity signal expired' : 'Activity not confirmed',
-    detail: `${observation.reason === 'activity-stale' ? 'The last work signal is out of date; current work is unknown'
-        : 'No current work signal has been received'} · ${confirmed} · ${observationAvailable
-      ? `Run ${observation.process} · Prompt readiness ${observation.readiness}`
-      : `Last observed Run ${observation.process} · Current input availability unconfirmed`}`
-  }
-}

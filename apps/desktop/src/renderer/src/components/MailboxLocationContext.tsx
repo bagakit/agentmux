@@ -6,7 +6,8 @@ import { isScratchWorkspaceId } from '../../../shared/contracts'
 import type { OpenHttpLinkOrigin } from '../lib/open-destination'
 import { sessionPresentationById } from '../lib/session-presentation'
 import { projectWorkspaces } from '../lib/workspace-projects'
-import { tabDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
+import { tabDisplayName } from '../lib/workbench-tabs'
+import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { agentProviderLabel } from './AgentProviderIcon'
 
 /** A detail-only metadata consumer; it neither owns navigation nor changes its availability. */

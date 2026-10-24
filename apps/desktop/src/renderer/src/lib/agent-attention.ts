@@ -1,6 +1,6 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
 import { attentionSortClass, attentionSortRank, categoryFor, isUrgentAttention } from './attention-event'
-import { isNeedsYouState } from './attention-vocabulary'
+import { isNeedsYouState } from '@agentmux/client-ui/attention-vocabulary'
 
 /** Only the live Dock badge consumes this rollup; it needs the original request count. */
 export function summarizeAgentAttention(sessions: readonly SessionSnapshot[]): { needsYou: number } {

@@ -1,6 +1,6 @@
 import { isAgentActivityStatusSource } from '@agentmux/core/agent-status'
 import { observeAgentSession } from './agent-observation'
-import { isNeedsYouState } from './attention-vocabulary'
+import { isNeedsYouState } from '@agentmux/client-ui/attention-vocabulary'
 import type {
   SessionSnapshot,
   WorkspaceBranchRecord,

@@ -28,10 +28,10 @@ import {
   workspaceOwnsSessionPath
 } from '../../../shared/scratch-topics'
 import {
-  resolveAgentName,
+  resolveAgentName, firstPromptFromTimeline,
   resolveTabName,
   type TabAgentMember
-} from './display-name'
+} from '@agentmux/client-ui/display-name'
 
 export type AgentWorkbenchSurface = {
   regionId: string
@@ -493,10 +493,7 @@ export function tabGroupForTab(layout: WorkspaceLayout | undefined, tabId: strin
  * 从 timeline 里取首条用户消息作为"首条 prompt"派生源。取不到返回 null——没有对话不是错误。
  * timeline 是 Store 已持有的投影，这里不新建第二份对话记录。
  */
-export function firstPromptFromTimeline(timeline: AgentTimelineSnapshot | undefined): string | null {
-  const first = timeline?.items.find((item) => item.kind === 'user_message')
-  return first?.content ?? first?.title ?? null
-}
+
 
 /** 求一个 Agent 的显示名所需的全部投影事实。都是既有 Store 里已有的东西，本模块不新增来源。 */
 export type AgentNameFacts = {

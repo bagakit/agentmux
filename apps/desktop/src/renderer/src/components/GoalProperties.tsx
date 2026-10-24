@@ -6,7 +6,8 @@ import { DEMAND_STATUS_IDS } from '../lib/global-demand-board'
 import { SCRATCH_WORKSPACE_ID } from '../../../shared/scratch-topics'
 import { useAppStore } from '../store'
 import { projectWorkspaces } from '../lib/workspace-projects'
-import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
+import { agentDisplayName } from '../lib/workbench-tabs'
+import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { SelectionField } from './SelectionField'
 
 function localDateInput(timestamp: number | null | undefined): string {

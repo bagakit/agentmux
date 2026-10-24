@@ -1,3 +1,4 @@
+import type { AgentTimelineSnapshot } from '@agentmux/core'
 /**
  * 显示名的唯一求值处。
  *
@@ -7,13 +8,11 @@
  * 优先级链（自高到低）：
  *   用户手改  >  启动时指定  >  从成员/首条 prompt 派生  >  Provider·Workspace 派生
  *
- * 最低一档「Provider·Workspace 派生」的那串字面（`Codex · workspace`）由 Desktop Main 构建并放在
- * `session.label` 上——那是唯一构建它的地方。本链把它当作 `fallback` 消费，而**不**在渲染层再拼一份：
+ * 最低一档「Provider·Workspace 派生」由 Host 的原配置投影构建，Desktop 的 `session.label` 也消费
+ * 同一求值处。本链把它当作 `fallback` 消费，而**不**在展示端再拼一份：
  * 再拼一份正是本合同禁止的"第二份拼名逻辑"，且两份会在 Provider 改名或 workspace 改名时各自漂移。
  *
- * 只有 `resolveAgentName` 与 `resolveTabName` 对外暴露。`deriveNameFromPrompt`、`tabFamilyName` 是这
- * 条链的内部环节，不单独导出——一个只被同文件调用的导出符号过不了零调用者检查，且把它们藏在链后也
- * 强制了"任何展示名字的地方都经这条链"这条约束（外部拿不到半截逻辑去自己拼）。
+ * `deriveNameFromPrompt`、`tabFamilyName` 是这条链的内部环节，不单独导出；各端统一通过完整链求值。
  */
 
 /** 名字最终落在哪一档。它是求值结果的一部分（结构化返回），调用方按结构读 `.source`，不按名导入。 */
@@ -53,7 +52,7 @@ function deriveNameFromPrompt(prompt: string | null | undefined): string | null 
 /**
  * Agent 显示名：走完整优先级链。
  *
- * `fallback` 是最低一档，通常是 `session.label`（Main 构建的 Provider·Workspace 事实）。它不会缺席——
+ * `fallback` 是最低一档，通常是 `session.label`（Host 构建的 Provider·Workspace 事实）。它不会缺席——
  * 缺席意味着这个 Agent 连最基本的身份都没有，那是上游的 bug，不该由这里编一个占位掩盖。
  */
 export function resolveAgentName(input: {
@@ -123,4 +122,10 @@ export function resolveTabName(input: {
   if (input.agents.length === 1) return { name: input.agents[0]!.name, source: 'derived' }
   if (input.agents.length >= 2) return { name: tabFamilyName(input.agents), source: 'derived' }
   return { name: input.fallback, source: 'fallback' }
+}
+
+/** Reads only the Core owner's accepted bounded conversation projection. */
+export function firstPromptFromTimeline(timeline: AgentTimelineSnapshot | undefined): string | null {
+  const first = timeline?.items.find(item => item.kind === 'user_message')
+  return first?.content ?? first?.title ?? null
 }

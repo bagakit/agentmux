@@ -1,9 +1,11 @@
+import { agentStatusLabel } from '@agentmux/client-ui/agent-presentation'
 import { scratchTopicsForConfig } from './scratch-topic-snapshots'
 import type { AppConfig, SessionSnapshot } from '../../../shared/contracts'
-import { isNeedsYouState } from './attention-vocabulary'
+import { isNeedsYouState } from '@agentmux/client-ui/attention-vocabulary'
 import { focusLaneForSession } from './agent-focus'
 import { scratchTopicsForWorkspace, type ScratchTopicsSnapshot } from './scratch-topic-snapshots'
-import { firstPromptFromTimeline, topicIdForSession, workspaceForSession } from './workbench-tabs'
+import { topicIdForSession, workspaceForSession } from './workbench-tabs'
+import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import type { AgentTimelineSnapshot } from '../../../shared/contracts'
 import type { SessionViewMode } from './session-state'
 
@@ -119,9 +121,5 @@ export function createFirstPromptSelector(sessionId: string) {
 
 /** Human-readable status uses the same facts in Focus and a projected coordination context. */
 export function sessionStatusLabel(session: SessionSnapshot): string {
-  const state = session.status.state
-  const pending = session.kind === 'agent' && Boolean(session.pendingInteraction)
-  return state === 'error' ? 'Failed' : pending ? 'Request pending' : isNeedsYouState(state) ? (state === 'blocked' ? 'Blocked' : 'Needs reply')
-    : state === 'done' ? 'Idle' : state === 'running' ? (session.kind === 'agent' ? 'Status unknown' : 'Shell open')
-    : state === 'disconnected' ? 'Disconnected' : state === 'exited' ? (session.kind === 'terminal' && session.status.exitReason !== 'user-stopped' ? 'Exited' : 'Stopped') : state === 'starting' ? 'Starting' : 'Working'
+  return agentStatusLabel(session)
 }

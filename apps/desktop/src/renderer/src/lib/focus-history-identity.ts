@@ -1,6 +1,7 @@
 import type { AppConfig, AgentTimelineSnapshot, SessionSnapshot } from '../../../shared/contracts'
 import type { AgentFocusHistoryIdentity } from './agent-focus'
-import { agentDisplayName, firstPromptFromTimeline, topicIdForSession, workspaceForSession } from './workbench-tabs'
+import { agentDisplayName, topicIdForSession, workspaceForSession } from './workbench-tabs'
+import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 import { directoryIdentity } from '../../../shared/space-addresses'
 
 /** Called only when focus is recorded; later project/name edits never rewrite this observation. */

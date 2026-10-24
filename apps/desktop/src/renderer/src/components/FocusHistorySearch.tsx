@@ -8,7 +8,8 @@ import { focusHistoryHitKey, type FocusHistoryHit, type useFocusHistorySearch } 
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { agentSessionPresentationIndex } from '../lib/session-presentation'
-import { agentDisplayName, firstPromptFromTimeline } from '../lib/workbench-tabs'
+import { agentDisplayName } from '../lib/workbench-tabs'
+import { firstPromptFromTimeline } from '@agentmux/client-ui/display-name'
 
 function highlightExcerpt(text: string, query: string) {
  if (!query) return text

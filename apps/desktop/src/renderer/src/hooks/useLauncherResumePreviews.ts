@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { api } from '../lib/api'
-import { launcherCandidateKey, launcherNativeRecap, launcherSavedNativeRecap, type LauncherRecap, type LauncherResumeRow } from '../lib/launcher-resume'
+import { launcherCandidateKey, type LauncherResumeRow } from '../lib/launcher-resume'
+import { launcherNativeRecap, launcherSavedNativeRecap, type LauncherRecap } from '@agentmux/client-ui/conversation-recap'
 import { launcherNativeSourceKey } from '../lib/launcher-native-discovery'
 
 type Preview = { state: 'loading' | 'ready' | 'error'; recap: LauncherRecap | null; error?: string }
