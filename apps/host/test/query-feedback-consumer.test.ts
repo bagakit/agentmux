@@ -125,12 +125,50 @@ async function fixture(mode: 'native' | 'waiting' | 'terminal' = 'native') {
   const expectStages = async (messageId: string, stages: Stage[]) => {
     await vi.waitFor(async () => expect((await feedback(messageId)).filter(item => item.state === 'confirmed').map(item => item.queryFeedback!.stage).sort()).toEqual([...stages].sort()), { timeout: 15_000 })
   }
+  const admitted = async (record: ConnectionIngressRecord): Promise<NativePacket> => {
+    let stop = () => {}, timer: ReturnType<typeof setTimeout> | undefined, closed = false
+    let last: unknown, first: unknown, events = 0
+    const startedAt = performance.now()
+    try {
+      return await new Promise<NativePacket>((accept, reject) => {
+        const inspect = async () => {
+          const observed = await rpc!.call('connection.ingress.inspect', { ingressId: record.ingressId })
+          if (closed) return
+          const receipt = observed.inputReceipt, input = observed.ingress?.kind !== 'action' ? observed.ingress?.input : undefined
+          last = { state: observed.ingress?.state, code: observed.ingress?.code, status: receipt?.status,
+            control: receipt?.control.state, waiting: receipt?.control.waiting }
+          first ??= last
+          if (receipt?.status !== 'admitted') return
+          expect(input).toMatchObject({ agentSessionId: 'original-agent', expectedRun: { runId: 'run-original-agent' } })
+          expect(receipt.key).toEqual({ kind: 'message', agentSessionId: input!.agentSessionId, expectedRun: input!.expectedRun, messageId: input!.messageId })
+          const packet = packets.find(value => {
+            const key = nativeInputCorrelationKey(value.plan.clientCorrelation!)
+            return key.kind === 'message' && receipt.key.kind === 'message' && key.agentSessionId === receipt.key.agentSessionId &&
+              key.expectedRun.runId === receipt.key.expectedRun.runId && key.messageId === receipt.key.messageId
+          })
+          expect(packet, 'The exact admitted original input must have reached the native port').toBeDefined()
+          if (process.env.QUERY_FEEDBACK_INPUT_FACTS) await appendFile(process.env.QUERY_FEEDBACK_INPUT_FACTS,
+            JSON.stringify({ ingressId: record.ingressId, first, last, events, elapsedMs: performance.now() - startedAt }) + '\n')
+          accept(packet!)
+        }
+        // The SDK receive ACK and received reaction precede native input dispatch.
+        // Observe that original input's receipt, rather than a one-second packet-count race.
+        stop = executionClient.onEvent(event => {
+          if (event.type === 'agent-input' && event.receipt.key.agentSessionId === 'original-agent') {
+            events++; void inspect().catch(reject)
+          }
+        }, { observeMessages: false })
+        timer = setTimeout(() => reject(Error('Original native input admission was not observed: ' + JSON.stringify(last))), 15_000)
+        void inspect().catch(reject)
+      })
+    } finally { closed = true; if (timer) clearTimeout(timer); stop() }
+  }
   const adopt = async (packet = packets.at(-1)!, ids: string | readonly string[] = 'canonical-original-user') => await appendFile(transcript, (typeof ids === 'string' ? [ids] : ids).map(id => row({ type: 'event_msg', payload: { type: 'item_completed', thread_id: source.nativeSessionId, turn_id: packet.turnId,
     item: { type: 'UserMessage', id, client_id: packet.plan.clientCorrelation, content: [{ type: 'text', text: packet.prompt, text_elements: [] }] } } })).join(''))
   const complete = async (turnId: string, kind: 'task_complete' | 'turn_aborted' = 'task_complete') => await appendFile(transcript, row({ type: 'event_msg', payload: { type: kind, turn_id: turnId } }))
   const reply = async (text: string, turnId = packets.at(-1)?.turnId ?? 'unrelated-turn') => await appendFile(transcript, row({ type: 'response_item', payload: { type: 'message', id: 'reply-' + text, role: 'assistant', phase: 'final_answer', turn_id: turnId, content: [{ type: 'output_text', text }] } }))
   const reactionPosts = (messageId: string) => remote.calls.filter(call => call.method === 'POST' && call.path === '/open-apis/im/v1/messages/' + messageId + '/reactions')
-  return { original, source, transcript, desktop, socket, packets, controls, reactions, remote, sdk, config, binding: binding.binding, receive, feedback, deliveries, expectStages, adopt, complete, reply, row, reactionPosts,
+  return { original, source, transcript, desktop, socket, packets, controls, reactions, remote, sdk, config, binding: binding.binding, receive, admitted, feedback, deliveries, expectStages, adopt, complete, reply, row, reactionPosts,
     get executionClient() { return executionClient },
     get rpc() { return rpc! }, get service() { return opened.at(-1)! }, reopen: async () => { await stop(); await start(); await vi.waitFor(() => expect(sdk.sockets.length).toBeGreaterThan(1)) } }
 }
@@ -138,7 +176,7 @@ async function fixture(mode: 'native' | 'waiting' | 'terminal' = 'native') {
 it('default Host reports current native cursor failure while original input and received reactions remain usable', async () => {
   const f = await fixture(), first = await f.receive('native-coverage-original')
   await f.expectStages('native-coverage-original', ['received'])
-  await vi.waitFor(() => expect(f.packets).toHaveLength(1))
+  await f.admitted(first); expect(f.packets).toHaveLength(1)
   const originalFeedback = (await f.feedback('native-coverage-original'))[0]!
   const provider = f.executionClient.providers.get('codex'), changes = provider.readConversationChanges!.bind(provider)
   const failure = vi.spyOn(provider, 'readConversationChanges').mockImplementation(input => input.after !== undefined
@@ -149,7 +187,7 @@ it('default Host reports current native cursor failure while original input and 
   expect(failure).toHaveBeenCalled()
   const second = await f.receive('native-coverage-independent')
   await f.expectStages('native-coverage-independent', ['received'])
-  await vi.waitFor(() => expect(f.packets).toHaveLength(2))
+  await f.admitted(second); expect(f.packets).toHaveLength(2)
   expect((await f.rpc.call('connection.ingress.inspect', { ingressId: first.ingressId })).inputReceipt?.status).toBe('admitted')
   expect((await f.rpc.call('connection.ingress.inspect', { ingressId: second.ingressId })).inputReceipt?.status).toBe('admitted')
   expect((await f.feedback('native-coverage-original'))[0]).toEqual(originalFeedback)
@@ -180,7 +218,7 @@ it('default Host attaches cumulative feedback only to the exact original adopted
     expect(retained?.kind).not.toBe('action')
     expect(retained && retained.kind !== 'action' ? retained.group?.recorded : undefined).toBeUndefined()
   } finally { release(); capture.mockRestore() }
-  await vi.waitFor(() => expect(f.packets).toHaveLength(1))
+  await f.admitted(received); expect(f.packets).toHaveLength(1)
   const input = (await f.rpc.call('connection.ingress.inspect', { ingressId: received.ingressId })).ingress!.input!
   if (!('messageId' in input)) throw Error('Original group message input required')
   expect(input).toMatchObject({ hostId: 'local', agentSessionId: 'original-agent', expectedRun: { runId: 'run-original-agent' } })
@@ -207,8 +245,9 @@ it('default Host attaches cumulative feedback only to the exact original adopted
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   const cli = await runCompiledObjectCli(['--endpoint', 'unix:' + f.socket, 'connection', 'delivery', 'inspect', '--operation-id', receipts[2]!.operationId], objectCliEnvironment(f.original.root))
   expect(cli.code, cli.stdout + cli.stderr).toBe(0); expect(JSON.parse(cli.stdout).result).toEqual({ delivery: receipts[2] })
-  const ambiguous = await f.receive('ambiguous-query'); await vi.waitFor(() => expect(f.packets).toHaveLength(2))
-  await f.adopt(f.packets[1], ['ambiguous-original-one', 'ambiguous-original-two'])
+  const ambiguous = await f.receive('ambiguous-query'), ambiguousPacket = await f.admitted(ambiguous)
+  expect(f.packets).toHaveLength(2)
+  await f.adopt(ambiguousPacket, ['ambiguous-original-one', 'ambiguous-original-two'])
   await f.complete(f.packets[1]!.turnId); await f.reply('Ambiguous input remains independently readable')
   await vi.waitFor(() => expect(JSON.stringify(f.remote.calls)).toContain('Ambiguous input remains independently readable'))
   expect((await f.feedback('ambiguous-query')).map(item => item.queryFeedback!.stage)).toEqual(['received'])
@@ -236,7 +275,7 @@ it.each(['waiting', 'terminal'] as const)('%s input retains received feedback wi
 
 it('unknown reaction reopens under its original effect without a second create and reaction permission failure never blocks original input or reply', async () => {
   const f = await fixture(); f.controls.unknown = 'OnIt'; f.controls.reconcileUnavailable = true
-  const original = await f.receive('unknown-query'); await vi.waitFor(() => expect(f.packets).toHaveLength(1))
+  const original = await f.receive('unknown-query'); await f.admitted(original); expect(f.packets).toHaveLength(1)
   await f.adopt()
   await vi.waitFor(async () => expect((await f.feedback('unknown-query')).some(item => item.queryFeedback!.stage === 'started' && item.state === 'unknown')).toBe(true), { timeout: 15_000 })
   const before = (await f.feedback('unknown-query')).find(item => item.queryFeedback!.stage === 'started')!
@@ -252,7 +291,7 @@ it('unknown reaction reopens under its original effect without a second create a
   await f.service.ingress!.dispatch(original.ingressId); expect(f.packets).toHaveLength(1)
   f.controls.fail = 'Get'
   const second = await f.receive('missing-scope-query')
-  await vi.waitFor(() => expect(f.packets).toHaveLength(2))
+  await f.admitted(second); expect(f.packets).toHaveLength(2)
   await vi.waitFor(async () => expect((await f.feedback('missing-scope-query')).some(item => item.queryFeedback!.stage === 'received' && item.state === 'not-applied')).toBe(true))
   await f.reply('Body continues without reaction permission')
   await vi.waitFor(() => expect(JSON.stringify(f.remote.calls)).toContain('Body continues without reaction permission'))
