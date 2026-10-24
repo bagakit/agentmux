@@ -166,7 +166,7 @@ Runtime 连接反复波动或短期重试耗尽后，停止高频重试并转为
 
 - **恢复须核验原 lifecycle owner。** 已确认 owner 退出或明确释放的未完成 reservation 可由原 Core owner 回收；仅租约到期、观察超时或新进程启动均不构成接管资格。已知旧 owner 活着时保原归属；归属未知时保 Session／Region 与服务窗，说明核验步骤，不静默删除、不伪造新 Session。
 
-  显式 restart 在应用重启后继续保留原 operation、冻结的执行来源与原生会话目标；通用 continuity 观察不能将它改成另一项自动恢复或重算执行配置。用户可核对并显式继续原 restart。用户要求关闭时，原 owner 已释放、已确认退出或同一 owner 可在原子事务内用准确 Session／Run 的 Stop 取代尚未准备 Start 的 restart；旧 restart 随即失去后续 Start 的资格。已准备 Start 或结果未知时保留原操作核对入口，不重复启动，也不为了关闭而先补启动。
+  显式 restart 在应用重启后继续保留原 operation、冻结的执行来源与原生会话目标；通用 continuity 观察不能将它改成另一项自动恢复或重算执行配置。原 reservation 已持久化而首条 operation 回执尚未写入时，仍须从准确 reservation 保留可发现的原请求；事实一致时用户可核对并显式继续原 restart。若同 ID 的历史回执或原生目标存在无法区分的冲突，保留原事实并提供可执行的核对或安全关闭路径，不能猜测或覆盖。回执缺失不授权重放或另铸操作。用户要求关闭时，原 owner 已释放、已确认退出或同一 owner 可在原子事务内用准确 Session／Run 的 Stop 取代尚未准备 Start 的 restart；旧 restart 随即失去后续 Start 的资格。已准备 Start 或结果未知时保留原操作核对入口，不重复启动，也不为了关闭而先补启动。
 
 - **累计退役历史不能阻断启动或删除恢复身份。** 停止完成沿原 Store 保存准确 Session／Run 的退役事实与恢复引用；不能因累计条数或共享字节额度淘汰原 Session、Provider native handle 或退役身份。可回收的缓存、索引与输出前缀只沿各自 owner 的保留合同治理，不替代语义记录。真实持久化失败如实表达，不删除旧记录换取成功。同一 Run 同时被声明为当前与退役仍是真实冲突，应拒绝该次错误写入；合法历史增长不属于损坏。
 
