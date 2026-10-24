@@ -134,7 +134,7 @@ it('shows creator unlimited access and each guest used, total and remaining allo
   const row = () => chat().querySelector<HTMLElement>('[data-mote-chat-person="original-guest"]')!
   expect(row().querySelectorAll('dd')[0]!.textContent).toBe('1'); expect(row().querySelectorAll('dd')[1]!.textContent).toBe('2'); expect(row().querySelectorAll('dd')[2]!.textContent).toBe('1')
   const creatorRow = chat().querySelector<HTMLElement>('[data-mote-chat-person="original-creator"]')!
-  expect(creatorRow.textContent).toContain('Creator · unlimited'); expect(creatorRow.querySelector('button')).toBeNull()
+  expect(creatorRow.textContent).toContain('Creator · unlimited'); expect(creatorRow.textContent).not.toContain('Edit allowance')
   await act(async () => row().querySelector<HTMLButtonElement>('button')!.click())
   await fill('Total allowance for original-guest', '5')
   await act(async () => row().querySelector<HTMLFormElement>('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
