@@ -1,5 +1,6 @@
 import { parseConnectionDeliveryObservation, parseConnectionDeliverySourceObservation } from './connection-delivery-codec.js'
 import { parseConnectionObservation } from './connection-record-codec.js'
+import { parseConnectionServiceState } from './connection-service-codec.js'
 import { AgentMuxError } from './errors.js'
 import { parseIngressContextObservation } from './ingress-codec.js'
 import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisSourceCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosis, type ConnectionDiagnosisInput, type ConnectionDiagnosisReading, type ConnectionGroupDiagnosis } from './connection-diagnosis-contract.js'
@@ -50,11 +51,16 @@ function sourceGap(value: unknown) {
     code, codeRecorded, association: association(g.association), sourceKind: nullable(g.sourceKind, value => member(value, ['captured', 'native', 'native-unavailable'] as const)) }
 }
 function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGroupDiagnosis {
-  const p = object(value, ['target', 'window', 'limit', 'connection', 'binding', 'outgoing', 'incoming']), t = object(p.target, ['bindingId', 'bindingRevision', 'connectionId', 'domain', 'appId', 'externalConversationId', 'executionHostId', 'agentSessionId'])
+  const p = object(value, ['target', 'window', 'limit', 'adapterService', 'connection', 'binding', 'outgoing', 'incoming']), t = object(p.target, ['bindingId', 'bindingRevision', 'connectionId', 'domain', 'appId', 'externalConversationId', 'executionHostId', 'agentSessionId'])
   const target = { bindingId: id(t.bindingId), bindingRevision: count(t.bindingRevision, 1), connectionId: id(t.connectionId), domain: text(t.domain), appId: text(t.appId), externalConversationId: text(t.externalConversationId), executionHostId: id(t.executionHostId), agentSessionId: id(t.agentSessionId) }
   if (target.executionHostId !== request.executionHostId || target.agentSessionId !== request.agentSessionId || request.bindingId && target.bindingId !== request.bindingId || request.bindingRevision && target.bindingRevision !== request.bindingRevision || p.limit !== connectionDiagnosisWindowLimit) return fail()
   const window = object(p.window, ['after', 'afterContent', 'beforeIngressId'])
   if (['after', 'afterContent', 'beforeIngressId'].some(key => window[key] !== request[key as keyof ConnectionDiagnosisInput])) return fail()
+  const adapterService = reading(p.adapterService, value => {
+    const state = parseConnectionServiceState(value)
+    if (!state.adapterId) return fail()
+    return { adapterId: state.adapterId, enabled: state.enabled, revision: state.revision }
+  })
   const connection = reading(p.connection, value => {
     const c = object(value, ['revision', 'enabled', 'authentication', 'transport', 'intake', 'delivery'])
     return { revision: count(c.revision, 1), enabled: bool(c.enabled), ...parseConnectionObservation({ authentication: c.authentication, transport: c.transport, intake: c.intake, delivery: c.delivery }) }
@@ -106,7 +112,7 @@ function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGro
     if (new Set(rows.map(row => row.ingressId)).size !== rows.length) return fail()
     return { beforeIngressId: nullable(page.beforeIngressId, id), next: nullable(page.next, id), rows }
   })
-  return { target, window: { ...(request.after ? { after: request.after } : {}), ...(request.afterContent ? { afterContent: request.afterContent } : {}), ...(request.beforeIngressId ? { beforeIngressId: request.beforeIngressId } : {}) }, limit: connectionDiagnosisWindowLimit, connection, binding, outgoing, incoming }
+  return { target, window: { ...(request.after ? { after: request.after } : {}), ...(request.afterContent ? { afterContent: request.afterContent } : {}), ...(request.beforeIngressId ? { beforeIngressId: request.beforeIngressId } : {}) }, limit: connectionDiagnosisWindowLimit, adapterService, connection, binding, outgoing, incoming }
 }
 export function parseConnectionDiagnosis(value: unknown, input: ConnectionDiagnosisInput): ConnectionDiagnosis {
   const p = object(value, ['target', 'service', 'groups']), target = parseConnectionDiagnosisInput(p.target)

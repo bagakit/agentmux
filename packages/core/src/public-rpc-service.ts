@@ -696,7 +696,7 @@ export class AgentMuxRpcService {
       if (isConnectionServiceMethod(method)) {
         const service = owner.service
         if (!service) throw new AgentMuxError('Connector service policy is unavailable on this Host. Existing connection management and Agents remain available.', 'CONTROL_UNAVAILABLE')
-        const result = method === 'connection.service.get' ? await service.get()
+        const result = method === 'connection.service.get' ? await service.get(parseConnectionServiceParams(method, params))
           : method === 'connection.service.configure' ? await service.configure(parseConnectionServiceParams(method, params))
           : await service.inspect(parseConnectionServiceParams(method, params))
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>

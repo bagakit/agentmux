@@ -5,6 +5,7 @@ import type { ConnectionDelivery } from './connection-delivery-contract.js'
 import type { ConnectionIngressRecord } from './ingress-contract.js'
 import type { RoomBinding } from './room-binding-contract.js'
 import type { ConnectionPort } from './connections-contract.js'
+import { parseConnectionServiceResult } from './connection-service-codec.js'
 import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisSourceCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosisInput, type ConnectionDiagnosis, type ConnectionGroupDiagnosis, type ConnectionDiagnosisTarget, type ConnectionDiagnosisWindow, type ConnectionDiagnosisReading, type GroupDiagnosis } from './connection-diagnosis-contract.js'
 
 export const groupWindowLimit = connectionDiagnosisWindowLimit
@@ -61,6 +62,11 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
   ])
   const c = connection.value?.connection, b = binding.value?.binding
   const sameConnection = !!c && c.config.connectionId === target.connectionId && applicationMatches(c.config.application, target)
+  const adapterService: ConnectionGroupDiagnosis['adapterService'] = sameConnection ? await reading(async () => {
+    const input = { adapterId: c.config.adapterId }
+    const value = parseConnectionServiceResult('connection.service.get', await owner.service!.get(input), input)
+    return { adapterId: input.adapterId, enabled: value.enabled, revision: value.revision }
+  }) : { value: null, issue: connection.issue ?? 'target-unconfirmed' }
   const sameBinding = !!b && b.bindingId === target.bindingId && b.revision === target.bindingRevision && b.connectionId === target.connectionId &&
     b.externalConversationId === target.externalConversationId && applicationMatches(b.application, target) && b.executionHostId === target.executionHostId && b.agentSessionId === target.agentSessionId
   const rows = incoming.value?.ingresses.filter(ingress => ingressMatches(ingress, target)) ?? []
@@ -89,6 +95,7 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
   }))
   const scopedOutgoing = outgoing.value && outgoing.value.deliveries.every(delivery => deliveryMatches(delivery, target) && recordMatches(delivery.reference, target, ['native', 'captured'].includes(delivery.reference.source.kind) ? b?.sourceFrontier?.sourceHostId : target.executionHostId)) && (outgoing.value.coverage?.gaps.every(gap => gapMatches(gap, target, b?.sourceFrontier?.sourceHostId)) ?? true)
   return { target: { ...target }, window: { ...(window.after ? { after: window.after } : {}), ...(window.afterContent ? { afterContent: window.afterContent } : {}), ...(window.beforeIngressId ? { beforeIngressId: window.beforeIngressId } : {}) }, limit: groupWindowLimit,
+    adapterService,
     connection: { value: sameConnection ? { revision: c.revision, enabled: c.config.enabled,
       authentication: { state: c.observation.authentication.state, ...(c.observation.authentication.reason ? { reason: c.observation.authentication.reason } : {}) },
       transport: { state: c.observation.transport.state, ...(c.observation.transport.reason ? { reason: c.observation.transport.reason } : {}) },
@@ -132,18 +139,19 @@ export async function readConnectionDiagnosis(owner: ConnectionPort, input: Conn
 export function retainGroupDiagnosis(previous: GroupDiagnosis | null, next: GroupDiagnosis): GroupDiagnosis {
   if (!previous || JSON.stringify(previous.target) !== JSON.stringify(next.target) || JSON.stringify(previous.window) !== JSON.stringify(next.window)) return next
   const retain = <T,>(before: Reading<T>, after: Reading<T>): Reading<T> => after.issue && before.value ? { value: before.value, issue: after.issue, retained: true } : after
-  return { ...next, service: retain(previous.service, next.service), connection: retain(previous.connection, next.connection), binding: retain(previous.binding, next.binding), outgoing: retain(previous.outgoing, next.outgoing), incoming: retain(previous.incoming, next.incoming) }
+  return { ...next, service: retain(previous.service, next.service), adapterService: retain(previous.adapterService, next.adapterService), connection: retain(previous.connection, next.connection), binding: retain(previous.binding, next.binding), outgoing: retain(previous.outgoing, next.outgoing), incoming: retain(previous.incoming, next.incoming) }
 }
 /** Only the projected facts above enter the text; no original DTO is serialized. */
 export function formatGroupDiagnosis(report: GroupDiagnosis) {
-  const { target: t, service, connection, binding, outgoing, incoming } = report, lines = [
+  const { target: t, service, adapterService, connection, binding, outgoing, incoming } = report, lines = [
     'Group diagnosis — bounded local observations, not an atomic history',
     `Binding: ${t.bindingId} · revision ${t.bindingRevision}`, `Connection: ${t.connectionId} · ${t.domain} · ${t.appId}`,
     `Group: ${t.externalConversationId}`, `Agent: ${t.executionHostId} · ${t.agentSessionId}`, `Window limit: ${report.limit}`
   ]
   const section = (name: string, value: { issue: string | null; retained?: true }) => { if (value.issue) lines.push(`${name}: ${value.issue}${value.retained ? ' (earlier observed facts retained)' : ''}`) }
-  section('Service read', service); section('Connection read', connection); section('Binding read', binding); section('Delivery read', outgoing); section('Ingress read', incoming)
+  section('Service read', service); section('Platform service read', adapterService); section('Connection read', connection); section('Binding read', binding); section('Delivery read', outgoing); section('Ingress read', incoming)
   if (service.value) lines.push(`Automatic service: ${service.value.enabled ? 'on' : 'off'} · revision ${service.value.revision}`)
+  if (adapterService.value) lines.push(`Platform automatic service: ${adapterService.value.adapterId} · ${adapterService.value.enabled ? 'on' : 'off'} · revision ${adapterService.value.revision}`)
   if (connection.value) { lines.push(`Connection revision: ${connection.value.revision} · enabled ${connection.value.enabled}`); for (const stage of ['authentication', 'transport', 'intake', 'delivery'] as const) lines.push(`Application ${stage}: ${connection.value[stage].state} · ${connection.value[stage].reason ?? 'no recorded reason'}`) }
   if (binding.value) lines.push(`Binding state: ${binding.value.state} · current revision ${binding.value.currentRevision ?? 'unconfirmed'} · scope ${binding.value.scope.input} / ${binding.value.scope.publication} · active grants input ${binding.value.activeInputGrants} / answer ${binding.value.activeAnswerGrants} / permission ${binding.value.activePermissionGrants}`)
   const out = outgoing.value
