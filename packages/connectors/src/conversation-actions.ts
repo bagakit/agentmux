@@ -250,7 +250,7 @@ export class ConversationActions implements PublicationPermissionsPort {
         .map(row => JSON.parse(String(row.reference_json)) as QuestionReference).find(ref => same(ref.run, session!.run) && same(ref.target, { source, turnId: item.turnId, recordId: item.id, afterSubmissionId: condition.afterSubmissionId }) && same(ref.questions, questions)) : undefined
       if (!grants.length) {
         if (existing) {
-          const prior = this.options.connections.database.prepare('SELECT operation_json FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND projection_id=? ORDER BY ordinal DESC LIMIT 1').get(binding.bindingId, binding.revision, existing.projectionId)
+          const prior = this.options.connections.database.prepare("SELECT operation_json FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND json_extract(operation_json,'$.payload.actionRef')=? ORDER BY ordinal DESC LIMIT 1").get(binding.bindingId, binding.revision, existing.actionRef)
           if (prior) Object.assign(payload, JSON.parse(String(prior.operation_json)).payload)
         }
         continue
