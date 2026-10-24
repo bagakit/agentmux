@@ -11,19 +11,33 @@ import { createFocusProjectionSelector } from './focus-context'
 import { topicSpaceIconTarget, type SpaceIconOverrides } from './space-object-appearance'
 import { moteExpressionPresentation } from './mote-expression'
 import type { RendererAgentTimelineSnapshot } from './session-state'
+import { deriveFocusProjectLanes, focusProjectKey } from './focus-project-lanes'
+import { focusStateMarkKind } from '@agentmux/client-ui/focus-state-mark'
+import { directoryIdentity } from '../../../shared/space-addresses'
 import { originalTopicAddress } from '../../../shared/space-addresses'
 import { resolveMoteDefaultConversation, moteDefaultCatalog } from './mote-default-conversation'
-type State = Omit<Parameters<ReturnType<typeof createFocusProjectionSelector>>[0], 'timelines'> & { timelines: Record<string, RendererAgentTimelineSnapshot> } & { spaceObjectIcons: SpaceIconOverrides; spaceZoneBindings: SpaceZoneBindings }
+type State = { tabs?: Record<string, WorkbenchTab> } & Omit<Parameters<ReturnType<typeof createFocusProjectionSelector>>[0], 'timelines'> & { timelines: Record<string, RendererAgentTimelineSnapshot> } & { spaceObjectIcons: SpaceIconOverrides; spaceZoneBindings: SpaceZoneBindings }
 const originalFocus = createFocusProjectionSelector()
 /** Only read existing presentation owners. No alternate names, statuses, identities or image store. */
 export function readAgentPresentation(state: State): NonNullable<AgentMuxSpaceCatalog['agentPresentation']> {
   const sessions = new Map(state.sessions.map(value => [value.id, value]))
-  return originalFocus(state).contexts.map(row => {
+  const projection = originalFocus(state)
+  const workspaces = new Map(state.config?.workspaces.map(value => [value.id, value]))
+  const lanes = deriveFocusProjectLanes(projection.laneContexts, state.config, undefined, state.tabs ?? {}, Date.now(), state.scratchTopicSnapshots)
+  const byContext = new Map(lanes.flatMap(lane => lane.contextIds.map(id => [id, lane] as const)))
+  return projection.contexts.map(row => {
+    const lane = byContext.get(row.id)
+    const projectWorkspace = lane?.projectWorkspaceId ? workspaces.get(lane.projectWorkspaceId) : undefined
+    const objectLane = lane?.objectKind === 'mote' || lane?.objectKind === 'topic'
+    const projectGroup = lane && lane.projectId && (objectLane || projectWorkspace) ? { key: objectLane ? lane.id : focusProjectKey(lane.hostId, lane.projectId), projectId: lane.projectId,
+      hostId: lane.hostId, name: objectLane ? lane.labels.at(-1)! : lane.labels[0]!,
+      spaceId: objectLane ? lane.objectIconKey ?? null : projectWorkspace ? directoryIdentity(projectWorkspace.hostId, projectWorkspace.repoPath ?? projectWorkspace.path) : null } : undefined
     const original = sessions.get(row.id)
     const executorId = original?.kind === 'agent' ? original.executorId : undefined
     const avatar = executorId ? state.config?.executors[executorId]?.avatar ?? state.config?.appearance.agentAvatars?.[executorId] : undefined
     return { agentSessionId: original?.control.kind === 'agent' ? original.control.agentSessionId : row.id, name: row.name, project: row.workspace ? row.workspaceName : 'Project unconfirmed',
       detail: row.detail, group: row.bucket, state: row.state, providerId: row.providerId ?? '',
+      stateMark: focusStateMarkKind(row), stateLabel: row.stateLabel, presenceUnknown: row.runUnobserved === true, ...(projectGroup ? { projectGroup } : {}),
       recap: row.recap ? { text: row.recap.text, source: row.recap.source } : null, ...(avatar ? { avatar } : {}) }
   })
 }
@@ -51,7 +65,7 @@ export function readMotePresentation(state: Parameters<typeof resolveMoteDefault
       ...(issues.length ? { issue: [...new Set(issues)].join('\n') } : {}) }
   })
 }
-export async function readSpatialAppearance(state: State, catalog: AgentMuxSpaceCatalog, imageSpaceId: string | undefined, topics: readonly ScratchTopicSnapshot[], readAvatar: (target: MoteAvatarTarget, choice: MoteAvatarRef) => Promise<MoteAvatarImage>): Promise<NonNullable<AgentMuxSpaceCatalog['appearance']>> {
+export async function readSpatialAppearance(state: State, catalog: AgentMuxSpaceCatalog, imageSpaceId: string | undefined, topics: readonly ScratchTopicSnapshot[], readAvatar: (target: MoteAvatarTarget, choice: MoteAvatarRef) => Promise<MoteAvatarImage>, readProject?: (workspaceId: string) => Promise<{ kind: string; icon: string | null }>): Promise<NonNullable<AgentMuxSpaceCatalog['appearance']>> {
   return Promise.all(catalog.spaces.map(async space => {
     const scratch = state.config?.workspaces.find(value => value.id === SCRATCH_WORKSPACE_ID && value.hostId === space.hostId)
     const topic = space.topicId ? topics.find(value => value.id === space.topicId) : undefined
@@ -59,6 +73,18 @@ export async function readSpatialAppearance(state: State, catalog: AgentMuxSpace
     if (space.kind === 'mote' && !target) return { spaceId: space.spaceId, issue: '原 Mote 头像身份尚未确认；已保存外观保留。', expression: 'unknown' }
     const key = target?.key ?? space.spaceId
     const choice = state.spaceObjectIcons[key]
+    // Reuse ProjectIcon's original filesystem owner, only for the explicitly read Space.
+    // Directory lists carry a source marker, never an eager image scan or image bytes.
+    if (space.kind === 'folder' && !choice) {
+      if (space.spaceId !== imageSpaceId) return { spaceId: space.spaceId, preset: 'project' }
+      const resource = state.config?.workspaces.find(value => directoryIdentity(value.hostId, value.repoPath ?? value.path) === space.spaceId)
+      try {
+        if (!resource || !readProject) throw new Error('原项目图标来源暂未确认，原项目与工作面保留。')
+        const appearance = await readProject(resource.id)
+        return { spaceId: space.spaceId, preset: appearance.kind === 'repository' ? 'repository' : 'directory', image: { dataUrl: appearance.icon } }
+      } catch (error) { return { spaceId: space.spaceId, preset: 'project', issue: presentError(error) } }
+    }
+
     const matching = target && scratch && topic ? state.sessions.filter(value => value.kind === 'agent' && value.hostId === scratch.hostId && (value.workspacePath === scratchTopicPhysicalPath(scratch, topic) || value.workspacePath === JSON.parse(target.key)[1])) : []
     const original = matching.length === 1 ? matching[0] : undefined
     const { expression } = moteExpressionPresentation(original, 'static', original ? state.timelines[original.id]?.liveTool : undefined)

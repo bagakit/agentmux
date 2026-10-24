@@ -57,3 +57,15 @@
 .mobile-directory-notice :focus-visible, .mobile-space-directory summary:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 1px; }
 @media (prefers-reduced-motion: reduce) { .mobile-tree-chevron { transition: none; } }
 .mobile-space-row > svg { margin-left: 0; }
+
+.mobile-space-icon { position: relative; display: inline-flex; width: 100%; height: 100%; align-items: center; justify-content: center; }
+.mobile-spatial-panel .mobile-focus-project > h2 { min-height: 32px; margin-top: 12px; gap: 7px; color: var(--text-2); align-items: center; }
+.mobile-focus-project > h2 > strong { font-size: 12px; font-weight: 550; }
+.mobile-focus-project > h2 > span:last-child { margin-left: auto; color: var(--text-3); font-size: 11px; }
+.mobile-focus-project[data-project-confirmed='true'] .mobile-session-project { display: none; }
+.mobile-spatial-panel .mobile-focus-project .mobile-session-list button > .mobile-session-copy { display: flex; flex-direction: column; gap: 2px; }
+.mobile-focus-project[data-project-confirmed='false'] .mobile-session-project { order: -1; max-width: none; }
+.mobile-session-state .focus-state-mark { display: inline-flex; grid-column: 1; grid-row: 1 / 3; align-self: center; margin-right: 5px; }
+.mobile-session-state:has(.focus-state-mark) { grid-template-columns: auto auto; column-gap: 2px; }
+.mobile-session-state:has(.focus-state-mark) > :not(.focus-state-mark) { grid-column: 2; }
+.mobile-session-state[data-state='done'] { color: var(--status-success-text, var(--green)); }

@@ -8,13 +8,14 @@ import { isMoteFace } from '@agentmux/client-ui/mote-face'
 import { observeMoteMotion } from '@agentmux/client-ui/mote-face-motion'
 import '@agentmux/client-ui/styles/mote-identity.css'
 import { SPACE_ICON_CATALOG } from '@agentmux/client-ui/space-icon-catalog'
+import { MobileSpaceIcon } from './MobileSpaceIcon'
 import { MoteIcon as MoteMark } from '@agentmux/client-ui/components/MoteIcon'
 const ThemeStatusWarningIcon = semanticIconComponent('status.warning')
 type Catalog = AgentMuxRpcResult<'space.ls'>['catalog']
 export type MobileObjectIdentity = { name: string; project: string; context?: AgentMuxSpaceAddress;
   mote?: { spaceId: string; name?: string; conversationName?: string | undefined; contentReference?: AgentMuxMotePresentation['content']; facts?: AgentMuxMotePresentation | undefined; appearance?: NonNullable<Catalog['appearance']>[number] | undefined } }
-export function MobileIdentity({ identity, session, client, connected, size = 32, visible = true }: {
-  identity: MobileObjectIdentity; session?: AgentMuxAgentSession | undefined; client: AgentMuxHostedClient | null; connected: boolean; size?: number; visible?: boolean
+export function MobileIdentity({ identity, session, client, connected, size = 32, visible = true, objectSpaceId, appearance, appearanceRevision }: {
+  identity: MobileObjectIdentity; session?: AgentMuxAgentSession | undefined; client: AgentMuxHostedClient | null; connected: boolean; size?: number; visible?: boolean; objectSpaceId?: string | null | undefined; appearanceRevision?: number | undefined; appearance?: NonNullable<Catalog['appearance']>[number] | undefined
 }) {
   const observationOwner = useMemo(() => ({}), [client, identity.mote?.spaceId, session?.agentSessionId, session?.hostId, session?.run.runId, connected, visible])
   const [liveAppearance, setLiveAppearance] = useState<{ spaceId: string; value: NonNullable<Catalog['appearance']>[number]; owner: object; requestStartedMono: number | null } | null>(null)
@@ -70,7 +71,7 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
     document.addEventListener('visibilitychange', foreground)
     void read()
     return () => { live = false; epoch++; release(); document.removeEventListener('visibilitychange', foreground) }
-  }, [spaceId, identity.mote?.appearance, client, connected, session?.agentSessionId, visible, observationOwner])
+  }, [spaceId, identity.mote?.appearance, appearanceRevision, client, connected, session?.agentSessionId, visible, observationOwner])
   const expressions = ['identity', 'sleep', 'idle', 'thinking', 'tool', 'starting', 'waiting', 'error', 'unknown', 'stopped']
   const activitySource = liveAppearance?.owner === observationOwner ? liveAppearance : null
   const activity = session ? activitySource?.value.activities?.find(value => value.agentSessionId === session.agentSessionId && value.runId === session.run.runId) : undefined
@@ -102,7 +103,7 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
     {identity.mote ? <span className="space-object-icon">{face ? <MoteFace face={face} expression={expression} />
       : selected?.image ? image && image.spaceId === spaceId && image.revision === selected.image.revision ? <img className="space-object-icon__avatar" src={image.dataUrl} alt="" /> : <MoteMark size={size - 8} />
       : selected?.glyph ? Glyph ? <Glyph size={size - 8} /> : <MoteMark size={size - 8} /> : <MoteMark size={size - 8} interactive={visible} data-mote-icon-source="automatic" />}</span>
-      : <span>{Array.from(identity.project || identity.name).slice(0, 1).join('').toLocaleUpperCase()}</span>}
+      : <MobileSpaceIcon appearanceRevision={appearanceRevision} spaceId={objectSpaceId ?? identity.context?.spaceId} name={identity.project || identity.name} appearance={appearance} client={client} connected={connected} visible={visible} size={size - 8} />}
     {(issue || selected?.issue) && <span className="mobile-avatar-issue" aria-label={issue || selected?.issue}><ThemeStatusWarningIcon size={10} /></span>}
   </span>
 }
