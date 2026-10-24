@@ -680,6 +680,8 @@ export class AgentMuxClient {
   private readonly registry: AgentMuxAgentSessionRegistry
   private readonly deliveryAttempts: DeliveryAttemptStore
   private readonly store: AgentMuxAgentSessionStore
+  /** Only concurrent Provider reads are shared; every caller projects its own Core ownership. */
+  private readonly nativeSessionCatalogReads = new WeakMap<AgentProvider, Map<string, Promise<Omit<AgentNativeSessionCatalog, 'capabilities'>>>>()
   private readonly messageQueue: DurableAgentMuxMessageQueue
   /** Only the original live caller context; credentials are never journaled. */
   private readonly inputWaitingContexts = new Map<string, {
@@ -2627,8 +2629,21 @@ export class AgentMuxClient {
   async listNativeAgentSessions(input: { providerId: AgentProviderId; workspacePath?: string; env?: Readonly<Record<string, string>> }): Promise<AgentNativeSessionCatalog> {
     const provider = this.providers.get(input.providerId), capabilities = structuredClone(provider.catalog.capabilities)
     if (!provider.listNativeSessions) return { providerId: provider.id, capabilities, availability: 'unsupported', sessions: [], issues: [] }
-    const catalog = await provider.listNativeSessions({ ...(input.workspacePath === undefined ? {} : { workspacePath: input.workspacePath }),
-      env: input.env ?? {}, signal: new AbortController().signal })
+    const env = { ...input.env }, workspacePath = input.workspacePath
+    const entries = (value: Readonly<Record<string, string | undefined>>) => Object.entries(value).sort(([a], [b]) => a.localeCompare(b))
+    // Inherited values qualify the original source, but remain Provider fallbacks rather than explicit overrides.
+    const key = JSON.stringify([workspacePath ?? null, entries(env), entries(process.env)])
+    let reads = this.nativeSessionCatalogReads.get(provider)
+    if (!reads) { reads = new Map(); this.nativeSessionCatalogReads.set(provider, reads) }
+    let pending = reads.get(key)
+    if (!pending) {
+      pending = (async () => await provider.listNativeSessions!({ ...(workspacePath === undefined ? {} : { workspacePath }),
+        env, signal: new AbortController().signal }))().finally(() => {
+        if (reads.get(key) === pending) reads.delete(key)
+      })
+      reads.set(key, pending)
+    }
+    const catalog = structuredClone(await pending)
     try {
       const managed = await this.managedNativeIndex()
       for (const entry of catalog.sessions) {
