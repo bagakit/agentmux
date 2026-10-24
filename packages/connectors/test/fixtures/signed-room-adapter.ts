@@ -8,14 +8,14 @@ const observation = (authenticated: boolean) => ({ authentication: authenticated
   transport: { state: 'ready' as const }, intake: { state: 'ready' as const }, delivery: { state: 'unknown' as const, reason: 'not-started' as const } })
 
 /** Test protocol leaves: an actual signed HTTP receiver and an idempotent replay ledger. No platform claim. */
-export function signedRoomAdapter() {
+export function signedRoomAdapter(adapterId = 'signed-room') {
   const trace: string[] = [], effects: Array<{ key: string; room: string; text: string }> = []
   const ledger = new Map<string, { messageId: string }>()
   let endpoint: string | undefined, server: Server | undefined, signingKey: string | undefined, authenticated = false, latestReceive: Parameters<ConnectionIngressTransport['start']>[0]['receive'] | undefined
-  const publication: PublicationAdapter = { adapterId: 'signed-room', renderVersion: 'replay-text-v1', supportedRenderVersions: ['replay-text-v1'], fragmentBytes: 8_192,
+  const publication: PublicationAdapter = { adapterId, renderVersion: 'replay-text-v1', supportedRenderVersions: ['replay-text-v1'], fragmentBytes: 8_192,
     prepare: operation => {
       if (operation.payload.kind !== 'speech') throw new Error('Signed-room fixture supports only original speech payloads')
-      return { adapterId: 'signed-room', renderVersion: 'replay-text-v1', requestKey: operation.operationId,
+      return { adapterId, renderVersion: 'replay-text-v1', requestKey: operation.operationId,
         request: { method: 'POST', path: '/replay-records', contentType: 'application/json', body: JSON.stringify({ room: operation.target.externalConversationId, text: operation.payload.text }) } }
     },
     dispatch: async (prepared, target, credential) => {
@@ -31,9 +31,9 @@ export function signedRoomAdapter() {
     },
     inspect: async prepared => { const mapping = ledger.get(prepared.requestKey); return mapping ? { state: 'confirmed', mapping } : null }
   }
-  const adapter: ConnectionAdapter = { adapterId: 'signed-room', publication,
+  const adapter: ConnectionAdapter = { adapterId, publication,
     test: async () => observation(authenticated),
-    ingress: { adapterId: 'signed-room', verify: async (config, raw, proof): Promise<VerifiedIngressEvent> => {
+    ingress: { adapterId, verify: async (config, raw, proof): Promise<VerifiedIngressEvent> => {
       if (!signingKey) throw new Error('Original Host receiver has not resolved its credential')
       const expected = createHmac('sha256', signingKey).update(raw).digest()
       if (typeof proof !== 'string' || !/^[0-9a-f]{64}$/u.test(proof) || !timingSafeEqual(expected, Buffer.from(proof, 'hex'))) throw new Error('Private signature mismatch')

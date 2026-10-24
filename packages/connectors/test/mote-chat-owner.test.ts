@@ -73,6 +73,25 @@ it('keeps configuration and original operation readable without launching, with 
   expect((await f.host.inspect({ target })).configuration?.values).toEqual(f.input.values)
 })
 
+it('scoped private chat policy pauses new creation and publication without deleting the original route or Agent', async () => {
+  const f = await fixture(), adapterId = f.connection.adapterId
+  const policy = (operationId: string, expectedRevision: number, enabled: boolean) => ({ operationId, expectedRevision, adapterId, service: { enabled } })
+  await f.connections.service.configure(policy('pause-private-adapter', 0, false))
+  await expect(f.host.prepareIncoming(f.incoming('paused-message'))).rejects.toMatchObject({ code: 'CONNECTION_SERVICE_DISABLED' })
+  expect(f.agents.prepare).not.toHaveBeenCalled(); expect(f.agents.create).not.toHaveBeenCalled()
+  expect((await f.host.inspect({ target }, context)).configuration?.values).toEqual(f.input.values)
+  expect(await f.connections.service.get()).toEqual({ enabled: true, revision: 0 })
+  await f.connections.service.configure(policy('enable-private-adapter', 1, true))
+  const binding = (await f.host.prepareIncoming(f.incoming('paused-message')))!
+  expect(f.agents.create).toHaveBeenCalledOnce()
+  expect(f.host.publicationAuthority(binding.bindingId, binding.revision).authorized).toBe(true)
+  await f.connections.service.configure(policy('pause-existing-private-adapter', 2, false))
+  expect(f.host.publicationAuthority(binding.bindingId, binding.revision)).toMatchObject({ binding, authorized: false, reason: 'service-disabled' })
+  expect(f.host.readExact(binding.bindingId, binding.revision)).toEqual(binding)
+  expect((await f.host.inspect({ target }, context)).configuration?.values).toEqual(f.input.values)
+  expect(f.agents.create).toHaveBeenCalledOnce()
+})
+
 it('reserves one generation for concurrent first messages and charges each original message once across duplicate events', async () => {
   const f = await fixture(2), original = f.agents.create
   let release!: () => void, reached!: () => void

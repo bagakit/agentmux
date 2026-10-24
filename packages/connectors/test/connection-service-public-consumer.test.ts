@@ -45,17 +45,18 @@ async function child(root: string, mode: string, held = 0) {
   await message('ready')
   return { process, message }
 }
-async function fixture(options: { feishu?: boolean; publication?: boolean; coreAvailable?: boolean } = {}) {
+async function fixture(options: { feishu?: boolean; publication?: boolean; coreAvailable?: boolean; dual?: boolean } = {}) {
   const original = await ingressFixture(true); cleanup.push(() => original.close())
   vi.stubEnv('AGENTMUX_TEST_OBJECT_CLI', resolve('packages/core/bin/amux'))
   const wire = signedRoomAdapter(), starts = vi.spyOn(wire.adapter.transport!, 'start')
+  const secondary = options.dual ? signedRoomAdapter('secondary-room') : undefined
   const platform = options.feishu ? await feishuPublicationHttp() : undefined
   if (platform) cleanup.push(() => platform.close())
   const transport = options.feishu ? feishuSdkTransport() : undefined
   if (platform) vi.spyOn(defaultHttpInstance, 'request').mockImplementation(platform.http.request as unknown as typeof defaultHttpInstance.request)
   // Only this pointer changes when the actual execution Host takes over the same durable Store.
   let inputCore = (hostId: string): import('../src/durable-ingress.js').DurableIngressCore | undefined => options.coreAvailable === false || hostId !== 'local' ? undefined : original.client
-  const services = await createConnectionServices({ directory: join(original.root, 'service-owner'), ...(options.feishu ? {} : { adapters: [wire.adapter] }),
+  const services = await createConnectionServices({ directory: join(original.root, 'service-owner'), ...(options.feishu ? {} : { adapters: [wire.adapter, ...(secondary ? [secondary.adapter] : [])] }),
     bindings: { spatial: original.spatial, checkpoint: async ref => await original.client.conversationCheckpoint(ref) },
     ...(options.publication === false ? {} : { publication: createPublicationConversationPort(original.coreClients) }), ingress: { core: hostId => inputCore(hostId) } })
   cleanup.push(() => services.close())
@@ -76,7 +77,7 @@ async function fixture(options: { feishu?: boolean; publication?: boolean; coreA
   else await vi.waitFor(() => expect(wire.endpoint).toBeDefined())
   const message = (suffix = 'one') => ({ deliveryKey: 'event/' + suffix, recordKey: 'message/' + suffix, roomKey: input.externalConversationId, person: actor.userId, text: 'External original ' + suffix, addressing: 'broadcast' as const })
   const set = (operationId: string, revision: number, enabled: boolean) => sdk.call('connection.service.configure', policy(operationId, revision, enabled))
-  return { ...original, services, server, sdk, cli, wire, platform, transport, config, input, grant, actor, binding: applied.binding, starts, set, message,
+  return { ...original, services, server, sdk, cli, wire, secondary, platform, transport, config, input, grant, actor, binding: applied.binding, starts, set, message,
     setInputCore: (read: typeof inputCore) => { inputCore = read } }
 }
 
@@ -115,19 +116,71 @@ it('shares strict policy CAS and original receipts through the actual public SDK
   evidence('public-policy', { off, currentAfterEnable: await f.sdk.call('connection.service.get', {}), originalReceiptAfterEnable: await f.sdk.call('connection.service.inspect', { operationId: 'original-off' }), preservedApplication: (await f.sdk.call('connection.inspect', { operationId: 'original-application' })).operation })
 }, 30_000)
 
-it('recovers a committed policy whose CLI reply is lost through real child death, using the same SQLite receipt and original operation', async () => {
+it('scoped adapter policy preserves global receipts while only its original automatic traffic pauses through SDK and compiled CLI', async () => {
+  const f = await fixture({ dual: true }), secondary = f.secondary!, late = f.wire.receive!
+  const secondConfig = { ...f.config, connectionId: 'second-channel-bot', adapterId: secondary.adapter.adapterId, application: { domain: 'second.example', appId: 'second-app' } }
+  await f.sdk.call('connection.configure', { operationId: 'save-second-channel', expectedRevision: null, connection: secondConfig })
+  const bound = await f.sdk.call('connection.bind', { ...f.input, operationId: 'bind-second-channel', bindingId: 'second-channel-binding', connectionId: secondConfig.connectionId, externalConversationId: 'second-room' })
+  expect(bound.state).toBe('applied'); if (bound.state !== 'applied') throw new Error('Original second Binding not applied')
+  const secondActor = { ...f.actor, application: secondConfig.application }
+  await f.sdk.call('connection.grant', { ...f.grant, operationId: 'grant-second-channel', grantId: 'second-channel-grant', bindingId: bound.binding.bindingId, expectedBindingRevision: bound.binding.revision, actor: secondActor })
+  await vi.waitFor(() => expect(secondary.endpoint).toBeDefined())
+  const global = await f.set('keep-global-enabled', 0, true)
+  const originalGlobal = f.services.database!.prepare('SELECT input_json,result_json FROM connection_configuration_operation WHERE operation_id=?').get(global.operationId)
+  const input = { ...policy('pause-only-original-adapter', 0, false), adapterId: f.config.adapterId }
+  expect(success(await f.cli(['service', 'get', '--adapter', f.config.adapterId]))).toEqual({ enabled: true, revision: 0, adapterId: f.config.adapterId })
+  const paused = success(await f.cli(['service', 'configure', '--input', '-'], input))
+  expect(paused).toEqual({ operationId: input.operationId, expectedRevision: 0, status: 'configured', service: { adapterId: f.config.adapterId, enabled: false, revision: 1 } })
+  expect(await f.sdk.call('connection.service.get', { adapterId: f.config.adapterId })).toEqual(paused.service)
+  expect(await f.sdk.call('connection.service.get', {})).toEqual(global.service)
+  expect(await f.sdk.call('connection.service.get', { adapterId: secondConfig.adapterId })).toEqual({ adapterId: secondConfig.adapterId, enabled: true, revision: 0 })
+  await expect(f.sdk.call('connection.service.configure', { ...input, adapterId: secondConfig.adapterId })).rejects.toMatchObject({ code: 'CONNECTION_OPERATION_CONFLICT' })
+  await expect(f.sdk.call('connection.service.configure', { ...input, operationId: 'stale-scoped-choice' })).rejects.toMatchObject({ code: 'CONNECTION_REVISION_CONFLICT' })
+  const acknowledgement = vi.fn()
+  const admission = await late(f.wire.encode(f.message('after-adapter-pause')), acknowledgement).then(() => ({ code: null }), error => ({ code: error.code }))
+  evidence('scoped-adapter-new-admission', { input, paused, admission, acknowledgementCalls: acknowledgement.mock.calls.length, retained: (await f.services.ingress!.list({ connectionId: f.config.connectionId })).ingresses })
+  expect(admission, 'paused adapter rejects new original traffic before durable ACK').toEqual({ code: 'CONNECTION_SERVICE_DISABLED' })
+  expect(acknowledgement).not.toHaveBeenCalled()
+  expect((await f.services.ingress!.list({ connectionId: f.config.connectionId })).ingresses).toEqual([])
+  await appendFile(f.transcript, row('other-adapter-continues'))
+  await vi.waitFor(() => expect(secondary.effects).toHaveLength(1))
+  expect(f.wire.effects, 'paused adapter cannot dispatch new automatic output').toEqual([])
+  expect(await secondary.post({ ...f.message('second-adapter-input'), roomKey: 'second-room' })).toBe(202)
+  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
+  expect((await f.services.ingress!.list({ connectionId: secondConfig.connectionId })).ingresses).toHaveLength(1)
+  const diagnosis = await f.sdk.call('connection.diagnose', { executionHostId: f.input.executionHostId, agentSessionId: f.input.agentSessionId, bindingId: f.binding.bindingId })
+  expect(diagnosis.service.value).toEqual(global.service)
+  expect(diagnosis.groups.value?.items[0]?.adapterService).toEqual({ value: paused.service, issue: null })
+  const configured = (await f.sdk.call('connection.ls', {})).connections
+  expect(configured.map(record => [record.config.connectionId, record.config.enabled, record.revision])).toEqual([[f.config.connectionId, true, 1], [secondConfig.connectionId, true, 1]].sort((a, b) => String(a[0]).localeCompare(String(b[0]))))
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  expect(f.services.database!.prepare('SELECT input_json,result_json FROM connection_configuration_operation WHERE operation_id=?').get(global.operationId)).toEqual(originalGlobal)
+  expect(success(await f.cli(['service', 'inspect', '--operation-id', input.operationId]))).toEqual({ operation: paused })
+  await f.sdk.call('connection.service.configure', { ...policy('resume-original-adapter', 1, true), adapterId: f.config.adapterId })
+  await vi.waitFor(() => expect(f.wire.effects).toHaveLength(1))
+  expect(success(await f.cli(['service', 'inspect', '--operation-id', input.operationId]))).toEqual({ operation: paused })
+  evidence('scoped-adapter-public-and-automatic-owners', { input, paused, global, diagnosis, configured: configured.map(record => ({ config: record.config, revision: record.revision })), originalGlobal, preservedGlobal: f.services.database!.prepare('SELECT input_json,result_json FROM connection_configuration_operation WHERE operation_id=?').get(global.operationId), primaryEffects: f.wire.effects, secondaryEffects: secondary.effects, inputCalls: (f.inner.kernel.input as ReturnType<typeof vi.fn>).mock.calls.length, originalReceipt: await f.sdk.call('connection.service.inspect', { operationId: input.operationId }) })
+}, 30_000)
+
+it.each([{ scope: 'global', adapterId: null }, { scope: 'adapter', adapterId: 'signed-room' }])('recovers a committed $scope policy whose CLI reply is lost through real child death, using the same SQLite receipt and original operation', async selection => {
   const root = await mkdtemp(join(tmpdir(), 'service-restart-')); cleanup.push(() => rm(root, { recursive: true, force: true }))
   const owner = await child(root, 'drop-policy-reply'), committed = owner.message('policy-committed')
   const cli = (args: string[], input?: unknown) => runCompiledObjectCli(['--endpoint', 'unix:' + join(root, 'service.sock'), 'connection', 'service', ...args], objectCliEnvironment(root), input === undefined ? '' : JSON.stringify(input))
-  const pending = cli(['configure', '--input', '-'], policy('lost-reply', 0, false))
+  const scope = selection.adapterId === null ? {} : { adapterId: selection.adapterId }
+  const input = { ...policy('lost-reply', 0, false), ...scope }
+  const pending = cli(['configure', '--input', '-'], input)
   await committed; owner.process.kill('SIGKILL'); await once(owner.process, 'exit'); expect((await pending).code).not.toBe(0)
   await child(root, 'observe')
   const saved = success(await cli(['inspect', '--operation-id', 'lost-reply'])).operation
-  expect(saved).toMatchObject({ operationId: 'lost-reply', expectedRevision: 0, service: { enabled: false, revision: 1 } })
-  expect(success(await cli(['configure', '--input', '-'], policy('lost-reply', 0, false)))).toEqual(saved)
-  success(await cli(['configure', '--input', '-'], policy('reopened', 1, true)))
+  expect(saved.service).toEqual({ enabled: false, revision: 1, ...scope })
+  expect(saved).toMatchObject({ operationId: 'lost-reply', expectedRevision: 0 })
+  expect(success(await cli(['configure', '--input', '-'], input))).toEqual(saved)
+  success(await cli(['configure', '--input', '-'], { ...policy('reopened', 1, true), ...scope }))
   expect(success(await cli(['inspect', '--operation-id', 'lost-reply']))).toEqual({ operation: saved })
-  evidence('process-restart-after-lost-reply', { originalReceipt: saved, current: success(await cli(['get'])) })
+  const current = success(await cli(['get', ...(selection.adapterId === null ? [] : ['--adapter', selection.adapterId])]))
+  expect(current).toEqual({ enabled: true, revision: 2, ...scope })
+  if (selection.adapterId !== null) expect(success(await cli(['get']))).toEqual({ enabled: true, revision: 0 })
+  evidence('process-restart-after-lost-reply-' + selection.scope, { input, originalReceipt: saved, current, retained: success(await cli(['inspect', '--operation-id', 'lost-reply'])) })
 }, 30_000)
 
 it('keeps received intake nonterminal while off and resumes its same ingress identity on enable; late callbacks cannot admit another message', async () => {
@@ -150,35 +203,42 @@ it('keeps received intake nonterminal while off and resumes its same ingress ide
   evidence('received-off-on', { retained: retained.ingress, whileOff: waiting, afterEnable: after })
 }, 20_000)
 
-it('rechecks service policy after asynchronous authentication before durable receive and ACK', async () => {
+it.each([{ scope: 'global', adapterId: null }, { scope: 'adapter', adapterId: 'signed-room' }])('rechecks $scope service policy after asynchronous authentication before durable receive and ACK', async selection => {
   const f = await fixture(), verify = f.wire.adapter.ingress!.verify.bind(f.wire.adapter.ingress), entered = deferred<void>(), release = deferred<void>()
   f.wire.adapter.ingress!.verify = async (...args) => { const event = await verify(...args); entered.resolve(); await release.promise; return event }
   const ack = vi.fn(), receive = f.services.ingress!.receive({ connectionId: f.config.connectionId, ...f.wire.encode(f.message()) }, ack)
-  await entered.promise; await f.set('auth-race-off', 0, false); release.resolve()
-  await expect(receive).rejects.toMatchObject({ code: 'INGRESS_SERVICE_DISABLED' })
-  expect(ack).not.toHaveBeenCalled(); expect((await f.services.ingress!.list({ connectionId: f.config.connectionId })).ingresses).toEqual([])
+  await entered.promise
+  await f.sdk.call('connection.service.configure', { ...policy('auth-race-off', 0, false), ...(selection.adapterId === null ? {} : { adapterId: selection.adapterId }) })
+  release.resolve()
+  const result = await receive.then(() => ({ code: null }), error => ({ code: error.code }))
+  const retained = (await f.services.ingress!.list({ connectionId: f.config.connectionId })).ingresses
+  evidence('post-authentication-policy-' + selection.scope, { result, acknowledgementCalls: ack.mock.calls.length, retained })
+  expect(result).toEqual({ code: 'INGRESS_SERVICE_DISABLED' })
+  expect(ack).not.toHaveBeenCalled(); expect(retained).toEqual([])
 }, 15_000)
 
 it('default SDK transport and publication stop both automatic directions and reopen only the originally enabled application', async () => {
   const f = await fixture({ feishu: true }), originalSocket = f.transport!.sockets[0]!
   await f.sdk.call('connection.configure', { operationId: 'paused-bot', expectedRevision: null, connection: { ...f.config, connectionId: 'paused-bot', application: { ...f.config.application, appId: 'cli_abcdef0123456789' }, enabled: false } })
   await f.transport!.receive(feishuPayload()); await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
-  await appendFile(f.transcript, row('before-off')); await vi.waitFor(() => expect(f.platform!.messageCalls().filter(call => call.method === 'POST')).toHaveLength(1))
-  const before = f.services.publication!.store.list(f.binding), frontier = f.services.publication!.store.checkpoint(f.binding, f.binding.sourceCheckpoints[0]!)
+  const speech = () => f.services.publication!.store.list(f.binding).filter(operation => operation.payload.kind === 'speech')
+  const posts = () => { const bodies = new Set(speech().map(operation => operation.prepared?.request.body)); return f.platform!.messageCalls().filter(call => call.method === 'POST' && bodies.has(call.body)) }
+  await appendFile(f.transcript, row('before-off')); await vi.waitFor(() => expect(posts()).toHaveLength(1))
+  const before = speech(), frontier = f.services.publication!.store.checkpoint(f.binding, f.binding.sourceFrontier?.sourceHostId ?? f.binding.executionHostId)
   await f.set('sdk-off', 0, false)
   await f.transport!.receive(feishuPayload({ message_id: 'late-sdk-message' }), originalSocket)
   await appendFile(f.transcript, row('during-off')); f.services.publication!.refresh()
-  expect(f.platform!.messageCalls().filter(call => call.method === 'POST')).toHaveLength(1)
-  expect(f.services.publication!.store.list(f.binding)).toEqual(before)
-  expect(f.services.publication!.store.checkpoint(f.binding, f.binding.sourceCheckpoints[0]!)).toEqual(frontier)
+  expect(posts()).toHaveLength(1)
+  expect(speech()).toEqual(before)
+  expect(f.services.publication!.store.checkpoint(f.binding, f.binding.sourceFrontier?.sourceHostId ?? f.binding.executionHostId)).toEqual(frontier)
   await f.set('sdk-on', 1, true)
   await vi.waitFor(() => expect(f.transport!.sockets).toHaveLength(2))
-  await vi.waitFor(() => expect(f.platform!.messageCalls().filter(call => call.method === 'POST')).toHaveLength(2))
+  await vi.waitFor(() => expect(posts()).toHaveLength(2))
   const next = feishuPayload({ message_id: 'after-sdk-message' }); next.header.event_id = 'after-sdk-event'
   await f.transport!.receive(next); await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledTimes(2))
   const records = (await f.sdk.call('connection.ls', {})).connections
   expect(records.map(record => [record.config.connectionId, record.config.enabled, record.revision])).toEqual([['feishu-connection', true, 1], ['paused-bot', false, 1]])
-  expect(f.services.publication!.store.list(f.binding)[0]).toEqual(before[0])
+  expect(f.services.publication!.store.inspect(before[0]!.operationId)).toEqual(before[0])
   expect(f.inner.kernel.stop).not.toHaveBeenCalled(); expect(f.inner.kernel.attach).not.toHaveBeenCalled()
   evidence('official-sdk-bidirectional-off-on', { configEnabled: records.map(record => [record.config.connectionId, record.config.enabled, record.revision]), outgoingHttp: f.platform!.messageCalls(), socketGenerations: f.transport!.sockets.length, before, frontier, after: f.services.publication!.store.list(f.binding) })
 }, 30_000)
@@ -262,25 +322,27 @@ it.each(['prepare', 'claim'] as const)('rechecks persisted policy after %s befor
   evidence('publication-' + phase + '-off', { original, afterExplicitRecovery: f.services.publication!.store.list(f.binding)[0], effects: f.wire.effects })
 }, 20_000)
 
-it('settles a late authoritative publication ACK while off and never replays unknown original effects on enable', async () => {
+it.each([{ scope: 'global', adapterId: null }, { scope: 'adapter', adapterId: 'signed-room' }])('settles a late authoritative publication ACK while $scope is off and never replays unknown original effects on enable', async selection => {
   const f = await fixture(), complete = deferred<PublicationReceipt>(), dispatch = f.wire.adapter.publication!.dispatch
+  const speech = () => f.services.publication!.store.list(f.binding).filter(operation => operation.payload.kind === 'speech')
+  const set = (id: string, revision: number, enabled: boolean) => f.sdk.call('connection.service.configure', { ...policy(id, revision, enabled), ...(selection.adapterId === null ? {} : { adapterId: selection.adapterId }) })
   f.wire.adapter.publication!.dispatch = async () => await complete.promise
   await appendFile(f.transcript, row('late-ack'))
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)[0]?.state).toBe('dispatching'))
-  const original = f.services.publication!.store.list(f.binding)[0]!
-  await f.set('late-ack-off', 0, false)
+  await vi.waitFor(() => expect(speech()[0]?.state).toBe('dispatching'))
+  const original = speech()[0]!
+  await set('late-ack-off', 0, false)
   complete.resolve({ state: 'confirmed', mapping: { messageId: 'late-original-message' } })
   await vi.waitFor(() => expect(f.services.publication!.store.inspect(original.operationId)).toMatchObject({ state: 'confirmed', attempt: 1, mapping: { messageId: 'late-original-message' } }))
-  f.wire.adapter.publication!.dispatch = async (...args) => { await dispatch(...args); throw new Error('Unconfirmed original platform ACK') }
-  await f.set('late-ack-on', 1, true); await appendFile(f.transcript, row('unknown-effect'))
-  await vi.waitFor(() => expect(f.services.publication!.store.list(f.binding)[1]?.state).toBe('unknown'))
-  const unknown = f.services.publication!.store.list(f.binding)[1]!
   f.wire.adapter.publication!.inspect = async () => null
-  await f.set('unknown-off', 2, false); await f.set('unknown-on', 3, true)
+  f.wire.adapter.publication!.dispatch = async (...args) => { await dispatch(...args); throw new Error('Unconfirmed original platform ACK') }
+  await set('late-ack-on', 1, true); await appendFile(f.transcript, row('unknown-effect'))
+  await vi.waitFor(() => expect(speech()[1]?.state).toBe('unknown'))
+  const unknown = speech()[1]!
+  await set('unknown-off', 2, false); await set('unknown-on', 3, true)
   await vi.waitFor(() => expect(f.services.publication!.observation(f.binding.bindingId, 1)).toEqual({ state: 'unknown', reason: 'effect-unconfirmed' }))
   expect(f.wire.effects).toHaveLength(1); expect(f.services.publication!.store.inspect(unknown.operationId)?.attempt).toBe(1)
   await expect(f.sdk.call('connection.delivery.retry', { operationId: unknown.operationId })).rejects.toMatchObject({ code: 'PUBLICATION_RETRY_UNCONFIRMED' })
-  evidence('publication-late-ack-and-unknown', { originalClaim: original, settledWhileOff: f.services.publication!.store.inspect(original.operationId), originalUnknown: unknown, retainedUnknown: f.services.publication!.store.inspect(unknown.operationId), effects: f.wire.effects })
+  evidence('publication-late-ack-and-unknown-' + selection.scope, { originalClaim: original, settledWhileOff: f.services.publication!.store.inspect(original.operationId), originalUnknown: unknown, retainedUnknown: f.services.publication!.store.inspect(unknown.operationId), effects: f.wire.effects })
 }, 20_000)
 
 it.each([1, 3, 5])('actual execution Host rechecks current cross-process authority at gate %i, retains the original input and distinguishes wait rejoin from unknown or not-applied receipts', async held => {
