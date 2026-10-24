@@ -66,7 +66,7 @@ window.nativeState = () => {
 }
 window.nativeLiveReady = () => readTerminalViewObservation({ regionId: identity.regionId, sessionId: identity.sessionId, runId: identity.run.runId })?.liveReady === true
 window.nativeFlush = async () => { prepareRendererUpdate(); await request('flush') }
-window.nativeTheme = mode => updateThemeSelection({ appAppearance:mode, terminalTheme:'graphite' })
+window.nativeTheme = mode => updateThemeSelection({ appAppearance:mode, themeId:'graphite' })
 window.nativeTerminalNode = () => window.terminals.find(one=>one.element?.isConnected)
 createRoot(document.getElementById('root')).render(createElement(App))
 window.nativeReady = true

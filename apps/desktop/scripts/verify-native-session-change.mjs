@@ -18,9 +18,10 @@ const coreRequire=createRequire(path.join(root,'packages/core/package.json'))
 const run=promisify(execFile),sha=value=>createHash('sha256').update(value).digest('hex')
 const owned=['src/shared/agent-native-source.ts','src/shared/contracts.ts','src/main/runtime-controller.ts','src/main/ipc.ts','src/preload/index.ts','src/renderer/src/lib/session-state.ts','src/renderer/src/lib/session-user-messages.ts','src/renderer/src/lib/api.ts','src/renderer/src/components/AgentNativeSourceControls.tsx','src/renderer/src/components/AgentRegionHeader.tsx','src/renderer/src/components/SessionPane.tsx','src/renderer/src/styles/agent-region-header.css'].map(file=>'apps/desktop/'+file)
 const testFiles=['apps/desktop/test/native-session-change.test.tsx','apps/desktop/test/native-source-themed-action.test.tsx','apps/desktop/scripts/fixtures/native-session-change/vitest.config.mts']
+const probeFiles=['apps/desktop/scripts/verify-native-session-change.mjs',...['main.ts','owner.ts','entry.mjs','native-cli.mjs','preload.cjs','index.html'].map(file=>'apps/desktop/scripts/fixtures/native-session-change/'+file)]
 const hashes=files=>Promise.all(files.map(async file=>[file,sha(await fs.readFile(path.join(root,file)))])).then(Object.fromEntries)
 await fs.mkdir(evidence,{recursive:true})
-const receipt={schema:'agentmux.native-target-ui.v1',passed:false,sourceBefore:await hashes(owned),sourceAfter:{},processes:[],captureOnly:true,aestheticReview:'not-performed',isolation:[
+const receipt={schema:'agentmux.native-target-ui.v1',passed:false,sourceBefore:await hashes(owned),sourceAfter:{},probeSources:await hashes(probeFiles),processes:[],captureOnly:true,aestheticReview:'not-performed',isolation:[
  'Current source App, Store, SessionPane, Region menu, TerminalView, Core and Main RuntimeController are privately compiled; source hashes and bundle inputs are retained.',
  'One private semantic owner and actual ctxmux Run serve two independent Electron processes through the production Hosted connector and public RPC. File and Spatial stores, terminal PID and raw-input ACK are real.',
  'The native CLI is an explicit protocol fixture with real writable OS descriptors; it is not stock Codex and does not prove upstream TUI selection. Stock-native provenance is qualified separately by the T002 evidence.',
@@ -136,6 +137,7 @@ try{
  }
  assert.equal(new Set(receipt.processes.map(value=>value.pid)).size,2)
  receipt.sourceAfter=await hashes(owned);assert.deepEqual(receipt.sourceAfter,receipt.sourceBefore)
+ assert.deepEqual(await hashes(probeFiles),receipt.probeSources,'Probe source remains the executed candidate')
  for(const [file,digest] of Object.entries(receipt.compiledRenderer))assert.equal(sha(await fs.readFile(path.join(root,file))),digest,'Renderer source remains the compiled candidate: '+file)
  for(const bundle of Object.values(receipt.nodeBundles))for(const [file,digest] of Object.entries(bundle.sourceSHA256))assert.equal(sha(await fs.readFile(path.join(root,file))),digest,'Node source remains the compiled candidate: '+file)
  receipt.passed=true
