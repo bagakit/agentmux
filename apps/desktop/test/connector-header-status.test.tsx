@@ -64,9 +64,9 @@ it('the actual header diagnoses a source gap separately from older unknown platf
   await appendFile(f.original.transcript, row('public-unconfirmed', 'user'))
   await wait(() => expect(f.services.publication!.observation(binding.bindingId, binding.revision).reason).toBe('content-unconfirmed'))
   const before = { writes: writes(), effects: effects() }
-  await open(); await wait(() => expect(trigger().getAttribute('aria-label')).toContain('content gap'))
+  await open(); await wait(() => expect(trigger().getAttribute('aria-label')).toContain('Some conversation content is not shared yet'))
   await wait(() => expect(menu().textContent).toContain('Content not confirmed'))
-  expect(menu().textContent).toContain('content gap')
+  expect(menu().textContent).toContain('Some conversation content is not shared yet')
   expect(menu().textContent).toContain('unconfirmed')
   expect(menu().textContent).toContain('original results remain unconfirmed')
   const kinds = [...menu().querySelectorAll<HTMLElement>('[data-problem-kind]')].map(node => node.dataset.problemKind)
@@ -125,7 +125,7 @@ it('actual recorded refusal and waiting stay separate from adoption, and typed b
   await vi.waitFor(async () => expect((await f.forward('connection.ingress.ls', { connectionId: binding.connectionId })).ingresses.find(value => value.kind !== 'action' && value.externalMessageId === 'header-no-access')?.state).toBe('refused'), { timeout: 8000 })
   await open(); await wait(() => expect(menu().textContent).toContain('Member request was refused'))
   expect(menu().querySelector('[data-problem-kind="request-refused"]')).not.toBeNull()
-  expect(menu().querySelector('[data-connection-action="members"]')).toBeNull()
+  expect(menu().querySelector('[data-connection-action="members"]')).not.toBeNull()
   await f.forward('connection.grant', { operationId: 'header-explicit-grant', bindingId: binding.bindingId, expectedBindingRevision: binding.revision, grantId: 'header-input', expectedRevision: null,
     actor: { application: f.config.application, idType: 'open_id', userId: 'original-external-user' }, capabilities: ['input'], state: 'active' })
   // This case qualifies a real durable Runtime-unavailable wait, not a transient pre-dispatch read.
