@@ -22,7 +22,7 @@ try {
   const config = resolved.config.preload
   await build({ ...config, build: { ...config.build, outDir: directory, emptyOutDir: true } })
   const files = (await readdir(directory)).sort()
-  assert.deepEqual(files, ['browser-popup.cjs', 'capsule.cjs', 'index.cjs'], 'Sandbox entries must have no shared runtime chunks')
+  assert.deepEqual(files, ['capsule.cjs', 'index.cjs'], 'Sandbox entries must have no shared runtime chunks')
   for (const file of files) {
     const code = await readFile(join(directory, file), 'utf8')
     const modules = [...code.matchAll(/require\(["']([^"']+)["']\)/gu)].map(match => match[1])

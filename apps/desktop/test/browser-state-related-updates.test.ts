@@ -127,7 +127,7 @@ describe('Browser updated projection preserves unrelated work surfaces', () => {
     let projected = state
     const set = (update: (current: typeof state) => typeof state) => { projected = update(state) }
     const parameters = methods[0]!.parameters.map(parameter => parameter.getText(file)).join(', ')
-    const apply = new Function('set', 'reduceBrowserEvent', `return function(${parameters}) ${body!.getText(file)}`)(set, reduceBrowserEvent)
+    const apply = new Function('set', 'get', 'pendingNativeBrowsers', 'reduceBrowserEvent', `return function(${parameters}) ${body!.getText(file)}`)(set, () => projected, new Map(), reduceBrowserEvent)
     apply({ type: 'updated', browser: updated })
     expect(projected.tabs.mixed.regions.primary).toMatchObject({ title: 'Updated' })
     expect(projected.tabs['unrelated-tab']).toBe(state.tabs['unrelated-tab'])

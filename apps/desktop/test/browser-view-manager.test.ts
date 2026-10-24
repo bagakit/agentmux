@@ -152,7 +152,7 @@ const fakeElectron = vi.hoisted(() => {
   class FakeWebContentsView {
     static instances: FakeWebContentsView[] = []
     static nextLoadURLImpl: null | ((contents: FakeWebContents, url: string) => Promise<void>) = null
-    readonly webContents = new FakeWebContents()
+    readonly webContents: FakeWebContents
     readonly partition: string | undefined
     // 整份 webPreferences 都留着，不只挑 partition 出来。沙箱开关（contextIsolation/sandbox/
     // nodeIntegration）是这个内嵌浏览器唯一挡住"任意 URL 的页面拿到 Node 能力"的东西，而这个 fake
@@ -164,7 +164,8 @@ const fakeElectron = vi.hoisted(() => {
     // Keep every native geometry write so lifecycle synchronization cannot hide extra layout work.
     boundsHistory: Array<{ x: number; y: number; width: number; height: number }> = []
 
-    constructor(options?: { webPreferences?: Record<string, unknown> }) {
+    constructor(options?: { webContents?: FakeWebContents; webPreferences?: Record<string, unknown> }) {
+      this.webContents = options?.webContents ?? new FakeWebContents()
       FakeWebContentsView.instances.push(this)
       this.webPreferences = options?.webPreferences
       this.partition = options?.webPreferences?.partition as string | undefined
@@ -507,22 +508,22 @@ describe('BrowserViewManager', () => {
     await manager.create('private-failure', 'about:blank', 'workspace-a', undefined, 'private')
     const original = f.children.at(-1)!, storage = fakeElectron.fromPartition(original.partition!)
     const popup = () => {
-      let destroyed = false
-      return { isDestroyed: () => destroyed, destroy: vi.fn(() => { destroyed = true }), once: vi.fn(),
-        webContents: new fakeElectron.FakeWebContentsView().webContents }
+      const page = new fakeElectron.FakeWebContentsView().webContents
+      Object.assign(page, { session: storage })
+      vi.spyOn(page, 'close')
+      return page
     }
     const first = popup(), second = popup()
-    // Custom native creation does not emit did-create-window. Exercise the real
-    // handler's creation callback, replacing only the native window constructor.
-    vi.spyOn(Reflect.get(manager, 'popupWindows'), 'create').mockImplementation((options: any, creation: any) => {
-      creation.onCreated(options.fixtureWindow)
-      return options.webContents
-    })
-    const opened = (window: ReturnType<typeof popup>) => {
+    // Consume the real original request with Electron's supplied native guest;
+    // child ownership is the ordinary entries map, with no popup-only helper.
+    const opened = (page: ReturnType<typeof popup>) => {
       const outcome = original.webContents.windowOpenHandler!({ url: 'https://popup.example/' }) as any
-      return outcome.createWindow({ webContents: window.webContents, fixtureWindow: window })
+      const actual = outcome.createWindow({ webContents: page, webPreferences: { session: storage } })
+      expect(actual).toBe(page)
+      return actual
     }
     opened(first); opened(second)
+    expect(manager.targets().filter(target => target.openedFrom?.browserId === 'private-failure')).toHaveLength(2)
     if (failure === 'parent-close') vi.spyOn(original.webContents, 'close').mockImplementationOnce(() => { throw new Error('Parent close failed') })
     const closedReceiptFault = vi.fn()
     if (failure === 'closed-receipt') {
@@ -536,13 +537,13 @@ describe('BrowserViewManager', () => {
         send(channel, value)
       })
     }
-    if (failure === 'first-popup') first.destroy.mockImplementationOnce(() => { throw new Error('Popup close failed') })
+    if (failure === 'first-popup') first.close.mockImplementationOnce(() => { throw new Error('Popup close failed') })
     if (failure === 'storage') storage.clearStorageData.mockRejectedValueOnce(new Error('Storage clear failed'))
     await expect(manager.close('private-failure')).rejects.toThrow('cleanup failures')
     if (failure === 'closed-receipt') expect(closedReceiptFault).toHaveBeenCalledExactlyOnceWith(BROWSER_EVENT_CHANNEL, { type: 'closed', id: 'private-failure' })
     expect(original.webContents.isDestroyed()).toBe(failure !== 'parent-close')
-    expect(first.destroy).toHaveBeenCalledTimes(1)
-    expect(second.destroy).toHaveBeenCalledTimes(1)
+    expect(first.close).toHaveBeenCalledTimes(1)
+    expect(second.close).toHaveBeenCalledTimes(1)
     expect(storage.clearStorageData).toHaveBeenCalledTimes(1)
     expect(storage.clearCache).toHaveBeenCalledTimes(1)
     expect(storage.closeAllConnections).toHaveBeenCalledTimes(1)
@@ -550,8 +551,11 @@ describe('BrowserViewManager', () => {
     const permission = vi.fn(); storage.requestHandler?.(original.webContents, 'notifications', permission)
     expect(permission).toHaveBeenCalledWith(false)
     expect(manager.targets().map(target => target.id)).toEqual(['normal-kept'])
-    const late = popup(); opened(late)
-    expect(late.destroy).toHaveBeenCalledTimes(1)
+    const late = popup()
+    expect(() => opened(late)).toThrow('no longer current')
+    expect(late.close).not.toHaveBeenCalled()
+    expect(manager.targets().map(target => target.id)).toEqual(['normal-kept'])
+    late.close()
     await manager.create('private-failure', 'about:blank', 'workspace-a', undefined, 'private')
     expect(f.children.at(-1)!.partition).not.toBe(original.partition)
     expect(normal.webContents.isDestroyed()).toBe(false)
@@ -738,7 +742,7 @@ describe('BrowserViewManager', () => {
     const source = f.children[0]!, shieldContents = new fakeElectron.FakeWebContentsView().webContents
     shieldContents.mainFrame.framesInSubtree = [{ osProcessId: 20, detached: false }]
     const dispose = vi.fn(() => { throw new Error('Native cleanup unavailable') })
-    const shield = { contents: shieldContents, dispose, synchronize: vi.fn() }
+    const shield = { contents: shieldContents, dispose, synchronize: vi.fn(), isCurrentFor: () => false }
     const entry = Reflect.get(manager, 'entries').get('native-cleanup')
     entry.agent = { hostId: 'original-host', agentSessionId: 'original-agent' }
     entry.inputShield = shield; entry.inputIsolation = 'isolated'
@@ -753,7 +757,7 @@ describe('BrowserViewManager', () => {
     expect(manager.resourceTargets(processes)[0]?.resource?.retention).toMatchObject({ status: 'unknown', reasons: expect.arrayContaining(['close-unconfirmed']) })
     expect(manager.returnControl('native-cleanup').activity?.warning).toContain('could not be fully released')
     dispose.mockImplementation(() => { shieldContents.close() })
-    expect(manager.returnControl('native-cleanup').control?.inputIsolation).toBe('inactive')
+    expect(manager.takeControl('native-cleanup').control).toMatchObject({ owner: 'human', inputIsolation: 'inactive' })
     expect(manager.resourceProcessIds()).not.toContain(20)
     manager.close('native-cleanup')
   })
