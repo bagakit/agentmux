@@ -24,6 +24,11 @@ app.whenReady().then(async () => {
   await until('!!document.querySelector(".mobile-session-list button")')
   const click = async selector => { const r = await read(`(()=>{const n=document.querySelector(${JSON.stringify(selector)});if(!n)throw Error('missing actual control '+${JSON.stringify(selector)});n.scrollIntoView({block:'nearest'});const r=n.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()`); for (const type of ['mouseDown','mouseUp']) win.webContents.sendInputEvent({type,x:Math.round(r.x),y:Math.round(r.y),button:'left',clickCount:1}); await pause(120) }
   const named = label => click('[aria-label=' + JSON.stringify(label) + ']')
+  const assertHittable = async selector => {
+    const hit = await read(`(()=>{const n=document.querySelector(${JSON.stringify(selector)}),r=n.getBoundingClientRect(),x=r.x+r.width/2,y=r.y+r.height/2;return {visible:getComputedStyle(n).visibility,hit:n.contains(document.elementFromPoint(x,y)),rect:r.toJSON(),inViewport:r.x>=0&&r.y>=0&&r.right<=innerWidth&&r.bottom<=innerHeight}})()`)
+    assert.equal(hit.visible, 'visible'); assert.equal(hit.inViewport, true); assert.equal(hit.hit, true)
+    result.operations.push({ name: 'actual-hit', selector, ...hit })
+  }
   const capture = async name => { await pause(120); const facts = await read(`(()=>{const n=document.querySelector('.mobile-app');return {text:n.textContent,overflow:n.scrollWidth>n.clientWidth,rootTop:n.getBoundingClientRect().top,windowScrollY:scrollY,appScroll:n.scrollTop,header:document.querySelector(".mobile-header").getBoundingClientRect().toJSON(),viewport:{height:innerHeight,visualHeight:visualViewport.height,top:visualViewport.offsetTop},...attachmentScene.facts()}})()`); assert.equal(facts.overflow, false); await fs.writeFile(path.join(evidence, name+'.png'), (await win.webContents.capturePage()).toPNG()); result.images.push(name+'.png'); result.operations.push({ name, ...facts }) }
   await click('.mobile-spatial-panel details > summary'); await click('.mobile-session-list button')
   await click('[contenteditable="true"]'); win.webContents.insertText('先看附件，再比较两种方案。')
@@ -49,6 +54,19 @@ app.whenReady().then(async () => {
   assert.equal(await read('document.querySelector("[contenteditable=true]").getAttribute("contenteditable")'), 'true')
   win.setContentSize(900, 820); await capture('offline-retains-wide')
   await read('attachmentScene.reconnect()'); await named('移除 本周研究资料与两个方案的比较.md 本地引用'); await capture('original-draft-retained-wide')
+  win.setContentSize(390, 844); await read('attachmentScene.posture()')
+  await until('document.querySelector(".mobile-conversation__composer").textContent.includes("Run 状态未确认")')
+  await capture('posture-unknown-phone'); await named('执行模式'); await capture('posture-menu-unknown-phone')
+  await assertHittable('.mobile-posture-menu [role="menuitem"]'); await click('.mobile-posture-menu [role="menuitem"]')
+  await until('attachmentScene.facts().calls.some(call=>call.method==="setAgentPosture")')
+  assert.deepEqual(await read('JSON.parse(JSON.stringify(attachmentScene.facts().calls.find(call=>call.method==="setAgentPosture").params))'), { agentSessionId: 'session-original', expectedRun: { runId: 'run-original' }, modeId: 'review' })
+  await named('Choose a command'); await click('input[aria-label="查找命令"]'); win.webContents.insertText('review')
+  await until('document.querySelectorAll(".mobile-command-menu [role=menuitem]").length===1')
+  await capture('command-menu-phone'); win.setContentSize(320, 760); await capture('command-menu-narrow')
+  await assertHittable('.mobile-command-menu [role="menuitem"]'); await click('.mobile-command-menu [role="menuitem"]')
+  await until('document.querySelector("[contenteditable=true]").textContent.includes("/review")')
+  assert.equal(await read('document.querySelector("[contenteditable=true]").textContent.includes("后来补充的文字仍在")'), true)
+  assert.equal(await read('attachmentScene.facts().calls.filter(call=>call.method==="setAgentPosture").length'), 1)
   result.passed = true
  } catch (error) { result.error = { message: error.message, stack: error.stack }; if (win) await fs.writeFile(path.join(evidence, 'failed.png'), (await win.webContents.capturePage()).toPNG()) }
  finally { await fs.writeFile(path.join(evidence, 'renderer-result.json'), JSON.stringify(result, null, 2)+'\n'); win?.destroy(); app.exit(result.passed ? 0 : 1) }
