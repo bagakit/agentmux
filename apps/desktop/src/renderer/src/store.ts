@@ -274,7 +274,7 @@ import {
   type PersistedWorkbench
 } from './lib/workbench-persistence'
 import { createBrowserProjectionEventQueue, reduceBrowserEvent } from './lib/browser-state'
-import { projectNativeBrowserOpening } from './lib/browser-child-projection'
+import { nativeBrowserContainerChanged, projectNativeBrowserOpening } from './lib/browser-child-projection'
 import {
   bumpWorkspaceFileRevision,
   reduceDocumentAttached,
@@ -12616,7 +12616,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
 
 let projectingNativeBrowsers = false
 useAppStore.subscribe((state, previous) => {
-  if (!pendingNativeBrowsers.size || projectingNativeBrowsers || state.tabs === previous.tabs && state.layouts === previous.layouts) return
+  if (!pendingNativeBrowsers.size || projectingNativeBrowsers || !nativeBrowserContainerChanged(state, previous)) return
   projectingNativeBrowsers = true
   try { for (const event of pendingNativeBrowsers.values()) useAppStore.getState().applyBrowserEvent(event) }
   finally { projectingNativeBrowsers = false }
