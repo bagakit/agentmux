@@ -22,6 +22,7 @@ import { errorMessage } from './delivery'
 import { createLocalDrafts, type PromptAttempt, type ResponseAttempt } from './local-drafts'
 import { useHostedConversation, type MobileConnection } from './use-hosted-conversation'
 import { MobileMessageTools, MobilePosturePicker } from './MobileMessageTools'
+import { MobileSkillsPicker } from './MobileSkillsPicker'
 import { MobileMailbox } from './MobileMailbox'
 import { MobileAttachments, type MobileAttachmentControls } from './MobileAttachments'
 import { fileUploadScopeMatches } from './attachments'
@@ -435,6 +436,8 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           commands={commandSuggestions} references={agentReferences}
           tools={<MobileMessageTools refresh={() => { void reading.refresh() }} terminal={onShowTerminal}
             commands={commandSuggestions} onCommand={item => { void insertSuggestion(item) }}
+            skills={<MobileSkillsPicker client={client} session={session} scope={JSON.stringify([historyScope, session?.providerId, session?.workspacePath, session?.run.runId])}
+              connected={connection.state === 'connected' && !reading.disconnected} visible={visible} onSelect={item => { void insertSuggestion(item) }} />}
             {...(isWorking && available && Boolean(draft.trim()) ? { onInterrupt: () => { void interruptCurrentTurn() } } : {})} />}
           {...(postureControl && available && reading.activity?.process !== 'exited' && reading.activity?.process !== 'interrupted' ? { postureTool:
             <MobilePosturePicker control={postureControl} disabled={!available} onSet={modeId => { void changePosture(modeId) }} />

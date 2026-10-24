@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import type { AgentPostureControl } from '@agentmux/core'
 import type { ComposerSuggestion } from '@agentmux/client-ui/components/AgentComposer'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -57,12 +57,13 @@ export function MobileCommandPicker({ commands, disabled, onSelect }: {
 }
 
 /** The same input layout control as Desktop; communication records have their own mailbox. */
-export function MobileMessageTools({ refresh, terminal, onInterrupt, commands = [], onCommand, disabled }: {
+export function MobileMessageTools({ refresh, terminal, onInterrupt, commands = [], onCommand, skills, disabled }: {
   refresh(): void
   terminal?: (() => void) | undefined
   onInterrupt?: (() => void) | undefined
   commands?: readonly ComposerSuggestion[]
   onCommand?: ((command: ComposerSuggestion) => void) | undefined
+  skills?: ReactNode
   disabled?: boolean | undefined
 }) {
   const [phase, setPhase] = useState<ComposerToolPhase>('collapsed')
@@ -70,6 +71,7 @@ export function MobileMessageTools({ refresh, terminal, onInterrupt, commands = 
     {onInterrupt && <button type="button" className="composer-tool" aria-label="Interrupt the current turn" title="Interrupt the current reply" onClick={onInterrupt}><SemanticIcon name="action.stop" size={14} /></button>}
     {phase !== 'collapsed' && <>
       {commands.length > 0 && onCommand ? <MobileCommandPicker commands={commands} {...(disabled !== undefined ? { disabled } : {})} onSelect={onCommand} /> : null}
+      {skills}
       {terminal && <button type="button" className="composer-tool" aria-label="查看终端" onClick={terminal}><SemanticIcon name="object.terminal" size={16} /></button>}
       <button type="button" className="composer-tool" aria-label="刷新原对话" onClick={refresh}><SemanticIcon name="action.refresh" size={16} /></button>
     </>}
