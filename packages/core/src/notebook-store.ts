@@ -1,11 +1,11 @@
 import { watch, type FSWatcher } from 'node:fs'
-import { mkdir, readFile } from 'node:fs/promises'
+import { mkdir, readFile, stat } from 'node:fs/promises'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 import { durableWriteFile } from './durable-write.js'
 import { AgentMuxNotesStorage, defaultNotesDirectory, withNotesStorageFileLock } from './notes-storage.js'
 import { AgentMuxError } from './errors.js'
 import { applyNotebookChange, emptyNotebookState, notebookFingerprint, parseNotebookState, type NoteResource, type NotebookActor, type NotebookObservation, type NotebookState, type NotebookWrite } from './notebook-catalog.js'
-import { NOTEBOOK_DATABASE_NAME, initializeNotebookDatabase, readNotebookDatabase, readNotebookProvenance, writeNotebookDatabase, readNotebookHistory, writeNotebookHistory, readNotebookHistoryProvenance, readNotebookHistoryOperation, readNotebookHistoryBatch } from './notebook-database.js'
+import { NOTEBOOK_ROOT_NAME, notebookFileRoot, notebookFilesLocated, initializeNotebookFiles, readNotebookFiles, readNotebookProvenance, writeNotebookFiles, readNotebookHistory, writeNotebookHistory, readNotebookHistoryProvenance, readNotebookHistoryOperation, readNotebookHistoryBatch } from './notebook-files.js'
 import { parseNoteProvenanceWrite, type NoteProvenanceQuery, type NoteProvenanceSnapshot, type NoteProvenanceWrite } from './note-provenance.js'
 import { parseNoteFileTitle, parseNoteTitleIntent, parseNoteTitleOperation, type NoteTitlePort, type NoteTitleIntent, type NoteTitleOperation, type NoteFileTitle, type NoteTitleProjection, type NoteTitleInspection } from './note-title.js'
 import { noteProvenanceResourceKey } from './note-provenance.js'
@@ -14,12 +14,11 @@ export * from './notes-storage.js'
 export * from './notebook-catalog.js'
 export * from './note-provenance.js'
 export * from './note-history.js'
-const sqlitePath = (path: string) => path.endsWith('.json') ? path.slice(0, -5) + '.sqlite' : path
 /** The stable original catalog lock also serializes attribution and directory publication. */
-export async function withNotebookDatabaseLock<T>(path: string, work: () => Promise<T>): Promise<T> {
+export async function withNotebookFileLock<T>(path: string, work: () => Promise<T>): Promise<T> {
   return withNotesStorageFileLock(path, work)
 }
-/** One durable SQLite metadata owner. Original Markdown bodies remain with Files. */
+/** One durable local-file metadata owner. Original Markdown bodies remain with Files. */
 export class AgentMuxNotebookStore {
   readonly storage: AgentMuxNotesStorage | null
   private initialized: Promise<void> | null = null
@@ -34,8 +33,8 @@ export class AgentMuxNotebookStore {
   get path(): string { return this.currentPath }
   constructor(path?: string, storage = new AgentMuxNotesStorage(), private readonly options: { title?: NoteTitlePort } = {}) {
     this.storage = path === undefined ? storage : null
-    this.currentPath = sqlitePath(path ?? join(defaultNotesDirectory(), NOTEBOOK_DATABASE_NAME))
-    this.legacyPath = path?.endsWith('.json') ? path : join(dirname(this.currentPath), 'notebooks.json')
+    this.currentPath = notebookFileRoot(path ?? join(defaultNotesDirectory(), NOTEBOOK_ROOT_NAME))
+    this.legacyPath = this.currentPath.slice(0, -'.root.json'.length) + '.json'
     if (!isAbsolute(this.currentPath)) throw new AgentMuxError('Notebook storage needs an absolute owner path.', 'NOTEBOOK_INPUT_INVALID')
   }
   private async locate(writing = false): Promise<void> {
@@ -43,33 +42,48 @@ export class AgentMuxNotebookStore {
     await this.ready()
     const observed = await this.storage.inspect()
     if (writing && observed.operation) throw new AgentMuxError('The original Notes directory change needs recovery. Saved pages and unrelated work remain available.', 'NOTEBOOK_BUSY')
-    this.currentPath = sqlitePath(observed.catalogPath)
-    this.legacyPath = observed.catalogPath.endsWith('.json') ? observed.catalogPath : join(dirname(this.currentPath), 'notebooks.json')
+    this.currentPath = notebookFileRoot(observed.catalogPath)
+    this.legacyPath = this.currentPath.slice(0, -'.root.json'.length) + '.json'
   }
   private withWriteLock<T>(work: () => Promise<T>) {
-    return withNotebookDatabaseLock(this.legacyPath, () => withNotebookDatabaseLock(this.path, work))
+    return withNotebookFileLock(this.legacyPath, () => withNotebookFileLock(this.path, work))
+  }
+  private async requireEstablishedRoot(): Promise<void> {
+    if (this.confirmedPath === this.path || this.storage && await this.storage.fileAuthorityEstablished()) {
+      try { await stat(this.path) } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw new AgentMuxError('The confirmed original Notebook file root is missing; older inputs were not substituted.', 'NOTEBOOK_READ_UNCONFIRMED')
+        throw error
+      }
+    }
+  }
+  private confirmedPath: string | null = null
+  /** First read establishes the selected file owner; subsequent exact metadata reads never load the catalog. */
+  private async ensureReadableFiles(): Promise<void> {
+    await this.locate()
+    await this.requireEstablishedRoot()
+    if (this.confirmedPath === this.path || await notebookFilesLocated(this.path)) { this.confirmedPath = this.path; return }
+    let input = false
+    for (const path of [this.path, this.legacyPath, this.path.slice(0, -'.root.json'.length) + '.sqlite', this.path.slice(0, -'.root.json'.length) + '.sqlite.sqlite-identity', this.path + '.importing.json']) {
+      try { await readFile(path); input = true; break } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+    }
+    if (!input) {
+      if (this.storage && await this.storage.catalogEstablished()) throw new AgentMuxError('The confirmed original Notebook root is missing.', 'NOTEBOOK_READ_UNCONFIRMED')
+      return
+    }
+    const initialize = async () => {
+      await this.locate(true)
+      await this.withWriteLock(async () => {
+        await initializeNotebookFiles(this.path, this.legacyPath, true)
+        if (this.storage) await this.storage.confirmCatalog()
+      })
+    }
+    if (this.storage) await this.storage.withLock(initialize); else await initialize()
+    this.confirmedPath = this.path
   }
   async read(): Promise<NotebookState> {
     try {
-      await this.locate()
-      const current = await readNotebookDatabase(this.path, false)
-      if (current) return current.state
-      if (this.storage && await this.storage.databaseEstablished()) throw new Error('The confirmed original SQLite directory is missing.')
-      let legacy = false
-      try { await readFile(this.legacyPath); legacy = true } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
-      if (legacy) {
-        const importOriginal = async () => {
-          await this.locate(true)
-          return this.withWriteLock(async () => {
-            const imported = await initializeNotebookDatabase(this.path, this.legacyPath, true)
-            if (this.storage) await this.storage.confirmCatalog()
-            return imported.state
-          })
-        }
-        return this.storage ? await this.storage.withLock(importOriginal) : await importOriginal()
-      }
-      if (this.storage && await this.storage.catalogEstablished()) throw new Error('The confirmed Notebook catalog is missing.')
-      return emptyNotebookState()
+      await this.ensureReadableFiles()
+      return (await readNotebookFiles(this.path, false))?.state ?? emptyNotebookState()
     } catch (error) {
       throw new AgentMuxError('The Notebook directory could not be read. Original bytes, Note files and work surfaces are kept; restore or repair this same catalog.', 'NOTEBOOK_READ_UNCONFIRMED', error instanceof Error ? error.message : String(error))
     }
@@ -90,13 +104,13 @@ export class AgentMuxNotebookStore {
     throw new AgentMuxError(message + ' Run notebook inspect --operation-id with this same operation; original files, history and other work are retained.', code)
   }
   private async originalCatalog() {
-    if (this.storage && await this.storage.databaseEstablished() && !await readNotebookDatabase(this.path, false)) throw new AgentMuxError('The confirmed original SQLite directory is missing. Original files are retained.', 'NOTEBOOK_READ_UNCONFIRMED')
-    return initializeNotebookDatabase(this.path, this.legacyPath, !!this.storage && await this.storage.catalogEstablished())
+    if (this.storage && await this.storage.fileAuthorityEstablished() && !await readNotebookFiles(this.path, false)) throw new AgentMuxError('The confirmed original Notebook file root is missing. Original files are retained.', 'NOTEBOOK_READ_UNCONFIRMED')
+    return initializeNotebookFiles(this.path, this.legacyPath, !!this.storage && await this.storage.catalogEstablished())
   }
   private async publishCatalog(before: NotebookState, next: NotebookState): Promise<NotebookState> {
     if (next === before) return before
     await durableWriteFile(this.path + '.previous', JSON.stringify(before) + '\n', { requireDirectorySync: true })
-    await writeNotebookDatabase(this.path, { state: next })
+    await writeNotebookFiles(this.path, { state: next })
     if (this.storage) await this.storage.confirmCatalog()
     this.emit({ state: next }); return next
   }
@@ -203,21 +217,21 @@ export class AgentMuxNotebookStore {
   private async write(input: NotebookWrite, actor: NotebookActor): Promise<NotebookState> {
     await this.locate(true)
     return this.withWriteLock(async () => {
-      if (this.storage && await this.storage.databaseEstablished() && !await readNotebookDatabase(this.path, false)) throw new AgentMuxError('The confirmed original SQLite directory is missing. Original files are retained.', 'NOTEBOOK_READ_UNCONFIRMED')
-      const before = await initializeNotebookDatabase(this.path, this.legacyPath, !!this.storage && await this.storage.catalogEstablished())
+      if (this.storage && await this.storage.fileAuthorityEstablished() && !await readNotebookFiles(this.path, false)) throw new AgentMuxError('The confirmed original Notebook file root is missing. Original files are retained.', 'NOTEBOOK_READ_UNCONFIRMED')
+      const before = await initializeNotebookFiles(this.path, this.legacyPath, !!this.storage && await this.storage.catalogEstablished())
       const next = applyNotebookChange(before.state, input, actor, Date.now())
       if (next !== before.state) await durableWriteFile(this.path + '.previous', JSON.stringify(before.state) + '\n', { requireDirectorySync: true })
       const relocation = next !== before.state && input.change.kind === 'relocate'
         ? { noteId: input.change.noteId, from: before.state.pages[input.change.noteId]!.resource, to: next.pages[input.change.noteId]!.resource }
         : undefined
-      await writeNotebookDatabase(this.path, { state: next, ...(relocation ? { relocation } : {}) })
+      await writeNotebookFiles(this.path, { state: next, ...(relocation ? { relocation } : {}) })
       if (this.storage) await this.storage.confirmCatalog()
       this.emit({ state: next }); return next
     })
   }
   async readProvenance(query: NoteProvenanceQuery): Promise<NoteProvenanceSnapshot> {
     parseNoteProvenanceWrite({ noteId: query.noteId, resource: query.resource, revision: query.revision, blocks: Object.fromEntries(query.blockIds.map(id => [id, { created: null, lastEdited: null }])) })
-    await this.locate()
+    await this.ensureReadableFiles()
     const provenance = await readNotebookProvenance(this.path, query)
     // Historical events distinguish a new edit/restore even when its body digest repeats.
     let latest: Awaited<ReturnType<typeof readNotebookHistoryProvenance>>
@@ -237,7 +251,7 @@ export class AgentMuxNotebookStore {
   }
   async readHistory(query: NoteHistoryQuery): Promise<NoteHistorySnapshot> {
     const original = parseNoteHistoryQuery(query)
-    await this.locate()
+    await this.ensureReadableFiles()
     return readNotebookHistory(this.path, original)
   }
   /** Trusted history action owner: exact full batch metadata, not a public pagination bypass. */
@@ -245,13 +259,13 @@ export class AgentMuxNotebookStore {
     const original = parseNoteHistoryQuery({ noteId: query.noteId, resource: query.resource })
     if (typeof query.batchId !== 'string' || !query.batchId || /[\0\r\n]/u.test(query.batchId)) throw new AgentMuxError('An exact original history batch is required.', 'NOTE_HISTORY_INVALID')
     const input = { noteId: original.noteId, resource: original.resource, batchId: query.batchId }
-    const run = async () => { await this.locate(); return this.withWriteLock(() => readNotebookHistoryBatch(this.path, input)) }
+    const run = async () => { await this.ensureReadableFiles(); return this.withWriteLock(() => readNotebookHistoryBatch(this.path, input)) }
     return this.storage ? this.storage.withLock(run) : run()
   }
   /** Original writer only: includes the private request fingerprint, never exposed by file.history. */
   async readHistoryOperation(eventId: string): Promise<NoteHistoryRecord | undefined> {
     if (typeof eventId !== 'string' || !eventId || /[\0\r\n]/u.test(eventId)) throw new AgentMuxError('An original operation identity is required.', 'NOTE_HISTORY_INVALID')
-    const run = async () => { await this.locate(); return this.withWriteLock(() => readNotebookHistoryOperation(this.path, eventId)) }
+    const run = async () => { await this.ensureReadableFiles(); return this.withWriteLock(() => readNotebookHistoryOperation(this.path, eventId)) }
     return this.storage ? this.storage.withLock(run) : run()
   }
   /** Trusted host-internal journal port; body callers cannot submit authors or event outcomes. */
@@ -261,8 +275,8 @@ export class AgentMuxNotebookStore {
     const run = async () => {
       await this.locate(true)
       return this.withWriteLock(async () => {
-        if (this.storage && await this.storage.databaseEstablished() && !await readNotebookDatabase(this.path, false)) throw new AgentMuxError('The confirmed original SQLite directory is missing. Original files are retained.', 'NOTEBOOK_READ_UNCONFIRMED')
-        await initializeNotebookDatabase(this.path, this.legacyPath, !!this.storage && await this.storage.catalogEstablished())
+        await this.requireEstablishedRoot()
+        if (!await notebookFilesLocated(this.path)) await initializeNotebookFiles(this.path, this.legacyPath, !!this.storage && await this.storage.catalogEstablished())
         const saved = await writeNotebookHistory(this.path, value)
         if (this.storage) await this.storage.confirmCatalog()
         return saved
@@ -277,9 +291,9 @@ export class AgentMuxNotebookStore {
     const run = async () => {
       await this.locate(true)
       await this.withWriteLock(async () => {
-        if (this.storage && await this.storage.databaseEstablished() && !await readNotebookDatabase(this.path, false)) throw new AgentMuxError('The confirmed original SQLite directory is missing. Original files are retained.', 'NOTEBOOK_READ_UNCONFIRMED')
-        await initializeNotebookDatabase(this.path, this.legacyPath, !!this.storage && await this.storage.catalogEstablished())
-        await writeNotebookDatabase(this.path, { provenance: value })
+        await this.requireEstablishedRoot()
+        if (!await notebookFilesLocated(this.path)) await initializeNotebookFiles(this.path, this.legacyPath, !!this.storage && await this.storage.catalogEstablished())
+        await writeNotebookFiles(this.path, { provenance: value })
         if (this.storage) await this.storage.confirmCatalog()
       })
       return readNotebookProvenance(this.path, { ...value, blockIds: Object.keys(value.blocks) })

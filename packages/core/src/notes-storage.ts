@@ -11,7 +11,7 @@ import { defaultAgentMuxStateDirectory } from './runtime-paths.js'
 import { AgentMuxError } from './errors.js'
 import { applyNotebookChange, parseNotebookState, notebookFingerprint, type NoteResource, type NotebookState } from './notebook-catalog.js'
 import { NOTE_FILE_EXTENSION, readNoteMarkdownHeader } from './note-format.js'
-import { initializeNotebookDatabase, NOTEBOOK_DATABASE_NAME, notebookDatabaseFingerprint, publishNotebookDatabase, readNotebookDatabase, replaceNotebookDatabase, type NotebookDatabaseSnapshot } from './notebook-database.js'
+import { initializeNotebookFiles, notebookFilesRetired, retireNotebookFiles, NOTEBOOK_ROOT_NAME, notebookFileRoot, notebookFilesFingerprint, publishNotebookFiles, readNotebookFiles, replaceNotebookFiles, type NotebookFileSnapshot } from './notebook-files.js'
 import { noteProvenanceResourceKey, parseNoteProvenanceWrite, type NoteProvenanceWrite } from './note-provenance.js'
 import { parseNoteHistoryRecord, type NoteHistoryRecord } from './note-history.js'
 export type NotesResourceChange = { noteId: string; from: NoteResource; to: NoteResource; conversion?: { sourceRevision: string; targetRevision: string } }
@@ -23,7 +23,7 @@ export type NotesStorageSnapshot = { directory: string; catalogPath: string; res
 export type NotesStorageApi = { inspect(operationId?: string): Promise<NotesStorageSnapshot>; change(input: NotesStorageChange): Promise<NotesStorageSnapshot>; onChange(listener: (snapshot: NotesStorageSnapshot) => void): () => void }
 /** The converter stages fsynced Markdown; this original owner journals and publishes it. */
 export type NotesStorageConversion = { files: NotesStorageTransfer[]; resourceChanges: NotesResourceChange[]; provenance: NoteProvenanceWrite[]; issues?: NotesConversionIssue[] }
-type Location = { schemaVersion: 1; directory: string; operations: Record<string, NotesStorageOperation>; pending: string | null; catalogEstablished?: true; catalogFormat?: 'sqlite'; conversionIssues?: NotesConversionIssue[] }
+type Location = { schemaVersion: 1; directory: string; operations: Record<string, NotesStorageOperation>; pending: string | null; catalogEstablished?: true; catalogFormat?: 'sqlite' | 'files'; conversionIssues?: NotesConversionIssue[] }
 const native = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
 const heldLocks = new AsyncLocalStorage<ReadonlyMap<string, { active: boolean }>>()
 /** Reuse only a lease held by this async operation, never an independent request. */
@@ -50,13 +50,12 @@ export function parseNotesConversionIssue(value: unknown): NotesConversionIssue 
   return structuredClone(issue)
 }
 const nested = (parent: string, child: string) => { const path = relative(parent, child); return path !== '' && !path.startsWith('..') && !isAbsolute(path) }
-const databasePath = (path: string) => path.endsWith('.json') ? path.slice(0, -5) + '.sqlite' : path
 const targetHash = (file: NotesStorageTransfer) => file.targetHash ?? file.hash
-const operationDatabase = async (operation: NotesStorageOperation): Promise<NotebookDatabaseSnapshot> => {
+const operationSnapshot = async (operation: NotesStorageOperation): Promise<NotebookFileSnapshot> => {
   if (!operation.database) throw failure('The original JSON directory operation needs explicit format recovery before cutover.', 'NOTES_STORAGE_CONVERSION_REQUIRED')
   const bytes = await readFile(operation.database.snapshotPath)
   if (digest(bytes) !== operation.database.snapshotHash) throw failure('The original prepared metadata export changed.')
-  const value = JSON.parse(bytes.toString('utf8')) as NotebookDatabaseSnapshot
+  const value = JSON.parse(bytes.toString('utf8')) as NotebookFileSnapshot
   parseNotebookState(value.state); value.provenance.forEach(parseNoteProvenanceWrite)
   value.history?.forEach(parseNoteHistoryRecord)
   if (value.incarnation !== operation.database.incarnation || notebookFingerprint(value.state) !== notebookFingerprint(operation.catalog)) throw failure('The original prepared metadata export identity changed.')
@@ -99,9 +98,9 @@ export class AgentMuxNotesStorage {
   }
   async hasLocation(): Promise<boolean> { try { await readFile(this.locatorPath); return true } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error } }
   async catalogEstablished(): Promise<boolean> { const location = await this.location(); return !!location.catalogEstablished || Object.keys(location.operations).length > 0 }
-  async databaseEstablished(): Promise<boolean> { const location = await this.location(); return location.catalogFormat === 'sqlite' || Object.values(location.operations).some(operation => !!operation.database) }
-  async confirmCatalog(): Promise<void> { const location = await this.location(); if (!location.catalogEstablished || location.catalogFormat !== 'sqlite') await this.persist({ ...location, catalogEstablished: true, catalogFormat: 'sqlite' }) }
-  async inspect(operationId?: string): Promise<NotesStorageSnapshot> { const location = await this.location(); return { directory: location.directory, catalogPath: location.pending && location.operations[location.pending]!.phase === 'prepared' ? location.operations[location.pending]!.sourceCatalog : join(location.directory, NOTEBOOK_DATABASE_NAME), resourceChanges: Object.values(location.operations).filter(o => o.phase === 'committed').flatMap(o => o.resourceChanges), directoryChanges: Object.values(location.operations).filter(o => o.phase === 'committed' && o.expectedDirectory !== o.directory).map(o => ({ from: o.expectedDirectory, to: o.directory })), operation: operationId ? Object.hasOwn(location.operations, operationId) ? location.operations[operationId]! : null : location.pending ? location.operations[location.pending] ?? null : null, ...location.conversionIssues?.length ? { conversionIssues: structuredClone(location.conversionIssues) } : {} } }
+  async fileAuthorityEstablished(): Promise<boolean> { const location = await this.location(); return location.catalogFormat === 'files' }
+  async confirmCatalog(): Promise<void> { const location = await this.location(); if (!location.catalogEstablished || location.catalogFormat !== 'files') await this.persist({ ...location, catalogEstablished: true, catalogFormat: 'files' }) }
+  async inspect(operationId?: string): Promise<NotesStorageSnapshot> { const location = await this.location(); return { directory: location.directory, catalogPath: location.pending && location.operations[location.pending]!.phase === 'prepared' ? location.operations[location.pending]!.sourceCatalog : join(location.directory, NOTEBOOK_ROOT_NAME), resourceChanges: Object.values(location.operations).filter(o => o.phase === 'committed').flatMap(o => o.resourceChanges), directoryChanges: Object.values(location.operations).filter(o => o.phase === 'committed' && o.expectedDirectory !== o.directory).map(o => ({ from: o.expectedDirectory, to: o.directory })), operation: operationId ? Object.hasOwn(location.operations, operationId) ? location.operations[operationId]! : null : location.pending ? location.operations[location.pending] ?? null : null, ...location.conversionIssues?.length ? { conversionIssues: structuredClone(location.conversionIssues) } : {} } }
   async withLock<T>(work: () => Promise<T>): Promise<T> {
     return this.lock(this.locatorPath, work)
   }
@@ -109,11 +108,11 @@ export class AgentMuxNotesStorage {
     return withNotesStorageFileLock(path, work)
   }
   private persist(value: Location) { return durableWriteFile(this.locatorPath, JSON.stringify(value) + '\n', { requireDirectorySync: true }) }
-  private async originalDatabase(path: string, required: boolean, legacyPath?: string) {
-    if (await this.databaseEstablished() && !await readNotebookDatabase(path, false)) throw failure('The confirmed original SQLite directory is missing.', 'NOTEBOOK_READ_UNCONFIRMED')
-    return initializeNotebookDatabase(path, legacyPath ?? join(dirname(path), 'notebooks.json'), required)
+  private async originalFiles(path: string, required: boolean, legacyPath?: string) {
+    if (await this.fileAuthorityEstablished() && !await readNotebookFiles(path, false)) throw failure('The confirmed original Notebook file root is missing.', 'NOTEBOOK_READ_UNCONFIRMED')
+    return initializeNotebookFiles(path, legacyPath ?? join(dirname(path), 'notebooks.json'), required)
   }
-  private databaseLock<T>(path: string, work: () => Promise<T>) {
+  private catalogLock<T>(path: string, work: () => Promise<T>) {
     const legacy = path.endsWith('.sqlite') ? path.slice(0, -7) + '.json' : join(dirname(path), 'notebooks.json')
     return this.lock(legacy, () => this.lock(path, work))
   }
@@ -123,9 +122,9 @@ export class AgentMuxNotesStorage {
     await this.withLock(async () => {
       if (await this.hasLocation()) return
       try { await readFile(legacyPath) } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return; throw error }
-      const path = databasePath(legacyPath)
-      await this.lock(legacyPath, () => this.lock(path, () => initializeNotebookDatabase(path, legacyPath, true)))
-      await this.persist({ schemaVersion: 1, directory: dirname(legacyPath), operations: {}, pending: null, catalogEstablished: true, catalogFormat: 'sqlite' })
+      const path = notebookFileRoot(legacyPath)
+      await this.lock(legacyPath, () => this.lock(path, () => initializeNotebookFiles(path, legacyPath, true)))
+      await this.persist({ schemaVersion: 1, directory: dirname(legacyPath), operations: {}, pending: null, catalogEstablished: true, catalogFormat: 'files' })
     })
     return this.inspect()
   }
@@ -142,12 +141,12 @@ export class AgentMuxNotesStorage {
       if (destination !== sourceRoot && (nested(sourceRoot, destination) || nested(destination, sourceRoot))) throw failure('The new Notes directory must be outside the old directory.', 'NOTES_STORAGE_INPUT_INVALID')
       await mkdir(destination, { recursive: true, mode: 0o700 })
       if ((await lstat(destination)).isSymbolicLink()) throw failure('Choose the actual Notes directory rather than a symbolic link.', 'NOTES_STORAGE_INPUT_INVALID')
-      const sourceCatalog = databasePath(adoption?.catalogPath ?? join(sourceRoot, NOTEBOOK_DATABASE_NAME))
-      return this.databaseLock(sourceCatalog, async () => {
-        await this.originalDatabase(sourceCatalog, !!location.catalogEstablished || Object.keys(location.operations).length > 0, adoption?.catalogPath.endsWith('.json') ? adoption.catalogPath : undefined)
-        const original = (await readNotebookDatabase(sourceCatalog))!
+      const sourceCatalog = notebookFileRoot(adoption?.catalogPath ?? join(sourceRoot, NOTEBOOK_ROOT_NAME))
+      return this.catalogLock(sourceCatalog, async () => {
+        await this.originalFiles(sourceCatalog, !!location.catalogEstablished || Object.keys(location.operations).length > 0, adoption?.catalogPath.endsWith('.json') ? adoption.catalogPath : undefined)
+        const original = (await readNotebookFiles(sourceCatalog))!
         let catalog = original.state
-        if (join(destination, NOTEBOOK_DATABASE_NAME) !== sourceCatalog && await readNotebookDatabase(join(destination, NOTEBOOK_DATABASE_NAME))) throw failure('The target already contains a Notebook directory.', 'NOTES_STORAGE_CONFLICT')
+        if (join(destination, NOTEBOOK_ROOT_NAME) !== sourceCatalog && !await notebookFilesRetired(join(destination, NOTEBOOK_ROOT_NAME)) && await readNotebookFiles(join(destination, NOTEBOOK_ROOT_NAME))) throw failure('The target already contains a Notebook directory.', 'NOTES_STORAGE_CONFLICT')
         const resourceChanges: NotesResourceChange[] = [], files: NotesStorageTransfer[] = []
         // Explicit adoption consumes only the original converter's latest exact observation.
         // Ordinary directory changes must still confirm every managed source.
@@ -185,23 +184,23 @@ export class AgentMuxNotesStorage {
           await collect(sourceRoot)
         }
         const provenance = this.relocateProvenance(original.provenance, resourceChanges)
-        const operation: NotesStorageOperation = { ...input, directory: destination, expectedDirectory: sourceRoot, phase: 'prepared', resourceChanges, files, catalog, sourceCatalog, sourceCatalogHash: notebookDatabaseFingerprint(original), database: await this.exportMetadata({ ...original, state: catalog, provenance, ...(original.history ? { history: this.relocateHistory(original.history, resourceChanges) } : {}) }) }
+        const operation: NotesStorageOperation = { ...input, directory: destination, expectedDirectory: sourceRoot, phase: 'prepared', resourceChanges, files, catalog, sourceCatalog, sourceCatalogHash: notebookFilesFingerprint(original), database: await this.exportMetadata({ ...original, state: catalog, provenance, ...(original.history ? { history: this.relocateHistory(original.history, resourceChanges) } : {}) }) }
         location = { ...location, pending: input.operationId, operations: { ...location.operations, [input.operationId]: operation } }; await this.persist(location); await this.finish(location, operation, true); return this.inspect(input.operationId)
       })
     })
   }
   /** Explicit one-time conversion shares the same journal, locks and host acknowledgement. */
-  async convert(input: { operationId: string; expectedDirectory: string }, prepare: (snapshot: NotebookDatabaseSnapshot) => Promise<NotesStorageConversion>): Promise<NotesStorageSnapshot> {
+  async convert(input: { operationId: string; expectedDirectory: string }, prepare: (snapshot: NotebookFileSnapshot) => Promise<NotesStorageConversion>): Promise<NotesStorageSnapshot> {
     return this.withLock(async () => {
       if (!input.operationId?.trim() || !isAbsolute(input.expectedDirectory)) throw failure('The original conversion identity and Notes directory are required.', 'NOTES_STORAGE_INPUT_INVALID')
       let location = await this.location(); const existing = Object.hasOwn(location.operations, input.operationId) ? location.operations[input.operationId] : undefined
       if (existing) { if (existing.kind !== 'convert' || existing.expectedDirectory !== resolve(input.expectedDirectory)) throw failure('This operation identity belongs to another original operation.', 'NOTES_STORAGE_INPUT_INVALID'); return this.retry(location, existing) }
       if (location.pending) throw failure('The original Notes directory operation needs recovery before conversion.', 'NOTEBOOK_BUSY')
       if (location.directory !== resolve(input.expectedDirectory)) throw failure('The original Notes directory changed before conversion.', 'CONFIG_CONFLICT')
-      const sourceCatalog = join(location.directory, NOTEBOOK_DATABASE_NAME)
-      return this.databaseLock(sourceCatalog, async () => {
-        await this.originalDatabase(sourceCatalog, !!location.catalogEstablished || Object.keys(location.operations).length > 0)
-        const original = (await readNotebookDatabase(sourceCatalog))!, prepared = await prepare(structuredClone(original))
+      const sourceCatalog = join(location.directory, NOTEBOOK_ROOT_NAME)
+      return this.catalogLock(sourceCatalog, async () => {
+        await this.originalFiles(sourceCatalog, !!location.catalogEstablished || Object.keys(location.operations).length > 0)
+        const original = (await readNotebookFiles(sourceCatalog))!, prepared = await prepare(structuredClone(original))
         location.conversionIssues = (prepared.issues ?? []).map(parseNotesConversionIssue)
         let catalog = original.state
         if (!prepared.files.length && !prepared.resourceChanges.length && !prepared.provenance.length) { await this.persist(location); return this.inspect() }
@@ -226,14 +225,14 @@ export class AgentMuxNotesStorage {
           if (existing && notebookFingerprint(existing) !== notebookFingerprint(value)) throw failure('Converted attribution conflicts with original trusted metadata.', 'NOTES_STORAGE_CONFLICT')
           if (!existing) provenance.push(value)
         }
-        const operation: NotesStorageOperation = { operationId: input.operationId, expectedDirectory: location.directory, directory: location.directory, kind: 'convert', phase: 'prepared', resourceChanges: prepared.resourceChanges, files: prepared.files, catalog, sourceCatalog, sourceCatalogHash: notebookDatabaseFingerprint(original), database: await this.exportMetadata({ ...original, state: catalog, provenance, ...(original.history ? { history: this.relocateHistory(original.history, prepared.resourceChanges) } : {}) }) }
+        const operation: NotesStorageOperation = { operationId: input.operationId, expectedDirectory: location.directory, directory: location.directory, kind: 'convert', phase: 'prepared', resourceChanges: prepared.resourceChanges, files: prepared.files, catalog, sourceCatalog, sourceCatalogHash: notebookFilesFingerprint(original), database: await this.exportMetadata({ ...original, state: catalog, provenance, ...(original.history ? { history: this.relocateHistory(original.history, prepared.resourceChanges) } : {}) }) }
         parseNotesStorageOperation(operation)
         location = { ...location, pending: input.operationId, operations: { ...location.operations, [input.operationId]: operation } }; await this.persist(location); await this.finish(location, operation, true); return this.inspect(input.operationId)
       })
     })
   }
   /** One-time recovery of the prior JSON journal, without enabling JSON in normal moves. */
-  async recoverLegacyOperation(operationId: string, prepare: (original: NotesStorageOperation, snapshot: NotebookDatabaseSnapshot) => Promise<NotesStorageConversion>): Promise<NotesStorageSnapshot> {
+  async recoverLegacyOperation(operationId: string, prepare: (original: NotesStorageOperation, snapshot: NotebookFileSnapshot) => Promise<NotesStorageConversion>): Promise<NotesStorageSnapshot> {
     return this.withLock(async () => {
       const location = await this.location(), originalOperation = Object.hasOwn(location.operations, operationId) ? location.operations[operationId] : undefined
       if (!originalOperation || location.pending !== operationId) throw failure('The exact original pending Notes operation is required.', 'NOTES_STORAGE_INPUT_INVALID')
@@ -242,11 +241,11 @@ export class AgentMuxNotesStorage {
       return this.lock(originalOperation.sourceCatalog, async () => {
         const bytes = await readFile(legacyPath), expectedHash = originalOperation.phase === 'prepared' ? originalOperation.sourceCatalogHash : digest(Buffer.from(JSON.stringify(originalOperation.catalog) + '\n'))
         if (digest(bytes) !== expectedHash) throw failure('The original pending JSON directory changed before explicit recovery.', 'NOTES_STORAGE_CONFLICT')
-        const sourceCatalog = databasePath(legacyPath)
+        const sourceCatalog = notebookFileRoot(legacyPath)
         return this.lock(sourceCatalog, async () => {
           const state = parseNotebookState(JSON.parse(bytes.toString('utf8')))
-          await initializeNotebookDatabase(sourceCatalog, legacyPath, true)
-          const original = (await readNotebookDatabase(sourceCatalog))!
+          await initializeNotebookFiles(sourceCatalog, legacyPath, true)
+          const original = (await readNotebookFiles(sourceCatalog))!
           if (notebookFingerprint(original.state) !== notebookFingerprint(state)) throw failure('The imported original directory changed before recovery.', 'NOTES_STORAGE_CONFLICT')
           for (const file of originalOperation.files) {
             const raw = await readFile(file.source).catch(error => { if (error.code !== 'ENOENT' || originalOperation.phase === 'prepared') throw error; return null })
@@ -268,7 +267,7 @@ export class AgentMuxNotesStorage {
             if (old && notebookFingerprint(old) !== notebookFingerprint(value)) throw failure('Recovered attribution conflicts with the original trusted authors.', 'NOTES_STORAGE_CONFLICT')
             if (!old) provenance.push(value)
           }
-          const operation: NotesStorageOperation = { ...originalOperation, kind: 'convert', phase: 'prepared', files: prepared.files, resourceChanges: prepared.resourceChanges, catalog, sourceCatalog, sourceCatalogHash: notebookDatabaseFingerprint(original), database: await this.exportMetadata({ ...original, state: catalog, provenance, ...(original.history ? { history: this.relocateHistory(original.history, prepared.resourceChanges) } : {}) }) }
+          const operation: NotesStorageOperation = { ...originalOperation, kind: 'convert', phase: 'prepared', files: prepared.files, resourceChanges: prepared.resourceChanges, catalog, sourceCatalog, sourceCatalogHash: notebookFilesFingerprint(original), database: await this.exportMetadata({ ...original, state: catalog, provenance, ...(original.history ? { history: this.relocateHistory(original.history, prepared.resourceChanges) } : {}) }) }
           parseNotesStorageOperation(operation)
           location.pending = operationId; location.operations[operationId] = operation
           await this.persist(location); await this.finish(location, operation, true); return this.inspect(operationId)
@@ -276,7 +275,7 @@ export class AgentMuxNotesStorage {
       })
     })
   }
-  private async exportMetadata(value: NotebookDatabaseSnapshot): Promise<NonNullable<NotesStorageOperation['database']>> {
+  private async exportMetadata(value: NotebookFileSnapshot): Promise<NonNullable<NotesStorageOperation['database']>> {
     const bytes = Buffer.from(JSON.stringify(value) + '\n'), snapshotPath = join(this.locatorPath + '.operations', mintObjectId() + '.metadata.json')
     await mkdir(dirname(snapshotPath), { recursive: true, mode: 0o700 })
     await durableWriteFile(snapshotPath, bytes, { mode: 0o600, requireDirectorySync: true })
@@ -298,9 +297,35 @@ export class AgentMuxNotesStorage {
   private async confirmOriginal(source: string, workspacePath: string) {
     if (!nested(workspacePath, source) || !(await lstat(source)).isFile() || !nested(await realpath(workspacePath), await realpath(source))) throw failure('The original Note file cannot be confirmed.')
   }
+  private async resumeSqliteOperation(location: Location, operation: NotesStorageOperation): Promise<void> {
+    if (!operation.database || !operation.sourceCatalog.endsWith('.sqlite')) return
+    const oldSource = operation.sourceCatalog, source = notebookFileRoot(oldSource), target = join(operation.directory, NOTEBOOK_ROOT_NAME)
+    await this.catalogLock(source, async () => {
+      const prepared = await operationSnapshot(operation), expected = notebookFilesFingerprint(prepared)
+      let original = await readNotebookFiles(source)
+      try { if (!original) { await lstat(oldSource); await initializeNotebookFiles(source, undefined, true); original = await readNotebookFiles(source) } }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT' || operation.phase !== 'committed') throw error }
+      if (original && notebookFilesFingerprint(original) !== operation.sourceCatalogHash && !(source === target && notebookFilesFingerprint(original) === expected)) throw failure('The original SQL operation source changed before file adoption.', 'NOTES_STORAGE_CONFLICT')
+      if (!original && operation.phase === 'prepared') throw failure('The prepared original SQL operation source is missing.')
+      if (target !== source) {
+        const legacyTarget = target.slice(0, -'.root.json'.length) + '.sqlite'
+        let hasTarget = false
+        try { await lstat(legacyTarget); hasTarget = true } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+        if (hasTarget) await this.catalogLock(target, () => initializeNotebookFiles(target, undefined, true))
+        const destination = await readNotebookFiles(target)
+        if (destination && notebookFilesFingerprint(destination) !== expected || !destination && operation.phase === 'committed') throw failure('The original committed SQL destination cannot be confirmed.', 'NOTES_STORAGE_CONFLICT')
+      }
+      if (target === source && operation.phase === 'committed' && (!original || notebookFilesFingerprint(original) !== expected)) throw failure('The original committed conversion destination cannot be confirmed.', 'NOTES_STORAGE_CONFLICT')
+      // The prepared export, original operation ID, phase and request stay unchanged.
+      operation.sourceCatalog = source
+      await this.persist(location)
+    })
+  }
   private async retry(location: Location, operation: NotesStorageOperation) {
+    if (operation.phase === 'committed' && location.pending !== operation.operationId) return this.inspect(operation.operationId)
+    await this.resumeSqliteOperation(location, operation)
     if (operation.phase === 'prepared') await this.finish(location, operation)
-    else { await this.cleanup(operation); if (location.pending === operation.operationId) { location.pending = null; await this.persist(location) } }
+    else { await this.cleanup(operation); if (location.pending === operation.operationId) { location.pending = null; location.catalogFormat = 'files'; await this.persist(location); await this.removePreparedSnapshot(operation) } }
     return this.inspect(operation.operationId)
   }
   /** Atomic create: an external file appearing at the destination is never replaced. */
@@ -315,13 +340,13 @@ export class AgentMuxNotesStorage {
     } finally { await unlink(temporary).catch(error => { if (error.code !== 'ENOENT') throw error }) }
   }
   private async finish(location: Location, operation: NotesStorageOperation, locked = false): Promise<void> {
-    if (!locked) return this.databaseLock(operation.sourceCatalog, () => this.finish(location, operation, true))
-    const targetCatalog = join(operation.directory, NOTEBOOK_DATABASE_NAME), prepared = await operationDatabase(operation), preparedHash = notebookDatabaseFingerprint(prepared)
-    const original = await readNotebookDatabase(operation.sourceCatalog)
-    if (!original || notebookDatabaseFingerprint(original) !== operation.sourceCatalogHash && !(targetCatalog === operation.sourceCatalog && notebookDatabaseFingerprint(original) === preparedHash)) throw failure('The original Notebook catalog changed after this operation was prepared.', 'NOTES_STORAGE_CONFLICT')
+    if (!locked) return this.catalogLock(operation.sourceCatalog, () => this.finish(location, operation, true))
+    const targetCatalog = join(operation.directory, NOTEBOOK_ROOT_NAME), prepared = await operationSnapshot(operation), preparedHash = notebookFilesFingerprint(prepared)
+    const original = await readNotebookFiles(operation.sourceCatalog)
+    if (!original || notebookFilesFingerprint(original) !== operation.sourceCatalogHash && !(targetCatalog === operation.sourceCatalog && notebookFilesFingerprint(original) === preparedHash)) throw failure('The original Notebook catalog changed after this operation was prepared.', 'NOTES_STORAGE_CONFLICT')
     if (targetCatalog !== operation.sourceCatalog) {
-      const existing = await readNotebookDatabase(targetCatalog)
-      if (existing && notebookDatabaseFingerprint(existing) !== preparedHash) throw failure('The destination Notebook catalog changed after this operation was prepared.', 'NOTES_STORAGE_CONFLICT')
+      const existing = await notebookFilesRetired(targetCatalog) ? null : await readNotebookFiles(targetCatalog)
+      if (existing && notebookFilesFingerprint(existing) !== preparedHash) throw failure('The destination Notebook catalog changed after this operation was prepared.', 'NOTES_STORAGE_CONFLICT')
     }
     for (const file of operation.files) {
       const bytes = await readFile(file.source)
@@ -340,33 +365,35 @@ export class AgentMuxNotesStorage {
       if (file.destination !== file.source) await this.createFile(file.destination, targetBytes)
       if (!(await lstat(file.destination)).isFile() || digest(await readFile(file.destination)) !== targetHash(file)) throw failure('The target already contains a different Note file.', 'NOTES_STORAGE_CONFLICT')
     }
-    if (targetCatalog === operation.sourceCatalog) await replaceNotebookDatabase(targetCatalog, prepared)
-    else await publishNotebookDatabase(targetCatalog, prepared)
-    operation.phase = 'committed'; location.directory = operation.directory; location.catalogEstablished = true; location.catalogFormat = 'sqlite'; location.pending = operation.operationId; await this.persist(location)
+    if (targetCatalog === operation.sourceCatalog) await replaceNotebookFiles(targetCatalog, prepared)
+    else await publishNotebookFiles(targetCatalog, prepared)
+    operation.phase = 'committed'; location.directory = operation.directory; location.catalogEstablished = true; location.catalogFormat = 'files'; location.pending = operation.operationId; await this.persist(location)
     await this.cleanup(operation, true)
-    location.pending = null; await this.persist(location)
+    location.pending = null; await this.persist(location); await this.removePreparedSnapshot(operation)
+  }
+  private async removePreparedSnapshot(operation: NotesStorageOperation) {
+    if (operation.database) await unlink(operation.database.snapshotPath).catch(error => { if (error.code !== 'ENOENT') throw error })
   }
   private async cleanup(operation: NotesStorageOperation, locked = false): Promise<void> {
-    if (!locked) return this.databaseLock(operation.sourceCatalog, () => this.cleanup(operation, true))
+    if (!locked) return this.catalogLock(operation.sourceCatalog, () => this.cleanup(operation, true))
     const pending: NotesStorageTransfer[] = []
     for (const file of operation.files) if (file.source !== file.destination) {
       const original = await readFile(file.source).catch(error => { if (error.code !== 'ENOENT') throw error; return null })
       if (original && digest(original) !== file.hash) throw failure('An original Note changed before its copies were acknowledged.')
       if (original) pending.push(file)
     }
-    const targetCatalog = join(operation.directory, NOTEBOOK_DATABASE_NAME)
-    let originalCatalog: NotebookDatabaseSnapshot | null = null
+    const targetCatalog = join(operation.directory, NOTEBOOK_ROOT_NAME)
+    let originalCatalog: NotebookFileSnapshot | null = null
     if (operation.sourceCatalog !== targetCatalog) {
-      try { originalCatalog = await readNotebookDatabase(operation.sourceCatalog) } catch (error) {
+      try { originalCatalog = await notebookFilesRetired(operation.sourceCatalog, operation.operationId) ? null : await readNotebookFiles(operation.sourceCatalog) } catch (error) {
         try { await lstat(operation.sourceCatalog); throw error } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e }
       }
     }
-    if (originalCatalog && notebookDatabaseFingerprint(originalCatalog) !== operation.sourceCatalogHash) throw failure('The original Notebook catalog changed before its copies were acknowledged.')
+    if (originalCatalog && notebookFilesFingerprint(originalCatalog) !== operation.sourceCatalogHash) throw failure('The original Notebook catalog changed before its copies were acknowledged.')
     const confirmDestination = async () => {
-      if (!pending.length && !originalCatalog) return
-      const destination = await readNotebookDatabase(targetCatalog)
+      const destination = await readNotebookFiles(targetCatalog)
       if (!destination) throw failure('The destination Notebook catalog is unavailable.')
-      for (const file of pending) {
+      for (const file of operation.files) {
         if (!(await lstat(file.destination)).isFile() || digest(await readFile(file.destination)) !== targetHash(file)) throw failure('A destination Note is unavailable or changed; the last original copy is retained.')
         if (file.backup && (!(await lstat(file.backup)).isFile() || digest(await readFile(file.backup)) !== file.hash)) throw failure('The original JSON backup is unavailable; its original is retained.')
       }
@@ -374,11 +401,11 @@ export class AgentMuxNotesStorage {
         const current = destination.state.pages[change.noteId]?.resource
         if (!current || noteProvenanceResourceKey(current) !== noteProvenanceResourceKey(change.to)) throw failure('The destination Notebook no longer confirms this original Note resource.')
       }
-      for (const expected of (await operationDatabase(operation)).provenance) {
+      for (const expected of (await operationSnapshot(operation)).provenance) {
         const actual = destination.provenance.find(row => row.noteId === expected.noteId && row.revision === expected.revision && noteProvenanceResourceKey(row.resource) === noteProvenanceResourceKey(expected.resource))
         if (!actual || notebookFingerprint(actual) !== notebookFingerprint(expected)) throw failure('The destination no longer confirms the original trusted attribution.')
       }
-      for (const expected of (await operationDatabase(operation)).history ?? []) {
+      for (const expected of (await operationSnapshot(operation)).history ?? []) {
         const actual = destination.history?.find(row => row.eventId === expected.eventId && row.noteId === expected.noteId && noteProvenanceResourceKey(row.resource) === noteProvenanceResourceKey(expected.resource))
         if (!actual || notebookFingerprint(actual) !== notebookFingerprint(expected)) throw failure('The destination no longer confirms the original edit history. Original copies are retained.')
       }
@@ -387,16 +414,25 @@ export class AgentMuxNotesStorage {
     await this.ports.beforeSourceCleanup?.(operation.resourceChanges)
     await confirmDestination()
     for (const file of pending) if (digest(await readFile(file.source)) !== file.hash) throw failure('An original Note changed during the host acknowledgement.')
-    if (originalCatalog && notebookDatabaseFingerprint((await readNotebookDatabase(operation.sourceCatalog))!) !== operation.sourceCatalogHash) throw failure('The original Notebook catalog changed during the host acknowledgement.')
+    if (originalCatalog && notebookFilesFingerprint((await readNotebookFiles(operation.sourceCatalog))!) !== operation.sourceCatalogHash) throw failure('The original Notebook catalog changed during the host acknowledgement.')
     // All destination bytes, metadata, backups and host references are confirmed before deleting any source.
     for (const file of pending) if (digest(await readFile(file.source)) === file.hash) await unlink(file.source)
-    if (originalCatalog) { await unlink(operation.sourceCatalog); await unlink(operation.sourceCatalog + '.sqlite-identity').catch(error => { if (error.code !== 'ENOENT') throw error }) }
+    if (originalCatalog) await retireNotebookFiles(operation.sourceCatalog, originalCatalog.incarnation, operation.operationId, targetCatalog)
     for (const file of operation.files) if (file.preparedSource) await unlink(file.preparedSource).catch(error => { if (error.code !== 'ENOENT') throw error })
-    if (operation.database) await unlink(operation.database.snapshotPath).catch(error => { if (error.code !== 'ENOENT') throw error })
   }
   async bootstrap(legacy: { catalogPath: string; workspace: { id: string; hostId: string; path: string }; destinationWorkspaceId: string }): Promise<NotesStorageSnapshot> {
     return this.withLock(async () => {
       if (!await this.hasLocation()) {
+        const selected = join(this.initialDirectory, NOTEBOOK_ROOT_NAME)
+        let selectedExists = false
+        for (const candidate of [selected, selected + '.identity', selected + '.files', selected + '.importing.json']) {
+          try { await lstat(candidate); selectedExists = true; break } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+        }
+        if (selectedExists) {
+          await this.catalogLock(selected, () => initializeNotebookFiles(selected))
+          await this.persist({ schemaVersion: 1, directory: resolve(this.initialDirectory), operations: {}, pending: null, catalogEstablished: true, catalogFormat: 'files' })
+          return this.inspect()
+        }
         try {
           await readFile(legacy.catalogPath)
           await this.persist({ schemaVersion: 1, directory: dirname(legacy.catalogPath), operations: {}, pending: null })
@@ -407,7 +443,7 @@ export class AgentMuxNotesStorage {
       await this.resume()
       const current = await this.inspect()
       if (current.directory !== dirname(legacy.catalogPath)) {
-        const catalog = (await readNotebookDatabase(current.catalogPath, false))?.state
+        const catalog = (await readNotebookFiles(current.catalogPath, false))?.state
         const deferred = new Set((current.conversionIssues ?? []).flatMap(issue => issue.resource ? [noteProvenanceResourceKey(issue.resource)] : []))
         if (!catalog || !Object.values(catalog.pages).some(p => p.resource.hostId === legacy.workspace.hostId && p.resource.workspaceId === legacy.workspace.id && p.resource.workspacePath === legacy.workspace.path && !p.resource.path.includes('/') && !deferred.has(noteProvenanceResourceKey(p.resource)))) return this.inspect()
         return this.change({ operationId: 'adopt-original-note-resources:' + mintObjectId(), expectedDirectory: current.directory, directory: current.directory }, { ...legacy, catalogPath: current.catalogPath })
