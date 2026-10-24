@@ -1,8 +1,8 @@
 {
   "sources": {
     "darwin-arm64": {
-      "commit": "4c797a97c469cd9d11596f9891ba4114268d5a6e",
-      "tree": "2076998d36be23b8ac52a173896cb9b6a76d40c5"
+      "commit": "b2fdae7263e53c06704ec0ab3876158065d9d18e",
+      "tree": "b3ed828b7d264132052cd9913e899326b63182fa"
     },
     "linux-x64": {
       "commit": "4c797a97c469cd9d11596f9891ba4114268d5a6e",
@@ -12,7 +12,7 @@
   "version": "0.1.0",
   "protocol": 23,
   "manifests": {
-    "darwin-arm64": "adc8245edd59f06bc89e5fe6426ec5c8395f873629ee01299eda9421724e6c95",
+    "darwin-arm64": "3b4f0785b5d04196da4df750bdb5518add3d7d2ce00f7fd78d7f16a25e8a4969",
     "linux-x64": "a378d0b78f9971c3bdaeea61560bfa9fc44ef38a403fcffbff0d4c41a442a7fa"
   }
 }
