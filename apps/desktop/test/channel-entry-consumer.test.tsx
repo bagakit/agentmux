@@ -75,7 +75,7 @@ describe('actual App channel Settings navigation', () => {
     const trigger = document.querySelector<HTMLElement>('[data-workbench-region-id="default-region"] [data-channel-entry="discord"]')!
     await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
     await wait(() => expect(document.querySelector('.connector-header-menu')).not.toBeNull())
-    await clickText('Connect a conversation', '.connector-header-menu [role="menuitem"]')
+    await clickText('Connect a group', '.connector-header-menu [role="menuitem"]')
     await wait(() => expect(document.querySelector('[role="dialog"]')).not.toBeNull())
     const choice = document.querySelector<HTMLElement>('[aria-label="Group application"]')!
     await moteClick(choice)
@@ -92,7 +92,8 @@ describe('actual App channel Settings navigation', () => {
     await openOriginalSettings()
     await wait(() => expect(document.querySelector('[data-settings-pane="discord"] [data-connection-check]')).not.toBeNull())
     const pane = document.querySelector('[data-settings-pane="discord"]')!
-    expect(pane.textContent).toContain('Application ID'); expect(pane.textContent).toContain('100')
+    const facts = pane.querySelector('[aria-label="Saved identity facts"]')!
+    expect(facts.textContent).toContain('App ID'); expect(facts.querySelector('code')?.textContent).toBe('100')
     expect(pane.textContent).toContain('Discord bot'); expect(pane.textContent).not.toContain('Robot A')
     expect(await f.services.connections.service!.get()).toEqual(before)
     expect(f.connections.mock.calls.some(([method]) => method === 'connection.service.configure' || method === 'connection.bind')).toBe(false)

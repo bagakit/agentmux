@@ -20,7 +20,7 @@ app.whenReady().then(async () => {
     async function capture(name) { await settle(); const file = name + '.png'; fs.writeFileSync(path.join(evidence, file), (await win.webContents.capturePage()).toPNG()); result.frames.push(file) }
     await click('[data-channel-entry=discord]'); await until('document.querySelector(".connector-header-menu")')
     await capture('channel-unbound-menu-wide')
-    await click(text('Connect a conversation', '.connector-header-menu [role="menuitem"]'))
+    await click(text('Connect a group', '.connector-header-menu [role="menuitem"]'))
     await until(node('[aria-label="Existing group"]') + ' && ' + node('[aria-label="New group"]') + '?.disabled')
     await click('.selection-field[aria-label="Existing group"]')
     await click('[role="menuitemradio"][data-value="345678901234567890"]')

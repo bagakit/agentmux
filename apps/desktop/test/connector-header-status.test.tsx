@@ -106,7 +106,7 @@ it('a later failed check retains the exact group and earlier observations, with 
   vi.mocked(api.connections.call).mockImplementation(async (method, input) => { if (method === 'connection.diagnose') throw Error('PRIVATE credential path'); return original(method, input) })
   await check(); await wait(() => expect(trigger().getAttribute('aria-label')).toContain('unread'))
   expect(checked()!.dateTime).not.toBe(first)
-  for (const text of ['Original status group', 'Unavailable', 'Kept after this check failed', 'Connect a conversation', 'Channel settings', 'Refresh observations']) expect(menu().textContent).toContain(text)
+  for (const text of ['Original status group', 'Unavailable', 'Kept after this check failed', 'Connect a group', 'Channel settings', 'Refresh observations']) expect(menu().textContent).toContain(text)
   expect(trigger().getAttribute('aria-disabled')).not.toBe('true')
   expect(menu().textContent).not.toContain('PRIVATE credential path')
   const input = document.querySelector<HTMLElement>('[data-workbench-region-id="original-region"] [role="textbox"]')
