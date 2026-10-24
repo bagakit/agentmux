@@ -17,14 +17,16 @@ app.setPath('userData', profile!)
 app.on('window-all-closed', () => {})
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 const execute = promisify(execFile)
-const frontmost = async () => Number((await execute('/usr/bin/osascript', ['-e', 'tell application "System Events"\nset originalProcess to first application process whose frontmost is true\nreturn unix id of originalProcess\nend tell'], { timeout: 2000 })).stdout.trim())
-const focusProcess = async (pid: number) => { assert.ok(Number.isSafeInteger(pid) && pid > 0); await execute('/usr/bin/osascript', ['-e', `tell application "System Events" to set frontmost of first application process whose unix id is ${pid} to true`], { timeout: 2000 }) }
+const frontmost = async () => Number((await execute('/usr/bin/osascript', ['-e', 'tell application "System Events"\nset originalProcess to first application process whose frontmost is true\nreturn unix id of originalProcess\nend tell'], { timeout: 10000 })).stdout.trim())
+const focusProcess = async (pid: number) => { assert.ok(Number.isSafeInteger(pid) && pid > 0); await execute('/usr/bin/osascript', ['-e', `tell application "System Events" to set frontmost of first application process whose unix id is ${pid} to true`], { timeout: 10000 }) }
 const report: any = { passed: false, phase, created: [], releases: [], geometries: [], userRunTouched: false }
 report.nativeScope = { pid: process.pid, profile, main: process.argv[1] }
 const step = async (stage: string) => { report.stage = stage; await writeFile(join(evidence!, `${phase}.progress.json`), JSON.stringify(report, null, 2)) }
 let owner: NodeCapsuleOwner | null = null, manager: BrowserViewManager | null = null, win: BrowserWindow | null = null, windows: WorkbenchWindows | null = null
+let metadataUnavailable = false
 try {
   await app.whenReady()
+  await step('ready-before-native-focus-observation')
   report.initialFrontmostPid = await frontmost()
   if (process.platform === 'darwin') { app.setActivationPolicy('regular'); await app.dock!.show() }
   await step('ready')
@@ -34,16 +36,20 @@ try {
   const isolated = await owner.call('capsule.create', { operationId: 'create-isolated', sourcePath: source, title: 'Independent result', mode: 'isolated' })
   const injected = await owner.call('capsule.create', { operationId: 'create-injected', sourcePath: source, title: 'Connected result', mode: 'injected' })
   win = new BrowserWindow({ width: 1040, height: 820, show: true, webPreferences: { preload, contextIsolation: true, sandbox: true, nodeIntegration: false, backgroundThrottling: false } })
+  for (const event of ['focus', 'blur', 'show', 'hide'] as const) win.on(event, () => { (report.windowEvents ??= []).push({ event, at: Date.now(), focused: win?.isFocused() }) })
   windows = new WorkbenchWindows(win, new WorkbenchWindowStore(join(profile!, 'workbench-windows.json')), () => [])
   win.webContents.on('console-message', (event, _level, message) => { const text = event.message ?? message; (report.console ??= []).push(text); void appendFile(join(evidence!, `${phase}.console.log`), String(text) + '\n') })
   manager = new BrowserViewManager(win, { defaultProfileId: () => 'unused', resolvePartition: () => 'unused' } as never,
     new BrowserRefLedgerStore(join(profile!, 'ledger.json')), { rememberedSchemes: async () => ({}), rememberScheme: async () => {}, openExternal() {} })
-  manager.setPresentationWindowOwner((_occurrence, document) => windows!.windowForDocument(document))
+  manager.setPresentationWindowOwner((document) => windows!.windowForDocument(document))
   const sdk = capsuleDocumentIpc({ browsers: manager, capsules: owner, theme: () => ({ mode: 'light', tokens: {} }) })
   ipcMain.handle('capsule:document', (event, action, params) => sessionInputOperationResult(() => sdk.call(event, action, params)))
   ipcMain.handle('capsule-proof', async (event, method, ...args) => {
     if (method === 'window') return await windows!.rendererReady(event)
-    if (method === 'capsule') return await owner!.call(args[0], args[1])
+    if (method === 'capsule') {
+      if (metadataUnavailable && args[0] === 'capsule.inspect') throw new Error('Original page metadata observation is unavailable')
+      return await owner!.call(args[0], args[1])
+    }
     if (method === 'open') { report.opened = args[0]; return }
     if (method === 'restore') return manager!.ensure(args[0], async () => { throw new Error('The original inline presentation has no cold spatial Region') }, args[1])
     if (method === 'create') {
@@ -93,10 +99,13 @@ try {
   const press = await evaluate(`(() => {const r=document.querySelector('.browser-stage').getBoundingClientRect();const s=Math.min(r.width/${input.width},r.height/${input.height});return {x:Math.round(r.x+(r.width-${input.width}*s)/2+${input.x}*s),y:Math.round(r.y+(r.height-${input.height}*s)/2+${input.y}*s)} })()`)
   const previous = await frontmost()
   report.previousFrontmostPid = previous === process.pid ? report.initialFrontmostPid : previous
+  report.focusPreparation = { previous, originalPid: process.pid, windowId: win.id, visible: win.isVisible(), minimized: win.isMinimized(), focusable: win.isFocusable(), appHidden: app.isHidden() }
   if (!win.isFocused()) await focusProcess(process.pid)
-  win.focus(); win.webContents.focus()
-  const focusDeadline = Date.now() + 3000
-  while (!win.isFocused()) { await delay(100); assert.ok(Date.now() < focusDeadline, 'The original private native window must actually own focus before trusted input') }
+  win.show(); win.moveTop(); win.focus(); win.webContents.focus()
+  const focusDeadline = Date.now() + 5000
+  while (!win.isFocused() && Date.now() < focusDeadline) { win.focus(); await delay(100) }
+  report.focusPreparation.after = { frontmost: await frontmost(), focused: win.isFocused(), focusedWindow: BrowserWindow.getFocusedWindow()?.id, focusedContents: webContents.getFocusedWebContents()?.id }
+  assert.ok(win.isFocused(), 'The original private native window must actually own focus before trusted input')
   report.beforePress = { facts: await facts(), nativeInput: input, press, windowFocused: win.isFocused() }
   win.webContents.sendInputEvent({ type: 'mouseDown', ...press, button: 'left', clickCount: 1 })
   win.webContents.sendInputEvent({ type: 'mouseUp', ...press, button: 'left', clickCount: 1 })
@@ -107,10 +116,10 @@ try {
   const entry = (manager as any).entries.get(first.browserId)
   assert.equal(entry.view.getVisible(), true, 'The selected native input owner is visible in the card')
   await evaluate(`document.querySelector('.activity-feed').style.height='230px'`)
-  await until('conversationCapsuleProbe.facts().ready', 'Clipped previews preserve the original live capture')
   await delay(100)
   assert.ok(report.geometries.some((geometry: any) => geometry.visible && geometry.inputVisible === false), 'Actual scroll clipping must reach the native presentation owner')
   assert.equal(entry.view.getVisible(), false, 'A clipped card cannot cover adjacent conversation content with its native input view')
+  await until('conversationCapsuleProbe.facts().ready', 'Clipped previews preserve the original live capture')
   report.clipped = await facts()
   await writeFile(join(evidence!, `${phase}-clipped.png`), (await win.webContents.capturePage()).toPNG())
   await evaluate(`document.querySelector('.activity-feed').style.height='calc(100dvh - 48px)'`)
@@ -148,6 +157,16 @@ try {
   await until('document.body.textContent.includes("Review the original page")', 'Trusted original question must be readable from the card')
   assert.ok((await owner.call('capsule.interaction.ls', { capsuleId: injected.record.capsuleId })).interactions.length === 1)
   await writeFile(join(evidence!, `${phase}-injected.png`), (await win.webContents.capturePage()).toPNG())
+  metadataUnavailable = true
+  await evaluate('conversationCapsuleProbe.unmount()')
+  await until('!document.querySelector(".conversation-capsule")', 'The injected original message fully unmounts')
+  await evaluate(`conversationCapsuleProbe.set(${JSON.stringify(content(injected.record.capsuleId))})`)
+  await until(`conversationCapsuleProbe.facts().ready && !!document.querySelector('[aria-label="Page questions"]')`, 'Original questions remain reachable after native restore despite failed page metadata')
+  await evaluate(`document.querySelector('[aria-label="Page questions"]').click()`)
+  await until('document.body.textContent.includes("Review the original page") && document.body.textContent.includes("Original page metadata observation is unavailable")', 'Independent saved-question reads survive metadata failure')
+  report.injectedMetadataFailure = { browserId: (await facts()).browserId, questionReadable: true, sourceFailed: 'capsule.inspect', independentOwnerRead: 'capsule.interaction.ls' }
+  await writeFile(join(evidence!, `${phase}-metadata-unavailable.png`), (await win.webContents.capturePage()).toPNG())
+  metadataUnavailable = false
   await evaluate(`conversationCapsuleProbe.set(${JSON.stringify(content(injected.record.capsuleId))},true,'light')`)
   win.setContentSize(420, 760); await delay(100)
   report.narrow = await facts()
@@ -183,5 +202,6 @@ finally {
   manager?.dispose(); windows?.dispose(); if (win && !win.isDestroyed()) win.destroy(); await owner?.close()
   report.remainingWindows = BrowserWindow.getAllWindows().length
   await writeFile(join(evidence!, `${phase}.native.json`), JSON.stringify(report, null, 2))
-  app.exit(report.passed ? 0 : 1)
+  // Let this imported ESM's evaluation settle before Electron tears down its loader.
+  setImmediate(() => app.exit(report.passed ? 0 : 1))
 }
