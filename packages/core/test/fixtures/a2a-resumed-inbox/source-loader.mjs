@@ -16,6 +16,8 @@ function record(path, bytes, transformed = bytes) {
       ...(changed ? { mutation: process.env.AGENTMUX_RESUMED_INBOX_MUTATION } : {}) }) + '\n')
 }
 export async function resolve(specifier, context, next) {
+  if (specifier === '@agentmux/identity/runtime-source') return {
+    url: pathToFileURL(pathResolve(root, 'packages/identity/dist/runtime-source.js')).href, shortCircuit: true }
   const match = specifier.match(/^@agentmux\/([^/]+)(.*)$/u)
   if (match) {
     const directory = pathResolve(root, 'packages', match[1]), manifest = pathResolve(directory, 'package.json')

@@ -274,13 +274,13 @@ describe('A2A references through actual private Runtime and public CLI', () => {
   }, 45_000)
 
 
-  it('submits trusted user reference notifications through flags and JSON without granting managed steer', async () => {
+  it('submits reference notifications through flags and JSON and lets an authenticated participant inspect or reuse the original operation', async () => {
     const h = await fixture(), originals = ['user-single', 'user-batch-left', 'user-batch-right']
     for (const id of originals) await h.cli(['agent', 'send', '--to-session', 'recipient', '--message-id', id, '--text', 'Private original body ' + id])
     const batch = await h.queue.check({ consumerId: 'recipient', readerRun: h.session.run, limit: 3 }, async () => {})
     const before = await h.client.statusAgent('recipient')
     const singleArgs = ['message', 'notify', '--host', 'local', '--message-id', originals[0]!, '--operation-id', 'user-single-notice']
-    const single = await h.humanCli(singleArgs)
+    const single = await h.managedCli(singleArgs)
     expect(single.code, single.stdout + single.stderr).toBe(0)
     const singleResult = JSON.parse(single.stdout).result
     expect(singleResult.notification).toMatchObject({ notificationId: 'user-single-notice', messageIds: [originals[0]], mode: 'steer', state: 'submitted' })
@@ -306,8 +306,14 @@ describe('A2A references through actual private Runtime and public CLI', () => {
     expect((await h.humanCli(singleArgs)).code).toBe(0); expect((await h.humanCli(batchArgs)).code).toBe(0)
     expect((await h.client.statusAgent('recipient')).run.acceptedInputBytes).toBe(accepted.run.acceptedInputBytes)
     expect(await readFile(join(h.root, 'recipient-terminal.bytes'), 'utf8')).toBe(written)
-    const refused = await h.managedCli(singleArgs)
-    expect(refused.code).not.toBe(0); expect(refused.stdout + refused.stderr).toContain('PERMISSION_DENIED')
+    const repeated = await h.managedCli(singleArgs)
+    expect(repeated.code, repeated.stdout + repeated.stderr).toBe(0)
+    expect(JSON.parse(repeated.stdout).result.notification.key).toEqual(singleResult.notification.key)
+    const inspected = await h.managedCli(['message', 'notify', 'inspect', '--host', 'local', '--operation-id', 'user-single-notice'])
+    expect(inspected.code, inspected.stdout + inspected.stderr).toBe(0)
+    expect(JSON.parse(inspected.stdout).result.notification.key).toEqual(singleResult.notification.key)
+    expect((await h.client.statusAgent('recipient')).run.acceptedInputBytes).toBe(accepted.run.acceptedInputBytes)
+    expect(await readFile(join(h.root, 'recipient-terminal.bytes'), 'utf8')).toBe(written)
     expect(await h.requests()).toEqual([])
     const retained = await h.queue.check({ consumerId: 'recipient', readerRun: h.session.run, limit: 3 }, async () => {})
     expect(retained.generation).toBe(batch.generation); expect(retained.readerRun).toEqual(batch.readerRun)

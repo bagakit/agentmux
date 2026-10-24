@@ -228,14 +228,14 @@ it('indexes the first notification in an original legacy journal before any auto
     idle: { nativeEvidence: { sourceId: 'source', id: 'idle' }, inputByte: 0 }, sourceRuns: messageNotificationSourceRuns(current) })).toBeNull()
 })
 
-it('reads a missing operation without prepare, submit, message body read or journal append and denies managed access', async () => {
+it('reads a missing operation without prepare, submit, message body read or journal append for users and managed callers', async () => {
   const f = await fixture(), before = await f.queue.readJournal()
   const prepare = vi.spyOn(f.queue, 'prepareNotification'), body = vi.spyOn(f.queue, 'readByMessageId')
   const result = await f.rpc.call('message.notify.inspect', { hostId: 'local', operationId: 'not-recorded' })
   expect(result).toEqual({ hostId: 'local', notification: null, input: null })
   expect(await f.queue.readJournal()).toEqual(before); expect(prepare).not.toHaveBeenCalled(); expect(body).not.toHaveBeenCalled()
   expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.native).not.toHaveBeenCalled(); expect(f.start).not.toHaveBeenCalled()
-  await expect(f.managed.call('message.notify.inspect', { hostId: 'local', operationId: 'not-recorded' })).rejects.toMatchObject({ code: 'CONTROL_PERMISSION_DENIED' })
+  await expect(f.managed.call('message.notify.inspect', { hostId: 'local', operationId: 'not-recorded' })).resolves.toEqual({ hostId: 'local', notification: null, input: null })
   await expect(f.rpc.call('message.notify.inspect', { hostId: 'another-host', operationId: 'not-recorded' })).rejects.toMatchObject({ code: 'CONTROL_UNAVAILABLE' })
 })
 
