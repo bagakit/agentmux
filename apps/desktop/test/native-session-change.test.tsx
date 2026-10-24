@@ -103,6 +103,25 @@ it('Main confirms only the exact Session/Run and preserves Core current:false re
 
 const ambiguous = { ...observation, state: 'ambiguous' as const, reason: 'Verified Run members; frontend selection is not reported.', candidates: [old, candidate] }
 const selectedBinding = { source: 'user-selected' as const, run: control.run, observedAt: 200 }
+it('keeps keyboard focus in the same menu across candidate review, cancellation and confirmation', async () => {
+ const confirm=vi.spyOn(api.sessions,'confirmNativeSession').mockResolvedValue({session:core({nativeHandle:candidate}),confirmation,persisted:true,current:true})
+ await menu(session({nativeSourceObservation:ambiguous}))
+ const item=(label:string)=>[...document.querySelectorAll<HTMLElement>('[role=menuitem]')].find(node=>node.textContent?.trim()===label)!
+ const check=item('Check native source')
+ const activate=async(label:string)=>{const row=item(label);expect(row).toBeTruthy();await act(async()=>{row.focus();row.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true}))})}
+ await activate('Choose target: '+candidate.sessionId)
+ expect(document.activeElement).toBe(check)
+ await act(async()=>check.dispatchEvent(new KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true})))
+ await act(async()=>{await vi.waitFor(()=>expect(document.activeElement).toBe(item('Confirm this native source')))})
+ await activate('Cancel source change')
+ expect(document.activeElement).toBe(check)
+ expect(confirm).not.toHaveBeenCalled()
+ await activate('Choose target: '+candidate.sessionId)
+ await activate('Confirm this native source')
+ expect(document.activeElement).toBe(check)
+ expect(confirm).toHaveBeenCalledOnce()
+ await closeMenu()
+})
 it('projects the selected target independently of an unknown frontend and clears it only on authoritative removal', () => {
  const source = core({nativeBinding:selectedBinding,nativeHandle:candidate,nativeSourceObservation:ambiguous})
  const projected = project(session(),source)
