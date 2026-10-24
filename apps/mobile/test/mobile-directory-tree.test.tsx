@@ -42,7 +42,7 @@ describe('original mobile directory tree consumers', () => {
     expect(notice.open).toBe(false)
     await click(notice.querySelector('summary')!); expect(notice.open).toBe(true)
     await click(notice.querySelector('summary')!); expect(notice.open).toBe(false)
-    await click(view.element.querySelector('.mobile-space-row')!)
+    await click(view.element.querySelector('.mobile-mote-choice')!)
     expect(view.element.querySelector('.mobile-mote-contents')?.textContent).toContain('原 Agent 绑定尚未确认')
     expect(view.element.querySelector('.mobile-mote-contents')?.textContent).not.toContain('尚无已绑定 Agent')
     expect(view.element.querySelector('.mobile-spatial-tab')).toBeNull()
@@ -54,12 +54,12 @@ describe('original mobile directory tree consumers', () => {
     const f = fixture(), open = vi.fn(), rpc = vi.fn(async () => ({ catalog: decoded(catalog) })); f.client.forwardRpc = rpc as never
     if (process.env.MOBILE_TREE_EVIDENCE) await writeFile(resolve(process.env.MOBILE_TREE_EVIDENCE, 'mote-owner-catalog.json'), JSON.stringify(decoded(catalog)))
     const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={f.client.agentSessions()} openSession={open} />)
-    expect(view.element.querySelector('.mobile-space-row'), view.element.textContent ?? '').not.toBeNull()
-    await click(view.element.querySelector('.mobile-space-row')!)
+    expect(view.element.querySelector('.mobile-mote-choice'), view.element.textContent ?? '').not.toBeNull()
+    await click(view.element.querySelector('.mobile-mote-choice')!)
     expect(open).not.toHaveBeenCalled()
     expect(view.element.querySelector('h1')?.textContent).toBe('Mote')
-    expect(view.element.querySelector('.mobile-space-row')?.getAttribute('aria-expanded')).toBe('true')
-    expect(view.element.querySelector('.mobile-space-children')?.textContent).toContain('Agents')
+    expect(view.element.querySelector('.mobile-mote-choice')?.getAttribute('aria-pressed')).toBe('true')
+    expect(view.element.querySelector('.mobile-mote-selected')?.textContent).toContain('Agents')
     expect(view.element.querySelector('.mobile-session-recap')?.textContent).toBe('从原 owner 读回的 recap')
     expect(rpc).toHaveBeenCalledExactlyOnceWith('space.ls', { target: {}, presentation: true })
     await click(view.element.querySelector('.mobile-mote-agents .mobile-agent-row__open')!)
@@ -73,23 +73,23 @@ describe('original mobile directory tree consumers', () => {
       agentPresentation: [{ ...catalog.agentPresentation![0]!, name: 'Original left', recap: null }, { ...catalog.agentPresentation![0]!, agentSessionId: 'peer', name: 'Original right', recap: null }] }
     f.client.forwardRpc = vi.fn(async () => ({ catalog: decoded(split) })) as never
     const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={f.client.agentSessions()} openSession={open} />)
-    await click(view.element.querySelector('.mobile-space-row')!)
+    await click(view.element.querySelector('.mobile-mote-choice')!)
     const rows = view.element.querySelectorAll<HTMLButtonElement>('.mobile-mote-agents .mobile-agent-row__open')
     expect([...rows].map(row => row.querySelector('strong')?.textContent)).toEqual(['Original left', 'Original right'])
     await click(rows[1]!);expect(open).toHaveBeenLastCalledWith('peer', expect.objectContaining({ context: split.locations[1] }))
     await click(rows[0]!);expect(open).toHaveBeenLastCalledWith('session-original', expect.objectContaining({ context: split.locations[0] }))
   })
-  it('closes only the directory layer through Back and retains the original Mote after a failed refresh', async () => {
+  it('keeps horizontal Mote selection outside the Back stack and retains the original Mote after a failed refresh', async () => {
     const f = fixture(), back = vi.fn(), open = vi.fn();let fail = false
     f.client.forwardRpc = vi.fn(async () => { if (fail) throw Error('original observation failed'); return { catalog: decoded(catalog) } }) as never
     const view = await mount(<MobileSpatialNavigation home="mote" client={f.client} connected sessions={f.client.agentSessions()} openSession={open} onBackChange={back} />)
-    await click(view.element.querySelector('.mobile-space-row')!);fail = true;await click(button(view.element, '刷新空间目录'))
+    await click(view.element.querySelector('.mobile-mote-choice')!);fail = true;await click(button(view.element, '刷新空间目录'))
     expect(view.element.querySelector('.mobile-directory-notice')?.textContent).toContain('original observation failed')
     expect(view.element.querySelector('.mobile-directory-notice')?.hasAttribute('open')).toBe(false)
     expect(view.element.querySelector('.mobile-mote-contents')).not.toBeNull()
-    await act(async () => back.mock.calls.at(-1)![0]())
-    expect(view.element.querySelector('.mobile-mote-contents')).toBeNull()
-    expect(view.element.querySelector('.mobile-space-row')).not.toBeNull()
+    expect(back.mock.calls.at(-1)![0]).toBeNull()
+    expect(view.element.querySelector('.mobile-mote-selected')?.getAttribute('data-space-id')).toBe('mote-original')
+    expect(view.element.querySelector('.mobile-mote-choice')?.getAttribute('aria-pressed')).toBe('true')
     expect(open).not.toHaveBeenCalled()
   })
   it('consumes real Desktop spatialCatalog binding facts with its exact shared grouping algorithm, retaining worktree and Tab identity', async () => {
@@ -127,7 +127,7 @@ describe('original mobile directory tree consumers', () => {
     f.client.forwardRpc = vi.fn(async () => ({ catalog: decoded({ ...catalog, spaces: [...catalog.spaces, ...folders] }) })) as never
     const component = (home: 'mote' | 'space') => <MobileSpatialNavigation home={home} client={f.client} connected sessions={f.client.agentSessions()} openSession={vi.fn()} />
     const view = await mount(component('mote'))
-    await click(view.element.querySelector('.mobile-space-row')!)
+    await click(view.element.querySelector('.mobile-mote-choice')!)
     expect(view.element.querySelector('.mobile-session-recap')?.textContent).toBe('从原 owner 读回的 recap')
     expect(tree).not.toHaveBeenCalled()
     await view.render(component('space'))

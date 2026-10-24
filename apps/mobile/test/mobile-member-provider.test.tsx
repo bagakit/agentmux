@@ -23,7 +23,7 @@ async function directory(home: 'mote' | 'space' | 'focus', emptyPresentation = f
   f.client.forwardRpc = vi.fn().mockResolvedValue({ catalog })
   const node = (visible = true, nextHome = home) => <MobileAgentMenuContext.Provider value={menu}><MobileSpatialNavigation home={nextHome} client={f.client} connected visible={visible} openSession={open} /></MobileAgentMenuContext.Provider>
   const view = await mount(node())
-  const expand = () => click(view.element.querySelector('.mobile-space-row')!)
+  const expand = () => click(view.element.querySelector('.mobile-mote-choice, .mobile-space-row')!)
   const provider = () => view.element.querySelector('.mobile-agent-row .mobile-session-state small')?.textContent
   return { ...f, ...view, pointRead, fullRead, open, menu, node, expand, provider }
 }
