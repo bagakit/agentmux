@@ -1,14 +1,16 @@
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { readConnectionHostingTarget } from '../../../shared/connection-hosting-target'
 import { parseConnectionParams, parseRoomBindingTarget, type ConnectionParamsMap, type RoomBindingTarget } from '@agentmux/core/connections'
+import { restoredConnectorMemberDrafts, type ConnectorMemberDrafts } from './connector-member-draft'
 
 type Effect = 'connection.room.create' | 'connection.room.link.create' | 'connection.bind' | 'connection.binding.relink' | 'connection.binding.pause' | 'connection.binding.resume' | 'connection.binding.detach' | 'connection.grant'
-/** Unsaved form values only. Consent and member capabilities are always chosen in the current form. */
+/** Unsaved UI intent only. Restoring a member draft never grants or dispatches access. */
 export type ConnectorRoomDraft = {
   connectionId: string; bindingId: string | null; bindingRevision: number | null
   mode: 'create' | 'existing' | 'details'; name: string; group: string; members: string; memberType: string
   scope: 'mentions-and-replies' | 'all-messages'; publication: 'future-native-user-facing' | 'future-shared-conversation'
   actorId: string; actorType: string
+  memberDrafts?: ConnectorMemberDrafts
 }
 export const connectorRoomDraftKey = (target: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>, hostingTarget?: ConnectionHostingTarget, channel?: string) => JSON.stringify([target.executionHostId, target.agentSessionId, ...(hostingTarget ? [hostingTarget.hostId, hostingTarget.runtimeId, ...(channel ? [channel] : [])] : [])])
 export function restoredConnectorRoomDrafts(value: unknown): Record<string, ConnectorRoomDraft> {
@@ -22,7 +24,8 @@ export function restoredConnectorRoomDrafts(value: unknown): Record<string, Conn
         ['create', 'existing', 'details'].includes(draft.mode) && ['mentions-and-replies', 'all-messages'].includes(draft.scope) && ['future-native-user-facing', 'future-shared-conversation'].includes(draft.publication)
     } catch { return false }
   }).map(([key, draft]) => [key, { connectionId: draft.connectionId, bindingId: draft.bindingId, bindingRevision: draft.bindingRevision,
-    mode: draft.mode, name: draft.name, group: draft.group, members: draft.members, memberType: draft.memberType, scope: draft.scope, publication: draft.publication, actorId: draft.actorId, actorType: draft.actorType }]))
+    mode: draft.mode, name: draft.name, group: draft.group, members: draft.members, memberType: draft.memberType, scope: draft.scope, publication: draft.publication, actorId: draft.actorId, actorType: draft.actorType,
+    ...(draft.memberDrafts ? { memberDrafts: restoredConnectorMemberDrafts(draft.memberDrafts) } : {}) }]))
 }
 /** Submitted UI correlation only. Original effects and receipts remain with their Core/Host owners. */
 export type ConnectorRoomIntent = { [M in Effect]: {
