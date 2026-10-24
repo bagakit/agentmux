@@ -236,7 +236,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     await this.navigationCleanup
     this.rendererAvailable = true
     for (const record of this.windows.values()) if (record.durable && !record.native && !record.retiredNative) {
-      void this.launch(record).catch(error => { record.phase = 'unknown'; this.warn(String(error)) })
+      void this.launch(record, false).catch(error => { record.phase = 'unknown'; this.warn(String(error)) })
     }
     this.changed()
     return { windowId: this.mainId, documentGeneration: this.mainGeneration }
@@ -319,6 +319,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
   }
 
   private async open(operation: AppWindowOperation, target: AppWindowTarget, context: AppWindowCallContext): Promise<AppWindowPage> {
+    const focus = operation.method === 'app.window.open' && operation.input.focus !== false
     let nativeSize: { width: number; height: number } | null | undefined
     try { nativeSize = await this.nativeOwner?.windowSize?.(target) }
     catch (error) { this.warn(`The original page remains usable; its requested window size could not be read. Inspect its window arrangement to retry. ${String(error)}`) }
@@ -327,7 +328,11 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     const existing = this.byTarget.get(targetKey(target))
     if (existing) {
       operation.windowId = existing.windowId; operation.documentGeneration = existing.native ? existing.generation : null
-      if (existing.native && existing.phase === 'visible') { this.focusNative(existing.native); return this.finish(operation, 'confirmed', null) }
+      if (existing.native && existing.phase === 'visible') {
+        if (focus) this.focusNative(existing.native)
+        else existing.native.showInactive()
+        return this.finish(operation, 'confirmed', null)
+      }
       if (!existing.native && !existing.ticket && existing.phase === 'unknown') {
         await this.childDepartures.get(existing.windowId)
         if (existing.retiredNative) {
@@ -342,7 +347,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
         await context.assertCurrent?.()
         if (context.signal?.aborted) return this.finish(operation, 'rejected', 'The original caller ended before the shell was reopened. Original work remains.')
         if (!await this.persistWindows()) return this.finish(operation, 'unknown', 'Window arrangement persistence is unconfirmed. Original content remains in its recovered host.')
-        const response = await this.launch(existing)
+        const response = await this.launch(existing, focus)
         operation.documentGeneration = existing.native ? existing.generation : null
         if (response.outcome === 'rejected' && !existing.native && (existing as ManagedWindow).ticket?.admitted === false) existing.ticket = null
         return this.finish(operation, response.outcome === 'applied' && existing.native ? 'confirmed' : 'unknown', response.message)
@@ -370,7 +375,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     catch (error) { this.remove(record); return this.finish(operation, 'rejected', String(error)) }
     record.durable = true
     if (!await this.persistWindows()) { record.phase = 'unknown'; return this.finish(operation, 'unknown', 'The original window arrangement could not be persisted. No native window was created; inspect the same operation to reconcile.') }
-    const response = await this.launch(record, async late => {
+    const response = await this.launch(record, focus, async late => {
       if (late.outcome === 'applied' && this.windows.get(record.windowId) === record && record.native && !record.native.isDestroyed()) {
         record.phase = 'visible'; operation.documentGeneration = record.generation
         await this.finish(operation, 'confirmed', null)
@@ -382,7 +387,7 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     return this.finish(operation, response.outcome === 'rejected' && !record.native ? 'rejected' : 'unknown', response.message)
   }
 
-  private async launch(record: ManagedWindow, late?: RendererPending['late']): Promise<WorkbenchWindowResponse> {
+  private async launch(record: ManagedWindow, focus: boolean, late?: RendererPending['late']): Promise<WorkbenchWindowResponse> {
     const generation = record.generation
     const url = new URL('./workbench-window.html', this.main.webContents.getURL())
     url.searchParams.set('window', record.windowId); url.searchParams.set('document', record.generation); url.searchParams.set('ticket', mintCapabilityToken())
@@ -394,7 +399,9 @@ export class WorkbenchWindows implements AgentMuxRpcWindowsOwner {
     })
     if (record.generation !== generation || this.windows.get(record.windowId) !== record) return { ...response, outcome: 'unconfirmed', message: 'The original native document ended before placement confirmation. Original work remains recoverable.' }
     if (response.outcome === 'applied' && record.native && !record.native.isDestroyed()) {
-      record.phase = 'visible'; this.focusNative(record.native)
+      record.phase = 'visible'
+      if (focus) this.focusNative(record.native)
+      else record.native.showInactive()
     } else record.phase = 'unknown'
     this.changed()
     return response

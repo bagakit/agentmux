@@ -19,9 +19,9 @@ const notify = () => { snapshot = { ...snapshot }; for (const listener of listen
 const subscribe = (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener) }
 const publishIssue = (error: unknown) => { snapshot = { ...snapshot, issue: String(error) }; notify() }
 
-export async function openWorkbenchWindow(target: AppWindowTarget): Promise<void> {
+export async function openWorkbenchWindow(target: AppWindowTarget, options: { focus?: boolean } = {}): Promise<void> {
   try {
-    const page = await api.ui.workbenchWindows.call('app.window.open', { operationId: mintObjectId(), target })
+    const page = await api.ui.workbenchWindows.call('app.window.open', { operationId: mintObjectId(), target, ...options })
     snapshot = { ...snapshot, windows: page.windows, operation: page.recordedOperation }; notify()
     if (page.recordedOperation?.state !== 'confirmed') publishIssue(page.recordedOperation?.message ?? 'Original window presentation is unconfirmed. Original work remains.')
   } catch (error) { publishIssue(error) }

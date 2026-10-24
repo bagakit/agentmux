@@ -10854,7 +10854,7 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         const target = projection.target
         void import('./lib/workbench-windows').then(({ openWorkbenchWindow }) => {
           const surface = get().tabs[target.tabId]?.regions[target.regionId]
-          if (surface?.kind === 'browser' && surface.browserId === event.browser.id) return openWorkbenchWindow({ kind: 'region', ...target })
+          if (surface?.kind === 'browser' && surface.browserId === event.browser.id) return openWorkbenchWindow({ kind: 'region', ...target }, { focus: false })
         }).catch(error => get().reportError(error))
       }
       return

@@ -19,7 +19,7 @@ export type AppWindowDescriptor = {
 export type AppWindowActor = { kind: 'user' | 'device' | 'agent'; id: string }
 export type AppWindowParamsMap = {
   'app.window.ls': { operationId?: string }
-  'app.window.open': { operationId: string; target: AppWindowTarget }
+  'app.window.open': { operationId: string; target: AppWindowTarget; focus?: boolean }
   'app.window.focus': { operationId: string; windowId: string; documentGeneration: string }
   'app.window.return': { operationId: string; windowId: string; documentGeneration: string }
 }
@@ -72,11 +72,12 @@ export function parseAppWindowTarget(value: unknown, code = 'INVALID_CONTROL_REQ
 }
 export function parseAppWindowParams<M extends AppWindowMethod>(method: M, value: unknown, code = 'INVALID_CONTROL_REQUEST'): AppWindowParamsMap[M] {
   const fields = method === 'app.window.ls' ? ['operationId'] : method === 'app.window.open'
-    ? ['operationId', 'target'] : ['operationId', 'windowId', 'documentGeneration']
+    ? ['operationId', 'target', 'focus'] : ['operationId', 'windowId', 'documentGeneration']
   const p = rpcRecord(value, fields, code)
   if (method === 'app.window.ls') return (p.operationId === undefined ? {} : { operationId: identity(p.operationId, code) }) as AppWindowParamsMap[M]
   const operationId = identity(p.operationId, code)
-  return (method === 'app.window.open' ? { operationId, target: parseAppWindowTarget(p.target, code) }
+  if (method === 'app.window.open' && p.focus !== undefined && typeof p.focus !== 'boolean') invalid('Window focus must be an explicit boolean.', code)
+  return (method === 'app.window.open' ? { operationId, target: parseAppWindowTarget(p.target, code), ...(p.focus === undefined ? {} : { focus: p.focus }) }
     : { operationId, windowId: identity(p.windowId, code), documentGeneration: identity(p.documentGeneration, code) }) as AppWindowParamsMap[M]
 }
 export function parseAppWindowDescriptor(value: unknown, code = 'CONTROL_PROTOCOL_ERROR'): AppWindowDescriptor {
