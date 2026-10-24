@@ -11,6 +11,8 @@ window. Each request records the exact candidate PID, native window identity, or
 output path and a release path. It waits at most 45 seconds. The reviewer saves the original
 CUA image bytes to that output and creates the release file; the fixture validates the real
 PNG/JPEG format and records its MIME type, dimensions and SHA256 without transcoding.
+For user-selected Orca capture, also set `AGENTMUX_CHILD_UI_CAPTURE_PROVIDER=orca`; the
+original bytes use the same exact-window handoff and are recorded with Orca provenance.
 The default uses a fresh attempt directory. A separate `prepared` directory keeps compiled
 Renderer assets across harness retries; reuse requires byte-identical compiled assets and
 identical Renderer/shared/Core/Layout/client-ui inputs. Main and the production preload
