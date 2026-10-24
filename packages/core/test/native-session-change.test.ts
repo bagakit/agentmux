@@ -1,7 +1,7 @@
-import { withInteractionOperation } from './fixtures/interaction-client.js'
 import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
+import { fileURLToPath } from 'node:url'
 import { mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -16,9 +16,19 @@ import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
 import { parseRpcNativeResult } from '../src/rpc-native-codec.js'
-import { objectCliEnvironment, runCompiledObjectCli } from './helpers/object-cli-rpc.js'
+import { runSourceObjectCli } from './helpers/source-object-cli.js'
+import { objectCliEnvironment } from './helpers/object-cli-rpc.js'
 import type { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 import type { AgentMuxNativeSessionConfirmationInput, AgentMuxStoredAgentSession, NativeHookEnvelope } from '../src/types.js'
+
+// Run the unchanged listener worker from source when this suite loads Core source.
+vi.mock('node:child_process', async original => {
+  const actual = await original<typeof import('node:child_process')>()
+  return { ...actual, fork: ((path: string | URL, args: readonly string[], options: import('node:child_process').ForkOptions) =>
+    actual.fork(String(path).endsWith('/control-endpoint-listener-worker.js')
+      ? fileURLToPath(new URL('../src/control-endpoint-listener-worker.ts', import.meta.url)) : path, args, options)) as typeof actual.fork }
+})
+
 
 const SID = 'private-current-conversation', RUN = 'same-private-run', OLD = 'previous-main', NEW = 'current-main'
 const cleanups: Array<() => Promise<void>> = []
@@ -27,19 +37,23 @@ function discoveryProvider(client: AgentMuxClient, id: 'codex' | 'claude'): Agen
   if (!provider.discoverNativeSession) throw new Error('This fixture requires real native session discovery')
   return provider as AgentProvider & Required<Pick<AgentProvider, 'discoverNativeSession'>>
 }
-afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup(); vi.restoreAllMocks() })
+afterEach(async () => {
+  try { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() }
+  finally { vi.restoreAllMocks(); vi.unstubAllEnvs() }
+})
 
 async function fixture(providerId: 'codex' | 'claude' = 'codex', mode: 'main' | 'child' | 'ambiguous' | 'unknown' = 'main') {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-source-change-'))), nativeProvider = new AgentProviderRegistry().get(providerId)
+  vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(root, 'messages.ndjson'))
   const record = (id: string, child = false) => providerId === 'codex'
-    ? { type: 'session_meta', payload: { id, source: child ? { subagent: { thread_spawn: { parent_thread_id: OLD } } } : mode === 'unknown' && id !== OLD ? 'unknown' : 'cli' } }
+    ? { type: 'session_meta', payload: { id, cwd: root, source: child ? { subagent: { thread_spawn: { parent_thread_id: OLD } } } : mode === 'unknown' && id !== OLD ? 'unknown' : 'cli' } }
     : { type: 'user', sessionId: id, isSidechain: child ? true : mode === 'unknown' && id !== OLD ? undefined : false, uuid: `${id}-message`, message: { role: 'user', content: `Original ${id} record` } }
   const path = (id: string) => join(root, providerId === 'codex' ? `rollout-${id}.jsonl` : `${id}.jsonl`)
   const oldPath = path(OLD), currentPath = path(NEW), files = [currentPath]
   await writeFile(oldPath, JSON.stringify(record(OLD)) + '\n')
   await writeFile(currentPath, JSON.stringify(record(NEW, mode === 'child')) + '\n')
-  if (mode === 'ambiguous') { files.push(path('another-main')); await writeFile(files[1]!, JSON.stringify(record('another-main')) + '\n') }
-  const holder = spawn(process.execPath, ['-e', `const fs=require('fs'),mode=${JSON.stringify(providerId === 'claude' ? 'a+' : 'r')};let fds=process.argv.slice(1).map(p=>fs.openSync(p,mode));console.log('ready');process.stdin.on('data',d=>{const s=d.toString();if(s.startsWith('@fixture:open:')){fds.forEach(fd=>fs.closeSync(fd));fds=[fs.openSync(s.slice(14).trim(),mode)];console.log('switched')}else if(s.startsWith('@fixture:permission:'))process.stdout.write('\\x1b[2J\\x1b[H'+s.slice(20).trim());else console.log('raw:'+s)});setInterval(()=>{},1000)`, ...files],
+  if (mode === 'ambiguous') files.push(oldPath)
+  const holder = spawn(process.execPath, ['-e', `const fs=require('fs'),mode='a+';let fds=process.argv.slice(1).map(p=>fs.openSync(p,mode));console.log('ready');process.stdin.on('data',d=>{const s=d.toString();if(s.startsWith('@fixture:open:')){fds.forEach(fd=>fs.closeSync(fd));fds=[fs.openSync(s.slice(14).trim(),mode)];console.log('switched')}else if(s.startsWith('@fixture:permission:'))process.stdout.write('\\x1b[2J\\x1b[H'+s.slice(20).trim());else console.log('raw:'+s)});setInterval(()=>{},1000)`, ...files],
     { detached: true, stdio: ['pipe', 'pipe', 'pipe'] })
   await once(holder.stdout!, 'data')
   cleanups.push(async () => { if (holder.exitCode === null && holder.signalCode === null) { const exited = once(holder, 'exit'); holder.kill(); await exited }
@@ -97,7 +111,7 @@ async function fixture(providerId: 'codex' | 'claude' = 'codex', mode: 'main' | 
   const controls = (['start', 'stop', 'resize', 'attach'] as const).map(name => vi.spyOn(kernel, name).mockImplementation(() => { throw new Error('Unexpected Runtime control ' + name) }))
   const events: unknown[] = []; client.onEvent(event => events.push(event))
   const hook = async (id = NEW, eventName = providerId === 'claude' ? 'SessionStart' : 'PermissionRequest', extra: Record<string, unknown> = {}) => {
-    const envelope: NativeHookEnvelope = { receiptId: `${eventName}-${id}-${events.length}`, agentSessionId: SID, providerId, runId: RUN,
+    const envelope: NativeHookEnvelope = { receiptId: `${eventName}-${id}-${events.length}`, eventName, agentSessionId: SID, providerId, runId: RUN,
       payload: { hook_event_name: eventName, source: 'clear', session_id: id, transcript_path: path(id), tool_name: 'Edit', tool_use_id: `tool-${id}`, tool_input: { file_path: 'private.txt' }, ...extra } }
     await Reflect.get(client, 'acceptHookEvent').call(client, envelope, new AbortController().signal)
     if (id === NEW && eventName === 'PermissionRequest') {
@@ -111,10 +125,10 @@ async function fixture(providerId: 'codex' | 'claude' = 'codex', mode: 'main' | 
       }
     }
   }
-  const confirmation = (operationId = 'confirm-current'): AgentMuxNativeSessionConfirmationInput => {
+  const confirmation = (operationId = 'confirm-current', candidateNativeHandle?: AgentMuxNativeSessionConfirmationInput['candidateNativeHandle']): AgentMuxNativeSessionConfirmationInput => {
     const session = client.agentSession(SID)
     return { agentSessionId: SID, expectedRun: { runId: RUN }, expectedNativeHandle: session.nativeHandle as AgentMuxNativeSessionConfirmationInput['expectedNativeHandle'],
-      candidateNativeHandle: session.observedNativeHandle as AgentMuxNativeSessionConfirmationInput['candidateNativeHandle'], expectedObservationAt: session.nativeSourceObservation!.observedAt, operationId }
+      candidateNativeHandle: candidateNativeHandle ?? session.observedNativeHandle as AgentMuxNativeSessionConfirmationInput['candidateNativeHandle'], expectedObservationAt: session.nativeSourceObservation!.observedAt, operationId }
   }
   const server = new AgentMuxControlServer({ socketPath: join(root, 'rpc.sock'), coreClients: () => [{ hostId: 'local', client }] })
   await server.start()
@@ -123,7 +137,7 @@ async function fixture(providerId: 'codex' | 'claude' = 'codex', mode: 'main' | 
     for (const control of controls) expect(control).not.toHaveBeenCalled() })
   const switchToOld = async () => { const ready = once(holder.stdout!, 'data'); holder.stdin!.write('@fixture:open:' + oldPath + '\n'); expect(String((await ready)[0])).toContain('switched') }
   return { root, oldPath, currentPath, client, store, kernel, status, input, holder, original, run, events, hook, confirmation, rpc, server, switchToOld,
-    cli: (value: unknown) => runCompiledObjectCli(['agent', 'native', 'confirm', '--input', '-'], objectCliEnvironment(root, { AGENTMUX_RPC_ENDPOINT: `unix:${server.path}` }), JSON.stringify(value)) }
+    cli: (value: unknown) => runSourceObjectCli(['agent', 'native', 'confirm', '--input', '-'], objectCliEnvironment(root, { AGENTMUX_RPC_ENDPOINT: `unix:${server.path}`, NODE_OPTIONS: [process.env.NODE_OPTIONS, '--disable-warning=ExperimentalWarning'].filter(Boolean).join(' ') }), JSON.stringify(value)) }
 }
 
 it.each(['codex', 'claude'] as const)('publishes witnessed %s source change, preserves source authority until explicit public confirmation and supports real CLI', async provider => {
@@ -135,8 +149,8 @@ it.each(['codex', 'claude'] as const)('publishes witnessed %s source change, pre
   expect(observed.observedNativeHandle).toEqual({ kind: 'provider', providerId: provider, sessionId: NEW, transcriptPath: f.currentPath })
   expect(observed.pendingInteraction).toEqual(f.original.pendingInteraction)
   expect(observed.terminalPromptReadiness).toEqual(f.original.terminalPromptReadiness)
-  await expect(f.client.respondAgentInteraction(withInteractionOperation(f.client, { agentSessionId: SID, expectedRun: { runId: RUN }, response: f.original.pendingInteraction!.response!.value })))
-    .rejects.toMatchObject({ code: 'AGENT_INTERACTION_SOURCE_CHANGED' })
+  await expect(f.client.respondAgentInteraction({ agentSessionId: SID, expectedRun: { runId: RUN }, operationId: f.original.pendingInteraction!.response!.operationId, expectedRequest: f.original.pendingInteraction!.request, response: f.original.pendingInteraction!.response!.value }))
+    .rejects.toMatchObject({ code: 'AGENT_INTERACTION_UNCONFIRMED' })
   expect(f.input).not.toHaveBeenCalled()
   await Reflect.get(f.client, 'recoverPendingInteractionResponses').call(f.client, [f.run])
   expect(f.input).not.toHaveBeenCalled()
@@ -155,25 +169,28 @@ it.each(['codex', 'claude'] as const)('publishes witnessed %s source change, pre
   expect(confirmed.workspacePath).toBe(f.root); expect(confirmed.run).toEqual(f.original.run)
   expect(confirmed.pendingInteraction).toBeUndefined(); expect(confirmed.terminalPromptReadiness).toBeUndefined()
   expect(confirmed.promptCompletionAdmission).toEqual(f.original.promptCompletionAdmission)
-  await expect(Reflect.get(f.client, 'promptSubmission').submitOwnedInputPlan(confirmed, f.run, 'previous-prompt', 'original input', { kind: 'single-phase', data: 'original input\r' }))
+  await expect(Reflect.get(f.client, 'promptSubmission').submitOwnedInputPlan(confirmed, f.run, 'previous-prompt', 'original input', { kind: 'single-phase', data: 'original input\r' }, { kind: 'prompt', agentSessionId: SID, expectedRun: { runId: RUN }, submissionId: 'previous-prompt' }))
     .rejects.toMatchObject({ code: 'AGENT_PROMPT_SOURCE_CHANGED' })
   await expect(Reflect.get(f.client, 'promptSubmission').submitOwnedInputPlan({ ...confirmed,
-    promptCompletionAdmission: { ...confirmed.promptCompletionAdmission!, acknowledged: true } }, f.run, 'previous-prompt', 'original input', { kind: 'single-phase', data: 'original input\r' })).resolves.toBeUndefined()
+    promptCompletionAdmission: { ...confirmed.promptCompletionAdmission!, acknowledged: true } }, f.run, 'previous-prompt', 'original input', { kind: 'single-phase', data: 'original input\r' }, { kind: 'prompt', agentSessionId: SID, expectedRun: { runId: RUN }, submissionId: 'previous-prompt' })).resolves.toBeUndefined()
   expect(f.input).toHaveBeenCalledOnce()
   expect((await loadAgentSessions(f.store))[0]!.nativeConfirmation).toEqual(confirmed.nativeConfirmation)
-  const modulePath = process.env.AMX_SOURCE_CONFIRM_STORE_MODULE
-  expect(modulePath).toBeTruthy()
-  const restore = spawn(process.execPath, ['--input-type=module', '-e', `const m=await import(process.argv[1]);console.log(JSON.stringify(await m.loadAgentSessions(new m.AgentMuxFileAgentSessionStore(process.argv[2]))))`, modulePath!, join(f.root, 'sessions.json')],
-    { stdio: ['ignore', 'pipe', 'pipe'] })
+  const modulePath = new URL('../src/agent-session-store.ts', import.meta.url).href
+  const loader = new URL('../../../apps/desktop/scripts/fixtures/performance-failure-evidence/source-loader.mjs', import.meta.url)
+  const registration = `import { register } from 'node:module'; register(${JSON.stringify(loader.href)}, ${JSON.stringify(import.meta.url)});`
+  const restore = spawn(process.execPath, ['--disable-warning=ExperimentalWarning', '--import', 'data:text/javascript,' + encodeURIComponent(registration), '--input-type=module', '-e', `const m=await import(process.argv[1]);console.log(JSON.stringify(await m.loadAgentSessions(new m.AgentMuxFileAgentSessionStore(process.argv[2]))))`, modulePath, join(f.root, 'sessions.json')],
+    { env: objectCliEnvironment(f.root), stdio: ['ignore', 'pipe', 'pipe'] })
   let restored = '', restoreError = ''; restore.stdout!.on('data', bytes => restored += bytes); restore.stderr!.on('data', bytes => restoreError += bytes)
   const [restoreCode] = await once(restore, 'exit')
   expect(restoreCode).toBe(0); expect(restoreError).toBe('')
   expect(JSON.parse(restored)[0]).toMatchObject({ agentSessionId: SID, run: { runId: RUN }, workspacePath: f.root,
     nativeHandle: confirmed.nativeHandle, nativeConfirmation: confirmed.nativeConfirmation, reopenedFrom: f.original.reopenedFrom })
-  const help = await runCompiledObjectCli(['agent', 'native', 'confirm', '--help'], objectCliEnvironment(f.root))
+  const help = await runSourceObjectCli(['agent', 'native', 'confirm', '--help'], objectCliEnvironment(f.root))
   expect(help.code).toBe(0); expect(help.stdout).toContain('expectedObservationAt')
-  const skill = await runCompiledObjectCli(['agent', '--help'], objectCliEnvironment(f.root))
-  expect(skill.code).toBe(0); expect(skill.stdout).toContain('amux agent native confirm')
+  const skill = await runSourceObjectCli(['agent', '--help'], objectCliEnvironment(f.root))
+  expect(skill.code).toBe(0); expect(skill.stdout).toContain('amux agent native')
+  const nativeHelp = await runSourceObjectCli(['agent', 'native', '--help'], objectCliEnvironment(f.root))
+  expect(nativeHelp.code).toBe(0); expect(nativeHelp.stdout).toContain('amux agent native confirm')
   expect(await readFile(f.oldPath, 'utf8')).toContain(OLD)
   f.status.mockRejectedValue(new Error('private unavailable runtime observation'))
   Reflect.set(f.client, 'connected', false)
@@ -188,20 +205,20 @@ it.each(['codex', 'claude'] as const)('publishes witnessed %s source change, pre
   expect(f.client.agentSession(SID).pendingInteraction?.request.nativeToolCallId).toBe(`tool-${NEW}`)
   expect(f.client.agentSession(SID).nativeHandle?.sessionId).toBe(NEW)
   const active = f.client.agentSession(SID).pendingInteraction!.request
-  await expect(f.client.respondAgentInteraction(withInteractionOperation(f.client, { agentSessionId: SID, expectedRun: { runId: RUN },
-    response: { kind: 'permission', requestId: active.id, decision: { outcome: 'selected', optionId: 'allow-once' } } })))
+  await expect(f.client.respondAgentInteraction({ agentSessionId: SID, expectedRun: { runId: RUN }, operationId: 'current-source-response', expectedRequest: active,
+    response: { kind: 'permission', requestId: active.id, decision: { outcome: 'selected', optionId: 'allow-once' } } }))
     .rejects.toMatchObject({ code: 'AGENT_INTERACTION_UNCONFIRMED' })
   expect(f.input).toHaveBeenCalledTimes(1)
   if (provider === 'claude') {
     const old = await f.client.sessionHistoryPage(SID, { nativeSource: 'previous' })
     const current = await f.client.sessionHistoryPage(SID)
-    expect(old.source.nativeSessionId).toBe(OLD); expect(old.items[0]?.contentParts[0]).toEqual({ kind: 'text', text: `Original ${OLD} record` })
+    expect(old.source.nativeSessionId).toBe(OLD); expect(old.items[0]?.contentParts[0]).toEqual({ kind: 'text', text: `Original ${OLD} record`, contentEligibility: 'unconfirmed' })
     expect(current.source.nativeSessionId).toBe(NEW)
     await expect(f.client.sessionHistoryPage(SID, { cursor: old.nextCursor ?? 'wrong-old-window' })).rejects.toBeDefined()
   }
 })
 
-it.each(['codex', 'claude'] as const)('keeps %s unknown, child and ambiguous observations non-adoptable with healthy original input', async provider => {
+it.each(['codex', 'claude'] as const)('keeps %s unknown, child and ambiguous observations from implicitly replacing the target with healthy original input', async provider => {
   for (const mode of ['child', 'ambiguous', 'unknown'] as const) {
     const f = await fixture(provider, mode)
     await f.hook()
@@ -210,10 +227,17 @@ it.each(['codex', 'claude'] as const)('keeps %s unknown, child and ambiguous obs
     expect(observed.observedNativeHandle).toBeUndefined(); expect(observed.nativeHandle).toEqual(f.original.nativeHandle)
     await f.client.writeAgent({ agentSessionId: SID, expectedRun: { runId: RUN }, source: 'user', data: 'x' })
     expect(f.input).toHaveBeenCalledOnce()
-    const counterfeit = { agentSessionId: SID, expectedRun: { runId: RUN }, expectedNativeHandle: observed.nativeHandle,
-      candidateNativeHandle: { kind: 'provider', providerId: provider, sessionId: NEW, transcriptPath: f.currentPath }, expectedObservationAt: observed.nativeSourceObservation!.observedAt, operationId: 'forged-current' }
-    const answer = await f.cli(counterfeit)
-    expect(answer.code).not.toBe(0); expect(JSON.parse(answer.stderr).error.code).toBe('AGENT_NATIVE_CONFIRMATION_STALE')
+    const candidateInput = { agentSessionId: SID, expectedRun: { runId: RUN }, expectedNativeHandle: observed.nativeHandle,
+      candidateNativeHandle: { kind: 'provider', providerId: provider, sessionId: NEW, transcriptPath: f.currentPath }, expectedObservationAt: observed.nativeSourceObservation!.observedAt, operationId: 'explicit-target-choice' }
+    const answer = await f.cli(candidateInput)
+    if (mode === 'ambiguous') {
+      expect(answer.code).toBe(0)
+      expect(JSON.parse(answer.stdout).result).toMatchObject({ persisted: true, current: true,
+        confirmation: { basis: 'run-main-candidate' }, session: { nativeHandle: candidateInput.candidateNativeHandle,
+          nativeBinding: { source: 'user-selected' }, nativeSourceObservation: { state: 'ambiguous' } } })
+    } else {
+      expect(answer.code).not.toBe(0); expect(JSON.parse(answer.stderr).error.code).toBe('AGENT_NATIVE_CONFIRMATION_STALE')
+    }
   }
 })
 
@@ -240,14 +264,14 @@ it.each(['codex', 'claude'] as const)('publishes real %s unknown/ambiguous sourc
 it.each(['codex', 'claude'] as const)('retains the real %s save-failure diagnostic without publishing uncommitted source facts', async provider => {
   const f = await fixture(provider, 'unknown'), before = await readFile(join(f.root, 'sessions.json'))
   const failure = Object.assign(new Error('Private native observation save failed'), { code: 'ENOSPC' })
-  vi.spyOn(f.store, 'compareAndSwap').mockRejectedValue(failure)
+  vi.spyOn(f.store, 'compareAndSwapMetadata').mockRejectedValue(failure)
   await expect(f.hook()).rejects.toBe(failure)
   expect(f.events.map(event => (event as { type: string }).type)).toEqual(['agent-error'])
   expect(f.events[0]).toMatchObject({ code: 'AGENT_NATIVE_IDENTITY_PERSIST_FAILED', evidence: { run: { runId: RUN } } })
   expect(f.client.agentSession(SID).nativeSourceObservation).toBeUndefined()
   expect(f.client.agentSession(SID).pendingInteraction).toEqual(f.original.pendingInteraction)
   expect(await readFile(join(f.root, 'sessions.json'))).toEqual(before)
-  vi.mocked(f.store.compareAndSwap).mockRestore()
+  vi.mocked(f.store.compareAndSwapMetadata).mockRestore()
   await f.client.writeAgent({ agentSessionId: SID, expectedRun: { runId: RUN }, source: 'user', data: 'x' })
   expect(f.input).toHaveBeenCalledOnce()
 })
@@ -293,8 +317,8 @@ it('rejects exact stale/ABA/Run/locator targets, enforces user confirmation and 
   const old = (await loadAgentSessions(f.store))[0]!, aba = { ...old, nativeSourceObservation: { ...old.nativeSourceObservation!, observedAt: old.updatedAt + 1 }, updatedAt: old.updatedAt + 1 }
   await f.store.compareAndSwap(old, aba); await f.client.refreshAgentSession(SID, { runId: RUN })
   expect((await f.cli(input)).code).not.toBe(0)
-  const actual = f.confirmation(), persist = f.store.compareAndSwap.bind(f.store)
-  vi.spyOn(f.store, 'compareAndSwap').mockImplementation(async (...args) => { await persist(...args); throw Object.assign(new Error('private fsync outcome'), { code: 'EIO' }) })
+  const actual = f.confirmation(), persist = f.store.compareAndSwapMetadata.bind(f.store)
+  vi.spyOn(f.store, 'compareAndSwapMetadata').mockImplementation(async (...args) => { await persist(...args); throw Object.assign(new Error('private fsync outcome'), { code: 'EIO' }) })
   const saved = await f.cli(actual); expect(saved.code).toBe(0); expect(f.input).not.toHaveBeenCalled()
   const corrupt = { ...JSON.parse(saved.stdout).result, persisted: false }
   expect(() => parseRpcNativeResult('agent.native.confirm', corrupt, actual)).toThrow()
@@ -302,7 +326,7 @@ it('rejects exact stale/ABA/Run/locator targets, enforces user confirmation and 
 
 it('retains binding through failed persistence and process witness replacement; observation cannot auto-rebind via history', async () => {
   const f = await fixture('claude'); await f.hook(); const input = f.confirmation(), before = await readFile(join(f.root, 'sessions.json'))
-  vi.spyOn(f.store, 'compareAndSwap').mockRejectedValue(Object.assign(new Error('private save failed'), { code: 'ENOSPC' }))
+  vi.spyOn(f.store, 'compareAndSwapMetadata').mockRejectedValue(Object.assign(new Error('private save failed'), { code: 'ENOSPC' }))
   expect((await f.cli(input)).code).not.toBe(0); expect(await readFile(join(f.root, 'sessions.json'))).toEqual(before)
   vi.restoreAllMocks(); // Keep this fixture private; restore its Runtime observations below.
   vi.spyOn(f.kernel, 'isConnected').mockReturnValue(true)
@@ -379,8 +403,8 @@ it('retains both same-Run confirmation receipts and reconciles a historical oper
 
 it('keeps a readable confirmation unconfirmed until main durability acknowledgement succeeds, without replaying input', async () => {
   const f = await fixture(); await f.hook(); const input = f.confirmation()
-  const persist = f.store.compareAndSwap.bind(f.store)
-  vi.spyOn(f.store, 'compareAndSwap').mockImplementationOnce(async (...args) => {
+  const persist = f.store.compareAndSwapMetadata.bind(f.store)
+  vi.spyOn(f.store, 'compareAndSwapMetadata').mockImplementationOnce(async (...args) => {
     await persist(...args)
     throw new AgentMuxSessionDurabilityError(new DurableWriteError(join(f.root, 'sessions.json'), 'after-replace', new Error('private directory sync failure')))
   })
@@ -402,7 +426,7 @@ it('never replays an older-source submission after an intervening prompt and a s
   await f.client.writeAgent({ agentSessionId: SID, expectedRun: { runId: RUN }, source: 'user', data: 'x' })
   await f.client.confirmAgentNativeSession(f.confirmation('first-source'))
   const first = f.client.agentSession(SID), coordinator = Reflect.get(f.client, 'promptSubmission')
-  await coordinator.submitOwnedInputPlan(first, f.run, 'middle-prompt', 'middle body', { kind: 'single-phase', data: 'middle body\r' }, undefined, undefined, true)
+  await coordinator.submitOwnedInputPlan(first, f.run, 'middle-prompt', 'middle body', { kind: 'single-phase', data: 'middle body\r' }, { kind: 'prompt', agentSessionId: SID, expectedRun: { runId: RUN }, submissionId: 'middle-prompt' }, undefined, undefined, true)
   expect(f.client.agentSession(SID).promptCompletionAdmission?.submissionId).toBe('middle-prompt')
   expect(f.input).toHaveBeenCalledTimes(2)
   await f.switchToOld(); await f.hook(OLD)
@@ -410,7 +434,7 @@ it('never replays an older-source submission after an intervening prompt and a s
   const current = f.client.agentSession(SID)
   expect(current.nativeConfirmation?.previousPromptSubmissionId).toBe('middle-prompt')
   expect(current.nativeConfirmationHistory?.[0]?.previousPromptSubmissionId).toBe('previous-prompt')
-  await expect(coordinator.submitOwnedInputPlan(current, f.run, 'previous-prompt', 'original body', { kind: 'single-phase', data: 'original body\r' }))
+  await expect(coordinator.submitOwnedInputPlan(current, f.run, 'previous-prompt', 'original body', { kind: 'single-phase', data: 'original body\r' }, { kind: 'prompt', agentSessionId: SID, expectedRun: { runId: RUN }, submissionId: 'previous-prompt' }))
     .rejects.toMatchObject({ code: 'AGENT_PROMPT_SOURCE_CHANGED' })
   expect(f.input).toHaveBeenCalledTimes(2)
   await f.client.writeAgent({ agentSessionId: SID, expectedRun: current.run, source: 'user', data: 'x' })
@@ -442,13 +466,13 @@ it('does not let a late failed history read replace a newly confirmed native sou
 it('reports a failed history-source observation save while retaining readable records and real raw input', async () => {
   const f = await fixture('claude', 'unknown'), before = await readFile(join(f.root, 'sessions.json'))
   const failure = Object.assign(new Error('Private history observation save denied'), { code: 'EACCES' })
-  vi.spyOn(f.store, 'compareAndSwap').mockRejectedValueOnce(failure)
+  vi.spyOn(f.store, 'compareAndSwapMetadata').mockRejectedValueOnce(failure)
   const page = await f.client.sessionHistoryPage(SID, { refreshNativeSource: true })
   expect(page.source.nativeSessionId).toBe(OLD)
   expect(f.events).toHaveLength(1)
   expect(f.events[0]).toMatchObject({ type: 'agent-error', code: 'AGENT_NATIVE_IDENTITY_PERSIST_FAILED',
     evidence: { run: { runId: RUN } }, message: expect.stringContaining(failure.message) })
-  expect(f.events[0]).toMatchObject({ message: expect.stringContaining('No unique main native Session was confirmed') })
+  expect(f.events[0]).toMatchObject({ message: expect.stringContaining('No current main native Session was confirmed') })
   expect(await readFile(join(f.root, 'sessions.json'))).toEqual(before)
   expect(f.client.agentSession(SID).nativeHandle).toEqual(f.original.nativeHandle)
   expect(f.client.agentSession(SID).pendingInteraction).toEqual(f.original.pendingInteraction)
@@ -478,4 +502,273 @@ it('does not publish an old-source persistence diagnostic after another native s
   expect(current.nativeSourceObservation).toBeUndefined()
   await f.client.writeAgent({ agentSessionId: SID, expectedRun: current.run, source: 'user', data: 'x' })
   expect(f.input).toHaveBeenCalledOnce()
+})
+
+
+it.each(['codex', 'claude'] as const)('uses public confirmation to select a %s Run member without claiming frontend selection', async provider => {
+  const f = await fixture(provider, 'ambiguous')
+  await f.hook()
+  const observed = f.client.agentSession(SID), candidates = observed.nativeSourceObservation!.candidates!
+  expect(candidates.map(candidate => candidate.sessionId).sort()).toEqual([NEW, OLD].sort())
+  expect(observed.nativeHandle).toEqual(f.original.nativeHandle)
+  const target = candidates.find(candidate => candidate.sessionId === NEW)!
+  const input = f.confirmation('choose-member', target)
+  const receipt = await f.rpc.call('agent.native.confirm', input)
+  expect(parseRpcNativeResult('agent.native.confirm', receipt, input)).toMatchObject({ persisted: true, current: true,
+    confirmation: { basis: 'run-main-candidate', nativeHandle: target }, session: { nativeBinding: { source: 'user-selected' } } })
+  const current = f.client.agentSession(SID)
+  expect(current.nativeSourceObservation).toEqual(observed.nativeSourceObservation)
+  expect(current.pendingInteraction).toBeUndefined()
+  expect(current.nativeConfirmation?.previousInteraction).toEqual(observed.pendingInteraction)
+  expect(current.run).toEqual(f.original.run)
+  expect(f.input).not.toHaveBeenCalled()
+  if (provider === 'codex') {
+    const cli = await runSourceObjectCli(['agent', 'native', 'confirm', '--input', '-'],
+      objectCliEnvironment(f.root, { AGENTMUX_RPC_ENDPOINT: `unix:${f.server.path}` }), JSON.stringify(input))
+    expect(cli.code, cli.stderr).toBe(0)
+    expect(JSON.parse(cli.stdout).result).toMatchObject({ confirmation: current.nativeConfirmation, current: true })
+    const loader = new URL('../../../apps/desktop/scripts/fixtures/performance-failure-evidence/source-loader.mjs', import.meta.url)
+    const register = `import { register } from 'node:module'; register(${JSON.stringify(loader.href)}, ${JSON.stringify(import.meta.url)});`
+    const child = spawn(process.execPath, ['--import', 'data:text/javascript,' + encodeURIComponent(register),
+      fileURLToPath(new URL('./fixtures/native-session-change/restore-selected-target.mjs', import.meta.url)), join(f.root, 'sessions.json'), SID],
+      { env: objectCliEnvironment(f.root), stdio: ['ignore', 'pipe', 'pipe'] })
+    let output = '', errors = ''
+    child.stdout!.setEncoding('utf8').on('data', chunk => { output += chunk })
+    child.stderr!.setEncoding('utf8').on('data', chunk => { errors += chunk })
+    const [exit] = await once(child, 'exit')
+    expect(exit, errors).toBe(0)
+    const fresh = JSON.parse(output)
+    expect(fresh.processId).not.toBe(process.pid)
+    expect(fresh.session).toMatchObject({ agentSessionId: SID, run: f.original.run, nativeHandle: target,
+      nativeBinding: { source: 'user-selected' }, nativeConfirmation: current.nativeConfirmation })
+  }
+  const restored = (await loadAgentSessions(new AgentMuxFileAgentSessionStore(join(f.root, 'sessions.json'))))[0]!
+  expect(restored.nativeHandle).toEqual(target)
+  expect(restored.nativeBinding?.source).toBe('user-selected')
+  expect(restored.nativeSourceObservation).toEqual(observed.nativeSourceObservation)
+  // The same original operation reconciles while Runtime observation is unavailable.
+  f.status.mockRejectedValueOnce(new Error('Runtime observation unavailable'))
+  expect(await f.rpc.call('agent.native.confirm', input)).toMatchObject({ confirmation: current.nativeConfirmation, current: true })
+  expect(f.input).not.toHaveBeenCalled()
+})
+
+it.each(['codex', 'claude'] as const)('keeps %s original authority when explicitly choosing the retained member', async provider => {
+  const f = await fixture(provider, 'ambiguous')
+  await f.hook()
+  const before = f.client.agentSession(SID)
+  const input = f.confirmation('choose-retained', f.original.nativeHandle as AgentMuxNativeSessionConfirmationInput['candidateNativeHandle'])
+  const receipt = await f.rpc.call('agent.native.confirm', input)
+  expect(parseRpcNativeResult('agent.native.confirm', receipt, input)).toMatchObject({ current: true,
+    confirmation: { basis: 'run-main-candidate', previousNativeHandle: f.original.nativeHandle, nativeHandle: f.original.nativeHandle } })
+  const after = f.client.agentSession(SID)
+  for (const key of ['pendingInteraction', 'terminalPromptReadiness', 'semanticStatus', 'promptCompletionAdmission'] as const) expect(after[key]).toEqual(before[key])
+  expect(after.nativeConfirmation?.previousPromptSubmissionId).toBeUndefined()
+  expect(after.nativeConfirmation?.previousInteraction).toBeUndefined()
+  expect(after.nativeSourceObservation).toEqual(before.nativeSourceObservation)
+  await f.switchToOld()
+  // Removing another main does not invalidate membership of the explicitly chosen target.
+  await f.client.sessionHistoryPage(SID, { refreshNativeSource: true })
+  expect(f.client.agentSession(SID)).toMatchObject({ nativeHandle: f.original.nativeHandle, nativeBinding: { source: 'user-selected' },
+    nativeSourceObservation: { state: 'ambiguous', candidates: [f.original.nativeHandle] } })
+  expect(f.input).not.toHaveBeenCalled()
+})
+
+it('rejects a displayed candidate after the original process stops holding it', async () => {
+  const f = await fixture('codex', 'ambiguous')
+  await f.hook()
+  const input = f.confirmation('removed-member', f.client.agentSession(SID).nativeSourceObservation!.candidates!.find(candidate => candidate.sessionId === NEW)!)
+  await f.switchToOld()
+  await expect(f.rpc.call('agent.native.confirm', input)).rejects.toMatchObject({ code: 'AGENT_NATIVE_CONFIRMATION_STALE' })
+  expect(f.client.agentSession(SID).nativeHandle).toEqual(f.original.nativeHandle)
+  expect(f.client.agentSession(SID).pendingInteraction).toEqual(f.original.pendingInteraction)
+  expect(f.input).not.toHaveBeenCalled()
+})
+
+it('rechecks the selected member after discovery and ignores unrelated member churn', async () => {
+  const f = await fixture('codex', 'ambiguous')
+  await f.hook()
+  const provider = discoveryProvider(f.client, 'codex'), discover = provider.discoverNativeSession.bind(provider)
+  vi.spyOn(provider, 'discoverNativeSession').mockImplementation(async context => {
+    const observed = await discover(context)
+    if (!observed?.candidates) throw new Error('Expected two original main witnesses')
+    return { candidates: observed.candidates.map(candidate => candidate.handle.sessionId === OLD ? candidate : {
+      ...candidate, assertPresent: async () => { throw new Error('Unselected member changed after discovery') }
+    }) }
+  })
+  await f.rpc.call('agent.native.confirm', f.confirmation('keep-member', f.original.nativeHandle as AgentMuxNativeSessionConfirmationInput['candidateNativeHandle']))
+  await f.client.sessionHistoryPage(SID, { refreshNativeSource: true })
+  expect(f.client.agentSession(SID).nativeSourceObservation?.candidates).toHaveLength(2)
+  expect(f.client.agentSession(SID).nativeBinding?.source).toBe('user-selected')
+  expect(f.input).not.toHaveBeenCalled()
+})
+
+it('does not let an older target choice overwrite a newer explicit choice of the retained target', async () => {
+  const f = await fixture('codex', 'ambiguous')
+  await f.hook()
+  const other = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(join(f.root, 'sessions.json')), providers: [{ ...f.client.providers.get('codex') }] })
+  cleanups.push(() => other.dispose())
+  await Reflect.get(other, 'registry').load('local'); Reflect.set(other, 'connected', true)
+  const kernel = Reflect.get(other, 'kernel') as CtxmuxRunAdapter
+  vi.spyOn(kernel, 'isConnected').mockReturnValue(true)
+  vi.spyOn(kernel, 'status').mockResolvedValue(f.run)
+  const provider = discoveryProvider(f.client, 'codex'), discover = provider.discoverNativeSession.bind(provider)
+  const chooseB = f.confirmation('older-choice', f.client.agentSession(SID).nativeSourceObservation!.candidates!.find(candidate => candidate.sessionId === NEW)!)
+  const chooseA = f.confirmation('newer-choice', f.original.nativeHandle as AgentMuxNativeSessionConfirmationInput['candidateNativeHandle'])
+  vi.spyOn(provider, 'discoverNativeSession').mockImplementationOnce(async context => {
+    const witness = await discover(context)
+    await other.confirmAgentNativeSession(chooseA)
+    await f.client.refreshAgentSession(SID, { runId: RUN })
+    return witness
+  })
+  const rejected = await f.rpc.call('agent.native.confirm', chooseB).then(() => undefined, error => error)
+  expect(rejected).toMatchObject({ code: 'AGENT_NATIVE_CONFIRMATION_STALE' })
+  const saved = await f.store.readMetadata(SID)
+  expect(saved?.nativeHandle).toEqual(f.original.nativeHandle)
+  expect(saved?.nativeConfirmation?.operationId).toBe('newer-choice')
+  expect(saved?.pendingInteraction).toEqual(f.original.pendingInteraction)
+  expect(f.input).not.toHaveBeenCalled()
+})
+
+
+it('keeps the selected main activity and Hook context when another main emits a late transition', async () => {
+  const f = await fixture('claude', 'ambiguous')
+  await f.hook()
+  await f.rpc.call('agent.native.confirm', f.confirmation('select-working-main',
+    f.client.agentSession(SID).nativeSourceObservation!.candidates!.find(candidate => candidate.sessionId === NEW)!))
+  const neutralReceiptId = `SessionStart-${OLD}-${f.events.length}`
+  const neutral = await f.hook(OLD, 'SessionStart', { source: 'resume' }).then(() => ({ accepted: true }), error => ({ code: error.code }))
+  expect(neutral).toEqual({ accepted: true })
+  expect(f.client.agentSession(SID).hookReceipt).toBeUndefined()
+  expect(f.events).toContainEqual(expect.objectContaining({ type: 'agent-timeline', evidence: expect.objectContaining({ hookReceiptId: neutralReceiptId }) }))
+  await f.hook(NEW, 'turn.start', { sourceId: 'selected-observer', sequence: 1, turnId: 'selected-turn',
+    agentmuxUsage: { inputTokens: 8, outputTokens: 5, totalTokens: 13, observedAt: 2 } })
+  const before = f.client.agentSession(SID), stored = await f.store.readMetadata(SID)
+  expect(before.currentActivity?.state).toBe('active')
+  expect(before.turnUsage?.totalTokens).toBe(13)
+  await f.hook(OLD, 'SessionStart', { source: 'resume' })
+  await f.hook(OLD, 'SessionStart', { source: 'resume', session_id: undefined, transcript_path: undefined })
+  const after = f.client.agentSession(SID)
+  expect(after.currentActivity).toEqual(before.currentActivity)
+  expect(after.hookReceipt).toEqual(before.hookReceipt)
+  expect(after.semanticStatus).toEqual(before.semanticStatus)
+  expect(after.turnUsage).toEqual(before.turnUsage)
+  expect((await f.store.readMetadata(SID))?.recoveryActivity).toEqual(stored?.recoveryActivity)
+  expect(after.nativeHandle).toEqual(before.nativeHandle)
+  expect(after.nativeSourceObservation?.state).toBe('ambiguous')
+  expect(f.input).not.toHaveBeenCalled()
+})
+
+it.each([false, true])('attributes observer failures to their actual target with selected=%s', async selected => {
+  const f = await fixture('claude', selected ? 'ambiguous' : 'main')
+  await f.hook()
+  const session = f.client.agentSession(SID)
+  const candidate = selected
+    ? session.nativeSourceObservation!.candidates!.find(candidate => candidate.sessionId === NEW)!
+    : session.observedNativeHandle
+  if (candidate?.kind !== 'provider') throw new Error('Expected an exact Provider candidate')
+  await f.rpc.call('agent.native.confirm', f.confirmation('select-observer-target', candidate))
+  await f.hook(NEW, 'turn.start', { sourceId: 'selected-observer', sequence: 2, turnId: 'selected-turn' })
+  const before = f.client.agentSession(SID), stored = await f.store.readMetadata(SID)
+  expect(before.currentActivity?.state).toBe('active')
+  const failure = (sourceId: string, sequence: number) => f.hook(NEW, 'AgentMuxActivityUnavailable', {
+    session_id: undefined, transcript_path: undefined, sourceId, sequence, reason: 'source-identity-unavailable'
+  })
+  await failure('unidentified-other-observer', 1)
+  if (selected) {
+    await failure('selected-observer', 1)
+    const after = f.client.agentSession(SID)
+    expect(after.currentActivity).toEqual(before.currentActivity)
+    expect(after.hookReceipt).toEqual(before.hookReceipt)
+    expect(after.hookIngressObservation).toBeUndefined()
+    expect((await f.store.readMetadata(SID))?.recoveryActivity).toEqual(stored?.recoveryActivity)
+    expect(f.events).toContainEqual(expect.objectContaining({ type: 'agent-error', code: 'AGENT_NATIVE_ACTIVITY_UNAVAILABLE',
+      evidence: expect.objectContaining({ run: before.run }) }))
+    await failure('selected-observer', 5)
+  }
+  expect(f.client.agentSession(SID).currentActivity?.state).toBe('unknown')
+  expect(f.client.agentSession(SID).hookIngressObservation?.code).toBe('AGENT_NATIVE_ACTIVITY_UNAVAILABLE')
+  expect((await f.store.readMetadata(SID))?.recoveryActivity?.state).toBe('unknown')
+  if (selected) {
+    expect((await f.store.readMetadata(SID))?.recoveryActivity?.sequence).toBe(5)
+    await f.hook(NEW, 'turn.start', { sourceId: 'selected-observer', sequence: 3, turnId: 'late-turn' })
+    expect(f.client.agentSession(SID).currentActivity?.state).toBe('unknown')
+    expect((await f.store.readMetadata(SID))?.recoveryActivity?.sequence).toBe(5)
+    await f.hook(NEW, 'turn.start', { sourceId: 'selected-observer', sequence: 6, turnId: 'fresh-turn' })
+    expect(f.client.agentSession(SID).currentActivity).toMatchObject({ state: 'active', sequence: 6, nativeTurnId: 'fresh-turn' })
+  }
+  expect(f.client.agentSession(SID).nativeHandle).toEqual(before.nativeHandle)
+  expect(f.input).not.toHaveBeenCalled()
+})
+
+it.each([{ changed: false, failure: true }, { changed: true, failure: true }, { changed: false, failure: false }])(
+  'keeps newer target activity at the durable CAS (changed=$changed, failure=$failure)', async ({ changed, failure }) => {
+  const f = await fixture('claude', 'ambiguous')
+  await f.hook()
+  await f.rpc.call('agent.native.confirm', f.confirmation('select-before-failure',
+    f.client.agentSession(SID).nativeSourceObservation!.candidates!.find(candidate => candidate.sessionId === NEW)!))
+  await f.hook(NEW, 'turn.start', { sourceId: 'shared-native-observer', sequence: 1, turnId: 'old-selected-turn' })
+  const other = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(join(f.root, 'sessions.json')) })
+  cleanups.push(() => other.dispose())
+  await Reflect.get(other, 'registry').load('local'); Reflect.set(other, 'connected', true)
+  const kernel = Reflect.get(other, 'kernel') as CtxmuxRunAdapter
+  vi.spyOn(kernel, 'isConnected').mockReturnValue(true)
+  vi.spyOn(kernel, 'status').mockResolvedValue(f.run)
+  const chooseA = f.confirmation('select-during-failure', f.original.nativeHandle as AgentMuxNativeSessionConfirmationInput['candidateNativeHandle'])
+  const persist = f.store.compareAndSwapMetadata.bind(f.store)
+  vi.spyOn(f.store, 'compareAndSwapMetadata').mockImplementationOnce(async (...args) => {
+    if (changed) await other.confirmAgentNativeSession(chooseA)
+    await Reflect.get(other, 'acceptHookEvent').call(other, { receiptId: 'new-target-start', eventName: 'turn.start',
+      agentSessionId: SID, providerId: 'claude', runId: RUN,
+      payload: { session_id: changed ? OLD : NEW, sourceId: 'shared-native-observer', sequence: changed ? 2 : 6, turnId: 'new-selected-turn' } }, new AbortController().signal)
+    await persist(...args)
+  })
+  if (failure) await f.hook(NEW, 'AgentMuxActivityUnavailable', { session_id: undefined, transcript_path: undefined,
+    sourceId: 'shared-native-observer', sequence: 3, reason: 'source-identity-unavailable' })
+  else await f.hook(NEW, 'turn.start', { sourceId: 'shared-native-observer', sequence: 3, turnId: 'late-target-turn' })
+  const after = await f.store.readMetadata(SID)
+  const target = changed ? OLD : NEW
+  expect(after?.nativeHandle?.sessionId).toBe(target)
+  expect(after?.recoveryActivity).toMatchObject({ state: 'active', sequence: changed ? 2 : 6, nativeSessionId: target, nativeTurnId: 'new-selected-turn' })
+  expect(after?.hookReceipt?.id).toBe('new-target-start')
+  expect(f.client.agentSession(SID).hookIngressObservation).toBeUndefined()
+  if (!changed) {
+    expect(f.client.agentSession(SID).currentActivity).toBeUndefined()
+    await f.hook(NEW, 'turn.start', { sourceId: 'shared-native-observer', sequence: 4, turnId: 'late-target-turn' })
+    expect((await f.store.readMetadata(SID))?.recoveryActivity?.sequence).toBe(6)
+  }
+  await f.hook(target, 'turn.start', { sourceId: 'shared-native-observer', sequence: changed ? 3 : 7, turnId: 'new-target-next-turn' })
+  expect(f.client.agentSession(SID).currentActivity).toMatchObject({ state: 'active', sequence: changed ? 3 : 7, nativeSessionId: target,
+    nativeTurnId: 'new-target-next-turn' })
+  expect(f.input).not.toHaveBeenCalled()
+})
+
+it.each([false, true])('keeps source diagnostics scoped to their target across selection (anotherCore=%s)', async anotherCore => {
+  const f = await fixture('claude', 'ambiguous')
+  await f.hook()
+  const candidate = f.client.agentSession(SID).nativeSourceObservation!.candidates!.find(candidate => candidate.sessionId === NEW)!
+  await f.rpc.call('agent.native.confirm', f.confirmation('select-diagnostic-target', candidate))
+  await f.hook(NEW, 'turn.start', { sourceId: 'diagnostic-observer', sequence: 1, turnId: 'diagnostic-turn' })
+  await f.hook(NEW, 'AgentMuxActivityUnavailable', { session_id: undefined, transcript_path: undefined,
+    sourceId: 'diagnostic-observer', sequence: 2, reason: 'source-identity-unavailable' })
+  const diagnostic = f.client.agentSession(SID).hookIngressObservation
+  expect(diagnostic?.code).toBe('AGENT_NATIVE_ACTIVITY_UNAVAILABLE')
+  expect(diagnostic).not.toHaveProperty('nativeTarget')
+  await f.rpc.call('agent.native.confirm', f.confirmation('keep-diagnostic-target', candidate))
+  expect(f.client.agentSession(SID).hookIngressObservation).toEqual(diagnostic)
+  const chooseA = f.confirmation('choose-other-diagnostic-target', f.original.nativeHandle as AgentMuxNativeSessionConfirmationInput['candidateNativeHandle'])
+  if (anotherCore) {
+    const other = new AgentMuxClient({ store: new AgentMuxFileAgentSessionStore(join(f.root, 'sessions.json')) })
+    cleanups.push(() => other.dispose())
+    await Reflect.get(other, 'registry').load('local'); Reflect.set(other, 'connected', true)
+    const kernel = Reflect.get(other, 'kernel') as CtxmuxRunAdapter
+    vi.spyOn(kernel, 'isConnected').mockReturnValue(true)
+    vi.spyOn(kernel, 'status').mockResolvedValue(f.run)
+    await other.confirmAgentNativeSession(chooseA)
+    await f.client.refreshAgentSession(SID, { runId: RUN })
+  } else await f.rpc.call('agent.native.confirm', chooseA)
+  expect(f.client.agentSession(SID).nativeHandle).toEqual(f.original.nativeHandle)
+  expect(f.client.agentSession(SID).hookIngressObservation).toBeUndefined()
+  await f.hook(OLD, 'turn.start', { sourceId: 'new-target-observer', sequence: 1, turnId: 'new-target-turn' })
+  expect(f.client.agentSession(SID).currentActivity).toMatchObject({ state: 'active', nativeSessionId: OLD, sequence: 1 })
+  expect(f.input).not.toHaveBeenCalled()
 })
