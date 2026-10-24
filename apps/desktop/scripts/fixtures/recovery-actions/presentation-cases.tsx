@@ -47,7 +47,23 @@ export function setOriginalRecheckScene() {
     ? { ...item, status: { ...item.status, exitReason: 'crashed' as const, exitCode: 17 } } : item) }))
   api.sessions.refresh = async () => { throw new Error('The original Host observation is unavailable.') }
 }
-export function recoveryScene() { return <DesktopClientUiProvider><SessionPane sessionId={originalId} surfaceKind="agent" visible interactiveResize={false} linkOrigin={{ workspaceId: 'project', tabGroupId: 'original-group', tabId: 'original-tab', regionId: 'original-region' }} /></DesktopClientUiProvider> }
+export function recoveryScene(visible = true) { return <DesktopClientUiProvider><SessionPane sessionId={originalId} surfaceKind="agent" visible={visible} interactiveResize={false} linkOrigin={{ workspaceId: 'project', tabGroupId: 'original-group', tabId: 'original-tab', regionId: 'original-region' }} /></DesktopClientUiProvider> }
+
+/** Actual Pane presentation of exact synthetic startup facts, without starting a Provider. */
+export function setStartupRecoveryScene(phase: 'preparing' | 'creating' | 'unknown' | 'failed') {
+  const original = session(originalId)
+  useAppStore.setState({ sessions: [{ ...original, terminalFrontend: { run: original.control.run, frontendId: 'original-frontend',
+    state: 'starting', backendState: 'running', source: 'managed-process', observedAt: Date.now(),
+    initialization: { lifecycleOperationId: 'original-startup-operation', phase, native: { state: 'not-created' },
+      ...(['failed', 'unknown'].includes(phase) ? { failure: { step: 'preflight' as const,
+        code: phase === 'unknown' ? 'AGENT_NATIVE_INITIALIZATION_OBSERVATION_UNCONFIRMED' : 0,
+        message: phase === 'unknown' ? 'The original initialization response is unconfirmed. Its result remains observed; no native request or input was repeated.'
+          : 'Request timeout.\nThe required setup check did not return a response.\nOriginal initialization and native conversation state are retained.\nNo original message was resent.' } } : {}) } } }], notificationEvents: [] })
+  api.sessions.recover = async (control, _workspace, operationId) => {
+    Object.assign(window, { __startupRecoveryReceipt: { control, operationId } })
+    throw new Error('The original setup check has not returned a new result. Your Session and draft are kept.')
+  }
+}
 
 /** The new branches retain an exact original reference and reuse the qualified dialogs. */
 export function setUnobservedRecoveryScene(mode: 'connecting' | 'created') {

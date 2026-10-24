@@ -8,18 +8,23 @@ import { spawnSync } from 'node:child_process'
 import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from './probe-process.mjs'
 import { validateLauncherMotionCssReceipt } from './verify-launcher-interaction-motion-css.mjs'
 import { sourceAliases } from './fixtures/launcher-launchpad/vitest.owning.config.mts'
-const require=createRequire(import.meta.url),{build}=await import('vite'),ts=require('typescript')
+const require=createRequire(import.meta.url),{build,loadConfigFromFile}=await import('vite'),ts=require('typescript')
 const desktop=resolve(import.meta.dirname,'..'), repository=resolve(desktop,'../..'), sourceRoot=join(desktop,'src/renderer/src'),fixture=join(desktop,'scripts/fixtures/launcher-launchpad')
 const arg=name=>process.argv.find(value=>value.startsWith(name+'='))?.slice(name.length+1)
 const receiptPath=arg('--receipt')?resolve(repository,arg('--receipt')):null
 const evidence=arg('--output')?resolve(repository,arg('--output')):receiptPath?dirname(receiptPath):join(repository,'.tmp/launcher-launchpad-capture')
 const designRoot=arg('--design-root')?resolve(arg('--design-root')):repository
 const scenes=arg('--scenes')??'full'
+const sourceConfigPath=arg('--source-config')?resolve(repository,arg('--source-config')):null
+const sourceConfig=sourceConfigPath?(await loadConfigFromFile({command:'build',mode:'production'},sourceConfigPath)).config:null
+// Source-package bindings transfer from the owner config; external dependencies keep Vite's browser exports.
+const captureAliases=sourceConfig?[{find:/^@agentmux\/client-ui\/styles\/(.+)$/,replacement:join(repository,'packages/client-ui/src/styles/$1')},{find:/^@agentmux\/client-ui\/input\/styles.css$/,replacement:join(repository,'packages/client-ui/src/input/input.css')},...sourceConfig.resolve.alias.filter(alias=>!alias.customResolver&&alias.find!=='react'&&alias.find!=='react-dom')]:sourceAliases
 const sha=value=>createHash('sha256').update(value).digest('hex')
 const modules=['components/NewTabSurface.tsx','components/LauncherEnvironment.tsx','components/LaunchOptionControls.tsx','components/LauncherSecondarySurfaces.tsx','components/LauncherMoteAction.tsx','components/LauncherResumePicker.tsx','components/StableWorkbenchView.tsx','components/WorkspaceWorkbench.tsx','components/MoteWorkface.tsx','components/GlobalSurveySurface.tsx','components/PmoTeamsTopicFloatingPanel.tsx','lib/pmo-teams-topic-floating.ts','store.ts','lib/workbench-presentation.ts','lib/mote-workface.ts','components/LiquidSelectionSurface.tsx','lib/launcher-state.ts','lib/launcher-resume.ts','lib/workbench-persistence.ts','lib/copy-path-display.ts','styles/launcher.css','styles/resume.css','styles/liquid-selection.css','styles/settings-materials.css','styles/tokens.css','styles/surfaces.css','styles/base.css','styles/survey.css','styles/pmo-teams-topic.css','styles/mote-workface.css']
 const section=(bytes,start,end)=>{const a=bytes.indexOf(start),b=end?bytes.indexOf(end,a+start.length):bytes.length;assert.ok(a>=0&&b>a,'Source binding has a nonempty exact scope: '+start);return bytes.slice(a,b)}
 async function bindings(){
  const facts={}
+ if(sourceConfigPath)facts['fixture:explicit-source-config']=sha(await readFile(sourceConfigPath))
  for(const file of modules)facts[file]=sha(await readFile(join(sourceRoot,file)))
  const store=await readFile(join(sourceRoot,'store.ts'),'utf8')
  for(const [name,start,end] of [['note-content','  async createNote(','  async openHttpLink('],['resume-owner','  async recoverSession(','  async deleteSession('],['warm-owner','  prewarmTerminal(workspaceId, ownerLauncherId) {','  async promoteWarmTerminal(']]){
@@ -115,14 +120,14 @@ if(receiptPath){
 }
 const privateRoot=await mkdtemp(_hygiene_fixturePath("tmp/amx-launchpad-")),profile=join(privateRoot,'profile'),outDir=join(privateRoot,'out')
 const result={schema:'agentmux.launcher-launchpad-capture.v1',passed:false,scenes,sourceDigest:identity.digest,identity,callers:realCallers,frames:[],processes:[],
- aestheticReview:'Not performed by capture. Independent review is required by the final receipt gate.',userRunTouched:false,
+  aestheticReview:'Not performed by capture. Independent review is required by the final receipt gate.',userRunTouched:false,sourceRoot:repository,sourceConfigPath,
  boundary:scenes==='terminal-host-mote'
   ? 'Actual confirmed MoteWorkface and its original same-Scratch-cwd warm owner. Controlled preview API facts; one independent capture-only software-rendered Electron process. No cold-discovery, restart, native daemon, vendor CLI or installed user-App claim.'
   : 'Actual isolated production Workbench/Region, CSS, rich editors and xterm. Controlled preview API facts. Two separate Electron processes reuse one private profile; terminal-host additionally captures a confirmed Mote with its own same-cwd warm owner in an independent process. No native daemon or vendor CLI continuity claim.'}
 try{
  const loaded={},styles={}
  const wrapper=join(privateRoot,'xterm.mjs');await writeFile(wrapper,`import xterm from ${JSON.stringify(require.resolve('@xterm/xterm'))};export class Terminal extends xterm.Terminal {constructor(...args){super(...args);(globalThis.launchpadTerminals??=[]).push(this)}dispose(){this.disposed=true;return super.dispose()}}`);
- await build({configFile:false,root:fixture,base:'./',logLevel:'error',resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper},...sourceAliases]},plugins:[{name:'launcher-owned-source-identity',enforce:'pre',transform(bytes,id){if(id.startsWith(sourceRoot+'/')&&!id.includes('?'))loaded[id.slice(sourceRoot.length+1)]=sha(bytes)},async generateBundle(){for(const file of this.getWatchFiles())if(file.startsWith(sourceRoot+'/')&&file.endsWith('.css'))styles[file.slice(sourceRoot.length+1)]=sha(await readFile(file))}}],
+ await build({configFile:false,root:fixture,base:'./',logLevel:'error',resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper},...captureAliases]},plugins:[{name:'launcher-owned-source-identity',enforce:'pre',transform(bytes,id){if(id.startsWith(sourceRoot+'/')&&!id.includes('?'))loaded[id.slice(sourceRoot.length+1)]=sha(bytes)},async generateBundle(){for(const file of this.getWatchFiles())if(file.startsWith(sourceRoot+'/')&&file.endsWith('.css'))styles[file.slice(sourceRoot.length+1)]=sha(await readFile(file))}}],
   define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},esbuild:{jsx:'automatic'},worker:{format:'es'},build:{outDir,emptyOutDir:true}})
  for(const file of modules.filter(name=>!name.endsWith('.css')))assert.equal(loaded[file],identity.sources[file],'Actual production module compiled: '+file)
  for(const file of modules.filter(name=>name.endsWith('.css')))assert.equal(styles[file],identity.sources[file],'Actual stylesheet imported: '+file)
