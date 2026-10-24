@@ -51,7 +51,7 @@ async function openGroup(id = 'oc_header') {
 async function bind() {
   await f.mount(); await f.journey('existing'); await f.fill('Existing group ID', 'oc_header')
   await act(async () => document.querySelector<HTMLInputElement>('.agent-connector-check input')!.click())
-  await f.button('Connect group'); await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Group saved'))
+  await f.button('Connect group'); await wait(() => expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Connection saved'))
   await f.button('Close'); await wait(() => expect(trigger()?.getAttribute('aria-label')).toContain('Original team'))
   return (await f.services.connections.bindings!.list({})).bindings[0]!
 }
@@ -322,12 +322,17 @@ it('a late original metadata get cannot replace the relinked group or its origin
     await wait(() => expect(trigger().getAttribute('aria-label')).toContain('Current group'))
     await act(async () => releases.forEach(release => release()))
     await wait(() => expect(document.querySelectorAll('.conversation-sharing-notice__audience')).toHaveLength(2))
-    expect([...document.querySelectorAll('.conversation-sharing-notice__audience')].map(node => node.textContent)).toEqual(['Agent replies and questions → Current group', 'Agent replies and questions → Current group'])
+    expect([...document.querySelectorAll('.conversation-sharing-notice__destination')].map(node => node.textContent)).toEqual(['Agent replies → Current group', 'Agent replies → Current group'])
     expect(trigger().getAttribute('aria-label')).toContain('Current group')
     expect(trigger().title).toContain('Current group'); expect(trigger().title).not.toContain('Original team')
     await openGroup('oc_current_header')
-    await wait(() => expect(f.calls.filter(call => call.method === 'connection.binding.inspect').at(-1)?.input).toEqual({ bindingId: binding.bindingId, revision: 3 }))
-    expect(document.querySelector('.agent-connector-room-overview')?.textContent).toContain('Group ID · oc_current_header')
+    await wait(() => {
+      const inspected = f.calls.filter(call => call.method === 'connection.binding.inspect').at(-1)
+      expect(inspected?.input).toEqual({ bindingId: binding.bindingId })
+      expect(inspected?.result).toMatchObject({ binding: { bindingId: binding.bindingId, revision: 3, externalConversationId: 'oc_current_header' } })
+    })
+    expect(document.querySelector('.agent-connector-room-overview')?.textContent).toContain('Current group')
+    expect([...document.querySelectorAll('details')].find(node => node.querySelector('summary')?.textContent === 'Connection details')?.textContent).toContain('Group · oc_current_header')
     expect(document.querySelector('.agent-connector-room-overview')?.textContent).not.toContain('Original team')
     expect(useAppStore.getState().agentComposerDrafts['original-agent']).toBe('Keep the original draft 中')
     await f.original.unchanged()
