@@ -45,7 +45,7 @@ function desktopSeed(f) {
       tabs: { 'original-tab': { id: 'original-tab', workspaceId: id, titleRegionId: 'original-agent-region',
         layout: { root: { type: 'split', direction: 'horizontal', ratio: 0.5, first: { type: 'leaf', regionId: 'original-agent-region' }, second: { type: 'leaf', regionId: 'original-file-region' } }, activeRegionId: 'original-agent-region' },
         regions: { 'original-agent-region': { regionId: 'original-agent-region', kind: 'agent', phase: 'attached', workspaceId: id, sessionId: sid },
-          'original-file-region': { regionId: 'original-file-region', kind: 'file', workspaceId: id, path: join(f.workspace, 'original.note.md') } } } },
+          'original-file-region': { regionId: 'original-file-region', kind: 'file', workspaceId: id, path: 'original.note.md' } } } },
       layouts: { [id]: { root: { type: 'leaf', groupId: 'original-group' }, groups: [{ id: 'original-group', tabOrder: ['original-tab'], activeTabId: 'original-tab', recentTabIds: ['original-tab'] }], activeGroupId: 'original-group' },
         __scratch__: { root: { type: 'leaf', groupId: 'original-scratch-group' }, groups: [{ id: 'original-scratch-group', tabOrder: [], activeTabId: null, recentTabIds: [] }], activeGroupId: 'original-scratch-group' } }
     } } }
@@ -204,8 +204,25 @@ try {
   const afterInput = 'after-desktop-exit-' + randomUUID()
   const after = await browser.action('input-after-desktop-exit', mobileInput, { sessionId: sid, marker: afterInput })
   const afterReceipt = await originalInput(fixture, after, afterInput)
-  const content = await browser.action('content-after-desktop-exit', readOriginalContent,
-    { workspaceName: 'Original mobile workspace', fileName: 'original.note.md', body: 'Original retained Mobile paragraph.' })
+  let content
+  try {
+    content = await browser.action('content-after-desktop-exit', readOriginalContent,
+      { workspaceName: 'Original mobile workspace', fileName: 'original.note.md', body: 'Original retained Mobile paragraph.' })
+  } catch (error) {
+    receipt.contentFailure = {}
+    try {
+      const { catalog } = await fixture.rpc.call('space.inspect', { target: { regionId: 'original-file-region' }, presentation: true })
+      receipt.contentFailure.catalog = catalog
+      const regions = catalog.regions.filter(region => region.regionId === 'original-file-region')
+      assert.equal(regions.length, 1)
+      const tab = catalog.tabs.find(tab => tab.tabId === regions[0].tabId)
+      const params = { zoneId: tab.zoneId, path: regions[0].file.zoneRelativePath,
+        expectedResource: { hostId: 'local', workspaceId: regions[0].file.workspaceId, workspacePath: fixture.workspace } }
+      receipt.contentFailure.params = params
+      receipt.contentFailure.read = await fixture.rpc.call('file.read', params)
+    } catch (observation) { receipt.contentFailure.unavailable = { code: observation.code, message: observation.message } }
+    throw error
+  }
   const editedNoteBody = 'Mobile saved the original Note after Desktop quit.'
   const note = await browser.action('edit-note-after-desktop-exit', editOriginalNote, { body: editedNoteBody })
   const originalTab = graphBefore.graph.tabs.find(tab => tab.tabId === 'original-tab')
