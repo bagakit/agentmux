@@ -99,6 +99,51 @@ function snapshot(f: Awaited<ReturnType<typeof fixture>>): WorkbenchWindowSnapsh
 }
 
 describe('original workface native presentation owner', () => {
+  it('shows new and existing background shells without changing native input focus; explicit focus remains available', async () => {
+    const f = await fixture(); f.main.focused = true
+    const input = { operationId: 'background-shell', target, focus: false }
+    const page = await f.owner.call('app.window.open', input, context)
+    const child = f.children[0]!
+    expect(page.recordedOperation).toMatchObject({ state: 'confirmed', input })
+    expect(child.visible).toBe(true); expect(child.focused).toBe(false); expect(f.main.focused).toBe(true)
+    await f.owner.call('app.window.open', { ...input, operationId: 'same-background-shell' }, context)
+    expect(f.children).toHaveLength(1); expect(child.focused).toBe(false)
+    await expect(f.owner.call('app.window.open', { ...input, focus: true }, context)).rejects.toThrow('another original window intent')
+    await f.owner.call('app.window.focus', { operationId: 'focus-background-shell', windowId: page.recordedOperation!.windowId!,
+      documentGeneration: page.recordedOperation!.documentGeneration! }, context)
+    expect(child.focused).toBe(true)
+    const foreground = await f.owner.call('app.window.open', { operationId: 'explicit-open', target: { ...target, tabId: 'other-tab' } }, context)
+    expect(foreground.recordedOperation?.state).toBe('confirmed'); expect(f.children[1]!.focused).toBe(true)
+  })
+  it('restores durable shells without acquiring focus from the current window', async () => {
+    const previous = await fixture(); await opened(previous)
+    const restored = await fixture(previous.store)
+    await vi.waitFor(() => expect(restored.children).toHaveLength(1))
+    await vi.waitFor(async () => expect((await restored.owner.call('app.window.ls', {}, context)).windows.find(window => window.target)?.presentation).toBe('visible'))
+    expect(restored.children[0]!.visible).toBe(true); expect(restored.children[0]!.focused).toBe(false)
+  })
+  it('a late placement confirmation shows the original background shell without taking focus', async () => {
+    const f = await fixture(), accept = f.owner.accept.bind(f.owner)
+    let delayed: Parameters<WorkbenchWindows['accept']> | undefined
+    vi.spyOn(f.owner, 'accept').mockImplementation((event, response) => {
+      const request = f.main.webContents.send.mock.calls.find(([channel, value]) => channel === WORKBENCH_WINDOW_REQUEST && value.requestId === response.requestId)?.[1]
+      if (request?.action === 'open') delayed = [event, response]
+      else accept(event, response)
+    })
+    vi.useFakeTimers()
+    try {
+      const opening = f.owner.call('app.window.open', { operationId: 'late-background', target, focus: false }, context)
+      await vi.waitFor(() => expect(delayed).toBeDefined())
+      await vi.advanceTimersByTimeAsync(15_000)
+      expect((await opening).recordedOperation?.state).toBe('unknown')
+    }
+    finally { vi.useRealTimers() }
+    f.main.focused = true
+    accept(...delayed!)
+    await vi.waitFor(async () => expect((await f.owner.call('app.window.ls', { operationId: 'late-background' }, context)).recordedOperation?.state).toBe('confirmed'))
+    expect(f.children).toHaveLength(1); expect(f.children[0]!.visible).toBe(true)
+    expect(f.children[0]!.focused).toBe(false); expect(f.main.focused).toBe(true)
+  })
   it('claims the original operation before disk I/O and refuses changed concurrent intent', async () => {
     const f = await fixture()
     const first = f.owner.call('app.window.open', { operationId: 'same', target }, context)
@@ -126,7 +171,9 @@ describe('original workface native presentation owner', () => {
     await vi.waitFor(() => expect(sizes).toHaveLength(2))
     for (const finish of sizes) finish({ width: 840, height: 620 })
     const [one, two] = await Promise.all([firstOpen, secondOpen])
-    expect(one.recordedOperation?.state).toBe('confirmed')
+    // Disk intent persistence can admit either call first. Both must address
+    // the same owner; overlap never grants a second native reservation.
+    expect([one, two].some(page => page.recordedOperation?.state === 'confirmed')).toBe(true)
     expect(two.recordedOperation?.windowId).toBe(one.recordedOperation?.windowId)
     expect(f.children).toHaveLength(1)
     expect(f.tickets).toHaveLength(1)
