@@ -383,6 +383,7 @@ export function ConversationMessage({
       className={primaryNotice ? "conversation-a2a-notice" : "log-turn"}
       data-compact={compact || undefined}
       data-native-collaboration={nativeCollaboration ? true : undefined}
+      data-collaboration-empty={nativeCollaboration && !collaborationPreview && !collaborationHasResources || undefined}
       data-conversation-event-id={conversationEvent?.id}
       data-conversation-event-revision={conversationEvent?.revision}
       data-conversation-role={conversationEvent?.role}

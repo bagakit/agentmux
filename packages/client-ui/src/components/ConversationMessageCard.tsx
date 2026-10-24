@@ -67,8 +67,8 @@ export function SubagentReportCard({ identity, collaboration, located, preview, 
     <code className="log-turn__collaboration-path" title={collaboration.sender}>{collaboration.sender ?? '路径未记录'}</code>
     {collaboration.recipient ? <span className="log-turn__collaboration-recipient" title={`接收者 ${collaboration.recipient}`}>→ {collaboration.recipient}</span> : null}
   </button>}>
-    {!open ? <button type="button" className="log-turn__collaboration-preview" aria-label="展开协作消息正文" onClick={() => show(true)}>
-      {preview || (hasResources ? '包含按需读取的内容 · 展开查看' : '暂无可读正文 · 原始内容已保留')}
+    {!open && (preview || hasResources) ? <button type="button" className="log-turn__collaboration-preview" aria-label="展开协作消息正文" onClick={() => show(true)}>
+      {preview || '包含按需读取的内容 · 展开查看'}
     </button> : null}
     <div id={contentId} className="log-turn__collaboration-content" hidden={!open} inert={!open}>
       {current.presented || open ? <>
