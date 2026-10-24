@@ -129,15 +129,16 @@ it('reads the original profile and MOTE Executor afresh and rejects stale resour
   expect(f.start.mock.calls[0]![0].args.join('\n')).toContain('space mote chat history --input -')
 }, 15000)
 
-it('recovers the exact prepared Core creation after native observation fails without recomposing or creating twice', async () => {
+it('keeps original private input usable when native publication fails without recomposing or creating twice', async () => {
   const f = await fixture(1, 60_000, 'headless')
   const creation = vi.spyOn(f.client, 'createHostAgentWithDelivery'), inspection = vi.spyOn(f.client, 'inspectAgentCreation')
   const checkpoint = vi.spyOn(f.client, 'conversationCheckpoint')
   checkpoint.mockRejectedValueOnce(new core.AgentMuxError('Original native source is not observed yet', 'CONVERSATION_SOURCE_UNAVAILABLE'))
   expect(await f.wire.post(f.message('recover-original'))).toBe(202)
   await vi.waitFor(() => expect(checkpoint).toHaveBeenCalledOnce())
+  await f.claimed('recover-original')
+  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
   expect(creation).toHaveBeenCalledOnce(); expect(f.start).toHaveBeenCalledOnce()
-  expect(f.inner.kernel.input).not.toHaveBeenCalled()
   const prepared = await f.prepare.mock.results[0]!.value
   expect(prepared.executorRevision).toBeDefined()
   expect(prepared.input).not.toHaveProperty('injectAgentMuxGuide')
@@ -148,7 +149,7 @@ it('recovers the exact prepared Core creation after native observation fails wit
   const record = await f.claimed('recover-original')
   await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
   expect(record.input!.agentSessionId).toBe(prepared.input.agentSessionId)
-  expect(inspection).toHaveBeenCalledWith(prepared.input.agentSessionId)
+  expect(inspection).not.toHaveBeenCalled()
   expect(creation).toHaveBeenCalledOnce(); expect(f.prepare).toHaveBeenCalledOnce(); expect(f.start).toHaveBeenCalledOnce()
   await expect(f.agents.inspect({ ...prepared, executorRevision: 'another-executor-revision' })).rejects.toMatchObject({ code: 'MOTE_CHAT_CREATE_MISMATCH' })
   await f.reply(record.input!.agentSessionId, 'recovered-answer', 'Original creation remains able to answer')

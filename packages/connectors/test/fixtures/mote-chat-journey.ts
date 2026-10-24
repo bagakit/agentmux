@@ -19,7 +19,7 @@ const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { try { for (const close of cleanup.splice(0).reverse()) await close() } finally { vi.restoreAllMocks(); vi.unstubAllEnvs() } })
 type DirectMessage = SignedRoomMessage & { nativeKind: 'direct' | 'group' }
 
-export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversationIdleMs = 60_000, mode: 'desktop' | 'headless' = 'desktop') {
+export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversationIdleMs = 60_000, mode: 'desktop' | 'headless' = 'desktop', nativeAfterInput = false) {
   const publicationRefresh = vi.spyOn(PublicationHost.prototype, 'refresh')
   const original = await rpcOwnerFixture([], core)
   const client = original.client as core.AgentMuxClient
@@ -53,7 +53,7 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   const runs = new Map<string, ReturnType<typeof original.run>>(), sources = new Map<number, { id: string; path: string }>()
   const start = vi.fn(async (_input: { env?: Record<string, string>; args: string[] }) => {
     const number = runs.size + 1, runId = `native-run-${number}`, pid = 400_000 + number, id = `native-chat-${number}`, path = join(original.root, `${id}.jsonl`)
-    await writeFile(path, JSON.stringify({ sessionId: id, uuid: 'original-context', type: 'system', message: { role: 'system', content: 'Native system context' } }) + '\n')
+    if (!nativeAfterInput) await writeFile(path, JSON.stringify({ sessionId: id, uuid: 'original-context', type: 'system', message: { role: 'system', content: 'Native system context' } }) + '\n')
     const run = { ...original.run(runId), program: 'claude', pid, workspacePath: topic.physicalDirectoryPath! }
     runs.set(runId, run); sources.set(pid, { id, path }); return run
   })
@@ -68,8 +68,21 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
   expect(typeof provider.discoverNativeSession).toBe('function')
   vi.spyOn(provider, 'discoverNativeSession').mockImplementation(async ({ processId }) => {
     const source = sources.get(processId)
-    return source ? { handle: { kind: 'provider' as const, providerId: 'claude', sessionId: source.id, transcriptPath: source.path }, assertCurrent: async () => {} } : null
+    return source && (!nativeAfterInput || inputCreatedSources.has(processId)) ? { handle: { kind: 'provider' as const, providerId: 'claude', sessionId: source.id, transcriptPath: source.path }, assertCurrent: async () => {} } : null
   })
+  const inputCreatedSources = new Set<number>()
+  if (nativeAfterInput) {
+    const inputLeaf = vi.mocked(inner.kernel.input as (id: string, input: { operationId: string; expectedByte: number; data: string }) => Promise<unknown>)
+    const originalInput = inputLeaf.getMockImplementation()!
+    inputLeaf.mockImplementation(async (...args) => {
+      const run = runs.get(args[0])!, source = sources.get(run.pid!)!
+      if (!inputCreatedSources.has(run.pid!)) {
+        await writeFile(source.path, JSON.stringify({ sessionId: source.id, uuid: 'first-reply', type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'First reply created with the original input' }] } }) + '\n')
+        inputCreatedSources.add(run.pid!)
+      }
+      return await originalInput(...args)
+    })
+  }
   vi.spyOn(provider, 'planPromptInput').mockImplementation(text => ({ kind: 'single-phase', data: text + '\r' }))
   const clients = () => [{ hostId: 'local', client: original.client }]
   const checkpoint = (ref: Parameters<typeof original.client.conversationCheckpoint>[0]) => original.client.conversationCheckpoint(ref)
@@ -82,8 +95,8 @@ export async function moteChatJourneyFixture(strangerMessageLimit = 1, conversat
     await client.configureHostExecutor({ executorId: 'saved-chat', config: { label: 'Original saved chat', providerId: 'claude', command: process.execPath, args: ['--chosen'], env: { MOTE_VALUE: 'host-owned' }, injectAgentMuxGuide: false } })
   }
   const desktopAgents = mode === 'headless'
-    ? createHostMoteChatAgents({ resources: createMoteChatResources({ topics, catalog: async () => spatialCatalog(graph), configuration: target => readMoteResourceConfiguration(configurationPath, target) }), clients, checkpoint })
-    : (await import('../../../../apps/desktop/src/main/mote-chat-agents.js')).createMoteChatAgents({ config: () => config, catalog: async () => spatialCatalog(graph), topics, clients, checkpoint })
+    ? createHostMoteChatAgents({ resources: createMoteChatResources({ topics, catalog: async () => spatialCatalog(graph), configuration: target => readMoteResourceConfiguration(configurationPath, target) }), clients })
+    : (await import('../../../../apps/desktop/src/main/mote-chat-agents.js')).createMoteChatAgents({ config: () => config, catalog: async () => spatialCatalog(graph), topics, clients })
   const wire = signedRoomAdapter(), application = { domain: 'signed.example', appId: 'original-mote-app' }
   const creator = { application, idType: 'email', userId: 'creator@example.test' }, guest = { ...creator, userId: 'guest@example.test' }
   const verify = wire.adapter.ingress!.verify

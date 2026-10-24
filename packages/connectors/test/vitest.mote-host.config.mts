@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 const root = native.root!
 const mutations: Record<string, { path: string; before: string; after: string }> = {
+  'creation-history-gate': { path: 'apps/host/src/mote-chat-agents.ts', before: 'const session = exact(prepared, value)', after: "const session = exact(prepared, value); if (!session.nativeHandle) return failure('MOTE_CHAT_SOURCE_UNCONFIRMED', 'Native source required before input')" },
+  'origin-tail': { path: 'packages/connectors/src/publication-host.ts', before: "{ ...reference, nativePosition: 'beginning' }", after: '{ ...reference }' },
   'preparation-reason-drop': { path: 'packages/connectors/src/durable-ingress.ts', before: 'this.write({ ...current, code })', after: 'this.write(current)' },
   'diagnosis-owner-disconnect': { path: 'packages/connectors/src/connection-services.ts', before: 'return await owner.diagnose(input, context)', after: "throw new AgentMuxError('The diagnostic owner is disconnected.', 'CONTROL_UNAVAILABLE')" },
   'profile-disconnect': { path: 'apps/host/src/mote-resources.ts', before: 'const context = validProfile ? profileAgentContext(', after: 'const context = false ? profileAgentContext(' },
@@ -36,6 +38,7 @@ export default defineConfig({ ...native, cacheDir: resolve(root, '.cache/mote-ho
   }
 }, ...native.plugins!], test: { ...native.test, include: [
   'packages/connectors/test/mote-chat-headless-journey.integration.test.ts',
+  'packages/connectors/test/mote-chat-first-input.integration.test.ts',
   'packages/connectors/test/mote-chat-diagnosis.integration.test.ts',
   'packages/connectors/test/mote-chat-desktop-journey.integration.test.ts',
   'apps/desktop/test/mote-chat-agents-consumer.test.ts',
