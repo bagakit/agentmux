@@ -9,6 +9,9 @@ const mutations: Record<string, [string, string, string]> = {
   'wrong-run': ['client.ts', 'this.startupDiagnostics.observe(this.registry.get(session.agentSessionId), observation)', "this.startupDiagnostics.observe({ ...this.registry.get(session.agentSessionId), run: { runId: 'mutant-wrong-run' } }, observation)"],
   'lose-zero': ['startup-diagnostic.ts', 'return typeof value === \'number\' && Number.isSafeInteger(value) ? value : diagnosticCauseCode(value)', "return value === 0 ? null : typeof value === 'number' && Number.isSafeInteger(value) ? value : diagnosticCauseCode(value)"],
   'private-leak': ['startup-diagnostic-journal.ts', 'original: includeRaw ? structuredClone(record.original) : null', 'original: structuredClone(record.original)'],
+  'portable-target': ['startup-diagnostic.ts', 'if (!sameStartupTarget(replyTarget, target)) bad()', 'void replyTarget'],
+  'portable-authority': ['startup-diagnostic.ts', 'return authority.kind === expected.kind && authority.id === expected.id && authority.lifetime === expected.lifetime', 'return true'],
+  'portable-utf8': ['startup-diagnostic.ts', 'const utf8Bytes = (value: string) => encoder.encode(value).byteLength', 'const utf8Bytes = (value: string) => value.length'],
 }
 export default defineConfig({ root: resolve(import.meta.dirname, '../../..'), plugins: [{ name: 'startup-diagnostic-loaded-owner', enforce: 'pre',
   transform(input, id) {

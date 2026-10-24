@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxFileAgentSessionStore, type AgentMuxAgentSessionStore } from '../src/agent-session-store.js'
 import { CoreStartupDiagnosticJournal } from '../src/startup-diagnostic-journal.js'
-import { parseStartupDiagnosticRead, type AgentStartupDiagnosticPage, type AgentStartupDiagnosticRecord, type AgentStartupDiagnosticTarget } from '../src/startup-diagnostic.js'
+import { parseStartupDiagnosticRead, parseStartupDiagnosticTarget, type AgentStartupDiagnosticPage, type AgentStartupDiagnosticRecord, type AgentStartupDiagnosticTarget } from '../src/startup-diagnostic.js'
 import * as durable from '../src/durable-write.js'
 import * as identities from '../src/object-id.js'
 import { rpcOwnerFixture } from './helpers/public-rpc-owner.js'
@@ -56,6 +56,95 @@ async function core() {
   cleanup.push(() => journal.dispose())
   return { ...h, updated, reader, emit: (value: AgentTerminalFrontendObservation) => emit(value), journal }
 }
+
+function withoutNodeBuffer<T>(read: () => T): T {
+  const original = Object.getOwnPropertyDescriptor(globalThis, 'Buffer')!
+  Object.defineProperty(globalThis, 'Buffer', { configurable: true, enumerable: Boolean(original.enumerable), writable: true, value: undefined })
+  try { return read() } finally { Object.defineProperty(globalThis, 'Buffer', original) }
+}
+
+describe('portable startup diagnostic DTO', () => {
+  async function fixture() {
+    const h = await core(), value = observation()
+    value.initialization!.failure!.message = '中文😀，原始\\路径\n下一行'
+    h.emit(value)
+    const record = (await settled(h.journal, 1)).items[0]!.observation
+    const target = { domain: 'agent.startup' as const, hostId: 'local', logId: record.logId }
+    const query = { ...recent, recent: { runId: record.runId, since: 0 } }
+    return { target, query, safe: await h.client.readAgentStartupDiagnostic({ target }),
+      raw: await h.client.readAgentStartupDiagnostic({ target, includeRaw: true }),
+      page: await h.client.findAgentStartupDiagnostics(query) }
+  }
+  const decode = (value: unknown, target: AgentStartupDiagnosticTarget, raw = false) => withoutNodeBuffer(() => parseStartupDiagnosticRead(value, target, raw))
+  const protocolError = (read: () => unknown) => expect(read).toThrowError(expect.objectContaining({ code: 'CONTROL_PROTOCOL_ERROR' }))
+
+  it('decodes original safe/raw/recent facts without Node globals and accepts reordered JSON fields', async () => {
+    const f = await fixture()
+    expect(() => decode(f.safe, f.target)).not.toThrow()
+    expect(decode(f.safe, f.target)).toEqual(f.safe)
+    expect(decode(f.raw, f.target, true)).toEqual(f.raw)
+    expect(decode(f.page, f.query)).toEqual(f.page)
+    expect((decode(f.raw, f.target, true).data as AgentStartupDiagnosticRecord).failure?.code).toBe(0)
+    expect((decode(f.safe, f.target).data as AgentStartupDiagnosticRecord).original).toBeNull()
+    protocolError(() => decode(f.raw, f.target))
+    const reordered = structuredClone(f.safe)
+    reordered.target = { logId: f.target.logId, hostId: 'local', domain: 'agent.startup' }
+    const authority = reordered.recordRef!.authority!
+    reordered.recordRef!.authority = { lifetime: authority.lifetime, id: authority.id, kind: authority.kind }
+    expect(decode(reordered, f.target)).toEqual(reordered)
+    const page = structuredClone(f.page)
+    page.target = { recent: { since: 0, runId: f.query.recent.runId }, hostId: 'local', domain: 'agent.startup' }
+    expect(decode(page, f.query)).toEqual(page)
+  })
+
+  it('retains exact reply target and both authority fences after strict parsing without Node globals', async () => {
+    const f = await fixture()
+    for (const target of [{ ...f.target, hostId: 'other' }, { ...f.target, logId: '111111111111' },
+      { ...f.target, authority: undefined }, { ...f.target, extra: 'untrusted' }, { ...f.target, domain: 'other' }]) {
+      protocolError(() => decode({ ...f.safe, target }, f.target))
+    }
+    for (const recent of [{ ...f.query.recent, runId: 'other' }, { ...f.query.recent, since: -0 },
+      { ...f.query.recent, limit: undefined }, { ...f.query.recent, extra: 'untrusted' }]) {
+      protocolError(() => decode({ ...f.page, target: { ...f.query, recent } }, f.query))
+    }
+    for (const change of [{ kind: 'other' }, { id: 'other' }, { lifetime: 'instance' }, { extra: 'untrusted' }] as const) {
+      const exact = structuredClone(f.safe), page = structuredClone(f.page)
+      exact.recordRef!.authority = { ...exact.recordRef!.authority!, ...change }
+      const item = (page.data as AgentStartupDiagnosticPage).items[0]!
+      item.recordRef.authority = { ...item.recordRef.authority!, ...change }
+      protocolError(() => decode(exact, f.target)); protocolError(() => decode(page, f.query))
+    }
+    const constrained = { ...f.target, authority: { kind: 'core-runtime', id: owner.authority.id } }
+    expect(() => decode({ ...f.safe, target: constrained }, constrained)).not.toThrow()
+    protocolError(() => decode({ ...f.safe, target: { ...constrained, authority: { ...constrained.authority, id: 'other' } } }, constrained))
+    protocolError(() => decode({ ...f.safe, target: { ...constrained, authority: { ...constrained.authority, extra: true } } }, constrained))
+    expect(() => decode(f.safe, { ...f.target, extra: true } as AgentStartupDiagnosticTarget)).toThrowError(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
+  })
+
+  it('keeps UTF-8 and escaped JSON byte budgets without Buffer', async () => {
+    const f = await fixture(), encoder = new TextEncoder()
+    expect(() => withoutNodeBuffer(() => parseStartupDiagnosticTarget({ ...f.target, hostId: '界'.repeat(682) + 'ab' }))).not.toThrow()
+    expect(() => withoutNodeBuffer(() => parseStartupDiagnosticTarget({ ...f.target, hostId: '界'.repeat(683) }))).toThrowError(expect.objectContaining({ code: 'INVALID_CONTROL_REQUEST' }))
+    const material = (message: string, code: string | number = 0) => {
+      const read = structuredClone(f.raw), record = read.data as AgentStartupDiagnosticRecord
+      record.original = { message, code }; record.failure!.code = typeof code === 'number' ? code : null
+      record.material.originalBytes = record.material.retainedBytes = encoder.encode(JSON.stringify(record.original)).byteLength
+      return read
+    }
+    expect(() => decode(material('界'.repeat(1365) + 'a'), f.target, true)).not.toThrow()
+    protocolError(() => decode(material('界'.repeat(1365) + 'ab'), f.target, true))
+    expect(() => decode(material('😀', '界'.repeat(682) + 'ab'), f.target, true)).not.toThrow()
+    protocolError(() => decode(material('😀', '界'.repeat(683)), f.target, true))
+    const overhead = encoder.encode(JSON.stringify({ message: '', code: 0 })).byteLength
+    const escaped = '\\'.repeat(Math.floor((8192 - overhead) / 2)) + 'a'.repeat((8192 - overhead) % 2)
+    expect((material(escaped).data as AgentStartupDiagnosticRecord).material.retainedBytes).toBe(8192)
+    expect(() => decode(material(escaped), f.target, true)).not.toThrow()
+    protocolError(() => decode(material(escaped + 'a'), f.target, true))
+    const wrong = material('中文😀\\\n'), record = wrong.data as AgentStartupDiagnosticRecord
+    record.material.retainedBytes = JSON.stringify(record.original).length
+    protocolError(() => decode(wrong, f.target, true))
+  })
+})
 
 describe('accepted Core startup diagnostics', () => {
   it('records the original accepted unknown/failed/ready facts, zero code and private material without reprojection writes', async () => {
