@@ -245,7 +245,8 @@ export class PublicationHost implements ConnectionDeliveryPort {
         const response = await this.options.conversation.resource(reference, input, signal)
         if (response.agentSessionId !== reference.agentSessionId) throw Error('Foreign Markdown resource Session')
         return response
-      }, adapter.images, signal)
+      }, adapter.images, signal, (textSha256, start, end) => this.store.retainedDiagram(binding,
+        { record: record.reference!, recordRevision: record.revision, selector: slot.selector }, text, textSha256, start, end))
       if (part.kind === 'text') {
         const value = await markdown(part.text)
         if (value) result.set(publicationPartKey({ record: record.reference!, selector: slot.selector }), value)

@@ -316,6 +316,19 @@ export class PublicationStore {
     this.database.prepare('INSERT INTO connector_publication_decision (binding_id,binding_revision,source_key,record_id,source_revision,reason,decision_json) VALUES (?,?,?,?,?,?,?) ON CONFLICT(binding_id,binding_revision,source_key,record_id,source_revision) DO UPDATE SET reason=excluded.reason,decision_json=excluded.decision_json')
       .run(...scopeKey(boundary), 'unified', id, revision, 'content-accounted', encode(value))
   }
+  /** Reuse only this accepted original part's exact derived image; no second resource cache. */
+  retainedDiagram(boundary: PublicationBoundary, part: ConversationContentRef, text: string,
+    textSha256: string, start: number, end: number): PublicationImage | undefined {
+    const row = this.database.prepare("SELECT decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND record_id=? AND source_revision='current'")
+      .get(...scopeKey(boundary), 'part-' + digest(publicationPartKey(part)))
+    if (!row) return
+    const value = JSON.parse(String(row.decision_json)) as RepresentationIntent
+    if (value.kind !== 'representation' || !same(value.part, part) || value.text !== text) return
+    return value.segments?.find(segment => {
+      const derived = segment.image?.derivation
+      return derived?.kind === 'mermaid' && derived.textSha256 === textSha256 && derived.start === start && derived.end === end
+    })?.image
+  }
   private representationRows(boundary: Pick<PublicationBoundary, 'bindingId' | 'revision'>, projectionId: string, records: readonly ConversationItemRef[] = []): RepresentationRow[] {
     const rows: RepresentationRow[] = this.database.prepare("SELECT rowid,record_id,decision_json FROM connector_publication_decision WHERE binding_id=? AND binding_revision=? AND source_key='unified' AND json_extract(decision_json,'$.kind') IN ('representation','legacy-representation') AND json_extract(decision_json,'$.projectionId')=? ORDER BY rowid")
       .all(...scopeKey(boundary), projectionId).map(row => ({ ordinal: Number(row.rowid), id: String(row.record_id), value: JSON.parse(String(row.decision_json)) }))
