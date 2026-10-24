@@ -8,8 +8,8 @@ it('keeps a qualified identity small and literal above complete native Markdown 
   const text = '[message · source · agent]\n\n**Original body**\n\n| Name | Value |\n| :--- | :--- |\n| Original | 完整 |\n\n```ts\nconst original = "<at user_id=all>";\n```'
   const card = feishuRoleCard(text, { kind: 'agent', name: 'Original <at user_id="all">Name</at>', imageKey: 'confirmed-original-image' }, { phase: 'final' })
   expect(card.header).toBeUndefined(); expect(card.schema).toBe('2.0')
-  expect(body(card)[0]).toEqual({ tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: 'Original <at user_id="all">Name</at> · Agent · Reply' },
-    icon: { tag: 'custom_icon', img_key: 'confirmed-original-image', size: '24px 24px' } })
+  expect(body(card)[0]).toEqual({ tag: 'div', text_size: 'notation', text: { tag: 'plain_text', content: 'Original <at user_id="all">Name</at> · Agent · Reply', text_size: 'notation', text_color: 'grey' },
+    icon: { tag: 'custom_icon', img_key: 'confirmed-original-image', size: '16px 16px' } })
   expect(body(card).slice(1)).toEqual(feishuReplyElements(text))
   expect(body(card).some(node => node.tag === 'table')).toBe(true)
   expect(body(card)[1]!.content).toContain('[message · source · agent]')
@@ -17,7 +17,8 @@ it('keeps a qualified identity small and literal above complete native Markdown 
 it.each(['agent', 'human', 'external', 'mixed', 'unknown'] as const)('retains complete body without inventing a %s portrait or name', kind => {
   const text = 'Complete original body\nNo avatar is available.'
   const card = feishuRoleCard(text, { kind })
-  expect(body(card)[0]!.icon).toMatchObject({ tag: 'standard_icon', size: '20px 20px' })
+  expect(body(card)[0]!.icon).toMatchObject({ tag: 'standard_icon', size: '16px 16px' })
+  expect(body(card)[0]!.text.text_color).toBe('grey')
   expect(body(card)[0]!.text.content).toBe({ agent: 'Agent', human: 'User · via amux', external: 'External message', mixed: 'Mixed authors', unknown: 'Unknown author' }[kind])
   expect(body(card).slice(1)).toEqual(feishuReplyElements(text))
 })

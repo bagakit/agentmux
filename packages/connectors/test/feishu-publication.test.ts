@@ -114,6 +114,53 @@ it('delivers compact attributed progress and preserves the same original card th
   if (process.env.ATTRIBUTED_PROGRESS_PREVIEW) await writeFile(join(process.env.ATTRIBUTED_PROGRESS_PREVIEW, 'native-card.json'), JSON.stringify(card, null, 2) + '\n')
 })
 
+it.each(['progress', 'final'] as const)('sends the compact secondary %s author row through actual native create, replacement and inspection', async phase => {
+  const f = await fixture(), text = '**完整正文**\n\n保留正文、引用和原始换行。', signal = new AbortController().signal
+  const original = operation({ speaker: { kind: 'agent', name: 'Exact original author' },
+    avatarSource: { operationId: 'original-confirmed-upload', attempt: 1, imageKey: 'confirmed-original-portrait' },
+    payload: { kind: 'speech', phase, text } })
+  const prepared = f.publisher.prepare(original), frozen = JSON.stringify(prepared)
+  expect(prepared.renderVersion).toBe('feishu-conversation-v8')
+  const receipt = await f.publisher.dispatch(prepared, original.target, 'fixture-credential', signal)
+  expect(receipt.state).toBe('confirmed'); if (receipt.state !== 'confirmed') throw Error('Author row did not reach native create')
+  expect(await f.publisher.inspect(prepared, original.target, 'fixture-credential', signal, receipt.mapping)).toEqual(receipt)
+  const replacement = f.publisher.prepare({ ...original, operationId: 'original-row-replacement', mapping: receipt.mapping,
+    payload: { kind: 'speech', phase, text: text + '\n原始更新。' } })
+  expect(await f.publisher.dispatch(replacement, original.target, 'fixture-credential', signal, receipt.mapping)).toEqual(receipt)
+  expect(await f.publisher.inspect(replacement, original.target, 'fixture-credential', signal, receipt.mapping)).toEqual(receipt)
+  expect(f.remote.messageCalls().map(call => call.method)).toEqual(['POST', 'GET', 'PATCH', 'GET'])
+  for (const request of f.remote.messageCalls().filter(call => call.method !== 'GET')) {
+    const card = JSON.parse(JSON.parse(request.body).content)
+    expect(card.body.elements[0]).toEqual({ tag: 'div', text_size: 'notation', text: { tag: 'plain_text',
+      content: `Exact original author · Agent · ${phase === 'progress' ? 'Progress' : 'Reply'}`, text_size: 'notation', text_color: 'grey' },
+      icon: { tag: 'custom_icon', img_key: 'confirmed-original-portrait', size: '16px 16px' } })
+    expect(card.body.padding).toBe(phase === 'progress' ? '4px 8px 4px 8px' : '12px 14px 12px 14px')
+    expect(card.body.elements[1].content).toContain(text)
+    expect(card.body.elements[1].text_size).toBe(phase === 'progress' ? 'notation' : undefined)
+  }
+  expect(JSON.stringify(prepared)).toBe(frozen)
+})
+
+it.each(['POST', 'PATCH'] as const)('reconciles the frozen v7 %s author row without preparing or replaying its unknown effect', async method => {
+  const mapping = { messageId: 'original-frozen-message' }, original = operation({ speaker: { kind: 'agent', name: 'Original author' },
+    ...(method === 'PATCH' ? { mapping } : {}), payload: { kind: 'speech', phase: 'final', text: 'Original complete body' } })
+  let savedCard = ''
+  const f = await fixture(call => call.method === 'GET' ? { status: 200, body: { code: 0, data: { items: [{
+    message_id: mapping.messageId, chat_id: original.target.externalConversationId, msg_type: 'interactive',
+    sender: { sender_type: 'app', id_type: 'app_id', id: original.target.application.appId }, body: { content: savedCard }
+  }] } } } : undefined)
+  const prepared = { ...f.publisher.prepare(original), renderVersion: 'feishu-conversation-v7' }, body = JSON.parse(prepared.request.body!)
+  const card = JSON.parse(body.content), row = card.body.elements[0]
+  delete row.text.text_color; delete row.text.text_size; row.icon.size = '20px 20px'
+  savedCard = JSON.stringify(card); prepared.request.body = JSON.stringify({ ...body, content: savedCard })
+  const frozen = JSON.stringify(prepared), prepare = vi.spyOn(f.publisher, 'prepare'), signal = new AbortController().signal
+  expect(await f.publisher.inspect(prepared, original.target, 'fixture-credential', signal, mapping)).toEqual({ state: 'confirmed', mapping })
+  expect(JSON.stringify(prepared)).toBe(frozen); expect(prepare).not.toHaveBeenCalled()
+  expect(f.remote.messageCalls().map(call => call.method)).toEqual(['GET'])
+  expect(await f.publisher.inspect(prepared, original.target, 'fixture-credential', signal)).toBeNull()
+  expect(f.remote.messageCalls()).toHaveLength(1)
+})
+
 const feedCases: Array<[string, Partial<PublicationOperation>, string]> = [
   ['progress', { payload: { kind: 'speech', phase: 'progress', text: 'Original progress body' } }, 'Agent progress · Original progress body'],
   ['final', { payload: { kind: 'speech', phase: 'final', text: 'Original final body' } }, 'Agent reply · Original final body'],
