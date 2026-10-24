@@ -23,6 +23,7 @@ async function fixture() {
     initial_size: { cols: 80, rows: 24 }, declared_inputs: [] } })
   const client = {
     connectRuntime: async () => {}, prepareTerminal: () => structuredClone(frozen),
+    terminalCreationRuntimeIdentity: () => ({ runtimeId: 'fixture-lineage', instanceId: 'fixture-owner', buildIdentity: 'fixture-build', protocolVersion: 1 }),
     createPreparedTerminal: async () => { creates++; await creationGate; if (unknownCreation) throw new AgentMuxError('Original Start ACK lost', 'CAPSULE_RUNTIME_CREATION_UNKNOWN')
       if (creates > 1) run = { ...run, runId: 'next-run', state: 'running' }; return { ...run } },
     inspectPreparedTerminal: async (prepared: unknown, ref?: { runId: string }) => { inspections++; await inspectionGate; expect(prepared).toEqual(frozen)
