@@ -13,7 +13,7 @@ import { invalidateConnectorTarget } from '../src/renderer/src/lib/connector-roo
 import { ConnectorHeaderLinks } from '../src/renderer/src/components/ConnectorHeaderLinks'
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 import { settingsCatalog } from '../src/renderer/src/components/settings/settings-modules'
-import { connectorGroupStatus } from '../src/renderer/src/lib/connector-group-status'
+import { connectorGroupDiagnostics, connectorGroupSummary } from '../src/renderer/src/lib/connector-group-status'
 import { useAppStore } from '../src/renderer/src/store'
 import type { RoomBinding } from '@agentmux/core/connections'
 
@@ -63,11 +63,15 @@ it('the actual header diagnoses a source gap separately from older unknown platf
   await appendFile(f.original.transcript, row('public-unconfirmed', 'user'))
   await wait(() => expect(f.services.publication!.observation(binding.bindingId, binding.revision).reason).toBe('content-unconfirmed'))
   const before = { writes: writes(), effects: effects() }
-  await open(); await wait(() => expect(trigger().getAttribute('aria-label')).toContain('Needs attention'))
+  await open(); await wait(() => expect(trigger().getAttribute('aria-label')).toContain('content gap'))
   await wait(() => expect(menu().textContent).toContain('Content not confirmed'))
   expect(menu().textContent).toContain('content gap')
   expect(menu().textContent).toContain('unconfirmed')
   expect(menu().textContent).toContain('original results remain unconfirmed')
+  const kinds = [...menu().querySelectorAll<HTMLElement>('[data-problem-kind]')].map(node => node.dataset.problemKind)
+  expect(kinds).toContain('content-gap'); expect(kinds).toContain('outgoing-unconfirmed')
+  expect(menu().querySelector('.connector-traffic-summary__tile[aria-label="Conversation → group"]')?.textContent).toContain('unconfirmed')
+  expect(menu().textContent).not.toContain('Needs attention')
   for (const section of ['Configuration', 'Sharing', 'Conversation → group', 'Platform requests', 'Group → Agent', 'Snapshot of bounded local observations']) expect(menu().textContent).toContain(section)
   expect(f.calls.filter(call => call.method === 'connection.diagnose').at(-1)?.input).toEqual({ ...target, bindingId: binding.bindingId, bindingRevision: binding.revision })
   expect(menu().textContent).not.toContain('PRIVATE')
@@ -83,10 +87,10 @@ it('an empty checked window remains a linked snapshot, and explicit Off and paus
   expect(trigger().getAttribute('aria-label')).not.toMatch(/healthy|working|disconnected/i)
   const service = await f.forward('connection.service.get', {})
   await f.forward('connection.service.configure', { operationId: 'header-explicit-off', expectedRevision: service.revision, service: { enabled: false } })
-  await check(); await wait(() => expect(trigger().getAttribute('aria-label')).toContain('Sync off'))
+  await check(); await wait(() => expect(trigger().getAttribute('aria-label')).toContain('Automatic sync is off'))
   expect(menu().textContent).toContain('Linked · Sync off')
   const paused = await f.forward('connection.binding.pause', { operationId: 'header-explicit-pause', bindingId: binding.bindingId, expectedRevision: binding.revision })
-  await renderHeader([paused.binding!]); await wait(() => expect(trigger().getAttribute('aria-label')).toContain('Sharing paused'))
+  await renderHeader([paused.binding!]); await wait(() => expect(trigger().getAttribute('aria-label')).toContain('Group sharing is paused'))
   await open(); expect(menu().querySelector('.connector-header-menu__item')?.getAttribute('aria-label')).toContain('oc_header_status')
 }, 30_000)
 
@@ -98,7 +102,7 @@ it('a later failed check retains the exact group and earlier observations, with 
   expect(f.calls.filter(call => call.method === 'connection.diagnose')).toHaveLength(count)
   const original = f.forward
   vi.mocked(api.connections.call).mockImplementation(async (method, input) => { if (method === 'connection.diagnose') throw Error('PRIVATE credential path'); return original(method, input) })
-  await check(); await wait(() => expect(trigger().getAttribute('aria-label')).toContain('Status unknown'))
+  await check(); await wait(() => expect(trigger().getAttribute('aria-label')).toContain('unread'))
   expect(checked()!.dateTime).not.toBe(first)
   for (const text of ['Original status group', 'Unavailable', 'Kept after this check failed', 'Connect a conversation', 'Automatic sync settings', 'Check group status']) expect(menu().textContent).toContain(text)
   expect(trigger().getAttribute('aria-disabled')).not.toBe('true')
@@ -111,11 +115,14 @@ it('a later failed check retains the exact group and earlier observations, with 
 
 it('actual recorded refusal and waiting stay separate from adoption, and typed byte receipts keep their exact presentation', async () => {
   const binding = await bind(); await wait(() => expect(f.ingressTransport!.sockets).toHaveLength(1))
+  await f.forward('connection.grant', { operationId: 'header-other-person-grant', bindingId: binding.bindingId, expectedBindingRevision: binding.revision, grantId: 'other-member-input', expectedRevision: null,
+    actor: { application: f.config.application, idType: 'open_id', userId: 'other-external-user' }, capabilities: ['input'], state: 'active' })
   const payload = feishuPayload({ message_id: 'header-no-access', chat_id: binding.externalConversationId, content: JSON.stringify({ text: 'PRIVATE incoming original' }) })
   payload.header.event_id = 'header-no-access-event'
   await f.ingressTransport!.receive(payload)
   await vi.waitFor(async () => expect((await f.forward('connection.ingress.ls', { connectionId: binding.connectionId })).ingresses.find(value => value.kind !== 'action' && value.externalMessageId === 'header-no-access')?.state).toBe('refused'), { timeout: 8000 })
-  await open(); await wait(() => expect(menu().textContent).toContain('Conversation recorded · not sent; member request access missing'))
+  await open(); await wait(() => expect(menu().textContent).toContain('Member request access missing'))
+  expect(menu().querySelector('[data-problem-kind="member-access"]')?.textContent).toContain('Sender has no request access')
   await f.forward('connection.grant', { operationId: 'header-explicit-grant', bindingId: binding.bindingId, expectedBindingRevision: binding.revision, grantId: 'header-input', expectedRevision: null,
     actor: { application: f.config.application, idType: 'open_id', userId: 'original-external-user' }, capabilities: ['input'], state: 'active' })
   // This case qualifies a real durable Runtime-unavailable wait, not a transient pre-dispatch read.
@@ -134,6 +141,8 @@ it('actual recorded refusal and waiting stay separate from adoption, and typed b
   const checkStart = f.calls.length
   await check(); await wait(() => expect(menu().textContent).toContain('Waiting for Agent'))
   // This is the original completed Check snapshot, not a later observation of a progressing input.
+  expect(menu().querySelector('[data-problem-kind="agent-waiting"]')).not.toBeNull()
+  expect(menu().querySelector('[data-problem-kind="member-access"]')).toBeNull()
   const report = f.calls.slice(checkStart).find(call => call.method === 'connection.diagnose' &&
     (call.input as { bindingId?: string }).bindingId === binding.bindingId)?.result as import('@agentmux/core/connections').ConnectionDiagnosis
   expect(report).toBeDefined()
@@ -148,7 +157,10 @@ it('actual recorded refusal and waiting stay separate from adoption, and typed b
   // Pure presentation cases qualify mapping of the public typed receipt, not new native I/O.
   for (const [coreStatus, text] of [['terminal-confirmed', 'Input sent; Agent acceptance unconfirmed'], ['admitted', 'Accepted by Agent'], ['not-applied', 'Not delivered to Agent']] as const) {
     const snapshot = { report: { ...group, service: report.service, incoming: { value: { ...incoming, rows: [{ ...original, coreStatus }] }, issue: null } }, checkedAt: 1, checking: false }
-    expect(connectorGroupStatus(snapshot).rows.find(([label]) => label === 'Group → Agent')?.[1]).toContain(text)
+    expect(connectorGroupDiagnostics(snapshot).rows.find(([label]) => label === 'Group → Agent')?.[1]).toContain(text)
+    const summary = connectorGroupSummary(snapshot.report)
+    expect(summary.incoming.value).toBe(coreStatus === 'terminal-confirmed' ? 'Sent; Agent acceptance unconfirmed' : text)
+    expect(summary.problems.some(problem => problem.kind === 'agent-unconfirmed')).toBe(coreStatus === 'terminal-confirmed')
   }
   expect(menu().textContent).not.toContain('PRIVATE incoming original')
 }, 30_000)
