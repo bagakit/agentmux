@@ -5,7 +5,7 @@ const { app, BrowserWindow } = require('electron')
 const { nativeRendererInput } = require('../settings-connections/native-input.cjs')
 const [html, privateRoot, evidence] = process.argv.slice(2)
 app.setPath('userData', path.join(privateRoot, 'user-data')); app.setPath('sessionData', path.join(privateRoot, 'session-data'))
-const result = { passed: false, frames: [], scenes: [], interactions: [], boundary: 'Actual production Workbench, split Regions, channel contributions, header/menu and CSS; controlled safe public connection and diagnosis DTOs. Native pointer/keyboard input operates the original components. No IPC/SDK, live account, delivery, installed App or healthy-Agent qualification.' }
+const result = { passed: false, frames: [], scenes: [], interactions: [], hoverGeometry: {}, boundary: 'Actual production Workbench, split Regions, channel contributions, header/menu, original group form and CSS; controlled typed public connection/diagnosis/member/retained-link DTOs. Native pointer/keyboard operates the original components. No IPC/SDK, live account, delivery, installed App or healthy-Agent qualification.' }
 let win
 app.whenReady().then(async () => {
   try {
@@ -17,6 +17,10 @@ app.whenReady().then(async () => {
     const menu = '.connector-header-menu'
     const exists = selector => 'document.querySelector(' + JSON.stringify(selector) + ')'
     const action = (label, selector = '.connector-header-menu [role="menuitem"]') => 'js:[...document.querySelectorAll(' + JSON.stringify(selector) + ')].find(node=>node.textContent.trim()===' + JSON.stringify(label) + ')'
+    const geometry = adapter => read(`(() => {const region=document.querySelector(${JSON.stringify(region)}),button=region.querySelector(${JSON.stringify('[data-channel-entry="' + adapter + '"]')}),header=region.querySelector('.agent-region-header');
+      const rect=node=>node?.getBoundingClientRect().toJSON();const paint=(node,pseudo)=>{const s=getComputedStyle(node,pseudo);return Object.fromEntries(['content','display','position','width','height','top','left','right','bottom','padding','borderWidth','boxSizing','backgroundColor','borderRadius','lineHeight','transform','outlineWidth','outlineOffset'].map(key=>[key,s[key]]))};
+      return {rects:{button:rect(button),header:rect(header),neighbors:[...header.querySelectorAll('.agent-region-header__name,.agent-region-header__more,[data-channel-entry]')].map(node=>({identity:node.dataset.channelEntry??node.className,rect:rect(node)}))},
+      paint:{button:paint(button),before:paint(button,'::before'),after:paint(button,'::after'),headerBefore:paint(header,'::before')},hover:button.matches(':hover'),focus:document.activeElement===button,open:button.dataset.state==='open'};})()`)
     const facts = () => read(`(() => {const region=document.querySelector(${JSON.stringify(region)}),menu=document.querySelector(${JSON.stringify(menu)});return {
       viewport:{width:innerWidth,height:innerHeight},region:region?.getBoundingClientRect().toJSON(),regionCount:document.querySelectorAll('[data-workbench-region-id]').length,
       entries:[...region.querySelectorAll('[data-channel-entry]')].map(node=>({adapter:node.dataset.channelEntry,state:node.dataset.channelState,label:node.getAttribute('aria-label'),title:node.title,html:node.outerHTML})),
@@ -34,9 +38,31 @@ app.whenReady().then(async () => {
       await until(`(() => {const entries=[...document.querySelectorAll(${JSON.stringify(region + ' [data-channel-entry]')})];return entries.length===2&&entries.every(node=>node.dataset.channelState===${JSON.stringify(expected)})})()`)
     }
     async function open(adapter) { await click(entry(adapter)); await until(exists(menu)); await settle() }
+    async function inspectHover(adapter, label) {
+      await close()
+      const bounds = await read('document.querySelector(' + JSON.stringify(region) + ').getBoundingClientRect().toJSON()')
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(bounds.x + bounds.width / 2), y: Math.round(bounds.y + 150) })
+      await settle()
+      const before = await geometry(adapter), r = before.rects.button
+      const previous = await read('window.__connectionsTrustedEvents.length')
+      win.webContents.sendInputEvent({ type: 'mouseMove', x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) })
+      await until('document.querySelector(' + JSON.stringify(entry(adapter)) + ').matches(":hover")'); await settle()
+      const hover = await geometry(adapter), events = await read('window.__connectionsTrustedEvents.slice(' + previous + ')')
+      assert.ok(events.some(event => event.type === 'mousemove' && event.trusted), 'Native mouse movement reaches the original entry')
+      await open(adapter)
+      const opened = await geometry(adapter)
+      await close()
+      const closed = await geometry(adapter)
+      assert.deepEqual(hover.rects, before.rects, 'Pointer hover preserves the original button/header/neighbor geometry')
+      assert.deepEqual(opened.rects, before.rects, 'Opening preserves the original button/header/neighbor geometry')
+      assert.deepEqual(closed.rects, before.rects, 'Closing preserves the original button/header/neighbor geometry')
+      result.hoverGeometry[label] = { adapter, before, hover, opened, closed, events }
+      result.interactions.push({ kind: 'native-renderer-hover', adapter, label, events })
+    }
     async function capture(name) {
       await settle()
       const scene = await facts()
+      scene.dialog = await read(`(() => {const node=document.querySelector('.agent-connector-dialog');if(!node)return null;const body=node.querySelector('.agent-connector-dialog__body');return {html:node.outerHTML,rect:node.getBoundingClientRect().toJSON(),body:body?{scrollTop:body.scrollTop,scrollHeight:body.scrollHeight,clientHeight:body.clientHeight}:null}})()`)
       assert.equal(scene.draft, 'Keep this original research draft.')
       assert.deepEqual(scene.entries.map(item => item.adapter).sort(), ['discord', 'feishu'])
       assert.ok(scene.entries.every(item => item.label && item.title), 'Both original contribution entries expose accessible state summaries')
@@ -46,15 +72,16 @@ app.whenReady().then(async () => {
       result.frames.push(file); result.scenes.push({ file, ...scene })
     }
     await until('window.channelEntryProof?.ready && document.querySelector(' + JSON.stringify(entry('discord')) + ')')
-    await read('window.__connectionsTrustedEvents=[];for(const type of ["click","keydown","input"])document.addEventListener(type,event=>window.__connectionsTrustedEvents.push({type,trusted:event.isTrusted,key:event.key}),true)')
+    await read('window.__connectionsTrustedEvents=[];for(const type of ["click","keydown","input","mousemove"])document.addEventListener(type,event=>window.__connectionsTrustedEvents.push({type,trusted:event.isTrusted,key:event.key}),true)')
     win.showInactive(); win.focus(); win.webContents.focus(); await until('document.hasFocus()')
     await state('unbound')
+    await inspectHover('feishu', 'wide')
     // Both contributions are actually opened; Escape returns focus to the exact original trigger.
     await open('feishu'); result.unboundPanel = await facts(); await close()
     assert.equal(await read('document.activeElement===document.querySelector(' + JSON.stringify(entry('feishu')) + ')'), true)
     await press('Down'); await until(exists(menu)); await close()
     await capture('header-unbound-wide-closed')
-    await layout(true); await state('unbound'); await open('discord')
+    await layout(true); await state('unbound'); await inspectHover('discord', 'narrow'); await open('discord')
     await capture('header-unbound-narrow-open')
 
     await layout(false); await read('window.channelEntryProof.setScenario("owner-failure")'); await state('unknown'); await open('feishu')
@@ -80,6 +107,12 @@ app.whenReady().then(async () => {
     await layout(false); await read('window.channelEntryProof.setScenario("attention")')
     await until('document.querySelector(' + JSON.stringify(entry('discord')) + ')?.dataset.channelState==="attention"')
     await open('discord'); await until('document.querySelectorAll(".connector-header-menu__group").length===2')
+    await until('document.querySelector("[data-problem-kind=content-gap]") && document.querySelector("[data-problem-kind=outgoing-unconfirmed]") && document.querySelector("[data-problem-kind=member-access]")')
+    result.typedGroups = await read('[...document.querySelectorAll(".connector-header-menu__group")].map(node=>({identity:node.querySelector(".connector-header-menu__item").getAttribute("aria-label"),problems:[...node.querySelectorAll("[data-problem-kind]")].map(problem=>problem.dataset.problemKind)}))')
+    const sourceGroup = result.typedGroups.find(group => group.identity.includes('345678901234567890'))
+    const effectGroup = result.typedGroups.find(group => group.identity.includes('456789012345678901'))
+    assert.ok(sourceGroup.problems.includes('content-gap') && sourceGroup.problems.includes('member-access') && !sourceGroup.problems.includes('outgoing-unconfirmed'), 'The original source gap and refused member remain separate from platform effects')
+    assert.ok(effectGroup.problems.includes('outgoing-unconfirmed') && !effectGroup.problems.includes('content-gap') && !effectGroup.problems.includes('member-access'), 'The other exact group has an uncertain original effect with its accepted input fact preserved')
     await capture('header-attention-wide')
     await layout(true)
     await until('document.querySelector(' + JSON.stringify(entry('discord')) + ')?.dataset.channelState==="attention"')
@@ -87,11 +120,40 @@ app.whenReady().then(async () => {
     await capture('header-attention-narrow')
     // Long diagnostic rows remain available on demand rather than becoming header chrome.
     await click('.connector-header-menu__diagnostics summary')
-    result.expandedDetails = await facts(); await close()
-    result.facts = await read('({calls:window.channelEntryProof.calls,targets:window.channelEntryProof.targets,errors:window.channelEntryProof.errors,draft:window.channelEntryProof.draft(),trusted:window.__connectionsTrustedEvents})')
+    result.expandedDetails = await facts()
+    await layout(false); await open('discord')
+    await click('js:[...document.querySelectorAll(".connector-header-menu__item")].find(node=>node.getAttribute("aria-label")?.includes("345678901234567890"))')
+    await until(exists('[aria-label="Group connection sections"]') + ' && ' + exists('[data-connection-section="members"]') + ' && ' + exists('[data-connection-section="joining"] [data-enrollment-code] svg'))
+    win.setContentSize(1380, 1100); await until('innerWidth===1380 && innerHeight===1100')
+    await capture('group-details-wide')
+    win.setContentSize(520, 980); await until('innerWidth===520 && innerHeight===980')
+    for (const [label, section] of [['Members', 'members'], ['Sharing', 'sharing'], ['Join group', 'joining']]) {
+      await click('js:[...document.querySelectorAll(' + JSON.stringify('[aria-label="Group connection sections"] button') + ')].find(node=>node.querySelector("span")?.textContent===' + JSON.stringify(label) + ')')
+      await until('document.activeElement===document.querySelector(' + JSON.stringify('[data-connection-section="' + section + '"]') + ')')
+      result.interactions.push({ kind: 'original-section-navigation', label, section, focus: await read('document.activeElement.outerHTML') })
+    }
+    await click('js:[...document.querySelectorAll("[data-connection-section=members] .agent-connector-person")].find(node=>node.querySelector("strong")?.textContent==="Ava Chen")?.querySelector("button")')
+    const memberFlags = await read('Object.fromEntries([...document.querySelectorAll("[data-connection-section=members] label.agent-connector-check")].map(node=>[node.textContent.trim(),node.querySelector("input").checked]))')
+    assert.equal(memberFlags['Send requests'], false); assert.equal(memberFlags['Answer questions'], false); assert.equal(memberFlags['Allow permission decisions'], false)
+    await click('js:[...document.querySelectorAll("[data-connection-section=members] label.agent-connector-check")].find(node=>node.textContent.trim()==="Send requests")?.querySelector("input")')
+    result.memberDraft = await read('({selected:document.querySelector("[data-connection-section=members]").textContent,flags:Object.fromEntries([...document.querySelectorAll("[data-connection-section=members] label.agent-connector-check")].map(node=>[node.textContent.trim(),node.querySelector("input").checked]))})')
+    assert.equal(result.memberDraft.flags['Send requests'], true); assert.equal(result.memberDraft.flags['Allow permission decisions'], false)
+    await click('[aria-label="Group sharing content"]'); await until(exists('[role="menuitemradio"][data-value="future-native-user-facing"]'))
+    await click('[role="menuitemradio"][data-value="future-native-user-facing"]')
+    result.sharingDraft = await read('({value:' + exists('[aria-label="Group sharing content"]') + '.dataset.value,joinCode:!!document.querySelector("[data-connection-section=joining] [data-enrollment-code]"),calls:[...window.channelEntryProof.calls]})')
+    assert.equal(result.sharingDraft.value, 'future-native-user-facing'); assert.equal(result.sharingDraft.joinCode, true)
+    // Return to the actual default details view after checking every original section.
+    await click('[aria-label="Close group setup"]'); await until('!document.querySelector("[role=dialog]")')
+    await open('discord'); await click('js:[...document.querySelectorAll(".connector-header-menu__item")].find(node=>node.getAttribute("aria-label")?.includes("345678901234567890"))')
+    await until(exists('[aria-label="Group connection sections"]'))
+    await capture('group-details-narrow')
+    await click('[aria-label="Close group setup"]'); await until('!document.querySelector("[role=dialog]")')
+    result.facts = await read('({calls:window.channelEntryProof.calls,requests:window.channelEntryProof.requests,targets:window.channelEntryProof.targets,errors:window.channelEntryProof.errors,draft:window.channelEntryProof.draft(),trusted:window.__connectionsTrustedEvents})')
     assert.deepEqual(result.facts.errors, [])
     assert.equal(result.facts.calls.some(method => /configure|\.bind$|\.relink$|\.pause$|\.grant$|\.create$|\.retry$/.test(method)), false, 'Opening and checking captures cause no writes, grants, sends or unknown replay')
     assert.ok(result.facts.calls.includes('connection.diagnose'), 'Bound original groups use the original diagnosis consumer')
+    assert.ok(result.facts.requests.some(request => request.method === 'connection.room.members' && request.input.externalConversationId === '345678901234567890' && request.owner?.runtimeId === 'preview-original-runtime'), 'The original details form reads exact group members on its original hosting owner')
+    assert.ok(result.facts.requests.some(request => request.method === 'connection.room.link.inspect' && request.input.operationId === 'preview-original-join-link'), 'The visible code comes from the retained original link receipt without creating a link')
     result.passed = true
   } catch (error) { result.failure = { name: error.name, message: error.message, stack: error.stack }; if (win && !win.isDestroyed()) fs.writeFileSync(path.join(evidence, 'failure.png'), (await win.webContents.capturePage()).toPNG()) }
   finally { fs.writeFileSync(path.join(evidence, 'render.json'), JSON.stringify(result, null, 2)); win?.destroy(); app.exit(result.passed ? 0 : 1) }

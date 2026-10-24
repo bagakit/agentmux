@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
-import { groupTarget, type ConnectionDiagnosis, type ConnectionRecord, type RoomBinding } from '@agentmux/core/connections'
+import { groupTarget, type ConnectionDiagnosis, type ConnectionGrant, type ConnectionRecord, type RoomBinding, type RoomLinkOperation, type RoomMembersResult } from '@agentmux/core/connections'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { SettingsNavigation, type SettingsNavigationRequest } from '../../../src/renderer/src/components/SettingsNavigation'
@@ -42,6 +42,7 @@ const headerStatus = new URLSearchParams(location.search).has('header-status')
 type Scenario = 'unbound' | 'owner-failure' | 'attention'
 const proof = { ready: false, omitOriginal: false, status: 'normal' as 'normal' | 'attention' | 'unavailable', scenario: 'unbound' as Scenario,
   calls: [] as string[], targets: [] as (ConnectionHostingTarget | undefined)[], errors: [] as string[],
+  requests: [] as { method: string; input: unknown; owner: ConnectionHostingTarget | undefined }[],
   hostingReads: 0, routes: [] as string[], channelSections: Object.fromEntries(settingsCatalog.channelEntries.map(entry => [entry.adapterId, entry.section])),
   setScenario(value: Scenario) {
     proof.scenario = value; proof.status = value === 'attention' ? 'attention' : 'normal'
@@ -49,6 +50,9 @@ const proof = { ready: false, omitOriginal: false, status: 'normal' as 'normal' 
       revision: 1, state: 'active', connectionId: connection.config.connectionId, application: connection.config.application,
       externalConversationId: index ? '456789012345678901' : room.externalConversationId,
       scope: { input: 'mentions-and-replies', publication: 'future-shared-conversation' }, sourceCheckpoints: [], authorizedBy: { kind: 'user', id: 'preview-person' } })) : []
+    useAppStore.setState({ connectorRoomIntents: value === 'attention' ? { [joinOperation.operationId]: {
+      target, hostingTarget, method: 'connection.room.link.create', input: joinOperation.input, phase: 'may-have-dispatched'
+    } } : {} })
     invalidateConnectorTarget(target)
   },
   setLayout(narrow: boolean) {
@@ -63,7 +67,20 @@ const proof = { ready: false, omitOriginal: false, status: 'normal' as 'normal' 
   },
   draft: () => useAppStore.getState().agentComposerDrafts[session.id]
 }
-const room = { externalConversationId: '345678901234567890', name: 'research-and-engineering', state: 'active' as const, mode: 'group' as const, membershipApproval: 'unknown' as const }
+const room = { externalConversationId: '345678901234567890', name: 'research-and-engineering', state: 'active' as const, mode: 'group' as const, membershipApproval: 'not-required' as const }
+const members: RoomMembersResult['members'] = [
+  { idType: 'user_id', userId: '567890123456789012', name: 'Ava Chen' },
+  { idType: 'user_id', userId: '678901234567890123', name: 'Ben Ortiz' }
+]
+const grantsFor = (binding: RoomBinding): ConnectionGrant[] => binding.externalConversationId === room.externalConversationId ? [] : [{
+  grantId: 'preview-original-member-grant', revision: 1, bindingId: binding.bindingId, bindingRevision: binding.revision,
+  connectionId: binding.connectionId, externalConversationId: binding.externalConversationId, state: 'active', capabilities: ['input', 'answer'],
+  actor: { application: binding.application, idType: members[0]!.idType, userId: members[0]!.userId }
+}]
+const joinOperation: RoomLinkOperation = { operationId: 'preview-original-join-link', input: { operationId: 'preview-original-join-link',
+  connectionId: connection.config.connectionId, expectedConnectionRevision: connection.revision, externalConversationId: room.externalConversationId },
+  application: connection.config.application, authorizedBy: { kind: 'user', id: 'preview-person' }, state: 'confirmed',
+  link: { url: 'https://example.invalid/join/preview-original', expiresAtUnixSeconds: Math.floor(Date.now() / 1000) + 3600 } }
 api.connections.hostingTarget = async () => {
   proof.hostingReads++
   if (headerStatus && proof.scenario === 'owner-failure') throw Error('The original bot hosting connection could not be reached. Existing groups and requests are kept. Check this Host again or open its channel settings; local Agent input remains available.')
@@ -73,6 +90,7 @@ api.connections.onMetadataChanged = (_listener, observation) => { observation?.(
 api.connections.call = (async (method: string, input: any, owner?: ConnectionHostingTarget) => {
   proof.calls.push(method)
   proof.targets.push(owner ? structuredClone(owner) : undefined)
+  proof.requests.push({ method, input: structuredClone(input), owner: owner ? structuredClone(owner) : undefined })
   if (owner && JSON.stringify(owner) !== JSON.stringify(hostingTarget)) throw Error('The preview cannot read a different bot hosting target')
   const subject = { kind: 'conversation', externalConversationId: input.subject?.externalConversationId ?? room.externalConversationId }
   const meta = { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application,
@@ -84,24 +102,31 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
   if (method === 'connection.diagnose') {
     if (proof.status === 'unavailable') throw Error('Controlled unavailable local status read')
     const binding = bindings.find(binding => binding.bindingId === input.bindingId && binding.revision === input.bindingRevision)
-    const attention = proof.status === 'attention'
+    const attention = proof.status === 'attention', sourceGap = attention && binding?.externalConversationId === room.externalConversationId
+    const unknownEffect = attention && !sourceGap
     return { target: input, service: { value: { enabled: true, revision: 1 }, issue: null }, groups: { issue: null, value: { nextBindingId: null, items: binding ? [{
       target: groupTarget(binding), window: {}, limit: 5,
       connection: { value: { revision: connection.revision, enabled: true, ...connection.observation }, issue: null },
-      binding: { value: { state: binding.state, currentRevision: binding.revision, scope: binding.scope, activeInputGrants: 0, activeAnswerGrants: 0, activePermissionGrants: 0 }, issue: null },
+      binding: { value: { state: binding.state, currentRevision: binding.revision, scope: binding.scope, activeInputGrants: grantsFor(binding).length, activeAnswerGrants: grantsFor(binding).length, activePermissionGrants: 0 }, issue: null },
       outgoing: { issue: null, value: { after: null, afterContent: null, next: null,
-        observation: attention ? { state: 'unavailable', reason: 'content-unconfirmed' } : { state: 'ready' },
+        observation: sourceGap ? { state: 'unavailable', reason: 'content-unconfirmed' } : unknownEffect ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'ready' },
         sourceObservation: { state: 'ready', code: null, codeRecorded: false, checkpointKey: null },
-        effectObservation: attention ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'ready' },
-        deliveries: attention ? [1, 2].map(i => ({ kind: 'conversation' as const, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null }, operationId: 'preview-original-' + i, state: 'unknown' as const, receipt: 'unknown' as const, platformMessageId: null, reason: 'effect-unconfirmed' as const, resourceUpload: null })) : [],
-        coverage: { state: attention ? 'incomplete' : 'complete', nextContent: null, originCount: 0, omittedGapCount: 0, gaps: attention ? [1, 2, 3].map(i => ({ gapKey: 'preview-gap-' + i, reason: 'source-gap' as const, code: null, codeRecorded: false, sourceKind: null, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null } })) : [] }
-      } }, incoming: { issue: null, value: { beforeIngressId: null, next: null, rows: [] } }
+        effectObservation: unknownEffect ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'ready' },
+        deliveries: unknownEffect ? [1, 2].map(i => ({ kind: 'conversation' as const, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null }, operationId: 'preview-original-' + i, state: 'unknown' as const, receipt: 'unknown' as const, platformMessageId: null, reason: 'effect-unconfirmed' as const, resourceUpload: null })) : [],
+        coverage: { state: sourceGap ? 'incomplete' : 'complete', nextContent: null, originCount: 0, omittedGapCount: 0, gaps: sourceGap ? [1, 2, 3].map(i => ({ gapKey: 'preview-gap-' + i, reason: 'source-gap' as const, code: null, codeRecorded: false, sourceKind: null, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null } })) : [] }
+      } }, incoming: { issue: null, value: { beforeIngressId: null, next: null, rows: attention ? [{
+        ingressId: 'preview-original-intake-' + binding.bindingId, sourceConnectionId: binding.connectionId, kind: 'message', state: sourceGap ? 'refused' : 'claimed',
+        code: sourceGap ? 'INGRESS_ACTOR_NOT_AUTHORIZED' : null, codeRecorded: sourceGap, bindingId: binding.bindingId, bindingRevision: binding.revision,
+        targetConnectionId: binding.connectionId, scope: 'current-binding', inputOperationId: sourceGap ? null : 'preview-original-agent-input',
+        recording: { state: 'recorded' }, coreStatus: sourceGap ? null : 'admitted', coreObservation: sourceGap ? 'not-started' : 'observed', nativeAdoption: sourceGap ? null : 'unknown', waiting: null
+      }] : [] } }
     }] : [] } } } satisfies ConnectionDiagnosis
   }
-  if (method === 'connection.binding.inspect') { const binding = bindings.find(item => item.bindingId === input.bindingId) ?? null; return { binding, current: binding, operation: null, grants: [] } }
+  if (method === 'connection.binding.inspect') { const binding = bindings.find(item => item.bindingId === input.bindingId) ?? null; return { binding, current: binding, operation: null, grants: binding ? grantsFor(binding) : [] } }
   if (method === 'connection.room.ls' || method === 'connection.room.search') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, observation: { state: 'ready' }, rooms: [room], next: null }
-  if (method === 'connection.room.get') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, observation: { state: 'ready' }, room }
-  if (method === 'connection.room.members') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, observation: { state: 'unknown', reason: 'response-unconfirmed' }, members: [], next: null }
+  if (method === 'connection.room.get') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, observation: { state: 'ready' }, room: { ...room, externalConversationId: input.externalConversationId } }
+  if (method === 'connection.room.members') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, externalConversationId: input.externalConversationId, observation: { state: 'ready' }, members, next: null } satisfies RoomMembersResult
+  if (method === 'connection.room.link.inspect') return { operation: input.operationId === joinOperation.operationId ? structuredClone(joinOperation) : null }
   if (method === 'connection.metadata.get') return meta
   if (method === 'connection.metadata.ls') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, entries: [], next: null }
   if (method === 'connection.bind') {
