@@ -36,6 +36,11 @@ it('discovers the exact shared semantic catalog through the actual Main owner, p
   expect(discovered.iconCatalog.icons.find(icon => icon.id === 'object.agent-creation')).toMatchObject({ id: 'object.agent-creation', defaultGlyph: 'plus', label: 'Agent creation relation' })
   expect(discovered.iconCatalog.icons.find(icon => icon.id === 'conversation.tool-result')).toMatchObject({ id: 'conversation.tool-result', defaultGlyph: 'tool-return', label: 'Tool result' })
   expect(discovered.iconCatalog.glyphs).toEqual(expect.arrayContaining(['tool-return', 'mote-mark', 'mote-identity', 'mote-companion', 'badge-token']))
+  const modules = { 'object.session-recovery': 'session-resume', 'object.capsule': 'capsule-page', 'object.user-input': 'user-input-field', 'object.agent-messaging': 'git-compare-arrows', 'object.amux-protocols': 'protocol-frame' }
+  const moduleRows = discovered.iconCatalog.icons.filter(icon => Object.hasOwn(modules, icon.id))
+  expect(moduleRows).toHaveLength(5)
+  for (const [id, defaultGlyph] of Object.entries(modules)) expect(moduleRows.find(icon => icon.id === id), id).toMatchObject({ id, groupId: 'object', defaultGlyph, label: expect.any(String), description: expect.any(String) })
+  expect(discovered.iconCatalog.glyphs).toEqual(expect.arrayContaining(['capsule-page', 'user-input-field', 'protocol-frame', 'session-resume', 'git-compare-arrows']))
 
   const cli = await runCompiledObjectCli(['settings', 'themes', 'ls'], objectCliEnvironment(directory))
   expect(cli.code, cli.stderr).toBe(0)
