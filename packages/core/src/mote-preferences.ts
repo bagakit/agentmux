@@ -1,8 +1,15 @@
 import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import type { ConnectionApplication } from './connections-contract.js'
+import type { AgentMuxSpaceFact } from './space-control.js'
 import { parseFileReadParams, parseFileReadResult, type FileDocument, type FileReadResource, type FileReadResult,
   type FileResource } from './public-rpc-files.js'
+
+/** Durable home of the default Mote, independent of its name and appearance. */
+export const PMO_TEAMS_TOPIC_ID = 'launcher:leader'
+export function isPrimaryMoteSpace(space: Pick<AgentMuxSpaceFact, 'kind' | 'topicId'>): boolean {
+  return space.kind === 'mote' && space.topicId === PMO_TEAMS_TOPIC_ID
+}
 
 /** Values are serialized only by the original MOTE.md owner. No YAML lives here. */
 export type MoteDefaultConversation = { hostId: string; sessionId: string; displayWorkspaceId: string; groupId: string; tabId: string; regionId: string }

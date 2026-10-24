@@ -1,10 +1,10 @@
 import { isScratchTopicId, scratchTopicDirectoryName, scratchTopicIdFromDirectoryName } from './mote-topic-identity.mjs'
 export { isScratchTopicId, scratchTopicDirectoryName, scratchTopicIdFromDirectoryName } from './mote-topic-identity.mjs'
 import type { MoteQuickMode } from './mote-quick-mode.js'
+import { PMO_TEAMS_TOPIC_ID } from '@agentmux/core/mote-preferences'
+export { PMO_TEAMS_TOPIC_ID } from '@agentmux/core/mote-preferences'
 export const SCRATCH_WORKSPACE_ID = '__scratch__'
 export const SCRATCH_WORKSPACE_NAME = 'Topics'
-/** Durable home of the default Mote. This identity does not change with its product name. */
-export const PMO_TEAMS_TOPIC_ID = 'launcher:leader'
 export const MOTE_TYPE_NAME = 'Mote'
 export const PMO_TEAMS_TOPIC_TITLE = MOTE_TYPE_NAME
 export const MOTE_SOUL_PATH = 'SOUL.md'
