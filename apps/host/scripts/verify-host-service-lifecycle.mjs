@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { once } from 'node:events'
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -15,7 +15,7 @@ assert.equal(process.platform, 'darwin', 'This qualification requires the actual
 await assertCoreDistBuiltFromCurrentSource()
 const root = resolve(import.meta.dirname, '../../..'), exec = promisify(execFile)
 const mutation = process.argv.find(value => value.startsWith('--mutation='))?.split('=')[1]
-const fixture = await mkdtemp(join(tmpdir(), 'amx-service-'))
+const fixture = await realpath(await mkdtemp(join(tmpdir(), 'amx-service-')))
 const runtime = join(fixture, 'r'), state = join(fixture, 's'), main = join(fixture, 'out/main'), assets = join(fixture, 'out/mobile')
 const storePath = join(state, 'sessions.json'), socketPath = join(runtime, 'control.sock')
 const corePath = join(root, 'packages/core/dist/index.js'), hostPath = join(root, 'apps/host/src/host.ts')
@@ -32,9 +32,9 @@ const until = async (read, accept, label, budget = 20_000) => {
 }
 const hash = bytes => 'sha256:' + createHash('sha256').update(bytes).digest('hex')
 const sources = ['apps/host/src/macos-service.ts', 'apps/host/src/index.ts', 'apps/host/src/host.ts',
-  'packages/core/src/headless-runtime.ts', 'apps/desktop/src/main/desktop-host.ts', 'apps/desktop/scripts/package-semantic-host.mjs']
+  'packages/core/src/headless-runtime.ts', 'packages/core/src/runtime-paths.ts', 'apps/desktop/src/main/desktop-host.ts', 'apps/desktop/scripts/package-semantic-host.mjs']
 const sourceDigests = Object.fromEntries(await Promise.all(sources.map(async path => [path, hash(await readFile(join(root, path)))])))
-const artifactPaths = [...['index', 'hosted', 'headless-runtime', 'public-rpc-client', 'control-endpoint-listener-worker', 'note-merge-worker']
+const artifactPaths = [...['index', 'hosted', 'headless-runtime', 'runtime-paths', 'public-rpc-client', 'control-endpoint-listener-worker', 'note-merge-worker']
   .map(name => 'packages/core/dist/' + name + '.js'), 'packages/core/vendor/ctxmux/' + process.platform + '-' + process.arch + '/bin/ctxmuxd']
 const artifacts = async () => Object.fromEntries(await Promise.all(artifactPaths.map(async path => [path, hash(await readFile(join(root, path)))])))
 const candidateIdentity = async () => {
@@ -51,7 +51,7 @@ const qualification = mutation ? null : { schema: 'agentmux.host-service-qualifi
   candidate: await candidateIdentity(), artifacts: await artifacts(), sources: sourceDigests,
   environment: { platform: process.platform, architecture: process.arch, node: process.versions.node },
   scope: 'Private macOS GUI service, actual Desktop connector and production Node Host entry, original public RPC, official ctxmux and original terminal Run. The HTTP asset is a private placeholder; formal Mobile UI is qualified separately. No user App, physical phone, cloud, logout or shutdown qualification.',
-  platform: { command: 'node apps/host/scripts/verify-host-service-lifecycle.mjs' + (process.argv.includes('--mutations') ? ' --mutations' : ''), passed: false, status: 'running', checks: [], mutants: {} }, compiled: {} }
+  platform: { command: 'node apps/host/scripts/verify-host-service-lifecycle.mjs' + (process.argv.includes('--mutations') ? ' --mutations' : process.argv.includes('--definition-mutants') ? ' --definition-mutants' : ''), passed: false, status: 'running', checks: [], mutants: {} }, compiled: {} }
 if (qualification) {
   await mkdir(receiptDirectory, { recursive: true, mode: 0o700 })
   await writeFile(receiptPath, JSON.stringify(qualification, null, 2) + '\n', { mode: 0o600 })
@@ -71,6 +71,16 @@ try {
   await writeFile(join(assets, 'mobile-release.json'), JSON.stringify({ ...manifest, digest: hash(JSON.stringify(manifest)) }))
 
   let source = await readFile(join(root, 'apps/host/src/macos-service.ts'), 'utf8')
+  if (mutation === 'definition-equivalence') {
+    const original = 'return { ...fields, EnvironmentVariables: { ...original,'
+    assert.ok(source.includes(original))
+    source = source.replace(original, 'return definition; return { ...fields, EnvironmentVariables: { ...original,')
+  }
+  if (mutation === 'definition-drift') {
+    const original = 'matches = isDeepStrictEqual(normalizeMacosHostServiceDefinition(actual, service.storePath),'
+    assert.ok(source.includes(original))
+    source = source.replace(original, 'matches = true || isDeepStrictEqual(normalizeMacosHostServiceDefinition(actual, service.storePath),')
+  }
   if (mutation === 'restart') {
     assert.ok(source.includes('<key>KeepAlive</key><true/>'))
     source = source.replace('<key>KeepAlive</key><true/>', '<key>KeepAlive</key><false/>')
@@ -120,14 +130,29 @@ try {
   const launcher = join(fixture, 'launcher.mjs')
   await writeFile(launcher, `import {connectDesktopAgentMuxHost} from ${JSON.stringify(pathToFileURL(desktop).href)};import {AgentMuxFileAgentSessionStore} from ${JSON.stringify(pathToFileURL(corePath).href)};const client=await connectDesktopAgentMuxHost({id:'local',kind:'local'},new AgentMuxFileAgentSessionStore(${JSON.stringify(storePath)}));await client.readAgentSessions();await client.dispose();`)
   const launchEnvironment = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_'))), ...environment }
+  // The service's durable authority is unchanged; only an explicit default queue is
+  // omitted by the actual cold Desktop launcher. State stays in this private fixture.
+  const originalDefinition = managed.macosHostServicePlist({ ...service, environment: { ...service.environment,
+    AGENTMUX_MESSAGE_QUEUE_PATH: core.defaultAgentMuxMessageQueuePath(storePath, '') } })
+  const invalidDefinition = '<plist><dict>invalid original definition'
+  await writeFile(service.plistPath, invalidDefinition, { mode: 0o600 })
+  await assert.rejects(managed.ensureMacosHostService(service), error => error.code === 'HOST_SERVICE_CONFIGURATION_CHANGED')
+  assert.equal(await readFile(service.plistPath, 'utf8'), invalidDefinition, 'Invalid original definition must remain available for repair')
+  await writeFile(service.plistPath, originalDefinition, { mode: 0o600 })
   const launched = spawn(process.execPath, [launcher], { env: launchEnvironment, stdio: ['ignore', 'pipe', 'pipe'] })
   let launcherErrors = ''; launched.stderr.on('data', bytes => { launcherErrors += bytes })
   const [launchExit] = await once(launched, 'exit')
   assert.equal(launchExit, 0, launcherErrors)
+  assert.equal(await readFile(service.plistPath, 'utf8'), originalDefinition, 'Equivalent service configuration must not be overwritten')
   owner = await managed.inspectMacosHostService(service)
   assert.notEqual(owner.process.pid, launched.pid)
   assert.equal(owner.owner.processId, owner.process.pid)
   assert.equal((await managed.macosHostServiceRegistration(service)).pid, owner.process.pid)
+  await assert.rejects(managed.ensureMacosHostService({ ...service, environment: { ...service.environment,
+    AGENTMUX_MESSAGE_QUEUE_PATH: join(state, 'another-queue.ndjson') } }),
+    error => error.code === 'HOST_SERVICE_CONFIGURATION_CHANGED', 'A different persistent queue must not be adopted')
+  assert.equal(await readFile(service.plistPath, 'utf8'), originalDefinition)
+  assert.equal((await managed.inspectMacosHostService(service)).owner.ownerInstanceId, owner.owner.ownerInstanceId)
 
   const connect = async () => {
     const transport = await core.connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socketPath } })
@@ -215,8 +240,18 @@ try {
   for (const [path, digest] of Object.entries(sourceDigests)) assert.equal(hash(await readFile(join(root, path))), digest,
     'The qualified source changed during this lifecycle proof: ' + path)
   baseline = { passed: true, sources: sourceDigests,
-    checks: ['launcher-exit', 'same-Host-HTTP', 'wrong-owner-retained', 'crash-recovery', 'same-Runtime-and-Run', 'whole-owner-shutdown', 'bootout-before-restart'] }
+    checks: ['invalid-definition-retained', 'equivalent-definition-retained', 'different-queue-refused', 'launcher-exit', 'same-Host-HTTP', 'wrong-owner-retained', 'crash-recovery', 'same-Runtime-and-Run', 'whole-owner-shutdown', 'bootout-before-restart'] }
   console.log(JSON.stringify(baseline))
+} catch (error) {
+  const log = service ? await readFile(service.logPath, 'utf8').catch(() => '') : ''
+  if (qualification) {
+    qualification.platform.status = 'failed'
+    qualification.platform.failure = { message: error.message, hostLog: log.slice(-16 * 1024) }
+    await writeFile(receiptPath, JSON.stringify(qualification, null, 2) + '\n', { mode: 0o600 })
+  }
+  console.error(JSON.stringify({ stage: 'private-service-failure', mutation: mutation ?? null,
+    hostLog: log.slice(-16 * 1024) }))
+  throw error
 } finally {
   for (const value of clients.reverse()) await value.dispose().catch(() => {})
   if (service) {
@@ -229,8 +264,9 @@ try {
   await rm(fixture, { recursive: true, force: true })
 }
 
-if (process.argv.includes('--mutations')) {
-  for (const name of ['restart', 'stop-fence']) {
+if (process.argv.includes('--mutations') || process.argv.includes('--definition-mutants')) {
+  const names = process.argv.includes('--definition-mutants') ? ['definition-equivalence', 'definition-drift'] : ['restart', 'stop-fence']
+  for (const name of names) {
     const failed = await exec(process.execPath, [import.meta.filename, `--mutation=${name}`], { timeout: 90_000, maxBuffer: 128 * 1024 })
       .then(() => null, error => { if (error.killed || error.signal) throw error; return error })
     assert.ok(failed, `The real lifecycle proof must reject ${name}`)
@@ -238,8 +274,9 @@ if (process.argv.includes('--mutations')) {
     const evaluated = observations.find(value => value.mutation === name && value.evaluatedSourceSHA256)
     assert.ok(evaluated && evaluated.originalSourceSHA256 !== evaluated.evaluatedSourceSHA256,
       `The actual service mutation must be evaluated: ${name}`)
-    const failure = name === 'restart' ? 'platform automatic Host recovery was not confirmed' : 'Missing expected rejection.'
-    assert.ok(String(failed.stderr).includes('AssertionError [ERR_ASSERTION]: ' + failure),
+    const failure = name === 'restart' ? 'platform automatic Host recovery was not confirmed' : name === 'definition-drift'
+      ? 'Missing expected rejection' : name === 'definition-equivalence' ? 'HOST_SERVICE_CONFIGURATION_CHANGED' : 'Missing expected rejection.'
+    assert.ok(String(failed.stderr).includes('AssertionError [ERR_ASSERTION]') && String(failed.stderr).includes(failure),
       `The actual lifecycle assertion must reject ${name}: ${failed.stderr}`)
     const recovery = name === 'restart' ? observations.find(value => value.stage === 'host-recovery-assertion' && value.mutation === name) : null
     if (name === 'restart') {
@@ -255,7 +292,7 @@ if (process.argv.includes('--mutations')) {
     qualification.platform.mutants[name] = rejected
     console.log(JSON.stringify(rejected))
   }
-  console.log('Host lifecycle mutations rejected: restart, stop-fence')
+  console.log('Host lifecycle mutations rejected: ' + names.join(', '))
 }
 if (qualification) {
   const current = await candidateIdentity()
@@ -267,7 +304,7 @@ if (qualification) {
   assert.deepEqual(await artifacts(), qualification.artifacts, 'Executed Core or native artifacts changed during the lifecycle proof')
   qualification.platform.checks = baseline.checks
   qualification.platform.passed = baseline.passed
-  qualification.platform.status = process.argv.includes('--mutations') ? 'baseline-and-mutations-confirmed' : 'baseline-confirmed'
+  qualification.platform.status = process.argv.includes('--mutations') || process.argv.includes('--definition-mutants') ? 'baseline-and-mutations-confirmed' : 'baseline-confirmed'
   qualification.platform.cleanup = 'The actual baseline and mutant processes completed the original private job/process cleanup assertions before this receipt was written.'
   await writeFile(receiptPath, JSON.stringify(qualification, null, 2) + '\n', { mode: 0o600 })
   console.log(JSON.stringify({ qualificationReceipt: '.local/state/mobile-independent-host/service/receipt.json', candidate: qualification.candidate,
