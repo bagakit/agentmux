@@ -10,11 +10,11 @@ const aliases = Object.entries(manifest.exports).map(([key, value]: [string, any
   replacement: resolve(root, 'packages/core', value.import.replace('./dist/', './src/').replace(/\.js$/, '.ts'))
 }))
 aliases.push({ find: /^@agentmux\/layout$/, replacement: resolve(root, 'packages/core/src/spatial-layout.ts') })
+const hostManifest = JSON.parse(readFileSync(resolve(root, 'apps/host/package.json'), 'utf8'))
+for (const [key, value] of Object.entries(hostManifest.exports) as [string, { import: string }][]) aliases.push({ find: new RegExp('^@agentmux/host/' + key.slice(2) + '$'), replacement: resolve(root, 'apps/host', value.import.replace('./dist/', './src/').replace(/\.js$/, '.ts')) })
 const digest = (text: string) => createHash('sha256').update(text).digest('hex')
 export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }, resolve: { alias: aliases, conditions: ['browser'] },
   plugins: [{ name: 'native-session-owning-source', enforce: 'pre',
-    resolveId(id) { if (/^(\.\.\/)+shared\/zone-file-resource(?:\.js)?$/.test(id)) return '\0unused-zone-file-resource'; if (/(^|\/)ConversationView(?:\.js)?$/.test(id)) return '\0unused-conversation-view' },
-    load(id) { if (id === '\0unused-conversation-view') return 'export function ConversationView(){throw new Error("Unrelated ConversationView leaf invoked in native proof")}' ; if (id === '\0unused-zone-file-resource') return 'export function zoneFileResource() { throw new Error("Unrelated missing file-resource leaf was invoked in the projection proof") }' },
     transform(source, id) {
       const path = id.split('?')[0]!
       if (!path.startsWith(root + '/apps/desktop/src/') && !path.startsWith(root + '/packages/core/src/')) return
@@ -28,6 +28,6 @@ export default defineConfig({ root, define: { __AGENTMUX_WEB_PREVIEW__: 'true' }
       if (code !== source) return { code, map: null }
     }
   }],
-  test: { include: ['apps/desktop/test/native-session-change.test.tsx'], setupFiles: [resolve(root, 'vitest.setup.ts')],
+  test: { include: ['apps/desktop/test/native-session-change.test.tsx', 'apps/desktop/test/native-source-themed-action.test.tsx'], setupFiles: [resolve(root, 'vitest.setup.ts')],
     passWithNoTests: false, fileParallelism: false, maxWorkers: 1, testTimeout: 10000 }
 })
