@@ -365,3 +365,66 @@ it('does not apply a discard confirmation to a replaced original byte object', a
   expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('所选附件') })
   expect(f.submit).not.toHaveBeenCalled()
 })
+
+it('keeps an unconfirmed browser export across late upload, explicit insertion and App remount', async () => {
+  const f = bound(), gate = deferred<any>(), forward = f.forward.getMockImplementation()!
+  f.forward.mockImplementation(async (method, params) => { const result = await forward(method, params); return method === 'file.upload' ? gate.promise : result })
+  const surface = <MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />
+  const scene = (show: boolean) => <MobileWebUpdateSafetyProvider verifyConnection={verifyConnection}><Action />{show && surface}</MobileWebUpdateSafetyProvider>
+  const view = await mount(scene(true))
+  await paste(view.element, '原正文'); await click(button(view.element, 'Reference files for the Agent to read')); await click(button(view.element, '上传并加入 screen.png'))
+  await vi.waitFor(() => expect(f.forward).toHaveBeenCalledOnce())
+  const original = getDeviceWorkface().snapshot().record.fileUploads![0]!
+  await vi.waitFor(async () => expect((await f.owner.inspect(original.identity)).status).toBe('uploaded'))
+  const receipt = await f.owner.inspect(original.identity)
+  await click(button(view.element, '结束等待')); await click(button(view.element, '管理 screen.png 本机副本'))
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:controlled'); vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  await click(button(view.element, '保存本机副本')); await click(button(view.element, '保留'))
+  await act(async () => gate.resolve(receipt))
+  await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.fileUploads?.[0]?.phase).toBe('uploaded'))
+  await click(button(view.element, '将 screen.png 加入消息'))
+  await vi.waitFor(() => expect(editor(view.element).textContent).toContain('screen.png'))
+  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('所选附件') })
+  await view.render(scene(false)); await view.render(scene(true))
+  expect(view.element.querySelector('.mobile-attachment')?.textContent).toContain('screen.png')
+  await click(button(view.element, '管理 screen.png 本机副本')); await click(button(view.element, '确认已另存'))
+  await click(button(view.element, '已保存，移除副本'))
+  expect(await apply()).toEqual({ status: 'navigating' })
+  expect(f.submit).not.toHaveBeenCalled(); expect(f.forward.mock.calls.filter(call => call[0] === 'file.upload')).toHaveLength(1)
+})
+
+it('keeps an unconfirmed export through ordinary Send, insertion commit and its confirmation', async () => {
+  const f = bound(), forward = f.forward.getMockImplementation()!
+  f.forward.mockImplementation(async (method, params) => { const result = await forward(method, params); if (method === 'file.upload') throw new Error('receipt unavailable'); return result })
+  const view = await mount(render(f))
+  await paste(view.element, '原正文'); await click(button(view.element, 'Reference files for the Agent to read')); await click(button(view.element, '上传并加入 screen.png'))
+  await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.fileUploads?.[0]?.phase).toBe('unknown'))
+  await click(button(view.element, '管理 screen.png 本机副本'))
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:controlled'); vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  await click(button(view.element, '保存本机副本')); await click(button(view.element, '保留'))
+  await click(button(view.element, 'Send')); await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce())
+  await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.fileUploads?.[0]?.phase).toBe('inserted'))
+  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('所选附件') })
+  expect(view.element.querySelector('.mobile-attachment')?.textContent).toContain('screen.png')
+  await click(button(view.element, '确认已另存')); await click(button(view.element, '已保存，移除副本'))
+  expect(await apply()).toEqual({ status: 'navigating' })
+  expect(f.submit).toHaveBeenCalledOnce(); expect(f.forward.mock.calls.map(call => call[0])).toEqual(['file.upload', 'file.upload.inspect'])
+})
+
+it('retains an unconfirmed export when a manual inspection inserts its confirmed Host path', async () => {
+  const f = bound(), forward = f.forward.getMockImplementation()!
+  f.forward.mockImplementation(async (method, params) => { const result = await forward(method, params); if (method === 'file.upload') throw new Error('receipt unavailable'); return result })
+  const view = await mount(render(f))
+  await paste(view.element, '原正文'); await click(button(view.element, 'Reference files for the Agent to read')); await click(button(view.element, '上传并加入 screen.png'))
+  await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.fileUploads?.[0]?.phase).toBe('unknown'))
+  await click(button(view.element, '管理 screen.png 本机副本'))
+  vi.spyOn(URL, 'createObjectURL').mockReturnValue('blob:controlled'); vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+  await click(button(view.element, '保存本机副本')); await click(button(view.element, '保留'))
+  await click(button(view.element, '核对 screen.png 原上传'))
+  await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.fileUploads?.[0]?.phase).toBe('inserted'))
+  expect(editor(view.element).textContent).toContain('screen.png')
+  expect(await apply()).toMatchObject({ status: 'blocked', message: expect.stringContaining('所选附件') })
+  expect(f.submit).not.toHaveBeenCalled()
+  await click(button(view.element, '确认已另存')); await click(button(view.element, '已保存，移除副本'))
+  expect(await apply()).toEqual({ status: 'navigating' })
+})
