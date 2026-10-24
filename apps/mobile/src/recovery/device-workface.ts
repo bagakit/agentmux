@@ -1,4 +1,5 @@
 import { parseMobileAgentCreateIntent, type MobileAgentCreateIntent } from './agent-create-intents'
+import { parseMobileAgentResumeIntent, type MobileAgentResumeIntent } from './agent-resume-intents'
 import { moteQuickDraftKey, parseMoteQuickDraft, parseMoteQuickDrafts, MoteQuickDraftInvalidError, MoteQuickDraftCapacityError, type MoteQuickDraft, type MoteQuickDraftCommit } from './mote-quick-drafts'
 import { parseQuestionReplyAttempt } from '@agentmux/client-ui/conversation-question-reply'
 import type { MobileQuestionReplyAttempt } from '../conversation/question-replies'
@@ -62,7 +63,7 @@ function sameGoalOperation(a: MobileGoalOperation, b: MobileGoalOperation): bool
   return keys.length === Object.keys(b).length && keys.every(key => a[key] === b[key])
 }
 export type DeviceWorkface = Navigation & { version: 1;
-  agentCreates?: MobileAgentCreateIntent[]; recordId?: string; host: { origin: string; hostId: string } | null; conversation: DraftRecord; presentation?: MobilePresentationRoute; goalWork?: GoalWorkface; goalIntents?: GoalIntent[]; fileUploads?: MobileFileUpload[]; goalDrafts?: MobileGoalDraft[]; goalDraftConflicts?: MobileGoalDraft[]; knowledgeDrafts?: MobileKnowledgeDraft[]; knowledgeDraftConflicts?: MobileKnowledgeDraft[];
+  agentCreates?: MobileAgentCreateIntent[]; agentResumes?: MobileAgentResumeIntent[]; recordId?: string; host: { origin: string; hostId: string } | null; conversation: DraftRecord; presentation?: MobilePresentationRoute; goalWork?: GoalWorkface; goalIntents?: GoalIntent[]; fileUploads?: MobileFileUpload[]; goalDrafts?: MobileGoalDraft[]; goalDraftConflicts?: MobileGoalDraft[]; knowledgeDrafts?: MobileKnowledgeDraft[]; knowledgeDraftConflicts?: MobileKnowledgeDraft[];
   moteFileDrafts?: MoteFileDraft[]; moteFileDraftConflicts?: MoteFileDraft[]; moteQuickDrafts?: MoteQuickDraft[]; moteQuickDraftConflicts?: MoteQuickDraft[] }
 type DeviceStorage = Pick<Storage, 'getItem' | 'setItem'>
 type StorageGetter = () => DeviceStorage
@@ -210,6 +211,7 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
   if (value && typeof value === 'object' && Object.hasOwn(value, 'moteFileDraftConflicts')) keys.push('moteFileDraftConflicts')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'moteQuickDrafts')) keys.push('moteQuickDrafts')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'moteQuickDraftConflicts')) keys.push('moteQuickDraftConflicts')
+  if (value && typeof value === 'object' && Object.hasOwn(value, 'agentResumes')) keys.push('agentResumes')
   if (value && typeof value === 'object' && Object.hasOwn(value, 'agentCreates')) keys.push('agentCreates')
   const v = record(value, keys)
   if (v.agentCreates !== undefined) {
@@ -217,7 +219,11 @@ export function parseDeviceWorkface(value: unknown): DeviceWorkface {
     const operations = new Set<string>()
     for (const raw of v.agentCreates) { const intent = parseMobileAgentCreateIntent(raw); if (operations.has(intent.input.operationId)) throw invalid(); operations.add(intent.input.operationId) }
   }
-
+  if (v.agentResumes !== undefined) {
+    if (!Array.isArray(v.agentResumes) || v.agentResumes.length > MAX_ENTRIES) throw invalid()
+    const operations = new Set<string>()
+    for (const raw of v.agentResumes) { const intent = parseMobileAgentResumeIntent(raw); if (operations.has(intent.input.operationId)) throw invalid(); operations.add(intent.input.operationId) }
+  }
   if (v.recordId !== undefined && !id(v.recordId)) throw invalid()
   if (v.version !== 1 || !(v.selectedSessionId === null || id(v.selectedSessionId))
     || !(v.hostUrl === '' || origin(v.hostUrl))
@@ -400,6 +406,18 @@ export class DeviceWorkfaceStore {
     return work
   }
   /** Preserve other tabs and refuse a replacement device record or changed original packet. */
+  retainAgentResume(intent: MobileAgentResumeIntent, expectedRecordId: string | null): Promise<void> {
+    const captured = parseMobileAgentResumeIntent(intent)
+    return this.update(record => {
+      const all = record.agentResumes ?? []
+      const retainedConfirmed = new Set(all.filter(item => item.phase === 'confirmed' || item.phase === 'superseded').slice(-31))
+      const current = all.filter(item => item.phase !== 'confirmed' && item.phase !== 'superseded' || retainedConfirmed.has(item)), prior = current.find(item => item.input.operationId === captured.input.operationId)
+      if (prior && !sameValue({ ...prior, phase: captured.phase }, captured)) throw new Error('原恢复操作已绑定另一目标；未覆盖原记录。')
+      if (!prior && current.some(item => item.phase !== 'confirmed' && item.phase !== 'superseded' && item.runtimeId === captured.runtimeId && item.deviceHostId === captured.deviceHostId && item.input.agentSessionId === captured.input.agentSessionId)) throw new Error('此 Agent 已有待核对的原恢复操作；请先核对原操作。')
+      if (prior?.phase === 'confirmed' || prior?.phase === 'superseded') return record
+      return { ...record, agentResumes: prior ? current.map(item => item === prior ? captured : item) : [...current, captured] }
+    }, expectedRecordId)
+  }
   retainAgentCreate(intent: MobileAgentCreateIntent, expectedRecordId: string | null): Promise<void> {
     const captured = parseMobileAgentCreateIntent(intent)
     return this.update(record => {

@@ -10,6 +10,7 @@ import { MobileGoalsSurface } from './goals/MobileGoalsSurface'
 import { MobileZoneWorkface } from './navigation/MobileZoneWorkface'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
 import { MobileAgentCreate, type MobileAgentCreateTarget } from './navigation/MobileAgentCreate'
+import { MobileAgentActions } from './conversation/MobileAgentActions'
 import { MobileConversationSurface, type MobileConnection } from './conversation/MobileConversationSurface'
 import { MobileTerminalViewer } from './terminal/MobileTerminalViewer'
 import { useHostAppearance } from './appearance/useHostAppearance'
@@ -277,14 +278,13 @@ export function MobileApp({ client, connection, platform, native = false, focusC
           : <MobileIdentity identity={objectIdentity ?? { name: sessionTitle ?? '原会话', project: pageName }} session={selected} client={client} connected={connected} size={24} visible={exposed} />}
         <span className="mobile-session-title">{sessionTitle ?? selected?.providerId ?? '原会话'}</span>
         <button className="mobile-icon-button" aria-label={showGoalWork ? '返回原对话' : '目标与结果'} aria-pressed={showGoalWork} onClick={() => setShowGoalWork(value => !value)}><ThemeObjectGoalIcon size={18} /></button>
-        {!objectIdentity?.mote && <button className="mobile-icon-button" aria-label={workface.panel === 'terminal' ? '查看对话' : '查看终端'} onClick={() => { setShowGoalWork(false); setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' })) }}>{workface.panel === 'terminal' ? <ThemeObjectConversationIcon size={18} /> : <ThemeObjectTerminalIcon size={18} />}</button>}
-        {objectIdentity?.mote && <button className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={18} /></button>}
+        <button className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={18} /></button>
         {native && selected && !showGoalWork && workface.panel !== 'terminal' && <button className="mobile-icon-button" aria-label="撰写消息" onClick={() => { if (!focusComposer()) setNotice('输入区暂时未准备好。原草稿保留。') }}><ThemeActionComposeIcon size={17} /></button>}
       </div> : <>
         {workspaceVisible && showSession ? <button className="mobile-icon-button" data-mobile-back aria-label={sessionBackLabel} onClick={requestBack}><ThemeNavigationBackIcon size={20} /></button> : <span className="mobile-header-spacer" />}
         {showSession && objectIdentity?.mote ? <button className="mobile-mote-heading" aria-label={`${objectIdentity.name} · 查看身份与状态`} onClick={() => openProfile(objectIdentity)}><MobileIdentity identity={objectIdentity} session={selected} client={client} connected={connected} size={38} visible={exposed} /></button>
           : <div className="mobile-brand"><img className="mobile-brand-icon" src={brandIcon} width={24} height={24} alt="" /><span>AgentMux</span></div>}
-        {showSession && objectIdentity?.mote ? <button className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></button> : <span className="mobile-header-spacer" />}
+        {showSession ? <button className="mobile-icon-button" aria-label="当前对话操作" onClick={() => setSheet('actions')}><ThemeActionMoreIcon size={20} /></button> : <span className="mobile-header-spacer" />}
       </>}
     </header>}
     <main className="mobile-main">
@@ -356,6 +356,7 @@ export function MobileApp({ client, connection, platform, native = false, focusC
           }} />
         </> : sheet === 'actions' ? <>
           <Dialog.Description id="mobile-sheet-description">{sessionTitle ?? '原 Agent'} · {objectIdentity?.project ?? '项目未确认'}</Dialog.Description>
+          {workface.selectedSessionId && <MobileAgentActions client={client} agentSessionId={workface.selectedSessionId} connected={connected} copyText={platform.copyText} />}
           <button className="mobile-menu-row" onClick={() => { setShowGoalWork(value => !value); setSheet(null) }}><ThemeObjectGoalIcon size={18} /><span>{showGoalWork ? '返回原对话' : '目标与结果'}</span></button>
           <button className="mobile-menu-row" onClick={() => { setShowGoalWork(false); setWorkface(value => ({ ...value, panel: value.panel === 'terminal' ? 'conversation' : 'terminal' })); setSheet(null) }}>{workface.panel === 'terminal' ? <ThemeObjectConversationIcon size={18} /> : <ThemeObjectTerminalIcon size={18} />}<span>{workface.panel === 'terminal' ? '查看对话' : '查看终端'}</span></button>
         </> : <>
