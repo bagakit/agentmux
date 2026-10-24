@@ -1,13 +1,14 @@
 import { createContext, createElement, useContext, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
 import { getDeviceWorkface } from '../recovery/device-workface'
 import { mobileUpdateFragment } from '../connection/reload-identity'
+import { createAttachmentPageOwner, type AttachmentPageOwner } from '../conversation/attachment-page-owner'
 
 export type MobileWebUpdateResult = { status: 'navigating' } | { status: 'blocked'; message: string }
 type SafetyOwner = () => string | null
 type ConnectionCheck = () => Promise<() => boolean>
 type DispatchMatch = (candidate: unknown) => boolean
 type SafetyContext = { apply(): Promise<MobileWebUpdateResult>; register(owner: SafetyOwner): () => void;
-  trackDispatch(key: string, match: DispatchMatch): () => void; isDispatched(key: string, candidate: unknown): boolean }
+  trackDispatch(key: string, match: DispatchMatch): () => void; isDispatched(key: string, candidate: unknown): boolean; attachmentOwner(): AttachmentPageOwner }
 const unavailable = '当前页面无法确认原连接；请保留工作内容并恢复原 Mac 连接后重试。'
 const Safety = createContext<SafetyContext | null>(null)
 
@@ -21,6 +22,13 @@ export function useMobileWebUpdateSafetyOwner(owner: SafetyOwner): void {
 export function useMobileWebUpdateSafety(): Pick<SafetyContext, 'apply'> {
   const context = useContext(Safety)
   return context ?? { apply: async () => ({ status: 'blocked', message: unavailable }) }
+}
+
+/** One original attachment owner survives presentation remounts within this page. */
+export function useMobileWebAttachmentOwner(): AttachmentPageOwner {
+  const context = useContext(Safety), owner = useRef<AttachmentPageOwner | null>(null)
+  if (!owner.current) owner.current = context?.attachmentOwner() ?? createAttachmentPageOwner()
+  return owner.current
 }
 
 /** Keep an accepted operation protected even if its presenting component unmounts. */
@@ -44,9 +52,13 @@ export function useMobileWebDispatchedOperations() {
 export function MobileWebUpdateSafetyProvider({ children, verifyConnection, prepareReload, native = false }: {
   children: ReactNode; verifyConnection: ConnectionCheck; prepareReload?: () => () => void; native?: boolean
 }) {
-  const owners = useRef(new Set<SafetyOwner>()), dispatched = useRef(new Map<string, Set<DispatchMatch>>()), ownersRevision = useRef(0), current = useRef({ verifyConnection, prepareReload, native })
+  const owners = useRef(new Set<SafetyOwner>()), dispatched = useRef(new Map<string, Set<DispatchMatch>>()), ownersRevision = useRef(0), attachment = useRef<AttachmentPageOwner | null>(null), current = useRef({ verifyConnection, prepareReload, native })
   current.current = { verifyConnection, prepareReload, native }
   const context = useMemo<SafetyContext>(() => ({
+    attachmentOwner() {
+      if (!attachment.current) { attachment.current = createAttachmentPageOwner(() => { ownersRevision.current++ }); ownersRevision.current++ }
+      return attachment.current
+    },
     trackDispatch(key, match) {
       const group = dispatched.current.get(key) ?? new Set<DispatchMatch>()
       group.add(match); dispatched.current.set(key, group)
@@ -61,7 +73,7 @@ export function MobileWebUpdateSafetyProvider({ children, verifyConnection, prep
       const blocked = (message: string): MobileWebUpdateResult => ({ status: 'blocked', message })
       if (current.current.native) return blocked('当前不是手机网页，请使用设备的应用更新方式。')
       const originalOwnersRevision = ownersRevision.current
-      const checkOwners = () => { for (const owner of owners.current) { const issue = owner(); if (issue) return issue } return null }
+      const checkOwners = () => { const issue = attachment.current?.issue(); if (issue) return issue; for (const owner of owners.current) { const issue = owner(); if (issue) return issue } return null }
       const issue = checkOwners()
       if (issue) return blocked(issue)
       const original = current.current

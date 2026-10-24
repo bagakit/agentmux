@@ -167,6 +167,12 @@
 .mobile-attachments .mobile-attachment-pending__row > .mobile-text-button { flex: none; min-width: 44px; padding-inline: 6px; white-space: nowrap; }
 .mobile-attachment-pending__identity { margin: 0 4px 6px; color: var(--text-2); font-size: 12px; line-height: 1.45; overflow-wrap: anywhere; }
 .mobile-attachment-copy p.mobile-attachment-original { color: var(--text-2); font-size: 12px; }
+.mobile-attachment-copy-actions { margin: 0 4px; color: var(--text-2); font-size: 12px; }
+.mobile-attachment-copy-actions__toolbar, .mobile-attachment-copy-actions__choices, .mobile-attachment-copy-actions__confirm > div { display: flex; align-items: center; gap: 12px; }
+.mobile-attachment-copy-actions__toolbar { justify-content: space-between; }
+.mobile-attachment-copy-actions__confirm { padding: 4px 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-1); }
+.mobile-attachment-copy-actions__confirm p { margin: 2px 0; color: var(--text-2); overflow-wrap: anywhere; }
+.mobile-attachment-copy-actions__confirm > div { justify-content: flex-end; }
 .mobile-attachment[data-phase="unknown"] { border-color: var(--amber); }
 .mobile-message-tools { display: flex; flex-direction: column; overflow: hidden; }
 .mobile-message-tools__records { flex: 1; max-height: 60dvh; }
