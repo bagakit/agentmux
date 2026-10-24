@@ -3,6 +3,8 @@ node_modules
 dist
 apps/desktop/release
 apps/desktop/resources/bin/agentmux-workspace-move
+apps/desktop/resources/AgentMux Native.app/
+packages/native-desktop/macos/.build/
 out
 .vite
 coverage

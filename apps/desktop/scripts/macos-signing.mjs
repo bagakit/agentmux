@@ -55,7 +55,7 @@ export async function verifyMacosSigning(appPath, plan, { run = runNative, bundl
   const verification = ['--verify', '--deep', '--strict', '--verbose=2']
   if (plan.kind === 'certificate') verification.push('--test-requirement',
     plan.profile === 'local' ? `=identifier "${bundleId}" and certificate leaf = H"${plan.identity}" and certificate leaf trusted` :
-      `=identifier "${bundleId}" and anchor apple generic and certificate leaf[subject.OU] = "${plan.teamId}"`)
+      `=identifier "${bundleId}" and anchor apple generic and certificate leaf[subject.OU] = "${plan.teamId}" and certificate leaf = H"${plan.identity}"`)
   await run('/usr/bin/codesign', [...verification, appPath])
   const metadataResult = await run('/usr/bin/codesign', ['--display', '--verbose=4', appPath])
   const metadata = `${metadataResult.stdout ?? ''}\n${metadataResult.stderr ?? ''}`
