@@ -75,7 +75,7 @@ Note 使用同一 `file.read/write/create`，经 Main 的 [NoteFileWriter](../..
 读写原 `.note.md`。正文、稳定块／引用和可信作者的边界见 [Note Markdown](note-markdown.md)。
 `notebook.inspect --content`／`notebook.content` 经 [NotebookObservationOwner](../../apps/desktop/src/main/notebook-observation-owner.ts)
 观察同一已保存正文与修订绑定元数据；`notebook.graph/resolve` 从正文派生关系。
-[NotebookStore](../../packages/core/src/notebook-store.ts) 是 SQLite 目录、关注、操作历史和块归因的原 owner。
+[NotebookStore](../../packages/core/src/notebook-store.ts) 以笔记库本地文件持有目录、关注、操作历史和块归因，存储机制见 [Note Markdown](note-markdown.md#元数据与公共消费)。
 `notebook.inspect` 同时公开原 NotesStorage 的 `resourceChanges` 与 `conversionIssues`，供消费者确认同一 Note 的位置及部分转换问题。
 
 原 Zone 文件的已保存正文与原修订保存沿[文件类型与严格 codec](../../packages/core/src/public-rpc-files.ts)公开。`file read`／`file write` CLI → 公共服务 → Main 注入的 [FileReadOwner](../../apps/desktop/src/main/file-read-owner.ts) 解析准确 Zone／资源，再委托原 [WorkspaceFiles](../../apps/desktop/src/main/workspace-files.ts)；结果保留完整原 revision、Host／Workspace／Zone 与原读取状态；观察未知不冒文件不存在，也不另建 Memory 存储。`file.write` 只保存已有文本文件，要求完整原 revision；`written`／`conflict`／`error`／`unknown` 保真，未知先读同一文件核对，不自动再写。
