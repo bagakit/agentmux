@@ -246,14 +246,20 @@ response; a null receipt is only the current observation. Explicit same-input co
 retains the original reference, while changed input conflicts. Neither command grants external
 actors, replays input or changes an Agent's capabilities.
 
-Group conversation sharing uses an exact Binding and future source cut. The publication scope
-future-native-user-facing retains public Agent replies only. future-shared-conversation shares
+New ordinary group bind/relink requests require publication scope future-shared-conversation,
+using an exact Binding and future source cut. This shares
 ordinary public human/Agent messages, progress, questions/answers and their supported resources.
 It also shares original independent AgentMux Session messages after their exact typed
 notification or direct message input key, recipient and original message association are verified. Notification/reference
 wrappers are not speech. It excludes tool input/output, reasoning, generated context and
 Provider-internal subagent collaboration, even when a source marks those parts public. Sharing a conversation is not authority to drive
 the Agent: member input grants and the Binding trigger scope govern execution separately.
+An original future-native-user-facing Binding or operation remains readable as public Agent
+replies only. Opening it does not expand its audience. The original authenticated person/device
+can explicitly confirm complete conversation sharing with a full-scope relink; earlier history
+is not backfilled. Original receipts, member decisions and unknown effects retain their identities.
+Recorded narrow bind/relink inputs are inspectable, not new dispatch requests. Original lifecycle
+pause/resume and Mote private-chat publication origins keep their own existing contracts.
 
 Application member defaults are managed with connection application access get, configure
 and inspect. Get takes connectionId and an optional exact actor; configure takes operationId,
