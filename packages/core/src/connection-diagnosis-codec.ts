@@ -21,10 +21,10 @@ function nullable<T>(value: unknown, parse: (value: unknown) => T): T | null { r
 /** The original safe waiting tuple; never includes its private failure or input reference. */
 export function parseConnectionDiagnosisWaiting(value: unknown): ConnectionDiagnosisIntake['waiting'] {
   return nullable(value, value => {
-    const w = object(value, ['phase', 'reason', 'wake']), phase = member(w.phase, ['runtime', 'authorization', 'observer', 'native-environment', 'input-environment', 'service'] as const)
-    const reasons = { runtime: ['runtime-unavailable'], authorization: ['author-authorization-needed'], observer: ['observer-stopped'], 'native-environment': ['original-environment-unconfirmed', 'original-target-changed'], 'input-environment': ['original-input-unconfirmed', 'original-target-changed'], service: ['observation-failed'] } as const
-    const reason = member(w.reason, reasons[phase] as readonly import('./agent-input-wait.js').AgentInputWaitReason['reason'][]), wake = member(w.wake, ['runtime-restored', 'explicit-rejoin'] as const)
-    if (wake !== (phase === 'runtime' ? 'runtime-restored' : 'explicit-rejoin')) return fail()
+    const w = object(value, ['phase', 'reason', 'wake']), phase = member(w.phase, ['runtime', 'session', 'authorization', 'observer', 'native-environment', 'input-environment', 'service'] as const)
+    const reasons = { runtime: ['runtime-unavailable'], session: ['session-resume-needed'], authorization: ['author-authorization-needed'], observer: ['observer-stopped'], 'native-environment': ['original-environment-unconfirmed', 'original-target-changed'], 'input-environment': ['original-input-unconfirmed', 'original-target-changed'], service: ['observation-failed'] } as const
+    const reason = member(w.reason, reasons[phase] as readonly import('./agent-input-wait.js').AgentInputWaitReason['reason'][]), wake = member(w.wake, ['runtime-restored', 'session-restored', 'explicit-rejoin'] as const)
+    if (!(phase === 'service' && wake === 'session-restored') && wake !== (phase === 'runtime' ? 'runtime-restored' : phase === 'session' ? 'session-restored' : 'explicit-rejoin')) return fail()
     return { phase, reason, wake }
   })
 }

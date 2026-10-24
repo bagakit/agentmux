@@ -41,7 +41,7 @@ import { noteProvenanceResourceKey } from './note-provenance.js'
 import type { NoteResource } from './notebook-catalog.js'
 import { parseControlDemandActivity } from './control-codec.js'
 import { parseDeliveryAttemptLookup, parseDeliveryFailure } from './delivery-attempt.js'
-import { validateAgentInputWaitRef, type AgentInputSubmissionReceipt } from './agent-input-wait.js'
+import { agentInputDeliveryKey, validateAgentInputWaitRef, type AgentInputSubmissionReceipt } from './agent-input-wait.js'
 
 import { parseFileUploadIdentity, parseFileUploadParams, parseFileUploadResult } from './public-rpc-files.js';
 
@@ -684,10 +684,10 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
         const key = validateAgentPromptInputKey(input.key)
         if (observed && (!isDeepStrictEqual(observed.key, key) || !isDeepStrictEqual(p.record, observed.admission))) fail()
         if (p.record !== null) {
-          const original = parsePromptSubmissionRecord(p.record)
-          if (original.agentSessionId !== key.agentSessionId || original.run.runId !== key.expectedRun.runId ||
+          const original = parsePromptSubmissionRecord(p.record), deliveryKey = observed ? agentInputDeliveryKey(observed.control) : key
+          if (original.agentSessionId !== key.agentSessionId || original.run.runId !== deliveryKey.expectedRun.runId ||
               (original.admission?.submissionId ?? original.terminalPromptSubmission?.submissionId ?? original.launch?.input.submissionId ?? original.admission?.operationId) !== agentPromptInputId(key) ||
-              original.admission?.inputKey && !isDeepStrictEqual(original.admission.inputKey, key)) fail()
+              original.admission?.inputKey && !isDeepStrictEqual(original.admission.inputKey, deliveryKey)) fail()
         }
         break
       }

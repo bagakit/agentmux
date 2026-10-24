@@ -3,10 +3,11 @@ import { normalizeAgentContinuityLaunchInput } from './agent-session-recovery/co
 import { parseAgentExternalMessageAuthor, parseAgentExternalInteractionAuthor } from './external-author.js'
 import { AgentMuxError } from './errors.js'
 import { browserInputContextFields } from './browser-input-context.js'
-import { validateAgentInputControlId, validateAgentInputWaitRef } from './agent-input-wait.js'
+import { agentInputDeliveryKey, validateAgentInputControlId, validateAgentInputDeliveryKey, validateAgentInputWaitRef } from './agent-input-wait.js'
 import { validateAgentPromptAdmissionIntent, validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { normalizeMessageChannel } from './message-origin.js'
 import { normalizeOperationDevice } from './operation-device.js'
+import { dequal } from 'dequal'
 import type { AgentMuxRunRef, AgentMuxStoredAgentSession, AgentPromptInputPlan, AgentPromptSubmissionRecord, AgentTerminalPromptReadinessSource } from './types.js'
 
 /** Pure original-input record decoding, shared by durable storage and public receipts. */
@@ -189,9 +190,10 @@ export function normalizePromptCompletionAdmission(value: unknown): NonNullable<
     ...(admission.inputDispatch === undefined ? {} : { inputDispatch: (() => {
       const dispatch = record(admission.inputDispatch, 'original input dispatch gate')
       const ref = validateAgentInputWaitRef(dispatch.ref), key = validateAgentPromptInputKey(admission.inputKey)
-      if (JSON.stringify(ref.key) !== JSON.stringify(key)) throw new AgentMuxError(
+      const deliveryKey = dispatch.deliveryKey === undefined ? undefined : validateAgentInputDeliveryKey(ref.key, dispatch.deliveryKey)
+      if (!dequal(agentInputDeliveryKey({ ref, ...(deliveryKey ? { deliveryKey } : {}) }), key)) throw new AgentMuxError(
         'Original dispatch gate does not name this input.', 'INVALID_AGENT_SESSION_STORE')
-      return { ref, gateId: validateAgentInputControlId(dispatch.gateId) }
+      return { ref, gateId: validateAgentInputControlId(dispatch.gateId), ...(deliveryKey ? { deliveryKey } : {}) }
     })() }),
     ...(admission.submissionId === undefined ? {} : { submissionId: string(admission.submissionId, 'promptCompletionAdmission.submissionId') }),
     ...(admission.completionId === undefined ? {} : { completionId: string(admission.completionId, 'promptCompletionAdmission.completionId') }),
