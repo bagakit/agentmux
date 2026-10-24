@@ -1,5 +1,5 @@
 import { defineConfig } from 'vitest/config'
-import { appendFileSync } from 'node:fs'
+import { appendFileSync, readFileSync } from 'node:fs'
 import { relative, resolve } from 'node:path'
 import { createHash } from 'node:crypto'
 import base from '../scripts/fixtures/conversation-latest-auto/vitest.owning.config.mts'
@@ -20,7 +20,7 @@ export default defineConfig({ ...base, cacheDir: resolve(root, '.local/a2a-prima
     }
     const output = process.env.AGENTMUX_PRIMARY_READING_LOADED
     const hash = (value: string) => createHash('sha256').update(value).digest('hex')
-    if (output) appendFileSync(output, JSON.stringify({ path: relative(root, file), original: hash(source), compiled: hash(code) }) + '\n')
+    if (output) appendFileSync(output, JSON.stringify({ path: relative(root, file), original: hash(readFileSync(file)), input: hash(source), compiled: hash(code) }) + '\n')
     return code === source ? undefined : { code, map: null }
   } }],
   test: { ...base.test, environment: 'happy-dom', include: [
