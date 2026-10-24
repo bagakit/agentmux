@@ -44,7 +44,7 @@ it('actual Mobile reporter and exact diagnostic references retain their original
   expect(unscopedBefore.data).toMatchObject({ items: [expect.objectContaining({ recordRef: expect.objectContaining({ logId: original.logId }) })] })
   const hostRecent = await inspect({ ...recent, authority: original.authority })
   expect(hostRecent).toMatchObject({ readAuthority: original.authority, completeness: 'complete', issue: null })
-  expect(await inspect({ domain: 'client.incident', hostId: 'local', logId: original.logId })).toMatchObject({ availability: 'unavailable', issue: { code: 'DIAGNOSTIC_EVIDENCE_AUTHORITY_UNVERIFIABLE' } })
+  expect(await inspect({ domain: 'client.incident', hostId: 'local', logId: original.logId })).toMatchObject({ availability: 'unavailable', authorityStatus: 'unconfirmed', issue: { code: 'DIAGNOSTIC_EVIDENCE_AUTHORITY_UNVERIFIABLE' } })
 
   await f.startMain()
   const state = f.native.env.AGENTMUX_STATE_DIRECTORY!
