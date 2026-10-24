@@ -41,11 +41,14 @@
 .agent-connector-receipt code { color: var(--text-3); overflow-wrap: anywhere; }
 .agent-connector-dialog__footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; flex: none; gap: var(--sp-3); padding: var(--sp-4) var(--sp-6); border-top: 1px solid var(--line-soft); }
 .agent-connector-dialog__footer > .agent-connector-text-action { margin-right: auto; }
-.conversation-sharing-notice { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-3); row-gap: var(--sp-1); min-width: 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
-.conversation-sharing-notice__label { flex-shrink: 0; }
-.conversation-sharing-notice__audience { display: inline-flex; flex-wrap: wrap; align-items: baseline; column-gap: var(--sp-2); min-width: 0; overflow-wrap: anywhere; }
-.conversation-sharing-notice__audience strong { color: var(--text-2); font-weight: 500; }
-.conversation-sharing-notice__status { color: var(--text-3); }
+.conversation-sharing-notice { display: flex; flex-wrap: wrap; align-items: flex-start; gap: var(--sp-1) var(--sp-4); min-width: 0; margin: var(--sp-2) var(--sp-4) 0; color: var(--text-3); font-size: var(--fs-micro); line-height: 1.5; }
+.conversation-sharing-notice__audience { display: flex; align-items: flex-start; gap: var(--sp-2); flex: 0 1 320px; min-width: 0; max-width: 100%; }
+.conversation-sharing-notice__audience > :is(img, svg) { flex: none; margin-top: 2px; }
+.conversation-sharing-notice__content { min-width: 0; }
+.conversation-sharing-notice__destination { display: flex; min-width: 0; white-space: nowrap; }
+.conversation-sharing-notice__destination > span { flex: none; margin-right: 0.3em; }
+.conversation-sharing-notice__destination strong { overflow: hidden; text-overflow: ellipsis; color: var(--text-2); font-weight: 500; }
+.conversation-sharing-notice__status { display: block; color: var(--text-3); overflow-wrap: anywhere; }
 
 .agent-connector-disclosure { min-width: 0; font-size: var(--fs-meta); color: var(--text-2); }
 .agent-connector-disclosure > summary { cursor: pointer; padding-block: var(--sp-2); }
