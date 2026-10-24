@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process'
 import { NativeConnection, NativeDesktop, type JsonObject } from '../../../packages/native-desktop/src/index.js'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service.js'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server.js'
+import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client.js'
 import { parseNativeDesktopParams, parseNativeDesktopResult } from '../../../packages/core/src/public-rpc-native-desktop.js'
 import { createNativeDesktopPublicOwner } from '../src/main/native-desktop-public.js'
 import { agentMuxCliModuleCatalog } from '../../../packages/core/src/agentmux-cli-module-skills.js'
@@ -15,11 +16,12 @@ const instanceId = 'native-instance-original'
 const scope = { hostId: 'local', instanceId }
 const target = { pid: 777, processStartedAt: 1234.5, windowId: 42 }
 const pngData = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aD1sAAAAASUVORK5CYII='
+const captured = { state: 'captured', screenshot: { data: pngData, format: 'png', width: 1, height: 1, scale: 2 }, engine: 'protocol-fixture', selectionRect: { x: -10, y: 0, width: .5, height: .5 } }
 const context = { principal: { kind: 'user' as const, id: 'fixture-person' }, transport: 'unix' as const }
 const cleanups: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
 
-async function nativeFixture() {
+async function nativeFixture(captureResults = new Map<string, unknown>()) {
   const directory = await mkdtemp(join(tmpdir(), 'amn-public-'))
   const socketPath = join(directory, 'native.sock'), calls: JsonObject[] = [], sockets = new Set<Socket>()
   const server = createServer(socket => {
@@ -36,7 +38,7 @@ async function nativeFixture() {
         else if (request.method === 'listApps') result = { apps: [{ name: 'Fixture', bundleId: null, pid: target.pid, processStartedAt: target.processStartedAt, isRunning: true, lastUsedAt: null, useCount: null }] }
         else if (request.method === 'clipboardRead') result = { state: 'read', format: request.params.format, data: ' \n原文\n ', changeCount: 7 }
         else if (request.method === 'clipboardWrite') result = { state: 'written', format: request.params.format, byteLength: Buffer.byteLength(request.params.data), changeCount: 8 }
-        else if (request.method === 'captureScreenshot') result = request.operationId === 'capture-png' ? { state: 'captured', screenshot: { data: pngData, format: 'png', width: 1, height: 1, scale: 2 }, engine: 'protocol-fixture', selectionRect: { x: -10, y: 0, width: .5, height: .5 } } : { state: 'cancelled' }
+        else if (request.method === 'captureScreenshot') result = captureResults.has(request.operationId) ? captureResults.get(request.operationId) : request.operationId === 'capture-png' ? captured : { state: 'cancelled' }
         else if (request.method === 'getAppState') result = { snapshotId: 'snapshot-original', snapshot: { id: 'snapshot-original', app: { name: 'Fixture', bundleId: null, pid: target.pid, processStartedAt: target.processStartedAt }, window: { id: target.windowId, title: 'Fixture window', x: 0, y: 0, width: 100, height: 80 }, coordinateSpace: 'window', treeText: 'label', elementCount: 1, elements: [{ index: 0, actions: ['AXPress'], frame: null }], focusedElementId: 0, truncation: { truncated: false, maxNodes: 1500, maxDepth: 20, maxDepthReached: false } }, screenshot: null, screenshotStatus: { state: 'skipped', reason: 'no_screenshot_flag' } }
         else if (request.method === 'click' && request.operationId === 'lose-action') { socket.destroy(); return }
         else if (request.method === 'click') result = { action: { path: 'accessibility', actionName: 'AXPress', fallbackReason: null, targetWindowId: target.windowId, verification: { state: 'accepted' } }, observation: { state: 'failed', error: { code: 'window_gone', message: 'Original window disappeared after the accepted action' } } }
@@ -55,6 +57,25 @@ async function nativeFixture() {
   const service = new AgentMuxRpcService({ coreClients: () => [], nativeDesktop: owner })
   cleanups.push(async () => { connection.close(); for (const socket of sockets) socket.destroy(); await new Promise<void>(resolve => server.close(() => resolve())); await rm(directory, { recursive: true, force: true }) })
   return { connection, owner, service, calls, directory }
+}
+
+async function publicFixture(captureResults = new Map<string, unknown>()) {
+  const h = await nativeFixture(captureResults)
+  const endpoint = join(h.directory, 'public.sock'), server = new AgentMuxControlServer({ socketPath: endpoint, coreClients: () => [], nativeDesktop: h.owner })
+  await server.start(); cleanups.push(() => server.stop())
+  const client = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: endpoint } })
+  cleanups.push(() => client.dispose())
+  const cliEntry = process.env.NATIVE_PUBLIC_CLI
+  expect(cliEntry, 'verification must build the actual CLI entry').toBeTruthy()
+  async function cli(action: string[], input?: unknown) {
+    return await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
+      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_')))
+      const child = spawn(process.execPath, [cliEntry!, '--endpoint', `unix:${endpoint}`, 'native', ...action, ...(input === undefined ? [] : ['--data', '-'])], { env, stdio: ['pipe', 'pipe', 'pipe'] })
+      let stdout = '', stderr = ''; child.stdout.on('data', part => { stdout += part }); child.stderr.on('data', part => { stderr += part })
+      child.once('error', reject); child.once('close', code => resolve({ code, stdout, stderr })); child.stdin.end(input === undefined ? '' : JSON.stringify(input))
+    })
+  }
+  return { ...h, client, cli }
 }
 
 it('public service consumes the production Node protocol port and preserves exact clipboard text', async () => {
@@ -133,7 +154,53 @@ it('a rejected duplicate cannot claim or disclose an earlier GUI receipt', async
 it('a captured PNG follows the real native response shape through the public codec', async () => {
   const h = await nativeFixture()
   const result = await h.service.call('native.capture', { ...scope, operationId: 'capture-png', capture: { mode: 'selection' } }, context)
-  expect(result.result).toMatchObject({ state: 'captured', screenshot: { data: pngData, format: 'png', width: 1, height: 1, scale: 2 }, selectionRect: { x: -10 } })
+  expect(result.result).toEqual(captured)
+})
+
+it.each([
+  ['provenance', [undefined, '', null, 42].map(engine => ({ ...captured, engine }))],
+  ['geometry', [
+    undefined, null, {}, { x: -10, y: 0, width: 0, height: .5 }, { x: -10, y: 0, width: .5, height: -1 },
+    { x: null, y: 0, width: .5, height: .5 }, { x: -10, y: '0', width: .5, height: .5 },
+    { x: -10, y: 0, width: .5, height: .5, displayId: 99 }
+  ].map(selectionRect => ({ ...captured, selectionRect }))]
+] as Array<[string, unknown[]]>)('public capture %s rejects malformed native replies without losing the original operation', async (kind, replies) => {
+  const captureResults = new Map<string, unknown>(), h = await publicFixture(captureResults)
+  for (const [index, reply] of replies.entries()) {
+    for (const consumer of ['service', 'client'] as const) {
+      const operationId = `invalid-${kind}-${index}-${consumer}`
+      captureResults.set(operationId, reply)
+      const input = { ...scope, operationId, capture: { mode: 'selection' as const } }
+      const request = consumer === 'service' ? h.service.call('native.capture', input, context) : h.client.call('native.capture', input)
+      await expect(request).rejects.toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+      expect(h.connection.inspectOperation(operationId)).toMatchObject({ instanceId, operationId, state: 'completed' })
+      const inspected = consumer === 'service' ? await h.service.call('native.operation.inspect', { ...scope, operationId }, context) : await h.client.call('native.operation.inspect', { ...scope, operationId })
+      expect(inspected.result).toMatchObject({ instanceId, operationId, state: 'completed' })
+      expect(h.calls.filter(call => call.operationId === operationId)).toHaveLength(1)
+    }
+  }
+  const operationId = `invalid-${kind}-cli`
+  captureResults.set(operationId, replies[0])
+  const rejected = await h.cli(['capture'], { ...scope, operationId, capture: { mode: 'selection' } })
+  expect(rejected.code).toBe(1)
+  expect(JSON.parse(rejected.stderr).error).toMatchObject({ code: 'CONTROL_PROTOCOL_ERROR' })
+  const inspect = await h.cli(['operation', 'inspect'], { ...scope, operationId })
+  expect(inspect.code, inspect.stderr).toBe(0)
+  expect(JSON.parse(inspect.stdout).result.result).toMatchObject({ instanceId, operationId, state: 'completed' })
+  expect(h.calls.filter(call => call.operationId === operationId)).toHaveLength(1)
+  expect((await h.client.call('native.clipboard.read', { ...scope, format: 'text' })).result).toMatchObject({ data: ' \n原文\n ' })
+})
+
+it('actual public client and CLI preserve valid capture pixels, provenance and geometry', async () => {
+  const captureResults = new Map([['client-captured', captured], ['cli-captured', captured]]), h = await publicFixture(captureResults)
+  const result = await h.client.call('native.capture', { ...scope, operationId: 'client-captured', capture: { mode: 'selection' } })
+  expect(result).toEqual({ ...scope, operationId: 'client-captured', state: 'responded', result: captured })
+  const cli = await h.cli(['capture'], { ...scope, operationId: 'cli-captured', capture: { mode: 'selection' } })
+  expect(cli.code, cli.stderr).toBe(0)
+  expect(JSON.parse(cli.stdout).result).toEqual({ ...scope, operationId: 'cli-captured', state: 'responded', result: captured })
+  for (const operationId of ['client-captured', 'cli-captured']) {
+    expect(h.calls.filter(call => call.operationId === operationId)).toEqual([expect.objectContaining({ method: 'captureScreenshot', expectedInstanceId: instanceId, params: { mode: 'selection' } })])
+  }
 })
 
 it('competing actors cannot replace the first admitted operation binding', async () => {
@@ -159,19 +226,7 @@ it('unknown mutation retains original operation and actor, and inspection sends 
 })
 
 it('actual CLI and public Unix server consume the same native owner and discovery', async () => {
-  const h = await nativeFixture()
-  const endpoint = join(h.directory, 'public.sock'), server = new AgentMuxControlServer({ socketPath: endpoint, coreClients: () => [], nativeDesktop: h.owner })
-  await server.start(); cleanups.push(() => server.stop())
-  const cliEntry = process.env.NATIVE_PUBLIC_CLI
-  expect(cliEntry, 'verification must build the actual CLI entry').toBeTruthy()
-  async function cli(action: string[], input?: unknown) {
-    return await new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve, reject) => {
-      const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_')))
-      const child = spawn(process.execPath, [cliEntry!, '--endpoint', `unix:${endpoint}`, 'native', ...action, ...(input === undefined ? [] : ['--data', '-'])], { env, stdio: ['pipe', 'pipe', 'pipe'] })
-      let stdout = '', stderr = ''; child.stdout.on('data', part => { stdout += part }); child.stderr.on('data', part => { stderr += part })
-      child.once('error', reject); child.once('close', code => resolve({ code, stdout, stderr })); child.stdin.end(input === undefined ? '' : JSON.stringify(input))
-    })
-  }
+  const h = await publicFixture(), cli = h.cli
   const help = await cli(['--help']); expect(help.code).toBe(0); expect(help.stdout).toContain('operation')
   expect(agentMuxCliModuleCatalog().find(module => module.root === 'native')?.readCommand).toBe('amux native --skill')
   const apps = await cli(['apps', 'list'], scope)
