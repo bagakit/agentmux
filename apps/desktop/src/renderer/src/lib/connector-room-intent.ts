@@ -1,6 +1,6 @@
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
 import { readConnectionHostingTarget } from '../../../shared/connection-hosting-target'
-import { parseConnectionParams, parseRoomBindingTarget, type ConnectionParamsMap, type RoomBindingTarget } from '@agentmux/core/connections'
+import { parseConnectionParams, parseRecordedRoomBindingInput, parseRoomBindingTarget, type ConnectionParamsMap, type RoomBindingRecordedBindInput, type RoomBindingRecordedRelinkInput, type RoomBindingTarget } from '@agentmux/core/connections'
 import { restoredConnectorMemberDrafts, type ConnectorMemberDrafts } from './connector-member-draft'
 
 type Effect = 'connection.room.create' | 'connection.room.link.create' | 'connection.bind' | 'connection.binding.relink' | 'connection.binding.pause' | 'connection.binding.resume' | 'connection.binding.detach' | 'connection.grant' | 'connection.binding.member.inherit'
@@ -8,7 +8,7 @@ type Effect = 'connection.room.create' | 'connection.room.link.create' | 'connec
 export type ConnectorRoomDraft = {
   connectionId: string; bindingId: string | null; bindingRevision: number | null
   mode: 'create' | 'existing' | 'details'; name: string; group: string; members: string; memberType: string
-  scope: 'mentions-and-replies' | 'all-messages'; publication: 'future-native-user-facing' | 'future-shared-conversation'
+  scope: 'mentions-and-replies' | 'all-messages'
   actorId: string; actorType: string
   memberDrafts?: ConnectorMemberDrafts
 }
@@ -21,15 +21,15 @@ export function restoredConnectorRoomDrafts(value: unknown): Record<string, Conn
       return Array.isArray(target) && (target.length === 2 || target.length === 4 || target.length === 5) && target.every(id => typeof id === 'string' && !!id) &&
         !!draft && typeof draft === 'object' && ['connectionId', 'name', 'group', 'members', 'memberType', 'actorId', 'actorType'].every(key => typeof Reflect.get(draft, key) === 'string') &&
         (draft.bindingId === null || typeof draft.bindingId === 'string') && (draft.bindingRevision === null || Number.isSafeInteger(draft.bindingRevision) && draft.bindingRevision > 0) &&
-        ['create', 'existing', 'details'].includes(draft.mode) && ['mentions-and-replies', 'all-messages'].includes(draft.scope) && ['future-native-user-facing', 'future-shared-conversation'].includes(draft.publication)
+        ['create', 'existing', 'details'].includes(draft.mode) && ['mentions-and-replies', 'all-messages'].includes(draft.scope)
     } catch { return false }
   }).map(([key, draft]) => [key, { connectionId: draft.connectionId, bindingId: draft.bindingId, bindingRevision: draft.bindingRevision,
-    mode: draft.mode, name: draft.name, group: draft.group, members: draft.members, memberType: draft.memberType, scope: draft.scope, publication: draft.publication, actorId: draft.actorId, actorType: draft.actorType,
+    mode: draft.mode, name: draft.name, group: draft.group, members: draft.members, memberType: draft.memberType, scope: draft.scope, actorId: draft.actorId, actorType: draft.actorType,
     ...(draft.memberDrafts ? { memberDrafts: restoredConnectorMemberDrafts(draft.memberDrafts) } : {}) }]))
 }
 /** Submitted UI correlation only. Original effects and receipts remain with their Core/Host owners. */
 export type ConnectorRoomIntent = { [M in Effect]: {
-  target: RoomBindingTarget; hostingTarget?: ConnectionHostingTarget; method: M; input: ConnectionParamsMap[M]; phase: 'not-dispatched' | 'may-have-dispatched'
+  target: RoomBindingTarget; hostingTarget?: ConnectionHostingTarget; method: M; input: M extends 'connection.bind' ? RoomBindingRecordedBindInput : M extends 'connection.binding.relink' ? RoomBindingRecordedRelinkInput : ConnectionParamsMap[M]; phase: 'not-dispatched' | 'may-have-dispatched'
 } & (M extends 'connection.room.link.create' ? { replacesOperationId?: string } : {}) }[Effect]
 const effects: readonly string[] = ['connection.room.create', 'connection.room.link.create', 'connection.bind', 'connection.binding.relink', 'connection.binding.pause', 'connection.binding.resume', 'connection.binding.detach', 'connection.grant', 'connection.binding.member.inherit']
 export const sameConnectorTarget = (a: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>, b: Pick<RoomBindingTarget, 'executionHostId' | 'agentSessionId'>) => a.executionHostId === b.executionHostId && a.agentSessionId === b.agentSessionId
@@ -51,7 +51,9 @@ export function restoredConnectorRoomIntents(value: unknown): Record<string, Con
     try {
       const entry = raw as ConnectorRoomIntent
       if (!effects.includes(entry.method)) continue
-      const input = parseConnectionParams(entry.method, entry.input), target = parseRoomBindingTarget(entry.target)
+      const input = entry.method === 'connection.bind' || entry.method === 'connection.binding.relink'
+        ? parseRecordedRoomBindingInput(entry.method, entry.input) : parseConnectionParams(entry.method, entry.input)
+      const target = parseRoomBindingTarget(entry.target)
       if (key !== input.operationId || 'executionHostId' in input && (!sameConnectorTarget(input, target) || input.regionAnchor?.regionId !== target.regionAnchor?.regionId)) continue
       let lineage: { replacesOperationId?: string } = {}
       if (entry.method === 'connection.room.link.create' && entry.replacesOperationId !== undefined) {

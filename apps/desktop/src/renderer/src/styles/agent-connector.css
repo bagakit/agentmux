@@ -75,6 +75,9 @@
 .connector-member-row > details > small { display: block; color: var(--text-3); overflow-wrap: anywhere; }
 .connector-member-row > .agent-connector-disclosure > summary { padding-block: var(--sp-1); font-size: var(--fs-micro); }
 .agent-connector-audiences { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+.agent-connector-audiences > span { display: grid; gap: 3px; padding: var(--sp-2) var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-sm); min-width: 0; }
+.agent-connector-audiences > span strong { font-size: 12px; font-weight: 600; }
+.agent-connector-audiences > span small { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .agent-connector-audiences button { text-align: left; overflow-wrap: anywhere; }
 .agent-connector-audiences button[aria-pressed=true] { border-color: var(--green); color: var(--text); }
 .agent-connector-disconnect { display: grid; flex-basis: 100%; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--line); border-radius: var(--radius-sm); }

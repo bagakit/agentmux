@@ -7,7 +7,7 @@ import { TextInput, Textarea } from '@agentmux/client-ui/input'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import { SelectionField } from './SelectionField'
 import { presentError } from '@agentmux/client-ui/error-presentation'
-import type { ConnectionActor, ConnectionGrant, ConnectionMemberAccess, ConnectionRecord, RoomBinding, RoomBindingInspection, RoomBindingOperation, RoomBindingScope, RoomBindingTarget, RoomLinkOperation, RoomProvisioningOperation } from '@agentmux/core/connections'
+import { parseConnectionParams, type ConnectionActor, type ConnectionGrant, type ConnectionMemberAccess, type ConnectionRecord, type RoomBinding, type RoomBindingInspection, type RoomBindingOperation, type RoomBindingTarget, type RoomLinkOperation, type RoomProvisioningOperation } from '@agentmux/core/connections'
 import type { AgentNativeSourceReference } from './AgentNativeSourceControls'
 import { api } from '../lib/api'
 import { clearConnectorRoomIntent, retainConnectorRoomIntent, useAppStore } from '../store'
@@ -40,6 +40,7 @@ const JoinIcon = semanticIconComponent('object.link')
 const InspectIcon = semanticIconComponent('action.inspect')
 
 const availableForNewGroup = (record: ConnectionRecord) => record.config.enabled && !connectionNeedsInitialSetup(record)
+const recordedRepliesOnly = (intent: ConnectorRoomIntent) => (intent.method === 'connection.bind' || intent.method === 'connection.binding.relink') && intent.input.scope.publication !== 'future-shared-conversation'
 function shortIdentity(value: string, others: readonly string[] = []) {
   const compact = (id: string) => id.length > 18 ? id.slice(0, 6) + '…' + id.slice(-8) : id
   const label = compact(value)
@@ -111,7 +112,6 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
   const [connectionId, setConnectionId] = useState(original.connectionId ?? (original.bindingId ? '' : savedDraft?.connectionId) ?? ''), [name, setName] = useState(savedDraft?.name ?? original.name + ' · AgentMux')
   const [group, setGroup] = useState(savedDraft?.group ?? ''), [members, setMembers] = useState(savedDraft?.members ?? ''), [memberType, setMemberType] = useState(savedDraft?.memberType ?? '')
   const [scope, setScope] = useState<'mentions-and-replies' | 'all-messages'>(savedDraft?.scope ?? (initialMode === 'create' ? 'all-messages' : 'mentions-and-replies')), [confirmed, setConfirmed] = useState(false)
-  const [publication, setPublication] = useState<RoomBindingScope['publication']>(savedDraft?.publication ?? 'future-shared-conversation')
   const [actorId, setActorId] = useState(savedDraft?.actorId ?? ''), [actorType, setActorType] = useState(savedDraft?.actorType ?? '')
   const [memberDrafts, setMemberDrafts] = useState<ConnectorMemberDrafts>(savedDraft?.memberDrafts ?? {})
   const [facts, setFacts] = useState<Record<string, Fact>>({}), [issue, setIssue] = useState(''), [busy, setBusy] = useState(false)
@@ -148,7 +148,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
   const currentGrants = actors && binding && actors.bindingId === binding.bindingId && actors.revision === binding.revision
     ? actors.grants.filter(grant => grant.actor.application.domain === binding.application.domain && grant.actor.application.appId === binding.application.appId) : []
   const creatingGroup = (mode === 'create' || !!roomIntent) && !binding && !detached
-  const bindingIntent = relevant.find(intent => intent.method === 'connection.bind' || intent.method === 'connection.binding.relink')
+  const bindingIntent = relevant.find(intent => (intent.method === 'connection.bind' || intent.method === 'connection.binding.relink') && !recordedRepliesOnly(intent))
   const bindingPending = !!bindingIntent
   const showingCurrentBinding = !!binding && !changingGroup && !bindingPending
   const links = relevant.filter((intent): intent is Extract<ConnectorRoomIntent, { method: 'connection.room.link.create' }> => intent.method === 'connection.room.link.create')
@@ -190,15 +190,14 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
     if (restore) return
     setGroup(binding?.externalConversationId ?? '')
     setScope(binding?.scope.input ?? (mode === 'create' ? 'all-messages' : 'mentions-and-replies'))
-    setPublication(binding?.scope.publication ?? 'future-shared-conversation')
     setConfirmed(false); setChangingGroup(false); setDisconnecting(false)
     setActorId(''); setActorType('')
   }, [loaded, connectionId, binding?.bindingId, binding?.revision])
   useEffect(() => {
     if (!loaded) return
-    const draft = { connectionId, bindingId: binding?.bindingId ?? null, bindingRevision: binding?.revision ?? null, mode, name, group, members, memberType, scope, publication, actorId, actorType, memberDrafts }
+    const draft = { connectionId, bindingId: binding?.bindingId ?? null, bindingRevision: binding?.revision ?? null, mode, name, group, members, memberType, scope, actorId, actorType, memberDrafts }
     useAppStore.setState(state => ({ connectorRoomDrafts: { ...state.connectorRoomDrafts, [draftKey]: draft } }))
-  }, [loaded, connectionId, binding?.bindingId, binding?.revision, mode, name, group, members, memberType, scope, publication, actorId, actorType, memberDrafts, draftKey])
+  }, [loaded, connectionId, binding?.bindingId, binding?.revision, mode, name, group, members, memberType, scope, actorId, actorType, memberDrafts, draftKey])
   const frozenRoom = roomIntent?.method === 'connection.room.create' ? roomIntent.input : null
   const creatorInvitation = useConnectorCreatorInvitation(connection, !!connection, hostingTarget)
   const awaitingCreator = creatorInvitation.pending && creatorInvitation.included
@@ -328,6 +327,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
     const retained = useAppStore.getState().connectorRoomIntents[intent.input.operationId]
     if (retained && (!sameHosting(retained.hostingTarget, hostingTarget) || !sameHosting(intent.hostingTarget, hostingTarget))) throw new Error('Keep the original request on its original bot hosting owner.')
     if (!retained) intent.hostingTarget = structuredClone(hostingTarget)
+    if (recordedRepliesOnly(intent)) { await inspect(intent); return }
     if (retained?.phase === 'may-have-dispatched' && !explicitPending) { await inspect(retained); return }
     const saved = await retainConnectorRoomIntent({ ...intent, phase: 'not-dispatched' })
     if (!saved.localStorageWritten) throw new Error('The original intent could not be saved. No request was sent; save this same intent before continuing.')
@@ -337,7 +337,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
       await retainConnectorRoomIntent({ ...intent, phase: 'not-dispatched' })
       throw new Error('Saving the original dispatch intent failed. No request was sent.')
     }
-    const value = await api.connections.call(intent.method, intent.input, intent.hostingTarget)
+    const value = await api.connections.call(intent.method, parseConnectionParams(intent.method, intent.input), intent.hostingTarget)
     if (epoch.current !== token) return
     setFacts(previous => ({ ...previous, [intent.input.operationId]: value }))
     if ('state' in value && value.state === 'applied') {
@@ -369,14 +369,17 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
     void work(() => execute({ method: 'connection.room.link.create', target, phase: 'not-dispatched', ...(replacesOperationId ? { replacesOperationId } : {}), input: { operationId: mintObjectId(), connectionId,
       expectedConnectionRevision: connection.revision, externalConversationId: audience } }))
   }
-  function bind() {
+  function bind(completeOriginal = false) {
     const native = session.nativeHandle
-    if (!connection || !confirmed || native?.kind !== 'provider' || !audience.trim()) return
-    const previous = relevant.find(intent => intent.method === 'connection.bind' || intent.method === 'connection.binding.relink')
+    if (!connection || !confirmed && !completeOriginal || native?.kind !== 'provider' || !audience.trim()) return
+    if (completeOriginal && (!binding || binding.scope.publication !== 'future-native-user-facing' || changingGroup || audience !== binding.externalConversationId)) return
+    const previous = relevant.find(intent => (intent.method === 'connection.bind' || intent.method === 'connection.binding.relink') && !recordedRepliesOnly(intent))
     if (previous) { void work(async () => { await inspect(previous) }); return }
     const input = { ...target, operationId: mintObjectId(), bindingId: binding?.bindingId ?? mintObjectId(), connectionId,
       expectedConnectionRevision: connection.revision, externalConversationId: audience,
-      scope: { input: scope, publication }, expectedSource: { providerId: native.providerId, nativeSessionId: native.sessionId } }
+      scope: { input: completeOriginal ? binding!.scope.input : scope, publication: 'future-shared-conversation' as const },
+      ...(binding && audience === binding.externalConversationId && binding.inputTarget ? { inputTarget: binding.inputTarget } : {}),
+      expectedSource: { providerId: native.providerId, nativeSessionId: native.sessionId } }
     void work(() => execute(binding ? { method: 'connection.binding.relink', input: { ...input, expectedRevision: binding.revision }, target, phase: 'not-dispatched' } : { method: 'connection.bind', input, target, phase: 'not-dispatched' }))
   }
   function lifecycle(method: 'connection.binding.pause' | 'connection.binding.resume' | 'connection.binding.detach', originalBinding = binding) {
@@ -433,17 +436,19 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
     node?.scrollIntoView({ block: 'start' })
     node?.focus({ preventScroll: true })
   }
-  const sameSharing = !!binding && audience === binding.externalConversationId && scope === binding.scope.input && publication === binding.scope.publication
+  const sameFilters = !!binding && audience === binding.externalConversationId && scope === binding.scope.input
   const connectedAudiences = bindings.filter(item => item.state !== 'detached')
+  const audienceReview = <div aria-label="Groups sharing this conversation" className="agent-connector-fields">
+    <p className="agent-connector-note">One conversation across App and every connected group. Members’ messages and public replies are shared across these audiences. Use a separate Agent for separate context.</p>
+    {!loaded ? <p className="agent-connector-note">The complete group list is not confirmed. Earlier observations and original requests are kept.</p> : null}
+    <div className="agent-connector-audiences"><span><strong>AgentMux App</strong><small>This Agent’s conversation</small></span>{connectedAudiences.map(item => <span key={item.bindingId} data-sharing-audience={item.bindingId} title={item.externalConversationId}>
+      <strong>{item.externalConversationId === audience && item.connectionId === connectionId ? roomFacts.room?.room?.name ?? 'Current group' : connections.find(app => app.config.connectionId === item.connectionId)?.config.label ?? 'Connected group'}</strong>
+      <small>{shortIdentity(item.externalConversationId)} · {item.state === 'paused' ? 'Paused' : item.scope.publication === 'future-native-user-facing' ? 'User messages not connected' : 'Complete conversation'}</small></span>)}
+      {audience && !connectedAudiences.some(item => item.connectionId === connectionId && item.externalConversationId === audience) ? <span data-sharing-audience="proposed" title={audience}><strong>{roomFacts.room?.room?.name ?? 'Proposed group'}</strong><small>{connection?.config.label ?? connectionId} · {shortIdentity(audience)}</small></span> : null}</div>
+  </div>
   const sharing = <section className="agent-connector-fields agent-connector-section" aria-label="Sharing options" data-connection-section="sharing" tabIndex={-1}><h3><SharingIcon size={16} />{binding ? 'Sharing options' : 'Share with this group'}</h3>
-    <div className="agent-connector-field"><label htmlFor={fieldId + '-publication'}>Conversation → group</label><SelectionField id={fieldId + '-publication'} label="Group sharing content" value={publication} disabled={busy} onValueChange={value => { if (value === 'future-native-user-facing' || value === 'future-shared-conversation') { setPublication(value); setConfirmed(false) } }} options={[{ value: 'future-native-user-facing', label: 'Agent replies and questions' }, { value: 'future-shared-conversation', label: 'Ordinary conversation' }]} /></div>
-    <p className="agent-connector-note">{publication === 'future-shared-conversation' ? 'New App user messages, group member messages, public Agent replies, questions and resources are shared. Earlier private history stays local.' : 'Partial sharing: user messages are not shared. Only Agent replies and questions are sent to this group.'}</p>
-    <details className="agent-connector-disclosure" aria-label="Groups sharing this conversation" open={!binding || changingGroup || !sameSharing}><summary>Connected audiences · App and {connectedAudiences.length} {connectedAudiences.length === 1 ? 'group' : 'groups'}</summary>
-      <p className="agent-connector-note">These groups share this Agent’s context. Their members’ messages can be seen in App and the other groups according to each saved sharing scope. Use a separate Agent for separate context.</p>
-      {!loaded ? <p className="agent-connector-note">The complete group list is not confirmed. Earlier observations and original requests are kept.</p> : null}
-      <div className="agent-connector-audiences"><span>App · this Agent’s conversation</span>{connectedAudiences.map(item => <span key={item.bindingId} data-sharing-audience={item.bindingId}>{connections.find(app => app.config.connectionId === item.connectionId)?.config.label ?? item.application.appId} · {item.externalConversationId} · {item.state === 'paused' ? 'Paused' : item.scope.publication === 'future-native-user-facing' ? 'Partial · replies only' : 'Whole conversation'}</span>)}
-        {audience && !connectedAudiences.some(item => item.connectionId === connectionId && item.externalConversationId === audience) ? <span data-sharing-audience="proposed">{connection?.config.label ?? connectionId} · {audience} · Proposed group</span> : null}</div>
-    </details>
+    <p className="agent-connector-note">New App user messages, group messages, public Agent replies, questions and resources belong to the same conversation. Earlier private history stays local.</p>
+    {binding?.scope.publication !== 'future-native-user-facing' || changingGroup ? <details className="agent-connector-disclosure" open={!binding || changingGroup}><summary>Connected audiences · App and {connectedAudiences.length} {connectedAudiences.length === 1 ? 'group' : 'groups'}</summary>{audienceReview}</details> : null}
     <div className="agent-connector-field"><label htmlFor={fieldId + '-scope'}>Group → conversation</label><p className="agent-connector-note">Only members with Send requests can trigger the Agent.</p><SelectionField id={fieldId + '-scope'} label="Group input scope" value={scope} disabled={busy} onValueChange={value => { if (value === 'mentions-and-replies' || value === 'all-messages') { setScope(value); setConfirmed(false) } }} options={[{ value: 'mentions-and-replies', label: 'Respond to @mentions and replies' }, { value: 'all-messages', label: 'Respond to every authorized message' }]} /></div>
     <details className="agent-connector-disclosure"><summary>Context and sharing boundaries</summary><div className="agent-connector-fields">
       <p className="agent-connector-note">New group messages are recorded once. Terminal input without verified original user text stays local. Delivery details show missing sources or attachments.</p>
@@ -451,8 +456,8 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
       <p className="agent-connector-note">This Agent may use its existing private context in replies. A separate discussion keeps contexts apart.</p>
       {mote ? <button className="agent-connector-text-action" onClick={newContext}>Start a separate discussion</button> : <p className="agent-connector-note">For separate context, start a new Agent in Mote before connecting it.</p>}
     </div></details>
-    {!binding || changingGroup || !sameSharing ? <p className="agent-connector-note">This Agent may use its existing private context in replies to the group.</p> : null}
-    {!binding || changingGroup || !sameSharing ? <label className="agent-connector-check"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)} />{publication === 'future-shared-conversation' ? 'Share new conversation content with this group.' : 'Share new replies and questions with this group.'}</label> : null}
+    {!binding || changingGroup || !sameFilters ? <p className="agent-connector-note">This Agent may use its existing private context in replies to the group.</p> : null}
+    {!binding || changingGroup || !sameFilters ? <label className="agent-connector-check"><input type="checkbox" checked={confirmed} disabled={busy} onChange={event => setConfirmed(event.target.checked)} />Share the complete new conversation with this group.</label> : null}
     {session.nativeHandle?.kind !== 'provider' ? <p role="status" className="agent-connector-note">The Agent’s conversation source is not confirmed yet. You can keep working locally.</p> : null}
   </section>
   const applicationPeers = (record: ConnectionRecord) => connections.filter(item => item.config.application.domain === record.config.application.domain && item.config.application.appId === record.config.application.appId)
@@ -479,7 +484,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
     {otherSetupPending.length ? <details className="agent-connector-disclosure"><summary>{otherSetupPending.length} {otherSetupPending.length === 1 ? 'bot needs' : 'bots need'} setup</summary>{otherSetupPending.map(setupRecovery)}</details> : null}
   </div>
   const canCreate = creatingGroup && !roomIntent
-  const canConnect = !bindingPending && !detached && !!audience && (!binding || changingGroup || !sameSharing)
+  const canConnect = !bindingPending && !detached && !!audience && (!binding || changingGroup || !sameFilters)
   const previousActivity = !!original.connectionId || bindings.length > 0 || Object.values(intents).some(intent => sameConnectorTarget(intent.target, target))
   const defaultNote = !explicitlySelected.current && !previousActivity && mode !== 'details'
     ? moteDefault.status === 'loading' ? 'Checking this Mote’s default bot. You can choose a bot now.'
@@ -571,7 +576,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
           </section>
           {defaultNote ? <p className="agent-connector-note" role="status" data-mote-bot-source>{defaultNote}</p> : null}
           {busy ? <p className="agent-connector-note" role="status" aria-busy="true" data-connector-request-pending><LoadingIcon size={13} animation="spin" /> Working on this group request…</p> : null}
-          {showingCurrentBinding && binding ? <section className="agent-connector-status" aria-label="Group connection status"><div className="agent-connector-saved"><CheckIcon size={14} /><span>{binding.state === 'active' ? 'Connection saved' : 'Sharing paused'}</span></div>{binding.scope.publication === 'future-native-user-facing' ? <div role="status" data-partial-sharing><strong>Partial sharing · replies only</strong><p className="agent-connector-note">App and group user messages are not shared with this group.</p><button type="button" className="agent-connector-text-action" disabled={busy || bindingPending} onClick={() => { setPublication('future-shared-conversation'); setConfirmed(false); showSection('sharing') }}>Review whole conversation</button></div> : null}<div className="agent-connector-link-actions"><button className="small-button" disabled={busy} onClick={() => lifecycle(binding.state === 'paused' ? 'connection.binding.resume' : 'connection.binding.pause')}>{binding.state === 'paused' ? 'Resume sync' : 'Pause sync'}</button><button className="agent-connector-text-action" disabled={busy} onClick={() => setDisconnecting(true)}>Disconnect group</button></div>
+          {showingCurrentBinding && binding ? <section className="agent-connector-status" aria-label="Group connection status"><div className="agent-connector-saved"><CheckIcon size={14} /><span>{binding.state === 'active' ? 'Connection saved' : 'Sharing paused'}</span></div>{binding.scope.publication === 'future-native-user-facing' ? <div role="status" className="agent-connector-fields" data-partial-sharing><strong>User messages are not connected</strong><p className="agent-connector-note">{binding.state === 'paused' ? 'Sync is paused. No new messages are being shared. The saved configuration shares only Agent replies.' : 'This group currently receives only Agent replies.'} Confirm below to also share new App and group user messages. Earlier private history stays local; saved member access and original requests are kept.{binding.state === 'paused' ? ' Sharing will resume when you confirm.' : ''}</p>{audienceReview}<p className="agent-connector-note">This Agent may use its existing private context in replies to these audiences.</p><button type="button" className="primary-button" disabled={busy || bindingPending || !connection?.config.enabled || session.nativeHandle?.kind !== 'provider'} onClick={() => bind(true)}>{binding.state === 'paused' ? 'Resume and share complete conversation' : 'Share complete conversation'}</button></div> : null}<div className="agent-connector-link-actions">{binding.state !== 'paused' || binding.scope.publication === 'future-shared-conversation' ? <button className="small-button" disabled={busy} onClick={() => lifecycle(binding.state === 'paused' ? 'connection.binding.resume' : 'connection.binding.pause')}>{binding.state === 'paused' ? 'Resume sync' : 'Pause sync'}</button> : null}<button className="agent-connector-text-action" disabled={busy} onClick={() => setDisconnecting(true)}>Disconnect group</button></div>
             {disconnecting ? <div className="agent-connector-disconnect" role="group" aria-label="Confirm group disconnection"><strong>Disconnect this group?</strong><p className="agent-connector-note">New messages will stop in both directions. This Agent keeps running and its conversation stays here. An end card is sent to this group; a card failure does not prevent disconnection.</p><div className="agent-connector-link-actions"><button className="small-button" disabled={busy} onClick={() => setDisconnecting(false)}>Keep connected</button><button className="small-button" disabled={busy} onClick={() => lifecycle('connection.binding.detach')}>Confirm disconnect</button></div></div> : null}
           </section> : null}
           {detached ? <section className="agent-connector-status" aria-label="Disconnected group"><div><strong>Group disconnected</strong><span>This Agent and its conversation remain available. New group messages are no longer shared.</span></div></section> : null}
@@ -604,10 +609,11 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
             }
             const memberIntent = intent.method === 'connection.grant' || intent.method === 'connection.binding.member.inherit' ? intent : null
             const receipt = <>
+              {recordedRepliesOnly(intent) ? <p className="agent-connector-note">Original replies-only request · {intent.phase === 'not-dispatched' ? 'Not sent. It will not be dispatched.' : 'Original result retained; check its status.'} Complete conversation sharing uses a separate explicit confirmation on the current group.</p> : null}
               {isRoom ? <><strong>{fact.creation.state === 'created' ? 'Group created' : fact.creation.state === 'not-applied' ? 'Group not created' : fact.creation.state === 'pending' ? 'Group setup pending' : 'Creation not confirmed'}</strong><span>{fact.membership.state === 'not-requested' ? 'No invitations requested.' : fact.membership.state === 'settled' ? fact.membership.results.filter(item => item.state === 'joined').length + ' of ' + fact.membership.results.length + ' invitations confirmed.' : fact.membership.state === 'not-applied' ? 'Invitations were not sent.' : fact.membership.state === 'pending' ? 'Invitations not started.' : 'Invitations not confirmed.'}</span></> : <strong>{fact && 'state' in fact && fact.state === 'refused' ? memberIntent ? 'Member access could not be saved' : 'Setup could not finish' : memberIntent ? memberReceiptState(memberIntent) === 'not-dispatched' ? 'Member access not sent' : memberReceiptState(memberIntent) === 'applied' ? 'Member access saved' : 'Member access not confirmed' : 'Setup not confirmed'}</strong>}
               {memberIntent ? <><span>Member · {currentGrantIntent(memberIntent) ? roomFacts.people?.members.find(member => member.idType === memberIntent.input.actor.idType && member.userId === memberIntent.input.actor.userId)?.name ?? memberIntent.input.actor.userId : memberIntent.input.actor.userId}</span><span>{currentGrantIntent(memberIntent) ? 'This group connection' : 'Original group connection'} · revision {memberIntent.input.expectedBindingRevision}</span></> : null}
               <button className="small-button" disabled={busy} onClick={() => void work(async () => { await inspect(intent); await refresh() })}>Check status</button>
-              {!memberIntent && (isRoom && (fact.creation.state === 'pending' || fact.creation.state === 'created' && fact.membership.state === 'pending') || fact && 'state' in fact && fact.state === 'preparing' || intent.phase === 'not-dispatched') ? <button className="small-button" disabled={busy} onClick={() => void work(() => execute(intent, true))}>Continue setup</button> : null}
+              {!memberIntent && !recordedRepliesOnly(intent) && (isRoom && (fact.creation.state === 'pending' || fact.creation.state === 'created' && fact.membership.state === 'pending') || fact && 'state' in fact && fact.state === 'preparing' || intent.phase === 'not-dispatched') ? <button className="small-button" disabled={busy} onClick={() => void work(() => execute(intent, true))}>Continue setup</button> : null}
               {!memberIntent && (isRoom && fact.creation.state === 'not-applied' || fact && 'state' in fact && fact.state === 'refused') ? <button className="small-button" disabled={busy} onClick={() => void work(async () => { await clearConnectorRoomIntent(intent.input.operationId); await refresh() })}>Dismiss unsuccessful setup</button> : null}
               <details className="agent-connector-disclosure"><summary>Setup receipt details</summary><div className="agent-connector-fields">
                 <span>Operation</span><code>{intent.input.operationId}</code><span>Host · {target.executionHostId}</span>
@@ -632,7 +638,7 @@ function AgentConnectorForm({ original, mode: initialMode, initialSection, resum
         </div><footer className="agent-connector-dialog__footer">
           {issue || relevant.length ? <button className="agent-connector-text-action" disabled={busy} onClick={() => void work(refresh)}>Refresh</button> : null}
           <button className="small-button" onClick={onClose}>{!binding && !detached && !relevant.length ? 'Cancel' : 'Close'}</button>
-          {canCreate ? <button className="primary-button" disabled={busy || creationUnsupported || !connection || !availableForNewGroup(connection) || awaitingCreator || !name.trim() || !!members && !memberType.trim()} onClick={createRoom}>{busy ? 'Creating…' : 'Create group'}</button> : canConnect ? <button className="primary-button" disabled={busy || !connection?.config.enabled || !confirmed || !audience.trim() || session.nativeHandle?.kind !== 'provider'} onClick={bind}>{binding ? audience === binding.externalConversationId ? sameSharing ? 'Reconnect group' : 'Save sharing' : 'Change group' : 'Connect group'}</button> : null}
+          {canCreate ? <button className="primary-button" disabled={busy || creationUnsupported || !connection || !availableForNewGroup(connection) || awaitingCreator || !name.trim() || !!members && !memberType.trim()} onClick={createRoom}>{busy ? 'Creating…' : 'Create group'}</button> : canConnect ? <button className="primary-button" disabled={busy || !connection?.config.enabled || !confirmed || !audience.trim() || session.nativeHandle?.kind !== 'provider'} onClick={() => bind()}>{binding ? audience === binding.externalConversationId ? sameFilters ? 'Reconnect group' : 'Save sharing' : 'Change group' : 'Connect group'}</button> : null}
         </footer>
       </Dialog.Content></DocumentOverlayPortal>
   </Dialog.Root>
