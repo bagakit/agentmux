@@ -16,11 +16,11 @@ export function feishuQueryReaction(payload: QueryFeedbackPayload): PreparedPubl
     body: JSON.stringify({ reaction_type: { emoji_type: emojiType } }) }
 }
 
-/** Only the frozen finite native request can be dispatched or reconciled. */
+/** The publication envelope owns version validation; this reader validates the frozen native reaction wire. */
 export function readFeishuQueryReaction(prepared: PreparedPublication): FeishuQueryReaction | null {
   try {
     const request = prepared.request
-    if (prepared.renderVersion !== 'feishu-conversation-v6' || request.method !== 'POST' || request.query !== undefined ||
+    if (request.method !== 'POST' || request.query !== undefined ||
         request.contentType !== 'application/json' || request.multipart !== undefined || !request.path.startsWith(path) || !request.path.endsWith('/reactions')) return null
     const messageId = feishuIdentity(decodeURIComponent(request.path.slice(path.length, -'/reactions'.length)))
     if (request.path !== `${path}${encodeURIComponent(messageId)}/reactions`) return null
