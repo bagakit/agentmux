@@ -123,6 +123,21 @@ no ordinary CLI authoring command and requires that live native confirmation for
 and submit. A local transport identity or a saved prepared envelope alone grants none.
 
 Keep page/request/answer identities and the original operation after an unknown response.
+For a stranded service creation, runtime inspect exposes recoveryTarget only when the
+exact original binding is available. Its runtime is the recorded original Native lineage;
+null means the older binding did not record that fact. Establish the exact original
+owner from authoritative original records before supplying it; the current listener
+identity cannot certify the old owner. Read runtime
+start --help, then explicitly start with a fresh operationId, current expectedRevision
+and that unchanged recoveryTarget as recovery. Core records the original retirement
+intent before invoking Native. A matching retained Run reconnects without Stop; only
+a confirmed durable retirement fence permits a new creation key in the same Capsule
+namespace. The old unknown Start remains historical unknown. Preserve the recovery
+operationId after an unknown reply: runtime inspect with that ID is read-only; repeating
+only the identical recovery command observes its original fence and may explicitly
+continue that same retry-safe monotonic retirement intent. Native alone resolves its
+original physical owner. not_retired never certifies the old Start was unapplied and
+never authorizes repeating Start or inventing a new recovery operation. No inspection retires a creation, changes intent or saves a binding.
 Read that same operation and its actual delivery receipt before deciding a next action;
 do not automatically resend an answer, open another Browser or bind a newer Run. Saved
 answers, submitted input and the Agent's adoption or task completion are separate facts.
