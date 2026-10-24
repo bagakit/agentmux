@@ -901,7 +901,7 @@ const mockApi: AgentMuxDesktopApi = {
     onSpatialLinkIssue: () => () => {},
     captureScreenshot: async () => { throw new Error('Screen selection requires the desktop app.') },
     screenshotShortcutStatus: async () => ({ state: 'unavailable', accelerator: SCREENSHOT_SHORTCUT_ACCELERATOR, message: 'System shortcuts require the desktop app.' }),
-    onScreenshotShortcut: () => () => {},
+    onScreenshotIssue: () => () => {},
     listAgentSkills: async () => { throw new Error('Skill discovery requires the desktop app.') },
     listWorkspaceSkills: async () => { throw new Error('Skill discovery requires the desktop app.') },
     readClipboardText: async () => '',

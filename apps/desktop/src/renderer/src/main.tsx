@@ -6,6 +6,8 @@ import { installUnobservedFailureReporter } from './lib/unobserved-failure'
 import { installFileDropGuard } from './lib/file-drop-guard'
 import { prepareRendererUpdate, useAppStore } from './store'
 import { agentBookmarks } from './lib/agent-bookmarks'
+import { installScreenshotAttachmentReceiver } from './lib/screenshot-attachment'
+import { api } from './lib/api'
 import './styles/index.css'
 
 // Installed before the first render so a failure during startup is reported too. This is the last
@@ -19,6 +21,8 @@ installUnobservedFailureReporter({
 // 渲染层的「不发起」，主进程 index.ts 的 will-navigate 闸是「就算发起也拦下」的后盾。见 lib/file-drop-guard.ts。
 installFileDropGuard(window)
 agentBookmarks.startLifecycle(window)
+installScreenshotAttachmentReceiver(window)
+api.ui.onScreenshotIssue(message => useAppStore.getState().reportError(new Error(message)))
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
