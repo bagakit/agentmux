@@ -214,6 +214,9 @@ it('unknown reaction reopens under its original effect without a second create a
   await f.expectStages('unknown-query', ['received', 'started'])
   expect((await f.feedback('unknown-query')).find(item => item.queryFeedback!.stage === 'started')).toMatchObject({ operationId: before.operationId, mapping: { messageId: 'unknown-query', reactionId: expect.any(String) } })
   expect(f.reactionPosts('unknown-query').filter(call => JSON.parse(call.body).reaction_type.emoji_type === 'OnIt')).toHaveLength(1)
+  const lookups = f.remote.calls.filter(call => call.method === 'GET' && call.path === '/open-apis/im/v1/messages/unknown-query/reactions')
+  expect(lookups.length).toBeGreaterThan(0)
+  expect(lookups.every(call => call.query.page_size === '50')).toBe(true)
   await f.service.ingress!.dispatch(original.ingressId); expect(f.packets).toHaveLength(1)
   f.controls.fail = 'Get'
   const second = await f.receive('missing-scope-query')
