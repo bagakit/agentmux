@@ -67,6 +67,7 @@ export async function compiledHostFixture(candidate) {
   const environment = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !/^(AGENTMUX_|CTXMUX_)/u.test(key))),
     ...Object.fromEntries(Object.keys(process.env).filter(key => /^(AGENTMUX_|CTXMUX_)/u.test(key)).map(key => [key, undefined])),
     HOME: privateHome, CODEX_HOME: join(privateHome, 'codex'), AGENTMUX_RUNTIME_DIRECTORY: runtime, AGENTMUX_STATE_DIRECTORY: state,
+    AGENTMUX_WORKSPACE_MOVE_HELPER: join(candidate.root, 'apps/host/resources/bin/agentmux-workspace-move'),
     AGENTMUX_DESKTOP_USER_DATA: userData, AGENTMUX_AGENT_SESSION_STORE: store,
     AGENTMUX_MESSAGE_QUEUE_PATH: join(userData, 'messages.ndjson'), AGENTMUX_SPATIAL_STATE_STORE: join(state, 'spatial-state.json'),
     AGENTMUX_CONFIG_PATH: join(userData, 'agentmux.config.json') }

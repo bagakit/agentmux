@@ -51,7 +51,7 @@ export async function bindCandidate(repository, output) {
   assert.deepEqual(renderer.identity, await sourceUpdateIdentity(root), 'Desktop shell/Core source differs from the built candidate')
   assert.ok(Object.keys(renderer.files).length > 2)
   const artifacts = ['apps/desktop/out/main/index.js', 'apps/desktop/out/main/agentmux-host.js', 'apps/desktop/out/preload/index.cjs',
-    'apps/desktop/out/renderer/release.json', 'apps/mobile/dist/mobile-release.json',
+    'apps/desktop/out/renderer/release.json', 'apps/mobile/dist/mobile-release.json', 'apps/host/resources/bin/agentmux-workspace-move',
     ...['index', 'hosted', 'headless-runtime', 'public-rpc-client', 'control-endpoint-listener-worker', 'note-merge-worker'].map(name => 'packages/core/dist/' + name + '.js'),
     'packages/core/vendor/ctxmux/' + process.platform + '-' + process.arch + '/bin/ctxmuxd']
   const artifactHashes = await hashes(root, artifacts)
