@@ -149,6 +149,18 @@ describe('Core original owned spatial resource SDK', () => {
     expect(settled.state.graph.regions[0]).toEqual({ tabId: agentRegion.tabId, regionId: agentRegion.regionId, kind: 'agent',
       agentSessionId: agentRegion.agentSessionId, runId: agentRegion.runId, execution: agentRegion.execution })
   })
+  it('does not treat old Launcher execution metadata as the authority for an explicit producer-confirmed Workspace', async () => {
+    const store = await fixture(), source = launcherGraph(), agentRegion = attachment()
+    source.regions[0]!.execution = { hostId: 'previous-launcher-host', cwd: fixturePath('previous-launcher-directory') }
+    const initial = await store.commit({ expectedRevision: 0, graph: source })
+    const contribution = store.commitOwnedResource({ key, expectedRevision: initial.revision, value, agentRegion })
+    await expect(contribution).resolves.toMatchObject({ diskDurability: 'confirmed', state: { revision: initial.revision + 1 } })
+    const { resource, ...region } = agentRegion, expected = structuredClone(initial.graph)
+    expected.regions[0] = { ...region, kind: 'agent' }
+    expected.resources['region:' + region.regionId] = resource; expected.resources[key] = value
+    expect((await contribution).state.graph).toEqual(expected)
+    expect((await new AgentMuxSpatialStateStore(store.path).read())!.graph).toEqual(expected)
+  })
   it('retains the newer Run and unsent input when an original same-Session creation receipt arrives late', async () => {
     const store = await fixture(), current = graph(); current.regions[0]!.runId = 'newer-run'
     const initial = await store.commit({ expectedRevision: 0, graph: current }); writes.calls.length = 0
