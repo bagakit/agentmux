@@ -81,7 +81,7 @@ try {
   }
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   for (const name of Object.keys(env)) if (name.startsWith('AGENTMUX_') || name.startsWith('CTXMUX_')) delete env[name]
-  Object.assign(env, { HOME: path.join(privateRoot, 'home'), XDG_CACHE_HOME: path.join(privateRoot, 'cache'), XDG_CONFIG_HOME: path.join(privateRoot, 'config'), XDG_DATA_HOME: path.join(privateRoot, 'data'), AGENTMUX_CHILD_UI_TOOL_HOME: process.env.HOME, AGENTMUX_CHILD_UI_CAPTURE_HOLD: process.env.AGENTMUX_CHILD_UI_CAPTURE_HOLD ?? '0' })
+  Object.assign(env, { HOME: path.join(privateRoot, 'home'), XDG_CACHE_HOME: path.join(privateRoot, 'cache'), XDG_CONFIG_HOME: path.join(privateRoot, 'config'), XDG_DATA_HOME: path.join(privateRoot, 'data'), AGENTMUX_CHILD_UI_TOOL_HOME: process.env.HOME, AGENTMUX_CHILD_UI_CAPTURE_HOLD: process.env.AGENTMUX_CHILD_UI_CAPTURE_HOLD ?? '0', AGENTMUX_CHILD_UI_CAPTURE_PROVIDER: process.env.AGENTMUX_CHILD_UI_CAPTURE_PROVIDER === 'orca' ? 'orca' : 'cua' })
   const executable = electron
   receipt.compiled = Object.fromEntries(await Promise.all(['preload.cjs', 'main.mjs'].map(async name => [name, hash(await fs.readFile(path.join(prepared, name)))])))
   for (const phase of ['seed', 'restore']) {

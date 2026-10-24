@@ -118,24 +118,25 @@ async function capture(window: BrowserWindow, label: string) {
   }
   }
   if (captureHold) {
+    const captureProvider = process.env.AGENTMUX_CHILD_UI_CAPTURE_PROVIDER === 'orca' ? 'orca' : 'cua'
     const release = join(output, `${phase}-${label}-capture-release`)
-    const cuaFilename = `${phase}-${label}-cua.png`
+    const independentFilename = `${phase}-${label}-${captureProvider}.png`
     const request = { pid: process.pid, title: window.getTitle(), browserWindowId: window.id, mediaSourceId: window.getMediaSourceId(), nativeId,
-      appPath: process.execPath, output: join(output, cuaFilename), release, deadlineAt: Date.now() + 45000, alreadyComposed: composed }
+      appPath: process.execPath, provider: captureProvider, output: join(output, independentFilename), release, deadlineAt: Date.now() + 45000, alreadyComposed: composed }
     await writeFile(join(output, `${phase}-${label}-capture-request.json`), JSON.stringify(request))
     process.stderr.write('UI_CAPTURE_HOLD ' + JSON.stringify(request) + '\n')
     await until('bounded independent capture hold', () => readFile(release).then(() => true).catch(() => false), 45000).catch(() => { receipt.warnings.push({ step: 'capture-hold', outcome: 'deadline', request }) })
     try {
-      const bytes = await readFile(join(output, cuaFilename)), signature = bytes.subarray(0, 8).toString('hex')
+      const bytes = await readFile(join(output, independentFilename)), signature = bytes.subarray(0, 8).toString('hex')
       const mimeType = signature === '89504e470d0a1a0a' ? 'image/png' : signature.startsWith('ffd8ff') ? 'image/jpeg' : null
-      assert.ok(mimeType, 'Raw independent CUA file has an original PNG or JPEG signature')
-      const pixels = nativeImage.createFromBuffer(bytes); assert.ok(!pixels.isEmpty(), 'Independent CUA image has actual pixels')
-      const filename = mimeType === 'image/jpeg' ? `${phase}-${label}-cua.jpg` : cuaFilename
-      if (filename !== cuaFilename) await rename(join(output, cuaFilename), join(output, filename))
-      receipt.images.push({ label, kind: 'actual-composed-native-window-cua', method: 'actual-composed-native-window-cua', filename, mimeType,
+      assert.ok(mimeType, 'Raw independent capture file has an original PNG or JPEG signature')
+      const pixels = nativeImage.createFromBuffer(bytes); assert.ok(!pixels.isEmpty(), 'Independent capture image has actual pixels')
+      const filename = mimeType === 'image/jpeg' ? `${phase}-${label}-${captureProvider}.jpg` : independentFilename
+      if (filename !== independentFilename) await rename(join(output, independentFilename), join(output, filename))
+      receipt.images.push({ label, kind: `actual-composed-native-window-${captureProvider}`, method: `actual-composed-native-window-${captureProvider}`, filename, mimeType,
         bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex'), size: pixels.getSize(), pid: process.pid, nativeId, windowId: window.id, sourceId: window.getMediaSourceId() })
       composed = true
-    } catch (error: any) { receipt.warnings.push({ step: 'independent-CUA-composed-capture', label, message: error.message }) }
+    } catch (error: any) { receipt.warnings.push({ step: 'independent-composed-capture', provider: captureProvider, label, message: error.message }) }
     assert.ok(composed, 'The exact private window requires a real independent compositor image in capture-hold mode')
   }
 }
