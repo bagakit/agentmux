@@ -4,13 +4,38 @@ import { parseRoomBinding, parseRoomBindingParams, parseRoomBindingResult } from
 import { MoteChatStore } from '../src/mote-chat-store.js'
 import { PublicationStore } from '../src/publication-store.js'
 import { moteChatJourneyFixture as fixture } from './fixtures/mote-chat-journey.js'
+import { appendFile } from 'node:fs/promises'
 
 it('submits the original private input before native history exists and publishes its already-written first reply once', async () => {
   const f = await fixture(1, 60_000, 'headless', true)
   const create = vi.spyOn(f.client, 'createHostAgentWithDelivery')
   expect(await f.wire.post(f.message('first', f.guest))).toBe(202)
   const record = await f.claimed('first')
-  await vi.waitFor(() => expect(f.inner.kernel.input).toHaveBeenCalledOnce())
+  const key = { kind: 'message' as const, agentSessionId: record.input!.agentSessionId,
+    expectedRun: record.input!.expectedRun, messageId: record.input!.messageId }
+  const observations: unknown[] = []
+  // Ingress custody precedes Core dispatch. Wait on that original input's owner,
+  // rather than treating a short default spy poll as a delivery deadline.
+  try {
+    await vi.waitFor(async () => {
+      const receipt = await f.client.inspectAgentInput({ key })
+      const observation = { status: receipt?.status ?? null, observation: receipt?.observation ?? null,
+        control: receipt?.control.state ?? null, waiting: receipt?.control.waiting?.phase ?? null }
+      if (JSON.stringify(observations.at(-1)) !== JSON.stringify(observation)) observations.push(observation)
+      expect(receipt?.status, JSON.stringify(observation)).toBe('terminal-confirmed')
+    }, { timeout: 4_000 })
+  } finally {
+    if (process.env.COMPLETE_SHARING_PRIVATE_EVIDENCE) {
+      const session = await f.client.readAgentSession(key.agentSessionId)
+      const diagnosis = await f.sdk.call('space.mote.chat.diagnose', { target: f.target })
+      const startup = await f.client.findAgentStartupDiagnostics({ domain: 'agent.startup', hostId: record.input!.hostId,
+        recent: { agentSessionId: key.agentSessionId, runId: key.expectedRun.runId, limit: 4 } })
+      await appendFile(process.env.COMPLETE_SHARING_PRIVATE_EVIDENCE, JSON.stringify({ key, observations, diagnosis, startup,
+        session: { run: session?.run, providerId: session?.providerId, nativeKind: session?.nativeHandle?.kind ?? null,
+          initialization: session?.terminalFrontend?.initialization?.phase ?? null }, kernelInputCalls: vi.mocked(f.inner.kernel.input).mock.calls.length }) + '\n')
+    }
+  }
+  expect(f.inner.kernel.input).toHaveBeenCalledOnce()
   expect(create).toHaveBeenCalledOnce()
   const store = new MoteChatStore(f.services.database!)
   const admission = store.admissionByIngress(record.ingressId)!
