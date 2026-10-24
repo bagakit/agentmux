@@ -16,7 +16,7 @@ async function saveDefaults(value: AutomationDefaults, expected: AutomationDefau
 }
 
 export const automationSettingsModule = {
-  id: 'automation', group: 'message-tool', title: 'Automation', icon: semanticIconComponent('action.refresh'),
+  id: 'automation', group: 'message-tool', title: 'Automation', icon: semanticIconComponent('object.automation'),
   description: 'Continue interrupted work and set defaults for new tasks.',
   keywords: 'automation progress calendar schedule quiet follow-up interruption continuation 自动化 持续推进 日历 安排 静默 续行',
   searchTargets: [

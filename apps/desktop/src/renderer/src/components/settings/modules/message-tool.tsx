@@ -24,7 +24,7 @@ export const messageToolSettingsModule = {
   group: 'message-tool',
   title: 'User Input',
   description: 'Input layout, shortcut prefixes, prompt suggestions and sending shortcuts.',
-  icon: semanticIconComponent('object.inbox'),
+  icon: semanticIconComponent('object.user-input'),
   keywords: 'message tool composer user input initial layout one line two lines send immediately steer queue keyboard shortcuts enter draft skills commands files agents trigger prefix dollar slash at 技能 指令 文件 引用 快捷输入 用户输入 一行 两行 初始 发送 立即发送 快捷键',
   searchTargets: [
     { id: 'initial-layout', title: 'Initial layout', keywords: 'one line two lines input composer' },

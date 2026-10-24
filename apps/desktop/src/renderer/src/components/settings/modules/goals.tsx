@@ -5,7 +5,7 @@ import { useAppStore } from '../../../store'
 import { GoalsSettingsPane } from '../GoalsSettingsPane'
 import type { SettingsModule } from '../settings-catalog'
 
-const ThemeObjectGoalIcon = semanticIconComponent('object.goal')
+const GoalsIcon = semanticIconComponent('navigation.goals')
 
 
 async function saveGoals(collapsed: boolean, expected: boolean, preferences: Required<GoalsPreferences>, expectedPreferences: Required<GoalsPreferences>): Promise<void> {
@@ -17,7 +17,7 @@ async function saveGoals(collapsed: boolean, expected: boolean, preferences: Req
 }
 
 export const goalsSettingsModule = {
-  id: 'goals', group: 'work', title: 'Goals', icon: ThemeObjectGoalIcon,
+  id: 'goals', group: 'work', title: 'Goals', icon: GoalsIcon,
   description: 'Choose a starting view and keep your goals in sight.',
   keywords: 'work goals default view list board finished history common actions collapsed expanded prompt library requester supervisor PMO continue',
   searchTargets: [

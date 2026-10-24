@@ -20,6 +20,7 @@ const ThemeActionClearIcon = semanticIconComponent('action.clear')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 const ThemeStatusSelectedIcon = semanticIconComponent('status.selected')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
+const OverviewIcon = semanticIconComponent('object.board')
 
 
 export { visibleSettingsSections, settingsNavGroups } from './settings/settings-modules'
@@ -193,12 +194,15 @@ function SettingsPanelView({ onClose, visible = true, initialSection = 'overview
                 && event.target instanceof HTMLElement && !event.target.contains(focused)) event.preventDefault()
             }}>
               <DropdownMenu.RadioGroup value={showResults ? '' : active} onValueChange={(value) => chooseSection(value as SettingsPageId)}>
-                {!query.trim() ? <DropdownMenu.RadioItem value="overview" className="settings-section-menu__item" data-settings-target="overview"><span><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span>Overview</DropdownMenu.RadioItem> : null}
+                {!query.trim() ? <DropdownMenu.RadioItem value="overview" className="settings-section-menu__item" data-settings-target="overview"><span><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span><OverviewIcon size={15} aria-hidden="true" />Overview</DropdownMenu.RadioItem> : null}
                 {navGroups.map((group) => <Fragment key={group.id}>
                   <DropdownMenu.Label className="settings-section-menu__label">{group.title}</DropdownMenu.Label>
-                  {group.items.map((item) => <DropdownMenu.RadioItem key={item.id} value={item.id} className="settings-section-menu__item">
-                    <span><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span>{item.title}
-                  </DropdownMenu.RadioItem>)}
+                  {group.items.map((item) => {
+                    const Icon = item.icon
+                    return <DropdownMenu.RadioItem key={item.id} value={item.id} className="settings-section-menu__item" data-settings-target={item.id}>
+                      <span><DropdownMenu.ItemIndicator><ThemeStatusSelectedIcon size={13} /></DropdownMenu.ItemIndicator></span><Icon size={15} aria-hidden="true" />{item.title}
+                    </DropdownMenu.RadioItem>
+                  })}
                 </Fragment>)}
               </DropdownMenu.RadioGroup>
             </DropdownMenu.Content>

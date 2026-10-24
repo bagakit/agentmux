@@ -6,11 +6,11 @@ import { DefaultBrowserSetting } from '../DefaultBrowserSetting'
 import type { BrowserStartPageConfig } from '../../../../../shared/browser-start-page'
 import type { SettingsModule } from '../settings-catalog'
 
-const ThemeActionSearchIcon = semanticIconComponent('action.search')
+const SurveyIcon = semanticIconComponent('navigation.survey')
 
 
 export const surveySettingsModule = {
-  id: 'survey', group: 'work', title: 'Survey', icon: ThemeActionSearchIcon,
+  id: 'survey', group: 'work', title: 'Survey', icon: SurveyIcon,
   description: 'Personalize your browser start page and continue research.',
   keywords: 'work survey research browser default system http https browsing exploration start page title subtitle icon background history cards',
   searchTargets: [

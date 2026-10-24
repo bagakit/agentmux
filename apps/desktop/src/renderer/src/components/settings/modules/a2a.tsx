@@ -14,7 +14,7 @@ async function saveNotifications(notifications: A2ANotificationPreference, expec
 export const a2aSettingsModule = {
   id: 'a2a', group: 'message-tool', title: 'A2A',
   description: 'Incoming Agent messages and system notification preferences.',
-  icon: semanticIconComponent('object.inbox'),
+  icon: semanticIconComponent('object.agent-messaging'),
   keywords: 'a2a agent message inbox arrival notification silent notify global 来信 提醒 静默',
   searchTargets: [{ id: 'a2a-notifications', title: 'Incoming message notifications', keywords: 'follow global silent notify banner sound' }],
   savedSummary: config => ({ 'follow-global': 'Follow global notifications', silent: 'Silent', notify: 'Notify for background messages' })[resolveA2ANotifications(config)],

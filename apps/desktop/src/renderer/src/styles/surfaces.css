@@ -173,7 +173,8 @@
 .settings-section-menu { z-index: var(--layer-popover); min-width: 180px; max-height: var(--radix-dropdown-menu-content-available-height); overflow: auto; padding: var(--sp-2); border: 1px solid var(--line-soft); border-radius: var(--radius); background: var(--surface-1); box-shadow: var(--elev-2); color: var(--text); }
 .settings-section-menu__label { padding: var(--sp-3); color: var(--text-3); font-size: var(--fs-micro); }
 .settings-section-menu__item { display: flex; align-items: center; gap: var(--sp-3); min-height: 32px; padding: var(--sp-2) var(--sp-3); border-radius: var(--radius-sm); outline: none; cursor: pointer; font-size: var(--fs-body); }
-.settings-section-menu__item > span { display: flex; width: 14px; color: var(--green); }
+.settings-section-menu__item > span:first-child { display: flex; flex: 0 0 14px; width: 14px; color: var(--green); }
+.settings-section-menu__item > :is(svg, img) { flex-shrink: 0; }
 .settings-section-menu__item[data-highlighted], .settings-section-menu__item:hover:where(:not([data-disabled])), .settings-section-menu__item[data-state="checked"] { background: var(--surface-2); }
 .settings-section-menu__item[data-state="checked"] { font-weight: 650; }
 
