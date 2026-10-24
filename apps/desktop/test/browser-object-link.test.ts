@@ -126,12 +126,12 @@ async function fixture(choices: Record<string, 'allow' | 'deny'> = {}, available
     expect(targets).toHaveLength(1)
     const id = targets[0]!.id
     expect(targets[0]!.openedFrom).toMatchObject({ browserId: 'source-browser' })
-    return { page: guest,
+    return { id, page: guest,
       snapshot: () => manager.setViewport(id, 'responsive'),
       answer: (allow: boolean, remember = false) => manager.answerAppLink(id, allow, remember) }
 
   }
-  return { manager, page, snapshot, popup, owner, receive, report, requests, shell, choices, execute }
+  return { id: 'source-browser', manager, page, snapshot, popup, owner, receive, report, requests, shell, choices, execute }
 }
 function navigate(page: InstanceType<typeof native.Contents>, url: string, channel = 'will-navigate') {
   const preventDefault = vi.fn()
@@ -140,6 +140,54 @@ function navigate(page: InstanceType<typeof native.Contents>, url: string, chann
 }
 
 describe('Browser object links share Main navigation after the original authorization', () => {
+  it.each(['Browser', 'Popup'])('%s address submission preserves one-use authorization and the original object', async kind => {
+    const f = await fixture(), source = kind === 'Popup' ? await f.popup() : f
+    const url = 'amux://agent/original%20SID%2F%E4%B8%AD%E6%96%87', pageUrl = source.page.getURL()
+    expect((await f.manager.navigate(source.id, url)).appLinkPrompt).toEqual({ url, scheme: 'amux' })
+    expect(f.receive).not.toHaveBeenCalled(); expect(f.shell.openExternal).not.toHaveBeenCalled()
+    await f.manager.answerAppLink(source.id, false, false)
+    expect(source.snapshot().error).toContain('You chose not')
+    expect(f.choices).toEqual({})
+    expect((await f.manager.navigate(source.id, url)).appLinkPrompt).toEqual({ url, scheme: 'amux' })
+    await f.manager.answerAppLink(source.id, true, false); await settled()
+    expect(f.receive).toHaveBeenCalledExactlyOnceWith(url)
+    expect(f.requests).toHaveLength(2)
+    expect(f.requests[1]).toMatchObject({ operation: 'focus', inputPolicy: 'preserve', expectedAgentSessionId: 'original SID/中文' })
+    expect(source.page.getURL()).toBe(pageUrl); expect(f.shell.openExternal).not.toHaveBeenCalled()
+  })
+
+  it.each(['Browser', 'Popup'])('%s address submission keeps remembered choices, raw validation and source feedback', async kind => {
+    const f = await fixture({ amux: 'deny', 'other-app': 'allow' }), source = kind === 'Popup' ? await f.popup() : f
+    const pageUrl = source.page.getURL(), url = 'amux://region/raw%2Fvalue'
+    expect((await f.manager.navigate(source.id, url)).error).toContain('You chose not')
+    expect(f.receive).not.toHaveBeenCalled(); expect(f.requests).toEqual([])
+    f.choices.amux = 'allow'
+    const malformed = 'amux://region/raw%2fvalue'
+    await f.manager.navigate(source.id, malformed); await settled()
+    expect(f.receive).toHaveBeenLastCalledWith(malformed)
+    expect(source.snapshot().error).toContain('not an exact original identity')
+    expect(f.requests).toEqual([])
+    await f.manager.navigate(source.id, url); await settled()
+    expect(f.requests).toHaveLength(1)
+    expect(f.requests[0]).toMatchObject({ operation: 'focus', inputPolicy: 'preserve', target: { kind: 'space', regionId: 'raw/value' } })
+    expect(source.snapshot().error).toBeNull(); expect(f.shell.openExternal).not.toHaveBeenCalled()
+    await f.manager.navigate(source.id, 'other-app://open/original'); await settled()
+    expect(f.shell.openExternal).toHaveBeenCalledExactlyOnceWith('other-app://open/original')
+    expect(f.receive).toHaveBeenCalledTimes(2); expect(source.page.getURL()).toBe(pageUrl)
+  })
+
+  it.each(['Browser', 'Popup'])('%s address submission preserves ordinary addresses and refused pseudo-protocols', async kind => {
+    const f = await fixture(), source = kind === 'Popup' ? await f.popup() : f
+    for (const [input, expected] of [['example.com:8443/a', 'https://example.com:8443/a'], ['localhost:3000', 'http://localhost:3000/'], ['weather', 'https://www.google.com/search?q=weather']]) {
+      expect((await f.manager.navigate(source.id, input!)).url).toBe(expected)
+      expect(source.page.getURL()).toBe(expected)
+    }
+    const pageUrl = source.page.getURL()
+    await expect(f.manager.navigate(source.id, 'javascript:123')).rejects.toThrow('Unsupported browser URL protocol')
+    expect(source.page.getURL()).toBe(pageUrl)
+    expect(f.receive).not.toHaveBeenCalled(); expect(f.shell.openExternal).not.toHaveBeenCalled()
+  })
+
   it('asks before opening, then keeps the exact Agent identity and original page', async () => {
     const f = await fixture(), url = 'amux://agent/original%20SID%2F%E4%B8%AD%E6%96%87'
     navigate(f.page, url); await settled()
