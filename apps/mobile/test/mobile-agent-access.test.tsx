@@ -35,6 +35,10 @@ function original(kind: 'folder' | 'mote' = 'folder') {
   return { catalog, rpc, client: { forwardRpc: rpc, onEvent: () => () => {} } as any, open: vi.fn() }
 }
 describe('original spatial Agent remains readable before SDK inventory hydration', () => {
+  it('keeps the navigation available before a client is connected', async () => {
+    const element = await mount(<MobileSpatialNavigation client={null} connected={false} home="focus" openSession={vi.fn()} />)
+    expect(element.querySelector('.mobile-spatial-panel')).not.toBeNull()
+  })
   it.each(['space', 'mote'] as const)('opens every original Region in %s even with an empty SDK inventory', async home => {
     const f = original(home === 'mote' ? 'mote' : 'folder')
     const element = await mount(<MobileSpatialNavigation client={f.client} connected home={home} sessions={[]} openSession={f.open} />)
