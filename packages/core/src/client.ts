@@ -1052,11 +1052,14 @@ export class AgentMuxClient {
         const current = await this.registry.refresh(id, this.registry.get(id).run)
         const run = await this.requireCurrentAgentRun(current)
         const session = this.projectSession(current)
+        const provider = this.providers.get(session.providerId)
+        if (!provider.prepareNativeInput) throw new AgentMuxError(
+          'This Provider has no native input adapter for idle-only Inbox notifications. Read the original MID or explicitly use message.notify; the original Agent and manual input remain available.',
+          'AGENT_NATIVE_INPUT_UNAVAILABLE')
         if (agentTurnCompletionIdentity(session)) return { session, inputByte: run.acceptedInputBytes }
         if (session.semanticStatus?.state === 'working' || session.currentActivity?.state === 'active') {
           return { session, inputByte: run.acceptedInputBytes }
         }
-        const provider = this.providers.get(session.providerId)
         const evidence = await provider.readPromptExecutionEvidence?.(this.providerNativeContext(session, run))
         if (evidence?.state === 'idle') return { session, inputByte: run.acceptedInputBytes, nativeIdle: evidence }
         if (!evidence) throw new AgentMuxError('The Provider initial idle opportunity is unconfirmed. Inspect the original Session or read its retained Inbox.', 'AGENT_TURN_END_UNCONFIRMED')
