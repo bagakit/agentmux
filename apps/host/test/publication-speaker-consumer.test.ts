@@ -17,12 +17,13 @@ import { prepareDiscordPublication } from '../../../packages/connectors/src/adap
 import { FeishuPublicationAdapter } from '../../../packages/connectors/src/adapters/feishu/publication.js'
 import { FeishuAdapter } from '../../../packages/connectors/src/adapters/feishu/index.js'
 import { publicationSpeaker } from '../../../packages/connectors/src/publication-speaker.js'
+import { createWorkspaceLayout } from '@agentmux/core/spatial-layout'
 
 const cleanup: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => { try { for (const close of cleanup.splice(0).reverse()) await close() } finally { vi.restoreAllMocks(); vi.unstubAllEnvs() } })
 const native = (sessionId: string, uuid: string, text: string) => JSON.stringify({ type: 'assistant', sessionId, uuid, message: { role: 'assistant', content: [{ type: 'text', text }] } }) + '\n'
 
-async function fixture() {
+async function fixture(ordinaryName?: string) {
   const original = await rpcOwnerFixture(['ordinary-agent'], core, root => ({ providerId: 'claude', executorId: 'claude',
     nativeHandle: { kind: 'provider', providerId: 'claude', sessionId: 'ordinary-native', transcriptPath: join(root, 'ordinary.jsonl') } }))
   cleanup.push(original.close); const sdk = feishuSdkTransport()
@@ -39,7 +40,7 @@ async function fixture() {
   const spatial = new core.AgentMuxSpatialStateStore(join(original.root, 'spatial.json'))
   await spatial.commit({ expectedRevision: 0, graph: { spaces: [{ spaceId, kind: 'mote', name: topic.title, hostId: 'local', directoryPath: topic.physicalDirectoryPath!, projectId: null, topicId: topic.id }],
     zones: [{ zoneId, workspaceId: workspace.id, kind: 'home', hostId: 'local', directoryPath: topic.physicalDirectoryPath!, branch: null }], bindings: [{ spaceId, zoneId }], tabs: [], regions: [], layouts: {}, tabLayouts: {}, resources: {} } })
-  await spatial.retainDisplayLabels([{ target: { kind: 'agent-session', id: 'ordinary-agent' }, value: topic.title }])
+  await spatial.retainDisplayLabels([{ target: { kind: 'agent-session', id: 'ordinary-agent' }, value: ordinaryName ?? topic.title }])
   const configurationPath = join(original.root, 'mote-config.json'), directory = join(original.root, 'connections'), socket = join(original.root, 'host.sock'), desktop = join(original.root, 'absent-desktop.sock')
   const config = { workspaces: [workspace], executors: { 'saved-chat': { label: 'Original chat', providerId: 'claude', command: process.execPath, args: [], env: {}, injectAgentMuxGuide: false } },
     appearance: { spaceObjectIcons: { [spaceId]: ref }, spaceObjectIconRevisions: { [spaceId]: 'original-avatar' } } }
@@ -61,7 +62,8 @@ async function fixture() {
     const inner = host.client as unknown as typeof original.inner & { hookServer: Record<string, unknown>; ensureManagedHooks: unknown; ensureTerminalHandshakeOrDegrade: unknown; providers: { get(id: string): core.AgentProvider } }
     inner.kernel.start = vi.fn(async () => {
       const number = runs.size + 1, runId = 'mote-run-' + number, pid = 400_000 + number, id = 'mote-native-' + number, path = join(original.root, id + '.jsonl')
-      await writeFile(path, native(id, 'before-sharing', 'Earlier original context'))
+      // A newly created private Session has no pre-existing assistant reply.
+      await writeFile(path, '')
       const run = { ...original.run(runId), program: 'claude', pid, workspacePath: topic.physicalDirectoryPath! }
       runs.set(runId, run); sources.set(pid, { id, path }); return run
     })
@@ -102,6 +104,10 @@ async function fixture() {
     const session = await host!.client.readAgentSession(binding.agentSessionId), source = session!.nativeHandle!
     if (source.kind !== 'provider' || !source.transcriptPath) throw Error('Exact native source required')
     await appendFile(source.transcriptPath, native(source.sessionId, id, text)); service().publication!.refresh()
+    await vi.waitFor(() => expect(operations(binding).some(operation => operation.payload.kind === 'speech' && operation.payload.text === text)).toBe(true))
+    if (process.env.GROUP_SPEAKER_CARD_FACTS) await appendFile(process.env.GROUP_SPEAKER_CARD_FACTS, JSON.stringify({ input: id, operations: operations(binding).map(operation => ({
+      operationId: operation.operationId, payload: operation.payload, speaker: operation.speaker, avatarUploads: operation.avatarUploads, avatarSource: operation.avatarSource, state: operation.state
+    })) }) + '\n')
   }
   const operations = (binding = moteBinding) => service().publication!.store.list(binding).filter(operation => operation.payload.kind !== 'binding-lifecycle')
   return { original, remote, topic, topics, workspace, png, ref, config, save, target, spatial, client, rpc, credential, service, moteBinding, ordinary: ordinary.binding, operations, reply, start, stop, socket, desktop, current: () => host! }
@@ -230,3 +236,57 @@ it('optional unknown avatar never holds body delivery or reuploads the same asse
   expect(discord.request.body).toContain('\\\\*\\\\*Name'); expect(discord.request.body).toContain('Authored **body** stays byte exact')
   expect(JSON.parse(discord.request.body!).allowed_mentions).toEqual({ parse: [] })
 }, 35_000)
+
+it('group portraits follow the exact sender spatial relation while equal names and conflicting Motes do not supply an avatar', async () => {
+  const f = await fixture('Original group author'), text = 'Complete group message from its exact original Agent'
+  await f.reply(f.ordinary, 'group-without-affiliation', text)
+  await vi.waitFor(() => expect(f.operations(f.ordinary).at(-1)?.state).toBe('confirmed'))
+  const unlinked = f.operations(f.ordinary).at(-1)!
+  expect(unlinked.speaker).toMatchObject({ name: 'Original group author', reference: { agentSessionId: 'ordinary-agent' } })
+  expect(unlinked.speaker?.avatar).toBeUndefined(); expect(f.remote.uploads).toHaveLength(0)
+  const original = await f.spatial.read(); if (!original) throw Error('Original fixture spatial graph required')
+  original.graph.tabs = [{ tabId: 'speaker-group-tab', workspaceId: f.workspace.id, zoneId: f.target.zoneId, name: null, regionIds: ['speaker-group-region'] }]
+  original.graph.regions = [{ tabId: 'speaker-group-tab', regionId: 'speaker-group-region', kind: 'agent', agentSessionId: 'ordinary-agent', runId: null,
+    execution: { hostId: 'local', cwd: f.original.root } }]
+  original.graph.layouts = { [f.workspace.id]: createWorkspaceLayout('speaker-group-layout', ['speaker-group-tab']) }
+  original.graph.tabLayouts = { 'speaker-group-tab': { root: { type: 'leaf', regionId: 'speaker-group-region' }, activeRegionId: 'speaker-group-region' } }
+  await f.spatial.commit({ expectedRevision: original.revision, graph: original.graph })
+  await f.reply(f.ordinary, 'group-original-avatar', 'The current Mote portrait does not change the Session author or execution')
+  await vi.waitFor(() => expect(f.operations(f.ordinary).at(-1)?.state).toBe('confirmed'))
+  await vi.waitFor(() => expect(f.operations(f.ordinary).at(-1)?.avatarUploads?.at(-1)?.state).toBe('confirmed'))
+  const first = f.operations(f.ordinary).at(-1)!
+  expect(first.speaker).toMatchObject({ name: 'Original group author', mote: f.target, avatar: { target: { objectKey: f.target.spaceId }, observation: 'available' } })
+  expect((await f.current().client.readAgentSession('ordinary-agent'))?.workspacePath).toBe(f.original.root)
+  expect(f.remote.uploads).toEqual([f.png])
+  const branch = await f.spatial.read(); if (!branch) throw Error('Original fixture graph required')
+  branch.graph.zones.push({ zoneId: 'speaker-mote-branch', workspaceId: f.workspace.id, kind: 'worktree', hostId: 'local', directoryPath: join(f.original.root, 'branch'), branch: 'speaker-branch' })
+  branch.graph.bindings.push({ spaceId: f.target.spaceId, zoneId: 'speaker-mote-branch' })
+  branch.graph.tabs.find(tab => tab.tabId === 'speaker-group-tab')!.zoneId = 'speaker-mote-branch'
+  await f.spatial.commit({ expectedRevision: branch.revision, graph: branch.graph })
+  await f.reply(f.ordinary, 'group-reused-avatar', 'The next group card reuses the exact confirmed portrait')
+  await vi.waitFor(() => expect(f.operations(f.ordinary).at(-1)?.payload).toMatchObject({ kind: 'speech', text: 'The next group card reuses the exact confirmed portrait' }))
+  await vi.waitFor(() => expect(f.operations(f.ordinary).at(-1)?.state).toBe('confirmed'))
+  const visible = f.operations(f.ordinary).at(-1)!, card = JSON.parse(JSON.parse(visible.prepared!.request.body!).content)
+  expect(card.body.elements[0]).toMatchObject({ text: { content: 'Original group author · Agent' }, icon: { img_key: 'original-image-key-1' } })
+  expect(visible.avatarSource).toMatchObject({ operationId: first.operationId, imageKey: 'original-image-key-1' })
+  const retained = structuredClone(visible)
+  const other = await f.topics.ensureMote(f.workspace, 'view:other-group-author'), otherSpace = directoryIdentity('local', other.identityDirectoryPath!), otherZone = homeZoneId(otherSpace)
+  const conflict = await f.spatial.read(); if (!conflict) throw Error('Original fixture graph required')
+  conflict.graph.spaces.push({ spaceId: otherSpace, kind: 'mote', name: other.title, hostId: 'local', directoryPath: other.physicalDirectoryPath!, projectId: null, topicId: other.id })
+  conflict.graph.zones.push({ zoneId: otherZone, workspaceId: f.workspace.id, kind: 'home', hostId: 'local', directoryPath: other.physicalDirectoryPath!, branch: null })
+  conflict.graph.bindings.push({ spaceId: otherSpace, zoneId: otherZone })
+  conflict.graph.tabs.push({ tabId: 'conflicting-speaker-tab', zoneId: otherZone, workspaceId: f.workspace.id, name: null, regionIds: ['conflicting-speaker-region'] })
+  conflict.graph.regions.push({ tabId: 'conflicting-speaker-tab', regionId: 'conflicting-speaker-region', kind: 'agent', agentSessionId: 'ordinary-agent', runId: null,
+    execution: { hostId: 'local', cwd: f.original.root } })
+  conflict.graph.layouts[f.workspace.id] = createWorkspaceLayout('speaker-group-layout', ['speaker-group-tab', 'conflicting-speaker-tab'])
+  conflict.graph.tabLayouts['conflicting-speaker-tab'] = { root: { type: 'leaf', regionId: 'conflicting-speaker-region' }, activeRegionId: 'conflicting-speaker-region' }
+  await f.spatial.commit({ expectedRevision: conflict.revision, graph: conflict.graph })
+  await f.reply(f.ordinary, 'group-conflicting-avatar', 'Conflicting optional portraits do not hold the complete body')
+  await vi.waitFor(() => expect(f.operations(f.ordinary).at(-1)?.payload).toMatchObject({ kind: 'speech', text: 'Conflicting optional portraits do not hold the complete body' }))
+  await vi.waitFor(() => expect(f.operations(f.ordinary).at(-1)?.state).toBe('confirmed'))
+  const ambiguous = f.operations(f.ordinary).at(-1)!, plain = JSON.parse(JSON.parse(ambiguous.prepared!.request.body!).content)
+  expect(ambiguous.speaker?.avatar).toBeUndefined(); expect(ambiguous.speaker?.mote).toBeUndefined()
+  expect(plain.body.elements[0]).toMatchObject({ text: { content: 'Original group author · Agent' }, icon: { tag: 'standard_icon', token: 'robot_outlined' } })
+  expect(f.remote.uploads).toHaveLength(1); expect(f.service().publication!.store.inspect(visible.operationId)).toEqual(retained)
+  expect(f.original.inner.kernel.input).toHaveBeenCalledTimes(2); expect(f.original.inner.kernel.stop).not.toHaveBeenCalled()
+}, 40_000)
