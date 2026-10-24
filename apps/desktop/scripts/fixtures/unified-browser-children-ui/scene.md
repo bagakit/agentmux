@@ -8,7 +8,7 @@ Run `node apps/desktop/scripts/verify-unified-browser-children-ui.mjs` from the 
 The optional positional output directory keeps this round's original receipts and PNGs.
 Set `AGENTMUX_CHILD_UI_CAPTURE_HOLD=1` for independent CUA capture of each complete native
 window. Each request records the exact candidate PID, native window identity, original-byte
-output path and a release path. It waits at most 45 seconds. The reviewer saves the original
+output path and a release path. It waits at most 120 seconds. The reviewer saves the original
 CUA image bytes to that output and creates the release file; the fixture validates the real
 PNG/JPEG format and records its MIME type, dimensions and SHA256 without transcoding.
 For user-selected Orca capture, also set `AGENTMUX_CHILD_UI_CAPTURE_PROVIDER=orca`; the
