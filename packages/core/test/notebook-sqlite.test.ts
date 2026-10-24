@@ -6,7 +6,9 @@ import { tmpdir } from 'node:os'
 import { createHash } from 'node:crypto'
 import { AgentMuxNotebookStore, AgentMuxNotesStorage } from '../src/notebook-store.js'
 import { applyNotebookChange, emptyNotebookState } from '../src/notebook-catalog.js'
-import { readNotebookDatabase } from '../src/notebook-database.js'
+import { readNotebookFiles } from '../src/notebook-files.js'
+import { changeOriginalMetadata, digest } from './helpers/notebook-files-fixture.js'
+import { noteProvenanceResourceKey } from '../src/note-provenance.js'
 import type { NoteProvenanceWrite } from '../src/note-provenance.js'
 const roots: string[] = []
 const io = vi.hoisted(() => ({ database: '', fullReads: 0, headerBytes: 0 }))
@@ -36,7 +38,7 @@ async function fixture() {
   return { root, directory, storage, store, resource, body, attribution }
 }
 afterEach(async () => { io.database = ''; io.fullReads = 0; io.headerBytes = 0; vi.restoreAllMocks(); for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true }) })
-describe('original SQLite Notebook metadata owner', () => {
+describe('original local-file Notebook metadata owner', () => {
   it('retains exact body authors through fresh owners, preserves old creation on unknown revisions and refuses a different resource', async () => {
     const f = await fixture(); await f.store.recordProvenance(f.attribution)
     const fresh = new AgentMuxNotebookStore(undefined, new AgentMuxNotesStorage(f.storage.locatorPath, _newTailFixturePath("unused")))
@@ -51,17 +53,17 @@ describe('original SQLite Notebook metadata owner', () => {
     await expect(fresh.recordProvenance({ ...next, blocks: { block: { created: null, lastEdited: creator } } })).rejects.toMatchObject({ code: 'NOTE_PROVENANCE_CONFLICT' })
     expect((await fresh.readProvenance({ ...query, blockIds: ['block'] })).blocks.block?.lastEdited).toEqual(next.blocks.block.lastEdited)
   })
-  it('imports old catalog JSON once with an exact recoverable backup; missing or replaced acknowledged SQLite never becomes empty', async () => {
+  it('imports old catalog JSON once with an exact recoverable backup; missing or replaced acknowledged file root never becomes empty', async () => {
     const f = await fixture(), original = { ...emptyNotebookState(), revision: 5 }
     const oldPath = join(f.directory, 'notebooks.json'), raw = JSON.stringify(original)
     await writeFile(oldPath, raw)
     expect(await f.store.read()).toEqual(original)
-    expect((await readFile(f.store.path)).subarray(0, 16).toString()).toBe('SQLite format 3\0')
+    expect(JSON.parse(await readFile(f.store.path, 'utf8')).schema).toBe('agentmux.notebook.files.v1')
     expect(await readFile(oldPath + '.original-' + sha(raw).slice(7), 'utf8')).toBe(raw)
     await writeFile(oldPath, JSON.stringify(emptyNotebookState()))
     expect(await f.store.read()).toEqual(original)
     await rm(f.store.path)
-    await rm(f.store.path + '.sqlite-identity')
+    await rm(f.store.path + '.identity')
     await expect(f.store.read()).rejects.toMatchObject({ code: 'NOTEBOOK_READ_UNCONFIRMED' })
     await expect(f.store.apply({ operationId: 'overwrite', expectedRevision: 0, change: { kind: 'create', notebookId: 'new', name: 'New' } }, { kind: 'user', id: 'human' })).rejects.toMatchObject({ code: 'NOTEBOOK_READ_UNCONFIRMED' })
     expect(await readFile(oldPath, 'utf8')).toBe(JSON.stringify(emptyNotebookState()))
@@ -97,20 +99,23 @@ describe('original SQLite Notebook metadata owner', () => {
   })
   it('keeps healthy directory and exact attribution reads independent of unrelated damaged author history without reading the whole database', async () => {
     const f = await fixture(); await f.store.recordProvenance(f.attribution)
-    const { DatabaseSync } = await import('node:sqlite'), db = new DatabaseSync(f.store.path)
-    const insert = db.prepare('INSERT INTO provenance VALUES (?,?,?,?)')
-    for (let i = 0; i < 200; i++) insert.run('unrelated-' + i, 'unrelated-resource', sha(String(i)), '{malformed unrelated attribution')
-    db.close()
+    const manifest = JSON.parse(await readFile(f.store.path, 'utf8'))
+    for (let i = 0; i < 200; i++) {
+      const noteId = 'unrelated-' + i, resource = { ...f.resource, path: noteId + '.note.md' }
+      const bytes = '{malformed unrelated attribution', hash = digest(bytes)
+      await writeFile(join(f.store.path + '.files', 'metadata', hash + '.json'), bytes)
+      manifest.originals[digest(JSON.stringify([noteId, noteProvenanceResourceKey(resource)]))] = { noteId, resource, metadata: hash }
+    }
+    await writeFile(f.store.path, JSON.stringify(manifest))
     io.database = f.store.path
     expect((await f.store.read()).revision).toBe(0)
     expect(await f.store.readProvenance({ ...f.attribution, blockIds: ['block'] })).toMatchObject({ status: 'recorded', blocks: f.attribution.blocks })
     expect(await f.store.readProvenance({ ...f.attribution, revision: sha('external-body'), blockIds: ['block'] })).toMatchObject({ status: 'unconfirmed', blocks: { block: { created: creator, lastEdited: null } } })
-    expect(io.fullReads).toBe(0); expect(io.headerBytes).toBe(3 * 16)
+    expect(io.fullReads).toBeGreaterThan(0); expect(io.fullReads).toBeLessThanOrEqual(7); expect(io.headerBytes).toBe(0)
   })
-  it('never grants a valid foreign attribution payload stored under the requested SQL row key', async () => {
+  it('never grants a valid foreign attribution payload stored under the requested original metadata address', async () => {
     const f = await fixture(); await f.store.recordProvenance(f.attribution)
-    const { DatabaseSync } = await import('node:sqlite'), db = new DatabaseSync(f.store.path)
-    db.prepare('UPDATE provenance SET json=?').run(JSON.stringify({ ...f.attribution, noteId: 'different-original' })); db.close()
+    await changeOriginalMetadata(f.store.path, f.attribution.noteId, f.resource, value => { value.provenance[0].noteId = 'different-original' })
     await expect(f.store.readProvenance({ ...f.attribution, blockIds: ['block'] })).rejects.toMatchObject({ code: 'NOTEBOOK_READ_UNCONFIRMED' })
     expect((await f.store.read()).revision).toBe(0)
     expect(await readFile(join(f.directory, f.resource.path), 'utf8')).toBe(f.body)
@@ -191,6 +196,6 @@ describe('original SQLite Notebook metadata owner', () => {
     expect(await f.storage.change(input)).toEqual(await f.storage.inspect(input.operationId))
     const operation = (await f.storage.inspect(input.operationId)).operation!
     await expect(readFile(operation.database!.snapshotPath)).rejects.toMatchObject({ code: 'ENOENT' })
-    expect((await readNotebookDatabase(join(target, 'notebooks.sqlite')))?.provenance).toHaveLength(1)
+    expect((await readNotebookFiles(join(target, 'notebooks.root.json')))?.provenance).toHaveLength(1)
   })
 })
