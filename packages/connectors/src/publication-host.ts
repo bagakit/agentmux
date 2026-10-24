@@ -1,7 +1,7 @@
 import { isCompleteConversationRecord } from '@agentmux/core/conversation'
 import { publicationMarkdown } from './publication-markdown.js'
 import { AgentMuxError, parseProviderSessionHistoryResourceReadResult, readSessionHistoryTextResource, type AgentSessionHistoryContentPart, type AgentSessionHistoryResourceRequest, type AgentSessionHistoryResourceReadResult } from '@agentmux/core'
-import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPage, parseConversationCheckpointPage, parseConversationReadPage, parseConversationUnit, conversationRecordId, conversationSourceKey, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationCheckpointInput, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationRef } from '@agentmux/core/conversation'
+import { consumeJsonReadEntry, consumeConversationWindowPage, parseConversationChangesPage, parseConversationCheckpointPage, parseConversationReadPage, parseConversationUnit, conversationRecordId, conversationSourceKey, CONVERSATION_MAX_UNIT_BYTES, type JsonReadAssembly, type ConversationWindowAssembly, type ConversationWatchInput, type ConversationObservation, type ConversationObservationHandle, type ConversationSourceRef, type ConversationCheckpointInput, type ConversationChangesInput, type ConversationChangesPage, type ConversationCheckpoint, type ConversationCheckpointPage, type ConversationTimelineReadInput, type AgentConversationReadPage, type ConversationUnit, type ConversationRef } from '@agentmux/core/conversation'
 import { connectionDiagnosisCheckpointKey, connectionDiagnosisSourceCode, type ConnectionDeliverySourceObservation, parseConnectionDeliveryParams, parseRoomBindingAuthority, type ConnectionDeliveryObservation, type ConnectionDeliveryPort, type ConnectionDeliveryListInput, type ConnectionDeliveryOperationInput, type RoomBinding, type RoomBindingCallContext, type RoomBindingReadPort } from '@agentmux/core/connections'
 import type { ConnectionHost } from './connection-host.js'
 import { credentialLookupFailure } from './credential-observation.js'
@@ -186,15 +186,63 @@ export class PublicationHost implements ConnectionDeliveryPort {
     }
     if (permissionsUnavailable && (lane.observation.state === 'ready' || accessUnavailable && lane.observation.reason === 'source-unconfirmed' && lane.sourceObservation?.state !== 'unavailable')) lane.observation = { state: 'unavailable', reason: accessUnavailable ? 'access-unconfirmed' : 'source-unconfirmed' }
   }
+  private async observeLane(lane: Lane, sourceHostId?: string, acceptedSources?: readonly ConversationSourceRef[]): Promise<void> {
+    if (lane.watch?.handle && !lane.watch.failure && !lane.watch.handle.closed.aborted && lane.watch.viewId === lane.viewId) return
+    const reference = { hostId: lane.binding.executionHostId, agentSessionId: lane.binding.agentSessionId }, signal = lane.abort.signal
+    const previous = lane.watch, watch: LaneWatch = { viewId: lane.viewId }
+    lane.watch = watch // Fence callbacks before releasing the previous original subscription.
+    previous?.handle?.dispose()
+    const unavailable = (code?: string) => {
+      if (signal.aborted || lane.watch !== watch) return
+      watch.failure = { ...(code ? { code } : {}) }
+      this.sourceUnavailable(lane, 'source-unconfirmed', code ? new AgentMuxError('The original publication subscription is unavailable.', code) : undefined)
+    }
+    let pending: ConversationObservation | undefined
+    const onObservation = (observation: ConversationObservation): void => {
+      if (signal.aborted || lane.watch !== watch) return
+      // A notification can follow Core's opening snapshot but precede the port
+      // returning its handle. Retain it until that owner and scope are known.
+      if (!watch.handle) { if (!pending || pending.kind !== 'unavailable') pending = observation; return }
+      if (observation.hostId !== reference.hostId || observation.agentSessionId !== reference.agentSessionId || observation.sourceHostId !== (sourceHostId ?? watch.handle.sourceHostId)) return
+      const sources = acceptedSources ?? watch.handle.scope.sources.filter(source => source.kind === 'native')
+      if (!sources.some(source => conversationSourceKey(source) === conversationSourceKey(observation.source))) return
+      if (observation.kind === 'unavailable') { unavailable(observation.code); return }
+      this.wake(lane)
+    }
+    try {
+      const handle = await this.options.conversation.observe({ ...reference, ...(lane.view ? { view: lane.view } : {}) }, onObservation, signal)
+      if (signal.aborted || lane.watch !== watch) { handle.dispose(); return }
+      if (handle.hostId !== reference.hostId || handle.agentSessionId !== reference.agentSessionId || sourceHostId !== undefined && handle.sourceHostId !== sourceHostId) { handle.dispose(); throw Error('Foreign observation owner') }
+      watch.handle = handle
+      const sources = acceptedSources ?? handle.scope.sources.filter(source => source.kind === 'native')
+      const failed = handle.coverage.find(value => (acceptedSources ? sources.some(source => conversationSourceKey(source) === conversationSourceKey(value.source)) : value.source.kind === 'native' || value.source.kind === 'native-unavailable') && ['unavailable', 'unsupported'].includes(value.current))
+      if (failed) unavailable(failed.gaps[0]?.code)
+      // A captured-only opening is useful to Core readers, but cannot establish
+      // this dedicated native origin. The existing recovery lane may rediscover it.
+      if (!acceptedSources && !sources.length) unavailable(failed?.gaps[0]?.code ?? 'AGENT_CONVERSATION_NATIVE_UNAVAILABLE')
+      handle.closed.addEventListener('abort', () => unavailable(), { once: true })
+      if (handle.closed.aborted) unavailable()
+      if (pending) onObservation(pending)
+    } catch (error) { unavailable(error instanceof AgentMuxError ? error.code : undefined) }
+  }
   private async catchUp(lane: Lane, adapter: PublicationAdapter): Promise<void> {
     const binding = lane.binding, signal = lane.abort.signal, reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }
     let after = this.store.retainedCheckpoint(binding)
     let sourceHostId = after?.sourceHostId ?? binding.sourceFrontier?.sourceHostId
+    if (!after && binding.publicationOrigin) await this.observeLane(lane)
     if (!after && binding.publicationOrigin) {
       try {
         const page = parseConversationCheckpointPage(await this.options.conversation.checkpoint({ ...reference, nativePosition: 'beginning' }, signal), reference)
         const native = page.checkpoint.frontier.cuts.filter(cut => cut.kind === 'native')
-        if (native.length !== 1) throw new AgentMuxError('The original native conversation has not appeared yet. Its first reply will be read from the accepted beginning.', 'AGENT_CONVERSATION_NATIVE_UNAVAILABLE')
+        if (native.length !== 1) {
+          const failure = page.coverage.find(value => (value.source.kind === 'native' || value.source.kind === 'native-unavailable') && ['unavailable', 'unsupported'].includes(value.current))?.gaps[0]
+          throw new AgentMuxError('The original native beginning is unavailable. Its first reply and input are retained.', failure?.code ?? 'AGENT_CONVERSATION_NATIVE_UNAVAILABLE')
+        }
+        const opening = lane.watch?.handle
+        if (opening && (opening.sourceHostId !== page.sourceHostId || opening.scope.sources.some(source => source.kind === 'native' && (source.providerId !== native[0]!.checkpoint.source.providerId || source.nativeSessionId !== native[0]!.checkpoint.source.nativeSessionId)))) {
+          if (lane.watch?.handle === opening) lane.watch.failure = { code: 'AGENT_SESSION_HISTORY_SOURCE_CHANGED' }
+          throw new AgentMuxError('The original native source changed while its beginning was established.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+        }
         sourceHostId = page.sourceHostId
         after = this.store.checkpoint(binding, sourceHostId, { ...page.checkpoint, frontier: { ...page.checkpoint.frontier,
           scope: { sources: native.map(cut => ({ kind: 'native' as const, ...cut.checkpoint.source })) }, cuts: native } })
@@ -204,33 +252,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
     catch (error) { this.sourceUnavailable(lane, 'source-unconfirmed', error); return }
     after ??= this.store.checkpoint(binding, sourceHostId)
     const acceptedSources = after.frontier.scope.sources
-    if (!lane.watch?.handle || lane.watch.failure || lane.watch.handle.closed.aborted || lane.watch.viewId !== lane.viewId) {
-      const previous = lane.watch
-      const watch: LaneWatch = { viewId: lane.viewId }
-      lane.watch = watch // Fence callbacks before releasing the previous original subscription.
-      previous?.handle?.dispose()
-      const unavailable = (code?: string) => {
-        if (signal.aborted || lane.watch !== watch) return
-        watch.failure = { ...(code ? { code } : {}) }
-        this.sourceUnavailable(lane, 'source-unconfirmed', code ? new AgentMuxError('The original publication subscription is unavailable.', code) : undefined)
-      }
-      try {
-        const handle = await this.options.conversation.observe({ ...reference, ...(lane.view ? { view: lane.view } : {}) }, observation => {
-          if (signal.aborted || lane.watch !== watch) return
-          if (observation.hostId !== reference.hostId || observation.agentSessionId !== reference.agentSessionId || observation.sourceHostId !== sourceHostId) return
-          if (!acceptedSources.some(source => conversationSourceKey(source) === conversationSourceKey(observation.source))) return
-          if (observation.kind === 'unavailable') { unavailable(observation.code); return }
-          this.wake(lane)
-        }, signal)
-        if (signal.aborted || lane.watch !== watch) { handle.dispose(); return }
-        if (handle.hostId !== reference.hostId || handle.agentSessionId !== reference.agentSessionId || handle.sourceHostId !== sourceHostId) { handle.dispose(); throw Error('Foreign observation owner') }
-        watch.handle = handle
-        const failed = handle.coverage.find(value => acceptedSources.some(source => conversationSourceKey(source) === conversationSourceKey(value.source)) && ['unavailable', 'unsupported'].includes(value.current))
-        if (failed) unavailable(failed.gaps[0]?.code)
-        handle.closed.addEventListener('abort', () => unavailable(), { once: true })
-        if (handle.closed.aborted) unavailable()
-      } catch (error) { unavailable(error instanceof AgentMuxError ? error.code : undefined) }
-    }
+    await this.observeLane(lane, sourceHostId, acceptedSources)
     // Transient fragment state is bounded to one original batch. A restart discards
     // it and resumes the original durable cut, preserving all unknown effects.
     lane.read ??= { after }
