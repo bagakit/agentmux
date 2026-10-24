@@ -121,6 +121,8 @@ const sha = text => createHash('sha256').update(text).digest('hex')
 const capture = { consumed: 0, loaded: {}, compiled: {} }
 const publish = () => fs.writeFileSync(process.env.SETTINGS_MODULES_CAPTURE!, JSON.stringify(capture, null, 2))
 const relative = id => path.relative(plan.root, id.split('?')[0])
+const compiledDirectory = path.join(path.dirname(process.env.SETTINGS_MODULES_CAPTURE!), 'compiled')
+fs.mkdirSync(compiledDirectory, { recursive: true })
 export default {
   ...base,
   // A single worker keeps the same original tests while avoiding the forks
@@ -137,10 +139,24 @@ export default {
       publish()
       return text
     } },
-    { name: 'settings-modules-actual-compiled', enforce: 'post', transform(code, id) {
+    { name: 'settings-modules-actual-compiled', enforce: 'post', transform(code, id, options) {
       const file = relative(id)
       if (!plan.monitored.includes(file)) return
-      capture.compiled[file] = sha(code)
+      // The same owner can be compiled by both happy-dom/client and node/SSR.
+      // Record every real context and output, rather than letting whichever
+      // transform finishes last replace the other environment's evidence.
+      const context = { environment: this.environment?.name ?? null,
+        consumer: this.environment?.config.consumer ?? null, ssr: options?.ssr ?? null }
+      const contexts = capture.compiled[file] ??= {}
+      const observed = contexts[JSON.stringify(context)] ??= { context, ids: [], hashes: [] }
+      const hash = sha(code), fullId = path.relative(plan.root, id)
+      if (!observed.ids.includes(fullId)) observed.ids.push(fullId)
+      if (!observed.hashes.includes(hash)) observed.hashes.push(hash)
+      observed.ids.sort(); observed.hashes.sort()
+      // Keep exact bytes for a future mismatch; no broad normalization of
+      // compiled code and no per-module exclusions qualify strict restoration.
+      const filename = path.join(compiledDirectory, hash + '.js')
+      if (!fs.existsSync(filename)) fs.writeFileSync(filename, code)
       publish()
     } }
   ]
@@ -176,6 +192,14 @@ async function run(id, mutant = '') {
   if ('numRuntimeErrorTestSuites' in report) assert.equal(report.numRuntimeErrorTestSuites, 0)
   assert.doesNotMatch(Buffer.concat(output).toString(), /Unhandled Errors|Unhandled Rejection|Uncaught Exception/, 'Framework unhandled errors cannot qualify a mutation')
   assert.ok(Object.keys(capture.compiled).length > 10, 'Nonempty actual production compilation')
+  for (const [file, contexts] of Object.entries(capture.compiled)) {
+    assert.ok(Object.keys(contexts).length > 0, `${id}: no actual compilation context for ${file}`)
+    for (const [key, observed] of Object.entries(contexts)) {
+      assert.equal(key, JSON.stringify(observed.context), `${id}: compilation context identity changed for ${file}`)
+      assert.ok(observed.ids.length > 0 && observed.hashes.length > 0, `${id}: empty compilation evidence for ${file}`)
+      for (const hash of observed.hashes) assert.equal(digest(await fs.readFile(path.join(directory, 'compiled', hash + '.js'))), hash, `${id}: compiled diagnostic bytes changed for ${file}`)
+    }
+  }
   if (mutant) {
     assert.notEqual(exitCode, 0, `${id}: mutation was white-green`)
     assert.ok(capture.consumed > 0, `${id}: owning Source was not actually loaded`)
@@ -213,7 +237,8 @@ try {
   for (const file of inputs.keys()) await bind(file)
   const receipt = { schema: 'settings-modules-proof.v1', source: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
     inputs: Object.fromEntries(inputs), callers, runs, mutants: mutants.map(({ source, ...metadata }) => metadata),
-    boundary: 'Actual Source/Vite compiled mounted UI and durable ConfigOwner fixtures; no user App, Native or installation.' }
+    compiledCode: path.relative(root, path.join(directory, 'compiled')),
+    boundary: 'Actual Source/Vite compiled mounted UI and durable ConfigOwner fixtures; exact distinct outputs per observed environment/SSR context, with original compiled bytes; no user App, Native or installation.' }
   await fs.writeFile(path.join(directory, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
   console.log('Settings module proof:', path.relative(root, directory))
 } catch (error) {
