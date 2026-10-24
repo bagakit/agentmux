@@ -9,7 +9,8 @@ import { useAppStore } from '../src/renderer/src/store'
 import { useLauncherState } from '../src/renderer/src/lib/launcher-state'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
 import { composerDOM } from './helpers/composer-dom-fixture'
-import { allStyleRules } from './helpers/styles.js'
+import { readStyleSheet, stripCssComments } from './helpers/styles.js'
+const allStyleRules = () => stripCssComments(readStyleSheet('./index.css'))
 
 // 启动页 message tool 的三处布局缺陷（用户报告）：
 //   D1 偏左——它没跟随 .launch-surface 的居中列。
@@ -61,17 +62,17 @@ describe('D1: 启动页 message tool 与页面其余块同列居中', () => {
     expect(launcherRule, '.launcher-composer 排在 .composer margin 之前，级联轮不到它').toBeGreaterThan(composerMargin)
   })
 
-  it('这条规则真的挂在启动页那个元素上，且它是 .launch-surface 的直接子元素', async () => {
+  it('这条规则挂在原 SurfaceState 的完整正文列里', async () => {
     // 上面两条只读样式表：类名从 JSX 上消失、或元素被挪进某层包裹 div，规则就整条失效，
     // 而它们照样全绿（本仓「零调用者检查」的 CSS 面）。这条从渲染出的 DOM 反着核。
     await mountLauncher()
     const node = dom.container.querySelector('.launcher-composer')
     expect(node, '渲染出的启动页里没有 .launcher-composer——样式表那条规则没有落点').not.toBeNull()
     expect(node!.classList.contains('composer'), '启动页这块没复用 .composer 表面样式').toBe(true)
-    // margin-inline:auto 只对「靠 .launch-surface > * 拿到 width:min(640px,100%)」的那一层有效；
-    // 多包一层 div 就会让宽度约束落在包裹层上，这条居中随之作废。
-    expect(node!.parentElement?.classList.contains('launch-surface'),
-      '.launcher-composer 不是 .launch-surface 的直接子元素——640px 列宽与居中都落不到它头上').toBe(true)
+    const body = node!.parentElement
+    expect(body?.classList.contains('surface-state__body')).toBe(true)
+    expect(body?.parentElement?.classList.contains('surface-state__content')).toBe(true)
+    expect(body?.closest('.launch-surface')).not.toBeNull()
   })
 })
 

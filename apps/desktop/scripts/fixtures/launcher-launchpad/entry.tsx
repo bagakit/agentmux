@@ -49,6 +49,13 @@ if (restarting) {
   if (!restartFacts) throw new Error('Restart must have the exact captured preview API facts, not seeded views')
   api.config.get = async () => structuredClone(restartFacts.config)
   api.sessions.snapshot = async () => structuredClone(restartFacts.snapshot)
+  // The first process writes the production Core spatial owner. The isolated
+  // preview transports that exact read receipt across processes, as it does Runs.
+  if (restartFacts.spatial) api.spatial.read = async () => structuredClone(restartFacts.spatial)
+  if (restartFacts.scratchTopics) {
+    api.scratch.listTopics = async () => structuredClone(restartFacts.scratchTopics)
+    api.scratch.readTopic = async (_workspaceId, topicId) => structuredClone(restartFacts.scratchTopics.find((topic: any) => topic.id === topicId) ?? null)
+  }
   api.sessions.attach = async control => {
     const session = restartFacts.snapshot.sessions.find((item: any) => item.control.run.runId === control.run.runId)
     if (!session) throw new Error('Captured preview Run is absent')
@@ -124,9 +131,10 @@ function Shell() {
 }
 const probe = {
   workspaceId, tabId, regionId, neighborId, groupId,
-  readBeforeFixtureSetup: restarting ? {tabs:boot.tabs,layouts:boot.layouts,activeWorkspaceId:boot.activeWorkspaceId,sections:useLauncherState.getState().sections,drafts:useLauncherState.getState().drafts,sourceDraft:boot.agentComposerDrafts[regionId],agentDrafts:boot.agentComposerDrafts} : null,
+  readBeforeFixtureSetup: restarting ? {tabs:boot.tabs,layouts:boot.layouts,activeWorkspaceId:boot.activeWorkspaceId,sections:useLauncherState.getState().sections,drafts:useLauncherState.getState().drafts,sourceDraft:boot.agentComposerDrafts[regionId],agentDrafts:boot.agentComposerDrafts,moteTopicId:useLauncherState.getState().moteTopicId,selectedExecutor:useLauncherState.getState().executors[workspaceId],sessions:boot.sessions} : null,
   flush() { return prepareRendererUpdate('quit') },
-  bootFacts() { const state=useAppStore.getState(); return {config:state.config,snapshot:{...snapshot,sessions:state.sessions,timelines:state.timelines,recoveryCandidates:state.recoveryCandidates},warm,neighbor} },
+  async bootFacts() { const state=useAppStore.getState(); return {config:state.config,snapshot:await api.sessions.snapshot(),spatial:await api.spatial.read(),scratchTopics:await api.scratch.listTopics(SCRATCH_WORKSPACE_ID),warm,neighbor} },
+  async runtimeFacts() { const value=await api.sessions.snapshot();return {warm:value.sessions.find(session=>session.id===warm.id),neighbor:value.sessions.find(session=>session.id===neighbor.id)} },
   settings() { flushSync(()=>root.render(<div style={{display:'flex',width:'100%',height:'100%'}}><SettingsPanel onClose={()=>probe.scene()} /></div>)) },
   visibility(visible: boolean) { fixtureVisible = visible; flushSync(() => root.render(<Shell />)) },
   host(surface: typeof fixtureHost, entity: typeof fixtureEntity = 'tab') {
@@ -153,10 +161,17 @@ const probe = {
     const config = useAppStore.getState().config!
     flushSync(() => useAppStore.setState({ config: { ...config, copyPathsAsAbsolute: absolute } }))
   },
-  scene({ split = false, long = false, theme = 'dark', ratio = 0.5, mount = true } = {}) {
+  scene({ split = false, long = false, theme = 'dark', ratio = 0.5, mount = true, executorCount = 6 } = {}) {
     document.documentElement.dataset.appearance = theme
     const config = structuredClone(baseConfig)
-    config.executors = Object.fromEntries(Object.entries(config.executors).slice(0, 6))
+    config.executors = Object.fromEntries(Object.entries(config.executors).slice(0, executorCount))
+    // Additional configured commands exercise the user's full catalog density, with real
+    // Provider declarations and unique Executor identities at the controlled API seam.
+    const declared = Object.entries(config.executors)
+    for (let index = declared.length; index < executorCount; index++) {
+      const [id, executor] = declared[index % declared.length]!
+      config.executors[`fixture-${id}-${index}`] = { ...executor, label: `${executor.label} · ${index + 1}` }
+    }
     config.workspaces = config.workspaces.map(item => item.id === workspaceId ? { ...item,
       name: long ? 'AgentMux · distributed runtime & workspace orchestration' : 'AgentMux',
       path: workspace.path } : item)
@@ -172,7 +187,7 @@ const probe = {
       tabs: { ...Object.fromEntries(Object.entries(state.tabs).filter(([, item]) => item.workspaceId !== workspaceId)), [tabId]: tab },
       layouts: { ...state.layouts, [workspaceId]: createWorkspaceLayout(groupId, [tabId]) }, activeWorkspaceId: workspaceId,
       mainSurface: 'workbench', loading: false, retainedSpatialFocus: null, workbenchNavigationInputPolicy: null, workbenchSpaceSelection: null,
-      warmTerminal: { key: warmTerminalKey(warmWorkspace.hostId, warmWorkspace.path), ownerLauncherId: `region:${regionId}`, session: warm, ready: Promise.resolve(warm) },
+      warmTerminals: { [warmTerminalKey(warmWorkspace.hostId, warmWorkspace.path)]: [{ key: warmTerminalKey(warmWorkspace.hostId, warmWorkspace.path), ownerLauncherId: `region:${regionId}`, session: warm, ready: Promise.resolve(warm) }] },
       recoveryCandidates: agents.map(session => ({ agentSessionId: session.id, hostId: session.hostId, workspacePath: session.workspacePath,
         providerId: session.providerId!, executorId: session.executorId!, capabilities: session.capabilities, label: session.label,
         createdAt: session.createdAt, updatedAt: session.updatedAt, run: session.control.run })),
@@ -208,10 +223,12 @@ const probe = {
   moteTerminalFacts() { const records=(window as any).launchpadTerminals??[];const node=probe.moteLauncher()?.querySelector('.launch-terminal__body .xterm');const actual=records.find((item:any)=>item.element===node&&!item.disposed);if(!actual)return null;const buffer=actual.buffer.active;return {rows:actual.rows,cols:actual.cols,fontSize:actual.options.fontSize,fontFamily:actual.options.fontFamily,lines:Array.from({length:actual.rows},(_,index)=>buffer.getLine(buffer.viewportY+index)?.translateToString(true)??'')} },
   facts() {
     const state = useAppStore.getState(), launcher = useLauncherState.getState()
-    return { sections: launcher.sections[workspaceId], allSections: launcher.sections, drafts: launcher.drafts[`region:${regionId}`], selectedExecutor: launcher.executors[workspaceId],
+    const candidate = Object.values(state.warmTerminals).flat().find(item => item.session?.control.run.runId === warm.control.run.runId)
+    return { sections: launcher.sections[workspaceId], allSections: launcher.sections, drafts: launcher.drafts[`region:${regionId}`], selectedExecutor: launcher.executors[workspaceId], moteTopicId: launcher.moteTopicId,
       sourceDraft: state.agentComposerDrafts[regionId], agentDrafts: state.agentComposerDrafts, activeWorkspaceId: state.activeWorkspaceId,
-      tab: state.tabs[tabId], layout: state.layouts[workspaceId], warmRun: state.warmTerminal?.session?.control.run.runId,
-      originalWarmRun: warm.control.run.runId, warmOwner: state.warmTerminal?.ownerLauncherId, warmKey: state.warmTerminal?.key, warmPath: state.warmTerminal?.session?.workspacePath, neighborRun: neighbor.control.run.runId, calls, floating: readPmoTeamsTopicFloatingState(),
+      tab: state.tabs[tabId], layout: state.layouts[workspaceId], warmRun: candidate?.session?.control.run.runId,
+      originalWarmRun: warm.control.run.runId, originalWarmSession: warm.id, observedWarmRun: state.sessions.find(session => session.id === warm.id)?.control.run.runId,
+      warmOwner: candidate?.ownerLauncherId, warmKey: candidate?.key, warmPath: candidate?.session?.workspacePath, neighborRun: neighbor.control.run.runId, observedNeighborRun: state.sessions.find(session => session.id === neighbor.id)?.control.run.runId, calls, floating: readPmoTeamsTopicFloatingState(),
       storageBytes: localStorage.getItem('agentmux-launcher'), workbenchStorageBytes: localStorage.getItem('agentmux-workbench-v1'), persistenceIssue: launcher.persistenceIssue }
   },
   moteHostFacts() {

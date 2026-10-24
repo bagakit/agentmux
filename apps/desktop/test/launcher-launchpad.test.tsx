@@ -31,16 +31,17 @@ describe('actual Launcher work start', () => {
   })
   it('discovery failure is a visible unconfirmed state while the actual launch remains usable', async () => {
     await mount('error'); const launch = vi.fn().mockResolvedValue(undefined); await act(async () => useAppStore.setState({ launchAgent: launch }))
-    expect(dom.container.textContent).toContain('Agent availability check is unconfirmed')
+    expect(dom.container.textContent).toContain('Agent check needs attention')
     const button = dom.container.querySelector<HTMLButtonElement>('.primary-button')!; expect(button.disabled).toBe(false)
     await act(async () => button.click()); expect(launch).toHaveBeenCalledWith('codex', 'Preserve the full request\nincluding this second line.', 'group', { tabId: 'launcher', regionId: 'region' }, {}, { agentName: undefined, tabName: undefined })
   })
-  it('only confirmed missing commands disable launch', async () => { await mount('missing'); expect(dom.container.querySelector<HTMLButtonElement>('.primary-button')!.disabled).toBe(true); expect(dom.container.textContent).toContain('not found') })
+  it('only confirmed missing commands disable launch', async () => { await mount('missing'); expect(dom.container.querySelector<HTMLButtonElement>('.primary-button')!.disabled).toBe(true); expect(dom.container.querySelector('.launcher-other-agents')?.textContent).toContain('Unavailable · 1'); await dom.click('.launcher-other-agents'); expect(dom.container.querySelector('.launcher-unavailable-agents')?.textContent).toContain('Codex') })
   it('collapse and close retain the same selected Agent and complete draft, then restore an editable input', async () => {
     await mount(); await dom.click('[aria-label="Collapse Agents"]'); expect(dom.container.querySelector('.launcher-composer')).toBeNull(); expect(dom.container.textContent).toContain('Preserve the full request'); expect(dom.container.querySelector('.primary-button')).toBeNull(); expect(dom.container.querySelector('.launcher-resume-trigger')).not.toBeNull()
     await dom.click('[aria-label="Close Agents"]'); expect(dom.container.querySelector('[aria-label="Launch options"]')).toBeNull(); expect(dom.container.querySelector('.launcher-restore')?.textContent).toContain('Codex')
     await dom.click('.launcher-restore'); expect(dom.draft('region')).toBe('Preserve the full request\nincluding this second line.')
-    const editor = dom.container.querySelector<HTMLElement & { editor: Editor }>('.tiptap')!.editor
+    await dom.render(<NewTabSurface tabGroupId="group" tabId="launcher" regionId="region" visible />)
+    const editor = dom.container.querySelector<HTMLElement & { editor: Editor }>('.launcher-composer .tiptap')!.editor
     await act(async () => { editor.commands.insertContent('Edited ') }); expect(dom.draft('region')).toContain('Edited ')
     expect(JSON.parse(window.localStorage.getItem('agentmux-launcher')!).state.sections.workspace.agents).toBe('expanded')
   })
