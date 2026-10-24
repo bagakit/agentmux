@@ -12,6 +12,8 @@ export type MobileObjectReference = { name: string; project: string; context?: A
   mote?: { spaceId: string; name?: string; conversationName?: string; contentReference?: AgentMuxMotePresentation['content'] } }
 export type MobilePresentationRoute = {
   primary: MobilePrimaryWorkface | 'survey'; showSession: boolean; showGoalWork: boolean
+  /** Last explicit Mote selection on this device; never an execution target. */
+  recentMoteSpaceId?: string
   identity: MobileObjectReference | null
   profile: { identity: MobileObjectReference; sourcePath: string | null } | null
   topics?: MobileTopicsRoute
@@ -53,12 +55,15 @@ function parseKnowledgeReference(value: unknown): void {
     if (key.topicId !== v.topicId || key.entryId !== v.entryId) invalid()
   }
 }
+function spatialId(value: unknown): value is string {
+  return typeof value === 'string' && !!value.trim() && value !== 'self' && !/[\0\r\n]/u.test(value)
+    && new TextEncoder().encode(value).byteLength <= 16 * 1024
+}
 function parseContentContext(value: unknown, parent: 'spaceId' | 'zoneId'): void {
   const v = object(value, [parent, 'tabId', 'regionId'])
   for (const key of [parent, 'tabId', 'regionId']) {
     const id = v[key]
-    if (id !== null && (typeof id !== 'string' || !id.trim() || id === 'self' || /[\0\r\n]/u.test(id)
-      || new TextEncoder().encode(id).byteLength > 16 * 1024)) invalid()
+    if (id !== null && !spatialId(id)) invalid()
   }
   if (v.tabId !== null && v[parent] === null || v.regionId !== null && v.tabId === null) invalid()
 }
@@ -80,16 +85,16 @@ function parseIdentity(value: unknown): MobileObjectReference {
   if (!text(v.name) || typeof v.project !== 'string' || v.project.length > 4096) invalid()
   if (v.context !== undefined) {
     const c = object(v.context, ['spaceId', 'zoneId', 'workspaceId', 'displayWorkspaceId', 'groupId', 'tabId', 'regionId'])
-    for (const key of ['spaceId', 'zoneId']) if (c[key] !== null && !text(c[key], 256)) invalid()
-    for (const key of ['workspaceId', 'displayWorkspaceId', 'groupId', 'tabId', 'regionId']) if (!text(c[key], 256)) invalid()
+    for (const key of ['spaceId', 'zoneId']) if (c[key] !== null && !spatialId(c[key])) invalid()
+    for (const key of ['workspaceId', 'displayWorkspaceId', 'groupId', 'tabId', 'regionId']) if (!spatialId(c[key])) invalid()
   }
   if (v.mote !== undefined) {
     const m = object(v.mote, ['spaceId'], ['name', 'conversationName', 'contentReference'])
-    if (!text(m.spaceId, 256)) invalid()
+    if (!spatialId(m.spaceId)) invalid()
     for (const key of ['name', 'conversationName']) if (m[key] !== undefined && !text(m[key])) invalid()
     if (m.contentReference !== undefined && m.contentReference !== null) {
       const c = object(m.contentReference, ['zoneId', 'hostId', 'workspaceId', 'workspacePath'])
-      for (const key of ['zoneId', 'hostId', 'workspaceId']) if (!text(c[key], 256)) invalid()
+      for (const key of ['zoneId', 'hostId', 'workspaceId']) if (!spatialId(c[key])) invalid()
       if (!text(c.workspacePath)) invalid()
     }
   }
@@ -108,7 +113,8 @@ export function retainObjectReference(identity: MobileObjectIdentity | null): Mo
       ...(content ? { contentReference: content } : {}) } } : {}) }
 }
 export function parsePresentationRoute(value: unknown): MobilePresentationRoute {
-  const v = object(value, ['primary', 'showSession', 'showGoalWork', 'identity', 'profile'], ['topics', 'survey', 'spatial', 'goals'])
+  const v = object(value, ['primary', 'showSession', 'showGoalWork', 'identity', 'profile'], ['topics', 'survey', 'spatial', 'goals', 'recentMoteSpaceId'])
+  if (v.recentMoteSpaceId !== undefined && !spatialId(v.recentMoteSpaceId)) invalid()
   if (!['goals', 'topics', 'mote', 'focus', 'space', 'survey'].includes(String(v.primary)) ||
     typeof v.showSession !== 'boolean' || typeof v.showGoalWork !== 'boolean' || v.showGoalWork && !v.showSession) invalid()
   if (v.identity !== null) parseIdentity(v.identity)
