@@ -363,6 +363,18 @@ api.sessions.readMessage = async (subject, mid) => {
 createClientUiRoot(document.getElementById('root')!).render(createElement(App))
 let originalState: ReturnType<typeof useAppStore.getState> | undefined, originalDraft: HTMLTextAreaElement | null = null, originalMap: Element | null = null, originalBody: HTMLElement | null = null
 const structuralValue = (value: unknown) => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item) ? Object.fromEntries(Object.entries(item).sort(([a], [b]) => a.localeCompare(b))) : item)
+type CaptureTabs = ReturnType<typeof useAppStore.getState>['tabs']
+let originalTabBaseline: { tabs: CaptureTabs; regions: Map<string, Map<string, CaptureTabs[string]['regions'][string]>>; shape: string } | undefined
+function originalTabProtection(tabs: CaptureTabs) {
+  const baseline = originalTabBaseline
+  return {
+    sameTabKeys: Boolean(baseline && structuralValue(Object.keys(tabs).sort()) === structuralValue(Object.keys(baseline.tabs).sort())),
+    sameTabObjects: Boolean(baseline && Object.entries(baseline.tabs).every(([id, tab]) => tabs[id] === tab)),
+    sameRegionKeys: Boolean(baseline && [...baseline.regions].every(([id, regions]) => tabs[id] && structuralValue(Object.keys(tabs[id]!.regions).sort()) === structuralValue([...regions.keys()].sort()))),
+    sameRegionObjects: Boolean(baseline && [...baseline.regions].every(([id, regions]) => [...regions].every(([regionId, region]) => tabs[id]?.regions[regionId] === region))),
+    tabsPreserved: Boolean(baseline && structuralValue(tabs) === baseline.shape)
+  }
+}
 function visibleSurfaces(selector: string) {
   return [...document.querySelectorAll<HTMLElement>(selector)].flatMap(element => {
     const rect = element.getBoundingClientRect(), style = getComputedStyle(element)
@@ -544,7 +556,15 @@ Object.assign(window, { graphCapture: {
       agentNames: Object.fromEntries(identities.map(([id, name]) => [id, name])), agentComposerDrafts: { 'fixture-ui': 'Original unsent reply · retain this exact draft.' } })
     useAppStore.getState().focusRegion(projects[0]!.id, 'tab-fixture-ui', 'region-fixture-ui', 'pointer', 'group-0')
   },
-  remember() { originalState = useAppStore.getState(); originalDraft = document.querySelector('[data-fixture-session="fixture-ui"] textarea'); originalDraft?.setSelectionRange(4, 12) },
+  remember() {
+    originalState = useAppStore.getState()
+    // Core spatial publication can rebuild only the outer dictionary. Protect
+    // every original workface object and immutable content, without rebasing it
+    // after the adaptive fixture's explicit configuration or membership input.
+    originalTabBaseline = { tabs: { ...originalState.tabs }, shape: structuralValue(originalState.tabs),
+      regions: new Map(Object.entries(originalState.tabs).map(([id, tab]) => [id, new Map(Object.entries(tab.regions))])) }
+    originalDraft = document.querySelector('[data-fixture-session="fixture-ui"] textarea'); originalDraft?.setSelectionRange(4, 12)
+  },
   async appearance(appAppearance: 'dark' | 'light') { const before = await api.config.get(); await api.config.save({ ...before, appearance: { ...before.appearance, appAppearance } }, before) },
   preferences() { return structuredClone(useAppStore.getState().config?.focus) },
   fail(value: boolean) { failEvents = value },
@@ -555,8 +575,9 @@ Object.assign(window, { graphCapture: {
     for (const listener of listeners) listener({ type: 'core', hostId, event: { type: 'agent-message-changed', messageId: mid, senderSessionId: ref.senderSessionId, recipientSessionId: ref.recipientSessionId, sequence, messageSequence: sequence, recordKind: kind, live } })
     return { at, hostId, sender, recipient, sequence, messageId: mid, kind, live }
   },
-  facts() { const state = useAppStore.getState(); return { loading: state.loading, ids: state.sessions.map(session => session.id),
-    sameTabs: state.tabs === originalState?.tabs, sameLayouts: state.layouts === originalState?.layouts,
+  facts() { const state = useAppStore.getState(), tabProtection = originalTabProtection(state.tabs); return { loading: state.loading, ids: state.sessions.map(session => session.id),
+    sameTabs: Object.values(tabProtection).every(Boolean), sameTabTable: state.tabs === originalState?.tabs, ...tabProtection, sameLayouts: state.layouts === originalState?.layouts,
+    ...(Object.values(tabProtection).every(Boolean) ? {} : { tabDifference: { before: originalTabBaseline ? JSON.parse(originalTabBaseline.shape) : null, after: state.tabs } }),
     layoutsPreserved: structuralValue(state.layouts) === structuralValue(originalState?.layouts),
     selectionPreserved: structuralValue(state.workbenchSpaceSelection) === structuralValue(originalState?.workbenchSpaceSelection),
     ...(structuralValue(state.layouts) === structuralValue(originalState?.layouts) ? {} : { layoutDifference: { before: originalState?.layouts, after: state.layouts } }),
