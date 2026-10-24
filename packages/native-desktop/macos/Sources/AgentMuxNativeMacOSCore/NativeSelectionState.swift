@@ -10,6 +10,18 @@ public struct NativeSelectionState {
         return CGRect(x: min(max(preferredOrigin.x, available.minX), available.maxX - width),
                       y: min(max(preferredOrigin.y, available.minY), available.maxY - height), width: width, height: height)
     }
+    public static func dimensionPanelFrame(size: CGSize, selection: CGRect, toolbar: CGRect, screen: CGRect) -> CGRect {
+        let origins = [
+            CGPoint(x: selection.minX, y: selection.maxY + 8),
+            CGPoint(x: selection.minX, y: selection.maxY - size.height - 8),
+            CGPoint(x: selection.minX, y: selection.minY - size.height - 8),
+            CGPoint(x: selection.minX, y: selection.minY + 8),
+            CGPoint(x: selection.minX, y: toolbar.maxY + 8),
+            CGPoint(x: selection.minX, y: toolbar.minY - size.height - 8),
+        ]
+        let candidates = origins.map { panelFrame(size: size, preferredOrigin: $0, screen: screen, padding: 8) }
+        return candidates.first { !$0.intersects(toolbar) } ?? candidates[0]
+    }
     public enum Handle: CaseIterable, Sendable, Equatable {
         case bottomLeft, bottom, bottomRight, right, topRight, top, topLeft, left
     }
