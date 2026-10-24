@@ -590,9 +590,21 @@ export function reconcileWorkbenchFileProjection(
   )))
   for (const key of fileDocumentConsumerKeys()) openDocumentKeys.add(key)
   for (const [key, document] of Object.entries(documents)) if (document.noteEditing?.share || document.noteEditing?.shareUndo) openDocumentKeys.add(key)
-  // A hidden/removed include cannot discard an unsaved shared-file draft.
+  // Only File occurrences removed by this close carry its discard intent.
+  // Consumer/cache cleanup cannot discard a draft already retained without a View.
+  const removedDocumentKeys = new Set<string>()
+  if (state.tabs !== topology.tabs) for (const tab of Object.values(state.tabs)) {
+    if (topology.tabs[tab.id] === tab) continue
+    for (const surface of workbenchSurfaces(tab)) if (surface.kind === 'file') {
+      const key = documentKey(surface.workspaceId, surface.path)
+      if (!openDocumentKeys.has(key)) removedDocumentKeys.add(key)
+    }
+  }
   for (const key of Object.keys(dirtyDocuments)) {
-    const header = dirtyDocuments[key] && documents[key] ? readNoteMarkdownHeader(documents[key]!.content) : null
+    if (!dirtyDocuments[key] || !documents[key]) continue
+    if (!removedDocumentKeys.has(key)) { openDocumentKeys.add(key); continue }
+    // A hidden/removed include cannot discard an unsaved shared-file draft.
+    const header = readNoteMarkdownHeader(documents[key]!.content)
     if (header?.status === 'valid' && header.kind === 'shared-block') openDocumentKeys.add(key)
   }
   for (const key of Object.keys(documents)) {
