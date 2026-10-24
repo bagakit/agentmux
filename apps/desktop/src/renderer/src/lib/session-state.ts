@@ -73,6 +73,24 @@ export type PendingAgentLaunch = {
   projectionFailures?: AgentLaunchResult['projectionFailures']
 }
 
+/** The original Core call owns retry eligibility; this only locates its current display fact. */
+function isPendingLaunchStorageWait(pending: PendingAgentLaunch | undefined, agentSessionId: string, event: RuntimeEvent): boolean {
+  return Boolean(pending && !pending.created && pending.request?.hostId === event.hostId &&
+    event.event.type === 'agent-error' && event.event.agentSessionId === agentSessionId &&
+    event.event.code === 'AGENT_CREATION_WAITING_FOR_STORAGE')
+}
+
+export function pendingAgentLaunchStorageWait(pending: PendingAgentLaunch | undefined, agentSessionId: string):
+  Extract<RuntimeEvent['event'], { type: 'agent-error' }> | undefined {
+  if (!pending) return undefined
+  for (let index = pending.events.length - 1; index >= 0; index--) {
+    const latest = pending.events[index]!
+    if (latest.hostId !== pending.request?.hostId || latest.event.type !== 'agent-error' || latest.event.agentSessionId !== agentSessionId) continue
+    return isPendingLaunchStorageWait(pending, agentSessionId, latest) ? latest.event : undefined
+  }
+  return undefined
+}
+
 export type RuntimeEventReduction = {
   state: SessionProjectionState
   timelineGapSessionId?: string
@@ -134,11 +152,14 @@ function gapObservationDetail(o: AgentMuxAttachmentGapObservation): string {
 }
 
 export function runtimeDiagnosticNotice(
-  state: Pick<SessionProjectionState, 'sessions'>,
+  state: Pick<SessionProjectionState, 'sessions'> & Partial<Pick<SessionProjectionState, 'pendingAgentLaunches'>>,
   event: RuntimeEvent
 ): { message: string; summary: string; subject?: SessionControl; cause?: 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' } | null {
   const core = event.event
   if (core.type !== 'agent-error') return null
+  // The exact pending Region displays this ongoing Core wait and settles it on creation.
+  // An absent or different Host/Session owner still requires the global diagnostic.
+  if (core.agentSessionId && isPendingLaunchStorageWait(state.pendingAgentLaunches?.[core.agentSessionId], core.agentSessionId, event)) return null
   const run = core.evidence.run
   let session: SessionSnapshot | undefined
   if (core.agentSessionId) {
@@ -150,14 +171,17 @@ export function runtimeDiagnosticNotice(
         // A complete failure of an original operation remains readable after
         // that Run changes. It is not a state or subject of the replacement.
         // Existing identity/source notices still settle with their original Run.
-        if (!core.failure || core.code === 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' ||
-          core.code === 'AGENT_NATIVE_SOURCE_UNCONFIRMED') return null
+        if (core.code !== 'AGENT_CREATION_WAITING_FOR_STORAGE' && (!core.failure || core.code === 'AGENT_NATIVE_IDENTITY_UNCONFIRMED' ||
+          core.code === 'AGENT_NATIVE_SOURCE_UNCONFIRMED')) return null
       } else session = current[0]
     }
   } else if (run) {
     const current = state.sessions.filter(item => item.hostId === event.hostId && sameRun(item.control.run, run))
     if (current.length === 1) session = current[0]
   }
+  // Membership reconciliation may replay a wait after the original create reply.
+  // An exact confirmed Session settles that pre-Start notice, including its queued copy.
+  if (session?.kind === 'agent' && core.code === 'AGENT_CREATION_WAITING_FOR_STORAGE') return null
   const confirmed = run !== undefined ? session : undefined
   // The exact Core source observation has its persistent Region service window.
   // Do not duplicate that fact in an unrelated global error that survives its resolution.

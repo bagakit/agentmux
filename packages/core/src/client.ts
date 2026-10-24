@@ -1,6 +1,7 @@
 import { decodePreparedTerminal, parsePreparedTerminal, parsePreparedTerminalStop, type AgentMuxPreparedTerminal, type AgentMuxPreparedTerminalStop } from './terminal-preparation.js'
 import type { AgentMuxCreationRuntime, AgentMuxTerminalCreationRetirement, AgentMuxTerminalCreationRetirementObservation } from './terminal-creation-retirement.js'
 import { AgentSessionRecoveryService } from './agent-session-recovery/service.js'
+import { retryAgentCreationResources } from './agent-creation-resource-retry.js'
 import type { AgentMuxAgentResumeInput, AgentMuxAgentReopenInput } from './agent-session-recovery/resume-contract.js'
 import { assertAgentPromptSize, runRef, safeId, hookBindingIdentity, terminalHandshakeOperationIdentity, terminalInitialPromptReadinessIdentity, terminalEnvironment } from './agent-runtime-helpers.js'
 import { parseExternalConversationReference, parseExternalConversationAuthority, externalConversationAuthor, externalConversationRecordId, type AgentExternalConversationAuthorityPort, type AgentExternalConversationReceipt, type AgentExternalConversationReference } from './external-conversation.js'
@@ -141,6 +142,7 @@ import {
 import { CTXMUX_COMMIT, CTXMUX_VERSION, CtxmuxRunAdapter, type CtxmuxAdapterAttachment, type CtxmuxAdapterEvent, type CtxmuxAdapterRun, type CtxmuxAdapterStopOperation, type CtxmuxEndpointObservation } from './ctxmux-run-adapter.js'
 import { supportedCtxmuxArtifactPlatform } from './runtime-paths.js'
 import { AgentMuxError } from './errors.js'
+import { agentCreationNotAppliedError, finishAgentCreationCleanup } from './agent-creation-failure.js'
 import { parseSessionHistoryResourceOptions, SESSION_HISTORY_IMAGE_MAX_BYTES } from './session-history-resource.js'
 import { readRecordedFile, readRecordedImage, readRecordedMarkdownImage } from './session-history-resource-read.js'
 import { isNativeContentReference, nativeContentNeedsRevalidation, readNativeContentResource, revalidateNativeContentReference } from './native-history-content.js'
@@ -686,6 +688,13 @@ export class AgentMuxClient {
   private readonly registry: AgentMuxAgentSessionRegistry
   private readonly deliveryAttempts: DeliveryAttemptStore
   private readonly store: AgentMuxAgentSessionStore
+  /** Single-flight execution only; durable creation facts remain in the original Store. */
+  private readonly activeCreations = new Map<string, {
+    input: AgentMuxAgentCreateInput
+    admitted: Parameters<AgentMuxClient['createAgentWithDeliveryAttempt']>[1]
+    controller: AbortController
+    pending: ReturnType<AgentMuxClient['createAgentWithDelivery']>
+  }>()
   /** Only concurrent Provider reads are shared; every caller projects its own Core ownership. */
   private readonly nativeSessionCatalogReads = new WeakMap<AgentProvider, Map<string, Promise<Omit<AgentNativeSessionCatalog, 'capabilities'>>>>()
   private readonly messageQueue: DurableAgentMuxMessageQueue
@@ -1814,6 +1823,7 @@ export class AgentMuxClient {
   }
 
   disconnect(): void {
+    for (const creation of this.activeCreations.values()) creation.controller.abort()
     this.cancelReconnect()
     this.cancelProviderReads()
     this.cancelNativeIdentityCaptures()
@@ -1861,6 +1871,7 @@ export class AgentMuxClient {
   }
 
   async dispose(): Promise<void> {
+    for (const creation of this.activeCreations.values()) creation.controller.abort()
     // Diagnostic IO keeps its own writer lock until settlement. It must not delay
     // healthy business ownership transfer or acquiring the new Core lease.
     void this.startupDiagnostics.dispose()
@@ -4538,7 +4549,42 @@ export class AgentMuxClient {
   }
 
   private async createAgentWithDeliveryAuthorized(input: AgentMuxAgentCreateInput,
-    admitted?: { intentDigest: string; origin?: AgentMuxCreationOrigin; threadId?: string; executorRevision?: string }): Promise<{
+    admitted?: Parameters<AgentMuxClient['createAgentWithDeliveryAttempt']>[1]): ReturnType<AgentMuxClient['createAgentWithDelivery']> {
+    this.requireConnected()
+    const frozen = structuredClone(input)
+    frozen.createOperationId ??= mintObjectId()
+    frozen.agentSessionId ??= await this.resolveAgentCreationSessionId(frozen.createOperationId)
+    const authority = structuredClone(admitted)
+    const key = frozen.agentSessionId
+    const active = this.activeCreations.get(key)
+    if (active) {
+      if (!isDeepStrictEqual(active.input, frozen) || !isDeepStrictEqual(active.admitted, authority)) throw new AgentMuxError(
+        'This active creation belongs to another original request. Keep its identity and inspect the original operation.', 'AGENT_FORK_OPERATION_CONFLICT')
+      return await active.pending
+    }
+    const controller = new AbortController()
+    const operationId = agentLifecycleOperationIdentity('create', key, frozen.createOperationId)
+    let waiting = false
+    const pending = retryAgentCreationResources({ operationId, signal: controller.signal,
+      attempt: () => this.createAgentWithDeliveryAttempt(frozen, authority, controller.signal),
+      waiting: (error, retryAfterMs) => { waiting = true; this.publisher.publish({ type: 'agent-error', agentSessionId: key,
+        code: 'AGENT_CREATION_WAITING_FOR_STORAGE',
+        message: `Storage is unavailable; this Agent has not started. Retrying the original request in ${retryAfterMs / 1_000}s. ${error.message}`,
+        evidence: { source: 'agentmux', observedAt: Date.now() } }) } })
+    this.activeCreations.set(key, { input: frozen, admitted: authority, controller, pending })
+    try { return await pending }
+    catch (error) {
+      if (waiting) this.publisher.publish({ type: 'agent-error', agentSessionId: key,
+        code: 'AGENT_CREATION_RESOURCE_RETRY_STOPPED',
+        message: `Automatic creation retry ended. ${error instanceof Error ? error.message : String(error)}`,
+        evidence: { source: 'agentmux', observedAt: Date.now() } })
+      throw error
+    }
+    finally { if (this.activeCreations.get(key)?.pending === pending) this.activeCreations.delete(key) }
+  }
+
+  private async createAgentWithDeliveryAttempt(input: AgentMuxAgentCreateInput,
+    admitted?: { intentDigest: string; origin?: AgentMuxCreationOrigin; threadId?: string; executorRevision?: string }, signal?: AbortSignal): Promise<{
     session: AgentMuxAgentSession; promptConfirmed: boolean; creation: NonNullable<AgentMuxAgentSession['creation']>
   }> {
     this.requireConnected()
@@ -4635,6 +4681,8 @@ export class AgentMuxClient {
     let hookBinding: AgentHookBinding | null = null
     let persisted: AgentMuxStoredAgentSession | null = null
     let preservePreparedCreation = false
+    let startAttempted = false
+    let creationError: unknown
     try {
       const provider = this.providers.get(input.providerId)
       if (nativeResumeSource && !provider.assertNativeResumeSource) {
@@ -4745,8 +4793,7 @@ export class AgentMuxClient {
         await assertForkCurrent?.()
       }
       await assertNativeSource?.()
-      preservePreparedCreation = true
-      const run = await this.kernel.start({
+      const startInput = {
         operationKey: lifecycleOperationId,
         program: plan.command,
         args: plan.args,
@@ -4762,7 +4809,11 @@ export class AgentMuxClient {
         ),
         ...(input.cols === undefined ? {} : { cols: input.cols }),
         ...(input.rows === undefined ? {} : { rows: input.rows })
-      }).catch(error => {
+      }
+      signal?.throwIfAborted()
+      preservePreparedCreation = true
+      startAttempted = true
+      const run = await this.kernel.start(startInput).catch(error => {
         if (!(error instanceof AgentMuxError && error.creationFailure?.operationId === lifecycleOperationId &&
           error.creationFailure.disposition === 'not_applied')) {
           const failure = new AgentMuxError(`Agent start is unconfirmed. Inspect the original operation; no start or input was resent. ${error instanceof Error ? error.message : String(error)}`,
@@ -4773,7 +4824,7 @@ export class AgentMuxClient {
           throw failure
         }
         preservePreparedCreation = false
-        throw error
+        throw agentCreationNotAppliedError(error, lifecycleOperationId)
       })
       this.publishExecutableCheckFailure(provider.label, agentSessionId, lifecycleOperationId, originalExecutable, capability, run)
       const now = Date.now()
@@ -4959,15 +5010,27 @@ export class AgentMuxClient {
       }
       if (initialEnvelope) await this.recordInitialMessageDelivery(readySession, initialEnvelope, promptConfirmed)
       return { session: this.projectSession(readySession), promptConfirmed, creation }
+    } catch (error) {
+      // Successful reservation is this new creation's exclusive no-Start boundary.
+      // Existing, claimed and replayed creations never enter this catch.
+      creationError = !startAttempted ? agentCreationNotAppliedError(error, lifecycleOperationId) : error
+      throw creationError
     } finally {
-      if (hookBinding && !preservePreparedCreation && ![...this.hookBindings.values()].includes(hookBinding)) await hookBinding.close()
+      const cleanup: Array<() => Promise<void>> = []
+      if (hookBinding && !preservePreparedCreation && ![...this.hookBindings.values()].includes(hookBinding)) {
+        const unusedBinding = hookBinding
+        cleanup.push(async () => { await unusedBinding.close() })
+      }
       if (!preservePreparedCreation) {
         this.pendingLifecycleBindings.delete(lifecycleOperationId)
         // A readable started Session has either committed (which atomically
         // releases creation) or still needs its original uncertain preparation.
         // Neither case authorizes cleanup to release a later Stop reservation.
-        if (!persisted) await this.registry.releaseLifecycle(reservation)
+        if (!persisted) {
+          cleanup.push(async () => { await this.registry.releaseLifecycle(reservation) })
+        }
       }
+      if (cleanup.length) await finishAgentCreationCleanup(creationError, cleanup)
     }
   }
 
