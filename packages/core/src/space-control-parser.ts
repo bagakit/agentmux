@@ -1,4 +1,4 @@
-import { parseSurveyOrganization } from './survey-organization.js'
+import { parseSurveyOrganization, parseSurveyCollectionChange, parseSurveyZoneIds } from './survey-organization.js'
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, type AgentMuxControlSuccessReceipt } from './control.js'
 import { AgentMuxError } from './errors.js'
 import { parseAgentForkSource } from './agent-fork.js'
@@ -128,16 +128,17 @@ export function isSpaceControlOperation(value: unknown): value is AgentMuxSpaceC
 }
 
 export function parseSpaceControlRequest(value: unknown, code: Code = 'INVALID_CONTROL_REQUEST'): AgentMuxSpaceControlRequest {
-  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values', 'nameSource', 'order', 'expectedOrder', 'organization', 'expected'], code)
+  const source = fields(value, ['schemaVersion', 'requestId', 'operation', 'target', 'presentation', 'content', 'destination', 'focus', 'caller', 'fromRegionId', 'expectedAgentSessionId', 'agentSessionId', 'tabId', 'name', 'expectedNameRevision', 'fromLocation', 'binding', 'regionId', 'withRegionId', 'mode', 'path', 'zoneId', 'spaceId', 'displayWorkspaceId', 'groupId', 'split', 'buildId', 'kind', 'baseline', 'values', 'nameSource', 'order', 'expectedOrder', 'organization', 'expected', 'collection'], code)
   if (source.schemaVersion !== 5 || !isSpaceControlOperation(source.operation)) fail('Space Control request is invalid.', code)
   const operation = source.operation as AgentMuxSpaceControlRequest['operation']
   const base = { schemaVersion: 5 as const, requestId: spaceControlId(source.requestId, 'Request ID', code) }
   let request: AgentMuxSpaceControlRequest
   if (operation === 'space.survey-list') {
-    fields(source, ['schemaVersion', 'requestId', 'operation', 'organization', 'expected'], code)
+    fields(source, ['schemaVersion', 'requestId', 'operation', 'organization', 'expected', 'collection'], code)
     if (Object.hasOwn(source, 'organization') !== Object.hasOwn(source, 'expected')) fail('Survey list writes require organization and its exact expected original value.', code)
     request = { ...base, operation, ...(Object.hasOwn(source, 'organization') ? {
-      organization: parseSurveyOrganization(source.organization, code), expected: parseSurveyOrganization(source.expected, code) } : {}) }
+      organization: parseSurveyOrganization(source.organization, code), expected: parseSurveyOrganization(source.expected, code) } : {}),
+      ...(Object.hasOwn(source, 'collection') ? { collection: parseSurveyCollectionChange(source.collection, code) } : {}) }
   } else if (operation === 'space.agent-order') {
     fields(source, ['schemaVersion', 'requestId', 'operation', 'displayWorkspaceId', 'order', 'expectedOrder'], code)
     if (Object.hasOwn(source, 'expectedOrder') && !Object.hasOwn(source, 'order')) fail('Expected order requires an explicit order change.', code)
@@ -547,8 +548,9 @@ export function parseSpaceControlSuccessReceipt(value: unknown): AgentMuxControl
   const requestId = spaceControlId(source.requestId, 'Receipt Request', code)
   let result: AgentMuxSpaceControlResult
   if (operation === 'space.survey-list') {
-    const body = fields(source.result, [...WORKFACE_FIELDS, 'scope', 'storedOrganization', 'effectiveOrganization'], code)
+    const body = fields(source.result, [...WORKFACE_FIELDS, 'scope', 'collectedZoneIds', 'storedOrganization', 'effectiveOrganization'], code)
     result = { operation, scope: member(body.scope, ['survey-list'], 'Survey list scope', code),
+      collectedZoneIds: parseSurveyZoneIds(body.collectedZoneIds, code),
       storedOrganization: parseSurveyOrganization(body.storedOrganization, code), effectiveOrganization: parseSurveyOrganization(body.effectiveOrganization, code),
       outcome: member(body.outcome, VIEW_OUTCOMES, 'Survey list outcome', code), ...workfaceCommon(body, code) }
   } else if (operation === 'space.agent-order') {

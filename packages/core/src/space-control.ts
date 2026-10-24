@@ -125,8 +125,11 @@ export type AgentMuxSurveyOrganization = {
   ungrouped: string[]
   groups: { groupId: string; name: string; collapsed: boolean; zoneIds: string[] }[]
 }
+/** Explicit client membership, independent of organization order and Core topology. */
+export type AgentMuxSurveyCollectionChange = { zoneIds: string[]; expectedZoneIds: string[] }
 export type AgentMuxSurveyListReport = AgentMuxWorkfaceReport & {
   scope: 'survey-list'
+  collectedZoneIds: string[]
   storedOrganization: AgentMuxSurveyOrganization
   effectiveOrganization: AgentMuxSurveyOrganization
   outcome: 'read' | 'changed' | 'unchanged' | 'partial' | 'unknown' | 'refused'
@@ -290,7 +293,7 @@ export type AgentMuxWorkspaceAgentOrderReport = AgentMuxWorkfaceReport & {
 }
 type Base = { schemaVersion: 5; requestId: string }
 export type AgentMuxSpaceControlRequest = Base & (
-  | { operation: 'space.survey-list'; organization?: AgentMuxSurveyOrganization; expected?: AgentMuxSurveyOrganization }
+  | { operation: 'space.survey-list'; organization?: AgentMuxSurveyOrganization; expected?: AgentMuxSurveyOrganization; collection?: AgentMuxSurveyCollectionChange }
   | { operation: 'space.agent-order'; displayWorkspaceId: string; order?: AgentMuxWorkspaceAgentOrderMember[]; expectedOrder?: AgentMuxWorkspaceAgentOrderMember[] }
   | ({ operation: 'space.mote.preferences.read' } & import('./mote-preferences.js').MotePreferencesReadInput)
   | ({ operation: 'space.mote.preferences.save' } & import('./mote-preferences.js').MotePreferencesSaveInput)
