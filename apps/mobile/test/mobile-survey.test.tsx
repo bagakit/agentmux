@@ -2,7 +2,10 @@ import { tmpdir } from 'node:os'
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { AgentMuxNotebookStore } from '@agentmux/core/notebook-store'
+import { NoteSnapshotTestWorker } from '../../desktop/test/note-snapshot-test-worker'
+import { computeNoteLiveMerge } from '@agentmux/client-ui/note/note-live-merge.worker'
 import { MobileRegionContent } from '../src/navigation/MobileRegionContent'
 import { MobileSurveySurface } from '../src/survey/MobileSurveySurface'
 import { readSurveyPresentation } from '../../desktop/src/renderer/src/lib/mobile-presentation'
@@ -11,6 +14,24 @@ import { NoteFileWriter } from '../../desktop/src/main/note-file-writer'
 import { parseFileReadResult } from '../../../packages/core/src/public-rpc-files'
 import { parseSpaceControlSuccessReceipt } from '../../../packages/core/src/space-control-parser'
 
+class SharedNoteTestWorker extends NoteSnapshotTestWorker {
+  override postMessage(request: Parameters<NoteSnapshotTestWorker['postMessage']>[0]) {
+    if ('base' in request) {
+      const input = request as unknown as { base: string; current: string; proposed: string }
+      queueMicrotask(() => this.onmessage?.({ data: computeNoteLiveMerge(input) } as never)); return
+    }
+    super.postMessage(request)
+  }
+}
+beforeEach(() => vi.stubGlobal('Worker', SharedNoteTestWorker))
+afterEach(() => vi.unstubAllGlobals())
+/** Author controls decorate the original body; assert its exact readable text separately. */
+function noteText(element: Element | null): string | undefined {
+  if (!element) return undefined
+  const content = element.cloneNode(true) as Element
+  content.querySelectorAll('[data-author-block]').forEach(control => control.remove())
+  return content.textContent ?? ''
+}
 ;(globalThis as any).IS_REACT_ACT_ENVIRONMENT = true
 const mounted: { root: Root; element: HTMLDivElement }[] = []
 afterEach(async () => { for (const view of mounted.splice(0)) { await act(async () => view.root.unmount()); view.element.remove() } })
@@ -81,12 +102,12 @@ describe('original Survey mobile slice', () => {
     view.forwardRpc.mockResolvedValueOnce({ workspaces: [{ workspaceId: 'resource', hostId: 'local', path: fixturePath("original") }] }).mockResolvedValueOnce({ resource: { hostId: 'local', workspaceId: 'resource', workspacePath: fixturePath("original"), zoneId: 'research', zonePath: fixturePath("original"), path: 'original.note.md' }, result: { status: 'read', document: { path: 'original.note.md', content, revision: 'rev-original' } } })
     await view.click('刷新原文件')
     expect(view.forwardRpc.mock.calls.filter(call => call[0] === 'file.read').at(-1)).toEqual(['file.read', { zoneId: 'research', path: 'original.note.md', expectedResource: { hostId: 'local', workspaceId: 'resource', workspacePath: fixturePath("original") } }])
-    expect(view.element.querySelector('[data-note-id="note-id"] .mobile-note-body')?.textContent).toBe('原笔记全文')
+    expect(noteText(view.element.querySelector('[data-note-id="note-id"] .mobile-note-body'))).toBe('原笔记全文')
     expect(view.element.querySelector('[data-block-id="block-id"]')).not.toBeNull()
     view.forwardRpc.mockRejectedValueOnce(new Error('file unavailable'))
     await view.click('刷新原文件')
     expect(view.element.textContent).toContain('file unavailable')
-    expect(view.element.querySelector('[data-note-id="note-id"] .mobile-note-body')?.textContent).toBe('原笔记全文')
+    expect(noteText(view.element.querySelector('[data-note-id="note-id"] .mobile-note-body'))).toBe('原笔记全文')
   })
   it('opens the exact browserId URL as an independent mobile page', async () => {
     const view = await mount()
@@ -117,10 +138,10 @@ describe('original Survey mobile slice', () => {
     await view.click('原名中文'); await view.click('original.note.md')
     expect(read).toHaveBeenCalledTimes(1)
     expect(read).toHaveBeenCalledWith(workspace, 'original.note.md', undefined)
-    expect(view.element.querySelector('h2[data-block-id="heading"]')?.textContent).toBe('原标题')
+    expect(noteText(view.element.querySelector('h2[data-block-id="heading"]'))).toBe('原标题')
     expect(view.element.querySelector('.mobile-note-body strong')?.textContent).toBe('加粗原正文')
-    expect(view.element.querySelector('.mobile-note-body pre code')?.textContent).toBe('const original = true')
-    expect(view.element.querySelector('.mobile-note-body ul li')?.textContent).toBe('原列表项')
+    expect(view.element.querySelector('.mobile-note-body .note-code-block__source')?.textContent).toBe('const original = true')
+    expect(noteText(view.element.querySelector('.mobile-note-body ul li'))).toBe('原列表项')
     expect(view.element.querySelector('.mobile-note-reference .mobile-note-body strong')?.textContent).toBe('加粗原正文')
   })
   it('reads only visible original Regions and isolates late reads after selection changes', async () => {
@@ -173,7 +194,7 @@ async function realNoteView(extra = false, crossScope = false, registeredSameSco
   fileCleanups.push(async () => files.dispose())
   let mappedDirectory = directory
   const fileRead = vi.spyOn(files, 'read'), fileWrite = vi.spyOn(files, 'write')
-  const noteWriter = new NoteFileWriter(files)
+  const noteWriter = new NoteFileWriter(files, undefined, new AgentMuxNotebookStore(join(directory, 'state', 'notes.sqlite')))
   const owner = new FileReadOwner({ files: { read: noteWriter.read.bind(noteWriter), write: noteWriter.write.bind(noteWriter), listFiles: files.listFiles.bind(files) }, workspace: id => workspaces.find(value => value.id === id), catalog: async () => ({ spaces: [], zones: workspaces.map(value => ({ zoneId: value.id === workspace.id ? 'note-zone' : 'cross-zone', workspaceId: value.id, hostId: value.hostId, kind: 'home', directoryPath: value.id === workspace.id ? mappedDirectory : value.path, branch: null })), tabs: [], regions: [], locations: [], bindings: [] }) })
   const service = new AgentMuxRpcService({ files: owner, coreClients: () => [] })
   const params = { zoneId: 'note-zone', path: 'original.note.md', expectedResource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: directory }, maxBytes: 1024 * 1024 }
@@ -183,14 +204,18 @@ async function realNoteView(extra = false, crossScope = false, registeredSameSco
   const root = createRoot(element); mounted.push({ root, element })
   const render = async () => act(async () => root.render(<MobileNoteFile rpc={rpc as any} params={params} read={originalRead} />))
   await render()
-  const click = async (text: string) => { const button = [...element.querySelectorAll('button')].find(value => value.textContent === text); expect(button, text).toBeDefined(); await act(async () => {
+  const click = async (text: string, pendingWrite = false) => { const button = [...element.querySelectorAll('button')].find(value => value.textContent === text); expect(button, text).toBeDefined(); await act(async () => {
     const start = rpc.mock.calls.length
     button!.click()
     if (text === '核对当前原文') {
       const readIndex = rpc.mock.calls.findIndex((call, index) => index >= start && call[0] === 'file.read')
       expect(readIndex).toBeGreaterThanOrEqual(start)
       await rpc.mock.results[readIndex]!.value
-    } else await new Promise(resolve => setTimeout(resolve, 80))
+    } else {
+      await new Promise(resolve => setTimeout(resolve, 80))
+      const writeIndex = rpc.mock.calls.findIndex((call, index) => index >= start && call[0] === 'file.write')
+      if (text === '保存原笔记' && !pendingWrite && writeIndex >= start) await Promise.allSettled([rpc.mock.results[writeIndex]!.value])
+    }
   }) }
   const edit = async (text: string) => {
     const node = element.querySelector<HTMLElement>('[contenteditable="true"]') as HTMLElement & { editor: { commands: { insertContent(content: string): void } } }
@@ -227,7 +252,7 @@ describe('T-006 existing Note editing and original cross-file references', () =>
     expect(view.params.maxBytes).toBe(1024 * 1024)
     for (const [method, input] of view.rpc.mock.calls) if (method === 'file.write') expect(input).not.toHaveProperty('maxBytes')
   })
-  it('preserves a conflict draft and never resends an unknown write; read reconciliation confirms actual saved bytes', async () => {
+  it('preserves a conflict draft and never resends an unknown write; an equal read retains the original unknown receipt', async () => {
     localStorage.clear()
     const view = await realNoteView()
     await view.click('编辑原笔记'); await view.edit('保留草稿')
@@ -245,7 +270,9 @@ describe('T-006 existing Note editing and original cross-file references', () =>
     expect(view.element.textContent).toContain('原保存回执未确认')
     await view.click('保存原笔记'); expect(view.fileWrite).toHaveBeenCalledTimes(writes)
     await view.click('核对当前原文')
-    expect(view.element.textContent).toContain('当前原文件已确认包含本次保存内容')
+    expect(view.element.textContent).toContain('即使字节相同，原回执仍未知')
+    expect(await readFile(join(view.directory, 'original.note.md'), 'utf8')).toContain('保留草稿')
+    expect(JSON.parse(localStorage.getItem(Object.keys(localStorage).find(key => key.startsWith('agentmux-mobile-note-draft:'))!)!).attempt.phase).toBe('unknown')
     expect(view.fileWrite).toHaveBeenCalledTimes(writes)
   })
   it('reads only the explicitly selected standalone reference from original Scope filenames, retaining wrong-file identity refusal', async () => {
@@ -260,7 +287,7 @@ describe('T-006 existing Note editing and original cross-file references', () =>
     await view.click('original.note.md')
     expect(view.element.textContent).toContain('所选原文件不是此引用的 Note')
     await view.click('target.note.md')
-    expect(view.element.querySelector('.mobile-note-reference .mobile-note-body')?.textContent).toBe('跨文件引用正文😀')
+    expect(noteText(view.element.querySelector('.mobile-note-reference .mobile-note-body'))).toBe('跨文件引用正文😀')
     expect(view.fileRead.mock.calls.map(call => call[1])).toEqual(['original.note.md', 'original.note.md', 'target.note.md'])
     expect(view.rpc).toHaveBeenCalledWith('file.read', { ...view.params, path: 'target.note.md' })
   })
@@ -268,7 +295,7 @@ describe('T-006 existing Note editing and original cross-file references', () =>
     localStorage.clear()
     const view = await realNoteView(true, false, true)
     await view.click('读取引用原文')
-    await vi.waitFor(() => expect(view.element.querySelector('.mobile-note-reference .mobile-note-body')?.textContent).toBe('跨文件引用正文😀'))
+    await vi.waitFor(() => expect(noteText(view.element.querySelector('.mobile-note-reference .mobile-note-body'))).toBe('跨文件引用正文😀'))
     expect(view.rpc).toHaveBeenCalledWith('file.list', { zoneId: view.params.zoneId, expectedResource: view.params.expectedResource, path: '.' })
     expect(view.rpc).toHaveBeenCalledWith('file.read', { ...view.params, path: 'target.note.md' })
     expect(view.fileRead.mock.calls.map(call => call[1])).toEqual(['original.note.md', 'target.note.md'])
@@ -287,7 +314,7 @@ describe('Note save uncertainty and durable device intent', () => {
       return method === 'file.write' ? await new Promise(resolve => { settle = () => resolve(result) }) : result
     })
     await view.click('编辑原笔记'); await view.edit('等待第一次保存')
-    await view.click('保存原笔记'); await view.click('核对当前原文')
+    await view.click('保存原笔记', true); await view.click('核对当前原文')
     expect(view.element.textContent).toContain('原保存请求仍在等待回执')
     const save = [...view.element.querySelectorAll<HTMLButtonElement>('button')].find(value => value.textContent === '保存原笔记')!
     expect(save.disabled).toBe(true)
@@ -321,7 +348,11 @@ describe('Note save uncertainty and durable device intent', () => {
         const readIndex = view.rpc.mock.calls.findIndex((call, index) => index >= start && call[0] === 'file.read')
         expect(readIndex).toBeGreaterThanOrEqual(start)
         await view.rpc.mock.results[readIndex]!.value
-      } else await new Promise(resolve => setTimeout(resolve, 80))
+      } else {
+        await new Promise(resolve => setTimeout(resolve, 80))
+        const writeIndex = view.rpc.mock.calls.findIndex((call, index) => index >= start && call[0] === 'file.write')
+        if (text === '保存原笔记' && writeIndex >= start) await Promise.allSettled([view.rpc.mock.results[writeIndex]!.value])
+      }
     })
     await click('核对当前原文')
     expect(element.textContent).toContain('原保存请求仍在等待回执')
@@ -331,7 +362,15 @@ describe('Note save uncertainty and durable device intent', () => {
     const fault = deviceFault !== 'none' ? vi.spyOn(localStorage, deviceFault as 'getItem' | 'setItem').mockImplementation(() => { throw new Error('ACK durable storage failed') }) : null
     await act(async () => finish(saved))
     fault?.mockRestore()
-    if (deviceFault !== 'none') { expect([...element.querySelectorAll('button')].find(button => button.textContent === '保存原笔记')!.disabled).toBe(true); await click('核对当前原文') }
+    if (deviceFault !== 'none') {
+      expect(element.textContent).toContain('本机保存回执未持久保存')
+      const key = Object.keys(localStorage).find(key => key.startsWith('agentmux-mobile-note-draft:'))!
+      expect(JSON.parse(localStorage.getItem(key)!).attempt.phase).toBe('sending')
+      await click('核对当前原文')
+      const retained = JSON.parse(localStorage.getItem(key)!)
+      expect(retained.attempt).toBeUndefined(); expect(retained.receipt.revision).toBe(saved.result.revision)
+      expect(retained.draft).toContain('第二工作面较新编辑'); expect(view.fileWrite).toHaveBeenCalledTimes(1)
+    }
     expect(element.querySelector('[contenteditable=true]')?.textContent).toContain('第二工作面较新编辑')
     expect([...element.querySelectorAll('button')].find(button => button.textContent === '保存原笔记')!.disabled).toBe(false)
     await act(async () => root.render(null)); await act(async () => render())
@@ -380,14 +419,14 @@ describe('Note save uncertainty and durable device intent', () => {
     view.rpc.mockImplementation(async (method: string, params: unknown) => method === 'file.write' ? { resource: null, result: { status: 'unknown', code: 'LOST', message: 'reply unavailable' } } : invoke(method, params))
     await view.click('编辑原笔记'); await view.edit('不丢手机草稿'); await view.click('保存原笔记')
     await view.click('核对当前原文')
-    await view.click('保留未知保存记录，以当前修订继续编辑')
+    await view.click('保留原保存记录，以当前修订继续编辑')
     expect(view.fileWrite).not.toHaveBeenCalled()
-    expect(view.element.textContent).toContain('原未知保存记录')
-    await view.remount(); expect(view.element.textContent).toContain('原未知保存记录')
+    expect(view.element.textContent).toContain('原保存记录')
+    await view.remount(); expect(view.element.textContent).toContain('原保存记录')
     expect(view.element.querySelector('[contenteditable=true]')?.textContent).toContain('不丢手机草稿')
     view.rpc.mockImplementation(invoke)
     await view.click('保存原笔记')
-    expect(view.fileWrite).toHaveBeenCalledTimes(1); expect(view.element.textContent).toContain('原未知保存记录')
+    expect(view.fileWrite).toHaveBeenCalledTimes(1); expect(view.element.textContent).toContain('原保存记录')
   })
   it('keeps editing during local storage failure and never sends an unretained save intent', async () => {
     localStorage.clear()
@@ -406,7 +445,7 @@ describe('Note save uncertainty and durable device intent', () => {
     await view.click('读取引用原文')
     await vi.waitFor(async () => { await act(async () => new Promise(resolve => setTimeout(resolve, 20))); expect(view.rpc).toHaveBeenCalledWith('file.read', { zoneId: 'cross-zone', path: 'target.note.md', expectedResource: { hostId: 'local', workspaceId: view.other.id, workspacePath: view.other.path } }) })
     await vi.waitFor(async () => { await act(async () => new Promise(resolve => setTimeout(resolve, 20))); expect(view.element.textContent).toContain('准确跨 Workspace 原块') })
-    expect(view.element.querySelector('.mobile-note-reference .mobile-note-body')?.textContent).toBe('准确跨 Workspace 原块')
+    expect(noteText(view.element.querySelector('.mobile-note-reference .mobile-note-body'))).toBe('准确跨 Workspace 原块')
     expect(view.fileRead.mock.calls.map(call => [call[0].id, call[1]])).toEqual([['note-workspace', 'original.note.md'], ['other-note-workspace', 'target.note.md']])
   })
 })
