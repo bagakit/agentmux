@@ -34,7 +34,7 @@ import { mobileChatStart } from './navigation/chat-start'
 import { useMobileBack } from './navigation/useMobileBack'
 import { retainObjectReference, type MobilePresentationRoute, type MobileTopicsRoute, type MobileGoalsContext, type MobileKnowledgeReference } from './recovery/presentation-route'
 import type { MobileTopicSourceContentReference } from './topics/source-reference'
-import { MobileNotice, MobileNoticeProvider, MobileNoticeRestore, MobileNoticeScope, useMobileNotices } from './notices/MobileNotice'
+import { MobileAvatarNoticeOutlet, MobileNotice, MobileNoticeProvider, MobileNoticeRestore, MobileNoticeScope, useMobileNotices } from './notices/MobileNotice'
 import { MobileGoalOperationRecovery, MobileGoalOperationSafety } from './goals/goal-operation-recovery'
 import { MobileWebDiagnostics } from './mobile-web/MobileWebDiagnostics'
 import { MobileWebUpdateSettings } from './mobile-web/MobileWebUpdate'
@@ -437,6 +437,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
       </section>
     </main>
     <div className="mobile-notice-stack">
+      <MobileAvatarNoticeOutlet />
       {webObservation && <MobileNotice owner={client} hidden={mobileWebUpdateStatus(webObservation) !== 'available'}
         identity={[webObservation.inspection.result?.hostInstanceId, webObservation.inspection.result?.active?.digest]} className="mobile-web-update-notice" kind="feedback">
         <span>网页有新版本</span><button type="button" onClick={() => setSheet('settings')}>前往更新</button>
