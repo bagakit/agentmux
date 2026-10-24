@@ -18,6 +18,33 @@ type OriginalDesktopTransport = {
 }
 const originalTransports = new WeakMap<DesktopRuntimeClient, OriginalDesktopTransport>()
 
+/** Launch smoke observes the existing Hosted reconnect; only a complete connect confirms readiness. */
+export async function waitForDesktopHostConnection(client: Pick<DesktopRuntimeClient, 'connect' | 'onEvent'>,
+  signal: AbortSignal): Promise<void> {
+  signal.throwIfAborted()
+  let unsubscribe = () => {}, cancel = () => {}
+  try {
+    await new Promise<void>((resolve, reject) => {
+      cancel = () => reject(signal.reason)
+      const confirm = () => {
+        if (signal.aborted) return
+        void client.connect().then(resolve, error => {
+          console.warn('Launch smoke is waiting for the original Host connection; its current observation failed.', error)
+        })
+      }
+      signal.addEventListener('abort', cancel, { once: true })
+      unsubscribe = client.onEvent(event => {
+        if (event.type !== 'connection-state') return
+        if (event.state === 'restored') confirm()
+        else if (event.state === 'unrecoverable' && event.observationOrigin.kind === 'runtime-connection' &&
+          event.observationOrigin.boundary === 'consumer-core') reject(new AgentMuxError(
+            event.diagnostic?.message ?? 'The original Host connection is unrecoverable.', event.diagnostic?.code ?? 'CONTROL_UNAVAILABLE'))
+      })
+      if (signal.aborted) cancel(); else confirm()
+    })
+  } finally { unsubscribe(); signal.removeEventListener('abort', cancel) }
+}
+
 /** Borrow the original Host transport without changing the client's local/remote routing identity. */
 export async function callOriginalDesktopHost<M extends AgentMuxRpcMethod>(client: DesktopRuntimeClient, method: M,
   params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext, expectedOwner?: AgentMuxRuntimeFence): Promise<AgentMuxRpcResult<M>> {

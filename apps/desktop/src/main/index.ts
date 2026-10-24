@@ -26,7 +26,7 @@ import { registerWorkbenchStartupCapture } from './workbench-startup-capture.js'
 import { ConfigStore } from './config-store.js'
 import { registerIpc } from './ipc.js'
 import { RuntimeController } from './runtime-controller.js'
-import { configuredDesktopAgentMuxHost } from './desktop-host.js'
+import { configuredDesktopAgentMuxHost, waitForDesktopHostConnection } from './desktop-host.js'
 import { ScratchTopics } from './scratch-topics.js'
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { runDesktopResourceProbe } from './resource-probe.js'
@@ -393,7 +393,9 @@ function startPrimaryInstance(): void {
       if (process.env.AGENTMUX_DESKTOP_EXIT_AFTER_READY === '1') {
         const clients = runtime.rpcClients()
         if (!clients.some(({ hostId }) => hostId === 'local')) throw new Error('Launch smoke requires the configured local Host.')
-        await Promise.all(clients.map(({ client }) => client.connect()))
+        const connectionWait = new AbortController()
+        try { await Promise.all(clients.map(({ client }) => waitForDesktopHostConnection(client, connectionWait.signal))) }
+        finally { connectionWait.abort() }
       }
       const readyPath = process.env.AGENTMUX_DESKTOP_READY_FILE
       const temporaryReadyPath = `${readyPath}.tmp-${process.pid}`
