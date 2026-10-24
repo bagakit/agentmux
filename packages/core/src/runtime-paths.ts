@@ -56,8 +56,8 @@ export function defaultCtxmuxSocketPath(): string {
   return join(defaultAgentMuxRuntimeDirectory(), 'ctxmux.sock')
 }
 
-export function defaultAgentMuxStateDirectory(): string {
-  const override = process.env.AGENTMUX_STATE_DIRECTORY?.trim()
+export function defaultAgentMuxStateDirectory(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  const override = env.AGENTMUX_STATE_DIRECTORY?.trim()
   if (override) {
     if (!isAbsolute(override)) throw new Error('AGENTMUX_STATE_DIRECTORY must be an absolute path.')
     return resolve(override)
