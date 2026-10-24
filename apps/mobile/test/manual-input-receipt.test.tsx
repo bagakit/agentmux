@@ -2,7 +2,7 @@ import { fixtureEpoch as _liveTailFixtureEpoch } from "../../../test/fixture-val
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { AgentInputSubmissionReceipt } from '@agentmux/core'
-import { MobileConversationSurface } from '../src/conversation/MobileConversationSurface'
+import { MobileConversationHeaderFixture as MobileConversationSurface } from './conversation-header-fixture'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { DeviceWorkfaceStore, emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { acceptedPrompt, button, click, deferred, editor, evidence, fixture, mount, mounted, paste } from './conversation-fixture'

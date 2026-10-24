@@ -8,7 +8,7 @@ import type { AgentProvider, AgentSessionHistoryReadInput, AgentSessionHistoryRe
 import { parseSessionHistoryResourceOptions } from '../../../packages/core/src/session-history-resource'
 import { projectSessionUserMessages } from '@agentmux/core/session-user-messages'
 import { createHostedHistoryFixture } from '../../../packages/core/test/helpers/session-history-query'
-import { MobileConversationSurface } from '../src/conversation/MobileConversationSurface'
+import { MobileConversationHeaderFixture as MobileConversationSurface } from './conversation-header-fixture'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
 import { button, click, deferred, editor, fixture, history, mount, mounted, paste } from './conversation-fixture'

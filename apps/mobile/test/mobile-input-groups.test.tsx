@@ -6,7 +6,7 @@ import type { AgentSessionHistoryPage, AgentSessionHistoryReadInput, AgentSessio
 import { createNativeInputCorrelation } from '../../../packages/core/src/native-input-correlation'
 import { projectConversationReading } from '@agentmux/core/conversation'
 import { ClientUiProvider } from '@agentmux/client-ui'
-import { MobileConversationSurface } from '../src/conversation/MobileConversationSurface'
+import { MobileConversationHeaderFixture as MobileConversationSurface } from './conversation-header-fixture'
 import { MobileMailbox } from '../src/conversation/MobileMailbox'
 import { createBrowserPlatform } from '../src/platform/browser'
 import { emptyDeviceWorkface, getDeviceWorkface } from '../src/recovery/device-workface'
