@@ -39,9 +39,11 @@ if (verifying) {
   if (scenario === 'perception-scale') {
     assert.ok(receipt.actual.perceptionScale?.input?.nodes >= 240)
     assert.equal(receipt.actual.perceptionScale.boxes.agents, receipt.actual.perceptionScale.input.nodes)
-    for (const label of ['terrain-parent-readable-destination', 'terrain-nested-dark', 'terrain-folded-dark', 'terrain-expanded-dark', 'terrain-deep-agent-revealed', 'terrain-lod-0-319', 'terrain-lod-0-321', 'terrain-lod-0-44', 'terrain-lod-0-46', 'terrain-lod-0-62', 'terrain-lod-0-72', 'terrain-lod-0-82', 'terrain-lod-light', 'terrain-narrow-light', 'terrain-narrow-dark', 'terrain-held-reader-overview', 'terrain-held-focus-overview', 'terrain-motion-off-static']) assert.ok(receipt.frames.some(frame => frame.label === label), 'Missing complete native frame: ' + label)
+    for (const label of ['workbench-entry', 'unselected-focus-list', 'map-first-context-readable', 'public-cli-map', 'public-cli-list', 'public-cli-exact-focus-agent', 'public-cli-retained-focus-short-window', 'public-cli-space', 'focus-entry', 'map-dark', 'focus-list-return', 'workbench-return', 'perception-dense-empty-projects-overview', 'perception-dense-empty-projects-panned', 'terrain-parent-readable-destination', 'terrain-nested-dark', 'terrain-folded-dark', 'terrain-expanded-dark', 'terrain-deep-agent-revealed', 'terrain-lod-0-319', 'terrain-lod-0-321', 'terrain-lod-0-44', 'terrain-lod-0-46', 'terrain-lod-0-62', 'terrain-lod-0-72', 'terrain-lod-0-82', 'terrain-nested-communication-live', 'terrain-lod-light', 'terrain-narrow-light', 'terrain-narrow-dark', 'terrain-held-reader-overview', 'terrain-held-focus-overview', 'terrain-motion-off-static']) assert.ok(receipt.frames.some(frame => frame.label === label), 'Missing original complete native frame: ' + label)
     const samples = receipt.actual.terrainLod.samples
     assert.ok(samples.length >= 7 && samples.find(sample => sample.target === .319)?.actual < .32 && samples.find(sample => sample.target === .321)?.actual > .32, 'Actual camera samples cross the glyph boundary')
+    assert.ok(receipt.actual.checks.some(check => check.name === 'adaptive-original-structure-and-motion-consumers' && check.passed === true), 'The original adaptive native check must actually execute')
+    createRequire(import.meta.url)(join(fixture, 'adaptive.cjs')).verify(receipt.actual.adaptive, receipt.frames)
   }
   console.log(JSON.stringify({ passed: true, evidence: directory, receiptSHA256: digest(await readFile(join(directory, 'receipt.json'))), nativeChecks: receipt.actual.checks.length, completeFrames: receipt.frames.length, aestheticReview: 'separate-independent-artifact', restart: 'separate-runtime-artifact' }))
   process.exit(0)
@@ -104,10 +106,10 @@ async function compileRenderer() {
         return effective
       }
       if (id === join(desktop, 'src/renderer/src/lib/use-collaboration-layout.ts')) {
-        const anchor = '  return { boxes, paths, busy, issues, retry:'
+        const anchor = '  return { ...frame, busy: busy || transitioning, issues, settle, retry:'
         assert.equal(source.split(anchor).length, 2, 'Observe the one original delivered layout owner')
-        const effective = source.replace(anchor, '  ;(globalThis as any).__collaborationCaptureLayout = { boxes, paths, busy, issues }\n' + anchor)
-        instrumented.push({ file: relative(root, id), originalSHA256: hash(source), effectiveSHA256: hash(effective), boundary: 'Reference-only O(1) observation of the original post-offset hook result; no geometry, paths, state, input or camera replacement. Uncalibrated reference-publication cost; arrays copy only at explicit evidence boundaries.' })
+        const effective = source.replace(anchor, '  ;(globalThis as any).__collaborationCaptureLayout = { ...frame, busy: busy || transitioning, transitioning, issues }\n' + anchor)
+        instrumented.push({ file: relative(root, id), originalSHA256: hash(source), effectiveSHA256: hash(effective), boundary: 'Reference-only O(1) observation of the actual presented hook frame and effective busy state, including its finite transition. No canonical Worker geometry is substituted for presentation; no state, input or camera replacement. Uncalibrated reference-publication cost; arrays copy only at explicit evidence boundaries or the declared finite related-neighborhood sampler.' })
         return effective
       }
       const component = id.slice(id.lastIndexOf('/') + 1)
@@ -143,7 +145,7 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key
 Object.assign(env, { AGENTMUX_DESKTOP_USER_DATA: join(privateRoot, 'user-data'), AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state'), COLLABORATION_CAPTURE_NODE: process.execPath })
 let server
 try {
-  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'perception.cjs', 'terrain.cjs', 'server-host.mjs', 'scenario.md'].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
+  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'perception.cjs', 'terrain.cjs', 'adaptive.cjs', 'adaptive-observer.ts', 'server-host.mjs', 'scenario.md'].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
   receipt.harness = Object.fromEntries(await Promise.all(harnessFiles.map(async file => [relative(root, file), hash(await readFile(file))])))
   receipt.publicTransport = { boundary: 'Original Core source publication spawns its existing compiled listener asset; only listener transport uses dist. Its bytes and corresponding source are bound in harness; CLI, Core business and Renderer remain original source.', file: 'packages/core/dist/control-endpoint-listener-worker.js' }
   receipt.phase = 'compiling'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
@@ -158,7 +160,7 @@ try {
   assert.deepEqual(receipt.compilation.foreignWorkspaceSources, {}, 'The exact candidate must not consume another worktree source')
   Object.assign(sources, receipt.compilation.inputs); isolated.push(...receipt.compilation.isolated); instrumented.push(...receipt.compilation.instrumented)
   receipt.inputs = sources; receipt.isolated = isolated; receipt.instrumented = instrumented
-  for (const owner of ['App.tsx', 'GlobalFocusSurface.tsx', 'FocusToolbar.tsx', 'FocusViewSwitch.tsx', 'SurfaceToolDock.tsx', 'WorkspaceCollaboration.tsx', 'CollaborationMapToolbar.tsx', 'collaboration-areas.ts', 'collaboration-presentation.ts', 'workspace-agent-scope.ts', 'AgentCollaborationMap.tsx', 'AgentCollaborationGraph.tsx', 'collaboration-layout.worker.ts', 'collaboration-layout-engine.ts', 'collaboration-map-geometry.ts', 'desktop-presentation.ts', 'FocusContextCards.tsx', 'use-collaboration-layout.ts', 'FocusContextCardBody.tsx', 'FocusContextRow.tsx', 'AgentInformationPreview.tsx', 'AgentInformationReader.tsx', 'store.ts', 'collaboration.css']) {
+  for (const owner of ['App.tsx', 'GlobalFocusSurface.tsx', 'FocusToolbar.tsx', 'FocusViewSwitch.tsx', 'SurfaceToolDock.tsx', 'WorkspaceCollaboration.tsx', 'CollaborationMapToolbar.tsx', 'collaboration-areas.ts', 'collaboration-presentation.ts', 'collaboration-hierarchy.ts', 'workspace-agent-scope.ts', 'AgentCollaborationMap.tsx', 'AgentCollaborationGraph.tsx', 'collaboration-layout.worker.ts', 'collaboration-layout-engine.ts', 'collaboration-layout-refinement.ts', 'collaboration-map-transition.ts', 'collaboration-map-geometry.ts', 'desktop-presentation.ts', 'FocusContextCards.tsx', 'use-collaboration-layout.ts', 'FocusContextCardBody.tsx', 'FocusContextRow.tsx', 'AgentInformationPreview.tsx', 'AgentInformationReader.tsx', 'store.ts', 'collaboration.css']) {
     assert.ok(Object.keys(sources).some(file => file.endsWith('/' + owner)), 'Actual owning module must compile: ' + owner)
   }
   receipt.outputs = {}

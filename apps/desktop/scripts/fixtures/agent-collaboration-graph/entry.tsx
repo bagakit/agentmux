@@ -17,7 +17,8 @@ import { desktopSpatialGraph } from '../../../src/renderer/src/lib/desktop-spati
 import { fixturePath } from '../../lib/fixture-values.mjs'
 import type { CollaborationLayoutBox, CollaborationLayoutRequest, CollaborationLayoutResponse } from '../../../src/renderer/src/lib/collaboration-layout-engine'
 import { COLLABORATION_ACTIVITY_MS } from '../../../src/renderer/src/lib/collaboration-map-presentation'
-import { collaborationAreaNode } from '../../../src/renderer/src/lib/collaboration-presentation'
+import { collaborationAreaNode, collaborationAgentNode } from '../../../src/renderer/src/lib/collaboration-presentation'
+import { createAdaptivePresentationObserver } from './adaptive-observer'
 import '../../../src/renderer/src/styles/index.css'
 
 // Transparent instrumentation: actual browser Workers and original context code execute.
@@ -269,6 +270,7 @@ const events: AgentMuxMessageEvent[] = [
   { sequence: 5, kind: 'dispatch-open', at: now - 5000, messages: [refs[0]!] },
   { sequence: 6, kind: 'message', at: now - 4000, messages: [refs[3]!] }
 ]
+const adaptiveSubjects = new Set<string>()
 for (const ref of refs.slice(4)) events.push({ sequence: events.at(-1)!.sequence + 1, kind: 'message', at: now - 3500, messages: [ref] })
 if (terrainSessions.length) events.push({ sequence: events.at(-1)!.sequence + 1, kind: 'delivery', state: 'delivered', at: now - 3200, messages: [refs.at(-1)!] })
 const denseSenders = extraSessions.slice(0, 88).filter(session => session.workspacePath === projects[0]!.path).slice(0, 12)
@@ -290,7 +292,9 @@ api.sessions.messageEvents = async (subject, options = {}) => {
   let selected = events.filter(event => event.sequence <= throughSequence && event.messages.some(message => (message.senderSessionId === subject.agentSessionId || message.recipientSessionId === subject.agentSessionId) && (!options.messageId || options.messageId === message.messageId)))
   if (options.beforeSequence !== undefined) selected = selected.filter(event => event.sequence < options.beforeSequence!)
   else if (options.afterSequence !== undefined) selected = selected.filter(event => event.sequence > options.afterSequence!)
-  const backward = options.latest === true || options.beforeSequence !== undefined, limit = Math.min(options.limit ?? 50, 4)
+  // The adaptive scene uses a normal bounded metadata page. Earlier pagination
+  // scenarios retain their original four-record platform pages unchanged.
+  const backward = options.latest === true || options.beforeSequence !== undefined, limit = Math.min(options.limit ?? 50, adaptiveSubjects.has(subject.agentSessionId) ? 50 : 4)
   const more = selected.length > limit
   selected = backward ? selected.slice(-limit) : selected.slice(0, limit)
   const input = { ...options, participantSessionId: subject.agentSessionId }
@@ -332,6 +336,43 @@ function visibleSurfaces(selector: string) {
       ? [{ left: rect.left, top: rect.top, width: rect.width, height: rect.height }] : []
   })
 }
+const adaptiveProjects: WorkspaceRecord[] = [
+  { id: 'fixture-adaptive-root', hostId, name: '协作邻域', path: fixturePath('private/graph/adaptive'), kind: 'folder' },
+  { id: 'fixture-adaptive-middle', hostId, name: '相关成员', path: fixturePath('private/graph/adaptive/work'), kind: 'folder' },
+  { id: 'fixture-adaptive-work', hostId, name: '结构调整', path: fixturePath('private/graph/adaptive/work/members'), kind: 'folder' },
+  { id: 'fixture-adaptive-control', hostId, name: '独立对照', path: fixturePath('private/graph/adaptive-control'), kind: 'folder' },
+  { id: 'fixture-adaptive-holding', hostId, name: '已移出成员', path: fixturePath('private/graph/adaptive-holding'), kind: 'folder' }
+]
+let adaptiveSessions: Array<Extract<SessionSnapshot, { kind: 'agent' }>> = []
+const adaptiveArea = (index: number) => collaborationAreaNode(directoryIdentity(hostId, adaptiveProjects[index]!.path))
+const adaptiveOccurrence = (session: Extract<SessionSnapshot, { kind: 'agent' }>) => collaborationAgentNode(directoryIdentity(hostId, session.workspacePath), JSON.stringify([hostId, session.id]))
+const adaptiveObserver = createAdaptivePresentationObserver(() => new Set([...adaptiveProjects.map((_, index) => adaptiveArea(index)),
+  ...adaptiveSessions.flatMap(session => [adaptiveOccurrence(session), collaborationAgentNode(directoryIdentity(hostId, adaptiveProjects[2]!.path), JSON.stringify([hostId, session.id]))])]),
+  () => new Map([[adaptiveArea(1), adaptiveArea(0)], [adaptiveArea(2), adaptiveArea(1)]]))
+function adaptiveSession(id: string, project: WorkspaceRecord, label: string): Extract<SessionSnapshot, { kind: 'agent' }> {
+  const observedAt = Date.now(), run = { runId: 'fixture-run-' + id }, nativeSessionId = 'native-' + id
+  return { ...plainBase, id, label, providerId: 'codex', executorId: 'codex', hostId, workspacePath: project.path, nativeSessionId,
+    nativeHandle: { kind: 'provider', providerId: 'codex', sessionId: nativeSessionId }, createdAt: observedAt, updatedAt: observedAt, agentSessionUpdatedAt: observedAt,
+    processState: 'running', status: { state: 'done', source: 'native-hook', observedAt },
+    semanticStatus: { state: 'done', source: 'native-hook', observedAt, stateEnteredAt: observedAt, currentActivityRevision: 1 },
+    currentActivity: { state: 'idle', source: 'native-hook', run, nativeSessionId, nativeTurnId: 'turn-' + id, sourceId: 'source-' + id, sequence: 1, hookReceiptId: 'receipt-' + id, observedAt },
+    control: { kind: 'agent', hostId, agentSessionId: id, run } }
+}
+function publishAdaptiveSession(session: Extract<SessionSnapshot, { kind: 'agent' }>) {
+  sessions = [...sessions.filter(candidate => candidate.id !== session.id), session]
+  adaptiveSessions = [...adaptiveSessions.filter(candidate => candidate.id !== session.id), session]
+  adaptiveSubjects.add(session.id)
+  const record: AgentMuxAgentSession = { kind: 'agent', agentSessionId: session.id, providerId: session.providerId, executorId: session.executorId, hostId,
+    workspacePath: session.workspacePath, run: session.control.run, retiredRuns: [], createdAt: session.createdAt, updatedAt: session.agentSessionUpdatedAt,
+    semanticStatus: session.semanticStatus, currentActivity: session.currentActivity, ...(session.nativeHandle ? { nativeHandle: session.nativeHandle } : {}) }
+  for (const listener of listeners) listener({ type: 'core', hostId, event: { type: 'agent-session', session: record } })
+}
+function adaptiveMessage(sender: string, recipient: string, id: string, notify = false) {
+  const message = reference(id, sender, recipient), sequence = events.at(-1)!.sequence + 1
+  refs.push(message); events.push({ sequence, kind: 'message', at: Date.now() - 10000, messages: [message] })
+  if (notify) for (const listener of listeners) listener({ type: 'core', hostId, event: { type: 'agent-message-changed', messageId: id, senderSessionId: sender, recipientSessionId: recipient, sequence, messageSequence: sequence, recordKind: 'message', live: false } })
+  return { id, sequence, sender, recipient, hostId, live: false }
+}
 Object.assign(window, { graphCapture: {
   ready: true, reads, controls, census, beginMeasurement, endMeasurement,
   async publicControl(request: Parameters<NonNullable<typeof admittedControl>>[0]) {
@@ -361,9 +402,53 @@ Object.assign(window, { graphCapture: {
   bodyState() { return { connected: originalBody?.isConnected, sameBody: originalBody === document.querySelector('.collaboration-evidence .composer-mailbox__detail .log-turn__body'), text: originalBody?.textContent, selection: getSelection()?.toString(), messageId: originalBody?.closest<HTMLElement>('[data-message-id]')?.dataset.messageId } },
   workerSamples() { return structuredClone(nativeWorkers) },
   deliveredLayout() {
-    const layout = (globalThis as typeof globalThis & { __collaborationCaptureLayout?: { boxes: ReadonlyMap<string, unknown>; paths: ReadonlyMap<string, unknown>; busy: boolean; issues: ReadonlyMap<string, string> } }).__collaborationCaptureLayout
-    return layout ? structuredClone({ boxes: [...layout.boxes.values()], pathIds: [...layout.paths.keys()], busy: layout.busy, issues: [...layout.issues] }) : null
+    const layout = (globalThis as typeof globalThis & { __collaborationCaptureLayout?: { boxes: ReadonlyMap<string, unknown>; paths: ReadonlyMap<string, unknown>; busy: boolean; transitioning: boolean; issues: ReadonlyMap<string, string> } }).__collaborationCaptureLayout
+    return layout ? structuredClone({ boxes: [...layout.boxes.values()], pathIds: [...layout.paths.keys()], busy: layout.busy, transitioning: layout.transitioning, issues: [...layout.issues] }) : null
   },
+  async adaptivePrepare() {
+    if (adaptiveSessions.length) throw Error('Use one new adaptive scene')
+    const before = await api.config.get()
+    projects.push(...adaptiveProjects)
+    await api.config.save({ ...before, workspaces: [...before.workspaces, ...adaptiveProjects] }, before)
+    for (let index = 0; index < 12; index++) adaptiveSessions.push(adaptiveSession('fixture-adaptive-' + String(index).padStart(2, '0'), adaptiveProjects[2]!, '成员 ' + String(index).padStart(2, '0')))
+    adaptiveSessions.push(adaptiveSession('fixture-adaptive-control', adaptiveProjects[3]!, '独立对照成员'))
+    const members = [...adaptiveSessions]
+    for (let index = 0; index < 11; index++) adaptiveMessage(members[index]!.id, members[index + 1]!.id, 'fixture-adaptive-chain-' + index)
+    for (const session of members) publishAdaptiveSession(session)
+    return { areas: adaptiveProjects.map((project, index) => ({ id: adaptiveArea(index), name: project.name, workspaceId: project.id })),
+      members: members.slice(0, 12).map(session => ({ id: session.id, nodeId: adaptiveOccurrence(session), runId: session.control.run.runId })),
+      reader: members[0]!.id, control: { id: members[12]!.id, nodeId: adaptiveOccurrence(members[12]!), areaId: adaptiveArea(3) },
+      boundary: 'Only private typed platform Session/config/message facts; original App initialization, membership owner, read budgets, Graph and Worker remain intact.' }
+  },
+  adaptiveAdd(farthest: string) {
+    const reader = adaptiveSessions.find(session => session.id === 'fixture-adaptive-00'), peer = adaptiveSessions.find(session => session.id === farthest)
+    if (!reader || !peer || peer.id === reader.id || adaptiveSubjects.has('fixture-adaptive-new')) throw Error('Exact distinct original adaptive endpoints required')
+    const session = adaptiveSession('fixture-adaptive-new', adaptiveProjects[2]!, '新增协作成员'), evidence = []
+    adaptiveSubjects.add(session.id)
+    for (let index = 0; index < 32; index++) for (const target of [reader, peer]) evidence.push(adaptiveMessage(session.id, target.id, 'fixture-adaptive-new-' + target.id + '-' + index, true))
+    publishAdaptiveSession(session)
+    return { member: { id: session.id, nodeId: adaptiveOccurrence(session), runId: session.control.run.runId }, evidence }
+  },
+  adaptiveRemoveMember(id: string) {
+    const original = adaptiveSessions.find(session => session.id === id)
+    if (!original || id === 'fixture-adaptive-00' || id === 'fixture-adaptive-control' || original.workspacePath !== adaptiveProjects[2]!.path) throw Error('Only the selected original non-reader work member can move')
+    const session = { ...original, workspacePath: adaptiveProjects[4]!.path, updatedAt: Date.now(), agentSessionUpdatedAt: Date.now() }
+    publishAdaptiveSession(session)
+    return { id, oldNodeId: adaptiveOccurrence(original), nodeId: adaptiveOccurrence(session), runId: session.control.run.runId, boundary: 'The exact Session/Run remains present in its new actual membership; no Session is terminated or deleted and no original message is removed.' }
+  },
+  adaptiveTier(id: string, active: boolean) {
+    const original = adaptiveSessions.find(session => session.id === id)
+    if (!original || id === 'fixture-adaptive-00' || id === 'fixture-adaptive-control') throw Error('The original Reader and control do not change footprint')
+    const observedAt = Date.now(), sequence = (original.currentActivity?.sequence ?? 0) + 1, state = active ? 'working' as const : 'done' as const
+    const session = { ...original, updatedAt: observedAt, agentSessionUpdatedAt: observedAt,
+      status: { state, source: 'native-hook' as const, observedAt }, semanticStatus: { state, source: 'native-hook' as const, observedAt, stateEnteredAt: observedAt, currentActivityRevision: sequence },
+      currentActivity: { ...original.currentActivity!, state: active ? 'active' as const : 'idle' as const, sequence, observedAt, hookReceiptId: 'receipt-' + id + '-' + sequence } }
+    publishAdaptiveSession(session); return { id, nodeId: adaptiveOccurrence(session), active, sequence, runId: session.control.run.runId }
+  },
+  adaptiveRemember() { const anchor = document.querySelector<HTMLElement>('.collaboration-agent__identity-layer:not([inert]) [data-session-id="fixture-adaptive-00"]'); if (!anchor) throw Error('Original adaptive identity owner must be visible'); return adaptiveObserver.remember(anchor) },
+  adaptiveRememberFocus() { adaptiveObserver.rememberFocus() },
+  adaptiveStatus() { return { ...adaptiveObserver.status(), workers: nativeWorkers.length, reading: Boolean(document.querySelector('.collaboration-map__reading')) } },
+  adaptiveSample: adaptiveObserver.sample, adaptiveTraceStart: adaptiveObserver.start, adaptiveTraceStop: adaptiveObserver.stop,
   activityMS: COLLABORATION_ACTIVITY_MS,
   delayRoutes(milliseconds: number, sender = 'fixture-core', recipient = 'fixture-design') { if (![0, 1200, 3600].includes(milliseconds)) throw Error('Use a declared finite transport delay'); delayedRoute = milliseconds ? { milliseconds, sender, recipient } : undefined },
   activity() {
