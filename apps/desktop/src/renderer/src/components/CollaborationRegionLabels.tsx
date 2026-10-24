@@ -25,10 +25,11 @@ const same = (a: readonly unknown[], b: readonly unknown[]) => a.length === b.le
 
 /** One screen-space identity layer. Natural text size is observed only when it
  * changes; camera movement projects the same boxes without measuring the world. */
-export const CollaborationRegionLabels = memo(function CollaborationRegionLabels({ areas, geometry, selectedAgent, locatedAreas, active, hud, contextControl }: {
+export const CollaborationRegionLabels = memo(function CollaborationRegionLabels({ areas, geometry, selectedAgent, locatedAreas, active, hud, contextControl, readingProxies }: {
   areas: readonly { data: Region }[]; geometry: ReadonlyMap<string, CollaborationLayoutBox>
   selectedAgent?: string | undefined; locatedAreas?: readonly string[] | undefined; active: boolean; hud: RefObject<HTMLDivElement | null>
   contextControl: RefObject<HTMLButtonElement | null> | null
+  readingProxies: readonly HTMLElement[]
 }) {
   const camera = useStore(state => [...state.transform, state.width, state.height], same)
   const root = useRef<HTMLDivElement>(null)
@@ -118,6 +119,7 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
     return placed
   }, [areas, camera, obstacles, sizes, occlusion, hierarchy, currentAreas, originalAreaIds])
   const mounted = labels.map(({ data, budget }) => `${data.area.id}:${budget}`).sort().join('\n')
+  const readingCamera = readingProxies.length ? camera : null
   useLayoutEffect(() => {
     if (!active || !root.current) return
     const observer = new ResizeObserver(entries => setSizes(previous => {
@@ -143,6 +145,7 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
       const canvas = element.parentElement!.getBoundingClientRect()
       const surfaces = [...element.children].filter(child => child.classList.contains('collaboration-canvas__controls') || child.classList.contains('collaboration-canvas__legend'))
       if (contextControl?.current) surfaces.push(contextControl.current)
+      surfaces.push(...readingProxies)
       const next = surfaces.map(child => {
         const box = child.getBoundingClientRect()
         return { x: box.x - canvas.x, y: box.y - canvas.y, width: box.width, height: box.height }
@@ -151,10 +154,13 @@ export const CollaborationRegionLabels = memo(function CollaborationRegionLabels
         const other = next[index]!; return box.x === other.x && box.y === other.y && box.width === other.width && box.height === other.height
       }) ? previous : next)
     }
+    // Only held readers add camera-dependent measurement. Their actual screen
+    // footprints include the inverse-zoom transform and can change with text.
+    if (readingProxies.length) update()
     const observer = new ResizeObserver(update), window = element.ownerDocument.defaultView!
-    const frame = window.requestAnimationFrame(() => { update(); observer.observe(element.parentElement!); observer.observe(element); for (const child of element.children) observer.observe(child); if (contextControl?.current) observer.observe(contextControl.current) })
+    const frame = window.requestAnimationFrame(() => { update(); observer.observe(element.parentElement!); observer.observe(element); for (const child of element.children) observer.observe(child); if (contextControl?.current) observer.observe(contextControl.current); for (const proxy of readingProxies) observer.observe(proxy) })
     return () => { window.cancelAnimationFrame(frame); observer.disconnect() }
-  }, [active, hud, contextControl])
+  }, [active, hud, contextControl, readingProxies, readingCamera])
   return <div ref={root} className="collaboration-region-labels">{labels.map(({ data, x, y, budget, width, height, context, current }) => <div key={data.area.id} className="collaboration-area__overview-label" data-region-id={data.area.id} data-area-id={data.box.id} data-kind={data.area.kind} data-depth={data.depth} data-empty={!data.totalMembers && !data.childCount || undefined} data-context={context || undefined} data-current={current || undefined} data-label-width={width} data-label-height={height} style={{ left: x, top: y, maxWidth: budget }}>
     <RegionIdentity data={data} hasChildren={data.childCount > 0} onToggle={() => data.onToggle({ x, y: y + height })} />
   </div>)}</div>

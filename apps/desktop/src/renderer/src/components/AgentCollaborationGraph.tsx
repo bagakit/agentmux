@@ -37,8 +37,10 @@ const sameItems = <T,>(left: readonly T[], right: readonly T[]) => left.length =
 export const COLLABORATION_LABELS = { communication: 'Messages', creation: 'Created', supervision: 'Dispatch' } as const
 const colors = { communication: 'var(--green)', creation: 'var(--text-2)', supervision: 'var(--amber)' } as const
 const MapMotionContext = createContext(true)
+const MapReadingProxyContext = createContext<(element: HTMLSpanElement | null) => (() => void) | undefined>(() => undefined)
 const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>) {
   const { agent } = data, zoom = useStore(state => state.transform[2])
+  const registerReadingProxy = useContext(MapReadingProxyContext)
   const lod = collaborationMapLod(zoom), overview = lod.identity === 0
   const root = useRef<HTMLDivElement>(null)
   const [focusedLayer, setFocusedLayer] = useState<'identity' | 'detail' | null>(null)
@@ -70,7 +72,7 @@ const AgentNodeView = memo(function AgentNodeView({ data }: NodeProps<AgentNode>
         <FocusContextCardBody context={agent.context} identity={data.identity} goalLinks={data.goals} selected={data.selected} onSelect={data.onSelect} onOpenWorkface={data.onOpen} />
       </div> : null}
     </div>
-    {focusProxy ? <span className="collaboration-agent__focus-proxy" aria-hidden="true" style={{ left: data.box.width / 2, top: hull.y - data.box.y - 8 / zoom, transform: `scale(${1 / zoom}) translate(-50%, -100%)` }}><strong>{label}</strong><kbd>↓ Read</kbd></span> : null}
+    {focusProxy ? <span ref={registerReadingProxy} className="collaboration-agent__focus-proxy" aria-hidden="true" style={{ left: data.box.width / 2, top: hull.y - data.box.y - 8 / zoom, transform: `scale(${1 / zoom}) translate(-50%, -100%)` }}><strong>{label}</strong><kbd>↓ Read</kbd></span> : null}
     {data.activity ? <ActivityMark activity={data.activity} /> : null}
   </div>
 })
@@ -112,6 +114,12 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
   context?: { name: string; onLocate(): void }
 }) {
   const motion = useCollaborationMotion(active), hud = useRef<HTMLDivElement>(null), contextControl = useRef<HTMLButtonElement>(null)
+  const [readingProxies, setReadingProxies] = useState<readonly HTMLSpanElement[]>([])
+  const registerReadingProxy = useCallback((element: HTMLSpanElement | null) => {
+    if (!element) return
+    setReadingProxies(previous => previous.includes(element) ? previous : [...previous, element])
+    return () => setReadingProxies(previous => previous.filter(proxy => proxy !== element))
+  }, [])
   const [areaLocate, setAreaLocate] = useState<{ source: CollaborationLocate | undefined; request: CollaborationLocate }>()
   const effectiveLocate = areaLocate && areaLocate.source === locate ? areaLocate.request : locate
   const [folded, setFolded] = useState<ReadonlySet<string>>(new Set())
@@ -273,10 +281,10 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
   const selectConnection = useCallback((path: RelationPath) => { const first = path.relations[0]; if (first) actions.current.onSelect({ kind: 'relation', id: first.id, relatedIds: path.relations.map(relation => relation.id) }) }, [])
   const clearSelection = useCallback(() => actions.current.onSelect(null), [])
   const areaNodes = useMemo(() => nodes.filter((node): node is AreaNode => node.type === 'area'), [nodes])
-  return <MapMotionContext.Provider value={motion.enabled}><div className="collaboration-canvas" data-motion={motion.enabled ? 'on' : 'off'} style={{ '--collaboration-activity-duration': `${COLLABORATION_ACTIVITY_MS}ms` } as CSSProperties} aria-label="Agent collaboration graph">
+  return <MapReadingProxyContext.Provider value={registerReadingProxy}><MapMotionContext.Provider value={motion.enabled}><div className="collaboration-canvas" data-motion={motion.enabled ? 'on' : 'off'} style={{ '--collaboration-activity-duration': `${COLLABORATION_ACTIVITY_MS}ms` } as CSSProperties} aria-label="Agent collaboration graph">
     <ReactFlow<GraphNode> nodes={nodes} edges={emptyEdges} nodeTypes={nodeTypes} onInit={instance => { flow.current = instance }} onPaneClick={clearSelection}
       onMoveStart={event => { if (event) { ++gestures.current; cameraAnimation.current = null } }} onlyRenderVisibleElements nodesDraggable={false} nodesConnectable={false} nodesFocusable={false} edgesReconnectable={false} deleteKeyCode={null} zoomOnDoubleClick={false} minZoom={.05} maxZoom={1.4} proOptions={{ hideAttribution: true }}>
-      <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} cameraAnimation={cameraAnimation} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} active={active} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} geometry={geometry} active={active} selectedAgent={selection?.kind === 'agent' ? selection.id : effectiveLocate?.agentId} locatedAreas={effectiveLocate?.areaIds} hud={hud} contextControl={context ? contextControl : null} />
+      <CollaborationViewport ready={ready && active && !(areaLocate && areaLocate.request === effectiveLocate && effectiveLocate.areaIds?.some(id => geometry.get(collaborationAreaNode(id))?.folded))} geometry={geometry} areas={graphAreas} agents={agents} locate={effectiveLocate} gestures={gestures} readingAnchor={readingAnchor} cameraAnimation={cameraAnimation} onVisibleAgents={onVisibleAgents} /><CollaborationRelations paths={paths} active={active} onSelect={selectConnection} onClear={clearSelection} /><CollaborationRegionLabels areas={areaNodes} geometry={geometry} active={active} selectedAgent={selection?.kind === 'agent' ? selection.id : effectiveLocate?.agentId} locatedAreas={effectiveLocate?.areaIds} hud={hud} contextControl={context ? contextControl : null} readingProxies={readingProxies} />
       <Background gap={22} size={1} />
     </ReactFlow>
     {context ? <button ref={contextControl} type="button" className="collaboration-map__locate" title="Locate original context" onClick={context.onLocate}><SemanticIcon name="action.locate" size={14} /><span>{context.name}</span></button> : null}
@@ -293,7 +301,7 @@ export function AgentCollaborationGraph({ agents, areas, relations, pulses, sele
     {locate?.agentId && geometry.size > 0 && !graphAreas.some(area => area.members.includes(locate.agentId!)) ? <p className="collaboration-canvas__issue" role="status">The original Agent location is unconfirmed. Its identity and sources are retained.</p> : null}
     {layout.issues.size ? <div className="collaboration-canvas__issue" role="status"><span>{layout.issues.has('layout') ? 'Layout needs attention. Original Agents and records are retained.' : `${layout.issues.size} ${layout.issues.size === 1 ? 'connection could' : 'connections could'} not be drawn. Original records remain readable.`}</span> <button type="button" onClick={layout.retry}>Retry layout</button><details><summary>Details</summary>{[...layout.issues].map(([id, message]) => <p key={id}>{message}</p>)}</details></div> : layout.busy ? <span className="collaboration-canvas__progress" role="status">{geometry.size ? 'Drawing connections…' : 'Arranging map…'}</span> : null}
     {!visibleIds.size ? <p className="collaboration-canvas__empty">No Agents in this map.</p> : null}
-  </div></MapMotionContext.Provider>
+  </div></MapMotionContext.Provider></MapReadingProxyContext.Provider>
 }
 
 /** Only this small layer subscribes to camera bounds; xyflow owns its transform and nodes. */
