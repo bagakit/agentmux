@@ -9,17 +9,24 @@ import { AgentMuxClient } from '../src/client.js'
 import { AgentMuxMemoryAgentSessionStore } from '../src/agent-session-store.js'
 import { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 
-const boundary = vi.hoisted(() => ({ artifact: 'healthy', directoryFault: '', directoryPath: '', spawn: vi.fn() }))
+const boundary = vi.hoisted(() => ({ artifact: 'healthy', directoryFault: '', directoryPath: '', namespaceUid: null as number | null, chmod: vi.fn(), spawn: vi.fn() }))
 vi.mock('node:child_process', async original => ({ ...await original<typeof import('node:child_process')>(), spawn: boundary.spawn }))
 vi.mock('node:fs/promises', async original => {
   const actual = await original<typeof import('node:fs/promises')>()
   return { ...actual,
+    stat: async (...args: Parameters<typeof actual.stat>) => {
+      const result = await Reflect.apply(actual.stat, actual, args)
+      if (boundary.namespaceUid !== null && String(args[0]) === boundary.directoryPath)
+        return Object.assign(result, { uid: boundary.namespaceUid })
+      return result
+    },
     mkdir: async (...args: Parameters<typeof actual.mkdir>) => {
       if (boundary.directoryFault === 'mkdir' && String(args[0]) === boundary.directoryPath)
         throw Object.assign(new Error('Local activation directory cannot be created'), { code: 'EACCES' })
       return await Reflect.apply(actual.mkdir, actual, args)
     },
     chmod: async (...args: Parameters<typeof actual.chmod>) => {
+      boundary.chmod(...args)
       if (boundary.directoryFault === 'chmod' && String(args[0]) === boundary.directoryPath)
         throw Object.assign(new Error('Local activation directory permissions cannot be changed'), { code: 'EPERM' })
       return await Reflect.apply(actual.chmod, actual, args)
@@ -34,9 +41,9 @@ vi.mock('node:fs/promises', async original => {
 })
 const cleanup: Array<() => Promise<void>> = []
 afterEach(async () => {
-  boundary.artifact = 'healthy'; boundary.directoryFault = ''; boundary.directoryPath = ''
+  boundary.artifact = 'healthy'; boundary.directoryFault = ''; boundary.directoryPath = ''; boundary.namespaceUid = null
   for (const close of cleanup.splice(0).reverse()) await close()
-  vi.restoreAllMocks(); vi.unstubAllEnvs(); boundary.spawn.mockReset()
+  vi.restoreAllMocks(); vi.unstubAllEnvs(); boundary.spawn.mockReset(); boundary.chmod.mockReset()
 })
 async function namespace() {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'amx-artifact-scope-')))
@@ -102,6 +109,21 @@ it('repairs actual public namespace permissions before using the original Run', 
   expect((await stat(f.runtime)).mode & 0o777).toBe(0o755)
   await assertOriginalRunUsable(f)
   expect((await stat(f.runtime)).mode & 0o777).toBe(0o700)
+})
+it.each([0o700, 0o755])('rejects a foreign namespace owner with mode %i even when chmod would succeed, keeping the original Run', async mode => {
+  const f = await serving()
+  await chmod(f.runtime, mode)
+  boundary.directoryPath = f.runtime; boundary.namespaceUid = process.getuid!() + 1
+  boundary.chmod.mockClear()
+  const client = new AgentMuxClient({ store: new AgentMuxMemoryAgentSessionStore() })
+  Object.defineProperty((client as any).hookServer, 'port', { value: 0 }); cleanup.push(() => client.dispose())
+  await expect(client.connect()).rejects.toMatchObject({ code: 'CTXMUX_OWNER_IDENTITY_UNPROVEN' })
+  expect(boundary.chmod).not.toHaveBeenCalled()
+  expect(boundary.spawn).not.toHaveBeenCalled()
+  expect(await f.native.status(f.run.id)).toMatchObject({ pid: f.run.pid, state: { type: 'running' } })
+  expect(f.daemon.exitCode).toBeNull(); expect(f.daemon.signalCode).toBeNull()
+  boundary.namespaceUid = null
+  await assertOriginalRunUsable(f)
 })
 it('refuses a failed namespace permission repair while preserving the original daemon and Run', async () => {
   const f = await serving()
