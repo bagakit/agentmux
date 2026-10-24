@@ -3,6 +3,7 @@ import { collaborationSubjectKey, type CollaborationAgent, type CollaborationAre
 import { collaborationAgentNode, collaborationAreaNode } from '../src/renderer/src/lib/collaboration-presentation'
 import { collaborationCameraTarget } from '../src/renderer/src/lib/collaboration-map-camera'
 import type { CollaborationLayoutBox } from '../src/renderer/src/lib/collaboration-layout-engine'
+import { focusMapPreset, type FocusMapPreferences } from '../src/shared/focus-map-preferences'
 
 const agent = (hostId: string, tier: CollaborationAgent['tier']): CollaborationAgent => {
   const subject = { hostId, agentSessionId: 'same-session' }
@@ -31,6 +32,19 @@ function nestedWorld() {
   return { local, remote, agents, areas, geometry: new Map(boxes.map(box => [box.id, box])) }
 }
 const viewport = { width: 600, height: 400 }
+
+it('reads custom late summary stages at their complete scale and retains exact point-only Reader destinations', () => {
+  const { areas, agents, geometry, remote } = nestedWorld()
+  const levels = focusMapPreset(3); levels[2] = { form: 'card', information: 'summary', from: .9, to: 1.2 }
+  const preferences: FocusMapPreferences = { boundary: 'polygon', levels }
+  const target = collaborationCameraTarget(geometry, areas, agents, viewport, { token: {}, agentId: remote.id }, preferences)
+  expect(target?.zoom).toBe(1.2)
+  expect(target?.anchor).toBe(collaborationAgentNode('elsewhere', remote.id))
+  expect(collaborationCameraTarget(geometry, areas, agents, viewport, { token: {}, areaIds: ['root'] }, preferences)?.zoom).toBe(1.2)
+  const points: FocusMapPreferences = { boundary: 'bezier', levels: focusMapPreset(2).map(level => ({ ...level, form: 'point', information: 'identity' })) }
+  const point = collaborationCameraTarget(geometry, areas, agents, viewport, { token: {}, agentId: remote.id }, points)
+  expect(point?.anchor).toBe(target?.anchor); expect(point?.zoom).toBe(1)
+})
 
 it('reads a real active descendant of a three-level large parent without inventing a parent or other Host occurrence', () => {
   const { areas, agents, geometry, remote } = nestedWorld(), originalAreas = structuredClone(areas), originalGeometry = structuredClone(geometry)
