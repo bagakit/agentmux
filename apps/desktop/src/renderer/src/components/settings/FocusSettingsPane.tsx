@@ -67,7 +67,7 @@ export function FocusSettingsPane({ preferences, active = true, onSave }: {
           <p className="focus-settings-description">Alt-click chooses a position for that link.</p>
           {previewButton('opening-resources', 'Opening resources', 'links')}
         </section>
-        <section className="settings-group" data-settings-field="map" data-settings-preview-group="map"><header><span>Map</span><button type="button" className="small-button" onClick={() => change('map', DEFAULT_FOCUS_MAP_PREFERENCES, 'map')}>Restore Map defaults</button></header>
+        <section className="settings-group" data-settings-field="map" data-settings-preview-group="map" onFocusCapture={() => setScene('map')}><header><span>Map</span><button type="button" className="small-button" onClick={() => change('map', DEFAULT_FOCUS_MAP_PREFERENCES, 'map')}>Restore Map defaults</button></header>
           <FocusMapSettings value={draft.value.map} onChange={value => change('map', value, 'map')} />
           {mapIssue ? <p className="settings-inline-error" role="alert">{mapIssue} Your draft is kept.</p> : null}
           <Choices id="map-motion" legend="Map motion" value={draft.value.mapMotion} options={[{ value: 'system', label: 'Follow system', hint: 'Respect reduced motion' }, { value: 'on', label: 'On', hint: 'Animate recent activity' }, { value: 'off', label: 'Off', hint: 'Keep activity still' }]} onChange={value => draft.setField('mapMotion', value)} />
