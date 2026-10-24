@@ -40,7 +40,7 @@ import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { RuntimeController } from '../src/main/runtime-controller.js'
 import { registerIpc } from '../src/main/ipc.js'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
-import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
+import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 
 const directories: string[] = []
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true }))) })

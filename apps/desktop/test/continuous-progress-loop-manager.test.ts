@@ -3,7 +3,7 @@ import { AGENTMUX_AGENT_MESSAGING_ENTRY, observeAgent } from '@agentmux/core'
 import { describe, expect, it, vi } from 'vitest'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
-import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
+import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
 import { fixtureEpoch as _historyFixtureEpoch } from '../../../test/fixture-values.mjs'
 

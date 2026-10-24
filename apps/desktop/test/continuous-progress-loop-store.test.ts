@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
+import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 
 describe('ContinuousProgressLoopStore', () => {
   it('round trips loop records durably and ignores malformed files', async () => {

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { observeAgent, parseGoalContinuationLoop } from '@agentmux/core'
 import { openDemandStore } from '@agentmux/demand'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager'
-import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store'
+import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { rpcControlRequest, parseRpcControlResult } from '../../../packages/core/src/rpc-business-codec'
 import { parseAgentMuxCliInvocation } from '../../../packages/core/src/agentmux-cli-commands'
 let root: string, goals: ReturnType<typeof openDemandStore>, store: ContinuousProgressLoopStore, manager: ContinuousProgressLoopManager

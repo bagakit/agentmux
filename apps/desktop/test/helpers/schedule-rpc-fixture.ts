@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { connectAgentMuxRpc, type ContinuousProgressLoop } from '@agentmux/core'
 import { AgentMuxControlServer } from '../../../../packages/core/src/public-rpc-server.js'
 import { ContinuousProgressLoopManager, type FutureProgressInputOwner } from '../../src/main/continuous-progress-loop-manager.js'
-import { ContinuousProgressLoopStore } from '../../src/main/continuous-progress-loop-store.js'
+import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 
 /** Real original Store/Main/RPC boundary. No Agent, Runtime or model is created;
  * tests explicitly provide any controlled future-intent owner they need. */

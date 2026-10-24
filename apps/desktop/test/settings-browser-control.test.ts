@@ -46,7 +46,7 @@ import { executeSettingsControl } from '../src/main/settings-control.js'
 import { executeSettingsBrowserControl, forgetBrowserAppLink } from '../src/main/settings-browser-control.js'
 import { scalarSettingsSchemaKeys } from './helpers/settings-schema-keys.js'
 import { ContinuousProgressLoopManager } from '../src/main/continuous-progress-loop-manager.js'
-import { ContinuousProgressLoopStore } from '../src/main/continuous-progress-loop-store.js'
+import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 
 const directories: string[] = []
 afterEach(async () => { vi.restoreAllMocks(); await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))) })
