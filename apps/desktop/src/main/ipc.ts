@@ -119,7 +119,7 @@ import { projectAppearance } from './project-appearance.js'
 import { executeBrowserTaskControl } from './browser-task-control.js'
 import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/core'
 import { registerNativeDesktopIpc } from './native-desktop-ipc.js'
-import { getNativeDesktopOwner } from './native-desktop-owner.js'
+import { getDesktopNativeUiOwner, getNativeDesktopOwner } from './native-desktop-owner.js'
 import { createNativeDesktopPublicOwner } from './native-desktop-public.js'
 import { readBookmark } from './bookmark-file.js'
 import { bookmarkKindForPath } from '../shared/bookmark-file.js'
@@ -1561,7 +1561,7 @@ export async function registerIpc(args: {
         { transport: 'unix', principal: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }, signal }))
     args.webLinks?.ready((request, signal) => controlBridge.execute(request, signal), message => contents.send('ui:spatialLinkIssue', message))
   })
-  registerNativeDesktopIpc({ home: app.getPath('home'), native: getNativeDesktopOwner,
+  registerNativeDesktopIpc({ home: app.getPath('home'), native: getDesktopNativeUiOwner,
     handle: handleWithEvent, trust: requireTrustedSender })
   handleWithEvent('ui:openExternal', async (event, rawUrl: string) => {
     await openExternalFromRenderer(event, contents, rawUrl)

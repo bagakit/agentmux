@@ -5,7 +5,7 @@ import { captureComposerScreenshot } from './composer-screenshot.js'
 
 type Channel = 'ui:captureScreenshot' | 'ui:readClipboardText' | 'ui:writeClipboardText' | 'ui:writeClipboardImage'
 
-/** Existing preload operations share the same lazy OS owner; Browser pixels remain independent. */
+/** Existing preload operations use their fixed platform owner; Browser pixels remain independent. */
 export function registerNativeDesktopIpc(ports: {
   home: string
   native(): Pick<NativeDesktop, 'captureScreenshot' | 'readClipboardText' | 'writeClipboardText' | 'writeClipboardImage'>
