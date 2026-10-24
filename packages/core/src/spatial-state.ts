@@ -19,11 +19,11 @@ export * from './spatial-graph.js';
 function invalid(message: string): never { throw new AgentMuxError(message, 'SPATIAL_STATE_INVALID'); }
 function record(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value))
   invalid('A spatial object is required.'); return value as Record<string, unknown>; }
-export function defaultAgentMuxSpatialStatePath(): string {
-  const selected = process.env.AGENTMUX_SPATIAL_STATE_STORE;
+export function defaultAgentMuxSpatialStatePath(env: Readonly<Record<string, string | undefined>> = process.env): string {
+  const selected = env.AGENTMUX_SPATIAL_STATE_STORE;
   if (selected && !isAbsolute(selected))
     invalid('AGENTMUX_SPATIAL_STATE_STORE must be absolute.');
-  return selected || join(defaultAgentMuxStateDirectory(), 'spatial-state.json');
+  return selected || join(defaultAgentMuxStateDirectory(env), 'spatial-state.json');
 }
 const requireNative = createRequire(import.meta.url);
 /** A single filesystem owner. Lock inode is never removed, including after process death. */
