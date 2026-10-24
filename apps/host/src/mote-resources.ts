@@ -687,14 +687,17 @@ export async function readOriginalMoteConfiguration(path: string): Promise<unkno
   return JSON.parse(await readFile(path, 'utf8'))
 }
 /** Read only the original AppConfig launch fields; no registration, mirror or alternate lookup. */
-export async function readMoteConfiguredExecutor(path: string, executorId: string): Promise<AgentExecutorConfig> {
-  const invalid = (): never => { throw new AgentMuxError('The original Mote Executor configuration is unconfirmed. Keep its original settings and conversations; inspect that saved Executor.', 'MOTE_CHAT_EXECUTOR_UNCONFIRMED') }
+export async function readConfiguredExecutor(path: string, executorId: string): Promise<AgentExecutorConfig> {
   let raw: unknown
-  try { raw = await readOriginalMoteConfiguration(path) } catch { return invalid() }
+  try { raw = await readOriginalMoteConfiguration(path) } catch { throw new AgentMuxError('The original Executor launch configuration is unreadable. Keep its saved settings and conversations.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE') }
+  return configuredExecutor(raw, executorId)
+}
+export function configuredExecutor(raw: unknown, executorId: string): AgentExecutorConfig {
+  const invalid = (): never => { throw new AgentMuxError('The original Executor launch configuration is unconfirmed. Keep its saved settings and conversations; inspect that exact Executor.', 'EXECUTOR_CONFIGURATION_UNAVAILABLE') }
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return invalid()
   const executors = (raw as Record<string, unknown>).executors
   if (!executors || typeof executors !== 'object' || Array.isArray(executors)) return invalid()
-  if (!Object.hasOwn(executors, executorId)) throw new AgentMuxError('The saved Mote Executor is unavailable in its original configuration. Keep that choice and restore its original settings; no other Executor was selected.', 'MOTE_CHAT_EXECUTOR_UNAVAILABLE')
+  if (!Object.hasOwn(executors, executorId)) throw new AgentMuxError('The saved Executor is unavailable in its original configuration. Keep that choice and restore its original settings; no other Executor was selected.', 'EXECUTOR_UNKNOWN')
   const value = (executors as Record<string, unknown>)[executorId]
   if (!value || typeof value !== 'object' || Array.isArray(value)) return invalid()
   const input = value as Record<string, unknown>
@@ -714,12 +717,8 @@ export async function readMoteResourceConfiguration(path: string, resource: Pick
   if (!raw || typeof raw !== 'object' || !Array.isArray(raw.workspaces)) return fail()
   const found = raw.workspaces.filter((value): value is ScratchWorkspace => !!value && typeof value === 'object' && value.id === resource.workspaceId)
   if (found.length !== 1 || typeof found[0]!.path !== 'string' || typeof found[0]!.hostId !== 'string') return fail()
-  const profile = raw.profile
-  const validProfile = profile === undefined || (!!profile && typeof profile === 'object' && !Array.isArray(profile) &&
-    ['displayName', 'about', 'avatar'].every(key => typeof (profile as Record<string, unknown>)[key] === 'string') && typeof (profile as Record<string, unknown>).shareWithAgents === 'boolean')
-  const { profileAgentContext } = await import('./mote-user-profile.js')
-  const context = validProfile ? profileAgentContext(profile as import('./mote-user-profile.js').UserProfile | undefined)
-    : 'User profile sharing preferences are unconfirmed. No profile content was included. Inspect the original profile setting if needed; existing conversations and permissions are unchanged.'
+  const { configuredProfileAgentContext } = await import('./mote-user-profile.js')
+  const context = configuredProfileAgentContext(raw.profile)
   return { workspace: { id: found[0]!.id, hostId: found[0]!.hostId, path: found[0]!.path }, ...(context ? { profileContext: context } : {}) }
 }
 /** The same original graph, MOTE files and directory witnesses serve Desktop and Headless. */

@@ -62,3 +62,12 @@ export function profileAgentContext(profile?: Partial<UserProfile>): string | un
     value.displayName.trim() ? 'Preferred name: ' + value.displayName.trim() : '',
     value.about.trim() ? 'Background and working preferences:\n' + value.about : ''].filter(Boolean).join('\n')
 }
+
+/** A failed sharing observation affects this optional context only, never Agent creation. */
+export function configuredProfileAgentContext(profile: unknown): string | undefined {
+  const valid = profile === undefined || (!!profile && typeof profile === 'object' && !Array.isArray(profile) &&
+    ['displayName', 'about', 'avatar'].every(key => typeof (profile as Record<string, unknown>)[key] === 'string') &&
+    typeof (profile as Record<string, unknown>).shareWithAgents === 'boolean')
+  return valid ? profileAgentContext(profile as UserProfile | undefined)
+    : 'User profile sharing preferences are unconfirmed. No profile content was included. Inspect the original profile setting if needed; existing conversations and permissions are unchanged.'
+}

@@ -3,7 +3,7 @@ import { AgentMuxError, AgentMuxSpatialStateStore, type AgentMuxHeadlessRuntime,
 import { parseAgentLearningResult } from '@agentmux/core/agent-learning'
 import { AgentLearningOwner } from './agent-learning-owner.js'
 import { createAgentLearningResources } from './agent-learning-resources.js'
-import { readMoteConfiguredExecutor } from './mote-resources.js'
+import { readConfiguredExecutor } from './mote-resources.js'
 
 /** Read the original configuration on demand; no mirrored settings or launch secrets. */
 export function createHostAgentLearning(options: {
@@ -13,7 +13,7 @@ export function createHostAgentLearning(options: {
 }) {
   const spatial = options.spatial ?? new AgentMuxSpatialStateStore()
   const configuration = async (executorId: string) => {
-    const config = await readMoteConfiguredExecutor(options.configurationPath, executorId)
+    const config = await readConfiguredExecutor(options.configurationPath, executorId)
     const revision = createHash('sha256').update(JSON.stringify(config)).digest('hex')
     return { config, revision }
   }
