@@ -15,7 +15,9 @@ const mutations = [
   { file: 'image.js', before: 'dimensions.width !== image.width', after: 'false', test: 'PNG limits and metadata' },
   { file: 'client.js', before: "pending.operation.state = 'unknown'", after: "pending.operation.state = 'failed'", test: 'lost mutation retains original' },
   { file: 'client.js', before: 'async request(method, params, options = {}) {\n        await options.beforeSubmit?.();', after: 'async request(method, params, options = {}) {', test: 'submission rechecks the original authority' },
-  { file: 'client.js', before: 'freezeReceivedJson(response.result)', after: 'response.result', test: 'callers cannot rewrite' }
+  { file: 'client.js', before: 'freezeReceivedJson(response.result)', after: 'response.result', test: 'callers cannot rewrite' },
+  { file: 'client.js', before: "params.mode === 'selection' && params.allowEditing === true", after: 'true', test: 'editable selection requires' },
+  { file: 'client.js', before: "result.completionAction !== 'capture' && result.completionAction !== 'edit'", after: 'false', test: 'editable selection requires' }
 ]
 for (const mutation of mutations) {
   const directory = await mkdtemp(join(tmpdir(), 'amux-native-mutation-'))

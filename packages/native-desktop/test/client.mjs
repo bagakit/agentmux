@@ -280,6 +280,52 @@ test('capture outcome is a machine string, not string-coerced display data', asy
   }, () => ({ state: ['cancelled'] }))
 })
 
+test('editable selection requires the original opt-in and exact completion intent', async () => {
+  const image = { format: 'png', data: PNG.toString('base64'), width: 1, height: 1, scale: 1 }
+  for (const params of [{ mode: 'selection' }, { mode: 'selection', allowEditing: false }, { mode: 'display', displayId: 1 }]) {
+    await fixture(async ({ connection }) => {
+      const desktop = new NativeDesktop({})
+      desktop.launch = async () => connection
+      const result = await desktop.captureScreenshot(params)
+      assert.deepEqual(result, { state: 'captured', screenshot: image })
+      await desktop.dispose()
+    }, () => ({ state: 'captured', screenshot: image }))
+  }
+  await fixture(async ({ connection }) => {
+    const desktop = new NativeDesktop({})
+    desktop.launch = async () => connection
+    assert.deepEqual(await desktop.captureScreenshot({ mode: 'selection', allowEditing: true }), { state: 'cancelled' })
+    await desktop.dispose()
+  }, () => ({ state: 'cancelled' }))
+  for (const action of ['capture', 'edit']) {
+    await fixture(async ({ connection, calls }) => {
+      const desktop = new NativeDesktop({})
+      desktop.launch = async () => connection
+      const result = await desktop.captureScreenshot({ mode: 'selection', allowEditing: true })
+      assert.equal(result.completionAction, action)
+      assert.deepEqual(calls.at(-1).params, { mode: 'selection', allowEditing: true })
+      await desktop.dispose()
+    }, () => ({ state: 'captured', screenshot: image, completionAction: action }))
+  }
+  for (const [params, result] of [
+    [{ mode: 'selection' }, { state: 'captured', screenshot: image, completionAction: 'edit' }],
+    [{ mode: 'selection', allowEditing: false }, { state: 'captured', screenshot: image, completionAction: 'capture' }],
+    [{ mode: 'display', displayId: 1 }, { state: 'captured', screenshot: image, completionAction: 'edit' }],
+    [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image }],
+    [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: 'annotate' }],
+    [{ mode: 'selection', allowEditing: true }, { state: 'captured', screenshot: image, completionAction: ['edit'] }],
+    [{ mode: 'selection', allowEditing: true }, { state: 'cancelled', completionAction: 'edit' }],
+    [{ mode: 'selection', allowEditing: true }, { state: 'failed', error: { code: 'pixels_failed', message: 'Original capture failed' }, completionAction: 'capture' }]
+  ]) {
+    await fixture(async ({ connection }) => {
+      const desktop = new NativeDesktop({})
+      desktop.launch = async () => connection
+      await assert.rejects(desktop.captureScreenshot(params), error => error.code === 'invalid_capture_result' && Boolean(error.operation?.operationId))
+      await desktop.dispose()
+    }, () => result)
+  }
+})
+
 test('fragmented UTF8 frames and coalesced responses preserve request boundaries', async () => {
   await fixture(async ({ connection }) => {
     assert.deepEqual(await connection.request('listApps', {}), { name: '原文' })

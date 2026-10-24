@@ -21,9 +21,10 @@ private enum NativeDesktopOperations {
     static func displayIDArgument(_ value: JSONValue?) throws -> CGDirectDisplayID { throw ProviderError.coded("fixture_scope", "display IO not selected") }
 }
 private enum JSONValue {
-    case string(String), number(Double), object([String: JSONValue])
+    case string(String), number(Double), bool(Bool), object([String: JSONValue])
     var string: String? { if case let .string(value) = self { return value }; return nil }
     var number: Double? { if case let .number(value) = self { return value }; return nil }
+    var bool: Bool? { if case let .bool(value) = self { return value }; return nil }
 }
 private enum ProviderError: Error { case coded(String, String) }
 private struct NativeScreenSelectionError: Error { let code: String; let message: String }
@@ -37,8 +38,13 @@ private func unleasedCapture<T>(_ operation: (NativeSelectionCaptureLease.Owners
     try NativeSelectionCaptureLease().withCapture(operation)
 }
 private enum NativeSelectionRequest {
-    static func run() throws -> CGRect? { ControlledIO.shared.selectorCall(); return CGRect(x: 10, y: 20, width: 100, height: 80) }
+    static func run(allowEditing: Bool = false) throws -> NativeSelectionChoice? {
+        ControlledIO.shared.selectorCall()
+        return NativeSelectionChoice(rectangle: CGRect(x: 10, y: 20, width: 100, height: 80), completionAction: allowEditing ? .edit : .capture)
+    }
 }
+private enum NativeSelectionCompletionAction: String { case capture, edit }
+private struct NativeSelectionChoice { let rectangle: CGRect; let completionAction: NativeSelectionCompletionAction }
 private final class ControlledIO: @unchecked Sendable {
     static let shared = ControlledIO()
     let pixelsStarted = DispatchSemaphore(value: 0), releasePixels = DispatchSemaphore(value: 0), finished = DispatchSemaphore(value: 0)
@@ -70,6 +76,13 @@ private struct SelectionCaptureConsumerChecks {
         check("production original pixels finish normally", io.finished.wait(timeout: .now() + 5) == .success && io.wasCaptured())
         let next = NativeDesktopOperations.capture(["mode": .string("selection")])
         check("production next capture succeeds after image receipt", next["state"] as? String == "captured")
+        check("production pure capture omits host editing intent", next["completionAction"] == nil)
+        let editable = NativeDesktopOperations.capture(["mode": .string("selection"), "allowEditing": .bool(true)])
+        check("production editable capture retains exact selector editing intent", editable["state"] as? String == "captured" && editable["completionAction"] as? String == "edit")
+        let disabled = NativeDesktopOperations.capture(["mode": .string("selection"), "allowEditing": .bool(false)])
+        check("production explicit false remains a pure capture", disabled["state"] as? String == "captured" && disabled["completionAction"] == nil)
+        let invalid = NativeDesktopOperations.capture(["mode": .string("selection"), "allowEditing": .string("true")])
+        check("production malformed editing flag is not inferred from text", invalid["state"] as? String == "failed" && (invalid["error"] as? [String: String])?["code"] == "invalid_argument")
         let report: [String: Any] = ["tests": cases.count, "cases": cases, "failures": failures, "boundary": "Exact production capture methods; controlled selector and pixel IO"]
         let data = try! JSONSerialization.data(withJSONObject: report, options: [.sortedKeys])
         print(String(data: data, encoding: .utf8)!)
