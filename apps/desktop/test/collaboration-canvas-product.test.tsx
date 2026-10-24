@@ -355,6 +355,64 @@ it('crossfades one visible semantic layer and keeps the original keyboard reader
   expect(requests).toHaveLength(operations)
 })
 
+it('keeps the actual held focus proxy clear of every region label through camera movement and Reader dismissal', async () => {
+  const originalRect = HTMLElement.prototype.getBoundingClientRect
+  let proxyRect = new DOMRect(), proxyReads = 0
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this.classList.contains('collaboration-agent__focus-proxy')) { proxyReads++; return this.isConnected ? proxyRect : new DOMRect() }
+    return originalRect.call(this)
+  })
+  const scene = scenario(1); scene.areas = [scene.areas[0]!]; scene.relations = []
+  await loaded(scene)
+  const id = collaborationAgentNode('area-0', subject('canvas-0')), box = renderedBox(id)
+  const area = renderedBox(JSON.stringify(['area', 'area-0'])) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
+  const panX = 200 - (area.x + area.heading.x) * .34, panY = 204 - (area.y + area.heading.y + area.heading.height) * .34
+  await viewport(panX, panY, 900, 650, .34)
+  const natural = regionLabelBounds('area-0'), nodes = captured.nodes, operations = requests.length
+  expect(proxyReads).toBe(0)
+  expect(natural.x).toBeGreaterThan(20); expect(natural.y).toBeGreaterThan(20)
+  await viewport(-box.x * .9 + 90, -box.y * .9 + 100, 900, 650, .9)
+  const card = nodeElement(id)!.querySelector<HTMLButtonElement>('.focus-context')!
+  await act(async () => card.focus())
+  const reader = agentInformationPreview.getAll().find(request => request.anchor === card)!
+  expect(reader).toBeDefined()
+  // Supply the browser's measured screen footprint, not a world-size guess.
+  proxyRect = new DOMRect(natural.x + 20, natural.y + 8, 120, 28)
+  await viewport(panX, panY, 900, 650, .34)
+  await settleCollaborationCanvas(() => expect(collaborationBoundsOverlap(regionLabelBounds('area-0'), proxyRect)).toBe(false))
+  const proxy = nodeElement(id)!.querySelector<HTMLElement>('.collaboration-agent__focus-proxy')!
+  expect(proxy.textContent).toContain('Agent 0'); expect(proxyReads).toBeGreaterThan(0)
+  expect(document.activeElement).toBe(card)
+  expect(agentInformationPreview.getAll().find(request => request.token === reader.token)).toBe(reader)
+  expect(regionLabelBounds('area-0').element.querySelector('[aria-label="Locate Original area 0 · 1 Agents"]')).not.toBeNull()
+  expect(regionLabelBounds('area-0').element.querySelector('[aria-label="Collapse Original area 0"]')).not.toBeNull()
+
+  await act(async () => agentInformationPreview.dismiss(reader.token))
+  expect(document.activeElement).toBe(card)
+  expect(nodeElement(id)!.querySelector('.collaboration-agent__focus-proxy')).toBe(proxy)
+  expect(agentInformationPreview.getAll()).toHaveLength(0)
+  expect(collaborationBoundsOverlap(regionLabelBounds('area-0'), proxyRect)).toBe(false)
+  // An inverse-zoom holder moves without resizing its CSS box. Camera movement
+  // must replace its old screen obstacle rather than keeping a stale exclusion.
+  proxyRect = new DOMRect(650, 500, 140, 28)
+  await viewport(panX + 10, panY + 10, 900, 650, .34)
+  await settleCollaborationCanvas(() => {
+    expect(regionLabelBounds('area-0').x).toBeCloseTo(natural.x + 10, 5)
+    expect(regionLabelBounds('area-0').y).toBeCloseTo(natural.y + 10, 5)
+  })
+  proxyRect = new DOMRect(natural.x + 31, natural.y + 19, 120, 28)
+  await viewport(panX + 11, panY + 11, 900, 650, .34)
+  await settleCollaborationCanvas(() => expect(collaborationBoundsOverlap(regionLabelBounds('area-0'), proxyRect)).toBe(false))
+  await act(async () => card.blur())
+  await settleCollaborationCanvas(() => {
+    expect(nodeElement(id)!.querySelector('.collaboration-agent__focus-proxy')).toBeNull()
+    expect(regionLabelBounds('area-0').x).toBeCloseTo(natural.x + 11, 5)
+    expect(regionLabelBounds('area-0').y).toBeCloseTo(natural.y + 11, 5)
+  })
+  expect(agentInformationPreview.getAll()).toHaveLength(0)
+  expect(captured.nodes).toBe(nodes); expect(requests).toHaveLength(operations)
+})
+
 it('keeps one legible identity ink through paused intermediate zoom without ghosting or avatar collisions', async () => {
   const scene = scenario(24); await loaded(scene)
   const id = collaborationAgentNode('area-0', subject('canvas-0')), box = renderedBox(id)
