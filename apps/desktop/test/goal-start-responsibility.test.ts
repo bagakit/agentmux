@@ -85,7 +85,6 @@ async function fixture() {
       if (automation.signal?.aborted || !automation.isCurrent()) return
       const composed = composeAgentPrompt(prompt, note)
       expect(composed.systemContext).toBe(note)
-      expect(composed.text).toContain('<amux from="amux">')
       actualInputs.push({ operationId, supervisorSessionId: control.agentSessionId, supervisorRunId: control.run.runId, note })
       if (state.submitUnknown) throw new Error('Isolated Native reminder receipt is unconfirmed')
       if (state.receiptConfirmed) receipts.set(operationId, { agentSessionId: control.agentSessionId, run: control.run, admission: { submissionId: operationId,

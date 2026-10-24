@@ -24,7 +24,7 @@ async function mount(initial = [original], onBackChange?: (back: (() => void) | 
     if (method === 'goal.ls') return { goals: goals.filter(goal => !params.status || goal.status === params.status).slice(0, params.limit ?? 100) }
     if (method === 'space.ls') return { catalog: { agentPresentation: [{ agentSessionId: 'session-exact', name: '原 Agent 名称', project: '原 Agent 项目', recap: { text: '原 recap', source: '原来源' }, state: 'working', detail: '原 detail', providerId: 'codex', group: 'working' }] } }
     if (method === 'goal.inspect') return { goal: goals.find(goal => goal.id === params.goalId) ?? null }
-    if (method === 'goal.decisions') return { goalId: params.goalId, decisions: [{ input: '原决策', candidates: [{ projectId: 'project-original', reason: '原理由' }], selectedProjectId: 'project-original', risk: 'low', confirmation: 'user', recordedAt: 1, wikiVersion: null, sourceSessionId: null }] }
+    if (method === 'goal.decisions') return { goalId: params.goalId, decisions: [{ id: 'original-decision', question: '原决策', decision: 'project-original', rationale: '原理由', createdAt: 1, actorId: null }] }
     if (method === 'goal.link-session') { goals = goals.map(goal => goal.id === params.goalId ? { ...goal, updatedAt: goal.updatedAt + 1, sessionIds: [...goal.sessionIds, params.sessionId] } : goal); return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, sessionId: params.sessionId } } }
     if (method === 'goal.link-project') { goals = goals.map(goal => goal.id === params.goalId ? { ...goal, updatedAt: goal.updatedAt + 1, projectId: params.projectId } : goal); return { goal: goals.find(goal => goal.id === params.goalId), receipt: { goalId: params.goalId, projectId: params.projectId } } }
     if (method === 'app.snapshot') return { projects: [{ projectId: 'project-original', name: '原项目' }], sessions: [{ session: { agentSessionId: 'session-exact', providerId: 'codex' } }], unavailable: [] }
@@ -445,7 +445,7 @@ it('one click saves the pending original Goal and opens its discussion with the 
   const input = view.forwardRpc.mock.calls.find(([method]) => method === 'goal.create')![1]
   expect(isObjectId(input.goalId)).toBe(true)
   expect(input).toEqual({ goalId: input.goalId, title: 'Untitled goal', description: '', status: 'backlog', projectId: 'project-original', risk: 'low', confirmation: 'user', operationId: expect.any(String) })
-  expect(view.forwardRpc).toHaveBeenCalledWith('goal.discuss', { goalId: input.goalId, mode: 'open', operationId: expect.any(String) })
+  expect(view.forwardRpc).toHaveBeenCalledWith('goal.discuss', { goalId: input.goalId, mode: 'grill', operationId: expect.any(String) })
   expect(view.element.querySelector('article h2')?.textContent).toBe('Untitled goal')
   expect(view.forwardRpc.mock.calls.some(([method]) => method === 'goal.start')).toBe(false)
 })

@@ -38,7 +38,7 @@ async function titleProcessBundle(root:string):Promise<string>{
   await symlink(resolve('apps/desktop/node_modules'),join(root,'node_modules'),'dir')
   const source=`import {AgentMuxNotebookStore} from '@agentmux/core/notebook-store';
 import {WorkspaceFiles} from './apps/desktop/src/main/workspace-files.ts';
-import {NoteTitleFileWriter} from '@agentmux/host/note-title-file-writer';
+import {NoteTitleFileWriter} from './apps/desktop/src/main/note-title-file-writer.ts';
 const [catalog,workspaceJSON,inputJSON,actorJSON,paused]=process.argv.slice(2),workspace=JSON.parse(workspaceJSON),files=new WorkspaceFiles(()=>({kind:'local'}));
 let writer;const store=new AgentMuxNotebookStore(catalog,undefined,{title:{inspect:id=>writer.inspect(id),current:(id,r)=>writer.current(workspace,id,r),write:async intent=>{if(paused==='yes'){process.send({phase:'writing'});await new Promise(ok=>process.once('message',ok));}return writer.write(workspace,intent);}}});writer=new NoteTitleFileWriter(files,store);
 process.send({phase:'ready'});await new Promise(ok=>process.once('message',ok));

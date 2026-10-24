@@ -43,7 +43,7 @@ import { AgentMuxMemoryAgentSessionStore, AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS } 
 import { objectCliEnvironment } from '../../../packages/core/test/helpers/object-cli-rpc.js'
 import { ConfigStore, DEFAULT_CONFIG } from '../src/main/config-store.js'
 import { RuntimeController, type RuntimePreparation } from '../src/main/runtime-controller.js'
-import { ContinuousProgressLoopManager } from '../../host/src/continuous-progress-loop-manager.js'
+import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
 import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
 import { registerIpc } from '../src/main/ipc.js'
 import { CONFIG_CHANGED_CHANNEL } from '../src/shared/contracts.js'
