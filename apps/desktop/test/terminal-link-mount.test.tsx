@@ -101,6 +101,7 @@ let terminal: InstanceType<typeof renderer.Terminal>
 let web: InstanceType<typeof renderer.WebLinksAddon>
 let openHttp: ReturnType<typeof vi.fn>
 let openFile: ReturnType<typeof vi.fn>
+let reportError: ReturnType<typeof vi.fn>
 let receive: (event: RuntimeEvent) => void
 let resized: () => void
 
@@ -136,6 +137,7 @@ beforeEach(async () => {
   vi.spyOn(api.sessions, 'write').mockResolvedValue(undefined)
   vi.spyOn(api.files, 'openSystem').mockResolvedValue(undefined)
   vi.spyOn(api.ui, 'openExternal').mockResolvedValue(undefined)
+  vi.spyOn(api.ui, 'openObjectLink').mockResolvedValue(undefined)
   vi.spyOn(window, 'open').mockReturnValue(null)
   vi.stubGlobal('ResizeObserver', class {
     constructor(callback: () => void) { resized = callback }
@@ -148,6 +150,7 @@ beforeEach(async () => {
     return { x, y, left: x, top: y, width, height, right: x + width, bottom: y + height, toJSON: () => ({}) }
   })
   openHttp = vi.fn().mockResolvedValue(undefined)
+  reportError = vi.fn()
   openFile = vi.fn<typeof initial.openFile>().mockImplementation(async (_path, _group, _location, _workspace, _preview, placement) => {
     placement?.onResult?.({ placement: { status: 'created', tabId: 'file-result', regionId: 'file-result-region' },
       data: { kind: 'text', reason: null }, navigation: 'applied' })
@@ -155,7 +158,7 @@ beforeEach(async () => {
   })
   const tab = createWorkbenchTab(origin.tabId, { regionId: origin.regionId, workspaceId: origin.workspaceId,
     kind: 'terminal', phase: 'attached', sessionId: session.id })
-  useAppStore.setState({ openHttpLink: openHttp, openFile, config: {
+  useAppStore.setState({ openHttpLink: openHttp, openFile, reportError, config: {
     ...initial.config, hosts: [{ id: 'local', kind: 'local', label: 'Local' }],
     workspaces: [{ id: origin.workspaceId, hostId: 'local', name: 'Source project', kind: 'folder', path: session.workspacePath }]
   } as NonNullable<typeof initial.config>, sessions: [session], tabs: { [tab.id]: tab },
@@ -190,6 +193,78 @@ async function fileLink(path = 'src/example.ts:3'): Promise<ILink> {
   expect(links).toHaveLength(1)
   return links![0]!
 }
+
+describe('mounted Terminal object-link activation', () => {
+  it('opts declared links into the same application-owned handler', () => {
+    expect(terminal.options.linkHandler?.allowNonHttpProtocols).toBe(true)
+  })
+
+  for (const provider of ['bare URI', 'OSC 8'] as const) {
+    it(`${provider}: opens original object URIs without HTTP destinations or input`, async () => {
+      const activate = provider === 'bare URI' ? web.activate : terminal.options.linkHandler!.activate
+      const uri = 'amux://agent/original%2FSID%20%E4%B8%AD%E6%96%87'
+      for (const modifier of [false, true]) {
+        await act(async () => {
+          pointer()
+          activate(new MouseEvent('mouseup', { button: 0, clientX: 50, clientY: 80, metaKey: modifier }), uri, range)
+        })
+      }
+      expect(api.ui.openObjectLink).toHaveBeenCalledTimes(2)
+      expect(api.ui.openObjectLink).toHaveBeenNthCalledWith(1, uri)
+      expect(api.ui.openObjectLink).toHaveBeenNthCalledWith(2, uri)
+      expect(openHttp).not.toHaveBeenCalled(); expect(host.querySelector('[role="dialog"]')).toBeNull()
+      expect(api.ui.openExternal).not.toHaveBeenCalled(); expect(window.open).not.toHaveBeenCalled()
+      expect(api.sessions.write).not.toHaveBeenCalled(); expect(api.sessions.detach).not.toHaveBeenCalled()
+      expect(renderer.Terminal.instances).toEqual([terminal])
+    })
+
+    it(`${provider}: drag, selection and right-click preserve the original workface`, async () => {
+      const activate = provider === 'bare URI' ? web.activate : terminal.options.linkHandler!.activate
+      const uri = 'amux://region/original-region'
+      await act(async () => { pointer(); activate(new MouseEvent('mouseup', { button: 0, clientX: 140, clientY: 80 }), uri, range) })
+      terminal.selection = 'selected text'
+      await act(async () => activate(pointer(), uri, range))
+      terminal.selection = ''
+      await act(async () => activate(pointer(2), uri, range))
+      await act(async () => { pointer(); activate(new MouseEvent('mouseup', { button: 0, clientX: 50, clientY: 80, ctrlKey: true }), uri, range) })
+      await act(async () => { pointer(); activate(new MouseEvent('mouseup', { button: 0, clientX: 50, clientY: 80, altKey: true }), uri, range) })
+      await act(async () => {
+        element.querySelector('.terminal-view__xterm')!.dispatchEvent(new PointerEvent('pointerdown', { button: 0, clientX: 50, clientY: 80, altKey: true, bubbles: true }))
+        activate(new MouseEvent('mouseup', { button: 0, clientX: 50, clientY: 80 }), uri, range)
+      })
+      expect(api.ui.openObjectLink).not.toHaveBeenCalled(); expect(openHttp).not.toHaveBeenCalled()
+      expect(api.sessions.write).not.toHaveBeenCalled(); expect(api.ui.openExternal).not.toHaveBeenCalled()
+    })
+
+    it(`${provider}: shows object ownership in the existing passive readout`, async () => {
+      const hover = provider === 'bare URI' ? web.callbacks.hover : terminal.options.linkHandler!.hover!
+      await act(async () => { hover(new MouseEvent('mousemove', { clientX: 50, clientY: 80 }), 'amux://tab/original-tab', range); await vi.advanceTimersByTimeAsync(350) })
+      expect(element.querySelector('.terminal-link-preview__url')?.textContent).toBe('amux://tab/original-tab')
+      expect(element.querySelector('.terminal-link-preview__hint')?.textContent).toBe('Click to open in AgentMux')
+      expect(api.ui.openObjectLink).not.toHaveBeenCalled()
+    })
+  }
+
+  it('reports an unsupported declared protocol without opening it or sending input', async () => {
+    for (const uri of ['javascript:alert(1)', ('file://' + (new URL('file:///').pathname + "private/file")), 'customapp://target']) {
+      await act(async () => terminal.options.linkHandler!.activate(pointer(), uri, range))
+    }
+    expect(reportError).toHaveBeenCalledTimes(3)
+    expect(reportError.mock.calls.every(([error]) => error instanceof Error && error.message.includes('unsupported protocol'))).toBe(true)
+    expect(api.ui.openObjectLink).not.toHaveBeenCalled(); expect(api.ui.openExternal).not.toHaveBeenCalled()
+    expect(window.open).not.toHaveBeenCalled(); expect(api.sessions.write).not.toHaveBeenCalled()
+  })
+
+  it('keeps the exact malformed URI for the original parser and surfaces an unavailable opening', async () => {
+    const unavailable = new Error('Original object navigation is unavailable')
+    vi.mocked(api.ui.openObjectLink).mockRejectedValueOnce(unavailable)
+    const uri = 'amux://agent/original?command=stop'
+    await act(async () => terminal.options.linkHandler!.activate(pointer(), uri, range))
+    expect(api.ui.openObjectLink).toHaveBeenCalledExactlyOnceWith(uri)
+    expect(reportError).toHaveBeenCalledExactlyOnceWith(unavailable)
+    expect(api.sessions.write).not.toHaveBeenCalled(); expect(api.sessions.detach).not.toHaveBeenCalled()
+  })
+})
 
 const focusOrigin = { ...origin, sessionId: session.id }
 const otherFocusOrigin = { workspaceId: 'private-other-display', tabGroupId: 'private-other-group',

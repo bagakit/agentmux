@@ -119,7 +119,7 @@ describe('every terminal link provider reaches the one destination exit', () => 
     // 自检一：把 linkHandler 的 activate 换成自己的内联实现（不转发共享出口）。判据若退化成
     // "文件里出现过共享函数名"，这段注入会静默通过——文件里那个名字始终在场。
     const mutated = SOURCE.replace(
-      'activate: (event, text) => activateHttpLink(event, text),',
+      'activate: (event, text) => activateLink(event, text),',
       'activate: (event, text) => { void openHttpLink(linkOriginRef.current, text, \'system\') },'
     )
     expect(mutated, '注入必须真的改动了源码').not.toBe(SOURCE)
