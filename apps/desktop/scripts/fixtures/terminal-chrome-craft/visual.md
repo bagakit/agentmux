@@ -6,9 +6,12 @@
 node apps/desktop/scripts/verify-terminal-chrome-craft.mjs
 node apps/desktop/scripts/verify-terminal-chrome-craft.mjs --recovery
 node apps/desktop/scripts/verify-terminal-chrome-craft.mjs --connector-geometry
+node apps/desktop/scripts/verify-terminal-chrome-craft.mjs --connector-neutral
 ```
 
 `--connector-geometry` 只运行 640px／320px 原 Region 的连接器与首行场景：真实贡献图标、原 Workbench／SessionPane／xterm 和生产 CSS，网络与 Runtime 字节为受控叶。分别记录已确认空绑定与托管观察未知的 glyph／角标、透明命中区、hover／键盘焦点／展开前后的邻控及终端网格；实际鼠标选择首行原文、滚轮移动非空 scrollback、普通点击重新取得原 Terminal 焦点，保原 Session／Run／草稿且不发送输入字节。关闭菜单前用原点击取得其键盘焦点，滚轮前确认落点属于原终端而非展开面板。该模式仅保留实测的 17px 必要净空，并将实际加载 CSS 私有改回原 20px，要求首行几何断言报红，再恢复通过；不跑通知／恢复矩阵，不代签真实 Run 连续阅读、持久恢复、安装包或群送达。独立 Agent 须实际打开完整宽窄首行图，另外记录审美结论。
+
+`--connector-neutral` 复用同一真实 DPR／BrowserWindow 与双平台贡献，只运行灰度与紧凑呈现：挂起读取、空绑定、已绑定、暂停、同步关闭和观察失败，记录实际图像加载／computed filter、22px 原命中区、零间距组、4px 浮层内边距与宽窄截图。原 sharing 事实变化可改变其既有 Composer 提示；只在同一观察稳定后比较 hover 的终端几何。菜单关闭后实际移出鼠标再进入，不用重复同坐标伪装新 hover。唯一变异把实际导入 CSS 的 grayscale 私有改为 none，必须命中非空原图像的 computed 断言，再恢复通过。保原身份／草稿／只读调用；不重复滚轮／选字矩阵，也不代签平台能力开关、真实业务投递或安装。
 
 前者沿原 Workbench、角标、通知与 xterm，核对 hover 轮廓和终端网格稳定、历史说明按需出现、通知不占纵向布局。后者编译生产 FullPageLoadingSurface、SessionConnectingSurface、SessionPane 和 CSS：
 
