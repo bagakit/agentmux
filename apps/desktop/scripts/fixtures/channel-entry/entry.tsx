@@ -284,6 +284,10 @@ if (composerSharing) {
     Object.assign(api.sessions, { [method]: async () => { composerWrites.push(method); throw Error('Composer preview must not write: ' + method) } })
   }
   Object.assign(proof, { composerSharing: {
+    addAudiences() {
+      bindings = [...bindings, ...bindings.map((binding, index) => ({ ...binding, bindingId: `preview-extra-${index}`, externalConversationId: `${binding.externalConversationId}-extra` }))]
+      invalidateConnectorTarget(target)
+    },
     setScenario(value: typeof composerScenario) {
       composerScenario = value
       bindings = bindings.map((binding, index) => ({ ...binding, revision: value === 'paused-off' && index === 0 ? 2 : 1, state: value === 'paused-off' && index === 0 ? 'paused' : 'active' }))

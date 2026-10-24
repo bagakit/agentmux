@@ -51,7 +51,7 @@ try {
   await writeFile(resolve(visual, 'capture.log'), lines.join('\n'))
   const render = JSON.parse(await readFile(resolve(visual, 'render.json'), 'utf8'))
   assert.equal(execution.exitCode, 0, JSON.stringify(render.failure)); assert.equal(render.passed, true)
-  assert.equal(render.frames.length, popoverClarity || conversationSharing || composerSharing ? 4 : applicationAccess ? 5 : memberAccess ? 4 : 8)
+  assert.equal(render.frames.length, composerSharing ? 6 : popoverClarity || conversationSharing ? 4 : applicationAccess ? 5 : memberAccess ? 4 : 8)
   receipt.render = render; receipt.images = Object.fromEntries(await Promise.all(render.frames.map(async file => [file, sha(await readFile(resolve(visual, file)))])))
   for (const [file, expected] of Object.entries(receipt.inputs)) assert.equal(sha(await readFile(resolve(root, file))), expected, 'A loaded source changed during capture: ' + file)
   receipt.passed = true

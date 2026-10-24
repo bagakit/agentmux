@@ -22,7 +22,7 @@ app.whenReady().then(async () => {
       const offset=(node,value)=>{if(!e||!node||!e.contains(node))return null;const range=document.createRange();range.selectNodeContents(e);range.setEnd(node,value);return range.toString().length};
       return {viewport:{width:innerWidth,height:innerHeight,dpr:devicePixelRatio},region:r?.getBoundingClientRect().toJSON(),notice:n?.getBoundingClientRect().toJSON(),composer:c?.getBoundingClientRect().toJSON(),
         noticeText:n?.textContent,noticeHTML:n?.outerHTML,editor:{text:e?.textContent,focused:document.activeElement===e,documentFocus:document.hasFocus(),sameNode:!window.__composerOriginalEditor||window.__composerOriginalEditor===e,selection:{anchor:offset(s?.anchorNode,s?.anchorOffset),focus:offset(s?.focusNode,s?.focusOffset),collapsed:s?.isCollapsed}},
-        audiences:[...n?.querySelectorAll('.conversation-sharing-notice__audience')??[]].map(a=>({text:a.textContent,title:a.title,rect:a.getBoundingClientRect().toJSON(),statuses:[...a.querySelectorAll('.conversation-sharing-notice__status')].map(s=>({text:s.textContent,rect:s.getBoundingClientRect().toJSON()})),names:[...a.querySelectorAll('strong')].map(s=>({text:s.textContent,title:s.title,rect:s.getBoundingClientRect().toJSON(),clientWidth:s.clientWidth,scrollWidth:s.scrollWidth,overflow:getComputedStyle(s).textOverflow})),glyphs:[...a.querySelectorAll('img,svg')].map(g=>({rect:g.getBoundingClientRect().toJSON(),label:g.getAttribute('aria-label'),alt:g.getAttribute('alt')}))})),
+        audiences:[...n?.querySelectorAll('.conversation-sharing-notice__audience')??[]].map(a=>({text:a.textContent,title:a.title,rect:a.getBoundingClientRect().toJSON(),statuses:[...a.querySelectorAll('.conversation-sharing-notice__status')].map(s=>({text:s.textContent,kind:s.dataset.sharingStatus,rect:s.getBoundingClientRect().toJSON(),glyphs:s.querySelectorAll('img,svg').length})),names:[...a.querySelectorAll('strong')].map(s=>({text:s.textContent,title:s.title,rect:s.getBoundingClientRect().toJSON(),clientWidth:s.clientWidth,scrollWidth:s.scrollWidth,overflow:getComputedStyle(s).textOverflow})),glyphs:[...a.querySelectorAll(':scope > img,:scope > svg')].map(g=>({rect:g.getBoundingClientRect().toJSON(),label:g.getAttribute('aria-label'),alt:g.getAttribute('alt')}))})),
         conversation:[...new Set([...r.querySelectorAll('[data-message-source-key]')].map(e=>e.dataset.messageSourceKey))],source:window.channelEntryProof.composerSharing.facts(),draft:window.channelEntryProof.draft(),requests:window.channelEntryProof.requests,routes:window.channelEntryProof.routes,errors:window.channelEntryProof.errors,events:window.__connectionsTrustedEvents};
     })()`)
     function assertReadOnly(scene) {
@@ -43,6 +43,9 @@ app.whenReady().then(async () => {
       assert.ok(scene.source.conversationKeys.length === 2 && scene.source.conversationKeys.every(key => scene.conversation.includes(key)), 'The original conversation consumer has loaded both controlled records')
       assert.equal(scene.editor.focused, true); assert.equal(scene.editor.documentFocus, true)
       assert.equal(scene.audiences.length, 2)
+      assert.equal(scene.notice.height, 18, 'The complete sharing context always occupies exactly one line')
+      assert.ok(scene.audiences.every(a => a.rect.top === scene.notice.top && a.rect.height === 18), 'All audiences stay on that same line')
+      assert.ok(scene.audiences.every(a => a.statuses.every(s => s.glyphs === 1 && s.rect.width <= 12 && s.rect.height <= 18)), 'Each visible status is a compact glyph, not a second text row')
       assert.ok(scene.audiences.every(a => a.glyphs.length === 1 && a.statuses.length <= 1), 'Each original audience has one small platform glyph and at most one subordinate status')
       assert.ok(scene.audiences.every(a => Math.abs(a.glyphs[0].rect.width - 12) < 0.01 && Math.abs(a.glyphs[0].rect.height - 12) < 0.01), 'Actual platform artwork remains 12 DIP at both widths')
       assert.ok(scene.audiences.every((a, index) => a.title.includes(scene.source.names[index])), 'The full original group name remains accessible when ellipsized')
@@ -116,6 +119,34 @@ app.whenReady().then(async () => {
       { id: 'preview-whole-discord', state: 'active', revision: 1, publication: 'future-shared-conversation' }
     ])
     assert.ok(final.audiences.every(a => a.statuses.length === 1))
+    assert.deepEqual(final.audiences.map(a => a.statuses[0].kind), ['paused', 'off'])
+    await click(notice + ' .conversation-sharing-notice__audience')
+    await until(`document.querySelector('[role="tooltip"]')?.textContent.includes('Sharing paused')`)
+    const tooltip = await read(`({text:document.querySelector('[role="tooltip"]').textContent,focused:document.activeElement.matches('.conversation-sharing-notice__audience'),height:document.querySelector(${JSON.stringify(notice)}).getBoundingClientRect().height})`)
+    assert.equal(tooltip.focused, true); assert.equal(tooltip.height, 18)
+    assert.ok(tooltip.text.includes('Only Agent replies') && tooltip.text.includes('Manage connections in the Agent header.'))
+    const tooltipFrame = 'composer-sharing-status-explanation.png'
+    fs.writeFileSync(path.join(evidence, tooltipFrame), (await win.webContents.capturePage()).toPNG()); result.frames.push(tooltipFrame)
+    result.statusExplanation = tooltip
+    win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Escape' }); win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Escape' })
+    await until(`!document.querySelector('[role="tooltip"]')`)
+    await read('window.channelEntryProof.composerSharing.addAudiences()')
+    await until(`document.querySelectorAll(${JSON.stringify(notice + ' .conversation-sharing-notice__audience')}).length===4`)
+    for (let index = 0; index < 3; index++) {
+      win.webContents.sendInputEvent({ type: 'keyDown', keyCode: 'Tab' }); win.webContents.sendInputEvent({ type: 'keyUp', keyCode: 'Tab' })
+      await settle()
+    }
+    await until(`document.activeElement===document.querySelectorAll(${JSON.stringify(notice + ' .conversation-sharing-notice__audience')})[3]`)
+    await until(`document.querySelectorAll('[role="tooltip"]').length===1&&document.querySelector('[role="tooltip"]')?.textContent.includes('Automatic sync off')`, 'The previous focus tooltip closes before capturing the current audience')
+    await settle()
+    const overflow = await read(`(() => {const n=document.querySelector(${JSON.stringify(notice)}),a=document.activeElement,r=a.getBoundingClientRect();return {height:n.getBoundingClientRect().height,width:n.clientWidth,scrollWidth:n.scrollWidth,scrollLeft:n.scrollLeft,groupVisible:r.left>=n.getBoundingClientRect().left-1&&r.right<=n.getBoundingClientRect().right+1,tooltip:document.querySelector('[role="tooltip"]').textContent,draft:window.channelEntryProof.draft()}})()`)
+    result.overflow = overflow
+    assert.equal(overflow.height, 18); assert.ok(overflow.scrollWidth > overflow.width && overflow.scrollLeft > 0)
+    assert.equal(overflow.groupVisible, true); assert.equal(overflow.draft, expectedDraft)
+    assert.ok(overflow.tooltip.includes(final.source.names[1]) && overflow.tooltip.includes('New conversation messages'))
+    const overflowFrame = 'composer-sharing-overflow-keyboard.png'
+    fs.writeFileSync(path.join(evidence, overflowFrame), (await win.webContents.capturePage()).toPNG()); result.frames.push(overflowFrame)
+    result.overflow = overflow
     result.final = final; result.passed = true
   } catch (error) {
     result.failure = { name: error.name, message: error.message, stack: error.stack }
