@@ -6,6 +6,13 @@ import { spawn } from 'node:child_process'
 import { mkdir, symlink, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 
+/** The identity package deliberately generates this string asset; it has no TS source counterpart. */
+function publicSourceEntry(directory: string, specifier: string, target: string): string {
+  if (specifier === '@agentmux/identity/runtime-source') return resolve(directory, target)
+  if (specifier === '@agentmux/identity/runtime') return resolve(directory, 'src/runtime-entry.ts')
+  return resolve(directory, target.replace('./dist/src/', './src/').replace('./dist/', './src/').replace(/\.js$/u, '.ts'))
+}
+
 /** The original listener worker is a shipped asset; stage only that current Source asset for this WT. */
 export async function stageMoteSourceListener() {
   const root = resolve(import.meta.dirname, '../../../..')
@@ -68,7 +75,7 @@ export async function sourceMoteDiagnosticsCli(directory: string, options: { mut
           const entry = specifier === `@agentmux/${name}` ? '.' : '.' + specifier.slice(`@agentmux/${name}`.length)
           const target = manifest.exports[entry]?.import
           if (!target) throw new Error('Missing current public CLI export: ' + specifier)
-          const path = resolve(directory, target.replace('./dist/src/', './src/').replace('./dist/', './src/').replace(/\.js$/, '.ts'))
+          const path = publicSourceEntry(directory, specifier, target)
           if (!existsSync(path)) throw new Error('Missing current public CLI source: ' + path)
           return path
         }
@@ -99,8 +106,7 @@ export async function sourceMoteDiagnosticsCli(directory: string, options: { mut
         const entry = args.path === `@agentmux/${name}` ? '.' : '.' + args.path.slice(`@agentmux/${name}`.length)
         const target = manifest.exports[entry]?.import
         if (!target) throw new Error('Unmapped current public CLI import: ' + args.path)
-        const source = target.replace('./dist/src/', './src/').replace('./dist/', './src/').replace(/\.js$/, '.ts')
-        const path = resolve(directory, source)
+        const path = publicSourceEntry(directory, args.path, target)
         if (!existsSync(path)) throw new Error('Missing current public CLI source: ' + path)
         return { path }
       })
