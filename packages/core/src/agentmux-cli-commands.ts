@@ -974,6 +974,7 @@ export const AGENTMUX_CLI_COMMANDS: readonly AgentMuxCliCommand[] = [
     { '--capture-id': 'data' }, f => parseRendererHeapSnapshotInspectInput(fields(f, { '--capture-id': 'captureId' })) as Record<string, unknown>,
     'Reads the one retained original capture, including a still-pending or late-settled request. Available means this read verified the file, not a reconstructed earlier fsync acknowledgement. Unknown never triggers another capture; replaced IDs are explicit mismatch. The Host-qualified file is not copied through RPC.'),
   empty('system.metrics.get', 'Read the first bounded metrics frame; sources may still be pending.'),
+  empty('system.metrics.app-memory.inspect', 'Read retained Electron application-process working-set peaks (rssKib); sampling gaps remain unknown. Reading does not start sampling.'),
   { ...empty('system.metrics.watch', 'Watch source-timed metrics; frame count is not source sample count. Slow readers end without an unbounded queue.'), stream: true },
   toolkit('ls', '', 'List original saved Toolkit resources.', 0),
   toolkit('inspect', '<id> [--execution-id ID] [--failure-evidence]', 'Inspect current facts; Performance accepts an exact retained execution ID and explicit failure evidence.'),

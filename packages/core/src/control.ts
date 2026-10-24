@@ -253,7 +253,7 @@ export type AgentMuxArrangeMode =
   | { kind: 'active-first' }
 
 type RequestBase = { schemaVersion: typeof AGENTMUX_CONTROL_SCHEMA_VERSION; requestId: string }
-export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' } | ({ operation: 'metrics.scene.capture' } & RendererSceneCaptureInput) | ({ operation: 'metrics.scene.inspect' } & RendererSceneInspectInput) | ({ operation: 'metrics.allocations.capture' } & RendererAllocationsInput) | ({ operation: 'metrics.memory.inspect' } & RendererMemoryInput) | ({ operation: 'metrics.heap.capture' } & RendererHeapSnapshotInput) | ({ operation: 'metrics.heap.inspect' } & RendererHeapSnapshotInspectInput) | ({ operation: 'metrics.animations.inspect' } & RendererAnimationsInput) | ({ operation: 'metrics.profile.capture' } & RendererV8ProfileInput) | ({ operation: 'metrics.trace.capture' } & RendererTraceInput))
+export type AgentMuxControlMetricsRequest = RequestBase & ({ operation: 'metrics.get' } | { operation: 'metrics.watch' } | { operation: 'metrics.app-memory.inspect' } | ({ operation: 'metrics.scene.capture' } & RendererSceneCaptureInput) | ({ operation: 'metrics.scene.inspect' } & RendererSceneInspectInput) | ({ operation: 'metrics.allocations.capture' } & RendererAllocationsInput) | ({ operation: 'metrics.memory.inspect' } & RendererMemoryInput) | ({ operation: 'metrics.heap.capture' } & RendererHeapSnapshotInput) | ({ operation: 'metrics.heap.inspect' } & RendererHeapSnapshotInspectInput) | ({ operation: 'metrics.animations.inspect' } & RendererAnimationsInput) | ({ operation: 'metrics.profile.capture' } & RendererV8ProfileInput) | ({ operation: 'metrics.trace.capture' } & RendererTraceInput))
 /** A host-owned, content-free client observation; the host owns its concrete schema. */
 export type AgentMuxControlInspectClientRequest = RequestBase & { operation: 'inspect.client'; conversation?: ConversationConsumerQuery }
 export type AgentMuxControlInspectMoteContextRequest = RequestBase & {
@@ -764,6 +764,7 @@ export type AgentMuxControlResult =
   | BrowserTaskControlResult
   | ToolkitResult
   | { operation: 'metrics.get'; observation: MetricsObservation }
+  | { operation: 'metrics.app-memory.inspect'; evidence: import('./app-memory-evidence.js').AppMemoryEvidence }
   | { operation: 'metrics.watch' }
   | { operation: 'metrics.allocations.capture'; capture: RendererAllocationsResult }
   | { operation: 'metrics.scene.capture'; capture: RendererSceneCaptureResult }
@@ -1036,6 +1037,7 @@ const OPERATION_BUDGET: Record<AgentMuxControlRequest['operation'], 'long' | 'sh
   'toolkit.stop': 'long',
   'toolkit.watch': 'short',
   'metrics.get': 'short',
+  'metrics.app-memory.inspect': 'short',
   'metrics.watch': 'short',
   'metrics.memory.inspect': 'short',
   'metrics.heap.capture': 'long',

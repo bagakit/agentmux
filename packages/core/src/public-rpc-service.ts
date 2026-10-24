@@ -28,6 +28,7 @@ import { isConnectionSetupMethod, parseConnectionSetupParams } from './connectio
 import { parseAgentContinuityControlInput, parseAgentContinuityControlResult } from './agent-session-recovery/control-contract.js'
 import { parseRendererV8ProfileResult } from './renderer-v8-profile.js'
 import { parseRendererMemoryResult } from './renderer-memory.js'
+import { parseAppMemoryEvidence } from './app-memory-evidence.js'
 import { parseRendererHeapSnapshotResult, parseRendererHeapSnapshotInspection } from './renderer-heap-snapshot.js'
 import { parseRendererAnimationsResult } from './renderer-animations.js'
 import { parseRendererTraceResult } from './renderer-trace.js'
@@ -1589,6 +1590,7 @@ export class AgentMuxRpcService {
         : request.operation === 'metrics.trace.capture' ? { operation: 'metrics.trace.capture', capture: await this.captureTrace({ target: request.target, durationMs: request.durationMs }, context.signal) }
         : request.operation === 'metrics.profile.capture' ? { operation: 'metrics.profile.capture', capture: await this.captureProfile({ target: request.target, durationMs: request.durationMs }, context.signal) }
         : request.operation === 'metrics.get' ? { operation: 'metrics.get', observation: await this.metrics(context.signal) }
+        : request.operation === 'metrics.app-memory.inspect' ? { operation: 'metrics.app-memory.inspect', evidence: await this.inspectAppMemory() }
         : await this.execute(request, nameContext, context)
       return rpcControlResult(method, result as AgentMuxControlResult) as AgentMuxRpcResult<M>
     }
@@ -2331,6 +2333,10 @@ export class AgentMuxRpcService {
   private async captureTrace(input: import('./renderer-trace.js').RendererTraceInput, signal?: AbortSignal) {
     if (!this.ports.metrics?.captureTrace) throw new AgentMuxError('Renderer tracing is unavailable on the original metrics owner.', 'METRICS_UNSUPPORTED')
     return parseRendererTraceResult(await this.ports.metrics.captureTrace(input, signal), input)
+  }
+  private async inspectAppMemory(): Promise<import('./app-memory-evidence.js').AppMemoryEvidence> {
+    if (!this.ports.metrics?.inspectAppMemory) throw new AgentMuxError('App memory evidence owner is unavailable.', 'METRICS_UNSUPPORTED')
+    return parseAppMemoryEvidence(await this.ports.metrics.inspectAppMemory())
   }
   private async metrics(signal?: AbortSignal): Promise<import('./metrics.js').MetricsObservation> {
     const metrics = this.ports.metrics

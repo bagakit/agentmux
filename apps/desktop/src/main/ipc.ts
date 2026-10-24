@@ -298,6 +298,7 @@ export async function registerIpc(args: {
   webLinks?: WebUrlIngress
   spatialLinks?: SpatialLinkIngress
   performanceScene?: PerformanceSceneOwner
+  appMemory?: import('./app-memory-evidence.js').AppMemoryEvidenceOwner
   performanceHeap?: RendererHeapSnapshotOwner
   clientIncidents?: ClientIncidentArchive
   loadedPackage?: DesktopPackageIdentity | null
@@ -598,6 +599,7 @@ export async function registerIpc(args: {
   const metrics = createResourceMetricsPort({ sampler: args.runtime.resourceSampler, currentWindow: currentMetricsWindow, profiler, tracer, memory, animations, allocations,
     ...(args.performanceHeap ? { heap: { owner: args.performanceHeap, dependencies: { contents, currentTarget: currentRendererCaptureTarget,
       host: () => ({ kind: 'unix-host' as const, hostId: 'local' as const, hostname: hostname(), mainPid: process.pid }) } } } : {}),
+    ...(args.appMemory ? { appMemory: args.appMemory } : {}),
     ...(args.performanceScene ? { scene: { owner: args.performanceScene, currentTarget: currentRendererCaptureTarget, loaded: () => ({ mainPid: process.pid,
       package: args.loadedPackage ?? null, renderer: contents.isLoadingMainFrame() ? null : args.loadedRenderer?.() ?? null }) } } : {}) })
   const closeMetrics = () => metrics.dispose()

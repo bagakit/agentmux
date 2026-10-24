@@ -10,6 +10,7 @@ import {
 } from '@agentmux/core/control'
 import type { DesktopControlIpcBridge } from './control-ipc-bridge.js'
 import type { ProcessResourceSampler, ResourceSample } from './process-resource-sampler.js'
+import type { AppMemoryEvidenceOwner } from './app-memory-evidence.js'
 
 function source<T>(data: T | null, observedAt: number | null, reason: string | null): MetricsSource<T> {
   return { data, observedAt, lastSuccessAt: observedAt, reason,
@@ -19,6 +20,7 @@ function source<T>(data: T | null, observedAt: number | null, reason: string | n
 /** This composes the original sampler; it owns neither a polling clock nor resource facts. */
 export function createResourceMetricsPort(args: {
   sampler: ProcessResourceSampler; currentWindow(): MetricsWindow | null; now?: () => number
+  appMemory?: AppMemoryEvidenceOwner
   allocations?: { capture: NonNullable<AgentMuxMetricsPort['captureAllocations']>; dispose(): void }
   scene?: { owner: PerformanceSceneOwner; currentTarget(): RendererV8ProfileTarget | null; loaded(): RendererSceneLoaded }
   heap?: { owner: RendererHeapSnapshotOwner; dependencies: RendererHeapSnapshotDependencies }
@@ -30,6 +32,10 @@ export function createResourceMetricsPort(args: {
   const consumers = new Set<() => void>()
   let disposed = false
   const port: AgentMuxMetricsPort & { dispose(): void } = {
+    ...(args.appMemory ? { inspectAppMemory: async () => {
+      if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
+      return args.appMemory!.inspect()
+    } } : {}),
     ...(args.heap ? {
       captureHeapSnapshot: async (input, signal) => {
         if (disposed) throw new AgentMuxError('Metrics Main owner was disposed.', 'CONTROL_UNAVAILABLE')
