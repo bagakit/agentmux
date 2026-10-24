@@ -11,12 +11,12 @@ import { aliases, browserInstalledDependency, desktopRequire, root } from './fix
 
 const fixture = resolve(root, 'apps/desktop/scripts/fixtures/channel-entry')
 const headerStatus = process.argv.includes('--header-status'), main = headerStatus ? 'status-main.cjs' : 'main.cjs'
-const evidenceRoot = headerStatus ? '.local/group-readiness/channel-entry-visual' : '.local/channel-protocol/channel-entry'
+const evidenceRoot = headerStatus ? '.local/group-readiness/connection-surface-visual' : '.local/channel-protocol/channel-entry'
 const evidence = resolve(root, evidenceRoot, 'runs', randomUUID()), temporary = await mkdtemp(resolve(tmpdir(), 'amux-channel-entry-'))
 await mkdir(evidence, { recursive: true })
 const sha = value => createHash('sha256').update(value).digest('hex')
 const receipt = { passed: false, captureOnly: true, aestheticReview: 'not-performed', candidate: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(), inputs: {}, loadedTransforms: {},
-  scope: headerStatus ? 'Compact channel entries in the actual Workbench; controlled public DTOs, native clicks and keyboard. Narrow means an actual split Region in the same wide viewport.' : 'Original controlled channel-entry journey.' }
+  scope: headerStatus ? 'Original channel header, popover and group details; controlled public DTOs and native pointer/keyboard. Header narrow uses an actual split Region; details narrow uses the actual narrow window.' : 'Original controlled channel-entry journey.' }
 const env = { ...process.env, pnpm_config_verify_deps_before_run: 'false' }; delete env.ELECTRON_RUN_AS_NODE
 try {
   for (const path of ['apps/desktop/scripts/capture-channel-entry.mjs', ...['entry.tsx', main, 'index.html', 'scenario.md'].map(name => 'apps/desktop/scripts/fixtures/channel-entry/' + name)]) receipt.inputs[path] = sha(await readFile(resolve(root, path)))
@@ -46,7 +46,7 @@ try {
   await writeFile(resolve(visual, 'capture.log'), lines.join('\n'))
   const render = JSON.parse(await readFile(resolve(visual, 'render.json'), 'utf8'))
   assert.equal(execution.exitCode, 0, JSON.stringify(render.failure)); assert.equal(render.passed, true)
-  assert.equal(render.frames.length, headerStatus ? 6 : 8)
+  assert.equal(render.frames.length, 8)
   receipt.render = render; receipt.images = Object.fromEntries(await Promise.all(render.frames.map(async file => [file, sha(await readFile(resolve(visual, file)))])))
   for (const [file, expected] of Object.entries(receipt.inputs)) assert.equal(sha(await readFile(resolve(root, file))), expected, 'A loaded source changed during capture: ' + file)
   receipt.passed = true
