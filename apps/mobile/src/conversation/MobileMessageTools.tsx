@@ -4,6 +4,7 @@ import type { ComposerSuggestion } from '@agentmux/client-ui/components/AgentCom
 import { TextInput } from '@agentmux/client-ui/input'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { ComposerLayoutToggle, type ComposerToolPhase } from '@agentmux/client-ui/components/ComposerLayoutToggle'
+import { ComposerToolMenu } from '@agentmux/client-ui/components/ComposerToolMenu'
 
 export function MobilePosturePicker({ control, disabled, onSet }: {
   control: AgentPostureControl | undefined
@@ -13,18 +14,17 @@ export function MobilePosturePicker({ control, disabled, onSet }: {
   const [open, setOpen] = useState(false)
   if (!control) return null
   return <span className="mobile-posture-picker">
-    <button type="button" className="composer-tool" disabled={disabled} aria-label={control.label}
-      aria-expanded={open} title={control.label} onClick={() => setOpen(value => !value)}>
+    <ComposerToolMenu open={open && !disabled} onOpenChange={setOpen} label={control.label} className="mobile-posture-menu" trigger={<button type="button" className="composer-tool" disabled={disabled} aria-label={control.label}
+      aria-expanded={open} title={control.label}>
       <SemanticIcon name="status.authorized" size={15} /><span className="composer-tool__label">{control.label}</span>
-    </button>
-    {open && !disabled ? <div role="menu" aria-label={control.label} className="mobile-posture-menu">
+    </button>}>
       {control.modes.map(mode => <button key={mode.id} type="button" role="menuitem" className="mobile-posture-menu__item"
         data-tier={mode.tier ?? 'safe'} title={mode.description ?? mode.label}
         onClick={() => { setOpen(false); onSet(mode.id) }}>
         <strong>{mode.label}</strong>
         {mode.description ? <small>{mode.description}</small> : null}
       </button>)}
-    </div> : null}
+    </ComposerToolMenu>
   </span>
 }
 
@@ -39,11 +39,10 @@ export function MobileCommandPicker({ commands, disabled, onSelect }: {
   const normalized = query.trim().toLocaleLowerCase()
   const matching = commands.filter(item => `${item.text} ${item.label ?? ''} ${item.description}`.toLocaleLowerCase().includes(normalized))
   return <span className="mobile-posture-picker mobile-command-picker">
-    <button type="button" className="composer-tool" disabled={disabled} aria-label="Choose a command"
-      aria-expanded={open} title="Choose a command" onClick={() => setOpen(value => { if (value) setQuery(''); return !value })}>
+    <ComposerToolMenu open={open && !disabled} onOpenChange={next => { setOpen(next); if (!next) setQuery('') }} label="Commands" className="mobile-posture-menu mobile-command-menu" trigger={<button type="button" className="composer-tool" disabled={disabled} aria-label="Choose a command"
+      aria-expanded={open} title="Choose a command">
       <SemanticIcon name="object.subcommand" size={14} /><span className="composer-tool__label">Commands</span>
-    </button>
-    {open && !disabled ? <div role="menu" aria-label="Commands" className="mobile-posture-menu mobile-command-menu">
+    </button>}>
       <TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder="查找命令…" aria-label="查找命令" />
       <div className="mobile-command-menu__list">
         {matching.map(item => <button key={item.id ?? item.text} type="button" role="menuitem" className="mobile-posture-menu__item"
@@ -53,7 +52,7 @@ export function MobileCommandPicker({ commands, disabled, onSelect }: {
         </button>)}
         {!matching.length ? <p className="mobile-command-menu__empty" role="status">无匹配命令</p> : null}
       </div>
-    </div> : null}
+    </ComposerToolMenu>
   </span>
 }
 
