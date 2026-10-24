@@ -6,6 +6,8 @@ Run `node apps/desktop/scripts/capture-space-launcher.mjs` from the repository r
 
 Review the wide dark/light, narrow and short workfaces against the Settings reference. The environment, complete executor catalog, composer and Launch action should form a clear reading order; Mote and utility surfaces remain secondary. Short and narrow workfaces must keep every control reachable through the shared scroll owner.
 
+The same production surface is captured with 16 declared Agents and a long selected Mote name, including the final visible catalog row. Geometry asserts a separate catalog/composer gap, no horizontal overflow and unchanged selected target and original warm Run. The shipped banner asset is consumed by the actual CSS in both themes. Trusted Tab keys then move from the selected Mote chooser to Resume and Launch. A controlled detection failure invokes the real Store owner and captures the nonblocking recovery service window with Launch still available.
+
 Trusted Chromium operations edit the real prompt, open Options, reach its name inputs and dismiss without losing the draft. They also edit and reopen Browser/Note, collapse and expand the original Terminal, and open the Mote target chooser. The fixture checks original targets and retained Terminal identity through controlled preview API facts.
 
 Independent subjective review is required; capture success does not approve aesthetics. The fixture uses an isolated profile and controlled external API seams. It does not operate the user's installed App, real Agent Sessions or native CLI, and does not prove durable Runtime recovery.
