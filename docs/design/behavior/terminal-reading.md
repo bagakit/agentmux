@@ -251,7 +251,7 @@ Core 的语义文本供 Provider/readiness 等文本观察使用，与 ordered b
 
 ## Hover 提示不改变 Terminal 几何
 
-用户反馈「现在 hover 的时候，terminal size 会变得有问题」。提示、菜单与其他浮层的出现和关闭只改变浮层本身；没有真实工作面尺寸变化时，Terminal 的容器边界、解析行列、Runtime 确认尺寸、阅读位置和 Session 身份必须保持稳定。原生 Browser 为浮层让位不能被当成 Terminal 的布局变化，不能因短暂不可见或浮层测量过程提交错误 PTY resize。真实分割、窗口尺寸与可见 Region 变化仍按既有权威尺寸合同同步；失败明确提示而不阻断健康 Agent。
+用户反馈「现在 hover 的时候，terminal size 会变得有问题」。提示、菜单与其他浮层的出现和关闭只改变浮层本身；没有真实工作面尺寸变化时，Terminal 的容器边界、解析行列、Runtime 确认尺寸、阅读位置和 Session 身份必须保持稳定。右上局部信息带不为自身扩大整窗顶部留白或将 Terminal 正文整体下移；首行字形、选择、滚动和正文点击仍可用，透明命中层只属于实际控件，不能拦截其余终端区域。原生 Browser 为浮层让位不能被当成 Terminal 的布局变化，不能因短暂不可见或浮层测量过程提交错误 PTY resize。真实分割、窗口尺寸与可见 Region 变化仍按既有权威尺寸合同同步；失败明确提示而不阻断健康 Agent。
 
 ## Terminal 链接读出与目的地面的信息归属
 
