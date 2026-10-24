@@ -53,7 +53,7 @@
   min-width: 0;
   min-height: 20px;
 }
-.log-turn__title { flex: 1 1 auto; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); min-width: 0; }
+.log-turn__title { flex: 1 1 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--sp-1) var(--sp-2); min-width: 0; }
 .log-turn__head > .log-turn__time { flex: none; align-self: start; line-height: 20px; }
 .log-turn__head > .log-turn__actions,
 .log-turn__head > .conversation-input-details > .conversation-input-details__toggle { flex: none; }
