@@ -26,6 +26,27 @@ export const MOTE_COMPANION_PARTS = {
 /** AgentMux drawings on the original 24-unit grid. Keep the theme pen, complete
  * still silhouette and negative space at 12–14px. Only declared parts can move. */
 export const AUTHORED_ICON_DEFINITIONS = {
+  "capsule-page": {
+    shapes: [["rect", {"x":"3","y":"3","width":"18","height":"18","rx":"5"}], ["path", {"d":"M8 7h8v10H8Z M8 11h8"}]],
+    design: {
+      rest: "圆角容器内保留独立页面，表达 Capsule 的持久页面边界；区别于 Browser 地球和 Agent 接管面孔",
+      motion: { kind: "still", animation: "none", description: "模块与页面身份保持完整静止，由宿主选中和焦点表达导航。", trigger: "按原 Capsule 对象或目的地显示；不表示页面存活、运行或操作成功。" }
+    }
+  },
+  "user-input-field": {
+    shapes: [["rect", {"x":"3","y":"6","width":"18","height":"12","rx":"2"}], ["path", {"d":"M7 12h3 M15 9v6 M13.5 9h3 M13.5 15h3"}]],
+    design: {
+      rest: "横向输入框内的短文字线与输入光标，表达 User Input；区别于收件箱和消息传递",
+      motion: { kind: "still", animation: "none", description: "光标作为输入类别记号保持静止，不闪烁或模拟输入。", trigger: "按原用户输入目的地显示；不表示输入资格、焦点、消息投递或 Agent 正在输入。" }
+    }
+  },
+  "protocol-frame": {
+    shapes: [["path", {"d":"M8 3H5v18h3 M16 3h3v18h-3 M9 9h6 M9 15h4"}]],
+    design: {
+      rest: "成对括定边界包围两条结构化内容线，表达 amux 协议；区别于普通文档与输入框",
+      motion: { kind: "still", animation: "none", description: "结构边界与内容保持静止，导航反馈由原宿主提供。", trigger: "按原协议目的地显示；不表示协议认证、授权或操作回执。" }
+    }
+  },
   "subagent-report": {
     shapes: [["circle", {"cx":"5","cy":"5","r":"2"}], ["path", {"d":"M5 7v8a2 2 0 0 0 2 2h3"}], ["rect", {"x":"10","y":"11","width":"11","height":"10","rx":"2"}], ["path", {"d":"M13 15h5m-5 3h3"}]],
     design: {
