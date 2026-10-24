@@ -24,6 +24,7 @@ function reaction(emojiType = 'Get', reactionId = 'original-reaction', appId = f
 async function fixture(override?: (call: FeishuHttpCall) => FeishuHttpResponse | undefined) {
   const retained: ReturnType<typeof reaction>[] = []
   const remote = await feishuPublicationHttp(call => {
+    if (call.path.endsWith('/reactions') && call.method === 'GET') expect(call.query.page_size).toBe('50')
     const selected = override?.(call)
     if (selected) return selected
     if (!call.path.endsWith('/reactions')) return undefined
