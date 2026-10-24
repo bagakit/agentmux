@@ -1,8 +1,10 @@
 // @vitest-environment happy-dom
 import { EventEmitter } from 'node:events'
-import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { once } from 'node:events'
+import { spawn } from 'node:child_process'
+import { mkdtemp, rm, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { act } from 'react'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import type { BrowserWindow } from 'electron'
@@ -16,8 +18,9 @@ const fixture = vi.hoisted(() => ({ root: '', socket: '', generation: 1, loading
   replies: [] as unknown[], receive: null as ((request: AgentMuxControlRequest) => void) | null,
   cancel: null as ((request: any) => void) | null
 }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
-  app: { getPath: () => fixture.root || tmpdir(), getAppPath: () => fixture.root || tmpdir() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
+  globalShortcut: { register: vi.fn(() => true), unregister: vi.fn(), isRegistered: vi.fn(() => false) },
+  app: { getPath: () => fixture.root || tmpdir(), getAppPath: () => fixture.root || tmpdir(), once: vi.fn() },
   ipcMain: { handle: (name: string, handler: (...args: any[]) => unknown) => fixture.handlers.set(name, handler),
     removeHandler: (name: string) => fixture.handlers.delete(name),
     on: (name: string, handler: (...args: any[]) => void) => fixture.events.set(name, handler),
@@ -50,6 +53,12 @@ import { useAppStore } from '../src/renderer/src/store'
 import { CONTROL_REQUEST_CHANNEL, CONTROL_RESPONSE_CHANNEL, CONTROL_CANCEL_CHANNEL } from '../src/shared/contracts'
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
+import { AgentMuxClient } from '../../../packages/core/src/client'
+import { AgentMuxMemoryAgentSessionStore, agentLifecycleOperationIdentity } from '../../../packages/core/src/agent-session-store'
+import { AgentMuxHostedRuntimeService } from '../../../packages/core/src/hosted-runtime-service'
+import { AgentMuxControlServer as SourceControlServer } from '../../../packages/core/src/public-rpc-server'
+import { connectHostedAgentMux } from '../../../packages/core/src/hosted-client'
+import type { AgentMuxClientEvent } from '../../../packages/core/src/types'
 import { parseDiagnosticEvidenceResult } from '../../../packages/core/src/diagnostic-evidence-codec'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
 import { toggleNotificationCenter } from './helpers/notification-center'
@@ -133,9 +142,132 @@ beforeEach(async () => {
 })
 afterEach(async () => {
   fixture.active = false
-  for (const close of cleanup.splice(0).reverse()) await close()
-  await rm(fixture.root, { recursive: true, force: true }); vi.unstubAllEnvs()
+  const failures: unknown[] = []
+  for (const close of cleanup.splice(0).reverse()) try { await close() } catch (error) {
+    failures.push(error instanceof AggregateError ? error.errors.map(value => String(value)) : String(error))
+  }
+  await rm(fixture.root, { recursive: true, force: true, maxRetries: 10, retryDelay: 30 }); vi.unstubAllEnvs()
+  expect(failures, 'All private owners must close: ' + JSON.stringify(failures)).toEqual([])
 })
+
+it('runtime lifecycle provenance: real Native/Core and Hosted events reach original notification identity, exact settlement and CLI', async () => {
+  const stateDir = join(fixture.root, 'state'); await mkdir(stateDir, { recursive: true })
+  const daemon = spawn(resolve('packages/core/vendor/ctxmux/darwin-arm64/bin/ctxmuxd'),
+    ['--socket', join(fixture.root, 'ctxmux.sock'), '--state-dir', join(stateDir, 'ctxmux'), '--readiness-fd', '3'],
+    { stdio: ['ignore', 'ignore', 'pipe', 'pipe'] })
+  const closed = once(daemon, 'close'); let ready = '', stderr = ''
+  daemon.stdio[3]!.on('data', data => { ready += data }); daemon.stderr!.on('data', data => { stderr += data })
+  cleanup.push(async () => { daemon.kill('SIGTERM'); await closed })
+  await vi.waitFor(() => expect(ready, stderr).toContain('\n'))
+  const store = new AgentMuxMemoryAgentSessionStore(), core = new AgentMuxClient({ store }), inner = core as any
+  const runs: Array<{ runId: string }> = []
+  cleanup.push(async () => { for (const run of runs) await core.stopTerminal(run).catch(() => {}); await core.dispose() })
+  await core.connect()
+  const owner = { runtimeId: 'private-provenance-runtime', ownerInstanceId: 'private-provenance-owner', protocolVersion: 2 as const,
+    processId: process.pid, availability: 'connected' as const, ctxmux: core.runtimeIdentity() }
+  const service = new AgentMuxHostedRuntimeService(core, null, () => owner)
+  const socket = join(fixture.root, 'core.sock'), server = new SourceControlServer({ socketPath: socket,
+    coreClients: () => [{ hostId: 'local', client: core }], hostedRuntime: () => service })
+  await stageMoteSourceListener(); await server.start(); cleanup.push(() => server.stop())
+  const transport = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: socket } })
+  cleanup.push(() => transport.dispose())
+  const sdk = await connectHostedAgentMux({ rpc: transport }); cleanup.push(() => sdk.dispose())
+  const received: AgentMuxClientEvent[] = [], originals: AgentMuxClientEvent[] = [], protocolErrors: AgentMuxClientEvent[] = []
+  const off = sdk.onEvent(event => {
+    if (event.type === 'agent-error' && event.code === 'CONTROL_PROTOCOL_ERROR') protocolErrors.push(event)
+    if (event.type === 'agent-error' && event.lifecycle || event.type === 'agent-lifecycle-observed') {
+      received.push(structuredClone(event)); useAppStore.getState().applyEvent({ hostId: 'local', event })
+    }
+  }); cleanup.push(off)
+  cleanup.push(core.onEvent(event => { if (event.type === 'agent-error' && event.lifecycle) originals.push(structuredClone(event)) }))
+  const launch = (operationId: string) => core.createTerminal({ createOperationId: operationId, workspacePath: fixture.root,
+    command: process.execPath, args: ['-e', `process.stdin.setEncoding('utf8');process.stdin.on('data',s=>process.stdout.write('private-echo:'+s))`] })
+  const healthy = await launch('healthy-original'); runs.push(healthy)
+  const attached = await sdk.attachTerminal(healthy.runId, 0), initialPid = attached.run.pid
+  const create = async (id: string, requested: string) => {
+    const reservation = { kind: 'create' as const, agentSessionId: id,
+      operationId: agentLifecycleOperationIdentity('create', id, requested), reservationId: 'reservation-' + id,
+      ownerId: inner.registry.lifecycleOwnerId, ownerPid: process.pid, expiresAt: Date.now() + 60000 }
+    await store.reserveLifecycle(reservation)
+    await store.prepareCreate(reservation, { kind: 'agent', agentSessionId: id, providerId: 'claude', executorId: 'private',
+      hostId: 'local', workspacePath: fixture.root, createdAt: 1, updatedAt: 1,
+      hookBindingId: 'b'.repeat(43), hookToken: 't'.repeat(43), capabilityHash: 'c'.repeat(43),
+      creation: { createOperationId: requested, initialPrompt: 'not-requested', intentDigest: 'd'.repeat(64) } })
+    return reservation
+  }
+  const original = await create('prepared-original', 'public-create-original')
+  // Force the existing full-observation boundary, not a fabricated error/event.
+  // The Native inspection of this original prepared key really has no Run.
+  for (let i = 0; i < 100; i++) { inner.connectionNeedsObservation = true; await core.connect() }
+  await vi.waitFor(() => expect(received.filter(event => event.type === 'agent-error')).toHaveLength(100))
+  expect(originals).toHaveLength(100)
+  const first = received[0] as Extract<AgentMuxClientEvent, { type: 'agent-error' }>
+  expect(first.lifecycle).toEqual({ kind: 'create', lifecycleOperationId: original.operationId, operationId: 'public-create-original', phase: 'prepared-run' })
+  expect(first.evidence.run).toBeUndefined()
+  const records = useAppStore.getState().notificationEvents
+  expect(records).toHaveLength(1); expect(records[0]!.occurrences).toBe(100)
+  expect(records[0]!.context?.runtimeOperation?.agentSessionId).toBe('prepared-original')
+  expect(records[0]!.lastObservedAt).toBeGreaterThanOrEqual(records[0]!.firstObservedAt!)
+  const initialId = records[0]!.id, initialTime = records[0]!.firstObservedAt
+  for (const hostId of ['another-host']) useAppStore.getState().applyEvent({ hostId, event: first })
+  useAppStore.getState().applyEvent({ hostId: 'local', event: { ...first, agentSessionId: 'another-session' } })
+  useAppStore.getState().applyEvent({ hostId: 'local', event: { ...first,
+    lifecycle: { ...first.lifecycle!, lifecycleOperationId: 'another-lifecycle', operationId: 'another-operation' } } })
+  useAppStore.getState().reportError('Unknown equal message'); useAppStore.getState().reportError('Unknown equal message')
+  expect(useAppStore.getState().notificationEvents).toHaveLength(6)
+  useAppStore.getState().applyEvent({ hostId: 'local', event: { ...first, message: 'Changed exact original diagnostic',
+    evidence: { ...first.evidence, observedAt: Date.now() } } })
+  const changed = useAppStore.getState().notificationEvents.find(record => record.id === initialId)!
+  expect(changed.firstObservedAt).toBe(initialTime); expect(changed.occurrences).toBe(101)
+  expect(changed.previousObservations?.[0]?.message).toContain(first.message)
+  // This is an actual Native Start under the original prepared key. The next
+  // original Core observation commits that same reservation and emits its receipt.
+  const created = await launch(original.operationId); runs.push(created)
+  inner.connectionNeedsObservation = true; await core.connect()
+  await vi.waitFor(() => expect(received.some(event => event.type === 'agent-lifecycle-observed' && event.agentSessionId === original.agentSessionId)).toBe(true))
+  const success = received.find(event => event.type === 'agent-lifecycle-observed')!
+  const settled = useAppStore.getState().notificationEvents.find(record => record.id === initialId)!
+  expect(settled.context?.runtimeOperation?.resolvedAt).toBeDefined()
+  expect(useAppStore.getState().notificationEvents.filter(record => record.context?.runtimeOperation && record.context.runtimeOperation.resolvedAt === undefined)).toHaveLength(3)
+  // Late old observations cannot resurrect this exact confirmed operation.
+  useAppStore.getState().applyEvent({ hostId: 'local', event: first })
+  expect(useAppStore.getState().notificationEvents.find(record => record.id === initialId)).toBe(settled)
+  // A wrong Host / lifecycle phase / expected Run cannot settle the other originals.
+  if (success.type !== 'agent-lifecycle-observed') throw new Error('Missing real original confirmation')
+  useAppStore.getState().applyEvent({ hostId: 'different-host', event: success })
+  useAppStore.getState().applyEvent({ hostId: 'local', event: { ...success,
+    lifecycle: { ...success.lifecycle, lifecycleOperationId: 'another-lifecycle', expectedRun: { runId: 'wrong-run' } } } })
+  expect(useAppStore.getState().notificationEvents.filter(record => record.context?.runtimeOperation && record.context.runtimeOperation.resolvedAt === undefined)).toHaveLength(3)
+  const beforeInput = await sdk.attachTerminal(healthy.runId, 0)
+  expect(beforeInput.run.pid).toBe(initialPid)
+  const bytes = 'original-still-usable\n', write = await sdk.writeTerminal({ runId: healthy.runId }, {
+    ownerInstanceId: owner.ctxmux.instanceId, operationId: 'healthy-exact-input', expectedByte: beforeInput.run.acceptedInputBytes, data: bytes })
+  expect(write.acceptedThroughByte).toBe(beforeInput.run.acceptedInputBytes + Buffer.byteLength(bytes))
+  expect((await core.listRuns()).find(run => run.runId === healthy.runId)?.pid).toBe(initialPid)
+  // Bad auxiliary provenance is refused by the Hosted decoder without ending
+  // its confirmed connection or borrowing an existing operation's success.
+  inner.publisher.publish({ ...first, code: 'PRIVATE_BAD_LIFECYCLE', evidence: { source: 'agentmux', observedAt: Date.now() },
+    lifecycle: { ...first.lifecycle, unknownPrivateField: 'must-not-leak' } })
+  await vi.waitFor(() => expect(protocolErrors).toHaveLength(1))
+  expect(received.some(event => event.type === 'agent-error' && event.code === 'PRIVATE_BAD_LIFECYCLE')).toBe(false)
+  expect((await sdk.listRuns()).find(run => run.runId === healthy.runId)?.pid).toBe(initialPid)
+  await mount(); const rpc = await main()
+  const observed = data(await rpc.call('system.diagnostics.inspect', { target, includeRaw: true }))
+  const notices = observed.items.filter((item: any) => item.subject.agentSessionId === original.agentSessionId && item.subject.hostId === 'local')
+  expect(notices.some((item: any) => item.subject.operationId === 'public-create-original' && item.section === 'activity' && item.occurrences === 101),
+    JSON.stringify(observed.items.map((item: any) => ({ section: item.section, subject: item.subject, occurrences: item.occurrences })))).toBe(true)
+  expect(notices.find((item: any) => item.subject.operationId === 'public-create-original')?.subject.runId).toBeUndefined()
+  const cli = await sourceMoteDiagnosticsCli(fixture.root, { mutations: process.env.AGENTMUX_NOTIFICATION_DIAGNOSTICS_SOURCES,
+    loaded: process.env.AGENTMUX_NOTIFICATION_DIAGNOSTICS_LOADED, ssr: true })
+  const result = await cli.run(['--endpoint', `unix://${fixture.socket}`, 'system', 'diagnostics', 'inspect', '--domain', 'client.notifications', '--host-id', 'local', '--include-raw'])
+  expect(result.code, result.stderr).toBe(0)
+  expect(data(JSON.parse(result.stdout).result).items.map((item: any) => item.subject)).toEqual(observed.items.map((item: any) => item.subject))
+  if (process.env.AGENTMUX_NOTIFICATION_DIAGNOSTICS_RECEIPT) await writeFile(process.env.AGENTMUX_NOTIFICATION_DIAGNOSTICS_RECEIPT,
+    JSON.stringify({ realNative: { instanceId: owner.ctxmux.instanceId, pid: daemon.pid, healthyRun: healthy.runId, healthyPid: initialPid },
+      originalCoreDiagnostics: originals.filter(event => event.type === 'agent-error' && event.code === 'AGENT_CREATION_UNCONFIRMED').length,
+      hostedDiagnostics: received.length, notifications: observed.items.length, originalId: initialId,
+      originalPublicOperationId: 'public-create-original', originalLifecycleOperationId: original.operationId, cli: result.code, userRuntimeTouched: false }))
+}, 60000)
 
 it('reads the closed original panel through registered Main, Control IPC, public socket and actual source CLI without acknowledging or focusing', async () => {
   seed(); await mount(); const rpc = await main(), before = useAppStore.getState(), focused = document.activeElement
