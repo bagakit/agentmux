@@ -21,6 +21,7 @@ import { createCapsuleDesktopAdapters } from './capsules.js'
 import { createHostConnectionOwner, type HostConnectionOptions } from './connections.js'
 import { createHostAgentLearning } from './agent-learning.js'
 import { FileUploadOwner } from './file-upload-owner.js'
+import { createHostMoteAvatarRead } from './mote-avatar-read.js'
 export type AgentMuxHostOptions = {
   store: AgentMuxAgentSessionStore
   providers?: readonly AgentProvider[]
@@ -67,6 +68,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       ...(context.principal?.kind === 'device' ? { forwarding: context.forwarding! } : {}) })
   }
   const configurationPath = options.configurationPath ?? options.connections?.moteConfigurationPath
+  const moteAvatars = configurationPath ? createHostMoteAvatarRead({ configurationPath }) : undefined
   const agentLearning = configurationPath && options.store instanceof AgentMuxFileAgentSessionStore ? createHostAgentLearning({
     configurationPath, directory: join(dirname(options.store.path), 'agent-learning'),
     ...(connectionOwner ? { spatial: connectionOwner.spatial } : {}),
@@ -95,6 +97,11 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
       return offerUrl()
     }),
     forwardControl: async <M extends AgentMuxRpcMethod>(method: M, params: AgentMuxRpcParams<M>, context: AgentMuxRpcCallContext): Promise<AgentMuxRpcResult<M>> => {
+      if (method === 'space.mote.avatar.read') {
+        if (!moteAvatars) throw new AgentMuxError('The original Mote configuration is unavailable on this Host. Saved appearances and healthy Agents are retained.', 'MOTE_AVATAR_SOURCE_UNCONFIRMED')
+        const input = params as AgentMuxRpcParams<'space.mote.avatar.read'>
+        return await moteAvatars.read(input.target, input.operationId) as AgentMuxRpcResult<M>
+      }
       if (isConnectionMethod(method) || isMoteConnectionMethod(method) || isMoteChatMethod(method) ||
           ((method === 'space.mote.preferences.read' || method === 'space.mote.preferences.save') &&
             (params as AgentMuxRpcParams<'space.mote.preferences.read'>).kind === 'connection')) {

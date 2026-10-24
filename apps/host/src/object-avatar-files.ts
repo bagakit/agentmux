@@ -2,7 +2,7 @@ import { mintObjectId } from '@agentmux/core/object-id'
 import { constants, link, lstat, mkdir, open, realpath, unlink } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
-import { AVATAR_OUTPUT_MAX_BYTES, isObjectAvatarRef, type ObjectAvatarRef } from '../shared/object-avatars.js'
+import { AVATAR_OUTPUT_MAX_BYTES, AVATAR_MAX_DIMENSION, AVATAR_MAX_PIXELS, isObjectAvatarRef, type ObjectAvatarRef, type ObjectAvatarInput } from './object-avatars.js'
 
 async function regularDirectory(path: string, create: boolean): Promise<void> {
   if (create) {
@@ -79,3 +79,35 @@ export async function saveObjectAvatarFile(original: string, png: Buffer): Promi
   await syncDirectory(directory); await syncDirectory(join(original, '.agentmux')); await syncDirectory(original)
   return ref
 }
+
+type ImageSize = { width: number; height: number }
+export function assertObjectAvatarSize({ width, height }: ImageSize): void {
+  if (width < 1 || height < 1 || width > AVATAR_MAX_DIMENSION || height > AVATAR_MAX_DIMENSION || width * height > AVATAR_MAX_PIXELS)
+    throw new Error('Choose an image at most 4096 pixels per side and 16 megapixels.')
+}
+/** Inspect encoded dimensions before native decoding can allocate the image. */
+export function objectAvatarImageSize(bytes: Buffer, mime: ObjectAvatarInput['mimeType']): ImageSize {
+  if (mime === 'image/jpeg' && bytes[0] === 255 && bytes[1] === 216) {
+    for (let offset = 2; offset + 4 <= bytes.length;) {
+      if (bytes[offset] !== 255) break
+      if (bytes[offset + 1] === 255) { offset++; continue }
+      const marker = bytes[offset + 1]!, length = bytes.readUInt16BE(offset + 2)
+      if (length < 2 || offset + 2 + length > bytes.length) break
+      if ([192, 193, 194].includes(marker) && length >= 8)
+        return { height: bytes.readUInt16BE(offset + 5), width: bytes.readUInt16BE(offset + 7) }
+      offset += 2 + length
+    }
+  } else if (mime === 'image/png' && bytes.length >= 33 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) &&
+    bytes.readUInt32BE(8) === 13 && bytes.toString('ascii', 12, 16) === 'IHDR') {
+    const size = { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) }
+    for (let offset = 8; offset + 12 <= bytes.length;) {
+      const length = bytes.readUInt32BE(offset), type = bytes.toString('ascii', offset + 4, offset + 8)
+      if (type === 'acTL') throw new Error('Choose a static PNG or JPEG image.')
+      if (offset + length + 12 > bytes.length) throw new Error('The PNG is incomplete.')
+      offset += length + 12
+      if (type === 'IEND' && length === 0 && offset === bytes.length) return size
+    }
+  }
+  throw new Error('Choose a valid static PNG or JPEG image.')
+}
+

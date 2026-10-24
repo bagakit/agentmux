@@ -10,7 +10,7 @@ import {
   type MoteAvatarSeriesCreateParams, type MoteAvatarSeriesCreateResult, type MoteAvatarSeriesRevealParams
 } from '@agentmux/core/mote-avatar-series'
 import { DEFAULT_MOTE_FACE } from '@agentmux/core/mote-face'
-import { AVATAR_INPUT_MAX_BYTES, AVATAR_MAX_PIXELS } from '../shared/object-avatars.js'
+import { AVATAR_INPUT_MAX_BYTES, AVATAR_MAX_PIXELS } from '@agentmux/host/object-avatars'
 import { decodeObjectAvatar, previewObjectAvatar } from './object-avatar-image.js'
 
 // Individual parser inputs, not a cumulative library or consumer budget.

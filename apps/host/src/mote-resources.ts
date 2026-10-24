@@ -682,7 +682,7 @@ export interface MoteChatResourcePort {
   prepare(target: import('@agentmux/core/mote-chat').MoteChatTarget, resource: MoteChatResource, input: { providerId: AgentProviderId; sessionId: string }): Promise<PreparedScratchAgentTopic>
 }
 export type MoteResourceConfiguration = { workspace: ScratchWorkspace | null; profileContext?: string }
-async function readOriginalMoteConfiguration(path: string): Promise<unknown> {
+export async function readOriginalMoteConfiguration(path: string): Promise<unknown> {
   if (!isAbsolute(path)) throw new Error('The original absolute Mote configuration path is unavailable.')
   return JSON.parse(await readFile(path, 'utf8'))
 }

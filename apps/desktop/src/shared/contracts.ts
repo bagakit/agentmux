@@ -2211,4 +2211,4 @@ export type AgentMuxPreloadApi = Omit<AgentMuxDesktopApi, 'control' | 'sessions'
 }
 import type { MoteAvatarInput, MoteAvatarRef, MoteAvatarImage } from './mote-avatars.js'
 
-import type { SpaceObjectImageTarget, SpaceObjectAppearance, ObjectAvatarInput, ObjectAvatarImage, ObjectAvatarRef } from './object-avatars.js'
+import type { SpaceObjectImageTarget, SpaceObjectAppearance, ObjectAvatarInput, ObjectAvatarImage, ObjectAvatarRef } from '@agentmux/host/object-avatars'

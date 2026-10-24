@@ -1,4 +1,4 @@
-import type { SpaceObjectImageTarget } from '../../../shared/object-avatars'
+import type { SpaceObjectImageTarget } from '@agentmux/host/object-avatars'
 import { SpaceDirectoryImage } from './SpaceDirectoryImage'
 import { memo, useEffect, useState } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'

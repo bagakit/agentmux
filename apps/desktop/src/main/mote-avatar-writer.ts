@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto'
-import { constants, lstat, mkdir, open, realpath } from 'node:fs/promises'
 import { join } from 'node:path'
+import { savedMoteAvatarSnapshot, moteAvatarOperationDirectory, readMoteAvatarOperation } from '@agentmux/host/mote-avatar-state'
 import { nativeTheme } from 'electron'
 import { DEFAULT_THEME_ID, resolveTheme } from '@agentmux/client-ui/theme'
 import { moteAvatarSvg } from '@agentmux/client-ui/mote-avatar-svg'
 import { isSpaceIconId } from '@agentmux/client-ui/space-icon-ids'
 import { durableWriteFile } from '@agentmux/core'
 import { avatarSeriesCanonical, isMoteAvatarSeriesChoice, type MoteAvatarSeriesChoice } from '@agentmux/core/mote-avatar-series'
-import { parseMoteAvatarSave, parseMoteAvatarTarget, parseMoteAvatarOperationId,
+import { parseMoteAvatarSave, parseMoteAvatarTarget,
   type MoteAvatarTarget, type MoteAvatarSave, type MoteAvatarOperation, type MoteAvatarRead, type MoteAvatarSaveResult } from '@agentmux/core/mote-avatar-write'
 import type { AppConfig } from '../shared/contracts.js'
 import { isMoteFace, type MoteAvatarImage, type MoteAvatarInput, type MoteAvatarRef } from '../shared/mote-avatars.js'
@@ -35,9 +35,7 @@ function avatarSnapshot(config: AppConfig, target: MoteAvatarTarget, prefersDark
       svg = moteAvatarSvg(value ?? null, theme)
     } else if (isMoteFace(value)) svg = moteAvatarSvg(value)
   } catch (error) { issue = message(error) }
-  const revision = hash(avatarSeriesCanonical({...(value===undefined?{present:false}:{present:true,value}),
-    publication:config.appearance.spaceObjectIconRevisions?.[target.objectKey]??null, ...(svg ? { drawing: svg } : {})}))
-  return { choice: structuredClone(value ?? null), revision, svg, issue }
+  return { ...savedMoteAvatarSnapshot(config.appearance, target.objectKey, svg ?? undefined), svg, issue }
 }
 export function moteAvatarRevision(config: AppConfig, target: MoteAvatarTarget, prefersDark = true): string {
   return avatarSnapshot(config, target, prefersDark).revision
@@ -59,7 +57,6 @@ export function createMoteAvatarWriter(config:ConfigOwner,sources:MoteAvatarSeri
     confirm:saved=>store.confirmSaved(saved)
   })
 }
-type Record = { schema:'agentmux.avatar-operation.v1'; target:MoteAvatarTarget; operation:MoteAvatarOperation }
 
 /** Original ConfigOwner/PNG owner remain authoritative; this journal contains history only. */
 export class MoteAvatarWriter {
@@ -76,32 +73,10 @@ export class MoteAvatarWriter {
     }) {}
 
   private async journalDirectory(target:MoteAvatarTarget, create=false):Promise<string> {
-    const original=await this.original.directory(target)
-    let current=original
-    for (const name of ['', '.agentmux','avatar-operations']) {
-      if (name) current=join(current,name)
-      if (create && name) { try { await mkdir(current,{mode:0o700}) } catch(error) { if ((error as NodeJS.ErrnoException).code!=='EEXIST') throw error } }
-      const info=await lstat(current)
-      if (!info.isDirectory() || info.isSymbolicLink() || await realpath(current)!==current) throw new Error('The original avatar operation directory is unconfirmed.')
-      if (create) { const handle=await open(current,constants.O_RDONLY|constants.O_NOFOLLOW);try { await handle.sync() } finally { await handle.close() } }
-    }
-    // Persist newly created metadata/receipt directory entries in their actual parents.
-    if (create) for (const parent of [join(original,'.agentmux'),original]) {
-      const handle=await open(parent,constants.O_RDONLY|constants.O_NOFOLLOW);try { await handle.sync() } finally { await handle.close() }
-    }
-    return current
+    return moteAvatarOperationDirectory(await this.original.directory(target), create)
   }
   private async inspect(target:MoteAvatarTarget, operationId:string):Promise<MoteAvatarOperation|undefined> {
-    parseMoteAvatarOperationId(operationId)
-    try {
-      const file=join(await this.journalDirectory(target),operationId+'.json')
-      const handle=await open(file,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK)
-      let bytes:Buffer
-      try { const stat=await handle.stat();if (!stat.isFile() || stat.size>32*1024*1024) throw new Error('The original avatar receipt is unreadable.');bytes=await handle.readFile();const after=await handle.stat();if (bytes.length!==stat.size || after.size!==stat.size || after.mtimeMs!==stat.mtimeMs) throw new Error('The original avatar receipt changed while reading.') } finally { await handle.close() }
-      const record=JSON.parse(bytes.toString()) as Record
-      if (record.schema!=='agentmux.avatar-operation.v1' || avatarSeriesCanonical(record.target)!==avatarSeriesCanonical(target) || record.operation?.operationId!==operationId || !/^sha256:[a-f0-9]{64}$/u.test(record.operation.requestHash) || !['intent','asset','publication-unknown','published'].includes(record.operation.phase) || !['unknown','confirmed'].includes(record.operation.durability) || record.operation.phase!=='intent' && !isMoteAvatarSeriesChoice(record.operation.choice) || record.operation.durability==='confirmed' && record.operation.phase!=='published') throw new Error('The original avatar receipt is unreadable. Keep this operationId and inspect its original file.')
-      return record.operation
-    } catch(error) { if ((error as NodeJS.ErrnoException).code==='ENOENT') return undefined; throw error }
+    return readMoteAvatarOperation(await this.original.directory(target), target, operationId)
   }
   private async record(target:MoteAvatarTarget,operation:MoteAvatarOperation):Promise<void> {
     await durableWriteFile(join(await this.journalDirectory(target,true),operation.operationId+'.json'),JSON.stringify({schema:'agentmux.avatar-operation.v1',target,operation})+'\n',{requireDirectorySync:true})

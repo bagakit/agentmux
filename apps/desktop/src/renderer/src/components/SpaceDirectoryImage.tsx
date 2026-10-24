@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react'
-import type { ObjectAvatarRef, SpaceObjectImageTarget } from '../../../shared/object-avatars'
+import type { ObjectAvatarRef, SpaceObjectImageTarget } from '@agentmux/host/object-avatars'
 import { api } from '../lib/api'
 import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
