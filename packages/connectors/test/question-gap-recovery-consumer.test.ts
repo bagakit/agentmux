@@ -148,3 +148,18 @@ it('does not replace the frozen original target when the same answer record acce
   await appendFile(f.saved.transcriptPath, savedQuestionJsonl([savedQuestionEvent()])); await f.readOriginalChanges()
   expect(f.store.coverage(f.boundary).gaps.map(gap => gap.gapId)).not.toContain(original.gapId)
 })
+
+it('retains an exact question accepted before the answer when another target is accepted later', async () => {
+  const f = await fixture()
+  await appendFile(f.saved.transcriptPath, savedQuestionJsonl([savedQuestionEvent()]))
+  const earlier = await f.readOriginalChanges()
+  expect(earlier.flatMap(unit => unit.records).some(record => record.original.kind === 'native' && record.original.item.questionRequest?.questions.some(question => question.id === savedQuestionId))).toBe(true)
+  const later = savedQuestionEvent(); later.payload.item.id = 'later-original-call'
+  const laterId = JSON.stringify(['request_user_input_async', later.payload.item.id, 0])
+  await appendFile(f.saved.transcriptPath, savedQuestionJsonl([replyWithTargets([savedQuestionId, laterId])]))
+  await f.readOriginalChanges()
+  const original = f.store.coverage(f.boundary).gaps.find(gap => gap.code === questionGap)!
+  expect(original).toBeDefined()
+  await appendFile(f.saved.transcriptPath, savedQuestionJsonl([later])); await f.readOriginalChanges()
+  expect(f.store.coverage(f.boundary).gaps.map(gap => gap.gapId), 'Both exact questions were accepted on their original pages').not.toContain(original.gapId)
+})
