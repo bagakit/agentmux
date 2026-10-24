@@ -580,10 +580,10 @@ export async function observeInstalledRuntimeOwner(appPath) {
     sourceTree: selected.manifest.source.tree, manifestSha256: selected.manifestSha256 }
 }
 
-/** One bounded public RPC read; no Renderer injection or lifecycle action. */
+/** One public RPC read; no Renderer injection or lifecycle action. */
 export async function observeUiClient(appPath) {
   const { stdout } = await exec(process.execPath, [script, '--inspect-ui', join(appPath, coreRelative, 'dist/index.js')], {
-    timeout: 10_000, maxBuffer: 1024 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+    maxBuffer: 1024 * 1024, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
   })
   return parseDesktopClientObservation(JSON.parse(stdout))
 }
