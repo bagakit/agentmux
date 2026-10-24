@@ -3,7 +3,7 @@ import { parseConnectionObservation } from './connection-record-codec.js'
 import { parseConnectionServiceState } from './connection-service-codec.js'
 import { AgentMuxError } from './errors.js'
 import { parseIngressContextObservation } from './ingress-codec.js'
-import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisSourceCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosis, type ConnectionDiagnosisInput, type ConnectionDiagnosisReading, type ConnectionGroupDiagnosis } from './connection-diagnosis-contract.js'
+import { connectionDiagnosisIntakeCodes, connectionDiagnosisRecordingCodes, connectionDiagnosisSourceCodes, connectionDiagnosisWindowLimit, type ConnectionDiagnosis, type ConnectionDiagnosisInput, type ConnectionDiagnosisIntake, type ConnectionDiagnosisReading, type ConnectionGroupDiagnosis } from './connection-diagnosis-contract.js'
 
 function fail(): never { throw new AgentMuxError('The bounded connection diagnosis is malformed or belongs to another target.', 'INVALID_CONNECTION_DIAGNOSIS') }
 function object(value: unknown, fields: readonly string[]): Record<string, unknown> {
@@ -18,6 +18,16 @@ function count(value: unknown, minimum = 0): number { if (!Number.isSafeInteger(
 function bool(value: unknown): boolean { if (typeof value !== 'boolean') return fail(); return value }
 function member<T extends string>(value: unknown, choices: readonly T[]): T { if (!choices.includes(value as T)) return fail(); return value as T }
 function nullable<T>(value: unknown, parse: (value: unknown) => T): T | null { return value === null ? null : parse(value) }
+/** The original safe waiting tuple; never includes its private failure or input reference. */
+export function parseConnectionDiagnosisWaiting(value: unknown): ConnectionDiagnosisIntake['waiting'] {
+  return nullable(value, value => {
+    const w = object(value, ['phase', 'reason', 'wake']), phase = member(w.phase, ['runtime', 'authorization', 'observer', 'native-environment', 'input-environment', 'service'] as const)
+    const reasons = { runtime: ['runtime-unavailable'], authorization: ['author-authorization-needed'], observer: ['observer-stopped'], 'native-environment': ['original-environment-unconfirmed', 'original-target-changed'], 'input-environment': ['original-input-unconfirmed', 'original-target-changed'], service: ['observation-failed'] } as const
+    const reason = member(w.reason, reasons[phase] as readonly import('./agent-input-wait.js').AgentInputWaitReason['reason'][]), wake = member(w.wake, ['runtime-restored', 'explicit-rejoin'] as const)
+    if (wake !== (phase === 'runtime' ? 'runtime-restored' : 'explicit-rejoin')) return fail()
+    return { phase, reason, wake }
+  })
+}
 function array<T>(value: unknown, parse: (value: unknown) => T, max = connectionDiagnosisWindowLimit): T[] { if (!Array.isArray(value) || value.length > max) return fail(); return value.map(parse) }
 function reading<T>(value: unknown, parse: (value: unknown) => T): ConnectionDiagnosisReading<T> {
   const p = object(value, ['value', 'issue']), issue = nullable(p.issue, value => member(value, ['read-unavailable', 'target-unconfirmed'] as const))
@@ -97,13 +107,7 @@ function group(value: unknown, request: ConnectionDiagnosisInput): ConnectionGro
         if (i.kind !== 'message' || (state === 'recorded' || state === 'not-started') && r.code !== undefined || state === 'recorded' && !bindingId) return fail()
         return { state, ...(r.code === undefined ? {} : { code: member(r.code, connectionDiagnosisRecordingCodes) }) }
       })
-      const waiting = nullable(i.waiting, value => {
-        const w = object(value, ['phase', 'reason', 'wake']), phase = member(w.phase, ['runtime', 'authorization', 'observer', 'native-environment', 'input-environment', 'service'] as const)
-        const reasons = { runtime: ['runtime-unavailable'], authorization: ['author-authorization-needed'], observer: ['observer-stopped'], 'native-environment': ['original-environment-unconfirmed', 'original-target-changed'], 'input-environment': ['original-input-unconfirmed', 'original-target-changed'], service: ['observation-failed'] } as const
-        const reason = member(w.reason, reasons[phase] as readonly import('./agent-input-wait.js').AgentInputWaitReason['reason'][]), wake = member(w.wake, ['runtime-restored', 'explicit-rejoin'] as const)
-        if (wake !== (phase === 'runtime' ? 'runtime-restored' : 'explicit-rejoin')) return fail()
-        return { phase, reason, wake }
-      })
+      const waiting = parseConnectionDiagnosisWaiting(i.waiting)
       const coreStatus = nullable(i.coreStatus, value => member(value, ['waiting', 'stopped', 'terminal-confirmed', 'admitted', 'not-applied', 'unknown', 'saved', 'bytes-accepted', 'hook-written', 'acp-acknowledged'] as const))
       if ((rowScope !== 'current-binding' || inputOperationId === null) && (coreStatus !== null || waiting !== null || i.nativeAdoption !== null)) return fail()
       if (i.context !== undefined && (rowScope !== 'current-binding' || inputOperationId === null || i.kind !== 'message')) return fail()

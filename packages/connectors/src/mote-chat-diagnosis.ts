@@ -1,6 +1,6 @@
 import { AgentMuxError } from '@agentmux/core'
 import { sameMotePreferencesTarget } from '@agentmux/core/mote-preferences'
-import { moteChatDiagnosisCode, moteChatDiagnosisKey, moteChatDiagnosisWindowLimit,
+import { moteChatDiagnosisCode, moteChatDiagnosisKey, moteChatDiagnosisWindowLimit, moteChatPreparationReason,
   type MoteChatDiagnosis, type MoteChatTarget } from '@agentmux/core/mote-chat'
 import { isDeepStrictEqual } from 'node:util'
 import type { ConnectionHost } from './connection-host.js'
@@ -75,13 +75,18 @@ export async function readMoteChatDiagnosis(target: MoteChatTarget, owner: MoteC
         else preparation = generation.binding ? 'ready' : generation.dispatched ? 'creation-dispatched' : generation.prepared ? 'prepared' : 'reserved'
       }
       let input: NonNullable<MoteChatDiagnosis['incoming']>['rows'][number]['input'] = {
-        status: null, observation: record.input ? 'unavailable' : 'not-started'
+        status: null, observation: record.input ? 'unavailable' : 'not-started',
+        controlState: null, receiptObservation: null, waiting: null, preparationReason: null
       }
       if (record.input && preparation !== 'other-route') {
         try {
           const observed = await ingress.inspect({ ingressId: record.ingressId })
           if (observed.ingress?.ingressId === record.ingressId && isDeepStrictEqual(observed.ingress.input, record.input)) {
-            input = { status: observed.inputReceipt?.status ?? null, observation: observed.observation }
+            const receipt = observed.inputReceipt, waiting = receipt?.control.waiting
+            input = { status: receipt?.status ?? null, observation: observed.observation,
+              controlState: receipt?.control.state ?? null, receiptObservation: receipt?.observation ?? null,
+              waiting: waiting ? { phase: waiting.phase, reason: waiting.reason, wake: waiting.wake } : null,
+              preparationReason: receipt ? moteChatPreparationReason(receipt) : null }
           }
         } catch { /* The original saved input remains visible without claiming its Core outcome. */ }
       }

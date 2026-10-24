@@ -1,6 +1,9 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 import type { AgentInputSubmissionReceipt } from './agent-input-wait.js'
-import { connectionDiagnosisIntakeCodes, connectionDiagnosisSourceCodes } from './connection-diagnosis-contract.js'
+import { agentPromptInputId } from './agent-prompt-condition.js'
+import { connectionDiagnosisIntakeCodes, connectionDiagnosisSourceCodes, type ConnectionDiagnosisIntake } from './connection-diagnosis-contract.js'
+import { parseConnectionDiagnosisWaiting } from './connection-diagnosis-codec.js'
+import { readAgentPromptPreparationWait, type AgentPromptPreparationWaitReason } from './prompt-preparation.js'
 import { parseConnectionObservation } from './connection-record-codec.js'
 import type { ConnectionObservation } from './connections-contract.js'
 import { AgentMuxError } from './errors.js'
@@ -29,7 +32,20 @@ export type MoteChatDiagnosisIntake = {
   code: MoteChatDiagnosisCode | null
   codeRecorded: boolean
   preparation: 'not-admitted' | 'reserved' | 'prepared' | 'creation-dispatched' | 'ready' | 'other-route'
-  input: { status: AgentInputSubmissionReceipt['status'] | null; observation: 'not-started' | 'observed' | 'unavailable' }
+  input: { status: AgentInputSubmissionReceipt['status'] | null; observation: 'not-started' | 'observed' | 'unavailable'
+    controlState: AgentInputSubmissionReceipt['control']['state'] | null
+    receiptObservation: AgentInputSubmissionReceipt['observation'] | null
+    /** Last retained reason, not proof of an active await or permission to retry. */
+    waiting: ConnectionDiagnosisIntake['waiting']
+    preparationReason: AgentPromptPreparationWaitReason | null }
+}
+/** Read a typed original preparation observation, then discard every private identity and retry fence. */
+export function moteChatPreparationReason(receipt: AgentInputSubmissionReceipt): AgentPromptPreparationWaitReason | null {
+  const waiting = receipt.control.waiting
+  const failure = waiting?.phase === 'native-environment' ? waiting.observation?.failure : waiting?.failure
+  const observed = readAgentPromptPreparationWait(failure)
+  return observed && observed.agentSessionId === receipt.key.agentSessionId && observed.runId === receipt.key.expectedRun.runId &&
+    observed.operationId === agentPromptInputId(receipt.key) ? observed.reason : null
 }
 export const moteChatDiagnosisIssues = ['configuration-unavailable', 'target-changed', 'service-unavailable', 'connection-unavailable', 'intake-unavailable'] as const
 export type MoteChatDiagnosis = {
@@ -99,14 +115,26 @@ export function parseMoteChatDiagnosis(value: unknown, input?: MoteChatDiagnosis
   const incoming = nullable(p.incoming, value => {
     const page = fields(value, ['rows', 'more'])
     const rows = array(page.rows, value => {
-      const row = fields(value, ['key', 'state', 'code', 'codeRecorded', 'preparation', 'input']), i = fields(row.input, ['status', 'observation'])
+      const row = fields(value, ['key', 'state', 'code', 'codeRecorded', 'preparation', 'input']), i = fields(row.input, ['status', 'observation', 'controlState', 'receiptObservation', 'waiting', 'preparationReason'])
       const code = nullable(row.code, value => member(value, moteChatDiagnosisCodes)), codeRecorded = bool(row.codeRecorded)
       const preparation = member(row.preparation, ['not-admitted', 'reserved', 'prepared', 'creation-dispatched', 'ready', 'other-route'] as const)
       const observation = member(i.observation, ['not-started', 'observed', 'unavailable'] as const)
       const status = nullable(i.status, value => member(value, ['waiting', 'stopped', 'terminal-confirmed', 'admitted', 'not-applied', 'unknown'] as const))
+      const controlState = nullable(i.controlState, value => member(value, ['enabled', 'stopped-before-dispatch', 'dispatch-authorized'] as const))
+      const receiptObservation = nullable(i.receiptObservation, value => member(value, ['owned', 'rejoin-needed', 'closed'] as const))
+      const preparationReason = nullable(i.preparationReason, value => member(value, ['context-compaction', 'native-busy'] as const))
+      let waiting: ConnectionDiagnosisIntake['waiting']
+      try { waiting = parseConnectionDiagnosisWaiting(i.waiting) } catch { return fail() }
       if (code !== null && !codeRecorded || status !== null && (observation !== 'observed' || preparation === 'other-route')) fail()
+      if (status === null ? controlState !== null || receiptObservation !== null || waiting !== null || preparationReason !== null
+        : controlState === null || receiptObservation === null) fail()
+      if (status === 'waiting' && (controlState !== 'enabled' || receiptObservation === 'closed') ||
+          status === 'stopped' && controlState !== 'stopped-before-dispatch' ||
+          (status === 'admitted' || status === 'not-applied' || status === 'terminal-confirmed') && controlState !== 'dispatch-authorized' ||
+          status !== null && status !== 'waiting' && receiptObservation !== 'closed') fail()
+      if (preparationReason !== null && waiting === null) fail()
       return { key: key(row.key), state: member(row.state, ['received', 'refused', 'claimed'] as const), code, codeRecorded,
-        preparation, input: { status, observation } }
+        preparation, input: { status, observation, controlState, receiptObservation, waiting, preparationReason } }
     }, moteChatDiagnosisWindowLimit)
     if (new Set(rows.map(row => row.key)).size !== rows.length) fail()
     return { rows, more: bool(page.more) }
