@@ -1,5 +1,5 @@
 import type { BrowserPng, BrowserScreenshotCapture } from '../../../../shared/contracts'
-import { screenshotCropGeometry } from './compose'
+import { screenshotCropGeometry } from '../image-annotation/compose'
 import { intersectRect, shapeBounds, screenshotOutputShapes } from '../image-annotation/drawing-model'
 import type { ImageAnnotationInput } from '../image-annotation/types'
 import type { AnnotationHistoricalSource } from '../image-annotation/document'
