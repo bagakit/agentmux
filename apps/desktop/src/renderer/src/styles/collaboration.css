@@ -64,6 +64,16 @@
 .collaboration-area[data-folded=true] { border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); }
 .collaboration-area[data-empty=true] { border-radius: var(--radius-sm); }
 .collaboration-agent { position: relative; height: 100%; --focus-reply-lines: 2; }
+.collaboration-agent__body { position: absolute; pointer-events: none; }
+.collaboration-agent__identity-layer, .collaboration-agent__detail-layer { position: absolute; inset: 0; border-radius: inherit; pointer-events: auto; }
+.collaboration-agent__identity-layer { display: flex; align-items: center; justify-content: center; }
+.collaboration-agent [inert] { pointer-events: none; }
+.collaboration-agent__body:has(:focus-visible), .collaboration-agent[data-reading=true] .collaboration-agent__body { outline: 2px solid var(--focus-line); outline-offset: 4px; }
+.collaboration-agent__body[data-selected=true] { box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 70%, transparent), 0 0 0 6px color-mix(in srgb, var(--green) 9%, transparent); }
+.collaboration-agent__detail-layer { overflow: hidden; }
+.collaboration-agent__focus-proxy { position: absolute; z-index: 2; display: inline-flex; align-items: center; gap: 9px; max-width: 260px; padding: 5px 8px; border: 1px solid var(--focus-line); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); box-shadow: var(--elev-1); font-size: 11px; line-height: 15px; transform-origin: 0 0; pointer-events: none; }
+.collaboration-agent__focus-proxy strong { min-width: 0; font-weight: 500; overflow-wrap: anywhere; }
+.collaboration-agent__focus-proxy kbd { flex: 0 0 auto; color: var(--text-2); font: inherit; font-size: 10px; }
 .collaboration-agent .focus-context-card { height: 100%; box-shadow: 0 2px 8px color-mix(in srgb, var(--text) 4%, transparent); background: var(--surface-1); }
 .collaboration-agent .focus-context { height: 100%; border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px; }
 .collaboration-agent .focus-context.is-selected { border-color: var(--green); background: var(--surface-2); }
@@ -79,6 +89,7 @@
 @keyframes collaboration-packet { 0% { offset-distance: 0%; opacity: 0; } 8%, 92% { opacity: 1; } 100% { offset-distance: 100%; opacity: 0; } }
 @keyframes collaboration-supervision { 0% { opacity: 0; } 25% { opacity: .9; } 100% { opacity: 0; } }
 .collaboration-canvas__controls { z-index: 6; position: relative; display: flex; align-items: center; padding: 5px; gap: 2px; margin-left: auto; background: var(--surface-1); border: 1px solid var(--line); border-radius: 9px; box-shadow: var(--elev-1); pointer-events: auto; }
+.collaboration-canvas__controls .collaboration-canvas__arrange { display: inline-flex; gap: 5px; width: auto; padding-inline: 7px; font-size: 11px; }
 .collaboration-canvas__empty { position: absolute; inset: 44% 0 auto; text-align: center; color: var(--text-2); font-size: var(--fs-meta); pointer-events: none; }
 .collaboration-inspector { flex: 0 0 296px; width: 296px; min-width: 0; border-left: 1px solid var(--line); padding: 18px; overflow: auto; overscroll-behavior: contain; background: var(--surface-1); }
 .collaboration-inspector h3 { font-size: var(--fs-body); font-weight: 600; margin: 0 0 8px; overflow-wrap: anywhere; }
@@ -118,8 +129,11 @@
 .collaboration-area__internal:hover { color: var(--green); }
 .collaboration-area-issues { border-bottom: 1px solid var(--line); padding-bottom: 10px; }
 
-.collaboration-agent__mark { display: flex; align-items: center; gap: 8px; width: 100%; height: 100%; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-1); color: var(--text-2); text-align: left; cursor: pointer; }
-.collaboration-agent__mark strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; font-size: var(--fs-meta); }
+.collaboration-agent__mark { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; height: 100%; padding: 0; border: 1px solid color-mix(in srgb, var(--line) calc(var(--collaboration-identity, 1) * 100%), transparent); border-radius: inherit; background: color-mix(in srgb, var(--surface-1) calc(var(--collaboration-identity, 1) * 100%), transparent); color: var(--text-2); text-align: left; cursor: pointer; }
+.collaboration-agent__mark strong { position: absolute; left: 38px; right: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; font-size: var(--fs-meta); }
+.collaboration-agent__mark .collaboration-agent__avatar { position: absolute; left: calc(50% * (1 - var(--collaboration-identity, 1)) + 20px * var(--collaboration-identity, 1)); top: 50%; transform: translate(-50%, -50%) scale(var(--collaboration-avatar-scale, 1)); }
+.collaboration-agent__mark[data-tier=closed] .collaboration-agent__avatar { left: 50%; }
+.collaboration-agent__avatar { position: relative; display: grid; place-items: center; flex: 0 0 auto; }
 .collaboration-agent__mark[aria-pressed=true] { outline: 2px solid var(--green); outline-offset: 3px; }
 .collaboration-agent__point { display: block; flex: 0 0 auto; border-radius: 50%; background: var(--text-2); }
 .collaboration-agent--active .collaboration-agent__point { background: var(--green); }
@@ -149,8 +163,8 @@
 .collaboration-area[data-empty=true] { border-color: transparent; background: transparent; }
 /* Match XYFlow's Panel layer above its full-canvas renderer hit surface. */
 .collaboration-region-labels { position: absolute; inset: 0; z-index: 5; pointer-events: none; }
-.collaboration-agent[data-overview=true] { display: flex; align-items: center; justify-content: center; }
 .collaboration-agent__dot { transform: scale(var(--collaboration-mark-scale, 1)); flex: 0 0 auto; display: grid; place-items: center; border: 0; border-radius: 50%; background: transparent; cursor: pointer; }
+.collaboration-agent__dot .collaboration-agent__avatar { grid-area: 1 / 1; }
 .collaboration-agent__dot .collaboration-agent__point { width: 12px; height: 12px; }
 .collaboration-agent__dot[aria-pressed=true] { outline: 3px solid var(--green); outline-offset: 2px; }
 .collaboration-connections .react-flow__edge[data-emphasis=related] .collaboration-edge { stroke-width: 2; opacity: .95; }
@@ -173,9 +187,13 @@
 .collaboration-area, .collaboration-area__overview-label { --area-color: var(--text-2); }
 :is(.collaboration-area, .collaboration-area__overview-label)[data-kind=project] { --area-color: var(--blue); }
 :is(.collaboration-area, .collaboration-area__overview-label)[data-kind=topic] { --area-color: var(--purple); }
+:is(.collaboration-area, .collaboration-area__overview-label)[data-kind=category] { --area-color: var(--purple); }
 :is(.collaboration-area, .collaboration-area__overview-label)[data-kind=mote] { --area-color: var(--amber); }
 .collaboration-area[data-kind=topic] .collaboration-area__envelope path { stroke-dasharray: 2 3; }
 .collaboration-area[data-kind=mote] .collaboration-area__envelope path { stroke-width: 1.6; }
+.collaboration-area[data-kind=category] .collaboration-area__envelope path { fill: color-mix(in srgb, var(--area-color) 3%, var(--surface-1)); stroke-width: 1; }
+.collaboration-area[data-depth="0"] .collaboration-area__envelope path { fill: color-mix(in srgb, var(--area-color) 3%, var(--surface-1)); }
+.collaboration-area__overview-label:not([data-depth="0"])::before { width: 2px; opacity: .65; }
 .collaboration-area__overview-label { position: absolute; width: max-content; min-width: 148px; pointer-events: none; border-radius: 9px; background: color-mix(in srgb, var(--surface-1) 96%, var(--area-color)); border: 1px solid color-mix(in srgb, var(--area-color) 32%, var(--line)); box-shadow: 0 3px 12px color-mix(in srgb, var(--surface-1) 70%, transparent); }
 .collaboration-area__overview-label::before { content: ''; position: absolute; inset: 9px auto 9px -1px; width: 3px; border-radius: 3px; background: var(--area-color); pointer-events: none; }
 .collaboration-area__overview-label[data-current=true] { border-color: var(--area-color); box-shadow: 0 0 0 2px color-mix(in srgb, var(--area-color) 13%, transparent), 0 4px 16px color-mix(in srgb, var(--surface-1) 80%, transparent); }
@@ -203,7 +221,6 @@
 .collaboration-agent__dot:has(.agent-avatar) { background: var(--surface-1); box-shadow: 0 0 0 1px var(--line); }
 .collaboration-agent--active .collaboration-agent__dot:has(.agent-avatar) { box-shadow: 0 0 0 1px color-mix(in srgb, var(--green) 50%, var(--line)); }
 .collaboration-agent__point[data-identity=true] { position: absolute; right: 0; bottom: 0; width: 5px !important; height: 5px !important; outline: 2px solid var(--surface-1); opacity: 1 !important; }
-.collaboration-agent__mark .collaboration-agent__point[data-identity=true] { left: 26px; right: auto; bottom: 8px; }
 .collaboration-agent--idle .collaboration-agent__point { background: var(--text-2); }
 .collaboration-agent--closed .collaboration-agent__point { background: var(--text-3); }
 .collaboration-canvas__motion { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 2px 7px; border: 0; border-radius: 5px; background: transparent; color: var(--text-2); font-size: 11px; cursor: pointer; }
@@ -226,9 +243,11 @@
 .collaboration-node-key[data-tier=active] { background: var(--green); border-color: var(--green); box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 16%, transparent); }
 .collaboration-node-key[data-tier=closed] { width: 5px; height: 5px; margin-inline: 1.5px; border: 0; background: var(--text-3); }
 .collaboration-node-key[data-tier=unknown] { background: transparent; }
-/* The effective map preference may explicitly override reduced motion, only for original event marks. */
+/* The effective preference overrides reduction only within this Map's presentation. */
 .collaboration-canvas[data-motion=on] :is(.collaboration-activity, .collaboration-edge__pulse, .collaboration-edge__packet) { animation-duration: var(--collaboration-activity-duration) !important; }
 .collaboration-canvas[data-motion=off] .collaboration-activity { animation: none; }
+.collaboration-canvas[data-motion=on] :is(.collaboration-agent__body, .collaboration-agent .focus-context, .collaboration-edge, .collaboration-area__overview-label, .collaboration-canvas__motion-switch::after) { transition: border-color 150ms ease-out, background-color 150ms ease-out, box-shadow 150ms ease-out, opacity 150ms ease-out; transition-duration: 150ms !important; }
+.collaboration-canvas[data-motion=off] :is(.collaboration-agent__body, .collaboration-agent .focus-context, .collaboration-edge, .collaboration-area__overview-label, .collaboration-canvas__motion-switch::after) { transition: none; }
 .collaboration-canvas[data-motion=off] .react-flow__edge[data-recent=true] .collaboration-edge { opacity: 1; stroke-width: 2.5; }
 .collaboration-canvas__hud { position: absolute; z-index: 6; left: 12px; right: 12px; bottom: 12px; display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 8px; pointer-events: none; }
 @container (max-width: 680px) {
