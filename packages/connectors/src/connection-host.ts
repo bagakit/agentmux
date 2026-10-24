@@ -1,3 +1,4 @@
+import { ApplicationAccessHost } from './application-access.js'
 import { parseConnectionDeletionParams, parseConnectionDeletionResult, type ConnectionDeleteInput, type ConnectionDeleteOperation } from '@agentmux/core/connections'
 import { ConnectionSetupHost } from './connection-setup.js'
 import { mkdirSync } from 'node:fs'
@@ -45,6 +46,7 @@ function unavailable(reason: 'credential-missing' | 'credential-format-unsupport
 }
 /** Optional original Host owner. Configuration and its operation receipt commit in one SQLite transaction. */
 export class ConnectionHost implements ConnectionPort {
+  readonly applicationAccess: ApplicationAccessHost
   readonly service: ConnectionServicePort
   readonly metadata: ChannelMetadataPort
   private serviceSchemaReady = false
@@ -70,6 +72,7 @@ export class ConnectionHost implements ConnectionPort {
   private readonly conversationProfileReads = new Set<string>()
   private closed = false
   constructor(private readonly options: ConnectionHostOptions) {
+    this.applicationAccess = new ApplicationAccessHost(this)
     let ownedDatabase: DatabaseSync | undefined
     try {
       if (!options.database && !options.databasePath) throw new Error('Missing original connection database.')

@@ -1,3 +1,4 @@
+import { effectiveRoomGrant } from './effective-grant.js'
 import { mintObjectId } from '@agentmux/core/object-id'
 import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
@@ -284,6 +285,8 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
   }
   readGrant(grantId: string, revision?: number) { const row = this.store.generationByGrant(grantId); return row?.grant && (revision === undefined || revision === row.grant.revision) ? { ...row.grant, state: this.active(row) ? 'active' as const : 'revoked' as const } : null }
   grants(bindingId: string, revision: number) { const row = this.store.generationByBinding(bindingId); const grant = row?.grant ? this.readGrant(row.grant.grantId) : null; return revision === 1 && grant ? [grant] : [] }
+  effectiveGrant(bindingId: string, revision: number, actor: ConnectionActor) { const grant = this.grants(bindingId, revision).find(g => same(g.actor, actor)); return grant ? effectiveRoomGrant(grant) : null }
+  effectiveGrants(bindingId: string, revision: number) { return { grants: this.grants(bindingId, revision).map(effectiveRoomGrant), issue: null } }
   findGrant(input: { connectionId: string; externalConversationId: string; actor: ConnectionActor }) {
     const c = this.store.route(input.actor.application)
     if (!c) return null
@@ -300,6 +303,8 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
 /** Exact native IDs do not fall through to another owner after a known Mote binding is paused. */
 export function composeMoteChatBindings(groups: RoomBindingReadPort, chat: MoteChatHost): RoomBindingReadPort {
   return {
+    effectiveGrant: (id, revision, actor) => chat.readExact(id, revision) ? chat.effectiveGrant(id, revision, actor) : groups.effectiveGrant(id, revision, actor),
+    effectiveGrants: (id, revision) => chat.readExact(id, revision) ? chat.effectiveGrants(id, revision) : groups.effectiveGrants(id, revision),
     readOperation: id => groups.readOperation?.(id) ?? null,
     readExact: (id, revision) => chat.readExact(id, revision) ?? groups.readExact(id, revision),
     readCurrent: id => chat.readCurrent(id) ?? groups.readCurrent(id),

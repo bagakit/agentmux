@@ -1,3 +1,4 @@
+import { isConnectionApplicationAccessMethod, parseConnectionApplicationAccessParams } from './connection-application-access-codec.js'
 import { isConnectionCredentialMethod } from './connection-credential-codec.js'
 import { homedir } from 'node:os'
 import { discoverAgentSkills } from './agent-skills.js'
@@ -696,6 +697,16 @@ export class AgentMuxRpcService {
         if (!result) throw new AgentMuxError('Local identity removal is unavailable on the original Host. The identity and its conversations are retained.', 'CONTROL_UNAVAILABLE')
         return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
       }
+      if (isConnectionApplicationAccessMethod(method)) {
+        if (caller) throw new AgentMuxError('Application access requires the original person or device.', 'CONTROL_PERMISSION_DENIED')
+        const access = owner.applicationAccess
+        if (!access) throw new AgentMuxError('Application access is unavailable on the original Host. Existing Agents remain available.', 'CONTROL_UNAVAILABLE')
+        const original = { ...administration, assertCurrent: async () => { await administration.assertCurrent(); await this.assertRuntimeFence(context) } }
+        const result = method === 'connection.application.access.get' ? await access.get(parseConnectionApplicationAccessParams(method, params))
+          : method === 'connection.application.access.configure' ? await access.configure(parseConnectionApplicationAccessParams(method, params), original)
+          : await access.inspect(parseConnectionApplicationAccessParams(method, params))
+        return parseConnectionResult(method, result, input) as unknown as AgentMuxRpcResult<M>
+      }
       if (isConnectionServiceMethod(method)) {
         const service = owner.service
         if (!service) throw new AgentMuxError('Connector service policy is unavailable on this Host. Existing connection management and Agents remain available.', 'CONTROL_UNAVAILABLE')
@@ -790,7 +801,10 @@ export class AgentMuxRpcService {
           : method === 'connection.binding.resume' ? await bindings.resume(parseRoomBindingParams(method, params), administration)
           : method === 'connection.binding.detach' ? await bindings.detach(parseRoomBindingParams(method, params), administration)
           : method === 'connection.binding.relink' ? await bindings.relink(parseRoomBindingParams(method, params), administration)
+          : method === 'connection.binding.member.inherit' ? await bindings.inherit(parseRoomBindingParams(method, params), { ...administration, assertCurrent: async () => { await administration.assertCurrent(); await this.assertRuntimeFence(context) } })
           : await bindings.grant(parseRoomBindingParams(method, params), administration)
+        // Application-wide member identities are administration data, not managed discovery.
+        if (caller && method === 'connection.binding.inspect') delete (result as import('./room-binding-contract.js').RoomBindingInspection).access
         if (caller && method === 'connection.binding.ls') {
           const page = result as import('./room-binding-contract.js').RoomBindingResultMap['connection.binding.ls']
           const owned = await Promise.all(page.bindings.map(async binding => binding.authorizedBy.kind === 'agent' && binding.authorizedBy.id === caller.agentSessionId &&

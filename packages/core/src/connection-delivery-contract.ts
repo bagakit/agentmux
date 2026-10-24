@@ -70,7 +70,7 @@ export type ConnectionDelivery = {
 /** Lane-level source, qualification or effect observation for this Binding scope. Each original delivery receipt owns its specific platform result; this is not Agent health. */
 export type ConnectionDeliveryObservation = {
   state: 'unknown' | 'ready' | 'unavailable' | 'disabled'
-  reason?: 'not-started' | 'source-unconfirmed' | 'source-gap' | 'content-unconfirmed' | 'storage-unconfirmed' | 'adapter-unavailable' | 'credential-missing' | 'credential-format-unsupported' | 'credential-unavailable' | 'effect-unconfirmed'
+  reason?: 'not-started' | 'access-unconfirmed' | 'source-unconfirmed' | 'source-gap' | 'content-unconfirmed' | 'storage-unconfirmed' | 'adapter-unavailable' | 'credential-missing' | 'credential-format-unsupported' | 'credential-unavailable' | 'effect-unconfirmed'
 }
 export type ConnectionDeliveryOperationInput = { operationId: string }
 export type ConnectionDeliveryListInput = { connectionId: string; bindingId: string; bindingRevision: number; after?: string; afterContent?: string; limit?: number }
