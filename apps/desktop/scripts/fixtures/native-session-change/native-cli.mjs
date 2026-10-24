@@ -24,7 +24,7 @@ if(args.includes('app-server')) {
   let handle='original-'+sid,currentCommand=''
   const descriptors=new Map()
   const transcript=id=>path.join(root,provider==='codex'?'rollout-'+id+'.jsonl':id+'.jsonl')
-  const record=id=>provider==='codex'?{type:'session_meta',payload:{id,source:'cli'}}:{type:'user',sessionId:id,isSidechain:false,uuid:id+'-user',timestamp:new Date().toISOString(),message:{role:'user',content:'Original history '+id}}
+  const record=id=>provider==='codex'?{type:'session_meta',payload:{id,source:'cli',cwd:process.cwd()}}:{type:'user',sessionId:id,isSidechain:false,uuid:id+'-user',timestamp:new Date().toISOString(),message:{role:'user',content:'Original history '+id}}
   const open=id=>{const file=transcript(id);if(!fs.existsSync(file))fs.writeFileSync(file,JSON.stringify(record(id))+'\n');return fs.openSync(file,'a+')}
   descriptors.set(handle,open(handle))
   const hook=async(eventName,id=handle)=>{

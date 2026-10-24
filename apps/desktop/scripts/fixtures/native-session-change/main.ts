@@ -22,7 +22,7 @@ ipcMain.handle('native-proof:request',async(_event,operation,...args)=>{
  case'setup':return{phase,config,ids:phase==='select'?null:JSON.parse(await fs.readFile(idFile,'utf8'))}
  case'launch':return runtime.launchAgent({hostId:'local',executorId:'private',workspacePath:nativeRoot},config)
  case'snapshot':return runtime.snapshot(config)
- case'providers':return (runtime.rpcClients()[0].client as any).providers.catalog()
+ case'providers':return runtime.providerCatalog(args[0])
  case'attach':return runtime.attachSession(win.webContents.id,args[0],args[1],config)
  case'replay':return runtime.readSessionReplay(win.webContents.id,args[0],args[1])
  case'detach':return runtime.detachSession(win.webContents.id,args[0])
@@ -32,7 +32,8 @@ ipcMain.handle('native-proof:request',async(_event,operation,...args)=>{
  case'respond':return runtime.respondInteraction(args[0],args[1])
  case'resolve':return runtime.resolveSession(args[0],config)
  case'refresh':return runtime.refresh(args[0],config)
- case'history-sources':return runtime.sessionHistorySources()
+ case'recover':return runtime.recoverSession(args[0],config,args[1],args[2],args[3])
+ case'history-sources':return runtime.sessionHistorySources(args[0])
  case'history-page':return runtime.sessionHistoryPage(args[0],args[1],config)
  case'confirm-native':return runtime.confirmNativeSession(args[0],args[1])
  case'save-ids':await fs.writeFile(idFile,JSON.stringify(args[0]));return
@@ -66,38 +67,57 @@ app.whenReady().then(async()=>{
   const state=()=>read('window.nativeState()'),facts=()=>read('window.nativeNativeFacts()')
   await read('window.originalTerminalForProof=window.nativeTerminalNode();true')
   const click=async(selector:string,label?:string)=>{
-   const point=await read(`(()=>{const element=[...document.querySelectorAll(${JSON.stringify(selector)})].find(node=>${label===undefined?'true':`node.textContent.trim()===${JSON.stringify(label)}`});if(!element)throw new Error('Missing product action');element.scrollIntoView({block:'nearest'});const r=element.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+   const element=`[...document.querySelectorAll(${JSON.stringify(selector)})].find(node=>${label===undefined?'true':`node.textContent.trim()===${JSON.stringify(label)}`})`
+   const point=await read(`(async()=>{const element=${element};if(!element)throw new Error('Missing product action');element.scrollIntoView({block:'nearest'});await new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));const r=element.getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`)
+   await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseMoved',...point})
+   assert.equal(await read(`(${element})?.contains(document.elementFromPoint(${point.x},${point.y}))`),true,'Pointer enters the original menu action before clicking')
    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mousePressed',button:'left',clickCount:1,...point})
    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent',{type:'mouseReleased',button:'left',clickCount:1,...point})
+   await read('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
   }
   const key=async(value:string)=>{
    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyDown',key:value,code:value})
    await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent',{type:'keyUp',key:value,code:value})
+   await read('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
+  }
+  const focusItem=async(label:string)=>{
+   const count=await read('document.querySelectorAll("[role=menuitem]").length')
+   for(let index=0;index<=count;index++){
+    if(await read(`document.activeElement?.getAttribute('role')==='menuitem'&&document.activeElement.textContent.trim()===${JSON.stringify(label)}`))return
+    await key('ArrowDown')
+   }
+   throw new Error('Original menu keyboard navigation did not reach: '+label)
   }
   const dismiss=async()=>{
    if(!await read('!!document.querySelector("[data-menu-entry=more]")'))return
    for(let count=0;count<3&&await read('!!document.querySelector("[data-menu-entry=more]")');count++){await key('Escape');await delay(30)}
    await until('menu dismissed and original trigger focus restored',()=>read('!document.querySelector("[data-menu-entry=more]") && document.activeElement===document.querySelector(".agent-region-header__more")'))
   }
-  const menu=async()=>{
+  const menu=async(pointer=false)=>{
    await dismiss();await click('.agent-region-header__more')
    await until('original More menu',()=>read('!!document.querySelector("[data-menu-entry=more]")'))
-   await click('[role=menuitem]','Session details')
+   if(pointer)await click('[role=menuitem]','Session details')
+   else{await focusItem('Session details');await key('ArrowRight')}
    await until('original Session details submenu',()=>read('!!document.querySelector(".agent-region-menu__details .agent-native-source")'))
   }
-  const select=(label:string)=>click('[role=menuitem],button',label)
-  const recheck=async()=>{
-   await menu();await select('Check native source')
+  const select=async(label:string)=>{await focusItem(label);await key('Enter')}
+  const recheck=async(pointer=false)=>{
+   const before=calls.filter(call=>call.operation==='history-page'&&call.args[1]?.refreshNativeSource===true).length
+   await menu(pointer)
+   if(pointer)await click('[data-native-source-check]')
+   else await select('Check native source')
+   await until('original source recheck reached Main',()=>Promise.resolve(calls.filter(call=>call.operation==='history-page'&&call.args[1]?.refreshNativeSource===true).length>before))
+   if(pointer)result.pointerRecheck={before,after:calls.filter(call=>call.operation==='history-page'&&call.args[1]?.refreshNativeSource===true).length}
    await until('source discovery returned',()=>read('!document.querySelector(".agent-region-menu__details")?.textContent.includes("Checking source…")'))
    await dismiss()
   }
-  const members=async(values:string[])=>{
+  const members=async(values:string[],pointer=false)=>{
    const id=globalThis.crypto.randomUUID()
    await fs.writeFile(path.join(nativeRoot,ids.sessionId+'.control.json'),JSON.stringify({id,members:values}))
    await until('private native actor holds exact members',async()=>{
     try{return JSON.parse(await fs.readFile(path.join(nativeRoot,ids.sessionId+'.controlled.json'),'utf8')).command.id===id}catch{return false}
    })
-   await recheck()
+   await recheck(pointer)
   }
   const shot=async(label:string)=>{
    for(const mode of ['dark','light'])for(const width of [1280,760]){
@@ -134,7 +154,7 @@ app.whenReady().then(async()=>{
   if(phase==='select'){
    await fs.writeFile(path.join(nativeRoot,ids.sessionId+'.core-ready'),'Original Run creation returned')
    await until('original native binding',async()=> (await core()).nativeHandle?.sessionId===targetA)
-   await members([])
+   await members([],true)
    await until('unknown observation',async()=> (await core()).nativeSourceObservation?.state==='unknown')
    await menu();await shot('unknown');await dismiss();await raw()
    await members([targetA,targetB])
