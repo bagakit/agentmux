@@ -1,8 +1,10 @@
 import { mintObjectId } from '@agentmux/core/object-id'
+import { hasSelectedNativeTarget } from '@agentmux/core/agent-status'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxNativeSessionConfirmationInput } from '@agentmux/core'
 import type { SessionSnapshot } from '../../../shared/contracts'
+import { nativeSourceUnconfirmed } from '../../../shared/agent-native-source'
 import { api } from '../lib/api'
 import { useAppStore } from '../store'
 import { presentError } from '@agentmux/client-ui/error-presentation'
@@ -15,20 +17,35 @@ const ThemeActionReviewSourceIcon = semanticIconComponent('action.review-source'
 
 
 export type AgentNativeSourceReference = Pick<Extract<SessionSnapshot, { kind: 'agent' }>,
-  'id' | 'control' | 'nativeHandle' | 'observedNativeHandle' | 'nativeSourceObservation' | 'nativeConfirmation'>
+  'id' | 'control' | 'nativeHandle' | 'nativeBinding' | 'observedNativeHandle' | 'nativeSourceObservation' | 'nativeConfirmation'>
 type Agent = AgentNativeSourceReference
+type NativeCandidate = AgentMuxNativeSessionConfirmationInput['candidateNativeHandle']
+
+/** These are observed choices, not input authority; Core freshly verifies the chosen member. */
+function nativeCandidates(session: Agent): readonly NativeCandidate[] {
+  const observation = session.nativeSourceObservation
+  if (session.nativeHandle?.kind !== 'provider' || observation?.run.runId !== session.control.run.runId) return []
+  if (observation.state === 'ambiguous') return observation.candidates ?? []
+  return observation.state === 'changed' && session.observedNativeHandle?.kind === 'provider' ? [session.observedNativeHandle] : []
+}
 
 /** Capture the exact reviewed observation; only Core can authorize adopting it. */
-export function nativeConfirmationInput(session: Agent, operationId: string): AgentMuxNativeSessionConfirmationInput | null {
-  const old = session.nativeHandle, candidate = session.observedNativeHandle, observation = session.nativeSourceObservation
-  if (old?.kind !== 'provider' || candidate?.kind !== 'provider' || observation?.state !== 'changed' ||
-    observation.run.runId !== session.control.run.runId) return null
+export function nativeConfirmationInput(session: Agent, operationId: string,
+  candidate: NativeCandidate | undefined
+): AgentMuxNativeSessionConfirmationInput | null {
+  const old = session.nativeHandle, observation = session.nativeSourceObservation
+  if (old?.kind !== 'provider' || !observation || !candidate || !nativeCandidates(session).includes(candidate)) return null
   return { agentSessionId: session.id, expectedRun: { ...session.control.run }, expectedNativeHandle: structuredClone(old),
     candidateNativeHandle: structuredClone(candidate), expectedObservationAt: observation.observedAt, operationId }
 }
 
+function selectedTargetAvailable(session: Agent): boolean {
+  return hasSelectedNativeTarget({ ...session, run: session.control.run }) && !nativeSourceUnconfirmed(session)
+}
+
 export function nativeSourceLabel(session: Agent): string | undefined {
   const state = session.nativeSourceObservation?.state
+  if (selectedTargetAvailable(session)) return 'Target selected'
   return state === 'changed' ? 'Source changed' : state ? 'Source unknown' : undefined
 }
 
@@ -42,7 +59,8 @@ export function useAgentNativeSourceControls({ session, readOnly }: { session: A
   owner.current = identity
   useEffect(() => { setReview(null); setBusy(false); setNotice(null) }, [identity])
   const observation = session?.nativeSourceObservation
-  const canReview = session && !readOnly && nativeConfirmationInput(session, 'eligibility') !== null
+  const candidates = session && !readOnly ? nativeCandidates(session) : []
+  const targetSelected = session && selectedTargetAvailable(session)
   async function recheck() {
     if (!session) return
     const exactOwner = identity
@@ -64,7 +82,7 @@ export function useAgentNativeSourceControls({ session, readOnly }: { session: A
     try {
       const result = await api.sessions.confirmNativeSession({ ...session.control, run: review.expectedRun }, review)
       if (owner.current !== exactOwner) return
-      setNotice(result.current ? 'Native source confirmed.' : 'This earlier confirmation is retained; the current source is unchanged.')
+      setNotice(result.current ? 'Conversation target confirmed.' : 'This earlier confirmation is retained; the current source is unchanged.')
       setReview(null)
     } catch (cause) { if (owner.current === exactOwner) setNotice(presentError(cause)) }
     finally {
@@ -75,18 +93,20 @@ export function useAgentNativeSourceControls({ session, readOnly }: { session: A
   }
   if (!session) return null
   return <WorkbenchMenuScope.Consumer>{DropdownMenu => <>
-    <DropdownMenu.Label className="agent-region-menu__context agent-native-source" data-native-source-state={observation?.state ?? 'confirmed'}>
-      <span>Native session: {session.nativeHandle?.sessionId ?? 'Unknown'}</span>
+    <DropdownMenu.Label className="agent-region-menu__context agent-native-source" data-native-source-state={observation?.state ?? (session.nativeHandle ? 'confirmed' : 'unknown')}>
+      <span>Conversation target: {session.nativeHandle?.sessionId ?? 'Unknown'}</span>
+      {targetSelected ? <span>Explicitly selected for AgentMux conversation input and recovery.</span> : null}
       {observation ? <><strong>{nativeSourceLabel(session)}</strong><span>{observation.reason}</span>
         <span>Run: {observation.run.runId}</span>
-        <span>Observed candidate: {session.observedNativeHandle?.sessionId ?? 'Unknown'}</span>
-        <span>The retained source is pending confirmation. Terminal input remains available while the Run is healthy.</span></> : null}
+        {session.observedNativeHandle ? <span>Observed candidate: {session.observedNativeHandle.sessionId}</span> : null}
+        {observation.state === 'ambiguous' ? <span>Terminal selection is not reported.</span> : null}
+        <span>{targetSelected ? 'The selected target is retained.' : 'Review an exact target or check the source again.'} Terminal input remains available while the Run is healthy.</span></> : null}
       {review ? <div className="agent-native-source__review" data-native-source-review="">
-        <strong>Confirm native source change?</strong>
+        <strong>Confirm conversation target?</strong>
         <span>From: {review.expectedNativeHandle.sessionId}</span>
         <span>To: {review.candidateNativeHandle.sessionId}</span>
         <span>Observation: {review.expectedObservationAt}</span>
-        <span>This changes native conversation authority in this Session. Its Run, terminal and draft stay in place.</span>
+        <span>AgentMux conversation input and recovery will use this target. This does not switch the terminal; its Run and your draft stay in place.</span>
       </div> : null}
       {notice ? <span role="status">{notice}</span> : null}
     </DropdownMenu.Label>
@@ -100,8 +120,9 @@ export function useAgentNativeSourceControls({ session, readOnly }: { session: A
       <DropdownMenu.Item className="tab-context-menu__item" disabled={busy} onSelect={event => {
         event.preventDefault(); setReview(null)
       }}><ThemeActionCancelIcon size={14} /><span>Cancel source change</span></DropdownMenu.Item>
-    </> : canReview ? <DropdownMenu.Item className="tab-context-menu__item" disabled={busy} onSelect={event => {
-      event.preventDefault(); setNotice(null); setReview(nativeConfirmationInput(session, mintObjectId()))
-    }}><ThemeActionReviewSourceIcon size={14} /><span>Review source change…</span></DropdownMenu.Item> : null}
+    </> : candidates.map(candidate => <DropdownMenu.Item key={candidate.sessionId}
+      className="tab-context-menu__item agent-native-source__candidate" disabled={busy} onSelect={event => {
+        event.preventDefault(); setNotice(null); setReview(nativeConfirmationInput(session, mintObjectId(), candidate))
+      }}><ThemeActionReviewSourceIcon size={14} /><span>{observation?.state === 'changed' ? 'Review source change…' : `Choose target: ${candidate.sessionId}`}</span></DropdownMenu.Item>)}
   </>}</WorkbenchMenuScope.Consumer>
 }

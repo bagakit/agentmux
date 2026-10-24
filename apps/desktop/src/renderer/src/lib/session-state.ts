@@ -774,6 +774,7 @@ export function projectRuntimeEvent(
       nativeSessionId: _nativeSessionId,
       nativeHandle: _nativeHandle,
       nativeHandlePersistence: _nativeHandlePersistence,
+      nativeBinding: _nativeBinding,
       observedNativeHandle: _observedNativeHandle,
       nativeSourceObservation: _nativeSourceObservation,
       hookIngressObservation: _hookIngressObservation,

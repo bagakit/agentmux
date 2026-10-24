@@ -1,4 +1,5 @@
 import type { SessionSnapshot } from '../../../shared/contracts'
+import { nativeSourceUnconfirmed } from '../../../shared/agent-native-source'
 import { continuitySupervisionPresentation } from './continuity-supervision'
 import type { AgentSteerQueueEntry } from '../store'
 import { steerEntryTargetsRun, steerQueueCanEverDrain } from './agent-steer-queue-drain'
@@ -83,13 +84,13 @@ export function sessionServiceNotices(session: SessionSnapshot | undefined, queu
       restore: 'Open the original Agent to inspect its current work. A new native activity observation updates this state; no message is replayed.'
     } } })
   const nativeSource = session.nativeSourceObservation
-  if (nativeSource && nativeSource.run.runId === session.control.run.runId) notices.push({ id: 'native-source',
+  if (nativeSource && nativeSourceUnconfirmed(session)) notices.push({ id: 'native-source',
     occurrence: JSON.stringify(identity), cause: JSON.stringify([nativeSource.state, nativeSource.reason]), observedAt: nativeSource.observedAt,
     notice: { kind: 'indeterminate', notice: {
       step: nativeSource.state === 'changed' ? 'Native conversation source changed'
         : nativeSource.state === 'ambiguous' ? 'Native conversation source is ambiguous' : 'Native conversation source is unconfirmed',
       mode: `${nativeSource.reason}. This source observation is separate from current activity. The original Session and available input are kept.`,
-      restore: 'Inspect the original Agent and refresh its native history to retry source confirmation.'
+      restore: 'Open Session details in the original Agent menu to check the source and review an exact conversation target.'
     } } })
   const receipt = session.completedInteractionResponse
   if (receipt) notices.push({ id: 'interaction-receipt',

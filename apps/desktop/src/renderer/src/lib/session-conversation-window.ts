@@ -5,7 +5,7 @@ import { describeConversationWindow, projectConversationWindow } from '@agentmux
 import { CONVERSATION_MAX_WINDOW_RECORDS, type ConversationItemRef, type ConversationReadOptions, type ConversationWindowSnapshot } from '@agentmux/core/conversation'
 import { api } from './api'
 import type { SessionHistoryReference } from '../../../shared/contracts'
-import { nativeBindingKey, type AgentNativeSourceFacts } from '../../../shared/agent-native-source'
+import { nativeSourceKey, type AgentNativeSourceFacts } from '../../../shared/agent-native-source'
 import { desktopConversationDiagnostics } from './conversation-diagnostic-options'
 import type { ReadingDiagnosticReason } from '@agentmux/core/reading-diagnostic'
 
@@ -46,7 +46,8 @@ export function useSessionConversationWindow(reading: ConversationReading | unde
   const intent = useRef<ConversationReadingIntent>('seed')
   const admissionIntent = useRef<ConversationReadingIntent>('seed')
   const key = reading ? JSON.stringify([reading.reference.hostId, reading.reference.agentSessionId, reading.identity]) : ''
-  const bindingKey = reading?.nativeSourceFacts ? nativeBindingKey(reading.nativeSourceFacts) : ''
+  // Confirming the same target changes authority, not the source of this open reading window.
+  const bindingKey = reading?.nativeSourceFacts ? nativeSourceKey(reading.nativeSourceFacts) : ''
   const acceptedBinding = useRef({ key, bindingKey })
   const coverageDemand = useRef({ key, duration: coverageDuration, remaining: 2 })
   const protectionReason = useRef<ReadingDiagnosticReason>('unknown')
