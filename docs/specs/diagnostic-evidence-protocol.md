@@ -77,11 +77,20 @@ reader 生命周期归原宿主；复用一个 query 实例承担 service 总在
 | performance.scene | hostId、captureId | 原 Scene owner 已保留的 capture；读取不启动采集，无原 logId |
 | mote.context.client | client route hostId、原 resource scope、prepare/open-space action；open-space 另含完整 reference | 原 client action owner 的 latest-per-scope-action 事实；无 logId、持久化或健康结论 |
 | reading.lifecycle | hostId、logId、可选原 Core instance authority，或 recent 范围 | 原 Core read／watch 的有限阶段；仅当前实例，metadata-only，原 scope 与访问路线分开 |
+| agent.startup | hostId、logId、可选原 Core authority，或 recent 范围 | Core 已接受的原启动 unknown／failed 及其后来 ready；[领域类型](../../packages/core/src/startup-diagnostic.ts)保留原 Run／actor／lifecycle、来源时间与接收者，默认隐藏私有失败文本 |
 | client.incident | client route hostId、logId、可选原 archive authority，或 recent 范围 | 原 client 档案的有限 Terminal／连接／探测／读取阶段；[公共类型](../../packages/core/src/client-incident.ts) 持字段全集，保原 producer 和原 reading ID，确认状态逐记录表达 |
 | client.notifications | client route hostId、原通知 ID，或有界列表筛选 | 原通知 client 当前问题和保留活动；[公共类型](../../packages/core/src/client-notifications.ts)持字段与严格解析，无日志档案，读取不标读或恢复 |
 | native-recorder-failure | hostId、agentSessionId、runId | 当前缺原 producer，not-exposed/null 原引用；不冒根因已取得 |
 
 managed Agent 沿原 capability 认证，受自身 Host 路线限定，不能借 user/device 或 Runtime 私有权限读其他 Host。局部拒绝不关闭原健康 Agent。GUI 继续沿原领域消费事实，既有 message.delivery.inspect、toolkit.inspect/watch 语义和原件能力不被替换。
+
+`agent.startup` 的 `--recent` 不要求 Session ID，可按原 source observedAt 范围、SID／Run 和最多 32 条分页；cursor 绑定原 authority 与筛选，返回顺序是该 journal 的接收序列，不把来源 wall clock 当单调时钟。精确读取沿 `--logid` 和可选 `--authority`；恢复记录的 `previousLogId` 仅关联同一 SID／Run／actor／frontend／lifecycle 下原已保留的异常，不授予恢复权限。正常启动不新增记录，订阅前与 owner 空窗均是未知覆盖，不能从空页推定没有发生过故障。
+
+原 Headless semantic owner 注入已确认 runtimeId 和当时 ownerInstanceId；file Store 的 durable authority 可在另一 owner 下读回，bare SDK 仅有 instance 范围并留在有界内存。持久记录在原状态根旁独立存放，最多 128 条／512 KiB 记录 payload；索引、单条未完成发布凭据及临时候选分别有额外固定边界，最多 32 条待写观察、一个实际写入和四个实际文件读取。写入／索引失败停止本 owner 扩盘，保有界内存和缺口；新 owner 仅对一个原发布凭据对账，不碰 Session／Run／输入。取得独立诊断写锁后，最多检查该诊断目录 141 项；超过 140 项时停止新持久化并报告覆盖缺口，不删除未知临时文件，也不把目录项当 Agent 历史。此上限限制本机制继续扩盘，不声明已有未知文件的字节数或全盘保留量。索引损坏不覆盖原索引，合法 exact 原件与 recent 缺证分别表达。
+
+诊断写锁独立于 semantic lease。旧 owner 的真实诊断 IO 未结束时仍持原锁，Core 关闭与新 owner 的业务接回不等待它；新 owner 仅报告诊断 busy 并保有界观察，后续实际诊断读取或观察再尝试原锁并加载最新索引，没有后台重试计时器。诊断自身失败不会改变启动结果。
+
+安全摘要保原步骤和数字码（包括 `0`），字符串码仅沿有限安全集合；任意错误原文默认 withheld。显式 `--include-raw` 只返回已取得的 `failure.message/code` 有界材料，不含整个 Error、stack、环境、argv、Prompt 或终端副本；已知原 actor／Hook 凭据先精确脱敏，保原 JSON 材料字节数、实际留存字节数、裁切与脱敏事实，不把它冒充未加工完整原件。错误正文最多保留 4096 UTF-8 字节、字符串原码最多 2048 字节，实际 JSON 材料最多 8192 字节；转义膨胀会进一步裁切私有材料，保留安全事实。没取得材料时 `not-retained`。原 Run output 引用标 `not-captured`，读取该引用仍遵循原输出保留与权限合同。
 
 通知查询沿原 client 已提交的投影，面板收起时仍可读，不为请求重新挂载阅读 owner。每项保原来源、对象、Current／Activity、等级和阅读状态，准确 ID 与内容版本分别沿原身份压缩；不是 logId、操作身份或权限。`recordRef`、authority、persistence 与 envelope observedAt 均为空，scope 是 point-observation；实际接收或观察时间只在原条目中保留，缺失时不补造。原 document 的 instanceId 限定本次范围，未注册、已卸载或加载代次不匹配不能返回另一窗口或假空列表。
 
