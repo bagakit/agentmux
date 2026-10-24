@@ -6,14 +6,15 @@ import type { DurableAgentMuxMessageQueue } from './agent-global-message-queue.j
 import type { AgentMuxMessageNotification } from './agent-message-notification.js'
 import type { AgentMuxAgentSession, AgentPromptExecutionEvidence } from './types.js'
 import { messageNotificationSourceRuns } from './agent-message-notification-sources.js'
+import { AgentMuxError } from './errors.js'
 
 type Dependencies = {
   queue: DurableAgentMuxMessageQueue
   connected(): boolean
-  read(agentSessionId: string): Promise<{ session: AgentMuxAgentSession; inputByte: number | null; nativeIdle?: AgentPromptExecutionEvidence } | null>
+  read(agentSessionId: string): Promise<{ session: AgentMuxAgentSession; inputByte: number | null; nativeIdle?: AgentPromptExecutionEvidence; unavailable?: unknown } | null>
   submit(notification: AgentMuxMessageNotification): Promise<void>
   inputAbsent(key: AgentPromptInputKey): Promise<boolean>
-  unavailable(agentSessionId: string | undefined, error: unknown): void
+  unavailable(agentSessionId: string | undefined, error: unknown, run?: AgentMuxAgentSession['run']): void
 }
 
 /** Event-driven wakeups over the original journal, never an input or message owner. */
@@ -22,6 +23,7 @@ export class AgentMuxMessageNotifications {
   private readonly drains = new Map<string, { pending: Promise<void>; requested: boolean }>()
   private readonly attempted = new Map<string, string>()
   private readonly unconfirmedSources = new Map<string, string>()
+  private readonly unavailableReads = new Map<string, string>()
   private observation: ReturnType<typeof observeMessageJournal> | undefined
   private disposed = false
 
@@ -70,10 +72,22 @@ export class AgentMuxMessageNotifications {
   }
 
   private async drain(agentSessionId: string): Promise<void> {
-    if (!await this.deps.queue.hasPendingNotification(agentSessionId)) { this.recipients.delete(agentSessionId); this.attempted.delete(agentSessionId); this.unconfirmedSources.delete(agentSessionId); return }
+    if (!await this.deps.queue.hasPendingNotification(agentSessionId)) { this.recipients.delete(agentSessionId); this.attempted.delete(agentSessionId); this.unconfirmedSources.delete(agentSessionId); this.unavailableReads.delete(agentSessionId); return }
     const current = await this.deps.read(agentSessionId)
     if (!current || this.disposed) return
     const { session, inputByte, nativeIdle } = current
+    if ('unavailable' in current) {
+      const error = current.unavailable
+      // This identity merges only observations. It never grants input or settles a claim.
+      const failure = JSON.stringify([session.run.runId, error instanceof AgentMuxError ? error.code : null,
+        error instanceof Error ? error.message : String(error)])
+      if (this.unavailableReads.get(agentSessionId) !== failure) {
+        this.unavailableReads.set(agentSessionId, failure)
+        this.deps.unavailable(agentSessionId, error, session.run)
+      }
+      return
+    }
+    this.unavailableReads.delete(agentSessionId)
     // A completion or exact initial idle selects an opportunity. The Input owner and Provider must
     // still confirm this exact source and idle-only admission before any input.
     const completionId = agentTurnCompletionIdentity(session)
@@ -92,13 +106,13 @@ export class AgentMuxMessageNotifications {
         const gap = JSON.stringify([session.run.runId, sourceRuns, excluded])
         if (this.unconfirmedSources.get(agentSessionId) !== gap) {
           this.unconfirmedSources.set(agentSessionId, gap)
-          this.deps.unavailable(agentSessionId, new Error('A retained Inbox reference belongs to a historical Run whose semantic recovery relationship to this writer is unconfirmed. Read the original Inbox or explicitly notify its MID; no original input was replayed.'))
+          this.deps.unavailable(agentSessionId, new Error('A retained Inbox reference belongs to a historical Run whose semantic recovery relationship to this writer is unconfirmed. Read the original Inbox or explicitly notify its MID; no original input was replayed.'), session.run)
         }
       }
     } catch (error) {
       const gap = JSON.stringify([session.run.runId, sourceRuns, 'unavailable'])
       if (this.unconfirmedSources.get(agentSessionId) !== gap) {
-        this.unconfirmedSources.set(agentSessionId, gap); this.deps.unavailable(agentSessionId, error)
+        this.unconfirmedSources.set(agentSessionId, gap); this.deps.unavailable(agentSessionId, error, session.run)
       }
     }
     // Our own rejected claim changes the predecessor, not the idle opportunity.
@@ -110,13 +124,13 @@ export class AgentMuxMessageNotifications {
       notificationId, condition, idle, sourceRuns,
       originalInputAbsent: () => this.deps.inputAbsent({ kind: 'prompt', agentSessionId, expectedRun: condition.expectedRun, submissionId: notificationId }) })
     if (notice) await this.deps.submit(notice)
-    if (!await this.deps.queue.hasPendingNotification(agentSessionId)) { this.recipients.delete(agentSessionId); this.attempted.delete(agentSessionId); this.unconfirmedSources.delete(agentSessionId) }
+    if (!await this.deps.queue.hasPendingNotification(agentSessionId)) { this.recipients.delete(agentSessionId); this.attempted.delete(agentSessionId); this.unconfirmedSources.delete(agentSessionId); this.unavailableReads.delete(agentSessionId) }
   }
 
   async dispose(): Promise<void> {
     this.disposed = true
     this.observation?.dispose()
     await Promise.allSettled([...this.drains.values()].map(value => value.pending))
-    this.drains.clear(); this.recipients.clear(); this.attempted.clear(); this.unconfirmedSources.clear()
+    this.drains.clear(); this.recipients.clear(); this.attempted.clear(); this.unconfirmedSources.clear(); this.unavailableReads.clear()
   }
 }

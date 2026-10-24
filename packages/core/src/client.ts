@@ -1053,24 +1053,27 @@ export class AgentMuxClient {
         const run = await this.requireCurrentAgentRun(current)
         const session = this.projectSession(current)
         const provider = this.providers.get(session.providerId)
-        if (!provider.prepareNativeInput) throw new AgentMuxError(
+        const observation = { session, inputByte: run.acceptedInputBytes }
+        if (!provider.prepareNativeInput) return { ...observation, unavailable: new AgentMuxError(
           'This Provider has no native input adapter for idle-only Inbox notifications. Read the original MID or explicitly use message.notify; the original Agent and manual input remain available.',
-          'AGENT_NATIVE_INPUT_UNAVAILABLE')
-        if (agentTurnCompletionIdentity(session)) return { session, inputByte: run.acceptedInputBytes }
+          'AGENT_NATIVE_INPUT_UNAVAILABLE') }
+        if (agentTurnCompletionIdentity(session)) return observation
         if (session.semanticStatus?.state === 'working' || session.currentActivity?.state === 'active') {
-          return { session, inputByte: run.acceptedInputBytes }
+          return observation
         }
-        const evidence = await provider.readPromptExecutionEvidence?.(this.providerNativeContext(session, run))
-        if (evidence?.state === 'idle') return { session, inputByte: run.acceptedInputBytes, nativeIdle: evidence }
-        if (!evidence) throw new AgentMuxError('The Provider initial idle opportunity is unconfirmed. Inspect the original Session or read its retained Inbox.', 'AGENT_TURN_END_UNCONFIRMED')
-        return { session, inputByte: run.acceptedInputBytes }
+        try {
+          const evidence = await provider.readPromptExecutionEvidence?.(this.providerNativeContext(session, run))
+          if (evidence?.state === 'idle') return { ...observation, nativeIdle: evidence }
+          if (!evidence) return { ...observation, unavailable: new AgentMuxError('The Provider initial idle opportunity is unconfirmed. Inspect the original Session or read its retained Inbox.', 'AGENT_TURN_END_UNCONFIRMED') }
+          return observation
+        } catch (error) { return { ...observation, unavailable: error } }
       },
       submit: notice => this.submitMessageNotification(notice),
       inputAbsent: async key => !await this.inspectAgentPromptSubmission(key),
-      unavailable: (agentSessionId, error) => this.publisher.publish({ type: 'agent-error',
+      unavailable: (agentSessionId, error, run) => this.publisher.publish({ type: 'agent-error',
         ...(agentSessionId ? { agentSessionId } : {}), code: 'A2A_NOTIFICATION_UNCONFIRMED',
         message: `Inbox notification is unconfirmed. Original messages and healthy manual input are retained; read the original MID or explicitly notify it. ${error instanceof Error ? error.message : String(error)}`,
-        evidence: { source: 'agentmux', observedAt: Date.now() } })
+        evidence: { source: 'agentmux', observedAt: Date.now(), ...(run ? { run } : {}) } })
     })
     this.messageNotificationsUnsubscribe = this.publisher.onStatusEvent(event => {
       if (event.type === 'agent-session') this.messageNotifications.changed(event.session.agentSessionId)
