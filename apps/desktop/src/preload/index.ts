@@ -659,7 +659,7 @@ const api: AgentMuxPreloadApi = {
   },
   toolkit: {
     list: async () => (await ipcRenderer.invoke('toolkit:list')).tools,
-    get: async (toolId) => (await ipcRenderer.invoke('toolkit:get', toolId)).snapshot,
+    get: async (toolId, executionId) => (await ipcRenderer.invoke('toolkit:get', toolId, executionId)).snapshot,
     script: async (toolId) => (await ipcRenderer.invoke('toolkit:script', toolId)).script,
     run: async (toolId, input) => (await ipcRenderer.invoke('toolkit:run', toolId, input)).snapshot,
     evaluate: async (toolId, input) => (await ipcRenderer.invoke('toolkit:evaluate', toolId, input)).snapshot,

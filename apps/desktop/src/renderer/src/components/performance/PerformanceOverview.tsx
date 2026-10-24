@@ -32,12 +32,13 @@ type Section = typeof sections[number][0]
 function Facts({ children }: { children: React.ReactNode }) { return <dl className="performance-facts">{children}</dl> }
 
 export function PerformanceOverview({ snapshot, close, paused = false, pending = false, error, onPause, onConfigure, onViewScript, onManageBrowsers,
-  scene, heap, singleCaptureBusy = false, onSingleCaptureBusyChange }: {
+  scene, heap, singleCaptureBusy = false, onSingleCaptureBusyChange, recovering = false, startNewObservation }: {
   snapshot: ToolkitMetricsSnapshot | null; close(): void
   paused?: boolean; pending?: boolean; error?: string | null; onPause?(): void; onConfigure(): void; onViewScript(): void
   onManageBrowsers?(): void
   scene?: PerformanceSceneState; singleCaptureBusy?: boolean; onSingleCaptureBusyChange?(busy: boolean): void
   heap?: PerformanceHeapSnapshotState
+  recovering?: boolean; startNewObservation?(): void
 }) {
   const [section, setSection] = useState<Section>('overview')
   const [expanded, setExpanded] = useState(false)
@@ -75,6 +76,10 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
     <div ref={body} className="performance-body" onScroll={event => { scroll.current[section] = event.currentTarget.scrollTop }}>
       <span className="performance-reading-time">{readingTime(source?.lastSuccessAt, snapshot?.observedAt)}</span>
       {error || snapshot?.reason ? <p className="performance-state" data-tone="warning">{error ?? snapshot?.reason}</p> : null}
+      {snapshot?.state === 'unknown' && snapshot.run === null && startNewObservation ? <div className="performance-state">
+        <p>The previous creation is unconfirmed. A new observation keeps its original record and does not retry or stop that execution.</p>
+        <button type="button" className="performance-inline-action" disabled={recovering} onClick={startNewObservation}>{recovering ? 'Starting new observation…' : 'Start new observation'}</button>
+      </div> : null}
       <section role="tabpanel" id={navigationId + '-panel-overview'} aria-labelledby={navigationId + '-overview'} hidden={section !== 'overview'} data-performance-section="overview">
         <PerformanceHostResources observation={observation} observedAt={snapshot?.observedAt} />
         <div className="performance-section-heading"><strong>AgentMux</strong><button type="button" className="performance-inline-action" onClick={() => setSection('resources')}>Inspect resources →</button></div>
@@ -104,6 +109,7 @@ export function PerformanceOverview({ snapshot, close, paused = false, pending =
       <details className="performance-disclosure performance-sources"><summary>Observation details <ThemeNavigationDownIcon size={12} /></summary><Facts>
         <dt>Host / Main</dt><dd>{observation ? `${observation.scope.hostname} · ${observation.scope.mainPid}` : '—'}</dd>
         <dt>Execution</dt><dd>{snapshot?.executionId ?? '—'}</dd><dt>Source state</dt><dd>{source?.state ?? 'pending'}</dd>
+        {snapshot?.previousUnknownExecutionId ? <><dt>Previous unconfirmed execution</dt><dd>{snapshot.previousUnknownExecutionId}</dd></> : null}
         <dt>Observed</dt><dd>{readingTime(source?.observedAt, snapshot?.observedAt)}</dd><dt>CPU · App / Run</dt><dd>100% = one logical core · interval / ps averages · 10s reading peak</dd>
         <dt>Run RSS</dt><dd>Root + attributed descendants; shared pages may count in multiple processes.</dd>
       </Facts></details>

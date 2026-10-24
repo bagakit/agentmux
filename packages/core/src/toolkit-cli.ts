@@ -11,6 +11,17 @@ export async function parseToolkitCommand(args: readonly string[]): Promise<Tool
   const [action, toolId] = args
   if (action === 'ls' && args.length === 1) return { method: 'toolkit.ls', params: {} }
   if (!toolId?.length) invalid('An exact Toolkit ID is required.')
+  if (action === 'inspect' && toolId === 'performance') {
+    let executionId: string | undefined, includeFailureEvidence = false
+    for (let index = 2; index < args.length; index++) {
+      const flag = args[index]
+      if (flag === '--failure-evidence' && !includeFailureEvidence) includeFailureEvidence = true
+      else if (flag === '--execution-id' && executionId === undefined && args[index + 1]) executionId = args[++index]
+      else invalid('Use one --execution-id and/or --failure-evidence for Performance inspect.')
+    }
+    return { method: 'toolkit.inspect', params: { toolId, ...(executionId ? { executionId } : {}),
+      ...(includeFailureEvidence ? { includeFailureEvidence: true } : {}) } }
+  }
   if (action === 'install') {
     const flags = new Map<string, string>()
     for (let index = 2; index < args.length; index++) {
@@ -27,7 +38,7 @@ export async function parseToolkitCommand(args: readonly string[]): Promise<Tool
     parseToolkitPackageFields(value, false, 'INVALID_CLI_ARGUMENT', true)
     return { method: 'toolkit.create', params: { toolId, value } }
   }
-  if ((action === 'watch' || toolId === 'performance' && action === 'inspect') && args.length > 2) {
+  if (action === 'watch' && args.length > 2) {
     const flags = args.slice(2), allowed = action === 'watch'
       ? ['--evaluate', ...(toolId === 'performance' ? ['--capture-failure', '--failure-evidence'] : [])] : ['--failure-evidence']
     if (new Set(flags).size !== flags.length || flags.some(flag => !allowed.includes(flag))) invalid('Use distinct Toolkit evaluation or supported Performance capture/read flags.')

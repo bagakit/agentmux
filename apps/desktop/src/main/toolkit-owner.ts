@@ -1,4 +1,4 @@
-import { parseToolkitSnapshot } from '@agentmux/core/toolkit'
+import { parseToolkitSnapshot, parseToolkitPerformanceRecoveryInput, type ToolkitPerformanceRecoveryInput } from '@agentmux/core/toolkit'
 import { parseToolkitResultDocument } from '@agentmux/core/toolkit-result-document'
 import { openToolkitResultChannel } from '@agentmux/core/toolkit-result-channel'
 import { mintObjectId } from '@agentmux/core/object-id'
@@ -7,7 +7,7 @@ import { AgentMuxError, DurableWriteError, type AgentMuxClientEvent, type AgentM
 import { AGENTMUX_CONTROL_MAX_MESSAGE_BYTES, parseMetricsObservation, AGENTMUX_CONTROL_REQUEST_TIMEOUT_MS, type AgentMuxToolkitPort,
   type ToolkitRequest, type ToolkitResult, type ToolkitSnapshot, type ToolkitMetricsSnapshot,
 } from '@agentmux/core/control'
-import { ToolkitFailureCapture, toolkitFailureError, parseToolkitPerformanceFailureDetails,
+import { ToolkitFailureCapture, toolkitFailureError, parseToolkitPerformanceFailure, parseToolkitPerformanceFailureDetails,
   type ToolkitPerformanceIssue, type ToolkitPerformanceFailure, type ToolkitPerformanceFailureDetails, type ToolkitPerformanceFailureStage } from '@agentmux/core/toolkit-performance-failure'
 import { readPerformanceScript, type PerformanceLaunch } from './toolkit-asset.js'
 import { bundledToolkitTools, bundledToolkitScript } from './toolkit-bundled.js'
@@ -30,8 +30,9 @@ type Execution = { id: string; ref: AgentMuxRunRef | null; port: ToolkitRunPort 
   exit: { code: number | null; signal: string | null } | null
   terminalCursor: number; terminalCapture: ToolkitFailureCapture | null
   lastAppObservedAt: number | null; cursor: number; buffer: string; decoder: TextDecoder; sequence: number }
-type PerformanceReceipt = { schema: 'agentmux.performance.receipt.v1'; admission:
-  (Pick<ToolkitMetricsSnapshot, 'executionId' | 'run' | 'reason' | 'startedAt'>) | null }
+type PerformanceAdmission = Pick<ToolkitMetricsSnapshot, 'executionId' | 'run' | 'reason' | 'startedAt'>
+type Recovery = { invocationId: string; admission: PerformanceAdmission; failure: ToolkitPerformanceFailure | null }
+type PerformanceReceipt = { schema: 'agentmux.performance.receipt.v1'; admission: PerformanceAdmission | null; recoveries?: Recovery[] }
 /** Observation state only. Core/ctxmux remains the sole Run and process owner. */
 export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
   private readonly leases = new Set<Lease>()
@@ -42,25 +43,28 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
   private loaded: Promise<void> | null = null
   private execution: Execution | null = null
   private failure: ToolkitPerformanceFailure | null = null
+  private recoveries: Recovery[] = []
   private value: ToolkitMetricsSnapshot = { schema: 'agentmux.toolkit.v1', kind: 'metrics', toolId: 'performance', executionId: null,
     run: null, state: 'idle', reason: null, startedAt: null, observedAt: null, observation: null,
     document: null, diagnostics: { captureEnabled: false, failureEvidence: 'none', droppedWrites: 0, lastFailure: null, persistence: 'not-requested', issue: null, cleanupIssue: null }, manual: false, consumerCount: 0, sequence: 0, trend: [] }
   constructor(private readonly args: { openRunPort(): Promise<ToolkitRunPort>; launch(): PerformanceLaunch
     enabled(): boolean; failures?: Pick<PerformanceFailureStore, 'read' | 'save'>; receipts: Pick<ToolkitReceiptStore, 'read' | 'save'>; mainPid?: number; now?: () => number }) {}
   get current(): ToolkitMetricsSnapshot { return this.snapshot() }
-  private snapshot(includeFailureEvidence = false): ToolkitMetricsSnapshot {
-    const retained = this.failure !== null && this.hasFailureEvidence(this.failure) ||
-      this.value.diagnostics.issue?.message != null || this.value.diagnostics.cleanupIssue?.message != null ||
-      this.value.diagnostics.output?.terminal != null || this.value.diagnostics.output?.stderr != null
+  private snapshot(includeFailureEvidence = false, value = this.value, failure = this.failure): ToolkitMetricsSnapshot {
+    const retained = failure !== null && this.hasFailureEvidence(failure) ||
+      value.diagnostics.issue?.message != null || value.diagnostics.cleanupIssue?.message != null ||
+      value.diagnostics.output?.terminal != null || value.diagnostics.output?.stderr != null
     const safeIssue = (issue: ToolkitPerformanceIssue | null) => issue === null ? null : { ...issue, message: null }
-    const diagnostics = { ...this.value.diagnostics,
-      lastFailure: includeFailureEvidence ? this.failure : this.value.diagnostics.lastFailure,
-      issue: includeFailureEvidence ? this.value.diagnostics.issue : safeIssue(this.value.diagnostics.issue),
-      cleanupIssue: includeFailureEvidence ? this.value.diagnostics.cleanupIssue : safeIssue(this.value.diagnostics.cleanupIssue),
-      ...(this.value.diagnostics.output ? { output: includeFailureEvidence ? this.value.diagnostics.output :
-        { ...this.value.diagnostics.output, terminal: null, stderr: null } } : {}),
+    const diagnostics = { ...value.diagnostics,
+      lastFailure: includeFailureEvidence ? failure : failure ? this.safeFailure(failure) : null,
+      issue: includeFailureEvidence ? value.diagnostics.issue : safeIssue(value.diagnostics.issue),
+      cleanupIssue: includeFailureEvidence ? value.diagnostics.cleanupIssue : safeIssue(value.diagnostics.cleanupIssue),
+      ...(value.diagnostics.output ? { output: includeFailureEvidence ? value.diagnostics.output :
+        { ...value.diagnostics.output, terminal: null, stderr: null } } : {}),
       failureEvidence: retained ? (includeFailureEvidence ? 'included' as const : 'retained' as const) : 'none' as const }
-    return structuredClone({ ...this.value, diagnostics, manual: this.manual, consumerCount: this.leases.size })
+    return structuredClone({ ...value, diagnostics, ...(value === this.value ? {
+      manual: this.manual, consumerCount: this.leases.size,
+      ...(this.recoveries.length ? { previousUnknownExecutionId: this.recoveries.at(-1)!.admission.executionId! } : {}) } : {}) })
   }
   private hasFailureEvidence(failure: ToolkitPerformanceFailure) {
     return failure.details.bytes !== null || failure.details.error.stack !== null || failure.details.error.message !== null || (failure.details.diagnosticOutput?.length ?? 0) > 0
@@ -100,20 +104,26 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
         const receipt = await this.args.receipts.read('performance') as PerformanceReceipt | null
         if (receipt === null) return
         if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) ||
-          receipt.schema !== 'agentmux.performance.receipt.v1' || Object.keys(receipt).sort().join() !== 'admission,schema') {
+          receipt.schema !== 'agentmux.performance.receipt.v1' || !Object.hasOwn(receipt, 'admission') ||
+          Object.keys(receipt).some(key => !['schema', 'admission', 'recoveries'].includes(key))) {
           throw new AgentMuxError('Performance receipt is invalid.', 'CONTROL_PROTOCOL_ERROR')
+        }
+        if (receipt.recoveries !== undefined) {
+          if (!Array.isArray(receipt.recoveries)) throw new AgentMuxError('Performance recovery records are invalid.', 'CONTROL_PROTOCOL_ERROR')
+          const ids = new Set<string>(), invocations = new Set<string>()
+          for (const entry of receipt.recoveries) {
+            if (!entry || Object.keys(entry).sort().join() !== 'admission,failure,invocationId') throw new AgentMuxError('Performance recovery record is invalid.', 'CONTROL_PROTOCOL_ERROR')
+            this.parseAdmission(entry.admission)
+            parseToolkitPerformanceRecoveryInput({ invocationId: entry.invocationId, expectedExecutionId: entry.admission.executionId }, 'CONTROL_PROTOCOL_ERROR')
+            if (entry.failure !== null) parseToolkitPerformanceFailure(entry.failure)
+            if (ids.has(entry.admission.executionId!) || invocations.has(entry.invocationId)) throw new AgentMuxError('Performance recovery identity is ambiguous.', 'CONTROL_PROTOCOL_ERROR')
+            ids.add(entry.admission.executionId!); invocations.add(entry.invocationId)
+          }
+          this.recoveries = receipt.recoveries
         }
         if (receipt.admission === null) return
         const admission = receipt.admission
-        if (!admission || typeof admission !== 'object' || Array.isArray(admission) ||
-          Object.keys(admission).sort().join() !== 'executionId,reason,run,startedAt') {
-          throw new AgentMuxError('Performance admission is invalid.', 'CONTROL_PROTOCOL_ERROR')
-        }
-        const value = parseToolkitSnapshot({ ...this.value, ...admission, state: 'unknown' })
-        if (value.kind !== 'metrics' || value.executionId === null || value.startedAt === null ||
-          (value.run !== null && value.run.hostId !== 'local')) {
-          throw new AgentMuxError('Performance admission identity is invalid.', 'CONTROL_PROTOCOL_ERROR')
-        }
+        const value = this.parseAdmission(admission)
         const execution = this.newExecution(value.executionId)
         execution.ref = value.run === null ? null : { runId: value.run.runId }
         execution.creationPending = execution.ref === null
@@ -126,6 +136,14 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
       }
     })()
     return await this.loaded
+  }
+  private parseAdmission(admission: PerformanceAdmission): ToolkitMetricsSnapshot & { executionId: string; startedAt: number } {
+    if (!admission || typeof admission !== 'object' || Array.isArray(admission) ||
+      Object.keys(admission).sort().join() !== 'executionId,reason,run,startedAt') throw new AgentMuxError('Performance admission is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    const value = parseToolkitSnapshot({ ...this.value, ...admission, state: 'unknown' })
+    if (value.kind !== 'metrics' || value.executionId === null || value.startedAt === null ||
+      value.run !== null && value.run.hostId !== 'local') throw new AgentMuxError('Performance admission identity is invalid.', 'CONTROL_PROTOCOL_ERROR')
+    return value as ToolkitMetricsSnapshot & { executionId: string; startedAt: number }
   }
   private failureLoaded: Promise<void> | null = null
   private loadFailure(): Promise<void> {
@@ -150,7 +168,8 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     execution.receiptUnconfirmed = true
     const receipt: PerformanceReceipt = { schema: 'agentmux.performance.receipt.v1', admission: {
       executionId: execution.id, run: execution.ref === null ? null : { hostId: 'local', runId: execution.ref.runId },
-      startedAt: this.value.startedAt, reason: this.value.reason } }
+      startedAt: this.value.startedAt, reason: this.value.reason },
+      ...(this.recoveries.length ? { recoveries: this.recoveries } : {}) }
     await this.args.receipts.save('performance', receipt)
     execution.admissionSaved = true; execution.receiptUnconfirmed = false
   }
@@ -166,10 +185,27 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
     await this.load()
     if (request.operation === 'toolkit.get') {
       await this.loadFailure()
+      if (request.executionId !== undefined && request.executionId !== this.value.executionId) {
+        const index = this.recoveries.findIndex(entry => entry.admission.executionId === request.executionId)
+        const record = this.recoveries[index]
+        if (!record) throw new AgentMuxError('The requested Performance execution is not retained.', 'CONTROL_TARGET_UNAVAILABLE')
+        const historical = { ...this.parseAdmission(record.admission), manual: false, consumerCount: 0,
+          observation: null, document: null, observedAt: null, sequence: 0, trend: [],
+          diagnostics: { captureEnabled: false, failureEvidence: 'none' as const, droppedWrites: 0,
+            lastFailure: null, persistence: record.failure ? 'observed-on-disk' as const : 'not-requested' as const, issue: null, cleanupIssue: null },
+          ...(index > 0 ? { previousUnknownExecutionId: this.recoveries[index - 1]!.admission.executionId! } : {}) }
+        return { operation: request.operation, snapshot: this.snapshot(request.includeFailureEvidence === true, historical, record.failure) }
+      }
       return { operation: request.operation, snapshot: this.snapshot(request.includeFailureEvidence === true) }
     }
     if (request.operation === 'toolkit.run') {
       this.allowed(signal)
+      if (request.input !== undefined) {
+        const input = parseToolkitPerformanceRecoveryInput(request.input)
+        await this.loadFailure()
+        await this.ensure(false, input, signal)
+        return { operation: request.operation, snapshot: this.current }
+      }
       await this.reconcileUnknown()
       if (this.value.state === 'unknown') throw new AgentMuxError('Previous tool outcome is unconfirmed: ' + this.value.reason, 'CONTROL_UNAVAILABLE')
       // Admission is the explicit write. A lost receipt is unknown, not an implicit undo.
@@ -216,15 +252,39 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
       return { dispose: lease.release }
     } catch (error) { lease.release(); throw error }
   }
-  private async ensure(captureFailure = false): Promise<void> {
+  private async ensure(captureFailure = false, recovery?: ToolkitPerformanceRecoveryInput, signal?: AbortSignal): Promise<void> {
+    if (this.starting) {
+      try { await this.starting } catch (error) { if (!recovery) throw error }
+    }
     if (this.stopping) await this.stopping
-    if (!this.wanted()) return
+    if (!this.wanted() && !recovery) return
     await this.reconcileUnknown()
-    if (this.value.state === 'unknown') throw new AgentMuxError('Previous tool cleanup is unconfirmed: ' + this.value.reason, 'CONTROL_UNAVAILABLE')
-    if (this.starting) return await this.starting
+    if (this.starting) {
+      if (!recovery) return await this.starting
+      try { await this.starting } catch { /* Reconcile this invocation against the retained handoff below. */ }
+      return await this.ensure(captureFailure, recovery, signal)
+    }
+    if (recovery) {
+      this.allowed(signal!)
+      const retained = this.recoveries.find(entry => entry.invocationId === recovery.invocationId)
+      if (retained) {
+        if (retained.admission.executionId !== recovery.expectedExecutionId || this.value.executionId !== recovery.invocationId)
+          throw new AgentMuxError('This recovery already belongs to its original execution. Inspect that execution without resending.', 'TOOLKIT_RECOVERY_CONFLICT')
+        return
+      }
+      if (!this.hasUnconfirmedAdmission() || this.execution?.ref || !this.execution?.ended ||
+          this.value.executionId !== recovery.expectedExecutionId ||
+          this.recoveries.some(entry => entry.admission.executionId === recovery.invocationId) || this.value.executionId === recovery.invocationId)
+        throw new AgentMuxError('The expected unknown Performance execution changed. Inspect the current observation.', 'TOOLKIT_RECOVERY_CONFLICT')
+      this.recoveries = [...this.recoveries, { invocationId: recovery.invocationId,
+        admission: { executionId: this.value.executionId, run: this.value.run, reason: this.value.reason, startedAt: this.value.startedAt },
+        failure: this.failure === null ? null : structuredClone(this.failure) }]
+      this.manual = true
+    } else if (this.value.state === 'unknown') throw new AgentMuxError('Previous tool cleanup is unconfirmed: ' + this.value.reason, 'CONTROL_UNAVAILABLE')
     if (this.execution?.ref && !this.execution.ended) return
     let id: string
-    do { id = mintObjectId() } while (id === this.value.executionId)
+    if (recovery) id = recovery.invocationId
+    else do { id = mintObjectId() } while (id === this.value.executionId || this.recoveries.some(entry => entry.invocationId === id || entry.admission.executionId === id))
     const execution = this.newExecution(id)
     execution.captureFailure = captureFailure
     this.execution = execution
@@ -234,13 +294,14 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
         output: { executionId: execution.id, run: null, terminalBytes: 0, stderrBytes: 0, terminalGap: false, terminal: null, stderr: null } } }
     this.publish()
     const work = async () => {
+      if (recovery) { execution.stage = 'admission'; await this.save(execution); this.allowed(signal!) }
       const launch = this.args.launch()
       execution.stage = 'launch'
       await readPerformanceScript(launch)
       if (!this.wanted() || execution.ended) return
       // Admit durably before acquiring or dispatching the native creation port.
       execution.stage = 'admission'
-      await this.save(execution)
+      if (!execution.admissionSaved) await this.save(execution)
       execution.stage = 'run-port'
       const port = await this.args.openRunPort()
       execution.port = port
@@ -259,6 +320,7 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
         onError: error => { if (!execution.ended) { execution.stage = 'result-channel'; this.fail(execution, error) } }
       })
       if (!this.wanted() || execution.ended) return
+      if (recovery) this.allowed(signal!)
       execution.creationPending = true
       execution.stage = 'create'
       let run: Awaited<ReturnType<ToolkitRunPort['create']>>
@@ -570,7 +632,8 @@ export class PerformanceToolkitOwner implements AgentMuxToolkitPort {
         }
         execution.receiptUnconfirmed = true
         operation = 'clear-admission'
-        await this.args.receipts.save('performance', { schema: 'agentmux.performance.receipt.v1', admission: null } satisfies PerformanceReceipt)
+        await this.args.receipts.save('performance', { schema: 'agentmux.performance.receipt.v1', admission: null,
+          ...(this.recoveries.length ? { recoveries: this.recoveries } : {}) } satisfies PerformanceReceipt)
         execution.receiptUnconfirmed = false
         if (this.execution === execution) { this.execution = null; this.value.run = null; this.value.diagnostics.captureEnabled = false; this.value.state = failed ? 'failed' : 'paused' }
       } catch (error) {
