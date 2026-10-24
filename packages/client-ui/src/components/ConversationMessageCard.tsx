@@ -60,22 +60,32 @@ export function SubagentReportCard({ identity, collaboration, located, preview, 
   useEffect(() => { setDisclosure({ identity, open: located, presented: located }) }, [identity])
   useEffect(() => { if (located) setDisclosure({ identity, open: true, presented: true }) }, [located])
   function show(open: boolean) { setDisclosure({ identity, open, presented: true }) }
-  return <MessageCardFrame {...slots} heading={<button type="button" className="log-turn__collaboration-toggle"
-    aria-label={`${open ? '收起' : '展开'} Subagent ${collaboration.sender ?? '路径未记录'}`}
-    aria-expanded={open} aria-controls={contentId} onClick={() => show(!open)}>
-    <SemanticIcon name="navigation.disclosure" size={12} aria-hidden="true" />
-    <span className="log-turn__collaboration-label">Subagent</span>
-    <code className="log-turn__collaboration-path" title={collaboration.sender}>{collaboration.sender ?? '路径未记录'}</code>
-    {collaboration.recipient ? <span className="log-turn__collaboration-recipient" title={`接收者 ${collaboration.recipient}`}>→ {collaboration.recipient}</span> : null}
-  </button>}>
-    {!open && (preview || hasResources) ? <button type="button" className="log-turn__collaboration-preview" aria-label="展开协作消息正文" onClick={() => show(true)}>
-      {preview || '包含按需读取的内容 · 展开查看'}
-    </button> : null}
+  return <>
+    <div className="log-turn__head log-turn__collaboration-head">
+      <button type="button" className="log-turn__collaboration-toggle"
+        aria-label={`${open ? '收起' : '展开'} Subagent ${collaboration.sender ?? '路径未记录'}`}
+        aria-expanded={open} aria-controls={contentId} onClick={() => show(!open)}>
+        <span className="log-turn__collaboration-node"><SemanticIcon name="navigation.disclosure" className="log-turn__collaboration-chevron" size={12} aria-hidden="true" /></span>
+        <span className="log-turn__collaboration-label"><SemanticIcon name="object.subagent" size={12} aria-hidden="true" />Subagent</span>
+        {slots.time}
+        <code className="log-turn__collaboration-path" title={collaboration.sender}>{collaboration.sender ?? '路径未记录'}</code>
+        {!open && (preview || hasResources) ? <span className="log-turn__collaboration-preview">
+          {preview || '包含按需读取的内容 · 展开查看'}
+        </span> : null}
+        {slots.badges}
+      </button>
+      {slots.actions}{slots.details}{slots.feedback}
+    </div>
+    {slots.metadata}
     <div id={contentId} className="log-turn__collaboration-content" hidden={!open} inert={!open}>
       {current.presented || open ? <>
+        <dl className="log-turn__collaboration-participants">
+          <div><dt>发送者</dt><dd><code>{collaboration.sender ?? '路径未记录'}</code></dd></div>
+          {collaboration.recipient ? <div><dt>接收者</dt><dd><code>{collaboration.recipient}</code></dd></div> : null}
+        </dl>
         {emptyText ? <p className="log-turn__collaboration-empty">原生记录未提供可读正文，可在消息详情中查看原始内容。</p> : null}
         {renderBody()}
       </> : null}
     </div>
-  </MessageCardFrame>
+  </>
 }

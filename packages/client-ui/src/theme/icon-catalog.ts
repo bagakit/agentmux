@@ -5,6 +5,7 @@ export { ICON_GLYPHS, ICON_GLYPH_IDS, AUTHORED_ICON_GLYPH_IDS, type IconGlyphId 
 export const SEMANTIC_ICON_CATALOG = {
   'action.fork-conversation': { label: 'Fork current conversation', glyph: 'git-fork' },
   'object.relationships': { label: 'Note relationships', glyph: 'topology-nodes' },
+  'object.subagent': { label: 'Native Subagent report', glyph: 'subagent-report' },
   'object.collaboration': { label: 'Recorded Agent collaboration', glyph: 'message-history' },
   'object.agent-creation': { label: 'Agent creation relation', glyph: 'plus' },
   'object.automation': { label: 'Automation', glyph: 'zap' },

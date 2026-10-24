@@ -26,6 +26,13 @@ export const MOTE_COMPANION_PARTS = {
 /** AgentMux drawings on the original 24-unit grid. Keep the theme pen, complete
  * still silhouette and negative space at 12–14px. Only declared parts can move. */
 export const AUTHORED_ICON_DEFINITIONS = {
+  "subagent-report": {
+    shapes: [["circle", {"cx":"5","cy":"5","r":"2"}], ["path", {"d":"M5 7v8a2 2 0 0 0 2 2h3"}], ["rect", {"x":"10","y":"11","width":"11","height":"10","rx":"2"}], ["path", {"d":"M13 15h5m-5 3h3"}]],
+    design: {
+      rest: "原生分支节点连到一份回报，短内容线在小尺寸仍可辨；不复用主 Agent 头像",
+      motion: { kind: "still", animation: "none", description: "类别标签保持静止，开合仅由相邻箭头表达。", trigger: "按原生协作回报类别显示；不表示身份认证、运行状态或任务完成。" }
+    }
+  },
   "layout-split-left": {
     shapes: [["rect",{"x":"3","y":"4","width":"9","height":"16","fill":"currentColor","opacity":".12","stroke":"none"}],["rect",{"x":"3","y":"4","width":"18","height":"16","rx":"2"}],["path",{"d":"M12 4v16"}],["path",{"d":"M10 12H5.5m2.5-2.5L5.5 12 8 14.5"}]],
     design: {
