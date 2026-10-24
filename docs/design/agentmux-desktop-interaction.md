@@ -21,6 +21,7 @@
 | Agent 工作经验提炼、用户确认与向 Mote／Topic 交付学习 | [Agent 工作经验的转正](behavior/knowledge-workflows.md#agent-工作经验的转正) |
 | Topics 的分类、主题、讨论、知识沉淀与本地承接 | [Topics 知识库的层级与沉淀](behavior/spaces-and-layout.md#topics-知识库的层级与沉淀) |
 | 持久 Mote、PMO、快捷面和原协调上下文 | [Mote 与 PMO 协调](behavior/motes-and-coordination.md) |
+| 伙伴的两条来源、Topic 晋升与成员连续性 | [伙伴从哪里来：从 Topic 到 Mote](behavior/companions-from-work.md) |
 | 目标对齐、结果核对、Demand、Board 与 Task | [Goals 与 Demand 闭环](behavior/goals-and-demand.md) |
 | 执行焦点、项目泳道、历史与时间音轨 | [Focus 执行上下文](behavior/focus-context.md) |
 | Map 的用途、空间地形、通信邻域与稳定阅读 | [Focus Map](behavior/collaboration-map.md) |

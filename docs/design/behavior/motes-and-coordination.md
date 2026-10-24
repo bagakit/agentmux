@@ -1,6 +1,6 @@
 # Mote 与 PMO 协调
 
-本文定义 Mote 的持久身份、资料与合作方式，以及快捷工作面、主对话恢复和协调职责。Mote 是自己的 Space，可绑定多处内容；它与一次 AgentSession／Run、展示位置及普通知识库 Topic 分开。公开产品关系为 Mote；Work（Space、Focus、Goals）；Know（Survey、Recall），导航归[空间合同](spaces-and-layout.md#左下角导航space-与-goals)。本文要求不代签实现或安装验收。
+本文定义 Mote 的持久身份、资料与合作方式，以及快捷工作面、主对话恢复和协调职责。Mote 以具有人格的团队承载长期合作，是自己的 Space，可绑定多处内容；内部实际做事的 Agent、一次 AgentSession／Run、展示位置及普通知识库 Topic 各有准确身份。伙伴的两条来源与 Topic 晋升需求见[《伙伴从哪里来》](companions-from-work.md)。公开产品关系为 Mote；Work（Space、Focus、Goals）；Know（Survey、Recall），导航归[空间合同](spaces-and-layout.md#左下角导航space-与-goals)。本文要求不代签实现或安装验收。
 
 [返回交互合同](../agentmux-desktop-interaction.md) · [同主题视觉](../presentation/motes-and-coordination.md)
 
@@ -307,19 +307,21 @@ Topic 与 Mote 各自已保存的 Wiki 仍是对应原内容对象的可编辑�
 
 ## Mote 预制与持久人格
 
-Mote 是带预制的持久协作对象，复用共同 Space 管理能力；人格与产品角色不等同 Provider／Executor 或某次 Session。
+Mote 是具有人格的持久协作团队，复用共同 Space 管理能力；人格与产品角色不等同 Provider／Executor 或某次 Session。Mote 可以按预设专家画像建立，也可以从已经持续工作的 Topic 晋升而来；两条来源与晋升连续性由[《伙伴从哪里来》](companions-from-work.md)定义。
 
-- PMO 等特殊 Agent 以带预制的持久 Mote 组织，复用耐久目录、Wiki、资料、产出与铭牌，以及共同的 Space 管理能力。预制负责特殊身份、默认上下文与产品入口，Mote 保原 Space，普通 Topic 沿知识库 Zone 层级；不建立另一套 Space、Topic、Agent 或 Run 生命周期。
-- 特殊 Agent 的入口、Space 树条目与已有工作面必须指向同一个持久 Space；打开、收起、恢复或切换入口不创建第二个 Topic 或 Session。现有 PMO 的身份、职责和执行焦点约束继续见[《PMO teams topic 名称与职责》](motes-and-coordination.md#pmo-teams-topic-名称与职责)与[《执行 Agent 焦点历史与 PMO 上下文隔离》](focus-context.md#执行-agent-焦点历史与-pmo-上下文隔离)。
+Topic／Mote 是组织工作的层次，Agent 是其中承担具体任务的成员层次。Topic 可以承载一个专业岗位或工作方向，保留知识积累和低门槛讨论的原用途；Mote 为长期承担的工作建立团队人格与职责。两者都可以有实际 Agent，成员关系沿原准确空间与协作事实表达，不以对象头像、同名目录、当前展示或 Session 数量猜测。Agent 从具体任务中积累经验，可能逐渐承担领域专家或协调管理职责；这些变化须有原工作和明确职责支撑，不新增固定职级、绩效分数或自动人事资格。组织晋升与成员成长分别表达，单一对外人格不能遮蔽实际执行者；具体成员、Session／Run 与原空间关系仍沿各自 owner。
+
+- PMO 等预设角色以带预制的持久 Mote 组织，复用耐久目录、Wiki、资料、产出与铭牌，以及共同的 Space 管理能力。预制负责特殊身份、默认上下文与产品入口，Mote 保原 Space，普通 Topic 沿知识库 Zone 层级；不建立另一套 Space、Topic、Agent 或 Run 生命周期。
+- 预设 Mote 的入口、Space 树条目与已有工作面必须指向同一个持久 Space；打开、收起、恢复或切换入口不创建第二个 Topic 或 Session。现有 PMO 的身份、职责和执行焦点约束继续见[《PMO teams topic 名称与职责》](motes-and-coordination.md#pmo-teams-topic-名称与职责)与[《执行 Agent 焦点历史与 PMO 上下文隔离》](focus-context.md#执行-agent-焦点历史与-pmo-上下文隔离)。
 - 普通 Topic 不继承特殊预制的角色。特殊身份属于产品预制，与执行它的 Provider/Executor 区分；实际 Agent Session 仍通过 Core 的公开能力启动与恢复。
 - Mote 的持久产品身份使用独立矢量标记；新建、技能和权限动作各按含义表达，不全换成Mote身份。Provider 官方标识与真实运行状态继续沿原 owner；具体字形、尺寸与替换范围只定义在密度 SSOT[《控件语言》](../presentation/shared-rules.md#控件语言)。
 - 这一类带持久人格的产品对象具有跨 Folder/Topic 全局负责的能力；其职责不被自身 Topic 目录或当前选中 Space 限定。产品身份与 Session 分离：产品身份在没有运行 Session、Session 结束、更换或恢复时仍然存在，不能用某一次 Session 的身份代替持久角色身份。
 
-Mote 可复用 Topic 的知识管理、协作者和内容能力；这不表示 Mote 收纳全部普通 Topic，或两者占据相同知识导航层级。Agent Space 保留这些能力，创建时额外带有具体可读、可编辑的 `SOUL.md` 等特殊预制。`SOUL.md` 表达这位 Agent 的持久人格、价值取向、沟通方式与行为边界，和当前执行它的 Session、Run、Provider/Executor 身份区分；更换或恢复执行会话不能把这些耐久内容丢掉，也不能用模板覆盖用户已经编辑的内容。
+Mote 可复用 Topic 的知识管理、协作者和内容能力；这不表示 Mote 收纳全部普通 Topic，或两者占据相同知识导航层级。Mote Space 保留这些能力，建立人格时提供具体可读、可编辑的 `SOUL.md` 等资料。`SOUL.md` 表达该 Mote 团队的持久人格、价值取向、沟通方式与行为边界，与实际成员及其 Session、Run、Provider/Executor 身份区分；更换或恢复执行会话不能把这些耐久内容丢掉，也不能用模板覆盖用户已经编辑的内容。原会话何时实际读取这些资料，继续沿下节加载合同。
 
 普通 Topic 沿用已有知识管理结构；这类持久角色自行决定如何组织和维护自己的知识。产品提供可读、可编辑的预制入口，不强制迁移已有资料或统一知识分类。`SOUL.md` 仍承载持久人格；已有 Wiki、资料、产出、铭牌和用户编辑内容继续保全，Session/Run 的权威事实仍由原 owner 持有。
 
-PMO Team 是这种 Agent Space 的已有产品实例，继续复用原固定 Topic、Wiki、角色说明与工作面。`SOUL.md` 属于耐久上下文，不能覆盖用户当前指令、既有授权与 Core/ctxmux 的权威事实，也不能把设定了长期职责伪装成已经启动或完成了后台执行。文件存在与执行会话实际加载是两件事：启动、恢复和文件编辑后的生效情况必须按真实执行能力表达，不能仅因预制了文件就声称已加载，也不能为一个 Space 修改其他 Agent 的全局人格。加载方式与更新时机遵守本节下文的新会话与恢复约束。
+PMO Team 是这种 Mote Space 的已有产品实例，继续复用原固定 Topic、Wiki、角色说明与工作面。`SOUL.md` 属于耐久上下文，不能覆盖用户当前指令、既有授权与 Core/ctxmux 的权威事实，也不能把设定了长期职责伪装成已经启动或完成了后台执行。文件存在与执行会话实际加载是两件事：启动、恢复和文件编辑后的生效情况必须按真实执行能力表达，不能仅因预制了文件就声称已加载，也不能为一个 Space 修改其他 Agent 的全局人格。加载方式与更新时机遵守本节下文的新会话与恢复约束。
 
 Mote 的默认人格与知识维护约束：新建或补缺失的 Mote SOUL 默认先读相关已有资料，记录有来源、时间和作用域的确认偏好与决定，区分事实、推测、提案、承诺和完成；更正只更新相关耐久知识，保存后读回才声称记住。换 Session 通过原资料接续，不假称继承未见对话或运行工具；不知道、未读、写入未确认都如实说明。知识组织继续自主；默认短记忆入口遵循下节，不要求其他 MEMORY 文件集、统一分类、scheduler 或第二份 Goal/Task 状态。详细执行协调沿 app-owned MOTE_COORDINATION_ROLE 单一职责；主 Mote 的新默认或用户明确恢复默认 Wiki 只提供短知识／协作指南，不重复整段角色流程，非主 Mote／普通 Topic 的默认 Wiki 不改。已有磁盘 SOUL、Wiki 与用户资料原样保留，不做 migration、自动清洗或截取用户文本去重；仅新的 Session 按原人格加载合同生效，恢复不热替换。实际模板交付与模型是否执行、读写成功分别验证，不能用提示词内容承诺每轮遵守或自动长期记忆。
 
