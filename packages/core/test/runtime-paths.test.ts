@@ -10,6 +10,8 @@ import {
   defaultAgentMuxControlSocketPath
 } from '../src/runtime-paths.js'
 
+import { defaultAgentMuxSpatialStatePath } from '../src/spatial-state.js'
+
 describe('AgentMux runtime paths', () => {
   const originalRuntimeDirectory = process.env.AGENTMUX_RUNTIME_DIRECTORY
   const originalStateDirectory = process.env.AGENTMUX_STATE_DIRECTORY
@@ -64,6 +66,15 @@ describe('AgentMux runtime paths', () => {
     expect(defaultCtxmuxSocketPath()).toBe(fixturePath("tmp/private-endpoints/ctxmux.sock"))
     delete process.env.AGENTMUX_RUNTIME_DIRECTORY
     expect(defaultCtxmuxStateDirectory()).toBe(fixturePath("tmp/durable/ctxmux"))
+  })
+
+  it('resolves spatial paths from the supplied namespace without changing override semantics', () => {
+    expect(defaultAgentMuxSpatialStatePath({ AGENTMUX_STATE_DIRECTORY: fixturePath('original/state') }))
+      .toBe(fixturePath('original/state/spatial-state.json'))
+    const selected = fixturePath('original/../spatial.json')
+    expect(defaultAgentMuxSpatialStatePath({ AGENTMUX_SPATIAL_STATE_STORE: selected })).toBe(selected)
+    expect(() => defaultAgentMuxSpatialStatePath({ AGENTMUX_SPATIAL_STATE_STORE: 'relative/spatial.json' }))
+      .toThrow('AGENTMUX_SPATIAL_STATE_STORE must be absolute.')
   })
 
   it('rejects a relative state override', () => {
