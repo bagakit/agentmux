@@ -41,7 +41,7 @@ async function fixture() {
         coverage={projection.timeline.coverage} sessionId={reference.agentSessionId} renderProcess={props => <NativeProcessObservation {...props} compact />}
         {...(located ? { locatedMessageKey } : {})} />))
   const openGroup = async () => {
-    await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) }); expect(host.querySelector('.wf-head')).not.toBeNull() })
+    await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) }); expect(host.querySelector('.wf-head'), host.textContent ?? '').not.toBeNull() })
     await act(async () => host.querySelector<HTMLButtonElement>('.wf-head')!.click())
   }
   return { ...f, host, root, item, draw, openGroup, copied }
@@ -50,16 +50,18 @@ async function fixture() {
 it.each([true, false])('reads the same original process through %s Desktop/shared renderer, with bounded diff and complete Copy', async desktop => {
   const f = await fixture(); await f.draw(desktop); await f.openGroup()
   const row = f.host.querySelector<HTMLButtonElement>('[data-observation-step-id]')!
-  expect(row.textContent).toContain('src/answer.ts')
+  expect(row.textContent).toContain(desktop ? f.item.toolName : 'src/answer.ts')
   expect(row.querySelector('[data-semantic-icon="conversation.tool-call"]')).not.toBeNull()
   expect(f.host.querySelector('.log-diff')).toBeNull()
   await act(async () => row.click())
   expect(row.getAttribute('aria-expanded')).toBe('true')
   const body = document.getElementById(row.getAttribute('aria-controls')!)!
   expect(body).not.toBeNull(); expect(body.hidden).toBe(false)
-  expect(body.querySelector('.log-diff__line--removed')?.textContent).toBe('-original answer')
+  await vi.waitFor(async () => { await act(async () => { await new Promise(resolve => setTimeout(resolve, 10)) }); expect(body.querySelector('.log-diff__line--removed')?.textContent).toBe('-original answer') })
   expect(body.querySelector('.log-diff__line--added')?.textContent).toBe('+revised answer')
   expect(body.textContent).toContain('Original recorded output')
+  expect(body.querySelector('[aria-label="Copy tool input"]')).toBeNull()
+  await act(async () => { const details = body.querySelector('details')!; details.open = true; details.dispatchEvent(new Event('toggle')) })
   await act(async () => body.querySelector<HTMLButtonElement>('[aria-label="Copy tool input"]')!.click())
   expect(f.copied).toHaveBeenCalledExactlyOnceWith(f.item.toolInput)
   const original = [...body.querySelectorAll('pre')].find(node => node.textContent === f.item.toolInput)!

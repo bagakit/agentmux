@@ -13,6 +13,7 @@ import { useSessionConversationWindow } from '../src/renderer/src/lib/session-co
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { inspectConversationConsumers } from '../src/renderer/src/lib/conversation-consumer-observation'
+import { useConversationReadAhead } from '../src/renderer/src/lib/use-conversation-read-ahead'
 
 const closes: Array<() => unknown | Promise<unknown>> = []
 afterEach(async () => {
@@ -93,7 +94,9 @@ it('actual Activity stops its initial batch at three source pages and changes or
   expect(f.calls).toHaveLength(3); expect(f.calls.map(call => call.limit)).toEqual([100, 100, 100])
   const row = f.host.querySelector('[data-native-record-id="original-999"]')!, text = row.querySelector('.log-turn__body p')!.firstChild!
   const range = document.createRange(); range.setStart(text, 0); range.setEnd(text, 8); window.getSelection()!.addRange(range)
-  const button = f.host.querySelector<HTMLButtonElement>('.activity-feed__reading-action')!; button.focus()
+  const button = f.host.querySelector<HTMLButtonElement>('.activity-feed__reading-action')!
+  await wait(() => expect(button.disabled).toBe(false))
+  button.focus(); expect(document.activeElement).toBe(button)
   await act(async () => f.appendCaptured('Independent source progress'))
   await wait(() => expect(f.host.textContent).toContain('Independent source progress'))
   await f.activity(); await act(async () => window.dispatchEvent(new Event('resize'))); await pause()
@@ -198,7 +201,7 @@ function foldedReadingGeometry(host: HTMLElement) {
   return feed
 }
 
-it('one upward demand prepares at most three complete pages of folded process records, preserving the original window', async () => {
+it('one upward demand passes three folded pages and stops at original EOF without renewing on repaint', async () => {
   const f = await fixture({ total: 1000, process: true })
   const read = vi.mocked(api.conversation.readAgentConversation), original = read.getMockImplementation()!
   const requests: Array<Parameters<typeof original>[0]> = []
@@ -207,14 +210,71 @@ it('one upward demand prepares at most three complete pages of folded process re
   const feed = foldedReadingGeometry(f.host)
   const before = requests.length
   await act(async () => feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -40 })))
-  await wait(() => { expect(f.calls).toHaveLength(6); expect(inspectConversationConsumers({ ...f.reference, records: [] }).consumers[0]?.loading).toBe(false) })
-  expect(requests.slice(before).filter(input => !input.view).every(input => input.preserveCurrent === true)).toBe(true)
+  await wait(() => { expect(f.calls).toHaveLength(10); expect(inspectConversationConsumers({ ...f.reference, records: [] }).consumers[0]?.loading).toBe(false) })
+  const demandReads = requests.slice(before).filter(input => !input.view)
+  expect(demandReads.length).toBeGreaterThan(3)
+  expect(demandReads.every(input => !input.preserveCurrent)).toBe(true)
   const loaded = () => [...f.host.querySelectorAll('[data-conversation-process-members]')].flatMap(node => processNativeRecordIds(node))
-  expect(loaded()).toHaveLength(600)
+  expect(loaded()).toHaveLength(1000)
   await f.activity(); await pause(); await act(async () => window.dispatchEvent(new Event('resize'))); await pause()
-  expect(f.calls).toHaveLength(6)
+  expect(f.calls).toHaveLength(10)
   expect(loaded()).toContain('original-999')
 })
+
+it.each(['wheel', 'Earlier'] as const)('a %s demand fills three actual screens even when each source page folds to a short strip', async action => {
+  const f = await fixture({ total: 1600, process: true })
+  await f.activity(); await wait(() => { expect(f.calls).toHaveLength(3); expect(inspectConversationConsumers({ ...f.reference, records: [] }).consumers[0]?.loading).toBe(false) })
+  const feed = foldedReadingGeometry(f.host)
+  const boundary = f.host.querySelector<HTMLElement>('.activity-feed__reading')!
+  // Model the completed layout: one hundred process originals add only a 128px
+  // readable strip. The actual Electron proof separately measures real DOM layout.
+  const start = f.calls.length
+  vi.spyOn(boundary, 'getBoundingClientRect').mockImplementation(() => {
+    const bottom = 20 - (f.calls.length - start) * 128
+    return { top: bottom - 20, bottom, left: 0, right: 600, width: 600, height: 20, x: 0, y: bottom - 20, toJSON() {} }
+  })
+  await act(async () => action === 'wheel'
+    ? feed.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -40 }))
+    : f.host.querySelector<HTMLButtonElement>('.activity-feed__reading-action')!.click())
+  await wait(() => { expect(f.calls).toHaveLength(start + 5); expect(inspectConversationConsumers({ ...f.reference, records: [] }).consumers[0]?.loading).toBe(false) })
+  expect(-boundary.getBoundingClientRect().bottom).toBeGreaterThanOrEqual(3 * feed.clientHeight)
+  expect(f.calls.slice(start).map(call => call.limit)).toEqual([100, 100, 100, 100, 100])
+  await f.activity(); await pause(); expect(f.calls).toHaveLength(start + 5)
+})
+
+it('a full captured-only window continues on upward reading and retains its visible captured anchor', async () => {
+  const f = await fixture({ total: 0 })
+  for (let n = 0; n < 1500; n++) await f.store.applyTimelineMutation({ type: 'append', agentSessionId: f.reference.agentSessionId,
+    item: { id: `captured-${n}`, agentSessionId: f.reference.agentSessionId, kind: 'user_message', source: 'user', authorHuman: true,
+      title: 'Original input', content: `Captured original input ${n}`, status: 'complete', createdAt: n + 1, updatedAt: n + 1 } })
+  await f.activity()
+  const sample = () => inspectConversationConsumers({ ...f.reference, records: [] }).consumers[0]!
+  const button = () => f.host.querySelector<HTMLButtonElement>('.activity-feed__reading-action')!
+  for (let page = 0; page < 11; page++) {
+    await wait(() => expect(sample().loading).toBe(false))
+    await act(async () => button().click())
+  }
+  await wait(() => { expect(sample().accepted?.recordCount).toBe(1200); expect(sample().loading).toBe(false) })
+  const feed = f.host.querySelector<HTMLElement>('.activity-feed')!
+  const anchor = f.host.querySelector<HTMLElement>('[data-segment-key]')!
+  expect(anchor.textContent).toContain('Captured original input 300')
+  const rect = (top: number, height: number) => ({ top, bottom: top + height, left: 0, right: 600, width: 600, height, x: 0, y: top, toJSON() {} })
+  Object.defineProperties(feed, { clientHeight: { configurable: true, value: 200 }, scrollHeight: { configurable: true, value: 5000 } })
+  vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    if (this === feed) return rect(0, 200)
+    if (this === anchor) return rect(50, 30)
+    if (this.matches('.activity-feed__reading')) return rect(0, 20)
+    return rect(600, 30)
+  })
+  await act(async () => anchor.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -40 })))
+  await wait(() => {
+    expect(f.host.textContent).toContain('Captured original input 0')
+    expect(sample().loading).toBe(false)
+  })
+  expect(anchor.isConnected).toBe(true); expect(anchor.getBoundingClientRect().top).toBe(50)
+  expect([...f.host.querySelectorAll('.activity-feed__reading-action')].map(node => node.textContent)).not.toContain('Earlier')
+  expect(f.host.textContent).toContain('Newer')
+}, 60000)
 
 it('opposite intent and hiding cancel the remaining read-ahead pages without replaying the batch', async () => {
   const f = await fixture({ total: 1000, process: true })
@@ -233,6 +293,51 @@ it('opposite intent and hiding cancel the remaining read-ahead pages without rep
   expect(f.calls).toHaveLength(5)
 })
 
+it('flat folded layout spends a finite demand and needs fresh reading before traversing another window', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const host = document.createElement('div'); document.body.append(host)
+  const root = createClientUiRoot(host)
+  closes.push(async () => { await act(async () => root.unmount()); host.remove() })
+  const read = vi.fn(() => true)
+  let demand!: ReturnType<typeof useConversationReadAhead>
+  function Probe({ frame }: { frame: object }) {
+    demand = useConversationReadAhead({ identity: 'original-folded-source', active: true, stopped: false, loading: false,
+      frame, nearEdge: () => true, read })
+    return null
+  }
+  const repaint = () => act(async () => root.render(<Probe frame={{}} />))
+  await repaint(); expect(read).not.toHaveBeenCalled()
+  await act(async () => demand.request('earlier'))
+  for (let n = 0; n < 30; n++) await repaint()
+  expect(read).toHaveBeenCalledTimes(12)
+  await act(async () => demand.request('earlier'))
+  expect(read).toHaveBeenCalledTimes(13)
+})
+
+it('a retained hook discards hidden demand before a new frame arrives and does not resume it on visibility alone', async () => {
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
+  const host = document.createElement('div'); document.body.append(host)
+  const root = createClientUiRoot(host)
+  closes.push(async () => { await act(async () => root.unmount()); host.remove() })
+  const read = vi.fn(() => true)
+  let demand!: ReturnType<typeof useConversationReadAhead>
+  function Probe({ frame, active }: { frame: object; active: boolean }) {
+    demand = useConversationReadAhead({ identity: 'retained-original', active, stopped: false, loading: false,
+      frame, nearEdge: () => true, read })
+    return null
+  }
+  const frame = {}
+  await act(async () => root.render(<Probe frame={frame} active />))
+  await act(async () => demand.request('earlier'))
+  expect(read).toHaveBeenCalledTimes(1)
+  await act(async () => root.render(<Probe frame={frame} active={false} />))
+  await act(async () => root.render(<Probe frame={{}} active={false} />))
+  await act(async () => root.render(<Probe frame={{}} active />))
+  expect(read).toHaveBeenCalledTimes(1)
+  await act(async () => demand.request('earlier'))
+  expect(read).toHaveBeenCalledTimes(2)
+})
+
 async function seedRetained(f: Awaited<ReturnType<typeof fixture>>, captured: number) {
   for (let index = 0; index < captured; index++) await f.store.applyTimelineMutation({ type: 'append', agentSessionId: f.reference.agentSessionId,
     item: { id: `captured-${index}`, agentSessionId: f.reference.agentSessionId, kind: 'assistant_message', source: 'native-hook',
@@ -241,7 +346,7 @@ async function seedRetained(f: Awaited<ReturnType<typeof fixture>>, captured: nu
   for (let page = 0; page < 6; page++) {
     let assembly: ConversationWindowAssembly | undefined, cursor = page ? snapshot.window.navigation.older! : undefined
     for (;;) {
-      const packet = await api.conversation.readAgentConversation({ ...f.reference, limit: 100, maxBytes: 4 * 1024 * 1024, ...(cursor ? { cursor } : {}) })
+      const packet = await api.conversation.readAgentConversation({ ...f.reference, processDetails: 'deferred', limit: 100, maxBytes: 4 * 1024 * 1024, ...(cursor ? { cursor } : {}) })
       const result = consumeConversationWindowPage(packet, assembly)
       if (result.kind === 'complete') { snapshot = result.snapshot; break }
       assembly = result.pending; cursor = packet.nextCursor!

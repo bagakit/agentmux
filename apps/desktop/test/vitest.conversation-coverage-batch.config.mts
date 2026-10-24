@@ -21,15 +21,18 @@ export default defineConfig({ ...base, cacheDir: '.cache/conversation-coverage-b
       'ignore-shrink': ['coverageDuration < previous.duration ? 0', 'coverageDuration < previous.duration ? previous.remaining'],
       'tiny-frozen-packets': ['...(cursor ? { cursor, limit: 100 } : {})', '...(cursor ? { cursor } : {})'],
       'ignore-request-limit': ["limit === undefined ? {} : { limit }", '{}'],
-      'unbounded-read-ahead': ['direction, remaining: 3, waitingFor: null', 'direction, remaining: 30, waitingFor: null'],
-      'drop-read-ahead-preservation': ['void view.earlier(limit, { preserveCurrent: true })', 'void view.earlier(limit)'],
+      'three-page-read-ahead': ['remaining: Math.ceil(CONVERSATION_MAX_WINDOW_RECORDS / 100)', 'remaining: 3'],
+      'ignore-readable-reserve': ['!next.force && !value.nearEdge(next.direction)', 'false'],
+      'block-full-window': ['!view.hasMore) return false', '!view.hasMore || remainingReadLimit(view.snapshot) <= 0) return false'],
+      'native-only-demand': ["const edge = direction < 0 ? 'earlier' : 'newer'", "if (anchorRef.current?.kind === 'segment') return; const edge = direction < 0 ? 'earlier' : 'newer'"],
       'ignore-opposite-demand': ['if (demand.current?.direction === direction) return', 'if (demand.current) return'],
       'retain-hidden-demand': [' || !input.active || input.stopped', ' || input.stopped']
     }
     if (mutation && !edits[mutation]) throw new Error('Unknown coverage batch mutation')
     let code = source
     const edit = mutation ? edits[mutation] : undefined
-    const target = mutation === 'linear-anchor-scan' ? anchor : ['unbounded-read-ahead', 'ignore-opposite-demand', 'retain-hidden-demand'].includes(mutation ?? '') ? ahead
+    const target = mutation === 'linear-anchor-scan' ? anchor : ['three-page-read-ahead', 'ignore-readable-reserve', 'ignore-opposite-demand', 'retain-hidden-demand'].includes(mutation ?? '') ? ahead
+      : mutation === 'native-only-demand' ? 'apps/desktop/src/renderer/src/components/ActivityView.tsx'
       : ['ignore-request-limit', 'tiny-frozen-packets'].includes(mutation ?? '') ? 'packages/client-ui/src/lib/use-conversation-view.ts' : owner
     if (edit && path === target) {
       if (source.split(edit[0]).length !== 2) throw new Error('Coverage batch mutation must match exactly once')
