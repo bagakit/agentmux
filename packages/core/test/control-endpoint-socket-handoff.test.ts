@@ -144,7 +144,7 @@ it.each(['crash', 'disconnect'] as const)('recovers %s while admitted connection
   expect(await echo(connect(scope.path), 'new-owner-same-core')).toBe('new-owner-same-core')
 }, 15000)
 
-it('bounds actual unacknowledged Socket transfers and recovers capacity without cutting admitted sockets', async () => {
+it('transfers a legitimate burst using IPC flow control without waiting for business ACKs', async () => {
   const root = await mkdtemp(fixturePath("tmp/amch-")), path = join(root, 'rpc')
   disposals.push(() => rm(root, { recursive: true, force: true }))
   const child = fork(resolve(import.meta.dirname, '../dist/control-endpoint-listener-worker.js'), [path], {
@@ -167,23 +167,16 @@ it('bounds actual unacknowledged Socket transfers and recovers capacity without 
   expect(await until(() => ready)).toBe(true)
   const rss = async () => Number((await promisify(execFile)('ps', ['-o', 'rss=', '-p', String(child.pid)])).stdout.trim())
   const idleRssKiB = await rss(), started = performance.now()
-  const clients = Array.from({ length: 64 }, (_, index) => { const socket = connect(path); socket.resume(); socket.write('first-' + index); return socket })
-  expect(await until(() => transfers.length === 64 && transfers.every(entry => entry.received.startsWith('first-')))).toBe(true)
+  const clients = Array.from({ length: 193 }, (_, index) => { const socket = connect(path); socket.resume(); socket.write('first-' + index); return socket })
+  expect(await until(() => transfers.length === 193 && transfers.every(entry => entry.received.startsWith('first-')))).toBe(true)
   const burstMs = performance.now() - started, fullRssKiB = await rss()
-  await delay(20)
-  const refused = connect(path)
-  expect(await until(() => refused.destroyed && pressure.includes(64))).toBe(true)
-  expect(transfers).toHaveLength(64)
+  expect(pressure).toEqual([])
   expect(await echo(clients[0], ':still-admitted')).toBe(':still-admitted')
-  child.send({ admitted: transfers[0].id })
-  expect(await until(() => pressure.includes(63))).toBe(true)
-  const recovered = connect(path); recovered.write('recovered')
-  expect(await until(() => transfers.length === 65 && transfers.at(-1)!.received === 'recovered')).toBe(true)
   // Parent IPC loss ends only admission; transferred connections remain usable.
   child.disconnect(); await closed
   expect(await echo(clients[1], ':after-disconnect')).toBe(':after-disconnect')
-  console.log(JSON.stringify({ socketHandoffBudget: 64, transferredAtCapacity: 64, overflowClosed: true,
-    recovered: true, existingConnectionsPreserved: true, idleRssKiB, fullRssKiB, burstMs }))
+  console.log(JSON.stringify({ legitimateBurst: 193, transferred: transfers.length, businessAcknowledgements: 0,
+    existingConnectionsPreserved: true, idleRssKiB, fullRssKiB, burstMs }))
 }, 15000)
 
 it('fences connections racing stop and leaves no late listener or child Pipe', async () => {
