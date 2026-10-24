@@ -5,12 +5,12 @@ import { appendFile, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
-import { createServer } from 'node:net'
+import { createConnection } from 'node:net'
 import { build } from 'esbuild'
 import { afterAll, afterEach, beforeAll, expect, it } from 'vitest'
 import { parseTerminalFrontendObservation, type AgentTerminalFrontendObservation } from '../src/agent-terminal-frontend.js'
 import { prepareCodexManagedLaunch } from '../src/providers/codex-native-input.js'
-import { codexFrontendSocketPath, observeCodexTerminalFrontend, reconnectCodexTerminalFrontend,
+import { codexFrontendSocketPath, openCodexFrontendControl, observeCodexTerminalFrontend, reconnectCodexTerminalFrontend,
   CODEX_NATIVE_TOKEN_ENV, CODEX_ACTOR_ID_ENV, CODEX_ACTOR_LIFECYCLE_ENV } from '../src/providers/codex-managed-frontend.js'
 import type { CodexManagedRunPlan } from '../src/providers/codex-managed-run.js'
 
@@ -74,7 +74,7 @@ const {appendFileSync,existsSync,writeFileSync}=require('node:fs');const args=pr
 if(args.includes('--version')){console.log('codex-cli 0.163.0');process.exit(0)}
 if(args.includes('app-server')){
  setInterval(()=>writeFileSync(${JSON.stringify(heartbeat)},JSON.stringify({pid:process.pid,time:Date.now()})),40);
- const server=new WebSocketServer({port:0,host:'127.0.0.1'});
+ let effective;const server=new WebSocketServer({port:0,host:'127.0.0.1'});
  server.on('connection',(socket,req)=>{if(req.headers.authorization!=='Bearer '+process.env.${CODEX_NATIVE_TOKEN_ENV})process.exit(9);
  socket.on('message',async bytes=>{const r=JSON.parse(String(bytes));appendFileSync(${JSON.stringify(log)},JSON.stringify(r)+String.fromCharCode(10));if(!Object.hasOwn(r,'id'))return;
  const reply=result=>socket.send(JSON.stringify({jsonrpc:'2.0',id:r.id,result}));
@@ -85,7 +85,8 @@ if(args.includes('app-server')){
  if(r.method==='thread/start'||r.method==='thread/resume'){
   while(existsSync(${JSON.stringify(gate)}))await new Promise(resolve=>setTimeout(resolve,10));
   if(${Boolean(options.nativeError)})return error(-32603,'Private original native mutation result unconfirmed');
-  return reply({thread:{id:${JSON.stringify(sid)},sessionId:'private-native-runtime',canAcceptDirectInput:true},cwd:r.params.cwd,model:r.params.model??'private-model',approvalPolicy:${options.wrongPolicy ? "'on-request'" : "r.params.approvalPolicy??'on-request'"},sandbox:{type:r.params.sandbox==='read-only'?'readOnly':r.params.sandbox==='danger-full-access'?'dangerFullAccess':'workspaceWrite'}});
+  effective??={cwd:r.params.cwd,model:r.params.model??'private-model',approvalPolicy:${options.wrongPolicy ? "'on-request'" : "r.params.approvalPolicy??'on-request'"},sandbox:{type:r.params.sandbox==='read-only'?'readOnly':r.params.sandbox==='danger-full-access'?'dangerFullAccess':'workspaceWrite'}};
+  return reply({thread:{id:${JSON.stringify(sid)},sessionId:'private-native-runtime',canAcceptDirectInput:true},...effective});
  }
  if(r.method==='thread/read')return reply({thread:{id:${JSON.stringify(sid)},sessionId:'private-native-runtime',canAcceptDirectInput:true}});
  error(-32601,'Unexpected private method');});});
@@ -108,7 +109,10 @@ if(args.includes('app-server')){
     await rm(codexFrontendSocketPath(token), { force: true }); await rm(directory, { recursive: true, force: true })
   })
   const context = { processId: child.pid!, nativeActor: { protocolId: 'codex-app-server-v2-0.163', actorId, token, lifecycleOperationId,
-    frontendControl: true as const, initializationControl: true as const, launch: { command: executable, args: [] } }, workspacePath: directory, signal: new AbortController().signal }
+    frontendControl: true as const, initializationControl: true as const, launch: { command: executable, args: [] } },
+    nativeHandle: { kind: 'provider' as const, providerId: 'codex', sessionId: sid },
+    assertCurrent: async () => { expect(child.exitCode).toBeNull(); expect(child.signalCode).toBeNull() },
+    workspacePath: directory, signal: new AbortController().signal }
   let latest: AgentTerminalFrontendObservation | undefined
   // A socket path can exist just before listen is ready. Wait for the actual
   // read-only authenticated observation, rather than treating path creation as readiness.
@@ -224,9 +228,12 @@ it.runIf(process.platform === 'darwin')('resumes the original native object befo
   const request = { operationId: 'original-reconnect', expectedFrontendId: original.frontendId, target: { kind: 'native-session' as const, nativeSessionId: sid } }
   const result = await reconnectCodexTerminalFrontend(f.context, request)
   expect(await reconnectCodexTerminalFrontend(f.context, request)).toEqual(result)
-  await expect(reconnectCodexTerminalFrontend(f.context, { ...request, target: { kind: 'native-session', nativeSessionId: 'another-thread' } })).rejects.toThrow('immutable target')
+  await expect(reconnectCodexTerminalFrontend(f.context, { ...request, target: { kind: 'native-session', nativeSessionId: 'another-thread' } })).rejects.toMatchObject({ code: 'AGENT_TERMINAL_FRONTEND_UNCONFIRMED' })
   await expect.poll(async () => (await rows(f.events)).length).toBe(2)
   expect((await rows(f.events)).map(row => row.args.slice(4))).toEqual([['resume', sid, '--no-alt-screen'], ['resume', sid, '--no-alt-screen']])
+  const prejoins = (await rows(f.log)).filter(row => row.method === 'thread/resume' && row.params.excludeTurns === false)
+  expect(prejoins.length).toBeGreaterThan(0)
+  for (const row of prejoins) expect(row.params).toEqual({ threadId: sid, excludeTurns: false })
   expect(f.child.exitCode).toBeNull()
 })
 
@@ -254,19 +261,26 @@ it('validates initialization source identity, native confirmation and original f
   }
 })
 
-it('keeps the original native-session wire for frozen actors and requires an explicit initialization capability', async () => {
+it('keeps the original frozen actor native-session wire at the actual low-level control server and requires an explicit initialization capability', async () => {
   const token = randomBytes(32).toString('hex'), packets: any[] = []
   const frontend: AgentTerminalFrontendObservation = { frontendId: 'original-frontend', state: 'attached', backendState: 'running', source: 'managed-process', observedAt: 1 }
-  const server = createServer(socket => { socket.once('data', bytes => {
-    packets.push(JSON.parse(String(bytes))); socket.end(JSON.stringify({ frontend }) + '\n')
-  }) })
-  server.listen(codexFrontendSocketPath(token)); await once(server, 'listening')
-  cleanups.push(async () => { await new Promise<void>(resolve => server.close(() => resolve())); await rm(codexFrontendSocketPath(token), { force: true }) })
+  const server = await openCodexFrontendControl(token, { actorId: 'original-actor', lifecycleOperationId: 'original-lifecycle', processId: process.pid }, {
+    current: () => frontend, reconnect: async request => { packets.push(request); return frontend }
+  })
+  cleanups.push(() => server.close())
   const context = { processId: process.pid, nativeActor: { protocolId: 'codex-app-server-v2-0.163', actorId: 'original-actor', token,
-    lifecycleOperationId: 'original-lifecycle', frontendControl: true as const, launch: { command: 'private', args: [] } }, workspacePath: root, signal: new AbortController().signal }
-  expect(await reconnectCodexTerminalFrontend(context, { operationId: 'original', expectedFrontendId: 'original-frontend', target: { kind: 'native-session', nativeSessionId: sid } })).toEqual(frontend)
-  expect(packets).toHaveLength(1); expect(packets[0].nativeSessionId).toBe(sid)
-  expect(packets[0].target).toBeUndefined(); expect(packets[0].initializationOperationId).toBeUndefined()
+    lifecycleOperationId: 'original-lifecycle', frontendControl: true as const, launch: { command: 'private', args: [] } },
+    assertCurrent: async () => {}, workspacePath: root, signal: new AbortController().signal }
+  // Wire compatibility only: an already running actor consumes this exact legacy
+  // packet. Provider prejoin is exercised by the real detached actor tests above.
+  const socket = createConnection(codexFrontendSocketPath(token)); await once(socket, 'connect')
+  const received = once(socket, 'data')
+  const wire = { method: 'reconnect', token, actorId: context.nativeActor.actorId, lifecycleOperationId: context.nativeActor.lifecycleOperationId,
+    processId: context.processId, operationId: 'original', expectedFrontendId: 'original-frontend', nativeSessionId: sid }
+  socket.end(JSON.stringify(wire) + '\n')
+  expect(JSON.parse(String((await received)[0])).frontend).toEqual(frontend)
+  expect(wire).not.toHaveProperty('target'); expect(wire).not.toHaveProperty('initializationOperationId')
+  expect(packets).toEqual([{ operationId: 'original', expectedFrontendId: 'original-frontend', target: { kind: 'native-session', nativeSessionId: sid } }])
   await expect(reconnectCodexTerminalFrontend(context, { operationId: 'unsupported', expectedFrontendId: 'original-frontend',
     target: { kind: 'initialization', lifecycleOperationId: 'original-lifecycle' } })).rejects.toThrow('did not declare')
   expect(packets).toHaveLength(1)
