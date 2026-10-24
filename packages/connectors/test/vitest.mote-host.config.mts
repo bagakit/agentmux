@@ -5,6 +5,8 @@ import { createHash } from 'node:crypto'
 import { relative, resolve } from 'node:path'
 const root = native.root!
 const mutations: Record<string, { path: string; before: string; after: string }> = {
+  'preparation-reason-drop': { path: 'packages/connectors/src/durable-ingress.ts', before: 'this.write({ ...current, code })', after: 'this.write(current)' },
+  'diagnosis-owner-disconnect': { path: 'packages/connectors/src/connection-services.ts', before: 'return await owner.diagnose(input, context)', after: "throw new AgentMuxError('The diagnostic owner is disconnected.', 'CONTROL_UNAVAILABLE')" },
   'profile-disconnect': { path: 'apps/host/src/mote-resources.ts', before: 'const context = validProfile ? profileAgentContext(', after: 'const context = false ? profileAgentContext(' },
   'target-disconnect': { path: 'apps/host/src/mote-resources.ts', before: 'space.spaceId === target.spaceId', after: 'space.kind === \'mote\'' },
   'executor-substitution': { path: 'apps/host/src/mote-chat-agents.ts', before: '.filter(entry => entry.executorId === executorId)', after: '.slice(0, 1)' },
@@ -34,6 +36,7 @@ export default defineConfig({ ...native, cacheDir: resolve(root, '.cache/mote-ho
   }
 }, ...native.plugins!], test: { ...native.test, include: [
   'packages/connectors/test/mote-chat-headless-journey.integration.test.ts',
+  'packages/connectors/test/mote-chat-diagnosis.integration.test.ts',
   'packages/connectors/test/mote-chat-desktop-journey.integration.test.ts',
   'apps/desktop/test/mote-chat-agents-consumer.test.ts',
   'apps/desktop/test/scratch-topics.test.ts'
