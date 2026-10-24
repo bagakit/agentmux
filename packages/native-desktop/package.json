@@ -11,7 +11,7 @@
     ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" },
     "./image": { "types": "./dist/image.d.ts", "import": "./dist/image.js" }
   },
-  "files": ["dist", "macos", "scripts/build-macos.mjs", "THIRD_PARTY_NOTICES.md"],
+  "files": ["dist", "macos/Package.swift", "macos/Sources", "macos/Tests", "macos/Verification", "macos/LICENSE.orca", "macos/UPSTREAM.md", "macos/PROTOCOL.md", "scripts/build-macos.mjs", "THIRD_PARTY_NOTICES.md"],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "prepack": "pnpm build",
