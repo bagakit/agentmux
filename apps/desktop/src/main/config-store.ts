@@ -5,6 +5,7 @@ import { constants, mkdir, open, readFile } from 'node:fs/promises'
 import { dirname, join, normalize as normalizeLocalPath } from 'node:path'
 import { app } from 'electron'
 import { z } from 'zod'
+import { FOCUS_MAP_BOUNDARIES, FOCUS_MAP_FORMS, FOCUS_MAP_INFORMATION, focusMapPreferencesIssue } from '../shared/focus-map-preferences.js'
 import { parseHostConfiguration, parseHostConfigurations, type HostConfigurationResult } from '@agentmux/host/host-configuration'
 import { A2A_NOTIFICATION_IDS } from '../shared/a2a-preferences.js'
 import { validateThemeConfigEdit } from './theme-config.js'
@@ -283,6 +284,12 @@ const DEFAULT_COMPOSER_SHORTCUTS: ComposerShortcut[] = [
   }
 ]
 
+const focusMapLevelSchema = z.object({ form: z.enum(FOCUS_MAP_FORMS), information: z.enum(FOCUS_MAP_INFORMATION), from: z.number(), to: z.number() }).strict()
+const focusMapSchema = z.object({ boundary: z.enum(FOCUS_MAP_BOUNDARIES), levels: z.array(focusMapLevelSchema).min(2).max(4) }).strict().superRefine((value, context) => {
+  const issue = focusMapPreferencesIssue(value)
+  if (issue) context.addIssue({ code: 'custom', message: issue })
+})
+
 const configSchema = z
   .object({
     version: z.literal(CONFIG_VERSION),
@@ -291,7 +298,7 @@ const configSchema = z
     workspaces: z.array(workspaceSchema),
     appearance: appearanceSchema,
     browser: browserSchema,
-    focus: z.object({ recentActivityHours: z.number().refine(value => (FOCUS_RECENT_ACTIVITY_HOURS as readonly number[]).includes(value)), linkDestination: z.enum(['region', 'tab']).optional(), replyLines: z.number().refine(value => (FOCUS_REPLY_LINES as readonly number[]).includes(value)).optional(), previewTrigger: z.enum(FOCUS_PREVIEW_TRIGGERS).optional(), recentInputs: z.number().refine(value => (FOCUS_RECENT_INPUTS as readonly number[]).includes(value)).optional(), mapMotion: z.enum(FOCUS_MAP_MOTION).optional() }).strict().optional(),
+    focus: z.object({ recentActivityHours: z.number().refine(value => (FOCUS_RECENT_ACTIVITY_HOURS as readonly number[]).includes(value)), linkDestination: z.enum(['region', 'tab']).optional(), replyLines: z.number().refine(value => (FOCUS_REPLY_LINES as readonly number[]).includes(value)).optional(), previewTrigger: z.enum(FOCUS_PREVIEW_TRIGGERS).optional(), recentInputs: z.number().refine(value => (FOCUS_RECENT_INPUTS as readonly number[]).includes(value)).optional(), mapMotion: z.enum(FOCUS_MAP_MOTION).optional(), map: focusMapSchema.optional() }).strict().optional(),
     notes: z.object({ fontSize: z.number().refine(validNoteFontSize).optional(), contentWidth: z.enum(NOTE_CONTENT_WIDTHS).optional() }).strict().optional(),
     goals: z.object({ defaultView: z.enum(GOALS_VIEW_IDS).optional(), showFinished: z.boolean().optional(), requesterAsSupervisor: z.boolean().optional() }).strict().optional(),
     continuity: z.object({

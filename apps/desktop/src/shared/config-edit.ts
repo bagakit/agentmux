@@ -7,6 +7,7 @@ import { DEFAULT_A2A_NOTIFICATION, resolveA2ANotifications } from './a2a-prefere
 import { DEFAULT_PERFORMANCE_PREFERENCES, DEFAULT_MOBILE_CONNECTION_PREFERENCES } from './toolkit-preferences'
 import { resolveUserProfile, type UserProfile } from './user-profile'
 import { resolveFocusRecentActivityHours, resolveFocusLinkDestination, resolveFocusReplyLines, resolveFocusPreviewTrigger, resolveFocusRecentInputs, resolveFocusMapMotion } from './focus-preferences'
+import { resolveFocusMapPreferences, DEFAULT_FOCUS_MAP_PREFERENCES, type FocusMapPreferences } from './focus-map-preferences'
 import { resolveGoalsCommonActions, resolveGoalsPreferences, type GoalsPreferences } from './goals-preferences'
 import { resolveNotesPreferences, type NotesPreferences } from './notes-preferences'
 import { resolveBrowserStartPage, type BrowserStartPageConfig } from './browser-start-page'
@@ -44,6 +45,9 @@ function effective(path: string, value: unknown): unknown {
   if (path === 'focus.previewTrigger') return resolveFocusPreviewTrigger(value)
   if (path === 'focus.recentInputs') return resolveFocusRecentInputs(value)
   if (path === 'focus.mapMotion') return resolveFocusMapMotion(value)
+  if (path === 'focus.map') return resolveFocusMapPreferences(value as FocusMapPreferences | undefined)
+  if (path === 'focus.map.boundary') return value ?? DEFAULT_FOCUS_MAP_PREFERENCES.boundary
+  if (path === 'focus.map.levels') return value ?? DEFAULT_FOCUS_MAP_PREFERENCES.levels
   if (path === 'notes') return resolveNotesPreferences(value as NotesPreferences | undefined)
   if (path === 'notes.fontSize') return value ?? resolveNotesPreferences(undefined).fontSize
   if (path === 'notes.contentWidth') return value ?? resolveNotesPreferences(undefined).contentWidth
@@ -95,7 +99,7 @@ export function applyConfigEdit(current: AppConfig, before: AppConfig, after: Ap
     if (path === 'a2a' || path === 'notes' || path === 'goals' || path === 'continuity' || path === 'automation' || path === 'browser.startPage' || path === 'browser.agentControl' || path === 'appearance.channelHeaderVisibility') {
       // Compare effective defaults without persisting fields the user did not edit.
       actual = actual ?? {}; expected = effective(path, expected); requested = effective(path, requested)
-    } else if (path === 'messageToolCompletion' || path === 'profile' || path === 'focus' || path === 'goalsCommonActions' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {
+    } else if (path === 'messageToolCompletion' || path === 'profile' || path === 'focus' || path === 'focus.map' || path === 'goalsCommonActions' || path === 'toolkit' || path === 'toolkit.performance' || path === 'toolkit.mobileConnection' || path === 'toolkit.tools') {
       actual = effective(path, actual); expected = effective(path, expected); requested = effective(path, requested)
     }
     // A theme record is authored as one complete value; never synthesize variants or icon assets.

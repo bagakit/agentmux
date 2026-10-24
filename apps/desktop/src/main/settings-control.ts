@@ -2,7 +2,7 @@ import { defaultNotesDirectory } from '@agentmux/core/notebook-store'
 import type { NotesStorageOwner } from './notes-storage-owner.js'
 import type { AgentMuxControlRequest, AgentMuxControlResult } from '@agentmux/core'
 import type { ConfigOwner } from './config-owner.js'
-import { scalarSettings as settings } from './settings/setting-catalog.js'
+import { scalarSettings } from './settings/setting-catalog.js'
 
 function unsupported(key: string): Error {
   return Object.assign(new Error(`Unsupported setting: ${key}. Run amux settings inspect to see the currently supported settings.`), { code: 'UNSUPPORTED_SETTING' })
@@ -16,16 +16,18 @@ export async function executeSettingsControl(
   if (request.operation === 'settings.get') {
     const directory = notes && (request.target === undefined || request.target === '' || request.target === 'notes' || request.target === 'notes.directory') ? { key: 'notes.directory', kind: 'string' as const, value: (await notes.inspect()).directory, default: defaultNotesDirectory() } : null
     if (request.target === 'notes.directory' && directory) return { operation: request.operation, entries: [directory], partial: true }
-    const selected = request.target === undefined || request.target === '' ? settings :
-      request.target === 'continuity' || request.target === 'automation' || request.target === 'profile' || request.target === 'focus' || request.target === 'notes' || request.target === 'goals' || request.target === 'goalsCommonActions' || request.target === 'startup' || request.target === 'messageToolCompletion' || request.target === 'appearance' || request.target === 'notifications' || request.target === 'a2a' || request.target === 'browser' || request.target === 'browser.agentControl' || request.target === 'browser.toolbar' || request.target === 'browser.startPage' || request.target === 'toolkit' || request.target === 'toolkit.performance'
-      ? settings.filter((setting) => setting.key.startsWith(`${request.target}.`))
-      : settings.filter((setting) => setting.key === request.target)
+    const snapshot = owner.current, settings = scalarSettings(snapshot)
+    const selected = request.target === undefined || request.target === '' ? settings
+      : settings.filter(setting => setting.key === request.target || setting.key.startsWith(`${request.target}.`))
     if (!selected.length) throw unsupported(request.target ?? '')
-    return { operation: request.operation, entries: [...selected.map((setting) => setting.entry(owner.current)), ...(directory ? [directory] : [])], partial: true as const }
+    return { operation: request.operation, entries: [...selected.map((setting) => setting.entry(snapshot)), ...(directory ? [directory] : [])], partial: true as const }
   }
   if (request.key === 'notes.directory' && notes) { const current = await notes.inspect(request.requestId); const saved = await notes.change({ operationId: request.requestId, expectedDirectory: current.operation?.expectedDirectory ?? current.directory, directory: request.value }); return { operation: request.operation, requestId: request.requestId, entry: { key: request.key, kind: 'string', value: saved.directory, default: defaultNotesDirectory() } } }
-  const setting = settings.find((candidate) => candidate.key === request.key)
-  if (!setting) throw unsupported(request.key)
-  const saved = await owner.update((current) => setting.apply(current, request.value))
+  const saved = await owner.update(current => {
+    const settings = scalarSettings(current), setting = settings.find(candidate => candidate.key === request.key)
+    if (!setting) throw unsupported(request.key)
+    return setting.apply(current, request.value)
+  })
+  const settings = scalarSettings(saved), setting = settings.find(candidate => candidate.key === request.key)!
   return { operation: request.operation, entry: setting.entry(saved) }
 }
