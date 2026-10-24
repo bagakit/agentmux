@@ -120,7 +120,7 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
   const retainedMetadata = useRef<{ client: typeof client; epoch: number; scope: string; revision: number; value: { sessions: AgentMuxAgentSession[]; issue: string } } | null>(null)
   const metadata = useMemo(() => {
     if (sessions !== undefined) return { sessions, issue: '' }
-    const previous = retainedMetadata.current?.client === client ? retainedMetadata.current.value : { sessions: [], issue: '' }
+    const previous = retainedMetadata.current && retainedMetadata.current.client === client ? retainedMetadata.current.value : { sessions: [], issue: '' }
     if (!needsMetadataDirectory) return previous
     if (retainedMetadata.current?.client === client && retainedMetadata.current.epoch === metadataEpoch.current && retainedMetadata.current.scope === metadataScope && retainedMetadata.current.revision === revision) return previous
     let value
