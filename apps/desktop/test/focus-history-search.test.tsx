@@ -4,10 +4,10 @@ import { createHash } from 'node:crypto'
 import { act, createElement } from 'react'
 import type { Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
-import { readAgentSessionHistory, type AgentSessionHistoryDescriptor, type AgentTimelineItem, type AgentSessionHistoryPage } from '@agentmux/core'
+import { AgentMuxMemoryAgentSessionStore, readAgentSessionHistory, type AgentSessionHistoryDescriptor, type AgentTimelineItem, type AgentSessionHistoryPage } from '@agentmux/core'
 import { createAgentMuxSearchReader } from '../../../packages/core/src/search-reader'
 import { readAgentMuxSearch } from '@agentmux/core/search'
-import type { AgentSessionHistoryReadInput, AgentSessionHistoryReadPage } from '@agentmux/core'
+import type { AgentSessionHistoryReadContext, AgentSessionHistoryReadInput, AgentSessionHistoryReadPage } from '@agentmux/core'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
 import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
@@ -23,6 +23,18 @@ const message = (id: string, content: string): AgentTimelineItem => ({ id, agent
 let reader: ReturnType<typeof createAgentMuxSearchReader>
 let history: ReturnType<typeof vi.fn<(input: AgentSessionHistoryReadInput, context: { signal?: AbortSignal }) => Promise<AgentSessionHistoryReadPage>>>
 let items: AgentTimelineItem[], container: HTMLDivElement, root: Root
+let capturedStore: AgentMuxMemoryAgentSessionStore, capturedSeed: Promise<void> | undefined
+function capturedContext(context: AgentSessionHistoryReadContext = {}): AgentSessionHistoryReadContext {
+ return { ...context, readCapturedHistory: async (id, input) => {
+  // A private original source supplies real Core stream/cut pagination; the
+  // owner's recent sessionTimeline remains separate from retained history.
+  capturedSeed ??= (async () => {
+   for (const item of items) await capturedStore.applyTimelineMutation({ type: 'append', agentSessionId: reference.agentSessionId, item })
+  })()
+  await capturedSeed
+  return capturedStore.readCapturedHistory(id, input)
+ } }
+}
 const owner = {
  sessionHistorySources: async () => [source],
  sessionTimeline: async () => ({ agentSessionId: reference.agentSessionId, revision: 1, items }),
@@ -34,12 +46,15 @@ async function enter() { await act(async () => container.querySelector('[aria-la
 async function settle() { for (let i = 0; i < 20; i++) { await act(async () => new Promise(resolve => setTimeout(resolve, 5))); if (container.querySelector('[aria-label="History search results"]')?.getAttribute('aria-busy') === 'false') return } throw Error('Nonempty history query did not settle') }
 beforeEach(async () => {
  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); seedMoteWorkface(); items = [message('captured-reply', 'Captured hidden needle original reply')]
+ capturedStore = new AgentMuxMemoryAgentSessionStore(); capturedSeed = undefined
+ await capturedStore.compareAndSwap(null, { kind: 'agent', ...reference, providerId: 'generic', executorId: 'generic', workspacePath: source.history!.workspacePath,
+  run: { runId: 'original-captured-run' }, retiredRuns: [], hookBindingId: 'private-captured-binding', hookToken: 'private-captured-token', createdAt: source.history!.createdAt, updatedAt: source.history!.createdAt })
  const workspace = { id: 'history-project', name: 'History project', hostId: 'local', path: fixturePath('history-search'), kind: 'folder' as const }
  const agent = { ...moteAgent(reference.agentSessionId, null), workspacePath: workspace.path }
  const tab = createWorkbenchTab('OriginalTab', { kind: 'agent', phase: 'attached', workspaceId: workspace.id, regionId: 'OriginalRegion', sessionId: agent.id })
  useAppStore.setState({ loading: false, config: { ...moteConfig, workspaces: [workspace] }, sessions: [agent], tabs: { [tab.id]: tab }, layouts: { [workspace.id]: createWorkspaceLayout('OriginalGroup', [tab.id]) }, timelines: {}, scratchTopicSnapshots: {}, agentNames: {}, mainSurface: 'agents', agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } }, agentComposerDrafts: { OriginalSession: 'Original unsent draft' } })
  vi.spyOn(api.sessions, 'historySources').mockResolvedValue({ sources: [source], warnings: [] })
- history = vi.fn((input, context) => readAgentSessionHistory(owner, input, context))
+ history = vi.fn((input, context) => readAgentSessionHistory(owner, input, capturedContext(context)))
  reader = createAgentMuxSearchReader({
   metadata: async () => { throw Error('This deliberate text query cannot read metadata') },
   sources: async input => ({ sources: ['captured', 'native'].filter(kind => !input.source || input.source === kind).map(kind => ({ ...reference, sourceHostId: reference.hostId,
@@ -75,13 +90,23 @@ it('aborts hidden and superseded readers and discards late query results without
  let finish!: (page: Awaited<ReturnType<typeof api.sessions.readHistory>>) => void, signal: AbortSignal | undefined
  history.mockImplementationOnce((_, context) => { signal = context?.signal; return new Promise(resolve => { finish = resolve }) })
  await query('hidden needle'); await enter(); expect(signal?.aborted).toBe(false)
- const old = await readAgentSessionHistory(owner, { ...reference, source: 'captured', kind: 'text', query: 'hidden needle' })
+ const old = await readAgentSessionHistory(owner, { ...reference, source: 'captured', kind: 'text', query: 'hidden needle' }, capturedContext())
  await query('new query'); expect(signal?.aborted).toBe(true); await act(async () => finish(old)); expect(container.querySelector('[aria-label="History search results"]')).toBeNull()
- history.mockImplementationOnce((_, context) => { signal = context?.signal; return new Promise(() => {}) })
- await enter(); await mount(false); expect(signal?.aborted).toBe(true); expect(container.querySelector('[aria-label="History search results"]')).toBeNull(); expect(useAppStore.getState().agentComposerDrafts.OriginalSession).toBe('Original unsent draft')
+ history.mockImplementationOnce((_, context) => { signal = context?.signal; return new Promise(resolve => { finish = resolve }) })
+ await enter()
+ const hiddenResult = container.querySelector('[aria-label="History search results"]')!
+ expect(hiddenResult).not.toBeNull()
+ await mount(false); expect(signal?.aborted).toBe(true)
+ expect(container.querySelector('[aria-label="History search results"]')).toBe(hiddenResult)
+ const cancelled = hiddenResult.textContent
+ expect(hiddenResult.getAttribute('aria-busy')).toBe('false')
+ await act(async () => finish(old))
+ expect(container.querySelector('[aria-label="History search results"]')).toBe(hiddenResult)
+ expect(hiddenResult.textContent).toBe(cancelled)
+ expect(useAppStore.getState().agentComposerDrafts.OriginalSession).toBe('Original unsent draft')
 })
 it('keeps unavailable source coverage visible alongside successful retained matches', async () => {
- history.mockImplementation((input, context) => input.source === 'native' ? Promise.reject(new Error('Original native source is unavailable')) : readAgentSessionHistory(owner, input, context))
+ history.mockImplementation((input, context) => input.source === 'native' ? Promise.reject(new Error('Original native source is unavailable')) : readAgentSessionHistory(owner, input, capturedContext(context)))
  await query('hidden needle'); await enter(); await settle(); expect(container.querySelectorAll('.focus-history-hit')).toHaveLength(1)
  expect(container.textContent).toContain('1 unavailable'); expect(container.textContent).toContain('Original native source is unavailable'); expect(container.textContent).toContain('1 / 2 source streams checked')
 })
