@@ -17,8 +17,11 @@ vi.mock('../src/renderer/src/components/TerminalView', () => ({ TerminalView: ()
 import { App } from '../src/renderer/src/App'
 import { api } from '../src/renderer/src/lib/api'
 import { useAppStore } from '../src/renderer/src/store'
-import { createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
-import { installNativePopover } from './fixtures/mote-workface'
+import { addWorkbenchRegion, createWorkbenchTab } from '../src/renderer/src/lib/workbench-tabs'
+import { installNativePopover, moteAgent, moteTopics, scratchWorkspace, customMoteId, quietMoteId } from './fixtures/mote-workface'
+import { scratchTopicsScope } from '../src/renderer/src/lib/scratch-topic-snapshots'
+import { directoryIdentity, homeZoneId } from '../src/shared/space-addresses'
+import { readPmoTeamsTopicFloatingState, requestPmoTeamsTopicFloatingClose } from '../src/renderer/src/lib/pmo-teams-topic-floating'
 const initial = useAppStore.getState()
 async function fixture() {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); window.localStorage.clear(); leaves.mounts = []; leaves.unmounts = []
@@ -63,6 +66,7 @@ async function fixture() {
   async function query(value: string) { const input = search(); expect(input).not.toBeNull(); await act(async () => { Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,value); input.dispatchEvent(new Event('input',{bubbles:true})) }) }
   const ids = () => [...container.querySelectorAll<HTMLElement>('.focus-context[data-session-id]')].map(node => node.dataset.sessionId).sort()
   return { container, alpha, trigger, search, open, menu, choose, escape, query, ids, async close() {
+    await act(async () => requestPmoTeamsTopicFloatingClose());
     await act(async () => root.unmount()); container.remove(); restorePopover(); useAppStore.setState(initial, true); window.localStorage.clear(); vi.restoreAllMocks(); vi.unstubAllGlobals()
   } }
 }
@@ -160,5 +164,147 @@ it('searches menu options without changing filters, and quick states preserve pr
     const needs = [...f.menu().querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node=>node.textContent==='Needs you')!;expect(needs).not.toBeNull();await act(async()=>needs.click())
     expect(f.ids()).toEqual([]);expect(f.search().value).toBe('parser')
     expect(f.trigger().getAttribute('aria-description')).toBe(`${f.alpha.name} · Attention · Project`)
+  } finally { await f.close() }
+})
+
+let coordinationFixtureSequence = 0
+async function addCoordination(f: Awaited<ReturnType<typeof fixture>>, positions: 'one' | 'multiple' | 'none' = 'one') {
+  const sequence = ++coordinationFixtureSequence
+  const first = moteAgent('mote-one', customMoteId, 'waiting'), second = moteAgent('mote-two', quietMoteId)
+  const firstTopic = moteTopics.find(topic => topic.id === customMoteId)!, secondTopic = moteTopics.find(topic => topic.id === quietMoteId)!
+  const zone = homeZoneId(directoryIdentity(scratchWorkspace.hostId, firstTopic.directoryPath))
+  const tab = createWorkbenchTab(`mote-tab-${sequence}`, { regionId: 'mote-target-region', workspaceId: scratchWorkspace.id, kind: 'agent', phase: 'attached', sessionId: first.id }, 'Original Mote location')
+  tab.topicId = customMoteId; tab.space = { spaceId: directoryIdentity('local', firstTopic.directoryPath), zoneId: zone }
+  const withNeighbor = addWorkbenchRegion(tab, 'mote-target-region', 'right', { regionId: 'other-active-region', workspaceId: f.alpha.id, kind: 'agent', phase: 'attached', sessionId: 'working' })
+  const another = createWorkbenchTab(`other-mote-tab-${sequence}`, { regionId: 'other-mote-region', workspaceId: scratchWorkspace.id, kind: 'agent', phase: 'attached', sessionId: second.id }, secondTopic.title)
+  another.topicId = quietMoteId
+  const duplicate = { ...tab, id: `second-location-${sequence}`, name: 'Second original Mote location' }
+  vi.spyOn(api.scratch, 'listTopics').mockResolvedValue(moteTopics)
+  await act(async () => useAppStore.setState(state => ({
+    config: { ...state.config!, workspaces: [...state.config!.workspaces, scratchWorkspace] },
+    sessions: [...state.sessions, first, second], agentNames: { ...state.agentNames, [first.id]: 'Mote analyst', [second.id]: 'Mote writer' },
+    tabs: { ...state.tabs, ...(positions === 'none' ? {} : { [tab.id]: withNeighbor }), [another.id]: another, ...(positions === 'multiple' ? { [duplicate.id]: duplicate } : {}) },
+    layouts: { ...state.layouts, [scratchWorkspace.id]: createWorkspaceLayout('coordination-group', [...(positions === 'none' ? [] : [tab.id]), another.id, ...(positions === 'multiple' ? [duplicate.id] : [])]) },
+    scratchTopicSnapshots: { ...state.scratchTopicSnapshots, [scratchWorkspace.id]: { scope: scratchTopicsScope(scratchWorkspace), revision: 1, reading: false, error: null, topics: moteTopics } },
+    spaceZoneBindings: { ...state.spaceZoneBindings, [zone]: { spaceId: directoryIdentity('local', firstTopic.directoryPath), workspaceId: scratchWorkspace.id, topicId: customMoteId, contentKind: 'mote', directoryPath: firstTopic.directoryPath } },
+    surveyCollectedZones: { [zone]: true }, surveyOrganization: { ungrouped: [zone], groups: [] }
+  })))
+  const toggle = async (dimension: string, id: string) => {
+    await f.open(); const item = [...f.menu().querySelectorAll<HTMLElement>(`[data-focus-${dimension}]`)].find(node => node.getAttribute(`data-focus-${dimension}`) === id)
+    expect(item).not.toBeNull(); await act(async () => item!.click())
+  }
+  const coordinationIds = () => [...f.container.querySelectorAll<HTMLElement>('.focus-coordination-results .focus-context[data-session-id]')].map(node => node.dataset.sessionId).sort()
+  return { tab, duplicate, first, second, toggle, coordinationIds }
+}
+it('actual App exposes useful Mote facets and independently combines coordination source, project, state and text', async () => {
+  const f = await fixture(); try {
+    const c = await addCoordination(f), before = useAppStore.getState(), draft = f.container.querySelector<HTMLTextAreaElement>('[aria-label="Original draft"]')!
+    draft.setSelectionRange(3, 8)
+    expect(c.coordinationIds()).toEqual([])
+    await f.open()
+    expect(f.menu().querySelector('[data-focus-type="mote"] .focus-filter-menu__count')?.textContent).toBe('2')
+    expect(c.coordinationIds()).toEqual([]) // Inspecting counts is not a filter edit.
+    await c.toggle('type', 'mote'); expect(c.coordinationIds()).toEqual(['mote-one', 'mote-two'])
+    expect(f.container.querySelector('.focus-project-lanes__row .focus-context')).toBeNull()
+    await c.toggle('type', 'survey'); expect(c.coordinationIds()).toEqual(['mote-one', 'mote-two'])
+    await c.toggle('type', 'mote'); expect(c.coordinationIds()).toEqual(['mote-one'])
+    await c.toggle('project', JSON.stringify(['local', scratchWorkspace.id])); await c.toggle('state', 'attention')
+    await f.escape(); await f.query('Mote analyst'); expect(c.coordinationIds()).toEqual(['mote-one'])
+    await f.query('Mote writer'); expect(c.coordinationIds()).toEqual([])
+    await f.query('Mote analyst'); expect(c.coordinationIds()).toEqual(['mote-one'])
+    const after = useAppStore.getState()
+    expect(after.agentFocus).toBe(before.agentFocus); expect(after.tabs).toBe(before.tabs); expect(after.layouts).toBe(before.layouts)
+    expect(after.agentComposerDrafts).toBe(before.agentComposerDrafts)
+    expect(f.container.querySelector('[aria-label="Original draft"]')).toBe(draft)
+    expect([draft.selectionStart, draft.selectionEnd]).toEqual([3, 8])
+    await f.open(); const clear = [...f.menu().querySelectorAll<HTMLElement>('[role="menuitem"]')].find(node => node.textContent === 'Clear filters')!
+    await act(async () => clear.click()); expect(c.coordinationIds()).toEqual([])
+    expect(f.ids()).toEqual(['attention','beta-agent','healthy-lost','idle','offline','results','working'])
+  } finally { await f.close() }
+})
+it('Mote result navigation selects its original inactive Region and preserves execution focus and draft', async () => {
+  const f = await fixture(); try {
+    const c = await addCoordination(f), before = useAppStore.getState()
+    await c.toggle('type', 'mote'); await f.escape()
+    const row = f.container.querySelector<HTMLButtonElement>('.focus-coordination-results [data-session-id="mote-one"]')!
+    expect(row).not.toBeNull(); await act(async () => row.click())
+    expect(readPmoTeamsTopicFloatingState()?.reference).toMatchObject({ tabId: c.tab.id, regionId: 'mote-target-region' })
+    expect(useAppStore.getState().agentFocus.pmo.sessionId).toBe('mote-one')
+    expect(useAppStore.getState().agentFocus.execution).toBe(before.agentFocus.execution)
+    expect(useAppStore.getState().agentComposerDrafts.working).toBe('Original unsent draft')
+    expect(useAppStore.getState().sessions.find(session => session.id === 'working')?.control.run).toBe(before.sessions.find(session => session.id === 'working')?.control.run)
+  } finally { await f.close() }
+})
+it('Mote multiple and missing locations keep the original execution work until an exact location is chosen', async () => {
+  const f = await fixture(); try {
+    const c = await addCoordination(f, 'multiple'), before = useAppStore.getState()
+    await c.toggle('type', 'mote'); await f.escape()
+    await act(async () => f.container.querySelector<HTMLButtonElement>('.focus-coordination-results [data-session-id="mote-one"]')!.click())
+    let choices = f.container.querySelector('[aria-label="Choose original Mote location"]')!
+    expect(choices).not.toBeNull(); expect(choices.querySelectorAll('.focus-location-choice')).toHaveLength(2)
+    const dismiss = [...choices.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === 'Dismiss location choices')!
+    dismiss.focus(); await act(async () => dismiss.click())
+    expect([f.trigger(), f.search()]).toContain(document.activeElement)
+    await act(async () => f.container.querySelector<HTMLButtonElement>('.focus-coordination-results [data-session-id="mote-one"]')!.click())
+    choices = f.container.querySelector('[aria-label="Choose original Mote location"]')!
+    expect(choices.querySelectorAll('.focus-location-choice')).toHaveLength(2)
+    expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
+    const second = [...choices.querySelectorAll<HTMLButtonElement>('.focus-location-choice')].find(button => button.textContent?.includes('Second original Mote location'))!
+    expect(second).not.toBeNull(); await act(async () => second.click())
+    expect(readPmoTeamsTopicFloatingState()?.reference).toMatchObject({ tabId: c.duplicate.id, regionId: 'mote-target-region' })
+    expect(useAppStore.getState().agentFocus.execution).toBe(before.agentFocus.execution)
+    await act(async () => useAppStore.setState(state => { const { [c.tab.id]: _first, [c.duplicate.id]: _second, ...tabs } = state.tabs; return { tabs } }))
+    await act(async () => f.container.querySelector<HTMLButtonElement>('.focus-coordination-results [data-session-id="mote-one"]')!.click())
+    expect(f.container.querySelector('[aria-label="Choose original Mote location"]')?.textContent).toContain('No original Mote location is confirmed')
+    expect(useAppStore.getState().agentFocus.execution).toBe(before.agentFocus.execution)
+    expect(useAppStore.getState().agentComposerDrafts.working).toBe('Original unsent draft')
+  } finally { await f.close() }
+})
+
+it('a stale Mote location choice cannot retarget coordination after its original content becomes a Topic', async () => {
+  const f = await fixture(); try {
+    const c = await addCoordination(f, 'multiple')
+    await c.toggle('type', 'mote'); await f.escape()
+    await act(async () => f.container.querySelector<HTMLButtonElement>('.focus-coordination-results [data-session-id="mote-one"]')!.click())
+    expect(f.container.querySelector('[aria-label="Choose original Mote location"]')).not.toBeNull()
+    await act(async () => useAppStore.setState(state => ({ scratchTopicSnapshots: { ...state.scratchTopicSnapshots,
+      [scratchWorkspace.id]: { ...state.scratchTopicSnapshots[scratchWorkspace.id]!, revision: 2,
+        topics: moteTopics.map(topic => topic.id === customMoteId ? { ...topic, kind: 'topic' as const } : topic) }
+    } })))
+    const before = useAppStore.getState(), floating = readPmoTeamsTopicFloatingState()
+    const button = f.container.querySelector<HTMLButtonElement>('[aria-label="Choose original Mote location"] .focus-location-choice')!
+    expect(button).not.toBeNull(); await act(async () => button.click())
+    expect(useAppStore.getState().agentFocus).toBe(before.agentFocus)
+    expect(readPmoTeamsTopicFloatingState()).toBe(floating)
+    expect(useAppStore.getState().agentComposerDrafts.working).toBe('Original unsent draft')
+  } finally { await f.close() }
+})
+it('a Mote-only candidate set with no local match exposes the same clear-filter action', async () => {
+  const f = await fixture(); try {
+    const c = await addCoordination(f)
+    await act(async () => useAppStore.setState(state => ({ sessions: state.sessions.filter(session => session.id === c.first.id || session.id === c.second.id),
+      agentFocus: { execution: { sessionId: null, history: [] }, pmo: { sessionId: null } } })))
+    await c.toggle('type', 'mote'); await f.escape(); expect(c.coordinationIds()).toEqual(['mote-one', 'mote-two'])
+    await f.query('no original metadata matches this query')
+    expect(c.coordinationIds()).toEqual([])
+    expect(f.container.textContent).toContain('No contexts match these local filters.')
+    expect(f.container.textContent).not.toContain('No execution contexts yet')
+    expect(f.container.querySelector('.focus-project-lanes__clear')).not.toBeNull()
+  } finally { await f.close() }
+})
+
+it('actual Mote filter and card path does not reread accepted conversation text', async () => {
+  const f = await fixture(); try {
+    const c = await addCoordination(f)
+    let bodyReads = 0
+    const message = { id: 'retained-mote-reply', agentSessionId: c.first.id, kind: 'assistant_message' as const, source: 'native-hook' as const,
+      status: 'complete' as const, title: 'Original reply', content: 'Accepted Mote content outside metadata filtering', createdAt: 1, updatedAt: 1 }
+    Object.defineProperty(message, 'content', { get() { bodyReads++; return 'Accepted Mote content outside metadata filtering' } })
+    await act(async () => useAppStore.setState(state => ({ timelines: { ...state.timelines, [c.first.id]: { agentSessionId: c.first.id, revision: 1, items: [message] } } })))
+    bodyReads = 0
+    await c.toggle('type', 'mote'); await f.escape(); expect(c.coordinationIds()).toEqual(['mote-one', 'mote-two'])
+    await f.query('Mote analyst'); expect(c.coordinationIds()).toEqual(['mote-one'])
+    await c.toggle('state', 'attention'); await f.escape(); expect(c.coordinationIds()).toEqual(['mote-one'])
+    expect(bodyReads).toBe(0)
   } finally { await f.close() }
 })
