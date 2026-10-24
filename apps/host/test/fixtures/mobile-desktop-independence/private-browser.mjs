@@ -66,12 +66,27 @@ export async function privateMobileBrowser(directory) {
 
 // Programs contain only real product navigation/input and readonly observations.
 export async function openMobile(page, input) {
-  const wire = { hold: false, sent: 0, received: 0, blocked: 0, sockets: new Set() }
+  const wire = { hold: false, sent: 0, received: 0, blocked: 0, handshakesForwarded: 0, sockets: new Set(), blockedFrames: [] }
   page.__independentWire = wire
   await page.routeWebSocket('**', ws => {
     const server = ws.connectToServer(); const socket = { ws, server }; wire.sockets.add(socket)
     ws.onMessage(value => { wire.sent++; server.send(value) })
-    server.onMessage(value => { wire.received++; if (wire.hold) wire.blocked++; else ws.send(value) })
+    server.onMessage(value => {
+      wire.received++
+      let ready = false
+      if (typeof value === 'string') try { ready = JSON.parse(value)?.type === 'e2ee_ready' } catch { /* Application ciphertext is not a plaintext protocol object. */ }
+      // The original encrypted channel owns handshake validation. Fault only its application replies.
+      if (ready) { wire.handshakesForwarded++; ws.send(value) }
+      else if (wire.hold) {
+        wire.blocked++
+        const text = typeof value === 'string'
+        wire.blockedFrames.push(text
+          ? { ordinal: wire.blocked, encoding: 'websocket-text', codeUnits: value.length,
+              ...(value.length * 2 <= 65536 ? { data: value } : { retained: false }) }
+          : { ordinal: wire.blocked, encoding: 'unavailable-binary', retained: false })
+        if (wire.blockedFrames.length > 8) wire.blockedFrames.shift()
+      } else ws.send(value)
+    })
   })
   await page.goto(input.url)
   await page.locator('.mobile-app[data-connection="connected"]').waitFor({ timeout: 30_000 })
@@ -196,7 +211,11 @@ export async function createMobileAgentTab(page, input) {
   await form.getByRole('combobox', { name: '新 Agent Zone', exact: true }).selectOption(input.zoneId)
   await form.getByRole('combobox', { name: '新 Agent 执行器', exact: true }).selectOption(input.executorId)
   await form.getByRole('textbox', { name: '新 Agent 初始指令', exact: true }).fill(input.prompt)
-  if (input.hold) page.__independentWire.hold = true
+  if (input.hold) {
+    const wire = page.__independentWire
+    wire.holdStarted = { sent: wire.sent, received: wire.received, blocked: wire.blocked, handshakesForwarded: wire.handshakesForwarded }
+    wire.hold = true
+  }
   await form.getByRole('button', { name: '创建 Agent', exact: true }).click()
   await page.waitForFunction(prompt => JSON.parse(localStorage.getItem('agentmux-mobile-workface-v1')).agentCreates?.some(intent =>
     intent.input.content.prompt === prompt), input.prompt)
@@ -206,6 +225,16 @@ export async function createMobileAgentTab(page, input) {
   if (!input.hold) await form.getByRole('button', { name: '关闭新建 Agent', exact: true }).click()
   return intent
 }
+export async function inspectOriginalCreation(page, input) {
+  const state = await page.evaluate(operationId => {
+    const record = JSON.parse(localStorage.getItem('agentmux-mobile-workface-v1'))
+    return { url: location.href, body: document.body.innerText, form: document.querySelector('.mobile-agent-create')?.outerHTML ?? null,
+      recordId: record?.recordId, host: record?.host, intents: record?.agentCreates?.filter(intent => intent.input.operationId === operationId) ?? [] }
+  }, input.operationId)
+  const wire = page.__independentWire
+  return { ...state, transport: { hold: wire.hold, sent: wire.sent, received: wire.received, blocked: wire.blocked,
+    handshakesForwarded: wire.handshakesForwarded, sockets: wire.sockets.size, holdStarted: wire.holdStarted, blockedFrames: wire.blockedFrames } }
+}
 export async function dropCreationReply(page, input) {
   const wire = page.__independentWire
   if (!wire.hold || wire.blocked < 1) throw Error('A real encrypted creation response must actually be withheld')
@@ -214,7 +243,8 @@ export async function dropCreationReply(page, input) {
   await page.waitForFunction(operationId => JSON.parse(localStorage.getItem('agentmux-mobile-workface-v1')).agentCreates.some(intent =>
     intent.input.operationId === operationId && intent.phase === 'unknown'), input.operationId)
   wire.hold = false
-  return { blocked: wire.blocked, sent: wire.sent, received: wire.received }
+  return { blocked: wire.blocked, sent: wire.sent, received: wire.received, handshakesForwarded: wire.handshakesForwarded,
+    holdStarted: wire.holdStarted }
 }
 export async function captureOriginalCreation(page, input) {
   await page.locator('.mobile-app[data-connection="connected"]').waitFor({ timeout: 40_000 })

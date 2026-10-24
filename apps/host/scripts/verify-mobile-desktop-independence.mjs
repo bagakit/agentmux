@@ -7,7 +7,7 @@ import { bindCandidate, digest } from '../test/fixtures/mobile-desktop-independe
 import { compiledHostFixture, until } from '../test/fixtures/mobile-desktop-independence/compiled-host-fixture.mjs'
 import { privateMobileBrowser, openMobile, openOriginalSession, mobileInput, dropReply, browserState,
   readOriginalContent, editOriginalGoal, editOriginalNote, recoverOriginalSession, openNewMobileConnection, waitOriginalConnection,
-  createMobileAgentTab, dropCreationReply, captureOriginalCreation, continueOriginalCreation } from '../test/fixtures/mobile-desktop-independence/private-browser.mjs'
+  createMobileAgentTab, inspectOriginalCreation, dropCreationReply, captureOriginalCreation, continueOriginalCreation } from '../test/fixtures/mobile-desktop-independence/private-browser.mjs'
 
 const args = process.argv.slice(2), value = (flag, fallback) => args.includes(flag) ? args[args.indexOf(flag) + 1] : fallback
 const repository = resolve(value('--repository', process.cwd())), directory = resolve(value('--output', join(repository, '.local/state/mobile-independent-host/join')))
@@ -260,9 +260,32 @@ try {
   const pendingCreate = await browser.action('mobile-creates-original-agent-and-tab', createMobileAgentTab,
     { spaceId: bindings[0].spaceId, zoneId: zone.zoneId, executorId: 'codex', prompt: newAgentPrompt, hold: true })
   assert.ok(pendingCreate.input.operationId)
-  const creationReport = await until('the original Core creation exists while its real reply is withheld', async () =>
-    (await fixture.rpc.call('space.inspect', { target: { operationId: pendingCreate.input.operationId } })).request?.report,
-    report => report?.outcome === 'opened' && report.agent?.initialPrompt === 'confirmed')
+  const creation = receipt.creation = { intent: pendingCreate }
+  let creationReport
+  try {
+    creationReport = await until('the original Core creation exists while its real reply is withheld', async () => {
+      creation.lastInspection = await fixture.rpc.call('space.inspect', { target: { operationId: pendingCreate.input.operationId } })
+      return creation.lastInspection.request?.report
+    }, report => report?.outcome === 'opened' && report.agent?.initialPrompt === 'confirmed')
+  } catch (error) {
+    const observe = async read => {
+      try { return { status: 'observed', value: await read() } }
+      catch (observation) { return { status: 'unavailable', code: observation.code, message: observation.message } }
+    }
+    creation.currentInspection = await observe(() => fixture.rpc.call('space.inspect', { target: { operationId: pendingCreate.input.operationId } }))
+    creation.durableSessions = await observe(async () => (await fixture.sdk.readAgentSessions()).filter(session => session.creation?.createOperationId === pendingCreate.input.operationId))
+    creation.sessions = await Promise.all((creation.durableSessions.value ?? []).map(async session => {
+      fixture.ownCreatedSession(session.agentSessionId)
+      return { session, creation: await observe(() => fixture.sdk.inspectAgentCreation(session.agentSessionId)),
+        status: await observe(() => fixture.sdk.statusAgent(session.agentSessionId)),
+        replay: await observe(() => fixture.sdk.readRunReplay(session.run, 0, 'raw')),
+        nativeTranscript: session.nativeHandle?.kind === 'provider' && session.nativeHandle.transcriptPath
+          ? await observe(() => readFile(session.nativeHandle.transcriptPath, 'utf8')) : { status: 'unavailable', message: 'No exact native transcript is recorded.' }
+      }
+    }))
+    creation.browser = await observe(() => browser.action('inspect-original-creation', inspectOriginalCreation, { operationId: pendingCreate.input.operationId }))
+    throw error
+  }
   const createdSid = creationReport.agent.agentSessionId
   assert.notEqual(createdSid, sid); fixture.ownCreatedSession(createdSid)
   assert.equal(creationReport.agent.createOperationId, pendingCreate.input.operationId)
@@ -270,8 +293,11 @@ try {
   const addedTab = { ...creationReport.to, agentSessionId: createdSid }
   const newOriginal = await until('actual input-ready Run of Mobile-created Agent', () => fixture.sdk.statusAgent(createdSid),
     value => value.run.state === 'running' && value.run.pid > 1 && Boolean(value.session.nativeHandle) &&
-      value.session.terminalPromptReadiness?.run.runId === creationReport.agent.runId &&
-      value.session.terminalPromptReadiness.readyThroughByte !== undefined)
+      value.session.run.runId === creationReport.agent.runId && value.run.runId === creationReport.agent.runId &&
+      value.observation.process === 'running' && value.observation.source === 'native-transcript' &&
+      value.observation.semantic === 'idle' && value.observation.readiness === 'ready' && !value.observation.stale &&
+      value.run.nativeService?.input.phase.type === 'open' && value.run.nativeService.input.unsettledCommands === 0 &&
+      value.run.nativeService.input.unsettledRequestBytes === 0 && value.run.nativeService.terminalFault === null)
   assert.equal(newOriginal.session.run.runId, creationReport.agent.runId)
   assert.equal(newOriginal.session.workspacePath, fixture.workspace)
   const graphAfterMobileCreate = (await fixture.rpc.call('space.state', {})).state.graph
