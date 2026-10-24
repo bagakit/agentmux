@@ -53,7 +53,7 @@ function RegionContent({ client, connected = true, visible = true, showTitle = t
     return () => onBackChange(null)
   }, [visible, onBackChange])
   useEffect(() => {
-    if (!visible || !connected || attempted.current?.client === client && attempted.current.revision === revision) return
+    if (!visible || !connected || attempted.current && attempted.current.client === client && attempted.current.revision === revision) return
     attempted.current = { client, revision }
     let disposed = false
     const read = async () => {
