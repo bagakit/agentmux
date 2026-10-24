@@ -1,6 +1,8 @@
+import { resolveFocusMapPreferences, type FocusMapPreferences } from './focus-map-preferences'
+
 export const FOCUS_RECENT_ACTIVITY_HOURS = [12, 24, 48, 72, 168] as const
 export type FocusRecentActivityHours = typeof FOCUS_RECENT_ACTIVITY_HOURS[number]
-export type FocusPreferences = { recentActivityHours: FocusRecentActivityHours; linkDestination?: FocusLinkDestination; replyLines?: FocusReplyLines; previewTrigger?: FocusPreviewTrigger; recentInputs?: FocusRecentInputs; mapMotion?: FocusMapMotion }
+export type FocusPreferences = { recentActivityHours: FocusRecentActivityHours; linkDestination?: FocusLinkDestination; replyLines?: FocusReplyLines; previewTrigger?: FocusPreviewTrigger; recentInputs?: FocusRecentInputs; mapMotion?: FocusMapMotion; map?: FocusMapPreferences }
 export const DEFAULT_FOCUS_RECENT_ACTIVITY_HOURS: FocusRecentActivityHours = 48
 /** Minimum project visibility guarantee, independent of a shorter sorting preference. */
 export const FOCUS_RECENT_PROJECT_HOURS = 48
@@ -43,5 +45,5 @@ export function resolveFocusMapMotion(value: unknown): FocusMapMotion {
 }
 export function resolveFocusPreferences(value: FocusPreferences | undefined): Required<FocusPreferences> {
   return { recentActivityHours: resolveFocusRecentActivityHours(value?.recentActivityHours), linkDestination: resolveFocusLinkDestination(value?.linkDestination),
-    replyLines: resolveFocusReplyLines(value?.replyLines), previewTrigger: resolveFocusPreviewTrigger(value?.previewTrigger), recentInputs: resolveFocusRecentInputs(value?.recentInputs), mapMotion: resolveFocusMapMotion(value?.mapMotion) }
+    replyLines: resolveFocusReplyLines(value?.replyLines), previewTrigger: resolveFocusPreviewTrigger(value?.previewTrigger), recentInputs: resolveFocusRecentInputs(value?.recentInputs), mapMotion: resolveFocusMapMotion(value?.mapMotion), map: resolveFocusMapPreferences(value?.map) }
 }
