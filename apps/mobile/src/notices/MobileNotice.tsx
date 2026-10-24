@@ -1,4 +1,5 @@
 import { createContext, useContext, useId, useMemo, useState, type HTMLAttributes, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 
 export const DELIVERY_DISMISSAL_STORAGE = 'agentmux-mobile-dismissed-delivery-v1'
@@ -13,6 +14,7 @@ type Presentation = {
 }
 const Notices = createContext<Presentation | null>(null)
 const Scope = createContext('')
+const AvatarNoticeTarget = createContext<{ target: HTMLElement | null; setTarget(target: HTMLDivElement | null): void } | null>(null)
 const objectIds = new WeakMap<object, number>()
 let nextObjectId = 0
 // Object identity is local to this presentation tree; no business object is serialized or inferred.
@@ -27,6 +29,8 @@ function identityKey(identity: Identity): string {
 }
 
 export function MobileNoticeProvider({ children }: { children: ReactNode }) {
+  const [avatarTarget, setAvatarTarget] = useState<HTMLDivElement | null>(null)
+  const avatarOutlet = useMemo(() => ({ target: avatarTarget, setTarget: setAvatarTarget }), [avatarTarget])
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
   const [deliveryDismissed, setDeliveryDismissed] = useState(() => {
     try { const value: unknown = JSON.parse(localStorage.getItem(DELIVERY_DISMISSAL_STORAGE) ?? 'null'); return new Set(Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string').slice(-64) : []) }
@@ -47,7 +51,33 @@ export function MobileNoticeProvider({ children }: { children: ReactNode }) {
       })
     }
   }), [dismissed, deliveryDismissed])
-  return <Notices.Provider value={value}>{children}</Notices.Provider>
+  return <AvatarNoticeTarget.Provider value={avatarOutlet}><Notices.Provider value={value}>{children}</Notices.Provider></AvatarNoticeTarget.Provider>
+}
+
+/** Presentation only: each original avatar owner keeps its own observation and retry. */
+export function MobileAvatarNoticeOutlet() {
+  const outlet = useContext(AvatarNoticeTarget)
+  return <div ref={outlet?.setTarget} className="mobile-avatar-notice-outlet" />
+}
+
+export function MobileAvatarNotice({ owner, identity, name, issue, visible, retry }: {
+  owner: object | null; identity: Identity; name: string; issue: string; visible: boolean; retry?: (() => void) | undefined
+}) {
+  const target = useContext(AvatarNoticeTarget)?.target
+  if (!target || !issue) return null
+  // Portals retain their React ancestry, which can include an Agent row button.
+  // Isolate the notice's own gestures without cancelling their native defaults.
+  return createPortal(<div onClick={event => event.stopPropagation()} onPointerDown={event => event.stopPropagation()}
+    onPointerMove={event => event.stopPropagation()} onPointerUp={event => event.stopPropagation()}
+    onPointerCancel={event => event.stopPropagation()} onContextMenu={event => event.stopPropagation()}
+    onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ' || event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') event.stopPropagation() }}
+    onKeyUp={event => { if (event.key === 'Enter' || event.key === ' ' || event.key === 'ContextMenu' || event.shiftKey && event.key === 'F10') event.stopPropagation() }}>
+    <MobileNotice owner={owner} identity={identity} hidden={!visible} className="mobile-avatar-notice">
+      <details><summary>{`头像外观未确认 · ${name}`}</summary><p>{issue}</p>
+        {retry ? <button type="button" onClick={retry}>重新读取头像</button> : <p>原对象连接可用后可重新核对。</p>}
+      </details>
+    </MobileNotice>
+  </div>, target)
 }
 
 export function MobileNoticeScope({ identity = [], owner, children }: { identity?: Identity; owner?: object | null | undefined; children: ReactNode }) {
