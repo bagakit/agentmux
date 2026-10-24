@@ -249,6 +249,9 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-object-avatar .space-object-icon { display: contents; }
 .mobile-object-avatar img { width: 100%; height: 100%; border-radius: 30%; object-fit: cover; }
 .mobile-object-avatar .mote-face { width: 100%; height: 100%; }
+/* Scale the entire original 64px rig as one HTML layer. WebKit does not reliably
+   scale HTML articulation inside a small SVG foreignObject with its viewBox. */
+.mobile-mote-face-model { position: absolute; top: 0; left: 0; width: 64px; height: 64px; transform-origin: 0 0; }
 .mobile-avatar-issue { position: absolute; right: -2px; bottom: -2px; background: var(--surface-0); color: var(--amber); border-radius: 50%; font-size: 10px; padding: 1px; display: inline-flex; }
 .mobile-connect-page { max-width: 440px; margin: 0 auto; min-height: 100%; padding: 20px 24px 30px; display: flex; flex-direction: column; align-items: center; text-align: center; justify-content: center; }
 .mobile-connect-dragon { object-fit: contain; margin-bottom: 12px; width: min(40vw, 150px); height: min(40vw, 150px); }

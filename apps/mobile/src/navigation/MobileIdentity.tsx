@@ -100,7 +100,7 @@ export function MobileIdentity({ identity, session, client, connected, size = 32
   const Glyph = selected?.glyph && Object.hasOwn(SPACE_ICON_CATALOG, selected.glyph) ? SPACE_ICON_CATALOG[selected.glyph as keyof typeof SPACE_ICON_CATALOG].Icon : null
   return <span ref={ref} className={identity.mote ? 'mobile-object-avatar mote-identity-motion' : 'mobile-object-avatar mobile-project-avatar'}
     data-mote-expression={expression} data-mote-motion="off" style={{ width: size, height: size, '--mote-ambient-delay': `-${Array.from(spaceId ?? '').reduce((n, c) => (n * 31 + c.charCodeAt(0)) >>> 0, 0) % 14000}ms` } as import('react').CSSProperties} title={issue || selected?.issue || identity.name}>
-    {identity.mote ? <span className="space-object-icon">{face ? <MoteFace face={face} expression={expression} />
+    {identity.mote ? <span className="space-object-icon">{face ? <span className="mobile-mote-face-model" style={{ transform: `scale(${size / 64})` }}><MoteFace face={face} expression={expression} /></span>
       : selected?.image ? image && image.spaceId === spaceId && image.revision === selected.image.revision ? <img className="space-object-icon__avatar" src={image.dataUrl} alt="" /> : <MoteMark size={size - 8} />
       : selected?.glyph ? Glyph ? <Glyph size={size - 8} /> : <MoteMark size={size - 8} /> : <MoteMark size={size - 8} interactive={visible} data-mote-icon-source="automatic" />}</span>
       : <MobileSpaceIcon appearanceRevision={appearanceRevision} spaceId={objectSpaceId ?? identity.context?.spaceId} name={identity.project || identity.name} appearance={appearance} client={client} connected={connected} visible={visible} size={size - 8} />}
