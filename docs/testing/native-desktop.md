@@ -9,6 +9,7 @@
 - `node apps/desktop/scripts/verify-native-consumers.mjs`：原 Composer、preload/Main、Browser 和 Terminal 消费链；保留原页面源和原稿。受控输入替身不证明物理点击或屏幕像素。
 - `node apps/desktop/scripts/verify-native-package.mjs --source-only`：构建回执、复制内容、签名资格参数及生产组包接线的轻量 fixture／变异，不调用 Swift、签名器或正式组包。
 - `node packages/native-desktop/scripts/verify-native.mjs --source-only`：只做 Swift 语法解析；不证明 SDK 类型、链接、测试或运行能力。
+- `node packages/native-desktop/scripts/verify-socket-publication.mjs`：只编译实际 Swift socket 初始化与隔离 producer，在 bind 后、chmod／listen 前暂停检查首个目录项，再经生产 Node 客户端握手及消费一次协议采图回执；移除私有创建步骤须使真实权限断言失败。它不启动 AppKit、不采真实屏幕，也不证明生产 peer 或 TCC 授权。
 
 跨层调用链 fixture 属于 Desktop 测试，Core 生产编译只消费中立端口。保留原始日志、失败断言、源码散列和独立审查；不能用空测试集合、加载错误或 JSON 自报成功代签行为。
 
