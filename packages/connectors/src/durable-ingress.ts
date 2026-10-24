@@ -222,7 +222,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
         if (target.connectionId !== record.connectionId) this.assertService(target.connectionId)
         const binding = this.binding(record), current = binding && this.options.bindings.readCurrent(binding.bindingId)
         const connection = this.options.connections.readConfiguration(target.connectionId), receiver = this.options.connections.readConfiguration(record.connectionId)
-        if (!binding || !current || current.state !== 'active' || current.revision !== binding.revision || binding.agentSessionId !== target.agentSessionId || binding.executionHostId !== target.hostId || binding.connectionId !== target.connectionId || binding.executionRuntimeId && binding.executionRuntimeId !== target.authoritySource?.executionRuntimeId) fail('INGRESS_BINDING_UNAVAILABLE')
+        if (!binding || !current || current.state !== 'active' || !sameRoomPublication(binding, current) || binding.agentSessionId !== target.agentSessionId || binding.executionHostId !== target.hostId || binding.connectionId !== target.connectionId || binding.executionRuntimeId && binding.executionRuntimeId !== target.authoritySource?.executionRuntimeId) fail('INGRESS_BINDING_UNAVAILABLE')
         if (!connection?.config.enabled || !receiver?.config.enabled || !equal(connection.config.application, record.application) || !equal(receiver.config.application, record.application)) fail('INGRESS_CONNECTION_UNAVAILABLE')
         return { message, authority: 'current' }
       })
