@@ -26,10 +26,9 @@
 .mobile-message-tools__trigger i[data-state='error'] { background: var(--red); }
 .mobile-message-tools__actions { display: flex; gap: 20px; padding-block: 8px; }
 .mobile-message-tools__records { max-height: 45dvh; overflow: auto; min-height: 0; }
-.native-process-observation--compact { padding-inline: 14px; min-width: 0; font-size: 12px; color: var(--text-2); }
+.native-process-observation--compact { min-width: 0; font-size: 12px; color: var(--text-2); }
 .native-process-observation--compact button { font: inherit; color: inherit; background: transparent; border: 0; text-align: left; cursor: pointer; }
-.native-process-observation--compact .wf-head { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 44px; padding: 0; }
-.native-process-observation--compact .log-fold__label { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; min-width: 0; }
+.native-process-observation--compact .wf-head { min-height: 44px; }
 .native-process-observation--compact :is(.wf-observation__recorded, .log-row__time, .log-row__source) { color: var(--text-3); font-size: 11px; }
 .native-process-observation--compact :is(.log-fold__time, .wf-chip, .log-row__chip) { display: inline-flex; align-items: center; gap: 4px; }
 .native-process-observation--compact .wf-tool-row { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; gap: 4px 6px; width: 100%; min-height: 44px; padding: 4px 0; }
