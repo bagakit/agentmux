@@ -2,21 +2,23 @@ import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
 import {createRequire} from 'node:module'
 import {spawnSync} from 'node:child_process'
-import {mkdtemp,mkdir,readFile,writeFile,rm} from 'node:fs/promises'
+import {mkdtemp,mkdir,readFile,writeFile,rm,statfs} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join,resolve,relative} from 'node:path'
 import {pathToFileURL} from 'node:url'
 import {runProbeProcess,listProbeProcesses} from './probe-process.mjs'
 
 const root=resolve(import.meta.dirname,'../../..'),desktop=join(root,'apps/desktop')
-assert.ok(process.argv[2]==='--evidence'&&process.argv[3]&&process.argv.length===4,'Use --evidence <private evidence directory>')
+assert.ok(process.argv[2]==='--evidence'&&process.argv[3]&&(process.argv.length===4||process.argv.length===6&&process.argv[4]==='--scene'&&process.argv[5]==='grouping'),'Use --evidence <private evidence directory> [--scene grouping]')
+const scene=process.argv[5]??'tabs-actions'
 const evidence=resolve(process.argv[3]);await mkdir(evidence,{recursive:true})
 const privateRoot=await mkdtemp(join(tmpdir(),'amux-survey-item-tabs-actions-')),fixture=join(desktop,'scripts/fixtures/survey-item-tabs-actions')
 const require=createRequire(join(desktop,'package.json')),{build}=createRequire(require.resolve('vite/package.json'))('esbuild')
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex'),inputs=new Map(),transformations=[],logs=[]
-const receipt={schema:'agentmux.survey-item-tabs-actions.v1',capturedPass:false,captureOnly:true,aestheticReview:'not-performed',userAppRunRuntimeControlled:false,
+const receipt={schema:'agentmux.survey-item-tabs-actions.v1',scene,capturedPass:false,captureOnly:true,aestheticReview:'not-performed',userAppRunRuntimeControlled:false,
  boundary:'Actual App/GlobalSurveySurface/SurveyZoneItem/SurveyItemOptions/Store/WorkbenchZone and complete CSS. Maintained typed preview API; only SessionPane PTY/Agent, File Editor and unused diff paint leaves isolated. No user Runtime, profile, Session, ordinary restart or installation.'}
 try{
+ if(scene==='grouping'){const disk=await statfs(root);receipt.diskBeforeBuild={availableBytes:disk.bavail*disk.bsize,requiredBytes:500*1024*1024};assert.ok(receipt.diskBeforeBuild.availableBytes>=receipt.diskBeforeBuild.requiredBytes,'Grouping capture build requires at least 500 MiB free; no build was started')}
  const freshness=spawnSync(process.execPath,['--experimental-strip-types','--input-type=module','-e',`const {assertWorkspaceDistBuiltFromCurrentSource}=await import(${JSON.stringify(pathToFileURL(join(root,'vitest.dist-freshness.ts')).href)});await assertWorkspaceDistBuiltFromCurrentSource(${JSON.stringify(root)});`],{cwd:root,encoding:'utf8'})
  await writeFile(join(evidence,'freshness.log'),freshness.stdout+freshness.stderr);assert.equal(freshness.status,0,'Original public freshness guard')
  const observe={name:'actual-survey-source-and-paint-leaf',setup(builder){
@@ -34,18 +36,19 @@ try{
   }
   return{contents:source,loader:path.endsWith('tsx')?'tsx':path.endsWith('ts')?'ts':'js'}
  });builder.onLoad({filter:/\.css$/},async({path})=>{if(!path.startsWith(root+'/')||path.includes('/node_modules/'))return;const source=await readFile(path,'utf8');inputs.set(path,hash(source));return{contents:source,loader:'css'}})}}
- for(const file of ['main.cjs','entry.mjs','scene.md'])inputs.set(join(fixture,file),hash(await readFile(join(fixture,file))))
+ for(const file of scene==='grouping'?['main.cjs','entry.mjs','grouping-entry.mjs','grouping-scene.cjs','grouping.md']:['main.cjs','entry.mjs','scene.md'])inputs.set(join(fixture,file),hash(await readFile(join(fixture,file))))
  inputs.set(new URL(import.meta.url).pathname,hash(await readFile(new URL(import.meta.url))))
  const out=join(privateRoot,'out');await mkdir(out);const renderer=join(out,'app.js')
- const buildResult=await build({entryPoints:[join(fixture,'entry.mjs')],outfile:renderer,bundle:true,platform:'browser',format:'esm',target:'es2022',jsx:'automatic',conditions:['production'],metafile:true,plugins:[observe],logLevel:'silent',define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},loader:{'.png':'file','.gif':'file','.svg':'file','.woff2':'file','.woff':'file','.ttf':'file'}})
+ const buildResult=await build({entryPoints:[join(fixture,scene==='grouping'?'grouping-entry.mjs':'entry.mjs')],outfile:renderer,bundle:true,platform:'browser',format:'esm',target:'es2022',jsx:'automatic',conditions:['production'],metafile:true,plugins:[observe],logLevel:'silent',define:{__AGENTMUX_WEB_PREVIEW__:'true','process.env.NODE_ENV':'"production"'},loader:{'.png':'file','.gif':'file','.svg':'file','.woff2':'file','.woff':'file','.ttf':'file'}})
  receipt.metafile=buildResult.metafile;receipt.inputs=Object.fromEntries([...inputs].map(([path,sha])=>[relative(root,path),sha]));receipt.transformations=transformations
  for(const suffix of ['App.tsx','GlobalSurveySurface.tsx','SurveyZoneItem.tsx','SurveyItemOptions.tsx','SurveyTabColumn.tsx','WorkbenchTabMarks.tsx','workbench-tab-marks.ts','store.ts','WorkbenchZone.tsx','survey.css'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Actual loaded '+suffix)
+ if(scene==='grouping')for(const suffix of ['SurveyItemList.tsx','useSurveyListOrganization.ts','survey-list.ts'])assert.ok([...inputs.keys()].some(path=>path.endsWith('/'+suffix)),'Actual grouping consumer '+suffix)
  const html=join(out,'index.html');await writeFile(html,'<!doctype html><html><meta charset="utf-8"><link rel="stylesheet" href="./app.css"><div id="root"></div><script type="module" src="./app.js"></script></html>')
  receipt.compiled={renderer:hash(await readFile(renderer)),css:hash(await readFile(join(out,'app.css')))}
  const env={...process.env,AGENTMUX_DESKTOP_USER_DATA:join(privateRoot,'user-data'),AGENTMUX_RUNTIME_DIRECTORY:join(privateRoot,'runtime'),AGENTMUX_STATE_DIRECTORY:join(privateRoot,'state')};delete env.ELECTRON_RUN_AS_NODE
- receipt.process=await runProbeProcess(require('electron'),[join(fixture,'main.cjs'),html,privateRoot,evidence],{temporaryRoot:privateRoot,cwd:root,env,timeoutMs:60000,onLine:line=>logs.push(line)})
+ receipt.process=await runProbeProcess(require('electron'),[join(fixture,'main.cjs'),html,privateRoot,evidence,scene],{temporaryRoot:privateRoot,cwd:root,env,timeoutMs:scene==='grouping'?90000:60000,onLine:line=>logs.push(line)})
  receipt.actual=JSON.parse(await readFile(join(evidence,'actual.json'),'utf8'));assert.equal(receipt.process.exitCode,0,receipt.actual.failure?.message);assert.equal(receipt.actual.passed,true)
- receipt.frames=await Promise.all(receipt.actual.frames.map(async frame=>({...frame,sha256:hash(await readFile(join(evidence,frame.file)))})));assert.equal(receipt.frames.length,9)
+ receipt.frames=await Promise.all(receipt.actual.frames.map(async frame=>({...frame,sha256:hash(await readFile(join(evidence,frame.file)))})));assert.equal(receipt.frames.length,scene==='grouping'?6:9)
  receipt.sourceAfter=Object.fromEntries(await Promise.all([...inputs.keys()].map(async path=>[relative(root,path),hash(await readFile(path))])));assert.deepEqual(receipt.sourceAfter,receipt.inputs,'Nonempty current Source stable before/after');receipt.capturedPass=true
 }catch(error){receipt.failure={name:error.name,message:error.message,stack:error.stack};process.exitCode=1}
 finally{
