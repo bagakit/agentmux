@@ -8,16 +8,20 @@ import { runProbeProcess, listProbeProcesses, signalOwnedProbeProcess } from './
 
 const desktop=resolve(import.meta.dirname,'..'), repository=resolve(desktop,'../..'), sourceRoot=join(desktop,'src/renderer/src')
 const require=createRequire(import.meta.url), {build}=await import('vite'), ts=require('typescript'), postcss=createRequire(require.resolve('vite'))('postcss')
-const fixture=join(desktop,'scripts/fixtures/terminal-chrome-craft'), recovery=process.argv.includes('--recovery'), candidateOnly=process.argv.includes('--candidate-only')
+const fixture=join(desktop,'scripts/fixtures/terminal-chrome-craft'), recovery=process.argv.includes('--recovery'), candidateOnly=process.argv.includes('--candidate-only'), connectorGeometry=process.argv.includes('--connector-geometry'), geometryBaseline=process.argv.includes('--geometry-baseline')
 const privateRoot=await mkdtemp(_hygiene_fixturePath("tmp/amx-chrome-craft-")), evidence=join(repository,'.tmp/terminal-chrome-craft',("attempt-" + (globalThis.crypto.randomUUID()) + "" + (recovery?'-recovery':'') + ""))
 const hash=value=>createHash('sha256').update(value).digest('hex')
 const files=['components/TerminalView.tsx','components/TerminalContextMenu.tsx','components/SessionPane.tsx','components/FullPageLoadingSurface.tsx','styles/terminal.css','styles/agent-region-header.css','styles/full-page-loading.css']
-const result={schema:'agentmux.terminal-chrome-craft.v1',passed:false,recovery,candidateOnly,userRunTouched:false,
+if(connectorGeometry)files.push('components/ConnectorHeaderLinks.tsx')
+const result={schema:'agentmux.terminal-chrome-craft.v1',passed:false,recovery,candidateOnly,connectorGeometry,geometryBaseline,userRunTouched:false,
   boundary:'Actual isolated production Renderer/CSS/xterm. Controlled preview API and loading caller facts. No installed App, user Run, TCC, Vendor CLI or durable restart claim.',
   aestheticReview:'Root self-review only; independent image review pending under user no-messaging instruction',mutations:[],callers:[]}
 async function sources(){return Object.fromEntries(await Promise.all(files.map(async file=>[file,hash(await readFile(join(sourceRoot,file)))])))}
 function replaceOne(source,from,to){assert.equal(source.split(from).length,2,'Private mutation anchors one real production block');return source.replace(from,to)}
-const mutations=recovery?[
+const mutations=connectorGeometry?[
+  {label:'full-width-inset-returned',file:'styles/agent-region-header.css',expected:/first row follows the original quiet band without extra full-width inset/,
+    change:source=>replaceOne(source,'--agent-region-reading-inset: calc(var(--sp-6) + var(--region-focus-ring-width)); margin-top:', '--agent-region-reading-inset: calc(var(--sp-6) + var(--sp-2)); margin-top:')}
+]:recovery?[
   {label:'parked-is-busy',file:'components/FullPageLoadingSurface.tsx',expected:/Parked and failed states are not busy/,
     change:source=>replaceOne(source,"const busy = phase === 'loading' || phase === 'recovering'",'const busy = true')},
   {label:'region-hero-returned',file:'components/FullPageLoadingSurface.tsx',expected:/Region recovery has no brand hero/,
@@ -42,7 +46,7 @@ async function renderer(label,mutation=null){
 export class Terminal extends xterm.Terminal { constructor(...args){super(...args);const entries=globalThis.resultReadyTerminals??=[];this.probeIdentity={id:entries.length,terminal:this,disposed:false};entries.push(this.probeIdentity)} dispose(){this.probeIdentity.disposed=true;return super.dispose()} }
 `)
   const loadedSources={},importedStyles={},changes=[]
-  await build({configFile:false,root:fixture,base:'./',logLevel:'error',resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper}]},
+  await build({configFile:false,root:fixture,base:'./',logLevel:'error',worker:{format:'es'},resolve:{alias:[{find:/^@xterm\/xterm$/,replacement:wrapper}]},
     plugins:[{name:'chrome-craft-owned-private-transform',enforce:'pre',async transform(source,id){
       if(id.startsWith(join(desktop,'src')+'/')&&!id.includes('?'))loadedSources[id.slice(repository.length+1)]=hash(source)
       if(mutation&&!mutation.file.endsWith('.css')&&id===join(sourceRoot,mutation.file)){
@@ -72,9 +76,13 @@ export class Terminal extends xterm.Terminal { constructor(...args){super(...arg
     const file=join(entry.parentPath,entry.name);compiled[file.slice(outDir.length+1)]=hash(await readFile(file))
   }
   assert.ok(Object.keys(compiled).length>0)
-  const identity={loadedSources,importedStyles,compiled,changes,mainSha256:hash(mainBytes)};await writeFile(join(directory,'compiled.json'),JSON.stringify(identity,null,2))
+  const fixtureSources={}
+  for(const name of ['entry.tsx','main.cjs'])fixtureSources['apps/desktop/scripts/fixtures/terminal-chrome-craft/'+name]=hash(await readFile(join(fixture,name)))
+  fixtureSources['apps/desktop/scripts/fixtures/result-ready-input-continuity/entry.tsx']=hash(await readFile(join(desktop,'scripts/fixtures/result-ready-input-continuity/entry.tsx')))
+  const xtermEntry=require.resolve('@xterm/xterm')
+  const identity={loadedSources,importedStyles,compiled,changes,fixtureSources,xterm:{entry:xtermEntry.slice(repository.length+1),sha256:hash(await readFile(xtermEntry))},mainSha256:hash(mainBytes)};await writeFile(join(directory,'compiled.json'),JSON.stringify(identity,null,2))
   const env={...process.env};delete env.ELECTRON_RUN_AS_NODE
-  const lines=[],outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),processRoot,directory,recovery?'recovery':'terminal'],{
+  const lines=[],outcome=await runProbeProcess(require('electron'),[main,join(outDir,'index.html'),processRoot,directory,connectorGeometry?(geometryBaseline?'connector-baseline':'connector-geometry'):recovery?'recovery':'terminal'],{
     temporaryRoot:processRoot,cwd:repository,env,timeoutMs:90_000,onLine:line=>lines.push(line)})
   await writeFile(join(directory,'process.log'),lines.join('\n'));assert.equal(outcome.timedOut,false);assert.equal(outcome.interruption,null)
   const rendered=JSON.parse(await readFile(join(directory,'render.json'),'utf8'))
@@ -110,6 +118,7 @@ try{
 finally{
   const remaining=await listProbeProcesses(-1,privateRoot);for(const pid of remaining)await signalOwnedProbeProcess(pid,privateRoot,'SIGKILL')
   result.cleanup={before:remaining,after:await listProbeProcesses(-1,privateRoot)};assert.equal(result.cleanup.after.length,0)
+  await rm(privateRoot,{recursive:true,force:true})
   result.privateRoot=privateRoot;await writeFile(join(evidence,'receipt.json'),JSON.stringify(result,null,2))
   console.log(JSON.stringify({passed:result.passed,evidence,failure:result.failure??null}));process.exitCode=result.passed?0:1
 }

@@ -9,15 +9,19 @@ import { useAppStore } from '../../../src/renderer/src/store'
 import { api } from '../../../src/renderer/src/lib/api'
 import { createWorkbenchTab, addWorkbenchRegion } from '../../../src/renderer/src/lib/workbench-tabs'
 import type { RuntimeEvent, SessionSnapshot } from '../../../src/shared/contracts'
+import { fixturePath } from '../../lib/fixture-values.mjs'
 import '../../../src/renderer/src/styles/index.css'
 
 // Only preview API facts are controlled. The production pane, terminal, input handlers and CSS run unchanged.
+const config = await api.config.get()
+config.workspaces = config.workspaces.map((workspace, index) => ({ ...workspace, path: fixturePath('private/terminal-chrome-' + index) }))
+api.config.get = async () => config
 await useAppStore.getState().initialize()
 const originals = (await api.sessions.snapshot()).sessions.filter(s => s.kind === 'agent').slice(0, 2)
 if (originals.length !== 2) throw new Error('The scene requires two distinct preview Agent Sessions')
 const workspaceId = useAppStore.getState().config!.workspaces[0]!.id
 const tabId = 'result-input-tab', regionId = 'result-input-owner', neighborId = 'result-input-neighbor'
-const root = createRoot(document.getElementById('root')!)
+export const root = createRoot(document.getElementById('root')!)
 const output = Array.from({ length: 100 }, (_, i) => `Original terminal history ${String(i + 1).padStart(3, '0')}`).join('\r\n') + '\r\nagent > half typed prompt'
 const outputBytes = new TextEncoder().encode(output)
 const writes: unknown[] = [], pastes: unknown[] = [], resizes: unknown[] = [], inputs: unknown[] = [], routes: unknown[] = []
