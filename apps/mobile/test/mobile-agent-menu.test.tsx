@@ -8,11 +8,18 @@ import { createBrowserPlatform } from '../src/platform/browser'
 import { getDeviceWorkface, emptyDeviceWorkface } from '../src/recovery/device-workface'
 import { saveMobileHome } from '../src/navigation/home-preference'
 import { MobileGoalSessions } from '../src/goals/MobileGoalSessions'
+import { MobileRegionContent } from '../src/navigation/MobileRegionContent'
 import { button, click, deferred, fixture, mount, mounted, session } from './conversation-fixture'
 
 beforeEach(async () => { window.history.replaceState(null, ''); localStorage.clear(); await getDeviceWorkface().replaceBackup(emptyDeviceWorkface()) })
 afterEach(async () => { vi.useRealTimers(); for (const item of mounted.splice(0)) { await act(async () => item.root.unmount()); item.element.remove() }; document.body.replaceChildren(); vi.restoreAllMocks() })
 const identity = { name: '原 Agent', project: '原项目', context: { spaceId: 'space-original', zoneId: 'zone-original', workspaceId: 'resource', displayWorkspaceId: 'display', groupId: 'group', tabId: 'tab', regionId: 'region' } }
+it('keeps usage and original Region diagnostics readable without a client', async () => {
+  const usage = await mount(<MobileAgentUsage client={null} agentSessionId="session-original" connected={false} />)
+  expect(usage.element.textContent).toContain('连接暂不可用')
+  const region = await mount(<MobileRegionContent client={null} connected tabId="tab-original" regionId="region-original" zoneId="zone-original" kind="file" />)
+  expect(region.element.textContent).toContain('原内容公共端口暂不可用')
+})
 async function pointer(target: Element, type: string, overrides = {}) {
   const event = new Event(type, { bubbles: true, cancelable: true })
   Object.assign(event, { pointerType: 'touch', isPrimary: true, pointerId: 1, button: 0, clientX: 10, clientY: 10, ...overrides })
