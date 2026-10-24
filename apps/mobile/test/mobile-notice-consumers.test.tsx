@@ -98,9 +98,10 @@ it('closes an original unknown upload warning without deleting its reference, in
   await getDeviceWorkface().retainFileUpload(original)
   f.client.forwardRpc = vi.fn()
   const view = await mount(<MobileNoticeProvider><MobileNoticeRestore /><MobileAttachments client={f.client} session={f.sessions.get('session-original')!}
-    connected controls={controls} insert={insert} pickFile={pick} promptOperationId={null} promptConfirmed={false} /></MobileNoticeProvider>)
+    connected controls={controls} insert={insert} pickFile={pick} promptOperationId={null} confirmedPrompt={null} /></MobileNoticeProvider>)
   await click(button(view.element.querySelector('.mobile-notice')!, '收起提醒'))
-  expect(view.element.textContent).not.toContain('原上传回执未知')
+  expect([...view.element.querySelectorAll('.mobile-notice')].map(node => node.textContent).join('')).not.toContain('原上传回执未知')
+  expect(view.element.querySelector('details.mobile-attachment-details')?.hasAttribute('open')).toBe(false)
   expect(button(view.element, '核对 evidence.png 原上传')).toBeDefined()
   expect(view.element.querySelector('[aria-label="移除 evidence.png 本地引用"]')).toBeNull()
   await click(button(view.element, '恢复已收起提醒'))

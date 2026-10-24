@@ -15,6 +15,7 @@ import { nativeDevicePorts, pickLocalAttachment, type NativeDevicePorts, type Lo
 import { createBrowserPlatform } from '../src/platform/browser'
 import { button, click, deferred, editor, fixture, mount, mounted, paste, session } from './conversation-fixture'
 import { attachmentHostedFixture } from './file-upload-hosted-fixture'
+import { appendNamedFileReference } from '@agentmux/client-ui/composer-file-reference'
 
 let root: string
 const disposers: Array<() => Promise<void>> = []
@@ -58,6 +59,227 @@ function identity(file: LocalAttachment) { return { hostId: 'local', agentSessio
   name: file.name, mimeType: file.mimeType, byteLength: file.size, revision: file.revision } }
 
 describe('actual Mobile picker, attachment chip, shared Composer and original send', () => {
+  it.each(['host', 'runtime', 'run', 'same'] as const)('cleans only an attachment consumed by its frozen confirmed input source after a late %s change', async change => {
+    const f = boundFixture(), input = deferred<any>(), accepted = f.submit.getMockImplementation()!
+    const file = local(), path = join(root, 'same-address.md')
+    const upload: MobileFileUpload = { runtimeId: change === 'runtime' ? 'new-runtime' : 'runtime-original', identity: {
+      ...identity(file), ...(change === 'host' ? { hostId: 'new-host' } : {}),
+      ...(change === 'run' ? { expectedRun: { runId: 'new-run' } } : {}) }, phase: 'inserted', path }
+    const body = appendNamedFileReference('Original frozen input', path, file.name)
+    await getDeviceWorkface().retainFileUpload(upload)
+    await getDeviceWorkface().updateConversation({ version: 1, drafts: [[JSON.stringify(['draft', 'session-original']), body]], attempts: [], responses: [] })
+    f.submit.mockReturnValueOnce(input.promise)
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await click(button(ui.element, 'Send')); await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce())
+    const original = f.submit.mock.calls[0]![0]
+    expect(original.expectedRun.runId).toBe('run-original')
+    if (change === 'runtime') Object.assign(f.client, { runtimeOwnerIdentity: () => ({ runtimeId: 'new-runtime' }) })
+    if (change === 'host' || change === 'run') await act(async () => f.emit({ type: 'agent-session', session: {
+      ...f.sessions.get('session-original')!, ...(change === 'host' ? { hostId: 'new-host' } : { run: { runId: 'new-run' } }) } }))
+    await act(async () => input.resolve(await accepted(original)))
+    await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.conversation.attempts[0]?.[1].phase).toBe('confirmed'))
+    if (change === 'same') await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.fileUploads).toEqual([]))
+    else expect(getDeviceWorkface().snapshot().record.fileUploads).toEqual([upload])
+    expect(f.calls).toEqual([]); expect(f.submit).toHaveBeenCalledOnce()
+  })
+
+  it('keeps an inserted intent when confirmation has no original source, and the same confirmation does not re-enter cleanup on parent renders', async () => {
+    const f = boundFixture(), file = local(), path = join(root, 'same-address.md'), controls = createRef<MobileAttachmentControls>()
+    const upload: MobileFileUpload = { runtimeId: 'runtime-original', identity: identity(file), phase: 'inserted', path }
+    await getDeviceWorkface().retainFileUpload(upload)
+    const originalRemove = getDeviceWorkface().removeFileUpload.bind(getDeviceWorkface())
+    const remove = vi.spyOn(getDeviceWorkface(), 'removeFileUpload'), gate = deferred<void>()
+    remove.mockImplementation(async (...args) => { await gate.promise; return originalRemove(...args) })
+    const props = { client: f.client, session: f.sessions.get('session-original')!, connected: true, promptOperationId: 'confirmed-input', controls, insert: insertionSpy().insert }
+    const ui = await mount(<MobileAttachments {...props} confirmedPrompt={null} />)
+    expect(getDeviceWorkface().snapshot().record.fileUploads).toEqual([upload]); expect(remove).not.toHaveBeenCalled()
+    const confirmed = { operationId: 'confirmed-input', body: appendNamedFileReference('', path, file.name), source: { runtimeId: 'runtime-original', hostId: 'local', sessionId: 'session-original', runId: 'run-original' } }
+    await ui.render(<MobileAttachments {...props} confirmedPrompt={confirmed} />)
+    expect(remove).toHaveBeenCalledOnce()
+    await ui.render(<MobileAttachments {...props} confirmedPrompt={{ ...confirmed, source: { ...confirmed.source } }} />)
+    expect(remove).toHaveBeenCalledOnce()
+    await act(async () => { gate.resolve(); await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.fileUploads).toEqual([])) })
+  })
+
+  it('does not inspect a never-requested selection from its expanded details and preserves upload and removal', async () => {
+    const f = boundFixture(), pick = pickFiles([{ name: 'screen.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, 'Selected original'); await click(button(ui.element, 'Reference files for the Agent to read'))
+    const details = ui.element.querySelector<HTMLDetailsElement>('.mobile-attachment-details')!
+    details.open = true
+    expect(details.querySelector('button')).toBeNull(); expect(f.calls).toEqual([])
+    await click(button(ui.element, '移除 screen.png 本地引用')); expect(ui.element.querySelector('.mobile-attachment')).toBeNull()
+    await click(button(ui.element, 'Reference files for the Agent to read')); expect(pick).toHaveBeenCalledTimes(2)
+    ui.element.querySelector<HTMLDetailsElement>('.mobile-attachment-details')!.open = true
+    await click(button(ui.element, 'Send')); await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce())
+    expect(f.calls.map(call => call.method)).toEqual(['file.upload'])
+    expect(f.submit.mock.calls[0]![0].prompt).toContain('Selected original')
+  })
+
+  it('joins the same saved manual upload before its reply returns, sends once and keeps later edits and selections', async () => {
+    const f = boundFixture(), gate = deferred<void>(), originalForward = f.forward.getMockImplementation()!
+    f.forward.mockImplementation(async (method, params) => { const result = await originalForward(method, params); if (method === 'file.upload') await gate.promise; return result })
+    const pick = pickFiles([{ name: 'screen.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, 'Original frozen body'); await click(button(ui.element, 'Reference files for the Agent to read'))
+    await click(button(ui.element, '上传并加入 screen.png')); await settled('sending')
+    const original = getDeviceWorkface().snapshot().record.fileUploads![0]!
+    await vi.waitFor(async () => expect((await f.owner.inspect(original.identity)).status).toBe('uploaded'))
+    const saved = await f.owner.inspect(original.identity)
+    expect(saved.status).toBe('uploaded'); if (saved.status !== 'uploaded') throw Error('Original saved bytes required')
+    await click(button(ui.element, 'Send')); expect(f.submit).not.toHaveBeenCalled()
+    await click(button(ui.element, 'Send'))
+    await paste(ui.element, ' Later edit')
+    pick.mockResolvedValue({ files: [{ name: 'later.txt', mimeType: 'text/plain', size: 4, blob: new NodeBlob(['next']) as Blob }] })
+    await click(button(ui.element, 'Reference files for the Agent to read'))
+    await act(async () => { gate.resolve(); await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce()) })
+    expect(f.calls.filter(call => call.method.startsWith('file.upload')).map(call => call.method)).toEqual(['file.upload'])
+    expect(f.submit.mock.calls[0]![0].prompt.split('@' + saved.path)).toHaveLength(2)
+    expect(f.submit.mock.calls[0]![0].prompt).toContain('Original frozen body'); expect(f.submit.mock.calls[0]![0].prompt).not.toContain('Later edit')
+    expect(editor(ui.element).textContent).toContain('Later edit')
+    expect(ui.element.querySelector('.mobile-attachment[data-phase="selected"]')?.textContent).toContain('later.txt')
+  })
+
+  it('joins manual insertion while inserted retention is pending without appending its frozen semantic file twice', async () => {
+    const f = boundFixture(), owner = getDeviceWorkface(), retain = owner.retainFileUpload.bind(owner), gate = deferred<void>(), inserted = deferred<void>()
+    pickFiles([{ name: 'screen.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, 'Original body'); await click(button(ui.element, 'Reference files for the Agent to read'))
+    vi.spyOn(owner, 'retainFileUpload').mockImplementation(async (...args) => { if (args[0].phase === 'inserted') { inserted.resolve(); await gate.promise }; return retain(...args) })
+    await click(button(ui.element, '上传并加入 screen.png')); await act(async () => inserted.promise)
+    const upload = owner.snapshot().record.fileUploads![0]!, saved = await f.owner.inspect(upload.identity)
+    expect(upload.phase).toBe('uploaded'); expect(saved.status).toBe('uploaded'); if (saved.status !== 'uploaded') throw Error('Saved original required')
+    expect(editor(ui.element).textContent).toContain('screen.png')
+    await click(button(ui.element, 'Send')); expect(f.submit).not.toHaveBeenCalled()
+    await act(async () => { gate.resolve(); await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce()) })
+    expect(f.submit.mock.calls[0]![0].prompt.split('@' + saved.path)).toHaveLength(2)
+    expect(f.calls.filter(call => call.method === 'file.upload')).toHaveLength(1)
+    expect(editor(ui.element).textContent).toBe('')
+  })
+
+  it('sends only the explicit body while retaining an unknown upload and its exact inspection entry', async () => {
+    const f = boundFixture(), originalForward = f.forward.getMockImplementation()!
+    f.forward.mockImplementation(async (method, params) => { const result = await originalForward(method, params); if (method === 'file.upload') throw new Error('Original receipt lost'); return result })
+    pickFiles([{ name: 'screen.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, 'Body only intent'); await click(button(ui.element, 'Reference files for the Agent to read')); await click(button(ui.element, 'Send')); await settled('unknown')
+    const original = getDeviceWorkface().snapshot().record.fileUploads![0]!
+    await click(button(ui.element, '本次仅发送正文'))
+    await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce())
+    expect(f.submit.mock.calls[0]![0].prompt).toBe('Body only intent')
+    expect(getDeviceWorkface().snapshot().record.fileUploads).toEqual([original])
+    expect(f.calls.filter(call => call.method.startsWith('file.upload')).map(call => call.method)).toEqual(['file.upload'])
+    await click(button(ui.element, '核对 screen.png 原上传')); await settled('inserted')
+    expect(f.calls.filter(call => call.method.startsWith('file.upload')).map(call => call.method)).toEqual(['file.upload', 'file.upload.inspect'])
+    expect(f.calls.find(call => call.method === 'file.upload.inspect')!.params).toEqual(original.identity)
+  })
+
+  it('explicit body-only supersedes only an undispatched attachment preparation and its late result cannot submit again', async () => {
+    const f = boundFixture(), gate = deferred<void>(), originalForward = f.forward.getMockImplementation()!
+    f.forward.mockImplementation(async (method, params) => { const result = await originalForward(method, params); if (method === 'file.upload') await gate.promise; return result })
+    pickFiles([{ name: 'screen.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, 'Original body'); await click(button(ui.element, 'Reference files for the Agent to read')); await click(button(ui.element, 'Send')); await settled('sending')
+    await click(button(ui.element, '本次仅发送正文')); await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce())
+    expect(f.submit.mock.calls[0]![0].prompt).toBe('Original body')
+    await paste(ui.element, 'Later body')
+    await act(async () => { gate.resolve(); await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.fileUploads?.[0]?.phase).toBe('uploaded')) })
+    expect(f.submit).toHaveBeenCalledOnce(); expect(editor(ui.element).textContent).toBe('Later body')
+    expect(ui.element.textContent).not.toContain('附件未就绪'); expect(ui.element.textContent).not.toContain('本次已明确选择')
+    expect(button(ui.element, '将 screen.png 加入消息')).toBeDefined()
+  })
+
+  it('body-only stops the old preparation before another selected file uploads while retaining its in-flight first operation', async () => {
+    const f = boundFixture(), gate = deferred<void>(), originalForward = f.forward.getMockImplementation()!
+    f.forward.mockImplementation(async (method, params) => { const result = await originalForward(method, params); if (method === 'file.upload') await gate.promise; return result })
+    const pick = pickFiles([{ name: 'first.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, 'Only body'); await click(button(ui.element, 'Reference files for the Agent to read'))
+    pick.mockResolvedValue({ files: [{ name: 'second.txt', mimeType: 'text/plain', size: 4, blob: new NodeBlob(['next']) as Blob }] })
+    await click(button(ui.element, 'Reference files for the Agent to read')); await click(button(ui.element, 'Send')); await settled('sending')
+    const first = getDeviceWorkface().snapshot().record.fileUploads![0]!.identity
+    await click(button(ui.element, '本次仅发送正文')); await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce())
+    await act(async () => { gate.resolve(); await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.fileUploads?.[0]?.phase).toBe('uploaded')) })
+    expect(f.calls.filter(call => call.method === 'file.upload')).toHaveLength(1)
+    expect(getDeviceWorkface().snapshot().record.fileUploads![0]!.identity).toEqual(first)
+    expect(ui.element.querySelector('.mobile-attachment[data-phase="selected"]')?.textContent).toContain('second.txt')
+    expect(f.submit.mock.calls[0]![0].prompt).toBe('Only body'); expect(f.submit).toHaveBeenCalledOnce()
+  })
+
+  it('body-only confirmation does not erase a manual attachment inserted after its body was frozen', async () => {
+    const f = boundFixture(), gate = deferred<void>(), originalForward = f.forward.getMockImplementation()!
+    f.forward.mockImplementation(async (method, params) => { const result = await originalForward(method, params); if (method === 'file.upload') await gate.promise; return result })
+    const prompt = deferred<any>(), accepted = f.submit.getMockImplementation()!
+    f.submit.mockReturnValueOnce(prompt.promise)
+    pickFiles([{ name: 'screen.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, 'Original body'); await click(button(ui.element, 'Reference files for the Agent to read'))
+    await click(button(ui.element, '上传并加入 screen.png')); await settled('sending')
+    await click(button(ui.element, '本次仅发送正文')); expect(f.submit).toHaveBeenCalledOnce()
+    await act(async () => { gate.resolve(); await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.fileUploads?.[0]?.phase).toBe('uploaded')) })
+    await click(button(ui.element, '将 screen.png 加入消息')); await settled('inserted')
+    const retained = getDeviceWorkface().snapshot().record.fileUploads![0]!
+    await act(async () => prompt.resolve(await accepted(f.submit.mock.calls[0]![0])))
+    expect(f.submit.mock.calls[0]![0].prompt).toBe('Original body')
+    expect(getDeviceWorkface().snapshot().record.fileUploads).toEqual([retained])
+    expect(editor(ui.element).textContent).toContain('screen.png')
+  })
+
+  it('does not use explicit body-only to replay the same unknown input, and refuses an empty body', async () => {
+    const f = boundFixture()
+    pickFiles([{ name: 'screen.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await click(button(ui.element, 'Reference files for the Agent to read'))
+    expect(button(ui.element, '本次仅发送正文').disabled).toBe(true)
+    await paste(ui.element, 'Unknown original body')
+    f.submit.mockRejectedValueOnce(new Error('Original input receipt lost'))
+    await click(button(ui.element, '本次仅发送正文')); await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce())
+    await click(button(ui.element, '本次仅发送正文'))
+    expect(f.submit).toHaveBeenCalledOnce(); expect(f.calls.filter(call => call.method.startsWith('file.upload'))).toEqual([])
+    expect(ui.element.textContent).toContain('同一正文已有未确认输入')
+  })
+
+  it('cannot use body-only to take over a message that already entered the original input owner', async () => {
+    const f = boundFixture(), input = deferred<any>(), accepted = f.submit.getMockImplementation()!
+    f.submit.mockReturnValueOnce(input.promise)
+    const pick = pickFiles([{ name: 'screen.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, 'Original attached input'); await click(button(ui.element, 'Reference files for the Agent to read')); await click(button(ui.element, 'Send'))
+    await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce())
+    pick.mockResolvedValue({ files: [{ name: 'later.txt', mimeType: 'text/plain', size: 4, blob: new NodeBlob(['next']) as Blob }] })
+    await click(button(ui.element, 'Reference files for the Agent to read'))
+    expect(button(ui.element, '本次仅发送正文').disabled).toBe(true)
+    await click(button(ui.element, '本次仅发送正文')); expect(f.submit).toHaveBeenCalledOnce()
+    const original = f.submit.mock.calls[0]![0]
+    expect(original.prompt).toContain('@')
+    await act(async () => input.resolve(await accepted(original)))
+    expect(f.submit).toHaveBeenCalledOnce(); expect(f.submit.mock.calls[0]![0]).toEqual(original)
+  })
+
+  it.each(['client', 'record', 'complete-intent'] as const)('does not coalesce an uploaded-looking in-flight result after its %s changes', async change => {
+    const f = boundFixture(), controls = createRef<MobileAttachmentControls>(), gate = deferred<void>(), inserting = deferred<void>()
+    let captured!: MobileFileUpload
+    const insert = vi.fn(async (resolve: () => Promise<string | null>, original: MobileFileUpload) => { captured = original; await resolve(); inserting.resolve(); await gate.promise })
+    const props = { client: f.client, session: f.sessions.get('session-original')!, connected: true, promptOperationId: null, confirmedPrompt: null, controls, insert, pickFile: async () => local() }
+    const ui = await mount(<MobileAttachments {...props} />)
+    await act(async () => controls.current!.choose()); await click(button(ui.element, '上传并加入 notes.md')); await act(async () => inserting.promise)
+    const retained = getDeviceWorkface().snapshot().record.fileUploads![0]!
+    expect(retained.phase).toBe('uploaded')
+    const name = captured.identity.name
+    if (change === 'client') await ui.render(<MobileAttachments {...props} client={{ ...f.client }} />)
+    if (change === 'record') await getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
+    if (change === 'complete-intent') captured.identity.name = 'different-original-name.md'
+    const preparation = controls.current!.captureForSend()!
+    const prepared = preparation.prepare('Original body').then(value => ({ value, error: null }), error => ({ value: null, error: error as Error }))
+    captured.identity.name = name
+    await act(async () => gate.resolve())
+    expect((await prepared).error?.message).toContain(change === 'record' ? '工作面已改变' : '另一客户端、工作面或目标')
+    if (change !== 'record') expect(getDeviceWorkface().snapshot().record.fileUploads).toEqual([{ ...retained, phase: 'inserted' }])
+    expect(f.calls.filter(call => call.method.startsWith('file.upload'))).toHaveLength(1)
+    expect((await f.owner.inspect(retained.identity)).status).toBe('uploaded')
+    expect(f.submit).not.toHaveBeenCalled()
+  })
+
   it('sends selected images without text through actual Hosted upload, public socket, Core admission and original Run producer', async () => {
     const f = await attachmentHostedFixture(root); disposers.push(f.dispose)
     pickFiles([{ name: 'screen.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
@@ -108,7 +330,8 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     expect(f.submit).not.toHaveBeenCalled()
     expect(getDeviceWorkface().snapshot().record.conversation.attempts).toEqual([])
     expect(editor(ui.element).textContent).toBe('原正文')
-    expect(ui.element.textContent?.split('附件尚未确认保存在原 Mac；本次消息没有发送。').length).toBe(2)
+    expect(ui.element.textContent?.split('附件未就绪；本次消息没有发送。').length).toBe(2)
+    expect(ui.element.textContent).toContain('private upload reply lost')
     const original = f.calls[0]!.params
     await click(button(ui.element, 'Send'))
     await act(async () => { await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce()) })
@@ -140,6 +363,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.fileUploads?.map(item => item.phase)).toEqual(['uploaded', 'error'])) })
     expect(f.submit).not.toHaveBeenCalled(); expect(editor(ui.element).textContent).toBe('原正文')
     expect(getDeviceWorkface().snapshot().record.conversation.attempts).toEqual([])
+    expect(ui.element.textContent).toContain('private disk unavailable [PRIVATE_DISK_FAILURE]')
     fail = false; await click(button(ui.element, 'Send'))
     await act(async () => { await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce()) })
     expect(selected.map(item => [item.method, item.params.name])).toEqual([['file.upload', 'first.png'], ['file.upload', 'second.png'], ['file.upload', 'second.png']])
@@ -223,7 +447,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
   it.each(['session', 'host', 'runtime', 'run', 'record'] as const)('keeps a late chooser result on its captured %s target and never writes the later selection', async change => {
     const f = boundFixture(), file = local(), originalSession = f.sessions.get('session-original')!, gate = deferred<LocalAttachment | null>()
     const controls = createRef<MobileAttachmentControls>(), { insert, added } = insertionSpy()
-    const render = (id = 'session-original') => <MobileAttachments client={f.client} session={f.sessions.get(id)!} connected promptOperationId={null} promptConfirmed={false} controls={controls} insert={insert} pickFile={() => gate.promise} />
+    const render = (id = 'session-original') => <MobileAttachments client={f.client} session={f.sessions.get(id)!} connected promptOperationId={null} confirmedPrompt={null} controls={controls} insert={insert} pickFile={() => gate.promise} />
     const ui = await mount(render())
     let pending!: Promise<void>
     await act(async () => { pending = controls.current!.choose() })
@@ -256,7 +480,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     const file = { name: 'slow.png', type: 'image/png', size: 4, stream: () => new ReadableStream<Uint8Array>({
       async start(controller) { await gate.promise; controller.enqueue(new Uint8Array([1, 2, 3, 4])); controller.close() }
     }) }
-    const render = (id = 'session-original') => <MobileAttachments client={f.client} session={f.sessions.get(id)!} connected promptOperationId={null} promptConfirmed={false} controls={controls} insert={insert} />
+    const render = (id = 'session-original') => <MobileAttachments client={f.client} session={f.sessions.get(id)!} connected promptOperationId={null} confirmedPrompt={null} controls={controls} insert={insert} />
     const ui = await mount(render()); let pending!: Promise<void>
     await act(async () => { pending = controls.current!.stageFile(file) })
     if (change === 'run') f.sessions.set('session-original', { ...originalSession, run: { runId: 'later-run' } })
@@ -359,7 +583,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     const f = boundFixture(), gate = deferred<void>(), file = local(), controls = createRef<MobileAttachmentControls>(), { insert, added } = insertionSpy()
     const originalForward = f.forward.getMockImplementation()!
     f.forward.mockImplementation(async (method, params) => { const response = await originalForward(method, params); if (method === 'file.upload') await gate.promise; return response })
-    const render = (id: string) => <MobileAttachments client={f.client} session={f.sessions.get(id)!} connected promptOperationId={null} promptConfirmed={false} controls={controls} insert={insert} pickFile={async () => file} />
+    const render = (id: string) => <MobileAttachments client={f.client} session={f.sessions.get(id)!} connected promptOperationId={null} confirmedPrompt={null} controls={controls} insert={insert} pickFile={async () => file} />
     const ui = await mount(render('session-original')); await act(async () => controls.current!.choose())
     await click(button(ui.element, '上传并加入 notes.md')); await ui.render(render('other'))
     await act(async () => gate.resolve()); await settled('uploaded'); expect(added).toEqual([])
@@ -371,7 +595,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     const f = boundFixture(), file = local(), controls = createRef<MobileAttachmentControls>(), { insert, added } = insertionSpy()
     const originalForward = f.forward.getMockImplementation()!
     f.forward.mockImplementation(async (method, params) => { const result = await originalForward(method, params); if (method === 'file.upload') throw new Error('private lost reply'); return result })
-    const props = { client: f.client, session: f.sessions.get('session-original')!, connected: true, promptOperationId: null, promptConfirmed: false, controls, insert, pickFile: async () => file }
+    const props = { client: f.client, session: f.sessions.get('session-original')!, connected: true, promptOperationId: null, confirmedPrompt: null, controls, insert, pickFile: async () => file }
     const ui = await mount(<MobileAttachments {...props} />); await act(async () => controls.current!.choose()); await click(button(ui.element, '上传并加入 notes.md'))
     await settled('unknown'); expect(getDeviceWorkface().snapshot().record.fileUploads![0]!.phase).toBe('unknown'); expect(added).toEqual([])
     await ui.render(<div />); await ui.render(<MobileAttachments {...props} />)
@@ -382,7 +606,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
   })
   it('retains local bytes while offline and leaves text input available; explicit reconnect action uploads once', async () => {
     const f = boundFixture(), file = local(), controls = createRef<MobileAttachmentControls>(), { insert, added } = insertionSpy()
-    const render = (online: boolean) => <MobileAttachments client={f.client} session={f.sessions.get('session-original')!} connected={online} promptOperationId={null} promptConfirmed={false} controls={controls} insert={insert} pickFile={async () => file} />
+    const render = (online: boolean) => <MobileAttachments client={f.client} session={f.sessions.get('session-original')!} connected={online} promptOperationId={null} confirmedPrompt={null} controls={controls} insert={insert} pickFile={async () => file} />
     const ui = await mount(render(false)); await act(async () => controls.current!.choose()); await click(button(ui.element, '上传并加入 notes.md'))
     expect(f.calls).toHaveLength(0); expect(ui.element.textContent).toContain('未连接')
     await ui.render(render(true)); await click(button(ui.element, '上传并加入 notes.md')); await settled('inserted')
@@ -390,7 +614,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
   })
   it('does not write the Host if the original device intent cannot be retained durably', async () => {
     const f = boundFixture(), file = local(), controls = createRef<MobileAttachmentControls>(), { insert, added } = insertionSpy()
-    const ui = await mount(<MobileAttachments client={f.client} session={f.sessions.get('session-original')!} connected promptOperationId={null} promptConfirmed={false} controls={controls} insert={insert} pickFile={async () => file} />)
+    const ui = await mount(<MobileAttachments client={f.client} session={f.sessions.get('session-original')!} connected promptOperationId={null} confirmedPrompt={null} controls={controls} insert={insert} pickFile={async () => file} />)
     await act(async () => controls.current!.choose())
     vi.spyOn(getDeviceWorkface(), 'retainFileUpload').mockImplementation(() => { throw new Error('private device storage full') })
     await click(button(ui.element, '上传并加入 notes.md'))
@@ -402,7 +626,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
     const f = boundFixture(), controls = createRef<MobileAttachmentControls>(), { insert } = insertionSpy()
     const bytes = Buffer.alloc(FILE_UPLOAD_MAX_BYTES), dataBase64 = bytes.toString('base64'), revision = fileUploadRevision(bytes)
     let count = 0
-    const ui = await mount(<MobileAttachments client={f.client} session={f.sessions.get('session-original')!} connected promptOperationId={null} promptConfirmed={false} controls={controls} insert={insert}
+    const ui = await mount(<MobileAttachments client={f.client} session={f.sessions.get('session-original')!} connected promptOperationId={null} confirmedPrompt={null} controls={controls} insert={insert}
       pickFile={async () => ({ id: `local-budget-${++count}`, name: `original-${count}.bin`, mimeType: 'application/octet-stream', size: bytes.length, revision, dataBase64 })} />)
     for (let i = 0; i < 5; i++) await act(async () => controls.current!.choose())
     expect(ui.element.querySelectorAll('.mobile-attachment')).toHaveLength(4)
@@ -415,7 +639,7 @@ describe('actual Mobile picker, attachment chip, shared Composer and original se
   })
   it('refuses a changed Runtime or Run without writing, and a later message suppresses automatic insertion', async () => {
     const f = boundFixture(), file = local(), controls = createRef<MobileAttachmentControls>(), { insert, added } = insertionSpy()
-    const render = (op: string | null) => <MobileAttachments client={f.client} session={f.sessions.get('session-original')!} connected promptOperationId={op} promptConfirmed={false} controls={controls} insert={insert} pickFile={async () => file} />
+    const render = (op: string | null) => <MobileAttachments client={f.client} session={f.sessions.get('session-original')!} connected promptOperationId={op} confirmedPrompt={null} controls={controls} insert={insert} pickFile={async () => file} />
     const ui = await mount(render(null)); await act(async () => controls.current!.choose())
     Object.assign(f.client, { runtimeOwnerIdentity: () => ({ runtimeId: 'foreign-runtime' }) })
     await click(button(ui.element, '上传并加入 notes.md')); expect(f.calls).toHaveLength(0)
