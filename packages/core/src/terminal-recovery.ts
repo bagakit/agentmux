@@ -20,13 +20,6 @@ export type AgentMuxTerminalRecoveryResult = {
   { kind: 'pending'; phase: 'prepared' | 'dispatched' | 'not_applied' | 'retained'; message: string; replacementRun?: AgentMuxRunRef })
 
 const id = (v: unknown): v is string => typeof v === 'string' && !!v && !/[\0\r\n]/u.test(v)
-// Hosted consumers also parse this DTO in a browser, where node:path is unavailable.
-function isAbsoluteWorkspacePath(path: string): boolean {
-  if (path.startsWith('/')) return true
-  const nodePlatform = typeof process === 'object' && process.versions?.node ? process.platform : undefined
-  if (nodePlatform && nodePlatform !== 'win32') return false
-  return path.startsWith('\\') || /^[A-Za-z]:[\\/]/u.test(path)
-}
 function service(value: unknown): void {
   if (value === null) return
   const record = (v: unknown, keys: string[]) => rpcRecord(v, keys, 'CONTROL_PROTOCOL_ERROR')
@@ -55,7 +48,7 @@ function service(value: unknown): void {
 export function parseTerminalRecoveryInput(value: unknown): AgentMuxTerminalRecoveryInput {
   const r = rpcRecord(value, ['expectedRun', 'runtimeId', 'workspacePath', 'operationId', 'action'])
   const run = rpcRecord(r.expectedRun, ['runId'])
-  if (![run.runId, r.runtimeId, r.operationId].every(id) || !id(r.workspacePath) || !isAbsoluteWorkspacePath(r.workspacePath) ||
+  if (![run.runId, r.runtimeId, r.operationId].every(id) || !id(r.workspacePath) ||
       r.action !== undefined && !['recover', 'inspect', 'continue'].includes(String(r.action)))
     throw new AgentMuxError('Terminal recovery requires its exact original Run, Runtime, directory and operation.', 'INVALID_CONTROL_REQUEST')
   return structuredClone(r) as AgentMuxTerminalRecoveryInput
