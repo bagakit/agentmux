@@ -57,6 +57,7 @@
 .collaboration-canvas .react-flow__edgelabel-renderer { z-index: 1; }
 .collaboration-connections .react-flow__edge { cursor: pointer; }
 .collaboration-canvas .react-flow__node-area { z-index: -1 !important; }
+.collaboration-canvas .react-flow__node-agent:has(> .collaboration-agent > .collaboration-agent__focus-proxy) { z-index: 2 !important; }
 .collaboration-area { height: 100%; pointer-events: none; }
 .collaboration-area__envelope { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
 .collaboration-area__envelope path { fill: color-mix(in srgb, var(--area-color) 6%, var(--surface-1)); stroke: color-mix(in srgb, var(--area-color) 30%, var(--line)); stroke-width: 1.2; vector-effect: non-scaling-stroke; }
