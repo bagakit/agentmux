@@ -317,6 +317,10 @@ export class DeviceWorkfaceStore {
   private temporary = false
   private writeUnavailable = false
   recordIdentity(): string | null { this.refresh(); return this.value.recordId ?? null }
+  /** Identity reads do not copy unrelated drafts, attachments or retained operations. */
+  snapshotIdentity(): { recordId: string | null; host: DeviceWorkface['host'] } {
+    this.refresh(); return { recordId: this.value.recordId ?? null, host: this.value.host ? { ...this.value.host } : null }
+  }
   canRetrySave(): boolean { return this.issue === null || this.writeUnavailable }
   constructor(private readonly storage: () => DeviceStorage) { this.refresh() }
   private refresh(): void {

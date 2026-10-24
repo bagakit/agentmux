@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import * as Dialog from '@agentmux/client-ui/components/Modal'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -182,8 +182,8 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const sessionTitle = objectIdentity?.name ?? null
   const [sheet, setSheet] = useState<'connection' | 'settings' | 'identity' | 'actions' | 'agent' | 'create' | 'notices' | null>(initial.current.presentation?.profile ? 'identity' : null)
   const menuSource = () => {
-    const runtime = client?.runtimeOwnerIdentity?.(), owner = getDeviceWorkface(), host = owner.snapshot().record.host
-    return JSON.stringify([runtime?.runtimeId, runtime?.ownerInstanceId, owner.recordIdentity(), host?.hostId, host?.origin])
+    const runtime = client?.runtimeOwnerIdentity?.(), { recordId, host } = getDeviceWorkface().snapshotIdentity()
+    return JSON.stringify([runtime?.runtimeId, runtime?.ownerInstanceId, recordId, host?.hostId, host?.origin])
   }
   const [rowMenu, setRowMenu] = useState<{ client: typeof client; target: MobileAgentMenuTarget; source: string } | null>(null)
   const [menuIssue, setMenuIssue] = useState('')
@@ -233,11 +233,11 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
   const backRef = useRef(requestBack)
   backRef.current = requestBack
   const [notice, setNotice] = useState<string | null>(initial.current.issue)
-  const [, setRevision] = useState(0)
-  let sessions: ReturnType<AgentMuxHostedClient['agentSessions']> = [], projectionError: string | null = null
-  try { sessions = client?.agentSessions() ?? [] }
-  catch { projectionError = 'Host 会话目录尚未核实。原会话引用与草稿仍保留；请恢复原 Mac 的连接。' }
-  const selected = sessions.find(value => value.agentSessionId === workface.selectedSessionId)
+  const [sessionRevision, setRevision] = useState(0)
+  const { selected, projectionError } = useMemo(() => {
+    try { return { selected: client && workface.selectedSessionId ? client.agentSession(workface.selectedSessionId) : undefined, projectionError: null } }
+    catch { return { selected: undefined, projectionError: '原会话元信息尚未核实。原身份、阅读与草稿仍保留；可核对原 Mac 的连接。' } }
+  }, [client, connection.state, workface.selectedSessionId, sessionRevision])
   const reportError = (error: unknown) => setNotice(error instanceof Error ? error.message : String(error))
 
   useEffect(() => {
@@ -253,12 +253,13 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     return () => { void binding.dispose().catch(reportError) }
   }, [client, native])
   useEffect(() => client?.onEvent(event => {
-    if (event.type === 'agent-session' || event.type === 'run-removed' || event.type === 'connection-state') {
+    if (event.type === 'agent-session' && event.session.agentSessionId === workface.selectedSessionId ||
+      event.type === 'run-removed' && (event.agentSessionId === workface.selectedSessionId || event.run.runId === selected?.run.runId) || event.type === 'connection-state') {
       setRevision(value => value + 1)
     }
     // Keep the local reading reference, including after retirement. The original Core determines
     // whether its history remains readable; unknown/old-Run events cannot erase a saved workface.
-  }), [client])
+  }), [client, workface.selectedSessionId, selected?.run.runId])
   const retainTopics = initial.current.presentation?.topics !== undefined || topicsRoute.context.categoryId !== null || topicId !== null
     || topicsRoute.context.mode !== 'discussion' || topicsRoute.sources.length > 0
   const presentation: MobilePresentationRoute = { primary: secondary ?? home, showSession, showGoalWork, ...(retainTopics ? { topics: topicsRoute } : {}),
@@ -327,7 +328,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
         <button className="mobile-secondary" onClick={() => setSheet('connection')}><ThemeObjectConnectionIcon size={16} />连接详情</button>
       </section>}
       {workspaceVisible && <>
-        <div hidden={showSession || secondary !== null}><MobileSpatialNavigation onCreateAgent={createAgent} visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} sessions={sessions} openSession={openSession} openMainAgent={openMainAgent} openProfile={openProfile} onBackChange={registerSpatialBack}
+        <div hidden={showSession || secondary !== null}><MobileSpatialNavigation onCreateAgent={createAgent} visible={exposed && !showSession && secondary === null} home={home} client={client} connected={connected} openSession={openSession} openMainAgent={openMainAgent} openProfile={openProfile} onBackChange={registerSpatialBack}
           initialContext={spatialContext} onContextChange={updateSpatialContext} openHttpLink={openBrowserHttpLink} /></div>
         <div hidden={showSession || secondary !== 'topics' || Boolean(source && source.kind !== 'topic')}><MobileTopicsSurface rpc={rpc} visible={exposed && !showSession && secondary === 'topics' && (!source || source.kind === 'topic')} topicId={topicId}
           client={client} connected={connected} {...(topicsRoute.knowledge ? { initialKnowledge: topicsRoute.knowledge } : {})} onKnowledgeChange={updateKnowledgeReference}
@@ -366,7 +367,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
     <footer className="mobile-navigation-bar">{menuButton}{workspaceVisible && <MobilePrimaryNavigation current={secondary === 'survey' ? null : secondary ?? home} onSelect={openPrimaryWorkface} />}</footer>
     <MobileAgentCreate client={client} connected={connected} visible={sheet === 'create'} target={createTarget} platform={platform} onClose={() => setSheet(null)} openSession={id => openSession(id, { name: '原 Agent', project: '项目未确认' })} />
     <Dialog.Root open={sheet !== null && sheet !== 'create'} onOpenChange={open => { if (!open) setSheet(null) }}>
-      <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className={sheet === 'settings' ? 'mobile-drawer-backdrop' : 'mobile-sheet-backdrop'} /><Dialog.Content className={sheet === 'settings' ? 'mobile-drawer' : 'mobile-sheet'} aria-describedby="mobile-sheet-description">
+      <Dialog.Portal container={platform.overlayContainer()}><Dialog.Overlay className={sheet === 'settings' ? 'mobile-drawer-backdrop' : 'mobile-sheet-backdrop'} /><Dialog.Content className={sheet === 'settings' ? 'mobile-drawer' : `mobile-sheet${sheet === 'agent' || sheet === 'actions' ? ' mobile-sheet--agent' : ''}`} aria-describedby="mobile-sheet-description">
         <div className="mobile-sheet-handle" /><div className="mobile-sheet-title"><Dialog.Title>{sheet === 'agent' ? menuTarget?.identity.name ?? 'Agent' : sheet === 'notices' ? '提醒与诊断' : sheet === 'identity' ? profileIdentity?.name ?? 'Mote' : sheet === 'actions' ? '当前对话' : sheet === 'settings' ? 'AgentMux' : '连接你的 Mac'}</Dialog.Title><Dialog.Close className="mobile-icon-button" aria-label="关闭面板"><ThemeActionCloseIcon size={19} /></Dialog.Close></div>
         {sheet === 'settings' ? <>
           <Dialog.Description id="mobile-sheet-description">工作面与手机设置</Dialog.Description>
