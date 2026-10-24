@@ -12,10 +12,10 @@ import { createConnectionServices } from '../src/connection-services.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 
 const APP = 'cli_permission_request_original', effect = 'add-application-permissions' as const
-const NAMES = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only', 'application:application:patch', 'application:application:self_manage']
+const NAMES = ['im:message:send_as_bot', 'im:message:readonly', 'im:message.group_msg', 'im:chat:create', 'im:chat:read', 'im:chat.members:read', 'im:chat.members:write_only', 'application:application:patch', 'application:application:self_manage', 'im:message.reactions:write_only']
 const IDS = NAMES.map((_, index) => index % 2 ? String(100 + index) : 100 + index)
-const REQUIRED_NAMES = [...NAMES.slice(0, 7), NAMES[8]]
-const REQUIRED_IDS = [...IDS.slice(0, 7), IDS[8]]
+const REQUIRED_NAMES = [...NAMES.slice(0, 3), NAMES[9], ...NAMES.slice(3, 7), NAMES[8]]
+const REQUIRED_IDS = [...IDS.slice(0, 3), IDS[9], ...IDS.slice(3, 7), IDS[8]]
 const clean: Array<() => void | Promise<void>> = []
 afterEach(async () => {
   const errors: unknown[] = []
@@ -95,7 +95,7 @@ it('SDK and compiled CLI review exact App rows then request only missing origina
   expect(configuration.effect).toBe(effect)
   if (configuration.effect !== effect) throw Error('Wrong permission result')
   expect(configuration.sources).toEqual({ catalog, applied })
-  expect(configuration.review!.permissions).toEqual(REQUIRED_NAMES.map((name, index) => ({ name, group: index < 3 ? 'messages' : index < 7 ? 'groups' : 'identity', state: index === 0 ? 'requested' : 'missing' })))
+  expect(configuration.review!.permissions).toEqual(REQUIRED_NAMES.map((name, index) => ({ name, group: index < 4 ? 'messages' : index < 8 ? 'groups' : 'identity', state: index === 0 ? 'requested' : 'missing' })))
   expect(f.native).toEqual(before)
   const input = action(offered, effect), accepted = await f.cli(['advance', '--input', '-'], input)
   expect(accepted.applicationConfiguration!.selected).toMatchObject({ effect, purpose: 'agent-conversation', sourceStepIds: { catalog: catalog.stepId, applied: applied.stepId }, scopeNames: REQUIRED_NAMES.slice(1), input, request: 'confirmed', secureStorage: 'stored', requiresDataRangeConfiguration: true })
