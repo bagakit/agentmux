@@ -10,8 +10,8 @@ import { pickWebFiles } from './web-file-picker'
 
 /** Only public OS capabilities. There is deliberately no credential/secret read method. */
 export const nativeDevicePorts = { app: App, clipboard: Clipboard, keyboard: Keyboard,
-  filePicker: { pickFiles: (options: Parameters<typeof FilePicker.pickFiles>[0]) =>
-    Capacitor.isNativePlatform() ? FilePicker.pickFiles(options) : pickWebFiles(options) } }
+  filePicker: { pickFiles: (options: Parameters<typeof FilePicker.pickFiles>[0], signal?: AbortSignal) =>
+    Capacitor.isNativePlatform() ? FilePicker.pickFiles(options) : pickWebFiles(options, signal) } }
 export type NativeDevicePorts = typeof nativeDevicePorts
 
 export function createNativePlatform(base: ClientUiPlatform, ports: Pick<NativeDevicePorts, 'clipboard'> = nativeDevicePorts) {
@@ -41,18 +41,27 @@ export function createNativePlatform(base: ClientUiPlatform, ports: Pick<NativeD
 export type LocalAttachment = { id: string; name: string; mimeType: string; size: number; revision: string; dataBase64: string }
 export type LocalAttachmentFile = { name: string; type?: string; mimeType?: string; size: number; stream(): ReadableStream<Uint8Array> }
 
-async function boundedBytes(stream: ReadableStream<Uint8Array>, size: number): Promise<Uint8Array> {
+async function boundedBytes(stream: ReadableStream<Uint8Array>, size: number, signal?: AbortSignal): Promise<Uint8Array> {
   const reader = stream.getReader(), chunks: Uint8Array[] = []
   let length = 0
+  let abortRead: (() => void) | undefined
+  const cancelled = signal && new Promise<never>((_, reject) => {
+    abortRead = () => reject(new DOMException('Selection cancelled', 'AbortError'))
+    if (signal.aborted) abortRead(); else signal.addEventListener('abort', abortRead, { once: true })
+  })
   try {
     for (;;) {
-      const part = await reader.read()
+      const part = await (cancelled ? Promise.race([reader.read(), cancelled]) : reader.read())
       if (part.done) break
       length += part.value.byteLength
       if (length > FILE_UPLOAD_MAX_BYTES || length > size) throw new Error('附件在读取时变大；本次尚未上传，原会话与草稿保留。')
       chunks.push(part.value)
     }
-  } finally { await reader.cancel(); reader.releaseLock() }
+  } finally {
+    if (abortRead) signal?.removeEventListener('abort', abortRead)
+    try { void reader.cancel().catch(() => {}) } catch { /* A broken source cannot retain this reader. */ }
+    try { reader.releaseLock() } catch { /* A pending read may finish after cancellation. */ }
+  }
   if (length !== size) throw new Error('附件在读取时变化；本次尚未上传，请重新选择原文件。')
   const bytes = new Uint8Array(length)
   let offset = 0
@@ -72,7 +81,7 @@ function normalizeAttachmentMimeType(name: string, rawMimeType?: string | null):
   return ({ png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', heic: 'image/heic', heif: 'image/heif' } as const)[ext ?? ''] ?? 'application/octet-stream'
 }
 
-export async function localAttachmentFromBlob(file: LocalAttachmentFile): Promise<LocalAttachment> {
+export async function localAttachmentFromBlob(file: LocalAttachmentFile, signal?: AbortSignal): Promise<LocalAttachment> {
   const name = file.name || `image-${randomClientRequestId()}.png`
   if (!Number.isSafeInteger(file.size) || file.size < 1) {
     throw new Error('系统尚未确认附件的名称、类型或大小；这次附件尚未采用。')
@@ -80,23 +89,26 @@ export async function localAttachmentFromBlob(file: LocalAttachmentFile): Promis
   const mimeType = normalizeAttachmentMimeType(name, file.mimeType ?? file.type)
   parseFileUploadIdentity({ hostId: 'local', agentSessionId: 'local-selection', expectedRun: { runId: 'local-selection' },
     operationId: 'local-selection', name, mimeType, byteLength: file.size, revision: 'sha256:' + '0'.repeat(64) })
-  const bytes = await boundedBytes(file.stream(), file.size)
+  const bytes = await boundedBytes(file.stream(), file.size, signal)
   return { id: randomClientRequestId(), name, mimeType, size: bytes.byteLength,
     revision: fileUploadRevision(bytes), dataBase64: base64(bytes) }
 }
 
 /** The system chooser owns access; native paths stay on this device. Byte reads are bounded before upload. */
 export async function pickLocalAttachment(ports: Pick<NativeDevicePorts, 'filePicker'> = nativeDevicePorts,
-  readNative: (path: string) => Promise<Response> = path => fetch(Capacitor.convertFileSrc(path))): Promise<LocalAttachment | null> {
+  readNative: (path: string, signal?: AbortSignal) => Promise<Response> = (path, signal) => fetch(Capacitor.convertFileSrc(path), signal ? { signal } : undefined),
+  signal?: AbortSignal): Promise<LocalAttachment | null> {
   let result: Awaited<ReturnType<NativeDevicePorts['filePicker']['pickFiles']>>
   try {
-    result = await ports.filePicker.pickFiles({ limit: 1, readData: false })
+    const options = { limit: 1, readData: false }
+    result = signal ? await ports.filePicker.pickFiles(options, signal) : await ports.filePicker.pickFiles(options)
   } catch (error) {
     // The native plugin's Android/iOS cancellation contract has this exact message.
     // Browser cancellation is the input's cancel event, never a focus heuristic.
     if (error && typeof error === 'object' && 'message' in error && error.message === 'pickFiles canceled.') return null
     throw error
   }
+  if (signal?.aborted) return null
   if (result.files.length === 0) return null
   if (result.files.length !== 1) throw new Error('系统文件选择返回了多个文件；这次附件尚未采用。')
   const file = result.files[0]!
@@ -111,12 +123,13 @@ export async function pickLocalAttachment(ports: Pick<NativeDevicePorts, 'filePi
   if (file.blob) stream = file.blob.stream()
   else {
     if (!file.path) throw new Error('系统尚未提供所选文件的读取权限；本次尚未上传。')
-    const response = await readNative(file.path)
+    const response = signal ? await readNative(file.path, signal) : await readNative(file.path)
+    if (signal?.aborted) return null
     if (!response.ok) throw new Error('系统暂时无法读取原附件；本次尚未上传。')
     stream = response.body
   }
   if (!stream) throw new Error('这台设备尚未提供有界文件读取；本次尚未上传，原消息仍可发送。')
-  const bytes = await boundedBytes(stream, file.size)
+  const bytes = await boundedBytes(stream, file.size, signal)
   return { id: randomClientRequestId(), name: file.name, mimeType, size: bytes.byteLength,
     revision: fileUploadRevision(bytes), dataBase64: base64(bytes) }
 }

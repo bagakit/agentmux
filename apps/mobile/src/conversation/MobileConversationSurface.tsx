@@ -460,7 +460,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       <div onFocusCapture={event => { if ((event.target as HTMLElement).isContentEditable) setComposerFocused(true) }} onBlurCapture={event => {
           if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setComposerFocused(false)
         }} className="mobile-conversation__composer">
-        <AgentComposer insertionRef={insertion} aboveInput={<MobileAttachments client={client} session={session ?? null}
+        <AgentComposer insertionRef={insertion} aboveInput={<MobileAttachments client={client} session={session ?? null} agentSessionId={agentSessionId}
           connected={connection.state === 'connected' && !reading.disconnected} controls={attachmentControls}
           onPendingContentChange={setHasPendingAttachments}
           promptOperationId={attempt?.operationId ?? null} confirmedPrompt={confirmedAttachmentPrompt}
