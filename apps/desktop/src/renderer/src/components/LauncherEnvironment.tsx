@@ -9,7 +9,6 @@ import { DocumentOverlayPortal } from './WindowOverlayHost'
 import { LauncherExecutionPicker } from './LauncherExecutionPicker'
 
 const ThemeObjectHostIcon = semanticIconComponent('object.host')
-const ThemeObjectTerminalIcon = semanticIconComponent('object.terminal')
 const ThemeObjectFolderIcon = semanticIconComponent('object.folder')
 const ThemeNavigationDownIcon = semanticIconComponent('navigation.down')
 const ThemeActionCloseIcon = semanticIconComponent('action.close')
@@ -35,7 +34,6 @@ export function LauncherEnvironment({ workspace, host, check, displayPath, activ
   const label = host?.label ?? workspace?.hostId ?? 'No host'
   const name = contextName ?? workspace?.name ?? 'Choose a workspace'
   const kind = host?.kind === 'local' ? 'Local host' : host?.kind === 'ssh' ? 'SSH host' : 'Host unconfirmed'
-  const Icon = host?.kind === 'ssh' ? ThemeObjectHostIcon : ThemeObjectTerminalIcon
   useEffect(() => { if (!active) setOpen(false) }, [active])
   useLayoutEffect(() => {
     const anchor = trigger.current
@@ -51,18 +49,19 @@ export function LauncherEnvironment({ workspace, host, check, displayPath, activ
   }, [active, open, panel])
 
   return <header className="launcher-environment">
-    <div className="launcher-environment__project"><ThemeObjectFolderIcon size={20} /><div>
-      <h2 title={name}>{name}</h2>
+    <div className="launcher-environment__project"><div className="launcher-environment__title">
+      <ThemeObjectFolderIcon size={20} /><h2 title={name}>{name}</h2>
+    </div>
       <span className="launcher-environment__path" title={displayPath || undefined}>{displayPath || 'No working directory selected'}</span>
-    </div></div>
+    </div>
     <Dialog.Root modal={false} open={open && active} onOpenChange={setOpen}>
       <Dialog.Trigger asChild><button type="button" className="launcher-environment__host" ref={trigger} disabled={!active} aria-label="Runtime environment" title={`${kind} · ${label}`}>
-        <Icon size={14} /><span>{label}</span><ThemeNavigationDownIcon size={12} />
+        <ThemeObjectHostIcon size={16} /><span>{label}</span><ThemeNavigationDownIcon size={12} />
       </button></Dialog.Trigger>
       {active ? <DocumentOverlayPortal component={Dialog.Portal}>
         <Dialog.Content ref={setPanel} className="launcher-environment__panel" inert={!open} style={{ visibility: 'hidden' }}
           onEscapeKeyDown={() => trigger.current?.focus()} onCloseAutoFocus={event => event.preventDefault()}>
-          <header><div className="launcher-environment__identity"><Icon size={18} /><div><Dialog.Title>Choose where to start</Dialog.Title><Dialog.Description>Current target · {label} · {kind}</Dialog.Description></div></div>
+          <header><div className="launcher-environment__identity"><ThemeObjectHostIcon size={18} /><div><Dialog.Title>Choose where to start</Dialog.Title><Dialog.Description>Current target · {label} · {kind}</Dialog.Description></div></div>
             <Dialog.Close className="icon-button" aria-label="Close runtime environment" onClick={() => trigger.current?.focus()}><ThemeActionCloseIcon size={14} /></Dialog.Close></header>
           {open ? <LauncherExecutionPicker hosts={hosts} workspaces={workspaces} selected={workspace} disabled={selectionDisabled}
             onSelect={workspaceId => { onSelectWorkspace(workspaceId); setOpen(false); trigger.current?.focus() }}
