@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import { isDeepStrictEqual } from 'node:util'
 import { AgentProviderRegistry, type AgentProviderPromptExecutionContext, type AgentProviderPreparedPromptTransport } from './agent-provider.js'
 import { agentTurnCompletionIdentity, agentTurnEndBoundary, cloneSession, sameNativeHandle, sameRun } from './agent-session-identity.js'
+import { hasSelectedNativeTarget } from './agent-native-source.js'
 import { invalidateAgentIdleEvidence } from './agent-semantic-state.js'
 import { AgentMuxAgentSessionRegistry } from './agent-session-registry.js'
 import type { AgentMuxAgentSessionStore } from './agent-session-store.js'
@@ -226,6 +227,8 @@ export type AgentPromptInputControl = {
   onlyIfUnclaimed?: boolean
   requiredNativeSource?: { providerId: string; nativeSessionId: string }
   idleOnly?: AgentMuxMessageIdleBoundary
+  /** An automatic producer may narrow native dispatch without granting admission. */
+  nativeIdleOnly?: true
 }
 
 /**
@@ -682,21 +685,23 @@ export class AgentPromptSubmissionCoordinator {
     }
     // Default semantic messages address the original durable Core conversation.
     // A manual terminal intent and any previously frozen byte plan stay terminal.
+    const defaultMessageInput = control?.requiredNativeSource || control?.idleOnly || inputKey.kind === 'message'
+    const defaultSemanticInput = execution === 'default' && admissionIntent?.kind === 'exact-condition' && !rejoiningFrozenPlan
+    const nativeIdleOnly = Boolean(control?.idleOnly || control?.nativeIdleOnly || expectedCompletionId !== undefined || expectedFutureIntent !== undefined)
     const defaultNativeSource = (current: AgentMuxStoredAgentSession) => {
       const handle = current.nativeHandle
-      if ((!control?.requiredNativeSource && !control?.idleOnly && inputKey.kind !== 'message') || execution !== 'default' || admissionIntent?.kind !== 'exact-condition' ||
-          rejoiningFrozenPlan || current.hostId !== 'local' || run.pid === null || !provider.prepareNativeInput ||
+      const selected = hasSelectedNativeTarget(current)
+      if (!defaultSemanticInput || !defaultMessageInput && !selected || current.hostId !== 'local' || run.pid === null || !provider.prepareNativeInput ||
           this.deps.registry.isDurabilityUnconfirmed(current.agentSessionId) ||
           handle?.kind !== 'provider' || handle.providerId !== current.providerId ||
-          current.observedNativeHandle && !sameNativeHandle(current.observedNativeHandle, handle) ||
           current.nativeBinding && !sameRun(current.nativeBinding.run, current.run) ||
-          current.nativeSourceObservation && sameRun(current.nativeSourceObservation.run, current.run)) return undefined
+          !selected && (current.observedNativeHandle && !sameNativeHandle(current.observedNativeHandle, handle) ||
+            current.nativeSourceObservation && sameRun(current.nativeSourceObservation.run, current.run))) return undefined
       const source = { providerId: handle.providerId, nativeSessionId: handle.sessionId }
       if (control?.requiredNativeSource && !isDeepStrictEqual(source, control.requiredNativeSource)) return undefined
       return source
     }
-    const nativeOriginal = admissionIntent?.kind === 'native-conversation' ||
-        (control?.requiredNativeSource || control?.idleOnly || inputKey.kind === 'message') && execution === 'default' && admissionIntent?.kind === 'exact-condition' && !rejoiningFrozenPlan
+    const nativeOriginal = admissionIntent?.kind === 'native-conversation' || defaultSemanticInput
       ? await refreshSession(session.agentSessionId, session.run) : undefined
     const assertNativeIdle = async (): Promise<void> => {
       const expected = control?.idleOnly?.nativeEvidence
@@ -716,7 +721,9 @@ export class AgentPromptSubmissionCoordinator {
         'The original Provider initial idle opportunity changed or is unconfirmed. The Inbox and manual input remain available.', 'AGENT_TURN_END_UNCONFIRMED')
     }
     const source = nativeOriginal && defaultNativeSource(nativeOriginal)
-    if ((control?.requiredNativeSource || control?.idleOnly) && !source) throw new AgentMuxError(
+    // Selecting a target does not prove transport availability or the TUI's current
+    // conversation. Its semantic message must keep that target even when unavailable.
+    if ((control?.requiredNativeSource || control?.idleOnly || defaultSemanticInput && nativeOriginal && hasSelectedNativeTarget(nativeOriginal)) && !source) throw new AgentMuxError(
       'The original native input source is unconfirmed. No input was sent; the Agent and terminal remain available.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
     const target: { source: { providerId: string; nativeSessionId: string }; expectedTurnId?: string } | undefined =
       admissionIntent?.kind === 'native-conversation' ? admissionIntent : source ? { source } : undefined
@@ -729,11 +736,11 @@ export class AgentPromptSubmissionCoordinator {
         ...(original.nativeActor ? { nativeActor: original.nativeActor } : {}),
         ...(original.nativeHandle ? { nativeHandle: original.nativeHandle } : {}),
         workspacePath: session.workspacePath, signal: signal ?? new AbortController().signal }, { ...target.source,
-        ...(target.expectedTurnId === undefined ? {} : { expectedTurnId: target.expectedTurnId }), ...(control?.idleOnly ? { idleOnly: true } : {}) })
+        ...(target.expectedTurnId === undefined ? {} : { expectedTurnId: target.expectedTurnId }), ...(nativeIdleOnly ? { idleOnly: true } : {}) })
       try {
         if (prepared.plan.sourceId !== nativeInputSourceId(target.source) || prepared.plan.threadId !== target.source.nativeSessionId ||
             prepared.plan.expectedTurnId !== target.expectedTurnId ||
-            prepared.plan.operation !== (control?.idleOnly ? 'queue-idle' : target.expectedTurnId === undefined ? 'start-or-steer' : 'steer')) throw new AgentMuxError(
+            prepared.plan.operation !== (nativeIdleOnly ? 'queue-idle' : target.expectedTurnId === undefined ? 'start-or-steer' : 'steer')) throw new AgentMuxError(
           'The prepared native plan does not address the original source and input operation. No input was sent.', 'AGENT_NATIVE_INPUT_UNAVAILABLE')
         await prepared.assertCurrent()
         await assertNativeIdle()
@@ -747,11 +754,17 @@ export class AgentPromptSubmissionCoordinator {
           const next: AgentMuxStoredAgentSession = { ...invalidateAgentIdleEvidence(stored), updatedAt: Math.max(stored.updatedAt, Date.now()),
             promptCompletionAdmission: { submissionId, operationId: submissionId, inputKey: structuredClone(inputKey),
               ...(expectedCompletionId === undefined ? {} : { completionId: expectedCompletionId }),
+              ...(expectedFutureIntent === undefined ? {} : { futureIntent: { ...expectedFutureIntent } }),
               ...(inputDispatch ? { inputDispatch: structuredClone(inputDispatch) } : {}),
               intent: { run: { ...stored.run }, ownerInstanceId: this.deps.kernel.identity().daemonInstanceId,
                 prompt, plan: frozenPlan, execution, admissionIntent: structuredClone(admissionIntent!), message: structuredClone(message) },
               transport: 'native', acknowledged: false, native: { plan: frozenPlan, outcome: 'claimed' } } }
           delete next.terminalPromptSubmission
+          if (expectedFutureIntent) {
+            const saved = stored.futurePromptIntents![expectedFutureIntent.intentId]!
+            next.futurePromptIntents = { ...stored.futurePromptIntents, [expectedFutureIntent.intentId]: { ...saved,
+              lastOccurrenceAt: expectedFutureIntent.occurrenceAt, lastOperationId: submissionId } }
+          }
           return next
         })
         // The original claim/history owner has acknowledged the complete frozen token before native send.
@@ -769,8 +782,9 @@ export class AgentPromptSubmissionCoordinator {
           const currentRun = await this.deps.kernel.status(run.runId)
           this.deps.assertAgentRun(claimed, currentRun)
           if (currentRun.state.type !== 'running' || currentRun.pid !== run.pid) throw new AgentMuxError('The original native Run changed before input.', 'STALE_AGENT_SESSION')
-          if (control?.idleOnly && currentRun.acceptedInputBytes !== control.idleOnly.inputByte) throw new AgentMuxError(
-            'The original input fence changed before notification admission. Ordinary input remains available.', 'AGENT_COMPLETION_CHANGED')
+          const nativeInputByte = control?.idleOnly?.inputByte ?? expectedInputByte
+          if (nativeIdleOnly && nativeInputByte !== undefined && currentRun.acceptedInputBytes !== nativeInputByte) throw new AgentMuxError(
+            'The original input fence changed before automatic admission. Ordinary input remains available.', 'AGENT_COMPLETION_CHANGED')
           // Provider/Runtime reads can yield to an accepted recovery cancellation.
           await control?.authority?.assertCurrent()
           dispatchAttempted = true

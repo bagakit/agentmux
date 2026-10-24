@@ -375,12 +375,13 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'agent.native.confirm': {
         record(p, ['session', 'confirmation', 'persisted', 'current'])
         const request = parseAgentNativeSessionConfirmation(input), session = parseRpcAgentSession(p.session)
-        const confirmation = record(p.confirmation, ['operationId', 'run', 'previousNativeHandle', 'nativeHandle', 'observedAt', 'candidateObservedAt', 'previousInteraction', 'previousPromptSubmissionId'])
+        const confirmation = record(p.confirmation, ['operationId', 'run', 'previousNativeHandle', 'nativeHandle', 'observedAt', 'candidateObservedAt', 'basis', 'previousInteraction', 'previousPromptSubmissionId'])
         if (p.persisted !== true || session.agentSessionId !== request.agentSessionId || session.run.runId !== request.expectedRun.runId ||
           confirmation.operationId !== request.operationId || runRef(confirmation.run).runId !== request.expectedRun.runId ||
           confirmation.candidateObservedAt !== request.expectedObservationAt || !isDeepStrictEqual(confirmation.previousNativeHandle, request.expectedNativeHandle) ||
           !isDeepStrictEqual(confirmation.nativeHandle, request.candidateNativeHandle)) fail()
         bool(p.current)
+        if (confirmation.basis !== undefined) member(confirmation.basis, ['current-main', 'run-main-candidate'])
         const current = isDeepStrictEqual(session.nativeConfirmation, confirmation) && isDeepStrictEqual(session.nativeHandle, request.candidateNativeHandle)
         if (p.current !== current || ![session.nativeConfirmation, ...(session.nativeConfirmationHistory ?? [])].some(value => isDeepStrictEqual(value, confirmation))) fail()
         count(confirmation.observedAt)

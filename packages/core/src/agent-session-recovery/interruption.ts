@@ -1,3 +1,4 @@
+import { nativeTargetSourceUnconfirmed } from '../agent-native-source.js'
 import type { AgentProvider } from '../agent-provider.js'
 import type { AgentMuxContinuityInterruption, AgentMuxContinuityPolicy } from './continuity-contract.js'
 import type { AgentMuxStoredAgentSession } from '../types.js'
@@ -27,7 +28,7 @@ export async function inspectAgentSessionInterruption(
     }
     return { ...result, state: 'interrupted', source: 'active-fallback', nativeObservedAt: status.observedAt, reason: 'explicit-active-fallback' }
   }
-  if (session.nativeSourceObservation?.run.runId === session.run.runId) {
+  if (nativeTargetSourceUnconfirmed(session)) {
     return { ...result, reason: 'original-native-source-unconfirmed' }
   }
   // A contributed observer returning nothing or failing is unknown, never unsupported.

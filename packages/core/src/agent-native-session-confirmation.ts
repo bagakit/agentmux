@@ -22,7 +22,7 @@ export function parseAgentNativeSessionConfirmation(value: unknown): AgentMuxNat
   if (!Number.isSafeInteger(p.expectedObservationAt) || (p.expectedObservationAt as number) < 1) invalid()
   const expectedNativeHandle = parseNativeConfirmationHandle(p.expectedNativeHandle)
   const candidateNativeHandle = parseNativeConfirmationHandle(p.candidateNativeHandle)
-  if (candidateNativeHandle.providerId !== expectedNativeHandle.providerId || candidateNativeHandle.sessionId === expectedNativeHandle.sessionId) invalid()
+  if (candidateNativeHandle.providerId !== expectedNativeHandle.providerId) invalid()
   return { agentSessionId: p.agentSessionId as string, expectedRun: { runId: run.runId as string }, expectedNativeHandle,
     candidateNativeHandle, expectedObservationAt: p.expectedObservationAt as number, operationId: p.operationId as string }
 }

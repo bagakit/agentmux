@@ -5,7 +5,7 @@ import type { AgentMuxAgentSession } from './types.js'
 export function messageNotificationSourceRuns(session: AgentMuxAgentSession): readonly string[] {
   const runs = [session.run.runId]
   const seen = new Set(runs)
-  if (session.nativeBinding?.source !== 'semantic-resume-target' || session.nativeBinding.run.runId !== session.run.runId ||
+  if ((session.nativeBinding?.source !== 'semantic-resume-target' && session.nativeBinding?.source !== 'user-selected') || session.nativeBinding.run.runId !== session.run.runId ||
       session.nativeHandle?.kind !== 'provider' || session.nativeHandle.providerId !== session.providerId) return runs
   const operations = new Map(Object.entries(session.continuityOperations ?? {}))
   if (session.continuity && !operations.has(session.continuity.operationId)) operations.set(session.continuity.operationId, session.continuity)

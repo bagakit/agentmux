@@ -1,3 +1,4 @@
+import { hasSelectedNativeTarget } from '../agent-native-source.js'
 import type { AgentSessionRecoveryReconciler } from './reconciliation.js'
 import { assertAgentPromptSize } from '../agent-runtime-helpers.js'
 import { parseAgentRestartInput, type AgentMuxAgentRestartIdentity, type AgentMuxAgentRestartInput, type AgentMuxAgentRestartInspection } from './restart-contract.js'
@@ -584,7 +585,7 @@ export class AgentSessionRunLifecycle {
         capabilityHash: hashAgentCapability(invocationCapability),
         updatedAt: Math.max(current.updatedAt + 1, nativeBindingObservedAt),
         nativeHandle: structuredClone(current.nativeHandle),
-        nativeBinding: { source: 'semantic-resume-target', run: runRef(run.runId), observedAt: nativeBindingObservedAt }
+        nativeBinding: { source: hasSelectedNativeTarget(current) ? 'user-selected' : 'semantic-resume-target', run: runRef(run.runId), observedAt: nativeBindingObservedAt }
       }
       if (continuity?.operationId === input.operationId && continuity.kind === 'starting') {
         next.continuity = { ...continuity, kind: 'resumed', newRun: { ...next.run }, observedAt: Date.now() }
@@ -830,7 +831,7 @@ export class AgentSessionRunLifecycle {
     const observedAt = Date.now()
     const next: AgentMuxStoredAgentSession = { ...prepared, run: runRef(run.runId),
       retiredRuns: [...prepared.retiredRuns, prepared.run], updatedAt: Math.max(observedAt, prepared.updatedAt + 1),
-      nativeBinding: { source: 'semantic-resume-target', run: runRef(run.runId), observedAt } }
+      nativeBinding: { source: hasSelectedNativeTarget(prepared) ? 'user-selected' : 'semantic-resume-target', run: runRef(run.runId), observedAt } }
     for (const key of ['observedNativeHandle', 'nativeSourceObservation', 'nativePromptPredecessor', 'hookReceipt', 'terminalHandshake',
       'terminalCapability', 'terminalPromptReadiness', 'promptCompletionAdmission', 'terminalPromptSubmission', 'terminalPromptDelivery',
       'terminalOutputChannel', 'semanticStatus', 'pendingInteraction', 'recoveryActivity'] as const) delete next[key]

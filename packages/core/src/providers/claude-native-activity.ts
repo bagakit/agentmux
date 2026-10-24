@@ -27,6 +27,7 @@ export function claudeNativeObservationFailure(
       typeof payload.sourceId !== 'string' || !payload.sourceId.trim() ||
       typeof payload.sequence !== 'number' || !Number.isSafeInteger(payload.sequence) || payload.sequence < 1) return
   return { code: 'AGENT_NATIVE_ACTIVITY_UNAVAILABLE',
+    source: { sourceId: payload.sourceId, sequence: payload.sequence },
     message: 'The native activity observer could not capture its original actor identity. Current activity is unconfirmed. The original Session, Run and input remain available; a subsequent original-identity Run can establish a fresh observer.' }
 }
 
