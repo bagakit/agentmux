@@ -1,10 +1,13 @@
 import type { ConnectionHostingTarget } from '../../../shared/contracts'
-import { useContext, useRef } from 'react'
+import { useContext, useEffect, useRef } from 'react'
 import { semanticIconComponent } from '@agentmux/client-ui/icons'
 import type { RoomBinding } from '@agentmux/core/connections'
 import * as DropdownMenu from './HoverDropdownMenu'
 import { useConnectorRoomName } from '../lib/use-connector-room-name'
 import { SettingsNavigation } from './SettingsNavigation'
+import { api } from '../lib/api'
+import { useAppStore } from '../store'
+import { readConnectorService, selectConnectorServiceObservation } from '../lib/connector-service-observation'
 import type { ChannelEntry } from './settings/settings-catalog'
 import { connectorDiagnosisKey, useConnectorGroupDiagnosis, type CheckedGroupDiagnosis } from '../lib/use-connector-group-diagnosis'
 import { ConnectorProblemIcon, ConnectorTrafficSummary } from './ConnectorTrafficSummary'
@@ -21,10 +24,23 @@ type Props = {
 /** Compiled channel entries share one bounded reading of the original Session's relationships. */
 export function ConnectorHeaderLinks(props: Props) {
   const navigation = useContext(SettingsNavigation), channels = navigation?.channelEntries ?? []
+  const observations = useAppStore(state => state.connectorServiceObservation)
+  const policyScope = JSON.stringify([props.hostingTarget, channels.map(channel => channel.adapterId)]), source = api.connections.call
+  useEffect(() => {
+    if (!props.visible || !props.hostingTarget) return
+    let live = true
+    for (const channel of channels) void readConnectorService(() => live, props.hostingTarget, channel.adapterId).catch(() => {})
+    return () => { live = false }
+  }, [policyScope, props.visible, props.nameVersion, source])
+  const visibleChannels = channels.filter(channel => {
+    const policy = selectConnectorServiceObservation(observations, props.hostingTarget, channel.adapterId)
+    return !policy || !!policy.issue || policy.state?.enabled !== false
+  })
   const diagnosis = useConnectorGroupDiagnosis(props.bindings, props.nameVersion, props.visible, props.syncEnabled, props.hostingTarget)
   const matches = (channel: ChannelEntry, binding: RoomBinding) => channel.domains.includes(binding.application.domain)
   const unknown = props.bindings.filter(binding => !channels.some(channel => matches(channel, binding)))
-  return <span className="agent-region-header__channels">{channels.map(channel => <ChannelHeaderEntry key={channel.adapterId} {...props} channel={channel}
+  if (!visibleChannels.length && !unknown.length) return null
+  return <span className="agent-region-header__channels">{visibleChannels.map(channel => <ChannelHeaderEntry key={channel.adapterId} {...props} channel={channel}
     bindings={props.bindings.filter(binding => matches(channel, binding))} diagnosis={diagnosis} totalBindings={props.bindings.length} />)}
     {unknown.length ? <ChannelHeaderEntry {...props} bindings={unknown} diagnosis={diagnosis} totalBindings={props.bindings.length} /> : null}</span>
 }
@@ -42,7 +58,7 @@ function ChannelHeaderEntry({ channel, diagnosis, totalBindings, ...props }: Pro
   const unconfirmed = !!issue || checking && !bindings.length && props.nameVersion === 0
   const unchecked = bindings.some(binding => !diagnosis.entries[connectorDiagnosisKey(binding)]?.report)
   const state = unconfirmed ? 'unknown' : !bindings.length ? 'unbound' : problems.some(problem => problem.tone === 'warning') ? 'attention' :
-    unchecked ? 'unknown' : problems.some(problem => problem.kind === 'sync-off') ? 'off' : problems.some(problem => problem.kind === 'sharing-paused') ? 'paused' : 'linked'
+    unchecked ? 'unknown' : problems.some(problem => problem.kind === 'sync-off' || problem.kind === 'platform-off') ? 'off' : problems.some(problem => problem.kind === 'sharing-paused') ? 'paused' : 'linked'
   const problemTitles = [...new Set(problems.map(problem => problem.title))]
   const label = unconfirmed ? hostingTarget === null ? 'Hosting unconfirmed' : checking ? 'Checking saved groups' : 'Group check unavailable' :
     !bindings.length ? 'No group linked' : problems.length ? problemTitles.slice(0, 2).join(' · ') + (problemTitles.length > 2 ? ` · +${problemTitles.length - 2}` : '') : unchecked ? 'Not checked' : 'Group linked'
