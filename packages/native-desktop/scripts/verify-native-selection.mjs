@@ -172,7 +172,8 @@ async function exercise(directory, capture) {
       const bytes = readFileSync(path)
       assert(bytes.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) && bytes.readUInt32BE(16) === value.width && bytes.readUInt32BE(20) === value.height, 'Actual AppKit layout PNG metadata mismatch')
       images.push({ name, state: 'captured', path, width: value.width, height: value.height, source: value.source,
-        windowServerFrame: false, sha256: createHash('sha256').update(bytes).digest('hex') })
+        windowServerFrame: false, rasterization: value.rasterization, compositing: value.compositing, scale: value.scale,
+        sha256: createHash('sha256').update(bytes).digest('hex') })
     }
     await image('initial')
     await drag(point(rectangle.x, rectangle.y), point(rectangle.x + rectangle.width, rectangle.y + rectangle.height))
@@ -204,6 +205,11 @@ async function exercise(directory, capture) {
     verify(host.completions.length === 1, 'Completion must settle exactly once')
     await host.request('begin')
     await drag(point(offset.x + 40, offset.y + 20), point(offset.x + Math.min(screen.width - 10, 350), offset.y + 150))
+    const edge = await host.request('inspect')
+    const dimensions = edge.dimensions, edgeToolbar = edge.toolbar
+    const intersects = dimensions.x < edgeToolbar.x + edgeToolbar.width && dimensions.x + dimensions.width > edgeToolbar.x
+      && dimensions.y < edgeToolbar.y + edgeToolbar.height && dimensions.y + dimensions.height > edgeToolbar.y
+    verify(dimensions.width > 0 && dimensions.height > 0 && !intersects, 'Real edge dimensions must remain visible without intersecting the actual toolbar')
     await image('edge')
     await host.request('key', { keyCode: 53 })
     verify((await host.completion(2)).state === 'cancelled', 'Escape must cancel an existing selection')
@@ -256,6 +262,7 @@ try {
       { name: 'release', path: view, before: 'selection.pointerUp(convert(event.locationInWindow, from: nil)); refresh()', after: 'selection.pointerUp(convert(event.locationInWindow, from: nil)); refresh(); confirm()' },
       { name: 'escape', path: view, before: 'case 53: cancel()', after: 'case 53: confirm()' },
       { name: 'toolbar', path: view, before: 'confirmButton.action = #selector(confirm)', after: 'confirmButton.action = #selector(cancel)' },
+      { name: 'dimensions-toolbar', path: view, before: 'selection: rect, toolbar: toolbar.frame, screen: screen)', after: 'selection: rect, toolbar: .zero, screen: screen)' },
     ]
     assert(mutations.length > 0)
     report.mutations = []
