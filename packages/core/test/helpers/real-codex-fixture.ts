@@ -191,9 +191,6 @@ export async function prepareRealCodexScope(register?: (scope: RealCodexScope) =
   }
 }
 
-export const privateCodexConfigArgs = ['--config', 'cli_auth_credentials_store="file"', '--config', 'notify=[]',
-  '--config', 'features.plugins=false', '--config', 'features.plugin_hooks=false', '--config', 'features.memories=false', '--config', 'features.chronicle=false']
-
 export async function assertExitedAdmission(scope: RealCodexScope, store: ObservedPromptStore, id: string, run: AgentMuxRunRef, submissionId: string, plan: unknown, startByte: number) {
   const witness = store.confirmedSubmission(id, run, submissionId)
   assert.deepEqual(witness.payload.inputByteRange, { startByte, endByte: startByte + 5 })
