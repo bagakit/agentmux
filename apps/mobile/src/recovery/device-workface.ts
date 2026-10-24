@@ -360,11 +360,37 @@ export class DeviceWorkfaceStore {
   private tail: Promise<unknown> = Promise.resolve()
   private pending: Array<(value: DeviceWorkface) => DeviceWorkface> = []
   private writeRevision = 0
+  private reloadWait?: { tail: Promise<unknown>; listeners: Set<(error: unknown, failed: boolean) => void> }
+  private waitForWrites(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return Promise.reject(new DOMException('已停止等待设备保存。', 'AbortError'))
+    let wait = this.reloadWait
+    if (!wait || wait.tail !== this.tail) {
+      wait = { tail: this.tail, listeners: new Set() }
+      this.reloadWait = wait
+      const current = wait
+      void current.tail.then(() => {
+        if (this.reloadWait === current) this.reloadWait = undefined
+        for (const listener of current.listeners) listener(undefined, false)
+      }, error => {
+        if (this.reloadWait === current) this.reloadWait = undefined
+        for (const listener of current.listeners) listener(error, true)
+      })
+    }
+    const current = wait
+    return new Promise<void>((resolve, reject) => {
+      const complete = (error: unknown, failed: boolean) => {
+        current.listeners.delete(complete); signal?.removeEventListener('abort', cancel)
+        if (failed) reject(error); else resolve()
+      }
+      const cancel = () => complete(new DOMException('已停止等待设备保存。', 'AbortError'), true)
+      current.listeners.add(complete); signal?.addEventListener('abort', cancel, { once: true })
+    })
+  }
   /** Wait for writes already requested; the returned check also catches later edits. */
-  async preparePageReload(): Promise<() => boolean> {
+  async preparePageReload(signal?: AbortSignal): Promise<() => boolean> {
     const recordId = this.recordIdentity()
     const revision = this.writeRevision
-    await this.tail
+    await this.waitForWrites(signal)
     const raw = this.lastRaw
     return () => {
       try {
