@@ -144,6 +144,34 @@ test('dispose during launch prevents original action submission', async () => {
   })
 })
 
+test('submission rechecks the original authority before any action frame', async () => {
+  await fixture(async ({ connection, calls }) => {
+    await assert.rejects(connection.request('click', {}, { operationId: 'revoked-op', beforeSubmit() { throw new Error('authority revoked') } }), /authority revoked/)
+    assert.equal(calls.length, 1)
+    assert.equal(connection.inspectOperation('revoked-op'), undefined)
+  })
+})
+
+test('explicit snapshot pixels are a mutation with an original operation', async () => {
+  await fixture(async ({ connection, calls }) => {
+    await connection.request('getAppState', { noScreenshot: false }, { operationId: 'snapshot-pixels' })
+    assert.equal(calls.at(-1).operationId, 'snapshot-pixels')
+    assert.equal(calls.at(-1).expectedInstanceId, 'instance-original')
+    assert.equal(connection.inspectOperation('snapshot-pixels').method, 'getAppState')
+    await connection.request('getAppState', { noScreenshot: true })
+    assert.equal(calls.at(-1).operationId, undefined)
+  })
+})
+
+test('confirmed empty native clipboard preserves the old empty-text contract', async () => {
+  await fixture(async ({ connection }) => {
+    const desktop = new NativeDesktop({})
+    desktop.launch = async () => connection
+    assert.equal(await desktop.readClipboardText(), '')
+    await desktop.dispose()
+  }, () => ({ format: 'text', data: null, state: 'empty', changeCount: 1 }))
+})
+
 test('late capture keeps its typed result on the original operation', async () => {
   await fixture(async ({ connection }) => {
     await assert.rejects(connection.request('captureScreenshot', { mode: 'selection' }, { operationId: 'capture-op', timeoutMs: 10 }), { code: 'operation_unknown' })
@@ -173,7 +201,29 @@ test('native convenience methods preserve clipboard text and typed cancellation'
     assert.equal(calls.at(-1).params.data, ' \n原文\n ')
     assert.deepEqual(await desktop.captureScreenshot(), { state: 'cancelled' })
     await desktop.dispose()
-  }, request => request.method === 'clipboardRead' ? { data: ' \n原文\n ' } : request.method === 'captureScreenshot' ? { state: 'cancelled' } : { written: true })
+  }, request => request.method === 'clipboardRead' ? { format: 'text', state: 'read', data: ' \n原文\n ', changeCount: 7 } : request.method === 'captureScreenshot' ? { state: 'cancelled' } : { state: 'written', format: 'text', byteLength: Buffer.byteLength(request.params.data), changeCount: 8 })
+})
+
+test('clipboard conveniences reject wrong-format and unconfirmed writes', async () => {
+  await fixture(async ({ connection }) => {
+    const desktop = new NativeDesktop({})
+    desktop.launch = async () => connection
+    await assert.rejects(desktop.readClipboardText(), { code: 'invalid_clipboard_result' })
+    await assert.rejects(desktop.writeClipboardText('original'), { code: 'invalid_clipboard_result' })
+    await desktop.dispose()
+  }, () => ({ format: 'png', state: 'read', data: PNG.toString('base64'), changeCount: 3 }))
+})
+
+test('PNG clipboard conveniences keep exact PNG bytes and written byte receipt', async () => {
+  await fixture(async ({ connection, calls }) => {
+    const desktop = new NativeDesktop({})
+    desktop.launch = async () => connection
+    const image = await desktop.readClipboardImage()
+    assert.deepEqual(pngBytes(image), PNG)
+    await desktop.writeClipboardImage(image)
+    assert.equal(calls.at(-1).params.data, PNG.toString('base64'))
+    await desktop.dispose()
+  }, request => request.method === 'clipboardRead' ? { format: 'png', state: 'read', data: PNG.toString('base64'), changeCount: 2 } : { format: 'png', state: 'written', byteLength: PNG.byteLength, changeCount: 3 })
 })
 
 test('invalid capture receipt does not become a cancellation', async () => {
@@ -183,6 +233,20 @@ test('invalid capture receipt does not become a cancellation', async () => {
     await assert.rejects(desktop.captureScreenshot(), { code: 'invalid_capture_result' })
     await desktop.dispose()
   }, () => ({ state: 'failed' }))
+})
+
+test('capture conveniences reject contradictory cancellation and wrong image format', async () => {
+  for (const result of [
+    { state: 'cancelled', error: { code: 'capture_failed', message: 'failed' } },
+    { state: 'captured', screenshot: { format: 'jpeg', data: PNG.toString('base64'), width: 1, height: 1, scale: 1 } }
+  ]) {
+    await fixture(async ({ connection }) => {
+      const desktop = new NativeDesktop({})
+      desktop.launch = async () => connection
+      await assert.rejects(desktop.captureScreenshot(), error => error.code === 'invalid_capture_result' && Boolean(error.operation?.operationId))
+      await desktop.dispose()
+    }, () => result)
+  }
 })
 
 test('capture outcome is a machine string, not string-coerced display data', async () => {
