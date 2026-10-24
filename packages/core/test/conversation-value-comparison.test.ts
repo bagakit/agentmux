@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { jsonl, nativeHistoryFixture } from './fixtures/native-history-session.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { connectAgentMuxRpc } from '../src/public-rpc-client.js'
+import { normalizeStoredAgentSession } from '../src/agent-session-store.js'
 import { consumeConversationWindowPage, parseConversationChangesInput, parseConversationUnit, type ConversationWindowAssembly } from '../src/conversation-changes.js'
 import * as timeline from '../src/conversation-stream.js'
 import type { AgentTimelineItem } from '../src/types.js'
@@ -63,7 +64,8 @@ it('replays an original empty window without hashing scope equality', async () =
     const changedCut = anotherCut.frontier.cuts.find(cut => cut.kind === 'captured')!
     expect(scopedSource?.kind).toBe('captured'); expect(scopedCut?.kind).toBe('captured'); expect(changedCut?.kind).toBe('captured')
     if (scopedSource.kind !== 'captured' || scopedCut.kind !== 'captured' || changedCut.kind !== 'captured') throw Error('Expected original captured cut')
-    scopedSource.epoch += '-different'; scopedCut.epoch = scopedSource.epoch
+    const differentEpoch = scopedCut.epoch + '-different'
+    scopedSource.epoch = differentEpoch; scopedCut.epoch = differentEpoch
     changedCut.sequence += 1
     for (const checkpoint of [anotherScope, anotherCut]) {
       const input = { ...ref, view, checkpoint }
@@ -78,7 +80,7 @@ it('replays an original empty window without hashing scope equality', async () =
   expect((await f.rpc.call('agent.conversation.release', { ...ref, view })).released).toBe(true)
   await expect(f.rpc.call('agent.conversation.inspect', { ...ref, view })).rejects.toThrow(/expired/)
   expect((await f.bytes()).native).toEqual(f.before.native)
-  const saved = (await f.store.load()).find(session => session.agentSessionId === ref.agentSessionId)!
+  const saved = (await f.store.load()).map(normalizeStoredAgentSession).find(session => session.agentSessionId === ref.agentSessionId)!
   expect(saved.run).toEqual(f.session.run)
   expect(saved.retiredRuns).toEqual(f.session.retiredRuns)
   expect(f.controls.map(control => control.mock.calls.length)).toEqual([0, 0, 0, 0, 0, 0])
@@ -123,7 +125,8 @@ it('rejects stale revisions when a decoded original is changed before window con
     if (unit.kind !== 'item') throw Error('Expected original unit')
     const original = unit.item.records[0]!.original
     if (original.kind === 'captured') original.item.content = 'Changed after decoding'
-    else original.item.contentParts = [{ kind: 'text', text: 'Changed after decoding' }]
+    else if (original.kind === 'native') original.item.contentParts = [{ kind: 'text', text: 'Changed after decoding' }]
+    else throw Error('Expected complete original')
     expect(() => consumeConversationWindowPage(changed)).toThrow('Original conversation record version changed.')
   }
   const forged = structuredClone(page), first = forged.items[0]!
@@ -158,10 +161,10 @@ it('preserves public Reader, wire decoding and fragmented window assembly for bo
     expect(record.reference.agentSessionId).toBe(ref.agentSessionId)
     const original = record.original
     if (original.kind === 'captured') expect(original.item.content).toBe(body)
-    else {
+    else if (original.kind === 'native') {
       expect(original.item.contentParts).toHaveLength(1)
       expect(original.item.contentParts[0]).toMatchObject({ kind: 'text', text: body })
-    }
+    } else throw Error('Expected complete original')
     expect(record.revision).toBe(timeline.conversationRevision(original.item))
   }
   expect(await f.bytes()).toEqual(f.before)
