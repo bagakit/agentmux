@@ -186,6 +186,18 @@ describe('finite collaboration Worker engine', () => {
     expect(contains(after.get('root')!, after.get('child')!)).toBe(true)
   })
 
+  it('keeps the full port corridor when a locally improving candidate could otherwise fit inside half the clearance', async () => {
+    const input: CollaborationLayoutInput = { areas: [{ id: 'work', name: 'Original work', members: ['reading', 'peer'], folded: false }],
+      nodes: [{ id: 'reading', areaId: 'work', width: 154, height: 38 }, { id: 'peer', areaId: 'work', width: 154, height: 38 }],
+      connections: [{ ...edge('original', 'reading', 'peer'), strength: 2 }] }
+    const boxes = [heading('work'), box('reading', 0, 0, 154, 38, 'work'), box('peer', 250, 0, 154, 38, 'work')]
+    const next = { ...input, nodes: input.nodes.map(node => node.id === 'peer' ? { ...node, height: 40 } : node) }
+    const after = new Map(reconcileCollaborationLayout(next, boxes, 'reading', input).map(box => [box.id, box]))
+    expect(after.get('reading')).toEqual(boxes[1]); expect(after.get('peer')!.x).toBeLessThan(249)
+    expect(after.get('peer')!.x - (after.get('reading')!.x + 154)).toBeGreaterThanOrEqual(28 - 1e-6)
+    await successfulRoutes([...after.values()], next.connections)
+  })
+
   it('cancels a structural neighborhood before publishing geometry or submitting any routing work', async () => {
     const { input, boxes, next } = adaptiveAddition(), controller = new AbortController(), responses: CollaborationLayoutResponse[] = []
     controller.abort(); measurements.length = 0
