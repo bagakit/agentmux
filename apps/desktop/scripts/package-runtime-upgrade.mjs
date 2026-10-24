@@ -664,9 +664,15 @@ export async function confirmUiTerminalRebindings(plan, confirmation, originalOb
     if (region.kind !== 'terminal') continue
     const current = observed.workbench.tabs.find(row => row.id === tab.id)?.regions.find(row => row.regionId === region.regionId)
     fail(current?.kind === 'terminal', 'The original raw Terminal Region is unconfirmed.')
-    if (region.sessionId === current.sessionId) continue
     const binding = value => value.control?.kind === 'terminal' && value.sessionId === value.control.runId &&
       value.control.runId === value.control.run.runId
+    fail((!region.control || binding(region)) && (!current.control || binding(current)),
+      'The raw Terminal control does not match its exact Run binding. Its continuity is unconfirmed.')
+    if (region.sessionId === current.sessionId) {
+      fail(!region.control || !current.control || region.control.hostId === current.control.hostId,
+        'The raw Terminal execution Host changed. Its continuity is unconfirmed.')
+      continue
+    }
     fail(region.processState === 'interrupted' && current.processState === 'running' && binding(region) && binding(current) &&
       region.control.hostId === 'local' && current.control.hostId === region.control.hostId && region.workspaceId === current.workspaceId,
     'The changed raw Terminal binding has no exact interrupted original target. Its continuity is unconfirmed.')
