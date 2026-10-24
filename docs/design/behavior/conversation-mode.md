@@ -413,6 +413,8 @@ Activity、Workflow、服务窗、权限卡与 Composer 沿[共同组件合同](
 
 ## 共同对话协议与外部交流入口
 
+群连接的观察与恢复复用原 Host 和 Binding owner：连接器已有的重连、原回执核对和等待处理自行收敛，客户端不另造发送队列或重试事实。展开当前群时自动读取有界原观察，读取不重放原输入或未知外部写入；查询失败保留原内容和已有能力。需要用户改变的明确设置采用就地、具名的一次操作，简单可逆动作不增加确认层；用户主动暂停、关闭及原成员授权不得由自动恢复改写。展示不得把历史缺口或一次查询失败升级为整条链不可用；首层信息组织见[群聊连接入口](../presentation/conversation-mode.md#agent-群聊连接入口)。
+
 对话视图与飞书等外部聊天 connector 是同一 Agent Conversation 统一 timeline 的接入方，共同消费[底层 merge 与 MECE 合同](../../specs/conversation-protocol.md#unified-timeline-and-mece)：准确的原 Session、事件身份与顺序、带原来源的消息和内容更新、问题与权限请求、有限类型的动作及可查询原回执。原历史、输入与交互 owner 保持唯一；Core 不依赖客户端框架、不输出平台卡片布局，也不新增独立 Conversation Runtime 或第二份完整历史。客户端分别持有呈现、草稿与阅读状态，连接器持有外部认证、绑定及收发事实。
 
 ### Host 常驻托管
