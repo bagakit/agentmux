@@ -31,12 +31,14 @@ function run(name, args = [], mutant = null) {
     ...(mutant ? { mutant: { file: mutant.file, before: mutant.before, after: mutant.after } } : {}) }
 }
 const mutations = [
-  { name: 'owner-readback-content', file: 'apps/desktop/src/main/file-upload-owner.ts', before: 'if (bytes.byteLength !== identity.byteLength || digest(bytes) !== identity.revision)', after: 'if (false)',
+  { name: 'owner-readback-content', file: 'apps/host/src/file-upload-owner.ts', before: 'if (bytes.byteLength !== identity.byteLength || digest(bytes) !== identity.revision)', after: 'if (false)',
     tests: ['apps/mobile/test/file-upload-public.test.ts', '-t', 'rejects content mismatch'] },
   { name: 'public-original-run', file: 'packages/core/src/public-rpc-service.ts', before: 'original.session.run.runId !== input.expectedRun.runId', after: 'false',
     tests: ['apps/mobile/test/file-upload-public.test.ts', '-t', 'checks the authoritative original'] },
-  { name: 'public-forward-bridge', file: 'packages/core/src/public-rpc-service.ts', before: 'if (!this.ports.fileUploads && !this.ports.forwardControl)', after: 'if (!this.ports.fileUploads)',
-    tests: ['apps/mobile/test/file-upload-public.test.ts', '-t', 'supports forwardControl bridging'] },
+  { name: 'public-device-recheck', file: 'packages/core/src/public-rpc-service.ts',
+    before: '        context.signal?.throwIfAborted(); await this.inputCallContext(context).assertCurrent?.()\n        const result = this.ports.fileUploads',
+    after: '        context.signal?.throwIfAborted()\n        const result = this.ports.fileUploads',
+    tests: ['apps/mobile/test/file-upload-public.test.ts', '-t', 'rechecks the original device'] },
   { name: 'mobile-original-run', file: 'apps/mobile/src/conversation/attachments.ts', before: 'upload.identity.expectedRun.runId === scope.runId', after: 'true',
     tests: ['apps/mobile/test/mobile-attachments.test.tsx', '-t', 'same exact target/content guard'] },
   { name: 'unknown-inspect-only', file: 'apps/mobile/src/conversation/MobileAttachments.tsx', before: "await originalClient.forwardRpc!('file.upload.inspect', upload.identity)", after: "await originalClient.forwardRpc!('file.upload', upload.identity as never)",
@@ -69,7 +71,7 @@ try {
     const source = readFileSync(join(root, file), 'utf8'); assert.ok(source.includes(anchor), 'Nonempty production caller: ' + file)
     receipt.productionCallers.push({ file, anchor }); receipt.source[file] = sha(source)
   }
-  for (const file of ['apps/desktop/src/main/file-upload-owner.ts', 'packages/core/src/public-rpc-files.ts', 'packages/client-ui/src/lib/composer-file-reference.ts',
+  for (const file of ['apps/host/src/file-upload-owner.ts', 'packages/core/src/public-rpc-files.ts', 'packages/client-ui/src/lib/composer-file-reference.ts',
     'packages/client-ui/src/lib/composer-semantic-reference.ts', 'packages/client-ui/src/components/InlineComposer.tsx', 'apps/mobile/src/conversation/attachments.ts', 'apps/mobile/src/recovery/device-workface.ts']) receipt.source[file] = sha(readFileSync(join(root, file)))
   receipt.passed = true
 } catch (error) { receipt.error = { message: error.message, stack: error.stack } }

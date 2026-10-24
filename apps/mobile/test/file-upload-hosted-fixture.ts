@@ -10,7 +10,7 @@ import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-ser
 import { connectAgentMuxRpc } from '../../../packages/core/src/public-rpc-client'
 import type { AgentMuxHostedRpcPort } from '../../../packages/core/src/hosted-client-contract'
 import { hostedTestOwner } from '../../../packages/core/test/helpers/hosted-runtime-port'
-import { FileUploadOwner } from '../../desktop/src/main/file-upload-owner'
+import { FileUploadOwner } from '../../host/src/file-upload-owner'
 
 /** The original Hosted SDK, public socket, disk owners, Core admission and provider
  * all run. Only the private ctxmux process transport is synthetic; no Agent starts. */

@@ -31,7 +31,7 @@ for (const name of ['core', 'demand', 'layout', 'relay', 'client-ui']) {
 paths['base64-js'] = [resolve(root, 'node_modules/.pnpm/base64-js@1.5.1/node_modules/base64-js/index.d.ts')]
 paths.tweetnacl = [resolve(root, 'node_modules/.pnpm/tweetnacl@1.0.3/node_modules/tweetnacl/nacl.d.ts')]
 for (const name of ['base64-js', 'tweetnacl']) assert.ok(existsSync(paths[name][0]), `Original installed dependency is missing: ${name}`)
-const roots = [...parsed.fileNames, resolve(root, 'apps/mobile/node_modules/vite/client.d.ts'), resolve(root, 'apps/mobile/test/mobile-attachments.test.tsx'), resolve(root, 'apps/mobile/test/file-upload-public.test.ts'), resolve(root, 'packages/core/src/agentmux.ts'), resolve(root, 'packages/core/src/client.ts'), resolve(root, 'apps/desktop/src/main/file-upload-owner.ts'),
+const roots = [...parsed.fileNames, resolve(root, 'apps/mobile/node_modules/vite/client.d.ts'), resolve(root, 'apps/mobile/test/mobile-attachments.test.tsx'), resolve(root, 'apps/mobile/test/file-upload-public.test.ts'), resolve(root, 'packages/core/src/agentmux.ts'), resolve(root, 'packages/core/src/client.ts'), resolve(root, 'apps/host/src/file-upload-owner.ts'),
   ...(nativeOwner ? [resolve(root, 'apps/desktop/scripts/fixtures/mote-daily-device/runtime-owner.ts'), resolve(root, 'apps/desktop/src/renderer/src/global.d.ts')] : [])]
   .filter(file => !baselineMain || file.includes('node_modules') || original(file) !== undefined)
 const options = { ...parsed.options, types: parsed.options.types.filter(name => name !== 'vite/client'), baseUrl: root, paths,

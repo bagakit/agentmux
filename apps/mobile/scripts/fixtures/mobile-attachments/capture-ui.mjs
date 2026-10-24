@@ -52,7 +52,7 @@ try {
       alias['@agentmux/' + name + (subpath === '.' ? '' : subpath.slice(1))] = path.join(folder, source)
     }
   }
-  await build({ absWorkingDir: root, entryPoints: ['apps/desktop/src/main/file-upload-owner.ts'], outfile: path.join(compiled, 'file-owner.cjs'), bundle: true, format: 'cjs', platform: 'node', target: 'node24', alias, logLevel: 'error' })
+  await build({ absWorkingDir: root, entryPoints: ['apps/host/src/file-upload-owner.ts'], outfile: path.join(compiled, 'file-owner.cjs'), bundle: true, format: 'cjs', platform: 'node', target: 'node24', alias, logLevel: 'error' })
   await fs.copyFile(path.join(fixture, 'attachments-preload.cjs'), path.join(compiled, 'preload.cjs'))
   const built = await build({ absWorkingDir: root, entryPoints: [path.join(fixture, 'attachments-entry.tsx')], outdir: compiled, bundle: true,
     format: 'esm', platform: 'browser', target: 'esnext', jsx: 'automatic', logLevel: 'error', metafile: true, alias, plugins: [clientSources, workers],
