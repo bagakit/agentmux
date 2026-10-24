@@ -32,10 +32,11 @@ export function useConnectorGroupDiagnosis(bindings: RoomBinding[], version: num
     let timer: ReturnType<typeof setTimeout> | undefined
     const watched = new Set<string>(JSON.parse(observed))
     const accepts = () => live && current.current.visible && current.current.identity === identity && current.current.source === source && api.connections.call === originalSource
+    const documentVisible = () => document.visibilityState !== 'hidden'
     if (pending.current.source !== source) pending.current = { source, reads: new Map() }
     const reads = pending.current.reads
     async function check(refreshOnly = false) {
-      if (!accepts() || reading || document.visibilityState === 'hidden') return
+      if (!accepts() || reading || !documentVisible()) return
       const selected = refreshOnly ? targets.filter(target => watched.has(JSON.stringify(target))) : targets
       if (!selected.length) return
       clearTimeout(timer); reading = true
@@ -61,7 +62,7 @@ export function useConnectorGroupDiagnosis(bindings: RoomBinding[], version: num
       }))
       reading = false
       // Host recovery owns the work. This open surface only observes its original results.
-      if (accepts() && watched.size && document.visibilityState !== 'hidden') timer = setTimeout(() => { void check(true) }, 5000)
+      if (accepts() && watched.size && documentVisible()) timer = setTimeout(() => { void check(true) }, 5000)
     }
     const resume = () => { clearTimeout(timer); void check(true) }
     document.addEventListener('visibilitychange', resume)
