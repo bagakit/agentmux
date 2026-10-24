@@ -105,11 +105,21 @@ module.exports = async function settings({ win, result, read, click, key, move, 
     await until('original Focus durable save completes', () => read(`document.querySelector('[data-settings-pane="focus"] [data-settings-save-bar]').textContent.includes('Changes saved')`))
   }
   async function close() { await click('[aria-label="Close settings"]'); await until('original settings closes', () => read(`!document.querySelector('.settings-page:not([hidden])')`)); await settled() }
+  const backgroundPoint = () => read(`(()=>{const canvas=document.querySelector('.collaboration-canvas'),r=canvas.getBoundingClientRect(),candidates=[[.52,.52],[.82,.3],[.18,.3],[.82,.72],[.18,.72],...Array.from({length:36},(_,i)=>[(i%6+2)/9,(Math.floor(i/6)+2)/9])];for(const [x,y] of candidates){const p={x:r.x+r.width*x,y:r.y+r.height*y};if(document.elementFromPoint(p.x,p.y)?.classList.contains('react-flow__pane'))return p}throw Error('No actual Map background for native information-budget pointer input')})()`)
+  async function releaseSummaryHover() {
+    const point = await backgroundPoint(), readersBefore = await readerCount()
+    await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
+    // This is the private fixture's transient hover, released by the original
+    // Reader departure handler. A close-button click could restore card focus.
+    await until('the original transient Reader departs after real background pointer input', async () => await readerCount() === 0)
+    evidence.summaryPointer = { point, readersBefore, readersAfter: await readerCount(), paneHit: await read(`Boolean(document.elementFromPoint(${point.x},${point.y})?.classList.contains('react-flow__pane'))`) }
+    assert.equal(evidence.summaryPointer.paneHit, true, 'The pointer really rests on original Map background before observing ordinary summary ink')
+  }
   async function wheelTo(target) {
     for (let attempt = 0; attempt < 24; attempt++) {
       const current = await read(`new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a`)
       if (Math.abs(Math.log(target / current)) < .0008) return current
-      const point = await read(`(()=>{const canvas=document.querySelector('.collaboration-canvas'),r=canvas.getBoundingClientRect(),candidates=[[.52,.52],[.82,.3],[.18,.3],[.82,.72],[.18,.72],...Array.from({length:36},(_,i)=>[(i%6+2)/9,(Math.floor(i/6)+2)/9])];for(const [x,y] of candidates){const p={x:r.x+r.width*x,y:r.y+r.height*y};if(document.elementFromPoint(p.x,p.y)?.classList.contains('react-flow__pane'))return p}throw Error('No actual Map background for native information-budget wheel input')})()`)
+      const point = await backgroundPoint()
       await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', ...point })
       await win.webContents.debugger.sendCommand('Input.dispatchMouseEvent', { type: 'mouseWheel', ...point, deltaX: 0, deltaY: Math.max(-180, Math.min(180, -Math.log2(target / current) / .002)) })
       await pause(120)
@@ -172,6 +182,7 @@ module.exports = async function settings({ win, result, read, click, key, move, 
     await readingEndpoint('saved-profile-reading')
     const zoom = await read(`new DOMMatrix(getComputedStyle(document.querySelector('.react-flow__viewport')).transform).a`)
     assert.ok(zoom >= 1.119 && zoom <= 1.121, 'Explicit later reading consumes the saved LOD endpoint')
+    await releaseSummaryHover()
     const outlines = await read(`[...document.querySelectorAll('.collaboration-area__envelope path')].map(path=>path.getAttribute('d'))`)
     assert.ok(outlines.length > 0 && outlines.every(path => !path.includes(' Q ')), 'Actual Map draws the saved polygon profile')
     await frame('settings-polygon-map-custom-reading')
@@ -222,6 +233,8 @@ module.exports.verify = (evidence, frames) => {
   assert.deepEqual(evidence.phases.map(phase => phase.phase), ['custom-saved-reopened', 'point-only-real-hit-and-reader', 'defaults-restored'])
   assert.ok(evidence.hitTests.length > 0 && evidence.hitTests.every(hit => hit.readerBefore === false && hit.readerAfter === false))
   assert.deepEqual(evidence.readerMeasurement, { selector: readerSelector, count: 1 }, 'Reader absence samples require a nonempty measurement of the existing actual Reader')
+  assert.ok(Number.isFinite(evidence.summaryPointer?.point?.x) && Number.isFinite(evidence.summaryPointer.point.y) && Number.isInteger(evidence.summaryPointer.readersBefore) && evidence.summaryPointer.readersBefore >= 0, 'Ordinary summary observation requires the actual native pointer release evidence')
+  assert.equal(evidence.summaryPointer.readersAfter, 0); assert.equal(evidence.summaryPointer.paneHit, true)
   verifyReadingEndpoints(evidence.readingEndpoints)
   verifyInformation(evidence.informationSamples)
   for (const label of ['settings-two-level-draft', 'settings-invalid-kept-draft', 'settings-custom-four-level-dark', 'settings-custom-narrow-dark', 'settings-custom-narrow-light', 'settings-saved-profile-reopened', 'settings-polygon-map-custom-reading', 'settings-status-only-map', 'settings-identity-only-map', 'settings-all-point-accurate-reader', 'settings-map-defaults-restored']) assert.ok(frames.some(frame => frame.label === label), 'Missing original native settings frame ' + label)
