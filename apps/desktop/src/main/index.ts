@@ -14,7 +14,7 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { app, BrowserWindow, crashReporter, dialog, Menu, nativeTheme, shell } from 'electron'
 import { resolveTheme } from '@agentmux/client-ui/theme'
-import { AgentMuxFileAgentSessionStore, hydrateProcessEnvironmentFromLoginShell, loginShellEnvironmentWarning } from '@agentmux/core'
+import { AgentMuxFileAgentSessionStore, prepareProcessEnvironmentFromLoginShell, loginShellEnvironmentWarning } from '@agentmux/core'
 import { AgentMuxSpatialStateStore } from '@agentmux/core/spatial-state'
 import { applicationMenuTemplate } from './application-menu.js'
 import { installTextEditContextMenu } from './text-edit-context-menu.js'
@@ -121,11 +121,17 @@ function startPrimaryInstance(): void {
   let workbenchWindows: WorkbenchWindows | null = null
   let recoverInterface: (() => Promise<void>) | null = null
   // Every window entry point shares this read, including a second launch during startup.
-  const environmentReady = hydrateProcessEnvironmentFromLoginShell().then((result) => {
+  let environmentWarning: string | undefined = 'Shell environment is loading. New Agents and terminals wait for complete exports; existing sessions remain available.'
+  const environmentReady = prepareProcessEnvironmentFromLoginShell().then((result) => {
     const warning = loginShellEnvironmentWarning(result)
+    environmentWarning = warning
+    const contents = workbenchWindow?.webContents
+    if (contents && !contents.isDestroyed()) contents.send('ui:environmentWarning', warning ?? null)
     if (warning) process.stderr.write(`${warning}\n`)
     return warning
   })
+
+  void environmentReady
 
   function disposeOwners(): Promise<void> {
     if (!ownerDisposal) {
@@ -172,7 +178,6 @@ function startPrimaryInstance(): void {
     }))
 
   async function buildWindow(appReadyAtMs: number = Date.now()): Promise<void> {
-    const environmentWarning = await environmentReady
     const initialConfig = await configStore.get()
     const windowCreationStartedAtMs = Date.now()
     // The window reopens where it was last left. Only a first launch (or a corrupt record) falls back
@@ -268,7 +273,7 @@ function startPrimaryInstance(): void {
     disposeIpc = await registerIpc({ window, workbenchWindows: windows, configStore, initialConfig, runtime, applicationAccess, scratchTopics, workspaceFiles, spatialLinks, webLinks,
       performanceScene, appMemory, performanceHeap, clientIncidents, loadedPackage: packageIdentity, loadedRenderer: () => rendererUpdates?.loadedRenderer() ?? null,
       onRendererStartupFailure: failure => startupCapture.recordRenderer(failure),
-      onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, ...(environmentWarning ? { environmentWarning } : {}) })
+      onRendererUpdateReady: (token) => { if (updateReady?.token === token) { startupCapture.ready(token); updateReady.resolve() } }, environmentWarning: () => environmentWarning })
     reportStartupStage('after-ipc')
     if (process.env.ELECTRON_RENDERER_URL) { reportStartupStage('before-load-url'); await window.loadURL(process.env.ELECTRON_RENDERER_URL); reportStartupStage('after-load-url') }
     else {

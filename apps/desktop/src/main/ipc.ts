@@ -287,7 +287,7 @@ export async function registerIpc(args: {
 
   workspaceFiles?: WorkspaceFiles
   scratchTopics: ScratchTopics
-  environmentWarning?: string
+  environmentWarning?: () => string | undefined
   onRendererUpdateReady?: (token: string) => void
   onRendererStartupFailure?: (input: unknown) => boolean
   webLinks?: WebUrlIngress
@@ -1521,7 +1521,7 @@ export async function registerIpc(args: {
         .map(warning => [JSON.stringify([warning.hostId, warning.step]), warning] as const)
     ]).values()]
     return sessionSnapshotPayload({ ...snapshot, runtimeEndpointWarnings },
-      args.environmentWarning, app.getPath('home'))
+      args.environmentWarning?.(), app.getPath('home'))
   })
   handle('sessions:nativeSessions', async (input: import('../shared/contracts.js').NativeAgentSessionsInput) => args.runtime.nativeAgentSessions(input, config))
   handle('sessions:nativeHistoryPage', async (input: import('../shared/contracts.js').NativeAgentHistoryInput) => args.runtime.nativeAgentHistory(input, config))

@@ -104,6 +104,7 @@ export class AgentSessionRunLifecycle {
           throw new AgentMuxError('Restart needs the exact verified native conversation and Provider resume support. The original Run was kept.',
             'AGENT_RESUME_UNAVAILABLE', undefined, { disposition: 'not_applied', confirmedInputBytes: null })
         }
+        await this.ports.runtime.prepareExecutionEnvironment?.()
         // Resolve the real replacement before interrupting useful work. Freeze these exact options in the original durable operation.
         const frozen = parseAgentRestartInput({ ...input, ...await this.ports.executors.sessionExecutorOptions(canonical, input) })
         const { plan } = this.buildResumePlan(canonical, frozen)
@@ -368,6 +369,7 @@ export class AgentSessionRunLifecycle {
       restartReservation ? 'restart' : reopening ? 'reopen' : 'resume', input.agentSessionId,
       safeId(input.operationId, 'Agent resume operation id')
     )
+    await this.ports.runtime.prepareExecutionEnvironment?.()
     let reservation = restartReservation ?? (reopening
       ? await this.ports.sessions.registry.reserveReopen(input.agentSessionId, reopening.expectedRetiredAt, lifecycleOperationId, input.operationId)
       : await this.ports.sessions.registry.reserveExisting('resume', previous!.agentSessionId, previous!.run, lifecycleOperationId))

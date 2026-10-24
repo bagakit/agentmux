@@ -1773,6 +1773,7 @@ export type AgentMuxDesktopApi = {
     spatialLinksReady(): Promise<void>
     /** Submit an internal object-link intent; later navigation issues use onSpatialLinkIssue. */
     openObjectLink(url: string): Promise<void>
+    onEnvironmentWarning(listener: (warning: string | null) => void): () => void
     onSpatialLinkIssue(listener: (message: string) => void): () => void
     captureScreenshot(): Promise<string | null>
     screenshotShortcutStatus(): Promise<import('./screenshot-shortcut').ScreenshotShortcutStatus>

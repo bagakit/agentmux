@@ -420,6 +420,8 @@ function rawInputCancellationDetail(session: AgentMuxAgentSession, data: AgentMu
 }
 
 export type AgentMuxClientOptions = {
+  /** Complete Host exports before freezing a new execution; original reads and healthy Runs stay available. */
+  prepareExecutionEnvironment?: () => Promise<void>
   /** Original semantic owner identity, supplied by the Host; never inferred from a path or Run. */
   diagnosticOwner?: AgentStartupDiagnosticOwner
   externalConversationAuthority?: AgentExternalConversationAuthorityPort
@@ -861,7 +863,10 @@ export class AgentMuxClient {
     return projectRunWith(this.endedRuns.get(run.runId), run, agentSession)
   }
 
+  private readonly prepareExecutionEnvironment: () => Promise<void>
+
   constructor(options: AgentMuxClientOptions = {}) {
+    this.prepareExecutionEnvironment = options.prepareExecutionEnvironment ?? (async () => {})
     this.externalConversationAuthority = options.externalConversationAuthority
     this.hostExecutorOwner = options.hostExecutorOwner
     this.sessionExecutorConfiguration = options.sessionExecutorConfiguration
@@ -1028,6 +1033,7 @@ export class AgentMuxClient {
     this.recovery = new AgentSessionRecoveryService({
       sessions: { store: this.store, registry: this.registry, resolveRawAgentSession: (...args) => this.resolveRawAgentSession(...args), currentStoredAgentSession: (...args) => this.currentStoredAgentSession(...args), updateExactAgentSession: (...args) => this.updateExactAgentSession(...args), requireAgentSession: (...args) => this.requireAgentSession(...args), retainUnconfirmedLifecycle: (...args) => this.retainUnconfirmedLifecycle(...args) },
       runtime: {
+        prepareExecutionEnvironment: () => this.prepareExecutionEnvironment(),
         kernel: this.kernel,
         assertAgentRun: (...args) => this.assertAgentRun(...args),
         requireCurrentAgentRun: (...args) => this.requireCurrentAgentRun(...args),
@@ -3796,6 +3802,7 @@ export class AgentMuxClient {
   }
 
   async probeAgent(providerId: AgentProviderId, commandOverride?: string, context: AgentExecutableProbeContext = {}): Promise<AgentCapabilitySnapshot> {
+    await this.prepareExecutionEnvironment()
     const observations: AgentMuxExecutorProbeResult[] = []
     const observe = async (executable: string) => {
       const observation = await classifyExecutable(executable, context)
@@ -3824,6 +3831,7 @@ export class AgentMuxClient {
    * （那正是那次误报要防的）。启动仅把准确缺失作为文件前置拒绝；检查失败由原 Native 执行裁定。
    */
   async probeExecutorAvailability(providerId: AgentProviderId, commandOverride?: string, context: AgentExecutableProbeContext = {}): Promise<AgentMuxExecutorProbeResult> {
+    await this.prepareExecutionEnvironment()
     // 借 probeCapabilities 的命令解析：它把解析后的命令传给 hasExecutable，我们截下那条命令再三态归类，
     // 不在这里重抄一份 commandOverride/catalog 的取舍（重抄一份就是第二处会漂移的命令解析）。
     let resolvedCommand: string | null = null
@@ -3969,7 +3977,9 @@ export class AgentMuxClient {
   }
 
   /** Capture this Host's complete launch request without starting or observing a Run. */
-  prepareTerminal(input: AgentMuxTerminalCreateInput): AgentMuxPreparedTerminal {
+  async prepareTerminal(input: AgentMuxTerminalCreateInput): Promise<AgentMuxPreparedTerminal> {
+    input = structuredClone(input)
+    await this.prepareExecutionEnvironment()
     const createOperationId = input.createOperationId ?? mintObjectId()
     return parsePreparedTerminal({
       createOperationId,
@@ -3987,7 +3997,7 @@ export class AgentMuxClient {
 
   async createTerminal(input: AgentMuxTerminalCreateInput): Promise<AgentMuxRun> {
     this.requireConnected()
-    return await this.createPreparedTerminal(this.prepareTerminal(input))
+    return await this.createPreparedTerminal(await this.prepareTerminal(input))
   }
 
   async createPreparedTerminal(input: AgentMuxPreparedTerminal): Promise<AgentMuxRun> {
@@ -4738,6 +4748,8 @@ export class AgentMuxClient {
       }
     }
     const originalPrompt = initialEnvelope ? renderAgentMuxMessageEnvelope(initialEnvelope) : input.prompt
+    await this.prepareExecutionEnvironment()
+    if (signal?.aborted) throw signal.reason
     let reservation = await this.registry.reserveNew(agentSessionId, lifecycleOperationId)
     let hookBinding: AgentHookBinding | null = null
     let persisted: AgentMuxStoredAgentSession | null = null

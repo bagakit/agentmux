@@ -35,6 +35,7 @@ import { createHostAgentLearning } from './agent-learning.js'
 import { FileUploadOwner } from './file-upload-owner.js'
 import { createHostMoteAvatarRead } from './mote-avatar-read.js'
 export type AgentMuxHostOptions = {
+  prepareExecutionEnvironment?: () => Promise<void>
   store: AgentMuxAgentSessionStore
   providers?: readonly AgentProvider[]
   socketPath?: string
@@ -231,7 +232,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     // Reserve the public endpoint before constructing/loading any Core owner. A live old owner
     // is never displaced or adopted by speculative workflow probes.
     const externalInputAuthority = options.externalInputAuthority ?? connectionOwner?.authority
-    runtime = await startHeadlessAgentMux({ store: options.store, socketPath: path, shutdown: options.shutdown ?? closeResources,
+    runtime = await startHeadlessAgentMux({ ...(options.prepareExecutionEnvironment ? { prepareExecutionEnvironment: options.prepareExecutionEnvironment } : {}), store: options.store, socketPath: path, shutdown: options.shutdown ?? closeResources,
       ...(configurationPath ? { sessionExecutorConfiguration: (executorId: string) => readConfiguredExecutor(configurationPath, executorId) } : {}),
       ...(options.connections?.clients ? { coreClients: options.connections.clients } : {}),
       ...(options.providers ? { providers: options.providers } : {}), service,

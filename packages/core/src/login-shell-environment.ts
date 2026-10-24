@@ -68,13 +68,10 @@ function runProfileShell(
 /**
  * Bound a probe arm at the caller's side as well.
  *
- * The SIGKILL above fixes the runner we ship, but `hydrateProcessEnvironmentFromLoginShell` is the
- * function the window waits on, and its contract to that caller must not depend on the runner
- * keeping any promise. A runner that simply never settles — a mocked one, a future replacement, an
- * `execFile` that loses its callback — would otherwise leave `startPrimaryInstance`'s
- * `environmentReady` pending forever, and since `buildWindow` awaits it the user gets no window at
- * all: a Dock icon that bounces and nothing else. Racing here converts every such case into the
- * ordinary `probe-failed` path, which still launches with the inherited environment.
+ * The SIGKILL above fixes the shipped runner. Bound its caller too so a runner that loses
+ * its callback cannot leave new execution preparation waiting forever. Window creation,
+ * original metadata and healthy Run use proceed independently of this preparation.
+ * A missed deadline keeps the inherited environment and publishes the existing warning.
  *
  * `work` is a thunk, not a promise, so an exhausted budget never starts the arm at all. Taking a
  * promise made the caller evaluate `runner(…, remainingMs)` before the budget check, and a negative
@@ -157,6 +154,21 @@ export async function hydrateProcessEnvironmentFromLoginShell(options: {
     return { ok: true, shell, mode: 'login' }
   }
   return { ok: false, reason: interactiveResult.kind === 'failed' || loginResult.kind === 'failed' ? 'probe-failed' : 'invalid-environment' }
+}
+
+/** Prepare exports off to the side; shell setup never owns the original Host namespace. */
+export async function prepareProcessEnvironmentFromLoginShell(
+  options: Parameters<typeof hydrateProcessEnvironmentFromLoginShell>[0] = {}
+): Promise<LoginShellEnvironmentHydration> {
+  const target = options.env ?? process.env
+  const prepared = { ...target }
+  const result = await hydrateProcessEnvironmentFromLoginShell({ ...options, env: prepared })
+  for (const [key, value] of Object.entries(prepared)) {
+    // HOME and temporary roots also participate in Core's default namespace paths.
+    if (key.startsWith('AGENTMUX_') || key.startsWith('CTXMUX_') || ['HOME', 'TMPDIR', 'TMP', 'TEMP'].includes(key)) continue
+    if (value !== undefined) target[key] = value
+  }
+  return result
 }
 
 export function loginShellEnvironmentWarning(result: LoginShellEnvironmentHydration): string | undefined {

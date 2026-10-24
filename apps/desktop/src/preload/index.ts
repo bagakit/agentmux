@@ -443,6 +443,11 @@ const api: AgentMuxPreloadApi = {
     openDefaultBrowserSettings: () => ipcRenderer.invoke('ui:openDefaultBrowserSettings'),
     spatialLinksReady: () => ipcRenderer.invoke('ui:spatialLinksReady'),
     openObjectLink: (url: string) => ipcRenderer.invoke('ui:openObjectLink', url),
+    onEnvironmentWarning(listener) {
+      const wrapped = (_event: Electron.IpcRendererEvent, warning: string | null): void => listener(warning)
+      ipcRenderer.on('ui:environmentWarning', wrapped)
+      return () => ipcRenderer.off('ui:environmentWarning', wrapped)
+    },
     onSpatialLinkIssue(listener) {
       const wrapped = (_event: Electron.IpcRendererEvent, message: string): void => { if (typeof message === 'string') listener(message) }
       ipcRenderer.on('ui:spatialLinkIssue', wrapped)
