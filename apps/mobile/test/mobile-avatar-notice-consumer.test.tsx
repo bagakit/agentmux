@@ -390,3 +390,22 @@ it('retains a confirmed Space image across an Agent Run change without a second 
   expect((f.client.forwardRpc as any).mock.calls.filter(([name, params]: any[]) => name === 'space.inspect' && params?.target?.spaceId === spaceId)).toHaveLength(reads)
   expect(f.submit).not.toHaveBeenCalled()
 })
+
+it.each([
+  { moteName: '原 Mote 名', expected: '原 Mote 名' },
+  { moteName: undefined, expected: 'Mote 名称未确认' }
+])('labels the Mote appearance failure as $expected without misidentifying the Agent conversation', async ({ moteName, expected }) => {
+  const f = originalClient('mote', async () => { throw Error('原 Mote 头像观察失败') })
+  const initial = presentation('mote')
+  await getDeviceWorkface().updatePresentation({ selectedSessionId: sid, hostUrl: '', panel: 'conversation' },
+    { ...initial, identity: { ...initial.identity, name: '不同的 Agent 会话名', mote: { spaceId, ...(moteName ? { name: moteName } : {}) } } })
+  await mount(<MobileApp client={f.client} connection={connected} platform={createBrowserPlatform()} native />)
+  await vi.waitFor(() => expect(notice()).toBeDefined())
+  const item = notice(), summary = item.querySelector('summary')!
+  expect(summary.textContent).toBe(`头像外观未确认 · ${expected}`)
+  expect(summary.textContent).not.toContain('不同的 Agent 会话名')
+  await click(summary)
+  expect(item.textContent).toContain('原 Mote 头像观察失败')
+  expect(button(item, '重新读取头像')).toBeDefined()
+  expect(f.submit).not.toHaveBeenCalled()
+})
