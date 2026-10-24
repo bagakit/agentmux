@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { defaultAgentMuxMessageQueuePath, defaultAgentMuxStateDirectory } from '@agentmux/core'
+import { defaultAgentMuxMessageQueuePath, defaultAgentMuxRuntimeDirectory, defaultAgentMuxSpatialStatePath, defaultAgentMuxStateDirectory } from '@agentmux/core'
 import { fixturePath } from '../../../test/fixture-values.mjs'
 import { macosHostService, macosHostServiceAddress, macosHostServicePlist, normalizeMacosHostServiceDefinition, parseMacosServiceList } from '../src/macos-service.js'
 
@@ -12,14 +12,19 @@ describe('the macOS Host has one platform service per original endpoint', () => 
     const original = { Label: 'original', ProgramArguments: ['program', '--store', input.storePath],
       KeepAlive: true, EnvironmentVariables: { ELECTRON_RUN_AS_NODE: '1' } }
     const explicit = { ...original, EnvironmentVariables: { ...original.EnvironmentVariables,
+      AGENTMUX_RUNTIME_DIRECTORY: defaultAgentMuxRuntimeDirectory({}),
       AGENTMUX_STATE_DIRECTORY: defaultAgentMuxStateDirectory({}),
+      AGENTMUX_SPATIAL_STATE_STORE: defaultAgentMuxSpatialStatePath({}),
       AGENTMUX_MESSAGE_QUEUE_PATH: defaultAgentMuxMessageQueuePath(input.storePath, '') } }
+    vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', fixturePath('unrelated/runtime'))
+    vi.stubEnv('AGENTMUX_SPATIAL_STATE_STORE', fixturePath('unrelated/spatial.json'))
     vi.stubEnv('AGENTMUX_STATE_DIRECTORY', fixturePath('unrelated/state'))
     vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', fixturePath('unrelated/queue.ndjson'))
     try {
       expect(normalizeMacosHostServiceDefinition(original, input.storePath))
         .toEqual(normalizeMacosHostServiceDefinition(explicit, input.storePath))
-      for (const [key, value] of Object.entries({ AGENTMUX_STATE_DIRECTORY: fixturePath('another/state'),
+      for (const [key, value] of Object.entries({ AGENTMUX_RUNTIME_DIRECTORY: fixturePath('another/runtime'),
+        AGENTMUX_SPATIAL_STATE_STORE: fixturePath('another/spatial.json'), AGENTMUX_STATE_DIRECTORY: fixturePath('another/state'),
         AGENTMUX_MESSAGE_QUEUE_PATH: fixturePath('another/queue.ndjson'), UNRECOGNIZED: 'extra' })) {
         expect(normalizeMacosHostServiceDefinition({ ...explicit,
           EnvironmentVariables: { ...explicit.EnvironmentVariables, [key]: value } }, input.storePath))
@@ -32,6 +37,18 @@ describe('the macOS Host has one platform service per original endpoint', () => 
           .not.toEqual(normalizeMacosHostServiceDefinition(original, input.storePath))
       }
     } finally { vi.unstubAllEnvs() }
+  })
+
+  it('resolves spatial defaults within each definition and retains invalid or genuinely different targets', () => {
+    const environment = { AGENTMUX_STATE_DIRECTORY: fixturePath('original/state') }
+    const original = { EnvironmentVariables: environment }
+    const explicit = { EnvironmentVariables: { ...environment,
+      AGENTMUX_SPATIAL_STATE_STORE: defaultAgentMuxSpatialStatePath(environment) } }
+    expect(normalizeMacosHostServiceDefinition(original, input.storePath))
+      .toEqual(normalizeMacosHostServiceDefinition(explicit, input.storePath))
+    for (const key of ['AGENTMUX_RUNTIME_DIRECTORY', 'AGENTMUX_STATE_DIRECTORY', 'AGENTMUX_MESSAGE_QUEUE_PATH', 'AGENTMUX_SPATIAL_STATE_STORE']) {
+      expect(() => normalizeMacosHostServiceDefinition({ EnvironmentVariables: { [key]: 'relative/path' } }, input.storePath)).toThrow()
+    }
   })
 
   it('preserves namespace overrides and persists only the service environment', () => {

@@ -16,6 +16,7 @@ await assertCoreDistBuiltFromCurrentSource()
 const root = resolve(import.meta.dirname, '../../..'), exec = promisify(execFile)
 const mutation = process.argv.find(value => value.startsWith('--mutation='))?.split('=')[1]
 const fixture = await realpath(await mkdtemp(join(tmpdir(), 'amx-service-')))
+const home = join(fixture, 'home')
 const runtime = join(fixture, 'r'), state = join(fixture, 's'), main = join(fixture, 'out/main'), assets = join(fixture, 'out/mobile')
 const storePath = join(state, 'sessions.json'), socketPath = join(runtime, 'control.sock')
 const corePath = join(root, 'packages/core/dist/index.js'), hostPath = join(root, 'apps/host/src/host.ts')
@@ -32,7 +33,7 @@ const until = async (read, accept, label, budget = 20_000) => {
 }
 const hash = bytes => 'sha256:' + createHash('sha256').update(bytes).digest('hex')
 const sources = ['apps/host/src/macos-service.ts', 'apps/host/src/index.ts', 'apps/host/src/host.ts',
-  'packages/core/src/headless-runtime.ts', 'packages/core/src/runtime-paths.ts', 'apps/desktop/src/main/desktop-host.ts', 'apps/desktop/scripts/package-semantic-host.mjs']
+  'packages/core/src/headless-runtime.ts', 'packages/core/src/runtime-paths.ts', 'packages/core/src/spatial-state.ts', 'apps/desktop/src/main/desktop-host.ts', 'apps/desktop/scripts/package-semantic-host.mjs']
 const sourceDigests = Object.fromEntries(await Promise.all(sources.map(async path => [path, hash(await readFile(join(root, path)))])))
 const artifactPaths = [...['index', 'hosted', 'headless-runtime', 'runtime-paths', 'public-rpc-client', 'control-endpoint-listener-worker', 'note-merge-worker']
   .map(name => 'packages/core/dist/' + name + '.js'), 'packages/core/vendor/ctxmux/' + process.platform + '-' + process.arch + '/bin/ctxmuxd']
@@ -61,7 +62,7 @@ let service, managed, client, run, native, owner
 let core, hosted, rpc
 const clients = []
 try {
-  for (const directory of [runtime, state, main, assets]) await mkdir(directory, { mode: 0o700, recursive: true })
+  for (const directory of [home, runtime, state, main, assets]) await mkdir(directory, { mode: 0o700, recursive: true })
   await writeFile(join(fixture, 'package.json'), JSON.stringify({type:'module'}))
   await symlink(join(root, 'apps/host/node_modules'), join(fixture, 'node_modules'), 'dir')
   const html = '<!doctype html><title>Independent Host</title><p>original mobile bytes</p>'
@@ -75,6 +76,13 @@ try {
     const original = 'return { ...fields, EnvironmentVariables: { ...original,'
     assert.ok(source.includes(original))
     source = source.replace(original, 'return definition; return { ...fields, EnvironmentVariables: { ...original,')
+  }
+  if (mutation === 'definition-runtime' || mutation === 'definition-spatial') {
+    const original = mutation === 'definition-runtime'
+      ? 'AGENTMUX_RUNTIME_DIRECTORY: defaultAgentMuxRuntimeDirectory(original),'
+      : 'AGENTMUX_SPATIAL_STATE_STORE: defaultAgentMuxSpatialStatePath(original),'
+    assert.ok(source.includes(original))
+    source = source.replace(original, '')
   }
   if (mutation === 'definition-drift') {
     const original = 'matches = isDeepStrictEqual(normalizeMacosHostServiceDefinition(actual, service.storePath),'
@@ -100,11 +108,24 @@ try {
     evaluatedSourceSHA256: hash(source) }))
   core = await import(pathToFileURL(corePath).href)
   hosted = await import(pathToFileURL(join(root, 'packages/core/dist/hosted.js')).href)
+  // Exercise native parsing and the production comparator without ever starting the default namespace.
+  const omittedRuntime = managed.macosHostService({ executable: process.execPath, entrypoint: join(main, 'entry.js'),
+    storePath, socketPath, mobileBuildDirectory: assets, environment: { AGENTMUX_STATE_DIRECTORY: state } })
+  const parsed = async (name, definition) => {
+    const path = join(fixture, name + '.plist')
+    await writeFile(path, managed.macosHostServicePlist(definition))
+    return JSON.parse((await exec('/usr/bin/plutil', ['-convert', 'json', '-o', '-', path])).stdout)
+  }
+  const [omitted, explicit] = await Promise.all([parsed('omitted-runtime', omittedRuntime),
+    parsed('explicit-runtime', { ...omittedRuntime, environment: { ...omittedRuntime.environment,
+      AGENTMUX_RUNTIME_DIRECTORY: core.defaultAgentMuxRuntimeDirectory({}) } })])
+  assert.deepEqual(managed.normalizeMacosHostServiceDefinition(omitted, storePath),
+    managed.normalizeMacosHostServiceDefinition(explicit, storePath), 'Explicit default Runtime must equal an omitted Runtime')
   const worker = join(main, 'agentmux-host.js')
   await build({ entryPoints: [join(root, 'apps/host/src/index.ts')], outfile: worker, bundle: true, packages: 'external',
     platform: 'node', format: 'esm', target: 'node24',
     // This guard runs before any product owner can touch a non-fixture namespace.
-    banner: { js: `if (process.env.AGENTMUX_RUNTIME_DIRECTORY !== ${JSON.stringify(runtime)} || process.env.AGENTMUX_STATE_DIRECTORY !== ${JSON.stringify(state)} || process.env.AGENTMUX_AGENT_SESSION_STORE !== ${JSON.stringify(storePath)}) throw Error('The private namespace is required');` },
+    banner: { js: `if (process.env.AGENTMUX_RUNTIME_DIRECTORY !== ${JSON.stringify(runtime)} || process.env.AGENTMUX_STATE_DIRECTORY !== ${JSON.stringify(state)} || process.env.AGENTMUX_AGENT_SESSION_STORE !== ${JSON.stringify(storePath)}) throw Error('The private namespace is required'); process.env.HOME=${JSON.stringify(home)}; process.env.ZDOTDIR=${JSON.stringify(home)}; process.env.SHELL='/bin/zsh';` },
     plugins: [{ name: 'private-listen-port', setup(context) {
       context.onResolve({ filter: /^\.\/host\.js$/ }, args => args.importer === join(root, 'apps/host/src/index.ts')
         ? { path: 'private-listen-port', namespace: 'private-host' } : undefined)
@@ -130,10 +151,11 @@ try {
   const launcher = join(fixture, 'launcher.mjs')
   await writeFile(launcher, `import {connectDesktopAgentMuxHost} from ${JSON.stringify(pathToFileURL(desktop).href)};import {AgentMuxFileAgentSessionStore} from ${JSON.stringify(pathToFileURL(corePath).href)};const client=await connectDesktopAgentMuxHost({id:'local',kind:'local'},new AgentMuxFileAgentSessionStore(${JSON.stringify(storePath)}));await client.readAgentSessions();await client.dispose();`)
   const launchEnvironment = { ...Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('AGENTMUX_') && !key.startsWith('CTXMUX_'))), ...environment }
-  // The service's durable authority is unchanged; only an explicit default queue is
-  // omitted by the actual cold Desktop launcher. State stays in this private fixture.
+  // The actual cold Desktop launcher omits explicit default queue and Spatial paths.
+  // Runtime and State overrides stay private throughout the real service lifecycle.
   const originalDefinition = managed.macosHostServicePlist({ ...service, environment: { ...service.environment,
-    AGENTMUX_MESSAGE_QUEUE_PATH: core.defaultAgentMuxMessageQueuePath(storePath, '') } })
+    AGENTMUX_MESSAGE_QUEUE_PATH: core.defaultAgentMuxMessageQueuePath(storePath, ''),
+    AGENTMUX_SPATIAL_STATE_STORE: core.defaultAgentMuxSpatialStatePath(environment) } })
   const invalidDefinition = '<plist><dict>invalid original definition'
   await writeFile(service.plistPath, invalidDefinition, { mode: 0o600 })
   await assert.rejects(managed.ensureMacosHostService(service), error => error.code === 'HOST_SERVICE_CONFIGURATION_CHANGED')
@@ -240,7 +262,7 @@ try {
   for (const [path, digest] of Object.entries(sourceDigests)) assert.equal(hash(await readFile(join(root, path))), digest,
     'The qualified source changed during this lifecycle proof: ' + path)
   baseline = { passed: true, sources: sourceDigests,
-    checks: ['invalid-definition-retained', 'equivalent-definition-retained', 'different-queue-refused', 'launcher-exit', 'same-Host-HTTP', 'wrong-owner-retained', 'crash-recovery', 'same-Runtime-and-Run', 'whole-owner-shutdown', 'bootout-before-restart'] }
+    checks: ['native-runtime-default-equivalence', 'invalid-definition-retained', 'equivalent-queue-and-spatial-definition-retained', 'different-queue-refused', 'launcher-exit', 'same-Host-HTTP', 'wrong-owner-retained', 'crash-recovery', 'same-Runtime-and-Run', 'whole-owner-shutdown', 'bootout-before-restart'] }
   console.log(JSON.stringify(baseline))
 } catch (error) {
   const log = service ? await readFile(service.logPath, 'utf8').catch(() => '') : ''
@@ -265,7 +287,7 @@ try {
 }
 
 if (process.argv.includes('--mutations') || process.argv.includes('--definition-mutants')) {
-  const names = process.argv.includes('--definition-mutants') ? ['definition-equivalence', 'definition-drift'] : ['restart', 'stop-fence']
+  const names = process.argv.includes('--definition-mutants') ? ['definition-equivalence', 'definition-runtime', 'definition-spatial', 'definition-drift'] : ['restart', 'stop-fence']
   for (const name of names) {
     const failed = await exec(process.execPath, [import.meta.filename, `--mutation=${name}`], { timeout: 90_000, maxBuffer: 128 * 1024 })
       .then(() => null, error => { if (error.killed || error.signal) throw error; return error })
@@ -275,7 +297,9 @@ if (process.argv.includes('--mutations') || process.argv.includes('--definition-
     assert.ok(evaluated && evaluated.originalSourceSHA256 !== evaluated.evaluatedSourceSHA256,
       `The actual service mutation must be evaluated: ${name}`)
     const failure = name === 'restart' ? 'platform automatic Host recovery was not confirmed' : name === 'definition-drift'
-      ? 'Missing expected rejection' : name === 'definition-equivalence' ? 'HOST_SERVICE_CONFIGURATION_CHANGED' : 'Missing expected rejection.'
+      ? 'Missing expected rejection' : name === 'definition-runtime' ? 'Explicit default Runtime must equal an omitted Runtime'
+      : name === 'definition-equivalence' ? 'Explicit default Runtime must equal an omitted Runtime'
+      : name === 'definition-spatial' ? 'HOST_SERVICE_CONFIGURATION_CHANGED' : 'Missing expected rejection.'
     assert.ok(String(failed.stderr).includes('AssertionError [ERR_ASSERTION]') && String(failed.stderr).includes(failure),
       `The actual lifecycle assertion must reject ${name}: ${failed.stderr}`)
     const recovery = name === 'restart' ? observations.find(value => value.stage === 'host-recovery-assertion' && value.mutation === name) : null
