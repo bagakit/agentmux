@@ -1,6 +1,7 @@
+import { createHash } from 'node:crypto'
 import { fixtureEpoch } from '../../../test/fixture-values.mjs'
 import { createServer } from 'node:http'
-import { appendFile } from 'node:fs/promises'
+import { appendFile, writeFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import type { PublicationStore } from '../dist/publication-store.js'
@@ -409,3 +410,118 @@ it('the original source-backed deferred raster reaches the same resource owner a
   expect(imagePosts(f)).toHaveLength(1)
   expect(await f.cli(imageOperation(f)!.operationId)).toMatchObject({ delivery: { state: 'confirmed', resourceUpload: { kind: 'image', state: 'confirmed' } } })
 }, 30_000)
+
+
+it('shares public user Markdown as original text without converting its paths into local image reads', async () => {
+  const f = await fixture(), text = `A user mentions ![Diagram](${join(f.root, 'unrequested.png')}) in ordinary conversation.`
+  const provider = f.client.providers.get('claude'), read = provider.readConversationChanges!.bind(provider)
+  // A Provider may confirm user text as public; that classification grants sharing, not new file IO.
+  vi.spyOn(provider, 'readConversationChanges').mockImplementation(async context => {
+    const page = await read(context)
+    return { ...page, items: page.items.map(item => item.id === 'public-user-markdown' ? {
+      ...item, contentParts: item.contentParts.map(part => ({ ...part, contentEligibility: 'public' as const }))
+    } : item) }
+  })
+  const resource = vi.spyOn(f.port, 'resource')
+  await appendFile(f.transcript, JSON.stringify({ sessionId: 'ingress-native', uuid: 'public-user-markdown', type: 'user',
+    message: { role: 'user', content: text } }) + '\n')
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(JSON.stringify(posts(f))).toContain(text), { timeout: 10_000 })
+  expect(resource.mock.calls.filter(([, request]) => request.markdownImage)).toEqual([])
+  expect(f.remote.uploads).toEqual([])
+  expect(f.services.publication!.store.coverage(f.binding).gaps).toEqual([])
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+})
+
+it('renders two original Markdown images between their text through the default Host and multipart SDK', async () => {
+  const f = await fixture('future-native-user-facing'), image = join(f.root, 'diagram.png'), first = recordedRaster(2, 2)
+  await writeFile(image, first.bytes)
+  const failure = vi.spyOn(f.services.publication! as any, 'sourceUnavailable')
+  const text = `Before\n\n![First diagram](${image})\n\nBetween\n\n![Second diagram][second]\n\nAfter\n\n[second]: ${reference}`
+  await appendFile(f.transcript, JSON.stringify({ sessionId: 'ingress-native', uuid: 'markdown-images', type: 'assistant', message: {
+    role: 'assistant', content: [{ type: 'text', text }]
+  } }) + '\n')
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(f.remote.uploads, JSON.stringify({ errors: failure.mock.calls.map(args => String(args[2])), observation: f.services.publication!.observation(f.binding.bindingId, f.binding.revision), coverage: f.services.publication!.store.coverage(f.binding), operations: contentOperations(f.services.publication!.store, f.binding).map(o => ({state:o.state,payload:o.payload})) })).toHaveLength(2), { timeout: 10_000 })
+  await vi.waitFor(() => {
+    const deliveries = contentOperations(f.services.publication!.store, f.binding)
+    expect(deliveries).toHaveLength(5)
+    expect(deliveries.every(operation => operation.state === 'confirmed')).toBe(true)
+  }, { timeout: 10_000 })
+  const deliveries = contentOperations(f.services.publication!.store, f.binding)
+  expect(deliveries.map(operation => operation.payload.kind)).toEqual(['speech', 'image', 'speech', 'image', 'speech'])
+  expect(deliveries.filter(operation => operation.payload.kind === 'image').map(operation => operation.payload.kind === 'image' && operation.payload.image.alt)).toEqual(['First diagram', 'Second diagram'])
+  expect(f.remote.uploads).toEqual([first.bytes, png])
+  expect(first.bytes).not.toEqual(png)
+  expect(JSON.stringify(posts(f))).not.toContain(image)
+  expect(JSON.stringify(posts(f))).not.toContain(reference)
+  expect(await f.cli(deliveries[1]!.operationId)).toMatchObject({ delivery: { state: 'confirmed' } })
+  const ids = deliveries.map(operation => operation.operationId), requests = posts(f).length
+  await f.restart(); f.services.publication!.refresh()
+  await vi.waitFor(() => expect(contentOperations(f.services.publication!.store, f.binding).map(operation => operation.operationId)).toEqual(ids))
+  expect(f.remote.uploads).toHaveLength(2); expect(posts(f)).toHaveLength(requests)
+})
+
+it('keeps code examples inert and leaves an explicit image gap without losing neighboring text', async () => {
+  const f = await fixture(), missing = join(f.root, 'missing.png')
+  const text = `Before\n\n![Missing diagram](${missing})\n\nAfter\n\n` + '`![example](' + reference + ')`' + '\n\n```md\n![example](' + reference + ')\n```'
+  await appendFile(f.transcript, JSON.stringify({ sessionId: 'ingress-native', uuid: 'missing-markdown-image', type: 'assistant', message: {
+    role: 'assistant', content: [{ type: 'text', text }]
+  } }) + '\n')
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(contentOperations(f.services.publication!.store, f.binding).some(operation => operation.state === 'confirmed')).toBe(true), { timeout: 10_000 })
+  expect(f.remote.uploads).toHaveLength(0)
+  const wire = JSON.stringify(posts(f))
+  expect(wire).toContain('Before'); expect(wire).toContain('After'); expect(wire).toContain('Image unavailable: Missing diagram')
+  expect(wire).not.toContain(missing)
+  expect(f.services.publication!.store.coverage(f.binding).gaps.some(gap => gap.reason === 'resource-unavailable')).toBe(true)
+  const request = { source: { providerId: 'claude', nativeSessionId: 'ingress-native' }, recordId: 'missing-markdown-image', partIndex: 0,
+    expectedReference: reference, representation: 'image' as const, markdownImage: { index: 1, textSha256: createHash('sha256').update(text).digest('hex') } }
+  await expect(f.client.sessionHistoryResource('original-agent', request)).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH' })
+})
+
+
+it('an unknown Markdown image upload retains its original operation across reopen while text continues', async () => {
+  const f = await fixture(); f.remote.controls.missingUploadKey = true
+  await append(f, native('markdown-unknown-upload', [{ type: 'text', text: `Before\n\n![Diagram](${reference})\n\nIndependent text after unconfirmed upload` }]))
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(imageOperation(f)?.state).toBe('not-applied'))
+  const original = imageOperation(f)!
+  expect(original.uploads).toEqual([{ state: 'unknown' }])
+  await vi.waitFor(() => expect(JSON.stringify(posts(f))).toContain('Independent text after unconfirmed upload'))
+  const count = posts(f).length
+  await f.restart(); f.services.publication!.refresh()
+  await vi.waitFor(() => expect(f.services.publication!.observation(f.binding.bindingId, f.binding.revision).state).toBe('unavailable'))
+  expect(f.services.publication!.store.inspect(original.operationId)).toEqual(original)
+  expect(f.remote.uploads).toHaveLength(1); expect(imagePosts(f)).toHaveLength(0); expect(posts(f)).toHaveLength(count)
+})
+
+it('an unavailable Markdown image reread preserves its confirmed image while a new neighboring part delivers', async () => {
+  const f = await fixture(), read = f.port.resource.bind(f.port)
+  let unavailable = false
+  vi.spyOn(f.port, 'resource').mockImplementation(async (...args) => {
+    const original = await read(...args)
+    return unavailable ? { ...original, result: { status: 'unavailable' as const, code: 'AGENT_SESSION_HISTORY_RESOURCE_UNAVAILABLE', message: 'Original image observation is temporarily unavailable.' } } : original
+  })
+  const text = `Before\n\n![Original diagram](${reference})\n\nAfter`
+  await append(f, native('markdown-image-reread', [{ type: 'text', text }]))
+  f.services.publication!.refresh()
+  await vi.waitFor(() => {
+    const operations = contentOperations(f.services.publication!.store, f.binding)
+    expect(operations).toHaveLength(3)
+    expect(operations.every(operation => operation.state === 'confirmed')).toBe(true)
+  })
+  const image = imageOperation(f)!, originalImage = f.remote.messages.get(image.mapping!.messageId)
+  unavailable = true
+  await append(f, native('markdown-image-reread', [{ type: 'text', text }, { type: 'text', text: 'New neighboring original text' }]))
+  f.services.publication!.refresh()
+  await vi.waitFor(() => expect(f.services.publication!.store.coverage(f.binding).gaps.some(gap => gap.reason === 'resource-unavailable')).toBe(true))
+  await vi.waitFor(() => expect(JSON.stringify([...f.remote.messages.values()])).toContain('New neighboring original text'))
+  expect(f.remote.messages.get(image.mapping!.messageId), JSON.stringify({ originalImage, calls: f.remote.calls, operations: contentOperations(f.services.publication!.store, f.binding) })).toEqual(originalImage)
+  expect(f.remote.calls.filter(call => ['PATCH', 'DELETE'].includes(call.method) && call.path.endsWith('/' + image.mapping!.messageId))).toEqual([])
+  expect(f.services.publication!.store.inspect(image.operationId)).toEqual(image)
+  expect(f.remote.uploads).toHaveLength(1)
+  expect(f.inner.kernel.stop).not.toHaveBeenCalled()
+  unavailable = false; f.services.publication!.refresh()
+  await vi.waitFor(() => expect(f.services.publication!.store.coverage(f.binding).gaps).toEqual([]))
+}, 20_000)
