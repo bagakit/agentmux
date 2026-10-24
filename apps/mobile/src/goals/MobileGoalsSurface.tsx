@@ -199,7 +199,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
       ? <MobileZoneWorkface key={discussionTab.tabId} client={client} name="目标原主 Mote" tabId={discussionTab.tabId} regionId={discussionTab.regionId}
         expectedAgent={discussionTab.agentSessionId && discussionTab.hostId ? { agentSessionId: discussionTab.agentSessionId, hostId: discussionTab.hostId } : null} visible={visible}
         openSession={(id, identity) => { if (id !== discussionTab.agentSessionId || discussionTab.hostId !== 'local') { setIssue('原讨论位于其他执行 Host，当前手机连接尚不提供该会话；原目标、工作面与身份保留。'); return }; openSession?.(id, identity) }} />
-      : <MobileNotice identity={[discussionTab]} role="status">原讨论的准确 Region 与执行 Host 尚未核实；原 Tab 引用保留，返回目标后重新打开原讨论。</MobileNotice>}</div>}
+      : <MobileNotice identity={[discussionTab.goalId, discussionTab.tabId, discussionTab.regionId, discussionTab.hostId, discussionTab.agentSessionId]} role="status">原讨论的准确 Region 与执行 Host 尚未核实；原 Tab 引用保留，返回目标后重新打开原讨论。</MobileNotice>}</div>}
   </section></MobileNoticeScope>
 }
 
