@@ -310,9 +310,8 @@
 .log-turn[data-trace-only='true'] { grid-template-columns: minmax(0, 1fr); margin-block: var(--sp-1); }
 .log-turn[data-trace-only='true'] > .log-turn__head,
 .log-turn[data-trace-only='true'] > .log-turn__body { grid-column: 1; }
-.log-turn .wf-card--observation { margin-block: var(--sp-2); border-radius: var(--radius-sm); }
+.log-turn .wf-card--observation { --conversation-disclosure-padding: var(--sp-3); margin-block: var(--sp-2); border-radius: var(--radius-sm); }
 .log-turn .wf-card--observation > .wf-head { padding-inline: var(--sp-3); gap: var(--sp-3); }
-.log-turn .wf-card--observation > .wf-observation__body { margin-inline: var(--sp-3); }
 
 .observation-sample--conversation, .observation-sample--full { min-width: 0; }
 
@@ -431,7 +430,7 @@
   .log-turn__head:has(> .log-turn__identity .log-turn__sender-id) .log-turn__title > :not(.log-turn__sender),
   .log-turn__head:has(> .log-turn__identity .log-turn__sender-id) > .conversation-input-details > .conversation-input-details__body { grid-column: 1 / -1; grid-row: auto; }
 }
-.conversation-reply-observation { min-width: 0; }
+.conversation-reply-observation { --conversation-disclosure-padding: var(--sp-4); min-width: 0; }
 .conversation-reply-observation__controls { display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-4); color: var(--text-3); font-size: var(--fs-micro); }
 .conversation-reply-observation__toggle { display: flex; flex: 1; align-items: center; gap: var(--sp-3); min-width: 0; min-height: 28px; padding: 0; border: 0; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .conversation-reply-observation__node { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; }

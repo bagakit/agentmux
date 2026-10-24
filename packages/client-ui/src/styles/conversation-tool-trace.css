@@ -11,6 +11,7 @@
 .conversation-tool-trace__chevron { transition: transform var(--dur-fast) ease; }
 .conversation-tool-trace__row[aria-expanded="true"] .conversation-tool-trace__chevron { transform: rotate(90deg); }
 .conversation-tool-trace__payload { min-width: 0; padding: var(--sp-2) var(--sp-2) var(--sp-3) 25px; }
+.conversation-tool-trace__payload--direct { padding-inline-start: 0; }
 .conversation-tool-trace__identity { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .conversation-tool-trace__identity code { overflow-wrap: anywhere; }
 .conversation-tool-trace__payload pre { max-height: 320px; overflow: auto; margin: 0; color: var(--text-2); font: var(--fs-micro)/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }

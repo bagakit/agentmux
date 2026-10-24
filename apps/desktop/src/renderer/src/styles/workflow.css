@@ -167,7 +167,13 @@
 
 /* Recorded native process uses real timestamps only; no empty clock track. */
 .wf-tool-row--observation[data-recorded-time='false'] { grid-template-columns: 20px minmax(0, 1fr) auto; }
-.wf-native-process__body { margin: var(--sp-2) var(--sp-3) var(--sp-3) var(--sp-7); }
+.wf-native-process__body { margin: var(--sp-2) var(--sp-3) var(--sp-3) calc(20px + var(--sp-2)); }
+@media (min-width: 561px) {
+  .wf-native-process:has(> .wf-tool-row--observation[data-recorded-time='true']) > .wf-native-process__body { margin-inline-start: calc(20px + 56px + var(--sp-2) * 2); }
+}
+@media (max-width: 560px) {
+  .wf-native-process > .wf-native-process__body { margin-inline-start: calc(var(--sp-3) + 20px + var(--sp-2)); }
+}
 .wf-native-process__references { display: grid; gap: var(--sp-2); margin: 0 0 var(--sp-3); font-size: var(--fs-meta); }
 .wf-native-process__references > div { display: grid; grid-template-columns: minmax(72px, auto) minmax(0, 1fr); gap: var(--sp-3); }
 .wf-native-process__references dt { color: var(--text-3); }
@@ -182,6 +188,5 @@
 .wf-detail[data-for-recorded-agent] dl { grid-template-columns: minmax(0, 1fr); }
 .wf-detail[data-for-recorded-agent] dd { overflow: visible; white-space: normal; text-overflow: clip; overflow-wrap: anywhere; }
 @media (max-width: 520px) {
-  .wf-native-process__body { margin-inline: var(--sp-3); }
   .wf-native-process__references > div { grid-template-columns: minmax(0, 1fr); gap: var(--sp-1); }
 }

@@ -1,5 +1,5 @@
 /* Native reports share the observation reading origin, without a speaker-avatar column. */
-.log-turn[data-native-collaboration] { container: collaboration / inline-size; display: block; margin: 0; padding: 0; }
+.log-turn[data-native-collaboration] { --conversation-disclosure-padding: var(--sp-4); container: collaboration / inline-size; display: block; margin: 0; padding: 0; }
 .log-turn[data-native-collaboration] > .log-turn__collaboration-head { align-items: center; padding: 0 var(--sp-4); }
 .log-turn__collaboration-toggle {
   display: flex; align-items: center; gap: var(--sp-3); min-width: 0;
@@ -15,7 +15,6 @@
 .log-turn__collaboration-preview { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font: var(--fs-meta)/1.5 var(--font-sans); }
 .log-turn__collaboration-toggle:hover { color: var(--text-2); }
 .log-turn__collaboration-toggle:focus-visible { outline: 1px solid var(--focus-line); outline-offset: 2px; }
-.log-turn__collaboration-content { min-width: 0; padding: var(--sp-2) var(--sp-3); }
 .log-turn__collaboration-content[hidden] { display: none; }
 .log-turn__collaboration-participants { display: grid; gap: var(--sp-1); margin: 0 0 var(--sp-2); color: var(--text-3); font-size: var(--fs-micro); }
 .log-turn__collaboration-participants > div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--sp-2); }

@@ -5,7 +5,8 @@
 .conversation-native-thread__record { min-width: 0; }
 
 /* Shared recorded-process disclosure geometry belongs to the reading surface. */
-.wf-card.wf-card--observation { margin-block: var(--sp-2); padding: 0; border: 0; border-radius: var(--radius); background: color-mix(in srgb, var(--surface-1) 45%, transparent); }
+.wf-card--observation { --conversation-disclosure-padding: var(--sp-4); }
+.wf-card.wf-card--observation { margin-block: var(--sp-2); padding: 0; border: 0; border-radius: var(--radius); background: transparent; }
 .wf-card--observation > .wf-head { display: flex; align-items: center; gap: var(--sp-3); width: 100%; min-width: 0; min-height: 28px; padding: var(--sp-1) var(--sp-4); border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-3); font: inherit; text-align: left; cursor: pointer; }
 .wf-card--observation > .wf-head > .log-fold__node { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 20px; height: 20px; background: transparent; }
 .wf-card--observation > .wf-head > .log-fold__label { display: flex; flex: 1; flex-wrap: wrap; align-items: center; min-width: 0; gap: var(--sp-2) var(--sp-4); color: var(--text-3); font-size: var(--fs-meta); }
@@ -14,7 +15,22 @@
 .wf-card--observation > .wf-head[aria-expanded='true'] .log-fold__chevron { transform: rotate(90deg); }
 /* Observations keep their top-level origin; only actual process steps indent. */
 .wf-card--observation > .wf-observation__body { margin: var(--sp-1) 0 var(--sp-2); border: 0; padding: 0; }
-.native-process-observation__step { padding-inline: var(--sp-4); }
+/* Only real child slots carry an ownership edge. Interleaved originals remain peers. */
+.log-turn__collaboration-content,
+.conversation-reply-observation__body,
+.native-process-observation__metrics,
+.native-process-observation__step {
+  min-width: 0;
+  margin: var(--sp-1) var(--sp-4) var(--sp-4) calc(var(--conversation-disclosure-padding, var(--sp-4)) + 10px);
+  border-inline-start: 1px solid var(--line-soft);
+  padding: var(--sp-2) 0 var(--sp-2) calc(10px + var(--sp-3) - 1px);
+}
+.native-process-observation__metrics > .conversation-metrics__details { padding: 0; }
+.native-process-observation__step { margin-block: 0; padding-block: var(--sp-1); }
+.native-process-observation__step:not(.native-process-observation__step + *) { padding-block-start: var(--sp-2); }
+.native-process-observation__step:not(:has(+ .native-process-observation__step)) { margin-block-end: var(--sp-4); padding-block-end: var(--sp-2); }
+/* Deferred detail shells have no second title and therefore no second child level. */
+.wf-native-process[data-body-only] > .wf-native-process__body { margin: 0; }
 @media (pointer: coarse) {
   .wf-card--observation > .wf-head,
   .conversation-reply-observation__toggle,
