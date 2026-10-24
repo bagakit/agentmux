@@ -31,6 +31,19 @@ async function split(disabled = false) {
   await act(async () => root.render(<><input aria-label="editor" /><PaneSplitMenu disabled={disabled} regionCount={2} onSplit={action} onArrange={vi.fn()} /></>))
   return { trigger: container.querySelector<HTMLButtonElement>('.pane-action--split-menu')!, action }
 }
+async function nested() {
+  const action = vi.fn()
+  await act(async () => root.render(<Menu.Root><Menu.Trigger>More</Menu.Trigger><Menu.Portal><Menu.Content>
+    <Menu.Sub><Menu.SubTrigger>Details</Menu.SubTrigger><Menu.Portal><Menu.SubContent>
+      <Menu.Item onSelect={action}>Read source</Menu.Item>
+    </Menu.SubContent></Menu.Portal></Menu.Sub><Menu.Item>Other action</Menu.Item>
+  </Menu.Content></Menu.Portal></Menu.Root>))
+  await pointer(container.querySelector('button')!, 'pointerdown')
+  const trigger = document.querySelector<HTMLElement>('[role="menuitem"][aria-haspopup="menu"]')!
+  await act(async () => trigger.click())
+  const submenu = document.getElementById(trigger.getAttribute('aria-controls')!)!
+  return { action, trigger, submenu, item: submenu.querySelector<HTMLElement>('[role="menuitem"]')! }
+}
 const menu = () => document.querySelector<HTMLElement>('[role="menu"]')
 it('production Split opens without a click, preserves the editor caret and executes once', async () => {
   const { trigger, action } = await split()
@@ -76,6 +89,41 @@ it('keyboard opens and Escape dismisses the real Radix menu', async () => {
   expect(menu()).not.toBeNull()
   await act(async () => menu()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
   expect(menu()).toBeNull()
+})
+it('keeps a pinned submenu when a fast pointer crossing already targets its own item', async () => {
+  const { action, trigger, submenu, item } = await nested()
+  // A collision may place the submenu left even though no parent pointermove has
+  // yet updated Radix's initial rightward intent. The browser knows the real target.
+  submenu.dataset.side = 'left'
+  await pointer(trigger, 'pointerout', 'mouse', item)
+  expect(submenu.isConnected, 'Crossing directly into the owned submenu must not close it').toBe(true)
+  await pointer(item, 'pointerover', 'mouse', trigger)
+  await pointer(item, 'pointermove')
+  expect(document.activeElement).toBe(item)
+  await act(async () => item.click())
+  expect(action).toHaveBeenCalledOnce()
+  expect(menu()).toBeNull()
+})
+it('retains sibling focus, keyboard navigation and outside dismissal around the submenu', async () => {
+  const { action, trigger, submenu } = await nested()
+  const sibling = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === 'Other action')!
+  await pointer(trigger, 'pointerout', 'mouse', sibling)
+  await pointer(sibling, 'pointerover', 'mouse', trigger)
+  await pointer(sibling, 'pointermove')
+  expect(submenu.isConnected).toBe(false)
+  expect(document.activeElement).toBe(sibling)
+  await act(async () => {
+    trigger.focus()
+    trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true }))
+  })
+  const reopened = document.getElementById(trigger.getAttribute('aria-controls')!)!
+  expect(reopened).not.toBeNull()
+  await act(async () => reopened.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })))
+  expect(reopened.isConnected).toBe(false)
+  expect(document.activeElement).toBe(trigger)
+  await pointer(document.body, 'pointerdown')
+  expect(menu()).toBeNull()
+  expect(action).not.toHaveBeenCalled()
 })
 it('switching hover menus closes the previous owner and unmount releases the active owner', async () => {
   const first = vi.fn(), second = vi.fn()
