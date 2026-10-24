@@ -22,7 +22,7 @@ const OFFLINE_METHODS = new Set<AgentMuxHostedMethod>([
   'listNativeAgentSessions', 'listHostNativeAgentSessions', 'readNativeAgentHistory', 'readHostNativeAgentHistory', 'readNativeAgentHistoryResource', 'readHostNativeAgentHistoryResource',
   'clientPerformanceDiagnostics', 'respondAgentInteraction', 'inspectAgentInteractionOperation', 'replySessionQuestion',
   'listHostExecutors', 'configureHostExecutor', 'listAgentSpawns',
-  'readDeliveryAttempt', 'readReadingDiagnostic', 'findReadingDiagnostics', 'inspectAgentPromptSubmission', 'inspectMessageNotification', 'inspectAgentInput', 'readAgentInputMailbox', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'attestAgentCreation',
+  'readDeliveryAttempt', 'readReadingDiagnostic', 'findReadingDiagnostics', 'readAgentStartupDiagnostic', 'findAgentStartupDiagnostics', 'inspectAgentPromptSubmission', 'inspectMessageNotification', 'inspectAgentInput', 'readAgentInputMailbox', 'stopAgentInputWaiting', 'rejoinAgentInputWaiting', 'resolveAgentCreationSessionId', 'inspectAgentCreation', 'attestAgentCreation',
   'readAgentSession', 'readAgentSessions', 'readAgentFuturePromptIntent', 'listAgentFuturePromptIntents', 'sessionTimeline', 'readAgentSessionHistory', 'readAgentConversation', 'releaseConversationView', 'sessionHistoryCheckpoint', 'readSessionHistoryChanges', 'conversationCheckpoint', 'readConversationChanges', 'sessionHistorySources', 'sessionHistoryPage', 'sessionHistoryResource', 'inspectManagedHooks',
   'checkDeliveries', 'ackDeliveryBatch',
   'authorizeAgentCaller', 'authorizeRetainedAgentCaller', 'authorizeAgentMessage', 'handOff', 'readMessage', 'listMessages', 'listMessageEvents', 'inspectMessageBroadcast', 'broadcastMessages', 'readDispatch', 'listDispatches'
@@ -247,6 +247,8 @@ export class AgentMuxHostedRuntimeService {
         { kind: 'user', id: rpcString(context.principal.id, 'Transport principal') })) }
     }
     const invocation = input as unknown as AgentMuxHostedInvocation
+    if ((invocation.method === 'readAgentStartupDiagnostic' || invocation.method === 'findAgentStartupDiagnostics') && invocation.args.length !== 1)
+      throw new AgentMuxError('Startup evidence reads accept one original scoped request.', 'INVALID_CONTROL_REQUEST')
     if (invocation.method === 'readAgentSession' && (invocation.args.length !== 1 ||
         typeof invocation.args[0] !== 'string' || !/^[A-Za-z0-9_-]+$/u.test(invocation.args[0]))) throw new AgentMuxError(
       'Session metadata reading accepts one complete original Session ID.', 'INVALID_CONTROL_REQUEST')

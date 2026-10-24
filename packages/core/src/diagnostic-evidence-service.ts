@@ -1,4 +1,5 @@
 import { readReadingDiagnosticEvidence } from './reading-diagnostic-evidence.js'
+import { parseStartupDiagnosticRead } from './startup-diagnostic.js'
 import { readPerformanceSceneEvidence } from './performance-scene-evidence.js'
 import { toolkitFailureEvidenceReader } from './toolkit-failure-evidence-reader.js'
 import { rpcControlRequest } from './rpc-business-codec.js'
@@ -14,6 +15,10 @@ import type { AgentMuxDiagnosticEvidenceData, AgentMuxDiagnosticEvidenceInspectP
 export async function inspectDiagnosticEvidence(query: DiagnosticEvidenceQuery, params: AgentMuxDiagnosticEvidenceInspectParams,
   ports: AgentMuxRpcServiceOptions, caller: AgentMuxRpcCoreClient | undefined, signal?: AbortSignal): Promise<AgentMuxDiagnosticEvidenceResult> {
   const capabilities: AgentMuxDiagnosticEvidenceResult['capabilities'] = [
+    ...(ports.coreClients ? [
+      { domain: 'agent.startup' as const, target: 'log-id' as const, raw: true, read: 'supported' as const },
+      { domain: 'agent.startup' as const, target: 'recent' as const, raw: false, read: 'supported' as const },
+    ] : []),
     ...(ports.coreClients ? [{ domain: 'reading.lifecycle' as const, target: 'reading-lifecycle' as const, raw: false, read: 'supported' as const }] : []),
     ...(ports.deliveryAttempts ? [{ domain: 'delivery.client' as const, target: 'log-id' as const, raw: true, read: 'supported' as const }] : []),
     ...(ports.coreClients ? [{ domain: 'delivery.core' as const, target: 'log-id' as const, raw: true, read: 'supported' as const }] : []),
@@ -40,6 +45,18 @@ export async function inspectDiagnosticEvidence(query: DiagnosticEvidenceQuery, 
   const reader: DiagnosticEvidenceReader<AgentMuxDiagnosticEvidenceTarget, AgentMuxDiagnosticEvidenceData> = { async read(target, bounds) {
     const missing = (code: Parameters<typeof unavailableDiagnosticEvidence>[1]) => unavailableDiagnosticEvidence<AgentMuxDiagnosticEvidenceTarget, AgentMuxDiagnosticEvidenceData>(target, code)
     if (caller && target.hostId !== caller.hostId) return missing('DIAGNOSTIC_EVIDENCE_SOURCE_FORBIDDEN')
+    if (target.domain === 'agent.startup') {
+      const scopes = (await ports.coreClients?.() ?? []).filter(scope => scope.hostId === target.hostId && (!caller || scope.client === caller.client))
+      if (scopes.length !== 1) return missing(scopes.length ? 'DIAGNOSTIC_EVIDENCE_SOURCE_CORRUPT' : 'DIAGNOSTIC_EVIDENCE_SOURCE_UNAVAILABLE')
+      const client = scopes[0]!.client, local = { ...target, hostId: 'local' }
+      const result = parseStartupDiagnosticRead('logId' in local
+        ? await client.readAgentStartupDiagnostic({ target: local, includeRaw: params.includeRaw === true })
+        : await client.findAgentStartupDiagnostics(local), local, params.includeRaw === true)
+      // Route aliases never rewrite record-time Host, authority or producer facts.
+      return { ...result, target, recordRef: result.recordRef ? { ...result.recordRef, routeHostId: target.hostId } : null,
+        data: result.data?.kind === 'agent-startup-page' ? { ...result.data, items: result.data.items.map(item => ({
+          ...item, recordRef: { ...item.recordRef, routeHostId: target.hostId } })) } : result.data }
+    }
     if (target.domain === 'reading.lifecycle') {
       const scopes = (await ports.coreClients?.() ?? []).filter(scope => scope.hostId === target.hostId && (!caller || scope.client === caller.client))
       if (scopes.length !== 1) return missing(scopes.length ? 'DIAGNOSTIC_EVIDENCE_SOURCE_CORRUPT' : 'DIAGNOSTIC_EVIDENCE_SOURCE_UNAVAILABLE')
