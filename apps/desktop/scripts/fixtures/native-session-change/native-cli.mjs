@@ -21,11 +21,12 @@ if(args.includes('app-server')) {
 } else {
   const sid=process.env.AGENTMUX_AGENT_SESSION_ID,root=process.env.PRIVATE_NATIVE_DIRECTORY
   if(!sid||!root)throw new Error('Missing private Core-issued native context')
-  let handle='original-'+sid,fd,extraFd,currentCommand=''
+  let handle='original-'+sid,currentCommand=''
+  const descriptors=new Map()
   const transcript=id=>path.join(root,provider==='codex'?'rollout-'+id+'.jsonl':id+'.jsonl')
   const record=id=>provider==='codex'?{type:'session_meta',payload:{id,source:'cli'}}:{type:'user',sessionId:id,isSidechain:false,uuid:id+'-user',timestamp:new Date().toISOString(),message:{role:'user',content:'Original history '+id}}
-  const open=id=>{const file=transcript(id);if(!fs.existsSync(file))fs.writeFileSync(file,JSON.stringify(record(id))+'\n');return fs.openSync(file,provider==='codex'?'r':'a+')}
-  fd=open(handle)
+  const open=id=>{const file=transcript(id);if(!fs.existsSync(file))fs.writeFileSync(file,JSON.stringify(record(id))+'\n');return fs.openSync(file,'a+')}
+  descriptors.set(handle,open(handle))
   const hook=async(eventName,id=handle)=>{
     const receiptId=randomUUID()
     const body=JSON.stringify({receiptId,eventName,payload:{hook_event_name:eventName,source:'clear',session_id:id,transcript_path:fs.realpathSync(transcript(id)),tool_name:'request_user_input',tool_use_id:'original-tool'}})
@@ -50,14 +51,14 @@ if(args.includes('app-server')) {
   let inputCount=0
   process.stdin.on('data',data=>{inputCount++;fs.appendFileSync(path.join(root,sid+'.inputs.jsonl'),JSON.stringify({inputCount,bytes:[...data]})+'\n');process.stdout.write('private raw input '+inputCount+'\r\n')})
   while(!fs.existsSync(path.join(root,sid+'.core-ready')))await new Promise(resolve=>setTimeout(resolve,25))
-  await hook('SessionStart');await hook('PermissionRequest')
+  await hook('SessionStart')
   setInterval(async()=>{
     let command;try { command=fs.readFileSync(path.join(root,sid+'.control.json'),'utf8') } catch{return}
     if(command===currentCommand)return;currentCommand=command
     const next=JSON.parse(command)
-    if(fd!==undefined){fs.closeSync(fd);fd=undefined}if(extraFd!==undefined){fs.closeSync(extraFd);extraFd=undefined}
-    if(next.mode!=='unknown'){handle=next.id;fd=open(handle);if(next.mode==='ambiguous')extraFd=open('other-'+handle)}
-    if(next.mode==='unknown'||provider==='claude'&&next.mode==='changed')await hook('SessionStart')
+    if(!Array.isArray(next.members)||!next.members.every(id=>typeof id==='string'&&id))throw new Error('Exact private main members required')
+    for(const [id,descriptor] of descriptors)if(!next.members.includes(id)){fs.closeSync(descriptor);descriptors.delete(id)}
+    for(const id of next.members)if(!descriptors.has(id))descriptors.set(id,open(id))
     fs.writeFileSync(path.join(root,sid+'.controlled.json'),JSON.stringify({command:next,pid:process.pid,handle}))
   },25)
 }
