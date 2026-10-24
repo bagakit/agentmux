@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { chmodSync, copyFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, copyFileSync, lstatSync, mkdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -39,10 +39,16 @@ const appPath = resolve(option('--output') ?? join(binDirectory, 'AgentMux Nativ
 const executablePath = join(appPath, 'Contents', 'MacOS', 'agentmux-native-macos')
 // Resolve existing ancestors too: a symlinked output parent must not hide an
 // overlap with the source or compiler output that this operation will consume.
+const entry = path => {
+  try { return lstatSync(path) } catch (error) {
+    if (error.code === 'ENOENT') return undefined
+    throw error
+  }
+}
 const canonical = path => {
   const tail = []
   let ancestor = path
-  while (!existsSync(ancestor)) {
+  while (!entry(ancestor)) {
     if (dirname(ancestor) === ancestor) throw new Error(`Cannot resolve output ancestor: ${path}`)
     tail.unshift(basename(ancestor))
     ancestor = dirname(ancestor)
@@ -62,11 +68,11 @@ for (const source of ['Sources', 'Tests', 'Verification']) {
   const sourcePath = canonical(join(packageDirectory, source))
   if (contains(sourcePath, canonicalApp) || contains(canonicalApp, sourcePath)) throw new Error('Application output overlaps native source')
 }
-if (existsSync(appPath)) {
-  const info = lstatSync(appPath)
+const info = entry(appPath)
+if (info) {
   const plist = join(appPath, 'Contents', 'Info.plist')
-  if (!info.isDirectory() || info.isSymbolicLink() || !existsSync(plist) ||
-      !lstatSync(plist).isFile() || lstatSync(plist).isSymbolicLink() ||
+  const plistInfo = entry(plist)
+  if (!info.isDirectory() || info.isSymbolicLink() || !plistInfo?.isFile() || plistInfo.isSymbolicLink() ||
       run('/usr/bin/plutil', ['-extract', 'CFBundleIdentifier', 'raw', '--', plist], true) !== 'dev.agentmux.native') {
     throw new Error('Existing application output is not an owned AgentMux Native app; preserving it')
   }
