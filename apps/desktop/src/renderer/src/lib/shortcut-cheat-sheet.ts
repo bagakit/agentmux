@@ -115,7 +115,7 @@ export function formatChord(chord: Chord, isMac: boolean): string[] {
 /**
  * The whole cheat-sheet for the running platform: every registry binding, grouped, each row carrying its
  * platform chord tokens. Groups with no bindings are dropped. The row set across all groups is exactly the
- * registry's id set — nothing added, nothing filtered out — because this iterates SHORTCUT_BINDINGS directly.
+ * registry's applicable platform bindings, derived directly from SHORTCUT_BINDINGS.
  */
 export function buildCheatSheet(isMac: boolean): CheatSheetGroup[] {
   return CHEAT_SHEET_GROUPS.map(({ id, title }) => ({
