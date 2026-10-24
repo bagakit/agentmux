@@ -20,6 +20,8 @@ import { api } from '../src/renderer/src/lib/api'
 import { applyConfigEdit } from '../src/shared/config-edit'
 import { DEFAULT_MOTE_FACE } from '../src/shared/mote-avatars'
 import collaborationCSS from '../src/renderer/src/styles/collaboration.css?inline'
+import { focusMapPreset, type FocusMapPreferences } from '../src/shared/focus-map-preferences'
+import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
 const captured = vi.hoisted(() => ({ nodes: [] as Node[], store: null as ReturnType<typeof useStoreApi> | null, cardRenders: [] as string[], moveStart: undefined as ReactFlowProps['onMoveStart'] }))
 vi.mock('../src/renderer/src/components/FocusContextCardBody', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/renderer/src/components/FocusContextCardBody')>()
@@ -56,7 +58,7 @@ function scenario(count = 480) {
 type Scene = ReturnType<typeof scenario>
 let requests: engine.CollaborationLayoutRequest[], boxes: Map<string, engine.CollaborationLayoutBox>, paths: Map<string, engine.CollaborationPath>
 let holdResponses = false, heldResponses: { response: engine.CollaborationLayoutResponse; deliver(): void }[] = []
-function graph(scene: Scene, selection: CollaborationSelection = null, relations: readonly CollaborationRelation[] = scene.relations, pulses: readonly CollaborationPulse[] = [], agents: ReadonlyMap<string, CollaborationAgent> = scene.agents, options: Pick<ComponentProps<typeof AgentCollaborationGraph>, 'ready' | 'active' | 'locate' | 'context' | 'onPreviewAgent' | 'peeked'> = {}) {
+function graph(scene: Scene, selection: CollaborationSelection = null, relations: readonly CollaborationRelation[] = scene.relations, pulses: readonly CollaborationPulse[] = [], agents: ReadonlyMap<string, CollaborationAgent> = scene.agents, options: Pick<ComponentProps<typeof AgentCollaborationGraph>, 'ready' | 'active' | 'locate' | 'context' | 'onPreviewAgent' | 'peeked' | 'onVisibleAgents'> = {}) {
   return <AgentCollaborationGraph agents={agents} areas={scene.areas} relations={relations} pulses={pulses} selection={selection} onSelect={select} onOpen={open} ready={false} {...options} />
 }
 async function viewport(x: number, y: number, width = 600, height = 400, zoom = 1) {
@@ -269,6 +271,99 @@ beforeEach(() => {
     }
     if (holdResponses) heldResponses.push({ response, deliver }); else deliver()
   }, signal))
+})
+
+it('uses custom boundary and LOD for actual bodies, ports and summary leases without changing the world or camera', async () => {
+  const scene = scenario(24), visible = vi.fn()
+  await loaded(scene)
+  await dom.render(graph(scene, null, scene.relations, [], scene.agents, { ready: true, onVisibleAgents: visible }))
+  await new Promise(resolve => setTimeout(resolve, 40))
+  const config = useAppStore.getState().config!, initialRequests = requests.length, initialBoxes = boxes, initialPaths = new Map(paths)
+  const levels = focusMapPreset(3); levels[2] = { form: 'card', information: 'summary', from: .9, to: 1.2 }
+  const profile: FocusMapPreferences = { boundary: 'polygon', levels }
+  const nodeId = collaborationAgentNode('area-0', subject('canvas-0')), box = renderedBox(nodeId)
+  await viewport(-Math.min(...[...boxes.values()].map(box => box.x)) * .82 + 20, -Math.min(...[...boxes.values()].map(box => box.y)) * .82 + 20, 20000, 20000, .82)
+  const camera = captured.store!.getState().transform
+  await act(async () => useAppStore.setState({ config: { ...config, focus: { ...config.focus, map: profile } } }))
+  expect(captured.store!.getState().transform).toEqual(camera)
+  expect(dom.container.querySelector('.collaboration-area__envelope path')?.getAttribute('d')).not.toContain(' Q ')
+  expect(nodeElement(nodeId)!.querySelector('.focus-context')).toBeNull()
+  await act(async () => new Promise(resolve => setTimeout(resolve, 150)))
+  expect(visible.mock.calls.at(-1)?.[0]).toEqual([])
+  expectVisibleEndpoints()
+  await viewport(-Math.min(...[...boxes.values()].map(box => box.x)) * 1.2 + 20, -Math.min(...[...boxes.values()].map(box => box.y)) * 1.2 + 20, 20000, 20000, 1.2)
+  expect(nodeElement(nodeId)!.querySelector('.focus-context')).not.toBeNull()
+  await act(async () => new Promise(resolve => setTimeout(resolve, 150)))
+  expect(visible.mock.calls.at(-1)?.[0]).toContain(subject('canvas-0'))
+  expectVisibleEndpoints()
+  const points: FocusMapPreferences = { boundary: 'bezier', levels: focusMapPreset(2).map(level => ({ ...level, form: 'point', information: 'identity' })) }
+  const currentCamera = captured.store!.getState().transform
+  await act(async () => useAppStore.setState({ config: { ...config, focus: { ...config.focus, map: points } } }))
+  expect(captured.store!.getState().transform).toEqual(currentCamera)
+  const mark = nodeElement(nodeId)!.querySelector<HTMLButtonElement>('.collaboration-agent__dot')!
+  expect(mark).not.toBeNull()
+  await act(async () => { mark.focus(); mark.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
+  expect(agentInformationPreview.getAll().some(request => request.context.id === 'canvas-0' && request.anchor === mark)).toBe(true)
+  expect(document.activeElement).toBe(mark)
+  expect(requests).toHaveLength(initialRequests); expect(boxes).toBe(initialBoxes); expect(paths).toEqual(initialPaths)
+})
+
+it('opens the original Focus Map settings field from the actual Map HUD', async () => {
+  const scene = scenario(4), openSettings = vi.fn()
+  const navigation = { open: openSettings, openToolkit() {}, openHost() {}, openChannel() {}, channelEntries: [], channelPresentation: () => null, openMoteLark() {}, chooseAgent() {} }
+  await dom.render(<SettingsNavigation.Provider value={navigation}>{graph(scene)}</SettingsNavigation.Provider>)
+  await dom.click('[aria-label="Map settings"]')
+  expect(openSettings).toHaveBeenCalledExactlyOnceWith('focus', undefined, 'map')
+})
+
+it('admits only real summary-capable tiers, bootstraps original active catalog facts and keeps essential state at distant custom levels', async () => {
+  const scene = scenario(4), values = [...scene.agents.values()], visible = vi.fn()
+  scene.agents = new Map(values.map((agent, index) => [agent.id, { ...agent, tier: index < 2 ? 'active' : index === 2 ? 'closed' : 'unknown', ...(index === 1 ? { context: undefined } : {}) }]))
+  await loaded(scene)
+  await dom.render(graph(scene, null, scene.relations, [], scene.agents, { ready: true, onVisibleAgents: visible }))
+  await new Promise(resolve => setTimeout(resolve, 40)); await revealWorld()
+  await act(async () => new Promise(resolve => setTimeout(resolve, 150)))
+  expect(visible.mock.calls.at(-1)?.[0]).toEqual(values.slice(0, 2).map(agent => agent.id).sort())
+  const config = useAppStore.getState().config!
+  const status: FocusMapPreferences = { boundary: 'polygon', levels: focusMapPreset(2).map(level => ({ ...level, form: 'compact', information: 'status' })) }
+  await act(async () => useAppStore.setState({ config: { ...config, focus: { ...config.focus, map: status } } }))
+  const id = collaborationAgentNode('area-0', values[0]!.id), box = renderedBox(id)
+  await viewport(-box.x * .05 + 20, -box.y * .05 + 20, 600, 400, .05)
+  const mark = nodeElement(id)!.querySelector('.collaboration-agent__dot')!
+  expect(mark.querySelector('.collaboration-agent__essential [data-focus-state-icon]')).not.toBeNull()
+  await act(async () => new Promise(resolve => setTimeout(resolve, 150)))
+  expect(visible.mock.calls.at(-1)?.[0]).toEqual([])
+})
+
+it('shows cumulative identity, status and summary on the actual shared card while retaining mandatory service information', async () => {
+  const scene = scenario(4), first = [...scene.agents.values()][0]!, visible = vi.fn()
+  scene.agents = new Map(scene.agents).set(first.id, { ...first, tier: 'active', context: { ...first.context!, state: 'running', stateLabel: 'Working', bucket: 'working', activitySemantic: 'active', detailKind: undefined, detail: 'Retained original summary', detailIsRecap: true, recap: { text: 'Retained original summary', source: 'Last assistant message', origin: 'timeline' } } })
+  const second = [...scene.agents.values()][1]!
+  scene.agents.set(second.id, { ...second, tier: 'active', context: { ...second.context!, state: 'waiting', stateLabel: 'Needs you', bucket: 'attention', detailKind: 'service', detail: 'Approval required from the original Run', detailIsRecap: false, recap: null } })
+  const config = useAppStore.getState().config!, levels = focusMapPreset(2)
+  levels[1] = { ...levels[1]!, information: 'identity' }
+  useAppStore.setState({ config: { ...config, focus: { ...config.focus, map: { boundary: 'bezier', levels } } } })
+  await loaded(scene)
+  await dom.render(graph(scene, null, scene.relations, [], scene.agents, { ready: true, onVisibleAgents: visible }))
+  await new Promise(resolve => setTimeout(resolve, 40)); await revealWorld()
+  const id = collaborationAgentNode('area-0', first.id), card = nodeElement(id)!.querySelector<HTMLElement>('.focus-context')!
+  expect(card).not.toBeNull()
+  expect(card.querySelector<HTMLElement>('.focus-context__state')!.style.opacity).toBe('0')
+  expect(card.querySelector<HTMLElement>('.focus-context__detail')!.style.opacity).toBe('0')
+  const service = [...dom.container.querySelectorAll<HTMLElement>('.focus-context__detail--service')]
+  expect(service.length).toBeGreaterThan(0); expect(service.every(node => node.style.opacity === '1')).toBe(true)
+  await act(async () => new Promise(resolve => setTimeout(resolve, 150)))
+  expect(visible.mock.calls.at(-1)?.[0]).toEqual([])
+  for (const information of ['status', 'summary'] as const) {
+    const profile: FocusMapPreferences = { boundary: 'bezier', levels: levels.map((level, index) => index === 1 ? { ...level, information } : level) }
+    await act(async () => useAppStore.setState({ config: { ...config, focus: { ...config.focus, map: profile } } }))
+    expect(nodeElement(id)!.querySelector('.focus-context')).toBe(card)
+    expect(card.querySelector<HTMLElement>('.focus-context__state')!.style.opacity).toBe('1')
+    expect(card.querySelector<HTMLElement>('.focus-context__detail')!.style.opacity).toBe(information === 'summary' ? '1' : '0')
+    await act(async () => new Promise(resolve => setTimeout(resolve, 150)))
+    expect(visible.mock.calls.at(-1)?.[0].includes(first.id)).toBe(information === 'summary')
+  }
+  expect(card.textContent).toContain('Retained original summary')
 })
 
 it('overview remount never replays a retained relationship highlight as a new reading intent', async () => {

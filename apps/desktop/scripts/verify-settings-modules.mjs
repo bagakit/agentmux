@@ -123,6 +123,9 @@ const publish = () => fs.writeFileSync(process.env.SETTINGS_MODULES_CAPTURE!, JS
 const relative = id => path.relative(plan.root, id.split('?')[0])
 export default {
   ...base,
+  // A single worker keeps the same original tests while avoiding the forks
+  // pool's additional on-disk copy of every transformed application module.
+  test: { ...base.test, pool: 'threads' },
   plugins: [
     { name: 'settings-modules-actual-source', enforce: 'pre', load(id) {
       const file = relative(id)

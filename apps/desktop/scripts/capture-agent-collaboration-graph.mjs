@@ -44,6 +44,8 @@ if (verifying) {
     assert.ok(samples.length >= 7 && samples.find(sample => sample.target === .319)?.actual < .32 && samples.find(sample => sample.target === .321)?.actual > .32, 'Actual camera samples cross the glyph boundary')
     assert.ok(receipt.actual.checks.some(check => check.name === 'adaptive-original-structure-and-motion-consumers' && check.passed === true), 'The original adaptive native check must actually execute')
     createRequire(import.meta.url)(join(fixture, 'adaptive.cjs')).verify(receipt.actual.adaptive, receipt.frames)
+    assert.ok(receipt.actual.checks.some(check => check.name === 'settings-original-edit-save-reopen-and-map-consumers' && check.passed === true), 'The original Map settings native check must execute')
+    createRequire(import.meta.url)(join(fixture, 'settings.cjs')).verify(receipt.actual.mapSettings, receipt.frames)
   }
   console.log(JSON.stringify({ passed: true, evidence: directory, receiptSHA256: digest(await readFile(join(directory, 'receipt.json'))), nativeChecks: receipt.actual.checks.length, completeFrames: receipt.frames.length, aestheticReview: 'separate-independent-artifact', restart: 'separate-runtime-artifact' }))
   process.exit(0)
@@ -145,7 +147,7 @@ const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => key
 Object.assign(env, { AGENTMUX_DESKTOP_USER_DATA: join(privateRoot, 'user-data'), AGENTMUX_RUNTIME_DIRECTORY: join(privateRoot, 'runtime'), AGENTMUX_STATE_DIRECTORY: join(privateRoot, 'state'), COLLABORATION_CAPTURE_NODE: process.execPath })
 let server
 try {
-  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'perception.cjs', 'terrain.cjs', 'adaptive.cjs', 'adaptive-observer.ts', 'server-host.mjs', 'scenario.md'].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
+  const harnessFiles = ['index.html', 'entry.tsx', 'main.cjs', 'perception.cjs', 'terrain.cjs', 'adaptive.cjs', 'adaptive-observer.ts', 'settings.cjs', 'server-host.mjs', 'scenario.md'].map(name => join(fixture, name)).concat([scriptPath, join(desktop, 'scripts/probe-process.mjs'), join(desktop, 'scripts/fixtures/desktop-map/source-loader.mjs'), join(desktop, 'scripts/fixtures/performance-failure-evidence/source-loader.mjs'), join(desktop, 'test/helpers/desktop-map-source-mutations.mjs'), join(root, 'packages/core/dist/control-endpoint-listener-worker.js'), join(root, 'packages/core/src/control-endpoint-listener-worker.ts')])
   receipt.harness = Object.fromEntries(await Promise.all(harnessFiles.map(async file => [relative(root, file), hash(await readFile(file))])))
   receipt.publicTransport = { boundary: 'Original Core source publication spawns its existing compiled listener asset; only listener transport uses dist. Its bytes and corresponding source are bound in harness; CLI, Core business and Renderer remain original source.', file: 'packages/core/dist/control-endpoint-listener-worker.js' }
   receipt.phase = 'compiling'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
@@ -182,7 +184,7 @@ try {
   await new Promise(done => server.listen(0, '127.0.0.1', done))
   receipt.phase = 'capturing'; await writeFile(join(evidence, 'receipt.json'), JSON.stringify(receipt, null, 2) + '\n')
   receipt.process = await runProbeProcess(require('electron'), [join(fixture, 'main.cjs'), `http://127.0.0.1:${server.address().port}/?scenario=${scenario}`, privateRoot, evidence, scenario],
-    { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: 210000, onLine: line => logs.push(line) })
+    { temporaryRoot: privateRoot, cwd: root, env, timeoutMs: scenario === 'perception-scale' ? 360000 : 210000, onLine: line => logs.push(line) })
   const actualText = await readFile(join(evidence, 'actual.json'), 'utf8').catch(error => error.code === 'ENOENT' ? '' : Promise.reject(error))
   if (actualText.trim()) receipt.actual = JSON.parse(actualText)
   assert.equal(receipt.process.timedOut, false, 'The original source capture timed out; retain its partial scene evidence')

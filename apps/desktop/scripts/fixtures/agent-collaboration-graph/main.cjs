@@ -262,6 +262,7 @@ app.whenReady().then(async () => {
       await require('./perception.cjs')({ win, result, read, click, key, frame, check, facts, activity, motionFrame, intact, matrix, mapReady, closeReader, locate, pause, until, settle, fullMap, measure, pan, overview, observeDenseRelations, denseOnly: scenario === 'perception-scale' })
       if (scenario === 'perception-scale') await require('./terrain.cjs')({ win, result, read, click, key, move, frame, check, intact, mapReady, closeReader, locate, pause, until, settle, matrix, measure })
       if (scenario === 'perception-scale') await require('./adaptive.cjs')({ win, result, read, click, key, move, frame, check, intact, mapReady, closeReader, locate, pause, until, matrix, dragCanvas })
+      if (scenario === 'perception-scale') await require('./settings.cjs')({ win, result, read, click, key, move, frame, check, intact, closeReader, locate, pause, until, matrix })
     } else {
     await check('focus-locates-in-the-same-map', async () => {
       await click('[aria-label="List"]'); await until('original Focus Locate entry', () => read(`Boolean(document.querySelector('[aria-label="Locate Agent in map"]'))`)); await frame('focus-locate-entry')
