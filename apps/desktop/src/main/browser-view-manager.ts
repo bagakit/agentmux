@@ -122,6 +122,10 @@ type BrowserEntry = {
   source?: import('@agentmux/core').AgentMuxBrowserSource
   nativeChild?: {
     window: { width: number; height: number }
+    /** Only an unposted original display projection; no native page request is repeated. */
+    projectionPending?: true
+    projectionWarning?: string
+    placementWarning?: string
     closing?: NativeChildClose
     closeWarning?: string
   }
@@ -293,6 +297,9 @@ function removeWarning(current: string | undefined, warning: string): string | u
 /** Metadata retained while a hidden Browser native owner is released. */
 type ReleasedBrowser = {
   id: string
+  source?: import('@agentmux/core').AgentMuxBrowserSource
+  /** Runtime-only child presentation metadata. Never retain an old native Close intent. */
+  nativeChild?: { window: { width: number; height: number } }
   workspaceId: string | null
   storage: BrowserStorage
   requestedUrl: string
@@ -483,6 +490,7 @@ export class BrowserViewManager {
       .map(entry => ({ ...entry, inputShield: entry.inputShield ?? [...(this.inputSurfaceCleanup.get(entry.id) ?? [])][0]?.shield }))
       .map<AgentMuxBrowserTarget>(entry => ({
       id: entry.id, workspaceId: entry.workspaceId, source: 'embedded', mode: entry.storage.mode,
+      ...(entry.source ? { openedFrom: entry.source } : {}),
       status: 'unavailable', url: entry.cleanupOnly ? '' : entry.requestedUrl, title: '', capabilities: [],
       ...(this.closingViews.has(entry.id) ? { warning: NATIVE_CLOSE_WARNING } : entry.inputShield ? { warning: entry.cleanupOnly
         ? 'This Browser was closed explicitly. Its original native input surface cleanup is unconfirmed; use Close to retry cleanup. Open a new Browser for a fresh page.'
@@ -554,7 +562,7 @@ export class BrowserViewManager {
     try { window.contentView.addChildView(view, index); this.viewWindows.set(view, window) }
     catch (error) { if (previous && previous !== window && !previous.isDestroyed()) { previous.contentView.addChildView(view, 1); this.viewWindows.set(view, previous) } throw error }
     const id = this.browserIdsByView.get(view), entry = id ? this.entries.get(id) : undefined
-    if (entry?.view === view) this.synchronizeInputShield(entry)
+    if (entry?.view === view) { this.clearNativeChildWarning(entry, 'placementWarning'); this.synchronizeInputShield(entry) }
   }
   private detachView(view: WebContentsView): void {
     const host = this.windowForView(view)
@@ -1447,7 +1455,8 @@ export class BrowserViewManager {
     this.releasedEntries.delete(id)
     try {
       const snapshot = await this.createEntry(id, url, storage, viewport, released.workspaceId, released.inputShield, { agent: released.agent,
-        ...(released.agentWarning === undefined ? {} : { warning: released.agentWarning }) })
+        ...(released.source ? { source: released.source } : {}),
+        ...(released.agentWarning === undefined ? {} : { warning: released.agentWarning }) }, released.nativeChild)
       return snapshot
     } catch (error) {
       this.releasedEntries.set(id, { ...released, storage, requestedUrl: url, viewport })
@@ -1462,10 +1471,11 @@ export class BrowserViewManager {
     viewport: BrowserViewport = 'responsive',
     workspaceId: string | null = null,
     retiredInputShield?: BrowserNativeInputShield,
-    saved?: Pick<BrowserColdDescriptor, 'agent' | 'warning' | 'source' | 'capsule' | 'capsuleOrigin' | 'capsuleOpenOperationIds'>
+    saved?: Pick<BrowserColdDescriptor, 'agent' | 'warning' | 'source' | 'capsule' | 'capsuleOrigin' | 'capsuleOpenOperationIds'>,
+    native?: ReleasedBrowser['nativeChild']
   ): Promise<BrowserSnapshot> {
     const view = this.createView(storage.partition, 'capsule' in storage ? storage.capsule.record : undefined)
-    const entry = this.registerEntry(id, url, storage, view, viewport, workspaceId, retiredInputShield, saved)
+    const entry = this.registerEntry(id, url, storage, view, viewport, workspaceId, retiredInputShield, saved, native)
     try {
       void this.startNavigation(entry, url, true).catch(() => {})
       return this.snapshot(entry)
@@ -1494,11 +1504,48 @@ export class BrowserViewManager {
     const view = new WebContentsView({ ...(webPreferences ? { webPreferences } : {}), ...(guest ? { webContents: guest } : {}) })
     const window = { width: options.width ?? 1024, height: options.height ?? 768 }
     const child = this.registerEntry(mintObjectId(), view.webContents.getURL() || 'about:blank', parent.storage, view,
-      'responsive', parent.workspaceId, undefined, { agent: parent.agent, ...(parent.agentWarning ? { warning: parent.agentWarning } : {}) }, { source, window })
-    this.markResourceRisk(parent, sourceView, 'document-used')
-    this.send({ type: 'native-opened', browser: this.snapshot(child), workspaceId: child.workspaceId, window })
+      'responsive', parent.workspaceId, undefined, { source, agent: parent.agent, ...(parent.agentWarning ? { warning: parent.agentWarning } : {}) }, { window, originalRequest: true })
+    this.observeNativeChild(child, () => this.markResourceRisk(parent, sourceView, 'document-used'))
+    child.nativeChild!.projectionPending = true
+    this.publishNativeChildOpening(child)
     // Chromium, not startNavigation/loadURL, continues the original guest request.
     return view.webContents
+  }
+
+  /** A projection observation cannot roll back Chromium's already-created original guest. */
+  private observeNativeChild(entry: BrowserEntry, observe: () => void, warningKey: 'projectionWarning' | 'placementWarning' = 'projectionWarning'): void {
+    try { observe() }
+    catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      const child = entry.nativeChild!, previous = child[warningKey]
+      const warning = `The native Browser ${warningKey === 'placementWarning' ? 'host attachment' : 'presentation'} could not be confirmed: ${detail}. Its original page and Browser identity are kept; inspect this same Browser before continuing.`
+      child[warningKey] = warning
+      entry.activity = { ...entry.activity, warning: appendWarning(previous ? removeWarning(entry.activity.warning, previous) : entry.activity.warning, warning) }
+      console.warn('The original native Browser remains available after its presentation observation failed:', error)
+    }
+  }
+
+  private clearNativeChildWarning(entry: BrowserEntry, key: 'projectionWarning' | 'placementWarning'): void {
+    const child = entry.nativeChild, previous = child?.[key]
+    if (!child || !previous) return
+    const warning = removeWarning(entry.activity.warning, previous), { warning: _warning, ...activity } = entry.activity
+    entry.activity = { ...activity, ...(warning ? { warning } : {}) }
+    delete child[key]
+  }
+
+  private publishNativeChildOpening(entry: BrowserEntry, browser?: BrowserSnapshot): void {
+    const child = entry.nativeChild
+    if (!child?.projectionPending || !this.owns(entry, entry.view) || entry.view.webContents.isDestroyed() ||
+      this.window.isDestroyed() || this.window.webContents.isDestroyed()) return
+    this.observeNativeChild(entry, () => {
+      const observed = browser ?? this.snapshot(entry)
+      const observedActivity = observed.activity ?? entry.activity
+      const warning = child.projectionWarning ? removeWarning(observedActivity.warning, child.projectionWarning) : observedActivity.warning
+      const { warning: _warning, ...activity } = observedActivity
+      this.send({ type: 'native-opened', browser: { ...observed, activity: { ...activity, ...(warning ? { warning } : {}) } }, workspaceId: entry.workspaceId, window: child.window })
+      delete child.projectionPending
+      this.clearNativeChildWarning(entry, 'projectionWarning')
+    })
   }
 
   /** Native shell Close closes its original child page; explicit Return only moves it. */
@@ -1600,13 +1647,14 @@ export class BrowserViewManager {
     viewport: BrowserViewport = 'responsive', workspaceId: string | null = null,
     retiredInputShield?: BrowserNativeInputShield,
     saved?: Pick<BrowserColdDescriptor, 'agent' | 'warning' | 'source' | 'capsule' | 'capsuleOrigin' | 'capsuleOpenOperationIds'>,
-    native?: { source: import('@agentmux/core').AgentMuxBrowserSource; window: { width: number; height: number } }
+    native?: ReleasedBrowser['nativeChild'] & { originalRequest?: true }
   ): BrowserEntry {
     if (!isBrowserViewport(viewport)) throw new Error('Unknown browser viewport or invalid dimensions')
     if (this.entries.has(id)) throw new Error(`Browser already exists: ${id}`)
     const entry: BrowserEntry = {
       id,
-      ...(native ? { source: native.source, nativeChild: { window: native.window } } : saved?.source ? { source: saved.source } : {}),
+      ...(saved?.source ? { source: saved.source } : {}),
+      ...(native ? { nativeChild: { window: { ...native.window } } } : {}),
       workspaceId,
       view,
       storage,
@@ -1643,18 +1691,23 @@ export class BrowserViewManager {
     this.entries.set(id, entry)
     let childRegistrationAttempted = false
     try {
-      // An unattached view forwards its size to WebContents. Once hidden in a
-      // Widget, native layout hides the child without forwarding new bounds.
-      view.setVisible(false)
-      const drawingSize = browserViewportSize(viewport) ?? this.window.getContentBounds()
-      if (Number.isFinite(drawingSize.width) && drawingSize.width > 0 && Number.isFinite(drawingSize.height) && drawingSize.height > 0) {
-        view.setBounds({ x: 0, y: 0, width: drawingSize.width, height: drawingSize.height })
+      const prepareHost = () => {
+        // An unattached view forwards its size to WebContents. Once hidden in a
+        // Widget, native layout hides the child without forwarding new bounds.
+        view.setVisible(false)
+        const drawingSize = browserViewportSize(viewport) ?? this.window.getContentBounds()
+        if (Number.isFinite(drawingSize.width) && drawingSize.width > 0 && Number.isFinite(drawingSize.height) && drawingSize.height > 0) {
+          view.setBounds({ x: 0, y: 0, width: drawingSize.width, height: drawingSize.height })
+        }
+        childRegistrationAttempted = true
+        // BrowserWindow's original Renderer is below contentView. Native Chrome sits above Browsers.
+        this.placeView(view, this.window)
       }
-      childRegistrationAttempted = true
-      // BrowserWindow's original Renderer is below contentView. Native Chrome sits above Browsers.
-      this.placeView(view, this.window)
+      if (native?.originalRequest) this.observeNativeChild(entry, prepareHost, 'placementWarning')
+      else prepareHost()
       this.attach(entry, view)
-      this.emit(entry)
+      if (native?.originalRequest) this.observeNativeChild(entry, () => this.emit(entry))
+      else this.emit(entry)
       if (this.demonstrations) void this.getDemonstration(id).catch(() => {
         if (!this.owns(entry, view) || this.demonstrationCapture?.entry === entry) return
         entry.demonstration = { draft: null, warning: 'The saved demonstration could not be read. The Browser remains usable; reopen its activity details to retry.' }
@@ -1913,6 +1966,7 @@ export class BrowserViewManager {
       // Close of that source cannot become authority to remove the new page.
       entry.nativeChild?.closing?.settle(false)
       entry.view = candidate
+      this.clearNativeChildWarning(entry, 'placementWarning')
       entry.controlFeedback = candidateControlFeedback
       // Candidate preparation predates current-owner input/media observation. Do not inherit
       // another WC's quiet proof; this page remains usable, but is not an automatic discard target.
@@ -2218,7 +2272,7 @@ export class BrowserViewManager {
         operation.phase = 'stopped'
         operation.summary = 'Browser operation stopped explicitly'
         operation.finishedAt = Date.now()
-        operation.warning = 'The Browser operation was stopped explicitly. Earlier actions may have completed. Agent control remains; review the page before starting a fresh program, or use Take control to interact manually.'
+        operation.warning = 'The Browser operation was stopped explicitly. Earlier actions may have completed. Review the current page and control state before continuing.'
         entry.activity = { operation, control: entry.activity.control, warning: [entry.activity.warning, operation.warning].filter(Boolean).join('\n') }
         stopController.abort()
         void this.operationJournal?.setPhase(operation.id, 'stopped', { summary: operation.summary, warning: operation.warning })
@@ -3673,6 +3727,12 @@ export class BrowserViewManager {
     for (const child of [...this.entries.values()].filter(entry => entry.storage === storage)) {
       // The private root ends the whole original website Session. Closing an
       // individual child never reaches this shared-storage cleanup.
+      const previewScope = this.recoveryPreviewScope(child.id)
+      child.recoveryPreviewRetired = true
+      this.cancelRecoveryPreview(child)
+      if (previewScope) void this.recoveryPreviews?.remove(previewScope).then(result => {
+        if (result.warning) console.warn('Private Browser closed; its historical preview cleanup is unconfirmed:', result.warning)
+      }).catch(error => console.warn('Private Browser closed; its historical preview cleanup is unconfirmed:', error))
       try { if (this.destroyOwner(child.id)) this.send({ type: 'closed', id: child.id }) } catch (error) { failures.push(error) }
     }
     try { this.webAuthnSessions.get(storage.session)?.() } catch (error) { failures.push(error) }
@@ -4057,10 +4117,13 @@ export class BrowserViewManager {
       }
       if (!this.owns(entry, view)) return
       const nativeWindow = entry.nativeChild ? this.windowForView(view) : null
+      const nativePreviewScope = entry.nativeChild ? this.recoveryPreviewScope(entry.id) : null
       // Native destruction is authoritative even if a separate resource's cleanup throws. Retain
       // only the existing metadata: a dead WebContents cannot supply a fresh live snapshot.
       const released: ReleasedBrowser = {
-        id: entry.id, workspaceId: entry.workspaceId, storage: entry.storage, requestedUrl: entry.requestedUrl, viewport: entry.viewport, agent: entry.agent, agentWarning: entry.agentWarning
+        id: entry.id, workspaceId: entry.workspaceId, storage: entry.storage, requestedUrl: entry.requestedUrl, viewport: entry.viewport, agent: entry.agent, agentWarning: entry.agentWarning,
+        ...(entry.source ? { source: entry.source } : {}),
+        ...(entry.nativeChild ? { nativeChild: { window: { ...entry.nativeChild.window } } } : {})
       }
       this.releasedEntries.set(entry.id, released)
       const cleanupErrors: unknown[] = []
@@ -4093,6 +4156,11 @@ export class BrowserViewManager {
       }
       if (entry.nativeChild) {
         // The original child page ended, rather than becoming a restorable URL.
+        entry.recoveryPreviewRetired = true
+        this.cancelRecoveryPreview(entry)
+        if (nativePreviewScope) void this.recoveryPreviews?.remove(nativePreviewScope).then(result => {
+          if (result.warning) console.warn('Browser child closed; its historical preview cleanup is unconfirmed:', result.warning)
+        }).catch(error => console.warn('Browser child closed; its historical preview cleanup is unconfirmed:', error))
         released.cleanupOnly = true
         if (!released.inputShield && !released.pendingSwitch && !released.detachedView && !cleanupErrors.length) this.releasedEntries.delete(entry.id)
         entry.nativeChild.closing?.settle(true)
@@ -4413,6 +4481,7 @@ export class BrowserViewManager {
     const browser = this.snapshot(entry)
     entry.publishedRetention = JSON.stringify(browser.retention)
     this.send({ type: 'updated', browser })
+    this.publishNativeChildOpening(entry, browser)
   }
 
   private agentOwnsInput(entry: BrowserEntry): boolean { return entry.activity.control === 'agent' && !entry.humanControl }
