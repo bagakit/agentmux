@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { AgentMuxClient } from '../src/client.js'
 import { markdownImageReferences } from '../src/session-history-content.js'
+import { nativeHistoryFixture, jsonl } from './fixtures/native-history-session.js'
 import { AgentMuxFileAgentSessionStore, loadAgentSessions } from '../src/agent-session-store.js'
 import { AgentMuxControlServer } from '../src/public-rpc-server.js'
 import { AgentMuxRpcService } from '../src/public-rpc-service.js'
@@ -19,7 +20,7 @@ import { AgentMuxHostedRuntimeService } from '../src/hosted-runtime-service.js'
 import { decodeHostedValue, encodeHostedValue } from '../src/hosted-value.js'
 import { AGENTMUX_HOSTED_METHODS } from '../src/hosted-client-contract.js'
 import { parseAgentMuxCliInvocation, AGENTMUX_CLI_COMMANDS } from '../src/agentmux-cli-commands.js'
-import type { AgentSessionHistoryResourceRequest } from '../src/types.js'
+import type { AgentSessionHistoryResourceRequest, AgentSessionHistoryItem } from '../src/types.js'
 
 const png = process.env.AGENTMUX_IMAGE_FIXTURE_PATH ? await readFile(process.env.AGENTMUX_IMAGE_FIXTURE_PATH) : Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0K8AAAAASUVORK5CYII=', 'base64')
 const source = {providerId:'codex',nativeSessionId:'native-image-source'}
@@ -254,6 +255,51 @@ describe('exact native recorded image through the original public Core owner',()
 
 
 describe('original Markdown image nodes through the resource boundary', () => {
+  it('requires the exact original assistant public purpose while retaining text and typed resources', async () => {
+    const h = await fixture(), text = `![Private local image](${h.image})`
+    h.entries.push({ turnId: 'markdown-turn', item: { type: 'agentMessage', id: 'markdown-record', text } }); await h.save()
+    const read = h.provider.readSessionHistoryRecord!.bind(h.provider)
+    const request = { ...h.request, recordId: 'markdown-record', turnId: 'markdown-turn', representation: 'image' as const,
+      markdownImage: { index: 0, textSha256: createHash('sha256').update(text).digest('hex') } }
+    const changes: Array<{ kind?: AgentSessionHistoryItem['kind']; contentEligibility?: 'unconfirmed'; contentRole?: 'tool' | 'reasoning' }> = [
+      { kind: 'user-message' as const }, { kind: 'activity' as const },
+      { contentEligibility: 'unconfirmed' as const }, { contentRole: 'tool' as const }, { contentRole: 'reasoning' as const }
+    ]
+    for (const change of changes) {
+      const lookup = vi.spyOn(h.provider, 'readSessionHistoryRecord').mockImplementationOnce(async context => {
+        const item = await read(context), { kind, ...purpose } = change
+        return { ...item, ...(kind ? { kind } : {}), contentParts: item.contentParts.map(part => ({ ...part, ...purpose })) }
+      })
+      await expect(h.client.sessionHistoryResource('image-session', request)).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH' })
+      lookup.mockRestore()
+    }
+    expect((await h.client.sessionHistoryResource('image-session', request)).result.status).toBe('read')
+    // A true user resource is already typed by its original Provider; Markdown introduces no new authority for it.
+    expect((await h.client.sessionHistoryResource('image-session', h.request)).result.status).toBe('read')
+    expect((await h.client.sessionHistoryPage('image-session')).items.find(item => item.id === 'markdown-record')!.contentParts).toMatchObject([{ kind: 'text', text }])
+    expect(h.client.connect).not.toHaveBeenCalled()
+    expect((await loadAgentSessions(h.store))[0]!.run).toEqual({ runId: 'original-healthy-run' })
+  })
+
+  it('rechecks the original author before a signed Markdown image read without revoking its original text', async () => {
+    const text = 'Original public text '.repeat(105_000) + `\n![Diagram](data:image/png;base64,${png.toString('base64')})`
+    const h = await nativeHistoryFixture('claude', jsonl([{ sessionId: 'native-main', uuid: 'signed-markdown', type: 'assistant',
+      message: { role: 'assistant', content: [{ type: 'text', text }] } }]))
+    closes.push(h.close)
+    const page = await h.client.sessionHistoryPage('private-agent'), part = page.items[0]!.contentParts[0]!
+    expect(part.kind).toBe('resource'); if (part.kind !== 'resource') throw Error('Original signed text required')
+    const request = { source: page.source, recordId: 'signed-markdown', partIndex: 0, expectedReference: part.reference,
+      representation: 'image' as const, markdownImage: { index: 0, textSha256: createHash('sha256').update(text).digest('hex') } }
+    expect((await h.client.sessionHistoryResource('private-agent', request)).result.status).toBe('read')
+    const provider = h.client.providers.get('claude'), read = provider.readSessionHistoryRecord!.bind(provider)
+    const lookup = vi.spyOn(provider, 'readSessionHistoryRecord').mockImplementationOnce(async context => ({ ...await read(context), kind: 'user-message' }))
+    await expect(h.client.sessionHistoryResource('private-agent', request)).rejects.toMatchObject({ code: 'AGENT_SESSION_HISTORY_RESOURCE_MISMATCH' })
+    expect(lookup).toHaveBeenCalledOnce(); lookup.mockRestore()
+    const { markdownImage: _image, representation: _representation, ...originalText } = request
+    expect((await h.client.sessionHistoryResource('private-agent', originalText)).result.status).toBe('fragment')
+    for (const control of h.controls) expect(control).not.toHaveBeenCalled()
+  })
+
   it('reads direct and reference images, rejects code and changed text without reading another caller path', async () => {
     const h = await fixture()
     const text = `![one](${h.image})\n![two][diagram]\n\n[diagram]: ${h.data}\n\n` + '`![code](' + h.image + ')`' + '\n```md\n![code](' + h.image + ')\n```\n\\![escaped](' + h.image + ')'
