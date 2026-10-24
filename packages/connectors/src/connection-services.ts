@@ -148,7 +148,7 @@ export async function createConnectionServices(options: { directory: string | un
     connections: {
       ownsEnrollmentConnection: async (connectionId, agentSessionId) => (await ensure()).connections.ownsEnrollmentConnection(connectionId, agentSessionId),
       service: {
-        get: async () => (await ensure()).connections.service.get(),
+        get: async input => (await ensure()).connections.service.get(input),
         configure: async input => { const owner = await ensure(); const result = await owner.connections.service.configure(input); owner.receivers?.refresh(); owner.publication?.refresh(); return result },
         inspect: async input => (await ensure()).connections.service.inspect(input)
       },

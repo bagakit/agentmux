@@ -53,10 +53,16 @@ export class ConnectionReceivers {
       for (const [id, lane] of this.lanes) if (current.get(id)?.revision !== lane.record.revision || !current.get(id)?.config.enabled) {
         this.release(lane); this.lanes.delete(id)
       }
+      for (const [id, lane] of this.lanes) {
+        try { if (!this.connections.automaticTrafficEnabled(lane.record.config.adapterId)) { this.release(lane); this.lanes.delete(id) } }
+        catch { /* Unknown policy retains this reader; every new admission checks its original owner. */ }
+      }
       for (const [id, lane] of this.lanes) if (lane.receiver?.closed?.aborted) { this.release(lane); this.lanes.delete(id) }
       for (const record of connections) {
         const adapter = this.connections.registeredAdapter(record.config.adapterId)
         if (!record.config.enabled || !adapter?.ingress || !adapter.transport) continue
+        try { if (!this.connections.automaticTrafficEnabled(record.config.adapterId)) continue }
+        catch { continue } // No new lane or recovery admission without the original policy.
         let lane = this.lanes.get(record.config.connectionId)
         if (!lane) {
           lane = { record, abort: new AbortController(), opening: false, dispatchFailures: new Set() }
@@ -88,7 +94,7 @@ export class ConnectionReceivers {
   }
   private current(lane: Lane): boolean {
     if (this.closed || lane.abort.signal.aborted) return false
-    this.connections.assertServiceEnabled()
+    this.connections.assertServiceEnabled(lane.record.config.adapterId)
     const current = this.connections.readConfiguration(lane.record.config.connectionId)
     return current?.config.enabled === true && current.revision === lane.record.revision
   }
@@ -113,7 +119,7 @@ export class ConnectionReceivers {
           })
         },
         receive: async (input, acknowledge) => {
-          this.connections.assertServiceEnabled()
+          this.connections.assertServiceEnabled(lane.record.config.adapterId)
           if (!this.current(lane)) throw new AgentMuxError('This original connection receiver is no longer current. Existing Agents are retained.', 'INGRESS_CONNECTION_REVISED')
           const accepted = await this.ingress.receive({ connectionId: lane.record.config.connectionId, raw: input.raw,
             ...(input.transportProof === undefined ? {} : { transportProof: input.transportProof }) }, acknowledge)
