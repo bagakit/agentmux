@@ -1,4 +1,5 @@
 import { browserPageCapabilityNames } from '@agentmux/core'
+import { capturePageImage, PNG_MAX_BASE64_CHARS } from '@agentmux/native-desktop/image'
 import { readScreenshotObservation, readScreenshotViewport, screenshotSource } from './browser-screenshot-source.js'
 import type { BrowserPng, BrowserScriptRunReport, BrowserPageSnapshot, BrowserScreenshotCapture } from '../shared/contracts.js'
 import type { BrowserResultReadOptions, BrowserResultArtifactChunk } from '../shared/browser-result-artifact.js'
@@ -21,7 +22,7 @@ const actions = new Set([...browserPageCapabilityNames('act'), ...browserPageCap
 const waits = new Set(browserPageCapabilityNames('wait'))
 type Active = { binding: ExternalBrowserBinding; operation: BrowserOperation | null; controller: AbortController; stopped: boolean }
 type Stores = { journal: BrowserOperationJournal; refs: Pick<BrowserRefLedgerStore, 'read' | 'write'>;
-  results: BrowserResultArtifactStore; evidence: BrowserStepEvidenceStore; uploads: BrowserUploads; decodeScreenshot(base64: string): BrowserPng }
+  results: BrowserResultArtifactStore; evidence: BrowserStepEvidenceStore; uploads: BrowserUploads; validateScreenshot(image: BrowserPng): void }
 
 /** An external page owner, using the existing runner, dispatch, journal and payload owners.
  * It never supplies a pretend WebContentsView, creates a browser, or manages an Agent Run.
@@ -148,10 +149,18 @@ export class ExternalBrowserOwner {
           })
           const before = await readViewport()
           requireCurrent()
-          const result = await attached.sendCommand('Page.captureScreenshot', { format: 'png' }) as { data: string }
+          const image = await capturePageImage({ capture: async () => {
+            const result = await attached.sendCommand('Page.captureScreenshot', { format: 'png' }) as { data?: unknown }
+            const data = result?.data
+            if (typeof data !== 'string' || !data.length || data.length > PNG_MAX_BASE64_CHARS) throw new Error('Shared-tab screenshot must contain bounded base64 PNG data.')
+            const bytes = Buffer.from(data, 'base64')
+            if (bytes.toString('base64') !== data) throw new Error('Shared-tab screenshot must contain canonical base64 PNG data.')
+            return { png: bytes }
+          } })
           const after = await readViewport()
           requireCurrent(); if (binding.navigationId !== navigationId) throw new ExternalBrowserRequestFailure('The original document changed during screenshot capture.', true)
-          return { browserId: id, navigationId, source: screenshotSource(url, title, before, after), image: this.stores.decodeScreenshot(result.data) }
+          this.stores.validateScreenshot(image)
+          return { browserId: id, navigationId, source: screenshotSource(url, title, before, after), image }
         },
         uploads: { store: this.stores.uploads, context: () => { requireCurrent(); return {
           workspaceId: binding.workspaceId, browserId: id, operationId: operation.id, navigationId: binding.navigationId, documentSurvivesClient: true,

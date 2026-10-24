@@ -56,7 +56,8 @@ import { BrowserCdpSession } from './browser-cdp-session.js'
 import { BrowserNativeInputShield } from './browser-native-input-shield.js'
 import { cancelBrowserWebAuthnAccounts, registerBrowserWebAuthnAccounts, type BrowserWebAuthnOwner } from './browser-webauthn-accounts.js'
 import { cancelBrowserWebAuthnAccess, registerBrowserWebAuthnAccess } from './browser-webauthn-access.js'
-import { browserPngFromBytes, browserPngFromNativeImage } from './browser-image.js'
+import { capturePageImage } from '@agentmux/native-desktop/image'
+import { browserPagePixels } from './browser-image.js'
 import { createBrowserPageDispatch } from './browser-page-dispatch.js'
 import { browserOperationPhaseFromOutcome, browserRunOutcomeFromFailure } from './browser-run-outcome.js'
 import { safeBrowserUrl, startBrowserOperationStep, summarizeBrowserValue } from './browser-operation-step.js'
@@ -2025,11 +2026,13 @@ export class BrowserViewManager {
       if (typeof data !== 'string' || data.length === 0 || data.length > BROWSER_PNG_MAX_BASE64_CHARS) throw new Error('Browser screenshot must contain bounded base64 PNG data')
       const bytes = Buffer.from(data, 'base64')
       if (bytes.toString('base64') !== data) throw new Error('Browser screenshot must contain canonical base64 PNG data')
-      image = browserPngFromBytes(bytes)
+      image = await capturePageImage({ capture: async () => ({ png: bytes }) })
     } else {
-      const captured = await view.webContents.capturePage()
-      requireCurrent()
-      image = browserPngFromNativeImage(captured)
+      image = await capturePageImage({ capture: async () => {
+        const captured = await view.webContents.capturePage()
+        requireCurrent()
+        return browserPagePixels(captured)
+      } })
     }
     const after = await readViewport()
     requireCurrent()

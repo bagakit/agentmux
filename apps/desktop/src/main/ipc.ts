@@ -118,7 +118,9 @@ import type { DesktopLoadedRenderer, DesktopPackageIdentity } from '../shared/cl
 import { projectAppearance } from './project-appearance.js'
 import { executeBrowserTaskControl } from './browser-task-control.js'
 import { discoverAgentSkills, mintAgentSessionId, runProcess } from '@agentmux/core'
-import { captureComposerScreenshot } from './composer-screenshot.js'
+import { registerNativeDesktopIpc } from './native-desktop-ipc.js'
+import { getNativeDesktopOwner } from './native-desktop-owner.js'
+import { createNativeDesktopPublicOwner } from './native-desktop-public.js'
 import { readBookmark } from './bookmark-file.js'
 import { bookmarkKindForPath } from '../shared/bookmark-file.js'
 
@@ -127,7 +129,6 @@ import { dirname, join } from 'node:path'
 
 import {
   app,
-  clipboard,
   dialog,
   ipcMain,
   nativeImage,
@@ -163,7 +164,6 @@ import type {
   BrowserPresentationOccurrence,
   BrowserPresentationCaptureAck,
   BrowserPresentationActivation,
-  BrowserPng,
   BrowserProfileDeleteApproval,
   BrowserViewport,
   CreateWorkspacePathInput,
@@ -195,7 +195,7 @@ import type {
 } from '../shared/git-contracts.js'
 import type { AgentMuxControlErrorCode, AgentMuxInteractionResponse } from '@agentmux/core'
 import type { SessionHistoryPageOptions } from '../shared/contracts.js'
-import { BROWSER_PNG_MAX_BASE64_CHARS, AGENT_ATTENTION_ACTIVATE_CHANNEL, CONTROL_CANCEL_CHANNEL, CONTROL_REQUEST_CHANNEL, CONTROL_RESPONSE_CHANNEL, SESSION_HISTORY_OBSERVATION_CHANNEL, CONNECTION_METADATA_CHANGED_CHANNEL, CONNECTION_METADATA_OBSERVATION_CHANNEL, WORKSPACE_FILE_INVALIDATED_CHANNEL } from '../shared/contracts.js'
+import { AGENT_ATTENTION_ACTIVATE_CHANNEL, CONTROL_CANCEL_CHANNEL, CONTROL_REQUEST_CHANNEL, CONTROL_RESPONSE_CHANNEL, SESSION_HISTORY_OBSERVATION_CHANNEL, CONNECTION_METADATA_CHANGED_CHANNEL, CONNECTION_METADATA_OBSERVATION_CHANNEL, WORKSPACE_FILE_INVALIDATED_CHANNEL } from '../shared/contracts.js'
 import { createAgentNotifier } from './agent-notifier.js'
 import { ExternalBrowserBridge } from './browser-external-bridge.js'
 import { ExternalBrowserOwner } from './browser-external-owner.js'
@@ -220,7 +220,7 @@ import { verifiedBrowserWorkspace } from './browser-workspace-binding.js'
 import { BrowserProfileManager } from './browser-profile-manager.js'
 import { BrowserInputHistoryStore } from './browser-input-history.js'
 import type { BrowserInputHistoryTarget, BrowserInputHistoryScope } from '../shared/browser-input-history.js'
-import { browserPngFromBytes, nativeImageFromBrowserPng } from './browser-image.js'
+import { nativeImageFromBrowserPng } from './browser-image.js'
 import { savePastedImage } from './pasted-image-write.js'
 import { readPastedImage } from './pasted-image-read.js'
 import { ConfigStore } from './config-store.js'
@@ -450,12 +450,7 @@ export async function registerIpc(args: {
   await externalBridge.ready()
   const externalBrowsers = new ExternalBrowserOwner(externalBridge, { journal: browserOperationJournal,
     refs: browserRefs, evidence: browserEvidence, results: browserResults, uploads: browserUploads,
-    decodeScreenshot: data => {
-      if (typeof data !== 'string' || data.length > BROWSER_PNG_MAX_BASE64_CHARS) throw new Error('Shared-tab screenshot exceeds its image budget.')
-      const png = browserPngFromBytes(Buffer.from(data, 'base64'))
-      nativeImageFromBrowserPng(png, bytes => nativeImage.createFromBuffer(bytes))
-      return png
-    } })
+    validateScreenshot: image => { nativeImageFromBrowserPng(image, bytes => nativeImage.createFromBuffer(bytes)) } })
   const browsers = new BrowserViewManager(args.window, browserProfiles, browserRefs, {
     // Read the current owner fact so a remembered answer or explicit Forget takes effect immediately.
     rememberedSchemes: async () => config.browser.appLinkSchemes ?? {},
@@ -1566,20 +1561,10 @@ export async function registerIpc(args: {
         { transport: 'unix', principal: { kind: 'user', id: `local-user:${process.getuid?.() ?? 'current'}` }, signal }))
     args.webLinks?.ready((request, signal) => controlBridge.execute(request, signal), message => contents.send('ui:spatialLinkIssue', message))
   })
-  handle('ui:readClipboardText' , () => clipboard.readText())
-  handle('ui:writeClipboardText', (text: string) => {
-    clipboard.writeText(text)
-  })
-  handleWithEvent('ui:writeClipboardImage', (event, image: BrowserPng) => {
-    requireTrustedSender('ui:writeClipboardImage', event)
-    clipboard.writeImage(nativeImageFromBrowserPng(image, (png) => nativeImage.createFromBuffer(png)))
-  })
+  registerNativeDesktopIpc({ home: app.getPath('home'), native: getNativeDesktopOwner,
+    handle: handleWithEvent, trust: requireTrustedSender })
   handleWithEvent('ui:openExternal', async (event, rawUrl: string) => {
     await openExternalFromRenderer(event, contents, rawUrl)
-  })
-  handleWithEvent('ui:captureScreenshot', async (event) => {
-    requireTrustedSender('ui:captureScreenshot', event)
-    return await captureComposerScreenshot(app.getPath('home'))
   })
   handleWithEvent('ui:nativeBrowserVisibility', (event, scope?: import('../shared/workbench-windows.js').WorkbenchWindowDocument) => {
     requireTrustedSender('ui:nativeBrowserVisibility', event)
@@ -2441,6 +2426,7 @@ export async function registerIpc(args: {
     capsuleInput: capsuleReplies,
     agentLearning: agentLearningAuthority,
     inputContextCaptures,
+    nativeDesktop: createNativeDesktopPublicOwner(getNativeDesktopOwner(), { hostId: 'local' }),
     windows: args.workbenchWindows,
     deliveryAttempts,
     ...(args.clientIncidents ? { clientIncidents: args.clientIncidents } : {}),
