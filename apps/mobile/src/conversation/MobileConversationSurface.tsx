@@ -1,4 +1,5 @@
 import { useMobileCommands } from './use-mobile-commands'
+import { useMobileAgentReferences } from './use-mobile-agent-references'
 import { consumeProgrammaticReadingScroll, markProgrammaticReadingScroll } from '@agentmux/client-ui/reading-scroll'
 import type { ConversationPresentationController } from '@agentmux/client-ui/use-conversation-record-layout'
 import { MessageDeliveryFailure } from '@agentmux/client-ui/components/MessageDeliveryFailure'
@@ -30,9 +31,7 @@ import { MobileAttachments, type MobileAttachmentControls } from './MobileAttach
 import { fileUploadScopeMatches } from './attachments'
 import type { ComposerInsertionHandle } from '@agentmux/client-ui/composer-insertion'
 import type { ComposerSuggestion } from '@agentmux/client-ui/components/AgentComposer'
-import { encodeSemanticReference } from '@agentmux/client-ui/composer-semantic-reference'
 import { appendNamedFileReference } from '@agentmux/client-ui/composer-file-reference'
-import { formatSessionAddress } from '@agentmux/core/sharing'
 import { useMobilePromptController } from './use-mobile-prompt-controller'
 import { useMobileInteractionController } from './use-mobile-interaction-controller'
 import './conversation.css'
@@ -141,24 +140,9 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
     commands: providerCapabilities.commands, visible, connected: connection.state === 'connected' && !reading.disconnected,
     demand: commandMenuOpen || composerFocused })
   const commandSuggestions = mobileCommands.commands
-  const agentReferences = useMemo<ComposerSuggestion[]>(() => {
-    try {
-      return (client?.agentSessions() ?? []).map(peer => {
-        const peerId = peer.agentSessionId
-        const label = peerId === agentSessionId && displayName ? displayName : `${peer.providerId} (${peerId.slice(0, 6)})`
-        const link = formatSessionAddress(peerId)
-        return {
-          id: `agent:${peerId}`,
-          text: `@${label}`,
-          label,
-          description: `${peer.hostId} · ${peerId}`,
-          group: 'Agents',
-          searchText: `${label} ${peerId} ${peer.providerId}`,
-          insertText: encodeSemanticReference({ kind: 'agent', token: `@${label}`, label, reference: link })
-        }
-      })
-    } catch { return [] }
-  }, [client, session, agentSessionId, displayName])
+  const [referenceRequested, requestReferences] = useState(false)
+  const onCompletionQuery = useCallback((query: { kind: string } | null) => requestReferences(query?.kind === 'reference'), [])
+  const agentReferences = useMobileAgentReferences(client, agentSessionId, displayName, visible && referenceRequested)
   async function insertSuggestion(item: ComposerSuggestion) {
     if (!insertion.current) {
       setCopyNotice('原编辑器未准备好；草稿保留。')
@@ -492,7 +476,9 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
               return appendNamedFileReference('', path, original.identity.name)
             }, { separate: true })
           }} />}
-          commands={commandSuggestions} promptKeywords={mobileCommands.promptKeywords} references={agentReferences}
+          active={visible} onCompletionQuery={onCompletionQuery}
+          commands={commandSuggestions} promptKeywords={mobileCommands.promptKeywords} references={agentReferences.references}
+          {...(agentReferences.issue ? { completionFeedback: agentReferences.issue } : {})}
           tools={<MobileMessageTools refresh={() => { void reading.refresh() }}
             key={JSON.stringify([historyScope, session?.providerId])}
             commands={commandSuggestions} onCommand={item => { void insertSuggestion(item) }}
