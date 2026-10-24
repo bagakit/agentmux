@@ -344,6 +344,16 @@ export function parseRpcNativeResult(method: AgentMuxRpcMethod, value: unknown, 
       case 'system.diagnostics.inspect': return parseDiagnosticEvidenceResult(value, input) as unknown as Record<string, unknown>
       case 'message.delivery.inspect': return parseDeliveryAttemptLookup(value, input.logId as string) as unknown as Record<string, unknown>
       case 'message.delivery.report': return parseDeliveryAttemptLookup(value, (input.record as import('./delivery-attempt.js').DeliveryAttempt).logId) as unknown as Record<string, unknown>
+      case 'skill.ls': {
+        record(p, ['hostId', 'sourceHostId', 'agentSessionId', 'providerId', 'workspacePath', 'skills'])
+        string(p.hostId); string(p.sourceHostId); string(p.agentSessionId); string(p.providerId); string(p.workspacePath)
+        if (p.hostId !== input.hostId || p.agentSessionId !== input.agentSessionId) fail()
+        array(p.skills, value => {
+          const skill = record(value, ['name', 'description', 'path', 'source'])
+          string(skill.name); text(skill.description); string(skill.path); member(skill.source, ['project', 'user'])
+        })
+        break
+      }
       case 'agent.native.ls': {
         record(p, ['hostId', 'executorId', 'providerId', 'capabilities', 'availability', 'sessions', 'issues'])
         string(p.hostId); string(p.executorId); string(p.providerId)
