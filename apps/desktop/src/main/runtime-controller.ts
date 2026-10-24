@@ -2348,7 +2348,7 @@ export class RuntimeController {
     // 排在后面的 resize 找不到 owner，直接 revoke（这条性质原先靠「停止占着队列」间接成立，
     // 现在直接写出来）；而一次没回执的停止也不会让这一格永远顶着一个已经作废的附着。
     this.forgetSessionAttachmentOwner(attachmentKey)
-    const client = await this.connectedClient(control.hostId)
+    const client = await this.connectedClient(control.hostId, 'runtime')
     if (control.kind === 'agent') {
       await client.stopAgent(control.agentSessionId, control.run)
     } else {
