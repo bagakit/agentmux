@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config'
 import native from './vitest.channel-history.config.mts'
 
 const mutation = process.env.FEISHU_ROLE_MUTANT
-if (mutation && mutation !== 'original-role') throw Error('Unknown role presentation mutant')
+if (mutation && !['original-role', 'input-status-author-gate'].includes(mutation)) throw Error('Unknown role presentation mutant')
 export default defineConfig({ ...native, cacheDir: resolve(native.root!, '.cache/feishu-role-presentation'),
   plugins: [...native.plugins!, { name: 'runtime-loaded-role-presentation', enforce: 'pre', transform(input, id) {
     const path = relative(native.root!, id.split('?')[0]!)
@@ -14,6 +14,11 @@ export default defineConfig({ ...native, cacheDir: resolve(native.root!, '.cache
       const before = 'incoming: originalMessage !== undefined'
       if (input.split(before).length !== 2) throw Error('Original role mutation must load once')
       output = input.replace(before, 'incoming: false')
+    }
+    if (mutation === 'input-status-author-gate' && path === 'packages/connectors/src/adapters/feishu/publication.ts') {
+      const before = 'const status = inputStatus(payload)'
+      if (input.split(before).length !== 2) throw Error('Input status mutation must load once')
+      output = input.replace(before, "const status = speaker.kind === 'human' ? inputStatus(payload) : undefined")
     }
     const marker = process.env.FEISHU_ROLE_LOADED
     if (!marker) return input === output ? undefined : { code: output, map: null }

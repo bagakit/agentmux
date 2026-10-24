@@ -323,3 +323,30 @@ it('measures qualified original A2A surfaces in the native budget before freezin
     expect(feishuCardElements(card)[0].text.content).toContain('Exact peer · Agent · → this conversation')
   }
 })
+
+it('preserves typed original input status without inventing a missing speaker snapshot', async () => {
+  const f = await fixture(), signal = new AbortController().signal
+  const text = 'Original human relay with unconfirmed display attribution'
+  const original = operation({ payload: { kind: 'speech', text, inputSubmission: { status: 'waiting', observation: 'owned' },
+    relay: { sender: 'application', sources: [{ author: { kind: 'human' }, part: {
+      record: { hostId: 'local', agentSessionId: 'original-session', source: { kind: 'captured', recordId: 'original-user' } },
+      recordRevision: 'original-user-revision', selector: { kind: 'captured-field', field: 'content' } } }] } } })
+  expect(original.speaker).toBeUndefined()
+  const prepared = f.publisher.prepare(original), frozen = JSON.stringify(prepared)
+  const receipt = await f.publisher.dispatch(prepared, original.target, 'fixture-credential', signal)
+  expect(receipt.state).toBe('confirmed'); if (receipt.state !== 'confirmed') throw Error('Original input card did not reach native create')
+  expect(await f.publisher.inspect(prepared, original.target, 'fixture-credential', signal, receipt.mapping)).toEqual(receipt)
+  const accepted = f.publisher.prepare({ ...original, operationId: 'original-input-accepted', mapping: receipt.mapping,
+    payload: { ...original.payload as Extract<PublicationPayload, { kind: 'speech' }>, inputSubmission: { status: 'admitted', observation: 'closed' } } })
+  expect(await f.publisher.dispatch(accepted, original.target, 'fixture-credential', signal, receipt.mapping)).toEqual(receipt)
+  expect(await f.publisher.inspect(accepted, original.target, 'fixture-credential', signal, receipt.mapping)).toEqual(receipt)
+  for (const [wire, status] of [[prepared, 'Saved · waiting for Agent'], [accepted, 'Accepted by Agent']] as const) {
+    const card = JSON.parse(JSON.parse(wire.request.body!).content), elements = feishuCardElements(card)
+    expect(card.header).toBeUndefined(); expect(card.body.elements[0].background_style).toBe('bg-white')
+    expect(elements[0]).toMatchObject({ text: { content: 'Unknown author', text_color: 'grey' }, icon: { tag: 'standard_icon', token: 'info_outlined' } })
+    expect(elements[1]).toMatchObject({ tag: 'markdown', content: text })
+    expect(elements.at(-1)).toMatchObject({ tag: 'div', text_size: 'notation', text: { content: status, text_color: 'grey' } })
+  }
+  expect(JSON.stringify(prepared)).toBe(frozen)
+  expect(f.remote.messageCalls().map(call => call.method)).toEqual(['POST', 'GET', 'PATCH', 'GET'])
+})
