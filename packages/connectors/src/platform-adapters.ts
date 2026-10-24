@@ -6,6 +6,8 @@ import { DISCORD_PUBLICATION, prepareDiscordPublication } from './adapters/disco
 import { readDiscordActor } from './adapters/discord/profile.js'
 import { createDiscordMetadataCache } from './adapters/discord/metadata.js'
 import { createFeishuChannelProfiles } from './adapters/feishu/channel-profile.js'
+import { FEISHU_API_DESCRIPTION, validateFeishuApiRequest } from './adapters/feishu/api.js'
+import { DISCORD_API_DESCRIPTION, validateDiscordApiRequest } from './adapters/discord/api.js'
 
 /** Built-in leaves stay unloaded until an explicit adapter operation or receiver consumes them. */
 export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] {
@@ -23,6 +25,7 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
   })
   const adapter: ConnectionAdapter = {
     adapterId: 'feishu',
+    api: { description: FEISHU_API_DESCRIPTION, validate: validateFeishuApiRequest, request: async (...input) => (await feishu()).api.request(...input) },
     setClientRetention: read => { feishuRetention = read },
     releaseConnection: connectionId => feishuAdapter?.releaseConnection(connectionId),
     close: () => { feishuClosed = true; feishuRetention = () => false; feishuAdapter?.close() },
@@ -111,6 +114,7 @@ export function createBuiltinConnectionAdapters(): readonly ConnectionAdapter[] 
   const discordProfiles = createDiscordMetadataCache({ readActor: readDiscordActor })
   const discordAdapter: ConnectionAdapter = {
     adapterId: DISCORD_PUBLICATION.adapterId,
+    api: { description: DISCORD_API_DESCRIPTION, validate: validateDiscordApiRequest, request: async (...input) => (await discord()).api.request(...input) },
     setClientRetention: read => { discordRetention = read },
     releaseConnection: connectionId => discordAdapterOwner?.releaseConnection(connectionId),
     close: () => { discordClosed = true; discordRetention = () => false; discordAdapterOwner?.close() },
