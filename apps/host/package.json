@@ -264,6 +264,10 @@
     "./continuous-progress-loop-manager": {
       "types": "./dist/continuous-progress-loop-manager.d.ts",
       "import": "./dist/continuous-progress-loop-manager.js"
+    },
+    "./goal-projection": {
+      "types": "./dist/goal-projection.d.ts",
+      "import": "./dist/goal-projection.js"
     }
   }
 }
