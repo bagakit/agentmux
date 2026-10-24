@@ -93,13 +93,35 @@ async function originalInput(f, observed, marker) {
   assert.ok(manual, 'Real Mobile must retain the exact original input request')
   assert.equal(manual.agentSessionId, f.original.agentSessionId); assert.deepEqual(manual.expectedRun, f.original.run)
   const key = { kind: 'prompt', agentSessionId: manual.agentSessionId, expectedRun: manual.expectedRun, submissionId: attempt.operationId }
+  const proof = { observed, key, marker }
+  ;(receipt.inputs ??= []).push(proof)
   const input = await until('public original input receipt', () => f.sdk.inspectAgentInput({ key }), value => value?.status === 'terminal-confirmed' || value?.status === 'admitted')
+  proof.input = input
   assert.deepEqual(input.key, key)
-  const output = await until('actual Provider receives original Mobile input', async () => {
-    const attached = await f.sdk.reattachAgent(f.original.agentSessionId, 0, 'raw')
-    return attached.attachment.replay.map(chunk => chunk.data).join('')
-  }, text => text.includes('codex-submit:' + marker + ':accepted'))
-  assert.equal(output.split('codex-submit:' + marker + ':accepted').length - 1, 1, 'The exact input must reach the original native process once')
+  assert.equal(input.admission?.admission?.submissionId, key.submissionId)
+  assert.equal(input.admission?.admission?.acknowledged, true)
+  const intent = input.admission?.admission?.intent
+  assert.ok(intent); assert.deepEqual(intent.run, key.expectedRun)
+  assert.equal(intent.message.userContent, marker)
+  const accepted = ('codex-submit:' + intent.prompt + ':accepted').replaceAll('\r\n', '\n')
+  try {
+    const output = await until('actual Provider receives original Mobile input', async () => {
+      proof.replay = await f.sdk.readRunReplay(f.original.run, 0, 'raw')
+      assert.equal(proof.replay.run.runId, key.expectedRun.runId)
+      return proof.replay.replay.map(chunk => chunk.data).join('').replaceAll('\r\n', '\n')
+    }, text => text.includes(accepted))
+    assert.equal(output.split(accepted).length - 1, 1, 'The exact input must reach the original native process once')
+  } catch (error) {
+    proof.failureObservations = Object.fromEntries(await Promise.all([
+      ['currentInput', () => f.sdk.inspectAgentInput({ key })],
+      ['status', () => f.sdk.statusAgent(f.original.agentSessionId)],
+      ['nativeTranscript', () => readFile(f.original.nativeHandle.transcriptPath, 'utf8')]
+    ].map(async ([name, read]) => {
+      try { return [name, { status: 'observed', value: await read() }] }
+      catch (observation) { return [name, { status: 'unavailable', code: observation.code, message: observation.message }] }
+    })))
+    throw error
+  }
   return { key, input, marker }
 }
 async function servedMobile(f, loaded, candidate) {
