@@ -57,9 +57,9 @@ import { readInputObservation, resolveToolkitWorkspacePath } from '@agentmux/cor
 import { GoalDispatchInputOwner } from './goal-dispatch-input.js'
 import { assertGoalDispatchReference, type GoalDispatchReference } from '../shared/goal-dispatch.js'
 import { isDemandStoreError, parseDemandDispatchIntent, sameDemandDispatchIntent, type DemandDispatchIntent } from '@agentmux/demand'
-import { admittedDemandParticipation, admittedDemandCreateMatches, admittedDemandUpdateMatches } from './demand-participation.js'
+import { admittedDemandParticipation, admittedDemandCreateMatches, admittedDemandUpdateMatches } from '@agentmux/host/demand-participation'
 import { resolveGoalsPreferences } from '@agentmux/host/goals-preferences'
-import { assertGoalPmoIntent, goalPmoOperation, type GoalPmoIntent } from '../shared/goal-pmo-origin.js'
+import { assertGoalPmoIntent, goalPmoOperation, type GoalPmoIntent } from '@agentmux/host/goal-pmo-origin'
 import { NotesStorageOwner } from './notes-storage-owner.js'
 import { NOTES_WORKSPACE_ID } from '@agentmux/host/notes-library'
 import { DeliveryAttemptStore, parseDeliveryAttempt, type DeliveryAttempt } from '@agentmux/core'
@@ -86,7 +86,7 @@ import { AgentMuxNotebookStore, AgentMuxNotesStorage, type NotebookWrite } from 
 import {AgentMuxSpatialStateStore,spatialCatalog} from '@agentmux/core/spatial-state'
 import { displayLabel } from '@agentmux/core/spatial-graph'
 import { NameChangeAudit, nameChangeRequests, desktopNameContext, unknownNameContext } from './name-change-audit.js'
-import { desktopNameHistory } from './name-history.js'
+import { hostNameHistory } from '@agentmux/host/name-history'
 import type { AgentMuxNameContext } from '@agentmux/core/control'
 import { SCRATCH_WORKSPACE_ID } from '../shared/scratch-topics.js'
 import { sessionReopenResult } from '../shared/session-reopen-result.js'
@@ -2457,7 +2457,7 @@ export async function registerIpc(args: {
     clientNotifications: clientNotificationsPort(deliveryAttempts.hostId, (request, signal) => executeControl(request, undefined, signal)),
     moteContext: moteContextEvidencePort(deliveryAttempts.hostId, request => executeControl(request)),
     execute: executeControl,
-    nameHistory: query => desktopNameHistory(spatialState, demands, query),
+    nameHistory: query => hostNameHistory(spatialState, demands, query),
     spatialState,
     files: publicFiles,
     git: publicGit,

@@ -65,7 +65,7 @@ type AgentTimelineRuntimeEvent = RuntimeEvent & {
 
 export type PendingAgentLaunch = {
   /** Exact submitted request, captured before launch; never reconstructed from an editable draft. */
-  request?: { executorId: string; hostId?: string; workspacePath?: string; createOperationId?: string; prompt?: string; agentMuxNote?: string; goalPmo?: import('../../../shared/goal-pmo-origin').GoalPmoIntent }
+  request?: { executorId: string; hostId?: string; workspacePath?: string; createOperationId?: string; prompt?: string; agentMuxNote?: string; goalPmo?: import('@agentmux/host/goal-pmo-origin').GoalPmoIntent }
   events: RuntimeEvent[]
   overflowed: boolean
   /** Accepted Core identity while optional display reads are unavailable. */

@@ -42,7 +42,7 @@ import { readAgentPromptPreparationWait } from '@agentmux/core/prompt-preparatio
 import { submitWithPreparationRetry, type PromptPreparationRetryProgress } from './lib/prompt-preparation-retry'
 import { moteDefaultExecutor, moteDefaultConversation, recentMoteAgentsAfterVisit, restoredRecentMoteAgents, type MoteRecentAgent } from './lib/mote-quick-preferences'
 import { showMoteConversation } from './lib/mote-conversation-mode'
-import { goalPmoOperation, type GoalPmoIntent, type GoalPmoReceipt } from '../../shared/goal-pmo-origin'
+import { goalPmoOperation, type GoalPmoIntent, type GoalPmoReceipt } from '@agentmux/host/goal-pmo-origin'
 import { executeGlobalGoalPatrol } from './lib/goal-global-patrol'
 import { initializeGoalResponsibilityObservation, refreshKnownGoalResponsibilities } from './lib/goal-delegation-work'
 import { goalCreationDraftKey, restoredGoalAgentCreationDrafts, restoredGoalAgentSelectionDrafts, type GoalAgentSelectionDraft, type GoalAgentCreationDraft } from './lib/goal-agent-selection'
