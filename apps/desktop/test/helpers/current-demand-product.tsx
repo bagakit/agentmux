@@ -7,7 +7,7 @@ import { goalPmoOperation } from '@agentmux/host/goal-pmo-origin'
 // @vitest-environment happy-dom
 import { localRuntimeConnector } from './local-runtime-connector.js'
 import { EventEmitter } from 'node:events'
-import { mkdtemp, mkdir, rm, writeFile, symlink } from 'node:fs/promises'
+import { mkdtemp, mkdir, realpath, rm, writeFile, symlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { act, Profiler } from 'react'
@@ -29,7 +29,7 @@ const bridge = vi.hoisted(() => ({ api: null as AgentMuxPreloadApi | null, invok
   handlers: new Map<string, (...args: any[]) => any>(), renderer: new Map<string, Set<(...args: any[]) => any>>(),
   main: new Map<string, Set<(...args: any[]) => any>>(), sender: null as any,
   deliver: (channel: string, ...args: any[]) => {}, reply: (channel: string, ...args: any[]) => {} }))
-vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn() },
+vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn(), off: vi.fn(), removeListener: vi.fn() },
   contextBridge: { exposeInMainWorld: (name: string, api: AgentMuxPreloadApi) => { bridge.api = api; Object.assign(window, { [name]: api }) } },
   ipcRenderer: { invoke: bridge.invoke,
     on: (channel: string, fn: (...args: any[]) => any) => { const set = bridge.renderer.get(channel) ?? new Set(); set.add(fn); bridge.renderer.set(channel, set) },
@@ -41,13 +41,17 @@ vi.mock('electron', () => ({ nativeTheme: { shouldUseDarkColors: true, on: vi.fn
     off: (channel: string, fn: (...args: any[]) => any) => bridge.main.get(channel)?.delete(fn),
     on: (channel: string, fn: (...args: any[]) => any) => { const set = bridge.main.get(channel) ?? new Set(); set.add(fn); bridge.main.set(channel, set) },
     removeListener: (channel: string, fn: (...args: any[]) => any) => bridge.main.get(channel)?.delete(fn) },
-  webFrame: { getZoomFactor: () => 1 }, app: { getPath: () => bridge.storagePath, getAppPath: () => process.env.AGENTMUX_DAILY_GOAL_REPOSITORY + '/apps/desktop', isPackaged: false },
+  globalShortcut: { register: vi.fn(() => true), unregister: vi.fn() },
+  webFrame: { getZoomFactor: () => 1 }, app: { once: vi.fn(), getPath: () => bridge.storagePath, getAppPath: () => process.env.AGENTMUX_DAILY_GOAL_REPOSITORY + '/apps/desktop', isPackaged: false },
   safeStorage: { isAsyncEncryptionAvailable: async () => false },
   clipboard: {}, dialog: {}, nativeImage: {}, shell: {}
 }))
-vi.mock('@agentmux/core', async importOriginal => ({ ...await importOriginal<typeof import('@agentmux/core')>(),
-  AgentMuxControlServer: class { constructor(options: any) { bridge.controlOptions = options } async start() {} async stop() {} }
-}))
+vi.mock('@agentmux/core', async importOriginal => {
+  const actual = await importOriginal<typeof import('@agentmux/core')>()
+  return { ...actual, AgentMuxControlServer: class extends actual.AgentMuxControlServer {
+    constructor(options: ConstructorParameters<typeof actual.AgentMuxControlServer>[0]) { super(options); bridge.controlOptions = options }
+  } }
+})
 import { openDemandStore } from '@agentmux/demand'
 import { AgentMuxRpcService } from '../../../../packages/core/src/public-rpc-service'
 import { connectAgentMuxRpc } from '../../../../packages/core/src/public-rpc-client'
@@ -77,9 +81,8 @@ import { RuntimeController } from '../../src/main/runtime-controller'
 import { ScratchTopics } from '../../src/main/scratch-topics'
 import { registerIpc } from '../../src/main/ipc'
 import { DEFAULT_CONFIG } from '../../src/main/config-store'
-import { ContinuousProgressLoopManager } from '../../../host/src/continuous-progress-loop-manager'
-import { ContinuousProgressLoopStore } from '@agentmux/host/continuous-progress-loop-store'
-import { deliverContinuousProgress } from '@agentmux/host/continuous-progress-delivery'
+import { ContinuousProgressLoopManager } from '@agentmux/host/continuous-progress-loop-manager'
+import { createHostGoals } from '../../../host/src/goals.js'
 import { useAppStore } from '../../src/renderer/src/store'
 import { api } from '../../src/renderer/src/lib/api'
 import { GoalContinuationControl } from '../../src/renderer/src/components/GoalContinuationControl'
@@ -91,11 +94,10 @@ import { GoalDetail } from '../../src/renderer/src/components/GoalDetail'
 import { EMPTY_GOAL_ACKNOWLEDGEMENT } from '../../src/renderer/src/components/GoalAlignment'
 import { AgentSessionComposer } from '../../src/renderer/src/components/AgentSessionComposer'
 import { privateTracker } from './continuous-progress-tracker'
-import { CONTINUOUS_PROGRESS_CHANGED } from '../../src/shared/contracts'
-import { CONTROL_REQUEST_CHANNEL, SESSION_EVENT_CHANNEL } from '../../src/shared/contracts'
+import { SESSION_EVENT_CHANNEL } from '../../src/shared/contracts'
 
-// Target product owners run: Composer → leaf → preload → registered IPC → Main loop → public
-// Core ingress; Store initialize installs its actual request handler. Electron transport, startup
+// Actual Composer/Goal → preload → registered Main IPC → public Core service → Host
+// Goal/input owner → original Core. Electron transport, startup
 // Browser services and Native I/O/screen wait are isolated. No PTY, private renderer or user Run.
 let cliRoot: string, sourceCli: string
 beforeAll(async () => {
@@ -133,21 +135,20 @@ let workbenchWindows: WorkbenchWindows, applicationAccess: AgentMuxApplicationAc
 let root: Root, container: HTMLDivElement, config: AppConfig, session: AgentMuxStoredAgentSession
 let activityCapability: string
 let writes: string[], cursor: number | null, requests: any[], observations: string[], now: number
-let afterInputObservation: (() => Promise<void>) | undefined, corruptReply: boolean, dropReply: boolean
+let hostGoals: ReturnType<typeof createHostGoals>, hostService: AgentMuxRpcService
 let snapshot: Extract<SessionSnapshot, { kind: 'agent' }>, ended: boolean
 beforeEach(async () => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
-  directory = await mkdtemp(join(tmpdir(), 'amx-progress-product-'))
+  directory = await mkdtemp(join(await realpath(tmpdir()), 'ag-'))
   const scratchRoot = join(directory, '.agentmux', 'topics')
   await mkdir(scratchRoot, { recursive: true })
   bridge.storagePath = join(directory, 'chromium')
   vi.stubEnv('AGENTMUX_DESKTOP_USER_DATA', bridge.storagePath)
   await mkdir(join(bridge.storagePath, 'Local Storage', 'leveldb'), { recursive: true })
   await mkdir(join(directory, 'home'))
-  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(directory, 'runtime'))
-  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'runtime', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))
+  vi.stubEnv('AGENTMUX_RUNTIME_DIRECTORY', join(directory, 'r'))
+  vi.stubEnv('AGENTMUX_STATE_DIRECTORY', join(directory, 'r', 'state')); vi.stubEnv('AGENTMUX_MESSAGE_QUEUE_PATH', join(directory, 'messages.ndjson'))
   writes = []; requests = []; observations = []; cursor = 0; now = _reshape_fixtureEpoch(0, 0, 0); ended = false
-  corruptReply = false; dropReply = false; afterInputObservation = undefined
   const store = new AgentMuxMemoryAgentSessionStore(), timestamp = Date.now()
   activityCapability = issueAgentCapability()
   session = { kind: 'agent', agentSessionId: 'progress-agent', hostId: 'local', providerId: 'codex', executorId: 'codex',
@@ -157,6 +158,8 @@ beforeEach(async () => {
   await store.compareAndSwap(null, session)
   client = new AgentMuxClient({ store }); const inner = client as any
   inner.connected = true; await inner.registry.load('local')
+  vi.spyOn(client, 'connect').mockResolvedValue()
+  vi.spyOn(client, 'connectRuntime').mockResolvedValue()
   const projection = () => ({ runId: session.run.runId, lifecycleOperationId: null, program: _hygiene_fixturePath("private/generic-input"), args: [],
     workspacePath: scratchRoot, pid: 2345, state: ended ? { type: 'exited', code: 0, signal: null } : { type: 'running' },
     cols: 80, rows: 24, latestOutputBytes: 0, firstAvailableByte: 0, acceptedInputBytes: cursor })
@@ -174,40 +177,37 @@ beforeEach(async () => {
   runtime.commit({ hosts: [{ id: 'local', config: { id: 'local', label: 'Private local', kind: 'local' }, client, executionHost: { kind: 'local', dispose: vi.fn() } as never }],
     removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
   vi.spyOn(runtime, 'prepare').mockResolvedValue({ hosts: [], removedHostIds: [], reservedHostIds: [], hostSignatures: new Map() })
-  config = { ...structuredClone(DEFAULT_CONFIG), workspaces: [{ id: '__scratch__', name: 'Owned topics', hostId: 'local', path: scratchRoot, kind: 'folder' }] }
-  demands = openDemandStore({ root: join(directory, 'goals') })
+  config = { ...structuredClone(DEFAULT_CONFIG), toolkit: { tools: [] }, workspaces: [{ id: '__scratch__', name: 'Owned topics', hostId: 'local', path: scratchRoot, kind: 'folder' }] }
+  hostGoals = createHostGoals({ configurationPath: join(directory, 'original-config.json'), projects: async () => [],
+    runtime: () => ({ client, ownerIdentity: () => ({ ownerInstanceId: 'original-goal-owner' }) }) as never,
+    coreCall: (hostId, method, params, context) => { expect(hostId).toBe('local'); return hostService.call(method, params, context) } })
+  demands = hostGoals.demands; manager = hostGoals.schedules
+  hostService = new AgentMuxRpcService({ coreClients: () => [{ hostId: 'local', client }], goalControl: hostGoals.execute, goalChanges: hostGoals.goalChanges,
+    goalDelegations: hostGoals.goalDelegations, goalParticipation: hostGoals.participation, progress: hostGoals.progress, schedules: hostGoals.schedules, automaticInput: hostGoals.automaticInput })
+  const originalCore = runtime.callOriginalCore.bind(runtime)
+  vi.spyOn(runtime, 'callOriginalCore').mockImplementation((hostId, method, params, context) => {
+    if (method === 'runtime.owner.identity') return Promise.resolve({ owner: { ownerInstanceId: 'original-goal-owner' } }) as never
+    if (method.startsWith('goal.') || method.startsWith('schedule.') || method.startsWith('agent.progress.') || method.startsWith('agent.automation.')) return hostService.call(method, params, context)
+    return originalCore(hostId, method, params, context)
+  })
   await demands.create({ id: 'goal', title: 'Original useful work', description: 'Complete the original useful result.', sessionIds: [session.agentSessionId], assigneeSessionIds: [session.agentSessionId], supervisorSessionId: session.agentSessionId, status: 'todo' })
   await demands.update('goal', { alignment: { summary: 'Useful result', criteria: [{ id: 'real', text: 'Original output exists' }], openQuestions: [] } })
   await demands.confirmAlignment('goal', 1)
-  manager = new ContinuousProgressLoopManager(new ContinuousProgressLoopStore(join(directory, 'loops.json')),
-    (loop, operationId, isCurrent, signal) => deliverContinuousProgress(runtime, loop, operationId, isCurrent, signal),
-    () => now, (loop, tickId, time, signal) => runtime.observeContinuousProgress(loop, tickId, time, signal), undefined, { read: id => demands.get(id), subscribe: listener => demands.subscribe(snapshot => listener(snapshot.demands)), inspectInitial: loop => runtime.inspectContinuousProgressInitial(loop) })
   const frame = { url: 'app://private-goal-fixture', framesInSubtree: [] }
   bridge.sender = Object.assign(new EventEmitter(), { id: 7891, isDestroyed: () => false, mainFrame: frame,
     getURL: () => frame.url, getOSProcessId: () => process.pid, isLoadingMainFrame: () => false, getZoomFactor: () => 1,
     send: (channel: string, ...args: any[]) => bridge.deliver(channel, ...args), session: { flushStorageData: vi.fn(), getStoragePath: () => bridge.storagePath } })
-  bridge.deliver = (channel, ...args) => {
-    if (channel === CONTROL_REQUEST_CHANNEL && args[0].control) {
-      observations.push(args[0].control.agentSessionId)
-      if (dropReply) return
-    }
-    for (const fn of bridge.renderer.get(channel) ?? []) fn({}, ...args)
-  }
+  bridge.deliver = (channel, ...args) => { for (const fn of bridge.renderer.get(channel) ?? []) fn({}, ...args) }
   bridge.reply = (channel, ...args) => {
-    args = structuredClone(args)
-    const response = args[0]
-    if (corruptReply && response?.ok && response.result?.operation === 'continuous-progress.observeInput') response.result.control.run.runId = 'wrong-run'
-    const send = () => { for (const fn of bridge.main.get(channel) ?? []) fn({ sender: bridge.sender }, ...args) }
-    if (response?.ok && response.result?.operation === 'continuous-progress.observeInput' && afterInputObservation) {
-      const once = afterInputObservation; afterInputObservation = undefined; void once().then(send)
-    } else send()
+    for (const fn of bridge.main.get(channel) ?? []) fn({ sender: bridge.sender }, ...structuredClone(args))
   }
   const fixtureConfigStore = new ConfigStore(join(directory, 'original-config.json'))
+  config = await fixtureConfigStore.save(config)
   const mainWindow = Object.assign(new EventEmitter(), { id: 71, setBackgroundColor: vi.fn(), webContents: bridge.sender, isDestroyed: () => false }) as unknown as BrowserWindow
   workbenchWindows = new WorkbenchWindows(mainWindow, new WorkbenchWindowStore(join(directory, 'windows.json')), () => [])
   applicationAccess = new AgentMuxApplicationAccessOwner({ path: join(directory, 'application-access.sqlite'), resolveHost: async () => { throw new Error('Application access is outside this Goal fixture') } })
   disposeIpc = await registerIpc({ initialConfig: config, window: mainWindow, workbenchWindows, applicationAccess,
-    runtime, progressLoops: manager, demands, configStore: { get: async () => config, validate: (next: AppConfig) => fixtureConfigStore.validate(next), save: async (next: AppConfig) => { config = await fixtureConfigStore.save(next); return config } } as unknown as ConfigStore,
+    runtime, configStore: { get: async () => config, validate: (next: AppConfig) => fixtureConfigStore.validate(next), save: async (next: AppConfig) => { config = await fixtureConfigStore.save(next); return config } } as unknown as ConfigStore,
     scratchTopics: new ScratchTopics(), workspaceFiles: { read: vi.fn(), listFiles: vi.fn(), dispose: async () => {} } as unknown as WorkspaceFiles })
   bridge.invoke.mockImplementation(async (channel: string, ...values: unknown[]) => {
     const handler = bridge.handlers.get(channel); expect(handler).toBeTypeOf('function')
@@ -229,7 +229,7 @@ afterEach(async () => {
   useAppStore.setState(initial, true)
   window.dispatchEvent(new Event('pagehide'))
   await api.ui.requestStorageFlush()
-  const cleanup = await Promise.allSettled([manager?.stop(), disposeIpc?.(), runtime?.dispose()])
+  const cleanup = await Promise.allSettled([hostGoals?.dispose(), hostService?.dispose(), disposeIpc?.(), runtime?.dispose()])
   disposeIpc = undefined
   workbenchWindows?.dispose(); await applicationAccess?.dispose()
   bridge.main.clear(); bridge.renderer.clear(); bridge.handlers.clear(); bridge.invoke.mockReset()
@@ -239,4 +239,4 @@ afterEach(async () => {
 
 const request = (operationId = 'original-start') => ({ schemaVersion: AGENTMUX_CONTROL_SCHEMA_VERSION, requestId: operationId, operation: 'demand.start' as const, demandId: 'goal', sessionId: session.agentSessionId, continuation: { intervalMs: 60_000, alignmentRevision: 1 } })
 
-export { bridge, demands, directory, client, runtime, manager, root, container, config, session, writes, requests, snapshot, sourceCli, request }
+export { bridge, hostGoals, demands, directory, client, runtime, manager, root, container, config, session, writes, requests, snapshot, sourceCli, request }
