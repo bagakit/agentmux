@@ -13,7 +13,7 @@ vi.mock('../src/renderer/src/components/settings/ToolkitScriptEditor', () => ({ 
 import { SettingsPanel } from '../src/renderer/src/components/SettingsPanel'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
-import { resolveGoalsPreferences } from '../src/shared/goals-preferences'
+import { resolveGoalsPreferences } from '@agentmux/host/goals-preferences'
 import { AgentMuxRpcService } from '../../../packages/core/src/public-rpc-service'
 import { AgentMuxControlServer } from '../../../packages/core/src/public-rpc-server'
 import { parseSettingsCommand } from '../../../packages/core/src/settings-cli'
