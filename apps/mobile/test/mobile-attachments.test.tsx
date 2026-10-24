@@ -58,6 +58,168 @@ function identity(file: LocalAttachment) { return { hostId: 'local', agentSessio
   name: file.name, mimeType: file.mimeType, byteLength: file.size, revision: file.revision } }
 
 describe('actual Mobile picker, attachment chip, shared Composer and original send', () => {
+  it('sends selected images without text through actual Hosted upload, public socket, Core admission and original Run producer', async () => {
+    const f = await attachmentHostedFixture(root); disposers.push(f.dispose)
+    pickFiles([{ name: 'screen.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await click(button(ui.element, 'Reference files for the Agent to read'))
+    expect(button(ui.element, 'Send').disabled).toBe(false)
+    expect(f.writes).toEqual([]); expect(f.submit).not.toHaveBeenCalled()
+    await click(button(ui.element, 'Send'))
+    await act(async () => { await vi.waitFor(() => expect(f.core.agentSession('session-original').promptCompletionAdmission).toMatchObject({
+      acknowledged: true, intent: { run: { runId: 'run-original' }, message: { authorHuman: true } }
+    })) })
+    expect(f.submit).toHaveBeenCalledOnce()
+    const reference = f.submit.mock.calls[0]![0].prompt.match(/@([^\s]+attachment\.png)/u)?.[1]
+    expect(reference).toBeTruthy()
+    expect(await readFile(reference!, 'utf8')).toBe('file')
+    expect(f.writes).toEqual([expect.stringContaining('@' + reference)])
+    expect(editor(ui.element).textContent).toBe('')
+  })
+
+  it('uploads all selected attachments before one original text input without a separate upload click', async () => {
+    const f = boundFixture()
+    pickFiles([{ name: 'screen.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, '阅读所选图片'); await click(button(ui.element, 'Reference files for the Agent to read'))
+    await click(button(ui.element, 'Send'))
+    await act(async () => { await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce()) })
+    expect(f.calls.map(call => call.method)).toEqual(['file.upload'])
+    const receipt = await f.owner.inspect(f.calls[0]!.params)
+    expect(receipt.status).toBe('uploaded')
+    if (receipt.status !== 'uploaded') throw new Error('Original uploaded receipt required')
+    expect(f.submit.mock.calls[0]![0]).toMatchObject({ agentSessionId: 'session-original', expectedRun: { runId: 'run-original' } })
+    expect(f.submit.mock.calls[0]![0].prompt).toContain('阅读所选图片')
+    expect(f.submit.mock.calls[0]![0].prompt).toContain('@' + receipt.path)
+    expect(editor(ui.element).textContent).toBe('')
+  })
+
+  it('keeps an unknown selected upload out of input, then a new Send only inspects the same operation before submitting', async () => {
+    const f = boundFixture(), originalForward = f.forward.getMockImplementation()!
+    f.forward.mockImplementation(async (method, params) => {
+      const result = await originalForward(method, params)
+      if (method === 'file.upload') throw new Error('private upload reply lost')
+      return result
+    })
+    pickFiles([{ name: 'screen.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, '原正文'); await click(button(ui.element, 'Reference files for the Agent to read'))
+    await click(button(ui.element, 'Send')); await settled('unknown')
+    expect(f.submit).not.toHaveBeenCalled()
+    expect(getDeviceWorkface().snapshot().record.conversation.attempts).toEqual([])
+    expect(editor(ui.element).textContent).toBe('原正文')
+    expect(ui.element.textContent?.split('附件尚未确认保存在原 Mac；本次消息没有发送。').length).toBe(2)
+    const original = f.calls[0]!.params
+    await click(button(ui.element, 'Send'))
+    await act(async () => { await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce()) })
+    expect(f.calls.map(call => call.method)).toEqual(['file.upload', 'file.upload.inspect'])
+    expect(f.calls[1]!.params).toEqual(identity({ ...local(), id: original.operationId, name: original.name, mimeType: original.mimeType,
+      size: original.byteLength, revision: original.revision }))
+    expect(f.calls[1]!.params).not.toHaveProperty('dataBase64')
+    expect(f.submit.mock.calls[0]![0].prompt).toContain('原正文')
+    expect(f.submit.mock.calls[0]![0].prompt).toContain('@')
+  })
+
+  it('keeps partial upload results and the original body when one attachment fails, and explicitly retries only the same failed operation', async () => {
+    const f = boundFixture(), originalForward = f.forward.getMockImplementation()!, selected: any[] = []
+    let fail = true
+    f.forward.mockImplementation(async (method, params) => {
+      selected.push({ method, params: structuredClone(params) })
+      if (method === 'file.upload' && params.name === 'second.png' && fail) {
+        const { dataBase64: _bytes, ...original } = params
+        return { ...original, status: 'error', code: 'PRIVATE_DISK_FAILURE', message: 'private disk unavailable' } as any
+      }
+      return await originalForward(method, params)
+    })
+    const pick = pickFiles([{ name: 'first.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, '原正文'); await click(button(ui.element, 'Reference files for the Agent to read'))
+    pick.mockResolvedValue({ files: [{ name: 'second.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['next'], { type: 'image/png' }) as Blob }] })
+    await click(button(ui.element, 'Reference files for the Agent to read'))
+    await click(button(ui.element, 'Send'))
+    await act(async () => { await vi.waitFor(() => expect(getDeviceWorkface().snapshot().record.fileUploads?.map(item => item.phase)).toEqual(['uploaded', 'error'])) })
+    expect(f.submit).not.toHaveBeenCalled(); expect(editor(ui.element).textContent).toBe('原正文')
+    expect(getDeviceWorkface().snapshot().record.conversation.attempts).toEqual([])
+    fail = false; await click(button(ui.element, 'Send'))
+    await act(async () => { await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce()) })
+    expect(selected.map(item => [item.method, item.params.name])).toEqual([['file.upload', 'first.png'], ['file.upload', 'second.png'], ['file.upload', 'second.png']])
+    expect(selected[2]!.params).toEqual(selected[1]!.params)
+    expect(f.submit.mock.calls[0]![0].prompt.match(/@/gu)).toHaveLength(2)
+  })
+
+  it('freezes the selected message while a slow upload leaves later typing and new attachments untouched, and double Send cannot duplicate it', async () => {
+    const f = boundFixture(), gate = deferred<void>(), originalForward = f.forward.getMockImplementation()!
+    f.forward.mockImplementation(async (method, params) => { const result = await originalForward(method, params); if (method === 'file.upload') await gate.promise; return result })
+    const pick = pickFiles([{ name: 'first.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, '原正文'); await click(button(ui.element, 'Reference files for the Agent to read'))
+    await click(button(ui.element, 'Send'))
+    await act(async () => { await vi.waitFor(() => expect(f.calls).toHaveLength(1)) })
+    expect(button(ui.element, 'Send').disabled).toBe(true)
+    await click(button(ui.element, 'Send'))
+    await paste(ui.element, '后来编辑')
+    pick.mockResolvedValue({ files: [{ name: 'later.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['next'], { type: 'image/png' }) as Blob }] })
+    await click(button(ui.element, 'Reference files for the Agent to read'))
+    await act(async () => { gate.resolve(); await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce()) })
+    expect(f.calls).toHaveLength(1)
+    expect(f.submit.mock.calls[0]![0].prompt).toContain('原正文')
+    expect(f.submit.mock.calls[0]![0].prompt).not.toContain('后来编辑')
+    expect(f.submit.mock.calls[0]![0].prompt).not.toContain('later.png')
+    expect(editor(ui.element).textContent).toContain('后来编辑')
+    expect(ui.element.querySelector('.mobile-attachment[data-phase="selected"]')?.textContent).toContain('later.png')
+  })
+
+  it('keeps a target change after pre-RPC input retention as never requested and can explicitly send the same complete original operation afterwards', async () => {
+    const f = boundFixture(), owner = getDeviceWorkface(), edit = owner.editConversation.bind(owner)
+    const originalSession = f.sessions.get('session-original')!
+    let changeTarget = true
+    vi.spyOn(owner, 'editConversation').mockImplementation((edits, record) => {
+      const pending = edit(edits, record)
+      if (changeTarget && edits.some(item => item.bucket === 'attempts' && typeof item.next === 'object' && item.next && 'inputRequested' in item.next && item.next.inputRequested === true)) {
+        changeTarget = false
+        return pending.then(value => { f.sessions.set('session-original', { ...originalSession, run: { runId: 'later-run' } }); return value })
+      }
+      return pending
+    })
+    pickFiles([{ name: 'screen.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const ui = await mount(<MobileConversationSurface client={f.client} agentSessionId="session-original" connection={connected} platform={platform} />)
+    await paste(ui.element, '原正文'); await click(button(ui.element, 'Reference files for the Agent to read')); await click(button(ui.element, 'Send'))
+    await act(async () => { await vi.waitFor(() => {
+      const current = owner.snapshot().record.conversation.attempts[0]?.[1]
+      expect(current).toMatchObject({ phase: 'rejected', inputRequested: false })
+    }) })
+    expect(f.submit).not.toHaveBeenCalled()
+    const original = owner.snapshot().record.conversation.attempts[0]![1]
+    expect(original.draft).toContain('原正文'); expect(original.draft).toContain('agentmux-file:')
+    f.sessions.set('session-original', originalSession)
+    await click(button(ui.element, 'Send'))
+    await act(async () => { await vi.waitFor(() => expect(f.submit).toHaveBeenCalledOnce()) })
+    expect(f.submit.mock.calls[0]![0].operationId).toBe(original.operationId)
+    expect(f.calls.filter(item => item.method === 'file.upload')).toHaveLength(1)
+    expect(f.submit.mock.calls[0]![0].prompt).toContain('@')
+  })
+
+  it.each(['session', 'client', 'runtime', 'host', 'run', 'record'] as const)('does not input a prepared selected message after its original %s changes', async change => {
+    const f = boundFixture(), gate = deferred<void>(), originalForward = f.forward.getMockImplementation()!
+    f.forward.mockImplementation(async (method, params) => { const result = await originalForward(method, params); if (method === 'file.upload') await gate.promise; return result })
+    pickFiles([{ name: 'screen.png', mimeType: 'image/png', size: 4, blob: new NodeBlob(['file'], { type: 'image/png' }) as Blob }])
+    const render = (id = 'session-original', client = f.client) => <MobileConversationSurface client={client} agentSessionId={id} connection={connected} platform={platform} />
+    const ui = await mount(render())
+    await paste(ui.element, '原正文'); await click(button(ui.element, 'Reference files for the Agent to read')); await click(button(ui.element, 'Send'))
+    await act(async () => { await vi.waitFor(() => expect(f.calls).toHaveLength(1)) })
+    const original = f.sessions.get('session-original')!
+    if (change === 'runtime') Object.assign(f.client, { runtimeOwnerIdentity: () => ({ runtimeId: 'later-runtime' }) })
+    if (change === 'host') f.sessions.set('session-original', { ...original, hostId: 'later-host' })
+    if (change === 'run') f.sessions.set('session-original', { ...original, run: { runId: 'later-run' } })
+    if (change === 'record') await getDeviceWorkface().replaceBackup(emptyDeviceWorkface())
+    await ui.render(render(change === 'session' ? 'other' : 'session-original', change === 'client' ? { ...f.client } : f.client))
+    await act(async () => { gate.resolve(); await f.forward.mock.results[0]!.value })
+    if (change === 'record') await act(async () => { await vi.waitFor(() => expect(ui.element.textContent).toContain('附件回执仅在本次运行中保留')) })
+    else await settled('uploaded')
+    expect(f.submit).not.toHaveBeenCalled()
+    expect(getDeviceWorkface().snapshot().record.conversation.attempts).toEqual([])
+  })
+
   it.each(['session', 'host', 'runtime', 'run', 'record'] as const)('keeps a late chooser result on its captured %s target and never writes the later selection', async change => {
     const f = boundFixture(), file = local(), originalSession = f.sessions.get('session-original')!, gate = deferred<LocalAttachment | null>()
     const controls = createRef<MobileAttachmentControls>(), { insert, added } = insertionSpy()
