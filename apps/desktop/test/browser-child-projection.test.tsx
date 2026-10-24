@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act } from 'react'
+import { act, Profiler } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createWorkspaceLayout, moveTabToNewGroup } from '@agentmux/layout'
 import type { AppWindowTarget } from '@agentmux/core/control'
@@ -8,8 +8,9 @@ import type { AppConfig, BrowserEvent, BrowserSnapshot } from '../src/shared/con
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
 import { BrowserPane } from '../src/renderer/src/components/BrowserPane'
+import { BrowserSourceNavigation } from '../src/renderer/src/components/BrowserSourceNavigation'
 import { addWorkbenchRegion, createWorkbenchTab, type BrowserWorkbenchSurface } from '../src/renderer/src/lib/workbench-tabs'
-import { projectNativeBrowserOpening, resolveBrowserSource } from '../src/renderer/src/lib/browser-child-projection'
+import { createBrowserSourceSelector, nativeBrowserContainerChanged, projectNativeBrowserOpening, resolveBrowserSource } from '../src/renderer/src/lib/browser-child-projection'
 import { createBrowserProjectionEventQueue } from '../src/renderer/src/lib/browser-state'
 import { hydratePersistedTab, reducePersistedTab } from '../src/renderer/src/lib/workbench-persistence'
 import { placeWorkbenchWindow, registerWorkbenchDocument, registerWorkbenchHost } from '../src/renderer/src/lib/workbench-window-registry'
@@ -65,6 +66,53 @@ afterEach(async () => {
 })
 
 describe('native Browser child uses the ordinary Renderer workface', () => {
+  it('resolves an exact source without enumerating unrelated Tabs and retains the selector answer', () => {
+    const state = useAppStore.getState()
+    const tabs = new Proxy(state.tabs, { ownKeys: () => { throw new Error('Unrelated Tab enumeration on exact source lookup') } })
+    const select = createBrowserSourceSelector(source), first = select({ ...state, tabs })
+    expect(first).toEqual({ status: 'available', location: sourceLocation })
+    expect(select({ ...state, tabs })).toBe(first)
+  })
+
+  it.each(['unknown original location', 'moved original Region'])('shares fallback discovery and skips unrelated Store publications: %s', kind => {
+    const state = useAppStore.getState()
+    const layout = moveTabToNewGroup(createWorkspaceLayout(sourceLocation.groupId, [sourceLocation.tabId, 'unrelated-tab']), sourceLocation.tabId,
+      sourceLocation.groupId, sourceLocation.groupId, 'right', 'moved-group')
+    let scans = 0
+    const layouts = new Proxy({ [sourceLocation.displayWorkspaceId]: layout }, { ownKeys: target => { scans++; return Reflect.ownKeys(target) } })
+    const input = { tabs: state.tabs, layouts }
+    const target = kind === 'unknown original location' ? { browserId: source.browserId, navigationId: source.navigationId } : source
+    const selectors = Array.from({ length: 20 }, () => createBrowserSourceSelector(target))
+    const first = selectors.map(select => select(input))
+    expect(first[0]).toEqual({ status: 'available', location: { ...sourceLocation, groupId: 'moved-group' } })
+    expect(scans).toBe(1)
+    for (let index = 0; index < 30; index++) selectors.forEach((select, ordinal) => expect(select({ ...input })).toBe(first[ordinal]))
+    expect(scans).toBe(1)
+    const activity = { ...input, tabs: { ...state.tabs, 'unrelated-tab': { ...state.tabs['unrelated-tab']!, name: 'Unrelated activity' } } }
+    selectors.forEach(select => select(activity))
+    expect(scans).toBe(2)
+    const ended = { ...activity, tabs: { 'unrelated-tab': state.tabs['unrelated-tab']! } }
+    selectors.forEach(select => expect(select(ended).status).toBe('unavailable'))
+    expect(scans).toBe(3)
+  })
+
+  it('does not rerender mounted source controls or retry pending placement for unrelated Browser activity', async () => {
+    const render = vi.fn()
+    await act(async () => root.render(<Profiler id="source" onRender={render}><BrowserSourceNavigation source={source} /></Profiler>))
+    const before = render.mock.calls.length, state = useAppStore.getState()
+    for (let index = 0; index < 30; index++) {
+      const current = useAppStore.getState(), unrelated = current.tabs['unrelated-tab']!
+      const next = { tabs: { ...current.tabs, [unrelated.id]: { ...unrelated, name: 'Activity ' + index } } }
+      expect(nativeBrowserContainerChanged({ ...current, ...next }, current)).toBe(false)
+      await act(async () => useAppStore.setState(next))
+    }
+    expect(render.mock.calls.length).toBe(before)
+    const current = useAppStore.getState()
+    expect(nativeBrowserContainerChanged({ ...current, tabs: { ...current.tabs,
+      'unrelated-tab': { ...current.tabs['unrelated-tab']!, workspaceId: 'new-real-workspace' } } }, current)).toBe(true)
+    expect(resolveBrowserSource(state, source)).toEqual({ status: 'available', location: sourceLocation })
+  })
+
   it('preserves more than 256 native lifecycle events while coalescing only their Browser snapshots', () => {
     const queue = createBrowserProjectionEventQueue()
     for (let index = 0; index < 300; index++) {
@@ -145,6 +193,7 @@ describe('native Browser child uses the ordinary Renderer workface', () => {
     const after = useAppStore.getState(), child = childSurface()!
     expect(child).toMatchObject({ ...snapshot, browserId: snapshot.id, workspaceId: 'resource-workspace', kind: 'browser' })
     const target = windows.open.mock.calls[0]?.[0]
+    expect(windows.open.mock.calls[0]?.[1]).toEqual({ focus: false })
     expect(target).toMatchObject({ kind: 'region', displayWorkspaceId: sourceLocation.displayWorkspaceId, groupId: sourceLocation.groupId, regionId: snapshot.id })
     expect(after.tabs[target!.tabId]).toMatchObject({ space: sourceTab.space, topicId: sourceTab.topicId })
     expect(after.tabs[sourceLocation.tabId]).toBe(sourceTab)
@@ -165,6 +214,17 @@ describe('native Browser child uses the ordinary Renderer workface', () => {
     await flush()
     expect(childSurface()).toBeUndefined(); expect(useAppStore.getState().tabs[sourceLocation.tabId]).toBeDefined()
     expect(windows.retire).toHaveBeenCalledWith([{ tabId: target.tabId, regionId: target.regionId }])
+  })
+
+  it('projects the same healthy native child after a failed creation delivery without replaying the page', async () => {
+    const current = { ...snapshot, title: 'Original native page continued loading' }
+    const create = vi.spyOn(api.browser, 'create'), navigate = vi.spyOn(api.browser, 'navigate')
+    useAppStore.getState().applyBrowserEvent({ type: 'updated', browser: current })
+    expect(childSurface()).toBeUndefined()
+    useAppStore.getState().applyBrowserEvent({ ...event, browser: current })
+    await flush()
+    expect(childSurface()).toMatchObject({ id: snapshot.id, title: current.title, source })
+    expect(windows.open).toHaveBeenCalledTimes(1); expect(create).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled()
   })
 
   it('shows the same child for ambiguous source displays without inventing its original occurrence or following human focus', async () => {
@@ -194,7 +254,6 @@ describe('native Browser child uses the ordinary Renderer workface', () => {
     useAppStore.getState().applyBrowserEvent(event); await flush()
     expect(windows.open).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ kind: 'region',
       displayWorkspaceId: sourceLocation.displayWorkspaceId, groupId: sourceLocation.groupId, regionId: snapshot.id }), { focus: false })
-    expect(windows.open.mock.calls[0]?.[1]).toEqual({ focus: false })
     expect(childSurface()!.source).toEqual(source)
     expect(resolveBrowserSource(useAppStore.getState(), source)).toMatchObject({ status: 'ambiguous' })
   })
@@ -231,6 +290,25 @@ describe('native Browser child uses the ordinary Renderer workface', () => {
     expect(projectNativeBrowserOpening({ tabs: {}, layouts: { valid: empty } }, { ...event, browser, workspaceId: '' }).target).toBeNull()
     expect(projectNativeBrowserOpening({ tabs: {}, layouts: { valid: empty } }, { ...event, browser }).target)
       .toMatchObject({ displayWorkspaceId: 'valid', groupId: 'empty-group', regionId: snapshot.id })
+    const state = useAppStore.getState(), originalLayout = state.layouts[sourceLocation.displayWorkspaceId]!
+    expect(resolveBrowserSource({ tabs: state.tabs, layouts: { [sourceLocation.displayWorkspaceId]: {
+      ...originalLayout, root: { type: 'leaf', groupId: 'not-the-source-group' } } } }, source).status).toBe('unavailable')
+  })
+
+  it.each(['workspace', 'Browser identity'])('retries the same pending child when only its source Region gains a %s binding', async binding => {
+    const before = useAppStore.getState(), tab = before.tabs[sourceLocation.tabId]!
+    const unbound = { ...tab, workspaceId: '', regions: Object.fromEntries(Object.entries(tab.regions).map(([id, surface]) => [id, { ...surface, workspaceId: '' }])) }
+    if (binding === 'Browser identity') unbound.regions[sourceLocation.regionId] = { ...tab.regions[sourceLocation.regionId]!,
+      browserId: 'another-browser', workspaceId: 'recovered-workspace' } as BrowserWorkbenchSurface
+    useAppStore.setState({ tabs: { [tab.id]: unbound }, layouts: { [sourceLocation.displayWorkspaceId]: before.layouts[sourceLocation.displayWorkspaceId]! } })
+    useAppStore.getState().applyBrowserEvent({ ...event, workspaceId: null })
+    expect(childSurface()).toBeUndefined(); expect(windows.open).not.toHaveBeenCalled()
+    const create = vi.spyOn(api.browser, 'create'), navigate = vi.spyOn(api.browser, 'navigate')
+    useAppStore.setState({ tabs: { [tab.id]: { ...unbound, regions: { ...unbound.regions,
+      [sourceLocation.regionId]: { ...tab.regions[sourceLocation.regionId]!, workspaceId: 'recovered-workspace' } } } } })
+    await flush()
+    expect(childSurface()).toMatchObject({ id: snapshot.id, workspaceId: 'recovered-workspace' })
+    expect(windows.open).toHaveBeenCalledTimes(1); expect(create).not.toHaveBeenCalled(); expect(navigate).not.toHaveBeenCalled()
   })
 
   it('finishes the retained same-page projection after any legal workspace layout recovers, using its newest native snapshot', async () => {
