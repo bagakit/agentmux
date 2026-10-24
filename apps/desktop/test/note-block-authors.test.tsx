@@ -23,7 +23,7 @@ const authorshipStyles = readFileSync(join(import.meta.dirname, '../../../packag
 const originalWorker = globalThis.Worker
 const dom = composerDOM(), creator = { kind: 'agent', id: 'exact-original-creator' } as const, editorActor = { kind: 'agent', id: 'exact-latest-editor' } as const
 const names = { [creator.id]: 'Research', [editorActor.id]: 'Review' }
-const button = (id: string) => dom.container.querySelector<HTMLButtonElement>(`[data-author-block="${id}"]`)!
+const button = (id: string) => [...dom.container.querySelectorAll<HTMLButtonElement>('.note-block-author')].find(node => JSON.parse(node.dataset.authorBlocks!).includes(id))!
 const panel = () => document.querySelector<HTMLElement>('[role="dialog"][aria-label="Block authors"]')
 const directories: string[] = [], owners: WorkspaceFiles[] = []
 afterEach(async () => { await dom.render(null); await Promise.all(owners.splice(0).map(owner => owner.dispose())); await Promise.all(directories.splice(0).map(path => rm(path, { recursive: true, force: true }))); vi.stubGlobal('Worker', originalWorker) })
@@ -55,7 +55,8 @@ it.each(['rich editor', 'reader'] as const)('shows exact saved creator and lates
   else await dom.render(<NoteReader {...source.document} workspaceId="notes" agentNames={names} />)
   const body = dom.container.querySelector<HTMLElement & { editor: Editor }>('.ProseMirror')!, editor = body.editor
   const content = editor.getJSON(), selected = editor.state.selection.toJSON()
-  expect(button('authored').textContent).toBe('Agent · Review')
+  expect(button('authored').textContent).toBe('')
+  expect(button('authored').querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('object.agent')
   expect(button('authored').getAttribute('aria-label')).toBe('Block authors: Agent · Review')
   await openAuthors('authored')
   expect(panel()?.textContent).toContain('Created byAgent · Research')
@@ -81,8 +82,9 @@ it('keeps missing attribution distinct from confirmed people and retains an Agen
   saved.lastEdited = human
   useAppStore.setState({ agentNames: names })
   await dom.render(<NoteBlockEditor note={note} knowledge={noteKnowledge([])} onChange={() => {}} onOpen={() => {}} onSave={() => {}} onIssue={() => {}} />)
-  expect(button('authored').textContent).toBe('Agent · Research')
-  expect(button('unknown').textContent).toBe('Author unconfirmed'); expect(button('unknown').hasAttribute('data-human-only')).toBe(false)
+  expect(button('authored').textContent).toBe('')
+  expect(button('authored').title).toBe('Block authors: Agent · Research')
+  expect(button('unknown').textContent).toBe(''); expect(button('unknown').title).toBe('Block authors: Author unconfirmed'); expect(button('unknown').querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('status.unknown'); expect(button('unknown').hasAttribute('data-human-only')).toBe(false)
   expect(button('human').hasAttribute('data-human-only')).toBe(true)
   await openAuthors('unknown'); expect(panel()!.textContent).not.toContain('Person'); expect(panel()!.querySelectorAll('time')).toHaveLength(0); await escape()
   await openAuthors('authored'); expect(panel()!.textContent).toContain('Last edited byPerson'); expect(panel()!.textContent).toContain('confirmed-person'); await escape()
@@ -106,7 +108,8 @@ it('keeps partial saved attribution unknown and resolves the exact author after 
   note.content.content![0]!.attrs!.provenance.created = null
   useAppStore.setState({ agentNames: names })
   await dom.render(<NoteBlockEditor note={note} knowledge={noteKnowledge([])} onChange={() => {}} onOpen={() => {}} onSave={() => {}} onIssue={() => {}} />)
-  expect(button('authored').textContent).toBe('Agent · Review')
+  expect(button('authored').textContent).toBe('')
+  expect(button('authored').querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('object.agent')
   expect(button('authored').getAttribute('aria-label')).toContain('some attribution is unconfirmed')
   expect(button('authored').hasAttribute('data-human-only')).toBe(false)
   await openAuthors('authored')
@@ -115,7 +118,8 @@ it('keeps partial saved attribution unknown and resolves the exact author after 
   await act(async () => useAppStore.setState({ agentNames: { ...names, [editorActor.id]: 'Reviewer renamed' } }))
   // A replaced decoration cannot remain the focus-return target of an open dialog.
   expect(panel()).toBeNull()
-  expect(button('authored').textContent).toBe('Agent · Reviewer renamed')
+  expect(button('authored').textContent).toBe('')
+  expect(button('authored').title).toContain('Agent · Reviewer renamed')
   await openAuthors('authored')
   expect(panel()!.textContent).toContain('Last edited byAgent · Reviewer renamed')
   expect(panel()!.querySelector('code')!.textContent).toBe(`agent · ${editorActor.id}`)
@@ -141,7 +145,8 @@ it.each(['rich editor', 'reader'] as const)('keeps checked-item and paragraph au
   note.content.content = [{ type: 'taskList', content: [{ type: 'taskItem', attrs: { blockId: 'checked-item', checked: false }, content: [p('checked-body', 'Original task text'),
     { type: 'taskList', content: [{ type: 'taskItem', attrs: { blockId: 'nested-item', checked: false }, content: [p('nested-body', 'Nested text')] }] }] }] },
     { type: 'bulletList', content: [{ type: 'listItem', attrs: { blockId: 'plain-item' }, content: [p('plain-body', 'Plain item text')] }] },
-    { type: 'codeBlock', attrs: { blockId: 'human-code' }, content: [{ type: 'text', text: 'Original code' }] }]
+    { type: 'codeBlock', attrs: { blockId: 'human-code' }, content: [{ type: 'text', text: 'Original code' }] },
+    { type: 'blockquote', attrs: { blockId: 'quote' }, content: [p('quote-body', 'Original quote')] }]
   const created = await f.writer.write(f.workspace, { path: 'items.note.md', content: serializeNoteDocument(note), expectedRevision: null }, { actor: human })
   if (created.status !== 'written') throw Error('Original list write must succeed')
   note.content.content![0]!.content![0]!.attrs!.checked = true
@@ -161,18 +166,22 @@ it.each(['rich editor', 'reader'] as const)('keeps checked-item and paragraph au
     expect(button('checked-item').closest('p')?.dataset.blockId).toBe('checked-body')
     expect(button('nested-item').closest('p')?.dataset.blockId).toBe('nested-body')
     expect(button('plain-item').closest('p')?.dataset.blockId).toBe('plain-body')
-    expect(button('checked-item').textContent).toBe('Item · Agent · Review')
-    expect(button('checked-item').getAttribute('aria-label')).toBe('Item authors: Agent · Review')
+    expect(button('checked-item').textContent).toBe('')
+    expect(button('checked-item').querySelector('[data-semantic-icon]')?.getAttribute('data-semantic-icon')).toBe('object.agent')
+    expect(button('checked-item').getAttribute('aria-label')).toBe('Item authors: Agent · Review; Block authors: Person')
     expect(button('checked-item').hasAttribute('data-human-only')).toBe(false)
-    expect(button('checked-body').hasAttribute('data-human-only')).toBe(true)
-    expect(getComputedStyle(button('checked-body')).position).toBe('absolute')
-    const nestedGroup = button('nested-item').parentElement!
-    expect(nestedGroup).toBe(button('nested-body').parentElement)
-    expect(getComputedStyle(nestedGroup).position).toBe('absolute')
-    expect(getComputedStyle(button('nested-item')).position).toBe('static')
+    expect(button('checked-body')).toBe(button('checked-item'))
+    expect(button('checked-body').closest('p')!.querySelectorAll('.note-block-author')).toHaveLength(1)
+    expect(button('nested-item')).toBe(button('nested-body'))
+    expect(getComputedStyle(button('nested-item')).position).toBe('absolute')
+    expect(button('quote')).toBe(button('quote-body'))
+    expect(button('quote').closest('p')?.dataset.blockId).toBe('quote-body')
+    expect(button('quote').closest('blockquote')!.querySelectorAll('.note-block-author')).toHaveLength(1)
     expect(button('human-code').closest('pre')).toBeNull()
     expect(button('human-code').dataset.authorPlacement).toBe('block-end')
+    expect(getComputedStyle(button('human-code').parentElement!).height).toBe('0px')
     expect(getComputedStyle(button('human-code')).position).toBe('absolute')
+    expect(getComputedStyle(button('human-code')).pointerEvents).not.toBe('none')
     await openAuthors('checked-item')
     expect(panel()!.textContent).toContain('Item authors')
     expect(panel()!.textContent).toContain('structure and checked state')
@@ -181,8 +190,12 @@ it.each(['rich editor', 'reader'] as const)('keeps checked-item and paragraph au
     expect(panel()!.textContent).toContain(human.id); expect(panel()!.textContent).toContain(editorActor.id)
     await escape(); expect(document.activeElement).toBe(button('checked-item'))
     await openAuthors('checked-body')
-    expect(panel()!.textContent).toContain('Last edited byPerson')
-    expect(panel()!.textContent).not.toContain(editorActor.id)
+    expect(panel()!.querySelectorAll('[data-author-record]')).toHaveLength(2)
+    const itemRecord = panel()!.querySelector('[data-author-record="checked-item"]')!
+    const paragraphRecord = panel()!.querySelector('[data-author-record="checked-body"]')!
+    expect(itemRecord.textContent).toContain(editorActor.id)
+    expect(paragraphRecord.textContent).toContain('Last edited byPerson')
+    expect(paragraphRecord.textContent).not.toContain(editorActor.id)
     await escape()
     expect(editor.getJSON()).toEqual(content); expect(editor.state.selection.toJSON()).toEqual(selection)
     expect(editor.can().undo()).toBe(couldUndo); expect(changed).not.toHaveBeenCalled()

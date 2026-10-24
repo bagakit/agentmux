@@ -105,7 +105,7 @@ it.each(['hostId', 'workspaceId', 'workspacePath', 'path', 'noteId', 'revision',
   const original = { ...savedDocument, ...(field === 'documentPath' ? { path: 'another.note.md' } : {}), noteProvenance: saved }
   await dom.render(<Original original={original} />)
   const trigger = dom.container.querySelector('[aria-label="Page editors"]')!
-  expect(trigger.textContent).toContain('Unknown'); expect(trigger.querySelectorAll('[data-speaker-id]')).toHaveLength(0)
+  expect(trigger.textContent).toBe('Editors'); expect(trigger.getAttribute('aria-description')).toContain('not confirmed'); expect(trigger.querySelector('[data-semantic-icon="status.unknown"]')).not.toBeNull(); expect(trigger.querySelectorAll('[data-speaker-id]')).toHaveLength(0)
   await dom.click('[aria-label="Page editors"]')
   const panel = dom.container.querySelector('[aria-label="Note editors"]')!
   expect(panel.textContent).toContain('not confirmed for this file and revision')
@@ -163,6 +163,7 @@ it('does not use a local profile for an unconfirmed self and keeps the original 
   expect(dom.container.querySelector<HTMLButtonElement>('[aria-label="Follow page"]')!.disabled).toBe(false)
   await dom.click('[aria-label="Follow page"]')
   await vi.waitFor(async () => expect((await owner.read()).pages.original!.followers?.some(f => f.actor.id === self.id)).toBe(true))
+  await act(async () => { await vi.waitFor(() => expect(dom.container.querySelector<HTMLButtonElement>('[aria-label="Follow page"]')!.disabled).toBe(false)) })
   expect(panel.textContent).toContain('Refresh identity'); expect(panel.textContent).toContain('Unfollow myself')
 })
 
@@ -187,6 +188,7 @@ it('keeps the exact original follower and unfollow action available when a valid
   expect(dom.container.querySelector<HTMLButtonElement>('[aria-label="Unfollow page"]')!.disabled).toBe(false)
   await dom.click('[aria-label="Unfollow page"]')
   await vi.waitFor(async () => expect((await owner.read()).pages.original!.followers!.some(f => f.actor.id === self.id)).toBe(false))
+  await act(async () => { await vi.waitFor(() => expect(dom.container.querySelector<HTMLButtonElement>('[aria-label="Follow page"]')!.disabled).toBe(false)) })
   expect(editor()).toBe(originalEditor)
   expect(api.files.historyPublic).not.toHaveBeenCalled(); expect(api.files.write).not.toHaveBeenCalled()
 })

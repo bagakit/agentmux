@@ -21,6 +21,7 @@ import { useNotebookLibrary } from '../src/renderer/src/lib/notebook-library'
 import { api } from '../src/renderer/src/lib/api'
 import { WorkspaceFiles } from '../src/main/workspace-files'
 import { NoteFileWriter } from '../src/main/note-file-writer'
+import { NoteReader } from '@agentmux/client-ui/components/NoteReader'
 import { composerConfig, composerDOM } from './helpers/composer-dom-fixture'
 const dom = composerDOM(), path = 'original.note.md', key = documentKey('workspace', path)
 const surface = { kind: 'file' as const, regionId: 'original-note-region', workspaceId: 'workspace', path }, tab = createWorkbenchTab('original-note-tab', surface)
@@ -50,9 +51,12 @@ const presentation={active:true,survey:false,retainedRegionId:surface.regionId,t
 const notices=()=>[...dom.container.querySelectorAll<HTMLElement>('[role="status"]')].filter(node=>node.textContent?.startsWith('Block authorship '))
 const editor=()=>(dom.container.querySelector('.note-block-content') as HTMLElement&{editor:Editor}).editor
 async function openRecovery() {
- const summary=dom.container.querySelector('.note-recovery-summary')!
- expect(summary.textContent).toContain('Authorship unconfirmed')
- await act(async()=>summary.querySelector<HTMLButtonElement>('button')!.click())
+ expect(dom.container.querySelector('.note-recovery-summary')).toBeNull()
+ const entry=dom.container.querySelector<HTMLButtonElement>('[aria-label="Open versions and recovery"]')!
+ expect(entry.title).toContain('Authorship unconfirmed');expect(entry.textContent).toBe('History')
+ expect(entry.getAttribute('aria-description')).toContain('Authorship unconfirmed')
+ expect(entry.querySelector('.note-recovery-metadata')).not.toBeNull()
+ await act(async()=>entry.click())
  expect(dom.container.querySelector('[role="dialog"]')!.textContent).toContain('Drafts & recovery')
 }
 it('keeps the actual read attribution reason and original creator visible in Recall, checks the original owner and preserves later rich input',async()=>{
@@ -85,6 +89,21 @@ it('keeps the actual read attribution reason and original creator visible in Rec
  expect(notices()).toHaveLength(1);expect(notices()[0]!.textContent).toContain(reason)
  expect(notices()[0]!.textContent).not.toContain('The Note was saved.')
  expect(api.files.write).not.toHaveBeenCalled();expect(await readFile(join(rootPath,path),'utf8')).toBe(external)
+})
+it('discloses the original read attribution reason from a quiet reader footnote without replacing its body',async()=>{
+ const original=useAppStore.getState().documents[key]!
+ await dom.render(<NoteReader workspaceId="workspace" {...original}/>)
+ const body=dom.container.querySelector('.mobile-note-body')!,details=dom.container.querySelector<HTMLDetailsElement>('.note-reader-metadata')!
+ expect(body.textContent).toContain('Externally changed original')
+ expect(details.open).toBe(false);expect(details.querySelector('summary')!.textContent).toBe('')
+ expect(details.querySelector('summary')!.getAttribute('aria-label')).toBe('Authorship details: unconfirmed')
+ expect(details.querySelector('summary svg')).not.toBeNull()
+ expect(dom.container.querySelector('[data-note-id] > p[role="status"]')).toBeNull()
+ await act(async()=>details.querySelector('summary')!.click())
+ expect(details.open).toBe(true);expect(details.textContent).toContain(reason)
+ expect(dom.container.querySelector('.mobile-note-body')).toBe(body)
+ expect(api.files.read).not.toHaveBeenCalled();expect(api.files.write).not.toHaveBeenCalled()
+ expect(await readFile(join(rootPath,path),'utf8')).toBe(external)
 })
 it('shows one attribution notice through the actual File preview and Source routes when read and write metadata are both unconfirmed',async()=>{
  await act(async()=>{useAppStore.setState(state=>({documents:{...state.documents,[key]:{...state.documents[key]!,noteWriteAttribution:{status:'unconfirmed',reason:'Original metadata recording is pending'}}}}))})

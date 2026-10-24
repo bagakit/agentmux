@@ -151,6 +151,10 @@ async function click(label: string) {
 }
 it('connects the real FileSurfaceView to canonical update/save and the original Source toggle', async () => {
   await mount(); expect(dom.container.querySelector('textarea')).toBeNull()
+  const heading = dom.container.querySelector('.notebook-page-heading h1')!
+  expect(heading.getAttribute('title')).toBe(sourceRegion.path)
+  expect(heading.getAttribute('aria-description')).toBe(`Original file: ${sourceRegion.path}`)
+  expect(heading.parentElement?.querySelector('.note-scope')).toBeNull()
   await act(async () => editor().commands.insertContentAt(1, 'Edited '))
   const state = useAppStore.getState(), raw = state.documents[sourceKey]!.content
   expect(state.dirtyDocuments[sourceKey]).toBe(true)
@@ -180,7 +184,8 @@ it('renders per-block Agent authors and a non-blocking unconfirmed save notice w
   useAppStore.setState({ documents: { ...useAppStore.getState().documents, [sourceKey]: { path: sourceRegion.path, content, revision, noteProvenance: { status: 'recorded', noteId: source.noteId, resource: { hostId: workspace.hostId, workspaceId: workspace.id, workspacePath: workspace.path, path: sourceRegion.path }, revision, blocks: { 'source-block': authored.content.content![0]!.attrs!.provenance } } } } })
   await mount()
   const originalEditor = editor()
-  expect(dom.container.querySelector('[data-author-block]')?.textContent).toBe('Agent · verified…')
+  expect(dom.container.querySelector('[data-author-block]')?.textContent).toBe('')
+  expect(dom.container.querySelector('[data-author-block]')?.getAttribute('aria-label')).toContain('Agent · verified…')
   await dom.click('[data-author-block]')
   const authors = document.querySelector('[role="dialog"][aria-label="Block authors"]')!
   expect(authors.textContent).toContain('Created byAgent · verified…')
@@ -194,8 +199,9 @@ it('renders per-block Agent authors and a non-blocking unconfirmed save notice w
   vi.mocked(api.files.write).mockResolvedValueOnce({ status: 'written', revision: fileUploadRevision(new TextEncoder().encode(canonical)), content: canonical, noteAttribution: { status: 'unconfirmed', reason: 'Original actor is unknown' } })
   await click('Save')
   expect(useAppStore.getState().documents[sourceKey]?.content).toBe(canonical)
-  expect(dom.container.querySelector('.note-recovery-summary')?.textContent).toContain('Authorship unconfirmed')
-  await dom.click('.note-recovery-summary button')
+  expect(dom.container.querySelector('.note-recovery-summary')).toBeNull()
+  expect(dom.container.querySelector('[aria-label="Open versions and recovery"]')!.getAttribute('title')).toContain('Authorship unconfirmed')
+  await dom.click('[aria-label="Open versions and recovery"]')
   expect(dom.container.querySelector('[role="dialog"]')?.textContent).toContain('Block authorship from the last confirmed save is unconfirmed')
   await dom.click('[aria-label="Close versions and recovery"]')
   expect(editor()).toBe(originalEditor)
@@ -382,13 +388,16 @@ it('checks its real directory only on explicit refresh and leaves closed Note so
   ])
   await mount(); expect(api.files.readDirectory).not.toHaveBeenCalled()
   expect(dom.container.querySelector<HTMLDetailsElement>('.note-directory-sources')?.open).toBe(false)
-  expect(dom.container.querySelector('.note-directory-sources summary')?.textContent).toContain('Source coverage')
+  expect(dom.container.querySelector('.note-directory-sources summary')?.textContent).toBe('Sources')
+  expect(dom.container.querySelector('.note-directory-sources summary')?.getAttribute('aria-description')).toBe('Loaded Notes only')
+  expect(dom.container.querySelector('.note-directory-sources summary svg')).not.toBeNull()
   const before = useAppStore.getState(), tabs = before.tabs, layouts = before.layouts, document = before.documents[sourceKey]
   await click('Refresh directory')
   expect(api.files.readDirectory).toHaveBeenCalledExactlyOnceWith('workspace', '')
   expect(dom.container.querySelector('.note-directory-sources')?.textContent).toContain('2 confirmed in this directory · partial')
   expect(dom.container.querySelector('.note-directory-sources')?.textContent).toContain('Not yet readclosed-source.note.md')
   expect(dom.container.querySelector('.note-backlinks')?.textContent).toContain('Partial scope')
+  expect(dom.container.querySelector('.note-backlinks summary')?.textContent).not.toContain('Partial scope')
   expect(useAppStore.getState().tabs).toBe(tabs); expect(useAppStore.getState().layouts).toBe(layouts)
   expect(useAppStore.getState().documents[sourceKey]).toBe(document)
   expect(useAppStore.getState().documents[documentKey('workspace', 'closed-source.note.md')]).toBeUndefined()
