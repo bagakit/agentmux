@@ -9,6 +9,8 @@ const mutants = {
     replacement: 'const appearanceOwner = useMemo(() => ({}), [client, identity.mote?.spaceId, session?.run.runId])' },
   'image-host': { file: '/src/navigation/MobileIdentity.tsx', marker: 'const appearanceOwner = useMemo(() => ({}), [client, identity.mote?.spaceId])',
     replacement: 'const appearanceOwner = useMemo(() => ({}), [])' },
+  'mote-name': { file: '/src/navigation/MobileIdentity.tsx', marker: "name={identity.mote.name ?? 'Mote 名称未确认'}",
+    replacement: 'name={identity.name}' },
   'space-reference': { file: '/src/navigation/MobileSpaceIcon.tsx', marker: 'const observationOwner = useMemo(() => ({}), [client, reference])',
     replacement: 'const observationOwner = useMemo(() => ({}), [client, reference, appearance])' },
   'old-failure': { file: '/src/navigation/MobileIdentity.tsx', marker: "const issue = failure?.owner === sourceOwner ? failure.message : ''",
