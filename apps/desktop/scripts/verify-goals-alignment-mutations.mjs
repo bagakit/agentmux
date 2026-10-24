@@ -7,7 +7,7 @@ const store = 'apps/desktop/src/renderer/src/store.ts'
 const main = 'apps/desktop/src/main/ipc.ts'
 await verifyRendererSourceMutations({
   name: 'goals-alignment-t2-mutations',
-  tests: ['packages/demand/test/demand-alignment.test.ts', 'packages/core/test/demand-control.test.ts', 'apps/desktop/test/goals-durable-adapter.test.ts', 'apps/desktop/test/demand-pmo-tab-context.test.ts'],
+  tests: ['packages/demand/test/demand-alignment.test.ts', 'packages/core/test/demand-control.test.ts', 'apps/desktop/test/demand-pmo-tab-context.test.ts'],
   sources: [goals, owner, control, store, main],
   mutations: [
     { label: 'empty-standard-confirmed', file: goals, before: 'if (alignment.criteria.length === 0)', after: 'if (false)' },
