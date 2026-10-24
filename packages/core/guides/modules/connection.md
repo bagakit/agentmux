@@ -39,6 +39,38 @@ confirmed operation does not prove complete synchronization. It returns no bodie
 credentials or private setup data. Partial sections stay explicit; an empty page is not an
 absence proof. Follow original cursors for older observations; diagnosis never retries or
 rejoins input, reads the platform, or changes existing administration and grant permissions.
+For a native business API call, discover an explicit bot identity with
+connection api identities --session ID on its exact hosting endpoint. A managed Agent can list
+only its authenticated original Session. Human-created and Agent-created bot bindings use the
+same identity mechanism; enrollment ownership is not required. Multiple identities require an
+explicit choice of bindingId/bindingRevision and connectionId/connectionRevision. Pausing group
+synchronization does not revoke bot use, but detach, replaced/disabled configuration or inactive
+private-chat policy cannot admit a new call. The Host rechecks the original binding and policy.
+This identity grants the bot's effective native platform scope, potentially beyond this group;
+it does not expand Core administration or external input/answer/permission grants.
+
+Use connection api request --input FILE|- with
+{operationId,identity:{bindingId,bindingRevision,connectionId,connectionRevision},
+ request:{method,path,query?,body?,files?}}. Read the identity's documentationUrl and implemented
+requestFormats/responseFormats. The adapter fixes the API origin and authentication; path is
+relative, query values are string/number/boolean, and body is JSON. Multipart files are
+{field,name,contentType,base64}: exact caller-transmitted bytes in canonical base64, not a Host
+file path, caller URL or a credential reference. URLs, headers and arbitrary SDK options are
+not accepted. Credential issuance/export/authentication endpoints are excluded by the native
+adapter, not enabled by generic business composition. Limits are 256 KiB JSON body, eight files
+with 4 MiB combined bytes, JSON depth 32 and 1 MiB JSON response; native limits may be smaller.
+
+Keep the complete original input and operationId. The Host records the immutable intent digest
+and sanitized receipt, not request body/file data or credentials. Original native SDK token
+acquisition and safe rate-limit waiting remain inside that admitted call; an uncertain effect
+is never automatically replayed. connection api inspect --operation-id ID reads the same
+actor-owned operation without dispatch, even after detach or credential removal. A missing
+receipt is not evidence of non-application. Do not generate another ID after an unknown result.
+A responded operation reports native HTTP status and JSON/empty/unavailable body separately;
+HTTP200 does not establish business success. Sanitization is explicit in response.redacted.
+Unsupported/too-large/unreadable bodies stay unavailable rather than fabricated empty success.
+No credentials enter Agent argv/env or native API results.
+
 Start with connection enrollment ls to discover adapterId/domain and your own original operations.
 Use connection enrollment begin --input FILE|- with exact operationId, connectionId, adapterId,
 domain, label and preset {name,avatar:{pngDataUrl}}. Only a person can scan/authorize the platform
