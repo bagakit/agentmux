@@ -56,6 +56,16 @@ const catalog = {
     conversation: { hostId: 'host-original', sessionId: main.agentSessionId, displayWorkspaceId: 'display-original', groupId: 'group-mote', tabId: 'tab-mote', regionId: 'region-mote' } }],
   survey: { items: [{ zoneId: 'zone-other', name: '本周实验资料' }], selection: null }
 } as AgentMuxRpcResult<'space.ls'>['catalog']
+// A file-only Mote exercises the same anonymous single-Region shape as a normal resource directory.
+const resourceNames = ['BEHAVIOR.md', 'SOUL.md', 'MEMORY.md', '一份保留完整来源的协作资料说明.md']
+catalog.spaces.push({ spaceId: 'mote-resources', kind: 'mote', name: '资料协作', hostId: 'host-original', directoryPath: fixturePath('mote-resources'), projectId: null })
+catalog.zones.push({ zoneId: 'zone-resources', workspaceId: 'workspace-original', kind: 'home', hostId: 'host-original', directoryPath: fixturePath('mote-resources'), branch: null })
+catalog.bindings.push({ spaceId: 'mote-resources', zoneId: 'zone-resources' })
+for (const [index, name] of ['', ...resourceNames].entries()) {
+  const tabId = `resource-tab-${index}`, regionId = `resource-region-${index}`
+  catalog.tabs.push({ tabId, zoneId: 'zone-resources', workspaceId: 'workspace-original', name: '', regionIds: [regionId] })
+  catalog.regions.push(index === 0 ? { tabId, regionId, kind: 'launcher' } : { tabId, regionId, kind: 'file', file: { workspaceId: 'workspace-original', path: name } })
+}
 const goal: AgentMuxRpcGoal = { id: 'goal-original', title: '把两个想法变成一个小实验', description: '比较已有资料，选择本周可以开始的方向。', status: 'in_progress', priority: 'normal', projectId: null,
   sessionIds: [main.agentSessionId, result.agentSessionId], source: 'session', activityLog: [], createdAt: 1, updatedAt: 2,
   alignment: { revision: 1, summary: '给出小步可验证的建议，保留两种方案的依据。', criteria: [{ id: 'criterion-original', text: '形成可开始的实验步骤' }], openQuestions: [], confirmedAt: 1 },
@@ -210,6 +220,14 @@ function Scene() {
   const [, refresh] = useState(0)
   Object.assign(window, { mobileProductScene: {
     setPromptReadFailure: (fail: boolean) => { promptReadFails = fail },
+    seedSpatialRecovery: async () => {
+      const owner = getDeviceWorkface(), runtimeId = client.runtimeOwnerIdentity!()!.runtimeId!, deviceHostId = owner.snapshot().record.host?.hostId ?? null
+      for (const [operationId, destination] of [
+        ['retained-new-tab', { spaceId: 'mote-resources', zoneId: 'zone-resources', newTab: true }],
+        ['retained-launcher', { spaceId: 'mote-resources', zoneId: 'zone-resources', tabId: 'resource-tab-0', regionId: 'resource-region-0' }]
+      ] as const) await owner.retainAgentCreate({ runtimeId, deviceHostId,
+        input: { operationId, content: { kind: 'new-agent', executorId: 'fixture-original', prompt: '保留原意图，不自动重放。' }, destination, focus: false }, phase: 'unknown' }, owner.recordIdentity())
+    },
     unknownNext: () => { unknownNext = true },
     setAppearance: (mode: 'dark' | 'light') => { appearanceSubscriber?.onEvent({ type: 'snapshot', data: appearanceSnapshot(mode) }) },
     offline: () => { connected = false; refresh(value => value + 1) },

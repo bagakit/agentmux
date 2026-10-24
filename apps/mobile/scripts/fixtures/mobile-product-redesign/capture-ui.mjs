@@ -17,6 +17,7 @@ const sha = bytes => createHash('sha256').update(bytes).digest('hex')
 try {
   const mutationId = process.argv.find(value => value.startsWith('--mutation='))?.slice('--mutation='.length)
   const variants = {
+    'resource-leading-icon': { file: 'apps/mobile/src/mobile.css', before: '.mobile-session-list button > svg { flex: 0 0 auto;', after: '.mobile-session-list button > svg { margin-left: auto; flex: 0 0 auto;' },
     'duplicate-connection': { file: 'apps/mobile/src/MobileApp.tsx', before: '!conversationVisible ? connection.issue', after: 'true ? connection.issue' },
     'hide-unknown': { file: 'apps/mobile/src/conversation/MobileConversationSurface.tsx', before: "{attempt && (attempt.phase !== 'confirmed' || Boolean(attempt.logId)) ? renderPromptAttempt([draftKey, attempt]) : null}", after: "{attempt && attempt.phase === 'sending' ? renderPromptAttempt([draftKey, attempt]) : null}" },
     'persistent-confirmed-diagnostic': { file: 'apps/mobile/src/conversation/MobileConversationSurface.tsx', before: "{attempt && (attempt.phase !== 'confirmed' || Boolean(attempt.logId)) ? renderPromptAttempt([draftKey, attempt]) : null}", after: "{attempt && (attempt.phase !== 'confirmed' || attempt.manualInput) ? renderPromptAttempt([draftKey, attempt]) : null}" },
@@ -99,12 +100,23 @@ try {
   await fs.writeFile(path.join(compiled, 'index.html'), '<!doctype html><html><head><meta charset="UTF-8"><link rel="stylesheet" href="product-entry.css"></head><body><div id="root"></div><script type="module" src="product-entry.js"></script></body></html>')
   const env = { ...process.env }; delete env.ELECTRON_RUN_AS_NODE
   const logs = []
-  const subset = ['commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
+  const subset = ['spatial-resources', 'commands-entry', 'notice-light', 'notice-center', 'parity-final', 'baseline', 'navigation', 'source-recovery', 'input-history'].find(value => process.argv.includes('--' + value))
   receipt.process = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), path.join(compiled, 'index.html'), directory, ...(subset ? [subset] : [])],
     { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
+  if (subset === 'spatial-resources' && JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8')).passed) {
+    receipt.restartProcess = await runProbeProcess(require('electron'), [path.join(fixture, 'product-main.cjs'), path.join(compiled, 'index.html'), directory, subset, 'restore'],
+      { temporaryRoot: directory, cwd: root, env, timeoutMs: 90000, onLine: line => logs.push(line) })
+    receipt.restoredRenderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result-restored.json'), 'utf8'))
+    assert.equal(receipt.restartProcess.exitCode, 0)
+    assert.equal(receipt.restoredRenderer.passed, true, receipt.restoredRenderer.error?.message)
+  }
   await fs.writeFile(path.join(directory, 'renderer.log'), logs.join('\n'))
   receipt.renderer = JSON.parse(await fs.readFile(path.join(directory, 'renderer-result.json'), 'utf8'))
   if (receipt.sourceOverride) assert.equal(sha(await fs.readFile(path.join(root, receipt.sourceOverride.file))), receipt.sourceOverride.originalSha256, 'Private mutation never changes the shared source')
+  if (receipt.restoredRenderer) {
+    assert.notEqual(receipt.renderer.environment.pid, receipt.restoredRenderer.environment.pid, 'Fresh OS process owns the restored product')
+    receipt.renderer.images.push(...receipt.restoredRenderer.images)
+  }
   for (const file of receipt.renderer.images) receipt.images[path.relative(root, path.join(directory, file))] = sha(await fs.readFile(path.join(directory, file)))
   await fs.writeFile(path.join(directory, 'review.md'), '# Mobile product Renderer capture\n\nCapture only; independent aesthetic review has not run. Controlled Chromium is not physical phone validation.\n\nRenderer scenario: ' + (receipt.renderer.passed ? 'completed' : 'failed: ' + receipt.renderer.error?.message) + '\n\n' + receipt.renderer.images.map(file => '- [' + file + '](' + file + ')').join('\n') + '\n')
   assert.equal(receipt.renderer.passed, true, receipt.renderer.error?.message)

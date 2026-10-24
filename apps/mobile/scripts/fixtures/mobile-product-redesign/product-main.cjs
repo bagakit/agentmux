@@ -1,11 +1,11 @@
 const { app, BrowserWindow, Menu } = require('electron')
 const fs = require('node:fs/promises'), path = require('node:path'), assert = require('node:assert/strict')
-const [html, evidence, mode] = process.argv.slice(2)
+const [html, evidence, mode, phase] = process.argv.slice(2)
 const baseline = mode === 'baseline'
 app.setPath('userData', path.join(evidence, 'userData'))
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
 const result = { passed: false, captureOnly: true, aestheticReview: 'not-performed', physicalPhone: false,
-  environment: { renderer: 'private Electron Chromium', pointer: 'CDP touchStart/touchEnd', keyboard: 'webContents.insertText', keyboardIme: 'not-observed' },
+  environment: { pid: process.pid, renderer: 'private Electron Chromium', pointer: 'CDP touchStart/touchEnd', keyboard: 'webContents.insertText', keyboardIme: 'not-observed' },
   images: [], operations: [], gaps: [], errors: [] }
 app.whenReady().then(async () => {
  let win
@@ -69,12 +69,62 @@ app.whenReady().then(async () => {
     await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
     assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-mote')
   }
+  if (mode === 'spatial-resources' && phase === 'restore') {
+    await until('typeof mobileProductScene!=="undefined"&&mobileProductScene.facts().record.agentCreates?.length===2')
+    const saved = JSON.parse(await fs.readFile(path.join(evidence, 'renderer-result.json'), 'utf8')).recoveryOriginal
+    const retained = await read('mobileProductScene.facts().record')
+    for (const key of ['selectedSessionId', 'presentation', 'agentCreates', 'conversation']) assert.deepEqual(retained[key], saved[key], `Original ${key} survives a real product process restart`)
+    await until('document.querySelector("[contenteditable=true]")?.textContent.includes("原草稿在重启后保留")')
+    await capture('spatial-recovery-draft-phone')
+    await button('Mote', '.mobile-navigation')
+    await button('资料协作', '.mobile-spatial-panel')
+    await button('在此启动位新建 Agent', '.mobile-spatial-panel')
+    await until('document.querySelectorAll(".mobile-create-receipt").length===2')
+    await capture('spatial-recovery-intents-phone')
+    await button('核对原创建操作', '[role=dialog]')
+    await until('mobileProductScene.facts().calls.some(call=>call.method==="space.inspect"&&call.params.target?.operationId==="retained-new-tab")')
+    await read(`(()=>{const row=[...document.querySelectorAll('.mobile-create-receipt')].find(node=>node.textContent.includes('retained-launcher'));const action=[...row.querySelectorAll('button')].find(node=>node.textContent==='核对原创建操作');action.setAttribute('data-retained-launcher-inspect','true')})()`)
+    await tap('[data-retained-launcher-inspect="true"]', 'Inspect the retained original Launcher operation')
+    await until('mobileProductScene.facts().calls.some(call=>call.method==="space.inspect"&&call.params.target?.operationId==="retained-launcher")')
+    const facts = await read('mobileProductScene.facts()')
+    assert.equal(facts.calls.filter(call=>call.method==='agent.open'||call.method==='sdk.submitAgentPrompt').length,0)
+    assert.deepEqual(facts.record.agentCreates, saved.agentCreates)
+    result.recoveryRestored = facts.record; result.passed = true; return
+  }
   await until('!!document.querySelector(".mobile-spatial-panel .mobile-session-list button")')
   result.palette = await read(`(()=>{const s=getComputedStyle(document.documentElement);return Object.fromEntries(['--surface-0','--surface-1','--green','--amber','--red','--fs-body'].map(k=>[k,s.getPropertyValue(k).trim()]))})()`)
   if (!baseline) {
     assert.equal(result.palette['--surface-1'], '#171b21', 'Original MobileApp consumes the shared Graphite palette')
     assert.equal(result.palette['--green'], '#8de3ae', 'Original MobileApp consumes the shared Mint action color')
     assert.equal(result.palette['--fs-body'], '13px', 'Mobile typography remains client-owned')
+  }
+  if (mode === 'spatial-resources') {
+    await button('资料协作', '.mobile-spatial-panel')
+    await until('document.querySelectorAll(".mobile-spatial-tab").length===5')
+    assert.equal(await read('document.querySelectorAll(".mobile-spatial-tab > h3").length'), 0)
+    for (const [width,height,name] of [[390,844,'phone'],[320,760,'narrow'],[840,900,'wide']]) {
+      await resize(width,height)
+      const rows = await read(`Array.from(document.querySelectorAll('.mobile-spatial-tab button')).map(node=>({row:node.getBoundingClientRect().toJSON(),icon:node.querySelector('svg').getBoundingClientRect().toJSON(),copy:node.querySelector('span').getBoundingClientRect().toJSON(),arrow:node.querySelector('svg:last-child').getBoundingClientRect().toJSON()}))`)
+      assert.equal(rows.length,5)
+      for(const row of rows){assert.ok(row.icon.left-row.row.left<=12,'Leading resource icon stays in the left column');assert.ok(row.copy.left>=row.icon.right&&row.copy.left-row.icon.right<=16,'Resource copy follows its leading icon');assert.ok(row.arrow.right<=row.row.right&&row.row.right-row.arrow.right<=12,'Disclosure stays at the trailing edge');assert.ok(row.row.height>=44)}
+      result.operations.push({action:'resource-row-geometry',width,rows})
+      await capture('spatial-resources-'+name)
+    }
+    await resize(390,844); await button('在此启动位新建 Agent', '.mobile-spatial-panel')
+    await until('!!document.querySelector(".mobile-create-target")')
+    assert.equal(await read(`document.querySelector('[aria-label="新 Agent 空间"]').value`), "mote-resources")
+    assert.equal(await read(`document.querySelector('[aria-label="新 Agent Zone"]').value`), "zone-resources")
+    await capture('spatial-launcher-phone'); await resize(320,760); await capture('spatial-launcher-narrow')
+    await button('关闭新建 Agent', '[role=dialog]')
+    assert.equal(await read('mobileProductScene.facts().calls.filter(call=>call.method==="agent.open").length'),0)
+    await resize(390,844); await openMote()
+    await tap('.mobile-conversation-panel [contenteditable=true]', 'Original draft before private process restart')
+    win.webContents.insertText('原草稿在重启后保留')
+    await until('mobileProductScene.facts().record.conversation?.drafts.some(([,text])=>text.includes("原草稿在重启后保留"))')
+    await read('mobileProductScene.seedSpatialRecovery()')
+    result.recoveryOriginal = await read('mobileProductScene.facts().record')
+    await capture('spatial-recovery-before-phone')
+    result.passed = true; return
   }
   await capture('mote-overview-phone')
   await openMote()
@@ -458,7 +508,7 @@ app.whenReady().then(async () => {
   result.error = { name: error.name, message: error.message, stack: error.stack }
   if (win) { await fs.writeFile(path.join(evidence, 'failed.png'), (await win.webContents.capturePage()).toPNG()); result.images.push('failed.png') }
  } finally {
-  await fs.writeFile(path.join(evidence, 'renderer-result.json'), JSON.stringify(result, null, 2) + '\n')
+  await fs.writeFile(path.join(evidence, phase === 'restore' ? 'renderer-result-restored.json' : 'renderer-result.json'), JSON.stringify(result, null, 2) + '\n')
   win?.destroy(); app.exit(result.passed ? 0 : 1)
  }
 })
