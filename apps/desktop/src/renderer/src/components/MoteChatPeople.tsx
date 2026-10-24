@@ -7,10 +7,12 @@ import { api } from '../lib/api'
 import { submitMoteChatIntent } from '../lib/mote-chat-request'
 import { useAppStore } from '../store'
 import { sameMotePreferencesTarget } from '@agentmux/core/mote-preferences'
+import type { ConnectionHostingTarget } from '../../../shared/contracts'
+import { MoteChatHistory } from './MoteChatHistory'
 
 const actorKey = (person: MoteChatPerson) => JSON.stringify(person.actor)
 
-export function MoteChatPeople({ configuration, active, refreshRevision, onSaved }: { configuration: MoteChatConfiguration; active: boolean; refreshRevision: number; onSaved(): void }) {
+export function MoteChatPeople({ configuration, hostingTarget, active, refreshRevision, onSaved }: { configuration: MoteChatConfiguration; hostingTarget: ConnectionHostingTarget; active: boolean; refreshRevision: number; onSaved(): void }) {
   const [people, setPeople] = useState<MoteChatPerson[]>([]), [next, setNext] = useState<string | null>(null)
   const [reading, setReading] = useState(false), [issue, setIssue] = useState('')
   const lifetime = useRef(0)
@@ -18,9 +20,10 @@ export function MoteChatPeople({ configuration, active, refreshRevision, onSaved
     const epoch = ++lifetime.current
     setReading(true)
     try {
-      const page = await api.moteChat.call('space.mote.chat.audience', { target: configuration.target, ...(cursor ? { cursor } : {}), limit: 20 })
+      const page = await api.moteChat.call('space.mote.chat.audience', { target: configuration.target, ...(cursor ? { cursor } : {}), limit: 20 }, hostingTarget)
       if (lifetime.current !== epoch) return
-      setPeople(current => cursor ? [...current, ...page.people.filter(person => !current.some(old => actorKey(old) === actorKey(person)))] : page.people)
+      setPeople(current => cursor ? [...current, ...page.people.filter(person => !current.some(old => actorKey(old) === actorKey(person)))]
+        : [...page.people, ...current.filter(person => !page.people.some(updated => actorKey(updated) === actorKey(person)))])
       setNext(page.next); setIssue('')
     } catch (error) { if (lifetime.current === epoch) setIssue(presentError(error)) }
     finally { if (lifetime.current === epoch) setReading(false) }
@@ -28,7 +31,7 @@ export function MoteChatPeople({ configuration, active, refreshRevision, onSaved
   useEffect(() => { if (active) void read(); return () => { lifetime.current++ } }, [active, configuration.revision, refreshRevision])
   return <div className="mote-chat-people" aria-label="Private chat people" aria-busy={reading}>
     <p className="mote-details__hint">The confirmed bot creator has unlimited access. Other people have their own message allowance; changing a total keeps messages already used.</p>
-    {people.map(person => <MoteChatPersonRow key={actorKey(person)} person={person} configuration={configuration} onSaved={updated => {
+    {people.map(person => <MoteChatPersonRow key={actorKey(person)} person={person} configuration={configuration} hostingTarget={hostingTarget} active={active} onSaved={updated => {
       lifetime.current++; setReading(false); setPeople(current => current.map(old => actorKey(old) === actorKey(updated) ? updated : old)); onSaved()
     }} />)}
     {reading ? <p role="status" className="mote-details__hint">Reading people…</p> : !people.length && !issue ? <p className="mote-details__hint">People appear here when they first message this bot.</p> : null}
@@ -37,8 +40,9 @@ export function MoteChatPeople({ configuration, active, refreshRevision, onSaved
   </div>
 }
 
-function MoteChatPersonRow({ person, configuration, onSaved }: { person: MoteChatPerson; configuration: MoteChatConfiguration; onSaved(person: MoteChatPerson): void }) {
+function MoteChatPersonRow({ person, configuration, hostingTarget, active, onSaved }: { person: MoteChatPerson; configuration: MoteChatConfiguration; hostingTarget: ConnectionHostingTarget; active: boolean; onSaved(person: MoteChatPerson): void }) {
   const [editing, setEditing] = useState(false), [total, setTotal] = useState(String(person.total ?? 0)), [busy, setBusy] = useState(false), [issue, setIssue] = useState('')
+  const [historyOpen, setHistoryOpen] = useState(false)
   const pending = useAppStore(state => Object.values(state.moteChatIntents).some(intent => intent.method === 'space.mote.chat.allocate'
     && sameMotePreferencesTarget(intent.input.target, configuration.target) && JSON.stringify(intent.input.actor) === actorKey(person)))
   async function save() {
@@ -47,7 +51,7 @@ function MoteChatPersonRow({ person, configuration, onSaved }: { person: MoteCha
     if (busy || pending) return
     setBusy(true); setIssue('')
     try {
-      const result = await submitMoteChatIntent({ method: 'space.mote.chat.allocate', phase: 'not-dispatched', input: {
+      const result = await submitMoteChatIntent({ method: 'space.mote.chat.allocate', phase: 'not-dispatched', hostingTarget, input: {
         operationId: mintObjectId(), target: configuration.target, expectedConfigurationRevision: configuration.revision,
         actor: person.actor, expectedPersonRevision: person.revision, total: count } })
       if (result.action !== 'allocate') throw Error('The original allowance receipt is not confirmed.')
@@ -64,5 +68,6 @@ function MoteChatPersonRow({ person, configuration, onSaved }: { person: MoteCha
     </form> : <button type="button" className="small-button" onClick={() => { setTotal(String(person.total)); setEditing(true) }}>Edit allowance</button> : <span className="mote-details__hint">Creator · unlimited</span>}
     {issue ? <p role="status" className="mote-details__issue">{issue}</p> : null}
     {pending ? <p role="status" className="mote-details__hint">Check this person’s original allowance request below before another save.</p> : null}
+    <details className="mote-chat-person__history" onToggle={event => setHistoryOpen(event.currentTarget.open)}><summary>Conversations</summary><MoteChatHistory target={configuration.target} actor={person.actor} hostingTarget={hostingTarget} active={active && historyOpen} /></details>
   </article>
 }

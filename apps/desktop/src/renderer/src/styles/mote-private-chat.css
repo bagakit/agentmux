@@ -47,4 +47,27 @@
 .mote-chat-requests p, .mote-chat-requests summary { margin: 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
 .mote-chat-requests summary { cursor: pointer; }
 .mote-chat-requests code { color: var(--text-3); font: var(--fs-meta)/1.6 var(--font-mono); overflow-wrap: anywhere; }
+.mote-chat-activity { display: grid; gap: var(--sp-2); min-width: 0; padding: var(--sp-3); border: 1px solid var(--line-soft); border-radius: var(--radius-md, 8px); background: var(--surface-2); }
+.mote-chat-activity > header { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
+.mote-chat-activity > header > span { display: flex; align-items: center; gap: var(--sp-2); color: var(--text-3); font-size: var(--fs-meta); }
+.mote-chat-activity p, .mote-chat-activity summary, .mote-chat-activity code, .mote-chat-history p { margin: 0; font-size: var(--fs-meta); line-height: 1.6; color: var(--text-3); overflow-wrap: anywhere; }
+.mote-chat-activity strong { color: var(--text-2); font-size: var(--fs-meta); font-weight: 550; }
+.mote-chat-activity summary { cursor: pointer; }
+.mote-chat-activity details > ol { display: grid; gap: var(--sp-3); margin: var(--sp-3) 0; padding-left: var(--sp-4); }
+.mote-chat-person__history { width: 100%; min-width: 0; }
+.mote-chat-person__history > summary { cursor: pointer; color: var(--text-2); font-size: var(--fs-meta); padding-block: var(--sp-2); }
+.mote-chat-history { min-width: 0; display: grid; gap: var(--sp-3); padding-top: var(--sp-2); }
+.mote-chat-history > ol { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--sp-2); }
+.mote-chat-history > ol > li { min-width: 0; border: 1px solid var(--line-soft); border-radius: var(--radius-md, 8px); overflow: hidden; }
+.mote-chat-history__row { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: var(--sp-2); padding: var(--sp-3); }
+.mote-chat-history__row > div:first-child { display: grid; gap: var(--sp-1); min-width: 0; }
+.mote-chat-history__row span, .mote-chat-history__row small { color: var(--text-3); font-size: var(--fs-meta); overflow-wrap: anywhere; }
+.mote-chat-inputs { min-width: 0; border-top: 1px solid var(--line-soft); padding: var(--sp-3); }
+.mote-chat-inputs > header { display: grid; gap: var(--sp-1); margin-bottom: var(--sp-3); }
+.mote-chat-inputs > header small { color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; }
+.mote-chat-inputs .input-history { min-width: 0; }
+.mote-chat-inputs .input-history__records { padding: 0; list-style: none; }
+.mote-chat-inputs .composer-mailbox__record { min-width: 0; }
+.mote-chat-inputs .composer-mailbox__detail { min-width: 0; overflow-wrap: anywhere; }
+.mote-chat-inputs pre { max-width: 100%; overflow: auto; }
 @media (prefers-reduced-motion: reduce) { .mote-private-chat__toggle input[role="switch"], .mote-private-chat__toggle input[role="switch"]::before { transition: none; } }

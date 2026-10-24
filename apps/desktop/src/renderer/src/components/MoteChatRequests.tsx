@@ -6,8 +6,9 @@ import { presentError } from '@agentmux/client-ui/error-presentation'
 import { useAppStore } from '../store'
 import { inspectMoteChatIntent, submitMoteChatIntent } from '../lib/mote-chat-request'
 import type { MoteChatIntent } from '../lib/mote-chat-intent'
+import type { ConnectionHostingTarget } from '../../../shared/contracts'
 
-export function MoteChatRequests({ target, onConfirmed }: { target: MotePreferencesTarget; onConfirmed(operation: MoteChatOperation): void }) {
+export function MoteChatRequests({ target, onConfirmed }: { target: MotePreferencesTarget; onConfirmed(operation: MoteChatOperation, hostingTarget?: ConnectionHostingTarget): void }) {
   const intents = useAppStore(state => state.moteChatIntents)
   const retained = Object.values(intents).filter(intent => sameMotePreferencesTarget(intent.input.target, target))
   const [busy, setBusy] = useState<string | null>(null), [results, setResults] = useState<Record<string, { message: string; absent: boolean }>>({})
@@ -17,7 +18,7 @@ export function MoteChatRequests({ target, onConfirmed }: { target: MotePreferen
     setBusy(id)
     try {
       const result = continueOriginal ? await submitMoteChatIntent(intent) : await inspectMoteChatIntent(intent)
-      if (result) onConfirmed(result)
+      if (result) onConfirmed(result, intent.hostingTarget)
       else setResults(current => ({ ...current, [id]: { message: 'No receipt in this reading. The original request remains unconfirmed.', absent: true } }))
     } catch (error) { setResults(current => ({ ...current, [id]: { message: presentError(error), absent: false } })) }
     finally { setBusy(null) }
@@ -29,7 +30,7 @@ export function MoteChatRequests({ target, onConfirmed }: { target: MotePreferen
       <p role="status">{results[intent.input.operationId]?.message ?? (!intent.hostingTarget ? 'The original bot hosting owner is unconfirmed. The original request is kept.' : intent.phase === 'not-dispatched' ? 'Original input retained before dispatch.' : 'The original request and its input are kept.')}</p>
       <div className="mote-chat-actions"><button type="button" className="small-button" disabled={busy !== null || !intent.hostingTarget} onClick={() => void check(intent)}>{busy === intent.input.operationId ? 'Checking…' : 'Check original request'}</button>
         {intent.hostingTarget && (intent.phase === 'not-dispatched' || results[intent.input.operationId]?.absent) ? <button type="button" className="small-button" disabled={busy !== null} onClick={() => void check(intent, true)}>Continue original request</button> : null}</div>
-      <details><summary>Request reference</summary><code>{intent.input.operationId}</code></details>
+      <details><summary>Request reference</summary>{intent.hostingTarget ? <code>{intent.hostingTarget.hostId} · {intent.hostingTarget.runtimeId}</code> : null}<code>{intent.input.operationId}</code></details>
     </div>)}
   </section>
 }
