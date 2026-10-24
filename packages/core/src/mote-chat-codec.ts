@@ -2,11 +2,12 @@ import { AgentMuxError } from './errors.js'
 import { rpcRecord } from './rpc-data.js'
 import { parseMoteConnectionValues, parseMotePreferencesTarget, sameMotePreferencesTarget } from './mote-preferences.js'
 import { parseConnectionActor } from './room-binding-codec.js'
+import { parseMoteChatDiagnosis } from './mote-chat-diagnosis.js'
 import type { MoteChatConfiguration, MoteChatGeneration, MoteChatMethod, MoteChatOperation, MoteChatParamsMap, MoteChatPerson, MoteChatResultMap, MoteChatValues } from './mote-chat-contract.js'
 
 export const MOTE_CHAT_RPC_METHODS = {
   'space.mote.chat.configure': 'long', 'space.mote.chat.inspect': 'short', 'space.mote.chat.history': 'short',
-  'space.mote.chat.audience': 'short', 'space.mote.chat.allocate': 'short'
+  'space.mote.chat.audience': 'short', 'space.mote.chat.allocate': 'short', 'space.mote.chat.diagnose': 'short'
 } as const
 export function isMoteChatMethod(value: unknown): value is MoteChatMethod {
   return typeof value === 'string' && Object.hasOwn(MOTE_CHAT_RPC_METHODS, value)
@@ -73,6 +74,10 @@ function operation(v: unknown, code: Code): MoteChatOperation {
 export function parseMoteChatParams<M extends MoteChatMethod>(method: M, value: unknown): MoteChatParamsMap[M] {
   const code: Code = 'INVALID_CONTROL_REQUEST'
   if (!isMoteChatMethod(method)) fail(code)
+  if (method === 'space.mote.chat.diagnose') {
+    const p = fields(value, ['target'], ['target'], code)
+    return { target: target(p.target, code) } as MoteChatParamsMap[M]
+  }
   if (method === 'space.mote.chat.configure') {
     const p = fields(value, ['operationId', 'target', 'expectedRevision', 'expectedConnectionRevision', 'values'], ['operationId', 'target', 'expectedRevision', 'expectedConnectionRevision', 'values'], code)
     const values = parseMoteChatValues(p.values, code), connectionRevision = revision(p.expectedConnectionRevision, code)
@@ -97,6 +102,7 @@ export function parseMoteChatParams<M extends MoteChatMethod>(method: M, value: 
 export function parseMoteChatResult<M extends MoteChatMethod>(method: M, value: unknown, input?: MoteChatParamsMap[M]): MoteChatResultMap[M] {
   const code: Code = 'CONTROL_PROTOCOL_ERROR'
   if (!isMoteChatMethod(method)) fail(code)
+  if (method === 'space.mote.chat.diagnose') return parseMoteChatDiagnosis(value, input as MoteChatParamsMap['space.mote.chat.diagnose'] | undefined) as MoteChatResultMap[M]
   if (method === 'space.mote.chat.configure' || method === 'space.mote.chat.allocate') {
     const o = operation(value, code), i = input as MoteChatParamsMap['space.mote.chat.configure'] | MoteChatParamsMap['space.mote.chat.allocate'] | undefined
     if (o.action !== (method === 'space.mote.chat.configure' ? 'configure' : 'allocate') || i && (o.operationId !== i.operationId || !sameMotePreferencesTarget(o.configuration.target, i.target))) fail(code)

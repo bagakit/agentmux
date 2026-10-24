@@ -79,8 +79,8 @@ export function parseConnectionIngressRecord(value: unknown): ConnectionIngressR
   }
   const projected = { ...base, ...(group === undefined ? {} : { group }) }
   if (p.state === 'refused') { if (p.input !== undefined) fail(); return { ...projected, state: 'refused', code: text(p.code) } }
+  if (p.state === 'received') { if (p.input !== undefined) fail(); return { ...projected, state: 'received', ...(p.code === undefined ? {} : { code: text(p.code) }) } }
   if (p.code !== undefined) fail()
-  if (p.state === 'received') { if (p.input !== undefined) fail(); return { ...projected, state: 'received' } }
   const input = object(p.input, ['hostId', 'agentSessionId', 'expectedRun', 'operationId', 'messageId', 'author', 'admissionIntent', 'channelProfile', 'channelQuote', 'contextSource', 'contextObservation']), run = object(input.expectedRun, ['runId'])
   const channelProfile = input.channelProfile === undefined ? undefined : parseChannelActorProfileObservation(input.channelProfile)
   const contextSource = input.contextSource === undefined ? undefined : (() => { const s = object(input.contextSource, ['providerId', 'nativeSessionId']); return { providerId: text(s.providerId), nativeSessionId: text(s.nativeSessionId) } })()
