@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { mkdir, open, readFile } from 'node:fs/promises'
 import { createRequire } from 'node:module'
-import { dirname, join } from 'node:path'
+import { dirname, isAbsolute, join } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { durableWriteFile } from './durable-write.js'
 import { AgentMuxError } from './errors.js'
@@ -30,9 +30,14 @@ type Port = {
 }
 const native = createRequire(import.meta.url)('fs-native-extensions') as { tryLock(fd: number): boolean }
 const failure = (message: string) => new AgentMuxError(message + ' The original work surface and healthy Runs are retained.', 'TERMINAL_RECOVERY_UNCONFIRMED')
+function parseHostRecoveryInput(value: unknown): AgentMuxTerminalRecoveryInput {
+  const input = parseTerminalRecoveryInput(value)
+  if (!isAbsolute(input.workspacePath)) throw new AgentMuxError('Terminal recovery requires the original Host\'s absolute execution directory.', 'INVALID_CONTROL_REQUEST')
+  return input
+}
 function parseIntent(value: unknown): Intent {
   const r = rpcRecord(value, ['schemaVersion', 'expectedRun', 'runtimeId', 'workspacePath', 'operationId', 'prepared', 'phase', 'run', 'continuedBy', 'retirement', 'retiredAttempts'])
-  parseTerminalRecoveryInput({ expectedRun: r.expectedRun, runtimeId: r.runtimeId, workspacePath: r.workspacePath, operationId: r.operationId })
+  parseHostRecoveryInput({ expectedRun: r.expectedRun, runtimeId: r.runtimeId, workspacePath: r.workspacePath, operationId: r.operationId })
   const prepared = parsePreparedTerminal(r.prepared)
   if (r.schemaVersion !== 1 || prepared.workspacePath !== r.workspacePath || !['prepared', 'dispatched', 'retained', 'not_applied'].includes(String(r.phase)) ||
       !Array.isArray(r.continuedBy) || r.continuedBy.some(id => typeof id !== 'string' || !id || /[\0\r\n]/u.test(id)) || new Set(r.continuedBy).size !== r.continuedBy.length) throw failure('The original terminal recovery intent is invalid.')
@@ -93,7 +98,7 @@ export class TerminalRecoveryOwner {
         : 'The original terminal creation is unconfirmed. Inspect this same intent; explicit continue fences its original creation before a successor.' }
   }
   async recover(value: AgentMuxTerminalRecoveryInput): Promise<AgentMuxTerminalRecoveryResult> {
-    const input = parseTerminalRecoveryInput(value), runtime = this.identity(input), path = this.path(input)
+    const input = parseHostRecoveryInput(value), runtime = this.identity(input), path = this.path(input)
     const original = await this.port.original(input)
     if (original?.state === 'running') return { kind: 'reattachable', expectedRun: input.expectedRun, runtimeId: input.runtimeId, operationId: input.operationId, run: original }
     let intent = await this.read(path)
