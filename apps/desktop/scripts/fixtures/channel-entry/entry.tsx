@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { createWorkspaceLayout, splitWorkbenchRegion } from '@agentmux/layout'
-import { groupTarget, type ConnectionDiagnosis, type ConnectionGrant, type ConnectionRecord, type RoomBinding, type RoomBindingOperation, type RoomLinkOperation, type RoomMembersResult } from '@agentmux/core/connections'
+import { groupTarget, type ConnectionApplicationAccessOperation, type ConnectionApplicationGrant, type ConnectionDiagnosis, type ConnectionGrant, type ConnectionMemberAccess, type ConnectionRecord, type RoomBinding, type RoomBindingOperation, type RoomLinkOperation, type RoomMembersResult } from '@agentmux/core/connections'
 import { DesktopClientUiProvider } from '../../../src/renderer/src/components/DesktopClientUiProvider'
 import { SettingsPanel } from '../../../src/renderer/src/components/SettingsPanel'
 import { SettingsNavigation, type SettingsNavigationRequest } from '../../../src/renderer/src/components/SettingsNavigation'
@@ -32,7 +32,8 @@ mountThemeRuntime(window, config.appearance)
 
 // Controlled typed facts only. The real IPC/SDK/binding and App route are proven by the consumer tests.
 const memberAccess = new URLSearchParams(location.search).has('member-access')
-const connection: ConnectionRecord = { config: { connectionId: memberAccess ? 'preview-feishu' : 'preview-discord', adapterId: memberAccess ? 'feishu' : 'discord', application: memberAccess ? { domain: 'open.feishu.cn', appId: 'cli_original_members' } : { domain: 'discord.com', appId: '123456789012345678' },
+const applicationAccess = new URLSearchParams(location.search).has('application-access'), memberScenario = memberAccess || applicationAccess
+const connection: ConnectionRecord = { config: { connectionId: memberScenario ? 'preview-feishu' : 'preview-discord', adapterId: memberScenario ? 'feishu' : 'discord', application: memberScenario ? { domain: 'open.feishu.cn', appId: 'cli_original_members' } : { domain: 'discord.com', appId: '123456789012345678' },
   label: 'Research discussion', enabled: true, credentialRef: 'preview-secure-reference' }, revision: 1,
   capabilities: { roomDiscovery: true, roomCreation: false, roomLink: true },
   observation: { authentication: { state: 'ready' }, transport: { state: 'ready' }, intake: { state: 'unknown', reason: 'not-started' }, delivery: { state: 'unknown', reason: 'not-started' } } }
@@ -41,7 +42,7 @@ const hostingTarget: ConnectionHostingTarget = { hostId: 'preview-bot-host', run
 const target = { executionHostId: session.control.hostId, agentSessionId: session.control.agentSessionId }
 const headerStatus = new URLSearchParams(location.search).has('header-status')
 type Scenario = 'unbound' | 'owner-failure' | 'attention'
-const proof = { ready: false, omitOriginal: false, status: 'normal' as 'normal' | 'attention' | 'unavailable', scenario: 'unbound' as Scenario,
+const proof = { ready: false, omitOriginal: false, accessUnavailable: false, status: 'normal' as 'normal' | 'attention' | 'unavailable', scenario: 'unbound' as Scenario,
   calls: [] as string[], targets: [] as (ConnectionHostingTarget | undefined)[], errors: [] as string[],
   requests: [] as { method: string; input: unknown; owner: ConnectionHostingTarget | undefined }[],
   hostingReads: 0, routes: [] as string[], channelSections: Object.fromEntries(settingsCatalog.channelEntries.map(entry => [entry.adapterId, entry.section])),
@@ -72,11 +73,21 @@ const room = { externalConversationId: '345678901234567890', name: 'research-and
 const members: RoomMembersResult['members'] = [
   { idType: 'user_id', userId: '567890123456789012', name: 'Ava Chen' },
   { idType: 'user_id', userId: '678901234567890123', name: 'Ben Ortiz' },
-  ...(memberAccess ? [{ idType: 'user_id', userId: '789012345678901234', name: 'Casey Iqbal' }] : [])
+  ...(memberScenario ? [{ idType: 'user_id', userId: '789012345678901234', name: 'Casey Iqbal' }] : [])
 ]
 let memberGrants: ConnectionGrant[] = []
 const memberOperations = new Map<string, RoomBindingOperation>()
-const grantsFor = (binding: RoomBinding): ConnectionGrant[] => memberAccess ? structuredClone(memberGrants.filter(grant => grant.bindingId === binding.bindingId && grant.bindingRevision === binding.revision)) : binding.externalConversationId === room.externalConversationId ? [] : [{
+let applicationGrants: ConnectionApplicationGrant[] = []
+const applicationOperations = new Map<string, ConnectionApplicationAccessOperation>()
+// These are specific controlled public observations, not an authorization implementation.
+const previewMemberAccess = (binding: RoomBinding): ConnectionMemberAccess[] => members.map(member => {
+  const actor = { application: binding.application, idType: member.idType, userId: member.userId }
+  const local = memberGrants.find(grant => grant.actor.userId === member.userId), app = applicationGrants.find(grant => grant.actor.userId === member.userId)
+  return { actor, local: local ? { kind: 'override', grant: structuredClone(local) } : { kind: 'none', previousDecision: false },
+    effective: local ? { actor, state: local.state, capabilities: local.capabilities, source: { kind: 'room', grantId: local.grantId, revision: local.revision } }
+      : app ? { actor, state: app.state, capabilities: app.capabilities, source: { kind: 'application', grantId: app.grantId, revision: app.revision } } : null }
+})
+const grantsFor = (binding: RoomBinding): ConnectionGrant[] => memberScenario ? structuredClone(memberGrants.filter(grant => grant.bindingId === binding.bindingId && grant.bindingRevision === binding.revision)) : binding.externalConversationId === room.externalConversationId ? [] : [{
   grantId: 'preview-original-member-grant', revision: 1, bindingId: binding.bindingId, bindingRevision: binding.revision,
   connectionId: binding.connectionId, externalConversationId: binding.externalConversationId, state: 'active', capabilities: ['input', 'answer'],
   actor: { application: binding.application, idType: members[0]!.idType, userId: members[0]!.userId }
@@ -108,13 +119,14 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
     const binding = bindings.find(binding => binding.bindingId === input.bindingId && binding.revision === input.bindingRevision)
     const attention = proof.status === 'attention', sourceGap = attention && binding?.externalConversationId === room.externalConversationId
     const unknownEffect = attention && !sourceGap
+    const effective = binding && applicationAccess ? previewMemberAccess(binding).flatMap(member => member.effective?.state === 'active' ? [member.effective] : []) : null
     return { target: input, service: { value: { enabled: true, revision: 1 }, issue: null }, groups: { issue: null, value: { nextBindingId: null, items: binding ? [{
       target: groupTarget(binding), window: {}, limit: 5,
       adapterService: { value: { adapterId: connection.config.adapterId, enabled: true, revision: 0 }, issue: null },
       connection: { value: { revision: connection.revision, enabled: true, ...connection.observation }, issue: null },
-      binding: { value: { state: binding.state, currentRevision: binding.revision, scope: binding.scope, activeInputGrants: grantsFor(binding).length, activeAnswerGrants: grantsFor(binding).length, activePermissionGrants: 0 }, issue: null },
+      binding: { value: { state: binding.state, currentRevision: binding.revision, scope: binding.scope, activeInputGrants: effective ? effective.filter(grant => grant.capabilities.includes('input')).length : grantsFor(binding).length, activeAnswerGrants: effective ? effective.filter(grant => grant.capabilities.includes('answer')).length : grantsFor(binding).length, activePermissionGrants: effective ? effective.filter(grant => grant.capabilities.includes('permission')).length : 0 }, issue: null },
       outgoing: { issue: null, value: { after: null, afterContent: null, next: null,
-        observation: sourceGap ? { state: 'unavailable', reason: 'content-unconfirmed' } : unknownEffect ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'ready' },
+        observation: proof.accessUnavailable ? { state: 'unavailable', reason: 'access-unconfirmed' } : sourceGap ? { state: 'unavailable', reason: 'content-unconfirmed' } : unknownEffect ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'ready' },
         sourceObservation: { state: 'ready', code: null, codeRecorded: false, checkpointKey: null },
         effectObservation: unknownEffect ? { state: 'unknown', reason: 'effect-unconfirmed' } : { state: 'ready' },
         deliveries: unknownEffect ? [1, 2].map(i => ({ kind: 'conversation' as const, association: { sourceKey: null, recordKey: null, eventKey: null, partKey: null }, operationId: 'preview-original-' + i, state: 'unknown' as const, receipt: 'unknown' as const, platformMessageId: null, reason: 'effect-unconfirmed' as const, resourceUpload: null })) : [],
@@ -130,12 +142,29 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
   if (method === 'connection.binding.inspect') {
     const operation = input.operationId ? memberOperations.get(input.operationId) ?? null : null
     const binding = input.operationId ? operation?.state === 'applied' ? operation.binding : null : bindings.find(item => item.bindingId === input.bindingId) ?? null
-    return { binding, current: binding ? bindings.find(item => item.bindingId === binding.bindingId) ?? null : null, operation, grants: binding ? grantsFor(binding) : [] }
+    return { binding, current: binding ? bindings.find(item => item.bindingId === binding.bindingId) ?? null : null, operation, grants: binding ? grantsFor(binding) : [], ...(applicationAccess && binding && !input.operationId && input.revision === undefined ? { access: previewMemberAccess(binding) } : {}) }
   }
-  if (memberAccess && method === 'connection.profile.get') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application,
+  if (memberScenario && method === 'connection.profile.get') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application,
     language: 'en_us', state: 'observed', profile: { name: 'Research discussion' }, metadata: null, creator: { idType: members[0]!.idType, userId: members[0]!.userId },
     botId: 'preview-original-bot', onlineVersionId: null, reviewingVersionId: null, version: null }
-  if (memberAccess && method === 'connection.grant') {
+  if (applicationAccess && method === 'connection.application.access.get') return { connectionId: connection.config.connectionId, connectionRevision: 1, adapterId: connection.config.adapterId, application: connection.config.application, grants: structuredClone(applicationGrants) }
+  if (applicationAccess && method === 'connection.application.access.inspect') return { operation: structuredClone(applicationOperations.get(input.operationId) ?? null) }
+  if (applicationAccess && method === 'connection.application.access.configure') {
+    const original = applicationOperations.get(input.operationId)
+    if (original) return structuredClone(original)
+    const grant: ConnectionApplicationGrant = { grantId: input.grantId, revision: (input.expectedRevision ?? 0) + 1, adapterId: connection.config.adapterId, actor: structuredClone(input.actor), state: input.state, capabilities: input.capabilities.slice() }
+    applicationGrants = [...applicationGrants.filter(item => item.grantId !== grant.grantId), grant]
+    const operation: ConnectionApplicationAccessOperation = { operationId: input.operationId, state: 'applied', grant }
+    applicationOperations.set(input.operationId, operation)
+    return structuredClone(operation)
+  }
+  if (applicationAccess && method === 'connection.binding.member.inherit') {
+    const operation: RoomBindingOperation = { operationId: input.operationId, action: 'inherit', state: 'applied', binding: structuredClone(bindings[0]!), inherited: { actor: structuredClone(input.actor), grants: [structuredClone(input.expectedGrant)] } }
+    memberGrants = memberGrants.filter(grant => grant.grantId !== input.expectedGrant.grantId)
+    memberOperations.set(input.operationId, operation)
+    return structuredClone(operation)
+  }
+  if (memberScenario && method === 'connection.grant') {
     const known = memberOperations.get(input.operationId)
     if (known) return structuredClone(known)
     const binding = bindings[0]!
@@ -158,30 +187,39 @@ api.connections.call = (async (method: string, input: any, owner?: ConnectionHos
   if (method === 'connection.room.get') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, observation: { state: 'ready' }, room: { ...room, externalConversationId: input.externalConversationId } }
   if (method === 'connection.room.members') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, externalConversationId: input.externalConversationId, observation: { state: 'ready' }, members, next: null } satisfies RoomMembersResult
   if (method === 'connection.room.link.inspect') return { operation: input.operationId === joinOperation.operationId ? structuredClone(joinOperation) : null }
-  if (method === 'connection.metadata.get') return meta
-  if (method === 'connection.metadata.ls') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, entries: [], next: null }
+  if (applicationAccess && method === 'connection.setup.ls') return { operations: [], next: null, support: { connectionRevision: 1, capabilities: [] } }
+  if (applicationAccess && method === 'connection.profile.ls') return { operations: [], next: null }
+  const actorMetadata = members.map(member => { const actor = { application: connection.config.application, idType: member.idType, userId: member.userId }; return { subject: { kind: 'actor', actor }, cacheRevision: 'preview-actor-' + member.userId, observation: { actor, state: 'observed', freshness: 'current', profile: { name: member.name, observedAt: 1 }, checkedAt: 1 } } })
+  if (method === 'connection.metadata.get') return applicationAccess && input.subject.kind === 'actor' ? { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, entry: actorMetadata.find(entry => entry.subject.actor.userId === input.subject.actor.userId)! } : meta
+  if (method === 'connection.metadata.ls') return { connectionId: connection.config.connectionId, connectionRevision: 1, application: connection.config.application, entries: applicationAccess && input.kind === 'actor' ? actorMetadata : [], next: null }
   if (method === 'connection.bind') {
     bindings = [{ ...input, revision: 1, state: 'active', application: connection.config.application, sourceCheckpoints: [], authorizedBy: { kind: 'user', id: 'preview-person' } }]
     return { operationId: input.operationId, action: 'bind', state: 'applied', binding: bindings[0] }
   }
   throw Error('This preview does not execute ' + method)
 }) as typeof api.connections.call
-if (memberAccess) {
+if (memberScenario) {
   const binding: RoomBinding = { ...target, regionAnchor: { regionId: 'channel-preview-region' }, bindingId: 'preview-original-member-binding', revision: 1, state: 'active',
     connectionId: connection.config.connectionId, application: connection.config.application, externalConversationId: room.externalConversationId,
     scope: { input: 'mentions-and-replies', publication: 'future-shared-conversation' }, sourceCheckpoints: [], authorizedBy: { kind: 'user', id: 'preview-person' } }
   bindings = [binding]
-  memberGrants = [{ grantId: 'preview-original-ava-grant', revision: 1, bindingId: binding.bindingId, bindingRevision: 1, connectionId: binding.connectionId,
+  memberGrants = applicationAccess ? [] : [{ grantId: 'preview-original-ava-grant', revision: 1, bindingId: binding.bindingId, bindingRevision: 1, connectionId: binding.connectionId,
     externalConversationId: binding.externalConversationId, actor: { application: binding.application, idType: members[0]!.idType, userId: members[0]!.userId },
     state: 'active', capabilities: ['input', 'answer', 'permission'] }]
   const input = { operationId: 'preview-original-ben-pending', bindingId: binding.bindingId, expectedBindingRevision: 1, grantId: 'preview-original-ben-grant', expectedRevision: null,
     actor: { application: binding.application, idType: members[1]!.idType, userId: members[1]!.userId }, capabilities: ['input' as const], state: 'active' as const }
-  memberOperations.set(input.operationId, { operationId: input.operationId, action: 'grant', state: 'preparing' })
-  useAppStore.setState({ connectorRoomIntents: { [input.operationId]: { target, hostingTarget, method: 'connection.grant', input, phase: 'may-have-dispatched' } } })
+  if (!applicationAccess) {
+    memberOperations.set(input.operationId, { operationId: input.operationId, action: 'grant', state: 'preparing' })
+    useAppStore.setState({ connectorRoomIntents: { [input.operationId]: { target, hostingTarget, method: 'connection.grant', input, phase: 'may-have-dispatched' } } })
+  }
   Object.assign(proof, { member: {
     refuseOriginal() { memberOperations.set(input.operationId, { operationId: input.operationId, action: 'grant', state: 'refused', code: 'ROOM_GRANT_REVISION_CONFLICT' }) },
     facts: () => ({ bindings: structuredClone(bindings), grants: structuredClone(memberGrants), operations: [...memberOperations.values()].map(item => structuredClone(item)),
       intents: structuredClone(useAppStore.getState().connectorRoomIntents), drafts: structuredClone(useAppStore.getState().connectorRoomDrafts) })
+  } })
+  if (applicationAccess) Object.assign(proof, { application: {
+    unavailable() { proof.accessUnavailable = true; invalidateConnectorTarget(target) },
+    facts: () => ({ grants: structuredClone(applicationGrants), operations: [...applicationOperations.values()].map(item => structuredClone(item)), memberGrants: structuredClone(memberGrants), drafts: structuredClone(useAppStore.getState().manualConnectionIntents), groupDrafts: structuredClone(useAppStore.getState().connectorRoomDrafts) })
   } })
 }
 Object.assign(window, { channelEntryProof: proof })
