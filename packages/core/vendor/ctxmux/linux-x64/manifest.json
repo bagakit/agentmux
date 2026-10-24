@@ -1,13 +1,14 @@
 {
   "schema": "ctxmux.local-artifacts.v1",
   "source": {
-    "commit": "f28dff84a169e862d991e489a833d4ace2a58e0b",
-    "tree": "3a28343cf1c0bd5daa2328349f551acc19b61fcb",
+    "commit": "4c797a97c469cd9d11596f9891ba4114268d5a6e",
+    "tree": "2076998d36be23b8ac52a173896cb9b6a76d40c5",
+    "commit_time_unix": "1789240531",
     "worktree_clean": true
   },
   "product": {
     "version": "0.1.0",
-    "protocol": 22
+    "protocol": 23
   },
   "support": {
     "platform": "linux",
@@ -18,21 +19,22 @@
   "build": {
     "profile": "release",
     "locked": true,
+    "source_date_epoch": "1789240531",
     "rustc": "1.96.0",
     "cargo": "cargo 1.96.0 (30a34c682 2026-05-25)",
     "node": "v24.14.1",
-    "npm": "11.12.1"
+    "npm": "11.11.0"
   },
   "sdk": {
     "name": "@ctxmux/sdk",
     "version": "0.0.0",
-    "protocol": 22,
-    "entry_count": 338,
-    "unpacked_bytes": 542276,
+    "protocol": 23,
+    "entry_count": 358,
+    "unpacked_bytes": 563149,
     "archive": {
       "path": "ctxmux-sdk-0.0.0.tgz",
-      "sha256": "3a238347802afa63db7b2fd9056bba7e6fc9045fb6b8bd0b93852a8f634be955",
-      "bytes": 120635,
+      "sha256": "44b0deb8986aec232289292776dac9f0f2da64babebc2ab5cace246ba7d53cf4",
+      "bytes": 125002,
       "mode": "0644"
     }
   },
@@ -40,24 +42,24 @@
     {
       "name": "ctxmux",
       "version": "0.1.0",
-      "protocol": 22,
+      "protocol": 23,
       "path": "bin/ctxmux",
-      "sha256": "d9786e552fc7603c1c64744a9fff8b7d1ba0a715fc9700931a55cd33a18a4449",
-      "bytes": 3984472,
+      "sha256": "4bd9cddd5944f0a845c6268f13f908c3a30190fabe7887d83dc8d41098887ae4",
+      "bytes": 4302008,
       "mode": "0755"
     },
     {
       "name": "ctxmuxd",
       "version": "0.1.0",
-      "protocol": 22,
+      "protocol": 23,
       "path": "bin/ctxmuxd",
-      "sha256": "1f8fd1f7c188c03cc20c26a4a96796a699ddbd69c0fe99fa7765470fb220ce1a",
-      "bytes": 7667920,
+      "sha256": "3f03c7fa6a1f0e3ec795c60b7d9e28ac1c14b4e2e1517692e2c0a8cbc4b3e4d1",
+      "bytes": 8133080,
       "mode": "0755"
     }
   ],
   "determinism": {
-    "sdk_archive": "Archive member timestamps normalized; documentation examples use caller-owned configuration; executable member payloads are unchanged and the archive identity is the recorded digest.",
-    "binaries": "Diagnostic compiler source roots normalized without instruction changes; ad-hoc signatures regenerated where required; content identity is the recorded binary digest."
+    "sdk_archive": "byte-reproducible for the bound source and npm identity",
+    "binaries": "content-addressed for the bound source, target, profile, and Rust toolchain"
   }
 }
