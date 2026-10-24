@@ -63,12 +63,40 @@ app.whenReady().then(async () => {
     await until('!!document.querySelector(".mobile-conversation-panel:not([hidden]) [contenteditable=true]")')
     assert.equal(await read('mobileProductScene.facts().record.selectedSessionId'), 'session-mote')
   }
+  if (mode === 'conversation-spacing') {
+    await require('./conversation-spacing.cjs')({ win, read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
+  if (mode === 'focus-state') {
+    await require('./focus-state.cjs')({ win, read, until, resize, tap, button, capture, result, evidence })
+    result.passed = true; return
+  }
   if (mode === 'chat-start') {
     await require('./chat-start.cjs')({ win, read, until, resize, tap, button, capture, result, evidence, phase })
     result.passed = true; return
   }
   if (mode === 'conversation-controls') {
     await require('./conversation-controls.cjs')({ win, read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
+  if (mode === 'web-update') {
+    await require('./web-update.cjs')({ win, read, until, resize, tap, button, capture, result, evidence })
+    result.passed = true; return
+  }
+  if (mode === 'goal-recovery') {
+    await require('./goal-recovery.cjs')({ win, read, until, resize, tap, button, capture, result, evidence, phase })
+    result.passed = true; return
+  }
+  if (mode === 'attachment-upload-exit') {
+    await require('./attachment-upload-exit.cjs')({ win, read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
+  if (mode === 'attachment-selection') {
+    await require('./attachment-selection.cjs')({ win, read, until, resize, tap, button, capture, result })
+    result.passed = true; return
+  }
+  if (mode === 'goal-exit') {
+    await require('./goal-exit.cjs')({ win, read, until, resize, tap, button, capture, result })
     result.passed = true; return
   }
   if (mode === 'mote-home') {
@@ -204,6 +232,10 @@ app.whenReady().then(async () => {
       await until('!!document.querySelector(' + JSON.stringify('.mobile-conversation-panel:not([hidden]) [data-native-record-id="session-mote-answer-original"] .log-turn__body') + ')')
     }
     await button('刷新空间目录', '.mobile-spatial-panel')
+    // The initial workface may already show this Session's pre-fixture history.
+    // Switch to another original Session so reopening reads the prepared page.
+    await button('Focus', '.mobile-navigation')
+    await button('实验建议', '.mobile-focus-project')
     await enterOriginal()
     await tap('.mobile-conversation-panel [contenteditable=true]', 'Preserved original Composer')
     win.webContents.insertText(draft)
@@ -304,10 +336,14 @@ app.whenReady().then(async () => {
         assert.ok(facts.body.y >= facts.head.bottom - 1)
         bubbles.push(facts)
       }
-      assert.equal(bubbles[2].sid, 'session-mote')
-      const sender = bubbles[2]
+      assert.equal(bubbles[2].sid, undefined, 'Compact header keeps identity in the existing details')
+      await tap(reply + ' .conversation-input-details__toggle', 'Read exact sender identity')
+      await until(`!!document.querySelector(${JSON.stringify(reply + ' .log-turn__id-copy')})`)
+      const sender = await bubbleFacts(reply)
+      assert.equal(sender.sid, 'session-mote')
       assert.ok(sender.idCopy.width >= 44 && sender.idCopy.height >= 44, 'Exact Agent identity Copy keeps its full 44px target')
       assert.ok(sender.sidText.width > 0 && Math.abs((sender.sidText.y + sender.sidText.height / 2) - (sender.idCopy.y + sender.idCopy.height / 2)) <= 1, 'Exact Agent identity and Copy must share a single flex row')
+      await tap(reply + ' .conversation-input-details__toggle', 'Close sender details')
       result.operations.push({ action: 'actual-mobile-bubble-geometry', width, height, appearance, bubbles })
       await capture(`message-bubbles-${width}-${appearance}`)
     }
