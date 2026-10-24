@@ -143,6 +143,22 @@ app.whenReady().then(async () => {
     await read(`${pane}.scrollTop=0`)
   }
   const theme = async value => { await read(`window.settingsHomeProbe.theme(${JSON.stringify(value)})`); await settle() }
+  const moteStoryScenes = async (prefix, color) => {
+    const story = node('[data-settings-pane="mote"] .mote-origin')
+    const saves = await read('window.settingsHomeProbe.saves.length')
+    await click(`${story}.querySelectorAll('button')[0]`)
+    for (let chapter = 0; chapter < 3; chapter++) {
+      if (chapter === 1) { await key('Tab'); await key('Enter') }
+      if (chapter === 2) await click(`${story}.querySelectorAll('button')[2]`)
+      await until(`${story}.querySelectorAll('button')[${chapter}].getAttribute('aria-pressed')==='true'`)
+      await until(`${story}.querySelector('img').complete&&${story}.querySelector('img').naturalWidth>0`)
+      // Keep the first button focused for the trusted Tab/Enter transition.
+      if (chapter === 0) await capture(`${prefix}-story-${chapter}`, 'mote', color)
+      else await captureSegments(`${prefix}-story-${chapter}`, 'mote', color)
+    }
+    assert.equal(await read('window.settingsHomeProbe.saves.length'), saves, 'Story navigation never saves configuration')
+    await click(`${story}.querySelectorAll('button')[0]`)
+  }
   let catalog
   const nav = async id => {
     const entry = id === 'overview' ? {id,title:'Overview'} : catalog.find(item=>item.id===id)
@@ -962,6 +978,7 @@ app.whenReady().then(async () => {
       for (const mode of ['dark','light']) {
         await theme(mode)
         await captureSegments(`page-${entry.id}-${mode}`,entry.id,mode)
+        if (entry.id === 'mote') await moteStoryScenes(`page-mote-${mode}`, mode)
       }
     }
     await theme('dark')
@@ -977,6 +994,7 @@ app.whenReady().then(async () => {
       for (const color of ['dark','light']) {
         await theme(color)
         await captureSegments(`page-${id}-compact-${color}`,id,color)
+        if (id === 'mote') await moteStoryScenes(`page-mote-compact-${color}`, color)
         if (id==='appearance') {
           const palette = await read(`Array.from(document.querySelectorAll('.terminal-theme-choice')).map(n=>n.getBoundingClientRect().toJSON())`)
           assert.ok(palette.length>1&&Math.abs(palette[0].top-palette[1].top)<=1&&palette[1].left>palette[0].right,'Compact terminal palettes remain comparable in two columns')
