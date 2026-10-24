@@ -18,6 +18,7 @@ import { useVisibleWork } from '../lib/use-visible-work.js'
 import { useHorizontalReading } from '../lib/use-horizontal-reading.js'
 import { ConversationProgressiveBody, needsProgressiveText } from './ConversationProgressiveBody.js'
 import { markProgrammaticReadingScroll } from '../lib/reading-scroll.js'
+import { ConversationLinkCard } from './ConversationLinkCard.js'
 
 export type LinkClickModifiers = { metaKey: boolean; ctrlKey: boolean; altKey?: boolean; clientX: number; clientY: number }
 export type OpenHttpLink = (url: string, event: LinkClickModifiers) => void
@@ -161,6 +162,11 @@ function inlineLabel(nodes: InlineNode[]): string {
   return nodes.map(node => 'text' in node ? node.text : 'children' in node ? inlineLabel(node.children) : node.kind === 'break' ? ' ' : '').join('')
 }
 
+function textOnlyLinkLabel(nodes: InlineNode[]): boolean {
+  return nodes.every(node => node.kind === 'text' || node.kind === 'code' ||
+    (node.kind === 'strong' || node.kind === 'emphasis' || node.kind === 'strike') && textOnlyLinkLabel(node.children))
+}
+
 function MarkdownTable({ node, context }: { node: Extract<BlockNode, { kind: 'table' }>; context: InlineContext }) {
   const viewport = useVisibleWork<HTMLTableElement>(context.visible && !context.readOnly)
   const reading = useHorizontalReading<HTMLDivElement>(viewport.visible, node)
@@ -182,7 +188,13 @@ function MarkdownCapsule({ uri, capsuleId, title, active, inert, presentationKey
   </div>
 }
 
-function Block({ node, context, path }: { node: BlockNode; context: InlineContext; path: string }) {
+function Block({ node, context, path, topLevel = false }: { node: BlockNode; context: InlineContext; path: string; topLevel?: boolean }) {
+  if (topLevel && node.kind === 'paragraph' && !context.readOnly && !context.documentMode && context.openHttpLink !== defaultOpenHttpLink) {
+    const content = node.children.filter(child => child.kind !== 'text' || child.text.trim())
+    const link = content.length === 1 && content[0]?.kind === 'link' ? content[0] : null
+    const target = link ? resolveLink(link, context) : null
+    if (link && target?.kind === 'http' && textOnlyLinkLabel(link.children)) return <ConversationLinkCard url={target.url} href={link.href} label={inlineLabel(link.children)} open={context.openHttpLink} />
+  }
   if (node.kind === 'paragraph' && node.children.some(child => child.kind === 'image') && node.children.every(child =>
     child.kind === 'break' || child.kind === 'text' && !child.text.trim() || child.kind === 'image' && objectLinkReference(child.href)?.target.kind === 'capsule')) {
     return <>{node.children.flatMap((child, index) => {
@@ -305,7 +317,7 @@ function AgentMarkdownBody({ content, className, context, parse }: {
   const { document, blocks } = parsed!
   return <ConversationImageCollection references={imageReferences} readImage={readPastedImage}><div data-markdown-root="" className={`${className ? className + ' ' : ''}md${documentMode ? ' md-document' : isInput ? ' md-input' : ''}`}>
     {document && <MarkdownOutline headings={document.headings} onNavigate={(source, anchor) => navigateWithinMarkdown(source, 'data-md-anchor', anchor)} />}
-    {blocks.map((block, index) => <Block key={index} node={block} context={context} path={String(index)} />)}
+    {blocks.map((block, index) => <Block key={index} node={block} context={context} path={String(index)} topLevel />)}
   </div></ConversationImageCollection>
 }
 

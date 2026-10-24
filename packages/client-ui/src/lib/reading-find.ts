@@ -27,7 +27,7 @@ export function readingMatchDetails(root: HTMLElement, query: string, bodySelect
     if (node.nodeType === 1) { groups.push({ block: node as Element, boundary: null, nodes: [], text: '' }); continue }
     const text = node as Text
     const body = text.parentElement!.closest(bodySelector)!
-    const block = text.parentElement!.closest('p, li, td, th, pre, h1, h2, h3, h4, h5, h6, blockquote') ?? body
+    const block = text.parentElement!.closest('p, li, td, th, pre, h1, h2, h3, h4, h5, h6, blockquote, [data-reading-find-block]') ?? body
     const boundary = text.parentElement!.closest('[data-reading-find-boundary], .md-math')
     let group = groups.at(-1)
     if (!group || group.block !== block || group.boundary !== boundary) { group = { block, boundary, nodes: [], text: '' }; groups.push(group) }
