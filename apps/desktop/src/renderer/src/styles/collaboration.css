@@ -198,8 +198,7 @@
 .collaboration-area[data-kind=category] .collaboration-area__envelope path { fill: color-mix(in srgb, var(--area-color) 3%, var(--surface-1)); stroke-width: 1; }
 .collaboration-area[data-depth="0"] .collaboration-area__envelope path { fill: color-mix(in srgb, var(--area-color) 3%, var(--surface-1)); }
 .collaboration-area__overview-label:not([data-depth="0"])::before { width: 2px; opacity: .65; }
-.collaboration-area__overview-label { position: absolute; width: max-content; min-width: 148px; pointer-events: none; border-radius: 9px; background: color-mix(in srgb, var(--surface-1) 96%, var(--area-color)); border: 1px solid color-mix(in srgb, var(--area-color) 32%, var(--line)); box-shadow: 0 3px 12px color-mix(in srgb, var(--surface-1) 70%, transparent); }
-.collaboration-area__overview-label[data-internal-above=true] { display: flex; flex-direction: column; }
+.collaboration-area__overview-label { position: absolute; display: flex; flex-direction: column; width: max-content; min-width: 148px; pointer-events: none; border-radius: 9px; background: color-mix(in srgb, var(--surface-1) 96%, var(--area-color)); border: 1px solid color-mix(in srgb, var(--area-color) 32%, var(--line)); box-shadow: 0 3px 12px color-mix(in srgb, var(--surface-1) 70%, transparent); }
 .collaboration-area__overview-label[data-internal-above=true] .collaboration-area__internal { order: -1; margin-top: 6px; margin-bottom: 0; }
 .collaboration-area__overview-label::before { content: ''; position: absolute; inset: 9px auto 9px -1px; width: 3px; border-radius: 3px; background: var(--area-color); pointer-events: none; }
 .collaboration-area__overview-label[data-current=true] { border-color: var(--area-color); box-shadow: 0 0 0 2px color-mix(in srgb, var(--area-color) 13%, transparent), 0 4px 16px color-mix(in srgb, var(--surface-1) 80%, transparent); }
