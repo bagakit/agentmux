@@ -1,3 +1,5 @@
+import { effectiveRoomGrant } from './effective-grant.js'
+import type { ConnectionMemberAccess, ConnectionEffectiveGrant, ConnectionEffectiveGrants, RoomBindingInheritInput } from '@agentmux/core/connections'
 import { AgentMuxError } from '@agentmux/core'
 import { parseConversationCheckpointPage, type ConversationCheckpointPage, type ConversationRef } from '@agentmux/core/conversation'
 import { parseConnectionActor, parseConnectionGrant, parseRoomBinding, parseRoomBindingAuthority, parseRoomBindingOperation, parseRoomBindingParams, type ConnectionGrant, type RoomBinding, type RoomBindingAuthority, type RoomBindingBindInput, type RoomBindingCallContext, type RoomBindingGrantInput, type RoomBindingInspectInput, type RoomBindingListInput, type RoomBindingOperation, type RoomBindingPauseInput, type RoomBindingReadPort, type RoomBindingRelinkInput, type RoomBindingNoticeEvent, type RoomBindingNotice, type RoomBindingsPort, type RoomPublicationAuthority } from '@agentmux/core/connections'
@@ -16,12 +18,12 @@ export type RoomBindingHostOptions = {
   checkpoint(reference: ConversationRef): Promise<ConversationCheckpointPage>
 }
 type Action = RoomBindingOperation['action']
-type Input = RoomBindingBindInput | RoomBindingRelinkInput | RoomBindingPauseInput | RoomBindingGrantInput
+type Input = RoomBindingBindInput | RoomBindingRelinkInput | RoomBindingPauseInput | RoomBindingGrantInput | RoomBindingInheritInput
 type Saved = { intent: string; operation: RoomBindingOperation }
 class Refusal extends Error { constructor(readonly code: string) { super(code) } }
 function refuse(code: string): never { throw new Refusal(code) }
 const equal = (left: unknown, right: unknown) => JSON.stringify(left) === JSON.stringify(right)
-const method = { bind: 'connection.bind', relink: 'connection.binding.relink', pause: 'connection.binding.pause', resume: 'connection.binding.resume', detach: 'connection.binding.detach', grant: 'connection.grant' } as const
+const method = { bind: 'connection.bind', relink: 'connection.binding.relink', pause: 'connection.binding.pause', resume: 'connection.binding.resume', detach: 'connection.binding.detach', grant: 'connection.grant', inherit: 'connection.binding.member.inherit' } as const
 
 /** Binding, grant and operation snapshots belong to the original connector database. No topology is copied. */
 export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
@@ -35,7 +37,9 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
       CREATE INDEX IF NOT EXISTS room_binding_session ON room_binding_head(host_id,session_id,binding_id);
       CREATE TABLE IF NOT EXISTS room_binding_operation (operation_id TEXT PRIMARY KEY, intent_json TEXT NOT NULL, result_json TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS room_grant_revision (grant_id TEXT NOT NULL, revision INTEGER NOT NULL, snapshot_json TEXT NOT NULL, PRIMARY KEY(grant_id, revision));
+      CREATE INDEX IF NOT EXISTS room_grant_subject ON room_grant_revision(json_extract(snapshot_json,'$.bindingId'));
       CREATE TABLE IF NOT EXISTS room_grant_head (grant_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, binding_id TEXT NOT NULL, connection_id TEXT NOT NULL, room_id TEXT NOT NULL, actor_json TEXT NOT NULL, UNIQUE(connection_id, room_id, actor_json));
+      CREATE INDEX IF NOT EXISTS room_grant_binding_actor ON room_grant_head(binding_id,actor_json);
     `))
   }
   private safe<T>(read: () => T): T {
@@ -106,6 +110,50 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     if (!binding) return []
     return this.safe(() => this.database.prepare('SELECT grant_id FROM room_grant_head WHERE connection_id=? AND room_id=? AND binding_id=?').all(binding.connectionId, binding.externalConversationId, binding.bindingId).map(row => this.readGrant(String(row.grant_id))!).filter(grant => grant.bindingRevision === binding.revision))
   }
+  /** Head is authority; immutable history only explains a prior explicit decision. */
+  private localHeads(binding: RoomBinding, actor?: ConnectionGrant['actor']): ConnectionGrant[] {
+    return this.safe(() => this.database.prepare('SELECT r.snapshot_json FROM room_grant_head h JOIN room_grant_revision r ON r.grant_id=h.grant_id AND r.revision=h.revision WHERE h.binding_id=?' + (actor ? ' AND h.actor_json=?' : '')).all(binding.bindingId, ...(actor ? [JSON.stringify(parseConnectionActor(actor))] : []))
+      .map(row => parseConnectionGrant(JSON.parse(String(row.snapshot_json))))
+      .filter(g => { const original = this.readExact(g.bindingId, g.bindingRevision); return !!original && this.sameGrantSubject(original, binding) }))
+  }
+  private localDecision(binding: RoomBinding, actor: ConnectionGrant['actor']): ConnectionGrant | null {
+    const heads = this.localHeads(binding, actor).sort((a, b) => b.bindingRevision - a.bindingRevision)
+    if (heads.length > 1 && heads[1]!.bindingRevision === heads[0]!.bindingRevision) throw new AgentMuxError('The original member decision has conflicting heads. Inspect this member before explicitly saving; existing Agents remain available.', 'ROOM_GRANT_DECISION_UNCONFIRMED')
+    return heads[0] ?? null
+  }
+  effectiveGrant(bindingId: string, revision: number, actor: ConnectionGrant['actor']): ConnectionEffectiveGrant | null {
+    const binding = this.readCurrent(bindingId)
+    if (!binding || binding.revision !== revision || !equal(binding.application, actor.application)) return null
+    const local = this.localDecision(binding, actor)
+    if (local) return local.bindingRevision === revision || local.state === 'revoked' ? effectiveRoomGrant(local) : null
+    const grant = this.options.connections.applicationAccess.grants(binding.connectionId, actor)[0]
+    return grant ? { actor: grant.actor, state: grant.state, capabilities: grant.capabilities, source: { kind: 'application', grantId: grant.grantId, revision: grant.revision } } : null
+  }
+  effectiveGrants(bindingId: string, revision: number): ConnectionEffectiveGrants {
+    const binding = this.readCurrent(bindingId)
+    if (!binding || binding.revision !== revision) return { grants: [], issue: null }
+    const local = this.localHeads(binding), actors = new Map(local.map(g => [JSON.stringify(g.actor), g.actor]))
+    const grants: ConnectionEffectiveGrant[] = []
+    for (const actor of actors.values()) { const grant = this.localDecision(binding, actor)!; if (grant.bindingRevision === revision || grant.state === 'revoked') grants.push(effectiveRoomGrant(grant)) }
+    try {
+      for (const g of this.options.connections.applicationAccess.grants(binding.connectionId)) if (!actors.has(JSON.stringify(g.actor))) grants.push({ actor: g.actor, state: g.state, capabilities: g.capabilities, source: { kind: 'application', grantId: g.grantId, revision: g.revision } })
+      return { grants, issue: null }
+    } catch { return { grants, issue: 'application-unconfirmed' } }
+  }
+  private memberAccess(binding: RoomBinding): ConnectionMemberAccess[] {
+    const actors = new Map<string, { actor: ConnectionGrant['actor']; previousDecision: boolean }>()
+    const remember = (actor: ConnectionGrant['actor'], previousDecision: boolean) => { const key = JSON.stringify(actor); actors.set(key, { actor, previousDecision: previousDecision || actors.get(key)?.previousDecision === true }) }
+    for (const grant of this.localHeads(binding)) remember(grant.actor, true)
+    for (const row of this.database.prepare("SELECT snapshot_json FROM room_grant_revision WHERE json_extract(snapshot_json,'$.bindingId')=?").all(binding.bindingId)) {
+      const g = parseConnectionGrant(JSON.parse(String(row.snapshot_json))), original = this.readExact(g.bindingId, g.bindingRevision)
+      if (original && this.sameGrantSubject(original, binding)) remember(g.actor, true)
+    }
+    for (const g of this.options.connections.applicationAccess.grants(binding.connectionId)) remember(g.actor, false)
+    return [...actors.values()].map(({ actor, previousDecision }) => {
+      const grant = this.localDecision(binding, actor), effective = this.effectiveGrant(binding.bindingId, binding.revision, actor)
+      return { actor, local: grant ? { kind: grant.bindingRevision === binding.revision ? 'override' as const : 'review-required' as const, grant } : { kind: 'none' as const, previousDecision }, effective }
+    })
+  }
   readOperation(operationId: string): RoomBindingOperation | null { return this.safe(() => this.saved(operationId)?.operation ?? null) }
   private saved(operationId: string): Saved | null {
     const row = this.database.prepare('SELECT intent_json, result_json FROM room_binding_operation WHERE operation_id=?').get(operationId)
@@ -116,7 +164,7 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
     return this.safe(() => {
       const operation = input.operationId ? this.saved(input.operationId)?.operation ?? null : null
       const binding = input.bindingId ? input.revision === undefined ? this.readCurrent(input.bindingId) : this.readExact(input.bindingId, input.revision) : operation?.state === 'applied' ? operation.binding : null
-      return { binding, current: binding ? this.readCurrent(binding.bindingId) : null, operation, grants: this.bindingGrants(binding) }
+      return { binding, current: binding ? this.readCurrent(binding.bindingId) : null, operation, grants: this.bindingGrants(binding), ...(binding && input.bindingId && input.revision === undefined ? { access: this.memberAccess(binding) } : {}) }
     })
   }
   private writeBinding(binding: RoomBinding): void {
@@ -303,6 +351,24 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
         if (action === 'pause') this.carryGrants(current, binding)
         const notices = this.notices(input.operationId, [{ binding, event: action === 'pause' ? 'paused' : 'disconnected' }])
         return this.finish({ operationId: input.operationId, action, state: 'applied', binding, ...(notices ? { notices } : {}) })
+      })
+    })
+  }
+  async inherit(value: RoomBindingInheritInput, context: RoomBindingCallContext): Promise<RoomBindingOperation> {
+    return this.operate('inherit', value, context, async raw => {
+      const input = raw as RoomBindingInheritInput
+      await context.assertCurrent?.()
+      return this.transaction(() => {
+        const saved = this.saved(input.operationId)!.operation
+        if (saved.state !== 'preparing') return saved
+        const binding = this.readCurrent(input.bindingId)
+        if (!binding || binding.state !== 'active' || binding.revision !== input.expectedBindingRevision) refuse('ROOM_BINDING_REVISION_CONFLICT')
+        if (!equal(binding.application, input.actor.application)) refuse('ROOM_GRANT_ACTOR_MISMATCH')
+        const current = this.localDecision(binding, input.actor)
+        if (!current || current.grantId !== input.expectedGrant.grantId || current.revision !== input.expectedGrant.revision) refuse('ROOM_GRANT_REVISION_CONFLICT')
+        const grants = this.localHeads(binding, input.actor).map(g => ({ grantId: g.grantId, revision: g.revision }))
+        for (const g of grants) this.database.prepare('DELETE FROM room_grant_head WHERE grant_id=? AND revision=?').run(g.grantId, g.revision)
+        return this.finish({ operationId: input.operationId, action: 'inherit', state: 'applied', binding, inherited: { actor: input.actor, grants } })
       })
     })
   }

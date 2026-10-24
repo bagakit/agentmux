@@ -73,6 +73,7 @@ export async function createConnectionServices(options: { directory: string | un
           resume: (input, context) => bindings.resume(input, context),
           detach: (input, context) => bindings.detach(input, context),
           relink: (input, context) => bindings.relink(input, context),
+          inherit: (input, context) => bindings.inherit(input, context),
           grant: (input, context) => bindings.grant(input, context),
           list: async input => ({ bindings: [...(await bindings.list(input)).bindings, ...moteChat.listBindings(input)] }),
           inspect: async input => {
@@ -146,6 +147,11 @@ export async function createConnectionServices(options: { directory: string | un
       allocate: async (input, context) => (await ensure()).moteChat!.allocate(input, context)
     } satisfies MoteChatPort } : {}),
     connections: {
+      applicationAccess: {
+        get: async input => (await ensure()).connections.applicationAccess.get(input),
+        configure: async (input, context) => { const owner = await ensure(), result = await owner.connections.applicationAccess.configure(input, context); if (result.state === 'applied') owner.publication?.refreshAccess(result.grant.adapterId, result.grant.actor.application); return result },
+        inspect: async input => (await ensure()).connections.applicationAccess.inspect(input)
+      },
       ownsEnrollmentConnection: async (connectionId, agentSessionId) => (await ensure()).connections.ownsEnrollmentConnection(connectionId, agentSessionId),
       service: {
         get: async input => (await ensure()).connections.service.get(input),
@@ -196,6 +202,7 @@ export async function createConnectionServices(options: { directory: string | un
         resume: async (input, context) => { const owner = await ensure(); const result = await owner.bindings!.resume(input, context); owner.publication?.refresh(); owner.receivers?.refresh(); return result },
         detach: async (input, context) => { const owner = await ensure(); const result = await owner.bindings!.detach(input, context); owner.publication?.refresh(); owner.receivers?.refresh(); return result },
         relink: async (input, context) => { const owner = await ensure(); const result = await owner.bindings!.relink(input, context); owner.publication?.refresh(); owner.receivers?.refresh(); return result },
+        inherit: async (input, context) => { const owner = await ensure(), result = await owner.bindings!.inherit(input, context); if (result.state === 'applied') { const config = owner.connections.readConfiguration(result.binding.connectionId)?.config; if (config) owner.publication?.refreshAccess(config.adapterId, result.binding.application, result.binding.bindingId) }; return result },
         grant: async (input, context) => { const owner = await ensure(); const result = await owner.bindings!.grant(input, context); owner.publication?.refresh(); owner.receivers?.refresh(); return result }
       } satisfies import('@agentmux/core/connections').RoomBindingsPort } : {}),
       ...(options.publication && options.bindings ? { delivery: {

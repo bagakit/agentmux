@@ -19,7 +19,7 @@ export interface PublicationConversationPort {
 }
 export interface PublicationPermissionsPort {
   observe(binding: RoomBinding, wake: () => void): () => void
-  project(binding: RoomBinding, store: PublicationStore, supported?: { permission: boolean; question: boolean }): string[]
+  project(binding: RoomBinding, store: PublicationStore, supported?: { permission: boolean; question: boolean }, unavailable?: () => void): string[]
   questions?(binding: RoomBinding, units: readonly ConversationUnit[]): ReadonlyMap<string, QuestionPublicationPayload>
   refreshQuestions?(binding: RoomBinding, store: PublicationStore): Promise<void>
   authorized(operation: PublicationOperation): boolean
@@ -67,6 +67,15 @@ export class PublicationHost implements ConnectionDeliveryPort {
         } catch { lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' } }
         this.wake(lane)
       } else if (!recoveryOnly || lane.observation.state !== 'ready' || !lane.watch || lane.watch.closed?.aborted) this.wake(lane)
+    }
+  }
+  /** A member rule changes only existing lanes for that original application; receiver configuration is unchanged. */
+  refreshAccess(adapterId: string, application: RoomBinding['application'], bindingId?: string): void {
+    if (this.closed) return
+    for (const lane of this.lanes.values()) {
+      if (bindingId && lane.binding.bindingId !== bindingId || lane.binding.application.domain !== application.domain || lane.binding.application.appId !== application.appId) continue
+      const config = this.options.connections.readConfiguration(lane.binding.connectionId)?.config
+      if (config?.adapterId === adapterId) this.wake(lane)
     }
   }
   private authority(binding: Pick<RoomBinding, 'bindingId' | 'revision'>) {
@@ -131,11 +140,11 @@ export class PublicationHost implements ConnectionDeliveryPort {
     const adapter = this.options.connections.publicationAdapter(binding.connectionId)
     if (!adapter) { lane.observation = { state: 'unavailable', reason: 'adapter-unavailable' }; return }
     this.reconcile(lane, adapter)
-    let permissionProjections: string[] = [], permissionsUnavailable = false
+    let permissionProjections: string[] = [], permissionsUnavailable = false, accessUnavailable = false
     try {
       if (adapter.permissionActions === true || adapter.questionActions === true) {
         lane.permissionStop ??= this.options.permissions?.observe(binding, () => this.wake(lane))
-        permissionProjections = this.options.permissions?.project(binding, this.store, { permission: adapter.permissionActions === true, question: adapter.questionActions === true }) ?? []
+        permissionProjections = this.options.permissions?.project(binding, this.store, { permission: adapter.permissionActions === true, question: adapter.questionActions === true }, () => { permissionsUnavailable = true; accessUnavailable = true }) ?? []
         if (adapter.questionActions) await this.options.permissions?.refreshQuestions?.(binding, this.store)
       }
     } catch { permissionsUnavailable = true }
@@ -159,7 +168,7 @@ export class PublicationHost implements ConnectionDeliveryPort {
       // Original effects may still settle or dispatch; their observation cannot hide an unresolved content gap.
       if (effectObservation && lane.observation.state === 'ready') lane.observation = effectObservation
     }
-    if (permissionsUnavailable && lane.observation.state === 'ready') lane.observation = { state: 'unavailable', reason: 'source-unconfirmed' }
+    if (permissionsUnavailable && (lane.observation.state === 'ready' || accessUnavailable && lane.observation.reason === 'source-unconfirmed' && lane.sourceObservation?.state !== 'unavailable')) lane.observation = { state: 'unavailable', reason: accessUnavailable ? 'access-unconfirmed' : 'source-unconfirmed' }
   }
   private async catchUp(lane: Lane, adapter: PublicationAdapter): Promise<void> {
     const binding = lane.binding, signal = lane.abort.signal, reference = { hostId: binding.executionHostId, agentSessionId: binding.agentSessionId }

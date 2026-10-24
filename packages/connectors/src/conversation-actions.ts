@@ -1,16 +1,17 @@
+import { effectiveGrantKey, effectiveGrantSource, grantAuthorReference } from './effective-grant.js'
 import { isDeepStrictEqual } from 'node:util'
 import { createHash } from 'node:crypto'
 import { mintObjectId, AgentMuxError, agentPromptCondition, agentInteractionResponseUnavailableReason, agentQuestionReplyIntentDigest, agentInteractionIntentDigest, agentInteractionRequestDigest, agentInteractionRequestTarget, parseAgentExternalInteractionAuthor,
   type AgentMuxAgentInteractionInput, type AgentMuxSessionQuestionReplyInput, type AgentMuxPermissionRequest, type AgentMuxAgentSession, type AgentSessionHistoryQuestion } from '@agentmux/core'
 import type { ConversationUnit } from '@agentmux/core/conversation'
-import { parseConnectionIngressRecord, type ConnectionGrant, type ConnectionIngressAction, type RoomBinding } from '@agentmux/core/connections'
+import { parseConnectionIngressRecord, type ConnectionGrant, type ConnectionEffectiveGrant, type ConnectionEffectiveGrants, type ConnectionIngressAction, type RoomBinding } from '@agentmux/core/connections'
 import type { ConnectionQuestionForm, ConnectionQuestionFormInput, DurableIngressOptions, VerifiedIngressAction } from './durable-ingress.js'
 import type { PublicationPermissionsPort } from './publication-host.js'
 import type { PermissionPublicationPayload, QuestionPublicationPayload, PublicationOperation, PublicationStore } from './publication-store.js'
 
 type PermissionReference = { kind?: never; actionRef: string; projectionId: string; binding: RoomBinding; run: { runId: string }; request: AgentMuxPermissionRequest;
-  decision: { outcome: 'selected'; optionId: string }; grants: ConnectionGrant[] }
-type QuestionReference = { kind: 'question'; actionRef: string; projectionId: string; binding: RoomBinding; run: { runId: string }; grants: ConnectionGrant[];
+  decision: { outcome: 'selected'; optionId: string }; grants: Array<ConnectionGrant | ConnectionEffectiveGrant> }
+type QuestionReference = { kind: 'question'; actionRef: string; projectionId: string; binding: RoomBinding; run: { runId: string }; grants: Array<ConnectionGrant | ConnectionEffectiveGrant>;
   target: Pick<AgentMuxSessionQuestionReplyInput, 'source' | 'turnId' | 'recordId' | 'afterSubmissionId'>; questions: AgentSessionHistoryQuestion[] }
 type Reference = PermissionReference | QuestionReference
 export type ExternalActionInput = AgentMuxAgentInteractionInput | AgentMuxSessionQuestionReplyInput
@@ -50,28 +51,35 @@ export class ConversationActions implements PublicationPermissionsPort {
     if (!core?.onEvent) return failure('INGRESS_CORE_UNAVAILABLE')
     return core.onEvent(event => { if (event.type === 'agent-session' && event.session.agentSessionId === binding.agentSessionId) wake() })
   }
-  private grants(binding: RoomBinding, capability: 'permission' | 'answer' = 'permission'): ConnectionGrant[] {
-    return (this.options.bindings.grants?.(binding.bindingId, binding.revision) ?? [])
-      .filter(grant => grant.state === 'active' && grant.capabilities.includes(capability) && grant.bindingRevision === binding.revision)
-      .sort((a, b) => a.grantId.localeCompare(b.grantId))
+  private grants(binding: RoomBinding, capability: 'permission' | 'answer' = 'permission', reading?: ConnectionEffectiveGrants): ConnectionEffectiveGrant[] {
+    return (reading ?? this.options.bindings.effectiveGrants(binding.bindingId, binding.revision)).grants
+      .filter(grant => grant.state === 'active' && grant.capabilities.includes(capability))
+      .sort((a, b) => a.source.kind.localeCompare(b.source.kind) || a.source.grantId.localeCompare(b.source.grantId))
   }
-  private current(reference: Reference): ConnectionGrant[] {
+  private current(reference: Reference, actor?: ConnectionGrant['actor'], unavailable?: () => void): ConnectionEffectiveGrant[] {
     const binding = this.options.bindings.readCurrent(reference.binding.bindingId)
     if (!binding || binding.revision !== reference.binding.revision || binding.state !== 'active' || !same(binding.application, reference.binding.application) || binding.externalConversationId !== reference.binding.externalConversationId) return []
-    return this.grants(binding, reference.kind === 'question' ? 'answer' : 'permission').filter(grant => reference.grants.some(original => original.grantId === grant.grantId && original.revision === grant.revision && same(original.actor, grant.actor)))
+    return reference.grants.filter(g => !actor || same(g.actor, actor)).flatMap(original => {
+      try {
+        const current = this.options.bindings.effectiveGrant(binding.bindingId, binding.revision, original.actor)
+        return current?.state === 'active' && current.capabilities.includes(reference.kind === 'question' ? 'answer' : 'permission') && same(current.source, effectiveGrantSource(original)) ? [current] : []
+      } catch (error) { if (actor) throw error; unavailable?.(); return [] }
+    })
   }
-  project(binding: RoomBinding, store: PublicationStore, supported = { permission: true, question: true }): string[] {
+  project(binding: RoomBinding, store: PublicationStore, supported = { permission: true, question: true }, unavailable?: () => void): string[] {
     this.initialize()
     const core = this.options.core(binding.executionHostId)
     if (!core?.agentSession) return failure('INGRESS_CORE_UNAVAILABLE')
     const session = core.agentSession(binding.agentSessionId), pending = session.pendingInteraction
     const requests = pending ? [pending.request, ...(pending.additionalRequests ?? [])] : []
-    const grants = this.grants(binding)
+    const reading = this.options.bindings.effectiveGrants(binding.bindingId, binding.revision)
+    if (reading.issue) unavailable?.()
+    const grants = this.grants(binding, 'permission', reading)
     const questionProjections: string[] = []
     for (const request of requests) if (supported.question && request.kind === 'question') {
       const projectionId = 'live-question-' + digest([binding.bindingId, binding.revision, session.run, agentInteractionRequestDigest(request)])
-      const shareable = this.grants(binding, 'answer').length > 0
-      if (!shareable && !store.confirmedMapping(projectionId)) continue
+      const shareable = this.grants(binding, 'answer', reading).length > 0
+      if (!shareable && (!store.confirmedMapping(projectionId) || reading.issue)) continue
       const reason = pending ? agentInteractionResponseUnavailableReason(pending) : request.responseUnavailableReason
       const payload: QuestionPublicationPayload = { kind: 'question',
         text: shareable ? request.questions.map(question => [question.prompt, ...question.options.map(option => `- ${option.label}`)].join('\n')).join('\n\n') : 'Review the original question in AgentMux.',
@@ -86,7 +94,12 @@ export class ConversationActions implements PublicationPermissionsPort {
     for (const request of requests) if (supported.permission && request.kind === 'permission' && request.permissionHook && !request.permissionHook.closed &&
         !request.permissionHook.nativeTurnEnded && !request.permissionHook.response && !request.responseUnavailableReason && grants.length) {
       const target = agentInteractionRequestTarget(request) as AgentMuxPermissionRequest
-      const projectionId = 'permission-' + digest([binding.bindingId, binding.revision, session.run, agentInteractionRequestDigest(target), grants.map(grant => [grant.grantId, grant.revision])])
+      if (reading.issue) {
+        const known = this.options.connections.database.prepare("SELECT reference_json FROM connection_ingress_action_reference WHERE binding_id=? AND binding_revision=? AND json_extract(reference_json,'$.kind') IS NULL").all(binding.bindingId, binding.revision)
+          .some(row => { const ref = JSON.parse(String(row.reference_json)) as PermissionReference; return same(ref.run, session.run) && agentInteractionRequestDigest(ref.request) === agentInteractionRequestDigest(target) })
+        if (known) continue // Unknown app membership cannot replace or duplicate this original request.
+      }
+      const projectionId = 'permission-' + digest([binding.bindingId, binding.revision, session.run, agentInteractionRequestDigest(target), grants.map(effectiveGrantKey)])
       const prior = this.options.connections.database.prepare('SELECT 1 FROM connection_ingress_action_reference WHERE binding_id=? AND binding_revision=? AND projection_id=? LIMIT 1').get(binding.bindingId, binding.revision, projectionId)
       if (!prior) {
         const database = this.options.connections.database
@@ -109,7 +122,10 @@ export class ConversationActions implements PublicationPermissionsPort {
     for (const [projectionId, refs] of groups) {
       const ref = refs[0]!, request = requests.find(value => value.kind === 'permission' &&
         agentInteractionRequestDigest(value) === agentInteractionRequestDigest(ref.request)) as AgentMuxPermissionRequest | undefined
-      const shareable = session.run.runId === ref.run.runId && !!request && this.current(ref).length > 0
+      let currentUnavailable = false
+      const current = this.current(ref, undefined, () => { currentUnavailable = true; unavailable?.() })
+      if (currentUnavailable && !current.length) continue
+      const shareable = session.run.runId === ref.run.runId && !!request && current.length > 0
       const response = request?.permissionHook?.response
       const actionable = shareable && !!request?.permissionHook && !request.permissionHook.closed && !request.permissionHook.nativeTurnEnded && !request.responseUnavailableReason && !response
       const payload: PermissionPublicationPayload = shareable
@@ -145,14 +161,14 @@ export class ConversationActions implements PublicationPermissionsPort {
     if (!record.actor || !record.actionRef || !record.sourceMessageId || !record.externalConversationId) failure('INGRESS_ACTOR_NOT_AUTHORIZED')
     const ref = this.reference(record.actionRef!)
     if (!ref || ref.binding.connectionId !== record.connectionId || !same(ref.binding.application, record.application) || ref.binding.externalConversationId !== record.externalConversationId) failure('INGRESS_AUTHORITY_REVISED')
-    const grant = this.current(ref!).find(value => same(value.actor, record.actor))
+    const grant = this.current(ref!, record.actor).find(value => same(value.actor, record.actor))
     if (!grant) failure('INGRESS_ACTOR_NOT_AUTHORIZED')
     const mapping = ref!.kind === 'question'
       ? this.options.connections.database.prepare("SELECT operation_json FROM connector_publication_operation WHERE json_extract(operation_json,'$.payload.actionRef')=? AND state='confirmed' ORDER BY ordinal DESC LIMIT 1").get(ref!.actionRef)
       : this.options.connections.database.prepare("SELECT operation_json FROM connector_publication_operation WHERE projection_id=? AND state='confirmed' ORDER BY ordinal DESC LIMIT 1").get(ref!.projectionId)
     if (!mapping || JSON.parse(String(mapping.operation_json)).mapping?.messageId !== record.sourceMessageId) failure('INGRESS_AUTHORITY_REVISED')
     if (record.input && (record.input.hostId !== ref!.binding.executionHostId || record.input.agentSessionId !== ref!.binding.agentSessionId || record.input.expectedRun.runId !== ref!.run.runId ||
-        record.input.author.bindingId !== ref!.binding.bindingId || record.input.author.bindingRevision !== ref!.binding.revision || record.input.author.grantId !== grant!.grantId || record.input.author.grantRevision !== grant!.revision)) failure('INGRESS_AUTHORITY_REVISED')
+        record.input.author.bindingId !== ref!.binding.bindingId || record.input.author.bindingRevision !== ref!.binding.revision || !same({ kind: record.input.author.grantSource ?? 'room', grantId: record.input.author.grantId, revision: record.input.author.grantRevision }, grant!.source))) failure('INGRESS_AUTHORITY_REVISED')
     return ref!
   }
   questionForm(input: ConnectionQuestionFormInput): ConnectionQuestionForm | null {
@@ -170,10 +186,10 @@ export class ConversationActions implements PublicationPermissionsPort {
   }
   /** Called inside the original ingress transaction, before the first possible Core call. */
   claim(record: ConnectionIngressAction): { record: ConnectionIngressAction; input: ExternalActionInput; own: boolean } {
-    const ref = this.authorize(record), grant = this.current(ref).find(value => same(value.actor, record.actor))!
+    const ref = this.authorize(record), grant = this.current(ref, record.actor).find(value => same(value.actor, record.actor))!
     const database = this.options.connections.database
-    const existing = database.prepare("SELECT record_json FROM connection_ingress_event WHERE json_extract(record_json,'$.kind')='action' AND json_extract(record_json,'$.state')='claimed' AND json_extract(record_json,'$.input.author.actionRef')=? AND json_extract(record_json,'$.input.author.actor')=? AND json_extract(record_json,'$.input.author.grantRevision')=? ORDER BY intake_sequence LIMIT 1")
-      .get(ref.actionRef, encode(record.actor), grant.revision)
+    const existing = database.prepare("SELECT record_json FROM connection_ingress_event WHERE json_extract(record_json,'$.kind')='action' AND json_extract(record_json,'$.state')='claimed' AND json_extract(record_json,'$.input.author.actionRef')=? AND json_extract(record_json,'$.input.author.actor')=? AND json_extract(record_json,'$.input.author.grantRevision')=? AND json_extract(record_json,'$.input.author.grantId')=? AND coalesce(json_extract(record_json,'$.input.author.grantSource'),'room')=? ORDER BY intake_sequence LIMIT 1")
+      .get(ref.actionRef, encode(record.actor), grant.source.revision, grant.source.grantId, grant.source.kind)
     if (existing) {
       const original = parseConnectionIngressRecord(JSON.parse(String(existing.record_json))) as ConnectionIngressAction
       const intent = database.prepare('SELECT intent_json FROM connection_ingress_action_intent WHERE operation_id=?').get(original.input!.operationId)
@@ -183,7 +199,7 @@ export class ConversationActions implements PublicationPermissionsPort {
     }
     const author = parseAgentExternalInteractionAuthor({ kind: 'external-action', connectionId: record.connectionId, actor: record.actor,
       externalConversationId: record.externalConversationId, sourceMessageId: record.sourceMessageId, actionRef: record.actionRef,
-      bindingId: ref.binding.bindingId, bindingRevision: ref.binding.revision, grantId: grant.grantId, grantRevision: grant.revision })
+      bindingId: ref.binding.bindingId, bindingRevision: ref.binding.revision, ...grantAuthorReference(grant) })
     const input: ExternalActionInput = ref.kind === 'question' ? { ...ref.target, agentSessionId: ref.binding.agentSessionId, expectedRun: ref.run,
       operationId: mintObjectId(), answers: this.questionAnswers(ref, record), externalAction: author } : { agentSessionId: ref.binding.agentSessionId, expectedRun: ref.run,
       operationId: mintObjectId(), expectedRequest: ref.request,
@@ -217,20 +233,29 @@ export class ConversationActions implements PublicationPermissionsPort {
     this.initialize()
     let core: ReturnType<DurableIngressOptions['core']>, session: AgentMuxAgentSession | undefined
     try { core = this.options.core(binding.executionHostId); session = core?.agentSession?.(binding.agentSessionId) } catch { /* Keep public questions readable without granting a response route. */ }
-    const result = new Map<string, QuestionPublicationPayload>(), grants = this.grants(binding, 'answer')
+    const result = new Map<string, QuestionPublicationPayload>(), reading = this.options.bindings.effectiveGrants(binding.bindingId, binding.revision), grants = this.grants(binding, 'answer', reading)
     for (const unit of units) for (const record of unit.records) {
       if (record.original.kind !== 'native' || !record.original.item.questionRequest || record.reference?.source.kind !== 'native') continue
       const item = record.original.item, questions = item.questionRequest!.questions
       const payload: QuestionPublicationPayload = { kind: 'question', text: '', questions, status: 'unavailable' }
       result.set(record.id, payload)
-      if (!session || !item.turnId || !grants.length) continue
+      if (!session || !item.turnId) continue
       try { if (core?.providers?.get(record.reference.source.providerId).catalog.capabilities.asyncQuestionReply !== 'native-input') continue }
       catch { continue } // An unavailable responder never blocks independently qualified public content.
       let condition: ReturnType<typeof agentPromptCondition>
       try { condition = agentPromptCondition(session) } catch { continue }
       const source = { providerId: record.reference.source.providerId, nativeSessionId: record.reference.source.nativeSessionId }
       if (session.nativeHandle?.kind !== 'provider' || !same({ providerId: session.nativeHandle.providerId, nativeSessionId: session.nativeHandle.sessionId }, source)) continue
-      const projectionId = 'question-' + digest([binding.bindingId, binding.revision, session.run, source, item.id, record.revision, grants.map(grant => [grant.grantId, grant.revision])])
+      const existing = reading.issue ? this.options.connections.database.prepare("SELECT reference_json FROM connection_ingress_action_reference WHERE binding_id=? AND binding_revision=? AND json_extract(reference_json,'$.kind')='question' ORDER BY rowid DESC").all(binding.bindingId, binding.revision)
+        .map(row => JSON.parse(String(row.reference_json)) as QuestionReference).find(ref => same(ref.run, session!.run) && same(ref.target, { source, turnId: item.turnId, recordId: item.id, afterSubmissionId: condition.afterSubmissionId }) && same(ref.questions, questions)) : undefined
+      if (!grants.length) {
+        if (existing) {
+          const prior = this.options.connections.database.prepare('SELECT operation_json FROM connector_publication_operation WHERE binding_id=? AND binding_revision=? AND projection_id=? ORDER BY ordinal DESC LIMIT 1').get(binding.bindingId, binding.revision, existing.projectionId)
+          if (prior) Object.assign(payload, JSON.parse(String(prior.operation_json)).payload)
+        }
+        continue
+      }
+      const projectionId = existing?.projectionId ?? 'question-' + digest([binding.bindingId, binding.revision, session.run, source, item.id, record.revision, grants.map(effectiveGrantKey)])
       const prior = this.options.connections.database.prepare('SELECT reference_json FROM connection_ingress_action_reference WHERE projection_id=? LIMIT 1').get(projectionId)
       const ref: QuestionReference = prior ? JSON.parse(String(prior.reference_json)) : { kind: 'question', actionRef: mintObjectId(), projectionId, binding: structuredClone(binding), run: { ...session.run }, grants: structuredClone(grants),
         target: { source, turnId: item.turnId, recordId: item.id, afterSubmissionId: condition.afterSubmissionId }, questions: structuredClone(questions) }
@@ -271,8 +296,13 @@ export class ConversationActions implements PublicationPermissionsPort {
           const original = receipt?.admission?.intent?.message?.questionReply
           if (receipt?.admission?.transport === 'native' && receipt.admission.native.outcome === 'admitted' && original && same(original.externalAction, record.input!.author)) status = 'response-sent'
         } catch { /* Only the original Core receipt can establish this answer's submission. */ }
-      } else if (this.current(ref).length && session.run.runId === ref.run.runId) {
-        try { if (agentPromptCondition(session).afterSubmissionId === ref.target.afterSubmissionId) status = 'pending' } catch { status = 'unconfirmed' }
+      } else {
+        let unavailable = false
+        const current = this.current(ref, undefined, () => { unavailable = true })
+        if (unavailable && !current.length && session.run.runId === ref.run.runId) continue
+        if (current.length && session.run.runId === ref.run.runId) {
+          try { if (agentPromptCondition(session).afterSubmissionId === ref.target.afterSubmissionId) status = 'pending' } catch { status = 'unconfirmed' }
+        }
       }
       store.updateQuestion(operation, { ...operation.payload, status, ...(answers ? { answers } : {}) })
     }

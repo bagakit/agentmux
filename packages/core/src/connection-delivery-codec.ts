@@ -60,7 +60,7 @@ function relay(value: unknown, target: ConnectionDelivery['reference']): NonNull
   const sources = (p.sources as unknown[]).map(value => {
     const source = object(value, ['part', 'author']), original = part(source.part)
     if (original.record.hostId !== target.hostId || original.record.agentSessionId !== target.agentSessionId || original.record.source.kind !== 'captured' || original.selector.kind !== 'captured-field' || original.selector.field !== 'content') fail()
-    const a = object(source.author, ['kind', 'agentSessionId', 'connectionId', 'actor', 'externalConversationId', 'externalMessageId', 'bindingId', 'bindingRevision', 'grantId', 'grantRevision'])
+    const a = object(source.author, ['kind', 'agentSessionId', 'connectionId', 'actor', 'externalConversationId', 'externalMessageId', 'bindingId', 'bindingRevision', 'grantId', 'grantRevision', 'grantSource', 'authoritySource'])
     let author: NonNullable<ConnectionDelivery['relay']>['sources'][number]['author']
     if (a.kind === 'external') { try { author = 'grantId' in a ? parseAgentExternalMessageAuthor(a) : parseExternalConversationAuthor(a) } catch { return fail() } }
     else {
@@ -132,7 +132,7 @@ export function parseConnectionDelivery(value: unknown): ConnectionDelivery {
 }
 export function parseConnectionDeliveryObservation(value: unknown): ConnectionDeliveryObservation {
   const p = object(value, ['state', 'reason'])
-  if (!['unknown', 'ready', 'unavailable', 'disabled'].includes(p.state as string) || p.reason !== undefined && !['not-started', 'source-unconfirmed', 'source-gap', 'content-unconfirmed', 'storage-unconfirmed', 'adapter-unavailable', 'credential-missing', 'credential-format-unsupported', 'credential-unavailable', 'effect-unconfirmed'].includes(p.reason as string)) fail()
+  if (!['unknown', 'ready', 'unavailable', 'disabled'].includes(p.state as string) || p.reason !== undefined && !['not-started', 'access-unconfirmed', 'source-unconfirmed', 'source-gap', 'content-unconfirmed', 'storage-unconfirmed', 'adapter-unavailable', 'credential-missing', 'credential-format-unsupported', 'credential-unavailable', 'effect-unconfirmed'].includes(p.reason as string)) fail()
   return { state: p.state as ConnectionDeliveryObservation['state'], ...(p.reason === undefined ? {} : { reason: p.reason as NonNullable<ConnectionDeliveryObservation['reason']> }) }
 }
 /** Finite source evidence; a successful read does not resolve earlier durable gaps or effects. */

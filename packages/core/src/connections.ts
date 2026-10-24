@@ -45,3 +45,6 @@ export * from './connection-diagnosis-source.js'
 
 export * from './connection-credential-contract.js'
 export * from './connection-credential-codec.js'
+
+export * from './connection-application-access-contract.js'
+export * from './connection-application-access-codec.js'

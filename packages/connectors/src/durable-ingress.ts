@@ -1,3 +1,4 @@
+import { grantAuthorReference } from './effective-grant.js'
 import { parseExternalConversationReference, type AgentExternalAuthoritySource, type AgentExternalConversationAuthority, type AgentExternalConversationReference } from '@agentmux/core'
 import { isDeepStrictEqual } from 'node:util'
 import { ConversationActions, externalActionIntentDigest } from './conversation-actions.js'
@@ -253,11 +254,8 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
     const target = binding.connectionId === record.connectionId ? connection : this.options.connections.readConfiguration(binding.connectionId)
     if (!target?.config.enabled || !equal(target.config.application, record.application)) fail('INGRESS_CONNECTION_UNAVAILABLE')
     if (binding.connectionId !== record.connectionId) this.assertService(binding.connectionId)
-    const grant = expected ? this.options.bindings.readGrant(expected.author.grantId, expected.author.grantRevision)
-      : this.options.bindings.findGrant({ connectionId: binding.connectionId, externalConversationId: record.externalConversationId, actor: record.actor })
-    const currentGrant = grant ? this.options.bindings.readGrant(grant.grantId) : null
-    if (!currentGrant || currentGrant.state !== 'active' || currentGrant.revision !== grant?.revision) fail('INGRESS_ACTOR_NOT_AUTHORIZED')
-    if (!grant || grant.state !== 'active' || grant.bindingId !== binding.bindingId || grant.bindingRevision !== binding.revision || !grant.capabilities.includes('input') || !equal(grant.actor, record.actor)) fail('INGRESS_ACTOR_NOT_AUTHORIZED')
+    const grant = this.options.bindings.effectiveGrant(binding.bindingId, binding.revision, record.actor)
+    if (!grant || grant.state !== 'active' || !grant.capabilities.includes('input') || !equal(grant.actor, record.actor)) fail('INGRESS_ACTOR_NOT_AUTHORIZED')
     const event = JSON.parse(String(this.database.prepare('SELECT event_json FROM connection_ingress_message WHERE ingress_id=?').get(record.ingressId)!.event_json)) as VerifiedIngressMessage
     const qualifiedReply = record.addressing?.state === 'confirmed' && record.addressing.selection === 'reply' && record.addressing.replyToMessageId === event.replyToMessageId
     if (binding.scope.input === 'mentions-and-replies' && event.selection === 'message' && !qualifiedReply) {
@@ -268,7 +266,7 @@ export class DurableIngressHost implements ConnectionIngressReadPort {
       : binding.executionHostId === 'local' || binding.executionRuntimeId ? this.options.authoritySource?.(binding.executionHostId, binding.executionRuntimeId) : undefined
     if (this.options.authoritySource && binding.executionHostId !== 'local' && !source) fail('INGRESS_TARGET_UNCONFIRMED')
     if (source && !isDeepStrictEqual(source, this.options.authoritySource?.(binding.executionHostId, binding.executionRuntimeId))) fail('INGRESS_TARGET_UNCONFIRMED')
-    const author = parseAgentExternalMessageAuthor({ kind: 'external', connectionId: binding.connectionId, actor: record.actor, externalConversationId: record.externalConversationId, externalMessageId: record.externalMessageId, bindingId: binding.bindingId, bindingRevision: binding.revision, grantId: grant.grantId, grantRevision: grant.revision, ...(source ? { authoritySource: source } : {}) })
+    const author = parseAgentExternalMessageAuthor({ kind: 'external', connectionId: binding.connectionId, actor: record.actor, externalConversationId: record.externalConversationId, externalMessageId: record.externalMessageId, bindingId: binding.bindingId, bindingRevision: binding.revision, ...grantAuthorReference(grant), ...(source ? { authoritySource: source } : {}) })
     if (expected?.admissionIntent) { const { expectedRun: _run, ...target } = expected.admissionIntent; if (!isDeepStrictEqual(target, binding.inputTarget ?? { kind: 'manual-actor' })) fail('INGRESS_AUTHORITY_REVISED') }
     if (expected && (expected.hostId !== binding.executionHostId || expected.agentSessionId !== binding.agentSessionId || !equal(expected.author, author))) fail('INGRESS_AUTHORITY_REVISED')
     return { binding, author, event }

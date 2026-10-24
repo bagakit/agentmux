@@ -1,3 +1,4 @@
+import type { ConnectionMemberAccess, ConnectionEffectiveGrant, ConnectionEffectiveGrants } from './connection-application-access-contract.js'
 import type { NativeConversationCheckpoint } from './session-history-changes.js'
 import type { ConversationCheckpoint } from './conversation-changes.js'
 import type { ConnectionApplication, ConnectionGrant } from './connections-contract.js'
@@ -47,13 +48,14 @@ export type RoomBindingGrantInput = {
   grantId: string; expectedRevision: number | null
   actor: ConnectionGrant['actor']; capabilities: ConnectionGrant['capabilities']; state: ConnectionGrant['state']
 }
-export type RoomBindingAction = 'bind' | 'pause' | 'resume' | 'detach' | 'relink' | 'grant'
+export type RoomBindingInheritInput = { operationId: string; bindingId: string; expectedBindingRevision: number; actor: ConnectionGrant['actor']; expectedGrant: { grantId: string; revision: number } }
+export type RoomBindingAction = 'bind' | 'pause' | 'resume' | 'detach' | 'relink' | 'grant' | 'inherit'
 export type RoomBindingOperation =
   | { operationId: string; action: RoomBindingAction; state: 'preparing' }
   | { operationId: string; action: RoomBindingAction; state: 'refused'; code: string }
-  | { operationId: string; action: RoomBindingAction; state: 'applied'; binding: RoomBinding; grant?: ConnectionGrant; reused?: boolean; notices?: RoomBindingNotice[] }
+  | { operationId: string; action: RoomBindingAction; state: 'applied'; binding: RoomBinding; grant?: ConnectionGrant; inherited?: { actor: ConnectionGrant['actor']; grants: Array<{ grantId: string; revision: number }> }; reused?: boolean; notices?: RoomBindingNotice[] }
 export type RoomBindingInspectInput = { bindingId: string; revision?: number; operationId?: never } | { operationId: string; bindingId?: never; revision?: never }
-export type RoomBindingInspection = { binding: RoomBinding | null; current: RoomBinding | null; operation: RoomBindingOperation | null; grants: ConnectionGrant[] }
+export type RoomBindingInspection = { binding: RoomBinding | null; current: RoomBinding | null; operation: RoomBindingOperation | null; grants: ConnectionGrant[]; access?: ConnectionMemberAccess[] }
 export type RoomBindingListInput = { connectionId?: string; executionHostId?: string; agentSessionId?: string }
 export type RoomBindingCallContext = { actor: RoomBindingAuthority; assertCurrent?(): void | Promise<void> }
 export interface RoomBindingsPort {
@@ -64,6 +66,7 @@ export interface RoomBindingsPort {
   resume(input: RoomBindingPauseInput, context: RoomBindingCallContext): Promise<RoomBindingOperation>
   detach(input: RoomBindingPauseInput, context: RoomBindingCallContext): Promise<RoomBindingOperation>
   relink(input: RoomBindingRelinkInput, context: RoomBindingCallContext): Promise<RoomBindingOperation>
+  inherit(input: RoomBindingInheritInput, context: RoomBindingCallContext): Promise<RoomBindingOperation>
   grant(input: RoomBindingGrantInput, context: RoomBindingCallContext): Promise<RoomBindingOperation>
 }
 export type RoomPublicationAuthority = {
@@ -73,6 +76,8 @@ export type RoomPublicationAuthority = {
 }
 /** Synchronous reads can join the original connector database transaction. They never query a Region occupant. */
 export interface RoomBindingReadPort {
+  effectiveGrant(bindingId: string, revision: number, actor: ConnectionGrant['actor']): ConnectionEffectiveGrant | null
+  effectiveGrants(bindingId: string, revision: number): ConnectionEffectiveGrants
   readOperation?(operationId: string): RoomBindingOperation | null
   grants?(bindingId: string, revision: number): ConnectionGrant[]
   readExact(bindingId: string, revision: number): RoomBinding | null
@@ -93,6 +98,7 @@ export type RoomBindingParamsMap = {
   'connection.binding.resume': RoomBindingPauseInput
   'connection.binding.detach': RoomBindingPauseInput
   'connection.binding.relink': RoomBindingRelinkInput
+  'connection.binding.member.inherit': RoomBindingInheritInput
   'connection.grant': RoomBindingGrantInput
 }
 export type RoomBindingResultMap = {
@@ -103,6 +109,7 @@ export type RoomBindingResultMap = {
   'connection.binding.resume': RoomBindingOperation
   'connection.binding.detach': RoomBindingOperation
   'connection.binding.relink': RoomBindingOperation
+  'connection.binding.member.inherit': RoomBindingOperation
   'connection.grant': RoomBindingOperation
 }
 export type RoomBindingMethod = keyof RoomBindingParamsMap

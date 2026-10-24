@@ -56,7 +56,7 @@ const recordingCode = (value?: string) => connectionDiagnosisRecordingCodes.find
 async function readGroup(owner: ConnectionPort, target: GroupTarget, window: GroupWindow = {}): Promise<ConnectionGroupDiagnosis> {
   const [connection, binding, outgoing, incoming] = await Promise.all([
     reading(() => owner.inspect({ connectionId: target.connectionId })),
-    reading(() => owner.bindings!.inspect({ bindingId: target.bindingId, revision: target.bindingRevision })),
+    reading(() => owner.bindings!.inspect({ bindingId: target.bindingId })),
     reading(() => owner.delivery!.list({ connectionId: target.connectionId, bindingId: target.bindingId, bindingRevision: target.bindingRevision, limit: groupWindowLimit, ...(window.after ? { after: window.after } : {}), ...(window.afterContent ? { afterContent: window.afterContent } : {}) })),
     reading(() => owner.ingress!.listAudience!({ application: { domain: target.domain, appId: target.appId }, externalConversationId: target.externalConversationId, limit: groupWindowLimit, ...(window.beforeIngressId ? { beforeIngressId: window.beforeIngressId } : {}) }))
   ])
@@ -93,6 +93,7 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
       nativeAdoption: interaction?.nativeAdoption ?? null,
       ...(valid && current && inspected.value?.context ? { context: inspected.value.context } : {}) }
   }))
+  const effective = binding.value?.access ? binding.value.access.flatMap(access => access.effective ? [access.effective] : []) : binding.value?.grants.filter(grant => grant.bindingId === target.bindingId && grant.bindingRevision === target.bindingRevision) ?? []
   const scopedOutgoing = outgoing.value && outgoing.value.deliveries.every(delivery => deliveryMatches(delivery, target) && recordMatches(delivery.reference, target, ['native', 'captured'].includes(delivery.reference.source.kind) ? b?.sourceFrontier?.sourceHostId : target.executionHostId)) && (outgoing.value.coverage?.gaps.every(gap => gapMatches(gap, target, b?.sourceFrontier?.sourceHostId)) ?? true)
   return { target: { ...target }, window: { ...(window.after ? { after: window.after } : {}), ...(window.afterContent ? { afterContent: window.afterContent } : {}), ...(window.beforeIngressId ? { beforeIngressId: window.beforeIngressId } : {}) }, limit: groupWindowLimit,
     adapterService,
@@ -104,9 +105,9 @@ async function readGroup(owner: ConnectionPort, target: GroupTarget, window: Gro
       issue: connection.issue ?? (sameConnection ? null : 'target-unconfirmed' as const) },
     binding: { value: sameBinding ? { state: b.state, currentRevision: binding.value?.current?.revision ?? null,
       scope: { input: b.scope.input, publication: b.scope.publication },
-      activeAnswerGrants: binding.value!.grants.filter(grant => grant.bindingId === target.bindingId && grant.bindingRevision === target.bindingRevision && grant.state === 'active' && grant.capabilities.includes('answer')).length,
-      activePermissionGrants: binding.value!.grants.filter(grant => grant.bindingId === target.bindingId && grant.bindingRevision === target.bindingRevision && grant.state === 'active' && grant.capabilities.includes('permission')).length,
-      activeInputGrants: binding.value!.grants.filter(grant => grant.bindingId === target.bindingId && grant.bindingRevision === target.bindingRevision && grant.state === 'active' && grant.capabilities.includes('input')).length } : null,
+      activeAnswerGrants: effective.filter(grant => grant.state === 'active' && grant.capabilities.includes('answer')).length,
+      activePermissionGrants: effective.filter(grant => grant.state === 'active' && grant.capabilities.includes('permission')).length,
+      activeInputGrants: effective.filter(grant => grant.state === 'active' && grant.capabilities.includes('input')).length } : null,
       issue: binding.issue ?? (sameBinding ? null : 'target-unconfirmed' as const) },
     outgoing: { value: scopedOutgoing ? { after: window.after ?? null, afterContent: window.afterContent ?? null, next: outgoing.value!.next,
       deliveries: outgoing.value!.deliveries.map(deliveryFacts), observation: outgoing.value!.observation ? { state: outgoing.value!.observation.state, ...(outgoing.value!.observation.reason ? { reason: outgoing.value!.observation.reason } : {}) } : null,
