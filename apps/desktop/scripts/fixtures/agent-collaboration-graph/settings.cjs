@@ -3,7 +3,7 @@ const assert = require('node:assert/strict')
 /** Original settings and Map, driven by Chromium input. Reads never assign a
  * control value, camera transform, world coordinate or product identity. */
 module.exports = async function settings({ win, result, read, click, key, move, frame, check, intact, closeDetails, locate, pause, until, matrix }) {
-  const evidence = { phases: [], hitTests: [], boundary: 'Original App/Focus settings/ConfigOwner and original Graph/Reader; controlled platform facts only. No real user configuration, Session or Run touched.' }
+  const evidence = result.mapSettings = { phases: [], hitTests: [], controlEdits: [], boundary: 'Original App/Focus settings/ConfigOwner and original Graph/Reader; controlled platform facts only. No real user configuration, Session or Run touched.' }
   const profile = () => read('window.graphCapture.preferences()?.map')
   const layout = () => read('window.graphCapture.deliveredLayout().boxes')
   const settled = () => until('original settings world has settled', () => read('window.graphCapture.deliveredLayout()?.busy===false'))
@@ -11,12 +11,20 @@ module.exports = async function settings({ win, result, read, click, key, move, 
   async function choose(label, value) {
     const selector = `select[aria-label="${label}"]`
     await reveal(selector)
-    const options = await read(`[...document.querySelector(${JSON.stringify(selector)}).options].map(option=>option.value)`)
-    const index = options.indexOf(String(value)); assert.ok(index >= 0)
-    await click(selector); await key('Home')
-    for (let at = 0; at < index; at++) await key('ArrowDown')
-    await key('Enter')
+    const options = await read(`[...document.querySelector(${JSON.stringify(selector)}).options].map(option=>({value:option.value,label:option.text}))`)
+    const option = options.find(option => option.value === String(value)); assert.ok(option)
+    // macOS native popup menus do not receive CDP Home/arrow input in a hidden
+    // window. Focus the visible original select, then use its real typeahead.
+    // No option value or synthetic DOM change/input event is assigned.
+    const character = option.label[0].toLowerCase()
+    assert.equal(options.filter(option => option.label[0].toLowerCase() === character).length, 1, 'This native typeahead character identifies exactly one actual option')
+    // A new focus episode also resets Chromium's previous typeahead prefix.
+    const before = await read(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});e.blur();e.focus({preventScroll:true});if(document.activeElement!==e)throw Error('Original select must own input');return e.value})()`)
+    for (const type of ['keyDown', 'keyUp']) await win.webContents.debugger.sendCommand('Input.dispatchKeyEvent', { type, key: character,
+      code: /[0-9]/.test(character) ? 'Digit' + character : 'Key' + character.toUpperCase(), windowsVirtualKeyCode: character.toUpperCase().charCodeAt(0),
+      ...(type === 'keyDown' ? { text: character, unmodifiedText: character } : {}) })
     await until('native select commits ' + label, () => read(`document.querySelector(${JSON.stringify(selector)}).value===${JSON.stringify(String(value))}`))
+    evidence.controlEdits.push({ label, before, requested: String(value), observed: await read(`document.querySelector(${JSON.stringify(selector)}).value`), input: 'original focused select native character typeahead', character })
   }
   async function number(label, value) {
     const selector = `input[aria-label="${label}"]`; await reveal(selector); await click(selector); await key('a', 4)
