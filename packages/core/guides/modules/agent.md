@@ -20,7 +20,11 @@ recent working time. since is metadata updatedAt; activity-since selects origina
 No task category is inferred from names, and one registered role is not a multi-Agent group.
 
 Read only the needed history: agent conversation inspect --limit 3 for a small recent
-window, then its original cursor; agent history --source captured or native reads full
+window, then its original cursor. For folded process reading, add --process-details deferred
+and keep that representation on inspect/changes continuations. Deferred records retain exact
+original references and revisions; read their full body with the returned versioned anchor
+through inspect --input (omit processDetails). Speech and interactions stay complete.
+This saves wire and Renderer payload, not initial source IO; agent history --source captured or native reads full
 retained sources. Use history --kind user-message for input records, retaining human,
 Agent, external, platform and unknown authorship. For replies, inspect original assistant
 records and continue a nonterminal cursor when a bounded page has no matching reply;
