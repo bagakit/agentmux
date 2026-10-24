@@ -39,6 +39,15 @@ boundary/state. Diagnostic admission remains unconfirmed until its original arch
 otherwise. Missing Main/archive or exhausted diagnostic budgets leave existing phone and Agent
 operations available; retry only the retained original diagnostic occurrence when appropriate.
 
+system metrics app-memory inspect reads retained application-process working-set peaks
+without opening the resource panel or starting sampling. rssKib is Electron workingSetSize
+in KiB, not an independent RSS/footprint or reclaimable-memory reading. The Main owner samples
+every 30 seconds and retains at most eight Main lifetimes, sixteen process details per peak
+and omitted counts. Original PID/creation identities, sample times, sampling failures and
+persistence acknowledgements stay separate. Sampling gaps and unsaved tail values remain
+unknown; Agent CLI and ctxmux are outside this archive. It cannot establish a leak or
+allocation stack. Reads after restart cannot reconstruct the prior write acknowledgement.
+
 Metrics watch owns a reader; cancellation detaches that reader and never stops an Agent.
 diagnostics.host describes the local machine: CPU uses whole-machine capacity and a
 matching counter interval, separately from App/Run one-logical-core percentages. Physical
