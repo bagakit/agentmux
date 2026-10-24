@@ -114,24 +114,10 @@ export class AgentSessionRunLifecycle {
         reservation = await this.ports.sessions.registry.reserveRestart(input.agentSessionId, input.expectedRun, operation,
           { requestDigest: digest, request: frozen, nativeTarget: structuredClone(canonical.nativeHandle), stopOperation })
       }
-      {
-        const observedAt = Date.now()
-        const admitted: AgentMuxContinuityOperation = { ...prior, operationId: input.operationId, agentSessionId: input.agentSessionId,
-          action: 'restart', trigger: 'manual', policy: normalizeAgentContinuityPolicy(), previousRun: { ...input.expectedRun },
-          nativeTarget: structuredClone(reservation.restart!.nativeTarget), requestDigest: digest,
-          admittedAt: prior?.admittedAt ?? observedAt, observedAt, rechecks: 0, kind: 'starting', reason: 'restart-stopping',
-          evidence: { kind: 'run-unknown', observedAt, message: 'The original explicit restart was admitted.' },
-          recoveryInputs: { reminder: '', continuation: '' } }
-        // Explicit continuation reasserts this transaction's phase under its
-        // claimed reservation; an old generic observer cannot own its retry.
-        delete admitted.nextActionAt
-        delete admitted.supervision
-        delete admitted.error
-        delete admitted.errorCode
-        const recorded = await this.ports.sessions.updateExactAgentSession(input.agentSessionId, input.expectedRun, session => ({ ...session,
-          continuity: admitted, continuityOperations: { ...session.continuityOperations, [input.operationId]: admitted }, updatedAt: Math.max(session.updatedAt + 1, observedAt) }))
-        this.ports.events.publishSession(recorded)
-      }
+      // The Store fences both the original reservation and its receipt in one transaction.
+      const recorded = await this.ports.sessions.store.recordRestartAdmission(reservation)
+      await this.ports.sessions.registry.refresh(input.agentSessionId, input.expectedRun)
+      this.ports.events.publishSession(recorded)
       return await this.resumeAgentRun(reservation.restart!.request, input.expectedRun, undefined, undefined, digest, reservation)
     } finally { this.executingRestarts.delete(operation); this.restartSettlements.delete(operation); settle() }
   }
@@ -142,6 +128,26 @@ export class AgentSessionRunLifecycle {
     const canonical = await this.ports.sessions.store.readMetadata(input.agentSessionId)
     const prior = canonical?.continuityOperations?.[input.operationId]
     if (prior) {
+      const operation = agentLifecycleOperationIdentity('restart', input.agentSessionId, input.operationId)
+      const reservation = await this.ports.sessions.store.loadResumeCorrelation(input.agentSessionId, operation)
+      if (reservation?.restart && sameRun(reservation.expectedRun, input.expectedRun) &&
+          (prior.action !== 'restart' || prior.requestDigest !== reservation.restart.requestDigest ||
+           !sameRun(prior.previousRun, reservation.expectedRun) || !matchesProviderNativeSessionTarget(reservation.restart.nativeTarget, prior.nativeTarget))) {
+        const conflict = { ...result, session: this.ports.events.projectSession(canonical!), phase: 'unconfirmed' as const, canRetry: false }
+        if (reservation.preparedSession) {
+          try {
+            const run = await this.ports.runtime.kernel.inspectCreation(operation), frozen = reservation.preparedSession.continuity?.restartLaunch
+            const exact = run?.lifecycleOperationId === operation && run.workspacePath === reservation.preparedSession.workspacePath && frozen &&
+              frozen.program === run.program && frozen.argsDigest === createHash('sha256').update(JSON.stringify(run.args)).digest('base64url')
+            return { ...conflict, ...(exact && run ? { newRun: runRef(run.runId) } : {}), detail: exact
+              ? 'The original Start was found, but its retained receipt conflicts. Inspect this same operation again; the conflicting receipt remains unresolved, and no Start or input was repeated.'
+              : 'The original Start is unconfirmed and its retained receipt conflicts. Inspect this same operation again; no Start or input was repeated.' }
+          } catch (error) {
+            return { ...conflict, detail: `The original Start inspection is unconfirmed: ${error instanceof Error ? error.message : String(error)}. Inspect this same operation again; no Start or input was repeated.` }
+          }
+        }
+        return { ...conflict, detail: 'The original restart reservation and another retained receipt disagree. Both requests are kept; after the original owner releases or exits, explicitly close the exact Session to retain its history, or inspect the conflicting receipt.' }
+      }
       if (prior.action !== 'restart' || !sameRun(prior.previousRun, input.expectedRun)) throw new AgentMuxError('The operation names another original request.', 'AGENT_RESTART_CONFLICT')
       result.session = this.ports.events.projectSession(canonical!)
       if (prior.newRun && prior.kind === 'resumed') return { ...result, phase: 'restarted', canRetry: false, newRun: { ...prior.newRun } }

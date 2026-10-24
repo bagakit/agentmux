@@ -73,12 +73,36 @@ export async function performAgentContinuity(
       throw new AgentMuxError(requested.error ?? 'The original restart replacement exited during startup.', requested.errorCode)
     }
   }
-  const reservation = current && !input.input && sameRun(current.run, input.expectedRun)
-    ? await ports.sessions.store.readLifecycleReservation(input.agentSessionId) : null
-  const restart = requested?.action === 'restart' ? requested : reservation?.kind === 'resume' && reservation.restart &&
+  let reservation: Awaited<ReturnType<typeof ports.sessions.store.readLifecycleReservation>> = null
+  let reservationObservationUnknown = false
+  if (current && sameRun(current.run, input.expectedRun)) {
+    try { reservation = await ports.sessions.store.readLifecycleReservation(input.agentSessionId) }
+    catch (error) {
+      reservationObservationUnknown = true
+      ports.events.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId, code: 'AGENT_LIFECYCLE_OBSERVATION_UNCONFIRMED',
+        message: `The original lifecycle could not be observed: ${error instanceof Error ? error.message : String(error)}. The original Session and existing capabilities are retained; check this exact Run and retry the original lifecycle observation.`,
+        evidence: { source: 'agentmux', run: input.expectedRun, observedAt: Date.now() } })
+    }
+  }
+  if (reservation?.kind === 'resume' && reservation.restart?.request.operationId === input.operationId && requested?.action !== 'restart') {
+    throw new AgentMuxError('This operation belongs to the original restart. Inspect that operation; its Session and all original receipts are retained.',
+      'AGENT_CONTINUITY_SUPERSEDED')
+  }
+  const restart = requested?.action === 'restart' ? requested : !input.input && reservation?.kind === 'resume' && reservation.restart &&
     sameRun(reservation.expectedRun, input.expectedRun)
     ? current?.continuityOperations?.[reservation.restart.request.operationId] : undefined
-  if (current && restart?.action === 'restart' && sameRun(restart.previousRun, input.expectedRun)) {
+  let runningObserver = false
+  if (current && restart?.action === 'restart' && requested?.action !== 'restart' && sameRun(current.run, input.expectedRun)) {
+    try {
+      const observed = await ports.runtime.kernel.status(current.run.runId)
+      ports.runtime.assertAgentRun(current, observed)
+      runningObserver = observed.state.type === 'running'
+    } catch (error) {
+      if (error instanceof AgentMuxError && error.code === 'AGENT_SESSION_RUN_MISMATCH') throw error
+      // An observation failure is not proof of a running or ended Run.
+    }
+  }
+  if (current && restart?.action === 'restart' && sameRun(restart.previousRun, input.expectedRun) && !runningObserver) {
     const continuity = structuredClone(restart)
     const evidence = { kind: 'run-unknown' as const, observedAt: Date.now(),
       message: 'The original explicit restart is retained. Inspect or explicitly continue that restart operation.' }
@@ -118,7 +142,7 @@ export async function performAgentContinuity(
       continuity: structuredClone(retained) }
   }
   // A restarted observer rejoins the admitted automatic intent rather than recomposing its policy or delay.
-  if (current?.continuity && !current.continuityOperations?.[input.operationId] &&
+  if (current?.continuity && !current.continuity.action && !current.continuityOperations?.[input.operationId] &&
     input.trigger && !['manual', 'input'].includes(input.trigger) &&
     (current.continuity.kind === 'starting' || ['active-delay', 'operation-unconfirmed'].includes(current.continuity.reason) ||
       ['runtime-unverified', 'provider-unverified'].includes(current.continuity.reason) && current.continuity.nextActionAt !== undefined) &&
@@ -222,6 +246,8 @@ export async function performAgentContinuity(
       try {
         current = await ports.sessions.updateExactAgentSession(current.agentSessionId, current.run, value => {
           const latest = value.continuityOperations?.[receipt.operationId]
+          if (latest?.action === 'restart' && receipt.action !== 'restart') throw new AgentMuxError(
+            'The original operation is an explicit restart. Its receipt and original request are kept.', 'AGENT_CONTINUITY_SUPERSEDED')
           if (latest?.supervision?.phase === 'cancelled' && latest.supervision.attemptCount === 0) return value
           // A competing observer cannot demote the same admitted or bound Start to its local
           // lifecycle-busy result. The durable original operation remains the reconciliation owner.
@@ -239,7 +265,7 @@ export async function performAgentContinuity(
         })
         ports.events.publishSession(current)
       } catch (error) {
-        if (error instanceof AgentMuxError && ['AGENT_PROMPT_OPERATION_CONFLICT', 'AGENT_CONTINUITY_EXECUTOR_CONFLICT'].includes(error.code)) throw error
+        if (error instanceof AgentMuxError && ['AGENT_PROMPT_OPERATION_CONFLICT', 'AGENT_CONTINUITY_EXECUTOR_CONFLICT', 'AGENT_CONTINUITY_SUPERSEDED'].includes(error.code)) throw error
         receipt.error = `Continuity receipt persistence is unconfirmed. ${error instanceof Error ? error.message : String(error)}`
         ports.events.publisher.publish({ type: 'agent-error', agentSessionId: input.agentSessionId, code: 'AGENT_CONTINUITY_RECEIPT_UNCONFIRMED',
           message: receipt.error, evidence: { source: 'agentmux', run: input.expectedRun, observedAt: now } })
@@ -536,6 +562,7 @@ export async function performAgentContinuity(
     })
   }
   if (decision.kind !== 'resume') return record(decision)
+  if (reservationObservationUnknown) return pending('operation-unconfirmed', evidence)
   if (receipt.supervision?.phase === 'settled' && receipt.supervision.attemptCount === 0) throw new AgentMuxError(
     'The original attachment intent is complete. A new recovery needs its own explicit operation.', 'AGENT_CONTINUITY_SUPERSEDED', undefined,
     { disposition: 'not_applied', confirmedInputBytes: null })
@@ -551,6 +578,8 @@ export async function performAgentContinuity(
     attemptLimit: receipt.supervision?.attemptLimit ?? Math.min(Number.MAX_SAFE_INTEGER, 1 + policy.retryMaxAttempts), observedAt: now, reason: 'start-pending' }
   // Persist admission before the first irreversible start. This does not acquire a lifecycle lease.
   current = await ports.sessions.updateExactAgentSession(input.agentSessionId, input.expectedRun, value => {
+    if (value.continuityOperations?.[receipt.operationId]?.action === 'restart' && receipt.action !== 'restart') throw new AgentMuxError(
+      'The original operation is an explicit restart. Its receipt and original request are kept.', 'AGENT_CONTINUITY_SUPERSEDED')
     if (value.continuityOperations?.[receipt.operationId]?.supervision?.phase === 'cancelled') throw new AgentMuxError(
       'The original waiting recovery was cancelled before its first Start was admitted.', 'AGENT_CONTINUITY_SUPERSEDED', undefined,
       { disposition: 'not_applied', confirmedInputBytes: null })

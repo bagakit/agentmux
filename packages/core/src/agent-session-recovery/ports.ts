@@ -17,7 +17,7 @@ import type { AgentMuxHostExecutorOwner } from '../executor-owner.js'
 /** Explicit original Core resources; no client or recovery-decision callback crosses this port. */
 export type AgentSessionRecoveryPorts = {
   sessions: {
-    readonly store: Pick<AgentMuxAgentSessionStore, "readMetadata" | "readContinuityControlReceipt" | "readLifecycleReservation" | "loadResumeCorrelation" | "readRetiredAgentSession">;
+    readonly store: Pick<AgentMuxAgentSessionStore, "readMetadata" | "readContinuityControlReceipt" | "recordRestartAdmission" | "readLifecycleReservation" | "loadResumeCorrelation" | "readRetiredAgentSession">;
     readonly registry: Pick<AgentMuxAgentSessionRegistry, "get" | "resolveMetadata" | "refresh" | "claimRestart" | "reserveRestart" | "load" | "claimReopen" | "commitLifecycle" | "reserveReopen" | "reserveExisting" | "prepareReopen" | "prepareResume" | "recordRestartStartNotApplied" | "update" | "rememberStartedResume" | "releaseLifecycle">;
     resolveRawAgentSession(agentSessionId: string): Promise<AgentMuxStoredAgentSession>;
     currentStoredAgentSession(agentSessionId: string): Promise<AgentMuxStoredAgentSession>;

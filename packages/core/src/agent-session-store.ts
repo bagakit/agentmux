@@ -1,7 +1,7 @@
 import { mintObjectId } from './object-id.js'
 import { parseAgentExternalInteractionAuthor } from './external-author.js'
 import { parseAgentContinuityControlReceipts, type AgentMuxContinuityControlReceipt } from './agent-session-recovery/control-contract.js'
-import { normalizeAgentContinuityOperation, normalizeAgentContinuityLaunchInput } from './agent-session-recovery/continuity-contract.js'
+import { normalizeAgentContinuityOperation, normalizeAgentContinuityLaunchInput, normalizeAgentContinuityPolicy, type AgentMuxContinuityOperation } from './agent-session-recovery/continuity-contract.js'
 import { validateAgentPromptInputKey } from './agent-prompt-condition.js'
 import { MAX_STORED_TEXT_BYTES, parsePromptSubmissionRecord, normalizePromptCompletionAdmission, terminalPromptSubmission, terminalPromptReadinessSource } from './prompt-submission-record.js'
 export { parsePromptSubmissionRecord, normalizePromptCompletionAdmission } from './prompt-submission-record.js'
@@ -191,6 +191,10 @@ export type AgentMuxAgentSessionStore = {
    * An authenticated author binding, when supplied, must also match the current
    * author metadata with no author lifecycle reservation under that same owner.
    * Implementations must reject drift before committing; it is not a grant.
+   * During a restart, this CAS must atomically fence the original reservation's
+   * same-ID receipt and pointer against changes to the frozen Session, Run,
+   * request digest or native target, retaining any conflicting receipt/input.
+   * Unrelated operation IDs remain writable.
    */
   compareAndSwapMetadata(expected: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null,
     signal?: AbortSignal, future?: AgentMuxSessionFutureChange, author?: Readonly<AgentCapabilityBinding>): Promise<void>
@@ -204,13 +208,27 @@ export type AgentMuxAgentSessionStore = {
   loadCreationSessionId(createOperationId: string): Promise<string | null>
   /** Original no-Run creation correlation; reading never starts a process or replays input. */
   loadCreationCorrelation(agentSessionId: string): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }> | null>
-  /** Abort must cancel queued or active persistence without a late commit. */
+  /**
+   * Abort must cancel queued or active persistence without a late commit.
+   * The same restart reservation, receipt and pointer fence required by
+   * compareAndSwapMetadata applies atomically to this full-Session CAS too.
+   */
   compareAndSwap(
     expected: AgentMuxStoredAgentSession | null,
     next: AgentMuxStoredAgentSession | null,
     signal?: AbortSignal
   ): Promise<void>
+  /**
+   * A restart reservation and its initial typed operation receipt must commit
+   * atomically; a Store must never expose just one as a completed admission.
+   */
   reserveLifecycle(reservation: AgentMuxLifecycleReservation): Promise<void>
+  /**
+   * Restore or reassert the original restart receipt in one transaction fenced
+   * by the same reservation, owner, Run and frozen request/native target. Keep
+   * conflicting receipts and inputs, and never issue Runtime side effects.
+   */
+  recordRestartAdmission(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, mode?: 'continue' | 'restore'): Promise<AgentMuxStoredAgentSession>
   prepareCreate(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'create' }>, seed: AgentMuxPreparedCreation): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }>>
   claimCreate(agentSessionId: string, operationId: string, intentDigest: string, claim: AgentMuxLifecycleClaim): Promise<Extract<AgentMuxLifecycleReservation, { kind: 'create' }> | null>
   /** Exact current lifecycle fact, including pending Stop; a failed read is never absence. */
@@ -526,6 +544,53 @@ function canSupersedeRestartWithStop(
     !current.preparedSession && current.agentSessionId === requested.agentSessionId &&
     current.expectedRun.runId === requested.expectedRun.runId &&
     (current.ownerId === requested.ownerId || current.ownerReleased === true || !processIsAlive(current.ownerPid))
+}
+
+function assertRestartReceiptFence(reservation: AgentMuxLifecycleReservation | null | undefined,
+  current: AgentMuxStoredAgentSession | null, next: AgentMuxStoredAgentSession | null): void {
+  if (reservation?.kind !== 'resume' || !reservation.restart || !next) return
+  const restart = reservation.restart, id = restart.request.operationId
+  const matches = (value: AgentMuxContinuityOperation | undefined): boolean => Boolean(value && value.action === 'restart' &&
+    value.agentSessionId === reservation.agentSessionId && value.previousRun.runId === reservation.expectedRun.runId &&
+    value.requestDigest === restart.requestDigest && matchesProviderNativeSessionTarget(restart.nativeTarget, value.nativeTarget))
+  const check = (before: AgentMuxContinuityOperation | undefined, after: AgentMuxContinuityOperation | undefined): void => {
+    if (isDeepStrictEqual(before, after)) return
+    if (before && !matches(before) || !matches(after)) throw new AgentMuxError(
+      'The exact operation belongs to an original restart. Its reservation and any existing receipt are retained.', 'AGENT_CONTINUITY_SUPERSEDED')
+  }
+  check(current?.continuityOperations?.[id], next.continuityOperations?.[id])
+  // The pointer may move to a different operation, but cannot impersonate this
+  // original restart while the authoritative map retains a different receipt.
+  if (next.continuity?.operationId === id) check(current?.continuity?.operationId === id ? current.continuity : undefined, next.continuity)
+}
+
+/** The reservation is the authority for this exact frozen restart, never a new request. */
+function restartAdmission(session: AgentMuxStoredAgentSession, reservation: AgentMuxLifecycleReservation,
+  mode: 'new' | 'restore' | 'continue'): AgentMuxStoredAgentSession {
+  if (reservation.kind !== 'resume' || !reservation.restart) return session
+  const restart = reservation.restart, id = restart.request.operationId
+  if (session.agentSessionId !== reservation.agentSessionId || session.run.runId !== reservation.expectedRun.runId ||
+      !matchesProviderNativeSessionTarget(restart.nativeTarget, session.nativeHandle)) throw new AgentMuxError(
+    'The original restart Session, Run or native target changed.', 'STALE_AGENT_SESSION')
+  const prior = session.continuityOperations?.[id]
+  if (prior) {
+    if (mode === 'new' || prior.action !== 'restart' || prior.requestDigest !== restart.requestDigest ||
+        prior.previousRun.runId !== reservation.expectedRun.runId ||
+        !matchesProviderNativeSessionTarget(restart.nativeTarget, prior.nativeTarget)) throw new AgentMuxError(
+      'The original restart operation has another receipt. Preserve both original requests.', 'AGENT_RESTART_CONFLICT')
+    if (mode === 'restore') return session
+  }
+  const observedAt = Date.now()
+  const admitted: AgentMuxContinuityOperation = { ...prior, operationId: id, agentSessionId: session.agentSessionId,
+    action: 'restart', trigger: 'manual', policy: normalizeAgentContinuityPolicy(), previousRun: { ...reservation.expectedRun },
+    nativeTarget: structuredClone(restart.nativeTarget), requestDigest: restart.requestDigest,
+    admittedAt: prior?.admittedAt ?? observedAt, observedAt, rechecks: 0, kind: 'starting', reason: 'restart-stopping',
+    evidence: { kind: 'run-unknown', observedAt, message: mode === 'restore'
+      ? 'The original restart reservation was recovered; its admission time was not recorded.' : 'The original explicit restart was admitted.' },
+    recoveryInputs: { reminder: '', continuation: '' } }
+  delete admitted.nextActionAt; delete admitted.supervision; delete admitted.error; delete admitted.errorCode
+  return { ...session, continuity: mode === 'restore' && session.continuity ? session.continuity : admitted,
+    continuityOperations: { ...session.continuityOperations, [id]: admitted }, updatedAt: Math.max(session.updatedAt + 1, observedAt) }
 }
 
 function retiredRuns(value: unknown, current: AgentMuxRunRef): AgentMuxRunRef[] {
@@ -2427,6 +2492,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     if (future && !isDeepStrictEqual(current?.futurePromptIntents?.[future.intentId] ?? null, future.expected)) throw new AgentMuxError('The exact future intent changed before admission.', 'AGENT_FUTURE_INTENT_CHANGED')
     const reservation = this.reservations.get(id)
     if (reservation && (!next || !expected || next.run.runId !== expected.run.runId)) throw new AgentMuxError('Agent Session has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
+    assertRestartReceiptFence(reservation, current, next)
     if (!next) { this.setSession(id, null); return }
     const normalized = normalizeStoredAgentSession(agentSessionMetadata(next))
     assertInitialInputWrite(current, normalized)
@@ -2499,6 +2565,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     ) {
       throw new AgentMuxError('Agent Session has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
     }
+    assertRestartReceiptFence(reservation, current, next)
     if (next) {
       const normalized = normalizeStoredAgentSession(next)
       const values = [...this.sessions.values()].filter((session) => session.agentSessionId !== agentSessionId)
@@ -2522,13 +2589,30 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
       [...this.sessions.values()],
       this.retiredAgentSessions
     )
-    try { this.reservations.set(reservation.agentSessionId, structuredClone(reservation)) }
+    const session = this.sessions.get(reservation.agentSessionId)
+    const nextSession = session ? restartAdmission(session, reservation, 'new') : undefined
+    const savedReservation = structuredClone(reservation)
+    const savedSession = nextSession && nextSession !== session ? structuredClone(nextSession) : undefined
+    try {
+      if (savedSession) this.setSession(reservation.agentSessionId, savedSession)
+      this.reservations.set(reservation.agentSessionId, savedReservation)
+    }
     catch (error) {
       if (reservation.kind !== 'create') throw error
       const failure = agentCreationNotAppliedError(error, reservation.operationId)
       await finishAgentCreationCleanup(failure, [async () => { await this.releaseLifecycle(reservation) }])
       throw failure
     }
+  }
+
+  async recordRestartAdmission(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, mode: 'continue' | 'restore' = 'continue'): Promise<AgentMuxStoredAgentSession> {
+    const current = this.reservations.get(reservation.agentSessionId)
+    if (!current || current.kind !== 'resume' || !sameReservationOwner(current, reservation) || current.operationId !== reservation.operationId || !current.restart || current.preparedSession || current.expectedRun.runId !== reservation.expectedRun.runId || !isDeepStrictEqual(current.restart, reservation.restart)) throw new AgentMuxError('The original restart reservation changed.', 'STALE_AGENT_SESSION')
+    const session = this.sessions.get(reservation.agentSessionId)
+    if (!session) throw new AgentMuxError('The original Session is unavailable.', 'STALE_AGENT_SESSION')
+    const next = restartAdmission(session, current, mode)
+    this.setSession(session.agentSessionId, structuredClone(next))
+    return structuredClone(next)
   }
 
   async readContinuityControlReceipt(agentSessionId: string, operationId: string): Promise<ContinuityControlStoredResult | null> {
@@ -2673,6 +2757,7 @@ export class AgentMuxMemoryAgentSessionStore implements AgentMuxAgentSessionStor
     )
     const previous = this.sessions.get(reservation.agentSessionId)
     const normalized = next ? normalizeStoredAgentSession(preserveContinuityOperations(previous, next)) : null
+    assertRestartReceiptFence(currentReservation, previous ?? null, normalized)
     assertLifecycleCommit(currentReservation, normalized)
     const values = [...this.sessions.values()].filter(
       (session) => session.agentSessionId !== reservation.agentSessionId
@@ -3108,8 +3193,10 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     if (!id || expected && next && expected.agentSessionId !== next.agentSessionId) throw new AgentMuxError('Agent Session CAS identity is invalid.', 'INVALID_AGENT_SESSION_STORE')
     const current = complete ? this.completeSession(this.db, id) : this.sessionMetadata(this.db, id)
     if (!sameSession(current, expected)) throw new AgentMuxError('Agent Session changed before persistence completed.', 'STALE_AGENT_SESSION')
-    const reservation = this.db.prepare('SELECT 1 FROM reservations WHERE id=?').get(id)
+    const reservationRow = this.db.prepare('SELECT json FROM reservations WHERE id=?').get(id)
+    const reservation = reservationRow ? lifecycleReservation(JSON.parse(String(reservationRow.json))) : null
     if (reservation && (!next || !expected || next.run.runId !== expected.run.runId)) throw new AgentMuxError('Agent Session has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
+    assertRestartReceiptFence(reservation, current, next)
     if (future && !isDeepStrictEqual(this.futureIntent(this.db, id, future.intentId), future.expected)) throw new AgentMuxError('The exact future intent changed before admission.', 'AGENT_FUTURE_INTENT_CHANGED')
     if (next) {
       const normalized = normalizeStoredAgentSession(complete ? next : agentSessionMetadata(next))
@@ -3125,6 +3212,18 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
     const reservation = lifecycleReservation(value)
     let admissionChecked = false
     try { await this.enqueue(async () => {
+      if (reservation.kind === 'resume' && reservation.restart) {
+        const row = this.db.prepare('SELECT json FROM reservations WHERE id=?').get(reservation.agentSessionId)
+        if (row) throw new AgentMuxError('Agent Session already has a lifecycle operation in progress.', 'AGENT_SESSION_BUSY')
+        const session = this.sessionMetadata(this.db, reservation.agentSessionId)
+        if (!session) throw new AgentMuxError('The original Session is unavailable.', 'UNKNOWN_AGENT_SESSION')
+        assertReservationPrecondition(reservation, [session], [])
+        const admitted = restartAdmission(session, reservation, 'new')
+        this.saveSession(this.db, admitted, false)
+        this.db.prepare('INSERT INTO reservations (id, json) VALUES (?, ?)').run(reservation.agentSessionId, JSON.stringify(reservation))
+        this.dirty = true
+        return
+      }
       const document = await this.read()
       const current = document.reservations.find(item => item.agentSessionId === reservation.agentSessionId)
       if (current && !canSupersedeRestartWithStop(current, reservation)) {
@@ -3150,6 +3249,20 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
       await finishAgentCreationCleanup(failure, [async () => { await this.releaseLifecycle(reservation) }])
       throw failure
     }
+  }
+
+  async recordRestartAdmission(reservation: Extract<AgentMuxLifecycleReservation, { kind: 'resume' }>, mode: 'continue' | 'restore' = 'continue'): Promise<AgentMuxStoredAgentSession> {
+    let result!: AgentMuxStoredAgentSession
+    await this.enqueue(async () => {
+      const row = this.db.prepare('SELECT json FROM reservations WHERE id=?').get(reservation.agentSessionId)
+      const current = row ? lifecycleReservation(JSON.parse(String(row.json))) : null
+      if (!current || current.kind !== 'resume' || !sameReservationOwner(current, reservation) || current.operationId !== reservation.operationId || !current.restart || current.preparedSession || current.expectedRun.runId !== reservation.expectedRun.runId || !isDeepStrictEqual(current.restart, reservation.restart)) throw new AgentMuxError('The original restart reservation changed.', 'STALE_AGENT_SESSION')
+      const session = this.sessionMetadata(this.db, reservation.agentSessionId)
+      if (!session) throw new AgentMuxError('The original Session is unavailable.', 'STALE_AGENT_SESSION')
+      result = restartAdmission(session, current, mode)
+      if (result !== session) { this.saveSession(this.db, result, false); this.dirty = true }
+    })
+    return structuredClone(result)
   }
 
   async readContinuityControlReceipt(agentSessionId: string, operationId: string): Promise<ContinuityControlStoredResult | null> {
@@ -3384,6 +3497,7 @@ export class AgentMuxFileAgentSessionStore implements AgentMuxAgentSessionStore 
         (session) => session.agentSessionId === reservation.agentSessionId
       )
       const normalized = next ? normalizeStoredAgentSession(preserveContinuityOperations(previous, next)) : null
+      assertRestartReceiptFence(currentReservation, previous ?? null, normalized)
       assertLifecycleCommit(currentReservation, normalized)
       const sessions = document.sessions.filter(
         (session) => session.agentSessionId !== reservation.agentSessionId
