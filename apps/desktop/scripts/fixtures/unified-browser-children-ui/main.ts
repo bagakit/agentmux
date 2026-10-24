@@ -41,6 +41,9 @@ async function until(label: string, read: () => unknown | Promise<unknown>, budg
   throw new Error('UI fact not observed: ' + label)
 }
 const facts = () => js('window.childrenUi.facts()')
+async function sourceInputFacts() {
+  return { mainFocused: main.isFocused(), input: await js(`(()=>{const input=document.querySelector('.browser-surface input[role="combobox"]');return input&&{active:document.activeElement===input,value:input.value,start:input.selectionStart,end:input.selectionEnd}})()`) }
+}
 function handle(channel: string, action: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown) {
   ipcMain.handle(channel, async (event, ...args) => {
     assertSenderTrusted(senderTrust(channel as any, event.sender, main.webContents))
@@ -172,7 +175,9 @@ async function run() {
   handle('ui:workbenchWindowsCall', (_event, method, input) => windows.call(method, input, { actor: { kind: 'user', id: 'desktop' } }))
   handle('ui:publishNativeOverlays', (_event, regions, document) => overlays.update(regions, document))
   handle('ui:nativeBrowserVisibility', (_event, document) => overlays.visibility(document))
-  ipcMain.handle('children-ui:request', async (_event, operation, ...args) => {
+  ipcMain.handle('children-ui:request', async (event, operation, ...args) => {
+    assert.equal(event.sender, main.webContents, 'Private fixture operations address only the original privileged Renderer')
+    assert.equal(event.senderFrame?.frameToken, main.webContents.mainFrame.frameToken, 'Private fixture operations preserve their exact original frame')
     if (operation === 'setup') return { config, phase, pageUrl }
     if (operation === 'spatial-read') return spatial.read()
     if (operation === 'spatial-commit') return spatial.commit(args[0])
@@ -203,7 +208,21 @@ async function run() {
     const sourceTabBefore = Object.values((await facts()).tabs).find((tab: any) => Object.values(tab.regions).some((region: any) => region.browserId === source.id)) as any
     await js(`window.childrenUi.split(${JSON.stringify(sourceTabBefore.id)},${JSON.stringify(source.id)})`)
     await js(`window.childrenUi.select(${JSON.stringify(sourceTabBefore.id)},${JSON.stringify(source.id)})`)
+    await click(main, '.browser-surface input[role="combobox"]')
+    await wait(60)
+    await main.webContents.insertText('Private source draft 42')
+    await js(`(()=>{const input=document.querySelector('.browser-surface input[role="combobox"]');input.setSelectionRange(8,14)})()`)
+    const sourceFocusBefore = await sourceInputFacts()
+    assert.equal(sourceFocusBefore.mainFocused, true, 'The actual original native window is focused before the Agent opens the related page')
+    assert.equal(sourceFocusBefore.input?.active, true, 'The original address input owns actual DOM focus')
+    assert.equal(sourceFocusBefore.input?.value, 'Private source draft 42', 'The original input has a nonempty unsubmitted draft')
     const { child, nativeWindow } = await childFromSource(source.id)
+    const sourceFocusAfter = await sourceInputFacts()
+    assert.deepEqual(sourceFocusAfter, sourceFocusBefore, 'Automatic native child presentation preserves the original native focus, input draft and selection')
+    assert.equal(nativeWindow.isVisible(), true, 'Automatic native child is visible')
+    assert.equal(nativeWindow.isFocused(), false, 'Automatic native child does not steal native focus')
+    assert.equal((await facts()).tabs[sourceTabBefore.id].layout.activeRegionId, source.id, 'Automatic child presentation preserves the original selected Region')
+    receipt.assertions.push({ label: 'automatic-child-preserves-original-input-focus', before: sourceFocusBefore, after: sourceFocusAfter, childVisible: nativeWindow.isVisible(), childFocused: nativeWindow.isFocused() })
     const originalChildContents = browsers.nativeOwner(child.id)!.view.webContents
     await until('child page loaded', async () => originalChildContents.executeJavaScript('document.title === "Related task"'))
     let runResult: any
@@ -245,6 +264,8 @@ async function run() {
     const another = await childFromSource(source.id)
     another.nativeWindow.close()
     await until('native Close retires original child', () => !browsers.target(another.child.id) && another.nativeWindow.isDestroyed())
+    await until('native Close removes only its original Region projection', async () => !Object.values((await facts()).tabs).some((tab: any) => Object.values(tab.regions).some((region: any) => region.browserId === another.child.id)))
+    assert.equal(browsers.nativeOwner(child.id)!.view.webContents, originalChildContents, 'Closing the second child preserves the returned first child')
     receipt.assertions.push({ label: 'native-close-destroys-child', childId: another.child.id, facts: await facts() })
     const childTabToSave = Object.values((await facts()).tabs).find((tab: any) => Object.values(tab.regions).some((region: any) => region.browserId === child.id)) as any
     await js(`window.childrenUi.split(${JSON.stringify(childTabToSave.id)},${JSON.stringify(child.id)})`)
@@ -256,7 +277,11 @@ async function run() {
   } else {
     const expected = JSON.parse(await readFile(join(privateRoot, 'expected.json'), 'utf8')), recovered = await facts()
     assert.deepEqual(Object.keys(recovered.tabs).sort(), Object.keys(expected.tabs).sort(), 'A new Electron process restores original durable Tab identities')
-    for (const [tabId, tab] of Object.entries(expected.tabs) as any) assert.deepEqual(recovered.tabs[tabId].layout, tab.layout, 'Original split/focus layout')
+    assert.deepEqual(recovered.layouts, expected.layouts, 'Original durable Group topology, Tab selection and order')
+    for (const [tabId, tab] of Object.entries(expected.tabs) as any) {
+      assert.deepEqual(recovered.tabs[tabId].layout, tab.layout, 'Original split/focus layout')
+      assert.deepEqual(Object.keys(recovered.tabs[tabId].regions).sort(), Object.keys(tab.regions).sort(), 'Original durable Region identities')
+    }
     const childTab = Object.values(recovered.tabs).find((tab: any) => Object.values(tab.regions).some((region: any) => region.browserId === expected.childId)) as any
     assert.ok(childTab)
     await js(`window.childrenUi.select(${JSON.stringify(childTab.id)},${JSON.stringify(expected.childId)})`)

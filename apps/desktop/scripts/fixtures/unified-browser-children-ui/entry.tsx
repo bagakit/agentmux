@@ -30,7 +30,7 @@ const state = () => useAppStore.getState()
 const facts = () => ({ ...projectPersistedWorkbench(state()), loading: state().loading, mainSurface: state().mainSurface,
   activeWorkspaceId: state().activeWorkspaceId, errors: state().notificationEvents.map(event => event.message), error: state().error,
   documents: workbenchDocuments().map(document => ({ title: document.title, url: document.URL,
-    browserPanes: document.querySelectorAll('.browser-pane').length, text: document.body.textContent?.slice(0, 9000),
+    browserPanes: document.querySelectorAll('.browser-surface').length, text: document.body.textContent?.slice(0, 9000),
     sourceButtons: [...document.querySelectorAll('button[aria-label="Go to source Browser"]')].map(element => ({ title: element.getAttribute('title'), text: element.textContent })) })) })
 ;(window as any).childrenUi = {
   facts,
