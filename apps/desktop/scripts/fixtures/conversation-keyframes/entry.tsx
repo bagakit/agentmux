@@ -40,7 +40,24 @@ const original = [
   { id: 'green-original', content: `Green accepted frame\n\n@${imagePath('green')}`, name: 'Review agent' },
   { id: 'text-original', content: 'Text only: original author avatar stays here.', name: 'Review agent' }
 ]
-const reads: string[] = [], selections: string[] = [], captures: string[] = []
+const reads: string[] = [], selections: string[] = [], captures: string[] = [], observations: string[] = []
+let encodes = 0
+const toDataURL = HTMLCanvasElement.prototype.toDataURL
+HTMLCanvasElement.prototype.toDataURL = function (...args) {
+  if (args[0] === 'image/webp') encodes++
+  return toDataURL.apply(this, args)
+}
+const NativeIntersectionObserver = window.IntersectionObserver
+window.IntersectionObserver = class extends NativeIntersectionObserver {
+  constructor(callback: IntersectionObserverCallback, options?: IntersectionObserverInit) {
+    super((entries, observer) => {
+      for (const entry of entries) if (entry.target.matches('.md-conversation-image__thumb')) {
+        observations.push(entry.target.closest<HTMLElement>('[data-message-source-key]')!.dataset.messageSourceKey!)
+      }
+      callback(entries, observer)
+    }, options)
+  }
+}
 const draw = CanvasRenderingContext2D.prototype.drawImage
 CanvasRenderingContext2D.prototype.drawImage = function (...args: any[]) {
   const media = args[0] as Element
@@ -59,16 +76,19 @@ function Fixture() {
   const [feed, setFeed] = useState<HTMLDivElement | null>(null), [cluster, setCluster] = useState(false)
   const [invalidated, setInvalidated] = useState(false), [mismatch, setMismatch] = useState(false), [active, setActive] = useState(true)
   const [selected, setSelected] = useState<string | null>(null)
+  const [unrelatedRevision, setUnrelatedRevision] = useState(0), [omitRed, setOmitRed] = useState(false)
   const visible = useRef(null)
-  const content = original.map((item, index) => index === 0 && invalidated ? { ...item, content: 'The red visual was removed in the current exact record.' } : item)
+  const content = original.map((item, index) => index === 0 && invalidated ? { ...item, content: 'The red visual was removed in the current exact record.' }
+    : index === 2 && unrelatedRevision ? { ...item, content: `${item.content} Unrelated revision ${unrelatedRevision}.` } : item)
   // Stable versions are the exact current content strings; names never associate a source.
   const records: RulerRecord[] = content.map((item, index) => ({ id: item.id, kind: 'ruler-record',
     sourceKey: conversationMessageSourceKey(mismatch ? 'different-session' : session, source(item.id)),
     recordedAt: _privacyFixtureEpoch(19675, 80000) + (cluster ? [0, 1, 10000][index]! : index * 10000),
     speaker: { role: 'agent', id: session }, target: { kind: 'observed', index },
-    record: { id: item.id, kind: 'assistant_message', agentSessionId: session, content: item.content } as any }))
+    record: { id: item.id, kind: 'assistant_message', agentSessionId: session, content: item.content } as any })).filter(record => !omitRed || record.id !== 'red-original')
   control = { configure(input) { if (input.theme) updateThemeSelection({ appAppearance: input.theme }); if ('cluster' in input) setCluster(input.cluster)
-    if ('invalidated' in input) setInvalidated(input.invalidated); if ('mismatch' in input) setMismatch(input.mismatch); if ('active' in input) setActive(input.active) } }
+    if ('invalidated' in input) setInvalidated(input.invalidated); if ('mismatch' in input) setMismatch(input.mismatch); if ('active' in input) setActive(input.active)
+    if ('unrelatedRevision' in input) setUnrelatedRevision(input.unrelatedRevision); if ('omitRed' in input) setOmitRed(input.omitRed) } }
   return <ClientUiProvider platform={platform}><section aria-label="Conversation proof" style={{ width: 'min(920px,100%)', height: 'calc(100dvh - 40px)', marginInline: 'auto' }}>
     <div ref={setFeed} className="activity-feed">
       <ConversationReadingRuler feedEl={feed} sessionId={session} readingEnabled={active} rulerRecords={records} placed={records.map((_, index) => ({ key: `segment-${index}`, from: index, to: index }))}
@@ -101,7 +121,7 @@ async function pixels(image: HTMLImageElement) {
   configure(input: unknown) { control?.configure(input) },
   async facts() {
     const keyframes = [...document.querySelectorAll<HTMLImageElement>('.conversation-axis__keyframe, .conversation-axis__entry-keyframe')]
-    return { hidden: document.hidden, appearance: document.documentElement.dataset.appearance, reads: [...reads], captures: [...captures], selections: [...selections],
+    return { hidden: document.hidden, appearance: document.documentElement.dataset.appearance, reads: [...reads], captures: [...captures], encodes, observations: [...observations], selections: [...selections],
       axis: bounds(document.querySelector('.conversation-axis')), feed: bounds(document.querySelector('.activity-feed')),
       marks: await Promise.all([...document.querySelectorAll<HTMLElement>('.conversation-axis__mark')].map(async mark => ({ label: mark.getAttribute('aria-label'), count: mark.querySelector('.conversation-axis__count')?.textContent,
         ...bounds(mark), avatar: Boolean(mark.querySelector('.conversation-avatar')), avatarGlyph: Boolean(mark.querySelector('[data-agent-provider="codex"] svg path')), keyframe: Boolean(mark.querySelector('.conversation-axis__keyframe')) }))),
