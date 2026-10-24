@@ -6,9 +6,15 @@ import base from '../scripts/fixtures/conversation-latest-auto/vitest.owning.con
 
 const root = resolve(import.meta.dirname, '../../..')
 const mutation = process.env.AGENTMUX_EMPTY_REPORT_MUTATION
-const edits: Record<string, [string, string]> = {
-  'empty-preview': ['!open && (preview || hasResources)', '!open'],
-  'hide-resource': ['!open && (preview || hasResources)', '!open && preview']
+const cardPath = 'packages/client-ui/src/components/ConversationMessageCard.tsx'
+const edits: Record<string, { path: string; before: string; after: string }> = {
+  'empty-preview': { path: cardPath, before: '!open && (preview || hasResources)', after: '!open' },
+  'hide-resource': { path: cardPath, before: '!open && (preview || hasResources)', after: '!open && preview' },
+  'remove-path-details': { path: cardPath, before: `<dl className="log-turn__collaboration-participants">
+          <div><dt>发送者</dt><dd><code>{collaboration.sender ?? '路径未记录'}</code></dd></div>
+          {collaboration.recipient ? <div><dt>接收者</dt><dd><code>{collaboration.recipient}</code></dd></div> : null}
+        </dl>`, after: '' },
+  'parent-avatar': { path: 'packages/client-ui/src/components/ConversationMessage.tsx', before: 'avatar: nativeCollaboration ? null :', after: 'avatar:' }
 }
 if (mutation && !edits[mutation]) throw Error('Unknown empty report mutation')
 const hash = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex')
@@ -17,8 +23,8 @@ export default defineConfig({ ...base, cacheDir: resolve(root, '.local/subagent-
     const file = id.split('?')[0]!
     if (!file.startsWith(root + '/') || file.includes('/node_modules/')) return
     let code = source
-    if (mutation && file === resolve(root, 'packages/client-ui/src/components/ConversationMessageCard.tsx')) {
-      const [before, after] = edits[mutation]!
+    if (mutation && file === resolve(root, edits[mutation]!.path)) {
+      const { before, after } = edits[mutation]!
       if (source.split(before).length !== 2) throw Error('Mutation must match one production behavior')
       code = source.replace(before, after)
     }
