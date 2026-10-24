@@ -64,6 +64,27 @@ async function existingGoal() {
   return view
 }
 
+it('retains a lost delete receipt after the real public Goal service removes the original Goal', async () => {
+  vi.spyOn(api.demands, 'delete').mockImplementation(id => owner.delete(id) as never)
+  const view = await existingGoal(), original = view.forwardRpc
+  view.client.forwardRpc = async (method: string, params: any) => {
+    const result = await original(method, params)
+    if (method === 'goal.delete') throw new Error('original response lost after service execution')
+    return result
+  }
+  await view.render()
+  await view.click('删除目标…'); await view.click('确认删除此目标')
+  await view.wait('删除回执未确认')
+  expect(await owner.get('original-goal')).toBeNull()
+  const call = original.mock.calls.find(([method]) => method === 'goal.delete')!
+  const records = getDeviceWorkface().snapshot().record.goalOperationRecords ?? []
+  expect(records).toHaveLength(1)
+  expect(records[0]?.request).toEqual(call[1])
+  expect(records[0]?.runtimeId).toBe('private-goal-runtime')
+  expect(records[0]?.ownerInstanceId).toBe('original-goal-process')
+  expect(original.mock.calls.filter(([method]) => method === 'goal.delete')).toHaveLength(1)
+})
+
 it('published Demand dispatch persistence and strict Core Goal codec feed the mounted roles/stages consumer without Start or activity inference', async () => {
   await owner.create({ id: 'original-goal', title: 'Actual dispatch goal', assigneeSessionIds: ['original-assignee'], supervisorSessionId: 'original-assignee' })
   for (const stage of ['prepared', 'submitted', 'unknown', 'confirmed'] as const) {
