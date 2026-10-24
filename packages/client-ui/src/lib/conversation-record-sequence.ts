@@ -10,6 +10,9 @@ export type ConversationRecordSequenceRow = ConversationSequenceEntry
   | { kind: 'boundary' }
 export type ConversationSequence = { rows: readonly ConversationRecordSequenceRow[]; groups: ReadonlyMap<string, string> }
 export const conversationPresentationKey = (record: ConversationRecord): string => record.presentationKey ?? record.id
+/** Original peers stay exposed inside a process interval; their Core roles do not change. */
+export const conversationProcessPeer = (record: ConversationRecord): boolean => record.role === 'observation'
+  || record.role === 'message' && record.original.kind === 'native' && record.original.item.collaboration?.kind === 'message'
 
 /** One presentation projection over Core's ordered records; no source merge. */
 export function projectConversationRecordSequence(
@@ -20,7 +23,7 @@ export function projectConversationRecordSequence(
   const groups = new Map<string, string>(), usedGroups = new Set<string>()
   const rows: ConversationRecordSequenceRow[] = []
   let process: ConversationSequenceEntry[] = []
-  let knownTurn: string | undefined, priorGroup: string | undefined
+  let knownSource: string | undefined, knownTurn: string | undefined, priorGroup: string | undefined
   function flush(): void {
     if (!process.length) return
     const members = process.flatMap(entry => entry.kind === 'record' ? [entry.record] : [])
@@ -29,7 +32,7 @@ export function projectConversationRecordSequence(
     usedGroups.add(id)
     for (const record of members) groups.set(conversationPresentationKey(record), id)
     rows.push({ kind: 'process', id, records: members, entries: process })
-    process = []; knownTurn = undefined; priorGroup = undefined
+    process = []; knownSource = undefined; knownTurn = undefined; priorGroup = undefined
   }
   const before = new Map<string | undefined, ConversationSequenceInsertion[]>()
   const ids = new Set(records.map(conversationPresentationKey))
@@ -47,16 +50,20 @@ export function projectConversationRecordSequence(
     const key = conversationPresentationKey(record)
     insert(key)
     if (beforeRecordId === key) { flush(); rows.push({ kind: 'boundary' }) }
-    if (record.role === 'process') {
+    if (record.role === 'process' || record.role !== 'observation' && conversationProcessPeer(record)) {
       const native = record.original.kind === 'native' ? record.original.item : record.original.kind === 'deferred' && record.original.item.kind === 'native' ? record.original.item.item : undefined
-      const turn = native?.turnId !== undefined
-        ? JSON.stringify([record.sourceHostId, record.source.kind === 'native' ? record.source.providerId : undefined,
-          record.source.kind === 'native' ? record.source.nativeSessionId : undefined, native.turnId]) : undefined
+      const source = record.source.kind === 'native'
+        ? JSON.stringify([record.sourceHostId, record.source.providerId, record.source.nativeSessionId]) : undefined
+      const turn = native?.turnId
       const prior = previous.get(key)
       // Never combine two already mounted parents. A retained member owns its group.
-      if (knownTurn !== undefined && turn !== undefined && knownTurn !== turn
+      if (knownSource !== undefined && source !== undefined && knownSource !== source
+        || knownTurn !== undefined && turn !== undefined && knownTurn !== turn
         || priorGroup !== undefined && prior !== undefined && priorGroup !== prior) flush()
+      // A report without a pending actual step stays an independent original record.
+      if (record.role !== 'process' && !process.length) { rows.push({ kind: 'record', record }); continue }
       process.push({ kind: 'record', record })
+      if (source !== undefined) knownSource = source
       if (turn !== undefined) knownTurn = turn
       if (prior !== undefined) priorGroup = prior
     } else if (record.role === 'observation' && process.length) process.push({ kind: 'record', record })
