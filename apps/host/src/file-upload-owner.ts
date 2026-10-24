@@ -2,6 +2,7 @@ import { constants } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { lstat, mkdir, open, realpath } from 'node:fs/promises'
 import { extname, join } from 'node:path'
+import { homedir } from 'node:os'
 import { parseFileUploadIdentity, parseFileUploadParams, parseFileUploadResult, type AgentMuxRpcFileUploadsOwner,
   type FileUploadIdentity, type FileUploadParams, type FileUploadResult } from '@agentmux/core/files'
 
@@ -47,7 +48,7 @@ async function readBounded(path: string, max: number): Promise<Buffer> {
  * A receipt is reconstructed by reading the same file; it is never a second message queue. */
 export class FileUploadOwner implements AgentMuxRpcFileUploadsOwner {
   private readonly tails = new Map<string, Promise<unknown>>()
-  constructor(private readonly directory: string) {}
+  constructor(private readonly directory = join(homedir(), '.agentmux', 'attachments')) {}
   private address(identity: FileUploadIdentity) {
     return join(this.directory, createHash('sha256').update(identity.operationId).digest('hex'))
   }

@@ -20,6 +20,7 @@ import { createDeviceAdministration } from './device-administration.js'
 import { createCapsuleDesktopAdapters } from './capsules.js'
 import { createHostConnectionOwner, type HostConnectionOptions } from './connections.js'
 import { createHostAgentLearning } from './agent-learning.js'
+import { FileUploadOwner } from './file-upload-owner.js'
 export type AgentMuxHostOptions = {
   store: AgentMuxAgentSessionStore
   providers?: readonly AgentProvider[]
@@ -77,7 +78,7 @@ export async function startAgentMuxHost(options: AgentMuxHostOptions) {
     catch { return { ...mobileState, state: 'unavailable', message: '当前没有可用的局域网地址；连接记录和 Agent 会话保留。' } }
   }
   const service = {
-    ...(options.fileUploads ? { fileUploads: options.fileUploads } : {}),
+    fileUploads: options.fileUploads ?? new FileUploadOwner(),
     ...(agentLearning ? { agentLearning } : {}),
     ...(connectionOwner ? { connections: connectionOwner.connections, spatialState: connectionOwner.spatial,
       ...(connectionOwner.moteChat ? { moteChat: connectionOwner.moteChat } : {}),
