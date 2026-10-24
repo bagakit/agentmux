@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { act, useLayoutEffect, type ComponentProps, type ReactNode } from 'react'
+import { act, useLayoutEffect, useState, type ComponentProps, type ReactNode } from 'react'
 import { beforeEach, expect, it, vi } from 'vitest'
 import type { Node, ReactFlowProps, useStoreApi } from '@xyflow/react'
 import { composerDOM, composerSession } from './helpers/composer-dom-fixture'
@@ -22,7 +22,7 @@ import { DEFAULT_MOTE_FACE } from '../src/shared/mote-avatars'
 import collaborationCSS from '../src/renderer/src/styles/collaboration.css?inline'
 import { focusMapPreset, type FocusMapPreferences } from '../src/shared/focus-map-preferences'
 import { SettingsNavigation } from '../src/renderer/src/components/SettingsNavigation'
-const captured = vi.hoisted(() => ({ nodes: [] as Node[], store: null as ReturnType<typeof useStoreApi> | null, cardRenders: [] as string[], moveStart: undefined as ReactFlowProps['onMoveStart'] }))
+const captured = vi.hoisted(() => ({ nodes: [] as Node[], store: null as ReturnType<typeof useStoreApi> | null, cardRenders: [] as string[], moveStart: undefined as ReactFlowProps['onMoveStart'], onCommit: undefined as (() => void) | undefined }))
 vi.mock('../src/renderer/src/components/FocusContextCardBody', async importOriginal => {
   const actual = await importOriginal<typeof import('../src/renderer/src/components/FocusContextCardBody')>()
   return { ...actual, FocusContextCardBody: (props: ComponentProps<typeof actual.FocusContextCardBody>) => {
@@ -34,7 +34,8 @@ vi.mock('@xyflow/react', async importOriginal => {
   const actual = await importOriginal<typeof import('@xyflow/react')>()
   function ObserveOriginalStore() {
     const store = actual.useStoreApi()
-    useLayoutEffect(() => { captured.store = store }, [store]); return null
+    useLayoutEffect(() => { captured.store = store }, [store])
+    useLayoutEffect(() => { captured.onCommit?.() }); return null
   }
   return { ...actual, ReactFlow: ({ children, ...props }: ReactFlowProps & { children?: ReactNode }) => {
     captured.nodes = props.nodes ?? []
@@ -68,8 +69,8 @@ async function revealWorld() {
   const extent = [...boxes.values()]
   await viewport(-Math.min(...extent.map(box => box.x)) + 20, -Math.min(...extent.map(box => box.y)) + 20, 20000, 20000)
 }
-async function loaded(scene: Scene) {
-  await dom.render(graph(scene))
+async function loaded(scene: Scene, render: (scene: Scene) => ReactNode = graph) {
+  await dom.render(render(scene))
   await settleCollaborationCanvas(() => {
     expect(captured.nodes).toHaveLength(scene.areas.reduce((sum, area) => sum + area.members.length + 1, 0))
     expect(dom.container.querySelector('.collaboration-canvas__progress')).toBeNull()
@@ -135,11 +136,13 @@ function presentationClock() {
   const cancel = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(id => { frames.delete(id) })
   return {
     async advance(ms: number) { time += ms; await act(async () => { const pending = [...frames.values()]; frames.clear(); for (const callback of pending) callback(time) }) },
+    advanceNative(ms: number) { time += ms; const pending = [...frames.values()]; frames.clear(); for (const callback of pending) callback(time) },
+    pendingCount() { return frames.size },
     restore() { schedule.mockRestore(); cancel.mockRestore() }
   }
 }
 const centerDistance = (a: engine.CollaborationLayoutBox, b: engine.CollaborationLayoutBox) => Math.hypot(a.x + a.width / 2 - b.x - b.width / 2, a.y + a.height / 2 - b.y - b.height / 2)
-async function adaptiveScene() {
+async function adaptiveScene(render: (scene: Scene) => ReactNode = graph) {
   const scene = scenario(13)
   scene.agents = new Map([...scene.agents].map(([id, agent]) => [id, { ...agent, tier: 'idle' }]))
   scene.areas = [{ id: 'work', name: 'Original work', kind: 'project', members: [...scene.agents.keys()].slice(0, 12) },
@@ -147,7 +150,7 @@ async function adaptiveScene() {
   scene.relations = Array.from({ length: 11 }, (_, index) => ({ id: 'chain-' + index, kind: 'communication', source: subject('canvas-' + index), target: subject('canvas-' + (index + 1)), evidence: [] }))
   const config = useAppStore.getState().config!
   useAppStore.setState({ config: { ...config, focus: { ...config.focus, mapMotion: 'on' } } })
-  await loaded(scene); await revealWorld()
+  await loaded(scene, render); await revealWorld()
   const reading = collaborationAgentNode('work', subject('canvas-0')), mark = nodeElement(reading)!.querySelector<HTMLButtonElement>('.collaboration-agent__mark')!
   await act(async () => { mark.focus(); mark.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
   expect(document.activeElement).toBe(mark); expect(agentInformationPreview.getAll().map(request => request.context.id)).toEqual(['canvas-0'])
@@ -164,7 +167,7 @@ async function adaptiveScene() {
     relations: [...scene.relations, strong('new-reader', scene.agents.get(subject('canvas-0'))!), strong('new-far', farAgent)] }
   const originalPaths = new Map(paths)
   holdResponses = true
-  await dom.render(graph(added))
+  await dom.render(render(added))
   await settleCollaborationCanvas(() => expect(heldResponses.some(item => item.response.type === 'complete')).toBe(true))
   const raw = heldResponses.find(item => item.response.type === 'boxes')!.response
   if (raw.type !== 'boxes') throw Error('Actual Worker boxes required')
@@ -852,6 +855,87 @@ it('keeps explicit Zoom and Fit intent when original Worker placement arrives af
     // The retained camera must differ from the late Locate; equal incidental views cannot qualify cancellation.
     expect(current[2] !== 1 || Math.abs((target.x + target.width / 2) * current[2] + current[0] - width / 2) > 1 || Math.abs((target.y + target.height / 2) * current[2] + current[1] - height / 2) > 1).toBe(true)
   }
+})
+
+it('commits the complete adaptive frame before the original xyflow ResizeObserver delivery and cancels its presentation clock on teardown', async () => {
+  const OriginalResizeObserver = globalThis.ResizeObserver
+  const observers: Array<{ targets: Set<Element>; deliver(): void }> = []
+  vi.stubGlobal('ResizeObserver', class extends OriginalResizeObserver {
+    targets = new Set<Element>()
+    constructor(callback: ResizeObserverCallback) {
+      super(callback)
+      observers.push({ targets: this.targets, deliver: () => callback([...this.targets].map(target => ({ target, contentRect: target.getBoundingClientRect(), borderBoxSize: [{ inlineSize: (target as HTMLElement).offsetWidth, blockSize: (target as HTMLElement).offsetHeight }] } as unknown as ResizeObserverEntry)), this) })
+    }
+    override observe(target: Element) { this.targets.add(target); super.observe(target) }
+    override unobserve(target: Element) { this.targets.delete(target); super.unobserve(target) }
+    override disconnect() { this.targets.clear(); super.disconnect() }
+  })
+  const { previous, target, farthest, reading, mark, camera } = await adaptiveScene(), clock = presentationClock()
+  try {
+    await deliverHeldPlacement(); clock.advanceNative(0)
+    await act(async () => {})
+    const oldArea = previous.get(JSON.stringify(['area', 'work']))!, nextArea = target.get(oldArea.id)!
+    expect(Math.abs(nextArea.width - oldArea.width)).toBeGreaterThan(1)
+    // This deliberately crosses the browser rAF/RO boundary without act's
+    // extra render flush. The original xyflow callback is invoked unchanged.
+    clock.advanceNative(110)
+    const actualArea = nodeElement(oldArea.id)!
+    const atDelivery = { width: Number.parseFloat(actualArea.style.width), height: Number.parseFloat(actualArea.style.height), middle: renderedBox(farthest.id) }
+    const nodeObserver = observers.find(observer => observer.targets.has(actualArea))
+    expect(nodeObserver).toBeDefined()
+    const nodeWidths = () => [...dom.container.querySelectorAll<HTMLElement>('.react-flow__node')].map(node => [node.dataset.id, node.style.width, node.style.height, node.style.transform])
+    const delivered = nodeWidths()
+    nodeObserver!.deliver()
+    await act(async () => {})
+    expect(atDelivery.width).toBeCloseTo((oldArea.width + nextArea.width) / 2, 7)
+    expect(atDelivery.height).toBeCloseTo((oldArea.height + nextArea.height) / 2, 7)
+    const old = previous.get(farthest.id)!, next = target.get(farthest.id)!
+    expect(atDelivery.middle.x).toBeCloseTo((old.x + next.x) / 2, 7); expect(atDelivery.middle.y).toBeCloseTo((old.y + next.y) / 2, 7)
+    expect(nodeWidths()).toEqual(delivered)
+    expect(document.activeElement).toBe(mark); expect(captured.store!.getState().transform).toBe(camera)
+    expect(renderedBox(reading)).toBe(previous.get(reading)); expectVisibleEndpoints()
+    expect(clock.pendingCount()).toBeGreaterThan(0)
+    await dom.render(null)
+    expect(clock.pendingCount()).toBe(0)
+    clock.advanceNative(500)
+    expect(dom.container.querySelector('.collaboration-canvas')).toBeNull()
+  } finally { clock.restore() }
+})
+
+it.each(['motion-off', 'hidden', 'teardown'] as const)('does not resurrect an original clock cancelled by %s inside the synchronous frame commit', async intent => {
+  let presentation!: (value: 'shown' | 'hidden' | 'teardown') => void
+  function Host({ scene }: { scene: Scene }) {
+    const [state, setState] = useState<'shown' | 'hidden' | 'teardown'>('shown')
+    presentation = setState
+    return state === 'teardown' ? null : graph(scene, null, scene.relations, [], scene.agents, { active: state !== 'hidden' })
+  }
+  const fixture = await adaptiveScene(scene => <Host scene={scene} />), clock = presentationClock()
+  let cancelledInCommit = false
+  try {
+    await deliverHeldPlacement(); clock.advanceNative(0); await act(async () => {})
+    captured.onCommit = () => {
+      const current = captured.nodes.find(node => node.id === fixture.farthest.id)?.data.box as engine.CollaborationLayoutBox | undefined
+      if (cancelledInCommit || !current || current.x === fixture.previous.get(current.id)!.x && current.y === fixture.previous.get(current.id)!.y) return
+      cancelledInCommit = true
+      if (intent === 'motion-off') {
+        const config = useAppStore.getState().config!
+        useAppStore.setState({ config: { ...config, focus: { ...config.focus, mapMotion: 'off' } } })
+      } else presentation(intent)
+    }
+    clock.advanceNative(110)
+    expect(cancelledInCommit).toBe(true)
+    expect(clock.pendingCount()).toBe(0)
+    const delivered = captured.nodes.map(node => node.data.box)
+    clock.advanceNative(500); await act(async () => {})
+    expect(clock.pendingCount()).toBe(0); expect(requests.map(request => request.type)).toEqual(['arrange', 'reconcile'])
+    if (intent === 'teardown') expect(dom.container.querySelector('.collaboration-canvas')).toBeNull()
+    else {
+      expect(captured.nodes.map(node => node.data.box)).toEqual(delivered)
+      expect(renderedBox(fixture.farthest.id)).toEqual(fixture.target.get(fixture.farthest.id))
+      expect(captured.store!.getState().transform).toBe(fixture.camera)
+      if (intent === 'motion-off') expect(dom.container.querySelector('.collaboration-canvas')?.getAttribute('data-motion')).toBe('off')
+    }
+  } finally { captured.onCommit = undefined; await dom.render(null); clock.restore() }
 })
 
 it('presents real adaptive membership with one geometry clock and reclaims a deleted interior while preserving the reader', async () => {
