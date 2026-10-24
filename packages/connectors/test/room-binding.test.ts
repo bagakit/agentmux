@@ -72,7 +72,7 @@ describe('original room binding and grants', () => {
       await f.change(graph => { graph.regions[1]!.agentSessionId = 'unrelated-agent'; graph.tabLayouts.tab!.activeRegionId = 'other-region' })
       const after = (await f.spatial.read())!
       expect(after.revision).toBeGreaterThan(before.revision)
-      expect(after.graph.regions.find(region => region.regionId === input.regionAnchor.regionId)).toEqual(before.graph.regions.find(region => region.regionId === input.regionAnchor.regionId))
+      expect(after.graph.regions.find(region => region.regionId === input.regionAnchor!.regionId)).toEqual(before.graph.regions.find(region => region.regionId === input.regionAnchor!.regionId))
     } finally { release(); await work.catch(() => {}) }
     const operation = await work
     expect(operation.state).toBe('applied'); if (operation.state !== 'applied' || !captured) throw new Error('Original binding was not completed')
@@ -182,20 +182,61 @@ describe('original room binding and grants', () => {
     expect(f.bindings.readOperation(input.operationId)).toEqual(original)
     await f.unchanged()
   })
-  it('requires explicit authorization after scope changes', async () => {
+  it.each([
+    { dimension: 'input', state: 'active' }, { dimension: 'publication', state: 'active' },
+    { dimension: 'input', state: 'revoked' }, { dimension: 'publication', state: 'revoked' }
+  ] as const)('carries exact $state member decisions when only $dimension filtering changes', async ({ dimension, state }) => {
     const f = await fixture(); await f.bindings.bind(f.input, context)
-    const actor = { application: config.application, idType: 'open_id', userId: 'actor' }
-    const input = { operationId: 'original-grant', bindingId: f.input.bindingId, expectedBindingRevision: 1, grantId: 'original-grant', expectedRevision: null, actor, capabilities: ['input'] as ['input'], state: 'active' as const }
+    const actor = { application: config.application, idType: 'open_id', userId: 'original-member' }
+    const input = { operationId: 'original-grant', bindingId: f.input.bindingId, expectedBindingRevision: 1, grantId: 'original-grant', expectedRevision: null,
+      actor, capabilities: ['input', 'answer', 'permission'] as ['input', 'answer', 'permission'], state }
     const first = await f.bindings.grant(input, context)
-    await f.bindings.relink({ ...f.input, operationId: 'new-revision', expectedRevision: 1, scope: { ...f.input.scope, input: 'all-messages' } }, context)
-    const scope = { connectionId: config.connectionId, externalConversationId: f.input.externalConversationId, actor }
-    expect(f.bindings.findGrant(scope)).toBeNull()
-    const attempts = await Promise.all(['grant-a', 'grant-b'].map(grantId => f.bindings.grant({ ...input, operationId: grantId, grantId, expectedBindingRevision: 2 }, context)))
-    expect(attempts.filter(op => op.state === 'applied')).toHaveLength(1)
-    expect(attempts.filter(op => op.state === 'refused')).toEqual([expect.objectContaining({ code: 'ROOM_GRANT_ACTOR_CONFLICT' })])
-    expect(f.bindings.findGrant(scope)?.bindingRevision).toBe(2)
-    expect(f.bindings.readGrant(input.grantId)).toEqual(first.state === 'applied' ? first.grant : null)
-    expect((await f.bindings.inspect({ operationId: input.operationId })).operation).toEqual(first)
+    expect(first.state).toBe('applied'); if (first.state !== 'applied') throw new Error('Original grant not applied')
+    const scope = { ...f.input.scope, ...(dimension === 'input' ? { input: 'all-messages' as const } : { publication: 'future-shared-conversation' as const }) }
+    const linked = await f.bindings.relink({ ...f.input, operationId: 'filter-change', expectedRevision: 1, scope }, context)
+    expect(linked).toMatchObject({ state: 'applied', binding: { revision: 2, scope } })
+    const current = f.bindings.findGrant({ connectionId: config.connectionId, externalConversationId: f.input.externalConversationId, actor })
+    expect(current, 'same-subject filtering retains the exact original member decision').toEqual({ ...first.grant, revision: 2, bindingRevision: 2 })
+    expect(f.bindings.readGrant(input.grantId, 1)).toEqual(first.grant)
+    expect(f.bindings.readOperation(input.operationId)).toEqual(first)
+    expect(f.bindings.publicationAuthority(f.input.bindingId, 1)).toMatchObject({ authorized: false, reason: 'binding-revised' })
+    const stale = await f.bindings.grant({ ...input, operationId: 'stale-grant-write', expectedBindingRevision: 2, expectedRevision: 1 }, context)
+    expect(stale).toEqual({ operationId: 'stale-grant-write', action: 'grant', state: 'refused', code: 'ROOM_GRANT_REVISION_CONFLICT' })
+    expect(await f.bindings.grant({ ...input, operationId: 'other-actor', expectedBindingRevision: 2, expectedRevision: 2, actor: { ...actor, userId: 'different-member' } }, context)).toMatchObject({ state: 'refused', code: 'ROOM_GRANT_ACTOR_MISMATCH' })
+    await f.unchanged()
+  })
+  it.each(['input-target', 'runtime'] as const)('does not carry a member decision after an exact %s subject change', async dimension => {
+    const f = await fixture(); let runtime = 'original-runtime'
+    const bindings = new RoomBindingHost({ connections: f.connections, spatial: f.spatial, checkpoint: f.checkpoint, executionRuntimeId: () => runtime })
+    await bindings.bind(f.input, context)
+    const actor = { application: config.application, idType: 'open_id', userId: 'original-member' }
+    const input = { operationId: 'original-grant', bindingId: f.input.bindingId, expectedBindingRevision: 1, grantId: 'original-grant', expectedRevision: null,
+      actor, capabilities: ['input', 'permission'] as ['input', 'permission'], state: 'active' as const }
+    const original = await bindings.grant(input, context)
+    if (dimension === 'runtime') runtime = 'replacement-runtime'
+    const linked = await bindings.relink({ ...f.input, operationId: 'subject-change', expectedRevision: 1,
+      ...(dimension === 'input-target' ? { inputTarget: { kind: 'native-conversation' as const, source: f.input.expectedSource } } : {}) }, context)
+    expect(linked).toMatchObject({ state: 'applied', binding: { revision: 2 } })
+    expect(bindings.findGrant({ connectionId: config.connectionId, externalConversationId: f.input.externalConversationId, actor })).toBeNull()
+    expect(bindings.readGrant(input.grantId)).toEqual(original.state === 'applied' ? original.grant : null)
+    expect(bindings.readOperation(input.operationId)).toEqual(original)
+    await f.unchanged()
+  })
+  it('keeps one exact grant head for concurrent first saves of the same actor', async () => {
+    const f = await fixture(); await f.bindings.bind(f.input, context)
+    const actor = { application: config.application, idType: 'open_id', userId: 'original-member' }
+    const inputs = ['grant-a', 'grant-b'].map(grantId => ({ operationId: grantId, bindingId: f.input.bindingId, expectedBindingRevision: 1,
+      grantId, expectedRevision: null, actor, capabilities: ['input'] as ['input'], state: 'active' as const }))
+    const attempts = await Promise.all(inputs.map(input => f.bindings.grant(input, context)))
+    const applied = attempts.filter(operation => operation.state === 'applied')
+    expect(applied).toHaveLength(1)
+    expect(attempts.filter(operation => operation.state === 'refused')).toEqual([expect.objectContaining({ code: 'ROOM_GRANT_ACTOR_CONFLICT' })])
+    expect(f.bindings.findGrant({ connectionId: config.connectionId, externalConversationId: f.input.externalConversationId, actor })).toEqual(applied[0]!.grant)
+    expect(f.connections.database.prepare('SELECT COUNT(*) AS n FROM room_grant_head').get()?.n).toBe(1)
+    for (const [index, input] of inputs.entries()) {
+      expect(f.bindings.readOperation(input.operationId)).toEqual(attempts[index])
+      expect(await f.bindings.grant(input, context)).toEqual(attempts[index])
+    }
     await f.unchanged()
   })
   it('refuses unsupported or changed sources only at the new sharing boundary, preserving configuration and Agent', async () => {

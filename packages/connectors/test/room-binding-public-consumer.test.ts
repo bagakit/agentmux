@@ -1,14 +1,17 @@
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AgentMuxError } from '../../core/src/errors.js'
-import { AgentMuxControlServer } from '../../core/src/public-rpc-server.js'
-import { connectAgentMuxRpc } from '../../core/src/public-rpc-client.js'
-import { AgentMuxRpcService } from '../../core/src/public-rpc-service.js'
+import { writeFile } from 'node:fs/promises'
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest'
+import { AgentMuxError } from '../../core/dist/errors.js'
+import { AgentMuxControlServer } from '../../core/dist/public-rpc-server.js'
+import { connectAgentMuxRpc } from '../../core/dist/public-rpc-client.js'
+import { AgentMuxRpcService } from '../../core/dist/public-rpc-service.js'
 import { objectCliEnvironment, runCompiledObjectCli } from '../../core/test/helpers/object-cli-rpc.js'
 import { createConnectionServices } from '../src/connection-services.js'
 import { config, roomBindingFixture } from './fixtures/room-binding.js'
 
 const cleanup: Array<() => void | Promise<void>> = []
+const memberEvidence: unknown[] = []
+afterAll(async () => { if (process.env.AGENTMUX_MEMBER_ACCESS_OWNER_FACTS) await writeFile(process.env.AGENTMUX_MEMBER_ACCESS_OWNER_FACTS, JSON.stringify({ schema: 'agentmux.member-access-owner-consumer.v1', scenarios: memberEvidence }, null, 2) + '\n') })
 afterEach(async () => {
   const failures: unknown[] = []
   try {
@@ -29,7 +32,7 @@ async function fixture(retired = true) {
   expect(configured.code, configured.stdout + configured.stderr).toBe(0)
   return { ...f, services, server, socketPath, cli, env }
 }
-function result(output: { code: number; stdout: string; stderr: string }) { expect(output.code, output.stdout + output.stderr).toBe(0); return JSON.parse(output.stdout).result }
+function result(output: { code: number | null; stdout: string; stderr: string }) { expect(output.code, output.stdout + output.stderr).toBe(0); return JSON.parse(output.stdout).result }
 
 describe('room binding real public consumers', () => {
   it('binds and relinks an exact durable Session without a Region through the public CLI', async () => {
@@ -117,17 +120,54 @@ describe('room binding real public consumers', () => {
     expect(grant).toMatchObject({ state: 'applied', grant: { bindingRevision: 2 } })
     const before = await sdk.call('connection.binding.inspect', { bindingId: f.input.bindingId })
     const wrongHost = result(await interleave(() => f.cli(['binding', 'relink', '--input', '-'], { ...relink, operationId: 'late-wrong-host', expectedRevision: 2 }), graph => {
-      graph.regions.find(region => region.regionId === f.input.regionAnchor.regionId)!.execution!.hostId = 'other-host'
+      graph.regions.find(region => region.regionId === f.input.regionAnchor!.regionId)!.execution!.hostId = 'other-host'
     }))
     expect(wrongHost).toEqual({ operationId: 'late-wrong-host', action: 'relink', state: 'refused', code: 'ROOM_BINDING_TARGET_CHANGED' })
     expect(await sdk.call('connection.binding.inspect', { bindingId: f.input.bindingId })).toEqual(before)
-    await f.change(graph => { graph.regions.find(region => region.regionId === f.input.regionAnchor.regionId)!.execution!.hostId = f.input.executionHostId })
+    await f.change(graph => { graph.regions.find(region => region.regionId === f.input.regionAnchor!.regionId)!.execution!.hostId = f.input.executionHostId })
     const wrongSource = await sdk.call('connection.binding.relink', { ...relink, operationId: 'wrong-public-source', expectedRevision: 2, expectedSource: { ...f.input.expectedSource, nativeSessionId: 'another-native-source' } })
     expect(wrongSource).toEqual({ operationId: 'wrong-public-source', action: 'relink', state: 'refused', code: 'ROOM_BINDING_SOURCE_CHANGED' })
     expect(await sdk.call('connection.binding.inspect', { bindingId: f.input.bindingId })).toEqual(before)
     expect(result(await f.cli(['binding', 'inspect', '--operation-id', f.input.operationId])).operation).toEqual(saved)
     await f.unchanged()
   }, 20_000)
+  it('preserves saved member decisions through public SDK and compiled CLI filter edits without replaying the original grant', async () => {
+    const f = await fixture(), sdk = await connectAgentMuxRpc({ endpoint: { transport: 'unix', path: f.socketPath } }); cleanup.push(() => sdk.dispose())
+    const saved = result(await f.cli(['bind', '--input', '-'], f.input))
+    const owner = f.services.connections.bindings!, originalGrant = owner.grant.bind(owner)
+    const dispatch = vi.spyOn(owner, 'grant').mockImplementationOnce(async (input, context) => { await originalGrant(input, context); throw new AgentMuxError('The original grant reply was not confirmed.', 'CONTROL_UNAVAILABLE') })
+    const firstInput = { operationId: 'original-member-save', bindingId: f.input.bindingId, expectedBindingRevision: 1, grantId: 'original-member', expectedRevision: null,
+      actor: { application: config.application, idType: 'open_id', userId: 'original-member' }, capabilities: ['input', 'answer', 'permission'] as ['input', 'answer', 'permission'], state: 'active' as const }
+    const lost = await f.cli(['grant', '--input', '-'], firstInput)
+    expect(lost.code).not.toBe(0)
+    const confirmed = await sdk.call('connection.binding.inspect', { operationId: firstInput.operationId })
+    expect(confirmed.operation).toMatchObject({ state: 'applied', grant: { revision: 1, bindingRevision: 1, capabilities: firstInput.capabilities } })
+    if (confirmed.operation?.state !== 'applied' || !confirmed.operation.grant) throw new Error('Original grant receipt missing')
+    const revokedInput = { ...firstInput, operationId: 'revoked-member-save', grantId: 'revoked-member', actor: { ...firstInput.actor, userId: 'revoked-member' }, capabilities: ['input'] as ['input'], state: 'revoked' as const }
+    const revoked = await sdk.call('connection.grant', revokedInput)
+    expect(revoked.state).toBe('applied'); if (revoked.state !== 'applied' || !revoked.grant) throw new Error('Original revoked grant receipt missing')
+    const inputScope = { ...f.input.scope, input: 'all-messages' as const }
+    const inputEdit = await sdk.call('connection.binding.relink', { ...f.input, operationId: 'explicit-input-filter', expectedRevision: 1, scope: inputScope })
+    const afterInput = await sdk.call('connection.binding.inspect', { bindingId: f.input.bindingId })
+    memberEvidence.push({ stage: 'input-filter', saved, originalGrant: confirmed.operation, revoked, inputEdit, current: afterInput, grantDispatches: dispatch.mock.calls.length })
+    expect(afterInput.grants, 'public filtering retains both original active and revoked member decisions').toEqual([
+      { ...confirmed.operation.grant, revision: 2, bindingRevision: 2 }, { ...revoked.grant, revision: 2, bindingRevision: 2 }
+    ])
+    const publicationScope = { ...inputScope, publication: 'future-shared-conversation' as const }
+    const publicationEdit = result(await f.cli(['binding', 'relink', '--input', '-'], { ...f.input, operationId: 'explicit-publication-filter', expectedRevision: 2, scope: publicationScope }))
+    const afterPublication = result(await f.cli(['binding', 'inspect', '--binding', f.input.bindingId]))
+    expect(afterPublication.grants).toEqual([{ ...confirmed.operation.grant, revision: 3, bindingRevision: 3 }, { ...revoked.grant, revision: 3, bindingRevision: 3 }])
+    expect(result(await f.cli(['binding', 'inspect', '--operation-id', firstInput.operationId])).operation).toEqual(confirmed.operation)
+    expect(result(await f.cli(['binding', 'inspect', '--operation-id', revokedInput.operationId])).operation).toEqual(revoked)
+    expect(await sdk.call('connection.grant', { ...firstInput, operationId: 'stale-binding-save', expectedRevision: 1 })).toMatchObject({ state: 'refused', code: 'ROOM_BINDING_REVISION_CONFLICT' })
+    expect(await sdk.call('connection.grant', { ...firstInput, operationId: 'stale-member-save', expectedBindingRevision: 3, expectedRevision: 1 })).toMatchObject({ state: 'refused', code: 'ROOM_GRANT_REVISION_CONFLICT' })
+    expect(f.services.bindings!.publicationAuthority(f.input.bindingId, 1)).toMatchObject({ authorized: false, reason: 'binding-revised' })
+    expect(f.services.bindings!.publicationAuthority(f.input.bindingId, 3).authorized).toBe(true)
+    expect(dispatch.mock.calls.filter(([input]) => input.operationId === firstInput.operationId), 'scope editing only inspects the original unknown grant; it never resends it').toHaveLength(1)
+    expect(await sdk.call('connection.binding.inspect', { operationId: f.input.operationId })).toMatchObject({ operation: saved })
+    await f.unchanged()
+    memberEvidence.push({ stage: 'publication-filter', publicationEdit, current: afterPublication, originalGrant: await sdk.call('connection.binding.inspect', { operationId: firstInput.operationId }), originalGrantDispatches: dispatch.mock.calls.filter(([input]) => input.operationId === firstInput.operationId).length })
+  }, 30_000)
   it('keeps absent binding owners local and publishes usable generated help', async () => {
     const f = await fixture(), service = new AgentMuxRpcService({ connections: f.connections, spatialState: f.spatial }), principal = { principal: { kind: 'user' as const, id: 'fixture-user' } }
     cleanup.push(() => service.dispose())
