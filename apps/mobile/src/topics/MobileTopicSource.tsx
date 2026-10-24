@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { AgentMuxRpcResult } from '@agentmux/core'
@@ -259,9 +260,9 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
     <div hidden={Boolean(selectedPage)}>
     <header className="mobile-topics-actions"><button onClick={activeBack}>{history.length ? '返回上层来源' : view && scopes.length > 1 ? '返回来源范围' : backLabel}</button><div className="mobile-topics-heading"><small>{source.kind === 'notebook' ? '原笔记本' : '知识来源'}</small><h1>{source.kind === 'notebook' ? notebookName : source.kind === 'note' ? noteName : currentFilePath.split('/').at(-1) || '原文件'}</h1></div><button onClick={() => setRefresh(value => value + 1)}>重试读取</button></header>
     {loading && <p role="status">正在读取原来源…</p>}
-    {issue && <p className="mobile-topics-issue" role="status">{issue}</p>}
+    {issue && <MobileNotice identity={[JSON.stringify(source),issue]} className="mobile-topics-issue" role="status">{issue}</MobileNotice>}
     {queryDiagnostic && <details><summary>上次来源查询诊断</summary><p>{queryDiagnostic}</p></details>}
-    {readIssue && <p className="mobile-topics-issue" role="status">{readIssue}<button onClick={() => { if (requestedScope && !restoring.current) void read(requestedScope, undefined, Boolean(view && requestedScope.path !== view.scope.path)); else setRefresh(value => value + 1) }}>重试原文件</button></p>}
+    {readIssue && <MobileNotice identity={[JSON.stringify(requestedScope),readIssue]} className="mobile-topics-issue" role="status">{readIssue}<button onClick={() => { if (requestedScope && !restoring.current) void read(requestedScope, undefined, Boolean(view && requestedScope.path !== view.scope.path)); else setRefresh(value => value + 1) }}>重试原文件</button></MobileNotice>}
     <details><summary>来源引用</summary>{source.kind === 'file' ? <p>{pathLabel(source.path, source.hostId)}</p> : <code>{source.kind === 'note' ? source.noteId : source.notebookId}</code>}</details>
     {source.kind === 'notebook' && <ul className="mobile-topics-list">{pages.map(page => <li key={page.noteId}><button onClick={() => selectPage(page)}><strong>{page.title}</strong><small>{pathLabel(page.resource.path, page.resource.hostId)}{page.archivedAt !== undefined ? ' · 已归档' : ''}</small></button></li>)}</ul>}
     {scopes.length === 1 && <div className="mobile-topics-actions"><strong>{scopes[0]!.workspace.name}</strong><button onClick={() => open(view?.scope ?? scopes[0]!)}>打开原工作面</button>{view && <button onClick={() => { void read(view.scope) }}>刷新原文件</button>}</div>}
@@ -270,7 +271,7 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
       {scopes.length > 1 && <strong>{view.scope.workspace.name}</strong>}
       <details><summary>当前文件位置</summary><p>{pathLabel(view.scope.directoryPath, view.scope.workspace.hostId)} / {view.scope.path}</p></details>
       {view.read.result.status === 'read' && <>
-        {source.kind === 'file' && source.revision && scopes.some(scope => JSON.stringify(params(scope)) === JSON.stringify(params(view.scope))) && source.revision !== view.read.result.document.revision && <p role="status">当前保存版本与来源记录的版本不同；以下为原文件当前正文。</p>}
+        {source.kind === 'file' && source.revision && scopes.some(scope => JSON.stringify(params(scope)) === JSON.stringify(params(view.scope))) && source.revision !== view.read.result.document.revision && <MobileNotice identity={[JSON.stringify(source),JSON.stringify(view.scope),view.read.result.document.revision]} role="status">当前保存版本与来源记录的版本不同；以下为原文件当前正文。</MobileNotice>}
         {source.kind === 'note' || view.read.result.document.path.endsWith(NOTE_FILE_EXTENSION)
           ? <MobileNoteFile rpc={rpc} params={params(view.scope)} read={view.read}
             visible={visible && !selectedPage} {...(source.kind === 'note' && source.blockId ? { target: { noteId: source.noteId, blockId: source.blockId } } : {})} />
@@ -284,7 +285,7 @@ function SourceReader({ source, rpc, onBack, openScope, displayPath, openHttpLin
         <ul className="mobile-topics-list">{view.listing.result.files.map(path => <li key={path}><button onClick={() => { void read({ ...view.scope, path: view.scope.path === '.' ? path : view.scope.path.replace(/\/+$/u, '') + '/' + path }, undefined, true) }}>{path}</button></li>)}</ul></>}
     </article>}
     </div>
-    {selectedPage && !notebookReady && <section aria-label="原笔记页待核实"><button onClick={backToNotebook}>返回笔记本</button><p role="status">{issue || '正在核对原笔记本所选页引用…'}</p><button onClick={() => setRefresh(value => value + 1)}>重试读取</button></section>}
+    {selectedPage && !notebookReady && <section aria-label="原笔记页待核实"><button onClick={backToNotebook}>返回笔记本</button><MobileNotice dismissible={Boolean(issue)} kind={issue ? "warning" : "feedback"} identity={[JSON.stringify(source),selectedPage,issue]} role="status">{issue || '正在核对原笔记本所选页引用…'}</MobileNotice><button onClick={() => setRefresh(value => value + 1)}>重试读取</button></section>}
     {visitedPages.map(noteId => <div key={noteId} hidden={selectedPage !== noteId || !notebookReady}><NotebookSourcePage source={{ kind: 'note', noteId, ...(noteReferences.current.get(noteId)!.blockId ? { blockId: noteReferences.current.get(noteId)!.blockId! } : {}) }} noteId={noteId} reportBack={reportPageBack} reportReference={reportNoteReference} rpc={rpc} onBack={backToNotebook} visible={visible && notebookReady && selectedPage === noteId} backLabel="返回笔记本" openScope={openScope}
       initialReference={{ kind: 'note', mapping: noteMapping(noteReferences.current.get(noteId)!), trail: noteReferences.current.get(noteId)!.trail }}
       {...(displayPath ? { displayPath } : {})} {...(openHttpLink ? { openHttpLink } : {})} /></div>)}

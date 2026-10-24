@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useRef, useState } from 'react'
@@ -29,6 +30,6 @@ export function MobileGoalLinks({ client, goal, updated }: {
   return <details><summary>关联项目或会话</summary>
     <form onSubmit={event => { event.preventDefault(); void link('session') }}><label>准确 Session ID<TextInput aria-label="关联 Session ID" value={sessionId} onChange={event => setSessionId(event.target.value)} required /></label><button disabled={pending}>关联会话</button></form>
     <form onSubmit={event => { event.preventDefault(); void link('project') }}><label>准确 Project ID<TextInput aria-label="关联 Project ID" value={projectId} onChange={event => setProjectId(event.target.value)} required /></label><button disabled={pending}>关联项目</button></form>
-    {messages.map((text, index) => <p key={index} role="status">{text}</p>)}
+    {messages.map((text, index) => <MobileNotice kind="feedback" identity={[text]} key={index} role="status">{text}</MobileNotice>)}
   </details>
 }

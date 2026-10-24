@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxAgentPresentation } from '@agentmux/core/control'
@@ -47,7 +48,7 @@ export function MobileGoalSessions({ client, sessionIds, visible, openSession, g
   const displayedRows = !goal || !!rowsScope.current && !!factScope && sameMobileGoalDraftScope(rowsScope.current, factScope) ? rows : []
   const name = (id: string) => displayedRows.find(value => value.agentSessionId === id)?.name || 'Agent 名称未确认'
   const sessions = <section aria-label="关联会话"><h3>关联会话</h3>
-    {issue && <p role="status">{issue}</p>}
+    {issue && <MobileNotice identity={[goal?.id,issue]} role="status">{issue}</MobileNotice>}
     {sessionIds.map(id => {
       const row = displayedRows.find(value => value.agentSessionId === id)
       const identity = { name: row?.name || 'Agent 名称未确认', project: row?.project || '项目未确认' }
@@ -76,7 +77,7 @@ export function MobileGoalSessions({ client, sessionIds, visible, openSession, g
     {!dispatches.length ? <p>尚无公开输入记录。工作状态、关联历史与 Agent 活跃不证明目标已开始推进。</p>
       : <><p>{dispatches.length} 条原输入记录 · {dispatches.filter(value => value.stage === 'confirmed').length} 条已确认</p>
         <p>输入确认不代表工作完成或结果接受。多条记录分别保留，不推断唯一当前执行。</p>
-        {dispatches.filter(value => value.stage !== 'confirmed').map(value => <p key={value.operationId} role="status">{name(value.agentSessionId)} · {stages[value.stage]}{value.issue ? `：${value.issue}` : ''}</p>)}
+        {dispatches.filter(value => value.stage !== 'confirmed').map(value => <MobileNotice kind={value.stage === "unknown" || value.issue ? "warning" : "feedback"} dismissible={value.stage === "unknown" || Boolean(value.issue)} identity={[value.operationId,value.stage,value.issue]} key={value.operationId} role="status">{name(value.agentSessionId)} · {stages[value.stage]}{value.issue ? `：${value.issue}` : ''}</MobileNotice>)}
         <details><summary>全部原输入与确认依据</summary>{dispatches.map(value => <div key={value.operationId}>
           <p>{name(value.agentSessionId)} · {stages[value.stage]} · {value.execution === 'continue' ? '原续跑输入' : '原单次输入'}</p>
           <p className="mobile-goals-body">{value.prompt}</p><pre>{JSON.stringify(value, null, 2)}</pre>

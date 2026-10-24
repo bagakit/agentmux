@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -103,8 +104,8 @@ export function MobileGoalAlignment({ client, goal, updated, openDiscussion, beg
     {!accepted && alignment && grounding && !acceptIssue && acknowledgementAvailable && <button type="button" onClick={() => void invoke('goal.accept', { goalId: goal.id, expectedAlignmentRevision: alignment.revision, expectedSubmissionId: grounding.submissionId, acceptGaps: false })}>接受当前结果</button>}
     {!accepted && alignment && grounding && acceptIssue && gapIssue === null && acknowledgementAvailable && <button type="button" onClick={() => void invoke('goal.accept', { goalId: goal.id, expectedAlignmentRevision: alignment.revision, expectedSubmissionId: grounding.submissionId, acceptGaps: true })}>接受结果并保留差距</button>}
     {acceptIssue && grounding && !accepted && <p>结果待核对：{acceptIssue}</p>}
-    {humanPending && <p role="status">原操作正在等待回执，原工作面保留。</p>}{issue && <p role="status">{issue}</p>}{deviceIssue && <p role="status">{deviceIssue}</p>}
-    {retained && !humanPending && <p role="status">原人认可回执未知，准确目标版本、结果和操作身份保留；先读取当前提案与报告，不会重复提交。</p>}
+    {humanPending && <p role="status">原操作正在等待回执，原工作面保留。</p>}{issue && <MobileNotice identity={[goal.id,issue,deviceIssue]} role="status">{issue}</MobileNotice>}{deviceIssue && <MobileNotice identity={[goal.id,issue,deviceIssue]} role="status">{deviceIssue}</MobileNotice>}
+    {retained && !humanPending && <MobileNotice identity={[retained?.operationId]} role="status">原人认可回执未知，准确目标版本、结果和操作身份保留；先读取当前提案与报告，不会重复提交。</MobileNotice>}
     <div className="mobile-goal-discussion-actions">
       <button type="button" disabled={pending.includes('goal.discuss')} onClick={() => void invoke('goal.discuss', { goalId: goal.id, mode: 'open' })}>打开目标原讨论</button>
       <button type="button" disabled={pending.includes('goal.discuss')} onClick={() => void invoke('goal.discuss', { goalId: goal.id, mode: 'grill' })}>{alignment ? '讨论目标变更' : '澄清目标'}</button>

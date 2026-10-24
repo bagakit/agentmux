@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { readGoalFileEvidence } from '@agentmux/core/goal-evidence'
@@ -42,7 +43,7 @@ function Evidence({ reference, client, copyText }: { reference: DemandEvidence; 
     <button type="button" onClick={() => void copyReference()}>复制完整引用</button>
     {typeof reference === 'string' && !url ? <small>作者原文引用，未记录本地文件来源。</small> : null}
     {typeof reference !== 'string' ? <details><summary>文件来源与报告修订</summary><code>{original}</code></details> : null}
-    {issue ? <p role="status">{issue}</p> : null}
+    {issue ? <MobileNotice identity={[issue]} role="status">{issue}</MobileNotice> : null}
     {content !== null ? <pre className="mobile-region-source">{content}</pre> : null}
   </li>
 }

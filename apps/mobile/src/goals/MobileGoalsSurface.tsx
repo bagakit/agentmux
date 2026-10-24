@@ -1,3 +1,4 @@
+import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import { TextInput } from '@agentmux/client-ui/input'
@@ -142,12 +143,12 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
     if (receipt.agentSessionId && openSession) openSession(receipt.agentSessionId, { name: '目标原 Mote', project: details[receipt.goalId]?.projectName ?? '未分配项目' })
   }
   const visibleGoals = useMemo(() => goals?.filter(goal => (!status || goal.status === status) && `${goal.title} ${goal.description} ${goal.projectName ?? ''}`.toLocaleLowerCase().includes(query.toLocaleLowerCase())), [goals, status, query])
-  return <section className="mobile-goals" aria-label="Goals" hidden={!visible}>
+  return <MobileNoticeScope owner={client}><section className="mobile-goals" aria-label="Goals" hidden={!visible}>
     <header className="mobile-page-header">{(selected || discussionTab) && <button className="mobile-goals-back" aria-label={discussionTab ? '返回原目标' : '返回目标列表'} onClick={discussionTab ? backToGoal : backToList}><SemanticIcon name="navigation.back" size={18} /><span>返回</span></button>}<h1>Goals</h1><button className="mobile-icon-button mobile-goals-refresh" aria-label="刷新目标" title="刷新目标" onClick={() => refresh(value => value + 1)}><SemanticIcon name="action.refresh" size={18} /><span className="mobile-visually-hidden">刷新目标</span></button></header>
-    {!connected && <p role="status">连接暂不可用，已读目标与草稿保留；可刷新核对。</p>}
-    {!client?.forwardRpc && <p role="status">目标公共端口暂不可用，已读目标与会话保留。</p>}
-    {issue && <p role="status">{issue}</p>}
-    {goals?.length === 1000 && <p role="status">目录已达到原服务单次返回范围，搜索仅覆盖已读目标；可按准确 Goal ID 打开其他目标。完整翻页仍待原服务提供。</p>}
+    {!connected && <MobileNotice owner={client} identity={[connected]} role="status">连接暂不可用，已读目标与草稿保留；可刷新核对。</MobileNotice>}
+    {!client?.forwardRpc && <MobileNotice owner={client} role="status">目标公共端口暂不可用，已读目标与会话保留。</MobileNotice>}
+    {issue && <MobileNotice identity={[issue]} role="status">{issue}</MobileNotice>}
+    {goals?.length === 1000 && <MobileNotice identity={[goals?.length]} role="status">目录已达到原服务单次返回范围，搜索仅覆盖已读目标；可按准确 Goal ID 打开其他目标。完整翻页仍待原服务提供。</MobileNotice>}
       <MobileGoalCreate client={client} visible={visible && selected === null && !discussionTab} openDiscussion={openDiscussion} beginPresentation={beginPresentation} created={(goal, present) => {
         factEpoch.current.list += 1
         setGoals(previous => previous ? [...previous.filter(value => value.id !== goal.id), goal] : previous)
@@ -180,9 +181,9 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
           if (result.goal) { choose(result.goal, readScope(before)); setLookupIssue('') }
           else setLookupIssue('未找到这个准确 Goal ID；原列表与输入保留。')
         }).catch(error => { if (sequence === lookupRead.current && epoch === (factEpoch.current.goals[goalId] ?? 0)) setLookupIssue(`读取目标失败：${message(error)}。原列表与输入保留，可重试。`) })
-      }}><label>Goal ID<TextInput aria-label="打开 Goal ID" value={lookup} onChange={event => setLookup(event.target.value)} required /></label><button>打开指定目标</button></form>{lookupIssue && <p role="status">{lookupIssue}</p>}</details>
+      }}><label>Goal ID<TextInput aria-label="打开 Goal ID" value={lookup} onChange={event => setLookup(event.target.value)} required /></label><button>打开指定目标</button></form>{lookupIssue && <MobileNotice identity={[lookup,lookupIssue]} role="status">{lookupIssue}</MobileNotice>}</details>
     </div>
-    {[...new Set([...Object.keys(details), ...(selected ? [selected] : [])])].map(id => { const detail = details[id]; return <div key={id} hidden={selected !== id || !!discussionTab}>{selected === id && [detailIssue, decisionIssue].filter(Boolean).map((value, index) => <p key={index} role="status">{value}</p>)}
+    {[...new Set([...Object.keys(details), ...(selected ? [selected] : [])])].map(id => { const detail = details[id]; return <div key={id} hidden={selected !== id || !!discussionTab}>{selected === id && [detailIssue, decisionIssue].filter(Boolean).map((value, index) => <MobileNotice identity={[id,value]} key={index} role="status">{value}</MobileNotice>)}
       <GoalDetail key={id} goalId={id} goal={detail ?? null} factScope={detailScopes[id] ?? null} visible={visible && selected === id && !discussionTab} editing={context.mode === 'edit' && selected === id} edit={editing => setContext(value => ({ ...value, mode: editing ? 'edit' : 'detail' }))} decisions={decisions[id] ?? null} client={client} connected={connected} updated={updated} refresh={() => refresh(value => value + 1)} copyText={copyText}>
         {detail && <>
         <MobileGoalAlignment client={client} goal={detail} updated={updated} openDiscussion={openDiscussion} beginPresentation={beginPresentation} />
@@ -196,7 +197,7 @@ export function MobileGoalsSurface({ client, connected, visible, openSession, on
     </div> })}
     {discussionTab && <div><MobileZoneWorkface key={discussionTab.tabId} client={client} name="目标原主 Mote" tabId={discussionTab.tabId} visible={visible}
       openSession={(id, identity) => { if (openSession) openSession(id, identity) }} /></div>}
-  </section>
+  </section></MobileNoticeScope>
 }
 
 function GoalDetail({ goalId, goal, factScope, visible, decisions, client, connected, updated, refresh, children, editing, edit, copyText }: {
@@ -206,7 +207,7 @@ function GoalDetail({ goalId, goal, factScope, visible, decisions, client, conne
 }) {
   const model = useGoalDraft(goalId, goal, factScope, client, connected, updated)
   const editor = <MobileGoalDraftEditor model={model} editing={editing} onEditingChange={edit} refresh={refresh} copyText={copyText} />
-  if (!goal) return <article aria-label="目标详情" hidden={!visible}><h2>原目标</h2><p role="status">当前目标尚未读回；原引用、正文与请求保留。</p><code>{goalId}</code>{editor}<button onClick={refresh}>读取当前目标</button></article>
+  if (!goal) return <article aria-label="目标详情" hidden={!visible}><h2>原目标</h2><MobileNotice identity={[goalId]} role="status">当前目标尚未读回；原引用、正文与请求保留。</MobileNotice><code>{goalId}</code>{editor}<button onClick={refresh}>读取当前目标</button></article>
   const { saving, save } = model
   const alignment = goal.alignment, grounding = goal.grounding
   const currentReport = !!alignment && grounding?.alignmentRevision === alignment.revision
@@ -222,7 +223,7 @@ function GoalDetail({ goalId, goal, factScope, visible, decisions, client, conne
     </section>
     <section aria-label="结果与证据"><h3>结果与证据</h3>
       {grounding ? <><p className="mobile-goals-body">{grounding.summary}</p>
-        {(!alignment || grounding.alignmentRevision !== alignment.revision) && <p role="status">此报告尚不能对应当前目标标准，请核对目标版本。</p>}
+        {(!alignment || grounding.alignmentRevision !== alignment.revision) && <MobileNotice identity={[goal.id,grounding.alignmentRevision,alignment?.revision]} role="status">此报告尚不能对应当前目标标准，请核对目标版本。</MobileNotice>}
         {(currentReport ? alignment?.criteria : [])?.filter(criterion => !grounding.checks.some(check => check.criterionId === criterion.id)).map(criterion => <p key={criterion.id}>缺少结果检查：{criterion.text}</p>)}
         <ul>{grounding.checks.map(check => <li key={check.criterionId}><strong>{currentReport ? alignment?.criteria.find(criterion => criterion.id === check.criterionId)?.text ?? check.criterionId : `旧报告标准 ${check.criterionId}`}</strong><p>{({ met: '报告声称达成', gap: '仍有差距', unknown: '结果未知' })[check.outcome]}</p><p>{check.note}</p>
           <MobileGoalEvidence evidence={check.evidence} client={client} copyText={copyText} />{!check.evidence.length && <p>暂无定位证据。</p>}

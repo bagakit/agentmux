@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react'
 import { SemanticIcon } from '@agentmux/client-ui/icons'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -179,7 +180,7 @@ export function MobileAttachments({ client, session, connected, promptOperationI
           : <span className="mobile-attachment-icon">{image ? <SemanticIcon name="object.image" size={19} /> : <SemanticIcon name="object.file" size={19} />}</span>}
         <div className="mobile-attachment-copy"><strong title={upload.identity.name}>{upload.identity.name}</strong>
           <small>{upload.identity.byteLength < 1024 ? `${upload.identity.byteLength} B` : `${(upload.identity.byteLength / 1024).toLocaleString('zh-CN', { maximumFractionDigits: 1 })} KB`} · {busy ? '正在核对原 Host…' : unknown ? '回执待核对' : ready ? '已在原 Mac' : '仅在这台设备'}</small>
-          {upload.issue && <p role="status">{upload.issue}</p>}</div>
+          {upload.issue && <MobileNotice identity={[upload.identity.operationId,upload.phase,upload.issue]} role="status">{upload.issue}</MobileNotice>}</div>
         {!busy && <button type="button" className="mobile-icon-button" aria-label={ready ? `将 ${upload.identity.name} 加入消息` : unknown ? `核对 ${upload.identity.name} 原上传` : `上传并加入 ${upload.identity.name}`}
           title={ready ? '加入消息' : unknown ? '核对原上传' : '上传并加入消息'} onClick={() => { void act(upload, unknown) }}>
           {ready ? <SemanticIcon name="action.confirm" size={17} /> : unknown ? <SemanticIcon name="action.refresh" size={17} /> : <SemanticIcon name="action.upload" size={17} />}</button>}
@@ -187,6 +188,6 @@ export function MobileAttachments({ client, session, connected, promptOperationI
         {canRemove && <button type="button" className="mobile-icon-button" aria-label={`移除 ${upload.identity.name} 本地引用`} onClick={() => remove(upload)}><SemanticIcon name="action.close" size={15} /></button>}
       </div>
     })}
-    {notice && <p className="mobile-attachment-notice" role="status">{notice}</p>}
+    {notice && <MobileNotice identity={[session?.agentSessionId,notice]} className="mobile-attachment-notice" role="status">{notice}</MobileNotice>}
   </div>
 }

@@ -1,3 +1,4 @@
+import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentMuxMotePresentation } from '@agentmux/core/control'
@@ -103,10 +104,10 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
   const main = saved?.defaults.conversation
   const read = selected ? files[selected] : undefined
   const document = read?.result.status === 'read' ? read.result.document : null
-  return <section className="mobile-mote-profile" aria-label="Mote Profile" data-mote-space-id={spaceId}>
-    {issue && <p role="status">{issue}</p>}
+  return <MobileNoticeScope owner={client} identity={[identity.mote?.spaceId,sourcePath]}><section className="mobile-mote-profile" aria-label="Mote Profile" data-mote-space-id={spaceId}>
+    {issue && <MobileNotice identity={[identity.mote?.spaceId,issue]} role="status">{issue}</MobileNotice>}
     {queryDiagnostic && <details><summary>上次资料查询诊断</summary><p>{queryDiagnostic}</p></details>}
-    {facts?.issue && <p role="status">{facts.issue}</p>}
+    {facts?.issue && <MobileNotice identity={[identity.mote?.spaceId,facts?.issue]} role="status">{facts.issue}</MobileNotice>}
     {quickEditing && spaceId && content ? <MobileMoteQuickEditor key={JSON.stringify([spaceId, content])} target={{ spaceId, zoneId: content.zoneId,
       expectedResource: { hostId: content.hostId, workspaceId: content.workspaceId, workspacePath: content.workspacePath } }}
       client={client} visible={visible} copyText={copyText ?? createBrowserPlatform().copyText} onClose={backFromQuick}
@@ -121,7 +122,7 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
       <button type="button" className="mobile-text-button" onClick={() => { void loadSource(selected) }}>刷新原文件</button>
       {reading && <p role="status">正在读取原文件…</p>}
       {spaceId && content && isMoteFilePath(selected) && <button type="button" className="mobile-text-button" onClick={() => setEditing(true)}>编辑原稿</button>}
-      {fileIssue && <p role="status">{fileIssue}</p>}
+      {fileIssue && <MobileNotice identity={[identity.mote?.spaceId,fileIssue]} role="status">{fileIssue}</MobileNotice>}
       {document && <><AgentMarkdown content={document.content} sourcePath={document.path} {...(read?.resource?.workspacePath ? { workspaceRoot: read.resource.workspacePath } : {})} />
         <details><summary>文件来源与修订</summary><p>{document.path}</p><p>{document.revision}</p><p>{read?.resource?.hostId} · {read?.resource?.workspaceId}</p></details></>}
     </section> : <>
@@ -131,11 +132,11 @@ function MoteProfile({ identity, client, visible = true, sourcePath, onSourceCha
         {saved?.defaults.recovery && <><dt>接回原对话</dt><dd>{saved.defaults.recovery === 'startup' ? '启动时' : '打开时'}</dd></>}
       </dl>
       {main && <details><summary>主对话原引用</summary><dl>{Object.entries(main).map(([key, value]) => <div key={key}><dt>{key}</dt><dd>{value}</dd></div>)}</dl></details>}
-      {facts?.quickMode.status === 'unconfirmed' && <p role="status">{facts.quickMode.message}</p>}
+      {facts?.quickMode.status === 'unconfirmed' && <MobileNotice identity={[identity.mote?.spaceId,JSON.stringify(facts?.quickMode)]} role="status">{facts.quickMode.message}</MobileNotice>}
       {main && onOpenGoals && <button type="button" className="mobile-menu-row" onClick={() => onOpenGoals(main.sessionId)}><span>主对话的目标与结果</span></button>}
       <div className="mobile-mote-profile__sources"><h3>原资料</h3>{moteFileSources.map(source => <button type="button" className="mobile-menu-row" key={source.path} aria-label={source.label} onClick={() => changeSource(source.path)}><span>{source.label}</span></button>)}</div>
       <p>资料来自已保存的原文件；当前讨论保留原上下文。</p>
       <button type="button" className="mobile-text-button" onClick={() => setRefresh(value => value + 1)}>刷新原资料</button>
     </>}
-  </section>
+  </section></MobileNoticeScope>
 }

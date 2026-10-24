@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useMemo, useRef, useState } from 'react'
@@ -171,6 +172,6 @@ export function MobileGoalWork({ client, agentSessionId, connected, visible }: {
     {!goalId && pending.filter(op => op.sessionId === agentSessionId).map(op => <aside className="mobile-goal-pending" key={op.operationId}><strong>原目标操作待确认</strong><p>原目标引用与操作 ID 已保留。读取和重试仍须核对原 Host 与 Agent。</p><button onClick={() => {
       setSelection({ runtimeId: op.runtimeId, deviceHostId: op.deviceHostId, sessionId: op.sessionId, goalId: op.goalId })
     }}>查看原待确认目标</button></aside>)}
-    {notice && <p className="mobile-goal-notice" role="status">{notice}</p>}
+    {notice && <MobileNotice kind="feedback" identity={[agentSessionId,notice]} className="mobile-goal-notice" role="status">{notice}</MobileNotice>}
   </div>
 }

@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxAgentSession, AgentSkill } from '@agentmux/core'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -44,7 +45,7 @@ export function MobileSkillsPicker({ client, session, scope, connected, visible,
       <SemanticIcon name="object.skill" size={14} /><span className="composer-tool__label">Skills</span>
     </button>}>
       <TextInput value={query} onChange={event => setQuery(event.target.value)} placeholder="查找 Skills…" aria-label="查找 Skills" />
-      {own?.issue && <p className="mobile-command-menu__empty" role="status">{own.issue}<button type="button" onClick={() => setRetry(value => value + 1)}>重试读取 Skills</button></p>}
+      {own?.issue && <MobileNotice identity={[own?.issue]} className="mobile-command-menu__empty" role="status">{own.issue}<button type="button" onClick={() => setRetry(value => value + 1)}>重试读取 Skills</button></MobileNotice>}
       <div className="mobile-command-menu__list">{matching.map(skill => <button key={`${skill.source}:${skill.path}`} type="button" role="menuitem" className="mobile-posture-menu__item"
         onClick={() => {
           const kind = semanticReferenceKind(skill.path)

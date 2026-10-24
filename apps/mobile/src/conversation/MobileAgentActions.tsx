@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import { formatSessionAddress } from '@agentmux/core/sharing'
@@ -81,6 +82,6 @@ export function MobileAgentActions({ client, agentSessionId, connected, copyText
     {showLink && <input aria-label="Agent 身份链接" value={link} readOnly onFocus={event => event.target.select()} />}
     <button className="mobile-menu-row" disabled={busy || !connected || !client} onClick={() => void recover(pending ? 'inspect' : 'new')}><SemanticIcon name="action.refresh" size={18} /><span>{busy ? '正在核对原会话…' : pending ? '核对原恢复操作' : '恢复原 Agent'}</span></button>
     {pending && <button className="mobile-menu-row" disabled={busy || !connected || !client} onClick={() => void recover('continue')}><span>继续同一恢复操作</span></button>}
-    {notice && <p className="mobile-spatial-notice" role="status">{notice}</p>}
+    {notice && <MobileNotice kind="feedback" owner={client} identity={[agentSessionId,pending?.input.operationId,notice]} className="mobile-spatial-notice" role="status">{notice}</MobileNotice>}
   </div>
 }

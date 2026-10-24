@@ -1,3 +1,4 @@
+import { MobileNotice, MobileNoticeScope } from '../notices/MobileNotice'
 import { NOTE_FILE_EXTENSION } from '@agentmux/client-ui/note/note-format'
 import { useEffect, useRef, useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
@@ -33,7 +34,7 @@ function LegacyConversionNotice({ value, client, visible }: { value: Content; cl
     }).catch(error => { if (!disposed) setMessage('原格式转换状态尚未确认；原文件仍可阅读。' + String(error)) })
     return () => { disposed = true }
   }, [visible, client, value.path, value.read.resource, attempt])
-  return message ? <p role="status">{message}<button type="button" onClick={() => retry(value => value + 1)}>刷新原转换状态</button></p> : null
+  return message ? <MobileNotice identity={[message]} role="status">{message}<button type="button" onClick={() => retry(value => value + 1)}>刷新原转换状态</button></MobileNotice> : null
 }
 export type MobileRegionContentProps = { client: AgentMuxHostedClient | null; connected?: boolean; visible?: boolean; showTitle?: boolean; tabId: string; regionId: string; zoneId: string | null; kind: 'file' | 'browser'; browserId?: string | undefined; file?: AgentMuxSpaceCatalog['regions'][number]['file']; openHttpLink?: OpenHttpLink; onBackChange?(back: (() => void) | null): void }
 export function MobileRegionContent(props: MobileRegionContentProps) {
@@ -91,13 +92,13 @@ function RegionContent({ client, connected = true, visible = true, showTitle = t
   }, [client, connected, visible, tabId, regionId, kind, browserId, zoneId, file?.workspaceId, file?.path, file?.zoneRelativePath, file?.issue, revision])
   let externalUrl: string | null = null
   try { if (browser && ['http:', 'https:'].includes(new URL(browser.url).protocol)) externalUrl = browser.url } catch { /* Invalid URL remains visible below. */ }
-  return <section className="mobile-region-content" aria-label={kind === 'file' ? '原文件阅读' : '原网页地址'}>
+  return <MobileNoticeScope owner={client} identity={[regionId,tabId,zoneId]}><section className="mobile-region-content" aria-label={kind === 'file' ? '原文件阅读' : '原网页地址'}>
     {showTitle && kind === 'file' && file && <h4>{file.path.split('/').at(-1)}</h4>}
     <button type="button" onClick={() => refresh(value => value + 1)}>{kind === 'file' ? '刷新原文件' : '刷新原 Browser 当前网址'}</button>
-    {!connected && <p role="status">连接暂不可用；原引用、已有正文（如有）与草稿保留。</p>}
-    {issue && <p role="status">{issue}</p>}
-    {!value && !browser && !issue && <p role="status">原内容尚未确认；原引用保留，可刷新读取。</p>}
+    {!connected && <MobileNotice owner={client} identity={[regionId,connected]} role="status">连接暂不可用；原引用、已有正文（如有）与草稿保留。</MobileNotice>}
+    {issue && <MobileNotice owner={client} identity={[regionId,issue]} role="status">{issue}</MobileNotice>}
+    {!value && !browser && !issue && <MobileNotice owner={client} identity={[regionId]} role="status">原内容尚未确认；原引用保留，可刷新读取。</MobileNotice>}
     {value && <><OriginalFile value={value} client={client} visible={visible} openHttpLink={openHttpLink} /><details><summary>文件来源与修订</summary><code>{value.workspaceId} / {value.path}</code><small>{value.revision ?? '修订未确认'}</small></details></>}
     {browser && <><strong>{browser.title}</strong><details><summary>网页地址与来源</summary><p>{browser.url}</p><code>{browser.id}</code></details>{externalUrl && <a href={externalUrl} target="_blank" rel="noopener noreferrer">在手机浏览器打开当前网址</a>}<p>打开独立手机网页；不控制 Mac 原 Browser 画面。</p></>}
-  </section>
+  </section></MobileNoticeScope>
 }

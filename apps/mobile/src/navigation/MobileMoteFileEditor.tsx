@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { useState } from 'react'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { ClientUiPlatform } from '@agentmux/client-ui/platform'
@@ -20,9 +21,9 @@ export function MobileMoteFileEditor({ target, client, visible, copyText, onClos
   return <section className="mobile-mote-file-editor" aria-label="Mote 原稿编辑" data-mote-file-path={target.path}>
     <button type="button" className="mobile-text-button" onClick={onClose}>返回原文件</button>
     <h3>{target.path}</h3>
-    <p role="status">{model.saving ? '正在保存原文件…' : model.adopting ? '正在采用当前修订…' : pending
+    <MobileNotice dismissible={!model.saving && !model.adopting} kind={pending && !model.saving && !model.adopting ? "warning" : "feedback"} owner={client} identity={[target.path,pending?.attemptId,pending?.phase,model.notice]} role="status">{model.saving ? '正在保存原文件…' : model.adopting ? '正在采用当前修订…' : pending
       ? pending.phase === 'failed' ? '保存未完成；原稿与请求保留。' : '保存回执未确认；原稿与请求保留。'
-      : status}</p>
+      : status}</MobileNotice>
     <form onSubmit={event => { event.preventDefault(); void model.save() }}>
       <label>原文件正文<ComposerTextarea aria-label="Mote 原文件正文" rows={10} value={draft.body} onValueChange={model.edit} /></label>
       <div className="mobile-mote-file-editor__actions">
@@ -38,9 +39,9 @@ export function MobileMoteFileEditor({ target, client, visible, copyText, onClos
         ? <><p>{checked.read.result.document.revision}</p><pre>{checked.read.result.document.content}</pre></>
         : <p>{'message' in checked.read.result ? checked.read.result.message : checked.read.result.status}</p>}</details>
     </div>}
-    {model.storageIssue && <><p role="status">{model.storageIssue.includes('未进入设备备份') ? '本次未进入设备备份；原稿仍可复制。' : '设备草稿尚未确认保存；可复制保全。'}</p><details><summary>设备保存详情</summary><p>{model.storageIssue}</p></details></>}
+    {model.storageIssue && <><MobileNotice owner={client} identity={[target.path,model.storageIssue]} role="status">{model.storageIssue.includes('未进入设备备份') ? '本次未进入设备备份；原稿仍可复制。' : '设备草稿尚未确认保存；可复制保全。'}</MobileNotice><details><summary>设备保存详情</summary><MobileNotice owner={client} identity={[target.path,model.storageIssue]}>{model.storageIssue}</MobileNotice></details></>}
     {model.storageConflict && model.canonical && <button type="button" className="mobile-text-button" onClick={() => { void model.chooseStored(model.canonical!) }}>采用设备原稿</button>}
-    {copyIssue && <><p role="status">复制未完成；当前正文保留。</p><details><summary>复制详情</summary><p>{copyIssue}</p></details></>}
+    {copyIssue && <><MobileNotice owner={client} identity={[target.path,copyIssue]} role="status">复制未完成；当前正文保留。</MobileNotice><details><summary>复制详情</summary><MobileNotice owner={client} identity={[target.path,copyIssue]}>{copyIssue}</MobileNotice></details></>}
     {model.notice && <details><summary>本次操作详情</summary><p>{model.notice}</p></details>}
     {!!draft.attempts.length && <details><summary>原保存请求 · {draft.attempts.length}</summary>{draft.attempts.map(attempt => <article key={attempt.attemptId}>
       <p>{attempt.phase === 'sending' ? '原保存尚未确认' : attempt.phase === 'unknown' ? '未知原保存' : '未完成的原保存'} · {attempt.attemptId}</p>

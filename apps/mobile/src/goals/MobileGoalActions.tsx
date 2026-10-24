@@ -1,3 +1,4 @@
+import { MobileNotice } from '../notices/MobileNotice'
 import { randomClientRequestId } from '@agentmux/core/relay-hosted'
 import { TextInput } from '@agentmux/client-ui/input'
 import { useEffect, useRef, useState } from 'react'
@@ -54,7 +55,7 @@ export function MobileGoalActions({ client, goal, visible, updated, deleted }: {
     finally { inFlight.current = false; setPending(false) }
   }
   return <details onToggle={event => expand(event.currentTarget.open)}><summary>分配、执行与删除</summary>
-    {discoveryIssue && <p role="status">{discoveryIssue}</p>}
+    {discoveryIssue && <MobileNotice identity={[discoveryIssue]} role="status">{discoveryIssue}</MobileNotice>}
     <label>负责人会话<TextInput aria-label="分配 Session IDs" list={`goal-assignees-${goal.id}`} value={assigneeIds} onChange={event => setAssigneeIds(event.target.value)} placeholder="准确 Session ID，多个用逗号分隔，清空表示未分配" /></label>
     <datalist id={`goal-assignees-${goal.id}`}>{sessions.map(item => <option key={item.session.agentSessionId} value={item.session.agentSessionId}>{item.session.agentSessionId} · {item.session.providerId}</option>)}</datalist>
     <label>Supervisor 会话<TextInput aria-label="Supervisor Session ID" value={supervisorId} onChange={event => setSupervisorId(event.target.value)} placeholder="单一负责人 Session ID，清空表示不指定" /></label>
@@ -67,6 +68,6 @@ export function MobileGoalActions({ client, goal, visible, updated, deleted }: {
     <details><summary>删除目标</summary><p>删除此目标，保留原 Agent 会话。</p>
       {!confirmDelete ? <button onClick={() => setConfirmDelete(true)}>删除目标…</button> : <><p>确认删除「{goal.title}」？</p><button disabled={pending} onClick={() => { void execute('delete') }}>确认删除此目标</button><button onClick={() => setConfirmDelete(false)}>取消删除</button></>}
     </details>
-    {messages.map(value => <div key={value.operationId}><p role="status">{value.text}</p><details><summary>操作身份</summary><dl><dt>操作</dt><dd>{value.action}</dd><dt>操作 ID</dt><dd>{value.operationId}</dd><dt>原请求</dt><dd><pre>{JSON.stringify(value.request, null, 2)}</pre></dd></dl></details></div>)}
+    {messages.map(value => <div key={value.operationId}><MobileNotice kind="feedback" identity={[value.operationId,value.text]} role="status">{value.text}</MobileNotice><details><summary>操作身份</summary><dl><dt>操作</dt><dd>{value.action}</dd><dt>操作 ID</dt><dd>{value.operationId}</dd><dt>原请求</dt><dd><pre>{JSON.stringify(value.request, null, 2)}</pre></dd></dl></details></div>)}
   </details>
 }

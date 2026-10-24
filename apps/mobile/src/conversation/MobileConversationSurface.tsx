@@ -34,6 +34,7 @@ import { formatSessionAddress } from '@agentmux/core/sharing'
 import { useMobilePromptController } from './use-mobile-prompt-controller'
 import { useMobileInteractionController } from './use-mobile-interaction-controller'
 import './conversation.css'
+import { DELIVERY_DISMISSAL_STORAGE, MobileNotice, MobileNoticeScope, useMobileNotices } from '../notices/MobileNotice'
 
 export type { MobileConnection } from './use-hosted-conversation'
 export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
@@ -69,17 +70,19 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
   const drafts = useRef(local.drafts)
   const [, redraw] = useState(0)
   const [copyNotice, setCopyNotice] = useState<string | null>(null)
-  const [dismissed, setDismissed] = useState<Set<string>>(() => {
+  const notices = useMobileNotices()
+  const [localDismissed, setDismissed] = useState<Set<string>>(() => {
     try {
-      const raw = localStorage.getItem('agentmux-mobile-dismissed-delivery-v1')
+      const raw = localStorage.getItem(DELIVERY_DISMISSAL_STORAGE)
       const parsed: unknown = raw ? JSON.parse(raw) : null
       return Array.isArray(parsed) ? new Set(parsed.filter((item): item is string => typeof item === 'string').slice(-64)) : new Set()
     } catch { return new Set() }
   })
-  const updateDismissed = (mutate: (next: Set<string>) => void) => setDismissed(previous => {
+  const dismissed = notices?.deliveryDismissed ?? localDismissed
+  const updateDismissed = (mutate: (next: Set<string>) => void) => notices ? notices.updateDelivery(mutate) : setDismissed(previous => {
     const next = new Set(previous)
     mutate(next)
-    try { localStorage.setItem('agentmux-mobile-dismissed-delivery-v1', JSON.stringify([...next].slice(-64))) } catch { /* Presentation preference only. */ }
+    try { localStorage.setItem(DELIVERY_DISMISSAL_STORAGE, JSON.stringify([...next].slice(-64))) } catch { /* Presentation preference only. */ }
     return next
   })
   const mounted = useRef(true)
@@ -231,7 +234,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
       agentSessionId, session, available })
   function responseStatus(key: string, attempt: ResponseAttempt) {
     return <aside key={key} className="mobile-send-status" data-phase={attempt.phase} data-original-response={attempt.original!.input.operationId}>
-      <p role="status">{attempt.message}</p>
+      <MobileNotice identity={[attempt.original?.input.operationId,attempt.phase,attempt.message]} role="status">{attempt.message}</MobileNotice>
       <button type="button" onClick={() => { void inspectResponse(key, attempt).catch(() => {}) }}>查询原答复回执</button>
     </aside>
   }
@@ -334,15 +337,15 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           </details> : null}</>}
         </aside>
   }
-  return <ClientUiProvider platform={platform}>
+  return <ClientUiProvider platform={platform}><MobileNoticeScope owner={client} identity={[ agentSessionId, session?.run.runId]}>
     <section className="mobile-conversation" aria-label="会话" data-agent-surface-mode="activity" data-agent-session-id={agentSessionId ?? ''}>
-      {!available || connection.issue ? <p className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前发送暂不可用。' : ''}</p> : null}
+      {!available || connection.issue ? <MobileNotice identity={[connection.state,connection.issue,available]} className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前发送暂不可用。' : ''}</MobileNotice> : null}
       {reading.notice ? <details className="mobile-conversation__notice"><summary>对话读取暂未确认 · 原 Agent 与输入保留</summary><p>{reading.notice}</p><button onClick={() => { void reading.refresh() }}>刷新原记录</button></details> : null}
-      {questionCapability.issue ? <aside className="mobile-conversation__notice" role="status">
+      {questionCapability.issue ? <MobileNotice identity={[questionCapability.issue]} className="mobile-conversation__notice" role="status">
         异步问题能力观察未确认；原会话与草稿保留，普通输入仍按原 Core 条件处理。{questionCapability.issue}
         <button type="button" onClick={() => redraw(value => value + 1)}>重新核对问题能力</button>
-      </aside> : null}
-      {local.notice ? <aside className="mobile-conversation__notice" role="status">{local.notice}
+      </MobileNotice> : null}
+      {local.notice ? <MobileNotice identity={[local.notice]} className="mobile-conversation__notice" role="status">{local.notice}
         {local.canSave ? <button type="button" onClick={() => { void local.save().then(() => { if (mounted.current) redraw(value => value + 1) }); redraw(value => value + 1) }}>重试保存</button> : null}
         <button type="button" disabled={!draft} onClick={() => {
           void platform.copyText(draft, error => setCopyNotice(`草稿未复制：${errorMessage(error)}`))
@@ -352,7 +355,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           void platform.copyText(local.exportBackup(), error => setCopyNotice(`本页备份未复制：${errorMessage(error)}`))
             .then(copied => { if (copied) setCopyNotice('已复制本页保全备份，包含原正文和操作身份。') })
         }}>复制本页保全备份</button> : null}
-      </aside> : null}
+      </MobileNotice> : null}
       {local.conflicts.filter(item => item.key === draftKey).length > 0 && <details className="mobile-conversation__notice"><summary>保全的冲突内容</summary>
         {local.conflicts.filter(item => item.key === draftKey).map((item, index) => {
           const body = typeof item.value === 'string' ? item.value : Array.isArray(item.value) ? item.value.map(answer => answer.answer).join('\n') : 'draft' in item.value ? item.value.draft : 'input' in item.value ? item.value.input.answers.map(answer => answer.answer).join('\n') : '原请求的答复回执尚未确认。'
@@ -409,7 +412,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           onRespond={respond} />
       </div> : null}
       {retainedResponses.map(([key, attempt]) => responseStatus(key, attempt))}
-      {unidentifiedResponses.map(([key, attempt]) => <p key={key} role="status">{attempt.message}</p>)}
+      {unidentifiedResponses.map(([key, attempt]) => <MobileNotice identity={[key,attempt.original?.input.operationId,attempt.phase,attempt.message]} key={key} role="status">{attempt.message}</MobileNotice>)}
       <div className="mobile-conversation__composer">
         <AgentComposer insertionRef={insertion} aboveInput={<MobileAttachments client={client} session={session ?? null}
           connected={connection.state === 'connected' && !reading.disconnected} controls={attachmentControls}
@@ -442,7 +445,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           {...(postureControl && available && reading.activity?.process !== 'exited' && reading.activity?.process !== 'interrupted' ? { postureTool:
             <MobilePosturePicker control={postureControl} disabled={!available} onSet={modeId => { void changePosture(modeId) }} />
           } : {})}
-          {...(postureControl && available && !reading.activity ? { feedback: <small className="composer-feedback" role="status">Run 状态未确认；模式切换由原服务核验。</small> } : {})}
+          {...(postureControl && available && !reading.activity ? { feedback: <MobileNotice identity={[session?.run.runId]} className="composer-feedback" role="status">Run 状态未确认；模式切换由原服务核验。</MobileNotice> } : {})}
           primaryAction={isWorking && !draft.trim() ? 'stop' : 'send'}
           {...(isWorking && available ? { onInterrupt: () => { void interruptCurrentTurn() } } : {})}
           mailbox={<MobileMailbox key={historyConnection.current.generation} client={client} session={session} connected={connection.state === 'connected'} messages={mailboxMessages} platform={platform} describeSpeaker={describeSpeaker}
@@ -469,8 +472,8 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
         {retainedAttempts.length ? <details className="mobile-retained-prompts"><summary>保留的原消息 ({retainedAttempts.length})</summary>
           {retainedAttempts.map(renderPromptAttempt)}
         </details> : null}
-        {copyNotice ? <p role="status">{copyNotice}</p> : null}
+        {copyNotice ? <MobileNotice kind="feedback" identity={[copyNotice]} role="status">{copyNotice}</MobileNotice> : null}
       </div>
     </section>
-  </ClientUiProvider>
+  </MobileNoticeScope></ClientUiProvider>
 }
