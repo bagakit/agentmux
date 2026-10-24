@@ -669,7 +669,7 @@ export function SessionPane({
 
   const unobservedActions = unobservedActionsAt()
 
-  async function recover(): Promise<void> {
+  async function recover(trigger: 'manual' | 'startup' = 'manual'): Promise<void> {
     if (recovering) return
     setRecovering(true)
     try {
@@ -677,7 +677,7 @@ export function SessionPane({
         const scope = JSON.stringify([session.control.hostId, session.id, session.control.run.runId, session.terminalFrontend?.frontendId])
         if (frontendRecoveryIntent.current?.scope !== scope) frontendRecoveryIntent.current = { scope, operationId: originalFrontendRecovery(session)?.operationId ?? mintObjectId() }
         await recoverSession(sessionId, frontendRecoveryIntent.current.operationId)
-      } else await recoverSession(sessionId)
+      } else await recoverSession(sessionId, undefined, { trigger })
     } catch (error) {
       useAppStore.getState().reportError(error, session?.kind === 'agent' ? { kind: 'indeterminate', subject: session.control,
         ...(frontendSurface ? { lifecycle: { step: 'resume', subject: session.control, lastProcessState: session.processState } as const } : {}) } : undefined)
@@ -732,15 +732,14 @@ export function SessionPane({
     }
   }
 
-  // Terminals whose backend restarted (daemon_restart) can never come back by refreshing —
-  // the PTY is gone. Auto-relaunch a fresh terminal in the same cwd and rebind the tab,
-  // replacing the useless "Check again" with a seamless recovery. One-shot per session id.
+  // Core owns the durable replacement. Remount only reenters that original intent;
+  // this automatic observer never authorizes continuing an uncertain creation.
   useEffect(() => {
     if (!session || session.kind !== 'terminal') return
     if (!missing || interruptionReason !== 'daemon_restart') return
     if (autoRecoveredRef.current === session.id) return
     autoRecoveredRef.current = session.id
-    void recover()
+    void recover('startup')
     // recover()/recovering are stable enough; we intentionally key only on the dead-session signal.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.id, session?.kind, missing, interruptionReason])

@@ -11708,6 +11708,10 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
         recovery = await recoverOriginal()
       }
       if (options?.stillCurrent && !options.stillCurrent()) return
+      if (recovery.kind === 'terminal-pending') {
+        get().reportError(new Error(`${recovery.recovery.message} Original recovery operation: ${recovery.recovery.operationId}${recovery.recovery.replacementRun ? ` Replacement Run: ${recovery.recovery.replacementRun.runId}` : ''}`), { kind: 'indeterminate' })
+        return
+      }
       if (current.kind === 'agent' && 'agentSessionId' in recovery &&
         (recovery.agentSessionId !== current.control.agentSessionId || recovery.previousRun.runId !== recoveryControl.run.runId))
         throw new Error('Recovery response belongs to another Agent Session or Run. The original conversation is kept.')
@@ -11786,22 +11790,9 @@ export const useAppStore = create<AppState>()(persist<AppState, [], [], Persiste
           get().reportError(new Error(recovery.advisory), { kind: 'indeterminate' })
         return session
       }
-      // Agent continuity belongs to its durable Core Session. A closed view does not own or
-      // authorize stopping a canonical Run, including one recovered before a lost IPC reply.
-      if (session.kind === 'agent' || session.control.run.runId === current.control.run.runId) return
-      try {
-        await api.sessions.stop(session.control)
-      } catch (cleanupError) {
-        set((state) => projectRecoveredSession(state, sessionId, session))
-        get().selectSession(session.id)
-        const failure = new AggregateError(
-          [new Error('Recovered Session owner disappeared before commit.'), cleanupError],
-          'Recovered Session owner disappeared and cleanup failed.'
-        )
-        if (operationId) throw failure
-        // The replacement has a new ID; the outer stale-owner guard cannot report its cleanup.
-        get().reportError(failure)
-      }
+      // Core owns the canonical recovery Run for both Agent and raw Terminal intents.
+      // A late view result ends only observation; it never authorizes Stop.
+      return
     } catch (error) {
       if (operationId && !options?.preserveView) throw error
       if (options?.stillCurrent && !options.stillCurrent()) return

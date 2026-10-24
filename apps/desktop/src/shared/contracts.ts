@@ -1173,6 +1173,7 @@ export type SessionRestartResult = Omit<import('@agentmux/core/agent-session-rec
 
 export type SessionRecoveryResult =
   | { kind: 'terminal-restarted'; session: SessionSnapshot }
+  | { kind: 'terminal-pending'; recovery: Extract<import('@agentmux/core').AgentMuxTerminalRecoveryResult, { kind: 'pending' }> }
   | { kind: 'reattachable' | 'resumed'; session: SessionSnapshot; advisory?: string }
   | Extract<AgentMuxAgentContinuityResult, { kind: 'unavailable' | 'retired' | 'conflict' | 'pending' }>
 

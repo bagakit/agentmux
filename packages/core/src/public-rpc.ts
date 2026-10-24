@@ -225,6 +225,7 @@ type NativeParams = { 'capsule.input': import('./capsule-input.js').CapsuleInput
   whoami: Record<string, never>
   'agent.ls': import('./agent-discovery.js').AgentDiscoveryFilters
   'agent.inspect': { target: AgentMuxRpcSessionTarget }
+  'terminal.recover': import('./terminal-recovery.js').AgentMuxTerminalRecoveryInput & { hostId: string }
   'skill.ls': { hostId: string; agentSessionId: string }
   'agent.continuity.control': import('./agent-session-recovery/control-contract.js').AgentMuxContinuityControlInput
   'agent.restart': import('./agent-session-recovery/restart-contract.js').AgentMuxAgentRestartIdentity
@@ -317,6 +318,7 @@ type NativeResult = { 'capsule.input': import('./capsule-input.js').CapsuleInput
     view: import('./agent-self-context.js').SelfViewOutcome; unavailable: AgentMuxRpcUnavailable[] }
   'agent.ls': import('./agent-discovery.js').AgentDiscoveryPage
   'agent.inspect': AgentMuxRpcAgentInspection
+  'terminal.recover': import('./terminal-recovery.js').AgentMuxTerminalRecoveryResult
   'skill.ls': { hostId: string; sourceHostId: string; agentSessionId: string; providerId: string; workspacePath: string; skills: import('./agent-skills.js').AgentSkill[] }
   'agent.continuity.control': import('./agent-session-recovery/control-contract.js').AgentMuxContinuityControlResult
   'agent.restart': { session: Awaited<ReturnType<AgentMuxClient['restartAgent']>> }
@@ -446,7 +448,7 @@ export const AGENTMUX_RPC_NATIVE_METHODS = {
   'message.dispatch.open': 'long', 'message.dispatch.inspect': 'short', 'message.dispatch.report': 'long',
   'message.notify': 'long', 'message.notify.inspect': 'short', 'message.read': 'short', 'message.ls': 'short', 'message.events': 'short', 'message.dispatch.read': 'short', 'message.dispatch.ls': 'short',
   'app.search': 'long', 'app.snapshot': 'long', 'goal.activity': 'short', 'system.doctor': 'long', 'system.storage': 'short',
-  'system.endpoint': 'short', 'system.subscription.cancel': 'short'
+  'system.endpoint': 'short', 'system.subscription.cancel': 'short', 'terminal.recover': 'long'
 } as const satisfies Record<keyof NativeParams, 'short' | 'long'>
 
 export type AgentMuxRpcStreamMethod = 'goal.watch' | 'agent.conversation.watch' | 'agent.output' | 'browser.follow' | 'toolkit.watch' | 'system.metrics.watch' | 'settings.appearance.watch' | 'connection.metadata.watch' |
