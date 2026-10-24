@@ -87,6 +87,8 @@ it('opens the original Focus Map field without search and preserves the visited 
   await dom.render(<SettingsPanel initialSection="focus" navigationRequest={request} onClose={close} />)
   const target = dom.container.querySelector<HTMLElement>('[data-settings-pane="focus"] [data-settings-field="map"]')!
   expect(target).not.toBeNull(); expect(document.activeElement).toBe(target)
+  expect(dom.container.querySelector('.focus-settings-preview__canvas')?.getAttribute('data-scene')).toBe('map')
+  expect((dom.container.querySelector('[data-settings-save-bar] button') as HTMLButtonElement).disabled).toBe(true)
   await select('LOD levels', '4')
   await dom.render(<SettingsPanel initialSection="focus" navigationRequest={{ ...request }} onClose={close} />)
   expect(dom.container.querySelector('[data-settings-field="map"]')).toBe(target)
