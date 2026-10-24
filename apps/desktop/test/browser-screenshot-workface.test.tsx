@@ -8,9 +8,9 @@ const fixture = vi.hoisted(() => ({
   state: {
     applyBrowserEvent: vi.fn(),
     executeControl: vi.fn(async () => ({ operation: 'browser.history', operations: [] })),
-    reportError: vi.fn(), setConfig: vi.fn(),
+    reportError: vi.fn(), setConfig: vi.fn(), saveBrowserOpinionDraft: vi.fn(),
     saveBrowserBookmark: vi.fn(), openFile: vi.fn(), addBrowserAnnotation: vi.fn(),
-    browserAnnotationsByBrowserId: {}, noticeReadReceipts: {},
+    browserAnnotationsByBrowserId: {}, browserOpinionDrafts: {}, sessions: [], noticeReadReceipts: {},
     toolsOpen: false, config: null as AppConfig | null
   },
   compose: vi.fn(), committed: vi.fn(), paint: vi.fn()
@@ -40,6 +40,7 @@ vi.mock('../src/renderer/src/lib/browser-stage-geometry', () => ({
 
 import { BrowserPane } from '../src/renderer/src/components/BrowserPane'
 import { api } from '../src/renderer/src/lib/api'
+import { registerNativeDesktopIpc } from '../src/main/native-desktop-ipc'
 
 const page = {
   id: 'screenshot-original-browser', browserId: 'screenshot-original-browser',
@@ -73,6 +74,7 @@ let captureScreenshot: ReturnType<typeof vi.spyOn<typeof api.browser, 'captureSc
 let release: ReturnType<typeof vi.spyOn<typeof api.browser, 'release'>>
 let restore: ReturnType<typeof vi.spyOn<typeof api.browser, 'restore'>>
 let navigate: ReturnType<typeof vi.spyOn<typeof api.browser, 'navigate'>>
+let nativeImageWrite: ReturnType<typeof vi.fn>
 
 beforeEach(() => {
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true)
@@ -100,7 +102,12 @@ beforeEach(() => {
   }
   vi.clearAllMocks()
   bounds = vi.spyOn(api.browser, 'setBounds').mockResolvedValue(undefined)
-  clipboard = vi.spyOn(api.ui, 'writeClipboardImage').mockResolvedValue(undefined)
+  nativeImageWrite = vi.fn(async () => {})
+  const handlers = new Map<string, (...args: any[]) => any>()
+  registerNativeDesktopIpc({ home: '/unused-browser-image-fixture', native: () => ({ writeClipboardImage: nativeImageWrite,
+    captureScreenshot: vi.fn(), readClipboardText: vi.fn(), writeClipboardText: vi.fn() }),
+    handle: (channel, handler) => { handlers.set(channel, handler) }, trust: () => {} })
+  clipboard = vi.spyOn(api.ui, 'writeClipboardImage').mockImplementation(image => handlers.get('ui:writeClipboardImage')!({}, image))
   clipboardText = vi.spyOn(api.ui, 'writeClipboardText').mockResolvedValue(undefined)
   captureScreenshot = vi.spyOn(api.browser, 'captureScreenshot').mockResolvedValue(capture)
   vi.spyOn(api.browser, 'setAnnotationMarkers').mockResolvedValue(undefined)
@@ -351,6 +358,7 @@ describe('original Browser screenshot workface', () => {
     await mount(); const opened = await openScreenshot()
     await copyInput(opened); await copyInput(opened)
     expect(clipboard.mock.calls).toEqual([[image], [image]])
+    expect(nativeImageWrite.mock.calls).toEqual([[image], [image]])
     expect(captureScreenshot).toHaveBeenCalledTimes(1)
     expect(bounds).toHaveBeenLastCalledWith(page.browserId, null)
     await cancel('Cancel')

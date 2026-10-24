@@ -1,7 +1,6 @@
 const { fixturePath: _hygiene_fixturePath } = await vi.hoisted(async () => await import("../scripts/lib/fixture-values.mjs"))
 // @vitest-environment happy-dom
 import { act } from 'react'
-import { EventEmitter } from 'node:events'
 import type { Editor } from '@tiptap/core'
 import { expect, it, vi } from 'vitest'
 vi.hoisted(() => { vi.stubGlobal('__AGENTMUX_WEB_PREVIEW__', true) })
@@ -375,51 +374,27 @@ it('a late old-target capture error cannot overwrite the current target error or
   expect(failure()?.textContent).toContain('Current target capture failed')
   expect(dom.draft('region')).toBe('Launch draft')
 })
-it('the real Main owner reports a finite unknown in the mounted service window, retains ownership and recovers on late close', async () => {
-  const child = new EventEmitter() as EventEmitter & { stderr: EventEmitter; kill: ReturnType<typeof vi.fn> }
-  child.stderr = new EventEmitter()
-  child.kill = vi.fn(() => true)
-  const spawn = vi.fn(() => child)
-  const remove = vi.fn(async () => {})
-  const files = { mkdir: async () => {}, stat: async () => ({ size: 12, isFile: () => true }), rm: remove }
-  const electron = { systemPreferences: { getMediaAccessStatus: () => 'unknown' } }
-  vi.doMock('node:child_process', () => ({ spawn, default: { spawn } }))
-  vi.doMock('node:fs/promises', () => ({ ...files, default: files }))
-  vi.doMock('electron', () => ({ ...electron, default: electron }))
-  try {
-    const { captureComposerScreenshot } = await import('../src/main/composer-screenshot')
-    const capture = vi.spyOn(api.ui, 'captureScreenshot').mockImplementation(() => captureComposerScreenshot(_hygiene_fixturePath("home")))
-    await dom.render(<AgentSessionComposer sessionId="agent-1" />)
-    await act(async () => useAppStore.getState().setAgentComposerDraft('agent-1', ("Kept body @" + _hygiene_fixturePath("repo/old.png") + " ")))
-    await dom.click('.composer-tool--mode')
-    vi.useFakeTimers()
-    await dom.click('[aria-label="Capture a screen region"]')
-    expect(spawn).toHaveBeenCalledTimes(1)
-    await act(async () => vi.advanceTimersByTimeAsync(122_000))
-    expect(failure()?.textContent).toMatch(/cannot confirm.*exited/i)
-    expect(dom.draft()).toBe(("Kept body @" + _hygiene_fixturePath("repo/old.png") + " "))
-    expect(useAppStore.getState().error).toBeNull()
-    const editor = dom.container.querySelector<HTMLElement & { editor: Editor }>('.tiptap')!.editor
-    expect(editor).toBeDefined()
-    expect(editor.isEditable).toBe(true)
-    await act(async () => editor.commands.insertContentAt(1, 'Still typing '))
-    await retryFeedback()
-    expect(failure()?.textContent).toMatch(/already in progress|not yet confirmed/i)
-    expect(spawn).toHaveBeenCalledTimes(1)
-    expect(remove).toHaveBeenCalledTimes(0)
-    await act(async () => { child.emit('close', 0, null) })
-    expect(remove).toHaveBeenCalledTimes(1)
-    expect(spawn).toHaveBeenCalledTimes(1)
-    await retryFeedback()
-    expect(spawn).toHaveBeenCalledTimes(2)
-    await act(async () => { child.emit('close', 0, null) })
-    expect(capture).toHaveBeenCalledTimes(3)
-    expect(dom.draft()).toMatch(new RegExp("^Still typing @" + _hygiene_fixturePath("home").replace(/[.*+?^$\{\}()|[\]\\]/g, "\\$&") + "\\/\\.agentmux\\/pasted\\/screen-.+\\.png Kept body @" + _hygiene_fixturePath("repo").replace(/[.*+?^$\{\}()|[\]\\]/g, "\\$&") + "\\/old\\.png $", ""))
-    expect(failure()).toBeNull()
-  } finally {
-    vi.useRealTimers()
-    vi.doUnmock('node:child_process')
-    vi.doUnmock('node:fs/promises')
-    vi.doUnmock('electron')
-  }
+it('the real Main native owner reports unknown locally and preserves typing until an explicit retry', async () => {
+  const { captureComposerScreenshot } = await import('../src/main/composer-screenshot')
+  const unknown = Object.assign(new Error('The original capture result is unknown. Keep this draft and inspect the original selection.'), {
+    code: 'operation_unknown', operation: { operationId: 'original-native-capture', instanceId: 'original-native-instance' }
+  })
+  const native = { captureScreenshot: vi.fn().mockRejectedValueOnce(unknown).mockResolvedValueOnce({ state: 'cancelled' }) }
+  vi.spyOn(api.ui, 'captureScreenshot').mockImplementation(() => captureComposerScreenshot(_hygiene_fixturePath("home"), native))
+  await dom.render(<AgentSessionComposer sessionId="agent-1" />)
+  await act(async () => useAppStore.getState().setAgentComposerDraft('agent-1', ("Kept body @" + _hygiene_fixturePath("repo/old.png") + " ")))
+  await dom.click('.composer-tool--mode')
+  await dom.click('[aria-label="Capture a screen region"]')
+  expect(failure()?.textContent).toContain('original capture result is unknown')
+  expect(native.captureScreenshot).toHaveBeenCalledTimes(1)
+  expect(dom.draft()).toBe(("Kept body @" + _hygiene_fixturePath("repo/old.png") + " "))
+  const editor = dom.container.querySelector<HTMLElement & { editor: Editor }>('.tiptap')!.editor
+  expect(editor.isEditable).toBe(true)
+  await act(async () => editor.commands.insertContentAt(1, 'Still typing '))
+  expect(native.captureScreenshot).toHaveBeenCalledTimes(1)
+  await retryFeedback()
+  expect(native.captureScreenshot).toHaveBeenCalledTimes(2)
+  expect(dom.draft()).toBe(("Still typing Kept body @" + _hygiene_fixturePath("repo/old.png") + " "))
+  expect(failure()).toBeNull()
+  expect(useAppStore.getState().error).toBeNull()
 })
