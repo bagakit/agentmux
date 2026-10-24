@@ -464,3 +464,52 @@ it('an edited native reply preserves its original message mapping and inspects a
   expect(JSON.stringify(f.wire.messages.get(mapping.messageId))).toContain('Original reply after native edit')
   expect(f.inner.kernel.stop).not.toHaveBeenCalled()
 })
+
+it.each([false, true])('mixed Markdown typed question retains its original actions and answer receipt (missing image: %s)', async missingImage => {
+  const f = await fixture('codex'); await grant(f, ['input', 'answer'])
+  const image = join(f.root, 'question-diagram.png'), png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a0K8AAAAASUVORK5CYII=', 'base64')
+  if (!missingImage) await writeFile(image, png)
+  const original = (await f.store.readMetadata('original-agent'))!, actor = { protocolId: 'codex-app-server-v2-0.163', actorId: 'mixed-question-actor', lifecycleOperationId: 'mixed-question-lifecycle', token: 'a'.repeat(64), launch: { command: 'codex', args: [] } }
+  await f.store.compareAndSwap(original, { ...original, nativeActor: actor }); await f.inner.registry.load('local')
+  const send = vi.fn<import('../../core/src/agent-provider.js').AgentProviderPreparedNativeInput['send']>(async () => {
+    if (missingImage) throw Error('Controlled original native answer receipt loss')
+    return { outcome: 'admitted', turnId: 'mixed-answer-turn' }
+  })
+  f.client.providers.get('codex').prepareNativeInput = async (_context, source) => ({ plan: { kind: 'native-rpc', protocolId: actor.protocolId, sourceId: JSON.stringify([source.providerId, source.nativeSessionId]), actorId: actor.actorId, threadId: source.nativeSessionId, operation: 'start-or-steer' }, assertCurrent: async () => {}, send, dispose() {} })
+  const event = savedQuestionEvent(); event.payload.thread_id = 'original-native'
+  event.payload.item.content[0]!.text = `Before the original question\n\n![Original diagram](${image})\n\nAfter the original diagram`
+  await appendFile(f.transcript, savedQuestionJsonl([event])); f.services.publication!.refresh()
+  const question = () => f.services.publication!.store.list(f.binding).findLast(operation => operation.payload.kind === 'question')
+  await vi.waitFor(() => expect(question()?.state, 'The original typed question stays actionable beside Markdown media').toBe('confirmed'), { timeout: 10_000 })
+  const published = question()!
+  expect(published.payload).toMatchObject({ kind: 'question', status: 'pending', questions: [{ id: savedQuestionId }] })
+  if (published.payload.kind !== 'question') throw Error('The original typed question is required')
+  expect(published.payload.text).not.toContain(image)
+  expect(published.payload.text).toContain('Before the original question')
+  expect(published.payload.text).toContain('After the original diagram')
+  if (missingImage) expect(published.payload.text).toContain('Image unavailable')
+  else { expect(published.fragment.ordinal).toBeGreaterThan(0); expect(f.wire.uploads).toEqual([png]) }
+  const actionRef = published.payload.actionRef!, body = JSON.parse(published.prepared!.request.body!), button = body.components[0].components.flatMap((part: { components?: unknown[] }) => part.components ?? [])[0]
+  expect(button.custom_id).toBe('q:' + actionRef)
+  const form = { connectionId: discordConfig.connectionId, application: discordConfig.application, actor: { application: discordConfig.application, idType: 'snowflake', userId: '400' }, externalConversationId: discordRoomId, sourceMessageId: published.mapping!.messageId, actionRef }
+  expect(f.services.ingress!.questionForm(form)).toMatchObject({ status: 'pending', questions: [{ id: savedQuestionId }] })
+  expect(f.services.ingress!.questionForm({ ...form, actor: { ...form.actor, userId: '401' } })).toBeNull()
+  f.wire.interaction('9100', 3, { custom_id: button.custom_id, component_type: 2 }, published.mapping!.messageId)
+  await vi.waitFor(() => expect(f.wire.calls.some(call => call.path === '/interactions/9100/fixture-interaction-token/callback' && JSON.parse(call.body).type === 9)).toBe(true))
+  const modal = JSON.parse(f.wire.calls.find(call => call.path === '/interactions/9100/fixture-interaction-token/callback')!.body).data
+  const submitted = f.wire.interaction('9101', 5, { custom_id: modal.custom_id, components: [
+    { type: 18, component: { type: 3, custom_id: 'o0', values: ['0'] } }, { type: 18, component: { type: 4, custom_id: 't0', value: '' } }
+  ] })
+  await vi.waitFor(() => expect(send).toHaveBeenCalledOnce(), { timeout: 10_000 })
+  expect(codexQuestionAnswers([{ type: 'text', text: send.mock.calls[0]![0] }])).toEqual([{ questionId: savedQuestionId, prompt: event.payload.item.questions[0]!.title, answer: 'Keep the original work' }])
+  const record = (await f.services.ingress!.list({ connectionId: discordConfig.connectionId })).ingresses[0]!
+  expect(record).toMatchObject({ kind: 'action', state: 'claimed', input: { responseKind: 'question', author: { actionRef, actor: { userId: '400' } } } })
+  await vi.waitFor(async () => expect((await f.services.ingress!.inspect({ ingressId: record.ingressId })).questionReceipt).toMatchObject({ operationId: record.input!.operationId, outcome: missingImage ? 'unknown' : 'submitted' }))
+  const receipt = structuredClone((await f.services.ingress!.inspect({ ingressId: record.ingressId })).questionReceipt), uploads = f.wire.uploads.length
+  await f.restart(); f.services.publication!.refresh()
+  f.wire.emit('INTERACTION_CREATE', submitted)
+  await vi.waitFor(() => expect(question()?.payload).toMatchObject({ status: missingImage ? 'unconfirmed' : 'response-sent' }))
+  expect((await f.services.ingress!.inspect({ ingressId: record.ingressId })).questionReceipt).toEqual(receipt)
+  expect(send).toHaveBeenCalledOnce(); expect(f.wire.uploads).toHaveLength(uploads)
+  expect(f.inner.kernel.input).not.toHaveBeenCalled(); expect(f.client.agentSession('original-agent').run).toEqual(original.run)
+}, 30_000)
