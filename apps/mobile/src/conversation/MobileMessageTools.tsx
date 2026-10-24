@@ -37,7 +37,7 @@ export function MobileCommandPicker({ commands, disabled, onSelect }: {
   const [query, setQuery] = useState('')
   const normalized = query.trim().toLocaleLowerCase()
   const matching = commands.filter(item => `${item.text} ${item.label ?? ''} ${item.description}`.toLocaleLowerCase().includes(normalized))
-  return <span className="mobile-posture-picker mobile-command-picker">
+  return <span className="mobile-command-picker">
     <ComposerToolMenu open={open && !disabled} onOpenChange={next => { setOpen(next); if (!next) setQuery('') }} label="Commands" className="mobile-posture-menu mobile-command-menu" trigger={<button type="button" className="composer-tool" disabled={disabled} aria-label="Choose a command"
       aria-expanded={open} title="Choose a command">
       <SemanticIcon name="object.subcommand" size={14} /><span className="composer-tool__label">Commands</span>
