@@ -9,10 +9,10 @@ const ThemeActionRefreshIcon = semanticIconComponent('action.refresh')
 type ReadyCommit = Extract<GitCommitDetailsResult, { kind: 'ready' }>
 type ChangedFile = ReadyCommit['entries'][number]
 
-function CommitTime({ value }: { value: number | null }) {
+function CommitTime({ value, source = 'Author time' }: { value: number | null; source?: string }) {
   const date = value === null ? null : new Date(value)
   return date && Number.isFinite(date.getTime())
-    ? <time dateTime={date.toISOString()} title={date.toISOString()}>{date.toLocaleString()}</time>
+    ? <time dateTime={date.toISOString()} title={`${source} · ${date.toLocaleString()} (local time) · ${date.toISOString()}`}>{date.toLocaleString()}</time>
     : <span>Unknown date</span>
 }
 
@@ -30,6 +30,7 @@ export function GitCommitDetails({ regionId, selection, result, loading, error, 
   return <article className="git-workbench__details" aria-label="Commit details" aria-busy={loading}>
     {!selection && <div className="pane-state"><strong>Select a commit</strong><span>Choose a commit to read its message and files.</span></div>}
     {selection && <div className="git-workbench__target">
+      <span>Fixed commit</span>
       <code title={selection.commitOid}>{selection.commitOid.slice(0, 12)}</code>
       <button className="icon-button" aria-label="Reload commit details" title="Reload this fixed commit" disabled={loading} onClick={onReload}><ThemeActionRefreshIcon size={13} /></button>
     </div>}
@@ -56,7 +57,7 @@ export function GitCommitDetails({ regionId, selection, result, loading, error, 
         <dl className="git-workbench__metadata">
         {showCommitted && <><dt>Committed</dt><dd>
           {differentCommitter && <span className="git-workbench__person">{result.commit.committer || 'Unknown committer'}</span>}
-          <span className="git-workbench__identity-time"><CommitTime value={result.commit.committedAt} /></span>
+          <span className="git-workbench__identity-time"><CommitTime value={result.commit.committedAt} source="Committer time" /></span>
         </dd></>}
         <dt>Commit</dt><dd><code>{result.commit.oid}</code></dd>
         <dt>Parents</dt><dd>{result.commit.parents.length ? result.commit.parents.map(oid => <code key={oid}>{oid}</code>) : 'None · root commit'}</dd>

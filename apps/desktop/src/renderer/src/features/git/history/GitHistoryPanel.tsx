@@ -21,7 +21,7 @@ const rowTimeFormat = new Intl.DateTimeFormat(undefined, { month: 'short', day: 
 function CommitTime({ authoredAt }: { authoredAt: number | null }) {
   const date = authoredAt === null ? null : new Date(authoredAt)
   return date && Number.isFinite(date.getTime())
-    ? <time className="git-history-time" dateTime={date.toISOString()} title={date.toLocaleString()}>{rowTimeFormat.format(date)}</time>
+    ? <time className="git-history-time" dateTime={date.toISOString()} title={`Author time · ${date.toLocaleString()} (local time)`}>{rowTimeFormat.format(date)}</time>
     : <span className="git-history-time" title="Author time was not recorded">Time unknown</span>
 }
 
@@ -88,10 +88,10 @@ export function GitHistoryPanel({ workspace, history, onSelectCommit, selectedOi
   const showTime = useAppStore(state => state.config?.gitHistoryShowTime !== false)
   const ready = history.result?.kind === 'ready' ? history.result : null
   const graph = useMemo(() => historyGraph(ready?.commits ?? [], ready?.snapshot.refs ?? []), [ready?.commits, ready?.snapshot.refs])
-  // A page keeps its pinned roots and timestamp. Moving labels do not define reading position.
-  const scope = useMemo(() => JSON.stringify([workspace.id, workspace.hostId, workspace.path, history.reference,
-    ready?.snapshot.checkedAt, ready?.snapshot.roots]), [workspace.id, workspace.hostId, workspace.path, history.reference, ready?.snapshot])
-  const details = useGitHistoryDetails(scope, history.enabled)
+  // Refresh fills the previous window before replacement; the same range keeps its reading position.
+  const scope = useMemo(() => JSON.stringify([workspace.id, workspace.hostId, workspace.path, history.reference]),
+    [workspace.id, workspace.hostId, workspace.path, history.reference])
+  const details = useGitHistoryDetails(JSON.stringify([scope, ready?.snapshot.checkedAt, ready?.snapshot.roots]), history.enabled)
   const localViewport = useRef<GitHistoryViewportState | null>(null)
   const position = viewportState ?? localViewport
   const scrollHost = useRef<HTMLDivElement>(null)
@@ -133,8 +133,22 @@ export function GitHistoryPanel({ workspace, history, onSelectCommit, selectedOi
       <button className="icon-button" title="Refresh history" aria-label="Refresh history" disabled={!history.enabled || history.loading}
         onClick={() => { void history.refresh() }}><ThemeActionRefreshIcon size={13} /></button>
     </div>
+    {ready && <div className="git-history-snapshot">
+      <span title={`Reference labels belong to the snapshot read at ${new Date(ready.snapshot.checkedAt).toLocaleString()}. Checking references keeps this reading window.`}>Snapshot</span>
+      <button disabled={!history.enabled || history.referenceCheck?.checking} onClick={() => { void history.checkReferences() }}>
+        {history.referenceCheck?.checking ? 'Checking…' : 'Check references'}
+      </button>
+    </div>}
+    {history.referenceCheck?.changed && <div className="git-history-notice" role="status">
+      <span>References have changed.<small>This snapshot and your selected commit are retained.</small></span>
+      <button disabled={!history.enabled || history.loading} onClick={() => { void history.refresh() }}>Refresh</button>
+    </div>}
+    {history.referenceCheck?.error && <div className="git-history-notice" role="status">
+      <span>Current references unknown.<small>{history.referenceCheck.error} Snapshot retained.</small></span>
+      <button disabled={!history.enabled || history.referenceCheck.checking} onClick={() => { void history.checkReferences() }}>Retry check</button>
+    </div>}
     {history.error && <div className="git-history-error" role="alert"><span>{history.error}</span>
-      <button disabled={!history.enabled || history.loading} onClick={() => { void (ready?.nextCursor ? history.loadMore() : history.refresh()) }}>Retry</button>
+      <button disabled={!history.enabled || history.loading} onClick={() => { void history.retry() }}>Retry</button>
     </div>}
     {!ready && !history.error && <div className="branches-empty"><strong>{history.result?.kind === 'not-a-git-repository'
       ? 'Not a Git repository' : history.enabled ? 'Reading history…' : 'History will load when visible'}</strong></div>}

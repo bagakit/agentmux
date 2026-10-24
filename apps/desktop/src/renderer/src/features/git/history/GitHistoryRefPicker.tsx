@@ -100,7 +100,7 @@ export const GitHistoryRefPicker = memo(function GitHistoryRefPicker({ refs, ref
         if (isImeOwnedKeyboardEvent(event) || event.ctrlKey || event.metaKey || event.altKey || event.shiftKey) return
         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') { event.preventDefault(); setOpen(true) }
       }}>
-      <span title={reference ?? 'All branches'}>{label}</span><ThemeNavigationDownIcon size={13} aria-hidden="true" />
+      <span title={reference ? `Snapshot reference · ${reference}` : 'All local branches, remote-tracking references and HEAD in this snapshot; not just the checked-out branch.'}>{label}</span><ThemeNavigationDownIcon size={13} aria-hidden="true" />
     </button>
     {open && <WindowOverlayPortal><div ref={panel} id={id} role="dialog" aria-label="History references"
       className="tab-context-menu git-history-ref-picker__popover" style={{ visibility: 'hidden' }} onKeyDown={event => {
@@ -128,7 +128,7 @@ export const GitHistoryRefPicker = memo(function GitHistoryRefPicker({ refs, ref
         {query && <button type="button" className="selection-field__clear" aria-label="Clear reference search"
           onClick={() => { setQuery(''); input.current?.focus({ preventScroll: true }) }}><ThemeActionCloseIcon size={12} /></button>}
       </div>
-      <div id={id + '-count'} className="git-history-ref-picker__count" role="status">{matches.length} / {available.length} references</div>
+      <div id={id + '-count'} className="git-history-ref-picker__count" role="status">{matches.length} / {available.length} snapshot references</div>
       {reference !== null && !selected && <p className="git-history-ref-picker__notice">Saved reference not in the current observation: <span>{reference}</span></p>}
       <div ref={scroller} id={listId} role="listbox" aria-label="History reference choices" className="git-history-ref-picker__results">
         <div className="git-history-ref-picker__window" style={{ height: virtualizer.getTotalSize() }}>
