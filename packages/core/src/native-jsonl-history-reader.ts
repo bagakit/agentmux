@@ -333,8 +333,17 @@ export class NativeJsonlHistoryReader {
   /** Inspect the original record immediately before the validated changes cut.
    * Provider lineage checks must not move either paging direction. */
   async readBeforeChanges(): Promise<NativeJsonlHistoryRecord | null> {
+    return this.readBefore(this.forwardPosition)
+  }
+
+  /** Read the preceding complete record in this same source without moving either cursor. */
+  async readBefore(start: number): Promise<NativeJsonlHistoryRecord | null> {
+    if (!Number.isSafeInteger(start) || start < 0 || start > this.cut ||
+        start > 0 && (await this.read(start - 1, 1))[0] !== 10) {
+      return failure('INVALID_CURSOR', 'Native predecessor requires an original complete record boundary.')
+    }
     const original = this.position, originalEnd = this.lastRecordEnd
-    this.position = this.forwardPosition
+    this.position = start
     try { return await this.readPrevious() }
     finally { this.position = original; this.lastRecordEnd = originalEnd }
   }

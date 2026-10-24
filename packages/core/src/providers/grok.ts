@@ -5,7 +5,7 @@ import type { PostureControlDeclaration } from '../agent-interaction.js'
 import type { AgentProvider, AgentProviderDefinition } from '../agent-provider.js'
 import type { AgentManagedHookPlan } from '../managed-hook-installer.js'
 import type { AgentNativeHookSpecification } from '../hook-normalizer.js'
-import { observeGrokSessionHistory, readGrokSessionHistoryPage } from './grok-native-history.js'
+import { observeGrokSessionHistory, readGrokSessionHistoryPage, readGrokConversationChanges } from './grok-native-history.js'
 import { catalog, managedHookCommand, hookCommandTimeout } from './shared.js'
 import { normalizeNativeSessionId } from '../agent-native-locator.js'
 
@@ -142,6 +142,7 @@ export function createGrokProvider(defineAgentProvider: ProviderFactory): AgentP
     launchOptions: GROK_LAUNCH_OPTIONS,
     readSessionHistoryPage: readGrokSessionHistoryPage,
     observeSessionHistory: observeGrokSessionHistory,
+    readConversationChanges: readGrokConversationChanges,
     buildResumeArgs: (sessionId, _transcriptPath, prompt, args) => [
       '--resume', sessionId, ...args, ...(prompt ? ['--', prompt] : [])
     ]

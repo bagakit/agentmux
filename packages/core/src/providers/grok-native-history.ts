@@ -7,6 +7,7 @@ import { AgentMuxError } from '../errors.js'
 import { observeNativeJsonlHistory } from '../native-history-source-observer.js'
 import {
   NativeJsonlHistoryReader,
+  readNativeConversationChanges,
   readNativeHistoryBytes,
   type NativeHistoryReadBudget
 } from '../native-jsonl-history-reader.js'
@@ -15,12 +16,11 @@ import {
   nativeJsonStringify,
   nativeTextJoin,
   nativeTextHasSpeech,
-  nativeTextStartsWith,
-  nativeTextEndsWith,
   type NativeTextValue,
   type NativeHistoryContentPart as AgentSessionHistoryContentPart,
   type NativeHistoryItem as AgentSessionHistoryItem
 } from '../native-history-value.js'
+import type { ProviderConversationChangesContext, ProviderConversationChangesPage } from '../session-history-changes.js'
 import type {
   AgentProviderSessionHistoryContext,
   AgentProviderSessionHistoryObservationContext,
@@ -31,7 +31,6 @@ import type {
 type GrokHistorySourceContext = Pick<AgentProviderSessionHistoryContext,
   'source' | 'transcriptPath' | 'env' | 'workspacePath' | 'signal'>
 
-const GROK_CHAT_HISTORY_FILE = 'chat_history.jsonl'
 const GROK_UPDATES_FILE = 'updates.jsonl'
 const GROK_SUMMARY_FILE = 'summary.json'
 const GROK_SESSION_ID_MAX_LENGTH = 128
@@ -135,13 +134,7 @@ export function encodeCwdDirname(cwd: string): string {
 
 function extractText(value: unknown): NativeTextValue | undefined { return isNativeText(value) ? value : undefined }
 
-function stringifyValue(value: unknown): NativeTextValue {
-  if (isNativeText(value)) return value
-  if (value === undefined || value === null) return ''
-  return nativeJsonStringify(value)
-}
-
-export async function resolveGrokChatHistoryPath(
+export async function resolveGrokUpdatesPath(
   context: GrokHistorySourceContext,
   allowMissing = false
 ): Promise<string> {
@@ -151,11 +144,9 @@ export async function resolveGrokChatHistoryPath(
       throw new AgentMuxError('Native transcript path has not been established.', 'AGENT_SESSION_HISTORY_LOCATOR_UNAVAILABLE')
     }
     const fileBase = basename(givenPath)
-    if (fileBase === GROK_CHAT_HISTORY_FILE) {
-      return givenPath
-    }
-    if (fileBase === GROK_UPDATES_FILE) {
-      return join(dirname(givenPath), GROK_CHAT_HISTORY_FILE)
+    if (fileBase === GROK_UPDATES_FILE) return givenPath
+    if (fileBase === 'chat_history.jsonl') {
+      throw new AgentMuxError('The original raw-model source is not the native conversation stream.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
     }
     // Arbitrary paths or prefixed paths like prefix-chat_history.jsonl are rejected
     throw new AgentMuxError('Native transcript path has not been established.', 'AGENT_SESSION_HISTORY_LOCATOR_UNAVAILABLE')
@@ -170,7 +161,7 @@ export async function resolveGrokChatHistoryPath(
   const encodedGroup = encodeCwdDirname(workspacePath)
 
   const grokHome = context.env.GROK_HOME ? resolve(context.env.GROK_HOME) : join(homedir(), '.grok')
-  const candidate = join(grokHome, 'sessions', encodedGroup, sessionId, GROK_CHAT_HISTORY_FILE)
+  const candidate = join(grokHome, 'sessions', encodedGroup, sessionId, GROK_UPDATES_FILE)
 
   try {
     const s = await stat(candidate)
@@ -256,263 +247,143 @@ async function verifySummaryIdentity(
   }
 }
 
-function parseContentParts(content: unknown): AgentSessionHistoryContentPart[] {
-  if (isNativeText(content)) {
-    return content.length > 0 ? [{ kind: 'text', text: content }] : []
+// updates.jsonl is Grok's durable conversation owner. Raw model inputs are not a
+// fallback: compaction and replay can replace chat_history.jsonl independently.
+type Update = { params: Record<string, unknown>; update: Record<string, unknown>; kind: string; method: string }
+function updateRecord(record: Record<string, unknown>, sessionId: string): Update {
+  const params = isRecord(record.params) ? record.params : undefined
+  const update = params && isRecord(params.update) ? params.update : undefined
+  if (!params || !update || typeof update.sessionUpdate !== 'string' ||
+      !['session/update', '_x.ai/session/update'].includes(String(record.method))) {
+    throw new AgentMuxError('Grok native update is malformed.', 'AGENT_SESSION_HISTORY_INVALID_TRANSCRIPT')
   }
-  if (Array.isArray(content)) {
-    const parts: AgentSessionHistoryContentPart[] = []
-    for (const item of content) {
-      if (isNativeText(item)) {
-        if (item.length > 0) parts.push({ kind: 'text', text: item })
-      } else if (isRecord(item)) {
-        const itemType = extractString(item.type)
-        if (itemType === 'text') {
-          const text = extractText(item.text)
-          if (text) parts.push({ kind: 'text', text })
-        } else if (itemType === 'image') {
-          const url = extractText(item.url)
-          if (url) parts.push({ kind: 'resource', resourceType: 'image', reference: url })
-        }
-      }
+  if (params.sessionId !== sessionId) {
+    throw new AgentMuxError('Grok update belongs to another native Session.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+  }
+  if (update.sessionUpdate === 'rewind_marker') {
+    throw new AgentMuxError('Grok native conversation branch changed.', 'AGENT_SESSION_HISTORY_SOURCE_CHANGED')
+  }
+  return { params, update, kind: update.sessionUpdate, method: record.method as string }
+}
+function promptId(params: Record<string, unknown>): string | undefined {
+  return isRecord(params._meta) ? extractString(params._meta.promptId) : undefined
+}
+function hostTurn(update: Record<string, unknown>): boolean {
+  return isRecord(update._meta) && update._meta.hostTurn === true
+}
+function textPart(content: unknown, eligibility: 'public' | 'private' | 'unconfirmed'): AgentSessionHistoryContentPart[] {
+  if (!isRecord(content)) return []
+  if (content.type === 'text') {
+    const meta = isRecord(content._meta) ? content._meta : undefined
+    const text = extractText(meta?.displayText) ?? extractText(content.text)
+    return text === undefined ? [] : [{ kind: 'text', text, contentEligibility: eligibility }]
+  }
+  return [{ kind: 'text', text: nativeJsonStringify(content), contentEligibility: 'unconfirmed' }]
+}
+// These are non-speech protocol variants, never evidence of an additional author
+// or message boundary. Persisted hook_annotation/current_mode_update can follow
+// final chunks. Unknown variants stop assembly instead of joining unrelated text.
+function groupMetadata(row: Update): boolean {
+  return row.method === 'session/update' ? row.kind === 'current_mode_update'
+    : ['hook_annotation', 'hook_run_started', 'hook_execution', 'turn_usage', 'response_completed'].includes(row.kind)
+}
+async function finalText(reader: NativeJsonlHistoryReader, start: number, sessionId: string, terminalPrompt: string): Promise<NativeTextValue | undefined> {
+  const chunks: NativeTextValue[] = []
+  let position = start
+  while (position > 0) {
+    const previous = await reader.readBefore(position)
+    if (!previous) break
+    position = previous.start
+    const row = updateRecord(previous.value, sessionId)
+    const associated = promptId(row.params)
+    if (associated !== undefined && associated !== terminalPrompt) break
+    if (groupMetadata(row)) continue
+    if (row.method === 'session/update' && row.kind === 'agent_message_chunk') {
+      const content = isRecord(row.update.content) ? row.update.content : undefined
+      // An unknown or incomplete member cannot prove where the public group
+      // begins. Do not publish only the suffix as a complete answer.
+      if (associated !== terminalPrompt || hostTurn(row.update) || content?.type !== 'text' || !isNativeText(content.text)) return undefined
+      chunks.push(content.text)
+      continue
     }
-    return parts
+    if (row.method === 'session/update' && ['user_message_chunk', 'agent_thought_chunk', 'tool_call', 'tool_call_update'].includes(row.kind) ||
+        row.method === '_x.ai/session/update' && row.kind === 'turn_completed') break
+    return undefined
   }
-  return []
+  const text = nativeTextJoin(chunks.reverse(), '')
+  return nativeTextHasSpeech(text) ? text : undefined
 }
 
-function grokUserQueryRange(text: NativeTextValue): { start: number; end: number } | undefined {
-  const opening = '<user_query>\n', closing = '\n</user_query>'
-  return nativeTextStartsWith(text, opening) && nativeTextEndsWith(text, closing) && text.length >= opening.length + closing.length
-    ? { start: opening.length, end: text.length - closing.length } : undefined
+async function convertGrokRecord(reader: NativeJsonlHistoryReader, record: Record<string, unknown>, start: number, sessionId: string): Promise<AgentSessionHistoryItem> {
+  const row = updateRecord(record, sessionId), { params, update, kind, method } = row
+  const id = `grok-update:${start}`
+  const timestamp = typeof record.timestamp === 'number' && Number.isSafeInteger(record.timestamp) && record.timestamp >= 0
+    && Number.isSafeInteger(record.timestamp * 1000) ? record.timestamp * 1000 : undefined
+  const time = timestamp === undefined ? {} : { startedAt: timestamp }
+  if (method === '_x.ai/session/update' && kind === 'turn_completed') {
+    const turnId = extractString(update.prompt_id)
+    // agent_result is null for success in the native producer, and may contain
+    // backend error details for failure. Only the original text group is speech.
+    const text = turnId && (promptId(params) === undefined || promptId(params) === turnId) && update.stop_reason === 'end_turn' && update.error_kind == null
+      ? await finalText(reader, start, sessionId, turnId) : undefined
+    if (text !== undefined) return { id, kind: 'assistant-message', turnId: turnId!, messagePhase: 'final', ...time,
+      contentParts: [{ kind: 'text', text, contentEligibility: 'public' }] }
+  }
+  if (method === 'session/update') {
+    if (kind === 'user_message_chunk') return { id, kind: hostTurn(update) ? 'activity' : 'user-message', ...time,
+      contentParts: textPart(update.content, hostTurn(update) ? 'private' : 'unconfirmed') }
+    if (kind === 'agent_message_chunk') return { id, kind: 'activity', title: 'Grok text chunk', ...time,
+      contentParts: textPart(update.content, hostTurn(update) ? 'private' : 'unconfirmed') }
+    if (kind === 'agent_thought_chunk') {
+      const content = isRecord(update.content) ? update.content : undefined
+      return { id, kind: 'activity', title: 'Grok thought', ...time,
+        contentParts: content?.type === 'text' && isNativeText(content.text)
+          ? [{ kind: 'reasoning', text: content.text, contentEligibility: 'private' }] : [] }
+    }
+    if (kind === 'tool_call') return { id, kind: 'activity', title: 'Grok tool call', ...time,
+      contentParts: [{ kind: 'tool-call', name: extractString(update.title) ?? 'tool',
+        ...(extractString(update.toolCallId) ? { callId: update.toolCallId as string } : {}),
+        input: nativeJsonStringify(update.rawInput ?? {}), contentEligibility: 'unconfirmed' }] }
+    if (kind === 'tool_call_update') return { id, kind: 'activity', title: 'Grok tool result', ...time,
+      contentParts: [{ kind: 'tool-result', ...(extractString(update.toolCallId) ? { callId: update.toolCallId as string } : {}),
+        output: nativeJsonStringify(update.rawOutput ?? update.content ?? []), contentEligibility: 'unconfirmed' }] }
+  }
+  return { id, kind: 'activity', title: `Grok ${kind}`, ...time,
+    contentParts: [{ kind: 'text', text: nativeJsonStringify(record), contentEligibility: 'unconfirmed' }] }
 }
 
-function convertGrokRecord(
-  record: Record<string, unknown>,
-  start: number
-): AgentSessionHistoryItem | null {
-  const type = extractString(record.type)
-  if (!type) return null
-  const contentEligibility = type === 'system'
-    ? 'private' : ['assistant', 'reasoning', 'backend_tool_call', 'tool_result'].includes(type) ? 'public' : 'unconfirmed'
-
-  // Byte offset id is honest for native Grok records
-  const id = `grok-record:${start}`
-
-  if (type === 'user') {
-    const syntheticReason = extractString(record.synthetic_reason)
-    const isUserSpeech = !syntheticReason || syntheticReason === 'human'
-    const contentParts = parseContentParts(record.content)
-
-    if (!isUserSpeech) {
-      return {
-        id,
-        kind: 'activity',
-        title: `Grok ${syntheticReason}`,
-        contentParts: contentParts.map(part => ({ ...part, contentEligibility }))
-      }
-    }
-
-    // Grok's whole-string native user envelope is a reading projection, never author/source authority.
-    if (isNativeText(record.content)) {
-      const readingRange = grokUserQueryRange(record.content)
-      if (readingRange) contentParts[0] = { kind: 'text', text: record.content, readingRange }
-    }
-    return {
-      id,
-      kind: 'user-message',
-      contentParts: contentParts.map(part => ({ ...part, contentEligibility }))
-    }
-  }
-
-  if (type === 'assistant') {
-    const contentParts: AgentSessionHistoryContentPart[] = []
-    const textContent = extractText(record.content)
-
-    if (textContent && textContent.length > 0) {
-      contentParts.push({ kind: 'text', text: textContent })
-    }
-
-    if (Array.isArray(record.tool_calls)) {
-      for (const call of record.tool_calls) {
-        if (!isRecord(call)) continue
-        const name = extractString(call.name) ?? 'tool'
-        const callId = extractString(call.id)
-        const input = isNativeText(call.arguments) ? call.arguments : stringifyValue(call.arguments)
-        contentParts.push({
-          kind: 'tool-call',
-          contentEligibility,
-          name,
-          input,
-          ...(callId ? { callId } : {})
-        })
-      }
-    }
-
-    const hasText = contentParts.some((p) => p.kind === 'text' && nativeTextHasSpeech(p.text))
-    const kind = hasText ? 'assistant-message' : 'activity'
-
-    return {
-      id,
-      kind,
-      ...(kind === 'activity' ? { title: 'Grok tool_calls' } : {}),
-      contentParts: contentParts.map(part => ({ ...part, contentEligibility }))
-    }
-  }
-
-  if (type === 'reasoning') {
-    const contentParts: AgentSessionHistoryContentPart[] = []
-
-    const summary = Array.isArray(record.summary)
-      ? nativeTextJoin(record.summary
-          .map((s) => (isRecord(s) && s.type === 'summary_text' ? extractText(s.text) : null))
-          .filter((value): value is NativeTextValue => !!value))
-      : null
-
-    const contentText = Array.isArray(record.content)
-      ? nativeTextJoin(record.content
-          .map((c) => (isRecord(c) && c.type === 'text' ? extractText(c.text) : null))
-          .filter((value): value is NativeTextValue => !!value))
-      : null
-
-    const parts = [summary, contentText].filter(Boolean)
-    const text = parts.length > 0 ? nativeTextJoin(parts as NativeTextValue[]) : (extractText(record.text) ?? '')
-
-    if (text) {
-      contentParts.push({ kind: 'reasoning', text })
-    }
-
-    const encrypted = extractText(record.encrypted_content)
-    if (encrypted) {
-      contentParts.push({
-        kind: 'resource',
-        resourceType: 'other',
-        reference: encrypted,
-        label: 'Encrypted reasoning'
-      })
-    }
-
-    if (contentParts.length === 0) {
-      contentParts.push({ kind: 'reasoning', text: '' })
-    }
-
-    return {
-      id,
-      kind: 'activity',
-      title: 'Grok reasoning',
-      contentParts: contentParts.map(part => ({ ...part, contentEligibility }))
-    }
-  }
-
-  if (type === 'backend_tool_call') {
-    const kindRecord = isRecord(record.kind) ? record.kind : undefined
-    const name = extractString(kindRecord?.tool_type) ?? 'backend_tool'
-    const callId = extractString(kindRecord?.id) ?? extractString(record.id)
-    const input = nativeJsonStringify(kindRecord ?? record)
-
-    return {
-      id,
-      kind: 'activity',
-      title: 'Grok backend_tool_call',
-      contentParts: [
-        {
-          kind: 'tool-call',
-          contentEligibility: kindRecord ? contentEligibility : 'unconfirmed',
-          name,
-          input,
-          ...(callId ? { callId } : {})
-        }
-      ]
-    }
-  }
-
-  if (type === 'tool_result') {
-    const toolCallId = extractString(record.tool_call_id)
-    const output = isNativeText(record.content) ? record.content : stringifyValue(record.content)
-
-    const contentParts: AgentSessionHistoryContentPart[] = [
-      {
-        kind: 'tool-result',
-        output,
-        ...(toolCallId ? { callId: toolCallId } : {})
-      }
-    ]
-
-    if (Array.isArray(record.images)) {
-      for (const img of record.images) {
-        if (!isRecord(img)) continue
-        const url = extractText(img.url)
-        if (url) {
-          contentParts.push({ kind: 'resource', resourceType: 'image', reference: url })
-        }
-      }
-    }
-
-    return {
-      id,
-      kind: 'activity',
-      title: 'Grok tool_result',
-      contentParts: contentParts.map(part => ({ ...part, contentEligibility }))
-    }
-  }
-
-  if (type === 'system') {
-    const text = isNativeText(record.content) ? record.content : stringifyValue(record.content)
-    return {
-      id,
-      kind: 'activity',
-      title: 'Grok system',
-      contentParts: [{ kind: 'text', text, contentEligibility }]
-    }
-  }
-
-  return {
-    id,
-    kind: 'activity',
-    title: `Grok ${type}`,
-    contentParts: [{ kind: 'text', text: nativeJsonStringify(record), contentEligibility }]
-  }
-}
-
-/** Observe the same verified conversation file as the reader, including id-only handles. */
-export async function observeGrokSessionHistory(
-  context: AgentProviderSessionHistoryObservationContext
-): Promise<AgentSessionHistoryObservationHandle> {
+async function openGrokReader(context: AgentProviderSessionHistoryContext): Promise<NativeJsonlHistoryReader> {
   const budget: NativeHistoryReadBudget = { bytesRead: 0, startedAt: Date.now() }
-  const chatHistoryPath = await resolveGrokChatHistoryPath(context, true)
-  await verifySummaryIdentity(dirname(chatHistoryPath), context, budget)
-  return observeNativeJsonlHistory({ ...context, transcriptPath: chatHistoryPath })
+  const transcriptPath = await resolveGrokUpdatesPath(context)
+  await verifySummaryIdentity(dirname(transcriptPath), context, budget)
+  return NativeJsonlHistoryReader.open({ ...context, transcriptPath }, budget)
 }
 
-export async function readGrokSessionHistoryPage(
-  context: AgentProviderSessionHistoryContext
-): Promise<AgentProviderSessionHistoryPage> {
+/** Observe the same verified native updates file as history and changes. */
+export async function observeGrokSessionHistory(context: AgentProviderSessionHistoryObservationContext): Promise<AgentSessionHistoryObservationHandle> {
   const budget: NativeHistoryReadBudget = { bytesRead: 0, startedAt: Date.now() }
-  const chatHistoryPath = await resolveGrokChatHistoryPath(context)
-  await verifySummaryIdentity(dirname(chatHistoryPath), context, budget)
-
-  const reader = await NativeJsonlHistoryReader.open({
-    ...context,
-    transcriptPath: chatHistoryPath
-  }, budget)
-
+  const transcriptPath = await resolveGrokUpdatesPath(context, true)
+  await verifySummaryIdentity(dirname(transcriptPath), context, budget)
+  return observeNativeJsonlHistory({ ...context, transcriptPath })
+}
+export async function readGrokSessionHistoryPage(context: AgentProviderSessionHistoryContext): Promise<AgentProviderSessionHistoryPage> {
+  const reader = await openGrokReader(context)
   try {
     const items: AgentSessionHistoryItem[] = []
     while (items.length < context.limit) {
       const entry = await reader.readPrevious()
       if (!entry) break
-      const item = convertGrokRecord(entry.value, entry.start)
-      if (item) {
-        items.push(item)
-      }
+      items.push(await convertGrokRecord(reader, entry.value, entry.start, context.source.nativeSessionId))
     }
     const nextCursor = await reader.nextCursor()
-    return {
-      source: context.source,
-      items: await Promise.all(items.reverse().map(item => reader.materializeItem(item))),
-      nextCursor
-    }
-  } finally {
-    await reader.close()
-  }
+    return { source: context.source, items: await Promise.all(items.reverse().map(item => reader.materializeItem(item))), nextCursor,
+      changesCursor: await reader.historyChangesCursor(), replayCursor: await reader.historyReplayCursor(), sourceSizeBytes: reader.sourceSizeBytes }
+  } finally { await reader.close() }
+}
+export async function readGrokConversationChanges(context: ProviderConversationChangesContext): Promise<ProviderConversationChangesPage> {
+  const reader = await openGrokReader(context)
+  try {
+    return await readNativeConversationChanges(reader, context,
+      (record, start) => convertGrokRecord(reader, record, start, context.source.nativeSessionId))
+  } finally { await reader.close() }
 }
