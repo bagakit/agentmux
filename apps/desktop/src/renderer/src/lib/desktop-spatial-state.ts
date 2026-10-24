@@ -38,6 +38,15 @@ export function desktopSpatialGraph(state: SpatialWorkbench, topics: readonly Sc
         const region = regionFacts.get(surface.regionId);
         const session = sessions.get(surface.sessionId);
         const original = originalRegions.get(surface.regionId);
+        // A local pending surface is not a Core creation receipt. Keep the original
+        // Launcher until the real producer confirms its exact Agent and position.
+        if (surface.phase === 'launching' && !session && original?.tabId === tab.id && original.kind === 'launcher') {
+          const index = facts.regions.findIndex(fact => fact.regionId === surface.regionId && fact.tabId === tab.id);
+          if (index >= 0) facts.regions[index] = structuredClone(original);
+          const previousResource = previous?.resources[regionKey(surface.regionId)];
+          if (previousResource !== undefined) resources[regionKey(surface.regionId)] = structuredClone(previousResource);
+          continue;
+        }
         const retained = previous && original?.tabId === tab.id ? desktopAgentPresentationFromSpatial(previous, original) : null;
         const presentation = session?.control.kind === 'agent'
           ? { sessionId: surface.sessionId, agentSessionId: session.control.agentSessionId, hostId: session.control.hostId }

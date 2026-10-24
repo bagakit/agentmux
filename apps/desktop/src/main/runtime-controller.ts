@@ -1071,16 +1071,16 @@ export class RuntimeController {
       ...await client.readNativeAgentHistoryResource({ ...options, commandOverride: executor.command, args: executor.args, env: executor.env }) }
   }
 
-  async launchAgent(request: AgentLaunchInput, config: AppConfig): Promise<AgentLaunchResult> {
+  async launchAgent(request: AgentLaunchInput, config: AppConfig, spatialIntent?: import('@agentmux/core').AgentMuxAgentCreationSpatialIntent): Promise<AgentLaunchResult> {
     if (!request.forkSource && config.hosts.find(host => host.id === request.hostId)?.kind === 'ssh') {
-      return await this.launchAdmittedAgent(request, config)
+      return await this.launchAdmittedAgent(request, config, spatialIntent)
     }
     if (this.executorConfigReservations.has(request.executorId)) {
       throw Object.assign(new Error(`Executor “${request.executorId}” is being changed. Retry this new launch after its save completes.`), { code: 'SETTING_RESOURCE_IN_USE' })
     }
     this.admittedExecutorLaunches.set(request.executorId, (this.admittedExecutorLaunches.get(request.executorId) ?? 0) + 1)
     try {
-      return await this.launchAdmittedAgent(request, config)
+      return await this.launchAdmittedAgent(request, config, spatialIntent)
     } finally {
       const remaining = this.admittedExecutorLaunches.get(request.executorId)! - 1
       if (remaining) this.admittedExecutorLaunches.set(request.executorId, remaining)
@@ -1088,7 +1088,7 @@ export class RuntimeController {
     }
   }
 
-  private async launchAdmittedAgent(request: AgentLaunchInput, config: AppConfig): Promise<AgentLaunchResult> {
+  private async launchAdmittedAgent(request: AgentLaunchInput, config: AppConfig, spatialIntent?: import('@agentmux/core').AgentMuxAgentCreationSpatialIntent): Promise<AgentLaunchResult> {
     return await this.trackHostLifecycleOperation(request.hostId, async () => {
       const client = await this.connectedClient(request.hostId)
       const remoteCreation = config.hosts.find(host => host.id === request.hostId)?.kind === 'ssh' && !request.forkSource
@@ -1125,6 +1125,7 @@ export class RuntimeController {
         const agentMuxNote = [preparedTopic?.prompt, request.agentMuxNote, profileContext].filter(note => note?.trim()).join('\n\n')
         const hostIntent: AgentMuxHostAgentCreateInput | undefined = remoteCreation ? {
           executorId: request.executorId, executorRevision: request.executorRevision ?? selected!.configRevision,
+          ...(spatialIntent ? { spatialIntent } : {}),
           workspacePath: preparedTopic?.absolutePath ?? request.workspacePath,
           createOperationId: request.createOperationId ?? mintObjectId(),
           ...(agentMuxNote ? { agentMuxNote } : {}),
@@ -1156,6 +1157,7 @@ export class RuntimeController {
         const receipt = hostIntent ? await client.createHostAgentWithDelivery(hostIntent) : await client.createAgentWithDelivery({
           providerId: executor.providerId,
           executorId: request.executorId,
+          ...(spatialIntent ? { spatialIntent } : {}),
           workspacePath: preparedTopic?.absolutePath ?? request.workspacePath,
           args: localExecutor!.args,
           env: {

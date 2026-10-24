@@ -41,8 +41,9 @@ export async function handoffSavedGoalDiscussions(ports: {
       if (receipt.diskDurability !== 'confirmed' || receipt.key !== 'owned:goal-discussion:' + goalId)
         throw new Error('The original Core discussion binding has no durable producer acknowledgement. Its saved Desktop relationship is retained.')
       const confirmed = readGoalDiscussionBinding(receipt.state.graph, goalId)
-      if (JSON.stringify(confirmed) !== JSON.stringify(binding)) throw new Error('The Core acknowledgement names another discussion. The original Desktop relationship is retained.')
-      resolveGoalDiscussionBinding(receipt.state.graph, binding)
+      const completedLauncher = binding.recipient.kind === 'launcher' && confirmed?.recipient.kind === 'agent' && confirmed.tabId === binding.tabId && confirmed.regionId === binding.regionId
+      if (!completedLauncher && JSON.stringify(confirmed) !== JSON.stringify(binding)) throw new Error('The Core acknowledgement names another discussion. The original Desktop relationship is retained.')
+      resolveGoalDiscussionBinding(receipt.state.graph, confirmed!)
       ports.acknowledged(goalId, tabId, receipt)
     } catch (error) { failures.push(error) }
   }

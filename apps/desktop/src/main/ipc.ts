@@ -1,4 +1,4 @@
-import { handoffGoalDiscussion } from './goal-discussion-handoff.js'
+import { captureGoalDiscussionLauncherLaunch, confirmGoalDiscussionLauncherLaunch, handoffGoalDiscussion, launcherCreationSpatialIntent } from './goal-discussion-handoff.js'
 import { desktopGoalControl, desktopGoalChanges, observeDesktopGoalChanges, readDesktopGoals, confirmDesktopGoalParticipation, reconcileDesktopGoalDispatch } from './desktop-goals.js'
 import { hostGoalRecord } from '@agentmux/host/goal-projection'
 import { sessionRecoveryOperationResult } from './session-recovery-operation'
@@ -1187,16 +1187,21 @@ export async function registerIpc(args: {
   )
   const disposeGoalChanges = observeDesktopGoalChanges(args.runtime, (ids, snapshot) => { if (!contents.isDestroyed()) contents.send('demands:changed', ids, snapshot) }, message => { if (!contents.isDestroyed()) contents.send('demands:observationIssue', message) })
   const executeGoal = desktopGoalControl(args.runtime)
+  const originalDiscussionAgent = async (hostId: string, agentSessionId: string) => {
+    const clients = args.runtime.rpcClients().filter(item => item.hostId === hostId)
+    if (clients.length !== 1) throw new AgentMuxError('The exact original discussion Host is unconfirmed. Its saved relationship is retained.', 'GOAL_DISCUSSION_UNCONFIRMED')
+    const client = clients[0]!.client, agent = await client.inspectAgentCreation(agentSessionId)
+    const current = args.runtime.rpcClients().filter(item => item.hostId === hostId)
+    if (current.length !== 1 || current[0]!.client !== client) throw new AgentMuxError('The original discussion Core owner changed during observation. Its binding and Session remain retained.', 'GOAL_DISCUSSION_UNCONFIRMED')
+    if (agent.kind !== 'agent' || agent.agentSessionId !== agentSessionId || agent.hostId !== 'local' && agent.hostId !== hostId) throw new AgentMuxError('The original discussion Core Session is unconfirmed. No replacement was selected.', 'GOAL_DISCUSSION_UNCONFIRMED')
+    return { ...agent, hostId }
+  }
   handleWithEvent('goals:handoffDiscussion', async (event, input: import('@agentmux/host/goal-discussion-bindings').GoalDiscussionHandoff) => {
     requireTrustedSender('goals:handoffDiscussion', event)
     return handoffGoalDiscussion(input, { spatial: spatialState,
       goal: async goalId => (await args.runtime.callOriginalCore('local', 'goal.inspect', { goalId },
         { principal: { kind: 'user', id: 'local-user:' + (process.getuid?.() ?? 'current') } })).goal,
-      agent: async (hostId, agentSessionId) => {
-        const clients = args.runtime.rpcClients().filter(item => item.hostId === hostId)
-        if (clients.length !== 1) throw new AgentMuxError('The exact original discussion Host is unconfirmed. Its saved relationship is retained.', 'GOAL_DISCUSSION_UNCONFIRMED')
-        return clients[0]!.client.agentSession(agentSessionId)
-      } })
+      agent: originalDiscussionAgent })
   })
   handleWithEvent('goals:execute', async (event, request: AgentMuxControlRequest) => {
     requireTrustedSender('goals:execute', event)
@@ -1522,8 +1527,10 @@ export async function registerIpc(args: {
   handle('sessions:nativeHistoryPage', async (input: import('../shared/contracts.js').NativeAgentHistoryInput) => args.runtime.nativeAgentHistory(input, config))
   handle('sessions:nativeHistoryResource', async (input: import('../shared/contracts.js').NativeAgentHistoryResourceInput) => args.runtime.nativeAgentHistoryResource(input, config))
   handleWithEvent('sessions:launchAgent', async (event, input: AgentLaunchInput, goalPmo?: GoalPmoIntent) => sessionAgentLaunchResult(input, async () => {
+    let capturedLauncher: Awaited<ReturnType<typeof captureGoalDiscussionLauncherLaunch>> = null
     try {
-      if (input.agentMuxNote !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
+      if (input.agentMuxNote !== undefined || input.launcher !== undefined) assertManualPromptSenderTrusted(event.sender, contents)
+      capturedLauncher = await captureGoalDiscussionLauncherLaunch(input, { spatial: spatialState, workspaces: config.workspaces })
       if (goalPmo) {
         assertManualPromptSenderTrusted(event.sender, contents)
         await pmoGoal(goalPmo)
@@ -1534,7 +1541,14 @@ export async function registerIpc(args: {
       throw Object.assign(error instanceof Error ? error : new Error(String(error)),
         { controlFailure: { disposition: 'not_applied', confirmedInputBytes: null } })
     }
-    const result = await args.runtime.launchAgent(input, config)
+    const spatialIntent = launcherCreationSpatialIntent(input, config.workspaces)
+    const result = spatialIntent ? await args.runtime.launchAgent(input, config, spatialIntent) : await args.runtime.launchAgent(input, config)
+    try {
+      const issue = await confirmGoalDiscussionLauncherLaunch(capturedLauncher, result, { spatial: spatialState, agent: originalDiscussionAgent })
+      if (issue) result.placementIssue = issue
+    }
+    catch (error) { result.placementIssue = 'The original discussion binding is unconfirmed: ' + (error instanceof Error ? error.message : String(error)) }
+    if (!result.placementIssue) delete result.placementIssue
     const creation = result.creation
     if (goalPmo && creation && result.created.agentSessionId === input.agentSessionId && creation.createOperationId === input.createOperationId && creation.initialPrompt === 'confirmed') {
       try {
