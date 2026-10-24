@@ -10,6 +10,7 @@ import { DeliveryLogDetails } from '@agentmux/client-ui/components/DeliveryLogDe
 import { initFollowState, onContentChange, onScroll, shouldShowJumpToLatest } from '@agentmux/client-ui/activity-autoscroll'
 import { currentAgentSemanticStatus, nativeTargetSourceUnconfirmed } from '@agentmux/core/agent-status'
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { AgentMuxHostedClient } from '@agentmux/core/hosted'
 import type { AgentSessionUserMessage } from '@agentmux/core'
 import type { InputHistoryRead } from '@agentmux/client-ui/use-agent-input-history'
@@ -48,11 +49,12 @@ export type MobileConversationSurfaceProps = Pick<ConversationMessageProps,
   onAttach?: () => void
   onShowTerminal?: () => void
   onShowGoals?: (trigger: HTMLButtonElement) => void
+  toolbarTarget?: HTMLElement | null
   visible?: boolean
   displayName?: string
 }
 /** A first-party SDK reader and input client. Core owns ordering, authorship and admission. */
-export function MobileConversationSurface({ client, agentSessionId, connection, platform, onAttach, onShowTerminal, onShowGoals, visible = true, displayName,
+export function MobileConversationSurface({ client, agentSessionId, connection, platform, onAttach, onShowTerminal, onShowGoals, toolbarTarget, visible = true, displayName,
   openWorkspaceFile, readPastedImage, openHttpLink }: MobileConversationSurfaceProps) {
   const conversationPlatform = useMemo(() => ({ ...platform,
     readA2AMessage: async (reference: { hostId: string; agentSessionId: string }, messageId: string, notificationId?: string) => {
@@ -362,6 +364,26 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
           </details> : null}</>}
         </aside>
   }
+  const conversationTools = (
+    <div className="mobile-conversation__floating-tools" role="group" aria-label="对话工具">
+      {onShowGoals && <button type="button" className="mobile-conversation__goal" aria-label="目标与结果" title="目标与结果" onClick={event => onShowGoals(event.currentTarget)}><SemanticIcon name="object.goal" size={18} /></button>}
+      <MobileMailbox key={historyConnection.current.generation} client={client} session={session} connected={connection.state === 'connected'} messages={mailboxMessages} platform={platform} describeSpeaker={describeSpeaker}
+      {...(reading.projection ? { inputs: reading.projection.inputs } : {})}
+      {...(reading.projection?.timeline.reference?.hostId ? { sourceHostId: reading.projection.timeline.reference.hostId } : {})}
+      refresh={() => { void reading.refresh() }} historyScope={historyScope} readHistory={readInputHistory} visible={visible}
+      onHistoryFill={fillHistoryMessage} onHistoryCopy={copyHistoryMessage} localEntries={historyLocalEntries}
+      promptAttempts={sessionAttempts} diagnostics={diagnostics}
+      onHistoryFillLocal={entry => {
+        if (currentHistory.current.scope !== historyScope || current.current.client !== client || current.current.agentSessionId !== agentSessionId)
+          throw new Error('已切换 Agent，原正文和当前草稿保留。')
+        if (!insertion.current) throw new Error('原编辑器已关闭，正文和草稿保留。')
+        insertion.current.replace(entry.text)
+      }}
+      reading={readingProps}
+      {...(onShowTerminal ? { terminal: onShowTerminal } : {})} />
+    </div>
+  )
+
   return <ClientUiProvider platform={conversationPlatform}><MobileNoticeScope owner={client} identity={[ agentSessionId, session?.run.runId]}>
     <section className="mobile-conversation" aria-label="会话" data-agent-surface-mode="activity" data-agent-session-id={agentSessionId ?? ''}>
       {!available || connection.issue ? <MobileNotice identity={[connection.state,connection.issue,available]} className="mobile-conversation__connection" role="status">{connection.issue ?? connection.message}{!available ? ' 当前发送暂不可用。' : ''}</MobileNotice> : null}
@@ -425,23 +447,7 @@ export function MobileConversationSurface({ client, agentSessionId, connection, 
             {...(reading.page ? nativeReadingProps : readingProps)} />
         </> : !reading.reading ? <p className="mobile-conversation__empty">暂无已确认的对话内容，可发送消息或查看 Terminal。</p> : null}
       </div>
-        <div className="mobile-conversation__floating-tools" role="group" aria-label="对话工具">
-          {onShowGoals && <button type="button" className="mobile-conversation__goal" aria-label="目标与结果" title="目标与结果" onClick={event => onShowGoals(event.currentTarget)}><SemanticIcon name="object.goal" size={18} /></button>}
-          <MobileMailbox key={historyConnection.current.generation} client={client} session={session} connected={connection.state === 'connected'} messages={mailboxMessages} platform={platform} describeSpeaker={describeSpeaker}
-          {...(reading.projection ? { inputs: reading.projection.inputs } : {})}
-          {...(reading.projection?.timeline.reference?.hostId ? { sourceHostId: reading.projection.timeline.reference.hostId } : {})}
-          refresh={() => { void reading.refresh() }} historyScope={historyScope} readHistory={readInputHistory} visible={visible}
-          onHistoryFill={fillHistoryMessage} onHistoryCopy={copyHistoryMessage} localEntries={historyLocalEntries}
-          promptAttempts={sessionAttempts} diagnostics={diagnostics}
-          onHistoryFillLocal={entry => {
-            if (currentHistory.current.scope !== historyScope || current.current.client !== client || current.current.agentSessionId !== agentSessionId)
-              throw new Error('已切换 Agent，原正文和当前草稿保留。')
-            if (!insertion.current) throw new Error('原编辑器已关闭，正文和草稿保留。')
-            insertion.current.replace(entry.text)
-          }}
-          reading={readingProps}
-          {...(onShowTerminal ? { terminal: onShowTerminal } : {})} />
-        </div>
+        {toolbarTarget ? createPortal(conversationTools, toolbarTarget) : null}
       </div>
       {(jump || reading.newerAvailable || reading.olderWindow) && <button className="mobile-reading-action mobile-reading-latest" onClick={() => {
         follow.current = initFollowState(); presentationIntent.current++; setJump(false)

@@ -183,9 +183,20 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-brand-mark { display: grid; place-items: center; color: var(--green); border: 1px solid var(--green-line); background: var(--green-bg); width: 30px; height: 30px; border-radius: var(--radius); }
 .mobile-header-actions { display: flex; align-items: center; gap: 10px; }
 .mobile-session-header-actions { display: flex; align-items: center; justify-self: end; }
-.mobile-header:has(> .mobile-session-header-actions) { grid-template-columns: 44px minmax(0,1fr) 88px; }
+.mobile-session-tool-slot { display: flex; flex: none; align-items: center; }
+.mobile-session-tool-slot[hidden] { display: none; }
+.mobile-header:has(> .mobile-session-header-actions) { grid-template-columns: 44px minmax(0,1fr) auto; }
 .mobile-session-view-toggle { flex: none; }
 .mobile-session-toolbar > .mobile-session-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); font-size: 13px; font-weight: 550; }
+@media (max-width: 390px) {
+  .mobile-session-toolbar:has(.mobile-session-tool-slot:not([hidden])) { gap: 0; }
+  .mobile-session-toolbar:has(.mobile-session-tool-slot:not([hidden])):has(.mobile-session-compose) > .mobile-session-origin > span,
+  .mobile-session-toolbar:has(.mobile-session-tool-slot:not([hidden])):has(.mobile-session-compose) > .mobile-session-title { display: none; }
+}
+@media (max-width: 360px) {
+  .mobile-session-toolbar:has(.mobile-session-tool-slot:not([hidden])) > .mobile-session-origin > span,
+  .mobile-session-toolbar:has(.mobile-session-tool-slot:not([hidden])) > .mobile-session-title { display: none; }
+}
 .mobile-navigation > button > span { font-size: 10px; }
 .mobile-connect-mark { display: inline-flex; padding: 14px; border: 1px solid var(--mobile-border); border-radius: var(--radius-lg); color: var(--green); background: var(--surface-1); }
 .mobile-home-settings { margin: 18px 0; padding: 0; border: 0; }
