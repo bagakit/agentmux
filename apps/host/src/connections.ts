@@ -59,7 +59,7 @@ export function createHostConnectionOwner(options: HostConnectionOptions) {
   const avatars = options.moteConfigurationPath === undefined ? undefined : createHostMoteAvatarRead({ configurationPath: options.moteConfigurationPath })
   const remoteIngress = createHostedIngressCorePort(clients)
   const moteChat = options.moteChat ?? (options.moteConfigurationPath !== undefined ? createHostMoteChat({
-    configurationPath: options.moteConfigurationPath, spatial, publication, signal: shutdown.signal,
+    configurationPath: options.moteConfigurationPath, spatial,
     runtime: () => {
       if (!runtime || closed) throw new AgentMuxError('The original Mote Host is unavailable. Existing conversations and saved resources are retained.', 'MOTE_CHAT_HOST_UNAVAILABLE')
       return runtime

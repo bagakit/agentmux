@@ -11,7 +11,7 @@ import { parseConnectionDelivery, parseConnectionDeliveryReceipt, parseConnectio
 import { parseConversationChangesPage, parseConversationUnit, parseConversationCheckpoint, conversationRecordId, conversationSourceKey, conversationQuestionIdentity, type ConversationQuestionIdentity, type ConversationContentRef, type ConversationUnit, type ConversationChangesPage, type ConversationCheckpoint, type ConversationItemRef, type ConversationRef } from '@agentmux/core/conversation'
 
 /** The immutable authorized audience; presentation and current focus are deliberately absent. */
-export type PublicationBoundary = Pick<RoomBinding, 'bindingId' | 'revision' | 'connectionId' | 'application' | 'executionHostId' | 'agentSessionId' | 'externalConversationId' | 'sourceCheckpoints' | 'sourceFrontier' | 'scope'>
+export type PublicationBoundary = Pick<RoomBinding, 'bindingId' | 'revision' | 'connectionId' | 'application' | 'executionHostId' | 'agentSessionId' | 'externalConversationId' | 'sourceCheckpoints' | 'sourceFrontier' | 'publicationOrigin' | 'scope'>
 /** Exact original recipient, independent of current connection aliases and Binding generations. */
 export type PublicationContextRecipient = {
   application: PublicationBoundary['application']; externalConversationId: string; hostId: string; agentSessionId: string
@@ -311,17 +311,23 @@ export class PublicationStore {
     return this.database.prepare(`SELECT operation_json, state FROM connector_publication_operation WHERE binding_id=? AND binding_revision=?${cursor ? ` AND ordinal${comparison}?` : ''} ORDER BY ordinal ${direction} LIMIT ?`)
       .all(boundary.bindingId, boundary.revision, ...(cursor ? [cursor.ordinal!] : []), limit).map(row => this.read(row)!)
   }
-  /** Lift only original authorized cuts. Current discovery supplies namespace, never a replacement cut. */
-  checkpoint(boundary: PublicationBoundary, sourceHostId: string): ConversationCheckpoint {
+  retainedCheckpoint(boundary: PublicationBoundary): ConversationCheckpoint | null {
+    const saved = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?').get(...scopeKey(boundary), 'unified')
+    return saved ? parseConversationCheckpoint(JSON.parse(String(saved.checkpoint_json)), ref(boundary)) : null
+  }
+  /** Lift frozen cuts, or the explicitly authorized creation's first real native origin. Never replace a saved cut. */
+  checkpoint(boundary: PublicationBoundary, sourceHostId: string, origin?: ConversationCheckpoint): ConversationCheckpoint {
     return this.transaction(() => {
       const query = this.database.prepare('SELECT checkpoint_json FROM connector_publication_frontier WHERE binding_id=? AND binding_revision=? AND source_key=?')
-      const saved = query.get(...scopeKey(boundary), 'unified')
+      const saved = this.retainedCheckpoint(boundary)
       if (saved) {
-        const checkpoint = parseConversationCheckpoint(JSON.parse(String(saved.checkpoint_json)), ref(boundary))
+        const checkpoint = saved
         if (checkpoint.sourceHostId !== sourceHostId) throw new AgentMuxError('The retained source namespace changed.', 'PUBLICATION_SOURCE_CONFLICT')
         return checkpoint
       }
-      const initial: ConversationCheckpoint = boundary.sourceFrontier ?? {
+      if (boundary.publicationOrigin && (!origin || origin.frontier.cuts.length !== 1 || origin.frontier.cuts[0]?.kind !== 'native') || origin && !boundary.publicationOrigin)
+        throw new AgentMuxError('This conversation has no accepted native beginning yet. Input and the original creation remain available.', 'AGENT_CONVERSATION_NATIVE_UNAVAILABLE')
+      const initial: ConversationCheckpoint = origin ?? boundary.sourceFrontier ?? {
         ...ref(boundary), sourceHostId, frontier: { hostId: sourceHostId, agentSessionId: boundary.agentSessionId,
           scope: { sources: boundary.sourceCheckpoints.map(c => ({ kind: 'native' as const, ...c.source })) },
           cuts: boundary.sourceCheckpoints.map(c => {
