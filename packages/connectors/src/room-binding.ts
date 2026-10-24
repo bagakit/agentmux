@@ -136,11 +136,11 @@ export class RoomBindingHost implements RoomBindingsPort, RoomBindingReadPort {
       return { event, deliveryOperationId: this.options.lifecycle!.queueBindingNotice(operationId, binding, event, synchronization) }
     })
   }
-  private sameAudience(left: RoomBinding, right: RoomBinding): boolean {
-    return equal(left.application, right.application) && left.externalConversationId === right.externalConversationId && left.executionHostId === right.executionHostId && left.executionRuntimeId === right.executionRuntimeId && left.agentSessionId === right.agentSessionId && equal(left.scope, right.scope) && equal(left.inputTarget, right.inputTarget)
+  private sameGrantSubject(left: RoomBinding, right: RoomBinding): boolean {
+    return equal(left.application, right.application) && left.externalConversationId === right.externalConversationId && left.executionHostId === right.executionHostId && left.executionRuntimeId === right.executionRuntimeId && left.agentSessionId === right.agentSessionId && equal(left.inputTarget, right.inputTarget)
   }
   private carryGrants(previous: RoomBinding, binding: RoomBinding): void {
-    if (!this.sameAudience(previous, binding)) return
+    if (!this.sameGrantSubject(previous, binding)) return
     for (const original of this.bindingGrants(previous)) {
       const grant = { ...original, revision: original.revision + 1, bindingRevision: binding.revision, connectionId: binding.connectionId }
       this.database.prepare('INSERT INTO room_grant_revision (grant_id,revision,snapshot_json) VALUES (?,?,?)').run(grant.grantId, grant.revision, JSON.stringify(grant))
