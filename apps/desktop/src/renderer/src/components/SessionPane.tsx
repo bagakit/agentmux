@@ -645,11 +645,11 @@ export function SessionPane({
   const unobservedActionsAt = (origin = mailboxOrigin, displayId: string | null = null) => <>
     {storageWait ? <ServiceWindowNotice summary={{
       step: 'Waiting for storage',
-      mode: 'Agent has not started. The original request and initial prompt are kept.',
+      mode: 'The original request and initial prompt are kept.',
       restore: 'Free storage to continue automatically.' + (unobservedReadError ? ' Latest check unavailable; see details.' : '')
     }} notice={{ kind: 'indeterminate', notice: {
       step: storageWait.message,
-      mode: 'The Agent has not started. The original Session, request and initial prompt are retained.',
+      mode: 'The original Session, request and initial prompt are retained.',
       restore: 'Free storage on this host. This original request will continue automatically.' +
         (unobservedReadError ? ` Latest read: ${unobservedReadError}` : '')
     } }} /> : null}
