@@ -9,9 +9,6 @@
 .settings-profile__identity-text input:not([type=file]) { width: 100%; max-width: 410px; min-height: 36px; padding: 8px 12px; border: 1px solid var(--line-soft); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text); font: 550 var(--fs-title)/1.5 var(--font-sans); }
 .settings-profile__identity-text input:not([type=file]):hover { border-color: var(--line); }
 .settings-profile__image-actions { display: grid; justify-items: center; gap: var(--sp-2); }
-.settings-profile__image-actions .small-button { display: inline-flex; align-items: center; gap: 6px; }
-.settings-profile__remove { border: 0; background: transparent; color: var(--text-3); font-size: var(--fs-meta); cursor: pointer; padding: 5px 0; }
-.settings-profile__remove:hover { color: var(--text); }
 .settings-profile__context { display: grid; gap: 12px; }
 .settings-profile__context header h3 { margin: 0; font-size: var(--fs-body); font-weight: 550; }
 .settings-profile__context header p { margin: 6px 0 4px; font-size: var(--fs-meta); color: var(--text-3); }
@@ -35,5 +32,4 @@
 }
 
 .settings-profile__context header h3 label { color: var(--text); font: inherit; }
-.settings-profile__remove:focus-visible { outline: 2px solid var(--focus-line); outline-offset: 3px; }
 @media (max-width: 560px) { .settings-profile__identity-hint { font-size: var(--fs-micro); } .settings-profile__distribution { padding-block: var(--sp-5); } }

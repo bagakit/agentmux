@@ -6,8 +6,6 @@
 .lark-settings .connector-mote-identities h3 { font-size: var(--fs-body); }
 .lark-settings .connector-mote-identities header p { margin-top: var(--sp-1); font-size: var(--fs-meta); }
 .lark-settings .connector-service-control { gap: var(--sp-3); }
-.lark-settings .connector-service-control__refresh { display: inline-flex; align-items: center; gap: var(--sp-2); }
-.lark-settings .connector-service-control__refresh > svg { flex: none; }
 .lark-settings .connector-list-feedback { display: grid; justify-items: start; gap: var(--sp-3); padding: var(--sp-4); border: 1px solid var(--amber-line); border-radius: var(--radius); background: var(--amber-bg); }
 .lark-settings .connector-list-feedback > p { margin: 0; }
 .lark-settings .connector-credentials-source { padding: var(--sp-4); border-radius: var(--radius); background: var(--surface-1); gap: var(--sp-3); }

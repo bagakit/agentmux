@@ -36,12 +36,6 @@
 .settings-page .settings-pane-actions > span { min-width: 0; overflow-wrap: anywhere; }
 .settings-page .settings-pane-actions > button { flex-shrink: 0; }
 .settings-pane-actions[data-settings-save-bar] > button { align-self: flex-end; }
-.settings-page .settings-pane-actions > .primary-button:disabled {
-  color: var(--text-3);
-  background: var(--surface-2);
-  box-shadow: none;
-  opacity: 1;
-}
 
 /* These are browser-reported signals. Their presence does not imply an OS bridge.
    The normal material is already 92% opaque when a signal is unavailable. */
@@ -62,7 +56,6 @@
 }
 
 .external-browser-connections__actions, .external-browser-connections__link { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
-.external-browser-connections .small-button { display: inline-flex; align-items: center; gap: var(--sp-2); }
 .external-browser-connections__link input { min-width: 0; flex: 1; }
 .external-browser-connections__targets { list-style: none; margin: 0; padding: 0; }
 .external-browser-connections__targets li { display: flex; align-items: flex-start; gap: var(--sp-3); padding: var(--sp-2) 0; }

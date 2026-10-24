@@ -39,6 +39,8 @@ export function HostUpgradePanel({ host, committed, active }: {
   const [state, setState] = useState<State>({})
   const [copyState, setCopyState] = useState<{ input: SshHostConfig; text: string; status: 'copying' | 'copied' | 'failed'; error?: string }>()
   const latestCopyRequest = useRef<object | undefined>(undefined)
+  // Pending presentation keeps the initiating action role; eligibility still uses the fresh check.
+  const pendingPrimary = useRef(false)
   const autoCheckedInput = useRef<SshHostConfig | undefined>(undefined)
   const currentHost = useRef(host), currentCommitted = useRef(committed)
   currentHost.current = host; currentCommitted.current = committed
@@ -75,6 +77,7 @@ export function HostUpgradePanel({ host, committed, active }: {
   async function upgrade(runUpgrade = true): Promise<void> {
     if (!active || !saved || busy) return
     const input = structuredClone(host)
+    pendingPrimary.current = Boolean(check?.eligible && !needsRecheck)
     setState({ input, busy: 'checking' })
     let operationId: string | undefined
     try {
@@ -99,6 +102,7 @@ export function HostUpgradePanel({ host, committed, active }: {
   async function inspect(): Promise<void> {
     if (!active || busy || !state.operationId || !state.input) return
     const captured = state
+    pendingPrimary.current = Boolean(check?.eligible && !needsRecheck)
     setState({ ...captured, busy: 'inspecting' })
     try {
       const receipt = await api.hosts.upgradeInspect(captured.input!, captured.operationId!)
@@ -154,7 +158,7 @@ export function HostUpgradePanel({ host, committed, active }: {
     {runtimeBlocked ? <p className="host-upgrade__next-step">Copy the diagnostics for whoever maintains this host to arrange a supported runtime update. Recheck availability after that update is installed.</p> : null}
     <div className="host-upgrade__actions">
       {runtimeBlocked ? <button type="button" className="small-button" data-copy-upgrade-diagnostics disabled={copy?.status === 'copying'} onClick={() => void copyDiagnostics()}><ThemeActionCopyIcon size={13} />{copy?.status === 'copying' ? 'Copying…' : copy?.status === 'copied' ? 'Copied' : 'Copy diagnostics'}</button> : null}
-      <button type="button" data-upgrade-action className={check?.eligible && !needsRecheck && !busy ? 'primary-button' : 'small-button host-upgrade__recheck'} disabled={busy || !saved} onClick={() => void (uncertain ? inspect() : upgrade(!needsRecheck))}>
+      <button type="button" data-upgrade-action className={(busy ? pendingPrimary.current : check?.eligible && !needsRecheck) ? 'primary-button' : 'small-button'} disabled={busy || !saved} onClick={() => void (uncertain ? inspect() : upgrade(!needsRecheck))}>
         {busy ? 'Working…' : uncertain ? 'Check original result' : needsRecheck ? 'Recheck availability' : 'Upgrade and reconnect'}
       </button>
     </div>

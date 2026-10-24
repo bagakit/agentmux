@@ -21,7 +21,6 @@
 .channel-environment .connector-service-control__heading p { font-size: var(--fs-meta); max-width: 42ch; line-height: 1.5; }
 .channel-environment .connector-service-control__setting { gap: var(--sp-3); }
 .channel-environment .connector-service-control__setting > [role='status'] { padding: 2px 7px; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--text-2); }
-.channel-environment .connector-service-control__refresh { padding: 4px 0; border: 0; min-height: 28px; font-size: var(--fs-meta); }
 .channel-environment .connector-service-requests > summary { font-size: var(--fs-micro); padding-block: var(--sp-1); cursor: pointer; }
 .connector-identities-heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--sp-4); }
 .connector-identities-heading > div { min-width: 0; }
@@ -29,7 +28,6 @@
 .channel-settings .connector-identities-heading h3 { margin: 0; color: var(--text); font-size: 22px; font-weight: 600; letter-spacing: -.025em; }
 .channel-settings .connector-identities-heading p { margin: var(--sp-2) 0 0; color: var(--text-3); font-size: var(--fs-meta); line-height: 1.6; max-width: 48ch; }
 .channel-settings .connector-saved-identities { border: 0; margin: 0; padding: 0; }
-.channel-settings .connector-saved-identities > header > button { border: 0; padding: 3px 0; min-height: 24px; }
 .connector-bot-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 310px), 1fr)); gap: var(--sp-4); }
 .channel-settings .connector-record { min-width: 0; border: 0; }
 .channel-settings .connector-record__open { width: 100%; min-width: 0; color: var(--text); text-align: left; cursor: pointer; display: flex; flex-direction: column; align-items: stretch; gap: var(--sp-5); height: 100%; padding: var(--sp-5); border: 1px solid transparent; background: var(--surface-1); border-radius: var(--radius-lg); transition: background 120ms ease, border-color 120ms ease; }

@@ -97,7 +97,7 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
           <summary><ThemeObjectPhoneIcon size={16} aria-hidden="true" /><strong>{device.name}</strong><span>{device.online === true ? 'Connected' : device.online === false ? 'Disconnected' : 'Connection unconfirmed'}</span></summary>
           <div className="device-management__record-body">
             <dl className="device-management__identity">
-              <div><dt>Key fingerprint</dt><dd><code>{device.keyFingerprint ?? 'Not yet confirmed'}</code>{device.keyFingerprint && <button type="button" className="performance-icon-button" aria-label={`Copy key fingerprint for ${device.name}`} title="Copy key fingerprint" onClick={() => { void copyFingerprint(device.deviceId, device.keyFingerprint!) }}><ThemeActionCopyIcon size={14} /></button>}</dd></div>
+              <div><dt>Key fingerprint</dt><dd><code>{device.keyFingerprint ?? 'Not yet confirmed'}</code>{device.keyFingerprint && <button type="button" className="icon-button" aria-label={`Copy key fingerprint for ${device.name}`} title="Copy key fingerprint" onClick={() => { void copyFingerprint(device.deviceId, device.keyFingerprint!) }}><ThemeActionCopyIcon size={14} /></button>}</dd></div>
               <div><dt>{device.online === true ? 'Connection IP' : device.online === false ? 'Last connection IP' : 'Recorded connection IP'}</dt><dd><code>{device.connection?.address ?? 'Not recorded'}</code>{device.connection?.address && <small>Recorded {new Date(device.connection.observedAt ?? device.connection.connectedAt).toLocaleString()}</small>}</dd></div>
               <div><dt>Browser (reported)</dt><dd>{device.connection?.userAgent ?? 'Not recorded'}</dd></div>
               <div><dt>Device ID</dt><dd><code>{device.deviceId}</code></dd></div>
@@ -111,7 +111,7 @@ export function DeviceManagementSettings({ active }: { active: boolean }) {
             {device.connectionIssue && <p className="settings-group-note" role="status">{device.connectionIssue}</p>}
             {device.operationIssue && <p className="settings-group-note" role="status">{device.operationIssue}</p>}
             {copyFeedback?.deviceId === device.deviceId && <p className="device-management__feedback" role="status">{copyFeedback.text}</p>}
-            <button className="small-button" disabled={busy} onClick={() => { void revoke(device.deviceId) }}>Revoke access</button>
+            <button className="danger-button" disabled={busy} onClick={() => { void revoke(device.deviceId) }}>Revoke access</button>
           </div>
         </details>)}
         {list && !devices.length && <p className="settings-group-note">No devices paired yet. Your phone will appear after opening the link.</p>}

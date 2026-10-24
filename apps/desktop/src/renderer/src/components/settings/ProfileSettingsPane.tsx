@@ -69,7 +69,7 @@ export function ProfileSettingsPane({ profile, onSave }: {
       </div>
       <div className="settings-profile__image-actions">
         <button ref={photoButton} type="button" className="small-button" onClick={() => upload.current?.click()}><ThemeActionCaptureIcon size={13} aria-hidden="true" /> Change photo</button>
-        {value.avatar && <button type="button" className="settings-profile__remove" onClick={() => draft.setField('avatar', '')}>Remove photo</button>}
+        {value.avatar && <button type="button" className="small-button" onClick={() => draft.setField('avatar', '')}>Remove photo</button>}
       </div>
       </div>
       <div className="settings-profile__identity-text">

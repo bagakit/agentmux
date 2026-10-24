@@ -26,4 +26,3 @@
 .toolkit-palette__name svg { flex-shrink: 0; color: var(--green); }
 .toolkit-palette__choice > small { color: var(--text-3); font-size: var(--fs-micro); line-height: 1.4; }
 .toolkit-palette__summary { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--sp-2); min-height: 26px; font-size: var(--fs-meta); color: var(--text-3); }
-.toolkit-palette__summary .small-button { font-size: var(--fs-meta); }
