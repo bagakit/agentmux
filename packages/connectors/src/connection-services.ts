@@ -5,6 +5,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 import { AgentMuxError } from '@agentmux/core'
 import { ConnectionHost, type ConnectionAdapter } from './connection-host.js'
+import { ConnectionApiHost } from './connection-api.js'
 import { RoomBindingHost, type RoomBindingHostOptions } from './room-binding.js'
 import { RoomProvisioningHost } from './room-provisioning.js'
 import { PublicationHost, type PublicationConversationPort } from './publication-host.js'
@@ -88,6 +89,15 @@ export async function createConnectionServices(options: { directory: string | un
             return await bindings.inspect(input)
           }
         } : bindings
+        if (connections.bindings && bindings) {
+          let api: ConnectionApiHost | undefined
+          const apiOwner = () => api ??= new ConnectionApiHost(connections, {
+            list: input => connections.bindings!.list(input),
+            current: id => moteChat?.readCurrent(id) ? moteChat.apiBinding(id) : bindings.readCurrent(id)
+          })
+          connections.api = { identities: (input, context) => apiOwner().identities(input, context),
+            request: (input, context) => apiOwner().request(input, context), inspect: (input, context) => apiOwner().inspect(input, context) }
+        }
         const rooms = options.bindings ? new RoomProvisioningHost({ connections, spatial: options.bindings.spatial, ...(options.bindings.session ? { session: options.bindings.session } : {}) }) : undefined
         if (rooms) connections.rooms = { ...connections.rooms, create: (input, context) => rooms.create(input, context), inspect: input => rooms.inspect(input) }
         ingress = routing && options.ingress ? new DurableIngressHost({ connections, bindings: routing, authenticators: connections.ingressAuthenticators(), core: options.ingress.core, ...(options.ingress.authoritySource ? { authoritySource: options.ingress.authoritySource } : {}),
@@ -164,6 +174,11 @@ export async function createConnectionServices(options: { directory: string | un
       allocate: async (input, context) => (await ensure()).moteChat!.allocate(input, context)
     } satisfies MoteChatPort } : {}),
     connections: {
+      ...(options.bindings ? { api: {
+        identities: async (input, context) => (await ensure()).connections.api!.identities(input, context),
+        request: async (input, context) => (await ensure()).connections.api!.request(input, context),
+        inspect: async (input, context) => (await ensure()).connections.api!.inspect(input, context)
+      } satisfies import('@agentmux/core/connections').ConnectionApiPort } : {}),
       applicationAccess: {
         get: async input => (await ensure()).connections.applicationAccess.get(input),
         configure: async (input, context) => { const owner = await ensure(), result = await owner.connections.applicationAccess.configure(input, context); if (result.state === 'applied') owner.publication?.refreshAccess(result.grant.adapterId, result.grant.actor.application); return result },

@@ -32,6 +32,7 @@ export interface ConnectionAdapter {
   releaseConnection?(connectionId: string): void
   close?(): void
   readonly channelProfiles?: ChannelProfileAdapter
+  readonly api?: import('./connection-api-adapter.js').ConnectionApiAdapter
   readonly profile?: import('./connection-profile-adapter.js').ConnectionProfileAdapter
   readonly setup?: import('./connection-setup-adapter.js').ConnectionSetupAdapter
   readonly enrollment?: import('./connection-enrollment-adapter.js').ConnectionEnrollmentAdapter
@@ -54,6 +55,7 @@ export class ConnectionHost implements ConnectionPort {
   readonly applicationAccess: ApplicationAccessHost
   readonly service: ConnectionServicePort
   readonly metadata: ChannelMetadataPort
+  api?: import('@agentmux/core/connections').ConnectionApiPort
   private serviceSchemaReady = false
   profile?: import('@agentmux/core/connections').ConnectionProfilePort
   setup?: import('@agentmux/core/connections').ConnectionSetupPort
@@ -403,6 +405,8 @@ export class ConnectionHost implements ConnectionPort {
     const config = this.readConfiguration(connectionId)?.config
     return config?.enabled ? this.options.secrets.resolve(config.credentialRef) : null
   }
+  /** Native business calls borrow this exact registered adapter, never a default external CLI identity. */
+  apiAdapter(adapterId: string): import('./connection-api-adapter.js').ConnectionApiAdapter | undefined { return this.adapters.get(adapterId)?.api }
   /** Read-only original Profile fact shared with this application's current Setup owner. */
   unresolvedProfileWrite(application: import('@agentmux/core/connections').ConnectionApplication, actor: import('@agentmux/core/connections').ConnectionEnrollmentCallContext['actor']) {
     this.profileHost ??= new ConnectionProfileHost(this, this.options.secrets)
