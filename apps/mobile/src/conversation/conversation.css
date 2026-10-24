@@ -9,7 +9,7 @@
 .mobile-conversation .conversation-message { padding-left: 14px; padding-right: 14px; }
 .mobile-conversation .agent-interaction__actions { flex-wrap: wrap; }
 }
-.mobile-message-tools__trigger { position: relative; display: grid; place-items: center; width: 44px; min-height: 44px; border-radius: 9px; background: var(--surface-2); color: var(--text-2); }
+.mobile-message-tools__trigger { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; width: 44px; min-height: 44px; border-radius: 9px; background: var(--surface-2); color: var(--text-2); }
 .mobile-message-tools__trigger i { position: absolute; right: 8px; bottom: 8px; width: 5px; height: 5px; background: var(--text-3); mask: var(--native-presence-unknown-mask) center / contain no-repeat; }
 .mobile-message-tools__trigger i[data-state='neutral'] { mask-image: var(--native-presence-neutral-mask); }
 .mobile-message-tools__trigger i[data-state='working'] { mask-image: var(--native-presence-working-mask); }
@@ -169,3 +169,5 @@
 .mobile-app .mobile-conversation .conversation-coverage > summary { min-height: 44px; display: flex; align-items: center; gap: 5px; }
 .mobile-app .mobile-conversation .conversation-coverage > summary::before { content: '›'; font-size: 14px; }
 .mobile-app .mobile-conversation .conversation-coverage[open] > summary::before { transform: rotate(90deg); }
+
+.mobile-message-tools__trigger > span { font-size: 9px; line-height: 1; }
