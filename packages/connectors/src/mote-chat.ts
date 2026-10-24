@@ -277,6 +277,13 @@ export class MoteChatHost implements MoteChatPort, RoomBindingReadPort {
   }
   readExact(bindingId: string, revision: number): RoomBinding | null { const row = this.store.generationByBinding(bindingId); return revision === 1 ? row?.binding ?? null : null }
   readCurrent(bindingId: string): RoomBinding | null { const row = this.store.generationByBinding(bindingId); return row?.binding ? { ...row.binding, state: this.active(row) ? 'active' : 'paused' } : null }
+  /** On-demand identity authority comes from the current lane/policy, independently of automatic traffic. */
+  apiBinding(bindingId: string): RoomBinding | null {
+    const row = this.store.generationByBinding(bindingId)
+    if (!row?.binding || !this.active(row) || this.store.configuration(row.generation.target.spaceId)?.values.connection?.connectionId !== row.connectionId ||
+      this.store.latest(row.laneKey)?.generation.generationId !== row.generation.generationId) return null
+    return row.binding
+  }
   findActiveAudience(input: { application: RoomBinding['application']; externalConversationId: string }): RoomBinding | null {
     const c = this.store.route(input.application)
     if (!c) return null
