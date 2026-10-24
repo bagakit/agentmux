@@ -2,7 +2,7 @@ import { mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { FeishuAdapter } from '@agentmux/connectors/adapters/feishu'
-import type { PublicationOperation } from '../src/publication-store.js'
+import type { PublicationOperation, PublicationPayload } from '../src/publication-store.js'
 import { feishuConfig } from './fixtures/feishu.js'
 import { feishuPublicationHttp, type FeishuHttpCall, type FeishuHttpResponse } from './fixtures/feishu-publication.js'
 
@@ -26,14 +26,14 @@ it('actual SDK and Axios send the exact frozen native card bytes with a stable o
   expect(f.publisher.prepare(original)).toEqual(prepared)
   const body = JSON.parse(prepared.request.body!), node = JSON.parse(body.content).elements[0]
   expect(body.receive_id).toBe(original.target.externalConversationId); expect(body.uuid).toMatch(/^[A-Za-z0-9_-]{43}$/u)
-  expect(node).toEqual({ tag: 'div', text: { tag: 'plain_text', content: original.payload.text } })
+  expect(node).toEqual({ tag: 'div', text: { tag: 'plain_text', content: (original.payload as Extract<PublicationPayload, { kind: 'speech' }>).text } })
   const sent = await f.publisher.dispatch(prepared, original.target, 'fixture-credential', new AbortController().signal)
   expect(sent).toEqual({ state: 'confirmed', mapping: { messageId: 'platform-message-1', threadId: 'original-platform-thread' } })
   const create = nativeResponses.mock.calls.findIndex(([request]) => request.url?.endsWith('/open-apis/im/v1/messages'))
   expect(create).toBeGreaterThanOrEqual(0)
   const acknowledged = await nativeResponses.mock.results[create]!.value as { data: { body: { content: string } } }
   expect(acknowledged.data.body.content).not.toBe(body.content)
-  expect(JSON.parse(acknowledged.data.body.content)).toMatchObject({ title: 'Conversation message', elements: [[{ tag: 'text', text: original.payload.text }]] })
+  expect(JSON.parse(acknowledged.data.body.content)).toMatchObject({ title: 'Conversation message', elements: [[{ tag: 'text', text: (original.payload as Extract<PublicationPayload, { kind: 'speech' }>).text }]] })
   expect(f.remote.messageCalls()[0]).toMatchObject({ method: 'POST', query: { receive_id_type: 'chat_id' }, body: prepared.request.body })
   const next = f.publisher.prepare(operation({ operationId: 'another-original-operation' }))
   expect(JSON.parse(next.request.body!).uuid).not.toBe(body.uuid)
@@ -89,6 +89,29 @@ it('delivers, replaces and inspects compact progress through the native SDK with
     await writeFile(join(process.env.AGENTMUX_COMPACT_CARD_OUTPUT, 'native-consumer.json'), JSON.stringify({ originalOperationId: original.operationId,
       receipt: created, frozenUnchanged: JSON.stringify(prepared) === frozen, calls: f.remote.messageCalls() }, null, 2))
   }
+})
+
+it('delivers compact attributed progress and preserves the same original card through native replacement and inspection', async () => {
+  const f = await fixture(), text = '**Original progress**\n\n正在核对原始消息。\n\n正文、引用和代码均保持完整。'
+  const original = operation({ speaker: { kind: 'agent', name: 'Exact group sender' }, presentationTime: 0,
+    payload: { kind: 'speech', phase: 'progress', text } })
+  const prepared = f.publisher.prepare(original), frozen = JSON.stringify(prepared), signal = new AbortController().signal
+  const receipt = await f.publisher.dispatch(prepared, original.target, 'fixture-credential', signal)
+  expect(receipt.state).toBe('confirmed'); if (receipt.state !== 'confirmed') throw Error('Attributed progress did not reach native create')
+  expect(await f.publisher.inspect(prepared, original.target, 'fixture-credential', signal, receipt.mapping)).toEqual(receipt)
+  expect(await f.publisher.inspect({ ...prepared, renderVersion: 'feishu-conversation-v6' }, original.target, 'fixture-credential', signal, receipt.mapping)).toEqual(receipt)
+  const card = JSON.parse(JSON.parse(f.remote.messageCalls()[0]!.body).content)
+  expect(card.header).toBeUndefined(); expect(card.body.padding).toBe('4px 8px 4px 8px')
+  expect(card.body.elements[0]).toMatchObject({ icon: { tag: 'standard_icon', token: 'robot_outlined', size: '16px 16px' } })
+  expect(card.body.elements[1]).toEqual({ tag: 'markdown', text_size: 'notation', content: text })
+  expect(card.config.summary.content).toContain('Agent · Progress · **Original progress**')
+  const updated = f.publisher.prepare({ ...original, operationId: 'original-attributed-update', mapping: receipt.mapping,
+    payload: { kind: 'speech', phase: 'progress', text: text + '\n确认原回执后继续。' } })
+  expect(await f.publisher.dispatch(updated, original.target, 'fixture-credential', signal, receipt.mapping)).toEqual(receipt)
+  expect(await f.publisher.inspect(updated, original.target, 'fixture-credential', signal, receipt.mapping)).toEqual(receipt)
+  expect(JSON.stringify(prepared)).toBe(frozen)
+  expect(f.remote.messageCalls().map(call => call.method)).toEqual(['POST', 'GET', 'GET', 'PATCH', 'GET'])
+  if (process.env.ATTRIBUTED_PROGRESS_PREVIEW) await writeFile(join(process.env.ATTRIBUTED_PROGRESS_PREVIEW, 'native-card.json'), JSON.stringify(card, null, 2) + '\n')
 })
 
 const feedCases: Array<[string, Partial<PublicationOperation>, string]> = [
@@ -222,7 +245,7 @@ it.each([
   ['array', []], ['string', 'false'], ['null', null], ['object', {}], ['literal-false', false], ['literal-true', true], ['absent', undefined]
 ] as const)('only literal deletion facts can settle the original SDK message: %s', async (_name, deleted) => {
   const original = operation({ mapping: { messageId: 'original-platform-message', threadId: 'original-platform-thread' } })
-  const expectedCard = { config: { update_multi: true, summary: { content: 'Conversation message · 原文 Literal <at user_id="all">all</at>' } }, header: { title: { tag: 'plain_text', content: 'Conversation message' }, template: 'blue' }, elements: [{ tag: 'div', text: { tag: 'plain_text', content: original.payload.text } }] }
+  const expectedCard = { config: { update_multi: true, summary: { content: 'Conversation message · 原文 Literal <at user_id="all">all</at>' } }, header: { title: { tag: 'plain_text', content: 'Conversation message' }, template: 'blue' }, elements: [{ tag: 'div', text: { tag: 'plain_text', content: (original.payload as Extract<PublicationPayload, { kind: 'speech' }>).text } }] }
   const message = { message_id: original.mapping!.messageId, chat_id: original.target.externalConversationId, thread_id: original.mapping!.threadId,
     msg_type: 'interactive', sender: { sender_type: 'app', id_type: 'app_id', id: original.target.application.appId },
     body: { content: JSON.stringify(expectedCard) },
