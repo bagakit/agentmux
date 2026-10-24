@@ -10,15 +10,19 @@ const app = _reshape_fixturePath("Applications/AgentMux.app"), candidate = _resh
 const store = (_hygiene_fixturePath("data/original") + " workbench/agent-sessions.json")
 const command = `${app}/Contents/MacOS/AgentMux ${app}/Contents/Resources/app/out/main/agentmux-host.js --store ${store}`
 const original = { uid: process.getuid!(), pid: 211, ppid: 201, birth: _hygiene_fixturePsBirth(24022800000), command }
-const identity = { hostProcessId: original.pid, storePath: store }
+const identity = { hostProcessId: original.pid, storePath: store, socketPath: _hygiene_fixturePath('runtime/control.sock'),
+  owner: { runtimeId: 'original-runtime', ownerInstanceId: 'original-owner' } }
 const modeFor = (row = original) => ({ ...row, mode: 'node', executable: `${app}/Contents/MacOS/AgentMux` })
 
 function fixture() {
   let row: typeof original | null = { ...original }, time = 0
   let source = 'a'.repeat(40), serving = [201, 211], externalNode: number[] = []
-  let publicIdentity = { ...identity }
+  let publicIdentity = { ...identity }, managed = false
   const events: string[] = []
   const ops = {
+    activateRegisteredService: vi.fn(async () => managed),
+    serviceOwner: vi.fn(async () => managed ? { service: {}, expected: {} } : null),
+    stopService: vi.fn(async () => { events.push('bootout'); row = null; managed = false }),
     source: vi.fn(async (path: string) => path === candidate ? 'b'.repeat(40) : source),
     bootstrap: vi.fn(async () => { events.push('bootstrap'); return publicIdentity }),
     processRow: vi.fn(async (pid: number) => { events.push('row'); return row?.pid === pid ? { ...row } : null }),
@@ -29,11 +33,11 @@ function fixture() {
     now: () => time,
     wait: vi.fn(async () => { time += 1000 })
   }
-  return { ops, events,
+  return { ops, events, managed: () => { managed = true },
     quit: () => { row = { ...original, ppid: 1 }; serving = []; externalNode = [211, 999] },
     mutate: (next: Partial<typeof original>) => { row = { ...row!, ...next } },
     namespace: (next: Partial<typeof identity>) => { publicIdentity = { ...publicIdentity, ...next } },
-    launch: () => { source = 'b'.repeat(40); row = { ...original, pid: 212 }; publicIdentity = { ...identity, hostProcessId: 212 }; serving = [201, 212]; externalNode = [] },
+    launch: () => { source = 'b'.repeat(40); row = { ...original, pid: 212 }; publicIdentity = { ...identity, hostProcessId: 212, owner: { ...identity.owner, ownerInstanceId: 'new-owner' } }; managed = true; serving = [201, 212]; externalNode = [] },
     source: (next: string) => { source = next }
   }
 }
@@ -50,6 +54,26 @@ describe('the original Semantic Host follows a full Source installation', () => 
     f.launch()
     await expect(confirmSemanticHostReload(plan, app, f.ops)).resolves.toBeUndefined()
     expect(f.ops.signal.mock.calls).toEqual([[211, 'SIGTERM']])
+  })
+
+  it('boots out the confirmed platform owner before replacement and never sends a raw signal', async () => {
+    const f = fixture(); f.managed()
+    const plan = await prepareSemanticHostReload(app, candidate, f.ops)
+    expect(plan.service).not.toBeNull()
+    f.quit()
+    await stopSemanticHostForInstall(plan, f.ops)
+    expect(f.ops.stopService).toHaveBeenCalledWith(plan.service)
+    expect(f.ops.signal).not.toHaveBeenCalled()
+    f.launch()
+    await expect(confirmSemanticHostReload(plan, app, f.ops)).resolves.toBeUndefined()
+  })
+
+  it('retains the bundle when platform stop is unknown and never falls back to a signal', async () => {
+    const f = fixture(); f.managed()
+    const plan = await prepareSemanticHostReload(app, candidate, f.ops); f.quit()
+    f.ops.stopService.mockRejectedValue(new Error('platform stop unknown'))
+    await expect(stopSemanticHostForInstall(plan, f.ops)).rejects.toThrow('platform stop unknown')
+    expect(f.ops.signal).not.toHaveBeenCalled()
   })
 
   it('qualifies and reloads the original same-Source namespace for a full App replacement', async () => {
