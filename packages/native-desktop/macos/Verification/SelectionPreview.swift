@@ -1,5 +1,4 @@
 import AppKit
-import ScreenCaptureKit
 import AgentMuxNativeMacOSCore
 
 /// A bare AppKit host for the production picker. Commands deliver events to
@@ -74,7 +73,8 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
                 return
             }
             current = view
-            emit(["id": id, "ok": true, "window": rect(view.window!.frame), "completions": completions])
+            emit(["id": id, "ok": true, "window": rect(view.window!.frame), "windowId": view.window!.windowNumber,
+                  "pid": Int(getpid()), "completions": completions])
         }
     }
 
@@ -84,14 +84,21 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             let method = value["method"] as? String ?? ""
             if method == "begin" { begin(id: id); return }
             if method == "close" { emit(["id": id, "ok": true]); NSApp.terminate(nil); return }
-            if method == "inspect" { emit(["id": id, "ok": true, "completions": completions, "controls": controls(), "toolbar": toolbarFrame()]); return }
+            if method == "inspect" { emit(observation(id: id)); return }
             guard let view = current, let window = view.window else { throw PreviewFailure("Original picker is unavailable") }
             if method == "drag" {
                 let from = try point(value["from"]), to = try point(value["to"])
+                guard let recipient = view.hitTest(view.convert(from, from: nil)) else { throw PreviewFailure("No actual AppKit hit-test recipient") }
                 for (type, point) in [(NSEvent.EventType.leftMouseDown, from), (.leftMouseDragged, to), (.leftMouseUp, to)] {
                     guard let event = NSEvent.mouseEvent(with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                                                        windowNumber: window.windowNumber, context: nil, eventNumber: 1, clickCount: 1, pressure: 1) else { throw PreviewFailure("Could not create mouse event") }
-                    window.sendEvent(event)
+                    // Deliberately direct AppKit responder dispatch. The bare
+                    // host does not claim WindowServer activation/input proof.
+                    switch type {
+                    case .leftMouseDown: recipient.mouseDown(with: event)
+                    case .leftMouseDragged: recipient.mouseDragged(with: event)
+                    default: recipient.mouseUp(with: event)
+                    }
                 }
             } else if method == "key" {
                 let code = value["keyCode"] as? UInt16 ?? 0
@@ -99,19 +106,20 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
                 guard let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: flags,
                                                  timestamp: ProcessInfo.processInfo.systemUptime, windowNumber: window.windowNumber,
                                                  context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: code) else { throw PreviewFailure("Could not create key event") }
-                window.sendEvent(event)
+                guard let recipient = window.firstResponder else { throw PreviewFailure("Original window has no first responder") }
+                recipient.keyDown(with: event)
             } else if method == "button" {
                 let identifier = value["identifier"] as? String ?? ""
                 guard let button = descendants(view).compactMap({ $0 as? NSButton }).first(where: { $0.identifier?.rawValue == identifier }) else { throw PreviewFailure("Exact button is unavailable") }
                 // AppKit's button action/enablement is real. This deliberately
                 // does not claim a physical WindowServer mouse click.
                 button.performClick(nil)
-            } else if method == "capture" {
+            } else if method == "layout" {
                 guard let path = value["path"] as? String else { throw PreviewFailure("Missing capture output") }
-                capture(path: path, id: id)
+                captureLayout(path: path, id: id)
                 return
             } else { throw PreviewFailure("Unknown fixture command") }
-            emit(["id": id, "ok": true, "completions": completions, "controls": controls()])
+            emit(observation(id: id))
         } catch { emit(["id": id, "ok": false, "message": String(describing: error)]) }
     }
 
@@ -121,6 +129,21 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
             guard let button = child as? NSButton, let identifier = button.identifier?.rawValue else { return nil }
             return ["identifier": identifier, "enabled": button.isEnabled, "frame": rect(button.convert(button.bounds, to: view))]
         }
+    }
+    private func observation(id: Int) -> [String: Any] {
+        var value: [String: Any] = ["id": id, "ok": true, "completions": completions, "controls": controls(), "toolbar": toolbarFrame()]
+        if let view = current {
+            value["rectangle"] = view.selection.rectangle.map(rect) as Any? ?? NSNull()
+            value["isInteracting"] = view.selection.isInteracting
+            value["canConfirm"] = view.selection.canConfirm
+            value["window"] = view.window.map { rect($0.frame) } as Any? ?? NSNull()
+            value["isKeyWindow"] = view.window?.isKeyWindow ?? false
+            value["eventDelivery"] = "direct-AppKit-responder-dispatch"
+            value["firstResponder"] = view.window?.firstResponder.map { String(describing: type(of: $0)) } as Any? ?? NSNull()
+            value["windowId"] = view.window?.windowNumber ?? 0
+            value["pid"] = Int(getpid())
+        }
+        return value
     }
     private func toolbarFrame() -> [String: Double] {
         guard let view = current, let toolbar = descendants(view).first(where: { $0.identifier?.rawValue == "native-selection-toolbar" }) else { return [:] }
@@ -132,37 +155,34 @@ private final class SelectionPreview: NSObject, NSApplicationDelegate {
         return NSPoint(x: x, y: y)
     }
 
-    private func capture(path: String, id: Int) {
-        // Capture the real composed display, with only our own backdrop below
-        // the picker. No NSView bitmap or HTML image substitutes for this frame.
-        let screen = NSScreen.screens.first!
-        let displayID = (screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as! NSNumber).uint32Value
-        let scale = screen.backingScaleFactor
-        Task { @MainActor in
-            do {
-                let image: CGImage
-                if #available(macOS 14.0, *) {
-                    let content = try await SCShareableContent.current
-                    guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
-                        emit(["id": id, "ok": false, "message": "ScreenCaptureKit did not expose the original preview display; capture availability remains unconfirmed",
-                              "requestedDisplayId": displayID, "observedDisplayIds": content.displays.map(\.displayID),
-                              "preflight": CGPreflightScreenCaptureAccess(), "preflightAuthoritativeForOperation": false])
-                        return
-                    }
-                    let configuration = SCStreamConfiguration()
-                    configuration.width = Int(ceil(display.frame.width * scale))
-                    configuration.height = Int(ceil(display.frame.height * scale))
-                    configuration.showsCursor = false
-                    image = try await SCScreenshotManager.captureImage(contentFilter: SCContentFilter(display: display, excludingWindows: []), configuration: configuration)
-                } else {
-                    guard let captured = CGWindowListCreateImage(CGDisplayBounds(displayID), .optionOnScreenOnly, kCGNullWindowID, [.bestResolution]) else { throw PreviewFailure("Actual display capture returned no pixels") }
-                    image = captured
-                }
-                guard let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]) else { throw PreviewFailure("PNG encoding failed") }
-                try data.write(to: URL(fileURLWithPath: path), options: .atomic)
-                emit(["id": id, "ok": true, "width": image.width, "height": image.height, "source": "WindowServer-display"])
-            } catch { emit(["id": id, "ok": false, "message": String(describing: error)]) }
-        }
+    private func captureLayout(path: String, id: Int) {
+        do {
+            guard let view = current, let window = view.window, let backdrop = background.contentView else {
+                throw PreviewFailure("Original production view is unavailable")
+            }
+            let crop = background.frame.offsetBy(dx: -window.frame.minX, dy: -window.frame.minY)
+            backdrop.displayIfNeeded()
+            view.displayIfNeeded()
+            guard let base = backdrop.bitmapImageRepForCachingDisplay(in: backdrop.bounds),
+                  let overlay = view.bitmapImageRepForCachingDisplay(in: crop) else {
+                throw PreviewFailure("AppKit did not create layout bitmap representations")
+            }
+            backdrop.cacheDisplay(in: backdrop.bounds, to: base)
+            view.cacheDisplay(in: crop, to: overlay)
+            guard let composite = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: base.pixelsWide, pixelsHigh: base.pixelsHigh,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0),
+                  let context = NSGraphicsContext(bitmapImageRep: composite) else { throw PreviewFailure("Layout composite allocation failed") }
+            composite.size = backdrop.bounds.size
+            NSGraphicsContext.saveGraphicsState()
+            NSGraphicsContext.current = context
+            base.draw(in: backdrop.bounds)
+            overlay.draw(in: backdrop.bounds)
+            NSGraphicsContext.restoreGraphicsState()
+            guard let data = composite.representation(using: .png, properties: [:]) else { throw PreviewFailure("Layout PNG encoding failed") }
+            try data.write(to: URL(fileURLWithPath: path), options: .atomic)
+            emit(["id": id, "ok": true, "width": composite.pixelsWide, "height": composite.pixelsHigh,
+                  "source": "AppKit-view-layout-only", "windowServerFrame": false])
+        } catch { emit(["id": id, "ok": false, "message": String(describing: error)]) }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
