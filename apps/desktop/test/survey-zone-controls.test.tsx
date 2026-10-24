@@ -62,8 +62,10 @@ it('[icon-role] Survey new-note controls theme creation independently and keep t
   const href = semanticIconHref('action.create-note'), symbol = () => document.getElementById(href.slice(1))!
   try {
     await act(async () => root.render(<SurveyZoneItem zone={zone} title="Original exploration" glyph={null} selected activity={null} onSelect={vi.fn()} onNewNote={create} />))
-    const button = container.querySelector<HTMLButtonElement>('[aria-label="New note in Recall from Original exploration"]')!
-    expect(button, 'actual Survey shortcut').not.toBeNull()
+    const trigger = container.querySelector<HTMLButtonElement>('[aria-label="Add to Original exploration"]')!
+    await act(async () => trigger.focus()); await key(trigger, "ArrowDown")
+    const button = action("New Note in Recall")
+    expect(button, "actual Survey creation menu").not.toBeNull()
     expect(button.querySelector('use')?.getAttribute('href')).toBe(href)
     expect(button.querySelector('[data-icon-animation]')).toBeNull()
     const original = symbol().innerHTML

@@ -196,7 +196,7 @@ async function realNameOwner(retainedDirectory?: string) {
   const directory = retainedDirectory ?? await mkdtemp(join(tmpdir(), 'amux-survey-name-'))
   const owner = new AgentMuxSpatialStateStore(join(directory, 'spatial.json'))
   const state = useAppStore.getState()
-  if (!retainedDirectory || process.env.SURVEY_LAST_TAB_RESTART_PHASE === 'write') await owner.commit({ expectedRevision: 0, graph: desktopSpatialGraph(state, []) })
+  if (!retainedDirectory || process.env.SURVEY_LAST_TAB_RESTART_PHASE === 'write' || process.env.SURVEY_ITEM_RESTART_PHASE === 'write') await owner.commit({ expectedRevision: 0, graph: desktopSpatialGraph(state, []) })
   vi.spyOn(api.spatial, 'read').mockImplementation(() => owner.readForLayout())
   vi.spyOn(api.spatial, 'commit').mockImplementation(input => owner.commit(input))
   vi.spyOn(api.spatial, 'retainLabels').mockImplementation(values => owner.retainDisplayLabels(values))
@@ -1439,7 +1439,7 @@ it('offers an already-open chooser for the exact ambiguous Survey source without
   const before = useAppStore.getState(), held = before.surveyZoneSelection
   const create = vi.spyOn(api.files, 'createPublic')
   const row = [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(row => row.dataset.surveyZoneId === originalZoneId())!
-  await act(async () => row.querySelector<HTMLButtonElement>('[aria-label^="New note in Recall from"]')!.click())
+  await choosePrivateAction(row.querySelector<HTMLElement>('[aria-label^="Add to "]')!, "New Note in Recall")
   // The production parent supplies `open`: a file-level raw-import prohibition would
   // change this already-disclosed exact-location decision for no user benefit.
   await vi.waitFor(() => expect(document.querySelector('[role="menu"] .survey-panel-choice')).not.toBeNull())
@@ -1510,7 +1510,7 @@ it('creates an Agent launcher in the clicked unselected item through the real St
   useLauncherState.getState().setSection(SCRATCH_WORKSPACE_ID, 'agents', 'hidden')
   const owner = vi.spyOn(useAppStore.getState(), 'openLauncher')
   const row = dom.container.querySelector(`[data-survey-zone-id="${clicked}"]`)!
-  await act(async () => row.querySelector<HTMLButtonElement>('[aria-label^="New agent in"]')!.click())
+  await choosePrivateAction(row.querySelector<HTMLElement>('[aria-label^="Add to "]')!, "New Agent")
   expect(owner).toHaveBeenCalledOnce()
   expect(owner.mock.calls[0]![0]).toMatchObject({ zoneId: clicked, reveal: false })
   const latest = useAppStore.getState(), ref = latest.surveyZoneSelection!.active!
@@ -1531,7 +1531,7 @@ it('saves a note from the clicked unselected item through the real capture and f
   vi.spyOn(api.files, 'readPublic').mockImplementation(async input => ({ resource: { ...input.expectedResource, zoneId: input.zoneId, zonePath: notes.path, path: input.path }, result: { status: 'deleted' } }))
   const write = vi.spyOn(api.files, 'createPublic').mockImplementation(async input => ({ resource: input.expectedResource, result: { status: 'written', revision: 'note-written' } }))
   const row = dom.container.querySelector(`[data-survey-zone-id="${clicked.zoneId}"]`)!
-  await act(async () => row.querySelector<HTMLButtonElement>('[aria-label^="New note in Recall from"]')!.click())
+  await choosePrivateAction(row.querySelector<HTMLElement>('[aria-label^="Add to "]')!, "New Note in Recall")
   const dialog = document.querySelector<HTMLElement>('.survey-recall-capture')!
   expect(dialog).not.toBeNull()
   await vi.waitFor(() => expect(dialog.querySelector<HTMLSelectElement>('select')!.value).toBe('quick-notes'))
@@ -1571,7 +1571,7 @@ it('offers the original Browser choice for a multi-Browser note and captures the
   await renderApp(); await enterSurvey(); await choose()
   expect(useAppStore.getState().surveyZoneSelection!.active!.regionId).toBe(agent.regionId)
   const row = [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(item => item.dataset.surveyZoneId === originalZoneId())!
-  await act(async () => row.querySelector<HTMLButtonElement>('[aria-label^="New note in Recall from"]')!.click())
+  await choosePrivateAction(row.querySelector<HTMLElement>('[aria-label^="Add to "]')!, "New Note in Recall")
   expect(document.querySelector('.survey-recall-capture')).toBeNull()
   await vi.waitFor(() => expect(document.querySelectorAll('[data-survey-panel-reference]')).toHaveLength(2))
   const second = [...document.querySelectorAll<HTMLElement>('[data-survey-panel-reference]')].find(item => JSON.parse(item.dataset.surveyPanelReference!).regionId === pageB.regionId)!
@@ -1593,7 +1593,7 @@ it('offers the exact original Group choice for an Agent when the multi-Group act
   expect(useAppStore.getState().surveyZoneSelection!.active).toBeNull()
   const owner = vi.spyOn(useAppStore.getState(), 'openLauncher'), held = useAppStore.getState().surveyZoneSelection
   const row = [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(item => item.dataset.surveyZoneId === originalZoneId())!
-  await act(async () => row.querySelector<HTMLButtonElement>('[aria-label^="New agent in"]')!.click())
+  await choosePrivateAction(row.querySelector<HTMLElement>('[aria-label^="Add to "]')!, "New Agent")
   expect(owner).not.toHaveBeenCalled(); expect(useAppStore.getState().surveyZoneSelection).toBe(held)
   await vi.waitFor(() => expect(document.querySelectorAll('[data-survey-panel-reference]')).toHaveLength(5))
   const choice = [...document.querySelectorAll<HTMLElement>('[data-survey-panel-reference]')].find(item => JSON.parse(item.dataset.surveyPanelReference!).groupId === 'second-group')!
@@ -1607,7 +1607,7 @@ it('offers the exact original Group choice for an Agent when the multi-Group act
 it('uses a confirmed current Browser directly even when its original item has other Browser panels', async () => {
   await renderApp(); await enterSurvey(); await choose(); await selectRegion(pageB.regionId)
   const row = [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(item => item.dataset.surveyZoneId === originalZoneId())!
-  await act(async () => row.querySelector<HTMLButtonElement>('[aria-label^="New note in Recall from"]')!.click())
+  await choosePrivateAction(row.querySelector<HTMLElement>('[aria-label^="Add to "]')!, "New Note in Recall")
   await vi.waitFor(() => expect(document.querySelector('.survey-recall-capture')).not.toBeNull())
   expect(document.querySelectorAll('[data-survey-panel-reference]')).toHaveLength(0)
   expect(document.querySelector('.survey-recall-capture')!.textContent).toContain(pageB.url); healthy()
@@ -2037,5 +2037,172 @@ it('private More never selects a preparation whose original owner disappeared du
   expect(useAppStore.getState().tabs[prepared.id]).toBeUndefined()
   expect(dom.container.querySelector('.browser-address-error')?.textContent).toContain('has not confirmed attachment')
   expect(api.browser.close).toHaveBeenCalledExactlyOnceWith(id)
+  healthy()
+})
+
+function surveyRow(zoneId: string) {
+  const row = [...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].find(row => row.dataset.surveyZoneId === zoneId)
+  expect(row, 'actual Survey row').toBeDefined(); return row!
+}
+async function rowCreate(zoneId: string, label: string) {
+  await choosePrivateAction(surveyRow(zoneId).querySelector<HTMLElement>('[aria-label^="Add to "]')!, label)
+}
+async function rowOptions(zoneId: string) {
+  const trigger = surveyRow(zoneId).querySelector<HTMLElement>('[data-row-action]')!
+  expect(trigger, 'actual per-item options').not.toBeNull()
+  await act(async () => { trigger.focus(); trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })) })
+  const menu = document.querySelector<HTMLElement>('.survey-item-menu[role="menu"]')!
+  expect(menu).not.toBeNull(); return menu
+}
+async function rowAction(menu: HTMLElement, label: string) {
+  const action = [...menu.querySelectorAll<HTMLElement>('[role="menuitem"]')].find(item => item.textContent === label)
+  expect(action, label).toBeDefined(); await act(async () => { action!.click(); await new Promise(resolve => setTimeout(resolve, 0)) })
+}
+
+it('[survey-item-actions] shows every original Tab favicon in workface order and selects a nonfirst Tab without changing entities', async () => {
+  const second = createWorkbenchTab('survey-source-b', { ...pageB, faviconDataUrl: 'data:image/png;base64,AA==' }, 'Source B')
+  const third = createWorkbenchTab('survey-source-c', { ...pageC, faviconDataUrl: 'data:image/png;base64,BB==' }, 'Source C')
+  useAppStore.setState(state => ({ tabs: { ...state.tabs, [second.id]: second, [third.id]: third },
+    layouts: { ...state.layouts, [workspace.id]: createWorkspaceLayout('original-group', [mixed.id, third.id, second.id]) } }))
+  await renderApp(); await enterSurvey(); await choose()
+  const row = surveyRow(originalZoneId()), columns = [...row.querySelectorAll<HTMLButtonElement>('[data-survey-tab-id]')]
+  expect(columns.map(column => column.dataset.surveyTabId)).toEqual([mixed.id, third.id, second.id])
+  expect(columns[0]!.querySelectorAll('.workbench-tab__marks > *')).toHaveLength(3)
+  expect(columns[0]!.querySelector('.workbench-tab__agent-mark')).not.toBeNull()
+  expect(columns[1]!.querySelector('img'), 'third Tab retains its original favicon').not.toBeNull()
+  expect(columns[2]!.querySelector('img'), 'second Tab retains its original favicon').not.toBeNull()
+  expect(columns[1]!.querySelector('img')!.getAttribute('src')).toBe('data:image/png;base64,BB==')
+  expect(columns[2]!.querySelector('img')!.getAttribute('src')).toBe('data:image/png;base64,AA==')
+  expect(columns[2]!.textContent).toBe('Source B')
+  const before = useAppStore.getState()
+  await act(async () => columns[2]!.click())
+  expect(useAppStore.getState().surveyZoneSelection!.active).toEqual({ tabId: second.id, regionId: pageB.regionId })
+  expect(columns[2]!.getAttribute('aria-current')).toBe('true')
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+  expect(api.browser.create).not.toHaveBeenCalled(); healthy()
+})
+
+it('[survey-item-actions] creates Browser and general Launcher in the clicked unselected Zone through original owners', async () => {
+  await renderApp(); await enterSurvey(); await choose(); await dom.click('[aria-label="New webpage"]')
+  const other = useAppStore.getState().surveyZoneSelection!.zoneId, original = originalZoneId()
+  const before = useAppStore.getState(), create = vi.mocked(api.browser.create); create.mockClear()
+  await rowCreate(original, 'New Browser')
+  await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(1))
+  const created = useAppStore.getState(), ref = created.surveyZoneSelection!.active!
+  expect(created.surveyZoneSelection!.zoneId).toBe(original)
+  expect(created.tabs[ref.tabId]!.space?.zoneId).toBe(original)
+  expect(created.tabs[ref.tabId]!.regions[ref.regionId]?.kind).toBe('browser')
+  expect(created.tabs[mixed.id]).toBe(before.tabs[mixed.id])
+  await rowCreate(other, 'New tab…')
+  const latest = useAppStore.getState(), launcher = latest.surveyZoneSelection!.active!
+  expect(latest.surveyZoneSelection!.zoneId).toBe(other)
+  expect(latest.tabs[launcher.tabId]!.space?.zoneId).toBe(other)
+  expect(latest.tabs[launcher.tabId]!.regions[launcher.regionId]?.kind).toBe('launcher')
+  expect(create).toHaveBeenCalledTimes(1)
+  expect(surveyRow(other).querySelectorAll('.survey-item-shortcuts > button')).toHaveLength(2)
+  healthy()
+})
+
+it('[survey-item-actions] shares row options and right-click actions, closing only the invoked Survey reference', async () => {
+  await renderApp(); await enterSurvey(); await choose(); await dom.click('[aria-label="New webpage"]')
+  const other = useAppStore.getState().surveyZoneSelection!.zoneId
+  await choose(); const before = useAppStore.getState()
+  const options = await rowOptions(other), labels = [...options.querySelectorAll('[role^="menuitem"]')].map(item => item.textContent)
+  expect(labels).toContain('Rename exploration'); expect(labels).toContain('Close in Survey')
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection)
+  await act(async () => options.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  await vi.waitFor(() => expect(document.querySelector('.survey-item-menu')).toBeNull())
+  await surveyContext(other)
+  expect([...document.querySelectorAll('[data-survey-context-zone-id] [role^="menuitem"]')].map(item => item.textContent)).toEqual(labels)
+  await surveyContextAction('Close in Survey')
+  await vi.waitFor(() => expect(useAppStore.getState().surveyCollectedZones[other]).toBeUndefined())
+  expect(useAppStore.getState().surveyZoneSelection).toBe(before.surveyZoneSelection)
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().layouts).toBe(before.layouts)
+  expect(api.browser.close).not.toHaveBeenCalled(); expect(api.sessions.stop).not.toHaveBeenCalled(); healthy()
+  const currentMenu = await rowOptions(originalZoneId())
+  await rowAction(currentMenu, 'Close in Survey')
+  expect(useAppStore.getState().surveyZoneSelection).toBeNull()
+  expect(useAppStore.getState().tabs).toBe(before.tabs); expect(useAppStore.getState().sessions).toEqual(before.sessions)
+  expect(dom.container.querySelector('.global-survey-surface .browser-start-page')).not.toBeNull()
+})
+
+function completeSurveyRuntimeSnapshot() {
+  vi.spyOn(api.sessions, 'snapshot').mockResolvedValue({
+    sessions: [session], timelines: { [session.id]: { agentSessionId: session.id, revision: 0, items: [] } }, recoveryCandidates: []
+  })
+}
+it.runIf(process.env.SURVEY_ITEM_RESTART_PHASE === 'write')('[survey-item-restart] saves newly created Tabs and closed Survey references through the original durable owners', async () => {
+  await renderApp(); await enterSurvey(); await choose()
+  const zoneId = originalZoneId()
+  await rowCreate(zoneId, 'New Browser')
+  const newReference = useAppStore.getState().surveyZoneSelection!.active!
+  await dom.click('[aria-label="New webpage"]')
+  const closedZoneId = useAppStore.getState().surveyZoneSelection!.zoneId
+  await rowAction(await rowOptions(closedZoneId), 'Close in Survey')
+  await choose(zoneId)
+  await act(async () => surveyRow(zoneId).querySelector<HTMLButtonElement>('[data-survey-tab-id="' + newReference.tabId + '"]')!.click())
+  completeSurveyRuntimeSnapshot()
+  await realNameOwner(process.env.SURVEY_ITEM_RESTART_DIR!)
+  await useAppStore.getState().retryWorkbenchSave()
+  const current = useAppStore.getState(), durable = await api.spatial.read()
+  expect(durable!.graph.tabs.some(tab => tab.tabId === newReference.tabId)).toBe(true)
+  expect(current.surveyCollectedZones[closedZoneId]).toBeUndefined()
+  healthy()
+  writeFileSync(process.env.SURVEY_ITEM_RESTART_FILE!, JSON.stringify({
+    pid: process.pid, config: current.config, ui: JSON.parse(localStorage.getItem('agentmux-workbench-v1')!).state,
+    workbench: projectPersistedWorkbench(current), selected: current.surveyZoneSelection, zoneId, closedZoneId, newReference,
+    session: current.sessions[0], draft: current.agentComposerDrafts[session.id]
+  }))
+})
+it.runIf(process.env.SURVEY_ITEM_RESTART_PHASE === 'read')('[survey-item-restart] restores original and newly created workfaces in another process without resurrecting a closed list reference', async () => {
+  const saved = JSON.parse(readFileSync(process.env.SURVEY_ITEM_RESTART_FILE!, 'utf8'))
+  expect(process.pid).not.toBe(saved.pid)
+  useAppStore.setState({ loading: true, config: saved.config, tabs: {}, layouts: {}, restoredWorkbench: null, sessions: [session] })
+  localStorage.setItem('agentmux-workbench-v1', JSON.stringify({ version: 1, state: saved.ui }))
+  await useAppStore.persist.rehydrate()
+  completeSurveyRuntimeSnapshot()
+  await realNameOwner(process.env.SURVEY_ITEM_RESTART_DIR!)
+  await renderApp()
+  const current = useAppStore.getState()
+  expect(projectPersistedWorkbench(current)).toEqual(saved.workbench)
+  expect(current.surveyZoneSelection).toEqual(saved.selected)
+  expect(current.surveyCollectedZones[saved.closedZoneId]).toBeUndefined()
+  expect(surveyRow(saved.zoneId).querySelectorAll('[data-survey-tab-id]')).toHaveLength(2)
+  expect(current.tabs[saved.newReference.tabId]!.regions[saved.newReference.regionId]?.kind).toBe('browser')
+  expect(current.tabs[mixed.id]!.regions[agent.regionId]).toEqual(agent)
+  expect(current.sessions[0]!.control.run).toEqual(saved.session.control.run)
+  expect(current.agentComposerDrafts[session.id]).toBe(saved.draft)
+  expect([...dom.container.querySelectorAll<HTMLElement>('[data-survey-zone-id]')].some(row => row.dataset.surveyZoneId === saved.closedZoneId)).toBe(false)
+  healthy()
+})
+
+it('[survey-item-actions] keeps concurrent Browser failures recoverable at the original resource after another creation succeeds', async () => {
+  await renderApp(); await enterSurvey(); await choose(); await dom.click('[aria-label="New webpage"]')
+  const other = useAppStore.getState().surveyZoneSelection!.zoneId
+  await choose()
+  let release!: (value: BrowserSnapshot) => void, firstId = '', failedId = ''
+  let calls = 0
+  vi.mocked(api.browser.create).mockImplementation(async (id, url = 'about:blank') => {
+    calls += 1
+    if (calls === 1) { firstId = id; return new Promise<BrowserSnapshot>(resolve => { release = resolve }) }
+    if (calls === 2) { failedId = id; throw new Error('Original owner unavailable') }
+    return { ...browser, id, url }
+  })
+  await rowCreate(originalZoneId(), 'New Browser')
+  await vi.waitFor(() => expect(release).toBeDefined())
+  await rowCreate(other, 'New Browser')
+  await vi.waitFor(() => expect(document.querySelector('[data-survey-browser-recovery="' + failedId + '"]')).not.toBeNull())
+  await act(async () => release({ ...browser, id: firstId, url: 'about:blank' }))
+  await vi.waitFor(() => expect(Object.values(useAppStore.getState().tabs).flatMap(tab => workbenchSurfaces(tab)).some(surface => surface.kind === 'browser' && surface.browserId === firstId)).toBe(true))
+  expect(document.querySelector('[data-survey-browser-recovery="' + failedId + '"]')).not.toBeNull()
+  await choose()
+  const held = useAppStore.getState().surveyZoneSelection, tabIds = Object.keys(useAppStore.getState().tabs)
+  const recovery = document.querySelector('[data-survey-browser-recovery="' + failedId + '"]')!
+  await act(async () => recovery.querySelector<HTMLButtonElement>('button')!.click())
+  await vi.waitFor(() => expect(document.querySelector('[data-survey-browser-recovery="' + failedId + '"]')).toBeNull())
+  expect(api.browser.create).toHaveBeenLastCalledWith(failedId, 'about:blank', SCRATCH_WORKSPACE_ID, undefined, undefined)
+  expect(Object.keys(useAppStore.getState().tabs)).toEqual(tabIds)
+  expect(useAppStore.getState().surveyZoneSelection).toBe(held)
+  expect(calls).toBe(3)
   healthy()
 })
