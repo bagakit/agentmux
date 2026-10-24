@@ -12,7 +12,8 @@ import { collaborationAgentNode } from '../src/renderer/src/lib/collaboration-pr
 import { CollaborationBoundsIndex, collaborationBoundsOverlap } from '../src/renderer/src/lib/collaboration-spatial-index'
 import * as engine from '../src/renderer/src/lib/collaboration-layout-engine'
 import type { CollaborationPulse } from '../src/renderer/src/lib/use-collaboration-reading'
-import { COLLABORATION_ACTIVITY_MS } from '../src/renderer/src/lib/collaboration-map-presentation'
+import { COLLABORATION_ACTIVITY_MS, collaborationAgentGlyph } from '../src/renderer/src/lib/collaboration-map-presentation'
+import { collaborationVisiblePath } from '../src/renderer/src/lib/collaboration-map-geometry'
 import { agentInformationPreview } from '../src/renderer/src/lib/agent-information-preview'
 import { useAppStore } from '../src/renderer/src/store'
 import { api } from '../src/renderer/src/lib/api'
@@ -77,17 +78,24 @@ async function loaded(scene: Scene) {
 async function loadedDetourScene() {
   const scene = scenario(24); scene.relations = []
   await loaded(scene)
-  const source = boxes.get(collaborationAgentNode('area-0', subject('canvas-0')))!
-  const target = boxes.get(collaborationAgentNode('area-3', subject('canvas-3')))!
-  const obstacle = boxes.get(collaborationAgentNode('area-0', subject('canvas-12')))!
-  // Add a connection after real placement, through an explicitly verified original card. Do not prescribe a curve or depend on force-layout routing accidents.
-  expect(source.x).toBe(target.x)
-  expect(obstacle.y).toBeGreaterThan(target.y + target.height)
-  expect(obstacle.y + obstacle.height).toBeLessThan(source.y)
-  expect(obstacle.x).toBeLessThan(source.x + source.width / 4)
-  expect(obstacle.x + obstacle.width).toBeGreaterThan(source.x + source.width / 4)
+  const members = [...boxes.values()].filter(box => box.kind === 'agent')
+  const candidates = members.flatMap((source, index) => members.slice(index + 1).flatMap(target => {
+    const dx = Math.abs(source.x - target.x), dy = Math.abs(source.y - target.y)
+    if (Math.max(dx, dy) < 250) return []
+    return [{ source, target, alignment: Math.min(dx, dy) / Math.max(dx, dy), distance: Math.hypot(dx, dy) }]
+  })).sort((a, b) => a.alignment - b.alignment || b.distance - a.distance)
+  // Choose an input from the actual new world, not an accidental coordinate in
+  // the old force solver. The Graph still receives and draws its own Worker route.
+  let chosen: typeof candidates[number] | undefined
+  for (const candidate of candidates.slice(0, 48)) {
+    const [path] = await engine.routeCollaborationLayout([...boxes.values()], [{ id: 'probe', kind: 'communication', source: candidate.source.id, target: candidate.target.id }])
+    if (path && pathDetour(path, candidate.source, candidate.target)) { chosen = candidate; break }
+  }
+  expect(chosen, 'The actual placed world must offer a real obstructed route').toBeDefined()
+  const source = captured.nodes.find(node => node.id === chosen!.source.id)!.data.agent as CollaborationAgent
+  const target = captured.nodes.find(node => node.id === chosen!.target.id)!.data.agent as CollaborationAgent
   const originalBoxes = boxes
-  scene.relations = [{ id: 'original-obstructed-message', kind: 'communication', source: subject('canvas-0'), target: subject('canvas-3'), evidence: [] }]
+  scene.relations = [{ id: 'original-obstructed-message', kind: 'communication', source: source.id, target: target.id, evidence: [] }]
   await dom.render(graph(scene))
   await settleCollaborationCanvas(() => {
     expect(requests.at(-1)?.type).toBe('route'); expect(paths.size).toBe(1)
@@ -126,15 +134,21 @@ function curvePoints(path: string) {
 function detour() {
   const connections = requests.flatMap(request => request.type === 'route' ? request.connections : request.input.connections)
   for (const connection of connections) {
-    const route = paths.get(connection.id)!, points = curvePoints(route.path), from = boxes.get(connection.source)!, to = boxes.get(connection.target)!
+    const route = paths.get(connection.id)!, from = boxes.get(connection.source)!, to = boxes.get(connection.target)!
+    const point = pathDetour(route, from, to)
+    if (point) return { connection, route, ...point }
+  }
+  return undefined
+}
+function pathDetour(route: engine.CollaborationPath, from: engine.CollaborationLayoutBox, to: engine.CollaborationLayoutBox) {
+    const points = curvePoints(route.path)
     const first = points[0]!, last = points.at(-1)!, left = Math.min(first.x, last.x), right = Math.max(first.x, last.x), top = Math.min(first.y, last.y), bottom = Math.max(first.y, last.y)
     for (let segment = 0; segment < points.length - 1; segment += 3) for (let sample = 1; sample < 100; sample++) {
       const p = points.slice(segment, segment + 4), t = sample / 100, u = 1 - t
       const x = u ** 3 * p[0]!.x + 3 * u ** 2 * t * p[1]!.x + 3 * u * t ** 2 * p[2]!.x + t ** 3 * p[3]!.x
       const y = u ** 3 * p[0]!.y + 3 * u ** 2 * t * p[1]!.y + 3 * u * t ** 2 * p[2]!.y + t ** 3 * p[3]!.y
-      if ((x < left - 42 || x > right + 42 || y < top - 42 || y > bottom + 42) && !boxIntersects(from, x - 4, y - 4, 8) && !boxIntersects(to, x - 4, y - 4, 8)) return { connection, route, x, y }
+      if ((x < left - 42 || x > right + 42 || y < top - 42 || y > bottom + 42) && !boxIntersects(from, x - 4, y - 4, 8) && !boxIntersects(to, x - 4, y - 4, 8)) return { x, y }
     }
-  }
   return undefined
 }
 function edgeElement(id: string) { return [...dom.container.querySelectorAll<SVGGElement>('.collaboration-connections .react-flow__edge')].find(element => element.dataset.id === id) }
@@ -257,6 +271,138 @@ it('keeps every world member through viewport LOD while mounting full shared car
   await focusNode(collaborationAgentNode('area-0', subject('canvas-0')))
   expect(dom.container.querySelector('.focus-context[data-session-id="canvas-0"]')).not.toBeNull()
   expect(dom.container.querySelectorAll('.focus-context').length).toBeLessThan(16)
+  expect(requests).toHaveLength(operations)
+})
+
+it('crossfades one visible semantic layer and keeps the original keyboard reader through continuous LOD', async () => {
+  const scene = scenario(24); await loaded(scene)
+  const id = collaborationAgentNode('area-0', subject('canvas-0')), box = renderedBox(id)
+  const originalNodes = captured.nodes, operations = requests.length
+  const scale = (zoom: number) => viewport(-box.x * zoom + 90, -box.y * zoom + 100, 600, 400, zoom)
+  const semanticLayers = () => [...nodeElement(id)!.querySelectorAll<HTMLElement>('[data-map-layer]')].filter(layer => !layer.inert)
+  for (const zoom of [.44, .46, .69, .71, .76, .82]) {
+    await scale(zoom)
+    const node = nodeElement(id)!, body = node.querySelector<HTMLElement>('.collaboration-agent__body')!
+    expect(semanticLayers()).toHaveLength(1)
+    expect(node.querySelectorAll('.focus-context').length).toBe(zoom > .62 ? 1 : 0)
+    expect(Number.parseFloat(body.style.left) + Number.parseFloat(body.style.width) / 2).toBeCloseTo(box.width / 2)
+    expect(Number.parseFloat(body.style.top) + Number.parseFloat(body.style.height) / 2).toBeCloseTo(box.height / 2)
+    if (zoom === .69 || zoom === .71) {
+      const detail = node.querySelector<HTMLElement>('[data-map-layer="detail"]')!
+      expect(Number(detail.style.opacity)).toBeGreaterThan(0)
+      expect(Number(detail.style.opacity)).toBeLessThan(1)
+    }
+  }
+  await scale(.69)
+  const identity = nodeElement(id)!.querySelector<HTMLButtonElement>('.collaboration-agent__mark')!
+  await act(async () => identity.focus())
+  const reader = agentInformationPreview.getAll().find(request => request.anchor === identity)!
+  expect(reader).toBeDefined()
+  await scale(.86)
+  expect(document.activeElement).toBe(identity)
+  expect(agentInformationPreview.getAll().find(request => request.token === reader.token)).toBe(reader)
+  expect(semanticLayers().map(layer => layer.dataset.mapLayer)).toEqual(['identity'])
+  await act(async () => { identity.blur(); agentInformationPreview.dismiss(reader.token) })
+  expect(semanticLayers().map(layer => layer.dataset.mapLayer)).toEqual(['detail'])
+  const card = nodeElement(id)!.querySelector<HTMLButtonElement>('.focus-context')!
+  await act(async () => card.focus())
+  const originalReader = agentInformationPreview.getAll().find(request => request.anchor === card)!
+  expect(originalReader).toBeDefined()
+  await scale(.3)
+  expect(document.activeElement).toBe(card)
+  expect(card.isConnected).toBe(true)
+  expect(nodeElement(id)!.querySelector<HTMLElement>('[data-map-layer="detail"]')!.style.opacity).toBe('1')
+  const proxy = nodeElement(id)!.querySelector<HTMLElement>('.collaboration-agent__focus-proxy')!
+  expect(proxy.textContent).toContain('Agent 0')
+  expect(proxy.textContent).toContain('↓ Read')
+  expect(proxy.querySelector('button, [tabindex]')).toBeNull()
+  expect(proxy.getAttribute('aria-hidden')).toBe('true')
+  expect(agentInformationPreview.getAll().find(request => request.token === originalReader.token)).toBe(originalReader)
+  expect(semanticLayers().map(layer => layer.dataset.mapLayer)).toEqual(['detail'])
+  await act(async () => { card.blur(); agentInformationPreview.dismiss(originalReader.token) })
+  expect(nodeElement(id)!.querySelector('.focus-context')).toBeNull()
+  expect(semanticLayers().map(layer => layer.dataset.mapLayer)).toEqual(['identity'])
+  expect(captured.nodes).toBe(originalNodes)
+  expect(requests).toHaveLength(operations)
+})
+
+it('passes the effective Motion preference to explicit camera intent and cancels only an active transition', async () => {
+  const scene = scenario(24); await loaded(scene)
+  let config = useAppStore.getState().config!
+  vi.spyOn(api.config, 'save').mockImplementation(async (next, expected) => {
+    config = applyConfigEdit(config, expected, next); useAppStore.setState({ config }); return config
+  })
+  const panZoom = captured.store!.getState().panZoom!
+  let finish: ((value: boolean) => void) | undefined
+  // Keep the real camera boundary pending; HappyDOM does not implement D3's
+  // screen transform interpolation. The production caller must still cancel it.
+  const scaleBy = vi.spyOn(panZoom, 'scaleBy').mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const setViewport = vi.spyOn(panZoom, 'setViewport')
+  await dom.click('[aria-label="Zoom in"]')
+  expect(scaleBy.mock.calls.at(-1)?.[1]).toMatchObject({ duration: 280 })
+  await dom.click('[aria-label="Map animations"]')
+  expect(setViewport.mock.calls.at(-1)?.[1]).toMatchObject({ duration: 0 })
+  await act(async () => finish?.(true))
+  scaleBy.mockResolvedValue(true)
+  await dom.click('[aria-label="Zoom out"]')
+  expect(scaleBy.mock.calls.at(-1)?.[1]).toMatchObject({ duration: 0 })
+  const camera = captured.store!.getState().transform
+  await dom.click('[aria-label="Map animations"]')
+  expect(captured.store!.getState().transform).toBe(camera)
+  await dom.render(graph(scene, null, scene.relations, [], scene.agents, { active: false }))
+  expect(dom.container.querySelector('.collaboration-canvas')?.getAttribute('data-motion')).toBe('off')
+})
+
+it('joins the drawn hull of every Agent tier through LOD and keeps glyph geometry unchanged by selection', async () => {
+  vi.spyOn(Date, 'now').mockReturnValue(1_000_000)
+  const scene = scenario(5), tiers = ['active', 'idle', 'unknown', 'closed', 'unknown'] as const
+  scene.agents = new Map<string, CollaborationAgent>([...scene.agents].map(([id, agent], index) => {
+    const { providerId: _providerId, ...withoutProvider } = agent
+    return [id, { ...(index === 4 ? { ...withoutProvider, context: { ...agent.context!, providerId: null } } : agent), tier: tiers[index]!, lastActivityAt: 999_000 }]
+  }))
+  scene.areas = [{ id: 'tiers', name: 'All original tiers', kind: 'project', members: [...scene.agents.keys()] }]
+  scene.relations = [...scene.agents.keys()].slice(1).map((target, index) => ({ id: `tier-${index}`, kind: 'communication', source: [...scene.agents.keys()][0]!, target, evidence: [] }))
+  await loaded(scene)
+  const originalNodes = captured.nodes, operations = requests.length
+  const endpointDistance = (point: { x: number; y: number }, id: string) => {
+    const box = renderedBox(id), body = nodeElement(id)!.querySelector<HTMLElement>('.collaboration-agent__body')!
+    const width = Number.parseFloat(body.style.width), height = Number.parseFloat(body.style.height), radius = Number.parseFloat(body.style.borderRadius)
+    const x = Math.abs(point.x - box.x - Number.parseFloat(body.style.left) - width / 2) - width / 2 + radius
+    const y = Math.abs(point.y - box.y - Number.parseFloat(body.style.top) - height / 2) - height / 2 + radius
+    return Math.hypot(Math.max(x, 0), Math.max(y, 0)) + Math.min(Math.max(x, y), 0) - radius
+  }
+  let previousGlyphs: { avatar: boolean; point: number }[] | undefined
+  for (const zoom of [.319, .321, .44, .46, .69, .71, .9]) {
+    await viewport(60, 60, 4000, 4000, zoom)
+    const glyphs = captured.nodes.filter(node => node.type === 'agent').map(node => {
+      const element = nodeElement(node.id)!
+      return { avatar: Boolean(element.querySelector('.agent-avatar')), point: Number.parseFloat(element.querySelector<HTMLElement>('.collaboration-agent__point')!.style.width) }
+    })
+    expect(glyphs.map(glyph => glyph.avatar)).toEqual([true, true, true, false, false])
+    if (zoom === .319) for (const node of captured.nodes.filter(node => node.type === 'agent')) {
+      const element = nodeElement(node.id)!, dot = element.querySelector<HTMLElement>('.collaboration-agent__dot')!
+      const body = element.querySelector<HTMLElement>('.collaboration-agent__body')!
+      const visibleDiameter = element.querySelector('.agent-avatar') ? Number.parseFloat(dot.style.width)
+        : Number.parseFloat(element.querySelector<HTMLElement>('.collaboration-agent__point')!.style.width)
+      expect(Number.parseFloat(body.style.width)).toBeCloseTo(visibleDiameter * Number.parseFloat(element.querySelector<HTMLElement>('.collaboration-agent')!.style.getPropertyValue('--collaboration-mark-scale')))
+    }
+    if (zoom === .321) {
+      expect(glyphs.map(glyph => glyph.avatar)).toEqual(previousGlyphs!.map(glyph => glyph.avatar))
+      expect(Math.abs(glyphs[3]!.point - previousGlyphs![3]!.point)).toBeLessThan(.01)
+    }
+    previousGlyphs = glyphs
+    for (const edge of dom.container.querySelectorAll<SVGGElement>('.collaboration-connections .react-flow__edge')) {
+      const connection = requests.flatMap(request => request.type === 'arrange' ? request.input.connections : []).find(connection => connection.id === edge.dataset.id)!
+      const points = curvePoints(edge.querySelector('.react-flow__edge-path')!.getAttribute('d')!)
+      expect(Math.abs(endpointDistance(points[0]!, connection.source))).toBeLessThan(1e-4)
+      expect(Math.abs(endpointDistance(points.at(-1)!, connection.target))).toBeLessThan(1e-4)
+    }
+    const curves = [...dom.container.querySelectorAll('.react-flow__edge-path')].map(path => path.getAttribute('d'))
+    await dom.render(graph(scene, { kind: 'agent', id: subject('canvas-3') }))
+    expect([...dom.container.querySelectorAll('.react-flow__edge-path')].map(path => path.getAttribute('d'))).toEqual(curves)
+    await dom.render(graph(scene))
+  }
+  expect(captured.nodes.map(node => node.data.box)).toEqual(originalNodes.map(node => node.data.box))
   expect(requests).toHaveLength(operations)
 })
 
@@ -877,6 +1023,28 @@ it('retains exact region context when reading a member with its original heading
   expect(captured.nodes).toBe(before); expect(requests).toHaveLength(operations)
 })
 
+it('keeps every real ancestor readable and foldable while its deep Agent is read below the original headings', async () => {
+  const scene = scenario(12)
+  scene.areas = [{ id: 'project', name: 'Original project', kind: 'project', members: [] },
+    { id: 'category', name: 'Original category', kind: 'category', parentId: 'project', members: [] },
+    { id: 'topic', name: 'Original topic', kind: 'topic', parentId: 'category', members: [...scene.agents.keys()] }]
+  await loaded(scene)
+  const deepest = captured.nodes.filter(node => node.type === 'agent').sort((a, b) => (b.data.box as engine.CollaborationLayoutBox).y - (a.data.box as engine.CollaborationLayoutBox).y)[0]!
+  const box = deepest.data.box as engine.CollaborationLayoutBox
+  const before = captured.nodes, operations = requests.length
+  await viewport(-box.x + 40, -box.y + 100, 800, 400)
+  for (const id of ['project', 'category', 'topic']) {
+    const area = renderedBox(JSON.stringify(['area', id])) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
+    expect(area.y + area.heading.y - box.y + 100).toBeLessThan(0)
+    const label = dom.container.querySelector<HTMLElement>(`[data-region-id="${id}"]`)!
+    expect(label, `The original ${id} remains visible beside its deep member`).not.toBeNull()
+    expect(label.dataset.context).toBe('true')
+    expect(label.querySelector('[aria-expanded="true"]')).not.toBeNull()
+  }
+  expect(captured.nodes).toBe(before)
+  expect(requests).toHaveLength(operations)
+})
+
 it('keeps projected region labels clear of original Agent hit targets through camera LOD', async () => {
   const scene = scenario(24); await loaded(scene)
   const area = renderedBox(JSON.stringify(['area', 'area-0'])) as Extract<engine.CollaborationLayoutBox, { kind: 'area' }>
@@ -1052,8 +1220,16 @@ it('keeps the exact reading occurrence and translates all curves through an expl
   for (const edge of edges) {
     const rawPath = paths.get(edge.dataset.id!)!, curve = curvePoints(edge.querySelector('.react-flow__edge-path')!.getAttribute('d')!)
     const translated = engine.translateCollaborationPath(rawPath, offset)
-    expect(curve).toEqual(translated.points)
-    for (const [index, point] of curve.entries()) { expect(point.x).toBeCloseTo(rawPath.points[index]!.x + offset.x, 8); expect(point.y).toBeCloseTo(rawPath.points[index]!.y + offset.y, 8) }
+    const connection = requests.flatMap(request => request.type === 'arrange' ? request.input.connections : []).find(connection => connection.id === rawPath.id)!
+    const sourceGlyph = collaborationAgentGlyph(captured.nodes.find(node => node.id === connection.source)!.data.agent as CollaborationAgent)
+    const targetGlyph = collaborationAgentGlyph(captured.nodes.find(node => node.id === connection.target)!.data.agent as CollaborationAgent)
+    // Project first, then translate: the entire actual curve must commute with
+    // the anchored move, including both rounded-body terminal connectors.
+    const projected = curvePoints(collaborationVisiblePath(rawPath, boxes.get(connection.source)!, boxes.get(connection.target)!, 1,
+      sourceGlyph.overviewRadius, targetGlyph.overviewRadius, sourceGlyph.pointRadius, targetGlyph.pointRadius))
+    expect(curve).toHaveLength(projected.length)
+    for (const [index, point] of curve.entries()) { expect(point.x).toBeCloseTo(projected[index]!.x + offset.x, 7); expect(point.y).toBeCloseTo(projected[index]!.y + offset.y, 7) }
+    for (const [index, point] of translated.points.entries()) { expect(point.x).toBeCloseTo(rawPath.points[index]!.x + offset.x, 8); expect(point.y).toBeCloseTo(rawPath.points[index]!.y + offset.y, 8) }
     expect(translated.bounds).toEqual({ ...rawPath.bounds, x: rawPath.bounds.x + offset.x, y: rawPath.bounds.y + offset.y })
     expect([translated.labelX, translated.labelY]).toEqual([rawPath.labelX + offset.x, rawPath.labelY + offset.y])
   }
@@ -1142,6 +1318,7 @@ it('projects complete region identities and original Host and avatars without re
   const extent = [...boxes.values()], left = Math.min(...extent.map(box => box.x)), top = Math.min(...extent.map(box => box.y))
   await viewport(-left * .12 + 20, -top * .12 + 60, 1600, 1000, .12)
   const label = (id: string) => dom.container.querySelector<HTMLElement>(`[data-region-id="${id}"]`)!
+  expect(dom.container.querySelectorAll('[data-region-id]'), 'Every original area identity remains readable at overview scale').toHaveLength(4)
   expect(label('area-0').querySelector('strong')?.textContent).toBe(name)
   expect(label('area-0').querySelector('[data-host-id="remote"]')?.textContent).toContain('Studio')
   expect(label('area-0').querySelector('[data-host-id="remote"]')?.getAttribute('data-host-kind')).toBe('ssh')

@@ -60,11 +60,13 @@ it('honors explicit map motion through the actual reduced-motion cascade without
   for (const selector of ['.collaboration-activity', '.collaboration-edge__pulse', '.collaboration-edge__packet']) {
     expect(duration(dom.container.querySelector(selector)!)).toBe(COLLABORATION_ACTIVITY_MS)
   }
+  expect(getComputedStyle(dom.container.querySelector('.collaboration-edge')!).transitionDuration).toBe('150ms')
   expect(duration(dom.container.querySelector('.collaboration-canvas__controls')!)).toBe(0)
   expect(duration(document.body)).toBe(0)
   // Stylesheet order must not defeat the explicit choice either.
   await act(async () => { stylesheet.textContent = baseCSS + '\n' + collaborationCSS })
   expect(duration(dom.container.querySelector('.collaboration-edge__packet')!)).toBe(COLLABORATION_ACTIVITY_MS)
+  expect(getComputedStyle(dom.container.querySelector('.collaboration-edge')!).transitionDuration).toBe('150ms')
 
   await dom.click('[aria-label="Map animations"]')
   expect(config.focus?.mapMotion).toBe('off')
