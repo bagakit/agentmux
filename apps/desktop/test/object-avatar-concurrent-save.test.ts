@@ -3,7 +3,7 @@ import { mkdtemp, realpath, rm, readdir, readFile, writeFile } from 'node:fs/pro
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import { saveObjectAvatarFile, readObjectAvatarFile } from '../src/main/object-avatar-files'
+import { saveObjectAvatarFile, readObjectAvatarFile } from '@agentmux/host/object-avatar-files'
 import { imagePng } from './fixtures/mote-identity-image'
 
 const fault = vi.hoisted(() => ({
