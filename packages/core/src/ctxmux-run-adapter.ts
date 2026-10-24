@@ -986,7 +986,13 @@ export class CtxmuxRunAdapter {
     // An already-private namespace needs no filesystem mutation to reconnect.
     // Otherwise retain the existing same-user/private-directory permission boundary.
     const namespace = await stat(dirname(this.socketPath))
-    if (typeof process.getuid !== 'function' || namespace.uid !== process.getuid() || (namespace.mode & 0o077) !== 0) {
+    if (typeof process.getuid === 'function' && namespace.uid !== process.getuid()) {
+      throw new AgentMuxError(
+        'CtxMux socket directory belongs to another user. The existing Runtime was kept; connect through a directory owned by the current user.',
+        'CTXMUX_OWNER_IDENTITY_UNPROVEN'
+      )
+    }
+    if (typeof process.getuid !== 'function' || (namespace.mode & 0o077) !== 0) {
       await chmod(dirname(this.socketPath), 0o700)
     }
     const activation = daemonActivations.get(this.socketPath)
