@@ -14,6 +14,9 @@ import type { PublicationSpeaker } from '../../publication-speaker.js'
 import { feishuQueryReaction, readFeishuQueryReaction, feishuReactionMapping, feishuReactionReceipt } from './reaction.js'
 
 const path = '/open-apis/im/v1/messages'
+const currentCardRenderVersion = 'feishu-conversation-v7'
+// Retained frozen cards use their original wire; this never prepares or replays an older effect.
+const nativeCardRenderVersions = ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', 'feishu-conversation-v6', currentCardRenderVersion]
 const object = (value: unknown): Record<string, unknown> | null => value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : null
 const unknown = (): PublicationReceipt => ({ state: 'unknown', reason: 'effect-unconfirmed' })
 const key = (operationId: string) => createHash('sha256').update(operationId).digest('base64url')
@@ -64,7 +67,8 @@ function cardSummary(card: Record<string, unknown>, operation: Pick<PublicationO
   const purpose = operation.payload.kind === 'speech' && operation.speaker
     ? [{ agent: 'Agent', human: 'User', external: 'External message', mixed: 'Mixed authors', unknown: 'Unknown author' }[operation.speaker.kind],
       operation.payload.phase === 'final' ? 'Reply' : operation.payload.phase === 'progress' ? 'Progress' : undefined].filter(Boolean).join(' · ')
-    : operation.payload.kind === 'permission' ? 'Permission' : typeof title === 'string' ? title : operation.payload.kind === 'speech' && operation.payload.phase === 'final' ? 'Agent reply' : 'Conversation message'
+    : operation.payload.kind === 'permission' ? 'Permission' : typeof title === 'string' ? title : operation.payload.kind === 'speech'
+      ? operation.payload.phase === 'final' ? 'Agent reply' : operation.payload.phase === 'progress' ? 'Agent progress' : 'Conversation message' : 'Conversation message'
   const text = (elements: unknown): string[] => !Array.isArray(elements) ? [] : elements.flatMap(element => {
     const node = object(element), content = object(node?.text)?.content
     return node?.tag === 'markdown' && typeof node.content === 'string' ? [node.content]
@@ -156,8 +160,8 @@ function consistent(data: Record<string, unknown>, target: PublicationTarget, ma
 /** Stateless platform effects. The original Host owns source selection, durable work, ordering and retries. */
 export class FeishuPublicationAdapter implements PublicationAdapter {
   readonly adapterId = 'feishu'
-  readonly renderVersion = 'feishu-conversation-v6'
-  readonly supportedRenderVersions = ['feishu-post-group-v1', 'feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', this.renderVersion]
+  readonly renderVersion = currentCardRenderVersion
+  readonly supportedRenderVersions = ['feishu-post-group-v1', ...nativeCardRenderVersions]
   readonly fragmentBytes = 4_096
   readonly addressing = 'group'
   readonly permissionActions = true as const
@@ -339,10 +343,10 @@ export class FeishuPublicationAdapter implements PublicationAdapter {
       const reaction = readFeishuQueryReaction(prepared)
       if (reaction) return mapping === undefined || mapping.messageId === reaction.messageId && mapping.threadId === undefined
       if (mapping) return prepared.request.path === `${path}/${encodeURIComponent(feishuIdentity(mapping.messageId))}` &&
-        prepared.request.query === undefined && (prepared.request.method === 'DELETE' && prepared.request.body === undefined || prepared.request.method === 'PUT' && prepared.request.contentType === 'application/json' && (requestText(prepared) !== null || requestImage(prepared) !== null) || prepared.request.method === 'PATCH' && ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', this.renderVersion].includes(prepared.renderVersion) && prepared.request.contentType === 'application/json' && requestCard(prepared) !== null)
+        prepared.request.query === undefined && (prepared.request.method === 'DELETE' && prepared.request.body === undefined || prepared.request.method === 'PUT' && prepared.request.contentType === 'application/json' && (requestText(prepared) !== null || requestImage(prepared) !== null) || prepared.request.method === 'PATCH' && nativeCardRenderVersions.includes(prepared.renderVersion) && prepared.request.contentType === 'application/json' && requestCard(prepared) !== null)
       const body = object(JSON.parse(prepared.request.body!))
       return prepared.request.method === 'POST' && prepared.request.path === path && prepared.request.contentType === 'application/json' && prepared.request.query?.receive_id_type === 'chat_id' &&
-        body?.receive_id === target.externalConversationId && body.uuid === key(prepared.requestKey) && (body.msg_type === 'file' && requestFile(prepared) !== null || body.msg_type === 'post' && (requestText(prepared) !== null || requestImage(prepared) !== null) || body.msg_type === 'interactive' && ['feishu-group-v2', 'feishu-conversation-v3', 'feishu-conversation-v4', 'feishu-conversation-v5', this.renderVersion].includes(prepared.renderVersion) && requestCard(prepared) !== null)
+        body?.receive_id === target.externalConversationId && body.uuid === key(prepared.requestKey) && (body.msg_type === 'file' && requestFile(prepared) !== null || body.msg_type === 'post' && (requestText(prepared) !== null || requestImage(prepared) !== null) || body.msg_type === 'interactive' && nativeCardRenderVersions.includes(prepared.renderVersion) && requestCard(prepared) !== null)
     } catch { return false }
   }
   async dispatch(prepared: PreparedPublication, target: PublicationTarget, credential: string, signal: AbortSignal, mapping?: Readonly<PublicationMapping>): Promise<PublicationReceipt> {
