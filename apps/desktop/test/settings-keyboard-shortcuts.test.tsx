@@ -23,14 +23,14 @@ describe('read-only shortcuts through connected original SettingsPanel', () => {
   it('registers a real catalog pane and shows every complete registry binding with both platform projections', async () => {
     await dom.render(<SettingsPanel initialSection="keyboard-shortcuts" onClose={() => {}} />)
     expect(SHORTCUT_BINDINGS.length).toBeGreaterThan(0)
-    const registryIds = SHORTCUT_BINDINGS.map(binding => binding.id)
     for (const isMac of [true, false]) {
       vi.spyOn(platform, 'isMacPlatform').mockReturnValue(isMac)
       await dom.render(<SettingsPanel initialSection="keyboard-shortcuts" onClose={() => {}} />)
       const found = rows()
+      const available = SHORTCUT_BINDINGS.filter(binding => isMac || !binding.macOnly)
       expect(found.length).toBeGreaterThan(0)
-      expect(found.map(row => row.dataset.bindingId).sort()).toEqual([...registryIds].sort())
-      for (const binding of SHORTCUT_BINDINGS) {
+      expect(found.map(row => row.dataset.bindingId).sort()).toEqual(available.map(binding => binding.id).sort())
+      for (const binding of available) {
         const row = found.find(row => row.dataset.bindingId === binding.id)!
         expect(row.isConnected).toBe(true)
         expect([...row.querySelectorAll('kbd')].map(key => key.textContent)).toEqual(formatChord(chordForPlatform(binding, isMac), isMac))
@@ -46,7 +46,7 @@ describe('read-only shortcuts through connected original SettingsPanel', () => {
     await dom.click('[data-settings-search-section="keyboard-shortcuts"]')
     expect(dom.container.querySelector<HTMLElement>('.settings-page')!.dataset.settingsPage).toBe('keyboard-shortcuts')
     expect(rows().length).toBeGreaterThan(0)
-    expect(rows().map(row => row.dataset.bindingId).sort()).toEqual(SHORTCUT_BINDINGS.map(binding => binding.id).sort())
+    expect(rows().map(row => row.dataset.bindingId).sort()).toEqual(SHORTCUT_BINDINGS.filter(binding => platform.isMacPlatform() || !binding.macOnly).map(binding => binding.id).sort())
     const field = search('Find a command or shortcut')
     await fill(field, 'save')
     const expected = buildCheatSheet(platform.isMacPlatform()).flatMap(group => group.rows).filter(row => row.label.toLowerCase().includes('save'))
@@ -57,7 +57,7 @@ describe('read-only shortcuts through connected original SettingsPanel', () => {
     await dom.click('[aria-label="Clear shortcut search"]')
     expect(document.activeElement).toBe(field)
     expect(field.isConnected).toBe(true)
-    expect(rows().length).toBe(SHORTCUT_BINDINGS.length)
+    expect(rows().length).toBe(SHORTCUT_BINDINGS.filter(binding => platform.isMacPlatform() || !binding.macOnly).length)
     expect(api.config.save).not.toHaveBeenCalled()
   })
 

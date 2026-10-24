@@ -27,9 +27,9 @@ describe('cheat-sheet is the same set as the registry', () => {
     // no duplicates — every binding appears in exactly one group
     expect(new Set(rowIds).size).toBe(rowIds.length)
     expect(new Set(rowIds)).toEqual(new Set(registryIds))
-    // and the platform doesn't change WHICH bindings show, only their key shape
+    // Platform-specific capabilities omit only their explicitly owned platform bindings.
     const rowIdsOther = buildCheatSheet(false).flatMap((group) => group.rows.map((row) => row.id))
-    expect(new Set(rowIdsOther)).toEqual(new Set(registryIds))
+    expect(new Set(rowIdsOther)).toEqual(new Set(SHORTCUT_BINDINGS.filter(binding => !binding.macOnly).map(binding => binding.id)))
   })
 
   it('the help binding itself appears — you can discover how to open this sheet from inside it', () => {
@@ -55,6 +55,7 @@ describe('grouping is derived from scope + gate, and is total', () => {
     expect(groupOf('editor.save')).toBe('editor')
     expect(groupOf('launcher.submit')).toBe('launcher')
     expect(groupOf('message-tool.send')).toBe('message-tool')
+    expect(groupOf('capture.screen')).toBe('system')
   })
 
   // 守的缺陷：`groupIdForBinding` 曾以 `return binding.gate === 'not-in-editable' ? 'workbench' : 'global'`
@@ -80,7 +81,7 @@ describe('grouping is derived from scope + gate, and is total', () => {
       groupIdForBinding(fixture('window')),
       groupIdForBinding(fixture('window', 'not-in-editable'))
     ])
-    const innerScopes = SHORTCUT_SCOPES.filter((scope) => scope !== 'window')
+    const innerScopes = SHORTCUT_SCOPES.filter((scope) => scope !== 'window' && scope !== 'system')
     // Self-check: an empty list makes the loop vacuous.
     expect(innerScopes.length, 'no inner scopes — SHORTCUT_SCOPES changed shape').toBeGreaterThan(0)
     for (const scope of innerScopes) {

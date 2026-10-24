@@ -38,6 +38,7 @@ describe('binding id set', () => {
     // Anchored literal, NOT derived from SHORTCUT_BINDINGS. A dropped/renamed/added binding turns this red.
     expect([...SHORTCUT_BINDINGS.map((b) => b.id)].sort()).toEqual([
       'attention.next',
+      'capture.screen',
       'editor.save',
       'editor.show-commands',
       'editor.toggle-word-wrap',
@@ -133,8 +134,8 @@ describe('binding id set', () => {
     // unreachable, which is the exact defect this test was written for.
     expect(
       [...INNER_SCOPES].sort(),
-      'INNER_SCOPES must be every scope except window, or this guard has a blind spot again'
-    ).toEqual(SHORTCUT_SCOPES.filter((scope) => scope !== 'window').sort())
+      'INNER_SCOPES must include each surface listener; Main-owned system registration is not a Renderer listener'
+    ).toEqual(SHORTCUT_SCOPES.filter((scope) => scope !== 'window' && scope !== 'system').sort())
     const inner = SHORTCUT_BINDINGS.filter((b) => INNER_SCOPES.includes(b.scope))
     expect(inner.length, 'no inner-scope bindings found — the filter or the registry changed shape').toBeGreaterThan(0)
 
@@ -187,7 +188,7 @@ describe('non-mac never claims a bare Ctrl+letter', () => {
     // This is the second, different bottom line: Ctrl+digit (tab select) and Ctrl+Alt+arrow are safe off
     // mac and must NOT carry the letter rule's Shift. Guarding this stops anyone flattening the two
     // bottom lines into one "all chords need Shift off mac" rule.
-    const digits = SHORTCUT_BINDINGS.filter((b) => b.keyClass === 'digit')
+    const digits = SHORTCUT_BINDINGS.filter((b) => b.keyClass === 'digit' && !b.macOnly)
     expect(digits.length).toBeGreaterThan(0)
     for (const binding of digits) {
       expect(binding.other.shift, `${binding.id} digit must NOT require Shift off mac`).toBe(false)
