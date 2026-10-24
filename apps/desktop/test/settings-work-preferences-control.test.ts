@@ -147,8 +147,7 @@ it('ordinary CLI executable consumes Notes/Goals via an owned private public soc
   await server.start()
   try {
     const guide = (await cli(process.execPath, [args[0]!, 'settings', '--skill'], options)).stdout
-    expect(guide).toContain('settings set notes.fontSize 16')
-    expect(guide).toContain('settings set goals.defaultView board')
+    expect(guide).toContain('amux settings --help')
     const found = JSON.parse((await cli(process.execPath, [...args, 'inspect', 'notes'], options)).stdout).result
     expect(found.entries).toEqual(defaults.filter(entry => entry.key.startsWith('notes.')))
     const saved = JSON.parse((await cli(process.execPath, [...args, 'set', 'goals.defaultView', 'board'], options)).stdout).result

@@ -20,8 +20,14 @@ function alternate(entry: AgentMuxControlSettingEntry) {
   if (entry.key === 'browser.agentControl.glowOpacity') return 0.8
   if (entry.key === 'browser.agentControl.glowColor') return '#c78cfa'
   if (entry.kind === 'boolean') return !entry.value
+  if (entry.key === 'messageToolCompletion.command') return '!'
+  if (entry.key === 'messageToolCompletion.skill') return '%'
+  if (entry.key === 'messageToolCompletion.reference') return '&'
   if (entry.kind === 'number' && !entry.enum) return entry.value + 1
   if (entry.kind === 'string' && entry.key.startsWith('continuity.') && !entry.enum) return 'Keep the original conversation.\nRespect its confirmed constraints.'
+  if (entry.key === 'automation.checkInQuietStart') return ([23, 30].map(value => String(value).padStart(2, '0')).join(':'))
+  if (entry.key === 'automation.checkInQuietEnd') return ([7, 30].map(value => String(value).padStart(2, '0')).join(':'))
+  if (entry.kind === 'string' && entry.key.startsWith('automation.') && !entry.enum) return entry.key.endsWith('Timezone') ? 'Europe/London' : 'Keep the original task and report concrete progress.'
   if (entry.kind === 'string' && entry.key.startsWith('browser.startPage.') && !entry.enum) return entry.key.endsWith('.icon') || entry.key.endsWith('.backgroundImage') ? 'https://example.invalid/image.png' : 'A saved browser preference'
   if (entry.kind === 'string' && entry.key.startsWith('profile.') && !entry.enum) return entry.key === 'profile.avatar' ? 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==' : 'A profile value'
   const choice = entry.enum?.find((value) => value !== entry.value)
@@ -45,7 +51,10 @@ describe('ordinary preferences through the Main owner', () => {
 
   it('changes, rejects invalid values and proves real nochange for every supported field without touching permissions or resources', async () => {
     const f = await configOwnerFixture({ browser: { ...structuredClone(DEFAULT_CONFIG.browser), agentAutomation: false, appLinkSchemes: { custom: 'deny' } } })
-    const initial = structuredClone(f.owner.current), supported = await entries(f.owner)
+    // Cross-field Map stages are covered by their finite-profile CLI/CAS suite;
+    // this ordinary-leaf loop keeps its existing independent schema coverage above.
+    const initial = structuredClone(f.owner.current), supported = (await entries(f.owner)).filter(entry => !entry.key.startsWith('focus.map.'))
+    expect(supported.length).toBeGreaterThan(0)
     for (const entry of supported) {
       const next = alternate(entry), before = f.publish.mock.calls.length
       const result = await executeSettingsControl({ ...envelope, operation: 'settings.set', key: entry.key, value: String(next) }, f.owner)
@@ -56,7 +65,7 @@ describe('ordinary preferences through the Main owner', () => {
       expect(await f.bytes()).toBe(bytes)
       expect(f.publish).toHaveBeenCalledTimes(before + (next === entry.value ? 0 : 1))
       // Continuity text is a complete authored instruction, with no arbitrary length or vocabulary gate.
-      if (!(entry.kind === 'string' && entry.key.startsWith('continuity.') && !entry.enum)) {
+      if (!(entry.kind === 'string' && (entry.key.startsWith('continuity.') || entry.key === 'automation.progressPrompt') && !entry.enum)) {
         await expect(executeSettingsControl({ ...envelope, operation: 'settings.set', key: entry.key, value: entry.key === 'profile.about' ? 'x'.repeat(2001) : entry.key === 'profile.displayName' ? 'x'.repeat(81) : entry.key === 'browser.startPage.title' || entry.key === 'browser.startPage.subtitle' ? 'invalid\ncontrol' : 'INVALID' }, f.owner)).rejects.toMatchObject({ code: 'INVALID_SETTING_VALUE' })
       }
       expect(await f.bytes()).toBe(bytes)
