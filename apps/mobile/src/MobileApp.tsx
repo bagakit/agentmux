@@ -33,6 +33,8 @@ import { useMobileBack } from './navigation/useMobileBack'
 import { retainObjectReference, type MobilePresentationRoute, type MobileTopicsRoute, type MobileGoalsContext, type MobileKnowledgeReference } from './recovery/presentation-route'
 import type { MobileTopicSourceContentReference } from './topics/source-reference'
 import { MobileNotice, MobileNoticeProvider, MobileNoticeRestore, MobileNoticeScope, useMobileNotices } from './notices/MobileNotice'
+import { MobileWebDiagnostics } from './mobile-web/MobileWebDiagnostics'
+import type { MobileWebPageObservation } from './mobile-web/use-mobile-web-observation'
 
 const ThemeNavigationSubmenuIcon = semanticIconComponent('navigation.submenu')
 const ThemeObjectNetworkIcon = semanticIconComponent('object.network')
@@ -64,11 +66,12 @@ type MobileAppProps = {
   client: AgentMuxHostedClient | null; connection: MobileConnection; platform: ClientUiPlatform
   native?: boolean; focusComposer?: () => boolean
   connectionPanel?: ReactNode
+  webObservation?: MobileWebPageObservation | null
 }
 export function MobileApp(props: MobileAppProps) {
   return <MobileNoticeProvider><MobileAppContent {...props} /></MobileNoticeProvider>
 }
-function MobileAppContent({ client, connection, platform, native = false, focusComposer = () => false, connectionPanel }: MobileAppProps) {
+function MobileAppContent({ client, connection, platform, native = false, focusComposer = () => false, connectionPanel, webObservation }: MobileAppProps) {
   const notices = useMobileNotices()
   const initial = useRef<ReturnType<typeof loadWorkface> | null>(null)
   initial.current ??= loadWorkface()
@@ -372,6 +375,7 @@ function MobileAppContent({ client, connection, platform, native = false, focusC
           <button className="mobile-menu-row" onClick={() => setSheet('connection')}><ThemeObjectNetworkIcon size={18} /><span>连接与设备<small>{label} · {location.host}</small></span><ThemeNavigationSubmenuIcon size={16} /></button></div>
         </> : sheet === 'notices' ? <>
           <Dialog.Description id="mobile-sheet-description">本设备的提醒呈现</Dialog.Description>
+          {webObservation && <MobileWebDiagnostics observation={webObservation} copyText={platform.copyText} />}
           <MobileNoticeRestore onRestored={() => setSheet(null)} />
         </> : sheet === 'identity' && profileIdentity ? <>
           <Dialog.Description id="mobile-sheet-description">原资料与当前工作</Dialog.Description>

@@ -7,6 +7,7 @@ import { MobileApp } from '../MobileApp'
 import type { MobileConnection } from '../conversation/use-hosted-conversation'
 import { getDeviceWorkface } from '../recovery/device-workface'
 import { deviceRelayIdentity } from './relay-identity'
+import { MobileWebCatalogObservation, useMobileWebObservation } from '../mobile-web/use-mobile-web-observation'
 
 const OFFER_KEY = 'agentmux.connection-offer.v2'
 export function MobileConnectionRoot({ platform, native, focusComposer, offer, linkIssue }: {
@@ -14,6 +15,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
 }) {
   const [client, setClient] = useState<AgentMuxHostedClient | null>(null)
   const [connection, setConnection] = useState<MobileConnection>({ state: 'connecting', message: '正在连接 Mac' })
+  const mobileWeb = useMobileWebObservation(client, !native)
   useEffect(() => {
     const controller = new AbortController()
     let owned: AgentMuxHostedClient | undefined, release: (() => void) | undefined, timer: ReturnType<typeof setTimeout> | undefined
@@ -43,7 +45,7 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
         catch { bindingNotice = '设备工作面保存尚未确认，当前连接可继续使用；请保全工作面或恢复设备存储。' }
         setConnection({ state: 'connected', message: '已连接 Mac', ...(bindingNotice ? { issue: bindingNotice } : {}) })
         release = value.onEvent(event => {
-          if (event.type !== 'connection-state') return
+          if (event.type !== 'connection-state' || event.observationOrigin?.boundary !== 'consumer-core') return
           const state = (event as { state: string }).state
           setConnection({ state: state === 'restored' ? 'connected' : 'disconnected', message: state === 'restored' ? '已连接 Mac' : '连接中断，自动重连中；原会话与草稿保留。', ...(bindingNotice ? { issue: bindingNotice } : {}) })
         })
@@ -59,6 +61,8 @@ export function MobileConnectionRoot({ platform, native, focusComposer, offer, l
     void connect()
     return () => { controller.abort(); clearTimeout(timer); release?.(); void owned?.dispose(); window.removeEventListener('online', resume); document.removeEventListener('visibilitychange', resume) }
   }, [offer, linkIssue])
-  return <MobileApp client={client} connection={connection} platform={platform} native={native}
-    {...(focusComposer ? { focusComposer } : {})} connectionPanel={<p>连接会自动恢复。Mac 和手机保持在同一局域网即可。</p>} />
+  return <MobileWebCatalogObservation.Provider value={mobileWeb.observeCatalog}>
+    <MobileApp client={client} connection={connection} platform={platform} native={native} webObservation={mobileWeb.observation}
+      {...(focusComposer ? { focusComposer } : {})} connectionPanel={<p>连接会自动恢复。Mac 和手机保持在同一局域网即可。</p>} />
+  </MobileWebCatalogObservation.Provider>
 }

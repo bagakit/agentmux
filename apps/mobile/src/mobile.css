@@ -114,6 +114,7 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-sheet { position: fixed; bottom: max(0px, calc(100dvh - var(--mobile-viewport-height, 100dvh) - var(--mobile-viewport-top, 0px))); left: 50%; transform: translateX(-50%); width: min(100%, 720px); max-height: calc(var(--mobile-viewport-height, 100dvh) - env(safe-area-inset-top) - 20px); overflow-y: auto; background: var(--surface-1); border: 1px solid var(--line); border-bottom: 0; box-shadow: var(--elev-3); padding: 6px 12px max(12px, env(safe-area-inset-bottom)); border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
 .mobile-sheet-handle { height: 3px; width: 30px; background: var(--neutral-2); border-radius: 2px; margin: 0 auto 9px; }
 .mobile-sheet-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mobile-sheet > .mobile-sheet-title { position: sticky; top: 0; z-index: 1; background: var(--surface-1); }
 .mobile-sheet-title h2 { font-weight: 550; letter-spacing: -.6px; font-size: 17px; margin: 4px 0 8px; }
 .mobile-icon-button { width: 44px; min-height: 44px; display: grid; place-items: center; background: transparent; color: var(--text-2); }
 .mobile-page-header { display: flex; align-items: center; gap: 6px; min-height: 44px; }
@@ -281,6 +282,17 @@ button:disabled { opacity: .5; cursor: default; }
 .mobile-agent-usage dt { color: var(--text-3); font-size: 10px; }
 .mobile-agent-usage dd { margin: 2px 0 0; font-size: 13px; font-variant-numeric: tabular-nums; }
 .mobile-agent-usage__source { overflow-wrap: anywhere; }
+.mobile-web-diagnostics__body { padding: 4px 8px 12px; }
+.mobile-web-diagnostics__heading { display: flex; align-items: center; justify-content: space-between; color: var(--text-3); font-size: 11px; }
+.mobile-web-diagnostics dl { display: grid; gap: 8px; margin: 4px 0 10px; }
+.mobile-web-diagnostics dl > div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; align-items: baseline; }
+.mobile-web-diagnostics dt { color: var(--text-3); font-size: 11px; }
+.mobile-web-diagnostics dd { margin: 0; color: var(--text-2); font-size: 12px; overflow-wrap: anywhere; }
+.mobile-web-diagnostics p, .mobile-web-diagnostics__report { color: var(--text-3); font-size: 11px; line-height: 1.6; margin: 6px 0; }
+.mobile-web-diagnostics__report { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; }
+.mobile-web-diagnostics details { color: var(--text-3); font-size: 11px; }
+.mobile-web-diagnostics summary { min-height: 44px; display: flex; align-items: center; cursor: pointer; }
+.mobile-web-diagnostics pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; color: var(--text-2); font-size: 10px; user-select: text; }
 .mobile-header { align-items: center; justify-content: space-between; grid-row: 1; padding-top: max(8px, env(safe-area-inset-top)); display: grid; grid-template-columns: 44px minmax(0,1fr) 44px; padding-inline: 12px; gap: 6px; padding-block: 4px; min-height: 44px; padding: max(0px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left)); }
 .mobile-brand { display: flex; align-items: center; font-weight: 600; justify-self: center; font-size: 13px; gap: 6px; letter-spacing: -.25px; }
 .mobile-settings-button { position: relative; display: grid; place-items: center; color: var(--text-2); width: 44px; height: 44px; border-radius: var(--radius); background: transparent; box-shadow: none; }

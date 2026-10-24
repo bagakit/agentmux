@@ -17,6 +17,7 @@ import type { MobileHome } from './home-preference'
 import { MobileSpaceDirectory } from './MobileSpaceDirectory'
 import { MobileDirectoryNotice } from './MobileDirectoryNotice'
 import { MobileAgentRow } from './MobileAgentRow'
+import { useMobileWebCatalogObservation } from '../mobile-web/use-mobile-web-observation'
 import './navigation.css'
 
 type Catalog = AgentMuxRpcResult<'space.ls'>['catalog']
@@ -32,6 +33,7 @@ type ContentTarget = { key: string; spaceId: string; spaceName: string; tabName:
 const EMPTY_CONTEXT: MobileSpatialContext = { spaceId: null, tabId: null, regionId: null }
 const contentKey = (spaceId: string, zoneId: string | null, region: Region) => JSON.stringify([spaceId, zoneId, region.tabId, region.regionId, region.kind, region.browserId ?? null, region.file ?? null])
 export function MobileSpatialNavigation({ home, client, connected, sessions, openSession, openProfile, openHttpLink, initialContext, onContextChange, onBackChange, onCreateAgent, visible = true }: MobileSpatialNavigationProps) {
+  const observeCatalog = useMobileWebCatalogObservation()
   const avatarFilterId = useId().replace(/:/g, '')
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [issue, setIssue] = useState('')
@@ -59,19 +61,21 @@ export function MobileSpatialNavigation({ home, client, connected, sessions, ope
     const read = async () => {
       if (inFlight || document.visibilityState === 'hidden') return
       inFlight = true; setPending(true)
+      let observed: Catalog | null = null
       try {
         if (!client.forwardRpc) throw new Error('空间目录暂不可读；已有会话仍可在 Focus 中访问。')
         const value = await client.forwardRpc('space.ls', { target: {}, presentation: true })
-        if (!disposed) { setCatalog(value.catalog); setIssue('') }
+        if (!disposed) { setCatalog(value.catalog); setIssue(''); observed = value.catalog }
       } catch (error) { if (!disposed) setIssue(error instanceof Error ? error.message : '空间目录暂不可读，原记录保留。') }
       finally { inFlight = false; if (!disposed) setPending(false) }
+      if (observed) observeCatalog?.(observed)
     }
     void read()
     const timer = setInterval(() => { void read() }, 10000)
     const foreground = () => { if (document.visibilityState === 'visible') void read() }
     document.addEventListener('visibilitychange', foreground)
     return () => { disposed = true; setPending(false); clearInterval(timer); document.removeEventListener('visibilitychange', foreground) }
-  }, [client, connected, visible, revision])
+  }, [client, connected, visible, revision, observeCatalog])
   const previousHome = useRef(home), incoming = JSON.stringify(initialContext ?? null), previousIncoming = useRef(incoming)
   useEffect(() => {
     if (previousHome.current === home) return
