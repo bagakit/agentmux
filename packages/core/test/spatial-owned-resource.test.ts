@@ -34,6 +34,20 @@ async function fixture() {
   const directory = await mkdtemp(join(tmpdir(), 'amx-owned-resource-')); directories.push(directory)
   return new AgentMuxSpatialStateStore(join(directory, 'spatial.json'))
 }
+function launcherGraph(): AgentMuxSpatialGraph {
+  const initial = graph()
+  initial.regions[0] = { tabId: 'original-tab', regionId: 'original-region', kind: 'launcher', agentSessionId: null, runId: null, execution: null }
+  initial.tabs.push({ tabId: 'untouched-tab', workspaceId: 'original-workspace', zoneId: null, name: 'Original name', regionIds: ['untouched-region'] })
+  initial.regions.push({ tabId: 'untouched-tab', regionId: 'untouched-region', kind: 'agent', agentSessionId: 'untouched-session', runId: 'untouched-run', execution: { hostId: 'another-host', cwd: fixturePath('untouched-resource') } })
+  initial.layouts.original = createWorkspaceLayout('original-group', ['original-tab', 'untouched-tab'])
+  initial.tabLayouts['untouched-tab'] = { root: { type: 'leaf', regionId: 'untouched-region' }, activeRegionId: 'untouched-region' }
+  initial.resources['region:untouched-region'] = { draft: 'Keep the other original input' }
+  return initial
+}
+function attachment(): NonNullable<Parameters<AgentMuxSpatialStateStore['commitOwnedResource']>[0]['agentRegion']> {
+  return { tabId: 'original-tab', regionId: 'original-region', agentSessionId: 'original-session', runId: 'original-run',
+    execution: { hostId: 'original-host', cwd: fixturePath('owned-resource') }, resource: { phase: 'attached', source: 'Original producer receipt' } }
+}
 describe('Core original owned spatial resource SDK', () => {
   it('requires an existing graph and rejects bootstrap forgery without creating another owner', async () => {
     const store = await fixture()
@@ -106,5 +120,95 @@ describe('Core original owned spatial resource SDK', () => {
     expect(writes.calls).toEqual([{ path: store.path + '.previous', directorySync: true }, { path: store.path, directorySync: true }])
     expect(JSON.parse(await readFile(store.path, 'utf8'))).toEqual(confirmed.state)
     expect(confirmed.state.graph).toEqual(first.state.graph)
+  })
+  it('atomically contributes only the exact existing Launcher attachment and owned value through the original graph SDK', async () => {
+    const store = await fixture(), initial = await store.commit({ expectedRevision: 0, graph: launcherGraph() }), agentRegion = attachment()
+    const receipt = await store.commitOwnedResource({ key, expectedRevision: initial.revision, value, agentRegion })
+    const { resource, ...region } = agentRegion
+    const expected = structuredClone(initial.graph)
+    expected.regions[0] = { ...region, kind: 'agent' }
+    expected.resources['region:' + region.regionId] = resource
+    expected.resources[key] = value
+    expect(receipt).toMatchObject({ key, diskDurability: 'confirmed', state: { revision: initial.revision + 1, graph: expected } })
+    expect(receipt.state.graph).toEqual(expected)
+    const reader = new AgentMuxRpcService({ spatialState: new AgentMuxSpatialStateStore(store.path), coreClients: () => [] })
+    expect((await reader.call('space.state', {})).state).toEqual(receipt.state)
+    expect(receipt.state.graph.resources['core:agent-open']).toBeUndefined()
+    await expect(store.commitOwnedResource({ key, expectedRevision: initial.revision, value, agentRegion })).rejects.toMatchObject({ code: 'SPATIAL_STATE_CONFLICT' })
+    expect(await store.read()).toEqual(receipt.state)
+  })
+  it('accepts only an unchanged Agent identity and execution location, including a pending original position', async () => {
+    const store = await fixture(); await store.commit({ expectedRevision: 0, graph: graph() })
+    const agentRegion = attachment(), first = await store.commitOwnedResource({ key, expectedRevision: 1, value, agentRegion })
+    const replay = await store.commitOwnedResource({ key, expectedRevision: 2, value, agentRegion })
+    expect(replay.diskDurability).toBe('confirmed')
+    expect(replay.state.graph).toEqual(first.state.graph)
+    const pendingStore = await fixture(), pending = graph(); pending.regions[0]!.execution = null; pending.regions[0]!.runId = null
+    await pendingStore.commit({ expectedRevision: 0, graph: pending })
+    const settled = await pendingStore.commitOwnedResource({ key, expectedRevision: 1, value, agentRegion })
+    expect(settled.state.graph.regions[0]).toEqual({ tabId: agentRegion.tabId, regionId: agentRegion.regionId, kind: 'agent',
+      agentSessionId: agentRegion.agentSessionId, runId: agentRegion.runId, execution: agentRegion.execution })
+  })
+  it('retains the newer Run and unsent input when an original same-Session creation receipt arrives late', async () => {
+    const store = await fixture(), current = graph(); current.regions[0]!.runId = 'newer-run'
+    const initial = await store.commit({ expectedRevision: 0, graph: current }); writes.calls.length = 0
+    await expect(store.commitOwnedResource({ key, expectedRevision: initial.revision, value, agentRegion: attachment() })).rejects.toMatchObject({ code: 'SPATIAL_RESOURCE_TARGET_CONFLICT' })
+    expect(await new AgentMuxSpatialStateStore(store.path).read()).toEqual(initial)
+    expect(writes.calls).toEqual([])
+  })
+  it('refuses the wrong Tab membership, another occupant, Host or cwd without editing any original fact', async () => {
+    const agentRegion = attachment()
+    for (const mutate of [
+      (g: AgentMuxSpatialGraph) => { g.tabs[0]!.regionIds = []; delete g.tabLayouts['original-tab'] },
+      (g: AgentMuxSpatialGraph) => { g.regions[0]!.tabId = 'another-tab' },
+      (g: AgentMuxSpatialGraph) => { g.regions[0]!.agentSessionId = 'another-session' },
+      (g: AgentMuxSpatialGraph) => { g.regions[0]!.execution!.hostId = 'another-host' },
+      (g: AgentMuxSpatialGraph) => { g.regions[0]!.execution!.cwd = fixturePath('another-directory') },
+      (g: AgentMuxSpatialGraph) => { g.regions[0]!.kind = 'file'; g.regions[0]!.agentSessionId = null },
+      (g: AgentMuxSpatialGraph) => { g.regions[0]!.kind = 'launcher' },
+      (g: AgentMuxSpatialGraph) => { g.tabs = [] }
+    ]) {
+      const store = await fixture(), source = graph(); mutate(source)
+      const initial = await store.commit({ expectedRevision: 0, graph: source }); writes.calls.length = 0
+      await expect(store.commitOwnedResource({ key, expectedRevision: 1, value, agentRegion })).rejects.toMatchObject({ code: 'SPATIAL_RESOURCE_TARGET_CONFLICT' })
+      expect(await store.read()).toEqual(initial)
+      expect(writes.calls).toEqual([])
+    }
+    const store = await fixture(), initial = await store.commit({ expectedRevision: 0, graph: launcherGraph() })
+    for (const [contribution, code] of [
+      [{ ...agentRegion, regionId: 'missing-region' }, 'SPATIAL_RESOURCE_TARGET_CONFLICT'],
+      [{ ...agentRegion, tabId: 'untouched-tab' }, 'SPATIAL_RESOURCE_TARGET_CONFLICT'],
+      [{ ...agentRegion, agentSessionId: null }, 'SPATIAL_STATE_INVALID'],
+      [{ ...agentRegion, runId: null }, 'SPATIAL_STATE_INVALID'],
+      [{ ...agentRegion, execution: null }, 'SPATIAL_STATE_INVALID'],
+      [{ ...agentRegion, resource: { invalid: undefined } }, 'SPATIAL_STATE_INVALID'],
+      [null, 'SPATIAL_STATE_INVALID']
+    ] as const) {
+      await expect(store.commitOwnedResource({ key, expectedRevision: 1, value, agentRegion: contribution as never })).rejects.toMatchObject({
+        code
+      })
+      expect(await store.read()).toEqual(initial)
+    }
+  })
+  it('keeps Region and owned metadata together across replacement failures and a reopened producer confirmation', async () => {
+    const store = await fixture(), initial = await store.commit({ expectedRevision: 0, graph: launcherGraph() }), agentRegion = attachment()
+    writes.path = store.path; writes.phase = 'before-replace'
+    await expect(store.commitOwnedResource({ key, expectedRevision: 1, value, agentRegion })).rejects.toMatchObject({ phase: 'before-replace' })
+    expect(await new AgentMuxSpatialStateStore(store.path).read()).toEqual(initial)
+    writes.phase = 'after-replace'; writes.calls.length = 0
+    await expect(store.commitOwnedResource({ key, expectedRevision: 1, value, agentRegion })).rejects.toMatchObject({ phase: 'after-replace' })
+    const reopened = new AgentMuxSpatialStateStore(store.path), observed = (await reopened.read())!
+    const { resource, ...region } = agentRegion
+    expect(observed.revision).toBe(2)
+    expect(observed.graph.regions[0]).toEqual({ ...region, kind: 'agent' })
+    expect(observed.graph.resources['region:' + region.regionId]).toEqual(resource)
+    expect(observed.graph.resources[key]).toEqual(value)
+    expect(JSON.parse(await readFile(store.path + '.previous', 'utf8'))).toEqual(initial)
+    expect(writes.calls).toEqual([{ path: store.path + '.previous', directorySync: true }, { path: store.path, directorySync: true }])
+    writes.phase = ''; writes.calls.length = 0
+    const confirmed = await reopened.commitOwnedResource({ key, expectedRevision: observed.revision, value, agentRegion })
+    expect(confirmed).toMatchObject({ diskDurability: 'confirmed', state: { revision: 3 } })
+    expect(confirmed.state.graph).toEqual(observed.graph)
+    expect(writes.calls).toEqual([{ path: store.path + '.previous', directorySync: true }, { path: store.path, directorySync: true }])
   })
 })
