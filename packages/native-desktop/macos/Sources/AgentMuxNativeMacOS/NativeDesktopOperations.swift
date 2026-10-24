@@ -14,9 +14,11 @@ enum NativeDesktopOperations {
             let mode = params["mode"]?.string ?? "selection"
             let rect: CGRect
             if mode == "selection" {
-                let selection = try NativeSelectionRequest.run()
-                guard let selection else { return ["state": "cancelled"] }
-                rect = selection
+                return try NativeSelectionCaptureLease.shared.withCapture {
+                    let selection = try NativeSelectionRequest.run()
+                    guard let selection else { return ["state": "cancelled"] }
+                    return try capturedRectangle(selection)
+                }
             } else if mode == "rect" {
                 guard case let .object(values)? = params["rect"],
                       let x = values["x"]?.number, let y = values["y"]?.number,
@@ -35,16 +37,23 @@ enum NativeDesktopOperations {
             } else {
                 throw ProviderError.coded("invalid_argument", "mode must be selection, display, rect or window")
             }
-            guard NativeCaptureGeometry.isValid(rect) else {
-                throw ProviderError.coded("invalid_argument", "capture rectangle must have finite coordinates and positive dimensions")
-            }
-            let capture = try captureRect(rect)
-            var result: [String: Any] = ["state": "captured", "screenshot": try png(capture.image, scale: capture.scale), "engine": capture.engine]
-            result["selectionRect"] = renderRect(rect)
-            return result
+            return try capturedRectangle(rect)
         } catch {
-            return ["state": "failed", "error": nativeErrorPayload(error)]
+            let captureError: Error
+            if error is NativeSelectionCaptureLease.Failure {
+                captureError = ProviderError.coded("capture_busy", "the original selection capture is still producing its image")
+            } else { captureError = (error as? NativeScreenSelectionError).map { ProviderError.coded($0.code, $0.message) } ?? error }
+            return ["state": "failed", "error": nativeErrorPayload(captureError)]
         }
+    }
+
+    private static func capturedRectangle(_ rect: CGRect) throws -> [String: Any] {
+        guard NativeCaptureGeometry.isValid(rect) else {
+            throw ProviderError.coded("invalid_argument", "capture rectangle must have finite coordinates and positive dimensions")
+        }
+        let capture = try captureRect(rect)
+        return ["state": "captured", "screenshot": try png(capture.image, scale: capture.scale), "engine": capture.engine,
+                "selectionRect": renderRect(rect)]
     }
 
     static func listDisplays() -> [String: Any] {
@@ -302,117 +311,4 @@ func withNativeClipboard<T>(_ body: () throws -> T) rethrows -> T {
 func onMain<T>(_ body: () throws -> T) rethrows -> T {
     if Thread.isMainThread { return try body() }
     return try DispatchQueue.main.sync(execute: body)
-}
-
-private final class NativeSelectionResult: @unchecked Sendable {
-    var result: Result<CGRect?, Error>?
-}
-
-private enum NativeSelectionRequest {
-    static func run() throws -> CGRect? {
-        let result = NativeSelectionResult()
-        let semaphore = DispatchSemaphore(value: 0)
-        DispatchQueue.main.async {
-            do {
-                try NativeScreenSelection.begin { value in
-                    result.result = value
-                    semaphore.signal()
-                }
-            } catch {
-                result.result = .failure(error)
-                semaphore.signal()
-            }
-        }
-        // The socket's owner EOF and process watcher end a disconnected picker.
-        // AppKit's main run loop remains available to clipboard/status requests.
-        semaphore.wait()
-        return try result.result!.get()
-    }
-}
-
-/// The normal AppKit run loop owns this surface; no nested modal run loop or
-/// provider mutex blocks unrelated requests while the person chooses a region.
-private final class NativeScreenSelection: NSView {
-    private static var active: NativeScreenSelection?
-    private var startPoint: NSPoint?
-    private var selected: NSRect?
-    private var overlay: NSWindow?
-    private var previousApp: NSRunningApplication?
-    private var primaryTop: CGFloat = 0
-    private var globalOrigin = NSPoint.zero
-    private var completion: ((Result<CGRect?, Error>) -> Void)?
-    override var acceptsFirstResponder: Bool { true }
-
-    static func begin(completion: @escaping (Result<CGRect?, Error>) -> Void) throws {
-        guard active == nil else { throw ProviderError.coded("capture_busy", "the original native selection is still active") }
-        guard let primary = NSScreen.screens.first else {
-            throw ProviderError.coded("display_unavailable", "macOS did not provide an active selection display")
-        }
-        let allScreens = NSScreen.screens.reduce(NSRect.null) { $0.union($1.frame) }
-        let window = NativeSelectionWindow(contentRect: allScreens, styleMask: .borderless, backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.backgroundColor = .clear
-        window.isOpaque = false
-        window.hasShadow = false
-        window.level = .screenSaver
-        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        let selection = NativeScreenSelection(frame: NSRect(origin: .zero, size: allScreens.size))
-        selection.previousApp = NSWorkspace.shared.frontmostApplication
-        selection.primaryTop = primary.frame.maxY
-        selection.globalOrigin = allScreens.origin
-        selection.completion = completion
-        selection.overlay = window
-        active = selection
-        window.contentView = selection
-        window.makeFirstResponder(selection)
-        NSApp.activate(ignoringOtherApps: true)
-        window.makeKeyAndOrderFront(nil)
-        NSCursor.crosshair.push()
-    }
-
-    private func finish(accepted: Bool) {
-        let rectangle = accepted ? selected.map {
-            NativeCaptureGeometry.quartzRect(appKitRect: $0.offsetBy(dx: globalOrigin.x, dy: globalOrigin.y), primaryDisplayTop: primaryTop)
-        } : nil
-        overlay?.orderOut(nil)
-        overlay?.close()
-        overlay = nil
-        NSCursor.pop()
-        previousApp?.activate(options: [.activateIgnoringOtherApps])
-        let callback = completion
-        completion = nil
-        Self.active = nil
-        callback?(.success(rectangle))
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor.black.withAlphaComponent(0.22).setFill()
-        bounds.fill()
-        if let selected {
-            NSColor.clear.setFill()
-            selected.fill(using: .copy)
-            NSColor.white.setStroke()
-            let border = NSBezierPath(rect: selected)
-            border.lineWidth = 1
-            border.stroke()
-        }
-    }
-    override func mouseDown(with event: NSEvent) { startPoint = convert(event.locationInWindow, from: nil); selected = nil }
-    override func mouseDragged(with event: NSEvent) {
-        guard let startPoint else { return }
-        let end = convert(event.locationInWindow, from: nil)
-        selected = NSRect(x: min(startPoint.x, end.x), y: min(startPoint.y, end.y), width: abs(end.x - startPoint.x), height: abs(end.y - startPoint.y))
-        needsDisplay = true
-    }
-    override func mouseUp(with event: NSEvent) {
-        mouseDragged(with: event)
-        if let selected, selected.width > 0, selected.height > 0 { finish(accepted: true) }
-    }
-    override func keyDown(with event: NSEvent) { if event.keyCode == 53 { finish(accepted: false) } }
-    override func cancelOperation(_ sender: Any?) { finish(accepted: false) }
-}
-
-private final class NativeSelectionWindow: NSWindow {
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
 }
