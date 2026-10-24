@@ -7,10 +7,19 @@ import type { ChildProcess } from 'node:child_process'
 import type { Readable } from 'node:stream'
 import { CtxmuxClient, PROTOCOL_VERSION, type RuntimeIdentity } from '@ctxmux/sdk'
 
-const processBoundary = vi.hoisted(() => ({ spawn: vi.fn() }))
+const processBoundary = vi.hoisted(() => ({ spawn: vi.fn(), artifactMissing: false }))
 vi.mock('node:child_process', async original => ({
   ...await original<typeof import('node:child_process')>(), spawn: processBoundary.spawn
 }))
+vi.mock('node:fs/promises', async original => {
+  const actual = await original<typeof import('node:fs/promises')>()
+  return { ...actual, readFile: async (...args: Parameters<typeof actual.readFile>) => {
+    if (processBoundary.artifactMissing && String(args[0]).includes(join('vendor', 'ctxmux') + '/') && String(args[0]).endsWith('/manifest.json')) {
+      throw Object.assign(new Error('Activation artifacts disappeared after the original spawn'), { code: 'ENOENT' })
+    }
+    return await Reflect.apply(actual.readFile, actual, args)
+  } }
+})
 import { CtxmuxRunAdapter } from '../src/ctxmux-run-adapter.js'
 
 const runtime: RuntimeIdentity = {
@@ -22,6 +31,7 @@ const runtime: RuntimeIdentity = {
 }
 const cleanup: (() => Promise<void>)[] = []
 afterEach(async () => {
+  processBoundary.artifactMissing = false
   for (const action of cleanup.splice(0).reverse()) await action()
   vi.restoreAllMocks(); vi.unstubAllEnvs(); processBoundary.spawn.mockReset()
 })
@@ -100,6 +110,8 @@ describe('durable daemon startup outlives a connect observation', () => {
     expect((child.stdio[3] as Readable).destroyed).toBe(false)
     expect(child.stderr?.destroyed).toBe(false)
 
+    // The original activation owns its authenticated launch input even after local artifacts disappear.
+    processBoundary.artifactMissing = true
     // A compatible public listener can be used even while its inherited receipt is pending.
     h.serving.value = true
     await other.connect()
@@ -108,7 +120,9 @@ describe('durable daemon startup outlives a connect observation', () => {
     await expect(readFile(join(h.directory, 'owner.json'))).rejects.toMatchObject({ code: 'ENOENT' })
     child.stdin!.write('ready\n')
     await vi.waitFor(async () => {
-      expect(JSON.parse(await readFile(join(h.directory, 'owner.json'), 'utf8'))).toMatchObject({
+      const receipt = await readFile(join(h.directory, 'owner.json'), 'utf8').catch(error => error)
+      expect(typeof receipt).toBe('string')
+      expect(JSON.parse(receipt as string)).toMatchObject({
         schema: 'agentmux.ctxmux-owner.v1', daemonInstanceId: runtime.daemonInstanceId,
         runtimeId: runtime.runtimeId, socketPath: h.adapter.socketPath,
         stateDirectory: h.adapter.stateDirectory
